@@ -37,6 +37,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -222,6 +223,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Derive image pins from flake.nix and assert they match the expected digests
         # G18 (D5): the scan targets are read out of nix/midnight-env/flake.nix and asserted equal to
@@ -274,10 +277,15 @@ jobs:
         # genuine scan-EXECUTION failure (registry/pull/DB/scanner error -> nonzero) is NOT swallowed:
         # it propagates and FAILS the job, so a green run means BOTH pinned digests were actually
         # scanned. Each digest is scanned in its own loop iteration and its scanner exit code checked.
+        # The pins come from flake.nix, which a PR can change, so they reach the script as env vars,
+        # never as expressions spliced into it.
+        env:
+          INDEXER_REF: ${{ steps.pins.outputs.indexer }}
+          PROOF_REF: ${{ steps.pins.outputs.proof }}
         run: |
           echo "## Trivy image scan (HIGH,CRITICAL) - pinned digests" >> "$GITHUB_STEP_SUMMARY"
           rc=0
-          for ref in "${{ steps.pins.outputs.indexer }}" "${{ steps.pins.outputs.proof }}"; do
+          for ref in "$INDEXER_REF" "$PROOF_REF"; do
             echo "### $ref" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
             # --exit-code 0: a HIGH/CRITICAL FINDING does not fail the step; a nonzero exit here is a
