@@ -31,10 +31,14 @@ const env = { ...process.env };
 // tier — make sure the live gate is unset so nothing self-skips behind it.
 delete env.UMBRADB_LIVE_PREPROD;
 
+// Both children run on this Node binary directly, never through a shell: `npx` is a `.cmd` shim on
+// Windows, which only a shell can launch, so vitest's own CLI entry is invoked instead.
+const vitestCli = resolve(repoRoot, "node_modules/vitest/vitest.mjs");
+
 const vitest = spawnSync(
-  "npx",
+  process.execPath,
   [
-    "vitest",
+    vitestCli,
     "run",
     "--coverage",
     "--reporter=default",
@@ -42,7 +46,7 @@ const vitest = spawnSync(
     `--outputFile=${reportPath}`,
     ...forwarded,
   ],
-  { cwd: repoRoot, env, stdio: "inherit", shell: process.platform === "win32" },
+  { cwd: repoRoot, env, stdio: "inherit" },
 );
 const vitestExit = vitest.status ?? 1;
 
@@ -55,9 +59,9 @@ if (!existsSync(reportPath)) {
 
 console.log("\nconformance-gate: reconciling the required-tests manifest against the run…");
 const check = spawnSync(
-  "node",
+  process.execPath,
   ["--import", "tsx", checker, reportPath],
-  { cwd: repoRoot, env, stdio: "inherit", shell: process.platform === "win32" },
+  { cwd: repoRoot, env, stdio: "inherit" },
 );
 const checkExit = check.status ?? 1;
 
