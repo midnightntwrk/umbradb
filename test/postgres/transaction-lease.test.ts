@@ -1,0 +1,606 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { ValidationError } from "../../src/interfaces/storage-errors.js";
+import {
+  LeaseFaultError,
+  LeaseNotHeldError,
+  LeaseTimeoutError,
+  Rollback,
+  TransactionFaultError,
+  TransactionHandleInvalidError,
+  type TransactionHandle,
+} from "../../src/interfaces/transaction-lease.js";
+import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
+import { PgTemporalKV } from "../../src/postgres/temporal-kv.js";
+import { PgTransactionLeaseLayer, resolveTransaction } from "../../src/postgres/transaction-lease.js";
+import { registerSuiteLifecycle, TEST_SCHEMA } from "./setup.js";
+
+const { sql: getSql, connectionUri } = registerSuiteLifecycle();
+
+function txLayer(): PgTransactionLeaseLayer {
+  return new PgTransactionLeaseLayer(getSql());
+}
+
+function kv(): PgTemporalKV {
+  return new PgTemporalKV(getSql(), TEST_SCHEMA);
+}
+
+async function truncateAll(sql: UmbraDBSql): Promise<void> {
+  await sql`TRUNCATE ${sql(TEST_SCHEMA)}.kv_current, ${sql(TEST_SCHEMA)}.kv_history`;
+}
+
+async function tick(ms = 20): Promise<void> {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+const FAKE_TX = { __brand: "TransactionHandle", id: "fake-never-issued" } as unknown as TransactionHandle;
+
+describe("PgTransactionLeaseLayer.withTransaction", () => {
+  afterEach(async () => {
+    await truncateAll(getSql());
+  });
+
+  it("a callback that returns a value commits and that value is returned", async () => {
+    const result = await txLayer().withTransaction(async (tx) => {
+      await kv().put("ns", "sc", "wt-a", { v: 1 }, { tx });
+      return "committed";
+    });
+    expect(result).toBe("committed");
+    const row = await kv().get("ns", "sc", "wt-a");
+    expect(row?.value).toEqual({ v: 1 });
+  });
+
+  it("a callback that throws Rollback results in TransactionRolledBackError and no data written is visible", async () => {
+    await expect(
+      txLayer().withTransaction(async (tx) => {
+        await kv().put("ns", "sc", "wt-b", { v: 1 }, { tx });
+        throw new Rollback({ kind: "callback-requested", reason: "test" });
+      }),
+    ).rejects.toMatchObject({ code: "TRANSACTION_ROLLED_BACK" });
+    const row = await kv().get("ns", "sc", "wt-b");
+    expect(row).toBeNull();
+  });
+
+  it("a callback that throws a plain Error propagates that error unchanged and still rolls back", async () => {
+    const marker = new Error("plain application error");
+    await expect(
+      txLayer().withTransaction(async (tx) => {
+        await kv().put("ns", "sc", "wt-c", { v: 1 }, { tx });
+        throw marker;
+      }),
+    ).rejects.toBe(marker);
+    const row = await kv().get("ns", "sc", "wt-c");
+    expect(row).toBeNull();
+  });
+
+  it("a callback that throws an application error carrying its own .code propagates unchanged, not misclassified as a driver error", async () => {
+    // Codex re-audit finding: the plain-Error test above uses a marker with no `.code` at all,
+    // so it only proves the easy branch. isPgDriverError previously classified ANY Error with a
+    // string `.code` as a driver error (a Node built-in like ENOENT, or a caller's own
+    // business-error convention) -- this would have been misclassified and, for a code not in
+    // errors.ts's own enumerations, silently relabeled UnrecognizedPostgresError by the `default`
+    // branch, discarding its real identity. Fixed by requiring `.severity` too (a field every
+    // genuine Postgres wire-protocol error carries, but an arbitrary application error does not).
+    class ApplicationError extends Error {
+      readonly code = "INSUFFICIENT_FUNDS";
+    }
+    const marker = new ApplicationError("business rule violated");
+    await expect(
+      txLayer().withTransaction(async (tx) => {
+        await kv().put("ns", "sc", "wt-app-err", { v: 1 }, { tx });
+        throw marker;
+      }),
+    ).rejects.toBe(marker);
+    const row = await kv().get("ns", "sc", "wt-app-err");
+    expect(row).toBeNull();
+  });
+
+  it("opts.timeoutMs rejects with TransactionFaultError(faultKind: timeout) when a statement runs too long, rolling back any prior write in the same transaction", async () => {
+    await expect(
+      txLayer().withTransaction(
+        async (tx) => {
+          // Codex re-audit finding: the original version of this test only asserted the error
+          // translation, not that the interface's own documented transaction-atomicity guarantee
+          // ("the whole transaction rolls back") actually held for the timeout path specifically.
+          await kv().put("ns", "sc", "wt-timeout-rollback", { v: 1 }, { tx });
+          const sql = resolveTransaction(tx);
+          await sql`select pg_sleep(0.3)`;
+        },
+        { timeoutMs: 50 },
+      ),
+    ).rejects.toMatchObject({ code: "TRANSACTION_FAULT", faultKind: "timeout" });
+    const row = await kv().get("ns", "sc", "wt-timeout-rollback");
+    expect(row).toBeNull();
+  });
+
+  it("an already-aborted signal rejects with AbortError before fn is ever invoked", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let fnCalled = false;
+    await expect(
+      txLayer().withTransaction(async () => { fnCalled = true; }, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(fnCalled).toBe(false);
+  });
+
+  it("aborting after withTransaction has already started has no effect on that in-flight call", async () => {
+    const controller = new AbortController();
+    const result = await txLayer().withTransaction(async (tx) => {
+      controller.abort(); // fires synchronously once fn is already running
+      await kv().put("ns", "sc", "wt-d", { v: 1 }, { tx });
+      return "still-committed";
+    }, { signal: controller.signal });
+    expect(result).toBe("still-committed");
+    const row = await kv().get("ns", "sc", "wt-d");
+    expect(row?.value).toEqual({ v: 1 });
+  });
+
+  it("resolving a handle during fn's own execution participates in that same transaction (read-your-own-write before commit)", async () => {
+    await txLayer().withTransaction(async (tx) => {
+      await kv().put("ns", "sc", "wt-e", { v: 1 }, { tx });
+      const readBack = await kv().get("ns", "sc", "wt-e", { tx });
+      expect(readBack?.value).toEqual({ v: 1 });
+    });
+  });
+
+  it("a handle from an already-ended transaction throws TransactionHandleInvalidError on resolveTransaction", async () => {
+    let staleHandle: TransactionHandle | undefined;
+    await txLayer().withTransaction(async (tx) => { staleHandle = tx; });
+    expect(() => resolveTransaction(staleHandle!)).toThrow(TransactionHandleInvalidError);
+  });
+
+  it("a fabricated handle never issued by any withTransaction call throws TransactionHandleInvalidError", () => {
+    expect(() => resolveTransaction(FAKE_TX)).toThrow(TransactionHandleInvalidError);
+  });
+
+  it("invalid opts (e.g. a non-enum isolation string) rejects with ValidationError before opening a transaction", async () => {
+    await expect(
+      txLayer().withTransaction(async () => {}, { isolation: "bogus" as never }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it("a serialization failure under repeatable read isolation surfaces as TransactionFaultError(faultKind: serialization-failure)", async () => {
+    // Deterministic recipe (not a timing-dependent SSI-cycle scenario): tx2 takes its
+    // repeatable-read snapshot via a SELECT, a SEPARATE, already-committed write then changes
+    // the SAME row, and tx2's own subsequent UPDATE of that row is guaranteed to conflict --
+    // Postgres detects the row changed after tx2's snapshot began and raises 40001.
+    await kv().put("ns", "sc", "wt-ser", { v: 0 });
+    // The initial put and the later "separate, already-committed conflicting write" below are
+    // two sequential auto-committing writes to the SAME key -- exposed to the documented
+    // millisecond-truncation collision (ClockRegressionError) this project's tests guard
+    // against everywhere else this pattern appears. Force a boundary crossing.
+    await tick();
+    let signalReady: () => void;
+    const readySignal = new Promise<void>((resolve) => { signalReady = resolve; });
+    // Definite-assignment assertion: the Promise executor runs synchronously (per spec), so
+    // signalGo is always assigned before the top-level `signalGo()` call below -- TypeScript
+    // just can't prove that across the closure boundary on its own.
+    let signalGo!: () => void;
+    const goSignal = new Promise<void>((resolve) => { signalGo = resolve; });
+
+    const tx2Promise = txLayer().withTransaction(async (tx) => {
+      const sql = resolveTransaction(tx);
+      await sql`select value from ${sql(TEST_SCHEMA)}.kv_current where ns = 'ns' and scope = 'sc' and key = 'wt-ser'`;
+      signalReady();
+      await goSignal;
+      await sql`update ${sql(TEST_SCHEMA)}.kv_current set value = '{"v":2}'::jsonb, version = version + 1 where ns = 'ns' and scope = 'sc' and key = 'wt-ser'`;
+    }, { isolation: "repeatable read" });
+
+    await readySignal;
+    await kv().put("ns", "sc", "wt-ser", { v: 1 }); // a separate, already-committed conflicting write
+    signalGo();
+
+    await expect(tx2Promise).rejects.toMatchObject({ code: "TRANSACTION_FAULT", faultKind: "serialization-failure" });
+  });
+
+  it("a deadlock between two transactions surfaces as TransactionFaultError(faultKind: deadlock) for the loser", async () => {
+    await kv().put("ns", "sc", "wt-dl-a", { v: 0 });
+    await kv().put("ns", "sc", "wt-dl-b", { v: 0 });
+    let signalAReady: () => void;
+    const aReady = new Promise<void>((resolve) => { signalAReady = resolve; });
+    let signalBReady: () => void;
+    const bReady = new Promise<void>((resolve) => { signalBReady = resolve; });
+
+    // A locks row a then waits for B to lock row b before trying to lock row b itself; B does
+    // the mirror image -- a guaranteed circular wait once both signals have fired.
+    const txA = txLayer().withTransaction(async (tx) => {
+      const sql = resolveTransaction(tx);
+      await sql`update ${sql(TEST_SCHEMA)}.kv_current set version = version where ns = 'ns' and scope = 'sc' and key = 'wt-dl-a'`;
+      signalAReady();
+      await bReady;
+      await sql`update ${sql(TEST_SCHEMA)}.kv_current set version = version where ns = 'ns' and scope = 'sc' and key = 'wt-dl-b'`;
+    });
+    const txB = txLayer().withTransaction(async (tx) => {
+      const sql = resolveTransaction(tx);
+      await sql`update ${sql(TEST_SCHEMA)}.kv_current set version = version where ns = 'ns' and scope = 'sc' and key = 'wt-dl-b'`;
+      signalBReady();
+      await aReady;
+      await sql`update ${sql(TEST_SCHEMA)}.kv_current set version = version where ns = 'ns' and scope = 'sc' and key = 'wt-dl-a'`;
+    });
+
+    const results = await Promise.allSettled([txA, txB]);
+    const rejected = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    expect(rejected.length).toBeGreaterThanOrEqual(1);
+    expect(rejected.some((r) => (r.reason as { faultKind?: string })?.faultKind === "deadlock")).toBe(true);
+  }, 15_000);
+
+  it("a connection lost during withTransaction surfaces as TransactionFaultError(faultKind: connection-lost), not the shared ConnectionError", async () => {
+    // Codex re-audit finding: this interface's own JSDoc documents "@throws TransactionFaultError
+    // on connection loss," but the catch previously fell straight through to the shared
+    // translatePostgresError, which maps a connection-failure code to the unrelated shared
+    // ConnectionError class instead.
+    const dedicated = createClient({ connectionString: connectionUri(), schema: TEST_SCHEMA, maxConnections: 1 });
+    let signalReady!: () => void;
+    const ready = new Promise<void>((resolve) => { signalReady = resolve; });
+    const txPromise = new PgTransactionLeaseLayer(dedicated).withTransaction(async (tx) => {
+      const sql = resolveTransaction(tx);
+      await sql`select 1`; // proves the transaction is genuinely live before we kill it
+      signalReady();
+      await tick(50);
+      await sql`select 1`; // the connection is gone by now -- this one must fail
+    });
+    await ready;
+    await dedicated.end({ timeout: 0 });
+    await expect(txPromise).rejects.toMatchObject({ code: "TRANSACTION_FAULT", faultKind: "connection-lost" });
+  }, 10_000);
+
+  it("opts.timeoutMs above Postgres's int4 max rejects with ValidationError before opening a transaction", async () => {
+    await expect(
+      txLayer().withTransaction(async () => {}, { timeoutMs: 2_147_483_648 }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+});
+
+describe("PgTransactionLeaseLayer leases (acquireLease / tryAcquireLease / releaseLease / withLease)", () => {
+  it("a second acquireLease for a held key (no timeoutMs) blocks until release, then resolves promptly", async () => {
+    const layer = txLayer();
+    const first = await layer.acquireLease("lease-a");
+    let secondResolved = false;
+    const second = layer.acquireLease("lease-a").then((lease) => { secondResolved = true; return lease; });
+    await tick(100);
+    expect(secondResolved).toBe(false);
+    await layer.releaseLease(first);
+    const secondLease = await second;
+    expect(secondResolved).toBe(true);
+    await layer.releaseLease(secondLease);
+  });
+
+  it("acquireLease with opts.timeoutMs on a contended key rejects with LeaseTimeoutError after that duration", async () => {
+    const layer = txLayer();
+    const held = await layer.acquireLease("lease-b");
+    try {
+      const start = Date.now();
+      await expect(layer.acquireLease("lease-b", { timeoutMs: 100 }))
+        .rejects.toMatchObject({ code: "LEASE_TIMEOUT", key: "lease-b", waitedMs: 100 });
+      expect(Date.now() - start).toBeGreaterThanOrEqual(90);
+    } finally {
+      await layer.releaseLease(held);
+    }
+  });
+
+  it("tryAcquireLease with no timeoutMs against a contended key resolves null promptly", async () => {
+    const layer = txLayer();
+    const held = await layer.acquireLease("lease-c");
+    try {
+      const start = Date.now();
+      const result = await layer.tryAcquireLease("lease-c");
+      expect(result).toBeNull();
+      expect(Date.now() - start).toBeLessThan(200);
+    } finally {
+      await layer.releaseLease(held);
+    }
+  });
+
+  it("tryAcquireLease with timeoutMs against a contended key resolves null (not throw) after that duration", async () => {
+    const layer = txLayer();
+    const held = await layer.acquireLease("lease-d");
+    try {
+      // Codex re-audit finding: without an elapsed-time assertion, an (incorrect) immediate
+      // pg_try_advisory_lock-only implementation that ignores timeoutMs entirely would also
+      // pass this test -- it would just resolve null faster than intended, not later.
+      const start = Date.now();
+      const result = await layer.tryAcquireLease("lease-d", { timeoutMs: 100 });
+      expect(result).toBeNull();
+      expect(Date.now() - start).toBeGreaterThanOrEqual(90);
+    } finally {
+      await layer.releaseLease(held);
+    }
+  });
+
+  it("an already-aborted signal rejects acquireLease/tryAcquireLease with AbortError before any connection is reserved", async () => {
+    const layer = txLayer();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(layer.acquireLease("lease-e", { signal: controller.signal }))
+      .rejects.toMatchObject({ name: "AbortError" });
+    await expect(layer.tryAcquireLease("lease-e", { signal: controller.signal }))
+      .rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("a reservation failure surfaces as LeaseFaultError(reserve-failed)", async () => {
+    const badSql = createClient({
+      connectionString: "postgres://nouser:nopass@127.0.0.1:1/nonexistent",
+      schema: TEST_SCHEMA,
+      maxConnections: 1,
+      // Fail fast: unreachable endpoint; avoids the 30s default connect timeout hanging past the
+      // test timeout where a closed port does not promptly refuse (WSL2).
+      connectTimeout: 2,
+    });
+    try {
+      await expect(new PgTransactionLeaseLayer(badSql).acquireLease("lease-f"))
+        .rejects.toMatchObject({ code: "LEASE_FAULT", faultKind: "reserve-failed" });
+    } finally {
+      await badSql.end({ timeout: 1 });
+    }
+  });
+
+  it("aborting while genuinely waiting on a contended lease cancels server-side and leaks no lock", async () => {
+    const layer = txLayer();
+    const held = await layer.acquireLease("lease-g");
+    const controller = new AbortController();
+    const waiting = layer.acquireLease("lease-g", { signal: controller.signal });
+    await tick(100); // let the second acquireLease actually dispatch and start waiting
+    controller.abort();
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    await layer.releaseLease(held);
+    // A third, independent acquireLease must succeed promptly -- proving the aborted attempt
+    // left no advisory lock behind (the defensive pg_advisory_unlock in design.md §3).
+    const third = await layer.acquireLease("lease-g", { timeoutMs: 2_000 });
+    await layer.releaseLease(third);
+  }, 10_000);
+
+  it("aborting while genuinely blocked reserving a connection (pool exhausted) rejects with AbortError instead of hanging forever", async () => {
+    // Two independent Sprint 2 reviews (Opus, Codex) found raceAgainstAbort had no entry check
+    // for an already-aborted signal, and that sql.reserve() itself was never bounded by
+    // timeoutMs/signal at all -- only the advisory-lock wait was. This test isolates the
+    // RESERVE phase specifically (a different key than the held lease, so there is no lock
+    // contention at all -- only connection-pool exhaustion, via maxConnections: 1) to prove the
+    // reserveBounded fix, not the lock-acquisition-phase fix already covered above.
+    const dedicated = createClient({ connectionString: connectionUri(), schema: TEST_SCHEMA, maxConnections: 1 });
+    const layer = new PgTransactionLeaseLayer(dedicated);
+    try {
+      const first = await layer.acquireLease("reserve-race-key-1");
+      try {
+        const controller = new AbortController();
+        const second = layer.acquireLease("reserve-race-key-2", { signal: controller.signal });
+        await tick(100); // let the second call actually start blocking inside sql.reserve()
+        controller.abort();
+        await expect(second).rejects.toMatchObject({ name: "AbortError" });
+      } finally {
+        await layer.releaseLease(first);
+      }
+    } finally {
+      await dedicated.end({ timeout: 1 });
+    }
+  }, 10_000);
+
+  it("acquireLease with opts.timeoutMs blocked purely on connection-pool exhaustion (not lock contention) rejects with LeaseTimeoutError after that duration", async () => {
+    // The reserve-phase counterpart to the abort test above: proves reserveBounded's timeout
+    // branch (RESERVE_TIMED_OUT), not just its abort branch.
+    const dedicated = createClient({ connectionString: connectionUri(), schema: TEST_SCHEMA, maxConnections: 1 });
+    const layer = new PgTransactionLeaseLayer(dedicated);
+    try {
+      const first = await layer.acquireLease("reserve-timeout-key-1");
+      try {
+        const start = Date.now();
+        await expect(layer.acquireLease("reserve-timeout-key-2", { timeoutMs: 100 }))
+          .rejects.toMatchObject({ code: "LEASE_TIMEOUT", key: "reserve-timeout-key-2", waitedMs: 100 });
+        expect(Date.now() - start).toBeGreaterThanOrEqual(90);
+      } finally {
+        await layer.releaseLease(first);
+      }
+    } finally {
+      await dedicated.end({ timeout: 1 });
+    }
+  }, 10_000);
+
+  it("releaseLease against a connection that has been terminated surfaces LeaseFaultError(connection-lost), not LeaseNotHeldError", async () => {
+    // Found missing by the sprint's whole-sprint review: an earlier version of releaseLease
+    // unconditionally swallowed the unlock query's own failure, so a dead held connection
+    // resolved successfully instead of surfacing this documented error at all.
+    //
+    // Simulates connection loss via a graceful dedicated.end() BEFORE releaseLease, not an
+    // external pg_terminate_backend() -- an earlier version of this test used
+    // pg_terminate_backend and found it triggers an uncaught internal TypeError deep in
+    // postgres.js's own connection internals (a surprise server-side kill while the client still
+    // believes the socket is live is evidently not a path the installed driver handles cleanly),
+    // hanging the test rather than producing the clean rejection this test needs to assert on.
+    // end() is the driver's own normal, well-tested shutdown path and reliably rejects a
+    // subsequent query instead.
+    const dedicated = createClient({ connectionString: connectionUri(), schema: TEST_SCHEMA, maxConnections: 1 });
+    const layer = new PgTransactionLeaseLayer(dedicated);
+    const lease = await layer.acquireLease("lease-dead");
+    await dedicated.end({ timeout: 0 });
+    await expect(layer.releaseLease(lease))
+      .rejects.toMatchObject({ code: "LEASE_FAULT", faultKind: "connection-lost" });
+  }, 10_000);
+
+  it("releaseLease then a subsequent acquireLease by another caller succeeds immediately", async () => {
+    const layer = txLayer();
+    const lease = await layer.acquireLease("lease-h");
+    await layer.releaseLease(lease);
+    const start = Date.now();
+    const second = await layer.acquireLease("lease-h");
+    expect(Date.now() - start).toBeLessThan(200);
+    await layer.releaseLease(second);
+  });
+
+  it("releasing an already-released lease throws LeaseNotHeldError", async () => {
+    const layer = txLayer();
+    const lease = await layer.acquireLease("lease-i");
+    await layer.releaseLease(lease);
+    await expect(layer.releaseLease(lease)).rejects.toBeInstanceOf(LeaseNotHeldError);
+  });
+
+  it("withLease releases the lease even when fn throws, and propagates fn's own error unchanged", async () => {
+    const layer = txLayer();
+    const marker = new Error("fn failed");
+    await expect(layer.withLease("lease-j", async () => { throw marker; })).rejects.toBe(marker);
+    // A subsequent acquireLease succeeding proves the lease was released despite the throw.
+    const start = Date.now();
+    const lease = await layer.acquireLease("lease-j");
+    expect(Date.now() - start).toBeLessThan(200);
+    await layer.releaseLease(lease);
+  });
+
+  it("a lease acquired WITH timeoutMs does not leave statement_timeout poisoned on the connection after release (regression test)", async () => {
+    // A dedicated maxConnections: 1 pool -- not the shared suite pool -- so the SAME physical
+    // connection the lease reserves is GUARANTEED to be the one the follow-up query reuses.
+    // Using the shared pool here would make this test pass or fail depending on which of several
+    // physical connections happened to be idle, proving nothing either way -- exactly the class
+    // of self-fulfilling test this project's own history has repeatedly had to catch and fix.
+    const dedicated = createClient({ connectionString: connectionUri(), schema: TEST_SCHEMA, maxConnections: 1 });
+    try {
+      const layer = new PgTransactionLeaseLayer(dedicated);
+      const lease = await layer.acquireLease("lease-poison", { timeoutMs: 5_000 });
+      await layer.releaseLease(lease);
+      // SHOW statement_timeout names its result column "statement_timeout", not "timeout" --
+      // select current_setting(...) AS timeout gives a reliable, aliased column name instead.
+      const rows = await dedicated<{ timeout: string }[]>`select current_setting('statement_timeout') as timeout`;
+      // Restored to the CONNECTION default, NOT left at the 5s lease TTL. Since G7 (task 2.1)
+      // createClient sets a 120s statement_timeout default, `reset statement_timeout` reverts
+      // to that ("2min"), not to "0" as before — the not-poisoned property (it differs from the
+      // 5s TTL) still holds.
+      expect(rows[0]!.timeout).toBe("2min");
+    } finally {
+      await dedicated.end({ timeout: 5 });
+    }
+  });
+
+  it("a normal (no timeoutMs) lease never touches statement_timeout on the connection at all", async () => {
+    const dedicated = createClient({ connectionString: connectionUri(), schema: TEST_SCHEMA, maxConnections: 1 });
+    try {
+      const layer = new PgTransactionLeaseLayer(dedicated);
+      const lease = await layer.acquireLease("lease-no-poison"); // no timeoutMs at all
+      await layer.releaseLease(lease);
+      // SHOW statement_timeout names its result column "statement_timeout", not "timeout" --
+      // select current_setting(...) AS timeout gives a reliable, aliased column name instead.
+      const rows = await dedicated<{ timeout: string }[]>`select current_setting('statement_timeout') as timeout`;
+      // The connection default (G7 2.1: statement_timeout = 120s = "2min"), untouched by a
+      // lease that passed no timeoutMs.
+      expect(rows[0]!.timeout).toBe("2min");
+    } finally {
+      await dedicated.end({ timeout: 5 });
+    }
+  });
+});
+
+// ============================================================================================
+// tryAcquireLease branch coverage (v1.0.0-recovery-testing change-level audit — BLOCK 11 / §2.3).
+//
+// `acquireLease`'s reserve/timeout/abort forks are covered above; these exercise the SYMMETRIC —
+// and previously uncovered — forks of `tryAcquireLease` (transaction-lease.ts lines ~331-333, 358,
+// 361-372), plus its two token-minting SUCCESS paths (no-timeoutMs and with-timeoutMs), so the
+// per-file coverage floor for this durability adapter clears §2.3's binding 90% lines / 85%
+// branches. Each test mirrors an existing `acquireLease` test's proven mechanism (a dedicated
+// maxConnections:1 pool for pool-exhaustion; an unreachable endpoint for a reserve failure; a held
+// key for lock contention), applied to `tryAcquireLease`.
+// ============================================================================================
+
+describe("PgTransactionLeaseLayer.tryAcquireLease — reserve / timeout / abort / success branch coverage", () => {
+  it("tryAcquireLease with NO timeoutMs on a FREE key acquires the lease and returns a token, then releases", async () => {
+    const layer = txLayer();
+    const lease = await layer.tryAcquireLease("try-free-a");
+    expect(lease).not.toBeNull();
+    expect(lease!.key).toBe("try-free-a");
+    expect(typeof lease!.token).toBe("string");
+    await layer.releaseLease(lease!);
+    // Released → another caller can immediately take it (proves the token path really held the lock).
+    const again = await layer.acquireLease("try-free-a", { timeoutMs: 2_000 });
+    await layer.releaseLease(again);
+  }, 10_000);
+
+  it("tryAcquireLease WITH timeoutMs on a FREE key acquires the lease (the timeout branch's SUCCESS fork) and returns a token", async () => {
+    // The pg_advisory_lock (timeout) branch's success path — distinct from the no-timeout
+    // pg_try_advisory_lock path above — mints a token and does not poison statement_timeout.
+    const dedicated = createClient({ connectionString: connectionUri(), schema: TEST_SCHEMA, maxConnections: 1 });
+    try {
+      const layer = new PgTransactionLeaseLayer(dedicated);
+      const lease = await layer.tryAcquireLease("try-free-b", { timeoutMs: 2_000 });
+      expect(lease).not.toBeNull();
+      expect(lease!.key).toBe("try-free-b");
+      await layer.releaseLease(lease!);
+      // statement_timeout restored to the connection default (not left at the 2s TTL).
+      const rows = await dedicated<{ timeout: string }[]>`select current_setting('statement_timeout') as timeout`;
+      expect(rows[0]!.timeout).toBe("2min");
+    } finally {
+      await dedicated.end({ timeout: 5 });
+    }
+  }, 10_000);
+
+  it("tryAcquireLease with timeoutMs blocked purely on connection-pool exhaustion resolves null (the RESERVE_TIMED_OUT fork), not throw", async () => {
+    // The reserve-phase counterpart of tryAcquireLease's lock-phase timeout→null: a pool with no
+    // free connection makes reserveBounded time out; tryAcquireLease maps that to null, not an error.
+    const dedicated = createClient({ connectionString: connectionUri(), schema: TEST_SCHEMA, maxConnections: 1 });
+    const layer = new PgTransactionLeaseLayer(dedicated);
+    try {
+      const first = await layer.acquireLease("try-reserve-timeout-1"); // pins the only connection
+      try {
+        const start = Date.now();
+        const result = await layer.tryAcquireLease("try-reserve-timeout-2", { timeoutMs: 100 });
+        expect(result).toBeNull();
+        expect(Date.now() - start).toBeGreaterThanOrEqual(90);
+      } finally {
+        await layer.releaseLease(first);
+      }
+    } finally {
+      await dedicated.end({ timeout: 1 });
+    }
+  }, 10_000);
+
+  it("tryAcquireLease surfaces a reservation failure as LeaseFaultError(reserve-failed)", async () => {
+    const badSql = createClient({
+      connectionString: "postgres://nouser:nopass@127.0.0.1:1/nonexistent",
+      schema: TEST_SCHEMA,
+      maxConnections: 1,
+      connectTimeout: 2, // fail fast on the unreachable endpoint (WSL2 closed-port behaviour)
+    });
+    try {
+      await expect(new PgTransactionLeaseLayer(badSql).tryAcquireLease("try-reserve-fail"))
+        .rejects.toMatchObject({ code: "LEASE_FAULT", faultKind: "reserve-failed" });
+    } finally {
+      await badSql.end({ timeout: 1 });
+    }
+  }, 10_000);
+
+  it("tryAcquireLease aborting while blocked RESERVING a connection (pool exhausted) rejects with AbortError, not null", async () => {
+    // An abort is a caller cancellation, not lock contention — tryAcquireLease re-throws AbortError
+    // from the reserve phase rather than mapping it to null (the RESERVE_TIMED_OUT fork's sibling).
+    const dedicated = createClient({ connectionString: connectionUri(), schema: TEST_SCHEMA, maxConnections: 1 });
+    const layer = new PgTransactionLeaseLayer(dedicated);
+    try {
+      const first = await layer.acquireLease("try-reserve-abort-1");
+      try {
+        const controller = new AbortController();
+        const second = layer.tryAcquireLease("try-reserve-abort-2", { signal: controller.signal });
+        await tick(100); // let the reserve genuinely start blocking on the exhausted pool
+        controller.abort();
+        await expect(second).rejects.toMatchObject({ name: "AbortError" });
+      } finally {
+        await layer.releaseLease(first);
+      }
+    } finally {
+      await dedicated.end({ timeout: 1 });
+    }
+  }, 10_000);
+
+  it("tryAcquireLease with timeoutMs aborting while blocked on the HELD LOCK rejects with AbortError (the non-timeout re-throw fork) and leaks no lock", async () => {
+    // hadTimeout branch: raceAgainstAbort throws AbortError (not a statement timeout), so the inner
+    // catch re-throws it (the `throw err` fork), the outer catch unlocks/resets/releases, and the
+    // AbortError propagates — proving the aborted attempt leaves no advisory lock behind.
+    const layer = txLayer();
+    const held = await layer.acquireLease("try-lock-abort");
+    try {
+      const controller = new AbortController();
+      const waiting = layer.tryAcquireLease("try-lock-abort", { timeoutMs: 5_000, signal: controller.signal });
+      await tick(100); // let pg_advisory_lock genuinely block behind the held lock
+      controller.abort();
+      await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      await layer.releaseLease(held);
+    }
+    // A fresh acquire succeeding proves the aborted attempt released the connection and left no lock.
+    const layer2 = txLayer();
+    const third = await layer2.acquireLease("try-lock-abort", { timeoutMs: 2_000 });
+    await layer2.releaseLease(third);
+  }, 10_000);
+});

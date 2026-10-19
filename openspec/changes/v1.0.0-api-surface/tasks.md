@@ -1,0 +1,227 @@
+# Tasks — v1.0.0 API Surface & Release Contract
+
+Each task: implemented by a builder, then reviewed in parallel by two Opus auditors
+(spec-compliance against this change's `design.md` + `specs/release-contract/spec.md`; code/docs/test
+quality). A task is CLOSED only after both auditors approve, or their findings are fixed and
+re-reviewed. Matches Sprint 1-8's own review cadence. Every task states concrete acceptance criteria
+(what test passes / what artifact is checkable), per `openspec/config.yaml`'s tasks rule.
+
+**Critical-path ordering (roadmap §"Critical path", Council A §5).** This change is **Phase 2 —
+the freeze**. It has a **hard upstream dependency: G5 (co-transactional `save`) MUST have merged
+first** — it changes `save`'s signature, and freezing a pre-G5 barrel would ship a contract 1.0
+cannot fix without a major bump. Within this change: the chain-archive strip (§3) and the
+`retryable` field (§2) are pre-barrel; the barrel + package.json + build (§4) are the freeze moment;
+docs (§5) and the Lean cut-line (§6) run in parallel; the smoke test (§7) is last because it
+validates the packed result of everything above.
+
+## 0. Preconditions (blocking gate — verify before any freeze work)
+
+- [x] 0.1 **Confirm G5 has merged and `save`'s signature is final.** Inspect
+  `src/interfaces/checkpoint-store.ts` and `src/postgres/checkpoint-store.ts` and confirm the
+  co-transactional `save` (accepts a caller `tx`, or the documented `saveAndAdvance` combinator
+  exists). **Acceptance:** a written note in this file records the exact final `save` signature the
+  barrel will freeze; if G5 has not merged, STOP — this change is blocked (design §0). Satisfies the
+  ordering precondition for **G1**.
+
+> **Builder note (0.1) -- G5 precondition VERIFIED; frozen `save`/`saveAndAdvance` signatures + freeze decisions.**
+>
+> G5 has merged on `main` (`4e04926`). `CheckpointStore.save` accepts a caller transaction via
+> `SaveCheckpointOptions.tx`, and the `saveAndAdvance` combinator exists. The exact final
+> signatures the barrel freezes:
+>
+> - `CheckpointStore.save(walletId: string, networkId: string, data: Uint8Array, opts?: SaveCheckpointOptions): Promise<CheckpointSummary>`
+>   where `SaveCheckpointOptions = z.infer<typeof SaveCheckpointOptionsSchema> & { signal?: AbortSignal; tx?: TransactionHandle }`
+>   (`src/interfaces/checkpoint-store.ts`). With `opts.tx` supplied, `save` issues every statement
+>   on the caller's transaction (co-transactional composition); `PgCheckpointStore` implements it.
+> - `saveAndAdvance(deps: SaveAndAdvanceDeps, walletId: string, networkId: string, data: Uint8Array, cursor: SaveAndAdvanceCursor, opts?: { chunkSize?: number; label?: string; signal?: AbortSignal }): Promise<CheckpointSummary>`
+>   (`src/postgres/save-and-advance.ts`) -- opens ONE transaction, calls `checkpoints.save(..., { tx })`
+>   then `watermarks.set(..., { tx })`, and commits both together.
+>
+> **Consolidating-lead decisions recorded (design §1.1 is silent on each; the reconciliation brief
+> authorised them):**
+> 1. **`saveAndAdvance` IS frozen public API.** The barrel re-exports `saveAndAdvance` plus its
+>    `SaveAndAdvanceDeps`/`SaveAndAdvanceCursor` types. It is the G5 co-transactional composition
+>    primitive; its own doc comment says its signature is "finalised by the api-surface change (G1)",
+>    and the durability ordering guarantee (design §4.1) is unreachable through the public surface
+>    without it. The `save-and-advance.ts` "not re-exported from any barrel" NOTE was corrected to say
+>    it IS now exported and frozen.
+> 2. **The G6/G7 error classes join the frozen `StorageError` hierarchy.** `DurabilityContractError`
+>    (`DURABILITY_CONTRACT_VIOLATION`), `TransactionPoolerDetectedError` (`TRANSACTION_POOLER_DETECTED`),
+>    and `MigrationLockTimeoutError` (`MIGRATION_LOCK_TIMEOUT`) are all thrown from `runMigrations`, so
+>    a consumer catches them -- they are already-shipped public error surface. The barrel re-exports
+>    all three. This makes the **frozen non-chain-archive catalog 24 codes** (design §3.1's 21 + these
+>    3). Task 5.2's catalog doc and its C4 drift test MUST enumerate 24, not the pre-G6/G7 21 (the
+>    design §3.1 `grep -> 21` was taken before G6/G7 merged; the drift test, not the literal number,
+>    is the authority per design §3.1's own framing).
+> 3. **Kept internal (smallest-surface / additive-in-a-minor).** `probeDurability`,
+>    `DurabilityWarning`, `DurabilityViolation`, `DurabilityProbeOptions` (design §1.1 lists no probe
+>    types; the two error CLASSES suffice for `catch`/`instanceof`); `encode`/`decode`/`ENVELOPE_VERSION`
+>    (the `PgWalletStateEnvelopeStore` wraps them); and the bare bound constants (`MAX_JSON_DEPTH`,
+>    `MAX_CHECKPOINT_ID_LENGTH`, `MAX_ENTRY_CONTENT_DEPTH`, `THS_RESERVED_KEY_PREFIX`, the `DEFAULT_*_MS`
+>    timeouts). Any of these can be added in a 1.x minor without a break; over-exporting cannot be undone
+>    without a major.
+> 4. **Abstract intermediate error bases are NOT re-exported.** Design §1.1 freezes "`StorageError` and
+>    every concrete subclass"; the root `StorageError` IS exported (catch-all + spec scenario), but the
+>    intermediates `TemporalKVError`/`CheckpointStoreError`/`TransactionLeaseError`/`WalletStateEnvelopeError`
+>    are not, keeping the surface to base + concrete leaves.
+> 5. **`MIGRATION_LOCK_TIMEOUT` retryability = `retryable`** (cross-vendor re-audit reconciliation): it is
+>    another advisory-lock acquire wait, exactly like the retryable `LEASE_TIMEOUT` -- the migration
+>    advisory lock is released the moment the concurrent migration commits, so a bounded
+>    backoff-then-retry can succeed. `runMigrations` translates BOTH `55P03` (`lock_timeout`) and `57014`
+>    (`statement_timeout`) at the single lock-acquire site into this one error, and both are lock-acquire
+>    timeouts that clear the same way (not a conflation of unrelated faults). The earlier
+>    "non-retryable / orchestrator-restart" flag was an operational preference, not a retryability fact;
+>    RESOLVED to retryable. The frozen retryable set is exactly
+>    `{CONNECTION_ERROR, TRANSACTION_FAULT, LEASE_TIMEOUT, MIGRATION_LOCK_TIMEOUT}` (4 codes).
+> 6. **`retryable` field representation.** `abstract readonly retryable: Retryability` on the
+>    `StorageError` base, where `Retryability = "retryable" | "non-retryable" | "conditional"`. Every
+>    concrete subclass sets it; `ClockRegressionError` = `"conditional"` (its two documented causes are
+>    distinguished, not collapsed to a uniform non-retryable label). `Retryability` is re-exported from the
+>    barrel (it is the type of a public field).
+
+## 1. Pre-freeze: retryability field (G3)
+
+- [x] 1.1 Add a machine-readable retryability field to the `StorageError` base
+  (`src/interfaces/storage-errors.ts:7`) — `abstract readonly retryable` (boolean, or a small
+  `Retryability` enum to express the conditional case) — and set it on every concrete subclass
+  across `storage-errors.ts`, `temporal-kv.ts`, `checkpoint-store.ts`, `transaction-lease.ts`,
+  `wallet-state-envelope.ts`, `postgres/errors.ts`. Mark `CONNECTION_ERROR`, `TRANSACTION_FAULT`,
+  `LEASE_TIMEOUT`, `MIGRATION_LOCK_TIMEOUT` retryable; mark `CLOCK_REGRESSION` conditional (retryable same-ms collision vs.
+  non-retryable backward step — `errors.ts:33`'s own two documented causes); all others
+  non-retryable. **Acceptance:** `tsc --noEmit` passes; a unit test catches one instance of each
+  error class and asserts its `retryable` value matches the frozen catalog table (design §3.1);
+  `CLOCK_REGRESSION`'s representation distinguishes its two causes and does NOT label it uniformly
+  non-retryable. Satisfies **"Retryability is a machine-readable field on every StorageError."**
+
+## 2. Pre-freeze: strip / mark-experimental the chain-archive error classes (G3)
+
+- [x] 2.1 Ensure the six chain-archive error classes are excluded from the frozen surface:
+  `ChainArchiveInvariantError`/`ChainArchiveCheckViolationError` (`src/postgres/errors.ts:61,67`)
+  and `ChainArchiveError`/`BlobIntegrityError`/`BlobMissingError`/`BlockNotFoundError`
+  (`src/interfaces/chain-archive-store.ts:131-152`). They are NOT re-exported from `src/index.ts`
+  (task 4.1) and their codes are NOT in the frozen catalog (task 5.2). Keep the `translatePostgresError`
+  23514 constraint-name routing internal and mark those classes `@experimental`/`@internal` in TSDoc.
+  **Acceptance:** a test/lint assertion confirms none of the six class names is exported from the
+  built barrel and none of `CHAIN_ARCHIVE_INVARIANT_VIOLATION`/`CHAIN_ARCHIVE_CHECK_VIOLATION`/
+  `BLOB_INTEGRITY`/`BLOB_MISSING`/`BLOCK_NOT_FOUND` appears in the published catalog; a test confirms
+  `translatePostgresError` still routes a chain-archive-named 23514 to the correct internal class
+  (routing preserved, surface not frozen); the 23514 fall-through to `ClockRegressionError` for
+  unknown constraint names is unchanged. Satisfies **"The chain-archive error classes are excluded
+  from the frozen surface."** (`council/A` critique #6, ruling (e).)
+
+## 3. The freeze: build + package.json (G1)
+
+- [x] 3.1 Add a declaration-emitting build. Add `tsconfig.build.json` (extends the base;
+  `declaration: true`, `emitDeclarationMap: true`, `outDir: dist`, no `noEmit`) and a `"build"`
+  script (`tsc -p tsconfig.build.json`). Today the only build-ish script is `"typecheck": "tsc
+  --noEmit"` — nothing emits `.d.ts`. **Acceptance:** `npm run build` produces `dist/index.js` and
+  `dist/index.d.ts` with no errors; a compiled type-assertion file (`tsd` or `expectTypeOf`) run
+  under `noImplicitAny` asserts each frozen export resolves to a concrete type with no implicit-`any`
+  fallback and no "could not find a declaration file" diagnostic. Satisfies **"The published package
+  ships type declarations."**
+- [x] 3.2 Update `package.json`: remove `private: true`; add `main` (`dist/index.js`), `types`
+  (`dist/index.d.ts`), a strict `exports` map with a single `"."` entry and **no** wildcard/deep
+  subpath; add `"files"` allowlisting `dist/` + `README`/`CHANGELOG`/`LICENSE`; keep `version` at
+  `0.1.0` until tag time (bump to `1.0.0` is the tag step, not here). **Acceptance:** a test parses
+  the built `package.json` and asserts `private` is absent, `main`/`types`/`exports."."` are present,
+  and no `exports` entry resolves a `src/postgres/*`/`src/interfaces/*` deep path. Satisfies
+  **"package.json is publishable with a strict exports map and no deep-import escape hatch."**
+
+## 4. The freeze: the public barrel (G1)
+
+- [x] 4.1 Write `src/index.ts` re-exporting EXACTLY the frozen surface (design §1.1): `createClient`,
+  `UmbraDBConnectionOptions`, `UmbraDBSql`, `DEFAULT_SCHEMA`, `runMigrations`, `Migration`,
+  `RunMigrationsOptions`; the five adapters + `PgWalletStateEnvelopeStore`; all `src/interfaces/`
+  contract + value types (`TemporalKV`, `CheckpointStore`, `Watermarks`, `TransactionLeaseLayer`,
+  `TransactionHistoryStorage`, wallet-envelope types, `TransactionHandle`); the `Rollback` control
+  primitive (an `Error` subclass with NO catalog `code` — re-export it, but do NOT add a catalog
+  entry for it; Fable B3 / Opus F4); the full `StorageError` hierarchy **minus** the six
+  chain-archive classes. **`withTransaction`/`withLease` are NOT standalone exports** — they are
+  `async` methods of `PgTransactionLeaseLayer` (`transaction-lease.ts:207,403`), frozen as part of
+  that exported class/interface; do NOT author free-function wrappers for them (Fable B2). Do NOT
+  export Zod schemas, `translatePostgresError`/`isConnectionFailure`/`isStatementTimeout`,
+  `resolveTransaction`/`assertValidSchemaName`, `withAbort`/`abortError`, chain-archive symbols, or
+  dev-stack code. **Acceptance:** `tsc --noEmit` passes with `src/index.ts`; a test imports each
+  frozen name (including `Rollback`) from the built barrel and asserts it resolves; a test confirms
+  `withTransaction`/`withLease` are reachable only as methods on a `PgTransactionLeaseLayer` instance
+  (no top-level barrel export of either name); a test asserts a representative internal symbol (a Zod
+  schema, `translatePostgresError`, `resolveTransaction`, a chain-archive class) is NOT exported from
+  the barrel. Satisfies **"A single public barrel exports exactly the frozen 1.0.0 surface."**
+  Depends on 0.1 (final `save` signature), 2.1, 3.1/3.2.
+
+## 5. Release contract docs (G2, G4)
+
+- [x] 5.1 **SemVer stability policy + CHANGELOG (G2).** Add a stability policy (README section or
+  `docs/STABILITY.md`) stating: no breaking changes to the exported surface or error-`code` set in
+  minor/patch; deprecate-in-minor / remove-in-major; a major may require a forward migration, no
+  supported downgrade. Add `CHANGELOG.md` (Keep-a-Changelog) with the `1.0.0` entry enumerating the
+  five primitives + `PgWalletStateEnvelopeStore`. **Acceptance:** the stability doc states all three
+  commitment clauses verbatim-in-substance; `CHANGELOG.md` exists with a `1.0.0` entry naming the
+  frozen surface. Satisfies **"A written SemVer stability policy governs the frozen surface"** +
+  **"A CHANGELOG records the 1.0.0 surface."**
+- [x] 5.2 **Frozen error-code catalog table (G3).** Publish the `{code → meaning → retryable}` table
+  (design §3.1) covering exactly the 21 frozen codes (the complete set of non-chain-archive
+  `StorageError.code` values on `main`), excluding all chain-archive codes, with the retryability
+  from task 1.1. **Acceptance:** the catalog lists all 21 codes with meaning + retryable marking;
+  `CONNECTION_ERROR`/`TRANSACTION_FAULT`/`LEASE_TIMEOUT` are retryable; no chain-archive code
+  appears; a test cross-checks the table's code set against the actually-exported error classes'
+  `code` values (table ≡ surface, no drift — this drift test, not the literal number, is the
+  authority on the count). Satisfies **"The error-code catalog is frozen and published with a
+  retryable field."** Depends on 1.1, 2.1.
+- [x] 5.3 **Contract doc set (G4).** Author `docs/CONTRACT.md` (or README sections) with all eight
+  contracts (design §4): durability (+ probe precondition), forward-only/no-downgrade migration
+  (link `docs/SCHEMA.md`), cancellation semantics, save-retry caveat, lease limitation, backup/restore
+  guidance, threat-model **pointer** (not the doc itself — that is G15), and the format-headroom
+  paragraph. **Acceptance:** each of the eight sections exists and states its required content per the
+  matching spec requirement's scenario (durability names the ordering guarantee + required PG config;
+  migration states forward-only/no-downgrade + schema-doc link; cancellation states the three abort
+  timings; save-retry states re-check-`history()` + 1.1 deferral; lease states no-fencing/no-two-writers;
+  backup states chunk/manifest consistency under GC; threat-model section is a pointer; format-headroom
+  reserves keyed/encrypted chunk modes for 1.1). Satisfies the seven **G4** contract requirements.
+- [x] 5.4 **README consistency (G4 boundary hygiene).** Reframe the README front-matter section
+  "Full-chain storage — validated live against public Preprod (AC-8)" as a 1.1 *preview* explicitly
+  outside the frozen 1.0 surface (it currently markets a deferred track as a headline). **Acceptance:**
+  the README no longer presents full-chain archival as part of the 1.0 public surface; it labels it a
+  1.1 preview, consistent with the G3 error-class strip and `council/A` ruling (e). Depends on 2.1.
+
+## 6. Freeze the Lean cut-line (G20)
+
+- [x] 6.1 Record the frozen 1.0.0 formal cut-line as exactly `{T3, T5, W1, C1}` (mechanized,
+  trust-gated in `.github/workflows/lean.yml`) with a written deferral of C2a/GC, ordered
+  reconstruction, lease traces, keyed-store lifting, and SQL/runtime refinement — in `ROADMAP.md`'s
+  Milestone-1 checklist and/or the `Formal/` plan. **Acceptance:** the record names exactly the four
+  proved properties and lists the five deferred workstreams; a reviewer confirms the four are the set
+  actually gated by the Lean trust gate (checklist box objectively green). Documentation/decision only;
+  no proof work. Satisfies **"The 1.0.0 Lean cut-line is frozen with a written deferral."**
+
+## 7. Packed-tarball install smoke test (G1)
+
+- [x] 7.1 Add `test/smoke/pack-install.*`: `npm pack` → install the tarball into a throwaway scratch
+  project → `import { createClient, runMigrations, PgTemporalKV, StorageError } from "umbradb"` → run
+  `runMigrations` + one `PgTemporalKV.put`/`get` round-trip against a Testcontainers Postgres → assert
+  it resolves; additionally assert (a) a deep import `umbradb/src/postgres/temporal-kv.js` FAILS to
+  resolve, (b) `dist/index.d.ts` is present in the tarball. **Uses a scratch project + Testcontainers
+  Postgres, NEVER a real consumer app** (indexer-agnostic boundary, `council/A` ruling (b)).
+  **Acceptance:** the smoke test passes end to end in CI: root import + round-trip succeed; the deep
+  import fails; the declaration is present. Satisfies **"A packed-tarball install smoke test proves
+  the surface resolves for a real consumer"** + the declaration and strict-boundary scenarios. Depends
+  on 3.1, 3.2, 4.1.
+
+## 8. Change close-out
+
+- [x] 8.1 Whole-change differential review: an Opus auditor re-reads this `proposal.md`/`design.md`/
+  `spec.md` against the actual committed code + docs and confirms every "Acceptance" criterion above
+  was actually checked — a passing CI run is not sufficient evidence on its own, per every prior
+  sprint's close-out standard. Confirm specifically: the barrel excludes every internal symbol it
+  should (Zod, translate helpers, `resolveTransaction`/`assertValidSchemaName`/`withAbort`,
+  chain-archive, dev stack); `Rollback` IS exported but has no catalog code; `withTransaction`/
+  `withLease` are methods of the exported class, not standalone symbols; the frozen catalog has
+  exactly 21 codes (equal to the exported non-chain-archive `StorageError.code` set — verify via the
+  drift test, not a hard-coded number); the `save` signature frozen matches post-G5; no deferred code
+  (idempotency, keyed chunking, encryption, observability) leaked in.
+- [x] 8.2 Update `ROADMAP.md`'s 1.0.0 gate checklist to mark G1-G4 and G20 addressed by this change,
+  cross-referencing the change id `v1.0.0-api-surface`, so the roadmap doesn't drift from what's built.
+- [x] 8.3 Per this repo's `CLAUDE.md`: re-run `graphify --update` against the repo root and commit the
+  refreshed `graphify-out/` outputs in this close-out commit, so the knowledge graph doesn't silently
+  drift stale behind this change's new openspec change and code. **Do NOT run graphify while drafting
+  this change** (MEMORY: Codex-auditor graphify stall) — this is a close-out-only step.

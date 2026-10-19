@@ -1,0 +1,29 @@
+node_modules/
+docs/api/
+*.log
+.DS_Store
+.superpowers/
+Formal/Lean/.lake/
+
+# graphify: commit graph.json/GRAPH_REPORT.md/graph.html/cost.json, but not the
+# machine-local interpreter/scan-root cache (absolute paths, not portable — see CLAUDE.md)
+graphify-out/.graphify_python
+graphify-out/.graphify_root
+graphify-out/.graphify_labels.json
+graphify-out/cache/
+
+# v1.0.0-recovery-testing soak: per-run GC-pass duration artifact (runtime output, not source)
+test/integration/soak/artifacts/
+
+# v1.0.0-recovery-testing Task 7: coverage + mutation gate runtime outputs (not source)
+coverage/
+.conformance-report.json
+.stryker-tmp/
+reports/
+stryker.log
+
+# Build output (declaration + JS emitted by `npm run build`; never committed)
+dist/
+
+# v1.0.0-infosec-signoff (G19): locally generated Preview test wallet -- never commit a key
+nix/midnight-env/test-wallets/preview-test-wallet.json
