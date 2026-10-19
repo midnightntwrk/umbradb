@@ -111,7 +111,7 @@ export interface PruneResult {
    * pruned, for either reason. SECURITY: because that "referenced by another wallet's manifest"
    * state is cross-wallet, this return value is also a cross-wallet reference-state SIDE CHANNEL —
    * it leaks whether ANOTHER wallet in the shared pool still references a chunk this wallet just
-   * unreferenced. The shared pool is one trust domain; see the interface doc above and `SECURITY.md`.
+   * unreferenced. The shared pool is one trust domain; see the interface doc above and `docs/THREAT_MODEL.md`.
    */
   reclaimedChunks: number;
   reclaimedBytes: number;
@@ -188,7 +188,7 @@ export class ManifestCorruptError extends CheckpointStoreError {
  * wallet sharing this store is in a single trust domain — one user's wallet application managing its
  * own wallets, NOT multi-tenancy across mutually-distrusting principals. Placing
  * mutually-distrusting principals on one store is UNSUPPORTED (give each its own store). Full trust
- * model and the fixed-size-chunking bound on the leak: see `SECURITY.md`.
+ * model and the fixed-size-chunking bound on the leak: see `docs/THREAT_MODEL.md`.
  *
  * Each method is an atomic unit of work. With no `opts.tx`, implementations compose the
  * Transaction/Lease layer internally to make manifest + chunk writes all-or-nothing. `save`
@@ -235,7 +235,7 @@ export interface CheckpointStore {
    * see the interface doc above. SECURITY: because that reclamation decision spans every wallet
    * in the shared pool, the returned `reclaimedChunks`/`reclaimedBytes` expose cross-wallet
    * reference state (an observable side channel) and are only meaningful within a single shared
-   * trust domain — see the interface doc above and `SECURITY.md`.
+   * trust domain — see the interface doc above and `docs/THREAT_MODEL.md`.
    */
   prune(
     walletId: string, networkId: string, retainCount: number,

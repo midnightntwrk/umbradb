@@ -165,7 +165,7 @@ validation).
 > CA-management friction on a single-host dev stack where it buys nothing, and the common escape from
 > that friction is to disable verification entirely (a `rejectUnauthorized: false`-style opt-out) —
 > **strictly worse** than an honest `Require`. So the default stays `Require` for the co-located
-> case, and VerifyFull is a deliberate, documented opt-in. See the repo-root `SECURITY.md` (a
+> case, and VerifyFull is a deliberate, documented opt-in. See `docs/THREAT_MODEL.md` (a
 > VerifyFull default is a documented-but-not-implemented 1.0.0 fast-follow). Enabling `ssl = on` is
 > *permissive*, not *forcing*, so `cardano-db-sync`'s own documented plaintext connection keeps
 > working (`pg_hba.conf` is left untouched — do not switch the server to `hostssl`-only without

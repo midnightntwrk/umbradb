@@ -134,13 +134,13 @@ supported downgrade across a major).
 
 ## 7. Threat-model pointer
 
-The UmbraDB threat model is authored separately as `SECURITY.md` (gate G15, the InfoSec change) and
+The UmbraDB threat model is authored separately as `docs/THREAT_MODEL.md` (gate G15, the InfoSec change) and
 is **not** authored by this contract set. It covers: a single trusted writer; the schema is **not** a
 security boundary; the global content-addressed chunk pool is one trust domain with an observable
 dedup side channel; and no at-rest encryption (a binding deployer precondition). This section is the
 reserved pointer so the contract set is complete.
 
-> **See:** [`SECURITY.md`](../SECURITY.md) _(authored by the G15 InfoSec change)._
+> **See:** [`THREAT_MODEL.md`](THREAT_MODEL.md) _(authored by the G15 InfoSec change)._
 
 ## 8. Format headroom (reserved for 1.1)
 

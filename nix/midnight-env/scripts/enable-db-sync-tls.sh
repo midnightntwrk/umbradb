@@ -12,7 +12,7 @@
 # with NO server-identity validation and NO MITM protection. It is safe ONLY when the node and
 # Postgres are co-located on one trusted host. For any off-host / untrusted-segment / hardened
 # deployment use the `--ca` mode below (VerifyFull with a pinned local CA). See
-# nix/midnight-env/README.md and the repo-root SECURITY.md for the full caveat.
+# nix/midnight-env/README.md and docs/THREAT_MODEL.md for the full caveat.
 #
 # See design/db-sync-tls-feasibility.md for the full write-up.
 #

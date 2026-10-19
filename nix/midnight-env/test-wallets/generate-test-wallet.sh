@@ -2,7 +2,7 @@
 #
 # generate-test-wallet.sh -- create a FRESH, untracked Preview testnet wallet locally.
 #
-# WHY: no wallet key with any value is ever committed to this repo (see ../../../SECURITY.md and
+# WHY: no wallet key with any value is ever committed to this repo (see ../../../docs/THREAT_MODEL.md and
 # ./README.md). Instead of committing a shared secret, each machine generates its own throwaway
 # Preview wallet with this script and funds it once from the faucet. The generated file
 # (preview-test-wallet.json) is git-ignored, must never be committed, and is written mode 0600.

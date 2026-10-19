@@ -313,7 +313,7 @@ obligations for the tag are delivered as **documentation + CI + dev-environment 
 `src/` runtime behavior change** (G16 is doc-comment-only). The change also closes **R7**, the
 release-publication artifact the guideline assigns here:
 
-- **G15** — root [`SECURITY.md`](SECURITY.md) threat model (single trusted writer; `schema` is
+- **G15** — [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) threat model (single trusted writer; `schema` is
   namespacing, not a tenant boundary; the global chunk pool's cross-wallet dedup side channel; no
   at-rest encryption as a binding precondition; commit policy + vulnerability reporting), linked from
   `README.md`.

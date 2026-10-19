@@ -9,7 +9,7 @@ startup durability probe (`src/postgres/durability-probe.ts`, run as a mandatory
 must satisfy. Each row states which.*
 
 This document is the durability-configuration contract only. The threat model and format-headroom
-material live with the API/contract-docs change (G4) and `SECURITY.md` (G15).
+material live with the API/contract-docs change (G4) and `docs/THREAT_MODEL.md` (G15).
 
 ---
 
