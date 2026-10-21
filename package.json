@@ -22,11 +22,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CharlesHoskinson/UmbraDB.git"
+    "url": "git+https://github.com/midnightntwrk/umbradb.git"
   },
-  "homepage": "https://github.com/CharlesHoskinson/UmbraDB#readme",
+  "homepage": "https://github.com/midnightntwrk/umbradb#readme",
   "bugs": {
-    "url": "https://github.com/CharlesHoskinson/UmbraDB/issues"
+    "url": "https://github.com/midnightntwrk/umbradb/issues"
   },
   "engines": {
     "node": ">=24"
@@ -45,7 +45,9 @@
     "test:smoke": "npm run build && node test/smoke/pack-install.mjs",
     "archive:sync": "tsx chain-archive-sync/sync-cli.ts",
     "bench": "tsx bench/harness.ts",
-    "bench:smoke": "tsx bench/smoke.ts"
+    "bench:smoke": "tsx bench/smoke.ts",
+    "graph:refresh": "bash scripts/graphify/run.sh refresh",
+    "graph:check": "bash scripts/graphify/run.sh check"
   },
   "dependencies": {
     "postgres": "^3.4.9",

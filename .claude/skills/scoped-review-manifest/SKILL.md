@@ -1,21 +1,25 @@
 ---
 name: scoped-review-manifest
 description: |
-  Compute a graphify-based blast-radius reading-list manifest for the PUSH-mode roles in
-  this repo's review pipeline (Fable 5 consolidator, spec-compliance/code-quality Opus
-  auditors, final differential-review agent), per CLAUDE.md's "Graph-scoped review
-  policy". Trigger: at the start of a review round for a change with a non-trivial diff
-  (see the skip rule below) — never for design-panel adversarial/completeness roles or
-  the Codex cold audit, which must stay NONE-mode (no manifest, full independent
-  exploration).
-allowed-tools: Bash(git*), Bash(python*), Bash(graphify*), Bash(wc*), Bash(grep*), Bash(rm*), Bash(cat*), Bash(sort*)
+  PARKED — do not use. Graph-scoped review manifests were parked on 2026-10-21 (see
+  CLAUDE.md "Review workflow"); no review lane receives a manifest. This skill is kept,
+  unused, in case the owner re-enables them. It computed a graphify-based blast-radius
+  reading-list manifest for the warm review roles of the former review pipeline.
+allowed-tools: Bash(git*), Bash(npm run graph:*), Bash(python*), Bash(wc*), Bash(grep*), Bash(rm*), Bash(cat*), Bash(sort*)
 license: MIT
 metadata:
   author: umbradb-project
-  version: "1.2"
+  version: "1.3"
 ---
 
 # scoped-review-manifest
+
+> **Parked (2026-10-21).** The "Graph-scoped review policy" this skill implemented has been removed
+> from `CLAUDE.md`; its last full text is in git history. The steps below are kept for reference
+> only. Do not run them unless the owner re-enables graph-scoped review. They also rely on
+> `npm run graph:refresh -- --include-untracked` and `graphify-out/.graphify_python`, both removed
+> when the refresh became a from-scratch rebuild over tracked files, so re-enabling means restoring
+> those too.
 
 Computes a `review-manifest.md` for a single review round and writes it into the
 change's own directory (e.g. `openspec/changes/sprint-N-<module>/review-manifest.md`).
@@ -26,8 +30,8 @@ mechanism") of it.
 **Do not use this skill to scope**: the design-panel adversarial-risk or
 requirements-completeness/EARS panelists (both **NONE** — no manifest, no graph contact),
 the fidelity-to-prior-art panelist (**PULL** instead — point it at `graphify
-query`/`explain`/`path` directly, don't hand it a manifest), or the Codex GPT-5.6 Sol cold
-audit (**NONE**, hard rule). Handing any of those a precomputed reading list defeats the
+query`/`explain`/`path` directly, don't hand it a manifest), or the Codex cold audit
+(**NONE**, hard rule). Handing any of those a precomputed reading list defeats the
 reason they're run independently — see CLAUDE.md's confirmation-bias citation if the
 reasoning here isn't clear.
 
@@ -83,47 +87,30 @@ number exists in this repo by the time you're reading this, prefer it over 150.
 ## Step 1 — Freshness gate
 
 ```bash
-graphify update .
+npm run graph:refresh -- --include-untracked
+npm run graph:check
 ```
 
-(the real CLI subcommand is `update <path>`, not `--update` — that flag form is the
-Claude-Code slash-command invocation `/graphify --update`, which internally runs this; use
-whichever is actually available in the current environment. Confirmed: `update` runs
-AST-only re-extraction, "no LLM needed," per the CLI's own `--help` text). Then verify the
-update actually landed — a no-op update or a shrink-guard refusal both exit 0 without
-advancing the graph, so exit-code success alone does not prove freshness:
-
-```bash
-$(cat graphify-out/.graphify_python) -c "
-import json, subprocess
-from pathlib import Path
-
-data = json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8'))
-graph_sha = data.get('built_at_commit')
-head_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-
-if graph_sha != head_sha:
-    print(f'ABORT: graph.json built_at_commit={graph_sha!r} != HEAD={head_sha!r}. '
-          f'The graph is stale relative to the current commit even though update ran -- '
-          f'fall back to full independent exploration for every PUSH role this round.')
-    raise SystemExit(1)
-print(f'Freshness OK: graph built at {graph_sha}, matches HEAD.')
-"
-```
+`graph:refresh` is the only sanctioned way to write `graphify-out/` (CLAUDE.md, top section):
+pinned graphify, AST-only, no LLM tokens, deterministic. `--include-untracked` also graphs this
+round's not-yet-added files, so Step 3 can expand from their nodes. `graph:check` recomputes
+`graph.json`'s `corpus_fingerprint` from the working tree and exits 0 only if the graph on disk was
+built from exactly these files with the pinned tool versions (1 = stale, 2 = not written by
+`graph:refresh`). Never substitute bare `graphify update .`: its output has no fingerprint, so
+`graph:check` rejects it.
 
 **Abort scoping and fall back to full independent exploration for every PUSH role this
-round** if either command above fails. Code-only changes cost near-zero LLM tokens here
-(AST-only extraction); don't skip this step to "save tokens" — skipping it is what
-actually risks a stale, wrong manifest, and `built_at_commit` is the only field that
-actually proves the graph (not just the manifest file) is current.
+round** if either command fails. Don't skip this step to "save tokens" — it costs no LLM tokens,
+and skipping it is what actually risks a stale, wrong manifest.
 
-**This check on its own is necessary but not sufficient**: `graphify update .` extracts
-from whatever is actually on disk (including uncommitted edits), so `built_at_commit ==
-HEAD` only proves the graph's structural content is current relative to the working tree
-*at the time update ran* — it says nothing about whether Step 2's changed-file
-computation actually captured that same working-tree state (that's a separate, sequential
-concern, not implied by this gate). Run Step 2 immediately after this passes, not on a
-delay.
+The refresh leaves a working-tree-scoped graph in `graphify-out/`. Never commit that: run
+`npm run graph:refresh` without the flag (or `git checkout -- graphify-out/`) before committing —
+CI rejects a committed graph of that scope.
+
+**This check on its own is necessary but not sufficient**: it proves the graph matches the
+working tree *at the moment it ran* — it says nothing about whether Step 2's changed-file
+computation captured that same working-tree state (a separate, sequential concern). Run Step 2
+immediately after this passes, not on a delay.
 
 ## Step 2 — Changed-file seed set
 
@@ -369,8 +356,8 @@ confirmation-bias mechanism anchors on):
 ```markdown
 # Review manifest — <change name>
 
-**Provenance:** graph built_at_commit <sha from graph.json>, diff base <sha from
-.scoped_review_base.txt>, HEAD <sha from .scoped_review_head.txt>. Reviewing: <committed
+**Provenance:** graph corpus_fingerprint <digest and scope from graph.json>, diff base <sha
+from .scoped_review_base.txt>, HEAD <sha from .scoped_review_head.txt>. Reviewing: <committed
 history only | working tree with uncommitted changes>. Radius capped: <yes/no, N dropped
 at hop H if yes>.
 
@@ -417,8 +404,9 @@ once a manifest changes anyway).
 
 ## Step 5 — Hand off
 
-Give the PUSH-mode auditors (Fable 5 consolidator, spec-compliance Opus auditor,
-code-quality Opus auditor, final differential-review agent) a prompt that opens with the
+Give the PUSH-mode auditors (consolidator, spec-compliance auditor, code-quality auditor,
+final differential-review agent — each on the model floor AGENTS.md sets) a prompt that
+opens with the
 **identical bytes** of: this manifest, then the change's `design.md`, then its `spec.md`,
 in that fixed order — this is what makes real prompt-cache reuse across those specific
 roles possible, since caching requires a byte-exact shared prefix. Everything after that
@@ -432,7 +420,7 @@ Per CLAUDE.md's mode table, that's precisely:
 - **PULL** (point at `graphify query`/`explain`/`path` or the MCP server directly, if
   running — no manifest): the fidelity-to-prior-art panelist only.
 - **NONE** (no graph contact at all): the requirements-completeness/EARS panelist, the
-  adversarial-risk panelist, and the Codex GPT-5.6 Sol cold audit.
+  adversarial-risk panelist, and the Codex cold audit.
 
 ## Cleanup
 
