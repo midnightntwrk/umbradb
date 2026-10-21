@@ -83,5 +83,5 @@ Also part of the frozen surface:
 - Keyed/per-consumer chunk addressing and at-rest encryption.
 - A public observability/tracing seam.
 
-[Unreleased]: https://github.com/charleshoskinson/UmbraDB/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/charleshoskinson/UmbraDB/releases/tag/v1.0.0
+[Unreleased]: https://github.com/midnightntwrk/umbradb/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/midnightntwrk/umbradb/releases/tag/v1.0.0

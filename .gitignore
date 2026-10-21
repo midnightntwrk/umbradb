@@ -5,12 +5,23 @@ docs/api/
 .superpowers/
 Formal/Lean/.lake/
 
-# graphify: commit graph.json/GRAPH_REPORT.md/graph.html/cost.json, but not the
-# machine-local interpreter/scan-root cache (absolute paths, not portable — see CLAUDE.md)
+# graphify: commit graph.json/GRAPH_REPORT.md/graph.html/cost.json, written only by
+# `npm run graph:refresh` (see CLAUDE.md). Everything else graphify writes is machine-local:
+# interpreter/scan-root markers, its incremental manifest (mtimes), community-label sidecars, the
+# temporary exclude config, and the dated backups it takes before overwriting a curated graph.
 graphify-out/.graphify_python
 graphify-out/.graphify_root
 graphify-out/.graphify_labels.json
+graphify-out/.graphify_labels.json.sig
+graphify-out/.graphify_labels.pending.json
+graphify-out/.graphify_build.json
+graphify-out/.graph.html.stale
+graphify-out/*.tmp
+graphify-out/manifest.json
 graphify-out/cache/
+graphify-out/[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/
+# scoped-review-manifest's per-round scratch files (it deletes them at the end of a round)
+graphify-out/.scoped_review_*
 
 # v1.0.0-recovery-testing soak: per-run GC-pass duration artifact (runtime output, not source)
 test/integration/soak/artifacts/

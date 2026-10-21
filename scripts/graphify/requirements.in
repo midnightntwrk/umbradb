@@ -1,0 +1,3 @@
+# The graphify version scripts/graphify/graph.py pins (GRAPHIFY_VERSION). Compile to
+# requirements.txt as described at the top of that file.
+graphifyy==0.9.89

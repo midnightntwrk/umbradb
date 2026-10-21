@@ -1,6 +1,6 @@
 # UmbraDB
 
-![A near-total solar eclipse: a matte black disc with a single point of light at its upper-left rim, ringed by a faint corona, against a deep indigo field](https://raw.githubusercontent.com/CharlesHoskinson/UmbraDB/main/docs/assets/penumbra.png)
+![A near-total solar eclipse: a matte black disc with a single point of light at its upper-left rim, ringed by a faint corona, against a deep indigo field](https://raw.githubusercontent.com/midnightntwrk/umbradb/main/docs/assets/penumbra.png)
 
 A local, persistent datastore for [Midnight](https://midnight.network) clients: wallets, dev tooling,
 and anything else that needs durable, versioned, content-addressed storage without running a
@@ -14,13 +14,13 @@ service you run for other tenants.
 Not published to npm yet. Install from the repository until it is:
 
 ```bash
-npm install github:CharlesHoskinson/UmbraDB#v0.9.5
+npm install github:midnightntwrk/umbradb#19e225bfdabed2056f1192795db7b1932a530eb2  # v0.9.5
 ```
 
 or from a tarball built locally:
 
 ```bash
-git clone https://github.com/CharlesHoskinson/UmbraDB && cd UmbraDB
+git clone https://github.com/midnightntwrk/umbradb && cd umbradb
 npm ci && npm run build && npm pack
 npm install /path/to/umbradb-0.9.5.tgz
 ```

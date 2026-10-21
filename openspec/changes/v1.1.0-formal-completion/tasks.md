@@ -1,6 +1,6 @@
 # Tasks — v1.0.0: Formal completion (`formal-completion`)
 
-Each gate: **one builder → two Opus auditors** — *A: spec-faithfulness* (does the Lean theorem assert the spec law, right quantifiers, no trivializing premise?), *B: scope-honesty* (is the model rich enough to be non-vacuous — a mutex over a non-interleavable trace, a "safety" over unrepresentable-unsafe-op, an invariant whose transitions can't change state = a finding). CLOSED only when both approve or findings are fixed and re-reviewed.
+Each gate: **one builder → two auditors**, all Claude agents on the latest Opus model or better — *A: spec-faithfulness* (does the Lean theorem assert the spec law, right quantifiers, no trivializing premise?), *B: scope-honesty* (is the model rich enough to be non-vacuous — a mutex over a non-interleavable trace, a "safety" over unrepresentable-unsafe-op, an invariant whose transitions can't change state = a finding). These two auditors run in addition to the `AGENTS.md` review lanes. A gate is CLOSED when both approve; otherwise `AGENTS.md`'s bounded-review rule applies (fix, one targeted fix check, then the owner decides what remains).
 
 **Universal green:** `lake build --wfail` clean; 0 sorry/axiom/admit; named theorem present with the stated signature; module imported into `UmbraDBFormalTest/Trust.lean`; `#audit_umbradb_trust` axiom allowlist `{propext, Quot.sound, Classical.choice}` unchanged.
 

@@ -1,9 +1,8 @@
 # Roadmap
 
 Tracked in detail per-module as `openspec/changes/sprint-N-<module>/` changes (proposal/design/
-tasks/spec, EARS-format requirements, each reviewed by an Opus panel + Fable 5 consolidation and
-a Codex GPT-5.6 Sol audit before implementation) — Sprint 1 is archived under
-`openspec/changes/archive/`, while the completed and merged Sprint 2 Transaction/Lease, Sprint 3
+tasks/spec, EARS-format requirements; the workflow and review rules are in `AGENTS.md`) — Sprint 1 is
+archived under `openspec/changes/archive/`, while the completed and merged Sprint 2 Transaction/Lease, Sprint 3
 CheckpointStore, Sprint 4 Watermarks, Sprint 7 TransactionHistory, and Sprint 8 wallet-state
 envelope persistence records remain under `openspec/changes/` pending archival. The next work is
 the cross-cutting formal, testing, equivalence, and performance program.
@@ -113,7 +112,7 @@ items **G1-G4**:
 - [x] **G2 -- SemVer stability policy + CHANGELOG** (`docs/STABILITY.md`, `CHANGELOG.md`): no
   incompatible change to the exported surface or the error-`code` set in a minor/patch.
 - [x] **G3 -- Frozen error catalog with a machine-readable `retryable` field** (`docs/ERROR-CATALOG.md`),
-  drift-tested against the exported surface (25 codes; frozen retryable set `{CONNECTION_ERROR,
+  drift-tested against the exported surface (24 codes; frozen retryable set `{CONNECTION_ERROR,
   TRANSACTION_FAULT, LEASE_TIMEOUT, MIGRATION_LOCK_TIMEOUT}`); the chain-archive classes are excluded.
 - [x] **G4 -- The eight written release contracts** (`docs/CONTRACT.md`): durability, forward-only
   migration, cancellation, save-retry, lease limitation, backup/restore, threat-model pointer, and
@@ -279,12 +278,13 @@ downstream migrations that follow the tag.
 
 The 1.0.0 release is driven as a gated, per-item program. The five OpenSpec changes for it are
 committed under `openspec/changes/v1.0.0-*` (`api-surface`, `durable-checkpoint-cursor`,
-`recovery-testing`, `perf-baseline`, `infosec-signoff`) and governed by
-[`docs/v1-implementation-guideline.md`](docs/v1-implementation-guideline.md) (per-gate
-verify → red/green/self-verify in an isolated worktree → independent audit including a mandatory
-cold cross-vendor lane → merge).
+`recovery-testing`, `perf-baseline`, `infosec-signoff`). They follow the workflow in
+[`AGENTS.md`](AGENTS.md) (spec → test-first build → automated checks → three review lanes including
+a cold cross-vendor one → merge), and the 1.0.0-specific rules and tag gate in
+[`docs/v1-implementation-guideline.md`](docs/v1-implementation-guideline.md).
 
-**All 20 gate items G1–G20 are merged to `main`, and all five changes are complete.**
+**All 20 gate items G1–G20 are merged to `main`, and all five changes are implemented.** Open 1.0.0
+obligations the guideline still requires are listed at the end of "What blocks 1.0.0" below.
 
 | Change | Gates | Merge |
 |---|---|---|
@@ -292,7 +292,7 @@ cold cross-vendor lane → merge).
 | `perf-baseline` | G13, G14 | `855fb22` |
 | `recovery-testing` | G9, G10, G11 | `4e04926` |
 | `api-surface` | G1, G2, G3, G4, G20 | `726f567` |
-| `infosec-signoff` | G15, G16, G17, G18, G19 | (this change) |
+| `infosec-signoff` | G15, G16, G17, G18, G19 | `7ee8a4b` |
 
 Per-gate evidence — a CI run, a test id, a doc path, or an auditor verdict for **each** of G1–G20 —
 is the Release Record [`docs/releases/v0.9.5.md`](docs/releases/v0.9.5.md) (R1); a gate with no
@@ -300,9 +300,10 @@ evidence pointer is not green. The gate-by-gate narrative page is
 [`docs/roadmapv1.html`](docs/roadmapv1.html) and the blameless lessons log is
 `docs/v1-lessons-learned.md`.
 
-What remains before the tag is the release process itself (guideline §4.2 R1–R12), not gate work:
-the Release Record, the manual G12/R5 live-preprod round-trip against the release candidate, an
-independent cold release audit (R6), and a recorded Go/No-Go (R9).
+What remains before the tag is the release process itself (guideline §4.2 R1–R12) — the Release
+Record, the manual G12/R5 live-preprod round-trip against the release candidate, the three-lane
+`AGENTS.md` review of the release candidate (R6), and a recorded Go/No-Go (R9) — plus the open obligations listed at the end of
+"What blocks 1.0.0" below.
 
 **Superseded:** `docs/notes/2026-07-23-resume-checkpoint.md` describes the program at 1-of-20 gates
 with the Preprod sync paused at 55%. Both facts are stale — it is kept as a historical record of that
@@ -346,7 +347,7 @@ dedup-oracle fix) and the `EnvelopeCipher` at-rest-encryption seam — remain se
 
 ## What blocks 1.0.0 (recorded 2026-07-25)
 
-**All twenty gate items G1–G20 are merged and all five OpenSpec changes are complete.** The release
+**All twenty gate items G1–G20 are merged and all five OpenSpec changes are implemented.** The release
 nevertheless ships as **`0.9.5`**, not `1.0.0`, on one recorded owner decision:
 
 > **1.0.0 requires a full local sync of UmbraDB against Midnight** — archive node → local indexer →
@@ -395,7 +396,10 @@ back to the last finalized block so the corrupt state is rebuilt on re-import. T
    `docs/recovery/EVIDENCE.md`.
 4. Then, and only then, `1.0.0` — re-running the tag gate (R1–R12) against the new RC.
 
-Nothing else is outstanding. `0.9.5` ships the identical code today.
+Beyond these steps, `docs/v1-implementation-guideline.md` §6.1 lists the 1.0.0 obligations still
+open: the public-surface checks, the static `unsafe(` allowlist test, pinned property-test seeds, two
+spec decisions (perf-baseline A1, infosec-signoff E3), and the release prerequisites.
+`0.9.5` ships the identical code today.
 
 ## 1.0.0 acceptance checklist
 
