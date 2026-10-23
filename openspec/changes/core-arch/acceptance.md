@@ -325,7 +325,9 @@ release assets that CI downloads and verifies.
 - **A97** `[CI]` CI rebuilds every vendored ledger package from its pinned source and patches and gets the recorded
   SHA-256; a package file changed by one byte refuses startup with `package-hash-mismatch`. (LG-5)
 - **A98** `[CI]` One adapter test suite runs against the v8 and the v9 adapters and passes on both; `versionName` and
-  `rawPackages()` return the recorded release and packages. (LG-6, LG-7)
+  `rawPackages()` return the recorded release and packages; a state under the ledger's 1,024-byte embedding limit
+  reloads by its `stateKey` (Q55); the v8 adapter's `decodeLogItem` returns null for every input and its `apply`
+  returns no `logs` (Q54). (LG-6, LG-7, CC-2)
 - **A99** `[CI]` State roots match the node's on: a preview range crossing the runtime 1.0.300 upgrade; a mainnet range
   from a snapshot before block 1,774,492 to 1,780,000; a mainnet range including block 1,788,980. (LG-8)
 - **A100** `[CI]` On a devnet that starts on a v8 runtime and enacts the v9 upgrade (tape), the state is converted

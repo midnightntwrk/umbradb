@@ -47,9 +47,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `npm run vendor:ledger` gave the recorded SHA-256; the CI run (amd64 and arm64) is pending until the branch is
       pushed (Phase 3).
       **Pending:** the second acceptance item — the conversion's root against the node's at a devnet fork's F — needs
-      the devnet tape of task 0.3, which runs after task 9.2. v8 `decodeLogItem` stopped (Q54: the v8 VM has no log
-      decoding). Q53 (root counts reported as signed changes) and Q55 (`stateKey` in `LedgerPackage`) are open, not
-      blocking.
+      the devnet tape of task 0.3, which runs after task 9.2. No v8 `decodeLogItem` patch: the v8 adapter returns
+      null (owner decision Q54, task 12.1). Q53 (root counts as signed changes) and Q55 (`stateKey` in
+      `LedgerPackage`): owner decisions A. Proposing the patches upstream is the owner's, later (Q56).
 - [ ] 0.3 Tapes: record, with the builder of task 9.2, stagenet 0–10,000, preview 0–10,000 and a preview range across
       the runtime 1.0.300 upgrade, mainnet ranges around 1,774,492 and 1,788,980 (from snapshots), and a local devnet
       that starts on a v8 runtime and enacts the v9 upgrade; read each network's genesis hash, runtime at genesis and
@@ -168,8 +168,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 12. Ledger
 
-- [ ] 12.1 The `LedgerPackage` adapters for v8 (from `chain-archive-sync/tx-replay-decoder.ts`) and v9; the adapter test
-      suite.
+- [ ] 12.1 The `LedgerPackage` adapters for v8 (from `chain-archive-sync/tx-replay-decoder.ts`) and v9 (the v8
+      adapter's `decodeLogItem` returns null and its `apply` no logs, Q54); the adapter test suite.
       **Acceptance:** A98.
 - [ ] 12.2 Version selection, the built-in tables (`networks.json`, from task 0.3), pins, package identity checks,
       metadata selection at upgrades.

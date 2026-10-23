@@ -144,14 +144,15 @@ interface LedgerPackage {                                  // one per ledger ver
   load(stateKey: Uint8Array, store: NodeStore): StateHandle;
   apply(state: StateHandle, block: ApplyInput): ApplyOutput;   // LG-8
   stateRoot(state: StateHandle): Uint8Array;               // compared with midnight_ledgerStateRoot (LG-15)
-  flush(): NodeBatch;                                      // nodes created and root counts changed since the last flush
+  stateKey(state: StateHandle): Uint8Array;                // its root node's key, what `load` takes (Q55)
+  flush(): NodeBatch;                                      // nodes created, and root-count changes, since the last flush
   persist(key: Uint8Array): void;
   release(key: Uint8Array): void;
   childRefs(children: Uint8Array): Uint8Array[];           // a node's Ref keys, through embedded children
   evict(keys: Uint8Array[]): void;                         // drop swept nodes from the caches
   contractStateKey(state: StateHandle, address: Uint8Array): Uint8Array | null;
   contractZswapStateKey(state: StateHandle, address: Uint8Array): Uint8Array | null;
-  decodeLogItem(value: Uint8Array): LogItem | null;        // the VM's own log decoding (CC-3)
+  decodeLogItem(value: Uint8Array): LogItem | null;        // the VM's own log decoding (CC-3); v8: null (Q54)
   convertFromV8?(v8StateKey: Uint8Array, store: NodeStore): StateHandle;  // v9 only (LG-9)
 }
 interface ApplyInput { transactions: Uint8Array[]; height: bigint; hash: Uint8Array; parentHash: Uint8Array;
@@ -162,7 +163,7 @@ interface ApplyOutput {
 }
 interface NodeStore { get(key: Uint8Array): { data: Uint8Array; children: Uint8Array } | null }
 interface NodeBatch { inserts: { key: Uint8Array; data: Uint8Array; children: Uint8Array }[];
-  rootCounts: { key: Uint8Array; count: number }[] }
+  rootCounts: { key: Uint8Array; delta: number }[] }       // signed change of each changed root count (Q53)
 
 // What modules on the main thread receive as `block-parsed` (Q49): plain, structured-cloneable data.
 interface ParsedTransaction {
@@ -185,19 +186,30 @@ interface LedgerTask {
 `firstRegularAtParentTime` is true for runtimes 0.22, 1.0 below 1.0.300 and 2.0, and never for block 0, as the official
 indexer decides it (`chain-indexer/src/domain/ledger_state.rs:44-85`).
 
+A batch's `rootCounts` are signed changes, not counts (Q53): after a restart the worker cannot read a stored count
+through `NodeStore`, so the writer adds each `delta` to `core_ledger_state.root_counts` and deletes a row whose count
+reaches 0. `stateKey` gives the 32-byte key of a state's root node, which `core_ledger_state.states.state_key` stores
+and `load` takes; it cannot be derived from `stateRoot`, which for a state under the ledger's 1,024-byte embedding
+limit is the state itself (Q55). The v8 adapter's `decodeLogItem` returns null and its `apply` returns no `logs`: a
+v8 `ContractLog` carries a raw value, not a MIP-0002 event (Q54).
+
 ### 5.2 Vendored builds (LG-5)
 
 `vendor/ledger/<version>/` holds `upstream.json` (repository URL, commit, release name = `versionName`),
-`patches/*.patch` (applied in order), `build.sh` (a pinned Docker image with the Rust toolchain and `wasm-pack`), and
-the built package with `SHA256SUMS`. The functions `LedgerPackage` needs that the published v9 WASM lacks (`load`,
-`stateRoot`, `flush`, `persist`, `release`, `childRefs`, `evict`, the contract keys, `decodeLogItem`, the conversion)
-are the patches. v9 starts from `midnight-ledger` `ledger-9.1.0.0-rc.5` (the reference used for CORE-ARCH); the v8
-release is pinned in task 0.2. The v8→v9 conversion is the crate `v8-to-v9-state-translation` at `midnight-ledger`
-rev `da96e33d78ee9b7d3867b15c1037510d499cd909`, the revision the node pins (`midnight-node/Cargo.toml:115`); it
-depends on ledger v8 8.1.1 and v9 1.0.0 (tag `crate-ledger-9.1.0.0-rc.3`) and compiles for `wasm32-unknown-unknown`
-with `getrandom`'s `wasm_js` backend (verified 2026-10-22, `cargo check`). Because the conversion links the v9 crate it
-was built against, the vendored v9 package and the conversion are built from the same v9 version (task 0.2 aligns
-them). CI rebuilds each vendored package and compares the SHA-256.
+`patches/*.patch` (applied in order), `build.sh` (a Docker image pinned by digest with the Rust toolchain,
+`wasm-bindgen-cli` and `wasm-opt`, the tools of upstream's own WASM build), and the built package with `SHA256SUMS`;
+`npm run vendor:ledger` rebuilds every version and compares. The functions `LedgerPackage` needs that the published
+packages lack (`load`, `stateRoot`, `stateKey`, `flush`, `persist`, `release`, `childRefs`, `evict`, the contract keys,
+v9's `decodeLogItem`, the conversion) are the patches; the v9 package also exports `serializeStateValue`, which turns a
+native state value into `decodeLogItem`'s input. `vendor/ledger/README.md` lists each patch and what it adds; the owner
+proposes them upstream, as a few pull requests, once `midnight-ledger` is stable (Q56). v8 is `ledger-8.1.2`, the v8
+ledger `midnight-node` 2.1.0-rc.4 pins (`Cargo.toml:86`). v9 is `midnight-ledger` `ledger-9.1.0.0-rc.5` (the reference
+used for CORE-ARCH). The v8→v9 conversion is the crate `v8-to-v9-state-translation` at `midnight-ledger` rev
+`da96e33d78ee9b7d3867b15c1037510d499cd909`, the revision the node pins (`midnight-node/Cargo.toml:115`); it was written
+against v9 tag `crate-ledger-9.1.0.0-rc.3`, and the node's `[patch.crates-io]` (`Cargo.toml:459`) builds it against
+the rc.5 crates, so the vendored v9 package and the conversion are both built from rc.5, as the node builds them
+(task 0.2). It compiles for `wasm32-unknown-unknown` with `getrandom`'s `wasm_js` backend. CI rebuilds each vendored
+package and compares the SHA-256.
 
 ### 5.3 The ledger worker and the node-store bridge (LG-10, LG-11)
 

@@ -73,9 +73,9 @@ profiling timers zero on `wasm32`, where `std::time::Instant` panics). The expor
 before the module aborts (the build aborts on panic, so a panic is fatal to the instance). Builds keep the node's
 storage layout (`layout-v2`, `gc-v1`). `v8/patches/0002-…` moves ledger-8.1.2 from wasm-bindgen 0.2.104 to 0.2.108 (above).
 
-Open points are in the organizer's question record (Q53 root counts as signed changes, Q54 v8 log decoding, Q55
-`stateKey` in `LedgerPackage`). Per LG-5 every patch is to be proposed upstream and dropped once upstream releases it;
-none has been proposed yet.
+The v8 package has no `decodeLogItem`: v8 contract logs are not MIP-0002 events, and the v8 adapter returns null for
+them (owner decision Q54). The owner proposes these patches upstream, as a few pull requests, once `midnight-ledger`
+is stable (owner decision Q56); each is dropped once upstream releases it (LG-5).
 
 ## Updating a version
 

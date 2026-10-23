@@ -24,7 +24,12 @@ processed, it SHALL write a row for every contract, with its converted keys. It 
 
 WHERE `core-contract-logs-full` is enabled, it SHALL store every `vm-logs` entry as a row of `contract_logs.logs` keyed
 by `(height, tx_index, log_index)` with the contract address, entry point, logical segment, log version, event type and
-the logged value in the ledger's serialization. It SHALL NOT start mid-chain.
+the logged value in the ledger's serialization. It SHALL NOT start mid-chain. Ledger v8 logs are not MIP-0002 events:
+the v8 adapter returns none, so no v8 log is stored (owner decision Q54).
+
+#### Scenario: A v8 log
+- **WHEN** a contract call in a v8 block runs the `Log` operation
+- **THEN** no row of `contract_logs.logs` is stored for it
 
 #### Scenario: A log in a failed fallible segment
 - **WHEN** a transaction's fallible segment that emitted a log fails

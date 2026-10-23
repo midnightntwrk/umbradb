@@ -58,8 +58,10 @@ cached by `spec_version`. Reads of a block's own state SHALL use the runtime in 
 THE system SHALL load each ledger version from a vendored build or a released package, chosen per version by the
 `core` entry's `ledgerSources` (default vendored), and SHALL record each package's name, version and SHA-256 in the
 core version (CF-2). Every vendored build SHALL be reproducible from a pinned upstream source commit and the patches
-kept in this repository, by a build script in this repository; every patch SHALL be proposed upstream and dropped when
-upstream releases it. IF a loaded package's SHA-256 differs from the recorded one THEN startup SHALL refuse.
+kept in this repository, by a build script in this repository; every patch SHALL be listed, with what it adds, in
+`vendor/ledger/README.md`, and dropped when upstream releases it (proposing the patches upstream is outside this
+change: the owner does it once `midnight-ledger` is stable, owner decision Q56). IF a loaded package's SHA-256 differs
+from the recorded one THEN startup SHALL refuse.
 
 #### Scenario: Rebuilding the vendored v9 package
 - **WHEN** the build script runs twice from the pinned source and patches
@@ -127,7 +129,8 @@ references and embedded children included); and root counts per key. Per block, 
 ledger's flushed batch (inserted nodes, changed root counts) with the block's row of `core_ledger_state.states` in the
 block's `on-db-write`, and persist the state after the block. Whole serialized states SHALL NOT be stored. Reads SHALL
 check each node's hash against its key. WHEN the process restarts THE ledger worker SHALL load the state at the cursor
-from its state key and the stored nodes.
+from its state key and the stored nodes. THE flushed batch SHALL carry each changed root count as a signed change,
+which the writer adds to the stored count, deleting a count that reaches 0 (owner decision Q53).
 
 #### Scenario: Restart from the database alone
 - **WHEN** the process is killed and restarted at cursor h

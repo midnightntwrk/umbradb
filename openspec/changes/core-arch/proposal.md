@@ -4,7 +4,9 @@
 > adversarial reviews (Codex `gpt-6-astra`), their fixes, and targeted fix checks ending in PASS. Change id `core-arch`;
 > capabilities `library-surface`, `database-api`, `modules`, `configuration`, `runner`, `determinism`,
 > `storage-helpers`, `admin-endpoints`, `test-tape`, `ingest`, `chain-data`, `ledger`, `contract-data`,
-> `private-processes`, `snapshots`, `browser`, and the removal of `temporal-kv`. Next: stage 2, the test-first build.
+> `private-processes`, `snapshots`, `browser`, and the removal of `temporal-kv`. Stage 2, the test-first build, is
+> under way; owner decisions Q53–Q56 (2026-10-23) amend the ledger interface (signed root-count changes, `stateKey`),
+> v8 contract logs (none stored) and LG-5 (the owner proposes the patches upstream later).
 
 ## Why
 
