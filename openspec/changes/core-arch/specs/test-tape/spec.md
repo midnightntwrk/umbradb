@@ -8,10 +8,11 @@ interactions that replaces the node in tests.
 ### Requirement: TT-1 The tape file format
 
 THE system SHALL read and write tapes as JSON-lines files, one record per line in recorded order, of four kinds:
-`{ "method", "params", "result" | "error" }` (a call); `{ "subscribe": id, "method", "params" }` and
-`{ "notify": id, "result" }` (a subscription and its notifications); `{ "disconnect": true }`; and
-`{ "fault": "timeout" | "error", "method", "params", "code"? }`. A tape SHALL be identified by the SHA-256 of its
-bytes. IF a line is not one of these kinds THEN reading the tape SHALL fail with the line number.
+`{ "method", "params", "result" | "error", "delayMs"? }` (a call, answered after `delayMs` milliseconds when present);
+`{ "subscribe": id, "method", "params" }` and `{ "notify": id, "result" }` (a subscription and its notifications);
+`{ "disconnect": true }`; and `{ "fault": "timeout" | "error", "method", "params", "code"? }`. A tape SHALL be
+identified by the SHA-256 of its bytes. IF a line is not one of these kinds THEN reading the tape SHALL fail with the
+line number.
 
 #### Scenario: A malformed line
 - **WHEN** a tape's line 12 is `{"foo": 1}`
@@ -26,6 +27,10 @@ recorded for the pair THEN it SHALL answer a JSON-RPC error `not-on-tape` naming
 #### Scenario: A changing answer
 - **WHEN** a tape records `chain_getFinalizedHead` three times with heads A, B, C, and a client calls it four times
 - **THEN** the client receives A, B, C, C
+
+#### Scenario: A delayed answer
+- **WHEN** a call record carries `"delayMs": 2000`
+- **THEN** the tape node answers that call about 2 s after receiving it, and the next recorded answers without delay
 
 ### Requirement: TT-3 Subscriptions, disconnects and faults
 
@@ -42,7 +47,8 @@ session; on a `fault` record it SHALL make the next matching call time out (no a
 
 THE system SHALL provide a tape builder that records a tape by proxying a client's WebSocket JSON-RPC session to a real
 node, writing every call, subscription and notification in order; and SHALL provide variant transforms over a tape:
-drop, repeat or skip notifications of a subscription; insert a `disconnect` after a record; delay answers; replace an
+drop, repeat or skip notifications of a subscription; insert a `disconnect` after a record; delay answers (setting
+`delayMs`); replace an
 answer by an error (e.g. state unavailable); and splice another tape's notifications for a range (for a best-chain
 switch recorded on a devnet).
 

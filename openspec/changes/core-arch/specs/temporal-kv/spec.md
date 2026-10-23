@@ -16,7 +16,7 @@ requirement's intent survives, the migration names the requirement that now carr
 
 ### Requirement: Postgres errors surface as the shared StorageError hierarchy
 **Reason**: the storage error hierarchy is replaced by the database API's errors.
-**Migration**: `database-api` DB-12 and `runner` RN-8.
+**Migration**: `database-api` DB-13 and `runner` RN-8.
 
 ### Requirement: Unconditional writes are gapless and monotonic (Law T1)
 **Reason**: height-versioned tables have no version counter; versions are keyed by block height.

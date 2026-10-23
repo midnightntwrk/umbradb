@@ -23,7 +23,8 @@ not the source text, SHALL be validated, compared with the history, recorded and
 ### Requirement: CF-2 Builders fill identity and version from the build
 
 THE system SHALL export `coreEntry({ start, stop?, config })`, which fills `id: "core"` and the core version from the
-build (`{ umbradb: <package version>, ledgers: [] }` in this change); SHALL give every module package an
+build (`{ umbradb: <package version>, ledgers: [{ ledger, versionName, packages: [{ name, version, sha256 }] }] }`,
+one item per ledger version the build carries, LG-5); SHALL give every module package an
 `entry({ start, stop?, config })` builder that fills `id` and `version` from the imported declaration and types
 `config` with the module's settings schema; and SHALL export `pastEntry({ id, start, stop?, version, config })` for a
 revision already in the history whose version this build does not carry. Builders SHALL return plain data.
@@ -35,33 +36,57 @@ revision already in the history whose version this build does not carry. Builder
 ### Requirement: CF-3 Every entry is validated against its schema at startup
 
 THE process SHALL validate each entry's shape (`{ id, start, stop?, version, config }`, no unknown property, `stop ≥
-start`) and each `config` against its module's zod schema at startup, apply declared defaults to absent fields, and
-refuse startup on any violation, naming the entry and the field. Byte values SHALL be `0x`-prefixed lowercase hex
+start`) at startup. THE process SHALL validate the `config` of every revision whose version is the build's against the
+module's zod schema in this build, apply its declared defaults to absent fields, and classify its fields by the
+schema's kinds. A revision whose version is not the build's (written with `pastEntry`) SHALL NOT be validated against
+this build's schema: its `config` SHALL be plain data and SHALL equal, field for field, the data recorded for it in the
+history (CF-6), which is its only source of field kinds; a `pastEntry` with no recorded row SHALL refuse startup. Any
+violation SHALL refuse startup, naming the entry and the field. Byte values SHALL be `0x`-prefixed lowercase hex
 strings.
 
 #### Scenario: A wrong type
 - **WHEN** `livenessTimeoutMs` is the string `"30000"`
 - **THEN** startup refuses with the entry `core`, the field and the expected type
 
+#### Scenario: An upgrade that renames a setting
+- **WHEN** module `m` 1.0.0 recorded `{ foo: 1 }` from height 1, and the build carries 1.1.0, whose schema has `bar`
+  instead of `foo`, with a revision from 50 written as `m.entry({ start: 50, config: { bar: 1 } })` and the old one as
+  `pastEntry({ id: "m", start: 1, version: "1.0.0", config: { foo: 1 } })`
+- **THEN** startup validates only the 1.1.0 revision against the schema, checks the 1.0.0 one against the history, and
+  accepts both
+
 ### Requirement: CF-4 Every field is data, operational or secret
 
 THE system SHALL treat every settings field by its declared kind: `data` fields can change stored data and SHALL be
 recorded in the history; `operational` fields cannot and SHALL NOT be recorded; `secret` fields are operational and
-SHALL never be shown, logged or reported (`[redacted]`). An entry's `start`, `stop` and `version` SHALL be data. In this
-change the `core` entry's fields are:
+SHALL never be shown, logged or reported (`[redacted]`). An entry's `start` and `version` SHALL be data, and so SHALL a
+module entry's `stop`; the `core` entry's `stop` SHALL be operational (it stops the process, not stored data). The
+`core` entry's fields are:
 
 | Field | Kind | Type and default |
 |---|---|---|
+| `network` | data | `mainnet`, `preprod`, `preview`, `stagenet`, or `custom` (then `genesisHash`, hex, is required) |
+| `ledgerTable` | data | `{ rows, pins }` (LG-1, LG-2); default: the built-in table for the network |
+| `ledgerSources` | data | per ledger version, `vendored` or `released`; default `vendored` |
+| `sweep` | data | `on` or `off`; default `on` (`off` only under the development opt-in) |
+| `retainStates` | data | integer ≥ 0; default 0 (LG-12) |
 | `database` | secret | a PostgreSQL URL, `pglite:<directory>` or `pglite:memory` |
-| `listen` | operational | `{ api?, admin? }` addresses; admin default `0.0.0.0:8081` |
+| `node` | secret | the node's WebSocket URL (core process only) |
+| `listen` | operational | `{ api?, admin?, transport? }` addresses; admin default `0.0.0.0:8081` |
+| `tipCap`, `prefetchWindow` | operational | integers; 600, 64 |
+| `backoffCeilingMs` | operational | integer; 30000 |
+| `lockstepInstances` | operational | instance ids; default none |
+| `snapshotAtStop` | operational | a file path; default absent |
+| `tls` | secret | certificates and trusted roots for opt-in mutual TLS (PP-11); default absent |
 | `livenessTimeoutMs` | operational | integer; 30000 |
 | `followingThreshold` | operational | integer; 3 |
 | `readinessLag` | operational | integer; absent |
-| `fullPageWritesOffAllowed` | operational | boolean; false (the durability-probe override, DB-11) |
+| `fullPageWritesOffAllowed` | operational | boolean; false (the durability-probe override, DB-12) |
 | `developmentOptIn` | operational | boolean; false |
 
-Later projects add fields as new UmbraDB versions; the core's `stop` is the entry's `stop`, and for the core it is
-operational.
+A private process's `core` entry has, instead of `node` and `lockstepInstances`: `instanceId` (operational, string),
+`publicDatabase` (secret), `coreTransport` (operational, address), `keyApi` (operational, listener address) and
+`testKeys` (CF-11).
 
 #### Scenario: A secret never appears
 - **WHEN** `/config` is read and the logs are collected for a process whose `database` URL contains a password
@@ -80,13 +105,18 @@ configuration omits an entry recorded in the history THEN startup SHALL refuse a
 ### Requirement: CF-6 Configuration changes only the future
 
 WHEN a process starts with a cursor c, THE `core-chain` part SHALL compare the file with `core_chain.config` and SHALL
-refuse startup IF an entry starting at or below c differs in any data field or in its version, except a `stop` that is
-above c in both the recorded and the new value. Entries starting above c SHALL be accepted and recorded in the same
-transaction as the comparison. Operational changes SHALL be accepted with no change to the history.
+refuse startup IF an entry starting at or below c differs in any data field or in its version, except a module
+entry's `stop` that is above c in both the recorded and the new value. Entries starting above c SHALL be accepted and
+recorded in the same transaction as the comparison. Operational changes — the `core` entry's `stop` among them, which
+may be raised, lowered above c, or removed at any restart — SHALL be accepted with no change to the history.
 
 #### Scenario: Changing the past
 - **WHEN** an entry starting at 10 changes a data field and the cursor is 20
 - **THEN** startup refuses with `changes-past`, the entry and the field
+
+#### Scenario: Raising the core's stop after stopping
+- **WHEN** the core stopped at its `stop` 10 (cursor 10) and restarts with `stop` 20
+- **THEN** startup accepts it, `core_chain.config` is unchanged, and processing continues to 20
 
 #### Scenario: Adding a future revision
 - **WHEN** a revision starting at cursor + 10 is added
@@ -95,8 +125,9 @@ transaction as the comparison. Operational changes SHALL be accepted with no cha
 ### Requirement: CF-7 The history row and its hash
 
 THE `core-chain` part SHALL store, per entry, a row of `core_chain.config` keyed by `(entry_id, start)` with `stop`
-(null when absent), `version` (the module's semver, or the canonical JSON of the core version), `data` (the data fields
-as canonical JSON) and `data_hash` = SHA-256 of the canonical encoding (`determinism` capability) of the data fields.
+(null when absent, and always null for the `core` entry, whose stop is operational), `version` (the module's semver, or
+the canonical JSON of the core version), `data` (the data fields as canonical JSON) and `data_hash` = SHA-256 of the
+canonical encoding (`determinism` capability) of the data fields.
 
 #### Scenario: The same entry gives the same hash
 - **WHEN** two processes record the same entry, with its fields written in a different order
@@ -115,8 +146,9 @@ run no migration. Revisions starting above cursor + 1 MAY name versions the buil
 
 ### Requirement: CF-9 The development opt-in gates development-only features
 
-THE system SHALL run development-only features — development-only modules and the PGlite backend in this change —
-only when the `core` entry sets `developmentOptIn: true`; otherwise startup SHALL refuse and name the feature.
+THE system SHALL run development-only features — development-only modules (such as `core-contract-logs-fast`), the
+PGlite backend, `sweep: off` and private snapshots — only when the `core` entry sets `developmentOptIn: true`; otherwise
+startup SHALL refuse and name the feature.
 
 #### Scenario: PGlite without the opt-in
 - **WHEN** `database` is `pglite:memory` and `developmentOptIn` is false
@@ -131,3 +163,14 @@ exit 0 only if every check passes, and SHALL print each finding with its path.
 #### Scenario: A file with a type error and a schema error
 - **WHEN** `umbradb config check` runs on a file with one unknown property and one wrong type
 - **THEN** it prints both findings with their paths and exits non-zero
+
+### Requirement: CF-11 Test keys in a private configuration
+
+WHERE a private process's `core` entry lists `testKeys` (`{ kind, bytes, start }`), THE system SHALL admit each like a
+key from the key API (PP-8) at its `start`; a test key not yet admitted SHALL have a start above the private cursor; one
+already admitted with the same start SHALL be accepted unchanged at every restart; one admitted with another start
+SHALL refuse startup (`test-key-conflict`); removing a test key from the list SHALL NOT remove the admitted key.
+
+#### Scenario: Restarting with the same test key
+- **WHEN** a private process restarts with a test key it admitted at its start
+- **THEN** startup accepts it and its `arrived_height` is unchanged

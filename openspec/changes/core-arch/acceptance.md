@@ -1,0 +1,446 @@
+# Acceptance — CORE-ARCH: the standalone indexer's core architecture
+
+Every criterion is numbered, individually checkable, and tagged with how it is verified:
+
+| Tag | Meaning (AGENTS.md stage 1) |
+|---|---|
+| `[CI]` | CI test |
+| `[PROP]` | Property test (fast-check, seed recorded) |
+| `[FAULT]` | Crash or fault injection |
+| `[DIFF]` | Differential (two backends, or two runs) |
+| `[STATIC]` | Static check (type check, lint, a test over repository files) |
+| `[DOC]` | Documentation artifact |
+| `[MANUAL]` | Manual evidence recorded in the pull request |
+
+Database tests run against PostgreSQL 17 in Docker (Testcontainers, random free ports ≥ 10000, torn down afterwards)
+and against PGlite in Node.js. "Both backends" means the criterion runs once on each. Tapes (TT-1) are identified by
+their SHA-256; the large ones (stagenet, preview and mainnet ranges, the devnet fork) are stored outside git as pinned
+release assets that CI downloads and verifies.
+
+## Definition of done
+
+1. Every task in `tasks.md` is checked, each with its named criteria demonstrated by a passing test — not asserted.
+2. Every criterion below passes; every id of §17 is in the required-test manifest and passes in the conformance gate.
+3. **Every negative control has been observed failing** (A11, A13, A50, A56, A105, A134): a control never seen to
+   fire is not evidence.
+4. The retirement list of `design.md` §13 is applied exactly (A5) and approved by the owner in the pull request.
+5. The cold adversarial review of the spec and of the code, the spec-compliance and release lanes, and the fix check
+   are recorded in the pull request (`AGENTS.md`).
+
+## 1. Library surface
+
+- **A1** `[STATIC]` A test pins the sorted value exports and the type exports of `"."` to `design.md` §12; adding or
+  removing an export fails it with the name. (LS-1)
+- **A2** `[STATIC]` The pack smoke installs the packed tarball in a clean consumer and type-checks a file importing
+  every §7 export; a second file importing any of `PgTemporalKV`, `PgCheckpointStore`, `PgWatermarks`,
+  `PgTransactionLeaseLayer`, `PgWalletStateEnvelopeStore`, `saveAndAdvance` fails to type-check. (LS-2)
+- **A3** `[STATIC]` The packed tarball contains no file under `legacy/`; the TypeScript build and the conformance run
+  include no file from `legacy/`; `legacy/transaction-history/` holds the source and its tests. (LS-3)
+- **A4** `[DOC]` `package.json` version is `0.10.0`; `CHANGELOG.md`'s `0.10.0` section opens with a breaking-change
+  notice naming the removed exports and stating that 0.9.5 databases are not migrated. (LS-4)
+- **A5** `[STATIC]` A test compares the required-test manifest, `stryker.conf.json` `mutate`, the coverage floors of
+  `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on any difference.
+  (LS-5)
+- **A6** `[CI]` `umbradb sync` and `umbradb` with no argument print the usage and exit 2; `umbradb run`, `config check`,
+  `snapshot export` and `snapshot import` are recognized. (LS-6)
+
+## 2. Database API
+
+- **A7** `[DIFF]` The database-API conformance suite (A8–A19's single-process tests) passes on both backends with
+  identical query results. (DB-1)
+- **A8** `[PROP]` For random interleavings of a writer committing heights and readers running multi-statement reads,
+  every read handle's statements see one height and report it; on PGlite and PostgreSQL. (DB-2)
+- **A9** `[CI]` Query results map `bigint` → `bigint`, `bytea` → `Uint8Array`, `numeric` → decimal string, `jsonb` →
+  parsed JSON, on both backends; the `jsonb` values `9007199254740992` and `9007199254740993` read back as two
+  different `bigint`s, and `42` as the number 42. (DB-2)
+- **A10** `[CI]` A block write handle used after its `on-db-write` returns, or a schema write handle used after its
+  `on-start-db` returns, fails with `handle-closed`, which halts processing. (DB-3)
+- **A11** `[CI]` On PGlite, under a constant read load, an instrumented test records zero outside reads between any
+  block's `BEGIN` and `COMMIT` over 200 blocks; **negative control:** a build flag that lets reads bypass the queue
+  makes the test fail. (DB-4)
+- **A12** `[CI]` On PostgreSQL, a reader polling during an open block transaction never sees a row of that block before
+  its COMMIT. (DB-5)
+- **A13** `[CI]` On both backends, module `a` writing into module `b`'s table through its write handle is rejected by
+  the database with a permission error, the block rolls back and processing halts; writing its own table succeeds;
+  **negative control:** granting `a`'s role `INSERT` on `b`'s table makes the test fail. (DB-6)
+- **A14** `[CI]` On both backends: a consumer changes a provider's table through the provider's `SECURITY DEFINER`
+  function and is rejected on a direct `UPDATE` of the same table; a module that does not require the provider's item
+  is denied `EXECUTE`. (DB-7)
+- **A15** `[CI]` Schemas are named after module ids (`-` → `_`); a shared item gets one schema named after it; two
+  providers of one shared item with different migrations refuse startup naming the item; ids `core_chain`, `A-b`,
+  `a--b` and `-a` fail the id pattern; a module and an item with the same name, and a module named `pg-x` or `public`,
+  refuse startup naming both. (DB-8, MD-2)
+- **A16** `[CI]` A changed checksum of an applied migration, and a migration recorded as applied but missing from the
+  build, each refuse startup with module, migration id and checksums, before any migration runs; with migrations `001`
+  and `002` pending and `002` failing halfway, `001` is applied and recorded, nothing of `002` is visible or recorded,
+  the module's `on-start-db` callback did not run, and startup refuses. (DB-9)
+- **A17** `[FAULT]` A second writer refuses with `writer-lock-held` on PostgreSQL and on PGlite (lock file); after the
+  writer connection is terminated, the writer re-acquires the lock before its next write; if another process took the
+  lock meanwhile, processing halts; after a SIGKILL of a PGlite process, its stale lock file is taken over at the next
+  start; two processes started together against a 15-second-old stale lock directory end with exactly one running;
+  a lock directory left by a kill right after `mkdir` ages out and is taken over. (DB-11)
+- **A18** `[CI]` On PostgreSQL, startup refuses with `fsync=off`, with a detected transaction pooler, and with
+  `full_page_writes=off` unless `fullPageWritesOffAllowed` is set; on PGlite, startup refuses without the development
+  opt-in. (DB-12, CF-9)
+- **A19** `[FAULT]` Terminating the writer's backend mid-transaction yields `connection-lost` with `retryable: true`; a
+  constraint violation yields a not-retryable error. (DB-13)
+- **A72** `[CI]` A module version with `requiresResync: true` is refused with `requires-resync` on a database with
+  committed heights, before any migration runs, and accepted on an empty one; `[DOC]` the module guide states the
+  additive-only rule for upgrade migrations. (DB-10)
+- **A73** `[CI]` On both backends, `TRUNCATE` of a module's own table in `on-db-write` fails with
+  `truncate-not-allowed` and the block rolls back; the same statement in a migration succeeds. (DB-14)
+
+## 3. Modules
+
+- **A20** `[STATIC]` A type test shows a declaration with an unknown point name is a type error; `[CI]` the same
+  declaration built without types is refused at startup with `unknown-point`. (MD-1)
+- **A21** `[CI]` A table-driven test triggers each refusal of MD-2 (duplicate id, `core-` and `on-` prefixes, no
+  requirement, item without lifetime, table item without kind, field without kind) and checks its code and names. (MD-2)
+- **A22** `[CI]` A table-driven test triggers each refusal of MD-3 (missing provider, overlapping providers, cycle,
+  uncovered range) and checks the code, range, module and item. (MD-3)
+- **A23** `[CI]` A module with `startsMidChain: false` starting above S is refused; with `true` and mid-chain providers
+  it is accepted. (MD-4)
+- **A24** `[CI]` A development-only module without the opt-in is refused, and accepted with it. (MD-5)
+- **A25** `[CI]` Two providers of one shared item with adjacent ranges are accepted and a consumer reads one continuous
+  table; overlapping ranges are refused. (MD-6)
+
+## 4. Configuration
+
+- **A26** `[CI]` A table of non-plain values (function, class instance, `undefined`, bigint, 1.5, −1, 2^53) each refuses
+  startup with `not-plain-data` and its path. (CF-1)
+- **A27** `[STATIC]` Type tests (`// @ts-expect-error`) show that a misspelled `core` field, a wrong field type and a
+  module `entry` with another module's settings are type errors. (CF-2)
+- **A28** `[CI]` Entry-shape violations (unknown property, `stop < start`, bad hex) and schema violations each refuse
+  startup naming the entry and field; absent fields take declared defaults; an upgrade whose new schema renames a
+  setting starts with the old revision written as a `pastEntry` equal to its recorded row; a `pastEntry` that differs
+  from, or has no, recorded row refuses startup. (CF-3)
+- **A29** `[CI]` With a password in `database`, the password appears in neither `/config`, `/status` nor the captured
+  logs. (CF-4, AE-6)
+- **A30** `[CI]` A configuration omitting a recorded entry refuses with `missing-entry`; a later revision with the same
+  id supersedes the earlier one from its start. (CF-5)
+- **A31** `[CI]` With cursor c: changing a data field or the version of an entry starting ≤ c refuses with
+  `changes-past`; changing a `stop` that is above c in both values is accepted; a revision starting above c is
+  accepted and recorded in the same transaction; changing an operational field leaves `core_chain.config` unchanged;
+  after the core stopped at its `stop` 10, restarting with `stop` 20, or without a stop, is accepted with no history
+  change and processing continues; `core` rows of `core_chain.config` always have a null `stop`. (CF-4, CF-6, CF-7)
+- **A32** `[PROP]` For random data-field objects, `data_hash` is independent of property order and changes when any
+  value changes. (CF-7)
+- **A33** `[CI]` A build whose version is older, and one whose version is newer, than the revision covering cursor + 1
+  each refuse with `upgrade-required` (entry, needed, build), and no `core_chain.migrations` row is added. (CF-8)
+- **A34** `[CI]` PGlite and a development-only module each refuse without `developmentOptIn`, naming the feature.
+  (CF-9)
+- **A35** `[CI]` `umbradb config check` exits 0 on a valid file, and on a file with one type error and one schema error
+  prints both with their paths and exits non-zero, opening no database. (CF-10)
+
+## 5. Runner
+
+- **A36** `[CI]` A recording module observes the point sequence of RN-1 for every height of an in-memory source, and
+  never observes `on-best-block` or `on-rollback`. (RN-1)
+- **A37** `[CI]` After 50 heights with test modules, every row in the database is in a schema of a module, a backbone
+  part, `core_chain` or `core_digest`, written through a handle. (RN-2)
+- **A38** `[PROP]` For random acyclic module graphs (up to 12 modules), the `on-db-write` order is backbone, then Kahn
+  order with the smallest-id tie-break, then `core-digest`; in parallel points no callback starts before every module it
+  requires has completed. (RN-3)
+- **A39** `[CI]` Each point receives exactly the handle of `design.md` §2; `on-compute` reads report h − 1 and see no
+  row written at h; a write attempted from `on-after-db-write` fails and halts. (RN-4)
+- **A40** `[CI]` An item put in `on-parse` at h is visible to a requiring module's `on-compute` at h, invisible at
+  h + 1; a second put of one item in one block is a callback error. (RN-5)
+- **A41** `[CI]` On PostgreSQL, a catch-up of 100 heights produces 100 transactions committing one height each, in
+  ascending order (transaction ids recorded per committed height). (RN-6)
+- **A42** `[CI]` A module with revisions at 1 (`k = 1`) and 5 (`k = 2`) sees `k = 1` for heights 1–4 and `k = 2` from
+  5, without `on-start-height` firing at 5. (RN-7)
+- **A43** `[FAULT]` A thrown error in each of `on-fetch`, `on-parse`, `on-start-height`, `on-compute`, the first and the
+  last `on-db-write` callback leaves no row of h, cursor h − 1, state `halted` with h, module and point; an error in
+  `on-after-db-write` halts with h committed. (RN-8)
+- **A44** `[FAULT]` Killing the process after a module's `on-start-height` at its start h and before h commits makes
+  `on-start-height` fire again for that module at h after restart. (RN-9)
+- **A45** `[CI]` With the core's stop at 10 and head 20, the cursor ends at 10, stopping modules and then the core get
+  `on-stop-height`, the state is `stopped` and ready; restarting with cursor 10 processes nothing and fires the core's
+  `on-stop-height` again. (RN-10)
+- **A46** `[FAULT]` Killing the process after COMMIT of h and before `on-after-db-write` of h completes makes
+  `on-after-db-write` fire for h after restart, before any callback of h + 1, with h's height, hash and settings and no
+  `block` items; `on-after-db-write` never receives `block` items, re-delivered or not. (RN-5, RN-11)
+- **A47** `[CI]` A recorded revision with a newer version starting at 50 makes the runner commit 49, complete 49's
+  `on-after-db-write` and `on-stop-height`, and enter `stopped` with `upgrade-required` (entry, needed, build), ready,
+  serving reads at 49. (RN-12)
+- **A48** `[FAULT]` SIGTERM during `on-db-write` of h ends with h fully present or fully absent, and a restart resumes
+  from the cursor. (RN-13)
+- **A49** `[CI]` With the source's head equal to the cursor, no transaction is open (checked in `pg_stat_activity` on
+  PostgreSQL) and processing resumes when the head rises. (RN-14)
+- **A50** `[FAULT]` **Crash sweep** on PostgreSQL with 300 heights and four test modules (one with `digest: true`):
+  kill at each mandatory point — inside `on-compute`; inside `on-db-write` after the first and after the last callback;
+  just before COMMIT; just after COMMIT, before `on-after-db-write` — and at 100 random points (seeded; the seed is
+  recorded; height uniform over the range, point uniform over the instrumented points); after every restart the run
+  completes and its contents hash equals an uninterrupted run's. **Negative control:** a runner variant that commits
+  the cursor in a transaction separate from the modules' writes is detected by the sweep. (RN-6, RN-8, RN-11)
+- **A51** `[DIFF]` The same in-memory chain and configuration, run once uninterrupted and once restarted 20 times,
+  give equal contents hashes and equal digests, on each backend; and PostgreSQL and PGlite give equal contents hashes.
+  (RN-6, DT-3, DT-5)
+- **A74** `[CI]` A process item published in its provider's `on-start-db` is visible to a requiring module from
+  `on-start-api` on; publishing twice, publishing from `on-compute`, or publishing an undeclared item fails the
+  callback; a required process item left unpublished refuses startup with `process-item-missing`. (MD-7)
+- **A75** `[CI]` Module HTTP handlers answer on `listen.api` with a read handle at the latest committed height; a
+  subscription registered by a module is notified from its `on-after-db-write`; two modules registering the same route
+  or subscription name refuse startup with `duplicate-api-route`; every chain-data HTTP response carries
+  `X-Umbra-View: finalized`, `X-Umbra-Height` and `X-Umbra-Hash` of the height it read, a GraphQL response carries the
+  same in `extensions` with its `data` unchanged, and a read before block S commits answers 503
+  `no-committed-height`. (RN-15, RN-16)
+
+## 6. Determinism
+
+- **A52** `[CI]` The encoder's output equals RFC 8949 Appendix A for every example in its subset (integers 0, 1, 10,
+  23, 24, 100, 1000, 1000000, 1000000000000, 18446744073709551615, −1, −10, −100, −1000; text and byte strings; arrays
+  and maps). (DT-1)
+- **A53** `[PROP]` For random `jsonb` objects, encoded map keys are in RFC 8949 §4.2.1 order and the encoding is
+  independent of insertion order; `numeric` values with a fraction and non-integer JSON numbers fail to encode. (DT-1)
+- **A54** `[DIFF]` Tables with `text`, `bytea` and `bigint` primary keys list rows in the same order on both backends,
+  matching DT-2 (e.g. `"B" < "a" < "b"`). (DT-2)
+- **A55** `[DIFF]` The same rows give the same contents hash on both backends; changing one byte of one row changes it.
+  (DT-3)
+- **A56** `[PROP]` For random sequences of inserts, updates, deletes and same-value rewrites within one block, the
+  recorded changes equal the difference between the table's states before and after the block, on both backends;
+  `TRUNCATE` is refused (A73), so no change escapes the triggers; **negative control:** disabling the trigger on one
+  table makes the test fail. (DT-4)
+- **A57** `[CI]` Two chains differing only in one module's value at height 7 give equal digests up to 6 and different
+  digests from 7; the digest at a height with no change equals `SHA-256(previous ‖ CBOR([]))`. (DT-5)
+- **A58** `[CI]` A migration creating a `serial`, identity, floating-point, or `now()`/`random()`-defaulted column in a
+  public module table refuses startup with `non-deterministic-column`; a module without `digest` writing `{"x": 1.5}`,
+  or a JSON integer beyond the signed 64-bit range, to a `jsonb` column fails the block; `{"x": 2}` succeeds. (DT-6)
+
+## 7. Storage helpers
+
+- **A59** `[PROP]` (P9 retargeted) For random sequences of writes over heights, reading a cursor-table key returns its
+  last write. (SH-1)
+- **A60** `[PROP]` For random sequences of writes, same-value writes and deletes over heights, reading the
+  height-versioned table at every height equals a reference model; versions of a key never overlap and consecutive
+  versions meet at their boundary (`to` of one = `from` of the next, unless deleted between). (SH-2)
+- **A61** `[CI]` A second write of one key in one block fails the block. (SH-3)
+
+## 8. Admin endpoints
+
+- **A62** `[CI]` The four endpoints answer on the admin listener and other paths answer 404; while a PGlite job holds
+  the queue for 5 s, and while a callback runs a 10 s synchronous loop on the main thread, each answers within 1 s.
+  (AE-1)
+- **A63** `[CI]` With a 5 s liveness timeout set for the test: during an `on-compute` callback that awaits a 15 s
+  operation, `/health/live` answers 200 throughout; during one that runs a 15 s synchronous loop, it answers 503 after
+  5 s while every endpoint keeps answering within 1 s; it answers 200 again once the loop ends. (AE-2)
+- **A64** `[CI]` Each state of AE-3 is reached in a test; a refused start keeps the process up with live 200 and ready
+  503. (AE-3)
+- **A65** `[CI]` With readiness lag 10 and lag 500, ready answers 503, then 200 once the lag is ≤ 10; `stopped` answers
+  200 even with lag 100 and readiness lag 10; `following` with following threshold 20, readiness lag 10 and lag 15
+  answers 503. (AE-4)
+- **A66** `[CI]` `/status` and `/config` responses validate against JSON schemas committed with the tests; `cursor` is
+  `null` before block S commits. (AE-5)
+- **A67** `[CI]` A halt caused by an error whose message contains a secret shows the error code, height, module and
+  point, and the secret appears nowhere in the response. (AE-6)
+
+## 9. Test tape
+
+- **A68** `[CI]` Tapes round-trip through the reader and writer byte for byte; a malformed line fails with
+  `bad-tape-record` and its line number; the tape id is the SHA-256 of the file. (TT-1)
+- **A69** `[CI]` The tape node answers repeated calls by occurrence and repeats the last answer; an unrecorded call
+  gets `not-on-tape`; a call record with `delayMs: 2000` is answered no earlier than 2 s after the call, and the next
+  record without delay. (TT-1, TT-2)
+- **A70** `[CI]` Subscriptions deliver in file order after the preceding calls; `disconnect` drops the connection and
+  the next session continues; `fault` records time out or fail the next matching call. (TT-3)
+- **A71** `[CI]` A session against a scripted JSON-RPC server, recorded by the builder and replayed by the tape node,
+  gives byte-identical answers and notifications; each variant transform produces the tape committed as its expected
+  output (the delay transform sets `delayMs` on exactly the selected calls). `[MANUAL]` The
+  same record-and-replay against a real Midnight node (local devnet or Stagenet) is recorded in the pull request with
+  the tape's SHA-256. (TT-4)
+
+## 10. Ingest
+
+- **A76** `[FAULT]` Killing the process while 20 best blocks are queued leaves no row of a non-finalized block, on
+  PostgreSQL. (IN-1)
+- **A77** `[CI]` With S above the node's finalized head, the process stays `starting` with `waiting-for-node` and
+  commits S once the head reaches it, with the anchor recorded in S's transaction; a bootstrap killed before S commits
+  is repeated on the next start without error. (IN-2)
+- **A78** `[CI]` A node with another genesis hash refuses startup with `genesis-mismatch`; a node whose finalized hash
+  at the cursor differs refuses with `cursor-hash-mismatch`; a node whose head is below the cursor makes the process
+  wait with `waiting-for-node`. (IN-3)
+- **A79** `[CI]` With a tape whose finalized notifications report 10, 13, 13, 12, then a disconnect, then 20, heights
+  11–20 commit once each in order; a block whose parent hash differs from the cursor halts with `parent-mismatch`; a
+  finalized notification at or below the cursor with another hash halts with `finality-conflict`. (IN-4)
+- **A80** `[CI]` During a catch-up of 1,000 heights with `prefetchWindow` 64, instrumentation never sees more than 64
+  heights above the cursor fetched or held, and commits stay one per height in order. (IN-5)
+- **A81** `[CI]` A best-chain-switch tape replacing queued 101–103 by 101′–104′ fires `on-rollback` once naming 101–103,
+  and 101′ is not fetched again at finality (tape call counts); with `tipCap` 5 and finality stalled, the sixth best
+  block is not queued and `/status` shows `finality-stall`. (IN-6)
+- **A82** `[CI]` Block 0 is processed in both cases of IN-7 (genesis state including, and not including, block 0's
+  transactions), with transactions numbered in body order and the root after block 0 matching the node's. (IN-7)
+- **A83** `[CI]` A 1,000-height sync against the tape node uses only the methods of IN-8 (the tape node's call log);
+  `[STATIC]` no source file imports the official indexer's client or a wallet SDK. (IN-8)
+- **A84** `[CI]` A "state unavailable" answer for a finalized height halts with `node-requirement` and that height, with
+  no retry (tape call count). (IN-9)
+- **A85** `[FAULT]` A tape that drops the node connection for 2 minutes makes the process retry with back-off reaching
+  `backoffCeilingMs` and report `node-retrying`, then resume with no height skipped or repeated; an error on a queued
+  best block drops it without retry; a terminated database connection is retried with `database-retrying`. (IN-10)
+- **A86** `[FAULT]` Terminating the writer's backend during COMMIT: when the server committed h, the cursor is h after
+  reconnecting, h is not processed again and `on-after-db-write` fires for h; when it did not, h is processed again from
+  `on-compute`; a cursor that is neither halts with `unexpected-cursor`. (IN-11)
+- **A87** `[STATIC]` A test enumerates every refusal and halt code of `design.md` §11 and fails if one has no test that
+  triggers it and checks its code. (IN-12)
+
+## 11. Chain data
+
+- **A88** `[CI]` After block S commits on an empty database, `core_chain.identity` holds the node's genesis hash, S and
+  the anchor hash. (CD-1)
+- **A89** `[CI]` A module requiring `block-body` reads at h the extrinsics `core-block-fetch` fetched for h, decoded
+  with the metadata of h's parent state. (CD-2)
+- **A90** `[CI]` After heights S…h commit, `core_block_commit.blocks` holds exactly one row per height with the node's
+  hash, and the cursor is the last row. (CD-3)
+- **A91** `[CI]` `core-chain-events` stores every event of a range, and the events of a runtime-upgrade block U are
+  decoded with the old runtime's metadata without error (devnet upgrade tape). (CD-4)
+- **A92** `[CI]` Each transaction is parsed once (counted calls); a block with a system transaction between two regular
+  ones stores them as 0, 1, 2 in that order; block 0's transactions are in body order. (CD-5)
+- **A93** `[CI]` `TxApplied`, `TxPartialSuccess` and `ExtrinsicFailed` give `success`, `partial` and `failure`. (CD-6)
+
+## 12. Ledger
+
+- **A94** `[CI]` A block with an unknown `spec_version` halts with `unknown-runtime`; with no `MNSV` digest or two, with
+  `bad-version-digest`; a block contradicting a pin, with `pin-mismatch`; the mainnet header fixture of block 1,774,492
+  passes the built-in pin. (LG-1, LG-2)
+- **A95** `[STATIC]` Every pin in the built-in tables has a height, a hash and a `spec_version` with a recorded source
+  (the node it was read from and the U and F hashes); `[CI]` a configuration table "every `spec_version` → v8" parses
+  every block of a devnet with v8. (LG-3)
+- **A96** `[CI]` With a devnet runtime-upgrade tape, U is decoded with the old metadata and F with the new, and the
+  metadata cache never holds the new metadata under the old `spec_version`; a parent runtime whose `spec_version`
+  differs from the block's `MNSV` halts with `metadata-mismatch`. (LG-4)
+- **A97** `[CI]` CI rebuilds every vendored ledger package from its pinned source and patches and gets the recorded
+  SHA-256; a package file changed by one byte refuses startup with `package-hash-mismatch`. (LG-5)
+- **A98** `[CI]` One adapter test suite runs against the v8 and the v9 adapters and passes on both; `versionName` and
+  `rawPackages()` return the recorded release and packages. (LG-6, LG-7)
+- **A99** `[CI]` State roots match the node's on: a preview range crossing the runtime 1.0.300 upgrade; a mainnet range
+  from a snapshot before block 1,774,492 to 1,780,000; a mainnet range including block 1,788,980. (LG-8)
+- **A100** `[CI]` On a devnet that starts on a v8 runtime and enacts the v9 upgrade (tape), the state is converted
+  before F is applied, the root at F matches the node's, and the same holds when F has no transactions. (LG-9)
+- **A101** `[CI]` During a 60 s ledger step in the worker, `/health/live` answers 200 and every endpoint answers within
+  1 s. (LG-10)
+- **A102** `[FAULT]` After a restart at cursor h the state loaded from the database has h's root and the next root
+  matches; `[STATIC]` no table stores a whole serialized state; `[CI]` a stored node whose bytes no longer match its key
+  fails the read. (LG-11)
+- **A103** `[CI]` With `retainStates` 1,000 at cursor 5,000, loading 4,000 succeeds and 3,999 fails with
+  `state-not-retained`; raising it by a revision fills the window from the revision; lowering it releases the leaving
+  states in the revision's first block. (LG-12)
+- **A104** `[CI]` A contract state stored at height 10 and unchanged over 10,000 blocks and several sweep cycles still
+  loads. (LG-13)
+- **A105** `[DIFF]` After every block of a 2,000-block range, the set of stored ledger nodes is identical on PostgreSQL
+  and PGlite; a node deleted by the sweep and needed again is reinserted; with `sweep: off` nothing is deleted;
+  **negative control:** a sweep that takes grey keys in insertion order instead of byte order makes the comparison
+  fail. (LG-14)
+- **A106** `[CI]` A test package returning a wrong root for one block halts with `root-mismatch` and stores nothing of
+  that block. (LG-15)
+- **A107** `[CI]` `core_ledger_state.states`, `segment_results` and `events` hold the values of LG-16 for a tape range
+  (first-free indexes and roots match the node's runtime calls where the node exposes them); enabling
+  `core-ledger-state` above S without a snapshot refuses with `cannot-start-mid-chain`. (LG-16)
+
+## 13. Contract data
+
+- **A108** `[CI]` Two calls to one contract in one block give one `core_contract_states` row with the state after both;
+  at F of the devnet fork, every contract gets a row. (CC-1)
+- **A109** `[CI]` `core-contract-logs-full` stores the logs of applied segments and none from a failed fallible
+  segment. (CC-2)
+- **A110** `[DIFF]` A range with literal logs gives identical `contract_logs.logs` with `-full` and `-fast`; a malformed
+  wrapper is stored as a version-0 `Misc` log by both; an oversized log is stored by neither; a log of a value read from
+  state makes `-fast` halt with `fast-log-unsupported`. (CC-3)
+- **A111** `[CI]` `-full` stopping at h, a snapshot at h, and a restored database continuing with `-fast` from h + 1
+  give a continuous `contract_logs.logs`. (CC-4)
+
+## 14. Private processes
+
+- **A112** `[CI]` With a core and a private process running, the core's database connections reach only the public
+  database. (PP-1)
+- **A113** `[CI]` A private database bound to another public database refuses with `private-binding-mismatch`. (PP-2)
+- **A114** `[FAULT]` Dropping the transport while the public cursor advances 50 heights: after reconnecting, the private
+  process processes the 50 heights in order. (PP-3)
+- **A115** `[CI]` Every message type validates against the schemas of PP-4; `read-result` and `api-result` carry their
+  request's `id`; an unknown `v` or `type` closes the connection; a second `hello` with a connected id is refused with
+  `duplicate-instance`. (PP-4)
+- **A116** `[CI]` An independent instance stopped for 100 blocks never pauses the core and catches up from public data.
+  (PP-5)
+- **A117** `[FAULT]` A stopped lockstep instance makes the core wait before `BEGIN` with no transaction open
+  (`pg_stat_activity`) and `waiting-for-lockstep`, and resume when it reports; restarting the core while an instance is
+  at the public cursor does not deadlock; a `report` hash mismatch halts that instance; a `needsLockstep` module refuses
+  to run when `hello-ack` says `lockstep: false`. (PP-6)
+- **A118** `[CI]` An instance listed after the public cursor passed it is refused with `lockstep-behind`, and the core
+  waits and names it. (PP-7)
+- **A119** `[CI]` The key API answers `400` for an undeclared kind or invalid bytes, `200` for an admitted id, `409`
+  when stopped; a key posted during h's `on-compute` is admitted at h + 1 and answered `201` after that commit; a crash
+  before the commit drops it. (PP-8)
+- **A120** `[CI]` With a registered test key and 100 processed blocks, its bytes appear in no public table, log line,
+  status field or API response; the core's `/status` shows only each instance's id, connection, lockstep flag and
+  synced height. (PP-9, PP-10)
+- **A121** `[CI]` With `tls` set, a private process or key-API client without a certificate is refused and one with a
+  trusted certificate is accepted. (PP-11)
+- **A122** `[CI]` A private snapshot is refused with `private-snapshot-refused` without the development opt-in. (PP-12)
+- **A123** `[CI]` A private process restarting with a test key it already admitted at its start keeps its
+  `arrived_height`; the same key with another start refuses with `test-key-conflict`. (CF-11)
+
+## 15. Snapshots and browser
+
+- **A124** `[CI]` A snapshot exported while blocks commit holds every table at the manifest's height. (SN-1)
+- **A125** `[DIFF]` Two instances with the same history stopped at the same height with `snapshotAtStop`, on PostgreSQL
+  and PGlite, write snapshots with equal contents hashes. (SN-2)
+- **A126** `[CI]` Each import refusal of SN-3 is triggered and checked, including a one-byte change giving
+  `contents-hash-mismatch` with the target database left empty. (SN-3)
+- **A127** `[FAULT]` An import killed while loading rows publishes nothing, and the next start drops the staging
+  schemas. (SN-4)
+- **A128** `[DIFF]` A snapshot exported on PostgreSQL at h, imported on PGlite and on PostgreSQL, and continued to
+  h + 100, gives the same contents hash as an instance that never stopped. (SN-5)
+- **A129** `[CI]` In Chrome (headless, in CI), the page runs the core, ledger and a private instance in workers on
+  PGlite with the development opt-in; a second tab on the same OPFS database refuses with `writer-lock-held`. (BR-1)
+- **A130** `[CI]` In Chrome, an empty profile records S as the finalized head at creation; enabling `core-ledger-state`
+  without a snapshot refuses and names it. (BR-2)
+- **A131** `[CI]` In Chrome, the page's network requests go only to the node; importing a snapshot through the page runs
+  every SN-3 check and continues from its height + 1. (BR-3)
+- **A132** `[DIFF]` The same tape and configuration in Chrome and in Node.js on PGlite give equal contents hashes.
+  (BR-4)
+
+## 16. Whole system
+
+- **A133** `[CI]` Stagenet blocks 0–10,000 and preview blocks 0–10,000, from genesis, with every core module except
+  `-fast`, sync with every state root matching the node's. (IN-4, LG-15)
+- **A134** `[FAULT]` The crash sweep of A50 repeated on the stagenet 0–10,000 tape with every core module except
+  `-fast`: every mandatory point (inside `on-compute`; inside `on-db-write` after the first and the last callback; just
+  before and just after COMMIT; during a sweep step) and 100 seeded random points leave no partial block, no skipped
+  height, and a contents hash equal to an uninterrupted run's; **negative control:** a build that writes the ledger
+  nodes in a transaction of their own is detected. (RN-6, IN-1, LG-11, LG-14)
+- **A135** `[DIFF]` The same range and configuration on PostgreSQL, on PGlite in Node.js and on PGlite in Chrome give
+  equal contents hashes. (DT-3, BR-4)
+- **A136** `[MANUAL]` Ingest throughput over stagenet 0–10,000 with every core module except `-fast`, on PostgreSQL 17,
+  median of 3 runs — each from an empty database on a freshly started PostgreSQL, against the same local archive node
+  in Docker after one warm-up pass, timed from process start to the commit of block 10,000 — is equal to or better than
+  the official midnight-indexer's (release/4.4, PostgreSQL backend) on the same machine; the measurements are recorded
+  in the pull request. (CORE-ARCH SC-009)
+
+## 17. Required test ids added to the manifest
+
+Each id is a `[[id]]` token in its test title (`test/integration/required-tests.manifest.json`); the pinned count
+becomes 4 (kept harness ids) + 23.
+
+| Id | Criterion |
+|---|---|
+| `runner.crash-sweep.contents-hash-equal` | A50 |
+| `runner.crash-sweep.negative-control-fires` | A50 |
+| `runner.restart-20.contents-hash-equal` | A51 |
+| `runner.fault.pre-commit-failure-leaves-nothing` | A43 |
+| `runner.fault.start-height-at-least-once` | A44 |
+| `runner.fault.after-write-at-least-once` | A46 |
+| `runner.fault.sigterm-in-transaction` | A48 |
+| `db.writer-lock.single-writer` | A17 |
+| `db.connection-lost.retryable` | A19 |
+| `db.pglite.no-outside-read-in-transaction` | A11 |
+| `db.pglite.no-outside-read.negative-control-fires` | A11 |
+| `db.roles.cross-schema-write-rejected` | A13 |
+| `determinism.contents-hash.cross-backend` | A55 |
+| `db.block.truncate-refused` | A73 |
+| `ingest.no-unfinalized-rows-after-crash` | A76 |
+| `ingest.uncertain-commit-recovery` | A86 |
+| `ledger.sweep-cross-backend-identical` | A105 |
+| `ledger.root-check-halts` | A106 |
+| `contract-logs.fast-equals-full` | A110 |
+| `private.lockstep-waits-no-transaction` | A117 |
+| `private.no-key-bytes-public` | A120 |
+| `snapshot.restore-equals-uninterrupted` | A128 |
+| `core.full-crash-sweep` | A134 |

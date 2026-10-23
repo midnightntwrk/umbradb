@@ -21,8 +21,8 @@ cursor + 1 up to the block source's finalized head, in ascending order and witho
 `on-finalized` (once per new finalized head, before its heights are processed), `on-fetch`, `on-parse`,
 `on-start-height` (entries starting at h), `on-compute`, the block transaction with `on-db-write` inside it,
 `on-after-db-write`, and `on-stop-height` (entries stopping at h). THE runner SHALL expose `on-best-block` and
-`on-rollback` only through its dispatch interface, for the block source to call (project 2), and SHALL NOT call them
-itself.
+`on-rollback` only through its dispatch interface, for the block source's queue to call (IN-6), and SHALL NOT call
+them itself.
 
 #### Scenario: Points run in order for each height
 - **WHEN** an in-memory block source reports finalized head 3 on an empty database with S = 1
@@ -32,9 +32,9 @@ itself.
 ### Requirement: RN-2 The runner does only its five duties
 
 THE runner SHALL perform only these duties: resolve the module graph into an ordered callback list per point and per
-height range; drive the block source; call the points in order; open each block's transaction, call `on-db-write` and
-commit; and serve the admin endpoints from its own memory. Configuration checks, chain identity, fetching, parsing and
-writing SHALL be done by callbacks of backbone parts or modules.
+height range; drive the block source; call the points in order; wait for lockstep reports (PP-6), then open each block's
+transaction, call `on-db-write` and commit; and serve the admin endpoints from its own memory. Configuration checks,
+chain identity, fetching, parsing and writing SHALL be done by callbacks of backbone parts or modules.
 
 #### Scenario: The runner writes nothing itself
 - **WHEN** a height is processed with only a test backbone and no modules
@@ -60,7 +60,8 @@ path between them, and SHALL start a callback only after every callback of a mod
 
 ### Requirement: RN-4 Each point has fixed read and write permissions
 
-THE runner SHALL give callbacks only these handles: `on-start-db` a schema write handle for the module's own schema;
+THE runner SHALL give callbacks only these handles: `on-start-db` (called after the module's migrations, DB-9) a schema
+write handle for the module's own schema;
 `on-db-write` a block write handle (committed data plus what earlier callbacks wrote for this block, writes to its own
 schema only); `on-compute` a read handle at committed height h − 1; `on-after-db-write` and `on-stop-height` a read
 handle at h; `on-start-api` a registry whose handlers get a read handle per request; and no database handle to
@@ -77,7 +78,9 @@ WHEN processing of height h begins THE runner SHALL create a block context holdi
 `block` items published so far for h, the calling module's settings for the revision covering h, and an `active`
 predicate over the entry ranges at h; and SHALL drop it after `on-stop-height` of h. THE runner SHALL accept an item
 through `ItemSink.put` only from the module that declares it with a `block` lifetime, at most once per item per block,
-and SHALL make it visible only to callbacks that run after the publishing callback has completed.
+and SHALL make it visible only to callbacks that run after the publishing callback has completed and before the block's
+COMMIT. `on-after-db-write` and `on-stop-height` SHALL receive the block's height, hash, parent hash and settings but no
+`block` items: they read committed data instead, so the same context can be rebuilt after a restart (RN-11).
 
 #### Scenario: An item reaches a later callback of the same block
 - **WHEN** `provider` puts item `x` in `on-parse` at h and `consumer` (which requires `x`) reads it in `on-compute`
@@ -146,6 +149,9 @@ at s. WHEN the process starts with the cursor at or above the core's stop THE ru
 
 WHEN the process starts with a cursor c THE runner SHALL fire `on-after-db-write` for c again, and `on-stop-height`
 for every entry stopping at c again, before processing c + 1, because a crash may have come before they completed.
+The re-delivered callbacks SHALL get the context of RN-5 for c (no `block` items) and SHALL be those of the build now
+running, even if the revision covering c names another version: these points write nothing, so a newer callback cannot
+change stored data, and modules SHALL make them idempotent.
 `on-db-write` SHALL run exactly once per committed height (a rolled-back attempt leaves nothing), and
 `on-best-block`, `on-fetch`, `on-parse`, `on-rollback`, `on-finalized` and `on-compute` MAY run again for a height
 after a restart.
@@ -157,7 +163,8 @@ after a restart.
 ### Requirement: RN-12 The runner stops at an upgrade boundary
 
 WHEN the next height H to process is the start of a revision whose version differs from the version this build
-carries for that entry (CORE-ARCH Q43) THE runner SHALL commit H − 1, stop processing, and enter state `stopped` with
+carries for that entry (CORE-ARCH Q43) THE runner SHALL commit H − 1, complete its `on-after-db-write` and
+`on-stop-height`, stop processing, and enter state `stopped` with
 the condition `upgrade-required`, naming each entry, the version needed and the build's version; and SHALL keep serving
 reads at H − 1.
 
@@ -179,10 +186,34 @@ transaction is open commit or roll back, and then exit.
 
 THE runner SHALL learn the cursor, the finalized head and each finalized block's height, hash and parent hash only
 through the block source registered by the backbone, and SHALL process heights only up to the finalized head it
-reports. THE change SHALL ship the block-source interface and an in-memory implementation used by tests; the
-node-backed source is out of scope (project 2).
+reports. THE node-backed source is the backbone part `core-block-fetch` (CD-2); THE change SHALL also ship an
+in-memory implementation, used by tests and by module authors.
 
 #### Scenario: The runner waits for the source
 - **WHEN** the in-memory source's finalized head equals the cursor
 - **THEN** the runner processes nothing, holds no transaction open, and continues when the source reports a higher
   head
+
+### Requirement: RN-15 Module APIs are registered once, at startup
+
+WHEN `on-start-api` runs, THE runner SHALL collect every handler registered through `ApiRegistry` and mount the HTTP
+handlers on the module API listener (`listen.api`) and the subscriptions on WebSocket at the same listener; IF two
+modules register the same method and path, or the same subscription name, THEN startup SHALL refuse and name both
+modules. Each request SHALL get a read handle at the latest committed height; a subscription SHALL be notified from
+the module's `on-after-db-write` through `emit`.
+
+#### Scenario: Two modules claim one path
+- **WHEN** modules `a` and `b` both register `GET /api/v4/graphql`
+- **THEN** startup refuses with `duplicate-api-route`, the route, `a` and `b`
+
+### Requirement: RN-16 Chain-data responses name their view and height
+
+THE system SHALL answer every module API request from finalized data only, and SHALL state in each chain-data response
+its view (`finalized`), height and hash — as the `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` headers on HTTP,
+and in the `extensions` object of GraphQL responses — so response bodies stay compatible with existing clients. IF no
+height has committed yet THEN THE system SHALL refuse chain-data reads with `no-committed-height` (HTTP 503).
+
+#### Scenario: A GraphQL response
+- **WHEN** a module answers a GraphQL query at committed height 120
+- **THEN** the response's `extensions` hold view `finalized`, height 120 and that block's hash, and the body's `data` is
+  unchanged

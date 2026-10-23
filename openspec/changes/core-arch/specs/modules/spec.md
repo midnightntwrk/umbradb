@@ -8,12 +8,13 @@ processed, passed in its block context), `table` (stored in the provider's table
 
 ### Requirement: MD-1 A module is a declaration the host imports
 
-THE system SHALL define a module as a TypeScript package exporting a `ModuleDeclaration` with: `id`, `version`
-(semver), `side` (`public` or `private`), `requires` (item names), `provides` (items with lifetimes and, for `table`
-items, schema, tables and kind), `startsMidChain`, optional `needsLockstep`, `developmentOnly`, `digest` and
-`keyKinds` / `validateKey`, `configSchema` (a zod 4 object schema whose every property carries the metadata
-`kind: "data" | "operational" | "secret"`), `migrations` (`{ id, sql }`, cumulative) and `points` (callbacks by point
-name). THE host program SHALL import the modules it ships; THE system SHALL NOT load a module by name at run time.
+THE system SHALL define a module as a TypeScript package exporting a `ModuleDeclaration` with: `id`, `version` (semver),
+`side` (`public` or `private`), `requires` (item names), `provides` (items with lifetimes and, for `table` items,
+schema, tables and kind), `startsMidChain`, optional `needsLockstep`, `developmentOnly`, `digest` and `keyKinds` /
+`validateKey`, `configSchema` (a zod 4 object schema whose every property carries the metadata `kind: "data" |
+"operational" | "secret"`), `migrations` (`{ id, sql }`, cumulative), optional `requiresResync` (DB-10) and `points`
+(callbacks by point name). Ids and item names SHALL match the pattern of DB-8. THE host program SHALL import the modules
+it ships; THE system SHALL NOT load a module by name at run time.
 
 #### Scenario: A declaration with an unknown point name
 - **WHEN** a module declares a callback under `on-fetched`
@@ -21,9 +22,10 @@ name). THE host program SHALL import the modules it ships; THE system SHALL NOT 
 
 ### Requirement: MD-2 Declarations are validated at startup
 
-IF a declaration has an id used by another module, a user module's id starts with `core-` or `on-`, the declaration
-requires no item, an item is provided without a lifetime, a `table` item has no kind, or a property of `configSchema`
-has no `kind`, THEN startup SHALL refuse and name the module and the cause.
+IF a declaration has an id used by another module, an id or item name that does not match the pattern of DB-8, a user
+module's id that starts with `core-` or `on-`, a schema name that collides as DB-8 describes, no required item, an item
+provided without a lifetime, a `table` item without a kind, or a field of `configSchema` without a `kind`, THEN startup
+SHALL refuse and name the module and the cause.
 
 #### Scenario: A user module named like a core module
 - **WHEN** the host ships a user module with id `core-x`
@@ -76,3 +78,15 @@ at the next.
 - **WHEN** provider `p1` of shared item `x` stops at 99 and provider `p2` starts at 100, with identical migrations
 - **THEN** startup accepts it, `p1` writes `x`'s schema up to 99 and `p2` from 100, and a consumer of `x` sees one
   continuous table
+
+### Requirement: MD-7 Process items are published once, at startup
+
+THE system SHALL let the provider of an item with a `process` lifetime publish it once, from its `on-start-db` callback,
+through `ProcessContext.publish(item, value)`; the value SHALL be visible in `ProcessContext.items` to every callback of
+a module requiring it from `on-start-api` on, for the whole process. IF an item is published twice, published from any
+other point, or published by a module that does not declare it, THEN that callback SHALL fail; IF a required `process`
+item has not been published when every `on-start-db` callback has run, THEN startup SHALL refuse and name the item.
+
+#### Scenario: A required process item is never published
+- **WHEN** module `consumer` requires the process item `client` and its provider's `on-start-db` does not publish it
+- **THEN** startup refuses with `process-item-missing` and the item

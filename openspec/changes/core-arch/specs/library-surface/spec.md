@@ -7,7 +7,7 @@ code is refactored, kept or retired (CORE-ARCH §3.4; owner decisions Q25, Q27, 
 
 ### Requirement: LS-1 The package exports exactly the new surface
 
-THE package SHALL export from `"."` exactly the values and types listed in `design.md` §7, and nothing else; a test
+THE package SHALL export from `"."` exactly the values and types listed in `design.md` §12, and nothing else; a test
 SHALL pin the sorted list of value exports and the list of type exports, and `package.json` SHALL expose only `"."`
 and the `umbradb` command.
 
@@ -49,19 +49,20 @@ every 0.9.5 export is removed or replaced and that 0.9.5 databases are not migra
 
 THE conformance, mutation, Lean trust, supply-chain, pack-smoke and knowledge-graph gates SHALL run on the new code at
 the change's head; coverage floors and mutation targets SHALL name the new source files; the Lean proofs, required test
-ids, property tests and benchmarks that cover retired parts SHALL be retired exactly as listed in `design.md` §8, and
+ids, property tests and benchmarks that cover retired parts SHALL be retired exactly as listed in `design.md` §13, and
 nothing else SHALL be weakened.
 
 #### Scenario: The retirement list matches the tree
 - **WHEN** the required-test manifest, `stryker.conf.json`, `vitest.config.ts` floors and `Formal/Lean` at the
-  change's head are compared with `design.md` §8
+  change's head are compared with `design.md` §13
 - **THEN** every removal in the tree is in the list, and every item of the list is applied
 
 ### Requirement: LS-6 The `umbradb` command
 
-THE package SHALL provide the `umbradb` command; in this change its only subcommand is `config check` (CF-10), and
-any other subcommand SHALL exit non-zero with a usage message.
+THE package SHALL provide the `umbradb` command with the subcommands `run` (start a core or private process from its
+configuration), `config check` (CF-10), `snapshot export` and `snapshot import` (SN-1, SN-3); any other subcommand
+SHALL exit 2 with a usage message.
 
 #### Scenario: An unknown subcommand
-- **WHEN** `umbradb run` is invoked
+- **WHEN** `umbradb sync` is invoked
 - **THEN** it prints the usage and exits 2

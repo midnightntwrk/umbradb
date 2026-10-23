@@ -75,10 +75,18 @@ changes.
 
 ### Requirement: DT-6 Stored data avoids non-deterministic values
 
-THE runner and the database API SHALL reject, at migration time, a public module table that uses a sequence, serial or
-identity column, a floating-point column, or a column whose default is a wall-clock or random function, naming the
-module, the table and the column.
+THE database API SHALL refuse, at migration time, a public module table that uses a sequence, serial or identity
+column, a floating-point column, or a column whose default is a wall-clock or random function, naming the module, the
+table and the column. THE database API SHALL add to every `jsonb` column of a public module table a `CHECK` constraint
+that rejects any JSON number that is not an integer within the signed 64-bit range, so such a write fails whether or
+not the module opts into digests. Values a module computes from anything other than the chain, S and the configuration
+(wall-clock time, randomness, process state) are a module developer's error the database cannot see; they are caught by
+the convergence tests (two runs, two backends, restarts) and by digests.
 
 #### Scenario: A serial column
 - **WHEN** a test module's migration creates a table with a `serial` column
 - **THEN** startup refuses with `non-deterministic-column`, the module, the table and the column
+
+#### Scenario: A fractional JSON number
+- **WHEN** a module without `digest` writes `{"x": 1.5}` to a `jsonb` column in `on-db-write`
+- **THEN** the write fails the `CHECK` and the block rolls back
