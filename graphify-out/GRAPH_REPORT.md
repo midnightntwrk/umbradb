@@ -1,7 +1,7 @@
 # Graph Report - UmbraDB
 
 ## Corpus Check
-- 360 files · ~594,915 words
+- 360 files · ~594,841 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 37 file(s) not represented in the graph (top: .lean 25, (none) 8, .toml 1)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Corpus fingerprint: `9cb186d3e38a6b60` (360 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
+- Corpus fingerprint: `fe2c86155a660c78` (360 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
 - `npm run graph:check` recomputes it: exit 0 means the graph matches the tracked files.
 - `npm run graph:refresh` rebuilds the graph from scratch (no LLM, deterministic).
 
@@ -70,14 +70,15 @@
 - chain-archive-rollover.ts
 - load-under-prune.integration.test.ts
 - pack-install.mjs
+- graph.py
 - facade-merge-loader.ts
 - report
-- graph.py
 - migrate.ts
 - cold-boot-recovery.integration.test.ts
 - Design — Sprint 4: Watermarks
 - assertValidSchemaName
 - UmbraDB v0.9.5 "Penumbra" — Release Record
+- ADDED Requirements
 - ADDED Requirements
 - ADDED Requirements
 - Design — v1.0.0 API Surface & Release Contract
@@ -88,14 +89,12 @@
 - README.md
 - openspec-explore/SKILL.md
 - 3. Proof-blocking findings
-- ADDED Requirements
 - Tasks — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)
 - explore.md
 - UmbraDB v1.0.0 — Resume-From-Home Checkpoint (2026-07-23)
 - Design — v1.0.0-infosec-signoff
 - Design — v1.0.0-perf-baseline
 - Spec — `model-checking` capability
-- ADDED Requirements
 - Scalability ceilings (v1.0.0)
 - STORAGE_ALGEBRA_LEAN_RESEARCH.md
 - scoped-review-manifest
@@ -104,6 +103,7 @@
 - Sprint 7 — Midnight preprod toolchain inventory & build checklist
 - Storage Algebra Lean M3b CheckpointStore C1 Sprint
 - midnight-env — reproducible PREPROD dev environment
+- ADDED Requirements
 - ADDED Requirements
 - Tasks — v1.0.0-infosec-signoff
 - Acceptance criteria — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)
@@ -263,7 +263,7 @@ Nodes (67): BenchEnv, BaselineLoad, ManualOpts, TinybenchOpts, Baseline, BloatSt
 Cohesion: 0.05
 Nodes (50): CheckpointStore, Watermarks, encode(), 1.2 Async pattern, 1.3 Transaction participation, 2. `storage-errors.ts` — shared base (new file), 3.1 Transaction/Lease layer, 3.4 Watermarks (+42 more)
 
-### Community 104 - "LeaseAcquireOptions"
+### Community 105 - "LeaseAcquireOptions"
 Cohesion: 0.20
 Nodes (11): LeaseAcquireOptions, exceedsMaxDepth(), EntrySectionsSchema, G8 — Contract-integrity fixes, 6.3 Non-blocking findings applied, Impact, Non-goals (explicitly out of scope for this change), Proposal — v1.0.0-durable-checkpoint-cursor (+3 more)
 
@@ -471,6 +471,10 @@ Nodes (11): Callable, Deferred, LoadInterleaveObserver, SavedCheckpoint, backdat
 Cohesion: 0.06
 Nodes (36): dockerIndependentOracles(), fail(), main(), roundTripOracle(), run(), repoRoot, scratch, tscBin (+28 more)
 
+### Community 12 - "graph.py"
+Cohesion: 0.12
+Nodes (17): check(), check_environment(), dump_canonical(), fail(), fingerprint(), freshness_section(), git_lines(), inside() (+9 more)
+
 ### Community 121 - "facade-merge-loader.ts"
 Cohesion: 0.44
 Nodes (8): facadeDistIndexPath(), facadeMergeAvailable(), loadFacadeMerge(), unshieldedWalletDistIndexPath(), ledgerV8NodeEntry(), loadMidnightWalletSdk(), midnightWalletRepoRoot(), packageDistFile()
@@ -478,10 +482,6 @@ Nodes (8): facadeDistIndexPath(), facadeMergeAvailable(), loadFacadeMerge(), uns
 ### Community 129 - "report"
 Cohesion: 0.22
 Nodes (9): report(), 14. Private processes, 8. Private processes (PP), Requirement: PP-4 The process transport, Requirement: PP-6 Lockstep instances process each height at that height, Requirement: PP-9 What the public side may call, Scenario: A lockstep instance is stopped, Scenario: A read through the core (+1 more)
-
-### Community 13 - "graph.py"
-Cohesion: 0.12
-Nodes (17): check(), check_environment(), dump_canonical(), fail(), fingerprint(), freshness_section(), git_lines(), inside() (+9 more)
 
 ### Community 38 - "migrate.ts"
 Cohesion: 0.08
@@ -505,47 +505,47 @@ Nodes (10): 2. Tag preconditions R1–R12, 3. Rulings recorded for this release,
 
 ### Community 101 - "ADDED Requirements"
 Cohesion: 0.17
-Nodes (11): ADDED Requirements, Requirement: CC-1 `core-contract-states` stores each touched contract's keys, Requirement: CC-2 `core-contract-logs-full` stores the ledger's logs, Requirement: CC-3 `core-contract-logs-fast` stores the same logs without state, or halts, Requirement: CC-4 One provider of contract logs at a time, Scenario: A computed log value, Scenario: A log in a failed fallible segment, Scenario: Fast equals full (+3 more)
+Nodes (11): ADDED Requirements, Requirement: BR-1 Workers and databases in the browser, Requirement: BR-2 The browser starts at the tip, Requirement: BR-3 Only the node and a user's snapshot, Requirement: BR-4 Same results as Node.js, Scenario: A second tab on one OPFS database, Scenario: Browser and Node.js agree, Scenario: Importing a snapshot in the page (+3 more)
 
 ### Community 102 - "ADDED Requirements"
 Cohesion: 0.17
+Nodes (11): ADDED Requirements, Requirement: CC-1 `core-contract-states` stores each touched contract's keys, Requirement: CC-2 `core-contract-logs-full` stores the ledger's logs, Requirement: CC-3 `core-contract-logs-fast` stores the same logs without state, or halts, Requirement: CC-4 One provider of contract logs at a time, Scenario: A computed log value, Scenario: A log in a failed fallible segment, Scenario: Fast equals full (+3 more)
+
+### Community 103 - "ADDED Requirements"
+Cohesion: 0.17
 Nodes (11): ADDED Requirements, Requirement: TT-1 The tape file format, Requirement: TT-2 The tape node answers calls by occurrence, Requirement: TT-3 Subscriptions, disconnects and faults, Requirement: TT-4 The recording builder and its variants, Scenario: A changing answer, Scenario: A delayed answer, Scenario: A malformed line (+3 more)
 
-### Community 103 - "Design — v1.0.0 API Surface & Release Contract"
+### Community 104 - "Design — v1.0.0 API Surface & Release Contract"
 Cohesion: 0.17
 Nodes (11): 0. Ordering constraint (why this change is Phase 2, not Phase 1), 1.2 `package.json` — make it publishable with a strict `exports`, 1.3 Packed-tarball install smoke test, 1. G1 — Public API surface, 2. G2 — SemVer stability policy + CHANGELOG, 3.1 The frozen catalog (the machine-facing API), 3. G3 — Frozen, cleaned error-code catalog with `retryable`, 5. G20 — Freeze the Lean cut-line (+3 more)
 
-### Community 105 - "Design — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)"
+### Community 106 - "Design — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)"
 Cohesion: 0.17
 Nodes (11): 0. Test-infrastructure layout, 1.1 Skip-enforcement mechanism — the anti-self-skip guarantee, made a named check, 3.1 Full-sync soak (`council/B` §3 item 5; `01` checklist item 3), 3. G10 — full-sync soak + load-under-concurrent-prune, 4. Boundary respected — no consumer-app import (G11/G12), 5. G11 — differential state-equivalence, rescoped in-repo (`01` item 4; `council/B` §1; `02`-T11), 6. G12 — Milestone-5 live round-trip, rescoped as manual pre-tag Preprod evidence (`01` §Cutover), 7. What this change deliberately does not verify (traceability of the non-goals) (+3 more)
 
-### Community 106 - "Design — v1.1.0: Quint model checking"
+### Community 107 - "Design — v1.1.0: Quint model checking"
 Cohesion: 0.17
 Nodes (11): 1. Module layout, 2. Backend routing (the one non-obvious constraint), 3. C2a model sketch, 4. C2b model sketch, 5. L1 model sketch, 6. Falsifiability controls, 6b. Witnesses — proving the interesting state is reachable, 7. Bounds (+3 more)
 
-### Community 107 - "compilerOptions"
+### Community 108 - "compilerOptions"
 Cohesion: 0.17
 Nodes (11): compilerOptions, declaration, declarationMap, noEmit, outDir, rootDir, sourceMap, exclude (+3 more)
 
-### Community 108 - "compilerOptions"
+### Community 109 - "compilerOptions"
 Cohesion: 0.17
 Nodes (11): compilerOptions, declaration, esModuleInterop, module, moduleResolution, noEmit, noUncheckedIndexedAccess, skipLibCheck (+3 more)
 
-### Community 109 - "README.md"
+### Community 110 - "README.md"
 Cohesion: 0.35
 Nodes (3): Scope and pre-1.0 note, The three commitments, UmbraDB Stability Policy (SemVer)
 
-### Community 110 - "openspec-explore/SKILL.md"
+### Community 111 - "openspec-explore/SKILL.md"
 Cohesion: 0.18
 Nodes (10): Check for context, Ending Discovery, Guardrails, Handling Different Entry Points, OpenSpec Awareness, The Stance, What You Don't Have To Do, What You Might Do (+2 more)
 
-### Community 111 - "3. Proof-blocking findings"
+### Community 112 - "3. Proof-blocking findings"
 Cohesion: 0.18
 Nodes (11): 3.10 L1 has two non-equivalent meanings, 3.1 The TemporalKV carrier is too small, 3.2 The proposed action is not an ordinary monoid action, 3.3 T3 omits the current event and cannot replay a pruned suffix, 3.4 The time field is not a commit instant, 3.5 T2 overstates atomic conflict reporting, 3.6 T5 credits a constraint with more than it enforces, 3.7 C1 needs compatibility or a collision assumption (+3 more)
-
-### Community 112 - "ADDED Requirements"
-Cohesion: 0.18
-Nodes (10): ADDED Requirements, Requirement: BR-1 Workers and databases in the browser, Requirement: BR-2 The browser starts at the tip, Requirement: BR-3 Only the node and a user's snapshot, Requirement: BR-4 Same results as Node.js, Scenario: A second owner for one database, Scenario: Browser and Node.js agree, Scenario: Importing a snapshot in the page (+2 more)
 
 ### Community 113 - "Tasks — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)"
 Cohesion: 0.18
@@ -570,10 +570,6 @@ Nodes (9): 0. Package layout, 1. HP-1 — `save()` `UNNEST` batching (G13), 2. H
 ### Community 119 - "Spec — `model-checking` capability"
 Cohesion: 0.20
 Nodes (9): 1. Scope and honesty, 2. Faithfulness to the algebra, 3. C2a — GC reachability safety, 4. C2b — eventual collection (liveness), 5. L1 — lease mutual exclusion, 6. T1 cross-writer, 7. CI integration, 8. Documentation (+1 more)
-
-### Community 12 - "ADDED Requirements"
-Cohesion: 0.05
-Nodes (39): ADDED Requirements, Requirement: DB-10 Migrations of an upgrade never change stored values, Requirement: DB-11 Exactly one writer per database, Requirement: DB-12 The durability probe guards PostgreSQL, Requirement: DB-13 A lost connection is a distinct, retryable error, Requirement: DB-14 Block transactions change rows only, Requirement: DB-1 One API over two backends, Requirement: DB-2 A read handle sees one committed height (+31 more)
 
 ### Community 120 - "Scalability ceilings (v1.0.0)"
 Cohesion: 0.20
@@ -606,6 +602,10 @@ Nodes (8): Adversarial examples, Audited semantic decisions, Compatible-map theo
 ### Community 128 - "midnight-env — reproducible PREPROD dev environment"
 Cohesion: 0.22
 Nodes (8): 1. Reproducibility contract — what is pinned, and how, 2. Host-state assumptions the flake does NOT capture (the real impurities), 3. How to reproduce (exact steps), 4. Validation performed, 5. Impurity reduction vs. documented-as-known, midnight-env — reproducible PREPROD dev environment, Security — db-sync TLS posture (READ BEFORE ENABLING TLS), Why `nix develop -c bash scripts/start-stack.sh` and not `nix run .#start-stack`
+
+### Community 13 - "ADDED Requirements"
+Cohesion: 0.05
+Nodes (38): ADDED Requirements, Requirement: DB-10 Migrations of an upgrade never change stored values, Requirement: DB-11 Exactly one writer per database, Requirement: DB-12 The durability probe guards PostgreSQL, Requirement: DB-13 A lost connection is a distinct, retryable error, Requirement: DB-14 Block transactions change rows only, Requirement: DB-1 One API over two backends, Requirement: DB-2 A read handle sees one committed height (+30 more)
 
 ### Community 130 - "ADDED Requirements"
 Cohesion: 0.22
@@ -1056,7 +1056,7 @@ Nodes (12): 0. How this reconciles with the Tier-2 (indexer) Postgres decision, 
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `translatePostgresError()` connect `translatePostgresError` to `src/index.ts`, `TransactionHandle`, `StorageError`, `barrel-resolves.test.ts`, `crash-worker.ts`, `ValidationError`, `TransactionHandleInvalidError`, `runMigrations`, `postgres/checkpoint-store.ts`, `PgTemporalKV`, `postgres/transaction-lease.ts`, `withAbort`, `migrate.ts`, `interfaces/temporal-kv.ts`, `createClient`, `pg-kill-save.crash.test.ts`, `Change: `v1.0.0-recovery-testing` — G9/G10/G11 crash-injection + soak + differential (2026-07-24)`, `What changes — the 1.0.0 gate items this change addresses`, `ConnectionError`, `TransactionKeyReuseError`, `postgres/chain-archive-store.ts`, `TransactionPoolerDetectedError`, `postgres/transaction-history-storage.ts`, `Roadmap`, `chain-archive-rollover.ts`, `README.md`?**
-  _High betweenness centrality (0.049) - this node is a cross-community bridge._
+  _High betweenness centrality (0.051) - this node is a cross-community bridge._
 - **Are the 21 inferred relationships involving `PgTransactionLeaseLayer` (e.g. with `Boundary held` and `Added`) actually correct?**
   _`PgTransactionLeaseLayer` has 21 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `./tsconfig.json`, `RFC-8259`, `local>midnightntwrk/renovate-config` to the rest of the system?**
@@ -1064,7 +1064,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `harness.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.05303030303030303 - nodes in this community are weakly interconnected._
 - **Why does `runMigrations()` connect `runMigrations` to `harness.ts`, `vitest`, `src/index.ts`, `UmbraDB 1.0.0 Release Contracts`, `barrel-resolves.test.ts`, `ADDED Requirements`, `ADDED Requirements`, `cursor-durability.crash.test.ts`, `ValidationError`, `translatePostgresError`, `Tasks — v1.0.0 API Surface & Release Contract`, `Tasks — v1.0.0-perf-baseline`, `withAbort`, `migrate.ts`, `Proposal — CORE-ARCH: the standalone indexer's core architecture (`core-arch`)`, `Full-Chain Storage — Design`, `VersionConflictError`, `ChainArchiveStore`, `TemporalKV`, `createClient`, `Acceptance criteria — v1.0.0-perf-baseline`, `Change: `v1.0.0-recovery-testing` — G9/G10/G11 crash-injection + soak + differential (2026-07-24)`, `What changes — the 1.0.0 gate items this change addresses`, `ConnectionError`, `cold-boot-recovery.integration.test.ts`, `TransactionKeyReuseError`, `TransactionPoolerDetectedError`, `UmbraDB V1.0.0 Implementation Guideline`, `chain-archive-sync-retry.integration.test.ts`, `0. Preconditions (blocking gate — verify before any freeze work)`, `Design — v1.0.0-durable-checkpoint-cursor`, `assertValidSchemaName`, `chain-archive-rollover.ts`, `UmbraDB`, `Design — v1.0.0 API Surface & Release Contract`, `LeaseAcquireOptions`, `README.md`?**
-  _High betweenness centrality (0.046) - this node is a cross-community bridge._
+  _High betweenness centrality (0.047) - this node is a cross-community bridge._
 - **Are the 41 inferred relationships involving `ValidationError` (e.g. with `1.1 Error handling — one idiom: thrown, `code`-discriminated typed errors` and `1.4 Runtime validation`) actually correct?**
   _`ValidationError` has 41 INFERRED edges - model-reasoned connections that need verification._
 - **Should `CheckpointStore` be split into smaller, more focused modules?**

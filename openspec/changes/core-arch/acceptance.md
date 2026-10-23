@@ -42,7 +42,7 @@ release assets that CI downloads and verifies.
   `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on any difference.
   (LS-5)
 - **A6** `[CI]` `umbradb sync` and `umbradb` with no argument print the usage and exit 2; `umbradb run`, `config check`,
-  `snapshot export`, `snapshot import` and `unlock` are recognized. (LS-6)
+  `snapshot export` and `snapshot import` are recognized. (LS-6)
 
 ## 2. Database API
 
@@ -75,13 +75,11 @@ release assets that CI downloads and verifies.
   build, each refuse startup with module, migration id and checksums, before any migration runs; with migrations `001`
   and `002` pending and `002` failing halfway, `001` is applied and recorded, nothing of `002` is visible or recorded,
   the module's `on-start-db` callback did not run, and startup refuses. (DB-9)
-- **A17** `[FAULT]` A second writer refuses with `writer-lock-held` on PostgreSQL and on PGlite (lock directory); after
-  the writer connection is terminated, the writer re-acquires the lock before its next write; if another process took
-  the lock meanwhile, processing halts; a PGlite writer paused with `SIGSTOP` for 5 minutes keeps its lock — a second
-  process refuses — and continues after `SIGCONT`; after a `SIGKILL` the restarted process takes the lock over and
-  continues from the cursor; two processes started together against a dead holder's lock end with exactly one running;
-  a lock with another host name, or without `owner`, refuses until `umbradb unlock`; a holder whose lock directory is
-  removed halts with `writer-lock-lost` before its next write. (DB-11)
+- **A17** `[FAULT]` A second writer refuses with `writer-lock-held` on PostgreSQL and on PGlite; after the PostgreSQL
+  writer connection is terminated, the writer re-acquires the lock before its next write, and if another process took it
+  meanwhile, processing halts; a PGlite writer stopped with `SIGSTOP` for 5 minutes keeps its lock — a second process
+  refuses — and continues after `SIGCONT`; after a `SIGKILL` the restarted process takes the lock at once and continues
+  from the cursor; ten processes started together against one PGlite directory end with exactly one running. (DB-11)
 - **A18** `[CI]` On PostgreSQL, startup refuses with `fsync=off`, with a detected transaction pooler, and with
   `full_page_writes=off` unless `fullPageWritesOffAllowed` is set; on PGlite, startup refuses without the development
   opt-in. (DB-12, CF-9)
@@ -303,8 +301,10 @@ release assets that CI downloads and verifies.
 - **A89** `[CI]` A module requiring `block-body` reads at h the extrinsics `core-block-fetch` fetched for h, decoded
   with the metadata of h's parent state. (CD-2)
 - **A90** `[CI]` After heights S…h commit, `core_block_commit.blocks` and `core_block_commit.hashes` each hold exactly
-  one row per height with the node's hash, and the cursor is the last `blocks` row; a test source delivering a repeated
-  hash at a later height makes that block fail and processing halt. (CD-3)
+  one row per height with the node's hash, and the cursor is the last `blocks` row; a test source delivering, in a
+  different height partition, a block whose parent hash correctly links to the cursor but whose own hash repeats an
+  earlier block's makes that block fail with `duplicate-block-hash` (not `parent-mismatch`) and processing halt; the
+  same block delivered with a fresh hash commits. (CD-3)
 - **A91** `[CI]` `core-chain-events` stores every event of a range, and the events of a runtime-upgrade block U are
   decoded with the old runtime's metadata without error (devnet upgrade tape). (CD-4)
 - **A92** `[CI]` Each transaction is parsed once (counted calls); a block with a system transaction between two regular
@@ -419,9 +419,8 @@ release assets that CI downloads and verifies.
 - **A128** `[DIFF]` A snapshot exported on PostgreSQL at h, imported on PGlite and on PostgreSQL, and continued to
   h + 100, gives the same contents hash as an instance that never stopped. (SN-5)
 - **A129** `[CI]` In Chrome (headless, in CI), the page runs the core, ledger and a private instance in workers on
-  PGlite with the development opt-in, storing in memory; a second worker trying to open a database whose Web Locks lock
-  is held refuses with `writer-lock-held`; OPFS storage is enabled only after a test shows PGlite with OPFS working in a
-  worker. (BR-1)
+  PGlite with the development opt-in, in memory and with OPFS; with OPFS, a reload resumes from the cursor with the same
+  contents hash, and a second tab on the same database refuses with `writer-lock-held`. (BR-1)
 - **A130** `[CI]` In Chrome, an empty profile records S as the finalized head at creation; enabling `core-ledger-state`
   without a snapshot refuses and names it. (BR-2)
 - **A131** `[CI]` In Chrome, the page's network requests go only to the node; importing a snapshot through the page runs

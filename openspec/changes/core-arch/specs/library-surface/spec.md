@@ -60,8 +60,8 @@ nothing else SHALL be weakened.
 ### Requirement: LS-6 The `umbradb` command
 
 THE package SHALL provide the `umbradb` command with the subcommands `run` (start a core or private process from its
-configuration), `config check` (CF-10), `snapshot export` and `snapshot import` (SN-1, SN-3), and `unlock` (DB-11); any
-other subcommand
+configuration), `config check` (CF-10), `snapshot export` and `snapshot import` (SN-1, SN-3); any other
+subcommand
 SHALL exit 2 with a usage message.
 
 #### Scenario: An unknown subcommand

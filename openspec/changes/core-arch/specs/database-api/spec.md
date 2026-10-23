@@ -162,13 +162,12 @@ THE database API SHALL let exactly one process write each database, and SHALL fa
 session advisory lock on its writer connection for its lifetime; a second writer SHALL refuse to start; WHEN the writer
 connection is lost THE database API SHALL re-acquire the lock on reconnection before any further write, and IF another
 process holds it by then THEN processing SHALL halt. WHERE the backend is PGlite in Node.js — which does not guard its
-data directory itself — THE process SHALL hold the lock directory of `design.md` §4, recording its process id, process
-start time, host name and a random token; THE system SHALL take over an existing lock only WHEN its holder process is
-proven gone (same host, and no live process with that id and start time); IF the holder is alive (including a paused or
-sleeping process), is on another host, or cannot be checked, THEN the new process SHALL refuse to start
-(`writer-lock-held`), and only `umbradb unlock` (or removing the directory by hand) clears such a lock. THE holder SHALL
-check, every second and before every block's `BEGIN` and `COMMIT`, that the lock directory exists and holds its token,
-and SHALL halt (`writer-lock-lost`) at the first failed check, writing nothing more.
+data directory itself — THE process SHALL hold an operating-system lock for its whole lifetime: an exclusive SQLite
+transaction (`node:sqlite`, `BEGIN EXCLUSIVE`) on the file `<data directory>.lock.sqlite`, opened before PGlite and
+never committed (`design.md` §4). A second process SHALL fail to take it at once and refuse to start
+(`writer-lock-held`); the operating system SHALL release it only when the holder process ends, so a paused or sleeping
+holder keeps it and a crashed holder's restart takes it and continues. The data directory SHALL be on a local file
+system.
 
 #### Scenario: A second writer refuses
 - **WHEN** two processes start against the same PostgreSQL database
@@ -179,13 +178,9 @@ and SHALL halt (`writer-lock-lost`) at the first failed check, writing nothing m
 - **THEN** the second process refuses with `writer-lock-held`; the first resumes and continues; only the first ever
   writes
 
-#### Scenario: A crashed writer's lock is recovered
+#### Scenario: A crashed writer's lock is released
 - **WHEN** a PGlite writer is killed with `SIGKILL` and the process is started again
-- **THEN** the new process finds the holder gone, takes the lock, and continues from the cursor
-
-#### Scenario: Two processes race for a dead holder's lock
-- **WHEN** a PGlite process was SIGKILLed and two new processes start at the same moment
-- **THEN** exactly one takes the lock and runs; the other refuses with `writer-lock-held`
+- **THEN** the new process takes the lock at once and continues from the cursor
 
 ### Requirement: DB-12 The durability probe guards PostgreSQL
 

@@ -35,12 +35,12 @@ THE backbone part `core-block-commit` SHALL run first in every block's `on-db-wr
 timestamp in milliseconds — which is also the cursor; it SHALL provide the `table` item `blocks` (append-only).
 
 THE part SHALL also write `(hash, height)` to the unpartitioned table `core_block_commit.hashes`, whose primary key is
-the hash, in the same transaction, so a repeated hash fails the block — PostgreSQL cannot enforce a unique hash on the
-height-partitioned `blocks` table.
+the hash, in the same transaction, so a repeated hash fails the block with `duplicate-block-hash` (raised from that
+table's primary-key violation) — PostgreSQL cannot enforce a unique hash on the height-partitioned `blocks` table.
 
 #### Scenario: A repeated hash
 - **WHEN** a test source delivers, at height 12, a block whose hash equals height 7's
-- **THEN** the block fails on `core_block_commit.hashes` and processing halts
+- **THEN** the block fails with `duplicate-block-hash` and processing halts
 
 #### Scenario: The cursor is the last blocks row
 - **WHEN** heights 1–10 have committed

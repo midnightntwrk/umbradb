@@ -26,7 +26,7 @@ THE system SHALL export `coreEntry({ start, stop?, config })`, which fills `id: 
 build (`{ umbradb: <package version>, ledgers: [{ ledger, versionName, packages: [{ name, version, sha256 }] }] }`,
 one item per ledger version the build carries, LG-5); SHALL give every module package an
 `entry({ start, stop?, config })` builder that fills `id` and `version` from the imported declaration and types
-`config` with the module's settings schema; and SHALL export `versionEntry({ id, start, stop?, version, config })` for
+`config` with the module's settings schema; and SHALL export `versionEntry({ id, start, stop?, version, config? })` for
 a revision whose version this build does not carry — an earlier one already in the history, or a later one being
 scheduled. Builders SHALL return plain data.
 
@@ -36,17 +36,18 @@ scheduled. Builders SHALL return plain data.
 
 ### Requirement: CF-3 Every entry is validated at startup
 
-THE process SHALL validate each entry's shape (`{ id, start, stop?, version, config }`, no unknown property, `stop ≥
-start`) at startup. THE process SHALL validate the `config` of every revision whose version is the build's against the
-module's zod schema in this build, apply its declared defaults to absent fields, and classify its fields by the schema's
-kinds. A revision whose version is not the build's (written with `versionEntry`) SHALL NOT be validated against this
-build's schema. IF it starts at or below the cursor THEN its `config` SHALL equal, field for field, the data recorded
-for it, which is its only source of field kinds. IF it starts above the cursor THEN it is a scheduled revision: only its
-id, start, stop and version SHALL be recorded (its `config` is omitted, and SHALL be refused if given — so no secret or
-operational field of a version this build cannot classify is ever stored), and the build carrying its version SHALL
-supply and record its configuration, validated against that version's schema, before processing its start (CF-6 allows
-it, since the revision still starts above the cursor). Any violation SHALL refuse startup, naming the entry and the
-field. Byte values SHALL be `0x`-prefixed lowercase hex strings.
+THE process SHALL validate each entry's shape at startup: `{ id, start, stop?, version, config }`, where `config` is
+required except for a scheduled `versionEntry` (below), which has no `config`; no unknown property; `stop ≥ start`. THE
+process SHALL validate the `config` of every revision whose version is the build's against the module's zod schema in
+this build, apply its declared defaults to absent fields, and classify its fields by the schema's kinds. A revision
+whose version is not the build's (written with `versionEntry`) SHALL NOT be validated against this build's schema. IF it
+starts at or below the cursor THEN its `config` SHALL equal, field for field, the data recorded for it, which is its
+only source of field kinds. IF it starts above the cursor THEN it is a scheduled revision: only its id, start, stop and
+version SHALL be recorded (its `config` is omitted, and SHALL be refused if given — so no secret or operational field of
+a version this build cannot classify is ever stored), and the build carrying its version SHALL supply and record its
+configuration, validated against that version's schema, before processing its start (CF-6 allows it, since the revision
+still starts above the cursor). Any violation SHALL refuse startup, naming the entry and the field. Byte values SHALL be
+`0x`-prefixed lowercase hex strings.
 
 #### Scenario: A wrong type
 - **WHEN** `livenessTimeoutMs` is the string `"30000"`

@@ -110,19 +110,14 @@ interface BlockSource {
   `umbradb_i_<item>` stay within PostgreSQL's 63-byte identifiers; shadow tables are named by hash (below).
 - **Writer lock (DB-11).** PostgreSQL: `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on the writer connection
   (classes 1 and 2 were 0.9.5's, `src/postgres/transaction-lease.ts:192-195`). PGlite in Node.js — which lets two
-  processes open one data directory (probe, PGlite 0.5.10, 2026-10-22) — uses the directory `<data directory>.lock`,
-  fail-stop (Q50):
-  1. **Take:** `mkdir` it (atomic: one creator wins), then write `owner` inside it: the process id, the process start
-     time (from `ps -o lstart= -p <pid>` on macOS and Linux), the host name and a random 128-bit token.
-  2. **Hold:** every second, and before every block's `BEGIN` and `COMMIT`, read `owner`; a missing directory or
-     another token halts with `writer-lock-lost` before any further write.
-  3. **An existing lock:** read `owner`. If the host name is this host and no live process has that id with that start
-     time, the holder is gone: rename the directory to `<data directory>.lock.dead-<random>` (atomic), check that the
-     renamed directory holds the token just read (if not, rename it back and refuse), delete it, and go back to step 1,
-     where `mkdir` decides between contenders. In every other case — the holder is alive (even paused or asleep), the
-     host differs, `owner` is missing or unreadable, or the start time cannot be read — refuse with `writer-lock-held`;
-     `umbradb unlock` removes the lock after the operator has made sure no writer runs.
-  There is no time-based staleness, so a paused writer never loses its lock and two writers never coexist.
+  processes open one data directory (probe, PGlite 0.5.10, 2026-10-22) — takes an operating-system lock, fail-stop
+  (Q50): before opening PGlite, the process opens `<data directory>.lock.sqlite` with `node:sqlite` (`DatabaseSync`),
+  sets `busy_timeout` to 0, runs `BEGIN EXCLUSIVE` and keeps that transaction open, never committing, until it exits.
+  SQLite's file locks are operating-system locks: a second process gets `database is locked` at once and refuses with
+  `writer-lock-held`; the operating system releases the lock when the holder ends, and never while it lives. Verified
+  in Node.js v24.9.0 (2026-10-22): a second process was refused while the holder ran and while it was stopped with
+  `SIGSTOP`; after `SIGKILL` a new process took the lock at once. `node:sqlite` still prints an experimental warning in
+  Node.js 24; it is a built-in module, used only for this development-only backend. Local file systems only.
   Browser: a Web Locks lock named after the database (BR-1), which the browser releases when the worker ends.
 - **Durability probe.** Moved unchanged in behaviour (`fsync` :72-84, `full_page_writes` with the override :61-66 and
   :86, pooler detection :16 of `src/postgres/durability-probe.ts`); the override is `fullPageWritesOffAllowed`.
@@ -302,7 +297,7 @@ A start that finds the marker drops every schema the import created, then the ma
 
 `browser/` holds a static page and three worker entry points (core, ledger, private), bundled with `esbuild` (a new
 development dependency, pinned in task 0.1); PGlite runs in the core and private workers with `memory://` or
-`opfs-ahp://` storage once task 16.1 has verified it (memory only until then); the admin endpoints are message calls;
+`opfs-ahp://` storage (memory by default, OPFS optional; verified by probe, §14); the admin endpoints are message calls;
 the page offers a snapshot file picker. `npm run build:browser` writes `dist-browser/`, which is not part of the npm
 package.
 
@@ -349,10 +344,10 @@ per-block tables are append-only and partitioned by height range; no table store
 `snapshot-block-not-finalized`, `snapshot-root-mismatch`, `snapshot-target-not-empty`, `snapshot-import-interrupted`).
 
 **Processing halts** (state `halted`, live, not ready, the database at the last committed height), with these codes:
-`callback-error` (with point and module), `database-error`, `parent-mismatch`, `finality-conflict`,
-`node-requirement`, `unknown-runtime`, `bad-version-digest`, `pin-mismatch`, `metadata-mismatch`, `root-mismatch`,
-`fast-log-unsupported`, `unexpected-cursor`, `writer-lock-lost`, `truncate-not-allowed` (a callback error);
-for a private instance, `lockstep-behind` and `report-hash-mismatch`.
+`callback-error` (with point and module), `database-error`, `parent-mismatch`, `finality-conflict`, `node-requirement`,
+`duplicate-block-hash`, `unknown-runtime`, `bad-version-digest`, `pin-mismatch`, `metadata-mismatch`, `root-mismatch`,
+`fast-log-unsupported`, `unexpected-cursor`, `writer-lock-lost`, `truncate-not-allowed` (a callback error); for a
+private instance, `lockstep-behind` and `report-hash-mismatch`.
 
 ## 12. Exported surface and command (LS-1, LS-6)
 
@@ -366,8 +361,7 @@ for a private instance, `lockstep-behind` and `report-hash-mismatch`.
 `ProcessHandle`, `ProcessState`, `ErrorCode`, `ParsedTransaction`, `LedgerTask`.
 
 **Command:** `umbradb run [--config <file>]`, `umbradb config check <file>`, `umbradb snapshot export --out <file>`,
-`umbradb snapshot import <file>`, `umbradb unlock` (removes a PGlite lock whose holder cannot be proven gone, after
-the operator has checked that no writer runs; DB-11).
+`umbradb snapshot import <file>`.
 
 ## 13. Quality gates: what moves and what is retired (LS-5; for the owner's approval, CORE-ARCH SC-010)
 
@@ -402,8 +396,9 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | PostgreSQL 17: `SET LOCAL ROLE`, `SECURITY DEFINER`, `REPEATABLE READ READ ONLY`, session advisory locks, `BEFORE TRUNCATE` triggers, `jsonpath` `.type()`/`.floor()` | https://www.postgresql.org/docs/17/ (sql-set-role, sql-createfunction, sql-set-transaction, functions-admin, sql-createtrigger, functions-json) | Version-pinned documentation; re-checked by tests |
 | PGlite: roles, `SET LOCAL ROLE`, cross-schema writes denied, `SECURITY DEFINER` with a fixed `search_path` and `PUBLIC` revoked, PL/pgSQL row triggers, a `BEFORE TRUNCATE` trigger refusing, `jsonpath` `.type()`/`.floor()` in a `CHECK`, advisory-lock functions | Probe against `@electric-sql/pglite` 0.5.10 (published 2026-10-14) in Node.js v24.9.0, 2026-10-22: every item passed | Verified (probe); task 0.1 commits the probe as a test |
 | PGlite 0.5.10 embeds PostgreSQL 18.6 (production is PostgreSQL 17) | `select version()` on 0.5.10 | Verified; the cross-backend differentials (A55, A105, A135) are the guard against differences |
-| PGlite does not stop two processes opening one data directory | Probe: two Node.js processes opened and wrote one directory | Verified (probe); hence the lock directory of §4 |
-| PGlite with OPFS storage in a browser worker | — | **Unconfirmed**: browser-only; task 16.1 checks it in headless Chrome before the browser build relies on it |
+| PGlite does not stop two processes opening one data directory | Probe: two Node.js processes opened and wrote one directory | Verified (probe); hence the operating-system lock of §4 |
+| PGlite with OPFS storage in a browser worker; Web Locks exclusion | Probe in a Chromium-based browser, 2026-10-22: PGlite 0.5.10 in a module worker with `opfs-ahp://` wrote a row, closed, reopened and read it back; a second `navigator.locks.request(…, { ifAvailable: true })` on a held lock got `null` | Verified (probe) |
+| An operating-system lock from Node.js (`node:sqlite`, `BEGIN EXCLUSIVE`) | Probe in Node.js v24.9.0, 2026-10-22: second process refused while the holder ran and while it was stopped; taken at once after `SIGKILL` | Verified (probe); `node:sqlite` is marked experimental in Node.js 24 |
 | zod 4: per-field metadata read back (`shape[f].meta().kind`), defaults, issue paths, `z.toJSONSchema` keeping `kind` | Probe on `zod` 4.4.3, 2026-10-22 | Verified (probe) |
 | `ws`: WebSocket server over `https` requiring client certificates | Probe on `ws` 8.22.0 (2026-09-26), 2026-10-22: with a certificate connected; without, `ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED` | Verified (probe) |
 | `esbuild` bundles a worker entry with a WASM asset | Probe on `esbuild` 0.28.2 (2026-08-08), 2026-10-22: 0 errors, the asset emitted | Verified (probe) |

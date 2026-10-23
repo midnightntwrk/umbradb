@@ -52,8 +52,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       migrations, and `requiresResync`.
       **Acceptance:** A16, A72; the refactored `migrate` and `migration-lock-timeout` tests pass or are retired per
       `design.md` §13.
-- [ ] 2.5 Writer lock (refactored from `src/postgres/transaction-lease.ts`) and the PGlite lock directory with refresh
-      and atomic takeover; the durability probe moved to `src/db/`.
+- [ ] 2.5 Writer lock (refactored from `src/postgres/transaction-lease.ts`) and the PGlite operating-system lock
+      (`node:sqlite` exclusive transaction); the durability probe moved to `src/db/`.
       **Acceptance:** A17, A18; `durability-probe.test.ts` passes at its new path.
 - [ ] 2.6 Write handles and their closing.
       **Acceptance:** A10.
@@ -178,7 +178,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 - [ ] 15.1 Export (command and at stop) and the file format.
       **Acceptance:** A124, A125.
-- [ ] 15.2 Import with its checks, staging and publication.
+- [ ] 15.2 Import in place with its checks, the import marker and the final identity transaction.
       **Acceptance:** A126, A127, A128.
 
 ## 16. Browser
