@@ -31,7 +31,8 @@ the block's content with the metadata of the runtime in its parent's state (LG-4
 ### Requirement: CD-3 `core-block-commit` writes the cursor first
 
 THE backbone part `core-block-commit` SHALL run first in every block's `on-db-write` and SHALL write the row of
-`core_block_commit.blocks` for h — hash (unique), parent hash, `spec_version`, ledger version and the block's own
+`core_block_commit.blocks` for h — hash (indexed; distinct per height by the parent-hash chain of IN-4, so no
+cross-partition unique constraint is needed), parent hash, `spec_version`, ledger version and the block's own
 timestamp in milliseconds — which is also the cursor; it SHALL provide the `table` item `blocks` (append-only).
 
 #### Scenario: The cursor is the last blocks row
@@ -51,8 +52,9 @@ JSON). It MAY start mid-chain.
 
 ### Requirement: CD-5 `core-block-parsed` parses each block once
 
-WHERE `core-block-parsed` is enabled, it SHALL parse each block's transactions once, with the ledger package of the
-block's ledger version (LG-1), publish the parsed objects as the `block` item `block-parsed`, and store one row per
+WHERE `core-block-parsed` is enabled, it SHALL have each block's transactions parsed once in the ledger worker, with
+the ledger package of the block's ledger version (LG-1, LG-7), publish their plain data as the `block` item
+`block-parsed`, and store one row per
 transaction in `core_block_parsed.transactions` (hash, kind `regular` or `system`, size). It SHALL number transactions
 within a block in the order the ledger applies them — the order of their chain events (`TxApplied`,
 `TxPartialSuccess` or `ExtrinsicFailed` for regular transactions, `SystemTransactionApplied` for system transactions),

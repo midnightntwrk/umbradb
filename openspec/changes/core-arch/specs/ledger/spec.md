@@ -68,20 +68,21 @@ upstream releases it. IF a loaded package's SHA-256 differs from the recorded on
 ### Requirement: LG-6 One adapter interface per ledger version
 
 THE system SHALL wrap every ledger version in an adapter with the `LedgerPackage` interface of `design.md` §5.1 —
-including `versionName` and `rawPackages()` — so that the runner and modules use every version the same way.
+including `versionName` and `rawPackages()` — so that the ledger worker and ledger tasks use every version the same way.
 
 #### Scenario: Two versions, one call
-- **WHEN** a module calls `stateRoot` on a v8 state and on a v9 state
+- **WHEN** the adapter test suite calls `stateRoot` on a v8 state and on a v9 state
 - **THEN** both calls go through the same interface and return each state's root
 
-### Requirement: LG-7 Each block is parsed once
+### Requirement: LG-7 Each block is parsed once, in the ledger worker
 
-THE system SHALL parse each block once, with its version's package, and hand the parsed objects on as the `block` item
-`block-parsed`; there SHALL be no version-neutral model, and a module MAY call its block's package directly through
-`rawPackages()`.
+THE system SHALL parse each block once, in the ledger worker, with its version's package; the native parsed objects
+SHALL stay in the worker (owner decision Q49), and the `block` item `block-parsed` SHALL reach modules as the plain data
+of `design.md` §5.1 (per transaction: index, hash, kind, size, raw bytes, and per segment its contract calls and
+deploys). There SHALL be no version-neutral model beyond that plain data.
 
 #### Scenario: No second parse
-- **WHEN** three modules read a block's transactions in one block
+- **WHEN** three modules and two ledger tasks read a block's transactions in one block
 - **THEN** the package's parse function was called once per transaction
 
 ### Requirement: LG-8 The replay rules are reproduced
@@ -109,8 +110,10 @@ crate and shipped with the vendored ledger; the conversion resets DUST state, wh
 
 ### Requirement: LG-10 Ledger work runs in a worker thread
 
-THE system SHALL run ledger parsing, applying and state loading in a worker thread (Node.js `worker_threads`; a Web
-Worker in the browser), so that the runner and the admin endpoints stay responsive during long ledger steps.
+THE system SHALL run ledger parsing, applying, state loading and ledger tasks in a worker thread (Node.js
+`worker_threads`; a Web Worker in the browser), so that the runner and the admin endpoints stay responsive during long
+ledger steps and the ledger can read stored nodes synchronously from a database owned by another thread (`design.md`
+§5.3).
 
 #### Scenario: A long conversion
 - **WHEN** the v8→v9 conversion takes 60 s
@@ -195,3 +198,21 @@ mid-chain: it needs history from genesis or a snapshot.
 #### Scenario: A partially successful transaction
 - **WHEN** a transaction's guaranteed segment succeeds and one fallible segment fails
 - **THEN** `segment_results` records the guaranteed segment as successful and that fallible segment as failed
+
+### Requirement: LG-17 Ledger tasks give modules the native objects
+
+WHERE a module needs more than the plain data of `block-parsed`, it SHALL declare ledger tasks (`ledgerTasks` in its
+declaration, `design.md` §5.5): functions the ledger worker runs for each block, after parsing and before the block's
+`on-compute`, with the block's native parsed objects, the state before the block (read-only) and `rawPackages()`, each
+returning plain data that becomes a `block` item the module provides. A task's result SHALL be structured-cloneable
+plain data; IF it is not, or the task throws, THEN the block SHALL fail as a callback error (RN-8). Ledger tasks SHALL
+NOT write anything and SHALL NOT keep native objects between blocks. Callbacks on the main thread SHALL never receive a
+native ledger object.
+
+#### Scenario: A module reads decoded call arguments
+- **WHEN** a module's ledger task decodes each contract call's arguments with the native objects and returns them
+- **THEN** the module's `on-compute` receives them as its `block` item, and the package parsed each transaction once
+
+#### Scenario: A task returns a native object
+- **WHEN** a ledger task returns a WASM-backed object
+- **THEN** the block fails with `callback-error`, naming the module and the task

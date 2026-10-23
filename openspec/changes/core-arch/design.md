@@ -11,7 +11,7 @@ this change relies on is restated in `specs/`. Owner decisions cited as Qn are i
 | `src/runner/` | Points, dispatch and order, the finalized loop, block context, item sink, start/stop and upgrade-boundary handling, the lockstep wait, heartbeat, process state |
 | `src/db/` | The database API (`api.ts`), the PostgreSQL backend (refactored from `src/postgres/client.ts`), the PGlite backend, roles and grants, migrations (refactored from `src/postgres/migrate.ts`), the writer lock (refactored from `src/postgres/transaction-lease.ts`), the durability probe (moved from `src/postgres/durability-probe.ts`), change capture for digests |
 | `src/modules/` | `ModuleDeclaration` and related types, `defineModule`, declaration validation, graph resolution per height range |
-| `src/config/` | `defineConfig`, `coreEntry`, `pastEntry`, the loader, the plain-data check, schema validation, the history comparison, the version check |
+| `src/config/` | `defineConfig`, `coreEntry`, `versionEntry`, the loader, the plain-data check, schema validation, the history comparison, the version check |
 | `src/determinism/` | The canonical CBOR encoder, primary-key order, the contents hash, digests |
 | `src/helpers/` | The cursor table (from `src/postgres/watermarks.ts`) and the height-versioned table (from `src/postgres/temporal-kv.ts`) |
 | `src/node/` | The node client (refactored from `chain-archive-sync/node-rpc-client.ts`): JSON-RPC over WebSocket, subscriptions, reconnect, back-off |
@@ -93,9 +93,10 @@ interface BlockSource {
   `ALTER DEFAULT PRIVILEGES`). Callbacks and migrations run after `SET LOCAL ROLE` to the module role (DB-6). The writer
   connection's own role owns every module role. Modules are trusted code (Q46): the roles stop accidental writes into
   another module's schema; nothing more is enforced.
-- **Provider functions.** `SECURITY DEFINER`, owned by the provider role, with `SET search_path = pg_catalog,
-  <provider schema>`; default privileges revoke `EXECUTE` from `PUBLIC`; `EXECUTE` is granted to the roles of modules
-  that require the provider's item (DB-7). `core-ledger-state` offers `persist(key)` this way (LG-13).
+- **Provider functions.** `SECURITY DEFINER`, owned by the provider role, with `SET search_path = pg_catalog, <provider
+  schema>, pg_temp` (`pg_temp` last, so no temporary table shadows a provider table); default privileges revoke
+  `EXECUTE` from `PUBLIC`; `EXECUTE` is granted to the roles of modules that require the provider's item (DB-7).
+  `core-ledger-state` offers `persist(key)` this way (LG-13).
 - **`TRUNCATE`.** Every public module table gets a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger raising
   `truncate-not-allowed` (DB-14).
 - **`jsonb` values (DT-6).** `core_chain.jsonb_numbers_ok(jsonb)` (immutable; a `jsonpath` finding any number that is
@@ -103,19 +104,31 @@ interface BlockSource {
 - **Migrations and setup (DB-9, DB-10).** `core_chain.migrations`; checksum = SHA-256 of the UTF-8 SQL; per part and
   module, pending migrations each in their own transaction with their row, then `on-start-db` in its own transaction.
   Upgrade migrations only add — a module obligation (Q46); `requiresResync` versions are refused on a non-empty
-  database. The writer lock is taken before any migration, so the 0.9.5 migration advisory lock is gone.
+  database built with another version of the module (DB-10). The writer lock is taken before any migration, so the
+  0.9.5 migration advisory lock is gone.
+- **Identifier lengths (DB-8).** Ids and item names are at most 40 bytes, so `umbradb_m_<schema>` and
+  `umbradb_i_<item>` stay within PostgreSQL's 63-byte identifiers; shadow tables are named by hash (below).
 - **Writer lock (DB-11).** PostgreSQL: `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on the writer connection
-  (classes 1 and 2 were 0.9.5's, `src/postgres/transaction-lease.ts:192-195`). PGlite in Node.js: the directory
-  `<data directory>.lock`, created with `mkdir`, its modification time refreshed with `utimes` every second; older than
-  10 s is stale; takeover renames it to `<data directory>.lock.stale-<random>` (atomic: one contender wins), removes
-  it, and retries `mkdir`. Browser: a Web Locks lock named after the database (BR-1).
+  (classes 1 and 2 were 0.9.5's, `src/postgres/transaction-lease.ts:192-195`). PGlite in Node.js — which lets two
+  processes open one data directory (probe, PGlite 0.5.10, 2026-10-22) — uses the directory `<data directory>.lock`:
+  1. **Take:** `mkdir` it (atomic: one creator wins), then write `owner` inside it with a random 128-bit token. A lock
+     directory without `owner` is treated like a stale one once its modification time is 30 s old.
+  2. **Hold:** every second, read `owner` and `utimes` the directory; before every block's `BEGIN` and `COMMIT`, read
+     `owner` again. A missing directory or another token halts with `writer-lock-lost` before any further write.
+  3. **Stale and take over:** a lock whose modification time is more than 30 s old is stale. The contender notes its
+     token T, renames the directory to `<data directory>.lock.stale-<random>` (atomic), and reads the renamed
+     directory's token: if it is T, it deletes it and goes back to step 1 (where `mkdir` decides between contenders);
+     if not (a fresh lock had replaced the stale one), it renames it back and refuses with `writer-lock-held`.
+  4. **Residual window, accepted for a development-only backend:** a holder paused for more than 30 s inside a block
+     transaction can complete that commit after losing the lock; its next check halts it.
+  Browser: a Web Locks lock named after the database (BR-1), which the browser releases when the worker ends.
 - **Durability probe.** Moved unchanged in behaviour (`fsync` :72-84, `full_page_writes` with the override :61-66 and
   :86, pooler detection :16 of `src/postgres/durability-probe.ts`); the override is `fullPageWritesOffAllowed`.
 - **Change capture for digests (DT-4).** For a module with `digest: true`, a row-level `AFTER INSERT OR UPDATE OR
   DELETE` trigger on each of its tables copies, on the first touch of a primary key in the transaction, the old row (or
-  a tombstone) into `core_digest_shadow.<schema>__<table>`; `core-digest`, last in `on-db-write`, reads each shadow row
-  and the current row, computes the net change, extends the chain, writes `core_digest.digests` and deletes the shadow
-  rows, inside the block transaction.
+  a tombstone) into `core_digest_shadow.t_<first 32 hex digits of SHA-256(schema.table)>`; `core-digest`, last in
+  `on-db-write`, reads each shadow row and the current row, computes the net change, extends the chain, writes
+  `core_digest.digests` and deletes the shadow rows, inside the block transaction.
 - **Errors.** `UmbraError { code, retryable, details }`, keeping the 0.9.5 retryable split
   (`design/design-interfaces.md` §1.1); a lost connection is `connection-lost` (retryable).
 
@@ -153,6 +166,18 @@ interface ApplyOutput {
 interface NodeStore { get(key: Uint8Array): { data: Uint8Array; children: Uint8Array } | null }
 interface NodeBatch { inserts: { key: Uint8Array; data: Uint8Array; children: Uint8Array }[];
   rootCounts: { key: Uint8Array; count: number }[] }
+
+// What modules on the main thread receive as `block-parsed` (Q49): plain, structured-cloneable data.
+interface ParsedTransaction {
+  index: number;                               // application order (CD-5)
+  hash: Uint8Array; kind: "regular" | "system"; size: number; bytes: Uint8Array;
+  segments: { segment: number;
+              calls: { address: Uint8Array; entryPoint: Uint8Array }[];
+              deploys: { address: Uint8Array }[] }[];
+}
+// A module's ledger task (LG-17), run in the ledger worker once per block.
+type LedgerTask = (block: { height: bigint; transactions: unknown[]; /* native parsed objects */
+                            stateBefore: StateHandle; packages: Readonly<Record<string, unknown>> }) => unknown;
 ```
 
 `firstRegularAtParentTime` is true for runtimes 0.22, 1.0 below 1.0.300 and 2.0, and never for block 0, as the official
@@ -165,15 +190,20 @@ indexer decides it (`chain-indexer/src/domain/ledger_state.rs:44-85`).
 the built package with `SHA256SUMS`. The functions `LedgerPackage` needs that the published v9 WASM lacks (`load`,
 `stateRoot`, `flush`, `persist`, `release`, `childRefs`, `evict`, the contract keys, `decodeLogItem`, the conversion)
 are the patches. v9 starts from `midnight-ledger` `ledger-9.1.0.0-rc.5` (the reference used for CORE-ARCH); the v8
-release and the source of the v8→v9 conversion are pinned in task 0.2. CI rebuilds each vendored package and compares
-the SHA-256.
+release is pinned in task 0.2. The v8→v9 conversion is the crate `v8-to-v9-state-translation` at `midnight-ledger`
+rev `da96e33d78ee9b7d3867b15c1037510d499cd909`, the revision the node pins (`midnight-node/Cargo.toml:115`); it
+depends on ledger v8 8.1.1 and v9 1.0.0 (tag `crate-ledger-9.1.0.0-rc.3`) and compiles for `wasm32-unknown-unknown`
+with `getrandom`'s `wasm_js` backend (verified 2026-10-22, `cargo check`). Because the conversion links the v9 crate it
+was built against, the vendored v9 package and the conversion are built from the same v9 version (task 0.2 aligns
+them). CI rebuilds each vendored package and compares the SHA-256.
 
 ### 5.3 The ledger worker and the node-store bridge (LG-10, LG-11)
 
 Ledger work runs in a worker thread. The ledger reads nodes synchronously, so `NodeStore.get` in the worker posts a
 request to the main thread through a `SharedArrayBuffer` and blocks with `Atomics.wait` until the main thread, which
 owns the database, writes the node bytes back (batched: a miss prefetches the node's referenced keys). The main thread
-never blocks on the worker; it awaits the worker's results asynchronously.
+never blocks on the worker; it awaits the worker's results asynchronously. Native parsed objects never leave the
+worker (Q49): the main thread receives `block-parsed` as `ParsedTransaction[]` and each ledger task's plain result.
 
 ### 5.4 Storage, retention and sweep (LG-11 to LG-14)
 
@@ -182,6 +212,16 @@ computation; `on-db-write` writes the flushed batch, the `states` row, the reten
 sweep follows `gc-v1` (`storage-core/src/gc.rs:93-250`) with a node budget; its grey and mark sets are tables, its
 rounds take keys in byte order, and deleted nodes are evicted from the worker's caches so later blocks insert them again
 (`layout-v2` writes every created node, `storage-core/src/backend.rs:771-790`).
+
+### 5.5 Ledger tasks (LG-17, Q49)
+
+The host program provides the ledger worker's entry: a small file that imports the same module packages as the main
+thread and calls `runLedgerWorker(modules)` (exported); in the browser it is the ledger worker's bundle (§9.2). For each
+block, the worker parses the transactions, runs every active module's `ledgerTasks` in the order of RN-3 — each with the
+native parsed objects, the state before the block (read-only) and `rawPackages()` — checks that each result is
+structured-cloneable plain data (a `structuredClone` round trip that preserves it), and posts `block-parsed` and the
+task results to the main thread, where they become `block` items before `on-compute`. `core-ledger-state`'s apply, the
+conversion and the sweep step then run in the worker as part of `on-compute`. Ledger tasks keep no state between blocks.
 
 ## 6. Modules
 
@@ -199,19 +239,35 @@ process; a revision boundary switches lists between heights, never within one.
 - **Plain-data check.** A recursive walk accepting plain objects, arrays, strings, booleans, `null` and safe
   non-negative integers, reporting the first offending path (CF-1).
 - **Schemas.** zod 4 (installed 4.4.3; Q45): a module's `configSchema` is a `z.object` whose fields carry `kind` in
-  their metadata; only revisions whose version is this build's are validated against this build's schema; a
-  `pastEntry` revision is compared with its recorded row (CF-3).
+  their metadata (`schema.shape[field].meta().kind`, verified on 4.4.3); only revisions whose version is this build's
+  are validated against this build's schema; a `versionEntry` revision is compared with its recorded row, or — when it
+  is a later version not yet recorded — recorded as written and validated by the build that carries its version (CF-3).
 - **Core stop.** Operational: not stored (`core_chain.config.stop` is null for `core`), changeable at any restart.
 - **History.** `core_chain.config`, compared and extended by `core-chain`'s `on-start-db` (CF-6); the version check
   (CF-8) runs before any `on-start-db`.
 - **`umbradb config check`.** The TypeScript compiler API (`typescript` becomes a runtime dependency; 5.9.3 installed)
-  with `noEmit`, then the loader, the plain-data check and schema validation.
+  with `noEmit`, then the loader, the plain-data check and schema validation; with `--database`, a read-only connection
+  that reads `core_chain.config` and runs the history checks, with no migration and no write (CF-10).
 
 ## 8. Private processes (PP)
 
 - **Transport.** The core runs a WebSocket server (`ws`) on `listen.transport`; with `tls` set it is an `https` server
-  requiring client certificates (`requestCert`, `rejectUnauthorized`). In the browser, `postMessage` between workers;
-  in tests, direct calls. One JSON object per message.
+  requiring client certificates (`requestCert`, `rejectUnauthorized`; verified with `ws` 8.22.0: a client without a
+  certificate is refused with `CERTIFICATE_REQUIRED`). In the browser, `postMessage` between workers; in tests, direct
+  calls. One JSON object per message, validated against these schemas (zod) on both ends:
+
+  | Type | Fields (`H` = height, a decimal string; `X` = `0x`-prefixed lowercase hex) |
+  |---|---|
+  | `hello` | `v: 1`, `instance: string`, `version: string`, `height: H`, `hash: X` or `null` |
+  | `hello-ack` | `v: 1`, `lockstep: boolean`, `genesis: X`, `start: H`, `cursor: H` or `null`, `refused`: `null`, `"duplicate-instance"` or `"lockstep-behind"` |
+  | `committed`, `report` | `v: 1`, `height: H`, `hash: X` |
+  | `read` | `v: 1`, `id: string`, `statements`: an array of `{ sql: string, params: Value[] }` |
+  | `read-result` | `v: 1`, `id: string`, `height: H`, and either `rows` (one array of rows of `Value` per statement) or `error: string` (a code) |
+  | `api` | `v: 1`, `id: string`, `module: string`, `method: string`, `params` (JSON) |
+  | `api-result` | `v: 1`, `id: string`, and either `result` (JSON) or `error: string` (a code) |
+
+  `Value` is `null`, a boolean, a string (text; `bigint` and `numeric` as decimal strings; `bytea` as `X`), or JSON (for
+  `jsonb`); the column types of the statement say how to read each string back.
 - **Taking blocks.** `core-private-source` reads the public cursor (directly from the public database on PostgreSQL; via
   `read` messages when it is PGlite) and processes each height with `on-finalized`, `on-fetch` (a read of public data at
   h), `on-parse`, `on-compute`, its own block transaction, `on-after-db-write`.
@@ -226,10 +282,13 @@ process; a revision boundary switches lists between heights, never within one.
 ### 9.1 Snapshots (SN)
 
 Export streams one consistent read into a CBOR sequence (manifest, then per table a header item and its rows) and
-computes the contents hash while writing; the manifest's `contentsHash` is written last into a reserved header slot, so
-the file is written in one pass. Import reads the manifest, runs the checks of SN-3, creates the staging schemas
-(`staging_<schema>`) by running the recorded migrations, loads rows with `COPY`-like batched inserts, verifies the hash,
-and publishes by renaming schemas in one transaction.
+computes the contents hash while writing; the manifest's `contentsHash` (a fixed-size CBOR byte string) is written last
+into its reserved slot, so the file is written in one pass. Import runs in the empty target database (SN-4): it writes
+`core_chain.import_marker`, runs the checks of SN-3 that need no tables, runs the recorded migrations unchanged (so
+qualified names, checksums and provider functions stay as recorded), checks columns and types, loads the rows in
+batches, verifies the contents hash, and in one final transaction writes `core_chain.identity` and deletes the marker.
+A start that finds the marker drops every schema the import created, then the marker, and refuses with
+`snapshot-import-interrupted`.
 
 ### 9.2 Browser build (BR)
 
@@ -249,7 +308,7 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits) |
 | `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`), version (text), data (jsonb, canonical), data_hash |
 | database API | `core_chain.migrations` | (module, migration_id) | checksum, position (int) |
-| `core-block-commit` | `core_block_commit.blocks` | height | hash (unique), parent_hash, spec_version (int), ledger_version (text), block_timestamp_ms |
+| `core-block-commit` | `core_block_commit.blocks` | height | hash (indexed, not unique: PostgreSQL cannot enforce a unique constraint without the partition key; the parent-hash chain keeps hashes distinct), parent_hash, spec_version (int), ledger_version (text), block_timestamp_ms |
 | `core-digest` | `core_digest.digests` | (height, module) | digest |
 | `core-chain-events` | `core_chain_events.events` | (height, event_index) | phase (text), extrinsic_index (int null), pallet, name (text), bytes (SCALE), fields (jsonb, canonical) |
 | `core-block-parsed` | `core_block_parsed.transactions` | (height, tx_index) | tx_hash, kind (`regular`, `system`), size (int) |
@@ -277,7 +336,7 @@ per-block tables are append-only and partitioned by height range; no table store
 `package-hash-mismatch`, `writer-lock-held`, `durability-fsync-off`, `durability-pooler`,
 `durability-full-page-writes-off`, and the snapshot import checks (`snapshot-format-unknown`,
 `snapshot-history-mismatch`, `snapshot-build-mismatch`, `contents-hash-mismatch`, `snapshot-genesis-mismatch`,
-`snapshot-block-not-finalized`, `snapshot-root-mismatch`, `snapshot-target-not-empty`).
+`snapshot-block-not-finalized`, `snapshot-root-mismatch`, `snapshot-target-not-empty`, `snapshot-import-interrupted`).
 
 **Processing halts** (state `halted`, live, not ready, the database at the last committed height), with these codes:
 `callback-error` (with point and module), `database-error`, `parent-mismatch`, `finality-conflict`,
@@ -287,13 +346,14 @@ for a private instance, `lockstep-behind` and `report-hash-mismatch`.
 
 ## 12. Exported surface and command (LS-1, LS-6)
 
-**Values:** `defineConfig`, `coreEntry`, `pastEntry`, `defineModule`, `startProcess`, `InMemoryBlockSource`,
+**Values:** `defineConfig`, `coreEntry`, `versionEntry`, `defineModule`, `startProcess`, `runLedgerWorker`,
+`InMemoryBlockSource`,
 `cursorTable`, `heightVersionedTable`, `encodeCanonical`, `encodeRow`, `contentsHash`, `POINTS`, `UmbraError`.
 
 **Types:** `ModuleDeclaration`, `ItemDeclaration`, `Lifetime`, `FieldKind`, `FieldSchema`, `Migration`, `Revision`,
 `PointName`, `PointCallbacks`, `ProcessContext`, `BlockContext`, `ItemSink`, `ReadHandle`, `BlockWriteHandle`,
 `SchemaWriteHandle`, `ApiRegistry`, `BlockRef`, `BlockSource`, `LedgerPackage`, `Entry`, `CoreVersion`, `UmbraConfig`,
-`ProcessHandle`, `ProcessState`, `ErrorCode`.
+`ProcessHandle`, `ProcessState`, `ErrorCode`, `ParsedTransaction`, `LedgerTask`.
 
 **Command:** `umbradb run [--config <file>]`, `umbradb config check <file>`, `umbradb snapshot export --out <file>`,
 `umbradb snapshot import <file>`.
@@ -329,10 +389,13 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | JSON.parse source text access in revivers | Node.js v24.9.0: `JSON.parse("[1]", (k, v, c) => c?.source ?? v)` gives `"1"` | Verified (installed) |
 | `postgres`: `sql.reserve()` pins a connection; JSON parsed with `JSON.parse`, replaceable | `src/postgres/transaction-lease.ts:135-138, 287-301`; `node_modules/postgres/src/types.js:18-21` (3.4.9) | Verified (installed, in-repo use) |
 | PostgreSQL 17: `SET LOCAL ROLE`, `SECURITY DEFINER`, `REPEATABLE READ READ ONLY`, session advisory locks, `BEFORE TRUNCATE` triggers, `jsonpath` `.type()`/`.floor()` | https://www.postgresql.org/docs/17/ (sql-set-role, sql-createfunction, sql-set-transaction, functions-admin, sql-createtrigger, functions-json) | Version-pinned documentation; re-checked by tests |
-| PGlite: roles, `SET LOCAL ROLE`, `SECURITY DEFINER`, PL/pgSQL row and `TRUNCATE` triggers, `jsonpath`, one connection; OPFS storage in a browser worker | — | **Unconfirmed**: task 0.1 probe tests |
-| zod 4: per-field metadata read back from an object schema, defaults, issue paths | `zod` 4.4.3 installed | **Unconfirmed** (metadata API): task 0.1 |
-| `ws`: WebSocket server and client, over `https` with client certificates | — | **Unconfirmed**: task 0.1 |
-| `esbuild` bundles worker entry points with WASM assets | — | **Unconfirmed**: task 0.1 |
+| PGlite: roles, `SET LOCAL ROLE`, cross-schema writes denied, `SECURITY DEFINER` with a fixed `search_path` and `PUBLIC` revoked, PL/pgSQL row triggers, a `BEFORE TRUNCATE` trigger refusing, `jsonpath` `.type()`/`.floor()` in a `CHECK`, advisory-lock functions | Probe against `@electric-sql/pglite` 0.5.10 (published 2026-10-14) in Node.js v24.9.0, 2026-10-22: every item passed | Verified (probe); task 0.1 commits the probe as a test |
+| PGlite 0.5.10 embeds PostgreSQL 18.6 (production is PostgreSQL 17) | `select version()` on 0.5.10 | Verified; the cross-backend differentials (A55, A105, A135) are the guard against differences |
+| PGlite does not stop two processes opening one data directory | Probe: two Node.js processes opened and wrote one directory | Verified (probe); hence the lock directory of §4 |
+| PGlite with OPFS storage in a browser worker | — | **Unconfirmed**: browser-only; task 16.1 checks it in headless Chrome before the browser build relies on it |
+| zod 4: per-field metadata read back (`shape[f].meta().kind`), defaults, issue paths, `z.toJSONSchema` keeping `kind` | Probe on `zod` 4.4.3, 2026-10-22 | Verified (probe) |
+| `ws`: WebSocket server over `https` requiring client certificates | Probe on `ws` 8.22.0 (2026-09-26), 2026-10-22: with a certificate connected; without, `ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED` | Verified (probe) |
+| `esbuild` bundles a worker entry with a WASM asset | Probe on `esbuild` 0.28.2 (2026-08-08), 2026-10-22: 0 errors, the asset emitted | Verified (probe) |
 | `midnight_ledgerStateRoot(at)` | `midnight-node/pallets/midnight/rpc/src/lib.rs:60-61` (node 2.1.0-rc.4) | Verified (reference) |
 | `system_properties.genesis_state` holds the genesis ledger state | `midnight-indexer/chain-indexer/src/infra/subxt_node.rs:562-575` | Verified (reference) |
 | One `MNSV` digest per block, block 0 included | `midnight-node/pallets/version/src/lib.rs:32,55`; `midnight-node/node/src/service.rs:172-190` | Verified (reference) |
@@ -343,7 +406,8 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | Storage layout `layout-v2`, children with embedded nodes, `gc-v1` | `midnight-ledger/storage-core/src/db/sql.rs:258-262`, `arena.rs:285-331`, `gc.rs:93-250`, `backend.rs:771-790` | Verified (reference) |
 | The VM's log decoding | `midnight-ledger/onchain-vm/src/vm.rs:241-275` | Verified (reference) |
 | The published v9 WASM lacks the functions of §5.2 | `midnight-ledger/ledger-wasm/src/` (`@midnight/ledger-v9` 1.0.0-rc.5) | **Unconfirmed** in detail: task 0.2 lists each missing export |
-| The v8→v9 conversion builds to WASM | — | **Unconfirmed**: task 0.2 locates and pins its source |
+| The v8→v9 conversion builds to WASM | `v8-to-v9-state-translation` at `midnight-ledger` `da96e33d78ee9b7d3867b15c1037510d499cd909` (pinned by `midnight-node/Cargo.toml:115`): `cargo check --target wasm32-unknown-unknown` succeeds with `getrandom`'s `wasm_js` backend (2026-10-22) | Verified (compile check); running it is task 0.2 |
+| Genesis cNight registrations are enumerated by key | `midnight-indexer/chain-indexer/src/infra/subxt_node/runtimes/v2_1_0.rs:403-412` iterates the double map; `state_getKeysPaged` in `midnight-node/docs/openrpc.json:769` | Verified (reference) |
 | RFC 8949 §4.2.1 and Appendix A | https://www.rfc-editor.org/rfc/rfc8949 | Verified (normative text) |
 | TypeScript compiler API for `noEmit` | `typescript` 5.9.3 installed | Verified (installed) |
 

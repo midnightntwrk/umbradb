@@ -86,7 +86,8 @@ its transactions numbered in body order, each fully successful; its ledger state
 the transactions SHALL be applied to an empty state only to produce their results, segment results, events and logs,
 and the genesis state SHALL become the state after block 0; OTHERWISE they SHALL be applied to the genesis state; the
 root after block 0 SHALL be checked like any other; its cNight registrations SHALL be read from pallet storage at block
-0 and numbered in read order.
+0 — their keys enumerated with `state_getKeysPaged` in key order and their values read with `state_getStorage` — and
+numbered in that order.
 
 #### Scenario: A genesis state that already includes block 0
 - **WHEN** the genesis state's root equals the node's root at block 0
@@ -97,7 +98,8 @@ root after block 0 SHALL be checked like any other; its cNight registrations SHA
 
 THE system SHALL read chain data only from the node, only through `chain_subscribeNewHeads`,
 `chain_subscribeFinalizedHeads`, `chain_getFinalizedHead`, `chain_getBlockHash`, `chain_getBlock`, `chain_getHeader`,
-`state_getStorage`, `state_getMetadata`, `state_getRuntimeVersion`, `midnight_ledgerStateRoot` and `system_properties`,
+`state_getStorage`, `state_getKeysPaged` (block 0's registrations only), `state_getMetadata`, `state_getRuntimeVersion`,
+`midnight_ledgerStateRoot` and `system_properties`,
 and SHALL NOT depend on the official indexer or a wallet SDK at run time.
 
 #### Scenario: A full sync against a tape
@@ -118,9 +120,11 @@ THEN processing SHALL halt with `node-requirement`, without retrying.
 THE system SHALL handle errors as follows: a node connection error, timeout, HTTP 429 or 5xx during startup, the
 subscriptions or finalized processing SHALL be retried with exponential back-off from 1 s doubling up to
 `backoffCeilingMs` (default 30 s) without limit, with the condition `node-retrying`; a lost database connection SHALL be
-retried the same way with `database-retrying`, the writer lock re-acquired (DB-11), and, if a COMMIT was in flight,
-IN-11 applied; any error on a queued best block (node error or timeout, fetch, decode, callback) SHALL drop that block
-from the queue without retry; every other error at a finalized height SHALL roll back and halt (RN-8).
+retried the same way with `database-retrying` and the writer lock re-acquired (DB-11) — IF the connection was lost
+before COMMIT THEN the block transaction is gone, so the ledger worker's state and the block context SHALL be discarded
+and the state reloaded at the cursor before h is processed again from `on-compute`, and IF it was lost during COMMIT
+THEN IN-11 SHALL apply; any error on a queued best block (node error or timeout, fetch, decode, callback) SHALL drop
+that block from the queue without retry; every other error at a finalized height SHALL roll back and halt (RN-8).
 
 #### Scenario: A flapping node
 - **WHEN** the node refuses connections for 2 minutes during catch-up

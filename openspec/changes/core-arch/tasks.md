@@ -10,22 +10,18 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 0. Pins and verification
 
-- [ ] 0.1 Pin exact versions of `@electric-sql/pglite` and `ws` (runtime) and `esbuild` (development), each at least 7
-      days old, through the supply-chain gate; move `typescript` to `dependencies`; keep `zod` 4 (installed 4.4.3).
-      Write probe tests that verify, on the pinned PGlite, `CREATE ROLE`, `SET LOCAL ROLE`, a `SECURITY DEFINER`
-      function with a fixed `search_path` and revoked `PUBLIC` execute, a PL/pgSQL row trigger, a statement-level
-      `BEFORE TRUNCATE` trigger, the `jsonpath` methods `.type()` and `.floor()`, one connection per instance, and OPFS
-      storage in a browser worker; on the installed zod, per-field `kind` metadata read back from an object schema,
-      defaults, and issue paths; on `ws`, a server over `https` requiring client certificates; on `esbuild`, a worker
-      bundle carrying a WASM asset. Update `design.md` §14 with `file:line` evidence in the installed packages.
-      **Acceptance:** the probe tests pass; the corresponding §14 rows are no longer "Unconfirmed"; `npm run
-      test:conformance` is green on the unchanged code.
-- [ ] 0.2 Vendored ledger builds (`vendor/ledger/`, `design.md` §5.2): pin the v8 release and v9 `ledger-9.1.0.0-rc.5`
-      sources, locate and pin the source of the v8→v9 conversion, list each function of `LedgerPackage` the published
-      packages lack, write the patches and the reproducible build script, and record the SHA-256 of each build; add the
-      CI job that rebuilds and compares.
-      **Acceptance:** two runs of `npm run vendor:ledger` give the recorded SHA-256; the §14 ledger rows are no longer
-      "Unconfirmed".
+- [ ] 0.1 Pin `@electric-sql/pglite` 0.5.10 and `ws` 8.22.0 (runtime) and `esbuild` 0.28.2 (development) — the
+      versions verified by the stage-1 probes (`design.md` §14) — through the supply-chain gate; move `typescript` to
+      `dependencies`; keep `zod` 4. Commit the probes as tests (PGlite roles, `SET LOCAL ROLE`, provider functions,
+      triggers, `TRUNCATE` refusal, `jsonpath` check; zod metadata; `ws` mutual TLS; esbuild worker bundle).
+      **Acceptance:** the probe tests pass in CI; `npm run test:conformance` is green on the unchanged code.
+- [ ] 0.2 Vendored ledger builds (`vendor/ledger/`, `design.md` §5.2): pin the v8 release; build v9 and the v8→v9
+      conversion (`v8-to-v9-state-translation`, `midnight-ledger` `da96e33d78ee9b7d3867b15c1037510d499cd909`) from one
+      aligned v9 version; list each function of `LedgerPackage` the published packages lack and write the patches; make
+      the build reproducible and record each SHA-256; add the CI job that rebuilds and compares; run the conversion on
+      a v8 test state and compare its result with the node's root at a devnet fork's F.
+      **Acceptance:** two runs of `npm run vendor:ledger` give the recorded SHA-256; the conversion's root matches the
+      node's at F.
 - [ ] 0.3 Tapes: record, with the builder of task 9.2, stagenet 0–10,000, preview 0–10,000 and a preview range across
       the runtime 1.0.300 upgrade, mainnet ranges around 1,774,492 and 1,788,980 (from snapshots), and a local devnet
       that starts on a v8 runtime and enacts the v9 upgrade; read each network's genesis hash, runtime at genesis and
@@ -71,7 +67,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 4. Configuration
 
-- [ ] 4.1 `defineConfig`, `coreEntry`, `pastEntry`, the module `entry` builder; the loader; the plain-data check.
+- [ ] 4.1 `defineConfig`, `coreEntry`, `versionEntry`, the module `entry` builder; the loader; the plain-data check.
       **Acceptance:** A26, A27.
 - [ ] 4.2 Schema validation with kinds, defaults and the `core` fields of CF-4; secret redaction helper.
       **Acceptance:** A28; A29 (completed in 8.1).
@@ -157,6 +153,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Acceptance:** A100, A102, A103, A104.
 - [ ] 12.5 The fixed-budget mark-and-sweep.
       **Acceptance:** A105 including its negative control.
+- [ ] 12.6 Ledger tasks and the plain-data `block-parsed` (`runLedgerWorker`, the host's worker entry, the
+      structured-clone check).
+      **Acceptance:** A137.
 
 ## 13. Contract data
 

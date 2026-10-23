@@ -77,10 +77,11 @@ role, and THE system SHALL NOT add enforcement beyond them.
 ### Requirement: DB-7 Cross-module functions are owned by the provider
 
 WHERE a module offers a function that another module calls to change the provider's tables, THE provider SHALL define
-it as a `SECURITY DEFINER` function owned by its role with a fixed `search_path` (`SET search_path = pg_catalog,
-<provider schema>`), so that it resolves names the same way whoever calls it; THE database API SHALL revoke `EXECUTE`
-on functions in module schemas from `PUBLIC` (as a default privilege of each module role) and grant it to the roles of
-modules that require the provider's item.
+it as a `SECURITY DEFINER` function owned by its role with a fixed `search_path` that ends with `pg_temp` (`SET
+search_path = pg_catalog, <provider schema>, pg_temp`), so that it resolves names the same way whoever calls it and no
+temporary table can shadow a provider table; THE database API SHALL revoke `EXECUTE` on functions in module schemas from
+`PUBLIC` (as a default privilege of each module role) and grant it to the roles of modules that require the provider's
+item.
 
 #### Scenario: A consumer changes the provider's table only through its function
 - **WHEN** a consumer calls the provider's function in `on-db-write`, then tries a direct `UPDATE` on the same table
@@ -92,8 +93,9 @@ modules that require the provider's item.
 
 ### Requirement: DB-8 Schema names are unambiguous
 
-THE system SHALL accept module ids matching `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` and item names matching the same pattern,
-and SHALL name each module's schema after its id with `-` replaced by `_` (e.g. `core-chain-events` →
+THE system SHALL accept module ids and item names that match `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` and are at most 40
+bytes long — so that every derived identifier (`umbradb_m_<schema>`, `umbradb_i_<item>`) stays within PostgreSQL's
+63-byte limit — and SHALL name each module's schema after its id with `-` replaced by `_` (e.g. `core-chain-events` →
 `core_chain_events`), which is one-to-one for such ids. IF a module's schema name or a shared item's schema name equals
 another module's, another item's, or a reserved schema (`core_chain`, `core_digest`, `core_digest_shadow`, any name
 starting with `pg_`, `information_schema`, `public`) THEN startup SHALL refuse and name both. WHERE several modules
@@ -104,6 +106,10 @@ migrations (ids or checksums) THEN startup SHALL refuse.
 #### Scenario: Two providers of one item with different migrations
 - **WHEN** two test providers of item `shared-x` declare migration `001` with different SQL
 - **THEN** startup refuses and names the item
+
+#### Scenario: An id that is too long
+- **WHEN** a module's id is 41 bytes long
+- **THEN** startup refuses with `bad-id`, the id and the limit
 
 #### Scenario: An id that aliases a backbone schema
 - **WHEN** a user module has the id `core_chain` or a user module has the id `token-index` while an item is named
@@ -136,30 +142,45 @@ THE system SHALL require, as an obligation of every module version, that a migra
 hold rows only adds — tables, nullable columns or columns with defaults, indexes, constraints and functions — and never
 drops a table or column, changes a column's type, or changes a stored value; rows before an upgrade stay as the old
 version wrote them (CORE-ARCH Q33). THE system SHALL NOT check this at run time (modules are trusted, Q46). WHERE a
-module version declares `requiresResync: true`, THE system SHALL accept that version only on an empty database (no
-committed height) and SHALL otherwise refuse startup with `requires-resync`.
+module version declares `requiresResync: true`, THE system SHALL accept that version only while no committed height of
+the database is covered by a revision of that module with another version, and SHALL otherwise refuse startup with
+`requires-resync`; a database built with that version from its first revision of the module SHALL restart normally.
 
-#### Scenario: A version that needs a resync
-- **WHEN** a build carries a module version with `requiresResync: true` and the database has committed heights
+#### Scenario: A version that needs a resync, as an upgrade
+- **WHEN** heights covered by module `m` 1.0.0 have committed and the build carries `m` 2.0.0 with
+  `requiresResync: true`
 - **THEN** startup refuses with `requires-resync`, the module and the version, before any migration runs
+
+#### Scenario: Restarting a database built with that version
+- **WHEN** an empty database started with `m` 2.0.0 (`requiresResync: true`), committed blocks, and was restarted
+- **THEN** startup accepts it
 
 ### Requirement: DB-11 Exactly one writer per database
 
 THE database API SHALL let exactly one process write each database. WHERE the backend is PostgreSQL, THE writer SHALL
 hold a session advisory lock on its writer connection for its lifetime; a second writer SHALL refuse to start; WHEN the
 writer connection is lost THE database API SHALL re-acquire the lock on reconnection before any further write, and IF
-another process holds it by then THEN processing SHALL halt. WHERE the backend is PGlite in Node.js, THE process SHALL
-hold a lock directory next to the data directory: created with an atomic `mkdir`, its modification time refreshed by
-the holder every second; a lock not refreshed for 10 seconds SHALL be stale; a process taking over a stale lock SHALL
-first rename it atomically to a unique name, and only the process whose rename succeeded MAY create the new lock; a
-second process facing a fresh lock SHALL refuse to start.
+another process holds it by then THEN processing SHALL halt. WHERE the backend is PGlite in Node.js — which does not
+guard its data directory itself — THE process SHALL hold the lock directory of `design.md` §4: created with an atomic
+`mkdir` holding a random owner token, refreshed every second, stale after 30 seconds without a refresh, taken over
+only by renaming it and then confirming the renamed directory holds the stale token. THE holder SHALL check that the
+lock directory exists and holds its token at every refresh and before every block's `BEGIN` and `COMMIT`, and SHALL
+halt (`writer-lock-lost`) at the first failed check, writing nothing more. A second process facing a fresh lock SHALL
+refuse to start. Because PGlite runs only under the development opt-in, the one remaining window is accepted and
+stated: a writer paused for more than 30 seconds inside a block transaction may complete that one commit after losing
+the lock, and halts at its next check.
 
 #### Scenario: A second writer refuses
 - **WHEN** two processes start against the same PostgreSQL database
 - **THEN** exactly one runs; the other refuses with `writer-lock-held` and stays up, not ready
 
+#### Scenario: A paused writer loses its lock
+- **WHEN** a PGlite writer is paused for 40 seconds between blocks, another process takes over its stale lock, and the
+  first resumes
+- **THEN** the first halts with `writer-lock-lost` before its next `BEGIN`, and only the second writes
+
 #### Scenario: Two processes race for a stale lock
-- **WHEN** a PGlite process was SIGKILLed and two new processes start at the same moment 15 seconds later
+- **WHEN** a PGlite process was SIGKILLed and two new processes start at the same moment 40 seconds later
 - **THEN** exactly one takes the lock and runs; the other refuses with `writer-lock-held`
 
 ### Requirement: DB-12 The durability probe guards PostgreSQL

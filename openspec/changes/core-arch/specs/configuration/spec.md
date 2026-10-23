@@ -26,23 +26,26 @@ THE system SHALL export `coreEntry({ start, stop?, config })`, which fills `id: 
 build (`{ umbradb: <package version>, ledgers: [{ ledger, versionName, packages: [{ name, version, sha256 }] }] }`,
 one item per ledger version the build carries, LG-5); SHALL give every module package an
 `entry({ start, stop?, config })` builder that fills `id` and `version` from the imported declaration and types
-`config` with the module's settings schema; and SHALL export `pastEntry({ id, start, stop?, version, config })` for a
-revision already in the history whose version this build does not carry. Builders SHALL return plain data.
+`config` with the module's settings schema; and SHALL export `versionEntry({ id, start, stop?, version, config })` for
+a revision whose version this build does not carry — an earlier one already in the history, or a later one being
+scheduled. Builders SHALL return plain data.
 
 #### Scenario: A misspelled setting is a type error
 - **WHEN** an operator writes `coreEntry({ start: 0, config: { databse: "…" } })`
 - **THEN** `tsc --noEmit` on the configuration file reports the unknown property, and startup refuses it as well
 
-### Requirement: CF-3 Every entry is validated against its schema at startup
+### Requirement: CF-3 Every entry is validated at startup
 
 THE process SHALL validate each entry's shape (`{ id, start, stop?, version, config }`, no unknown property, `stop ≥
 start`) at startup. THE process SHALL validate the `config` of every revision whose version is the build's against the
 module's zod schema in this build, apply its declared defaults to absent fields, and classify its fields by the
-schema's kinds. A revision whose version is not the build's (written with `pastEntry`) SHALL NOT be validated against
-this build's schema: its `config` SHALL be plain data and SHALL equal, field for field, the data recorded for it in the
-history (CF-6), which is its only source of field kinds; a `pastEntry` with no recorded row SHALL refuse startup. Any
-violation SHALL refuse startup, naming the entry and the field. Byte values SHALL be `0x`-prefixed lowercase hex
-strings.
+schema's kinds. A revision whose version is not the build's (written with `versionEntry`) SHALL NOT be validated against
+this build's schema and its `config` SHALL be plain data: IF it is recorded in the history THEN it SHALL equal, field
+for field, the recorded data, which is its only source of field kinds; IF it is not recorded THEN it SHALL start above
+cursor + 1, and it SHALL be recorded as written, all of its fields treated as data, and validated against its own schema
+when the build carrying its version starts (CF-8), which MAY then refuse it (`invalid-configuration`) — it can still be
+changed then, because it starts above the cursor. Any violation SHALL refuse startup, naming the entry and the field.
+Byte values SHALL be `0x`-prefixed lowercase hex strings.
 
 #### Scenario: A wrong type
 - **WHEN** `livenessTimeoutMs` is the string `"30000"`
@@ -51,9 +54,15 @@ strings.
 #### Scenario: An upgrade that renames a setting
 - **WHEN** module `m` 1.0.0 recorded `{ foo: 1 }` from height 1, and the build carries 1.1.0, whose schema has `bar`
   instead of `foo`, with a revision from 50 written as `m.entry({ start: 50, config: { bar: 1 } })` and the old one as
-  `pastEntry({ id: "m", start: 1, version: "1.0.0", config: { foo: 1 } })`
+  `versionEntry({ id: "m", start: 1, version: "1.0.0", config: { foo: 1 } })`
 - **THEN** startup validates only the 1.1.0 revision against the schema, checks the 1.0.0 one against the history, and
   accepts both
+
+#### Scenario: Scheduling a newer version from the current build
+- **WHEN** a build carrying `m` 1.0.0 runs at cursor 20 and the operator adds
+  `versionEntry({ id: "m", start: 50, version: "1.1.0", config: { bar: 1 } })`
+- **THEN** startup records it; the process stops at 49 with `upgrade-required` (RN-12); the 1.1.0 build validates it
+  against its schema and continues from 50
 
 ### Requirement: CF-4 Every field is data, operational or secret
 
@@ -156,13 +165,20 @@ startup SHALL refuse and name the feature.
 
 ### Requirement: CF-10 `umbradb config check`
 
-THE package SHALL provide the command `umbradb config check <file>`, which type-checks the file with the TypeScript
-compiler (`noEmit`), evaluates it, and runs CF-1 and CF-3 without starting a process or opening a database; it SHALL
-exit 0 only if every check passes, and SHALL print each finding with its path.
+THE package SHALL provide the command `umbradb config check <file> [--database <url>]`, which type-checks the file with
+the TypeScript compiler (`noEmit`), evaluates it, and runs CF-1 and the schema checks of CF-3 for the revisions whose
+version is the build's, without starting a process. WITHOUT `--database` it SHALL open no database and SHALL report that
+the history checks (CF-3 for `versionEntry` revisions, CF-5, CF-6, CF-8) were not run; WITH `--database` it SHALL read
+the history read-only — no migration, no write — and run them too. It SHALL exit 0 only if every check it ran passes,
+and SHALL print each finding with its path.
 
 #### Scenario: A file with a type error and a schema error
 - **WHEN** `umbradb config check` runs on a file with one unknown property and one wrong type
 - **THEN** it prints both findings with their paths and exits non-zero
+
+#### Scenario: Checking against a database
+- **WHEN** `umbradb config check --database <url>` runs on a file that changes a recorded entry's data field
+- **THEN** it reports `changes-past` and exits non-zero, and the database is unchanged
 
 ### Requirement: CF-11 Test keys in a private configuration
 

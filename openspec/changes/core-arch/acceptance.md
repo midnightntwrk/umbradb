@@ -68,25 +68,28 @@ release assets that CI downloads and verifies.
   is denied `EXECUTE`. (DB-7)
 - **A15** `[CI]` Schemas are named after module ids (`-` → `_`); a shared item gets one schema named after it; two
   providers of one shared item with different migrations refuse startup naming the item; ids `core_chain`, `A-b`,
-  `a--b` and `-a` fail the id pattern; a module and an item with the same name, and a module named `pg-x` or `public`,
-  refuse startup naming both. (DB-8, MD-2)
+  `a--b`, `-a` and a 41-byte id fail with `bad-id`; a module and an item with the same name, and a module named `pg-x`
+  or `public`, refuse startup naming both; two 40-byte ids differing only in their last character get two distinct
+  roles. (DB-8, MD-2)
 - **A16** `[CI]` A changed checksum of an applied migration, and a migration recorded as applied but missing from the
   build, each refuse startup with module, migration id and checksums, before any migration runs; with migrations `001`
   and `002` pending and `002` failing halfway, `001` is applied and recorded, nothing of `002` is visible or recorded,
   the module's `on-start-db` callback did not run, and startup refuses. (DB-9)
-- **A17** `[FAULT]` A second writer refuses with `writer-lock-held` on PostgreSQL and on PGlite (lock file); after the
-  writer connection is terminated, the writer re-acquires the lock before its next write; if another process took the
-  lock meanwhile, processing halts; after a SIGKILL of a PGlite process, its stale lock file is taken over at the next
-  start; two processes started together against a 15-second-old stale lock directory end with exactly one running;
-  a lock directory left by a kill right after `mkdir` ages out and is taken over. (DB-11)
+- **A17** `[FAULT]` A second writer refuses with `writer-lock-held` on PostgreSQL and on PGlite (lock directory); after
+  the writer connection is terminated, the writer re-acquires the lock before its next write; if another process took
+  the lock meanwhile, processing halts; a PGlite writer paused (SIGSTOP) for 40 s between blocks while another process
+  takes over halts with `writer-lock-lost` on resuming, before its next `BEGIN`; two processes started together against
+  a 40-second-old stale lock end with exactly one running; a lock directory left by a kill right after `mkdir` (no
+  `owner`) ages out and is taken over. (DB-11)
 - **A18** `[CI]` On PostgreSQL, startup refuses with `fsync=off`, with a detected transaction pooler, and with
   `full_page_writes=off` unless `fullPageWritesOffAllowed` is set; on PGlite, startup refuses without the development
   opt-in. (DB-12, CF-9)
 - **A19** `[FAULT]` Terminating the writer's backend mid-transaction yields `connection-lost` with `retryable: true`; a
   constraint violation yields a not-retryable error. (DB-13)
-- **A72** `[CI]` A module version with `requiresResync: true` is refused with `requires-resync` on a database with
-  committed heights, before any migration runs, and accepted on an empty one; `[DOC]` the module guide states the
-  additive-only rule for upgrade migrations. (DB-10)
+- **A72** `[CI]` A module version with `requiresResync: true` is refused with `requires-resync` on a database whose
+  committed heights are covered by another version of that module, before any migration runs; it is accepted on an
+  empty database and still accepted after that database committed blocks and restarted; `[DOC]` the module guide states
+  the additive-only rule for upgrade migrations. (DB-10)
 - **A73** `[CI]` On both backends, `TRUNCATE` of a module's own table in `on-db-write` fails with
   `truncate-not-allowed` and the block rolls back; the same statement in a migration succeeds. (DB-14)
 
@@ -112,8 +115,9 @@ release assets that CI downloads and verifies.
   module `entry` with another module's settings are type errors. (CF-2)
 - **A28** `[CI]` Entry-shape violations (unknown property, `stop < start`, bad hex) and schema violations each refuse
   startup naming the entry and field; absent fields take declared defaults; an upgrade whose new schema renames a
-  setting starts with the old revision written as a `pastEntry` equal to its recorded row; a `pastEntry` that differs
-  from, or has no, recorded row refuses startup. (CF-3)
+  setting starts with the old revision written as a `versionEntry` equal to its recorded row; a `versionEntry` that
+  differs from its recorded row refuses startup; an unrecorded `versionEntry` starting at or below cursor + 1 refuses
+  startup; one starting above it is recorded as written. (CF-3)
 - **A29** `[CI]` With a password in `database`, the password appears in neither `/config`, `/status` nor the captured
   logs. (CF-4, AE-6)
 - **A30** `[CI]` A configuration omitting a recorded entry refuses with `missing-entry`; a later revision with the same
@@ -129,8 +133,10 @@ release assets that CI downloads and verifies.
   each refuse with `upgrade-required` (entry, needed, build), and no `core_chain.migrations` row is added. (CF-8)
 - **A34** `[CI]` PGlite and a development-only module each refuse without `developmentOptIn`, naming the feature.
   (CF-9)
-- **A35** `[CI]` `umbradb config check` exits 0 on a valid file, and on a file with one type error and one schema error
-  prints both with their paths and exits non-zero, opening no database. (CF-10)
+- **A35** `[CI]` `umbradb config check` exits 0 on a valid file; on a file with one type error and one schema error it
+  prints both with their paths and exits non-zero, opening no database, and says the history checks were not run; with
+  `--database` it reports `changes-past` for a changed recorded entry, exits non-zero, and leaves the database unchanged
+  (row counts and `core_chain.migrations` compared before and after). (CF-10)
 
 ## 5. Runner
 
@@ -141,8 +147,9 @@ release assets that CI downloads and verifies.
 - **A38** `[PROP]` For random acyclic module graphs (up to 12 modules), the `on-db-write` order is backbone, then Kahn
   order with the smallest-id tie-break, then `core-digest`; in parallel points no callback starts before every module it
   requires has completed. (RN-3)
-- **A39** `[CI]` Each point receives exactly the handle of `design.md` §2; `on-compute` reads report h − 1 and see no
-  row written at h; a write attempted from `on-after-db-write` fails and halts. (RN-4)
+- **A39** `[CI]` Each point receives exactly the handle of `design.md` §2 (`on-finalized` a read handle at the cursor);
+  `on-compute` reads report h − 1 and see no row written at h; a write attempted from `on-after-db-write` fails and
+  halts. (RN-4)
 - **A40** `[CI]` An item put in `on-parse` at h is visible to a requiring module's `on-compute` at h, invisible at
   h + 1; a second put of one item in one block is a callback error. (RN-5)
 - **A41** `[CI]` On PostgreSQL, a catch-up of 100 heights produces 100 transactions committing one height each, in
@@ -160,9 +167,10 @@ release assets that CI downloads and verifies.
 - **A46** `[FAULT]` Killing the process after COMMIT of h and before `on-after-db-write` of h completes makes
   `on-after-db-write` fire for h after restart, before any callback of h + 1, with h's height, hash and settings and no
   `block` items; `on-after-db-write` never receives `block` items, re-delivered or not. (RN-5, RN-11)
-- **A47** `[CI]` A recorded revision with a newer version starting at 50 makes the runner commit 49, complete 49's
-  `on-after-db-write` and `on-stop-height`, and enter `stopped` with `upgrade-required` (entry, needed, build), ready,
-  serving reads at 49. (RN-12)
+- **A47** `[CI]` A build carrying module `m` 1.0.0 at cursor 20 records `versionEntry({ id: "m", start: 50, version:
+  "1.1.0", … })`; the runner then commits 49, completes 49's `on-after-db-write` and `on-stop-height`, and enters
+  `stopped` with `upgrade-required` (entry, needed, build), ready, serving reads at 49; a build carrying 1.1.0 then
+  validates that revision against its schema and continues from 50. (RN-12, CF-3, CF-8)
 - **A48** `[FAULT]` SIGTERM during `on-db-write` of h ends with h fully present or fully absent, and a restart resumes
   from the cursor. (RN-13)
 - **A49** `[CI]` With the source's head equal to the cursor, no transaction is open (checked in `pg_stat_activity` on
@@ -275,7 +283,9 @@ release assets that CI downloads and verifies.
   no retry (tape call count). (IN-9)
 - **A85** `[FAULT]` A tape that drops the node connection for 2 minutes makes the process retry with back-off reaching
   `backoffCeilingMs` and report `node-retrying`, then resume with no height skipped or repeated; an error on a queued
-  best block drops it without retry; a terminated database connection is retried with `database-retrying`. (IN-10)
+  best block drops it without retry; a database connection terminated during `on-db-write` of h is retried with
+  `database-retrying`, the ledger state is reloaded at the cursor, and h is processed again with roots matching the
+  node's. (IN-10)
 - **A86** `[FAULT]` Terminating the writer's backend during COMMIT: when the server committed h, the cursor is h after
   reconnecting, h is not processed again and `on-after-db-write` fires for h; when it did not, h is processed again from
   `on-compute`; a cursor that is neither halts with `unexpected-cursor`. (IN-11)
@@ -289,7 +299,8 @@ release assets that CI downloads and verifies.
 - **A89** `[CI]` A module requiring `block-body` reads at h the extrinsics `core-block-fetch` fetched for h, decoded
   with the metadata of h's parent state. (CD-2)
 - **A90** `[CI]` After heights S…h commit, `core_block_commit.blocks` holds exactly one row per height with the node's
-  hash, and the cursor is the last row. (CD-3)
+  hash, the cursor is the last row, and its migration declares no unique constraint on `hash` alone (it would fail on a
+  partitioned table). (CD-3)
 - **A91** `[CI]` `core-chain-events` stores every event of a range, and the events of a runtime-upgrade block U are
   decoded with the old runtime's metadata without error (devnet upgrade tape). (CD-4)
 - **A92** `[CI]` Each transaction is parsed once (counted calls); a block with a system transaction between two regular
@@ -323,17 +334,26 @@ release assets that CI downloads and verifies.
 - **A103** `[CI]` With `retainStates` 1,000 at cursor 5,000, loading 4,000 succeeds and 3,999 fails with
   `state-not-retained`; raising it by a revision fills the window from the revision; lowering it releases the leaving
   states in the revision's first block. (LG-12)
-- **A104** `[CI]` A contract state stored at height 10 and unchanged over 10,000 blocks and several sweep cycles still
-  loads. (LG-13)
-- **A105** `[DIFF]` After every block of a 2,000-block range, the set of stored ledger nodes is identical on PostgreSQL
-  and PGlite; a node deleted by the sweep and needed again is reinserted; with `sweep: off` nothing is deleted;
-  **negative control:** a sweep that takes grey keys in insertion order instead of byte order makes the comparison
-  fail. (LG-14)
+- **A104** `[CI]` With `retainStates` 0: contract C's state and zswap-state keys are stored at height 10; C changes at
+  height 20; enough blocks pass for the ledger states holding the height-10 contract state to be released and for two
+  sweep cycles to complete; the contract state and zswap state stored at height 10 still load from their keys; a
+  control run without persisting them shows those nodes deleted. (LG-13)
+- **A105** `[DIFF]` A reference model of LG-14 (an independent in-memory implementation in the tests) computes, for
+  each block of a fixture built so that one marking round does not fit in the budget (K = 50, wide trees, interleaved
+  new roots), the grey, marked and deleted sets; the implementation matches the model after every block on PostgreSQL
+  and on PGlite; a node deleted by the sweep and needed again is reinserted; with `sweep: off` nothing is deleted;
+  **negative control:** a sweep that takes grey keys in insertion order instead of byte order differs from the model
+  on this fixture. (LG-14)
 - **A106** `[CI]` A test package returning a wrong root for one block halts with `root-mismatch` and stores nothing of
   that block. (LG-15)
 - **A107** `[CI]` `core_ledger_state.states`, `segment_results` and `events` hold the values of LG-16 for a tape range
   (first-free indexes and roots match the node's runtime calls where the node exposes them); enabling
   `core-ledger-state` above S without a snapshot refuses with `cannot-start-mid-chain`. (LG-16)
+- **A137** `[CI]` A test module's ledger task decodes each contract call's arguments with the native parsed objects
+  and `rawPackages()`, and its `on-compute` receives them as its `block` item; with that task and three modules reading
+  `block-parsed`, the package's parse function runs once per transaction; a task returning a WASM-backed object, or
+  throwing, fails the block with `callback-error` naming the module and the task; no main-thread callback receives a
+  native ledger object (each `block` item passes a `structuredClone` round trip). (LG-7, LG-17)
 
 ## 13. Contract data
 
@@ -354,9 +374,10 @@ release assets that CI downloads and verifies.
 - **A113** `[CI]` A private database bound to another public database refuses with `private-binding-mismatch`. (PP-2)
 - **A114** `[FAULT]` Dropping the transport while the public cursor advances 50 heights: after reconnecting, the private
   process processes the 50 heights in order. (PP-3)
-- **A115** `[CI]` Every message type validates against the schemas of PP-4; `read-result` and `api-result` carry their
-  request's `id`; an unknown `v` or `type` closes the connection; a second `hello` with a connected id is refused with
-  `duplicate-instance`. (PP-4)
+- **A115** `[CI]` Every message type round-trips through the zod schemas of `design.md` §8 and fails on a missing or
+  mistyped field; a `read-result` carries its request's `id`, the height read and `bigint`, `numeric` and `bytea`
+  values as strings; an `api-result` carries its request's `id`; an unknown `v` or `type`, or a message failing its
+  schema, closes the connection; a second `hello` with a connected id is refused with `duplicate-instance`. (PP-4)
 - **A116** `[CI]` An independent instance stopped for 100 blocks never pauses the core and catches up from public data.
   (PP-5)
 - **A117** `[FAULT]` A stopped lockstep instance makes the core wait before `BEGIN` with no transaction open
@@ -384,8 +405,9 @@ release assets that CI downloads and verifies.
   and PGlite, write snapshots with equal contents hashes. (SN-2)
 - **A126** `[CI]` Each import refusal of SN-3 is triggered and checked, including a one-byte change giving
   `contents-hash-mismatch` with the target database left empty. (SN-3)
-- **A127** `[FAULT]` An import killed while loading rows publishes nothing, and the next start drops the staging
-  schemas. (SN-4)
+- **A127** `[FAULT]` An import killed while loading rows leaves the import marker; the next start drops what the import
+  created, removes the marker and refuses with `snapshot-import-interrupted`; a new import into that database then
+  succeeds. (SN-4)
 - **A128** `[DIFF]` A snapshot exported on PostgreSQL at h, imported on PGlite and on PostgreSQL, and continued to
   h + 100, gives the same contents hash as an instance that never stopped. (SN-5)
 - **A129** `[CI]` In Chrome (headless, in CI), the page runs the core, ledger and a private instance in workers on

@@ -61,12 +61,12 @@ path between them, and SHALL start a callback only after every callback of a mod
 ### Requirement: RN-4 Each point has fixed read and write permissions
 
 THE runner SHALL give callbacks only these handles: `on-start-db` (called after the module's migrations, DB-9) a schema
-write handle for the module's own schema;
-`on-db-write` a block write handle (committed data plus what earlier callbacks wrote for this block, writes to its own
-schema only); `on-compute` a read handle at committed height h − 1; `on-after-db-write` and `on-stop-height` a read
-handle at h; `on-start-api` a registry whose handlers get a read handle per request; and no database handle to
-`on-best-block`, `on-fetch` (core side), `on-parse`, `on-rollback` and `on-finalized`. IF a callback tries to write
-outside the handle it was given THEN THE runner SHALL treat it as a callback error (RN-8).
+write handle for the module's own schema; `on-db-write` a block write handle (committed data plus what earlier callbacks
+wrote for this block, writes to its own schema only); `on-compute` a read handle at committed height h − 1;
+`on-after-db-write` and `on-stop-height` a read handle at h; `on-finalized` a read handle at the cursor; `on-start-api`
+a registry whose handlers get a read handle per request; and no database handle to `on-best-block`, `on-fetch` (core
+side), `on-parse` and `on-rollback`. IF a callback tries to write outside the handle it was given THEN THE runner SHALL
+treat it as a callback error (RN-8).
 
 #### Scenario: `on-compute` sees only committed data
 - **WHEN** module `m` reads its own table in `on-compute` at height h

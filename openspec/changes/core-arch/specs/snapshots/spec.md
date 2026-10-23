@@ -44,14 +44,17 @@ from the node's at that height.
 
 ### Requirement: SN-4 Import is all or nothing
 
-THE import SHALL create every schema in staging by running the recorded migrations, check that each table's columns and
-types equal the file's, load the rows, and publish the staging schemas in one transaction; IF it is interrupted THEN
-nothing SHALL be published and the staging schemas SHALL be dropped at the next start. THE restored database SHALL keep
-the snapshot's S and resume from its height + 1.
+THE import SHALL run in the empty target database itself, without staging schemas: it SHALL first write an import
+marker, then create every schema by running the recorded migrations unchanged, check that each table's columns and
+types equal the file's, load the rows, and, in one final transaction, write the chain identity and remove the marker;
+the database SHALL count as restored only after that transaction. IF a process starts and finds an import marker THEN
+it SHALL drop every schema the import created and refuse with `snapshot-import-interrupted`, leaving the database empty
+for a new import. THE restored database SHALL keep the snapshot's S and resume from its height + 1.
 
 #### Scenario: An import killed half-way
 - **WHEN** the import is killed while loading rows
-- **THEN** after restart nothing was published and no staging schema remains
+- **THEN** the next start finds the marker, empties the database, and refuses with `snapshot-import-interrupted`; a
+  new import then succeeds
 
 ### Requirement: SN-5 A restored database continues like one that never stopped
 

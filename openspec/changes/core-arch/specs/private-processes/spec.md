@@ -41,16 +41,21 @@ every height from its own cursor + 1 up to it, in order, reading public data at 
 
 THE core SHALL listen for private processes on its `listen.transport` address over WebSocket (`postMessage` between
 browser workers, direct calls in tests), exchanging JSON messages `{ "v": 1, "type", … }` with heights as decimal
-strings and hashes as `0x`-prefixed lowercase hex: `hello` (private → core: `instance`, `version`, `height`, `hash`),
-`hello-ack` (core → private: `lockstep`, `genesis`, `start`, `cursor`, `refused`), `committed` (core → private:
-`height`, `hash`), `report` (lockstep private → core: `height`, `hash`), `read` and `read-result` (correlated by `id`;
-used when the public database is PGlite), and `api` and `api-result` (correlated by `id`). IF a message has an unknown
-`v` or `type` THEN the connection SHALL close; IF an instance id is already connected THEN the second `hello` SHALL be
-refused with `duplicate-instance`.
+strings and hashes as `0x`-prefixed lowercase hex, exactly as the schemas of `design.md` §8 define them:
+`hello` (private → core: `instance`, `version`, `height`, `hash` or null); `hello-ack` (core → private: `lockstep`,
+`genesis`, `start`, `cursor`, `refused` — null, `duplicate-instance` or `lockstep-behind`); `committed` (core → private:
+`height`, `hash`); `report` (lockstep private → core: `height`, `hash`); `read` (private → core: `id`, `statements` —
+an array of `{ sql, params }` run as one consistent read; used when the public database is PGlite) and `read-result`
+(core → private: `id`, `height`, and `rows` — one array per statement — or `error`, a code); `api` (either way: `id`,
+`module`, `method`, `params`) and `api-result` (`id`, and `result` or `error`). In rows and params, `bigint` and
+`numeric` values SHALL be decimal strings, `bytea` values `0x`-prefixed hex, and `jsonb` values JSON. IF a message
+fails its schema, or has an unknown `v` or `type`, THEN the connection SHALL close; IF an instance id is already
+connected THEN the second `hello` SHALL be refused with `duplicate-instance`.
 
 #### Scenario: A read through the core
-- **WHEN** a private process sends `read` with id `7` while the public database is PGlite
-- **THEN** it receives `read-result` with id `7`, the committed height read, and the rows
+- **WHEN** a private process sends `read` with id `7` and two statements while the public database is PGlite
+- **THEN** it receives `read-result` with id `7`, the committed height read, and two row arrays whose `bigint` values
+  are decimal strings
 
 ### Requirement: PP-5 Independent instances lag as they need
 
