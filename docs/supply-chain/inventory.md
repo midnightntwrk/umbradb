@@ -7,7 +7,7 @@ component is fixed — this is the security signal: `sha256` / image `@sha256:` 
 locked rev is the real pin behind a range).
 
 - **Project license:** Apache-2.0 (`LICENSE`, `NOTICE` — Copyright 2026 Charles Hoskinson).
-- **npm totals:** 11 direct (2 runtime + 9 dev) · **307 packages total** in `package-lock.json`
+- **npm totals:** 19 direct (5 runtime + 14 dev) · **307 packages total** in `package-lock.json`
   (lockfileVersion 3) · **307/307 resolved from `registry.npmjs.org` with a `sha512` integrity
   hash** · 5 packages declare an install script (all dev/optional — see npm-dev note).
 - **Nix:** 6 flake inputs (5 locked + 1 source-only) · 3 pinned release binaries (sha256) ·
@@ -18,13 +18,19 @@ locked rev is the real pin behind a range).
 
 ## 1. npm — runtime dependencies
 
-Source: `package.json` (`dependencies`) + resolved from `package-lock.json`. Both are
-**zero-dependency** packages, so the entire *runtime* trust surface is these two nodes.
+Source: `package.json` (`dependencies`) + resolved from `package-lock.json`. All five are
+**zero-dependency** packages (`ws`'s optional peers `bufferutil` and `utf-8-validate` are not
+installed), so the entire *runtime* trust surface is these five nodes. `@electric-sql/pglite`
+and `ws` are pinned exactly, at the versions their characterization tests in
+`test/dependencies/` run against.
 
 | Component | Version/Pin | Pinning | Source | Integrity (sha512, truncated) | License | Purpose | Update-watch |
 |---|---|---|---|---|---|---|---|
-| `postgres` | `^3.4.9` → **3.4.9** | range → locked | registry.npmjs.org | `sha512-GD3qdB0x…KDLnaw==` | Unlicense | The Postgres client driver — UmbraDB's sole database access library | GH advisories / `npm audit` on `postgres` |
-| `zod` | `^4.0.0` → **4.4.3** | range → locked | registry.npmjs.org | `sha512-ytENFjIJ…HJyTQ==` | MIT | Runtime schema validation of stored/loaded state | advisories / `npm audit` on `zod` |
+| `@electric-sql/pglite` | **0.5.10** | exact (no caret) | registry.npmjs.org | `sha512-tXc/25U3…hCOBYw==` | Apache-2.0 | PostgreSQL compiled to WASM — the in-process database backend (Node.js and browser) | PGlite releases / advisories |
+| `postgres` | `^3.4.9` → **3.4.9** | range → locked | registry.npmjs.org | `sha512-GD3qdB0x…KDLnaw==` | Unlicense | The Postgres client driver | GH advisories / `npm audit` on `postgres` |
+| `typescript` | `^5.9.0` → **5.9.3** | range → locked | registry.npmjs.org | `sha512-jl1vZzPD…5TgSw==` | Apache-2.0 | Compiler API for `umbradb config check`; also typechecking (`tsc --noEmit`), `.d.ts` | TS releases / advisories |
+| `ws` | **8.22.0** | exact (no caret) | registry.npmjs.org | `sha512-Ydggc987…U+1DOg==` | MIT | WebSocket server of the process transport, with opt-in mutual TLS | ws releases / advisories |
+| `zod` | `^4.0.0` → **4.4.3** | range → locked | registry.npmjs.org | `sha512-ytENFjIJ…HJyTQ==` | MIT | Runtime schema validation (settings schemas, messages, stored/loaded state) | advisories / `npm audit` on `zod` |
 
 ---
 
@@ -35,7 +41,8 @@ tooling only — never shipped in the runtime path.
 
 | Component | Version/Pin | Pinning | Source | Integrity (truncated) | License | Purpose | Update-watch |
 |---|---|---|---|---|---|---|---|
-| `typescript` | `^5.9.0` → **5.9.3** | range → locked | registry.npmjs.org | `sha512-jl1vZzPD…5TgSw==` | Apache-2.0 | Typechecking (`tsc --noEmit`), `.d.ts` | TS releases / advisories |
+| `esbuild` | **0.28.2** | exact (no caret) | registry.npmjs.org | `sha512-HKVLS8dv…h32wIA==` | MIT | Bundler for the browser build (page and workers with WASM assets) | esbuild releases / advisories |
+| `@types/ws` | **8.18.2** | exact (no caret) | registry.npmjs.org | `sha512-67MQl+fp…iVd0/w==` | MIT | Type declarations for `ws` | DefinitelyTyped |
 | `vitest` | `^4.1.10` → **4.1.10** | range → locked | registry.npmjs.org | `sha512-R9jUTe5S…GUPw==` | MIT | Test runner (conformance + live tiers) | vitest releases / advisories |
 | `tsx` | `^4.23.1` → **4.23.1** | range → locked | registry.npmjs.org | `sha512-GQHnkIfx…2wcWQ==` | MIT | TS execution for the `archive:sync` CLI | advisories (pulls `esbuild`) |
 | `typedoc` | `^0.28.0` → **0.28.20** | range → locked | registry.npmjs.org | `sha512-uSKqkh8C…mplg==` | Apache-2.0 | API docs generation (`docs:storage`) | typedoc releases |
@@ -46,8 +53,8 @@ tooling only — never shipped in the runtime path.
 | `@midnightntwrk/wallet-sdk-abstractions` | **3.0.0-canary.20260716150734-e744d99** | exact canary build | registry.npmjs.org | `sha512-8oJ+0o09…7LDLw==` | Apache-2.0 | Wallet-state type/shape reference for test fixtures; test-only per the indexer-agnostic boundary | Midnight SDK — canary, watch closely |
 
 > **Install scripts.** 5 of the 307 packages declare an install/lifecycle script — all in the
-> **dev/optional** Testcontainers→dockerode→ssh2 toolchain, **none in the runtime (`postgres`,
-> `zod`) tree**: `esbuild@0.28.1`, `protobufjs@7.6.5`, `ssh2@1.17.0`, and the optional
+> **dev/optional** toolchain, **none in the runtime (`@electric-sql/pglite`, `postgres`,
+> `typescript`, `ws`, `zod`) tree**: `esbuild@0.28.2`, `protobufjs@7.6.5`, `ssh2@1.17.0`, and the optional
 > `cpu-features@0.0.10` + `fsevents@2.3.3` (darwin-only). This corrects the "zero install scripts"
 > phrasing in `openspec/changes/v1.0.0-infosec-signoff/design.md §4`: the lockfile flags five.
 > The planned G18 `.npmrc` `ignore-scripts=true` neutralizes all of them (and any future one)

@@ -10,11 +10,20 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 0. Pins and verification
 
-- [ ] 0.1 Pin `@electric-sql/pglite` 0.5.10 and `ws` 8.22.0 (runtime) and `esbuild` 0.28.2 (development) — the
+- [x] 0.1 Pin `@electric-sql/pglite` 0.5.10 and `ws` 8.22.0 (runtime) and `esbuild` 0.28.2 (development) — the
       versions verified by the stage-1 probes (`design.md` §14) — through the supply-chain gate; move `typescript` to
       `dependencies`; keep `zod` 4. Commit the probes as tests (PGlite roles, `SET LOCAL ROLE`, provider functions,
       triggers, `TRUNCATE` refusal, `jsonpath` check; zod metadata; `ws` mutual TLS; esbuild worker bundle).
       **Acceptance:** the probe tests pass in CI; `npm run test:conformance` is green on the unchanged code.
+      **Done (2026-10-22):** pins exact in `package.json` and `package-lock.json` (`@electric-sql/pglite` 0.5.10, `ws`
+      8.22.0, `esbuild` 0.28.2; `typescript` ^5.9.0 → 5.9.3 in `dependencies`; `zod` ^4.0.0 → 4.4.3), plus
+      `@types/ws` 8.18.2 (development; Q52). Probes in `test/dependencies/`: `pglite.test.ts` (15), `zod.test.ts` (7),
+      `ws-mutual-tls.test.ts` (4), `esbuild-worker-bundle.test.ts` (2), `sqlite-writer-lock.test.ts` (3, the
+      operating-system writer lock of `design.md` §4), `pins.test.ts` (4; seen failing on the previous manifest) — 35
+      pass. Supply-chain gate steps pass locally (`ignore-scripts` effective, `npm ci`, `npm run typecheck`, blocking
+      `npm audit --omit=dev` 0 vulnerabilities, image pins agree, `flake.lock` unchanged, gitleaks). `npm run
+      test:conformance` green on the otherwise unchanged code: 553 tests passed, 17 skipped (the environment-gated
+      ones), 25/25 required ids. The CI run is pending until the branch is pushed (Phase 3).
 - [ ] 0.2 Vendored ledger builds (`vendor/ledger/`, `design.md` §5.2): pin the v8 release; build v9 and the v8→v9
       conversion (`v8-to-v9-state-translation`, `midnight-ledger` `da96e33d78ee9b7d3867b15c1037510d499cd909`) from one
       aligned v9 version; list each function of `LedgerPackage` the published packages lack and write the patches; make

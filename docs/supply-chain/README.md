@@ -9,7 +9,7 @@ UmbraDB itself is licensed **Apache-2.0** (`LICENSE`, `NOTICE`; Copyright 2026 C
 ## Why this exists
 
 UmbraDB is the Postgres persistence layer for a Midnight/Cardano dependency chain. Its trust
-surface is not just its own two runtime npm packages — it is the full transitive npm graph used
+surface is not just its own five runtime npm packages — it is the full transitive npm graph used
 to build and test it, the pinned Cardano/Midnight release binaries and Docker images the dev
 environment runs, and the Lean/mathlib toolchain that checks the formal proofs. This directory
 makes that surface explicit so it can be watched, audited, and updated deliberately.
@@ -39,13 +39,16 @@ Every entry is grounded in a real manifest in this repo. The authoritative sourc
 
 The governing rule differs by ecosystem, because the *security value* of each pin differs.
 
-- **npm runtime deps (`postgres`, `zod`)** — carry caret ranges in `package.json`, but the
-  **resolved version + integrity hash in `package-lock.json` is the real pin**. Bump by editing
-  the range (or `npm update` within range) and committing the regenerated lockfile. Runtime scope
-  is deliberately tiny (2 packages, both zero-dependency) so `npm audit --omit=dev` stays quiet and
-  fast. Watch: GitHub advisories / `npm audit` for `postgres` and `zod`.
+- **npm runtime deps (`@electric-sql/pglite`, `postgres`, `typescript`, `ws`, `zod`)** —
+  `@electric-sql/pglite` and `ws` are pinned exactly (their characterization tests in
+  `test/dependencies/` run against those versions; bump the pin and the tests together);
+  `postgres`, `typescript` and `zod` carry caret ranges in `package.json`, but the **resolved
+  version + integrity hash in `package-lock.json` is the real pin**. Bump by editing the pin or
+  range and committing the regenerated lockfile. Runtime scope is deliberately small (5
+  packages, all zero-dependency) so `npm audit --omit=dev` stays quiet and fast. Watch: GitHub
+  advisories / `npm audit` for each of them.
 - **npm dev deps + transitive graph (307 packages total)** — `npm ci` reinstalls the exact locked
-  tree; never `npm install` in CI. Bump dev tooling (vitest, tsx, typedoc, typescript,
+  tree; never `npm install` in CI. Bump dev tooling (vitest, tsx, typedoc, esbuild,
   Testcontainers, `@types/node`, effect, fast-check, the wallet-sdk canary) deliberately, run the
   conformance suite, and commit the new lockfile. A non-blocking full `npm audit` gives dev-graph
   visibility without gating merges on the large dev tree.
