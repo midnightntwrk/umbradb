@@ -67,8 +67,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       contents hash and the digests can stream rows into one array) and `CanonicalEncodingError` (`reason`, `path`);
       no CBOR dependency; an explicit stack (100,000-deep values encode), cycles refused. A `number` must be a safe
       integer (DB-2 gives larger integers as `bigint`); `jsonb` integers lie within the signed 64-bit range of DT-6;
-      `numeric` text is `-?[0-9]+`, written canonically, and any fraction fails, `100.00` included — Q57 (open, not
-      blocking) asks whether a zero fraction should count. Tests in `test/determinism/`: `cbor.test.ts` (159: A52 —
+      `numeric` text is `-?[0-9]+`, written canonically, and any fraction fails, `100.00` included — Q57 (owner decision
+      C) confirms that a zero fraction counts. Tests in `test/determinism/`: `cbor.test.ts` (159: A52 —
       every RFC 8949 Appendix A example in the subset with the RFC's bytes, and the examples outside it refused — plus
       the spec's key-order scenario, integer and length boundaries at 23/24/255/256/65535/65536/2^32 and ±2^64,
       non-ASCII text, every column mapping and failure); `cbor.property.test.ts` (12, A53, seed 20261023: random

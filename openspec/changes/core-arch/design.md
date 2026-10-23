@@ -347,12 +347,12 @@ per-block tables are append-only and partitioned by height range; no table store
 
 **Startup refuses** (state `refused`, live, not ready), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,
 `changes-past`, `missing-entry`, `not-plain-data`, `invalid-configuration`, `upgrade-required`, `requires-resync`,
-`migration-checksum-changed`, `migration-missing`, `migration-failed`, `shared-item-migrations-differ`, `unknown-point`,
-`reserved-prefix`, `bad-id`, `schema-collision`, `item-no-provider`, `providers-overlap`, `graph-cycle`,
-`item-not-available`, `no-requirement`, `cannot-start-mid-chain`, `process-item-missing`, `duplicate-api-route`,
-`development-opt-in-required`, `needs-lockstep-not-listed`, `private-binding-mismatch`, `test-key-conflict`,
-`package-hash-mismatch`, `writer-lock-held`, `durability-fsync-off`, `durability-pooler`,
-`durability-full-page-writes-off`, and the snapshot import checks (`snapshot-format-unknown`,
+`migration-checksum-changed`, `migration-missing`, `migration-failed`, `non-deterministic-column` (DT-6),
+`shared-item-migrations-differ`, `unknown-point`, `reserved-prefix`, `bad-id`, `schema-collision`, `item-no-provider`,
+`providers-overlap`, `graph-cycle`, `item-not-available`, `no-requirement`, `cannot-start-mid-chain`,
+`process-item-missing`, `duplicate-api-route`, `development-opt-in-required`, `needs-lockstep-not-listed`,
+`private-binding-mismatch`, `test-key-conflict`, `package-hash-mismatch`, `writer-lock-held`, `durability-fsync-off`,
+`durability-pooler`, `durability-full-page-writes-off`, and the snapshot import checks (`snapshot-format-unknown`,
 `snapshot-history-mismatch`, `snapshot-build-mismatch`, `contents-hash-mismatch`, `snapshot-genesis-mismatch`,
 `snapshot-block-not-finalized`, `snapshot-root-mismatch`, `snapshot-target-not-empty`, `snapshot-import-interrupted`).
 
