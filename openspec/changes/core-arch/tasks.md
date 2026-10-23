@@ -60,8 +60,25 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 1. Determinism primitives
 
-- [ ] 1.1 `src/determinism/cbor.ts`: the canonical encoder of DT-1, `encodeCanonical`, `encodeRow`.
+- [x] 1.1 `src/determinism/cbor.ts`: the canonical encoder of DT-1, `encodeCanonical`, `encodeRow`.
       **Acceptance:** A52, A53 pass.
+      **Done (2026-10-23):** `encodeCanonical(value)`, `encodeRow(values, types)` (column types named as PostgreSQL's
+      `format_type(type, NULL)` names them, scalar or `T[]`), `encodeArrayHead(length)` (an array's head, so the
+      contents hash and the digests can stream rows into one array) and `CanonicalEncodingError` (`reason`, `path`);
+      no CBOR dependency; an explicit stack (100,000-deep values encode), cycles refused. A `number` must be a safe
+      integer (DB-2 gives larger integers as `bigint`); `jsonb` integers lie within the signed 64-bit range of DT-6;
+      `numeric` text is `-?[0-9]+`, written canonically, and any fraction fails, `100.00` included — Q57 (open, not
+      blocking) asks whether a zero fraction should count. Tests in `test/determinism/`: `cbor.test.ts` (159: A52 —
+      every RFC 8949 Appendix A example in the subset with the RFC's bytes, and the examples outside it refused — plus
+      the spec's key-order scenario, integer and length boundaries at 23/24/255/256/65535/65536/2^32 and ±2^64,
+      non-ASCII text, every column mapping and failure); `cbor.property.test.ts` (12, A53, seed 20261023: random
+      `jsonb` objects checked by `cbor-decoder.ts`, a decoder written independently of the encoder — keys in §4.2.1
+      order, shortest heads, round trip, insertion-order independence; fractional numerics, non-integer, unsafe and
+      out-of-range JSON numbers fail; negative controls: the checker flags reordered maps and non-canonical bytes, the
+      reorderings are real, JavaScript's sort differs from the canonical order). Seen failing first (no module), then
+      passing; 14 deliberately wrong encoders were each caught. Coverage floor `src/determinism/**` 95/90 (§13) added
+      in `vitest.config.ts`; `cbor.ts` 99.52 % lines, 100 % branches. Stryker on `cbor.ts` (temporary configuration,
+      informative; the mutation targets are task 17.2's): 97.07 %.
 - [ ] 1.2 Primary-key order and `contentsHash` (DT-2, DT-3), over a database handle.
       **Acceptance:** A54 and A55 pass on both backends (after task 2.2 provides PGlite; until then on PostgreSQL, and
       re-run in 2.2).

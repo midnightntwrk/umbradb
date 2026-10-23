@@ -59,6 +59,13 @@ const DURABILITY = {
   "**/postgres/transaction-lease.ts": { lines: 90, branches: 85, perFile: true },
 } as const;
 
+// CORE-ARCH floors (`openspec/changes/core-arch/design.md` §13, "Coverage floors" row), added with the directory each
+// covers. The canonical encoding, the contents hash and digests decide whether two databases agree, so they are held
+// above the default.
+const CORE_ARCH = {
+  "**/src/determinism/**": { lines: 95, branches: 90, perFile: true },
+} as const;
+
 export default defineConfig({
   test: {
     // Teardown budget. `registerSuiteLifecycle`'s afterAll already sets 60s explicitly because
@@ -88,6 +95,7 @@ export default defineConfig({
         branches: 78,
         // Stricter per-file floors on the durability-critical modules (BINDING 90/85, §2.3).
         ...DURABILITY,
+        ...CORE_ARCH,
       },
     },
   },
