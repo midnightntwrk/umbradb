@@ -1254,7 +1254,7 @@ describe("design.md §4's column-type table and the rules agree", () => {
       const { sequence: _sequence, unloggedTable: _unlogged, ...withoutQ61 } = TABLE_RULES;
       expect(proseDifferences(withoutQ61, table)).toContainEqual("the paragraph's refusals are not 3");
       const { nonImmutableDefault: _default, ...withoutDefaults } = TABLE_RULES;
-      expect(proseDifferences(withoutDefaults, table)).toContainEqual("the paragraph's refusals are not 3");
+      expect(proseDifferences(withoutDefaults, table)).toContainEqual("the paragraph's refusals are not 4");
     });
 
     it("an allowed-defaults or detection sentence that drifted, a function-id field dropped or added", () => {

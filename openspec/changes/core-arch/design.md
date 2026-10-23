@@ -146,14 +146,21 @@ transaction index). A default that is not immutable is refused with `non-determi
 PostgreSQL marks stable or volatile (`now()`, `random()`, `gen_random_uuid()`) or uses an SQL value function
 (`CURRENT_TIMESTAMP`, `CURRENT_USER`), so each machine, or each retry, gets a different value; compute the value from
 the block in `on-db-write`. An immutable default (`'abc'`, `1 + 2`, `lower('X')`) and a stored generated column, which
-PostgreSQL requires to be immutable, are allowed. A public schema holding a sequence, or an unlogged table, is refused
-with `non-deterministic-table` (Q61): module code can draw from a sequence at any time, and its values depend on
-retries; PostgreSQL empties an unlogged table after a crash, while the cursor still records its blocks as committed. The
-contents hash refuses all of these too, with the same codes and messages, in any public schema (Q61). Detection, checked
-on PostgreSQL 17.11 and PGlite 0.5.10: `pg_attribute.attidentity`; a default's expression tree (`pg_attrdef.adbin`)
-lists every function it calls (`:funcid`, and `:opfuncid`, `:hashfuncid` and `:negfuncid` for operators), each looked up
-in `pg_proc.provolatile`, and an SQL value function is a `SQLVALUEFUNCTION` node with no function id; `pg_class.relkind
-= 'S'` for a sequence and `relpersistence = 'u'` for an unlogged table.
+PostgreSQL requires to be immutable, are allowed. A public schema holding a sequence is refused with
+`non-deterministic-table` (Q61): module code can draw from a sequence at any time, and its values depend on retries;
+derive values from the block (height, transaction index), and drop the sequence (Q64). A public schema holding an
+unlogged table is refused with `non-deterministic-table` (Q61): PostgreSQL empties an unlogged table after a crash,
+while the cursor still records its blocks as committed; make the table logged: create it without `UNLOGGED`, or run
+`ALTER TABLE ... SET LOGGED` (Q64). The contents hash refuses all of these too, with the same codes and messages, in any
+public schema (Q61). Detection, checked on PostgreSQL 17.11 and PGlite 0.5.10: `pg_attribute.attidentity`; a default's
+expression tree (`pg_attrdef.adbin`), read as stored, as PostgreSQL's own immutability check reads it (Q62): every
+function id (`:funcid`, and `:opfuncid`, `:hashfuncid` and `:negfuncid` for operators, an operator stored without one
+read through `pg_operator`), each looked up in `pg_proc.provolatile`; a conversion through text (`COERCEVIAIO`: the
+result type's input function and the argument type's output function); a row comparison's operators (`ROWCOMPAREEXPR`);
+an SQL value function (`SQLVALUEFUNCTION`, stable) and `NEXTVALUEEXPR` (volatile), which have no function id; SQL/JSON
+constructors and queries, refused outright because the tree does not record whether they are immutable (Q63); a branch
+that can never run still counts, since the tree is read without PostgreSQL's constant folding (Q63); `pg_class.relkind =
+'S'` for a sequence and `relpersistence = 'u'` for an unlogged table.
 
 | Type | As a value | As a key | Refused because / use instead |
 |---|---|---|---|

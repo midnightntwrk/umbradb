@@ -531,11 +531,16 @@ export const COLUMN_TYPE_RULES: readonly TypeRule[] = [
   OTHER,
 ];
 
-// DT-6's last refusal sentence covers two things, each with its own reason (owner decision Q61).
-const NON_DETERMINISTIC_TABLE =
-  "A public schema holding a sequence, or an unlogged table, is refused with `non-deterministic-table` (Q61): module " +
-  "code can draw from a sequence at any time, and its values depend on retries; PostgreSQL empties an unlogged table " +
-  "after a crash, while the cursor still records its blocks as committed.";
+// DT-6's sequence and unlogged-table refusals, one sentence each, with its reason and alternative (owner decisions
+// Q61, Q64).
+const SEQUENCE_DESIGN =
+  "A public schema holding a sequence is refused with `non-deterministic-table` (Q61): module code can draw from a " +
+  "sequence at any time, and its values depend on retries; derive values from the block (height, transaction index), " +
+  "and drop the sequence (Q64).";
+const UNLOGGED_DESIGN =
+  "A public schema holding an unlogged table is refused with `non-deterministic-table` (Q61): PostgreSQL empties an " +
+  "unlogged table after a crash, while the cursor still records its blocks as committed; make the table logged: " +
+  "create it without `UNLOGGED`, or run `ALTER TABLE ... SET LOGGED` (Q64).";
 
 /**
  * The refusals of the paragraph above the column-type table, each with its sentence verbatim (`design`). A refusal of
@@ -598,11 +603,11 @@ export const TABLE_RULES: {
     },
   },
   // Module code may call nextval() on any sequence of its schema, in any block. The alternative is the identity and
-  // serial rule's, for values as for keys (`design.md` §4 gives none for this sentence: decision record Q64).
+  // serial rule's, for values as for keys (owner decision Q64).
   sequence: {
     code: "non-deterministic-table",
     what: "a public schema cannot hold a sequence",
-    design: NON_DETERMINISTIC_TABLE,
+    design: SEQUENCE_DESIGN,
     because: {
       reason:
         "Module code can draw from a sequence at any time, and a sequence never rolls back, so its values depend on " +
@@ -611,11 +616,11 @@ export const TABLE_RULES: {
     },
   },
   // An unlogged table is not written to the write-ahead log; crash recovery truncates it, while the blocks whose rows
-  // it held stay committed in the cursor. The alternative is the table made logged (decision record Q64).
+  // it held stay committed in the cursor. The alternative is the table made logged (owner decision Q64).
   unloggedTable: {
     code: "non-deterministic-table",
     what: "a public schema cannot hold an unlogged table",
-    design: NON_DETERMINISTIC_TABLE,
+    design: UNLOGGED_DESIGN,
     because: {
       reason:
         "PostgreSQL empties an unlogged table after a crash, while the cursor still records its blocks as committed, " +
@@ -627,10 +632,10 @@ export const TABLE_RULES: {
 
 /**
  * The paragraph's sentences on what is allowed and on how the rules detect it, verbatim. The detection reads every
- * function id the sentence names ({@link FUNCTION_ID_FIELDS}) and the `SQLVALUEFUNCTION` node, and also what
- * PostgreSQL's own check (`contain_mutable_functions`) reads that the sentence does not name (decision record Q62):
- * conversions through input and output functions, row comparisons, `NEXTVALUEEXPR`, and SQL/JSON nodes, which it
- * refuses outright (decision record Q63; {@link defaultReferences}).
+ * function id the sentence names ({@link FUNCTION_ID_FIELDS}) and every node it names, as PostgreSQL's own check
+ * (`contain_mutable_functions`) reads them: conversions through input and output functions, row comparisons,
+ * `SQLVALUEFUNCTION`, `NEXTVALUEEXPR`, and SQL/JSON nodes, which it refuses outright (owner decisions Q62, Q63;
+ * {@link defaultReferences}).
  */
 export const DEFAULT_DESIGN = {
   allowed:
@@ -638,10 +643,15 @@ export const DEFAULT_DESIGN = {
     "to be immutable, are allowed.",
   detection:
     "Detection, checked on PostgreSQL 17.11 and PGlite 0.5.10: `pg_attribute.attidentity`; a default's expression " +
-    "tree (`pg_attrdef.adbin`) lists every function it calls (`:funcid`, and `:opfuncid`, `:hashfuncid` and " +
-    "`:negfuncid` for operators), each looked up in `pg_proc.provolatile`, and an SQL value function is a " +
-    "`SQLVALUEFUNCTION` node with no function id; `pg_class.relkind = 'S'` for a sequence and `relpersistence = 'u'` " +
-    "for an unlogged table.",
+    "tree (`pg_attrdef.adbin`), read as stored, as PostgreSQL's own immutability check reads it (Q62): every " +
+    "function id (`:funcid`, and `:opfuncid`, `:hashfuncid` and `:negfuncid` for operators, an operator stored " +
+    "without one read through `pg_operator`), each looked up in `pg_proc.provolatile`; a conversion through text " +
+    "(`COERCEVIAIO`: the result type's input function and the argument type's output function); a row comparison's " +
+    "operators (`ROWCOMPAREEXPR`); an SQL value function (`SQLVALUEFUNCTION`, stable) and `NEXTVALUEEXPR` " +
+    "(volatile), which have no function id; SQL/JSON constructors and queries, refused outright because the tree " +
+    "does not record whether they are immutable (Q63); a branch that can never run still counts, since the tree is " +
+    "read without PostgreSQL's constant folding (Q63); `pg_class.relkind = 'S'` for a sequence and `relpersistence = " +
+    "'u'` for an unlogged table.",
 } as const;
 
 // ── verdicts ────────────────────────────────────────────────────────────────────────────────────────────────────────
