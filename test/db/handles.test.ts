@@ -9,12 +9,15 @@ import type {
 } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { ConsistentRead } from "../../src/determinism/public-tables.js";
-import { BACKENDS, TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
+import { askedLater, BACKENDS, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 
 /**
  * DB-2's read handles and DB-5's writer transactions, on every backend of `backends.ts`: a read handle sees one
  * committed height and reports it; a transaction commits when its body resolves and rolls back when it throws; a handle
  * used after its read or transaction ended is refused (`handle-closed`) instead of reaching the database.
+ *
+ * A commit asked for while a read is open lands between the read's statements on PostgreSQL (DB-5); on PGlite it waits
+ * until the read ends (DB-4), which the same tests check there instead of waiting for it inside the read.
  */
 
 async function failure(run: () => Promise<unknown>): Promise<UmbraError> {
@@ -62,12 +65,16 @@ for (const backend of BACKENDS) {
     it("lets two statements see the same height when the writer commits between them, and reports it", async () => {
       const { db } = await backend.database(TEST_SCHEMA, TEST_CURSOR);
       await commitHeight(db, 1n);
+      const commit = askedLater(() => commitHeight(db, 2n));
       const seen = await db.read(async (read) => {
         const [first] = await read.query("SELECT max(height) AS height, count(*) AS n FROM t.rows");
-        await commitHeight(db, 2n);
+        commit.gate();
+        if (backend.singleQueue) expect(await settlesWithin(commit.result, 50)).toBe(false);
+        else await commit.result;
         const [second] = await read.query("SELECT max(height) AS height, count(*) AS n FROM t.rows");
         return { reported: read.height, first, second };
       });
+      await commit.result;
       expect(seen).toEqual({ reported: 1n, first: { height: 1n, n: 1n }, second: { height: 1n, n: 1n } });
       expect(await db.read(async (read) => read.height)).toBe(2n);
     });
@@ -79,12 +86,16 @@ for (const backend of BACKENDS) {
         return TEST_CURSOR(read);
       });
       await commitHeight(db, 1n);
+      const commit = askedLater(() => commitHeight(db, 2n));
       const height = await db.read(async (read) => {
         expect(calls).toBe(1);
-        await commitHeight(db, 2n);
+        commit.gate();
+        if (backend.singleQueue) expect(await settlesWithin(commit.result, 50)).toBe(false);
+        else await commit.result;
         const [row] = await read.query("SELECT max(height) AS height FROM t.blocks");
         return [read.height, row?.height];
       });
+      await commit.result;
       expect(height).toEqual([1n, 1n]);
     });
 
@@ -110,6 +121,32 @@ for (const backend of BACKENDS) {
       const error = await failure(() => kept.query("SELECT 1"));
       expect(error.code).toBe("handle-closed");
       expect(error.retryable).toBe(false);
+    });
+
+    it("lets no session setting a transaction committed reach a later read, and keeps it for later transactions", async () => {
+      const role = `t_role_${process.pid}`;
+      const { db } = await backend.database(
+        `${TEST_SCHEMA}
+         DO $$ BEGIN CREATE ROLE ${role} NOLOGIN; EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+        TEST_CURSOR,
+      );
+      const state = `SELECT current_setting('TimeZone') AS zone, current_setting('bytea_output') AS bytea_output,
+                            current_setting('search_path') AS path, current_user = session_user AS own_role,
+                            '\\x01ff'::bytea AS bytes`;
+      const before = (await db.read((read) => read.query(state)))[0];
+      await db.transaction(async (tx) => {
+        await tx.execute("SET TimeZone = 'Asia/Tokyo'");
+        await tx.execute("SET search_path = pg_catalog");
+        await tx.execute("SET bytea_output = escape");
+        await tx.execute(`SET ROLE ${role}`);
+      });
+      for (let i = 0; i < 3; i++) expect((await db.read((read) => read.query(state)))[0]).toEqual(before);
+      expect(before).toMatchObject({ zone: "UTC", bytea_output: "hex", own_role: true, bytes: new Uint8Array([1, 255]) });
+      const kept = await db.transaction((tx) =>
+        tx.query(`SELECT current_setting('TimeZone') AS zone, current_setting('search_path') AS path,
+                         current_setting('bytea_output') AS bytea_output, current_user AS who`),
+      );
+      expect(kept).toEqual([{ zone: "Asia/Tokyo", path: "pg_catalog", bytea_output: "escape", who: role }]);
     });
 
     it("leaves no session setting behind for the next read", async () => {

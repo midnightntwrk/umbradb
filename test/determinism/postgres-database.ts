@@ -10,7 +10,8 @@ import { startPostgresServer } from "../db/postgres-server.js";
  * What stays here is what the API deliberately does not offer: setup SQL of several statements outside any read (the
  * API runs one statement per call; migrations are task 2.4), and the negative control of the snapshot test.
  *
- * Every test database is a fresh `CREATE DATABASE` on one PostgreSQL 17 container (`../db/postgres-server.ts`).
+ * Every test database is a fresh `CREATE DATABASE` on one PostgreSQL 17 container (`../db/postgres-server.ts`). Its
+ * PGlite twin, behind the same interfaces, is `pglite-database.ts` (task 2.2); `backends.ts` lists both.
  */
 
 /** One empty test database. */

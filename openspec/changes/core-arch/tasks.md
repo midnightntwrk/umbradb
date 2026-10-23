@@ -79,7 +79,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       passing; 14 deliberately wrong encoders were each caught. Coverage floor `src/determinism/**` 95/90 (§13) added
       in `vitest.config.ts`; `cbor.ts` 99.52 % lines, 100 % branches. Stryker on `cbor.ts` (temporary configuration,
       informative; the mutation targets are task 17.2's): 97.07 %.
-- [ ] 1.2 Primary-key order and `contentsHash` (DT-2, DT-3), over a database handle.
+- [x] 1.2 Primary-key order and `contentsHash` (DT-2, DT-3), over a database handle.
       **Acceptance:** A54 and A55 pass on both backends (after task 2.2 provides PGlite; until then on PostgreSQL, and
       re-run in 2.2).
       **Partial (2026-10-23):** A54 and A55 pass on PostgreSQL 17; the PGlite half is pending until task 2.2.
@@ -105,7 +105,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       read, DB-2's mapping with a lossless `jsonb` parser). 19 deliberately wrong variants of the two source files
       were each caught. Coverage 100 % lines and branches on both files (`src/determinism/**` floor 95/90). Q58 (owner
       decision: D plus `boolean` keys) moves these refusals to startup too; its code is task 1.3.
-      **Pending:** the PGlite half of A54 and A55, and A55's cross-backend comparison, re-run in task 2.2.
+      **PGlite half (task 2.2, 2026-10-23):** done — `public-tables.test.ts` and `contents-hash.test.ts` run on
+      PostgreSQL 17 and PGlite 0.5.10 (the concurrent-commit snapshot test stays PostgreSQL's: on PGlite nothing
+      commits while a read runs, which A11 checks); A55's cross-backend comparison,
+      `[[determinism.contents-hash.cross-backend]]`, is `test/determinism/cross-backend.test.ts` (equal hashes of
+      one fixture on both backends at three page sizes, a one-byte negative control, A54's row lists compared).
 
 - [x] 1.3 Column-type rules (owner decision Q58): `src/determinism/column-rules.ts`, one table deciding for each column
       type whether it is allowed as a value and as a key, with the reason and the alternative of `design.md` §4's
@@ -144,7 +148,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       for `real` (Q60); per-type reasons ship meanwhile. Q61 asks whether the hash should also refuse sequence and
       default columns, as DT-6's last sentence reads literally. `postgres` 3.4.9 reads NULL array elements wrongly
       (docs/issues/00006; for task 2.1).
-      **Pending (task 2.2):** A54's PGlite half for the `varchar`, `uuid` and `boolean` keys.
+      **PGlite half (task 2.2, 2026-10-23):** done — the `varchar`, `uuid` and `boolean` key tests and
+      `column-refusals.test.ts` pass on PGlite 0.5.10 too.
 
 - [x] 1.4 Non-deterministic tables and columns (owner decision Q61) and per-type reasons (Q59, Q60): in
       `column-rules.ts`, detect identity and `serial` columns, defaults that are not immutable (a function marked stable
@@ -176,7 +181,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       check). Q62–Q64 raised, none blocking: §4's detection sentence misses what the code and PostgreSQL also read
       (Q62); SQL/JSON defaults are refused outright (Q63); §4 gives no alternative for a sequence or an unlogged table
       (Q64).
-      **Pending (task 2.2):** the PGlite run of `column-refusals.test.ts`'s A58 cases, with 1.3's.
+      **PGlite run (task 2.2, 2026-10-23):** done — every A58 case, the refusal order, the catalog facts, the controls
+      and the 36-default oracle pass on PGlite 0.5.10; 11 refusals' codes and messages are compared across the two
+      backends in `test/determinism/cross-backend.test.ts`.
       **For task 7.1:** read `catalogTables` and `catalogRelations` (or their SQL) for the module's schemas, call
       `databaseRefusals`, and refuse with the first: `refusalMessage(refusal, { module, ...place })`.
 
@@ -213,8 +220,44 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       DB-2's text for arrays), Q67 (0.9.5's timeouts not carried over). **For task 2.2:** add PGlite to
       `test/db/backends.ts`; hand over text and map with `src/db/mapping.ts`; pin the same five settings; send the same
       parameter texts. The CI run is pending until the branch is pushed (Phase 3).
-- [ ] 2.2 The PGlite backend with its single queue, behind the same API.
+- [x] 2.2 The PGlite backend with its single queue, behind the same API.
       **Acceptance:** A7, A8 (PGlite), A11 including its negative control.
+      **Done (2026-10-23):** `src/db/pglite.ts` (`openPglite({ dataDir, committedHeight })`, `openPgliteOn(engine, …)`,
+      `PGLITE_START_PARAMS`, `classifyPgliteError`). Every read and every transaction is one job of one FIFO queue that
+      holds PGlite's one session from its first statement to its last, so a block transaction is one exclusive job
+      (DB-4); a job runs in its caller's async context. A read is `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`,
+      `RESET ALL` and `RESET ROLE` (no setting or role a transaction left on the session reaches it), the committed
+      height, the body, `ROLLBACK`; a transaction is `BEGIN`, the body, then `COMMIT` — a `COMMIT` answered with
+      `ROLLBACK` is an error — or `ROLLBACK`; `handle-closed` and `commit-rolled-back` exactly as on PostgreSQL (both
+      now in `src/db/errors.ts`). Values reach `src/db/mapping.ts` as PostgreSQL's text (every PGlite parser replaced
+      by the identity, `rowMode: "array"`) and parameters go as `parameterText`'s texts through identity serializers;
+      the engine starts with the five `PINNED_SETTINGS` (moved to `mapping.ts`) as `-c` start parameters, which beat
+      `postgresql.conf` and `ALTER SYSTEM`, and an engine without them is refused (`invalid-configuration`). Errors
+      (DB-13): PGlite has no connection, so nothing is `connection-lost`; a server `ERROR` is `database-error` with its
+      SQLSTATE and names; anything else (`FATAL`, a WebAssembly trap, a failed `ROLLBACK`, …) is `database-error`,
+      `reason: engine-failed`, for every later call too, until the database is opened again. Closing refuses the
+      waiting jobs and every later statement, waits for a statement in flight, then closes the engine. A call from
+      inside a running job of the same database (or through another database's job) is refused with `nested-call`
+      (Q73, resolved E by the owner with this guard kept). A11's negative-control flag is `READS_BYPASS_QUEUE` in
+      `src/db/pglite-build-flags.ts`: a `const false` that no option, setting or environment variable reads and §12 does
+      not export, so only a different build turns it on. Tests (seen failing first: module missing):
+      `differential.test.ts` (A7, 36: the same statements on both backends — mapped rows, errors with their messages,
+      row counts, a `COMMIT` turned `ROLLBACK`, a seeded round trip — compared with each other);
+      `read-height.property.test.ts` (A8 on PGlite, a model of the queue, two negative controls; interleavings now up
+      to 30 steps evenly);
+      `pglite-no-outside-read.test.ts` (A11 `[[db.pglite.no-outside-read-in-transaction]]`: 200 blocks under four
+      readers, every engine statement traced with who asked for it — 0 outside reads, 4 reads waiting in the middle of
+      every block, no read saw a half-written block) and `pglite-no-outside-read.negative-control.test.ts`
+      (`[[db.pglite.no-outside-read.negative-control-fires]]`: the bypass build fails A11's assertions with 1,600 read
+      statements inside the blocks' windows); `pglite-queue.test.ts` (25: order, holding, Q73, closing, errors, opening,
+      the pinned settings over a hostile `postgresql.conf`/`ALTER SYSTEM`); `results.test.ts` and `handles.test.ts` on
+      both backends; the PGlite halves of 1.2–1.4 and `test/determinism/cross-backend.test.ts`. **Found and fixed:**
+      Node.js 24.9.0's `JSON.parse` can read a one-escape object key (`"\t"`) as a backslash once another parse read the
+      key `"\\"` — A7's round trip failed on both backends — so `parseJsonLossless` is now the mapping's own JSON reader
+      (Q78). 46 deliberately wrong variants: 43 caught at once, 2 more after new tests, 1 equivalent. Coverage
+      `pglite.ts` 98.44 % lines / 96.61 % branches, `mapping.ts` 100 / 100 (floors `src/db/**` 90/85).
+      **Open question (not blocking):** Q78 (`design.md` §4 and §14 still prescribe `JSON.parse`). The CI run is
+      pending until the branch is pushed (Phase 3).
 - [ ] 2.3 Roles and `SET LOCAL ROLE`, provider functions (fixed `search_path`, `PUBLIC` revoked), the id pattern and
       schema-name collisions, shared-item schemas, and the `TRUNCATE` refusal.
       **Acceptance:** A13 including its negative control, A14, A15, A73.

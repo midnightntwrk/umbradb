@@ -27,22 +27,11 @@
 
 import postgres, { type Sql } from "postgres";
 import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
-import { UmbraError } from "./errors.js";
-import { mapRows, parameterText, type Row } from "./mapping.js";
+import { commitRolledBack, handleClosed, UmbraError } from "./errors.js";
+import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "./mapping.js";
 
-/**
- * The session settings every connection starts with: how PostgreSQL prints values, so that every mapped value and
- * every text the server prints is the same on every server and in every database, whatever their defaults —
- * `bytea_output` (the `bytea` mapping reads hex), `DateStyle` (the `Date` mapping reads ISO), `IntervalStyle`,
- * `TimeZone` and `extra_float_digits` (floats printed exactly).
- */
-export const PINNED_SETTINGS: readonly (readonly [string, string])[] = [
-  ["bytea_output", "hex"],
-  ["DateStyle", "ISO, MDY"],
-  ["IntervalStyle", "postgres"],
-  ["TimeZone", "UTC"],
-  ["extra_float_digits", "1"],
-];
+/** The session settings every connection starts with (`./mapping.ts`, shared with the PGlite backend). */
+export { PINNED_SETTINGS };
 
 /** Options of {@link openPostgres}. */
 export interface PostgresOptions {
@@ -153,15 +142,6 @@ export function classifyDriverError(error: unknown, connection: Role): UmbraErro
     details.cause = code;
   }
   return new UmbraError("database-error", message, details, { cause: error });
-}
-
-function handleClosed(handle: "read" | "transaction" | "database"): UmbraError {
-  const what = {
-    read: "a read handle was used after its read ended",
-    transaction: "a transaction was used after it ended",
-    database: "the database was used after it was closed",
-  }[handle];
-  return new UmbraError("handle-closed", what, { handle });
 }
 
 /** The value OIDs whose default driver serializer would rewrite a parameter's text (`postgres` 3.4.9 `types.js`). */
@@ -361,14 +341,8 @@ class Writer {
     }
     ended = true;
     const commit = await session.run("COMMIT", [], true);
-    if (commit.command !== "COMMIT") {
-      // PostgreSQL answers COMMIT with ROLLBACK when a failed statement aborted the transaction.
-      throw new UmbraError(
-        "database-error",
-        "the transaction was rolled back, not committed: a statement in it failed, and its error was caught",
-        { reason: "commit-rolled-back" },
-      );
-    }
+    // PostgreSQL answers COMMIT with ROLLBACK when a failed statement aborted the transaction.
+    if (commit.command !== "COMMIT") throw commitRolledBack();
     return result;
   }
 }

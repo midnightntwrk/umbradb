@@ -20,10 +20,10 @@
  * | `time`, `timetz`, `interval`, `money` | its text |
  * | an array of any of these | a JavaScript array (nested per dimension) of the elements so mapped, `NULL` → `null` |
  *
- * The texts are PostgreSQL's output under the session settings every connection of the API pins (`PINNED_SETTINGS` of
- * `./postgres.ts`): `bytea` in hex, dates in ISO style, intervals in `postgres` style, time zone UTC, floats in their
- * shortest exact form. Output the mapping cannot read (`bytea` in escape form after a session changed
- * `bytea_output`, say) is refused, never guessed.
+ * The texts are PostgreSQL's output under the session settings every backend pins ({@link PINNED_SETTINGS}): `bytea`
+ * in hex, dates in ISO style, intervals in `postgres` style, time zone UTC, floats in their shortest exact form.
+ * Output the mapping cannot read (`bytea` in escape form after a session changed `bytea_output`, say) is refused,
+ * never guessed.
  *
  * Parameters are sent as text with no type, so PostgreSQL types each from the statement as it types an untyped
  * literal (write `$1::bigint` where the statement does not say); {@link parameterText} gives each JavaScript value's
@@ -31,6 +31,21 @@
  */
 
 import { UmbraError } from "./errors.js";
+
+/**
+ * The session settings every session of the database API starts with — each PostgreSQL connection (`./postgres.ts`)
+ * and PGlite's one session (`./pglite.ts`): how PostgreSQL prints values, so that every mapped value and every text
+ * the server prints is the same on both backends, on every server and in every database, whatever their defaults —
+ * `bytea_output` (the `bytea` mapping reads hex), `DateStyle` (the `Date` mapping reads ISO), `IntervalStyle`,
+ * `TimeZone` and `extra_float_digits` (floats printed exactly).
+ */
+export const PINNED_SETTINGS: readonly (readonly [string, string])[] = [
+  ["bytea_output", "hex"],
+  ["DateStyle", "ISO, MDY"],
+  ["IntervalStyle", "postgres"],
+  ["TimeZone", "UTC"],
+  ["extra_float_digits", "1"],
+];
 
 /** A result row: column name → mapped value. When two columns share a name, the later one's value is kept. */
 export type Row = Record<string, unknown>;
@@ -94,19 +109,158 @@ function parseBytea(text: string): Uint8Array {
 const parseDate = (text: string): Date => new Date(text);
 
 /**
- * JSON parsed without loss (DB-2): an integer written as digits outside ±(2^53 − 1) becomes a `bigint` (JSON.parse
- * source text access, Node.js 24); every other number is JSON.parse's.
+ * JSON parsed without loss (DB-2), by a reader of RFC 8259's grammar written here, not `JSON.parse`:
+ * - an integer written as digits outside ±(2^53 − 1) becomes a `bigint`; every other number is what `JSON.parse`
+ *   makes of it (the `Number` of its text: `-0`, fractions, exponents, `1e400` as `Infinity`);
+ * - strings, objects and arrays as `JSON.parse` builds them: every escape, each `\uXXXX` one UTF-16 code unit; a key
+ *   given twice keeps its first place and its last value; `__proto__` is an own property; nesting is limited by memory
+ *   only (no recursion);
+ * - text that is not JSON is refused (`database-error`, `reason: unreadable-result`), never guessed.
+ *
+ * Not `JSON.parse`, because Node.js 24.9.0's (V8 13.6.233.10) can read an object key that is one escape sequence
+ * (`"\t"`, `"\n"`, `"\u00e9"`, …) as a backslash once an earlier `JSON.parse` in the process has read the key `"\\"`
+ * — whether it does depends on the strings the process already holds — so two different documents would read back
+ * equal, and so would their contents hashes (found by task 2.2's differential round trip; the decision record's Q78).
  */
 export function parseJsonLossless(text: string): unknown {
-  const reviver = (_key: string, value: unknown, context?: { source?: string }): unknown => {
-    if (typeof value === "number" && !Number.isSafeInteger(value)) {
-      const source = context?.source;
-      if (source !== undefined && /^-?[0-9]+$/.test(source)) return BigInt(source);
+  let at = 0;
+  const unreadable = (): UmbraError => malformed("json", text);
+  const skipSpace = (): void => {
+    for (let code = text.charCodeAt(at); code === 0x20 || code === 0x0a || code === 0x0d || code === 0x09; ) {
+      code = text.charCodeAt(++at);
     }
-    return value;
   };
-  return JSON.parse(text, reviver as (this: unknown, key: string, value: unknown) => unknown);
+  // At the opening quote; returns the string and leaves `at` after the closing quote.
+  const readString = (): string => {
+    at++;
+    let value = "";
+    for (;;) {
+      JSON_PLAIN_RUN.lastIndex = at;
+      JSON_PLAIN_RUN.test(text);
+      value += text.slice(at, JSON_PLAIN_RUN.lastIndex);
+      at = JSON_PLAIN_RUN.lastIndex;
+      const char = text[at];
+      if (char === '"') {
+        at++;
+        return value;
+      }
+      // Anything else that stops a run is a control character, the end of the text, or a backslash.
+      if (char !== "\\") throw unreadable();
+      const escaped = text[at + 1];
+      if (escaped === "u") {
+        JSON_HEX4.lastIndex = at + 2;
+        if (!JSON_HEX4.test(text)) throw unreadable();
+        value += String.fromCharCode(Number.parseInt(text.slice(at + 2, at + 6), 16));
+        at += 6;
+      } else {
+        const decoded = escaped === undefined ? undefined : JSON_ESCAPES.get(escaped);
+        if (decoded === undefined) throw unreadable();
+        value += decoded;
+        at += 2;
+      }
+    }
+  };
+  // An object's key and its colon.
+  const readKey = (): string => {
+    skipSpace();
+    if (text[at] !== '"') throw unreadable();
+    const key = readString();
+    skipSpace();
+    if (text[at] !== ":") throw unreadable();
+    at++;
+    return key;
+  };
+  const readScalar = (): unknown => {
+    if (text[at] === '"') return readString();
+    for (const [word, value] of JSON_WORDS) {
+      if (text.startsWith(word, at)) {
+        at += word.length;
+        return value;
+      }
+    }
+    JSON_NUMBER.lastIndex = at;
+    const token = JSON_NUMBER.exec(text)?.[0];
+    if (token === undefined) throw unreadable();
+    at += token.length;
+    const value = Number(token);
+    return Number.isSafeInteger(value) || !/^-?[0-9]+$/.test(token) ? value : BigInt(token);
+  };
+
+  // The arrays and objects not yet closed, innermost last.
+  const open: ({ readonly array: unknown[] } | { readonly object: Record<string, unknown>; key: string })[] = [];
+  for (;;) {
+    skipSpace();
+    let value: unknown;
+    const first = text[at];
+    if (first === "[") {
+      at++;
+      skipSpace();
+      if (text[at] !== "]") {
+        open.push({ array: [] });
+        continue;
+      }
+      at++;
+      value = [];
+    } else if (first === "{") {
+      at++;
+      skipSpace();
+      if (text[at] !== "}") {
+        open.push({ object: {}, key: readKey() });
+        continue;
+      }
+      at++;
+      value = {};
+    } else {
+      value = readScalar();
+    }
+    // Hands the value to the innermost open container, closing every container that ends after it.
+    for (;;) {
+      skipSpace();
+      const container = open[open.length - 1];
+      if (container === undefined) {
+        if (at !== text.length) throw unreadable();
+        return value;
+      }
+      if ("array" in container) {
+        container.array.push(value);
+      } else if (container.key === "__proto__") {
+        // An own property, as JSON.parse makes it, not the object's prototype.
+        const property = { value, writable: true, enumerable: true, configurable: true };
+        Object.defineProperty(container.object, "__proto__", property);
+      } else {
+        container.object[container.key] = value;
+      }
+      const separator = text[at++];
+      if (separator === ",") {
+        if ("object" in container) container.key = readKey();
+        break;
+      }
+      if (separator !== ("array" in container ? "]" : "}")) throw unreadable();
+      open.pop();
+      value = "array" in container ? container.array : container.object;
+    }
+  }
 }
+
+/** Characters a JSON string holds as themselves: anything but `"`, `\` and the control characters. */
+const JSON_PLAIN_RUN = /[^"\\\u0000-\u001f]*/y;
+const JSON_HEX4 = /[0-9a-fA-F]{4}/y;
+const JSON_NUMBER = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+const JSON_ESCAPES: ReadonlyMap<string, string> = new Map([
+  ['"', '"'],
+  ["\\", "\\"],
+  ["/", "/"],
+  ["b", "\b"],
+  ["f", "\f"],
+  ["n", "\n"],
+  ["r", "\r"],
+  ["t", "\t"],
+]);
+const JSON_WORDS: readonly (readonly [string, boolean | null])[] = [
+  ["true", true],
+  ["false", false],
+  ["null", null],
+];
 
 /** The types the mapping names, with their fixed OIDs (PostgreSQL's built-in `pg_type` entries). */
 export const RESULT_TYPES: readonly ResultType[] = [

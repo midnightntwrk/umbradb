@@ -67,3 +67,28 @@ export class UmbraError extends Error {
     this.details = Object.freeze({ ...details });
   }
 }
+
+/**
+ * `handle-closed`: a read handle or transaction used after it ended, or a database used after it was closed — the
+ * same error, with the same message, from both backends (DB-1).
+ */
+export function handleClosed(handle: "read" | "transaction" | "database"): UmbraError {
+  const what = {
+    read: "a read handle was used after its read ended",
+    transaction: "a transaction was used after it ended",
+    database: "the database was used after it was closed",
+  }[handle];
+  return new UmbraError("handle-closed", what, { handle });
+}
+
+/**
+ * A `COMMIT` that PostgreSQL answered with `ROLLBACK`, because a failed statement aborted the transaction and the body
+ * caught its error: never reported as a commit, on either backend.
+ */
+export function commitRolledBack(): UmbraError {
+  return new UmbraError(
+    "database-error",
+    "the transaction was rolled back, not committed: a statement in it failed, and its error was caught",
+    { reason: "commit-rolled-back" },
+  );
+}

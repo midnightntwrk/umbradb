@@ -1,13 +1,14 @@
 /**
  * The database API (`openspec/changes/core-arch/specs/database-api/spec.md`, `design.md` §4): the one interface the
  * runner, the backbone parts and the modules use to read and write a database, over PostgreSQL (`./postgres.ts`) and
- * PGlite (task 2.2). Its errors are {@link UmbraError}s (`./errors.ts`); its result mapping and parameter texts are
- * `./mapping.ts`'s, the same on both backends.
+ * PGlite (`./pglite.ts`), with the same observable results (DB-1). Its errors are {@link UmbraError}s
+ * (`./errors.ts`); its result mapping and parameter texts are `./mapping.ts`'s, the same on both backends.
  *
  * The handles are CORE-ARCH §4.10's. A read handle sees exactly one committed height and reports it (DB-2); the
  * determinism code takes only its `query` (`ConsistentRead`, `../determinism/public-tables.ts`). Writes go through
- * {@link Database.transaction}, one transaction at a time on the writer connection (DB-5); the block and schema write
- * handles of DB-3 (own schema, `SET LOCAL ROLE`, closing) are built on it by later tasks.
+ * {@link Database.transaction}, one transaction at a time: on PostgreSQL on the writer connection (DB-5); on PGlite
+ * as a job of the one queue every read and transaction waits in (DB-4). The block and schema write handles of DB-3
+ * (own schema, `SET LOCAL ROLE`, closing) are built on it by later tasks.
  */
 
 import type { ConsistentRead } from "../determinism/public-tables.js";
@@ -52,17 +53,19 @@ export type CommittedHeight = (read: ConsistentRead) => Promise<bigint | null>;
 export interface Database {
   /**
    * Runs `body` with a read handle that sees one committed height (DB-2): on PostgreSQL one `REPEATABLE READ READ
-   * ONLY` transaction on a pooled read connection, its height read first by {@link CommittedHeight}. The handle closes
-   * when `body` settles; using it afterwards fails with `handle-closed`. Resolves with `body`'s result; rejects with
-   * `body`'s own error unchanged, or with an {@link UmbraError}.
+   * ONLY` transaction on a pooled read connection, on PGlite one job of its queue (DB-4); its height read first by
+   * {@link CommittedHeight}. The handle closes when `body` settles; using it afterwards fails with `handle-closed`.
+   * Resolves with `body`'s result; rejects with `body`'s own error unchanged, or with an {@link UmbraError}.
    */
   read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T>;
   /**
-   * Runs `body` in one transaction on the writer connection (DB-5): it commits when `body` resolves and rolls back when
-   * `body` rejects (with `body`'s own error, unchanged). Transactions run one at a time, in the order asked for. The
-   * transaction closes when it ends; using it afterwards fails with `handle-closed`. A transaction a failed statement
-   * aborted is rolled back, never reported as committed, even when `body` caught the statement's error. A lost
-   * connection fails with `connection-lost` (retryable); the next transaction opens a new connection.
+   * Runs `body` in one transaction — on PostgreSQL on the writer connection (DB-5), on PGlite as one exclusive job of
+   * its queue (DB-4): it commits when `body` resolves and rolls back when `body` rejects (with `body`'s own error,
+   * unchanged). Transactions run one at a time, in the order asked for. The transaction closes when it ends; using it
+   * afterwards fails with `handle-closed`. A transaction a failed statement
+   * aborted is rolled back, never reported as committed, even when `body` caught the statement's error. On PostgreSQL a
+   * lost connection fails with `connection-lost` (retryable) and the next transaction opens a new connection; PGlite
+   * runs in the process and has no connection to lose.
    */
   transaction<T>(body: (tx: Transaction) => Promise<T>): Promise<T>;
   /** Closes every connection; later reads and transactions fail with `handle-closed`. Closing twice is harmless. */

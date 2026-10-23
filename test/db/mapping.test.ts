@@ -95,6 +95,103 @@ describe("lossless JSON (DB-2)", () => {
     expect(parseJsonLossless("1e2")).toBe(100);
     expect(parseJsonLossless('"9007199254740993"')).toBe("9007199254740993");
   });
+
+  // Node.js 24.9.0's JSON.parse (V8 13.6.233.10) can read such a key as a backslash once an earlier JSON.parse in the
+  // process has read the key "\\": two different documents would read back equal, and so would their contents
+  // hashes. Whether it does depends on the strings the process already holds, so this test cannot make it happen on
+  // demand; A7's seeded differential round trip (`differential.test.ts`) did, on both backends, and is its reproduction.
+  it("reads an object key that is one escape sequence as its character, also after the key \"\\\\\" was read", () => {
+    const keys = (text: string): string[] => Object.keys(parseJsonLossless(text) as object);
+    expect(keys('{"\\\\": 1}')).toEqual(["\\"]);
+    const ESCAPES: readonly (readonly [string, string])[] = [
+      ["\\t", "\t"],
+      ["\\n", "\n"],
+      ["\\r", "\r"],
+      ["\\b", "\b"],
+      ["\\f", "\f"],
+      ['\\"', '"'],
+      ["\\/", "/"],
+      ["\\\\", "\\"],
+      ["\\u00e9", "é"],
+      ["\\u0041", "A"],
+      ["\\uD83D", "\uD83D"],
+    ];
+    for (const [escape, char] of ESCAPES) {
+      expect(keys(`{"\\\\": 0}`)).toEqual(["\\"]);
+      expect(keys(`{"${escape}": 1}`), escape).toEqual([char]);
+      const nested = parseJsonLossless(`{"x": {"${escape}": [{"${escape}": 2}]}}`);
+      expect(nested, escape).toEqual({ x: { [char]: [{ [char]: 2 }] } });
+      expect(parseJsonLossless(`["${escape}"]`), escape).toEqual([char]);
+    }
+    expect(parseJsonLossless('{"\\t": 1, "\\\\": 2, "\\n": 3}')).toEqual({ "\t": 1, "\\": 2, "\n": 3 });
+  });
+
+  it("reads JSON as JSON.parse does: whitespace, every escape, surrogates, duplicate keys, __proto__, deep nesting", () => {
+    const text =
+      ' \t\n\r{ "a" : [ true , false , null , -0 , 0.5 , -1.25e-3 , 1E2 , 1e400 , "" ] ,\r\n ' +
+      '"b\\u00e9\\ud83d\\ude00\\/\\"" : { } , "a" : [ ] , "__proto__" : { "x" : 1 } } \n';
+    const read = parseJsonLossless(text) as Record<string, unknown>;
+    expect(read).toEqual(JSON.parse(text));
+    expect(Object.keys(read)).toEqual(["a", 'bé😀/"', "__proto__"]);
+    expect(read.a).toEqual([]);
+    expect(Object.getPrototypeOf(read)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(read, "__proto__")?.value).toEqual({ x: 1 });
+    expect(Object.is((parseJsonLossless("[-0]") as number[])[0], -0)).toBe(true);
+    expect(parseJsonLossless("[1e400, -1e400]")).toEqual([Infinity, -Infinity]);
+    const deep = 100_000;
+    let nested = parseJsonLossless(`${"[".repeat(deep)}7${"]".repeat(deep)}`);
+    for (let depth = 0; depth < deep; depth++) nested = (nested as unknown[])[0];
+    expect(nested).toBe(7);
+  });
+
+  it("refuses text that is not JSON as unreadable output, as an UmbraError", () => {
+    const NOT_JSON = [
+      ...["", " ", "{", "}", "[1,]", "[,1]", '{"a"}', '{"a":}', '{"a":1,}', "{a:1}", "[1 2]", "[]x", "{'a':1}"],
+      ...['{"a" 12}', '{"a"x1}', '{"a",1}', '"\\'],
+      ...['"\\x"', '"\\u12"', '"a', '"\u0001"', "01", "-", "1.", ".5", "1e", "+1", "tru", "nul", "NaN", "Infinity"],
+    ];
+    for (const text of NOT_JSON) {
+      expect(() => JSON.parse(text), `JSON.parse refuses ${JSON.stringify(text)} too`).toThrow(SyntaxError);
+      const error = (() => {
+        try {
+          parseJsonLossless(text);
+        } catch (thrown) {
+          return thrown;
+        }
+        return undefined;
+      })();
+      expect(error, JSON.stringify(text)).toBeInstanceOf(UmbraError);
+      expect((error as UmbraError).details, JSON.stringify(text)).toEqual({ reason: "unreadable-result", type: "json" });
+    }
+  });
+
+  it("round-trips random JSON values through JSON.stringify, with random spacing (property, seed 20261023)", () => {
+    // A JSON value as this reader must give it back: an integer printed as digits outside ±(2^53 − 1) as a bigint
+    // (JSON.stringify prints such doubles as digits below 1e21), and -0 as 0 (JSON.stringify prints it "0").
+    const expected = (value: unknown): unknown => {
+      if (typeof value === "number") {
+        if (Object.is(value, -0)) return 0;
+        const text = JSON.stringify(value);
+        return Number.isSafeInteger(value) || !/^-?[0-9]+$/.test(text) ? value : BigInt(text);
+      }
+      if (Array.isArray(value)) return value.map(expected);
+      if (value !== null && typeof value === "object") {
+        const out: Record<string, unknown> = {};
+        for (const [key, inner] of Object.entries(value)) {
+          Object.defineProperty(out, key, { value: expected(inner), enumerable: true, writable: true, configurable: true });
+        }
+        return out;
+      }
+      return value;
+    };
+    fc.assert(
+      fc.property(fc.jsonValue(), fc.constantFrom(undefined, 0, 1, 2, "\t", " \r\n "), (value, space) => {
+        const text = JSON.stringify(value, null, space);
+        expect(parseJsonLossless(text)).toEqual(expected(value));
+      }),
+      { seed: SEED, numRuns: 500 },
+    );
+  });
 });
 
 describe("the result mapping by type (DB-2; design.md §4's column-type table)", () => {
