@@ -32,13 +32,14 @@ the logged value in the ledger's serialization. It SHALL NOT start mid-chain.
 
 ### Requirement: CC-3 `core-contract-logs-fast` stores the same logs without state, or halts
 
-WHERE `core-contract-logs-fast` is enabled (development only), it SHALL read logs from the transcripts without ledger
-state and SHALL store a log only when its transaction succeeded fully and the value the `Log` operation takes is a
-literal pushed onto the VM stack by the transcript itself on an unconditional path to it, decoded by the ledger
-package's `decodeLogItem` (a malformed wrapper becomes a version-0 `Misc` log of the whole value; data larger than the
-ledger's emitted-log bound produces no log). IF a log is anything else — a log in a fallible segment of a partially
-successful transaction, a value read from contract state, a value behind a `branch` — THEN it SHALL halt. On every block
-it SHALL store exactly the rows `core-contract-logs-full` would, or halt. It MAY start mid-chain.
+WHERE `core-contract-logs-fast` is enabled (development only), it SHALL read logs from the transcripts, in a ledger task
+that does not need the state (LG-17), and SHALL store a log only when its transaction succeeded fully and the value the
+`Log` operation takes is a literal pushed onto the VM stack by the transcript itself on an unconditional path to it,
+decoded by the ledger package's `decodeLogItem` (a malformed wrapper becomes a version-0 `Misc` log of the whole value;
+data larger than the ledger's emitted-log bound produces no log). IF a log is anything else — a log in a fallible
+segment of a partially successful transaction, a value read from contract state, a value behind a `branch` — THEN it
+SHALL halt. On every block it SHALL store exactly the rows `core-contract-logs-full` would, or halt. It MAY start
+mid-chain.
 
 #### Scenario: Fast equals full
 - **WHEN** a range with literal logs is processed once with `-full` and once with `-fast`

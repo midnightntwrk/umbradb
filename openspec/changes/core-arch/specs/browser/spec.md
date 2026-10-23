@@ -8,13 +8,13 @@ modules in the browser, for showing the product and testing modules; it is a dev
 ### Requirement: BR-1 Workers and databases in the browser
 
 THE browser build SHALL run the core in a dedicated Web Worker with PGlite, the ledger work in its own worker, and each
-private instance in its own worker with its own PGlite; storage SHALL be in memory by default and in OPFS optionally;
-one worker SHALL own each database, through a Web Locks lock named after the database. THE build SHALL always set the
-development opt-in.
+private instance in its own worker with its own PGlite; storage SHALL be in memory, and SHALL use OPFS only once task
+16.1 has verified PGlite's OPFS storage in a browser worker; one worker SHALL own each database, through a Web Locks
+lock named after the database. THE build SHALL always set the development opt-in.
 
-#### Scenario: A second tab
-- **WHEN** the same page with OPFS storage opens in a second tab
-- **THEN** the second tab's core refuses with `writer-lock-held` while the first holds the lock
+#### Scenario: A second owner for one database
+- **WHEN** a second worker in the page tries to open a database whose Web Locks lock another worker holds
+- **THEN** it refuses with `writer-lock-held`
 
 ### Requirement: BR-2 The browser starts at the tip
 

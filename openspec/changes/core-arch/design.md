@@ -110,17 +110,19 @@ interface BlockSource {
   `umbradb_i_<item>` stay within PostgreSQL's 63-byte identifiers; shadow tables are named by hash (below).
 - **Writer lock (DB-11).** PostgreSQL: `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on the writer connection
   (classes 1 and 2 were 0.9.5's, `src/postgres/transaction-lease.ts:192-195`). PGlite in Node.js — which lets two
-  processes open one data directory (probe, PGlite 0.5.10, 2026-10-22) — uses the directory `<data directory>.lock`:
-  1. **Take:** `mkdir` it (atomic: one creator wins), then write `owner` inside it with a random 128-bit token. A lock
-     directory without `owner` is treated like a stale one once its modification time is 30 s old.
-  2. **Hold:** every second, read `owner` and `utimes` the directory; before every block's `BEGIN` and `COMMIT`, read
-     `owner` again. A missing directory or another token halts with `writer-lock-lost` before any further write.
-  3. **Stale and take over:** a lock whose modification time is more than 30 s old is stale. The contender notes its
-     token T, renames the directory to `<data directory>.lock.stale-<random>` (atomic), and reads the renamed
-     directory's token: if it is T, it deletes it and goes back to step 1 (where `mkdir` decides between contenders);
-     if not (a fresh lock had replaced the stale one), it renames it back and refuses with `writer-lock-held`.
-  4. **Residual window, accepted for a development-only backend:** a holder paused for more than 30 s inside a block
-     transaction can complete that commit after losing the lock; its next check halts it.
+  processes open one data directory (probe, PGlite 0.5.10, 2026-10-22) — uses the directory `<data directory>.lock`,
+  fail-stop (Q50):
+  1. **Take:** `mkdir` it (atomic: one creator wins), then write `owner` inside it: the process id, the process start
+     time (from `ps -o lstart= -p <pid>` on macOS and Linux), the host name and a random 128-bit token.
+  2. **Hold:** every second, and before every block's `BEGIN` and `COMMIT`, read `owner`; a missing directory or
+     another token halts with `writer-lock-lost` before any further write.
+  3. **An existing lock:** read `owner`. If the host name is this host and no live process has that id with that start
+     time, the holder is gone: rename the directory to `<data directory>.lock.dead-<random>` (atomic), check that the
+     renamed directory holds the token just read (if not, rename it back and refuse), delete it, and go back to step 1,
+     where `mkdir` decides between contenders. In every other case — the holder is alive (even paused or asleep), the
+     host differs, `owner` is missing or unreadable, or the start time cannot be read — refuse with `writer-lock-held`;
+     `umbradb unlock` removes the lock after the operator has made sure no writer runs.
+  There is no time-based staleness, so a paused writer never loses its lock and two writers never coexist.
   Browser: a Web Locks lock named after the database (BR-1), which the browser releases when the worker ends.
 - **Durability probe.** Moved unchanged in behaviour (`fsync` :72-84, `full_page_writes` with the override :61-66 and
   :86, pooler detection :16 of `src/postgres/durability-probe.ts`); the override is `fullPageWritesOffAllowed`.
@@ -176,8 +178,13 @@ interface ParsedTransaction {
               deploys: { address: Uint8Array }[] }[];
 }
 // A module's ledger task (LG-17), run in the ledger worker once per block.
-type LedgerTask = (block: { height: bigint; transactions: unknown[]; /* native parsed objects */
-                            stateBefore: StateHandle; packages: Readonly<Record<string, unknown>> }) => unknown;
+interface LedgerTask {
+  name: string;
+  needsState: boolean;                         // true: the module must require `ledger-state` (LG-17)
+  run(block: { height: bigint; transactions: unknown[];          // native parsed objects
+               stateBefore?: StateHandle;                         // only when needsState
+               packages: Readonly<Record<string, unknown>> }): unknown;   // returns plain data
+}
 ```
 
 `firstRegularAtParentTime` is true for runtimes 0.22, 1.0 below 1.0.300 and 2.0, and never for block 0, as the official
@@ -218,7 +225,8 @@ rounds take keys in byte order, and deleted nodes are evicted from the worker's 
 The host program provides the ledger worker's entry: a small file that imports the same module packages as the main
 thread and calls `runLedgerWorker(modules)` (exported); in the browser it is the ledger worker's bundle (§9.2). For each
 block, the worker parses the transactions, runs every active module's `ledgerTasks` in the order of RN-3 — each with the
-native parsed objects, the state before the block (read-only) and `rawPackages()` — checks that each result is
+native parsed objects, `rawPackages()` and, for a task that declares `needsState`, the state before the block
+(read-only) — checks that each result is
 structured-cloneable plain data (a `structuredClone` round trip that preserves it), and posts `block-parsed` and the
 task results to the main thread, where they become `block` items before `on-compute`. `core-ledger-state`'s apply, the
 conversion and the sweep step then run in the worker as part of `on-compute`. Ledger tasks keep no state between blocks.
@@ -262,7 +270,7 @@ process; a revision boundary switches lists between heights, never within one.
   | `hello-ack` | `v: 1`, `lockstep: boolean`, `genesis: X`, `start: H`, `cursor: H` or `null`, `refused`: `null`, `"duplicate-instance"` or `"lockstep-behind"` |
   | `committed`, `report` | `v: 1`, `height: H`, `hash: X` |
   | `read` | `v: 1`, `id: string`, `statements`: an array of `{ sql: string, params: Value[] }` |
-  | `read-result` | `v: 1`, `id: string`, `height: H`, and either `rows` (one array of rows of `Value` per statement) or `error: string` (a code) |
+  | `read-result` | `v: 1`, `id: string`, `height: H` or `null` (before the first commit), and either `results`: one `{ columns: { name: string, type: string }[], rows: Value[][] }` per statement, or `error: string` (a code); `type` is the PostgreSQL type name that says how to read each `Value` back |
   | `api` | `v: 1`, `id: string`, `module: string`, `method: string`, `params` (JSON) |
   | `api-result` | `v: 1`, `id: string`, and either `result` (JSON) or `error: string` (a code) |
 
@@ -294,8 +302,9 @@ A start that finds the marker drops every schema the import created, then the ma
 
 `browser/` holds a static page and three worker entry points (core, ledger, private), bundled with `esbuild` (a new
 development dependency, pinned in task 0.1); PGlite runs in the core and private workers with `memory://` or
-`opfs-ahp://` storage; the admin endpoints are message calls; the page offers a snapshot file picker. `npm run
-build:browser` writes `dist-browser/`, which is not part of the npm package.
+`opfs-ahp://` storage once task 16.1 has verified it (memory only until then); the admin endpoints are message calls;
+the page offers a snapshot file picker. `npm run build:browser` writes `dist-browser/`, which is not part of the npm
+package.
 
 ## 10. Tables
 
@@ -308,7 +317,8 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits) |
 | `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`), version (text), data (jsonb, canonical), data_hash |
 | database API | `core_chain.migrations` | (module, migration_id) | checksum, position (int) |
-| `core-block-commit` | `core_block_commit.blocks` | height | hash (indexed, not unique: PostgreSQL cannot enforce a unique constraint without the partition key; the parent-hash chain keeps hashes distinct), parent_hash, spec_version (int), ledger_version (text), block_timestamp_ms |
+| `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_timestamp_ms |
+| `core-block-commit` | `core_block_commit.hashes` (not partitioned) | hash | height — makes a repeated hash fail, which the height-partitioned `blocks` table cannot enforce |
 | `core-digest` | `core_digest.digests` | (height, module) | digest |
 | `core-chain-events` | `core_chain_events.events` | (height, event_index) | phase (text), extrinsic_index (int null), pallet, name (text), bytes (SCALE), fields (jsonb, canonical) |
 | `core-block-parsed` | `core_block_parsed.transactions` | (height, tx_index) | tx_hash, kind (`regular`, `system`), size (int) |
@@ -356,7 +366,8 @@ for a private instance, `lockstep-behind` and `report-hash-mismatch`.
 `ProcessHandle`, `ProcessState`, `ErrorCode`, `ParsedTransaction`, `LedgerTask`.
 
 **Command:** `umbradb run [--config <file>]`, `umbradb config check <file>`, `umbradb snapshot export --out <file>`,
-`umbradb snapshot import <file>`.
+`umbradb snapshot import <file>`, `umbradb unlock` (removes a PGlite lock whose holder cannot be proven gone, after
+the operator has checked that no writer runs; DB-11).
 
 ## 13. Quality gates: what moves and what is retired (LS-5; for the owner's approval, CORE-ARCH SC-010)
 
@@ -405,7 +416,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | Mainnet 1.0 boundary at F = 1,774,492 | `midnight-indexer/chain-indexer/src/infra/subxt_node/header.rs:56-91` | Verified (reference fixture) |
 | Storage layout `layout-v2`, children with embedded nodes, `gc-v1` | `midnight-ledger/storage-core/src/db/sql.rs:258-262`, `arena.rs:285-331`, `gc.rs:93-250`, `backend.rs:771-790` | Verified (reference) |
 | The VM's log decoding | `midnight-ledger/onchain-vm/src/vm.rs:241-275` | Verified (reference) |
-| The published v9 WASM lacks the functions of §5.2 | `midnight-ledger/ledger-wasm/src/` (`@midnight/ledger-v9` 1.0.0-rc.5) | **Unconfirmed** in detail: task 0.2 lists each missing export |
+| The published v9 WASM lacks the functions of §5.2 | `midnight-ledger/ledger-wasm/src/state.rs` (`@midnight/ledger-v9` 1.0.0-rc.5): `LedgerState` offers whole-state `serialize`/`deserialize` (`state.rs:206-212`) and no state root, node-store loading, flush, persist/release, child references, eviction, contract keys or log decoding (searched 2026-10-22) | Verified (reference); these are the patches of §5.2 |
 | The v8→v9 conversion builds to WASM | `v8-to-v9-state-translation` at `midnight-ledger` `da96e33d78ee9b7d3867b15c1037510d499cd909` (pinned by `midnight-node/Cargo.toml:115`): `cargo check --target wasm32-unknown-unknown` succeeds with `getrandom`'s `wasm_js` backend (2026-10-22) | Verified (compile check); running it is task 0.2 |
 | Genesis cNight registrations are enumerated by key | `midnight-indexer/chain-indexer/src/infra/subxt_node/runtimes/v2_1_0.rs:403-412` iterates the double map; `state_getKeysPaged` in `midnight-node/docs/openrpc.json:769` | Verified (reference) |
 | RFC 8949 §4.2.1 and Appendix A | https://www.rfc-editor.org/rfc/rfc8949 | Verified (normative text) |

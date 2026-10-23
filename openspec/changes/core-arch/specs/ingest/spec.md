@@ -121,8 +121,10 @@ THE system SHALL handle errors as follows: a node connection error, timeout, HTT
 subscriptions or finalized processing SHALL be retried with exponential back-off from 1 s doubling up to
 `backoffCeilingMs` (default 30 s) without limit, with the condition `node-retrying`; a lost database connection SHALL be
 retried the same way with `database-retrying` and the writer lock re-acquired (DB-11) — IF the connection was lost
-before COMMIT THEN the block transaction is gone, so the ledger worker's state and the block context SHALL be discarded
-and the state reloaded at the cursor before h is processed again from `on-compute`, and IF it was lost during COMMIT
+before COMMIT THEN the block transaction is gone: the `block` items published before `on-compute` (by `on-fetch`,
+`on-parse` and ledger tasks, which depend only on the block and the state at h − 1) SHALL be kept, every later item and
+the ledger worker's state after h − 1 SHALL be discarded, the state SHALL be reloaded at the cursor, and h SHALL be
+processed again from `on-compute`, and IF it was lost during COMMIT
 THEN IN-11 SHALL apply; any error on a queued best block (node error or timeout, fetch, decode, callback) SHALL drop
 that block from the queue without retry; every other error at a finalized height SHALL roll back and halt (RN-8).
 

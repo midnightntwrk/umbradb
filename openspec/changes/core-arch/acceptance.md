@@ -42,7 +42,7 @@ release assets that CI downloads and verifies.
   `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on any difference.
   (LS-5)
 - **A6** `[CI]` `umbradb sync` and `umbradb` with no argument print the usage and exit 2; `umbradb run`, `config check`,
-  `snapshot export` and `snapshot import` are recognized. (LS-6)
+  `snapshot export`, `snapshot import` and `unlock` are recognized. (LS-6)
 
 ## 2. Database API
 
@@ -77,10 +77,11 @@ release assets that CI downloads and verifies.
   the module's `on-start-db` callback did not run, and startup refuses. (DB-9)
 - **A17** `[FAULT]` A second writer refuses with `writer-lock-held` on PostgreSQL and on PGlite (lock directory); after
   the writer connection is terminated, the writer re-acquires the lock before its next write; if another process took
-  the lock meanwhile, processing halts; a PGlite writer paused (SIGSTOP) for 40 s between blocks while another process
-  takes over halts with `writer-lock-lost` on resuming, before its next `BEGIN`; two processes started together against
-  a 40-second-old stale lock end with exactly one running; a lock directory left by a kill right after `mkdir` (no
-  `owner`) ages out and is taken over. (DB-11)
+  the lock meanwhile, processing halts; a PGlite writer paused with `SIGSTOP` for 5 minutes keeps its lock — a second
+  process refuses — and continues after `SIGCONT`; after a `SIGKILL` the restarted process takes the lock over and
+  continues from the cursor; two processes started together against a dead holder's lock end with exactly one running;
+  a lock with another host name, or without `owner`, refuses until `umbradb unlock`; a holder whose lock directory is
+  removed halts with `writer-lock-lost` before its next write. (DB-11)
 - **A18** `[CI]` On PostgreSQL, startup refuses with `fsync=off`, with a detected transaction pooler, and with
   `full_page_writes=off` unless `fullPageWritesOffAllowed` is set; on PGlite, startup refuses without the development
   opt-in. (DB-12, CF-9)
@@ -115,9 +116,10 @@ release assets that CI downloads and verifies.
   module `entry` with another module's settings are type errors. (CF-2)
 - **A28** `[CI]` Entry-shape violations (unknown property, `stop < start`, bad hex) and schema violations each refuse
   startup naming the entry and field; absent fields take declared defaults; an upgrade whose new schema renames a
-  setting starts with the old revision written as a `versionEntry` equal to its recorded row; a `versionEntry` that
-  differs from its recorded row refuses startup; an unrecorded `versionEntry` starting at or below cursor + 1 refuses
-  startup; one starting above it is recorded as written. (CF-3)
+  setting starts with the old revision written as a `versionEntry` equal to its recorded row; a `versionEntry` at or
+  below the cursor that differs from its recorded row refuses startup; a `versionEntry` above the cursor is recorded
+  with id, start, stop and version only, and one that carries a `config` is refused; an entry above the cursor may
+  change between restarts and is re-recorded. (CF-3, CF-6)
 - **A29** `[CI]` With a password in `database`, the password appears in neither `/config`, `/status` nor the captured
   logs. (CF-4, AE-6)
 - **A30** `[CI]` A configuration omitting a recorded entry refuses with `missing-entry`; a later revision with the same
@@ -168,9 +170,10 @@ release assets that CI downloads and verifies.
   `on-after-db-write` fire for h after restart, before any callback of h + 1, with h's height, hash and settings and no
   `block` items; `on-after-db-write` never receives `block` items, re-delivered or not. (RN-5, RN-11)
 - **A47** `[CI]` A build carrying module `m` 1.0.0 at cursor 20 records `versionEntry({ id: "m", start: 50, version:
-  "1.1.0", … })`; the runner then commits 49, completes 49's `on-after-db-write` and `on-stop-height`, and enters
-  `stopped` with `upgrade-required` (entry, needed, build), ready, serving reads at 49; a build carrying 1.1.0 then
-  validates that revision against its schema and continues from 50. (RN-12, CF-3, CF-8)
+  "1.1.0" })` without configuration; the runner then commits 49, completes 49's `on-after-db-write` and
+  `on-stop-height`, and enters `stopped` with `upgrade-required` (entry, needed, build), ready, serving reads at 49; a
+  build carrying 1.1.0 writes that revision with `m.entry`, which is validated against its schema and recorded, and
+  continues from 50; no secret or operational field of that revision was ever stored. (RN-12, CF-3, CF-8)
 - **A48** `[FAULT]` SIGTERM during `on-db-write` of h ends with h fully present or fully absent, and a restart resumes
   from the cursor. (RN-13)
 - **A49** `[CI]` With the source's head equal to the cursor, no transaction is open (checked in `pg_stat_activity` on
@@ -284,8 +287,9 @@ release assets that CI downloads and verifies.
 - **A85** `[FAULT]` A tape that drops the node connection for 2 minutes makes the process retry with back-off reaching
   `backoffCeilingMs` and report `node-retrying`, then resume with no height skipped or repeated; an error on a queued
   best block drops it without retry; a database connection terminated during `on-db-write` of h is retried with
-  `database-retrying`, the ledger state is reloaded at the cursor, and h is processed again with roots matching the
-  node's. (IN-10)
+  `database-retrying`: the items a module published in `on-parse` at h are still visible to its `on-compute` on the
+  retry, the block is not parsed again, the ledger state is reloaded at the cursor, and h's root matches the node's.
+  (IN-10)
 - **A86** `[FAULT]` Terminating the writer's backend during COMMIT: when the server committed h, the cursor is h after
   reconnecting, h is not processed again and `on-after-db-write` fires for h; when it did not, h is processed again from
   `on-compute`; a cursor that is neither halts with `unexpected-cursor`. (IN-11)
@@ -298,9 +302,9 @@ release assets that CI downloads and verifies.
   the anchor hash. (CD-1)
 - **A89** `[CI]` A module requiring `block-body` reads at h the extrinsics `core-block-fetch` fetched for h, decoded
   with the metadata of h's parent state. (CD-2)
-- **A90** `[CI]` After heights S…h commit, `core_block_commit.blocks` holds exactly one row per height with the node's
-  hash, the cursor is the last row, and its migration declares no unique constraint on `hash` alone (it would fail on a
-  partitioned table). (CD-3)
+- **A90** `[CI]` After heights S…h commit, `core_block_commit.blocks` and `core_block_commit.hashes` each hold exactly
+  one row per height with the node's hash, and the cursor is the last `blocks` row; a test source delivering a repeated
+  hash at a later height makes that block fail and processing halt. (CD-3)
 - **A91** `[CI]` `core-chain-events` stores every event of a range, and the events of a runtime-upgrade block U are
   decoded with the old runtime's metadata without error (devnet upgrade tape). (CD-4)
 - **A92** `[CI]` Each transaction is parsed once (counted calls); a block with a system transaction between two regular
@@ -352,8 +356,10 @@ release assets that CI downloads and verifies.
 - **A137** `[CI]` A test module's ledger task decodes each contract call's arguments with the native parsed objects
   and `rawPackages()`, and its `on-compute` receives them as its `block` item; with that task and three modules reading
   `block-parsed`, the package's parse function runs once per transaction; a task returning a WASM-backed object, or
-  throwing, fails the block with `callback-error` naming the module and the task; no main-thread callback receives a
-  native ledger object (each `block` item passes a `structuredClone` round trip). (LG-7, LG-17)
+  throwing, fails the block with `callback-error` naming the module and the task; a task without `needsState` gets no
+  state and runs mid-chain, while a module with a `needsState` task refuses to start where `core-ledger-state` is not
+  active; no main-thread callback receives a native ledger object (each `block` item passes a `structuredClone` round
+  trip). (LG-7, LG-17)
 
 ## 13. Contract data
 
@@ -375,9 +381,11 @@ release assets that CI downloads and verifies.
 - **A114** `[FAULT]` Dropping the transport while the public cursor advances 50 heights: after reconnecting, the private
   process processes the 50 heights in order. (PP-3)
 - **A115** `[CI]` Every message type round-trips through the zod schemas of `design.md` §8 and fails on a missing or
-  mistyped field; a `read-result` carries its request's `id`, the height read and `bigint`, `numeric` and `bytea`
-  values as strings; an `api-result` carries its request's `id`; an unknown `v` or `type`, or a message failing its
-  schema, closes the connection; a second `hello` with a connected id is refused with `duplicate-instance`. (PP-4)
+  mistyped field; a `read-result` carries its request's `id`, the height read (`null` on an empty public database) and,
+  per statement, the column names and types with the rows, and a `bigint`, `numeric`, `bytea` and `jsonb` value each
+  decode back to the value the core read; an `api-result` carries its request's `id`; an unknown `v` or `type`, or a
+  message failing its schema, closes the connection; a second `hello` with a connected id is refused with
+  `duplicate-instance`. (PP-4)
 - **A116** `[CI]` An independent instance stopped for 100 blocks never pauses the core and catches up from public data.
   (PP-5)
 - **A117** `[FAULT]` A stopped lockstep instance makes the core wait before `BEGIN` with no transaction open
@@ -411,7 +419,9 @@ release assets that CI downloads and verifies.
 - **A128** `[DIFF]` A snapshot exported on PostgreSQL at h, imported on PGlite and on PostgreSQL, and continued to
   h + 100, gives the same contents hash as an instance that never stopped. (SN-5)
 - **A129** `[CI]` In Chrome (headless, in CI), the page runs the core, ledger and a private instance in workers on
-  PGlite with the development opt-in; a second tab on the same OPFS database refuses with `writer-lock-held`. (BR-1)
+  PGlite with the development opt-in, storing in memory; a second worker trying to open a database whose Web Locks lock
+  is held refuses with `writer-lock-held`; OPFS storage is enabled only after a test shows PGlite with OPFS working in a
+  worker. (BR-1)
 - **A130** `[CI]` In Chrome, an empty profile records S as the finalized head at creation; enabling `core-ledger-state`
   without a snapshot refuses and names it. (BR-2)
 - **A131** `[CI]` In Chrome, the page's network requests go only to the node; importing a snapshot through the page runs

@@ -46,7 +46,8 @@ strings and hashes as `0x`-prefixed lowercase hex, exactly as the schemas of `de
 `genesis`, `start`, `cursor`, `refused` — null, `duplicate-instance` or `lockstep-behind`); `committed` (core → private:
 `height`, `hash`); `report` (lockstep private → core: `height`, `hash`); `read` (private → core: `id`, `statements` —
 an array of `{ sql, params }` run as one consistent read; used when the public database is PGlite) and `read-result`
-(core → private: `id`, `height`, and `rows` — one array per statement — or `error`, a code); `api` (either way: `id`,
+(core → private: `id`, `height` — `null` before the first commit — and either, per statement, `columns` (name and
+PostgreSQL type of each column) with `rows`, or `error`, a code); `api` (either way: `id`,
 `module`, `method`, `params`) and `api-result` (`id`, and `result` or `error`). In rows and params, `bigint` and
 `numeric` values SHALL be decimal strings, `bytea` values `0x`-prefixed hex, and `jsonb` values JSON. IF a message
 fails its schema, or has an unknown `v` or `type`, THEN the connection SHALL close; IF an instance id is already

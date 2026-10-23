@@ -38,14 +38,15 @@ scheduled. Builders SHALL return plain data.
 
 THE process SHALL validate each entry's shape (`{ id, start, stop?, version, config }`, no unknown property, `stop ≥
 start`) at startup. THE process SHALL validate the `config` of every revision whose version is the build's against the
-module's zod schema in this build, apply its declared defaults to absent fields, and classify its fields by the
-schema's kinds. A revision whose version is not the build's (written with `versionEntry`) SHALL NOT be validated against
-this build's schema and its `config` SHALL be plain data: IF it is recorded in the history THEN it SHALL equal, field
-for field, the recorded data, which is its only source of field kinds; IF it is not recorded THEN it SHALL start above
-cursor + 1, and it SHALL be recorded as written, all of its fields treated as data, and validated against its own schema
-when the build carrying its version starts (CF-8), which MAY then refuse it (`invalid-configuration`) — it can still be
-changed then, because it starts above the cursor. Any violation SHALL refuse startup, naming the entry and the field.
-Byte values SHALL be `0x`-prefixed lowercase hex strings.
+module's zod schema in this build, apply its declared defaults to absent fields, and classify its fields by the schema's
+kinds. A revision whose version is not the build's (written with `versionEntry`) SHALL NOT be validated against this
+build's schema. IF it starts at or below the cursor THEN its `config` SHALL equal, field for field, the data recorded
+for it, which is its only source of field kinds. IF it starts above the cursor THEN it is a scheduled revision: only its
+id, start, stop and version SHALL be recorded (its `config` is omitted, and SHALL be refused if given — so no secret or
+operational field of a version this build cannot classify is ever stored), and the build carrying its version SHALL
+supply and record its configuration, validated against that version's schema, before processing its start (CF-6 allows
+it, since the revision still starts above the cursor). Any violation SHALL refuse startup, naming the entry and the
+field. Byte values SHALL be `0x`-prefixed lowercase hex strings.
 
 #### Scenario: A wrong type
 - **WHEN** `livenessTimeoutMs` is the string `"30000"`
@@ -60,9 +61,10 @@ Byte values SHALL be `0x`-prefixed lowercase hex strings.
 
 #### Scenario: Scheduling a newer version from the current build
 - **WHEN** a build carrying `m` 1.0.0 runs at cursor 20 and the operator adds
-  `versionEntry({ id: "m", start: 50, version: "1.1.0", config: { bar: 1 } })`
-- **THEN** startup records it; the process stops at 49 with `upgrade-required` (RN-12); the 1.1.0 build validates it
-  against its schema and continues from 50
+  `versionEntry({ id: "m", start: 50, version: "1.1.0" })`
+- **THEN** startup records `(m, 50, 1.1.0)` without configuration; the process stops at 49 with `upgrade-required`
+  (RN-12); the 1.1.0 build's file writes that revision with `m.entry({ start: 50, config: … })`, which is validated,
+  recorded and run from 50
 
 ### Requirement: CF-4 Every field is data, operational or secret
 
@@ -115,8 +117,9 @@ configuration omits an entry recorded in the history THEN startup SHALL refuse a
 
 WHEN a process starts with a cursor c, THE `core-chain` part SHALL compare the file with `core_chain.config` and SHALL
 refuse startup IF an entry starting at or below c differs in any data field or in its version, except a module
-entry's `stop` that is above c in both the recorded and the new value. Entries starting above c SHALL be accepted and
-recorded in the same transaction as the comparison. Operational changes — the `core` entry's `stop` among them, which
+entry's `stop` that is above c in both the recorded and the new value. Entries starting above c MAY differ from what is
+recorded for them, and SHALL be accepted and recorded (replacing their earlier record) in the same transaction as the
+comparison. Operational changes — the `core` entry's `stop` among them, which
 may be raised, lowered above c, or removed at any restart — SHALL be accepted with no change to the history.
 
 #### Scenario: Changing the past

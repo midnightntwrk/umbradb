@@ -31,9 +31,16 @@ the block's content with the metadata of the runtime in its parent's state (LG-4
 ### Requirement: CD-3 `core-block-commit` writes the cursor first
 
 THE backbone part `core-block-commit` SHALL run first in every block's `on-db-write` and SHALL write the row of
-`core_block_commit.blocks` for h — hash (indexed; distinct per height by the parent-hash chain of IN-4, so no
-cross-partition unique constraint is needed), parent hash, `spec_version`, ledger version and the block's own
+`core_block_commit.blocks` for h — hash, parent hash, `spec_version`, ledger version and the block's own
 timestamp in milliseconds — which is also the cursor; it SHALL provide the `table` item `blocks` (append-only).
+
+THE part SHALL also write `(hash, height)` to the unpartitioned table `core_block_commit.hashes`, whose primary key is
+the hash, in the same transaction, so a repeated hash fails the block — PostgreSQL cannot enforce a unique hash on the
+height-partitioned `blocks` table.
+
+#### Scenario: A repeated hash
+- **WHEN** a test source delivers, at height 12, a block whose hash equals height 7's
+- **THEN** the block fails on `core_block_commit.hashes` and processing halts
 
 #### Scenario: The cursor is the last blocks row
 - **WHEN** heights 1–10 have committed

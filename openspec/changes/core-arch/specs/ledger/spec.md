@@ -203,11 +203,13 @@ mid-chain: it needs history from genesis or a snapshot.
 
 WHERE a module needs more than the plain data of `block-parsed`, it SHALL declare ledger tasks (`ledgerTasks` in its
 declaration, `design.md` §5.5): functions the ledger worker runs for each block, after parsing and before the block's
-`on-compute`, with the block's native parsed objects, the state before the block (read-only) and `rawPackages()`, each
-returning plain data that becomes a `block` item the module provides. A task's result SHALL be structured-cloneable
-plain data; IF it is not, or the task throws, THEN the block SHALL fail as a callback error (RN-8). Ledger tasks SHALL
-NOT write anything and SHALL NOT keep native objects between blocks. Callbacks on the main thread SHALL never receive a
-native ledger object.
+`on-compute`, with the block's native parsed objects and `rawPackages()`, each returning plain data that becomes a
+`block` item the module provides. A task that declares `needsState: true` SHALL also receive the ledger state before the
+block (read-only), and its module SHALL require the item `ledger-state` (so the graph of MD-3 refuses it where
+`core-ledger-state` is not active); a task without it SHALL receive no state and MAY run mid-chain. A task's result
+SHALL be structured-cloneable plain data; IF it is not, or the task throws, THEN the block SHALL fail as a callback
+error (RN-8). Ledger tasks SHALL NOT write anything and SHALL NOT keep native objects between blocks. Callbacks on the
+main thread SHALL never receive a native ledger object.
 
 #### Scenario: A module reads decoded call arguments
 - **WHEN** a module's ledger task decodes each contract call's arguments with the native objects and returns them

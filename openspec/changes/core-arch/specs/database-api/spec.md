@@ -157,30 +157,34 @@ the database is covered by a revision of that module with another version, and S
 
 ### Requirement: DB-11 Exactly one writer per database
 
-THE database API SHALL let exactly one process write each database. WHERE the backend is PostgreSQL, THE writer SHALL
-hold a session advisory lock on its writer connection for its lifetime; a second writer SHALL refuse to start; WHEN the
-writer connection is lost THE database API SHALL re-acquire the lock on reconnection before any further write, and IF
-another process holds it by then THEN processing SHALL halt. WHERE the backend is PGlite in Node.js — which does not
-guard its data directory itself — THE process SHALL hold the lock directory of `design.md` §4: created with an atomic
-`mkdir` holding a random owner token, refreshed every second, stale after 30 seconds without a refresh, taken over
-only by renaming it and then confirming the renamed directory holds the stale token. THE holder SHALL check that the
-lock directory exists and holds its token at every refresh and before every block's `BEGIN` and `COMMIT`, and SHALL
-halt (`writer-lock-lost`) at the first failed check, writing nothing more. A second process facing a fresh lock SHALL
-refuse to start. Because PGlite runs only under the development opt-in, the one remaining window is accepted and
-stated: a writer paused for more than 30 seconds inside a block transaction may complete that one commit after losing
-the lock, and halts at its next check.
+THE database API SHALL let exactly one process write each database, and SHALL fail stop rather than risk a second writer
+(owner decision Q50: a second writer would break determinism). WHERE the backend is PostgreSQL, THE writer SHALL hold a
+session advisory lock on its writer connection for its lifetime; a second writer SHALL refuse to start; WHEN the writer
+connection is lost THE database API SHALL re-acquire the lock on reconnection before any further write, and IF another
+process holds it by then THEN processing SHALL halt. WHERE the backend is PGlite in Node.js — which does not guard its
+data directory itself — THE process SHALL hold the lock directory of `design.md` §4, recording its process id, process
+start time, host name and a random token; THE system SHALL take over an existing lock only WHEN its holder process is
+proven gone (same host, and no live process with that id and start time); IF the holder is alive (including a paused or
+sleeping process), is on another host, or cannot be checked, THEN the new process SHALL refuse to start
+(`writer-lock-held`), and only `umbradb unlock` (or removing the directory by hand) clears such a lock. THE holder SHALL
+check, every second and before every block's `BEGIN` and `COMMIT`, that the lock directory exists and holds its token,
+and SHALL halt (`writer-lock-lost`) at the first failed check, writing nothing more.
 
 #### Scenario: A second writer refuses
 - **WHEN** two processes start against the same PostgreSQL database
 - **THEN** exactly one runs; the other refuses with `writer-lock-held` and stays up, not ready
 
-#### Scenario: A paused writer loses its lock
-- **WHEN** a PGlite writer is paused for 40 seconds between blocks, another process takes over its stale lock, and the
-  first resumes
-- **THEN** the first halts with `writer-lock-lost` before its next `BEGIN`, and only the second writes
+#### Scenario: A paused writer keeps its lock
+- **WHEN** a PGlite writer is paused (`SIGSTOP`) for 5 minutes and a second process starts against the same directory
+- **THEN** the second process refuses with `writer-lock-held`; the first resumes and continues; only the first ever
+  writes
 
-#### Scenario: Two processes race for a stale lock
-- **WHEN** a PGlite process was SIGKILLed and two new processes start at the same moment 40 seconds later
+#### Scenario: A crashed writer's lock is recovered
+- **WHEN** a PGlite writer is killed with `SIGKILL` and the process is started again
+- **THEN** the new process finds the holder gone, takes the lock, and continues from the cursor
+
+#### Scenario: Two processes race for a dead holder's lock
+- **WHEN** a PGlite process was SIGKILLed and two new processes start at the same moment
 - **THEN** exactly one takes the lock and runs; the other refuses with `writer-lock-held`
 
 ### Requirement: DB-12 The durability probe guards PostgreSQL
