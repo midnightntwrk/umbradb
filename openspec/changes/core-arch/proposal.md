@@ -1,9 +1,10 @@
 # Proposal — CORE-ARCH: the standalone indexer's core architecture (`core-arch`)
 
-> **Status:** Proposed. Change id `core-arch`; capabilities `library-surface`, `database-api`, `modules`,
-> `configuration`, `runner`, `determinism`, `storage-helpers`, `admin-endpoints`, `test-tape`, `ingest`, `chain-data`,
-> `ledger`, `contract-data`, `private-processes`, `snapshots`, `browser`, and the removal of `temporal-kv`. Awaiting the
-> stage-1 gate: the targeted fix check after the cold review, and the owner's approval.
+> **Status:** Approved — by the owner on 2026-10-22, at commit `52cc6d4`, after the stage-1 gate: two cold
+> adversarial reviews (Codex `gpt-6-astra`), their fixes, and targeted fix checks ending in PASS. Change id `core-arch`;
+> capabilities `library-surface`, `database-api`, `modules`, `configuration`, `runner`, `determinism`,
+> `storage-helpers`, `admin-endpoints`, `test-tape`, `ingest`, `chain-data`, `ledger`, `contract-data`,
+> `private-processes`, `snapshots`, `browser`, and the removal of `temporal-kv`. Next: stage 2, the test-first build.
 
 ## Why
 
