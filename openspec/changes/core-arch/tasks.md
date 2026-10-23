@@ -82,6 +82,30 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 - [ ] 1.2 Primary-key order and `contentsHash` (DT-2, DT-3), over a database handle.
       **Acceptance:** A54 and A55 pass on both backends (after task 2.2 provides PGlite; until then on PostgreSQL, and
       re-run in 2.2).
+      **Partial (2026-10-23):** A54 and A55 pass on PostgreSQL 17; the PGlite half is pending until task 2.2.
+      `src/determinism/public-tables.ts`: `ConsistentRead` (exactly the `query` of CORE-ARCH §4.10's `ReadHandle`; a
+      `BlockWriteHandle` is one too), `publicTables` (the public tables in DT-3's order), `countRows`,
+      `rowsInKeyOrder` (DT-2, keyset pages of `pageSize` rows, default 1,000; text key columns `COLLATE "C"`) and
+      `PublicContentsError` (`no-primary-key`, `unsupported-key-type`, `unsupported-column-type`, `unencodable-row`,
+      `row-count-changed`); `src/determinism/contents-hash.ts`: `contentsHash(read, { pageSize }?)`, SHA-256 of DT-3's
+      array streamed row by row (each table's row count read first, in the same snapshot, and checked). Public schemas:
+      every schema but DB-8's reserved `pg_*`, `information_schema` and `public` (the public database holds only
+      public-side schemas, PP-1; `core_chain` included); tables: ordinary and partitioned tables that are not
+      partitions (a partitioned table is read whole, an ordinary one with `ONLY`); schemas and tables sorted by the
+      UTF-8 bytes of their names, columns in column order (dropped ones skipped) with `format_type(atttypid, NULL)`'s
+      types, key columns in `pg_index.indkey` order — no OIDs, no creation order. Tests in `test/determinism/`
+      (seen failing first: modules missing): `public-tables.test.ts` (14: A54 — text keys `"B" < "a" < "b"` through
+      an `und-x-icu` column and the default one, `bytea` keys, `smallint`/`integer`/`bigint` keys with negatives and
+      the 64-bit limits, a composite key in declared order, a partitioned table, inheritance; page sizes 1, 2, 3 and
+      the default; the table list and its refusals), `contents-hash.test.ts` (27: A55 — a fixed database's hash equal
+      to SHA-256 of DT-3's CBOR written out by hand; equal hashes for the same rows built three ways; one byte changed
+      and restored; 16 negative controls, each changing one thing a wrong hash could ignore and undoing it; the
+      snapshot test with a commit between statements and its control handle; DT-1 failures; the handle's type),
+      `postgres-database.ts` (a test-only adapter over `postgres`: one `REPEATABLE READ READ ONLY` transaction per
+      read, DB-2's mapping with a lossless `jsonb` parser). 19 deliberately wrong variants of the two source files
+      were each caught. Coverage 100 % lines and branches on both files (`src/determinism/**` floor 95/90). Q58 (open,
+      not blocking): refuse unhashable tables at migration time too (task 7.1)?
+      **Pending:** the PGlite half of A54 and A55, and A55's cross-backend comparison, re-run in task 2.2.
 
 ## 2. Database API
 
