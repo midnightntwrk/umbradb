@@ -10,13 +10,15 @@ import {
 import { startPostgres, type TestDatabase, type TestServer } from "./postgres-database.js";
 
 /**
- * A54 (DT-2) and the table list of DT-3, on PostgreSQL 17 (task 1.2; the PGlite half runs in task 2.2).
+ * A54 (DT-2) and the table list of DT-3, on PostgreSQL 17 (tasks 1.2 and 1.3; the PGlite half runs in task 2.2).
  *
- * DT-2: rows are ordered by their primary-key columns in order, integers numerically, `bytea` and `text` by their
- * bytes (`COLLATE "C"`). DT-3: the public schemas, then each table, in name order (byte order). Every expected order
- * below is written out by hand from those rules (UTF-8 bytes of each text; unsigned bytes, a prefix first; integers by
- * value), never computed by the code under test. Rows are inserted in shuffled order and every listing is repeated
- * with page sizes 1, 2, 3 and the default, so a paging error cannot hide behind one page.
+ * DT-2: rows are ordered by their primary-key columns in order, integers numerically, `boolean` with `false` first, and
+ * `bytea`, `text`, `varchar(n)` and `uuid` by their bytes (`COLLATE "C"` for `text` and `varchar`; `varchar`, `uuid`
+ * and `boolean` since owner decision Q58). DT-3: the public schemas, then each table, in name order (byte order).
+ * Every expected order below is written out by hand from those rules (UTF-8 bytes of each text; unsigned bytes, a
+ * prefix first; integers by value; `false` before `true`), never computed by the code under test. Rows are inserted
+ * in shuffled order and every listing is repeated with page sizes 1, 2, 3 and the default, so a paging error cannot
+ * hide behind one page.
  */
 
 const PAGE_SIZES = [1, 2, 3, undefined] as const;
@@ -227,6 +229,114 @@ describe("A54 (DT-2) — rows in primary-key order on PostgreSQL 17", () => {
     expect(await db.read((read) => countRows(read, parent))).toBe(2);
   }, 60_000);
 
+  // Task 1.3 (owner decision Q58): varchar, uuid and boolean keys. Expected orders are written out by hand from DT-2:
+  // varchar like text (UTF-8 bytes, COLLATE "C"), uuid by its 16 bytes, boolean false first.
+  it("orders varchar keys by their bytes like text — \"B\" < \"a\" < \"b\" — whatever the column's collation", async () => {
+    const values = shuffled(TEXT_KEYS)
+      .map((k) => `(${sqlText(k)})`)
+      .join(", ");
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.varchar_default (k varchar(16) PRIMARY KEY);
+      CREATE TABLE m.varchar_icu (k varchar COLLATE "und-x-icu" PRIMARY KEY);
+      INSERT INTO m.varchar_default VALUES ${values};
+      INSERT INTO m.varchar_icu VALUES ${values};
+    `);
+    const own = (await db.read((read) => read.query(`SELECT k FROM m.varchar_icu ORDER BY k`))).map((row) => row.k);
+    expect(own.indexOf("a")).toBeLessThan(own.indexOf("B"));
+
+    await expectKeyOrder(db, "m", "varchar_default", TEXT_KEYS);
+    await expectKeyOrder(db, "m", "varchar_icu", TEXT_KEYS);
+  }, 60_000);
+
+  // By bytes, unsigned: 00… < 0f… < 7f… < 80… < ff…, and within one first byte by the next bytes.
+  const UUID_KEYS = [
+    "00000000-0000-0000-0000-000000000000",
+    "00000000-0000-0000-0000-000000000001",
+    "00000000-0000-0000-0000-0000000000ff",
+    "00000000-0000-0000-0001-000000000000",
+    "0fffffff-ffff-ffff-ffff-ffffffffffff",
+    "7fffffff-ffff-ffff-ffff-ffffffffffff",
+    "80000000-0000-0000-0000-000000000000",
+    "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "ffffffff-0000-0000-0000-000000000000",
+    "ffffffff-ffff-ffff-ffff-ffffffffffff",
+  ];
+
+  it("orders uuid keys by their 16 bytes, unsigned, and reads them as lowercase text", async () => {
+    // Inserted in upper case and without hyphens: PostgreSQL stores 16 bytes and prints them one way.
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.u (k uuid PRIMARY KEY);
+      INSERT INTO m.u VALUES ${shuffled(UUID_KEYS)
+        .map((k, i) => `('${i % 2 === 0 ? k.toUpperCase() : k.replace(/-/g, "")}')`)
+        .join(", ")};
+    `);
+    await expectKeyOrder(db, "m", "u", UUID_KEYS);
+  }, 60_000);
+
+  it("orders boolean keys false first", async () => {
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.flag (k boolean PRIMARY KEY, v text);
+      INSERT INTO m.flag VALUES (true, 'yes'), (false, 'no');
+    `);
+    const t = await table(db, "m", "flag");
+    for (const pageSize of PAGE_SIZES) {
+      expect(await listRows(db, t, pageSize), `page size ${pageSize ?? "default"}`).toEqual([
+        [false, "no"],
+        [true, "yes"],
+      ]);
+    }
+  }, 60_000);
+
+  it("DT-2's scenario: rows keyed by (id uuid, shielded boolean) by the uuid's bytes, then false before true", async () => {
+    const expected: readonly (readonly [string, boolean])[] = [
+      ["00000000-0000-0000-0000-0000000000ff", false],
+      ["00000000-0000-0000-0000-0000000000ff", true],
+      ["7fffffff-ffff-ffff-ffff-ffffffffffff", true],
+      ["80000000-0000-0000-0000-000000000000", false],
+      ["80000000-0000-0000-0000-000000000000", true],
+      ["ffffffff-0000-0000-0000-000000000000", false],
+    ];
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.notes (id uuid, shielded boolean, PRIMARY KEY (id, shielded));
+      INSERT INTO m.notes VALUES ${shuffled(expected)
+        .map(([id, shielded]) => `('${id}', ${shielded})`)
+        .join(", ")};
+    `);
+    const t = await table(db, "m", "notes");
+    for (const pageSize of PAGE_SIZES) {
+      expect(await listRows(db, t, pageSize), `page size ${pageSize ?? "default"}`).toEqual(expected);
+    }
+  }, 60_000);
+
+  it("orders a composite key of varchar, boolean and uuid in the key's declared order", async () => {
+    // Columns (flag, id, name, v); key (name, flag, id): name by bytes, then false first, then the uuid's bytes.
+    const expected: readonly (readonly [boolean, string, string, string])[] = [
+      [false, "00000000-0000-0000-0000-000000000002", "B", "r1"],
+      [true, "00000000-0000-0000-0000-000000000001", "B", "r2"],
+      [false, "00000000-0000-0000-0000-000000000001", "a", "r3"],
+      [false, "ffffffff-ffff-ffff-ffff-ffffffffffff", "a", "r4"],
+      [true, "00000000-0000-0000-0000-000000000000", "a", "r5"],
+      [true, "80000000-0000-0000-0000-000000000000", "a", "r6"],
+      [false, "00000000-0000-0000-0000-000000000000", "é", "r7"],
+    ];
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.c (flag boolean, id uuid, name varchar(8) COLLATE "und-x-icu", v text, PRIMARY KEY (name, flag, id));
+      INSERT INTO m.c VALUES ${shuffled(expected)
+        .map(([flag, id, name, v]) => `(${flag}, '${id}', ${sqlText(name)}, ${sqlText(v)})`)
+        .join(", ")};
+    `);
+    const t = await table(db, "m", "c");
+    expect(t.key.map((i) => t.columns[i]?.name)).toEqual(["name", "flag", "id"]);
+    for (const pageSize of PAGE_SIZES) {
+      expect(await listRows(db, t, pageSize), `page size ${pageSize ?? "default"}`).toEqual(expected);
+    }
+  }, 60_000);
+
   it("refuses a page size that is not a positive integer", async () => {
     const db = await freshDatabase(`CREATE SCHEMA m; CREATE TABLE m.t (k integer PRIMARY KEY);`);
     const t = await table(db, "m", "t");
@@ -288,26 +398,30 @@ describe("DT-3's table list — public schemas and tables in name order, read fr
       CREATE SCHEMA m;
       CREATE TABLE m.t (
         z smallint, gone integer, y integer, x bigint, w numeric(38, 0), v bytea, u text, "we""ird col" boolean,
-        s jsonb, r bigint[], q text[][], PRIMARY KEY (u, x, z)
+        s jsonb, r bigint[], q text[][], p varchar(12), o uuid, n varchar(3)[], PRIMARY KEY (u, x, z)
       );
       ALTER TABLE m.t DROP COLUMN gone;
     `);
     const [t] = await db.read((read) => publicTables(read));
+    // The declared type (format_type with the type modifier) is kept for refusal messages (task 1.3).
     expect(t).toEqual({
       schema: "m",
       name: "t",
       partitioned: false,
       columns: [
-        { name: "z", type: "smallint" },
-        { name: "y", type: "integer" },
-        { name: "x", type: "bigint" },
-        { name: "w", type: "numeric" },
-        { name: "v", type: "bytea" },
-        { name: "u", type: "text" },
-        { name: 'we"ird col', type: "boolean" },
-        { name: "s", type: "jsonb" },
-        { name: "r", type: "bigint[]" },
-        { name: "q", type: "text[]" },
+        { name: "z", type: "smallint", declaredType: "smallint" },
+        { name: "y", type: "integer", declaredType: "integer" },
+        { name: "x", type: "bigint", declaredType: "bigint" },
+        { name: "w", type: "numeric", declaredType: "numeric(38,0)" },
+        { name: "v", type: "bytea", declaredType: "bytea" },
+        { name: "u", type: "text", declaredType: "text" },
+        { name: 'we"ird col', type: "boolean", declaredType: "boolean" },
+        { name: "s", type: "jsonb", declaredType: "jsonb" },
+        { name: "r", type: "bigint[]", declaredType: "bigint[]" },
+        { name: "q", type: "text[]", declaredType: "text[]" },
+        { name: "p", type: "character varying", declaredType: "character varying(12)" },
+        { name: "o", type: "uuid", declaredType: "uuid" },
+        { name: "n", type: "character varying[]", declaredType: "character varying(3)[]" },
       ],
       key: [5, 2, 0],
     });
@@ -360,8 +474,9 @@ describe("DT-3's table list — public schemas and tables in name order, read fr
     });
   }, 60_000);
 
+  // `boolean` keys are allowed since owner decision Q58 (DT-2); the refusals' messages are `column-refusals.test.ts`'s.
   it("refuses a primary-key column whose type DT-2 does not order", async () => {
-    for (const type of ["numeric", "boolean", "jsonb", "bigint[]"]) {
+    for (const type of ["numeric", "jsonb", "bigint[]"]) {
       await expectRefusal(
         `CREATE SCHEMA m; CREATE TABLE m.t (id ${type} PRIMARY KEY, v text);`,
         "unsupported-key-type",
@@ -370,13 +485,31 @@ describe("DT-3's table list — public schemas and tables in name order, read fr
     }
   }, 60_000);
 
+  // `varchar` and `uuid` are DT-1 types since owner decision Q58; floating-point columns are refused with
+  // `non-deterministic-column`, DT-6's code for them (`design.md` §4's column-type table).
   it("refuses a column whose type DT-1 does not encode", async () => {
-    for (const type of ["character varying", "timestamp with time zone", "real", "uuid", "json"]) {
+    for (const type of ["timestamp with time zone", "json", "character(4)", "numeric(38,2)"]) {
       await expectRefusal(
         `CREATE SCHEMA m; CREATE TABLE m.t (id bigint PRIMARY KEY, v ${type});`,
         "unsupported-column-type",
         { schema: "m", table: "t", column: "v" },
       );
     }
+    for (const type of ["real", "double precision"]) {
+      await expectRefusal(
+        `CREATE SCHEMA m; CREATE TABLE m.t (id bigint PRIMARY KEY, v ${type});`,
+        "non-deterministic-column",
+        { schema: "m", table: "t", column: "v" },
+      );
+    }
+  }, 60_000);
+
+  it("accepts varchar, uuid and boolean columns, and as keys", async () => {
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.t (a varchar(4), b uuid, c boolean, d varchar(4)[], e uuid[], PRIMARY KEY (a, b, c));
+    `);
+    const [t] = await db.read((read) => publicTables(read));
+    expect(t?.key).toEqual([0, 1, 2]);
   }, 60_000);
 });

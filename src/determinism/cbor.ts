@@ -11,6 +11,8 @@
  * refuses cyclic values. Anything outside the subset fails with a {@link CanonicalEncodingError} naming where it is.
  */
 
+import { explain, refusalOfTypeName } from "./column-rules.js";
+
 /**
  * A value {@link encodeCanonical} accepts: an integer (`number` within ±(2^53 − 1), or `bigint` within CBOR's 64-bit
  * range), a text string, a byte string, a boolean, `null`, an array, or a plain object (text keys).
@@ -25,7 +27,11 @@ export type CanonicalValue =
   | readonly CanonicalValue[]
   | { readonly [key: string]: CanonicalValue };
 
-/** The column types of DT-1, named as PostgreSQL's `format_type(type, NULL)` names them. */
+/**
+ * The column types of DT-1, named as PostgreSQL's `format_type(type, NULL)` names them (`character varying` for
+ * `varchar(n)`; `varchar` and `uuid` since owner decision Q58). `./column-rules.ts` allows exactly these, and their
+ * arrays, in a public table.
+ */
 export const SCALAR_COLUMN_TYPES = [
   "smallint",
   "integer",
@@ -33,6 +39,8 @@ export const SCALAR_COLUMN_TYPES = [
   "numeric",
   "bytea",
   "text",
+  "character varying",
+  "uuid",
   "boolean",
   "jsonb",
 ] as const;
@@ -55,14 +63,18 @@ export type CanonicalEncodingFailure =
   | "numeric-fraction"
   /** A `numeric` value that is not an optional `-` followed by decimal digits. */
   | "numeric-invalid"
+  /** A `uuid` value that is not PostgreSQL's output of one: 32 lowercase hex digits in groups 8-4-4-4-12. */
+  | "uuid-invalid"
   /** A text string holding a lone UTF-16 surrogate, which has no UTF-8 encoding. */
   | "lone-surrogate"
   /** A value with no encoding in the subset (`undefined`, a function, a `Map`, a class instance, …). */
   | "unsupported-value"
   /** A row value whose JavaScript type does not match its column type. */
   | "type-mismatch"
-  /** A column type outside DT-1. */
+  /** A column type outside DT-1 (`design.md` §4's column-type table gives the reason). */
   | "unsupported-column-type"
+  /** A floating-point column type, which DT-6 refuses with this code (`design.md` §4's column-type table). */
+  | "non-deterministic-column"
   /** A row whose number of values differs from its number of column types. */
   | "row-length"
   /** An array or object that contains itself. */
@@ -96,11 +108,19 @@ export function encodeCanonical(value: CanonicalValue): Uint8Array {
  *   its PostgreSQL range;
  * - `numeric` as PostgreSQL's decimal text, which must be an integer — an optional `-` and digits — and is encoded as
  *   canonical text (`-0` and leading zeros removed); a value with a fraction fails;
- * - `bytea` as a `Uint8Array` (a `Buffer` is one); `text` as a string; `boolean` as a boolean;
+ * - `bytea` as a `Uint8Array` (a `Buffer` is one); `text` and `character varying` as a string; `boolean` as a
+ *   boolean;
+ * - `uuid` as PostgreSQL prints it, which both drivers return unchanged: 32 lowercase hex digits in groups 8-4-4-4-12,
+ *   encoded as the byte string of its 16 bytes; any other form (upper case, braces, no hyphens) cannot have come from
+ *   a `uuid` column and fails;
  * - `jsonb` as the value parsed without loss: integers within ±(2^53 − 1) as `number`, others as `bigint`; every
  *   number must be an integer within the signed 64-bit range of DT-6;
  * - an array as a JavaScript array, nested for more dimensions, with `null` elements;
  * - `null` for NULL in any column.
+ *
+ * A column type outside DT-1 fails with the code and the reason of its row in `design.md` §4's column-type table, as
+ * far as its name tells (`refusalOfTypeName` of `./column-rules.ts`: without the catalog, an enum or a domain reads as
+ * "any other type").
  */
 export function encodeRow(values: readonly unknown[], types: readonly ColumnType[]): Uint8Array {
   if (values.length !== types.length) {
@@ -111,7 +131,9 @@ export function encodeRow(values: readonly unknown[], types: readonly ColumnType
     const type: string = types[i] as string;
     const path: PathNode = { parent: ROOT, key: i };
     if (!COLUMN_TYPES.has(type)) {
-      throw new CanonicalEncodingError("unsupported-column-type", render(path), `column type ${JSON.stringify(type)}`);
+      const { code, because } = refusalOfTypeName(type);
+      const detail = `column type ${JSON.stringify(type)} is refused. ${explain(because)}`;
+      throw new CanonicalEncodingError(code, render(path), detail);
     }
     const value = values[i];
     if (type.endsWith("[]") && value !== null && !Array.isArray(value)) {
@@ -173,6 +195,8 @@ const COLUMN_TYPES: ReadonlySet<string> = new Set([
 const NUMERIC_INTEGER = /^(-?)([0-9]+)$/;
 /** PostgreSQL's decimal output of a `numeric` with a fraction. */
 const NUMERIC_FRACTION = /^-?[0-9]+\.[0-9]+$/;
+/** PostgreSQL's output of a `uuid` (`uuid_out`): lowercase hex digits in groups of 8, 4, 4, 4 and 12. */
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** In a `u` regular expression a well-formed surrogate pair is one code point, so this matches only lone surrogates. */
 const LONE_SURROGATE = /\p{Cs}/u;
 
@@ -322,6 +346,14 @@ function writeText(writer: Writer, text: string, path: PathNode): void {
   const bytes = utf8Of(text, path);
   writer.head(MAJOR_TEXT, bytes.length);
   writer.raw(bytes);
+}
+
+/** The 16 bytes of a uuid in PostgreSQL's output form (already checked against {@link UUID_TEXT}). */
+function uuidBytes(text: string): Uint8Array {
+  const hex = text.replace(/-/g, "");
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) bytes[i] = Number.parseInt(hex.slice(2 * i, 2 * i + 2), 16);
+  return bytes;
 }
 
 function writeBytes(writer: Writer, bytes: Uint8Array): void {
@@ -481,8 +513,21 @@ function encodeColumnScalar(
       writeBytes(writer, value);
       return;
     case "text":
+    case "character varying":
       if (typeof value !== "string") break;
       writeText(writer, value, path);
+      return;
+    case "uuid":
+      if (typeof value !== "string") break;
+      if (!UUID_TEXT.test(value)) {
+        fail(
+          "uuid-invalid",
+          path,
+          `${JSON.stringify(value)} is not a uuid as PostgreSQL prints it: 32 lowercase hexadecimal digits in groups ` +
+            'of 8, 4, 4, 4 and 12, joined by "-"',
+        );
+      }
+      writeBytes(writer, uuidBytes(value));
       return;
     case "boolean":
       if (typeof value !== "boolean") break;

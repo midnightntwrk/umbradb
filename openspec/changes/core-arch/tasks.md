@@ -107,13 +107,44 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       decision: D plus `boolean` keys) moves these refusals to startup too; its code is task 1.3.
       **Pending:** the PGlite half of A54 and A55, and A55's cross-backend comparison, re-run in task 2.2.
 
-- [ ] 1.3 Column-type rules (owner decision Q58): `src/determinism/column-rules.ts`, one table deciding for each column
+- [x] 1.3 Column-type rules (owner decision Q58): `src/determinism/column-rules.ts`, one table deciding for each column
       type whether it is allowed as a value and as a key, with the reason and the alternative of `design.md` §4's
       column-type table and a comment at each rule, used by the contents hash now and by task 7.1's migration-time
       check; `varchar(n)` and `uuid` in the encoder; `varchar`, `uuid` and `boolean` keys in the hash; every refusal of
       the encoder and the hash naming the table, the column and its type, with the reason and what to use instead.
       **Acceptance:** A52; A54 on PostgreSQL (its PGlite half in task 2.2); the contents-hash half of A58 (same codes
       and messages as startup).
+      **Done (2026-10-23):** `column-rules.ts` takes a column as the catalog describes it (`format_type(atttypid,
+      NULL)`, `format_type(atttypid, atttypmod)`, `atttypmod` — `numeric`'s scale, negative scales included —
+      `typtype` of the type and of an array's element, and whether it is in the primary key) and holds 16 rules, one
+      per row of the column-type table, each with the row's cells verbatim, a comment, and a reason and alternative
+      written for a developer; `TABLE_RULES` holds the paragraph's no-primary-key, sequence and default refusals.
+      `tableRefusals` lists a table's refusals (no primary key first, then columns in column order; a type no table may
+      store is refused for that, with its own code, even in the key) and `refusalMessage` gives `code: [module "…", ]
+      table "s"."t", column "c" (declared type): what. Why. Instead, what to use.` — the hash's message exactly, and
+      task 7.1's with the module id. `public-tables.ts` exports `catalogTables` (those facts, for 7.1) and refuses with
+      the first refusal; `PublicContentsError` gains `declaredType`; floating-point columns are now
+      `non-deterministic-column` (design §11). The encoder takes `character varying` (as `text`) and `uuid` (its 16
+      bytes; only PostgreSQL's lowercase 8-4-4-4-12 form, anything else `uuid-invalid`), and refuses any other type
+      name with its rule's code and reason. A value the encoder refuses in the hash names the row by its primary key
+      and, for a `numeric` fraction or `NaN` or a `jsonb` number, says why and what to store instead. Tests (seen
+      failing first): `column-rules.test.ts` (35, no database: every rule, key orders, refusal order and messages, the
+      encoder's refusals, and the rules kept in step with `design.md` §4 — the table is found by its heading anywhere
+      under `openspec/`, so archiving the change does not break it — with 7 negative controls on that check),
+      `column-refusals.test.ts` (41, PostgreSQL 17: the rule of every type the table names, read from a real catalog;
+      `numeric`'s scale for 44 declarations; A58's hash half for 29 cases — no primary key, `numeric`/`jsonb`/array
+      keys, `numeric(38,2)`, each date and time type, `json`, `char(4)`, `money`, enum, domain, composite, range,
+      `real`, `double precision`, `inet`, arrays of refused types — each with its code, location, mechanism and
+      alternative, and the same message as `tableRefusals` + `refusalMessage` give over the same catalog facts; the
+      messages' mechanisms checked through the driver), A52's `varchar`/`uuid` additions in `cbor.test.ts`, A54's
+      `varchar`, `uuid`, `boolean` and composite keys in `public-tables.test.ts`, a hand-written hash oracle for them
+      in `contents-hash.test.ts`. 26 deliberately wrong variants of the sources were each caught. `src/determinism/`
+      coverage 100 % except `cbor.ts`'s one unreachable line. Two rows of the design table state reasons that are not
+      true of every type they cover: the date and time row for `time` and `timetz` (Q59) and the floating-point example
+      for `real` (Q60); per-type reasons ship meanwhile. Q61 asks whether the hash should also refuse sequence and
+      default columns, as DT-6's last sentence reads literally. `postgres` 3.4.9 reads NULL array elements wrongly
+      (docs/issues/00006; for task 2.1).
+      **Pending (task 2.2):** A54's PGlite half for the `varchar`, `uuid` and `boolean` keys.
 
 ## 2. Database API
 

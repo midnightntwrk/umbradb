@@ -10,6 +10,7 @@
 
 import { createHash } from "node:crypto";
 import { CanonicalEncodingError, type ColumnType, encodeArrayHead, encodeCanonical, encodeRow } from "./cbor.js";
+import { explain, valueFailureBecause } from "./column-rules.js";
 import {
   type ConsistentRead,
   countRows,
@@ -36,7 +37,7 @@ export async function contentsHash(read: ConsistentRead, options: PageOptions = 
     const types = table.columns.map((column) => column.type);
     let rows = 0;
     for await (const row of rowsInKeyOrder(read, table, options)) {
-      hash.update(encodeTableRow(table, types, row, rows));
+      hash.update(encodeTableRow(table, types, row));
       rows++;
     }
     if (rows !== count) {
@@ -52,20 +53,32 @@ export async function contentsHash(read: ConsistentRead, options: PageOptions = 
   return new Uint8Array(hash.digest());
 }
 
-function encodeTableRow(table: PublicTable, types: readonly ColumnType[], row: unknown[], index: number): Uint8Array {
+/**
+ * A row's encoding; a value DT-1 cannot encode fails naming the table, the column and its declared type, the row by
+ * its primary key, what is wrong, and — for a number a stored value can hold (a `numeric` fraction or `NaN`, a `jsonb`
+ * number outside the 64-bit integers) — why, and what to store instead (`./column-rules.ts`).
+ */
+function encodeTableRow(table: PublicTable, types: readonly ColumnType[], row: unknown[]): Uint8Array {
   try {
     return encodeRow(row, types);
   } catch (cause) {
     if (!(cause instanceof CanonicalEncodingError)) throw cause;
     // A row's values and types are equally many here, so the path starts with the failing column's index (`$[2]…`).
     const column = table.columns[Number.parseInt(cause.path.slice(2), 10)] as PublicColumn;
-    throw new PublicContentsError(
-      "unencodable-row",
-      table.schema,
-      table.name,
-      column.name,
-      `row ${index} in primary-key order: ${cause.message}`,
-      { cause },
-    );
+    const keyNames = table.key.map((index) => (table.columns[index] as PublicColumn).name).join(", ");
+    const keyValues = table.key.map((index) => renderKeyValue(row[index])).join(", ");
+    const because = valueFailureBecause(column.type, cause.reason);
+    const detail =
+      `the row with primary key (${keyNames}) = (${keyValues}) cannot be encoded: ${cause.message}` +
+      (because === null ? "" : `. ${explain(because)}`);
+    throw new PublicContentsError("unencodable-row", table.schema, table.name, column, detail, { cause });
   }
+}
+
+/** A key value for a message: text quoted as JSON, bytes as PostgreSQL's `\x…` hex, numbers and booleans as such. */
+function renderKeyValue(value: unknown): string {
+  if (value instanceof Uint8Array) {
+    return `\\x${Array.from(value, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+  }
+  return typeof value === "string" ? JSON.stringify(value) : String(value);
 }

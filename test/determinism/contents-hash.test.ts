@@ -137,6 +137,41 @@ describe("A55 (DT-3) — the contents hash of a fixed database equals a hash com
       expect(await hashOf(db, pageSize), `page size ${pageSize}`).toBe(expectedHash);
     }
   }, 60_000);
+
+  // Task 1.3 (owner decision Q58): a `uuid` is the byte string of its 16 bytes and a `varchar` a text string (DT-1);
+  // rows are keyed by the uuid's bytes, then `false` before `true` (DT-2). The uuids are inserted in upper case and
+  // without hyphens, which PostgreSQL stores as the same 16 bytes. No array holds a NULL element: `postgres` 3.4.9
+  // reads one as the text "NULL" (docs/issues/00006).
+  it("covers varchar values and uuid and boolean keys, written out by hand", async () => {
+    const db = await freshDatabase(`
+      CREATE SCHEMA k;
+      CREATE TABLE k.notes (id uuid, shielded boolean, label varchar(8), tags varchar(4)[], PRIMARY KEY (id, shielded));
+      INSERT INTO k.notes VALUES
+        ('FFFFFFFF-0000-0000-0000-000000000001', false, 'z', NULL),
+        ('00000000-0000-0000-0000-0000000000ff', true, NULL, '{}'),
+        ('000000000000000000000000000000FF', false, 'Ab', '{x,y}');
+    `);
+    const cbor: readonly (readonly [string, string])[] = [
+      ["array(1): one public table", "81"],
+      ["array(4): k.notes", "84"],
+      ['text(1) "k"', "61 6b"],
+      ['text(5) "notes"', "65 6e6f746573"],
+      ['["id", "shielded", "label", "tags"]', "84 62 6964 68 736869656c646564 65 6c6162656c 64 74616773"],
+      ["array(3): rows by (id, shielded)", "83"],
+      [
+        "[h'00…00ff' (bytes(16)), false, \"Ab\", [\"x\", \"y\"]]",
+        "84 50 000000000000000000000000000000ff f4 62 4162 82 6178 6179",
+      ],
+      ["[h'00…00ff', true, null, []]", "84 50 000000000000000000000000000000ff f5 f6 80"],
+      ["[h'ffffffff…01', false, \"z\", null]", "84 50 ffffffff000000000000000000000001 f4 61 7a f6"],
+    ];
+    const expected = createHash("sha256")
+      .update(Buffer.from(cbor.map(([, bytes]) => bytes.replace(/ /g, "")).join(""), "hex"))
+      .digest("hex");
+    for (const pageSize of [undefined, 1, 2]) {
+      expect(await hashOf(db, pageSize), `page size ${pageSize ?? "default"}`).toBe(expected);
+    }
+  }, 60_000);
 });
 
 describe("A55 (DT-3) — the same rows give the same contents hash", () => {
@@ -437,6 +472,64 @@ describe("DT-1 failures inside the hash", () => {
     expect(error.column).toBe("doc");
     expect((error.cause as CanonicalEncodingError).reason).toBe("not-integer");
   }, 60_000);
+
+  // Task 1.3: a refusal names the table, the column and its declared type, the row by its key, and says why and what
+  // to store instead (the numeric rows of `design.md` §4's column-type table; DT-6 and Q57 for jsonb numbers).
+  it("says where the value is and why a stored number must be an integer", async () => {
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.fees (id bigint, tag text, amount numeric(20), doc jsonb, PRIMARY KEY (tag, id));
+      INSERT INTO m.fees VALUES (1, 'a', 5, '{}'), (2, 'b"', 'NaN', '{}');
+      CREATE SCHEMA n;
+      CREATE TABLE n.docs (id bytea PRIMARY KEY, doc jsonb);
+      INSERT INTO n.docs VALUES ('\\x00ff', '{"x": [1, 18446744073709551616]}');
+    `);
+    const numeric = await failure(() => db.read((read) => contentsHash(read)));
+    expect([numeric.reason, numeric.declaredType]).toEqual(["unencodable-row", "numeric(20,0)"]);
+    expect(numeric.message).toBe(
+      'unencodable-row: table "m"."fees", column "amount" (numeric(20,0)): the row with primary key ' +
+        '(tag, id) = ("b\\"", 2) cannot be encoded: $[2]: numeric-invalid: "NaN" is not decimal digits with an ' +
+        'optional "-". A stored number must be an integer, so that equal contents hashes mean equal query results: ' +
+        "a numeric with a fraction, even a zero one such as 100.00, or NaN has no canonical encoding. Instead, store " +
+        "integer smallest units in numeric(p) or bigint.",
+    );
+    await db.exec(`DROP TABLE m.fees`);
+    const json = await failure(() => db.read((read) => contentsHash(read)));
+    expect([json.reason, json.schema, json.table, json.column, json.declaredType]).toEqual([
+      "unencodable-row",
+      "n",
+      "docs",
+      "doc",
+      "jsonb",
+    ]);
+    expect(json.message).toContain('the row with primary key (id) = (\\x00ff) cannot be encoded: $[1]["x"][1]: ');
+    expect(json.message).toContain("integer-out-of-range");
+    expect(json.message).toContain("a JSON number must be an integer within the signed 64-bit range");
+  }, 60_000);
+
+  it("explains nothing more when only a broken handle could have caused the failure", async () => {
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.notes (id bigint PRIMARY KEY, body text);
+      INSERT INTO m.notes VALUES (7, 'seven');
+    `);
+    // A handle that returns a number where the text column's value should be.
+    const broken = (read: ConsistentRead): ConsistentRead => ({
+      query: async (sql, params) =>
+        (await read.query(sql, params)).map((row) => (row.c1 === "seven" ? { ...row, c1: 7 } : row)),
+    });
+    const error = await failure(() => db.read((read) => contentsHash(broken(read))));
+    expect(error.message).toBe(
+      'unencodable-row: table "m"."notes", column "body" (text): the row with primary key (id) = (7) cannot be ' +
+        "encoded: $[1]: type-mismatch: text cannot hold a number",
+    );
+  }, 60_000);
+
+  it("names the table but no column when the rows read are not as many as counted", () => {
+    const error = new PublicContentsError("row-count-changed", "m", "b", null, "counted 7 rows, then read 8");
+    expect(error.message).toBe('row-count-changed: table "m"."b": counted 7 rows, then read 8');
+    expect(error.declaredType).toBeNull();
+  });
 
   it("passes on an error that is not an encoding failure unchanged", async () => {
     const db = await freshDatabase(`

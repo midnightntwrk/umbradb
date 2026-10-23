@@ -397,9 +397,76 @@ describe("encodeRow — DT-1 column mappings", () => {
 
   it("refuses a row whose length differs from its column types, and unknown column types", () => {
     expectFailure(() => encodeRow([1, 2], ["integer"]), "row-length", "$");
+    // Column types are named as format_type(atttypid, NULL) names them: "character varying", never "varchar".
     expectFailure(() => encodeRow(["x"], ["varchar" as ColumnType]), "unsupported-column-type", "$[0]");
     expectFailure(() => encodeRow([[[1]]], ["integer[][]" as ColumnType]), "unsupported-column-type", "$[0]");
-    expectFailure(() => encodeRow([1.5], ["double precision" as ColumnType]), "unsupported-column-type", "$[0]");
+    expectFailure(() => encodeRow(["{}"], ["json" as ColumnType]), "unsupported-column-type", "$[0]");
+    // Task 1.3 (owner decision Q58): a refused type gets the code `design.md` §4's column-type table gives it, the
+    // same the contents hash and startup give; floating-point types are DT-6's `non-deterministic-column`.
+    expectFailure(() => encodeRow([1.5], ["double precision" as ColumnType]), "non-deterministic-column", "$[0]");
+  });
+
+  describe("varchar and uuid (task 1.3, owner decision Q58; A52)", () => {
+    const UUID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
+    const UUID_BYTES = "a0eebc999c0b4ef8bb6d6bb9bd380a11";
+
+    it("a varchar value is the same text string as a text value", () => {
+      for (const value of ["", "a", "ü", "\u{1F600}", "x".repeat(24)]) {
+        expect(rowHex([value], ["character varying"])).toBe(rowHex([value], ["text"]));
+      }
+      expect(rowHex(["Ab"], ["character varying"])).toBe("81" + "624162");
+      expect(rowHex([["a", null], []], ["character varying[]", "character varying[]"])).toBe("82" + "826161f6" + "80");
+    });
+
+    it("a uuid is a byte string of its 16 bytes (head 0x50)", () => {
+      expect(rowHex([UUID], ["uuid"])).toBe("81" + "50" + UUID_BYTES);
+      expect(rowHex(["00000000-0000-0000-0000-000000000000"], ["uuid"])).toBe("81" + "50" + "00".repeat(16));
+      expect(rowHex(["ffffffff-ffff-ffff-ffff-ffffffffffff"], ["uuid"])).toBe("81" + "50" + "ff".repeat(16));
+      expect(rowHex([[UUID, null]], ["uuid[]"])).toBe("81" + "82" + "50" + UUID_BYTES + "f6");
+      // The same 16 bytes as a bytea value: one encoding for one value, whichever type holds it.
+      expect(rowHex([UUID], ["uuid"])).toBe(rowHex([Buffer.from(UUID_BYTES, "hex")], ["bytea"]));
+    });
+
+    it("null is CBOR null in varchar and uuid columns and their arrays", () => {
+      const types: ColumnType[] = ["character varying", "uuid", "character varying[]", "uuid[]"];
+      expect(rowHex([null, null, null, null], types)).toBe("84" + "f6".repeat(4));
+    });
+
+    it("a uuid must be PostgreSQL's output: 32 lowercase hex digits in groups 8-4-4-4-12", () => {
+      const malformed = [
+        UUID.toUpperCase(), // PostgreSQL never prints upper case
+        "A0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+        UUID_BYTES, // no hyphens
+        `{${UUID}}`, // braces
+        `urn:uuid:${UUID}`,
+        "a0eebc999c0b-4ef8-bb6d-6bb9-bd380a11", // hyphens in the wrong places
+        "a0eebc99-9c0b4ef8-bb6d6bb9-bd380a11",
+        `${UUID} `,
+        ` ${UUID}`,
+        `${UUID}\n`,
+        UUID.slice(0, -1), // 35 characters
+        `${UUID}0`, // 37 characters
+        "g0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", // not hex
+        "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a1١",
+        "",
+      ];
+      for (const value of malformed) expectFailure(() => encodeRow([value], ["uuid"]), "uuid-invalid", "$[0]");
+      expectFailure(() => encodeRow([[UUID, "x"]], ["uuid[]"]), "uuid-invalid", "$[0][1]");
+    });
+
+    it("a uuid must arrive as text, and varchar as a string", () => {
+      expectFailure(() => encodeRow([Buffer.from(UUID_BYTES, "hex")], ["uuid"]), "type-mismatch", "$[0]");
+      expectFailure(() => encodeRow([1n], ["uuid"]), "type-mismatch", "$[0]");
+      expectFailure(() => encodeRow([5], ["character varying"]), "type-mismatch", "$[0]");
+      expectFailure(() => encodeRow(["a\ud800"], ["character varying"]), "lone-surrogate", "$[0]");
+    });
+
+    it("says what a malformed uuid is", () => {
+      expect(failure(() => encodeRow(["ABC"], ["uuid"])).message).toBe(
+        '$[0]: uuid-invalid: "ABC" is not a uuid as PostgreSQL prints it: 32 lowercase hexadecimal digits in groups ' +
+          'of 8, 4, 4, 4 and 12, joined by "-"',
+      );
+    });
   });
 
   describe("integers: smallint, integer and bigint within their PostgreSQL ranges, as number or bigint", () => {
