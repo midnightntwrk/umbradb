@@ -31,6 +31,25 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       a v8 test state and compare its result with the node's root at a devnet fork's F.
       **Acceptance:** two runs of `npm run vendor:ledger` give the recorded SHA-256; the conversion's root matches the
       node's at F.
+      **Partial (2026-10-23):** `vendor/ledger/v8` pins `ledger-8.1.2` (`36d7442`, the v8 ledger `midnight-node`
+      2.1.0-rc.4 pins; its build moves wasm-bindgen 0.2.104 → 0.2.108, as 0.2.104's output varies run to run) and
+      `vendor/ledger/v9` `ledger-9.1.0.0-rc.5` (`67f9f97`), with the conversion at `da96e33` and ledger v8 8.1.2 built
+      against it exactly as the node builds them (aligned on rc.5: the node's `Cargo.lock` links the conversion to the
+      rc.5 crates, and rc.3 → rc.5 changes DUST semantics that roots after F depend on; evidence in the plan). Each
+      version has `upstream.json`, `patches/` (v8: 3, v9: 5), `build.sh` (Docker, `rust:1.98.1-slim-bookworm` by index
+      digest, every tool pinned), `pkg/` and `SHA256SUMS`; `npm run vendor:ledger` rebuilds and compares;
+      `.github/workflows/vendored-ledger.yml` does so on amd64 and arm64 runners. Exports added (both): `loadState`,
+      `stateRoot`, `stateKey`, `flushNodes`, `persistKey`, `releaseKey`, `childRefs`, `evictKeys`, `contractStateKey`,
+      `contractZswapStateKey`; (v9) `decodeLogItem`, `serializeStateValue`, `convertFromV8`. Tests in `test/ledger/`
+      (29, seen failing on the unpatched builds first) pass, including `stateRoot` equal to the node's
+      `midnight_ledgerStateRoot` at block 0 on mainnet and preview (v8) and a dev chain (v9), and the conversion of a
+      v8 state giving the same v9 root in two fresh instances. First acceptance item met locally (arm64): two runs of
+      `npm run vendor:ledger` gave the recorded SHA-256; the CI run (amd64 and arm64) is pending until the branch is
+      pushed (Phase 3).
+      **Pending:** the second acceptance item — the conversion's root against the node's at a devnet fork's F — needs
+      the devnet tape of task 0.3, which runs after task 9.2. v8 `decodeLogItem` stopped (Q54: the v8 VM has no log
+      decoding). Q53 (root counts reported as signed changes) and Q55 (`stateKey` in `LedgerPackage`) are open, not
+      blocking.
 - [ ] 0.3 Tapes: record, with the builder of task 9.2, stagenet 0–10,000, preview 0–10,000 and a preview range across
       the runtime 1.0.300 upgrade, mainnet ranges around 1,774,492 and 1,788,980 (from snapshots), and a local devnet
       that starts on a v8 runtime and enacts the v9 upgrade; read each network's genesis hash, runtime at genesis and

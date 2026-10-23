@@ -13,6 +13,9 @@ locked rev is the real pin behind a range).
 - **Nix:** 6 flake inputs (5 locked + 1 source-only) · 3 pinned release binaries (sha256) ·
   2 Docker images (digest) · ~15 nixpkgs packages.
 - **Lean:** toolchain `v4.32.0` · 9 Lake packages (mathlib + 8 transitive), each an exact git rev.
+- **Vendored ledger WASM:** 2 runtime packages (ledger v8, v9) built in this repository from pinned
+  `midnight-ledger` commits plus the patches in `vendor/ledger/`, every output file pinned by SHA-256 and rebuilt
+  and compared by CI (§9).
 
 ---
 
@@ -166,6 +169,26 @@ Tools the build, test, and CI depend on that are not captured as package entries
 
 ---
 
+## 9. Vendored ledger WASM builds (`vendor/ledger/`)
+
+Source: `vendor/ledger/*/upstream.json`, `vendor/ledger/*/patches/`, `vendor/ledger/Dockerfile`,
+`vendor/ledger/*/SHA256SUMS` (`vendor/ledger/README.md`). The ledger the indexer runs, built from source rather than
+taken from npm: the published `@midnight-ntwrk/ledger-v*` packages lack the node-store functions UmbraDB needs, which
+the patches add. Each package is rebuilt by `npm run vendor:ledger` and by `.github/workflows/vendored-ledger.yml` (amd64
+and arm64 runners), which fail on any file whose SHA-256 differs from `SHA256SUMS`. These are **runtime** artifacts,
+outside `npm audit`'s scope: their Rust crate graphs are pinned by the patched `Cargo.lock` (crates.io checksums, git
+commits).
+
+| Component | Version/Pin | Pinning | Source | Purpose | Update-watch |
+|---|---|---|---|---|---|
+| ledger v8 package (`vendor/ledger/v8/pkg/`) | `ledger-8.1.2` | exact commit `36d7442172136758e33009f75ff4aa56616cff40` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v8 for blocks built by v8 runtimes | midnight-ledger releases; the v8 ledger midnight-node pins |
+| ledger v9 package (`vendor/ledger/v9/pkg/`) | `ledger-9.1.0.0-rc.5` | exact commit `67f9f97246339539af0091c4d8c6bc5ab236a191` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v9, and the v8 → v9 state translation | midnight-ledger releases; the v9 ledger midnight-node pins |
+| `v8-to-v9-state-translation` (in the v9 package) | rev `da96e33d78ee9b7d3867b15c1037510d499cd909` | exact git rev in the patched `Cargo.lock` | github.com/midnightntwrk/midnight-ledger | The ledger team's v8 → v9 state translation (LG-9) | the revision midnight-node pins |
+| Build image base `rust:1.98.1-slim-bookworm` | 1.98.1 | index digest `sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730` | Docker Hub (official image) | Rust toolchain for the builds | Rust releases |
+| clang 14, llvm 14, git, jq, curl (in the image) | `1:14.0.6-12`, `1:2.39.5-0+deb12u3`, `1.6-2.1+deb12u2`, `7.88.1-10+deb12u15` | exact versions from snapshot.debian.org `20260918T000000Z` | Debian bookworm | C toolchain for `blst` on wasm32; source fetch; build scripting | Debian security updates |
+| `wasm-bindgen-cli` (in the image) | 0.2.108 | exact version, `cargo install --locked` | crates.io | JavaScript bindings (the version ledger-9.1.0.0-rc.5 pins; the v8 patches move ledger-8.1.2 from 0.2.104, whose output varies from run to run, to it) | wasm-bindgen releases |
+| binaryen `wasm-opt` (in the image) | `version_133` | release tarball SHA-256 (`x86_64` `2dc9c781…7489`, `aarch64` `89c07ea5…9bf8`) | github.com/WebAssembly/binaryen releases | Size optimization (`-Os`), as upstream's release recipe | binaryen releases |
+
 ## License summary
 
 - **UmbraDB:** Apache-2.0.
@@ -178,3 +201,5 @@ Tools the build, test, and CI depend on that are not captured as package entries
   `package-lock.json`.)
 - **Pinned binaries / images:** Cardano components Apache-2.0 (IntersectMBO); Midnight components
   Apache-2.0 (midnightntwrk). Lean/mathlib: Apache-2.0.
+- **Vendored ledger builds:** `midnight-ledger` and the translation crate Apache-2.0 (midnightntwrk); the patches
+  are UmbraDB's (Apache-2.0); their crate dependencies are listed in each patched `Cargo.lock`.

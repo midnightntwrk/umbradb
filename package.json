@@ -46,6 +46,7 @@
     "archive:sync": "tsx chain-archive-sync/sync-cli.ts",
     "bench": "tsx bench/harness.ts",
     "bench:smoke": "tsx bench/smoke.ts",
+    "vendor:ledger": "bash vendor/ledger/vendor-ledger.sh",
     "graph:refresh": "bash scripts/graphify/run.sh refresh",
     "graph:check": "bash scripts/graphify/run.sh check"
   },

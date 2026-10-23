@@ -1,0 +1,36 @@
+diff --git a/storage/src/state_translation.rs b/storage/src/state_translation.rs
+index bb21800..25bb58a 100644
+--- a/storage/src/state_translation.rs
++++ b/storage/src/state_translation.rs
+@@ -26,8 +26,31 @@ use std::fmt::Debug;
+ use std::io;
+ use std::marker::PhantomData;
+ use std::sync::atomic::AtomicU64;
++#[cfg(not(target_arch = "wasm32"))]
+ use std::time::Instant;
+ 
++/// `std::time::Instant::now` panics on `wasm32-unknown-unknown`. The timings taken in this module
++/// only feed the profiling counters (`TDEP`, `TFIN`, `TPROCESS`, `TUPDATE`) and never the
++/// translation itself, so on that target every timing reads as zero.
++#[cfg(target_arch = "wasm32")]
++#[derive(Clone, Copy)]
++struct Instant;
++
++#[cfg(target_arch = "wasm32")]
++impl Instant {
++    fn now() -> Self {
++        Instant
++    }
++}
++
++#[cfg(target_arch = "wasm32")]
++impl std::ops::Sub for Instant {
++    type Output = std::time::Duration;
++    fn sub(self, _earlier: Instant) -> std::time::Duration {
++        std::time::Duration::ZERO
++    }
++}
++
+ pub type RawNode<D> = ArenaKey<<D as DB>::Hasher>;
+ 
+ pub enum StepResult<D: DB> {

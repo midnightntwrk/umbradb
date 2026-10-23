@@ -1,0 +1,36 @@
+{
+  "description": "Genesis ledger states and the state root each node reports for block 0 (midnight_ledgerStateRoot). Each state file is the network's system_properties.genesis_state as the node returned it on 2026-10-23, byte-identical to midnight-node 2.1.0-rc.4 res/genesis/ (commit 1b2b31c714f8986a082b8690f15e805981c771dd, Apache-2.0).",
+  "recorded": "2026-10-23",
+  "states": [
+    {
+      "file": "genesis_state_mainnet.mn",
+      "ledger": "v8",
+      "network": "mainnet",
+      "node": "https://rpc.mainnet.midnight.network",
+      "block0": "0x1941ca8e2bb88146c14dea084d3be7eb6e96ca7135429c543848b628124f2854",
+      "nodeLedgerVersion": "=8.1.2",
+      "stateRoot": "00f329e679fa2965b1ecc6629a1c1ee42d48abad21e5f06c6bb6cfedeafb013b6a",
+      "sha256": "ce56fbd30245677d3af6968fe3f321edf991c202a503e9737de15593f93b1d12"
+    },
+    {
+      "file": "genesis_state_preview.mn",
+      "ledger": "v8",
+      "network": "preview",
+      "node": "https://rpc.preview.midnight.network",
+      "block0": "0x3c096de209e06a1a8c52be7bda109ee8c891a42288c0a9db5495f9616dd13796",
+      "nodeLedgerVersion": "=8.1.3",
+      "stateRoot": "009d25ab56a7aaf3beaf432595dbeb020542c082298012e371ce4dec2b0f4c4c93",
+      "sha256": "51a028ab0c248bdc8c34c675b4a313545e0cbf30f61f2d56f62b969884a6fc35"
+    },
+    {
+      "file": "genesis_state_undeployed.mn",
+      "ledger": "v9",
+      "network": "undeployed (local dev chain)",
+      "node": "midnightntwrk/midnight-node:2.1.0-rc.4 (CFG_PRESET=dev) in Docker",
+      "block0": "0x38d37ec487443e0aaebc47d04884caf86a1bce70db06612e5d2e94b5c9bb6d3c",
+      "nodeLedgerVersion": "1.0.0 (tag: crate-ledger-9.1.0.0-rc.5, rev: 6abe9b16f1a2a9965a3317729cd72fd1f7fbfc03)",
+      "stateRoot": "0082f13a0b4d7037501e960d49c8e3bbef8fab7f179a4cd88db666c4bdf9262c78",
+      "sha256": "203123b300a29319040208b420251738e1c1b5e01c644ea67d87da9b706df4d2"
+    }
+  ]
+}

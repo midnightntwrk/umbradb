@@ -1,0 +1,50 @@
+name: Vendored ledger builds
+
+# openspec/changes/core-arch task 0.2 (design.md §5.2, requirement LG-5, acceptance A97): rebuild every vendored ledger
+# package (vendor/ledger/) from its pinned upstream commit and patches, in the pinned build image
+# (vendor/ledger/Dockerfile), and fail if any built file differs from the SHA-256 recorded in that version's
+# SHA256SUMS, or if the committed pkg/ does. Each runner builds with the image's native toolchain (the Rust image is
+# pinned by its multi-architecture index digest); both architectures must give the recorded bytes, which is what makes
+# the build reproducible on any host rather than on one machine.
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  # Pull requests by number, pushes by ref (as graph.yml).
+  group: vendored-ledger-${{ github.workflow }}-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    name: rebuild (${{ matrix.version }}, ${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        version: [v8, v9]
+    runs-on: ${{ matrix.runner }}
+    # A cold build (image, then the ledger crate graph with LTO) takes minutes on a hosted runner.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - name: Rebuild and compare with SHA256SUMS
+        # No `npm ci`: the script is bash and Docker only. The version comes in through the environment, never spliced
+        # into the script.
+        env:
+          VERSION: ${{ matrix.version }}
+        run: npm run vendor:ledger -- "$VERSION"
