@@ -182,9 +182,37 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 2. Database API
 
-- [ ] 2.1 `src/db/api.ts` and the PostgreSQL backend (refactored from `src/postgres/client.ts`): writer connection, read
+- [x] 2.1 `src/db/api.ts` and the PostgreSQL backend (refactored from `src/postgres/client.ts`): writer connection, read
       pool, read handles at one height, result mapping, errors with retryability (`connection-lost`).
       **Acceptance:** A9 (including lossless `jsonb`), A12, A19 pass; A8 passes on PostgreSQL.
+      **Done (2026-10-23):** `src/db/api.ts` (CORE-ARCH §4.10's `ReadHandle`, `BlockWriteHandle`, `SchemaWriteHandle`;
+      `Transaction`; `CommittedHeight`; `Database { read, transaction, close }`), `src/db/errors.ts` (`UmbraError {
+      code, retryable, details }`, `ERROR_CODES`; retryable for `connection-lost` only, DB-13), `src/db/mapping.ts` (the
+      result mapping by type OID with its own array reader, lossless JSON for `json` and `jsonb`, parameter texts) and
+      `src/db/postgres.ts` (`openPostgres`): each connection is a single-connection driver client, marked lost by the
+      driver's `onclose` and never reused (the driver otherwise reconnects silently mid-transaction, or crashes on a
+      reserved connection used after its loss); the writer runs transactions one at a time; reads use a pool (default
+      10) and are `REPEATABLE READ READ ONLY` transactions whose first statement reads the committed height, ended by
+      `ROLLBACK`; every connection pins `bytea_output`, `DateStyle`, `IntervalStyle`, `TimeZone` and
+      `extra_float_digits`, and a `database` URL setting one is refused; a `COMMIT` that PostgreSQL turns into
+      `ROLLBACK` is an error, never a commit; a handle used after it ended fails with `handle-closed`. The driver hands
+      over text only, so `docs/issues/00006` (NULL array elements) is fixed and closed. `CanonicalEncodingError` and
+      `PublicContentsError` are now `UmbraError`s (code = reason), so §12's `UmbraError` covers them with no new
+      export. The determinism suites read through the real backend (`test/determinism/postgres-database.ts` keeps only
+      setup SQL and the snapshot control). Tests in `test/db/` (82, seen failing first: modules missing; issue 00006's
+      three reproductions in `contents-hash.test.ts` failed through the old adapter): `mapping.test.ts`,
+      `errors.test.ts`, `results.test.ts` (A9 — the `jsonb` pair as two `bigint`s and 42 as 42, every mapped type and
+      its array with NULL elements, hostile database defaults, a seeded round-trip property), `handles.test.ts` (DB-2,
+      DB-5, the handles' types), `read-height.property.test.ts` (A8, seed 20261023, with two negative controls that
+      must fail it), `postgres-pool.test.ts` (A12, with the writer seeing its own rows as the control),
+      `postgres-faults.test.ts` (A19 `[[db.connection-lost.retryable]]`: `pg_terminate_backend` of the writer
+      mid-transaction, during a statement and before `COMMIT`, of a reader, of idle connections, a refused connection;
+      constraint violations and other errors not retryable). 27 deliberately wrong variants of the sources were each
+      caught but one equivalent. Coverage floors `src/db/**` 90/85 and `src/db/errors.ts` 95/91 (§13) added.
+      **Open questions (none blocking):** Q65 (the pinned session settings), Q66 (types the mapping does not name, and
+      DB-2's text for arrays), Q67 (0.9.5's timeouts not carried over). **For task 2.2:** add PGlite to
+      `test/db/backends.ts`; hand over text and map with `src/db/mapping.ts`; pin the same five settings; send the same
+      parameter texts. The CI run is pending until the branch is pushed (Phase 3).
 - [ ] 2.2 The PGlite backend with its single queue, behind the same API.
       **Acceptance:** A7, A8 (PGlite), A11 including its negative control.
 - [ ] 2.3 Roles and `SET LOCAL ROLE`, provider functions (fixed `search_path`, `PUBLIC` revoked), the id pattern and

@@ -36,6 +36,7 @@
  * table — in any public schema, a table no module declared included.
  */
 
+import { UmbraError } from "../db/errors.js";
 import type { ColumnType } from "./cbor.js";
 import {
   type CatalogFunction,
@@ -124,9 +125,11 @@ export type PublicContentsFailure =
 /**
  * A failure to read public contents: `reason` says why; `schema`, `table` or `sequence` (the other null), `column` and
  * its `declaredType` (null for the table or sequence itself) say where. The message is the code, the location, and an
- * explanation: for a refusal, exactly what `refusalMessage` of `./column-rules.ts` gives, the message startup gives.
+ * explanation: for a refusal, exactly what `refusalMessage` of `./column-rules.ts` gives, the message startup gives. It
+ * is an `UmbraError` (`design.md` §12 exports `UmbraError`, not this class): its code is its `reason`, it is not
+ * retryable, and its details hold where it is.
  */
-export class PublicContentsError extends Error {
+export class PublicContentsError extends UmbraError {
   override readonly name = "PublicContentsError";
   readonly schema: string;
   readonly table: string | null;
@@ -141,12 +144,19 @@ export class PublicContentsError extends Error {
     detail: string,
     options?: ErrorOptions,
   ) {
-    super(`${reason}: ${describeLocation(place, column)}: ${detail}`, options);
-    this.schema = place.schema;
-    this.table = "table" in place ? place.table : null;
-    this.sequence = "sequence" in place ? place.sequence : null;
-    this.column = column?.name ?? null;
-    this.declaredType = column?.declaredType ?? null;
+    const where = {
+      schema: place.schema,
+      table: "table" in place ? place.table : null,
+      sequence: "sequence" in place ? place.sequence : null,
+      column: column?.name ?? null,
+      declaredType: column?.declaredType ?? null,
+    };
+    super(reason, `${reason}: ${describeLocation(place, column)}: ${detail}`, where, options);
+    this.schema = where.schema;
+    this.table = where.table;
+    this.sequence = where.sequence;
+    this.column = where.column;
+    this.declaredType = where.declaredType;
   }
 }
 

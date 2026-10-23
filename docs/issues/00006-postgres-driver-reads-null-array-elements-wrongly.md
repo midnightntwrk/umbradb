@@ -1,6 +1,9 @@
 # 00006 — `postgres` 3.4.9 reads a NULL array element as the text "NULL", so equal hashes can hide different rows
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-23 by task 2.1 of `openspec/changes/core-arch`, in the commit
+  `feat(db): database API and PostgreSQL backend (DB-2, DB-5, DB-13)`: the database API's PostgreSQL backend takes every
+  value from the driver as text and maps it itself (`src/db/mapping.ts`), arrays included, so no driver parser runs;
+  the determinism tests now read through that backend. See "Resolution" below.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-23, during task 1.3 of `openspec/changes/core-arch` (column-type rules), while writing a
   hand-computed contents-hash oracle for a `varchar[]` column.
@@ -52,3 +55,23 @@ Extend DB-2 to say arrays are mapped element by element, `NULL` to `null`. Add a
 contents-hash negative control showing the two `text[]` rows hash differently. Until then, the test adapter
 (`test/determinism/postgres-database.ts`) gets the same parser, so tasks 1.2 and 1.3's PostgreSQL tests can hold NULL
 array elements.
+
+## Resolution
+
+Fixed in task 2.1 (2026-10-23), test first:
+
+- Reproduced through the test adapter as it was (`test/determinism/postgres-database.ts` at `2f9e19c`) by three tests
+  in `test/determinism/contents-hash.test.ts` ("arrays with NULL elements"): a hand-written contents hash of a
+  `varchar[]` table holding `{x,NULL}`, `{x,"NULL"}` and `{NULL,NULL}` (failed: a different hash), the negative control
+  that `{x,NULL}` and `{x,"NULL"}` hash differently (failed: equal hashes), and a read of a NULL element of every DT-1
+  array type (failed: `SyntaxError: Cannot convert NULL to a BigInt`). All three pass now.
+- `src/db/postgres.ts` asks the driver for raw values (`.raw()`), so none of its parsers runs, and
+  `src/db/mapping.ts` maps each value by its column's type OID: an array of a mapped type through its own reader of
+  PostgreSQL's array output (unquoted `NULL` → `null`, a quoted `"NULL"` → the text, escapes, nested arrays, the
+  `[l:u]=` decoration), each element by its type's mapping. `test/db/mapping.test.ts` and `test/db/results.test.ts`
+  check every case of the table above against PostgreSQL 17, with a round-trip property over random text arrays.
+- The test adapter's own driver connection and parsing are retired: the determinism suites read through the API.
+- Not done here: DB-2's text still names only `bigint`, `bytea`, `numeric` and `jsonb`; adding "arrays are mapped
+  element by element, `NULL` to `null`" is a spec edit for the owner (raised with Q66 of the organizer's decision
+  record). PGlite (task 2.2) must give the same results; its own array parser already reads `NULL` as `null`.
+

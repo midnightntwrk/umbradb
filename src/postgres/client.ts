@@ -1,4 +1,5 @@
 import postgres, { type Sql } from "postgres";
+import { overridingUrlParameter } from "../db/postgres.js";
 
 /** The `Sql` type shape actually produced by `createClient` — includes the `bigint` type
  *  mapping (`postgres.BigInt`) configured below, so callers get real `bigint` in and out of
@@ -117,20 +118,20 @@ function assertNoConflictingSearchPath(connectionString: string): void {
   // rather than new URL(): new URL() cannot parse postgres.js's multi-host DSNs (`host1,host2`)
   // and would throw, letting the parameters through unchecked (audit). The `options=-c ...` route
   // is not a hazard -- PostgreSQL applies individual startup runtime-parameter pairs after
-  // `options`, so the explicit pairs win (verified against the PostgreSQL docs).
-  for (const param of [
+  // `options`, so the explicit pairs win (verified against the PostgreSQL docs). The search is shared with the
+  // database API's PostgreSQL backend (`../db/postgres.ts`), which refuses the settings it pins the same way.
+  const param = overridingUrlParameter(connectionString, [
     "search_path",
     "statement_timeout",
     "lock_timeout",
     "idle_in_transaction_session_timeout",
-  ]) {
-    if (new RegExp(`[?&]${param}=`, "i").test(connectionString)) {
-      throw new Error(
-        `connectionString must not set a "${param}" query parameter -- it would silently override ` +
-          `createClient's own setting (postgres.js merges query-string parameters after the explicit ` +
-          `connection settings). Configure it via the corresponding UmbraDBConnectionOptions field instead.`,
-      );
-    }
+  ]);
+  if (param !== undefined) {
+    throw new Error(
+      `connectionString must not set a "${param}" query parameter -- it would silently override ` +
+        `createClient's own setting (postgres.js merges query-string parameters after the explicit ` +
+        `connection settings). Configure it via the corresponding UmbraDBConnectionOptions field instead.`,
+    );
   }
 }
 /**

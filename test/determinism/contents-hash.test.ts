@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from "vitest";
+import type { BlockWriteHandle, ReadHandle } from "../../src/db/api.js";
 import { CanonicalEncodingError } from "../../src/determinism/cbor.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import { type ConsistentRead, PublicContentsError } from "../../src/determinism/public-tables.js";
@@ -141,8 +142,8 @@ describe("A55 (DT-3) — the contents hash of a fixed database equals a hash com
 
   // Task 1.3 (owner decision Q58): a `uuid` is the byte string of its 16 bytes and a `varchar` a text string (DT-1);
   // rows are keyed by the uuid's bytes, then `false` before `true` (DT-2). The uuids are inserted in upper case and
-  // without hyphens, which PostgreSQL stores as the same 16 bytes. No array holds a NULL element: `postgres` 3.4.9
-  // reads one as the text "NULL" (docs/issues/00006).
+  // without hyphens, which PostgreSQL stores as the same 16 bytes. Arrays with NULL elements have their own oracle
+  // below (docs/issues/00006).
   it("covers varchar values and uuid and boolean keys, written out by hand", async () => {
     const db = await freshDatabase(`
       CREATE SCHEMA k;
@@ -172,6 +173,72 @@ describe("A55 (DT-3) — the contents hash of a fixed database equals a hash com
     for (const pageSize of [undefined, 1, 2]) {
       expect(await hashOf(db, pageSize), `page size ${pageSize ?? "default"}`).toBe(expected);
     }
+  }, 60_000);
+});
+
+describe("arrays with NULL elements (docs/issues/00006; DT-1, DB-2)", () => {
+  // DT-1 encodes an array's NULL element as null (f6), and the text 'NULL' as text(4). `postgres` 3.4.9's own array
+  // parser read both as the text "NULL" (issue 00006), so the two hashed equal; the database API parses arrays itself.
+  it("hashes a NULL element as null and the text 'NULL' as text, written out by hand", async () => {
+    const db = await freshDatabase(`
+      CREATE SCHEMA a;
+      CREATE TABLE a.t (k integer PRIMARY KEY, v varchar[]);
+      INSERT INTO a.t VALUES (1, ARRAY['x', NULL]), (2, ARRAY['x', 'NULL']), (3, ARRAY[NULL, NULL]::varchar[]);
+    `);
+    const cbor: readonly (readonly [string, string])[] = [
+      ["array(1): one public table", "81"],
+      ["array(4): a.t", "84"],
+      ['text(1) "a"', "61 61"],
+      ['text(1) "t"', "61 74"],
+      ['["k", "v"]', "82 61 6b 61 76"],
+      ["array(3): rows by k", "83"],
+      ['[1, ["x", null]]', "82 01 82 61 78 f6"],
+      ['[2, ["x", "NULL"]]', "82 02 82 61 78 64 4e 55 4c 4c"],
+      ["[3, [null, null]]", "82 03 82 f6 f6"],
+    ];
+    const expected = createHash("sha256")
+      .update(Buffer.from(cbor.map(([, bytes]) => bytes.replace(/ /g, "")).join(""), "hex"))
+      .digest("hex");
+    expect(await hashOf(db)).toBe(expected);
+  }, 60_000);
+
+  it("negative control: a NULL element and the text 'NULL' give different hashes", async () => {
+    const setup = (element: string) => `
+      CREATE SCHEMA a;
+      CREATE TABLE a.t (k integer PRIMARY KEY, v text[]);
+      INSERT INTO a.t VALUES (1, ARRAY['x', ${element}]);
+    `;
+    const withNull = await hashOf(await freshDatabase(setup("NULL")));
+    const withText = await hashOf(await freshDatabase(setup("'NULL'")));
+    expect(withNull).not.toBe(withText);
+  }, 60_000);
+
+  it("reads a NULL element of every DT-1 array type as null, apart from false, 0, '' and the text 'NULL'", async () => {
+    const db = await freshDatabase("");
+    const [row] = await db.read((read) =>
+      read.query(`SELECT ARRAY[true, NULL, false]::boolean[] AS booleans,
+                         ARRAY[1, NULL, 0]::smallint[] AS smallints,
+                         ARRAY[1, NULL, 0]::integer[] AS integers,
+                         ARRAY[9007199254740993, NULL, 0]::bigint[] AS bigints,
+                         ARRAY[12, NULL, 0]::numeric[] AS numerics,
+                         ARRAY['\\x01'::bytea, NULL, '\\x'::bytea] AS byteas,
+                         ARRAY['x', NULL, 'NULL', ''] AS texts,
+                         ARRAY['x', NULL, 'NULL']::varchar(4)[] AS varchars,
+                         ARRAY['00000000-0000-0000-0000-0000000000ff'::uuid, NULL] AS uuids,
+                         ARRAY['{"a": 1}'::jsonb, NULL, 'null'::jsonb] AS jsonbs`),
+    );
+    expect(row).toEqual({
+      booleans: [true, null, false],
+      smallints: [1, null, 0],
+      integers: [1, null, 0],
+      bigints: [9007199254740993n, null, 0n],
+      numerics: ["12", null, "0"],
+      byteas: [new Uint8Array([1]), null, new Uint8Array([])],
+      texts: ["x", null, "NULL", ""],
+      varchars: ["x", null, "NULL"],
+      uuids: ["00000000-0000-0000-0000-0000000000ff", null],
+      jsonbs: [{ a: 1 }, null, null],
+    });
   }, 60_000);
 });
 
@@ -578,15 +645,8 @@ describe("DT-1 failures inside the hash", () => {
 });
 
 describe("the handle the contents hash needs", () => {
-  // CORE-ARCH §4.10's handles (`design.md` §4), as task 2.1 will define them: the hash must accept them unchanged.
-  interface ReadHandle {
-    readonly height: bigint | null;
-    query(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
-  }
-  interface BlockWriteHandle extends ReadHandle {
-    execute(sql: string, params?: unknown[]): Promise<number>;
-  }
-
+  // CORE-ARCH §4.10's handles, as the database API defines them (`src/db/api.ts`, task 2.1): the hash must accept them
+  // unchanged.
   it("is the query of a read handle and nothing more", () => {
     expectTypeOf<ReadHandle>().toExtend<ConsistentRead>();
     expectTypeOf<BlockWriteHandle>().toExtend<ConsistentRead>();

@@ -11,6 +11,7 @@
  * refuses cyclic values. Anything outside the subset fails with a {@link CanonicalEncodingError} naming where it is.
  */
 
+import { UmbraError } from "../db/errors.js";
 import { explain, refusalOfTypeName } from "./column-rules.js";
 
 /**
@@ -80,8 +81,12 @@ export type CanonicalEncodingFailure =
   /** An array or object that contains itself. */
   | "cyclic-value";
 
-/** An encoding failure: `reason` says why, `path` says where (`$` is the value, `$[2]["k"]` a column's nested key). */
-export class CanonicalEncodingError extends Error {
+/**
+ * An encoding failure: `reason` says why, `path` says where (`$` is the value, `$[2]["k"]` a column's nested key). It is
+ * an `UmbraError` (`design.md` §12 exports `UmbraError`, not this class): its code is its `reason`, it is not retryable,
+ * and its details hold the `path`.
+ */
+export class CanonicalEncodingError extends UmbraError {
   override readonly name = "CanonicalEncodingError";
 
   constructor(
@@ -89,7 +94,7 @@ export class CanonicalEncodingError extends Error {
     readonly path: string,
     detail: string,
   ) {
-    super(`${path}: ${reason}: ${detail}`);
+    super(reason, `${path}: ${reason}: ${detail}`, { path });
   }
 }
 

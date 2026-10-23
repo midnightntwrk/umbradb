@@ -64,6 +64,10 @@ const DURABILITY = {
 // above the default.
 const CORE_ARCH = {
   "**/src/determinism/**": { lines: 95, branches: 90, perFile: true },
+  // §13's default for `src/**`, added with the database API's directory; its errors module carries the `errors` floor
+  // §13 keeps at the moved path.
+  "**/src/db/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/db/errors.ts": { lines: 95, branches: 91, perFile: true },
 } as const;
 
 export default defineConfig({
