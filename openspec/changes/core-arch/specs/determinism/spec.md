@@ -84,18 +84,21 @@ changes.
 
 THE database API SHALL refuse, at migration time, a public module table that has no primary key (`no-primary-key`), a
 primary-key column of a type DT-2 does not order (`unsupported-key-type`), a column of a type DT-1 does not encode
-(`unsupported-column-type`; a `numeric` with a declared scale above 0 included), or a sequence, serial or identity
-column, a floating-point column, or a column whose default is a wall-clock or random function
-(`non-deterministic-column`). Each refusal SHALL name the module, the table, the column and its declared type, state why
-that type or default cannot be stored deterministically, and say what to use instead, as `design.md` §4's column-type
-table gives them (owner decision Q58); the contents hash (DT-3) SHALL refuse the same tables with the same codes and
-messages. THE database API SHALL add to every `jsonb` and `numeric` column of a public module table, and to every array
-of either, a `CHECK` constraint that rejects any JSON number that is not an integer within the signed 64-bit range or
-whose text has a fraction, a zero fraction such as `1.0` included (owner decision Q57: no stored number carries a scale,
-so equal contents hashes mean equal query results), and any `numeric` value with a fraction or `NaN`, so such a write
-fails whether or not the module opts into digests. Values a module computes from anything other than the chain, S and
-the configuration (wall-clock time, randomness, process state) are a module developer's error the database cannot see;
-they are caught by the convergence tests (two runs, two backends, restarts) and by digests.
+(`unsupported-column-type`; a `numeric` with a declared scale above 0 included), an identity column, a floating-point
+column, or a column whose default is not immutable — one that calls a function PostgreSQL marks stable or volatile or
+uses an SQL value function, so `now()`, `CURRENT_TIMESTAMP`, `random()`, `gen_random_uuid()` and a `serial` column's
+`nextval()` included (`non-deterministic-column`); and it SHALL refuse a public schema that holds a sequence or an
+unlogged table (`non-deterministic-table`; owner decision Q61). Each refusal SHALL name the module, the table or
+sequence, the column and its declared type where there is one, state why it cannot be stored deterministically, and say
+what to use instead, as `design.md` §4 gives them (owner decisions Q58, Q59, Q60); the contents hash (DT-3) SHALL refuse
+the same tables, sequences and columns with the same codes and messages, in any public schema (owner decision Q61). THE
+database API SHALL add to every `jsonb` and `numeric` column of a public module table, and to every array of either, a
+`CHECK` constraint that rejects any JSON number that is not an integer within the signed 64-bit range or whose text has
+a fraction, a zero fraction such as `1.0` included (owner decision Q57: no stored number carries a scale, so equal
+contents hashes mean equal query results), and any `numeric` value with a fraction or `NaN`, so such a write fails
+whether or not the module opts into digests. Values a module computes from anything other than the chain, S and the
+configuration (wall-clock time, randomness, process state) are a module developer's error the database cannot see; they
+are caught by the convergence tests (two runs, two backends, restarts) and by digests.
 
 #### Scenario: A serial column
 - **WHEN** a test module's migration creates a table with a `serial` column
@@ -107,6 +110,21 @@ they are caught by the convergence tests (two runs, two backends, restarts) and 
 - **THEN** startup refuses with `unsupported-column-type`; the message names the module, the table, the column and
   `timestamp with time zone`, says the drivers read it as a millisecond `Date` and its text depends on session
   settings, and says to store `bigint` milliseconds instead
+
+#### Scenario: A `CURRENT_TIMESTAMP` default
+- **WHEN** a test module's migration creates a `bigint` column with the default
+  `extract(epoch from CURRENT_TIMESTAMP)::bigint`
+- **THEN** startup refuses with `non-deterministic-column`, and the message says each machine gets a different value
+  and to compute the value from the block in `on-db-write`
+
+#### Scenario: An unlogged table
+- **WHEN** a test module's migration creates an unlogged table
+- **THEN** startup refuses with `non-deterministic-table`, and the message says PostgreSQL empties it after a crash
+
+#### Scenario: A table no module declared
+- **WHEN** an operator creates `ops.notes (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, body text)` in a
+  public schema by hand
+- **THEN** the contents hash refuses with `non-deterministic-column`, naming `ops.notes.id`
 
 #### Scenario: A table without a primary key
 - **WHEN** a test module's migration creates a table with no primary key

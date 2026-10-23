@@ -53,7 +53,8 @@ async function failure(run: () => Promise<unknown>): Promise<PublicContentsError
 describe("A55 (DT-3) — the contents hash of a fixed database equals a hash computed by hand", () => {
   // Created so that creation (OID) order differs from name order for the schemas and for the tables of each schema,
   // with a dropped column, a partitioned table, and objects that are not public tables (a table in the reserved
-  // `public` schema, a view, a materialized view, a sequence).
+  // `public` schema, a view, a materialized view, and a sequence in `public`: a sequence in a public schema refuses the
+  // hash, owner decision Q61, `column-refusals.test.ts`).
   const FIXED_DATABASE = `
     CREATE SCHEMA m_x;
     CREATE SCHEMA m0;
@@ -67,7 +68,7 @@ describe("A55 (DT-3) — the contents hash of a fixed database equals a hash com
     CREATE TABLE public.extension_table (x integer PRIMARY KEY);
     CREATE VIEW m0.v AS SELECT 1 AS x;
     CREATE MATERIALIZED VIEW m0.mv AS SELECT 1 AS x;
-    CREATE SEQUENCE m0.q;
+    CREATE SEQUENCE public.q;
     INSERT INTO public.extension_table VALUES (1);
     INSERT INTO m_x.t VALUES (2, 'b'), (-10, 'a'), (10, 'B'), (-3, 'ü'), (9007199254740993, NULL);
     INSERT INTO m_x.s VALUES ('b'), ('B'), ('a');
@@ -77,8 +78,8 @@ describe("A55 (DT-3) — the contents hash of a fixed database equals a hash com
   `;
 
   // The canonical CBOR of DT-3's array for FIXED_DATABASE, item by item. Schemas by bytes: "m0" (6d 30) before "m_x"
-  // (6d 5f 78); tables: "B" (42) before "b" (62), "s" before "t"; the partitions, the view, the materialized view, the
-  // sequence and `public` are not public tables. Rows in primary-key order; values per DT-1.
+  // (6d 5f 78); tables: "B" (42) before "b" (62), "s" before "t"; the partitions, the view, the materialized view and
+  // `public` (its table and its sequence) are not public tables. Rows in primary-key order; values per DT-1.
   const EXPECTED_CBOR: readonly (readonly [string, string])[] = [
     ["array(4): the four public tables", "84"],
 
@@ -202,7 +203,7 @@ describe("A55 (DT-3) — the same rows give the same contents hash", () => {
   `;
   // The same rows, with every incidental difference a database may have: schemas and tables created in another
   // order, other partition bounds, rows inserted in reverse and rewritten afterwards, a dropped column, an extra
-  // index, an empty schema, and objects that are not public tables.
+  // index, an empty schema, and objects that are not public tables (a view; a sequence and a table in `public`).
   const SECOND = `
     CREATE SCHEMA tokens;
     CREATE SCHEMA empty_one;
@@ -221,7 +222,7 @@ describe("A55 (DT-3) — the same rows give the same contents hash", () => {
     UPDATE chain.blocks SET hash = sha256(int8send(height)), parent_hash = sha256(int8send(height - 1));
     ${balances("desc")}
     CREATE VIEW chain.recent AS SELECT * FROM chain.blocks WHERE height > 100;
-    CREATE SEQUENCE tokens.counter;
+    CREATE SEQUENCE public.counter;
     CREATE TABLE public.unrelated (k integer PRIMARY KEY);
     INSERT INTO public.unrelated VALUES (1), (2);
   `;
@@ -526,7 +527,12 @@ describe("DT-1 failures inside the hash", () => {
   }, 60_000);
 
   it("names the table but no column when the rows read are not as many as counted", () => {
-    const error = new PublicContentsError("row-count-changed", "m", "b", null, "counted 7 rows, then read 8");
+    const error = new PublicContentsError(
+      "row-count-changed",
+      { schema: "m", table: "b" },
+      null,
+      "counted 7 rows, then read 8",
+    );
     expect(error.message).toBe('row-count-changed: table "m"."b": counted 7 rows, then read 8');
     expect(error.declaredType).toBeNull();
   });

@@ -1,19 +1,24 @@
 /**
  * The column-type rules of DT-1, DT-2 and DT-6 (`openspec/changes/core-arch/specs/determinism/spec.md`, owner decision
  * Q58): for each column of a public table, whether its type may be stored (as a value) and whether it may be part of
- * the primary key (as a key) — and, when it may not, why, and what to use instead.
+ * the primary key (as a key) — and, when it may not, why, and what to use instead. And DT-6's non-deterministic
+ * columns and tables (owner decision Q61): identity and `serial` columns, defaults that are not immutable, and public
+ * schemas holding a sequence or an unlogged table.
  *
  * **One source.** Every reason and alternative here comes from `design.md` §4's column-type table and the paragraph
- * above it, adapted into sentences for a module developer who has never read DT-1. Each rule keeps its row's four cells
- * verbatim (`design`), and `test/determinism/column-rules.test.ts` fails when the table and the rules part ways. The
- * contents hash (DT-3) refuses with these rules today; task 7.1's migration-time check (DT-6) calls the same
- * {@link tableRefusals} and {@link refusalMessage}, adding the module's id, so a refusal reads the same in both.
+ * above it, adapted into sentences for a module developer who has never read DT-1 or DT-6. Each rule keeps its row's
+ * four cells, or its sentence, verbatim (`design`), and `test/determinism/column-rules.test.ts` fails when the design
+ * and the rules part ways. The contents hash (DT-3) refuses with these rules in every public schema; task 7.1's
+ * migration-time check (DT-6) calls the same {@link tableRefusals}, {@link relationRefusals} (or
+ * {@link databaseRefusals}) and {@link refusalMessage}, adding the module's id, so a refusal reads the same in both.
  *
  * **The input** is what PostgreSQL's catalog says about a column ({@link ColumnFacts}), nothing more: the type's name
  * (`format_type(atttypid, NULL)`), the declared type for messages (`format_type(atttypid, atttypmod)`), the type
  * modifier (`atttypmod`, which holds `numeric`'s declared scale), the kind of type (`pg_type.typtype`, which tells
- * enums, domains, composite, range and multirange types apart, whatever their name) and of an array's element, and
- * whether the column is in the primary key.
+ * enums, domains, composite, range and multirange types apart, whatever their name) and of an array's element, whether
+ * the column is in the primary key, whether it is an identity column (`attidentity`), and what in its default is not
+ * immutable (read from `pg_attrdef.adbin` by {@link parseExpressionTree}, {@link defaultReferences} and
+ * {@link notImmutableParts}); and about a relation ({@link RelationFacts}): `relkind` and `relpersistence`.
  *
  * Two rows of the table give one reason to several types although it is not true of each of them (decision record
  * Q59 and Q60, 2026-10-23): the date and time types and the floating-point types. For those, each type gets the
@@ -46,6 +51,17 @@ export interface ColumnFacts {
   readonly elementKind: string | null;
   /** Whether the column is one of the primary key's columns. */
   readonly inPrimaryKey: boolean;
+  /**
+   * `pg_attribute.attidentity`: `always` (`GENERATED ALWAYS AS IDENTITY`, `a`), `by default` (`BY DEFAULT`, `d`), or
+   * null for a column that is no identity column.
+   */
+  readonly identity: "always" | "by default" | null;
+  /**
+   * What the column's default does that PostgreSQL does not treat as immutable, in the order its expression tree lists
+   * it ({@link notImmutableParts}); empty when the column has no default or an immutable one. A generated column's
+   * expression is no default: PostgreSQL requires it to be immutable, and computes it from the row.
+   */
+  readonly notImmutable: readonly DefaultPart[];
 }
 
 /** A table as PostgreSQL's catalog describes it: its columns in column order. */
@@ -55,6 +71,16 @@ export interface TableFacts {
   readonly columns: readonly ColumnFacts[];
 }
 
+/** A relation of a public schema as PostgreSQL's catalog describes it: a table (a partition included) or a sequence. */
+export interface RelationFacts {
+  readonly schema: string;
+  readonly name: string;
+  /** `pg_class.relkind`: `S` sequence, `r` table (a partition included), `p` partitioned table. */
+  readonly kind: string;
+  /** `pg_class.relpersistence`: `p` permanent, `u` unlogged. */
+  readonly persistence: string;
+}
+
 // ── the rules ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The codes of DT-6's startup refusals that the rules decide (`design.md` §11). */
@@ -62,7 +88,8 @@ export type RefusalCode =
   | "no-primary-key"
   | "unsupported-key-type"
   | "unsupported-column-type"
-  | "non-deterministic-column";
+  | "non-deterministic-column"
+  | "non-deterministic-table";
 
 /** How DT-2 orders a key column: integers numerically, `boolean` with `false` first, the others by their bytes. */
 export type KeyOrder = "numerically" | "false-first" | "by-bytes" | "by-bytes-collate-c";
@@ -272,8 +299,8 @@ const VALUE_TYPES = ALLOWED.flatMap((rule) =>
   rule.types.map((type) => (type === "numeric" ? "numeric (with no declared scale above 0)" : type)),
 );
 
-// `real` and `double precision`: DT-6 refuses floating-point columns with `non-deterministic-column`. The row's example
-// (0.1 + 0.2 against 0.3) holds in double precision only; in real, 0.1 + 0.2 equals 0.3 (Q60), so real gets its own.
+// `real` and `double precision`: DT-6 refuses floating-point columns with `non-deterministic-column`. 0.1 + 0.2
+// against 0.3 differs in double precision only; in real, 0.1 + 0.2 equals 0.3, so real has its own example (Q60).
 const FLOATING_POINT: RefusedRule = {
   id: "floating-point",
   design: {
@@ -281,7 +308,8 @@ const FLOATING_POINT: RefusedRule = {
     value: "refused (`non-deterministic-column`)",
     key: "refused",
     because:
-      "Approximate: a value computed two ways (`0.1 + 0.2`, `0.3`) can differ in its last bits; use integers in " +
+      "Approximate: a value computed two ways can differ in its last bits (Q60: in `double precision`, `0.1 + 0.2` " +
+      "is `0.30000000000000004`, not `0.3`; in `real`, `0.1 + 0.6` is `0.70000005`, not `0.7`); use integers in " +
       "fixed units (`bigint`, `numeric(p)`)",
   },
   allowed: false,
@@ -307,13 +335,13 @@ const FLOATING_POINT: RefusedRule = {
 
 const SINCE_EPOCH = "store bigint milliseconds since the epoch, as core_block_commit.blocks.block_timestamp_ms does";
 const MILLISECONDS = "store bigint milliseconds, as core_block_commit.blocks.block_timestamp_ms does";
-const MILLISECOND_DATE =
-  "The drivers return it as a JavaScript Date, which keeps milliseconds only (10:00:00.123456 and 10:00:00.123999 " +
-  "read back equal)";
+const MILLISECOND_DATE = (type: string): string =>
+  `The drivers return a ${type} as a JavaScript Date, which keeps milliseconds only (10:00:00.123456 and ` +
+  "10:00:00.123999 read back equal)";
 const TIME_OF_DAY: Because = {
   reason:
-    "UmbraDB defines no canonical encoding for a time of day: the drivers return its text, and, as for every date " +
-    "and time type, an encoding would need a rule of its own",
+    "UmbraDB defines no canonical encoding for a time of day (time, timetz): the drivers return its text, and, as " +
+    "for every date and time type, an encoding would need a rule of its own",
   alternative: MILLISECONDS,
 };
 
@@ -321,7 +349,8 @@ const TIME_OF_DAY: Because = {
 // parse `date`, `timestamp` and `timestamptz` into a `Date` (milliseconds only); `time`, `timetz` and `interval` come
 // back as text. `date` and `timestamp` text follows DateStyle, `timestamptz` also TimeZone, `interval` IntervalStyle;
 // `time` and `timetz` text follows no setting (checked on PostgreSQL 17.11 and PGlite 0.5.10, Q59), so their reason is
-// the one Q58 gives for every date and time type: an encoding would need its own rule.
+// the one Q58 gives for every date and time type: an encoding would need its own rule. Each reason names its type as
+// the row does.
 const DATE_TIME: RefusedRule = {
   id: "date-time",
   design: {
@@ -329,9 +358,13 @@ const DATE_TIME: RefusedRule = {
     value: "refused",
     key: "refused",
     because:
-      "The drivers return a JavaScript `Date`, which keeps milliseconds only (`10:00:00.123456` and " +
-      "`10:00:00.123999` read back equal), and the text depends on `TimeZone`, `DateStyle` and `IntervalStyle`; " +
-      "store `bigint` milliseconds since the epoch, as `core_block_commit.blocks.block_timestamp_ms` does",
+      "Per type (Q59): `timestamptz` and `timestamp` — the drivers return a JavaScript `Date`, which keeps " +
+      "milliseconds only (`10:00:00.123456` and `10:00:00.123999` read back equal), and the text depends on " +
+      "`DateStyle` (and, for `timestamptz`, `TimeZone`); `date` — the drivers return a JavaScript `Date`, and the " +
+      "text depends on `DateStyle` (`2026-10-23` or `23/10/2026`); `interval` — the drivers return its text, which " +
+      "depends on `IntervalStyle` (`1 day 02:00:00` or `P1DT2H`); `time` and `timetz` — no canonical encoding is " +
+      "defined for a time of day (the drivers return its text). Store `bigint` milliseconds since the epoch, as " +
+      "`core_block_commit.blocks.block_timestamp_ms` does",
   },
   allowed: false,
   code: "unsupported-column-type",
@@ -346,21 +379,23 @@ const DATE_TIME: RefusedRule = {
   because: {
     byType: {
       "timestamp with time zone": {
-        reason: `${MILLISECOND_DATE}, and its text depends on the TimeZone and DateStyle settings`,
+        reason: `${MILLISECOND_DATE("timestamptz")}, and its text depends on the TimeZone and DateStyle settings`,
         alternative: SINCE_EPOCH,
       },
       "timestamp without time zone": {
-        reason: `${MILLISECOND_DATE}, and its text depends on the DateStyle setting`,
+        reason: `${MILLISECOND_DATE("timestamp")}, and its text depends on the DateStyle setting`,
         alternative: SINCE_EPOCH,
       },
       date: {
         reason:
-          "The drivers return it as a JavaScript Date, and its text depends on the DateStyle setting (2026-10-23 or " +
-          "23/10/2026)",
+          "The drivers return a date as a JavaScript Date, and its text depends on the DateStyle setting (2026-10-23 " +
+          "or 23/10/2026)",
         alternative: SINCE_EPOCH,
       },
       interval: {
-        reason: "The drivers return its text, which depends on the IntervalStyle setting (1 day 02:00:00 or P1DT2H)",
+        reason:
+          "The drivers return an interval as its text, which depends on the IntervalStyle setting (1 day 02:00:00 or " +
+          "P1DT2H)",
         alternative: MILLISECONDS,
       },
       "time without time zone": TIME_OF_DAY,
@@ -496,11 +531,23 @@ export const COLUMN_TYPE_RULES: readonly TypeRule[] = [
   OTHER,
 ];
 
-/** The refusals of the paragraph above the column-type table; the last two are task 7.1's to detect. */
+// DT-6's last refusal sentence covers two things, each with its own reason (owner decision Q61).
+const NON_DETERMINISTIC_TABLE =
+  "A public schema holding a sequence, or an unlogged table, is refused with `non-deterministic-table` (Q61): module " +
+  "code can draw from a sequence at any time, and its values depend on retries; PostgreSQL empties an unlogged table " +
+  "after a crash, while the cursor still records its blocks as committed.";
+
+/**
+ * The refusals of the paragraph above the column-type table, each with its sentence verbatim (`design`). A refusal of
+ * an identity, `serial` or default column says, after `what`, what in the column draws from a sequence or is not
+ * immutable ({@link tableRefusals}).
+ */
 export const TABLE_RULES: {
   readonly noPrimaryKey: TableRule;
-  readonly sequenceColumn: TableRule;
-  readonly nonDeterministicDefault: TableRule;
+  readonly identityOrSerial: TableRule;
+  readonly nonImmutableDefault: TableRule;
+  readonly sequence: TableRule;
+  readonly unloggedTable: TableRule;
 } = {
   // DT-2 orders rows by their primary key; the contents hash and the digests depend on that order.
   noPrimaryKey: {
@@ -517,37 +564,85 @@ export const TABLE_RULES: {
       alternative: `add a primary key whose columns are ${KEY_TYPES.slice(0, -1).join(", ")} or ${KEY_TYPES.at(-1)}`,
     },
   },
-  // A sequence's value survives the rollback of the block that drew it.
-  sequenceColumn: {
+  // A sequence's value survives the rollback of the block that drew it. An identity column draws from its own
+  // sequence; a `serial` column is an integer column whose default calls nextval() on one.
+  identityOrSerial: {
     code: "non-deterministic-column",
-    what: "a sequence, serial or identity column cannot be in a public table",
+    what: "the column draws its values from a sequence",
     design:
-      "A sequence, `serial` or identity column is refused with `non-deterministic-column`: a sequence never rolls " +
-      "back, so its next value depends on rolled-back and retried blocks, not only on the chain; derive keys from " +
-      "the block (height, transaction index).",
+      "An identity or `serial` column is refused with `non-deterministic-column`: a sequence never rolls back, so " +
+      "its next value depends on rolled-back and retried blocks, not only on the chain; derive keys from the block " +
+      "(height, transaction index).",
     because: {
       reason:
-        "A sequence, the one behind a serial or identity column too, never rolls back, so its next value depends on " +
-        "rolled-back and retried blocks, not only on the chain",
+        "A sequence, such as the one behind an identity or serial column, never rolls back, so its next value " +
+        "depends on rolled-back and retried blocks, not only on the chain",
       alternative: "derive keys from the block (height, transaction index)",
     },
   },
-  // Defaults evaluated on each machine at write time.
-  nonDeterministicDefault: {
+  // PostgreSQL evaluates a default on each insert, on each machine.
+  nonImmutableDefault: {
     code: "non-deterministic-column",
-    what: "a column's default cannot read the wall clock or draw a random value",
+    what: "the column's default is not immutable",
     design:
-      "A wall-clock or random default (`now()`, `random()`, `gen_random_uuid()`) is refused with " +
-      "`non-deterministic-column`: each machine gets a different value; compute the value from the block in " +
-      "`on-db-write`.",
+      "A default that is not immutable is refused with `non-deterministic-column`: it calls a function PostgreSQL " +
+      "marks stable or volatile (`now()`, `random()`, `gen_random_uuid()`) or uses an SQL value function " +
+      "(`CURRENT_TIMESTAMP`, `CURRENT_USER`), so each machine, or each retry, gets a different value; compute the " +
+      "value from the block in `on-db-write`.",
     because: {
       reason:
-        "A default that reads the wall clock or draws at random (now(), random(), gen_random_uuid()) gives each " +
-        "machine a different value",
+        "PostgreSQL evaluates a default on each insert, and when the default calls a function PostgreSQL marks " +
+        "stable or volatile (now(), random(), gen_random_uuid()) or uses an SQL value function (CURRENT_TIMESTAMP, " +
+        "CURRENT_USER), each machine, or each retry, gets a different value",
       alternative: "compute the value from the block in on-db-write",
     },
   },
+  // Module code may call nextval() on any sequence of its schema, in any block. The alternative is the identity and
+  // serial rule's, for values as for keys (`design.md` §4 gives none for this sentence: decision record Q64).
+  sequence: {
+    code: "non-deterministic-table",
+    what: "a public schema cannot hold a sequence",
+    design: NON_DETERMINISTIC_TABLE,
+    because: {
+      reason:
+        "Module code can draw from a sequence at any time, and a sequence never rolls back, so its values depend on " +
+        "rolled-back and retried blocks, not only on the chain",
+      alternative: "derive values from the block (height, transaction index), and drop the sequence",
+    },
+  },
+  // An unlogged table is not written to the write-ahead log; crash recovery truncates it, while the blocks whose rows
+  // it held stay committed in the cursor. The alternative is the table made logged (decision record Q64).
+  unloggedTable: {
+    code: "non-deterministic-table",
+    what: "a public schema cannot hold an unlogged table",
+    design: NON_DETERMINISTIC_TABLE,
+    because: {
+      reason:
+        "PostgreSQL empties an unlogged table after a crash, while the cursor still records its blocks as committed, " +
+        "so the table loses rows the chain still holds",
+      alternative: "make the table logged: create it without UNLOGGED, or run ALTER TABLE ... SET LOGGED",
+    },
+  },
 };
+
+/**
+ * The paragraph's sentences on what is allowed and on how the rules detect it, verbatim. The detection reads every
+ * function id the sentence names ({@link FUNCTION_ID_FIELDS}) and the `SQLVALUEFUNCTION` node, and also what
+ * PostgreSQL's own check (`contain_mutable_functions`) reads that the sentence does not name (decision record Q62):
+ * conversions through input and output functions, row comparisons, `NEXTVALUEEXPR`, and SQL/JSON nodes, which it
+ * refuses outright (decision record Q63; {@link defaultReferences}).
+ */
+export const DEFAULT_DESIGN = {
+  allowed:
+    "An immutable default (`'abc'`, `1 + 2`, `lower('X')`) and a stored generated column, which PostgreSQL requires " +
+    "to be immutable, are allowed.",
+  detection:
+    "Detection, checked on PostgreSQL 17.11 and PGlite 0.5.10: `pg_attribute.attidentity`; a default's expression " +
+    "tree (`pg_attrdef.adbin`) lists every function it calls (`:funcid`, and `:opfuncid`, `:hashfuncid` and " +
+    "`:negfuncid` for operators), each looked up in `pg_proc.provolatile`, and an SQL value function is a " +
+    "`SQLVALUEFUNCTION` node with no function id; `pg_class.relkind = 'S'` for a sequence and `relpersistence = 'u'` " +
+    "for an unlogged table.",
+} as const;
 
 // ── verdicts ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -591,8 +686,11 @@ export interface Refusal {
 }
 
 /**
- * Every refusal of a table, in a fixed order: a missing primary key first, then each refused column in column order.
- * Empty when the table may be stored, hashed and digested. The contents hash refuses with the first; so will startup.
+ * Every refusal of a table, in a fixed order: a missing primary key first, then each refused column in column order,
+ * and for each column its type (no default can make a type storable), its identity, what in its default draws from a
+ * sequence (a `serial` column's `nextval()`), then the rest of its default that is not immutable. Empty when the table
+ * may be stored, hashed and digested. The contents hash refuses with the first refusal of the database
+ * ({@link databaseRefusals}); so will startup.
  */
 export function tableRefusals(table: TableFacts): Refusal[] {
   const refusals: Refusal[] = [];
@@ -601,40 +699,109 @@ export function tableRefusals(table: TableFacts): Refusal[] {
     refusals.push({ code, column: null, what, because });
   }
   for (const column of table.columns) {
+    const where = { name: column.name, declaredType: column.declaredType };
     const verdict = columnVerdict(column);
-    if (verdict.allowed) continue;
-    refusals.push({
-      code: verdict.code,
-      column: { name: column.name, declaredType: column.declaredType },
-      what: verdict.code === "unsupported-key-type" ? REFUSED_AS_KEY : REFUSED_AS_VALUE,
-      because: verdict.because,
-    });
+    if (!verdict.allowed) {
+      refusals.push({
+        code: verdict.code,
+        column: where,
+        what: verdict.code === "unsupported-key-type" ? REFUSED_AS_KEY : REFUSED_AS_VALUE,
+        because: verdict.because,
+      });
+    }
+    const { identityOrSerial, nonImmutableDefault } = TABLE_RULES;
+    if (column.identity !== null) {
+      const clause = column.identity === "always" ? "ALWAYS" : "BY DEFAULT";
+      const what = `${identityOrSerial.what}: it is an identity column (GENERATED ${clause} AS IDENTITY)`;
+      refusals.push({ code: identityOrSerial.code, column: where, what, because: identityOrSerial.because });
+    }
+    const draws = column.notImmutable.filter((part) => part.drawsFromSequence);
+    if (draws.length > 0) {
+      const what = `${identityOrSerial.what}: its default ${draws.map((part) => part.does).join("; it ")}`;
+      refusals.push({ code: identityOrSerial.code, column: where, what, because: identityOrSerial.because });
+    }
+    const rest = column.notImmutable.filter((part) => !part.drawsFromSequence);
+    if (rest.length > 0) {
+      const lead = rest.every((part) => part.undecided) ? UNDECIDED_DEFAULT : nonImmutableDefault.what;
+      const what = `${lead}: it ${rest.map((part) => part.does).join("; it ")}`;
+      refusals.push({ code: nonImmutableDefault.code, column: where, what, because: nonImmutableDefault.because });
+    }
   }
   return refusals;
 }
 
-/** Where a refusal is: the module (startup only; at hash time the schema stands in for it), the schema, the table. */
-export interface RefusalPlace {
-  readonly module?: string;
-  readonly schema: string;
-  readonly table: string;
+/**
+ * The refusal of a relation of a public schema: every sequence (an identity or `serial` column's own included), and
+ * every unlogged table, partitioned table or partition; nothing for a logged table (DT-6, owner decision Q61).
+ */
+export function relationRefusals(relation: RelationFacts): Refusal[] {
+  const isTable = relation.kind === "r" || relation.kind === "p";
+  const rule =
+    relation.kind === "S"
+      ? TABLE_RULES.sequence
+      : isTable && relation.persistence === "u"
+        ? TABLE_RULES.unloggedTable
+        : null;
+  return rule === null ? [] : [{ code: rule.code, column: null, what: rule.what, because: rule.because }];
 }
 
 /**
- * The message of a refusal, for a developer who has never read DT-1: the code, where (module, table, column and its
- * declared type), what is refused, why, and what to use instead. The contents hash and startup give it alike.
+ * Where a refusal is: the module (startup only; at hash time the schema stands in for it), the schema, and the table
+ * or, for a sequence, the sequence.
+ */
+export type RefusalPlace =
+  | { readonly module?: string; readonly schema: string; readonly table: string }
+  | { readonly module?: string; readonly schema: string; readonly sequence: string };
+
+/** A refusal and where it is. */
+export interface PlacedRefusal {
+  readonly refusal: Refusal;
+  readonly place: RefusalPlace;
+}
+
+/**
+ * Every refusal of a database's public tables and relations, in a fixed order: each table's refusals
+ * ({@link tableRefusals}) in the order the tables are given, then each relation's ({@link relationRefusals}) in the
+ * order given — `catalogTables` and `catalogRelations` of `./public-tables.ts` give DT-3's (by schema, then name, as
+ * bytes). Tables come first because a column is what a developer wrote: an identity or `serial` column's sequence is
+ * refused too, but it is dropped with its column, so the column's refusal is the one to read first.
+ */
+export function databaseRefusals(
+  tables: readonly TableFacts[],
+  relations: readonly RelationFacts[],
+): PlacedRefusal[] {
+  const placed: PlacedRefusal[] = [];
+  for (const table of tables) {
+    const place = { schema: table.schema, table: table.name };
+    for (const refusal of tableRefusals(table)) placed.push({ refusal, place });
+  }
+  for (const relation of relations) {
+    const place =
+      relation.kind === "S"
+        ? { schema: relation.schema, sequence: relation.name }
+        : { schema: relation.schema, table: relation.name };
+    for (const refusal of relationRefusals(relation)) placed.push({ refusal, place });
+  }
+  return placed;
+}
+
+/**
+ * The message of a refusal, for a developer who has never read DT-1 or DT-6: the code, where (module, table or
+ * sequence, column and its declared type), what is refused, why, and what to use instead. The contents hash and startup
+ * give it alike.
  */
 export function refusalMessage(refusal: Refusal, place: RefusalPlace): string {
   return `${refusal.code}: ${describeLocation(place, refusal.column)}: ${explainRefusal(refusal)}`;
 }
 
-/** The location part of a message: `module "m", table "s"."t", column "c" (declared type)`. */
+/** The location part of a message: `module "m", table "s"."t", column "c" (declared type)`, or `sequence "s"."q"`. */
 export function describeLocation(
   place: RefusalPlace,
   column: { readonly name: string; readonly declaredType: string } | null,
 ): string {
   const parts = place.module === undefined ? [] : [`module ${JSON.stringify(place.module)}`];
-  parts.push(`table ${quoteIdentifier(place.schema)}.${quoteIdentifier(place.table)}`);
+  const [kind, name] = "sequence" in place ? ["sequence", place.sequence] : ["table", place.table];
+  parts.push(`${kind} ${quoteIdentifier(place.schema)}.${quoteIdentifier(name)}`);
   if (column !== null) parts.push(`column ${quoteIdentifier(column.name)} (${column.declaredType})`);
   return parts.join(", ");
 }
@@ -691,6 +858,266 @@ export function quoteIdentifier(name: string): string {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+// ── defaults that are not immutable (DT-6, owner decision Q61) ──────────────────────────────────────────────────────
+//
+// PostgreSQL stores a default as an expression tree (`pg_attrdef.adbin`, type `pg_node_tree`, written by outfuncs.c).
+// A default is immutable when PostgreSQL's own check, `contain_mutable_functions` (clauses.c, with
+// `check_functions_in_node` of nodeFuncs.c; read at REL_17_STABLE, 2026-10-23), finds nothing in it: every function it
+// calls is marked immutable in `pg_proc.provolatile`, and it holds no SQL value function and no `NEXTVALUEEXPR`. The
+// functions a node calls are its function ids (`:funcid`; `:opfuncid`, and for an array operator `:hashfuncid` and
+// `:negfuncid`, of an operator), the input function of the result type and the output function of the argument type
+// of a conversion through text (`COERCEVIAIO`, which lists no function id), and the operators' functions of a row
+// comparison (`ROWCOMPAREEXPR`, which lists operators). Two kinds PostgreSQL decides from their arguments' types or
+// their jsonpath — SQL/JSON constructors (`JSON_OBJECT`, …) and queries (`JSON_VALUE`, …) — are refused outright here,
+// which refuses some that PostgreSQL would call immutable (decision record Q63). Everything is read as stored, without
+// PostgreSQL's constant folding, so `CASE WHEN true THEN 1 ELSE random() END` is refused although it never calls
+// random(). Aggregates, window functions and subqueries cannot be in a default (PostgreSQL refuses them there).
+// Checked on PostgreSQL 17.11 and PGlite 0.5.10 (PostgreSQL 18.6), whose trees agree.
+
+/** A node of PostgreSQL's expression-tree text: its kind (`FUNCEXPR`, `CONST`, …) and its fields, in order. */
+export interface TreeNode {
+  readonly kind: string;
+  /** Each field's value: its items, usually one (a token, a node or a list), several for a `Const`'s `:constvalue`. */
+  readonly fields: ReadonlyMap<string, readonly TreeItem[]>;
+}
+
+/** A parenthesised list: of nodes (`({…} {…})`), or of numbers after a marker (`(o 2358 97)`, OIDs). */
+export interface TreeList {
+  readonly list: readonly TreeItem[];
+}
+
+/** A token (`1184`, `true`, `<>` for no value), a node or a list. */
+export type TreeItem = TreeNode | TreeList | string;
+
+/**
+ * Parses PostgreSQL's expression-tree text as `pg_attrdef.adbin::text` gives it, tokenized as PostgreSQL's reader does
+ * (`pg_strtok`, read.c): `{`, `}`, `(` and `)` are tokens of their own, every other token runs to whitespace or to one
+ * of them, and a backslash makes the next character part of the token. A field's value is its first item and every
+ * following item up to the next `:field` (a `Const`'s `:constvalue 4 [ 1 0 0 0 ]` is several). Throws on text that is
+ * not one well-formed node.
+ */
+export function parseExpressionTree(text: string): TreeNode {
+  const tokens = tokenize(text);
+  let at = 0;
+  const fail = (why: string): never => {
+    throw new Error(`malformed expression tree (${why}): ${text.slice(0, 200)}`);
+  };
+  const is = (token: Token | undefined, char: string): boolean => token?.structural === true && token.text === char;
+  const startsField = (token: Token | undefined): boolean => token?.structural === false && token.text.startsWith(":");
+  const item = (): TreeItem => {
+    const token = tokens[at++];
+    if (token === undefined) return fail("it ends inside a node");
+    if (!token.structural) return token.text;
+    if (token.text === "{") return node();
+    if (token.text === "(") return list();
+    return fail(`an unexpected "${token.text}"`);
+  };
+  const node = (): TreeNode => {
+    const kind = tokens[at++];
+    if (kind === undefined || kind.structural) return fail("a node without a kind");
+    const fields = new Map<string, TreeItem[]>();
+    while (!is(tokens[at], "}")) {
+      const field = tokens[at++];
+      if (!startsField(field)) return fail(`${JSON.stringify(field?.text ?? "the end")} where a field was expected`);
+      if (is(tokens[at], "}")) return fail(`the field ${field?.text} has no value`);
+      const values = [item()];
+      while (at < tokens.length && !is(tokens[at], "}") && !startsField(tokens[at])) values.push(item());
+      fields.set((field as Token).text.slice(1), values);
+    }
+    at++;
+    return { kind: kind.text, fields };
+  };
+  const list = (): TreeList => {
+    const items: TreeItem[] = [];
+    while (!is(tokens[at], ")")) items.push(item());
+    at++;
+    return { list: items };
+  };
+  if (!is(tokens[at++], "{")) fail("it does not start with a node");
+  const root = node();
+  if (at !== tokens.length) fail("text follows the node");
+  return root;
+}
+
+/** The function-id fields of a tree's nodes, read wherever they occur (`design.md` §4's detection). */
+export const FUNCTION_ID_FIELDS = ["funcid", "opfuncid", "hashfuncid", "negfuncid"] as const;
+
+/** Something a default does that the catalog decides is immutable or not, or that is not immutable in itself. */
+export type DefaultReference =
+  /** A function id. */
+  | { readonly kind: "function"; readonly oid: string }
+  /** An operator whose function the node does not list (a row comparison's, or one stored without its function id). */
+  | { readonly kind: "operator"; readonly oid: string }
+  /** A conversion through text: the input function of `to`, the output function of `from` (null: not determined). */
+  | { readonly kind: "conversion"; readonly from: string | null; readonly to: string }
+  /** An SQL value function (`CURRENT_TIMESTAMP`, …): stable, whichever it is. `op` is `SQLValueFunctionOp`. */
+  | { readonly kind: "value-function"; readonly op: number }
+  /** A `NEXTVALUEEXPR`: volatile, it draws from a sequence. */
+  | { readonly kind: "next-value" }
+  /** An SQL/JSON constructor or query, refused outright. */
+  | { readonly kind: "sql-json"; readonly node: "constructor" | "query" };
+
+/**
+ * What a default's expression tree does that may not be immutable, in tree order (each node before its fields' nodes,
+ * fields in the order stored): what `contain_mutable_functions` checks, node by node (see the section's comment).
+ */
+export function defaultReferences(tree: TreeNode): DefaultReference[] {
+  const found: DefaultReference[] = [];
+  const visit = (node: TreeNode): void => {
+    for (const field of FUNCTION_ID_FIELDS) {
+      const oid = tokenOf(node, field);
+      if (oid !== null && oid !== "0") found.push({ kind: "function", oid: checkedOid(oid) });
+    }
+    // PostgreSQL's set_opfuncid: an operator stored without its function id is read through its operator.
+    if (OPERATOR_NODES.has(node.kind) && tokenOf(node, "opfuncid") === "0") {
+      found.push({ kind: "operator", oid: checkedOid(tokenOf(node, "opno")) });
+    }
+    switch (node.kind) {
+      case "COERCEVIAIO": {
+        const from = typeOf(childOf(node, "arg"));
+        const to = checkedOid(tokenOf(node, "resulttype"));
+        found.push({ kind: "conversion", from: from === null ? null : checkedOid(from), to });
+        break;
+      }
+      case "ROWCOMPAREEXPR":
+        // `:opnos (o 2358 97)`: the marker, then the operators.
+        for (const oid of listOf(node, "opnos").slice(1)) {
+          found.push({ kind: "operator", oid: checkedOid(String(oid)) });
+        }
+        break;
+      case "SQLVALUEFUNCTION":
+        found.push({ kind: "value-function", op: Number(tokenOf(node, "op")) });
+        break;
+      case "NEXTVALUEEXPR":
+        found.push({ kind: "next-value" });
+        break;
+      case "JSONCONSTRUCTOREXPR":
+        found.push({ kind: "sql-json", node: "constructor" });
+        break;
+      case "JSONEXPR":
+        found.push({ kind: "sql-json", node: "query" });
+        break;
+    }
+    for (const items of node.fields.values()) for (const each of items) visitItem(each);
+  };
+  const visitItem = (each: TreeItem): void => {
+    if (typeof each === "string") return;
+    if ("kind" in each) visit(each);
+    else for (const inner of each.list) visitItem(inner);
+  };
+  visit(tree);
+  return found;
+}
+
+/** A function as the catalog describes it, for a default's message. */
+export interface CatalogFunction {
+  /** `name()`, qualified by its schema outside `pg_catalog` (`now()`, `m.next_id()`). */
+  readonly name: string;
+  /** `pg_proc.provolatile`: `i` immutable, `s` stable, `v` volatile. */
+  readonly volatility: string;
+  /** Whether it is `pg_catalog.nextval(regclass)`, which draws from a sequence. */
+  readonly nextval: boolean;
+}
+
+/** A type as the catalog describes it: its name (`format_type`) and its input and output functions. */
+export interface CatalogType {
+  readonly name: string;
+  readonly input: CatalogFunction;
+  readonly output: CatalogFunction;
+}
+
+/** What the catalog says about the functions, operators (their functions) and types a set of defaults refers to. */
+export interface DefaultCatalog {
+  readonly functions: ReadonlyMap<string, CatalogFunction>;
+  readonly operators: ReadonlyMap<string, CatalogFunction>;
+  readonly types: ReadonlyMap<string, CatalogType>;
+}
+
+/** The OIDs of the functions, operators and types to read from the catalog for `references`, each once, by number. */
+export function catalogNeeds(references: readonly DefaultReference[]): {
+  readonly functions: string[];
+  readonly operators: string[];
+  readonly types: string[];
+} {
+  const functions = new Set<string>();
+  const operators = new Set<string>();
+  const types = new Set<string>();
+  for (const reference of references) {
+    if (reference.kind === "function") functions.add(reference.oid);
+    if (reference.kind === "operator") operators.add(reference.oid);
+    if (reference.kind === "conversion") {
+      types.add(reference.to);
+      if (reference.from !== null) types.add(reference.from);
+    }
+  }
+  const byNumber = (set: Set<string>): string[] => [...set].sort((a, b) => Number(a) - Number(b));
+  return { functions: byNumber(functions), operators: byNumber(operators), types: byNumber(types) };
+}
+
+/** Something in a column's default that PostgreSQL does not treat as immutable, or that UmbraDB cannot judge. */
+export interface DefaultPart {
+  /** What it does, as a clause after "it": `calls now(), which PostgreSQL marks stable`. */
+  readonly does: string;
+  /** Whether it draws from a sequence: `nextval()`, or a `NEXTVALUEEXPR`. */
+  readonly drawsFromSequence: boolean;
+  /**
+   * Whether it is refused without knowing whether it is immutable (an SQL/JSON node, or a conversion from a type that
+   * is not determined): PostgreSQL may call it immutable, so a refusal of such parts alone does not say the default is
+   * not immutable.
+   */
+  readonly undecided: boolean;
+}
+
+/**
+ * What in a default is not immutable, in tree order, each said once: the functions PostgreSQL marks stable or volatile
+ * that it calls (a conversion's input function before its output function, as PostgreSQL checks them), the SQL value
+ * functions it uses, its sequence draws, and its SQL/JSON nodes and conversions from an undetermined type (refused
+ * outright). Throws when the catalog does not list something the tree names: the read was not of one catalog.
+ */
+export function notImmutableParts(references: readonly DefaultReference[], catalog: DefaultCatalog): DefaultPart[] {
+  const parts = new Map<string, DefaultPart>();
+  const add = (does: string, drawsFromSequence = false, undecided = false): void => {
+    if (!parts.has(does)) parts.set(does, { does, drawsFromSequence, undecided });
+  };
+  const marked = (fn: CatalogFunction): string =>
+    `${fn.name}, which PostgreSQL marks ${fn.volatility === "s" ? "stable" : "volatile"}`;
+  for (const reference of references) {
+    switch (reference.kind) {
+      case "function":
+      case "operator": {
+        const fn = listed(reference.kind === "function" ? catalog.functions : catalog.operators, reference);
+        if (fn.volatility !== IMMUTABLE) add(`calls ${marked(fn)}`, fn.nextval);
+        break;
+      }
+      case "conversion": {
+        const to = listed(catalog.types, { kind: "type", oid: reference.to });
+        const from = reference.from === null ? null : listed(catalog.types, { kind: "type", oid: reference.from });
+        const fromName = from?.name ?? "a value of a type UmbraDB cannot determine";
+        if (to.input.volatility !== IMMUTABLE) add(`converts ${fromName} to ${to.name} with ${marked(to.input)}`);
+        if (from === null) {
+          add(`converts ${fromName} to ${to.name}, through an output function it cannot check`, false, true);
+        } else if (from.output.volatility !== IMMUTABLE) {
+          add(`converts ${fromName} to ${to.name} with ${marked(from.output)}`);
+        }
+        break;
+      }
+      case "value-function": {
+        const name = SQL_VALUE_FUNCTIONS[reference.op];
+        const used = name === undefined ? "an SQL value function" : `${name}, an SQL value function`;
+        add(`uses ${used}, which PostgreSQL treats as stable`);
+        break;
+      }
+      case "next-value":
+        add("draws from a sequence", true);
+        break;
+      case "sql-json":
+        add(reference.node === "constructor" ? SQL_JSON_CONSTRUCTOR : SQL_JSON_QUERY, false, true);
+        break;
+    }
+  }
+  return [...parts.values()];
+}
+
 // ── internals ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const REFUSED_AS_VALUE = "this type cannot be stored in a public table";
@@ -717,6 +1144,167 @@ const ALLOWED_BY_NAME: ReadonlyMap<string, AllowedRule> = new Map(
 const REFUSED_BY_NAME: ReadonlyMap<string, RefusedRule> = new Map(
   COLUMN_TYPE_RULES.flatMap((rule) => (rule.allowed ? [] : rule.types.map((type) => [type, rule] as const))),
 );
+
+// ── internals of the default detection ──
+
+interface Token {
+  readonly text: string;
+  readonly structural: boolean;
+}
+
+/** PostgreSQL's pg_strtok, over the whole text: whitespace is space, newline and tab. */
+function tokenize(text: string): Token[] {
+  const tokens: Token[] = [];
+  const ends = (char: string): boolean => char === " " || char === "\n" || char === "\t" || "{}()".includes(char);
+  let at = 0;
+  while (at < text.length) {
+    const char = text[at] as string;
+    if (char === " " || char === "\n" || char === "\t") {
+      at++;
+    } else if ("{}()".includes(char)) {
+      tokens.push({ text: char, structural: true });
+      at++;
+    } else {
+      let token = "";
+      while (at < text.length && !ends(text[at] as string)) {
+        const escaped = text[at] === "\\" && at + 1 < text.length;
+        token += text[escaped ? at + 1 : at];
+        at += escaped ? 2 : 1;
+      }
+      tokens.push({ text: token, structural: false });
+    }
+  }
+  return tokens;
+}
+
+const IMMUTABLE = "i";
+const BOOLEAN_OID = "16";
+
+/** Operator nodes whose function id PostgreSQL fills in from the operator when it is 0 (set_opfuncid). */
+const OPERATOR_NODES: ReadonlySet<string> = new Set(["OPEXPR", "DISTINCTEXPR", "NULLIFEXPR", "SCALARARRAYOPEXPR"]);
+
+/** The field holding the result type of each node kind that holds it (PostgreSQL's exprType, nodeFuncs.c). */
+const TYPE_FIELDS: Readonly<Record<string, string>> = {
+  CONST: "consttype",
+  FUNCEXPR: "funcresulttype",
+  OPEXPR: "opresulttype",
+  DISTINCTEXPR: "opresulttype",
+  NULLIFEXPR: "opresulttype",
+  RELABELTYPE: "resulttype",
+  COERCEVIAIO: "resulttype",
+  ARRAYCOERCEEXPR: "resulttype",
+  CONVERTROWTYPEEXPR: "resulttype",
+  FIELDSELECT: "resulttype",
+  FIELDSTORE: "resulttype",
+  COERCETODOMAIN: "resulttype",
+  COERCETODOMAINVALUE: "typeId",
+  CASEEXPR: "casetype",
+  CASETESTEXPR: "typeId",
+  ARRAYEXPR: "array_typeid",
+  ROWEXPR: "row_typeid",
+  COALESCEEXPR: "coalescetype",
+  MINMAXEXPR: "minmaxtype",
+  SQLVALUEFUNCTION: "type",
+  SUBSCRIPTINGREF: "refrestype",
+  NEXTVALUEEXPR: "typeId",
+};
+/** Node kinds whose type is `boolean` (exprType's BOOLOID cases). */
+const BOOLEAN_NODES: ReadonlySet<string> = new Set([
+  "BOOLEXPR",
+  "SCALARARRAYOPEXPR",
+  "ROWCOMPAREEXPR",
+  "NULLTEST",
+  "BOOLEANTEST",
+  "JSONISPREDICATE",
+]);
+/** Node kinds whose type is that of one of their fields' node. */
+const TYPED_BY_FIELD: Readonly<Record<string, string>> = {
+  COLLATEEXPR: "arg",
+  NAMEDARGEXPR: "arg",
+  JSONVALUEEXPR: "formatted_expr",
+};
+
+/**
+ * The type of an expression node, as PostgreSQL's exprType gives it, for the node kinds a default can hold; null for
+ * a kind not listed (an `XMLEXPR`, whose type depends on its operation), so that its conversion fails closed.
+ */
+function typeOf(node: TreeNode | null): string | null {
+  if (node === null) return null;
+  if (BOOLEAN_NODES.has(node.kind)) return BOOLEAN_OID;
+  const field = TYPED_BY_FIELD[node.kind];
+  if (field !== undefined) return typeOf(childOf(node, field));
+  // SQL/JSON constructors and queries: the type of their RETURNING clause.
+  if (node.kind === "JSONCONSTRUCTOREXPR" || node.kind === "JSONEXPR") {
+    return tokenOf(childOf(node, "returning"), "typid");
+  }
+  const typeField = TYPE_FIELDS[node.kind];
+  return typeField === undefined ? null : tokenOf(node, typeField);
+}
+
+/** A field's value when it is a token, else null. */
+function tokenOf(node: TreeNode | null, field: string): string | null {
+  const first = node?.fields.get(field)?.[0];
+  return typeof first === "string" ? first : null;
+}
+
+/** A field's value when it is a node, else null (`<>`, no value). */
+function childOf(node: TreeNode, field: string): TreeNode | null {
+  const first = node.fields.get(field)?.[0];
+  return typeof first === "object" && "kind" in first ? first : null;
+}
+
+/** A field's value when it is a list, its items; else none. */
+function listOf(node: TreeNode, field: string): readonly TreeItem[] {
+  const first = node.fields.get(field)?.[0];
+  return typeof first === "object" && "list" in first ? first.list : [];
+}
+
+/** An OID read from a tree: decimal digits only, since it is written into the catalog query as a literal. */
+function checkedOid(text: string | null): string {
+  if (text === null || !/^[0-9]+$/.test(text)) {
+    throw new Error(`malformed expression tree: ${JSON.stringify(text)} is not an OID`);
+  }
+  return text;
+}
+
+/** The catalog's entry for an OID the tree names. */
+function listed<T>(entries: ReadonlyMap<string, T>, reference: { readonly kind: string; readonly oid: string }): T {
+  const entry = entries.get(reference.oid);
+  if (entry === undefined) throw new Error(`the catalog lists no ${reference.kind} ${reference.oid}`);
+  return entry;
+}
+
+/** SQLValueFunctionOp's names, by number (primnodes.h; the same in PostgreSQL 17 and 18). */
+const SQL_VALUE_FUNCTIONS: readonly string[] = [
+  "CURRENT_DATE",
+  "CURRENT_TIME",
+  "CURRENT_TIME",
+  "CURRENT_TIMESTAMP",
+  "CURRENT_TIMESTAMP",
+  "LOCALTIME",
+  "LOCALTIME",
+  "LOCALTIMESTAMP",
+  "LOCALTIMESTAMP",
+  "CURRENT_ROLE",
+  "CURRENT_USER",
+  "USER",
+  "SESSION_USER",
+  "CURRENT_CATALOG",
+  "CURRENT_SCHEMA",
+];
+
+const SQL_JSON_CONSTRUCTOR =
+  "uses an SQL/JSON constructor (JSON_OBJECT, JSON_ARRAY, JSON, JSON_SCALAR or JSON_SERIALIZE), whose result can " +
+  "depend on session settings (a timestamptz is written in the session's TimeZone); UmbraDB does not check its " +
+  "arguments' types, so it refuses every such default";
+const SQL_JSON_QUERY =
+  "uses JSON_VALUE, JSON_QUERY or JSON_EXISTS, whose result can depend on the session's TimeZone; UmbraDB does not " +
+  "check its path, so it refuses every such default";
+
+/** What a refusal of a default says when everything refused in it is refused without knowing (`undecided`). */
+const UNDECIDED_DEFAULT = "UmbraDB cannot tell that the column's default is immutable";
+
+// ── internals of the column-type rules ──
 
 /** The row a column falls under, and the scalar type (an array's element) whose reason applies. */
 function ruleOf(column: ColumnFacts): { readonly rule: TypeRule; readonly scalar: string } {

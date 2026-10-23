@@ -43,8 +43,7 @@ export async function contentsHash(read: ConsistentRead, options: PageOptions = 
     if (rows !== count) {
       throw new PublicContentsError(
         "row-count-changed",
-        table.schema,
-        table.name,
+        { schema: table.schema, table: table.name },
         null,
         `counted ${count} rows, then read ${rows}: the handle did not read one snapshot (DB-2)`,
       );
@@ -71,7 +70,8 @@ function encodeTableRow(table: PublicTable, types: readonly ColumnType[], row: u
     const detail =
       `the row with primary key (${keyNames}) = (${keyValues}) cannot be encoded: ${cause.message}` +
       (because === null ? "" : `. ${explain(because)}`);
-    throw new PublicContentsError("unencodable-row", table.schema, table.name, column, detail, { cause });
+    const place = { schema: table.schema, table: table.name };
+    throw new PublicContentsError("unencodable-row", place, column, detail, { cause });
   }
 }
 

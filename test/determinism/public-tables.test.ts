@@ -374,6 +374,8 @@ describe("DT-3's table list — public schemas and tables in name order, read fr
     ]);
   }, 60_000);
 
+  // A sequence is no table; in a public schema it refuses the list (owner decision Q61, `column-refusals.test.ts`), so
+  // the one here is in the reserved `public` schema.
   it("leaves out PostgreSQL's own schemas, the reserved public schema, partitions, views and sequences", async () => {
     const db = await freshDatabase(`
       CREATE SCHEMA m;
@@ -383,7 +385,7 @@ describe("DT-3's table list — public schemas and tables in name order, read fr
       CREATE TABLE m.plain (k bigint PRIMARY KEY);
       CREATE VIEW m.v AS SELECT 1 AS x;
       CREATE MATERIALIZED VIEW m.mv AS SELECT 1 AS x;
-      CREATE SEQUENCE m.q;
+      CREATE SEQUENCE public.q;
       CREATE TYPE m.pair AS (a integer, b integer);
     `);
     const tables = await db.read((read) => publicTables(read));
@@ -502,6 +504,27 @@ describe("DT-3's table list — public schemas and tables in name order, read fr
         { schema: "m", table: "t", column: "v" },
       );
     }
+  }, 60_000);
+
+  // Owner decision Q61: a sequence or an unlogged table in a public schema refuses the list, and with it the hash.
+  it("refuses a public schema holding a sequence or an unlogged table", async () => {
+    const sequence = await freshDatabase(`
+      CREATE SCHEMA m; CREATE TABLE m.t (k integer PRIMARY KEY); CREATE SEQUENCE m.q;
+    `);
+    const error = await failure(() => sequence.read((read) => publicTables(read)));
+    expect([error.reason, error.schema, error.table, error.sequence, error.column]).toEqual([
+      "non-deterministic-table",
+      "m",
+      null,
+      "q",
+      null,
+    ]);
+    await expectRefusal(
+      `CREATE SCHEMA m; CREATE TABLE m.ok (k integer PRIMARY KEY);
+       CREATE UNLOGGED TABLE m.scratch (k integer PRIMARY KEY);`,
+      "non-deterministic-table",
+      { schema: "m", table: "scratch", column: null },
+    );
   }, 60_000);
 
   it("accepts varchar, uuid and boolean columns, and as keys", async () => {

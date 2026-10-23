@@ -137,14 +137,23 @@ interface BlockSource {
 - **Errors.** `UmbraError { code, retryable, details }`, keeping the 0.9.5 retryable split
   (`design/design-interfaces.md` §1.1); a lost connection is `connection-lost` (retryable).
 
-**Column types (Q58).** Every refusal names the module, the table, the column and its declared type, then the reason
-and the alternative of its row. A table without a primary key is refused with `no-primary-key`: rows are hashed and
-digested in primary-key order (DT-2), and without a key there is no order every database agrees on; add a primary key of
-the key types below. A sequence, `serial` or identity column is refused with `non-deterministic-column`: a sequence
-never rolls back, so its next value depends on rolled-back and retried blocks, not only on the chain; derive keys from
-the block (height, transaction index). A wall-clock or random default (`now()`, `random()`, `gen_random_uuid()`) is
-refused with `non-deterministic-column`: each machine gets a different value; compute the value from the block in
-`on-db-write`.
+**Column types (Q58).** Every refusal names the module, the table, the column and its declared type, then the reason and
+the alternative of its row. A table without a primary key is refused with `no-primary-key`: rows are hashed and digested
+in primary-key order (DT-2), and without a key there is no order every database agrees on; add a primary key of the key
+types below. An identity or `serial` column is refused with `non-deterministic-column`: a sequence never rolls back, so
+its next value depends on rolled-back and retried blocks, not only on the chain; derive keys from the block (height,
+transaction index). A default that is not immutable is refused with `non-deterministic-column`: it calls a function
+PostgreSQL marks stable or volatile (`now()`, `random()`, `gen_random_uuid()`) or uses an SQL value function
+(`CURRENT_TIMESTAMP`, `CURRENT_USER`), so each machine, or each retry, gets a different value; compute the value from
+the block in `on-db-write`. An immutable default (`'abc'`, `1 + 2`, `lower('X')`) and a stored generated column, which
+PostgreSQL requires to be immutable, are allowed. A public schema holding a sequence, or an unlogged table, is refused
+with `non-deterministic-table` (Q61): module code can draw from a sequence at any time, and its values depend on
+retries; PostgreSQL empties an unlogged table after a crash, while the cursor still records its blocks as committed. The
+contents hash refuses all of these too, with the same codes and messages, in any public schema (Q61). Detection, checked
+on PostgreSQL 17.11 and PGlite 0.5.10: `pg_attribute.attidentity`; a default's expression tree (`pg_attrdef.adbin`)
+lists every function it calls (`:funcid`, and `:opfuncid`, `:hashfuncid` and `:negfuncid` for operators), each looked up
+in `pg_proc.provolatile`, and an SQL value function is a `SQLVALUEFUNCTION` node with no function id; `pg_class.relkind
+= 'S'` for a sequence and `relpersistence = 'u'` for an unlogged table.
 
 | Type | As a value | As a key | Refused because / use instead |
 |---|---|---|---|
@@ -157,8 +166,8 @@ refused with `non-deterministic-column`: each machine gets a different value; co
 | `boolean` | `false` / `true` | yes, `false` first | — |
 | `jsonb` | CBOR, map keys sorted; the `CHECK` on numbers | no | As a key: PostgreSQL's `jsonb` order (by kind, then size, then contents) is not the order of the encoded bytes; use a `text` or `bytea` key |
 | arrays of the value types above | array | no | As a key: PostgreSQL compares arrays element by element, while the encoding puts the length first; use a composite key |
-| `real`, `double precision` | refused (`non-deterministic-column`) | refused | Approximate: a value computed two ways (`0.1 + 0.2`, `0.3`) can differ in its last bits; use integers in fixed units (`bigint`, `numeric(p)`) |
-| `timestamptz`, `timestamp`, `date`, `time`, `timetz`, `interval` | refused | refused | The drivers return a JavaScript `Date`, which keeps milliseconds only (`10:00:00.123456` and `10:00:00.123999` read back equal), and the text depends on `TimeZone`, `DateStyle` and `IntervalStyle`; store `bigint` milliseconds since the epoch, as `core_block_commit.blocks.block_timestamp_ms` does |
+| `real`, `double precision` | refused (`non-deterministic-column`) | refused | Approximate: a value computed two ways can differ in its last bits (Q60: in `double precision`, `0.1 + 0.2` is `0.30000000000000004`, not `0.3`; in `real`, `0.1 + 0.6` is `0.70000005`, not `0.7`); use integers in fixed units (`bigint`, `numeric(p)`) |
+| `timestamptz`, `timestamp`, `date`, `time`, `timetz`, `interval` | refused | refused | Per type (Q59): `timestamptz` and `timestamp` — the drivers return a JavaScript `Date`, which keeps milliseconds only (`10:00:00.123456` and `10:00:00.123999` read back equal), and the text depends on `DateStyle` (and, for `timestamptz`, `TimeZone`); `date` — the drivers return a JavaScript `Date`, and the text depends on `DateStyle` (`2026-10-23` or `23/10/2026`); `interval` — the drivers return its text, which depends on `IntervalStyle` (`1 day 02:00:00` or `P1DT2H`); `time` and `timetz` — no canonical encoding is defined for a time of day (the drivers return its text). Store `bigint` milliseconds since the epoch, as `core_block_commit.blocks.block_timestamp_ms` does |
 | `json` | refused | refused | PostgreSQL keeps `json`'s input text (spaces, key order, duplicate keys), but the drivers parse it, so different stored texts read back equal; use `jsonb` |
 | `char(n)` | refused | refused | Stored padded with spaces, compared ignoring them and cast to `text` without them, so its value depends on how it is read; use `text` or `varchar(n)` |
 | `money` | refused | refused | Its text depends on the `lc_monetary` setting; use `bigint` smallest units |
@@ -385,13 +394,13 @@ per-block tables are append-only and partitioned by height range; no table store
 
 **Startup refuses** (state `refused`, live, not ready), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,
 `changes-past`, `missing-entry`, `not-plain-data`, `invalid-configuration`, `upgrade-required`, `requires-resync`,
-`migration-checksum-changed`, `migration-missing`, `migration-failed`, `non-deterministic-column`, `no-primary-key`,
-`unsupported-key-type`, `unsupported-column-type` (DT-6, Q58), `shared-item-migrations-differ`, `unknown-point`,
-`reserved-prefix`, `bad-id`, `schema-collision`, `item-no-provider`, `providers-overlap`, `graph-cycle`,
-`item-not-available`, `no-requirement`, `cannot-start-mid-chain`, `process-item-missing`, `duplicate-api-route`,
-`development-opt-in-required`, `needs-lockstep-not-listed`, `private-binding-mismatch`, `test-key-conflict`,
-`package-hash-mismatch`, `writer-lock-held`, `durability-fsync-off`, `durability-pooler`,
-`durability-full-page-writes-off`, and the snapshot import checks (`snapshot-format-unknown`,
+`migration-checksum-changed`, `migration-missing`, `migration-failed`, `non-deterministic-column`,
+`non-deterministic-table`, `no-primary-key`, `unsupported-key-type`, `unsupported-column-type` (DT-6, Q58, Q61),
+`shared-item-migrations-differ`, `unknown-point`, `reserved-prefix`, `bad-id`, `schema-collision`, `item-no-provider`,
+`providers-overlap`, `graph-cycle`, `item-not-available`, `no-requirement`, `cannot-start-mid-chain`,
+`process-item-missing`, `duplicate-api-route`, `development-opt-in-required`, `needs-lockstep-not-listed`,
+`private-binding-mismatch`, `test-key-conflict`, `package-hash-mismatch`, `writer-lock-held`, `durability-fsync-off`,
+`durability-pooler`, `durability-full-page-writes-off`, and the snapshot import checks (`snapshot-format-unknown`,
 `snapshot-history-mismatch`, `snapshot-build-mismatch`, `contents-hash-mismatch`, `snapshot-genesis-mismatch`,
 `snapshot-block-not-finalized`, `snapshot-root-mismatch`, `snapshot-target-not-empty`, `snapshot-import-interrupted`).
 

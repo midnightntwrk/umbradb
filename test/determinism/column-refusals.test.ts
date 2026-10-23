@@ -1,9 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeCanonical } from "../../src/determinism/cbor.js";
-import { columnVerdict, numericScale, refusalMessage, tableRefusals } from "../../src/determinism/column-rules.js";
+import {
+  columnVerdict,
+  databaseRefusals,
+  numericScale,
+  refusalMessage,
+  tableRefusals,
+} from "../../src/determinism/column-rules.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import {
   type CatalogTable,
+  catalogRelations,
   catalogTables,
   type ConsistentRead,
   PublicContentsError,
@@ -12,13 +19,15 @@ import {
 import { startPostgres, type TestDatabase, type TestServer } from "./postgres-database.js";
 
 /**
- * Task 1.3 on PostgreSQL 17 (`postgres:17-alpine`, Testcontainers): the column-type rules read from a real catalog, and
- * the contents-hash half of A58 — the hash refuses the tables startup will refuse (DT-6), with the same codes and the
- * same messages (owner decision Q58). The startup half is task 7.1's, which calls the same `tableRefusals` and
+ * Tasks 1.3 and 1.4 on PostgreSQL 17 (`postgres:17-alpine`, Testcontainers): the column-type rules and DT-6's
+ * non-deterministic columns and tables read from a real catalog, and the contents-hash half of A58 — the hash refuses
+ * what startup will refuse (DT-6), with the same codes and the same messages (owner decisions Q58 and Q61), in any
+ * public schema. The startup half is task 7.1's, which calls the same `tableRefusals`, `databaseRefusals` and
  * `refusalMessage` with the module's id.
  *
- * Every expected code, location and phrase below is written by hand from `design.md` §4's column-type table and DT-6;
- * the code under test is only compared with them. The last section checks, through the same driver the hash reads with,
+ * Every expected code, location and phrase below is written by hand from `design.md` §4 and DT-6; the code under test
+ * is only compared with them, and the defaults it calls immutable or not are compared with PostgreSQL's own check (a
+ * stored generated column must be immutable). The last section checks, through the same driver the hash reads with,
  * that the mechanisms the messages name are real.
  */
 
@@ -482,6 +491,481 @@ describe("A58 (contents-hash half): the hash refuses what startup refuses, with 
     expect(hash.length).toBe(32);
     expect((await catalogTable(db, "m", "t")).columns.every((c) => columnVerdict(c).allowed)).toBe(true);
   }, 60_000);
+});
+
+describe("A58 (contents-hash half), Q61: non-deterministic columns and tables, in any public schema", () => {
+  interface Case {
+    readonly what: string;
+    /** Run after `CREATE SCHEMA m` and a table the hash can read, `m.fine`. */
+    readonly setup: string;
+    readonly code: "non-deterministic-column" | "non-deterministic-table";
+    readonly place: { readonly schema: string; readonly table?: string; readonly sequence?: string };
+    readonly column: string | null;
+    readonly declaredType: string | null;
+    /** Phrases the message must hold: what is refused, why, and what to do instead. */
+    readonly says: readonly string[];
+    /** Phrases it must not hold: what in the default is immutable. */
+    readonly saysNot?: readonly string[];
+  }
+
+  const DEFAULT = "the column's default is not immutable: it ";
+  const EACH_MACHINE = "each machine, or each retry, gets a different value";
+  const ON_DB_WRITE = "Instead, compute the value from the block in on-db-write.";
+  const SEQUENCE_DRAW = "the column draws its values from a sequence: ";
+  const NEVER_ROLLS_BACK = "never rolls back, so its next value depends on rolled-back and retried blocks";
+  const FROM_THE_BLOCK = "Instead, derive keys from the block (height, transaction index).";
+  const NEXTVAL = "its default calls nextval(), which PostgreSQL marks volatile";
+
+  const CASES: readonly Case[] = [
+    {
+      what: "a now() default",
+      setup: "CREATE TABLE m.t (id bigint PRIMARY KEY, at_ms bigint DEFAULT extract(epoch from now())::bigint)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "at_ms",
+      declaredType: "bigint",
+      says: [DEFAULT, "calls now(), which PostgreSQL marks stable", EACH_MACHINE, ON_DB_WRITE],
+    },
+    {
+      what: "the CURRENT_TIMESTAMP default of DT-6's scenario",
+      setup:
+        "CREATE TABLE m.t (id bigint PRIMARY KEY, at bigint DEFAULT extract(epoch from CURRENT_TIMESTAMP)::bigint)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "at",
+      declaredType: "bigint",
+      says: [DEFAULT, "uses CURRENT_TIMESTAMP, an SQL value function", "each machine", "different value", ON_DB_WRITE],
+    },
+    {
+      what: "a CURRENT_USER default, a value function inside an immutable cast",
+      setup: "CREATE TABLE m.t (id bigint PRIMARY KEY, who text DEFAULT CURRENT_USER)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "who",
+      declaredType: "text",
+      says: [DEFAULT, "uses CURRENT_USER, an SQL value function, which PostgreSQL treats as stable", EACH_MACHINE],
+      saysNot: ["text()"],
+    },
+    {
+      what: "a CURRENT_DATE default under an immutable operator, found by its value function alone",
+      setup: "CREATE TABLE m.t (id bigint PRIMARY KEY, days integer DEFAULT (CURRENT_DATE - DATE '2020-01-01'))",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "days",
+      declaredType: "integer",
+      says: [DEFAULT, "uses CURRENT_DATE, an SQL value function"],
+      saysNot: ["date_mi"],
+    },
+    {
+      what: "a random() default",
+      setup: "CREATE TABLE m.t (id bigint PRIMARY KEY, roll bigint DEFAULT (random() * 6)::bigint)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "roll",
+      declaredType: "bigint",
+      says: [DEFAULT, "calls random(), which PostgreSQL marks volatile", ON_DB_WRITE],
+    },
+    {
+      what: "a gen_random_uuid() key default",
+      setup: "CREATE TABLE m.t (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), v text)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "id",
+      declaredType: "uuid",
+      says: [DEFAULT, "calls gen_random_uuid(), which PostgreSQL marks volatile", ON_DB_WRITE],
+    },
+    {
+      what: "a nextval() default, before the sequence it draws from",
+      setup: "CREATE SEQUENCE m.q; CREATE TABLE m.t (id bigint PRIMARY KEY DEFAULT nextval('m.q'))",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "id",
+      declaredType: "bigint",
+      says: [SEQUENCE_DRAW, NEXTVAL, NEVER_ROLLS_BACK, FROM_THE_BLOCK],
+    },
+    {
+      what: "a serial key",
+      setup: "CREATE TABLE m.t (id serial PRIMARY KEY, v text)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "id",
+      declaredType: "integer",
+      says: [SEQUENCE_DRAW, NEXTVAL, "identity or serial column", NEVER_ROLLS_BACK, FROM_THE_BLOCK],
+      saysNot: ["int4()"],
+    },
+    {
+      what: "a bigserial column outside the key",
+      setup: "CREATE TABLE m.t (k bigint PRIMARY KEY, n bigserial)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "n",
+      declaredType: "bigint",
+      says: [SEQUENCE_DRAW, NEXTVAL],
+    },
+    {
+      what: "an identity key, GENERATED ALWAYS",
+      setup: "CREATE TABLE m.t (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, v text)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "id",
+      declaredType: "bigint",
+      says: [
+        SEQUENCE_DRAW,
+        "it is an identity column (GENERATED ALWAYS AS IDENTITY)",
+        NEVER_ROLLS_BACK,
+        FROM_THE_BLOCK,
+      ],
+    },
+    {
+      what: "an identity column GENERATED BY DEFAULT",
+      setup: "CREATE TABLE m.t (k bigint PRIMARY KEY, n integer GENERATED BY DEFAULT AS IDENTITY)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "n",
+      declaredType: "integer",
+      says: [SEQUENCE_DRAW, "it is an identity column (GENERATED BY DEFAULT AS IDENTITY)"],
+    },
+    {
+      what: "an operator's hand-made identity table in a schema no module declared (DT-6's scenario)",
+      setup:
+        "CREATE SCHEMA ops; CREATE TABLE ops.notes (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, body text)",
+      code: "non-deterministic-column",
+      place: { schema: "ops", table: "notes" },
+      column: "id",
+      declaredType: "bigint",
+      says: [SEQUENCE_DRAW, "identity column", FROM_THE_BLOCK],
+    },
+    {
+      what: "a sequence in a public schema",
+      setup: "CREATE SEQUENCE m.counter",
+      code: "non-deterministic-table",
+      place: { schema: "m", sequence: "counter" },
+      column: null,
+      declaredType: null,
+      says: [
+        "a public schema cannot hold a sequence",
+        "Module code can draw from a sequence at any time",
+        "never rolls back",
+        "Instead, derive values from the block (height, transaction index), and drop the sequence.",
+      ],
+    },
+    {
+      what: "an unlogged sequence in a public schema",
+      setup: "CREATE UNLOGGED SEQUENCE m.counter",
+      code: "non-deterministic-table",
+      place: { schema: "m", sequence: "counter" },
+      column: null,
+      declaredType: null,
+      says: ["a public schema cannot hold a sequence"],
+    },
+    {
+      what: "an unlogged table (DT-6's scenario)",
+      setup: "CREATE UNLOGGED TABLE m.t (id bigint PRIMARY KEY)",
+      code: "non-deterministic-table",
+      place: { schema: "m", table: "t" },
+      column: null,
+      declaredType: null,
+      says: [
+        "a public schema cannot hold an unlogged table",
+        "PostgreSQL empties an unlogged table after a crash",
+        "the cursor still records its blocks as committed",
+        "Instead, make the table logged: create it without UNLOGGED, or run ALTER TABLE ... SET LOGGED.",
+      ],
+    },
+    {
+      what: "an unlogged partition of a logged partitioned table",
+      setup: `CREATE TABLE m.t (k bigint PRIMARY KEY) PARTITION BY RANGE (k);
+        CREATE TABLE m.t_0 PARTITION OF m.t FOR VALUES FROM (0) TO (10);
+        CREATE UNLOGGED TABLE m.t_1 PARTITION OF m.t FOR VALUES FROM (10) TO (20)`,
+      code: "non-deterministic-table",
+      place: { schema: "m", table: "t_1" },
+      column: null,
+      declaredType: null,
+      says: ["a public schema cannot hold an unlogged table"],
+    },
+    {
+      what: "a conversion to timestamptz through its stable input function",
+      setup: "CREATE TABLE m.t (id bigint PRIMARY KEY, c text DEFAULT (('now'::text)::timestamptz)::text)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "c",
+      declaredType: "text",
+      says: [DEFAULT, "converts text to timestamp with time zone with timestamptz_in(), which PostgreSQL marks stable"],
+    },
+    {
+      what: "a conversion of a timestamptz constant through its stable output function",
+      setup: "CREATE TABLE m.t (id bigint PRIMARY KEY, c text DEFAULT ('2020-01-01 00:00:00+00'::timestamptz)::text)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "c",
+      declaredType: "text",
+      says: [
+        DEFAULT,
+        "converts timestamp with time zone to text with timestamptz_out(), which PostgreSQL marks stable",
+      ],
+    },
+    {
+      what: "a conversion of an array to text through array_out",
+      setup: "CREATE TABLE m.t (id bigint PRIMARY KEY, c text DEFAULT (ARRAY[1, 2])::text)",
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "c",
+      declaredType: "text",
+      says: [DEFAULT, "converts integer[] to text with array_out(), which PostgreSQL marks stable"],
+    },
+    {
+      what: "an array coercion whose elements go through date_in",
+      setup: `CREATE TABLE m.t (id bigint PRIMARY KEY,
+        n integer DEFAULT array_length(ARRAY['2020-01-01']::text[]::date[], 1))`,
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "n",
+      declaredType: "integer",
+      says: [DEFAULT, "converts text to date with date_in(), which PostgreSQL marks stable"],
+    },
+    {
+      what: "a row comparison through a stable operator",
+      setup: `CREATE TABLE m.t (id bigint PRIMARY KEY,
+        b boolean DEFAULT (ROW('2020-01-01'::date, 1) < ROW('2020-01-01 00:00:00+00'::timestamptz, 2)))`,
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "b",
+      declaredType: "boolean",
+      says: [DEFAULT, "calls date_lt_timestamptz(), which PostgreSQL marks stable"],
+      saysNot: ["int4lt"],
+    },
+    {
+      what: "an SQL/JSON constructor of a timestamptz",
+      setup: `CREATE TABLE m.t (id bigint PRIMARY KEY,
+        j jsonb DEFAULT JSON_OBJECT('a': '2020-01-01 00:00:00+00'::timestamptz RETURNING jsonb))`,
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "j",
+      declaredType: "jsonb",
+      says: [
+        "UmbraDB cannot tell that the column's default is immutable: it uses an SQL/JSON constructor",
+        "the session's TimeZone",
+        "refuses every such default",
+      ],
+    },
+    {
+      what: "a function of a module's own schema marked volatile",
+      setup: `CREATE FUNCTION m.next_id() RETURNS bigint LANGUAGE sql VOLATILE AS 'SELECT 1::bigint';
+        CREATE TABLE m.t (id bigint PRIMARY KEY DEFAULT m.next_id())`,
+      code: "non-deterministic-column",
+      place: { schema: "m", table: "t" },
+      column: "id",
+      declaredType: "bigint",
+      says: [DEFAULT, "calls m.next_id(), which PostgreSQL marks volatile"],
+    },
+  ];
+
+  const locationOf = (c: Case): string => {
+    const relation =
+      c.place.sequence === undefined
+        ? `table "${c.place.schema}"."${c.place.table}"`
+        : `sequence "${c.place.schema}"."${c.place.sequence}"`;
+    return c.column === null ? relation : `${relation}, column "${c.column}" (${c.declaredType})`;
+  };
+
+  for (const c of CASES) {
+    it(`refuses ${c.what}`, async () => {
+      const db = await freshDatabase(`CREATE SCHEMA m; CREATE TABLE m.fine (k integer PRIMARY KEY); ${c.setup};`);
+      const error = await refusalOf(() => db.read((read) => contentsHash(read)));
+      expect(error.reason).toBe(c.code);
+      expect([error.schema, error.table, error.sequence, error.column, error.declaredType]).toEqual([
+        c.place.schema,
+        c.place.table ?? null,
+        c.place.sequence ?? null,
+        c.column,
+        c.declaredType,
+      ]);
+      expect(error.message.startsWith(`${c.code}: ${locationOf(c)}: `), error.message).toBe(true);
+      for (const phrase of c.says) expect(error.message).toContain(phrase);
+      for (const phrase of c.saysNot ?? []) expect(error.message).not.toContain(phrase);
+      expect(error.message).toContain(" Instead, ");
+
+      // The same message task 7.1's startup check will give: the shared rules over the same catalog facts.
+      const [first] = await db.read(async (read) =>
+        databaseRefusals(await catalogTables(read), await catalogRelations(read)),
+      );
+      if (first === undefined) throw new Error("the catalog facts gave no refusal");
+      expect(first.refusal.code).toBe(c.code);
+      expect(error.message).toBe(refusalMessage(first.refusal, first.place));
+      // And the same refusal when only the table list is read.
+      const listed = await refusalOf(() => db.read((read) => publicTables(read)));
+      expect(listed.message).toBe(error.message);
+    }, 60_000);
+  }
+
+  it("lists a serial column's refusal before its sequence's, and a column's refusals in a fixed order", async () => {
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.t (id serial PRIMARY KEY, at timestamptz DEFAULT now());
+    `);
+    const refusals = await db.read(async (read) =>
+      databaseRefusals(await catalogTables(read), await catalogRelations(read)),
+    );
+    expect(refusals.map(({ refusal, place }) => [refusal.code, place, refusal.column?.name ?? null])).toEqual([
+      ["non-deterministic-column", { schema: "m", table: "t" }, "id"],
+      ["unsupported-column-type", { schema: "m", table: "t" }, "at"],
+      ["non-deterministic-column", { schema: "m", table: "t" }, "at"],
+      ["non-deterministic-table", { schema: "m", sequence: "t_id_seq" }, null],
+    ]);
+    const error = await refusalOf(() => db.read((read) => contentsHash(read)));
+    expect(error.message.startsWith('non-deterministic-column: table "m"."t", column "id" (integer): ')).toBe(true);
+  }, 60_000);
+
+  it("reads identity, what each default does that is not immutable, sequences and unlogged tables", async () => {
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE SCHEMA z;
+      CREATE TABLE m.t (
+        id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+        at_ms bigint DEFAULT extract(epoch from now())::bigint,
+        plain text DEFAULT 'abc',
+        g bigint GENERATED ALWAYS AS (CASE WHEN true THEN id ELSE (random() * 10)::bigint END) STORED,
+        n bigint
+      );
+      CREATE UNLOGGED TABLE z.scratch (k integer PRIMARY KEY);
+      CREATE SEQUENCE z."B";
+      CREATE SEQUENCE z.a;
+      CREATE VIEW m.v AS SELECT 1 AS x;
+      CREATE SEQUENCE public.outside;
+      CREATE UNLOGGED TABLE public.outside_table (k integer PRIMARY KEY);
+    `);
+    const [tables, relations] = await db.read(async (read) => [
+      await catalogTables(read),
+      await catalogRelations(read),
+    ]);
+    const columns = new Map((tables.find((t) => t.name === "t")?.columns ?? []).map((c) => [c.name, c]));
+    expect(columns.get("id")).toMatchObject({ identity: "by default", notImmutable: [] });
+    expect(columns.get("at_ms")).toMatchObject({
+      identity: null,
+      notImmutable: [
+        { does: "calls extract(), which PostgreSQL marks stable", drawsFromSequence: false },
+        { does: "calls now(), which PostgreSQL marks stable", drawsFromSequence: false },
+      ],
+    });
+    expect(columns.get("plain")).toMatchObject({ identity: null, notImmutable: [] });
+    // A generated column's expression is no default, even when PostgreSQL's constant folding hides a random() in it.
+    expect(columns.get("g")).toMatchObject({ identity: null, notImmutable: [] });
+    expect(columns.get("n")).toMatchObject({ identity: null, notImmutable: [] });
+    // Sequences and unlogged tables of public schemas (the identity's own sequence included), by bytes; not public's.
+    expect(relations).toEqual([
+      { schema: "m", name: "t_id_seq", kind: "S", persistence: "p" },
+      { schema: "z", name: "B", kind: "S", persistence: "p" },
+      { schema: "z", name: "a", kind: "S", persistence: "p" },
+      { schema: "z", name: "scratch", kind: "r", persistence: "u" },
+    ]);
+  }, 60_000);
+
+  it("controls: immutable defaults and stored generated columns are hashed; public is no public schema", async () => {
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE TABLE m.t (
+        id bigint PRIMARY KEY,
+        a text DEFAULT 'abc',
+        b integer DEFAULT 1 + 2,
+        c text DEFAULT lower('X'),
+        d text DEFAULT (1 + 2)::text,
+        e boolean DEFAULT (ROW(1, 2) < ROW(3, 4)),
+        f boolean DEFAULT (1 = ANY (ARRAY[1, 2])),
+        g jsonb DEFAULT '{"a": 1}'::jsonb,
+        h bigint GENERATED ALWAYS AS (id * 2) STORED,
+        i bigint GENERATED ALWAYS AS (CASE WHEN true THEN id ELSE (random() * 10)::bigint END) STORED,
+        j text DEFAULT NULL,
+        k uuid DEFAULT 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        l text DEFAULT md5('x') COLLATE "C"
+      );
+      INSERT INTO m.t (id) VALUES (1), (2);
+      CREATE SEQUENCE public.q;
+      CREATE UNLOGGED TABLE public.scratch (k integer PRIMARY KEY);
+      CREATE TABLE public.counted (id serial PRIMARY KEY, at timestamptz DEFAULT now());
+    `);
+    const hash = await db.read((read) => contentsHash(read));
+    expect(hash.length).toBe(32);
+    const [t] = await db.read((read) => catalogTables(read));
+    expect(t?.columns.every((c) => c.identity === null && c.notImmutable.length === 0)).toBe(true);
+    // The same table with a refused default is refused: the control above is not passing by reading nothing.
+    await db.exec("ALTER TABLE m.t ALTER COLUMN a SET DEFAULT now()::text");
+    expect((await refusalOf(() => db.read((read) => contentsHash(read)))).column).toBe("a");
+  }, 60_000);
+
+  // PostgreSQL's own check (contain_mutable_functions, which a stored generated column must pass) decides "immutable"
+  // independently of the code under test. UmbraDB reads the default as stored and fails closed where PostgreSQL decides
+  // from argument types or a jsonpath (SQL/JSON) or after folding constants: those divergences are listed, and refused.
+  it("refuses exactly the defaults PostgreSQL's check calls not immutable, except where it fails closed", async () => {
+    const CORPUS: readonly (readonly [type: string, expression: string, divergence?: string])[] = [
+      ["bigint", "extract(epoch from now())::bigint"],
+      ["bigint", "extract(epoch from CURRENT_TIMESTAMP)::bigint"],
+      ["text", "CURRENT_USER"],
+      ["text", "CURRENT_SCHEMA"],
+      ["integer", "CURRENT_DATE - DATE '2020-01-01'"],
+      ["text", "(CURRENT_DATE)::text"],
+      ["bigint", "(random() * 6)::bigint"],
+      ["uuid", "gen_random_uuid()"],
+      ["bigint", "nextval('public.q')"],
+      ["text", "to_char(1, '999')"],
+      ["bigint", "length(now()::text)"],
+      ["text", "'abc'"],
+      ["integer", "1 + 2"],
+      ["text", "md5('x')"],
+      ["numeric", "1.5 * 2"],
+      ["text", "(1 + 2)::text"],
+      ["text", "('2020-01-01 00:00:00+00'::timestamptz)::text"],
+      ["text", "(('now'::text)::timestamptz)::text"],
+      ["text", "(ARRAY[1, 2])::text"],
+      ["integer", "array_length(ARRAY['2020-01-01']::text[]::date[], 1)"],
+      ["boolean", "ROW('2020-01-01'::date, 1) < ROW('2020-01-01 00:00:00+00'::timestamptz, 2)"],
+      ["boolean", "ROW(1, 2) < ROW(3, 4)"],
+      ["boolean", "1 = ANY (ARRAY[1, 2])"],
+      ["boolean", "'2020-01-01'::date = ANY (ARRAY['2020-01-01 00:00:00+00'::timestamptz])"],
+      ["boolean", "'2020-01-01'::date IS DISTINCT FROM '2020-01-01 00:00:00+00'::timestamptz"],
+      ["boolean", "NULLIF('2020-01-01'::date, '2020-01-01 00:00:00+00'::timestamptz) IS NULL"],
+      ["text", "COALESCE(NULL, 'x')"],
+      ["text", "('x'::text COLLATE \"C\")"],
+      ["bigint", "GREATEST(1, 2)"],
+      ["text", "CASE WHEN 1 > 2 THEN 'a' ELSE 'b' END"],
+      ["jsonb", "'{\"a\": 1}'::jsonb"],
+      ["jsonb", "jsonb_build_object('a', 1)"],
+      ["jsonb", "JSON_OBJECT('a': '2020-01-01 00:00:00+00'::timestamptz RETURNING jsonb)"],
+      ["jsonb", "JSON_OBJECT('a': 1 RETURNING jsonb)", "an SQL/JSON constructor: fails closed"],
+      ["text", "JSON_VALUE(jsonb '{\"a\": \"x\"}', '$.a')", "an SQL/JSON query: fails closed"],
+      ["bigint", "CASE WHEN true THEN 1 ELSE (random() * 10)::bigint END", "PostgreSQL folds constants first"],
+    ];
+    const columns = CORPUS.map(([type, expression], i) => `c${i} ${type} DEFAULT (${expression})`).join(", ");
+    const db = await freshDatabase(`
+      CREATE SCHEMA m;
+      CREATE SEQUENCE public.q;
+      CREATE TABLE m.t (id bigint PRIMARY KEY, ${columns});
+    `);
+    const [t] = await db.read((read) => catalogTables(read));
+    const refusedColumns = new Set(
+      tableRefusals(t as CatalogTable)
+        .filter((refusal) => refusal.code === "non-deterministic-column")
+        .map((refusal) => refusal.column?.name),
+    );
+    let immutableForPostgres = 0;
+    for (const [index, [type, expression, divergence]] of CORPUS.entries()) {
+      let postgresSaysImmutable = true;
+      try {
+        await db.exec(`CREATE TABLE m.g${index} (id bigint, c ${type} GENERATED ALWAYS AS (${expression}) STORED)`);
+      } catch (error) {
+        // 42P17: "generation expression is not immutable"; any other error means the probe itself is wrong.
+        expect((error as { code?: string }).code, expression).toBe("42P17");
+        postgresSaysImmutable = false;
+      }
+      if (postgresSaysImmutable) immutableForPostgres++;
+      const refused = refusedColumns.has(`c${index}`);
+      if (divergence === undefined) expect(refused, expression).toBe(!postgresSaysImmutable);
+      else expect([refused, postgresSaysImmutable], `${expression}: ${divergence}`).toEqual([true, true]);
+    }
+    // Not vacuous: both verdicts occur, as often as the corpus was written to have them (counted by hand: 12 immutable
+    // and 21 not for both, and the 3 divergences, immutable for PostgreSQL and refused here).
+    expect(immutableForPostgres).toBe(15);
+    expect(refusedColumns.size).toBe(24);
+  }, 120_000);
 });
 
 describe("the mechanisms the messages name, checked through the driver the hash reads with", () => {

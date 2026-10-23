@@ -29,21 +29,33 @@
  * **Streaming.** Rows are read a page at a time with keyset pagination over the primary key (`WHERE (key) > (last
  * key) ORDER BY key LIMIT n`), so a large table is never held in memory and only the handle's `query` is needed.
  *
- * A table this cannot read deterministically fails with a {@link PublicContentsError} carrying the code and the
- * message of the column-type rules (`./column-rules.ts`, owner decision Q58), the ones startup gives (DT-6): one
- * without a primary key, a key column whose type DT-2 does not order, or a column whose type DT-1 does not encode.
+ * A database this cannot read deterministically fails with a {@link PublicContentsError} carrying the code and the
+ * message of the rules (`./column-rules.ts`, owner decisions Q58 and Q61), the ones startup gives (DT-6): a table
+ * without a primary key, a key column whose type DT-2 does not order, a column whose type DT-1 does not encode, an
+ * identity or `serial` column, a default that is not immutable, or a public schema holding a sequence or an unlogged
+ * table — in any public schema, a table no module declared included.
  */
 
 import type { ColumnType } from "./cbor.js";
 import {
+  type CatalogFunction,
+  type CatalogType,
   type ColumnFacts,
+  catalogNeeds,
+  type DefaultCatalog,
+  type DefaultReference,
+  databaseRefusals,
+  defaultReferences,
   describeLocation,
   explainRefusal,
   keyOrder,
+  notImmutableParts,
+  parseExpressionTree,
   quoteIdentifier,
   type RefusalCode,
+  type RefusalPlace,
+  type RelationFacts,
   type TableFacts,
-  tableRefusals,
 } from "./column-rules.js";
 
 /**
@@ -99,8 +111,9 @@ export interface PageOptions {
 /** Why a database's public contents could not be read in canonical form. */
 export type PublicContentsFailure =
   /**
-   * A table the column-type rules refuse, with the code startup gives it (DT-6, `./column-rules.ts`): no primary key,
-   * a key column DT-2 does not order, a column type DT-1 does not encode, or a floating-point column.
+   * What the rules refuse, with the code startup gives it (DT-6, `./column-rules.ts`): no primary key, a key column
+   * DT-2 does not order, a column type DT-1 does not encode, a floating-point, identity or `serial` column or a default
+   * that is not immutable (`non-deterministic-column`), a sequence or an unlogged table (`non-deterministic-table`).
    */
   | RefusalCode
   /** A row DT-1 cannot encode (the cause is the encoder's error). */
@@ -109,24 +122,29 @@ export type PublicContentsFailure =
   | "row-count-changed";
 
 /**
- * A failure to read public contents: `reason` says why; `schema`, `table`, `column` and its `declaredType` (the last
- * two null for the table itself) say where. The message is the code, the location, and an explanation: for a refused
- * table, exactly what `refusalMessage` of `./column-rules.ts` gives, the message startup gives.
+ * A failure to read public contents: `reason` says why; `schema`, `table` or `sequence` (the other null), `column` and
+ * its `declaredType` (null for the table or sequence itself) say where. The message is the code, the location, and an
+ * explanation: for a refusal, exactly what `refusalMessage` of `./column-rules.ts` gives, the message startup gives.
  */
 export class PublicContentsError extends Error {
   override readonly name = "PublicContentsError";
+  readonly schema: string;
+  readonly table: string | null;
+  readonly sequence: string | null;
   readonly column: string | null;
   readonly declaredType: string | null;
 
   constructor(
     readonly reason: PublicContentsFailure,
-    readonly schema: string,
-    readonly table: string,
+    place: RefusalPlace,
     column: { readonly name: string; readonly declaredType: string } | null,
     detail: string,
     options?: ErrorOptions,
   ) {
-    super(`${reason}: ${describeLocation({ schema, table }, column)}: ${detail}`, options);
+    super(`${reason}: ${describeLocation(place, column)}: ${detail}`, options);
+    this.schema = place.schema;
+    this.table = "table" in place ? place.table : null;
+    this.sequence = "sequence" in place ? place.sequence : null;
     this.column = column?.name ?? null;
     this.declaredType = column?.declaredType ?? null;
   }
@@ -134,15 +152,20 @@ export class PublicContentsError extends Error {
 
 /**
  * The public tables of the database `read` sees, as the catalog describes them, in DT-3's order (by schema name, then
- * table name, as bytes), each with its columns in column order. Nothing is refused here: this is the column-type
- * rules' input.
+ * table name, as bytes), each with its columns in column order: their types, identity, and what in their defaults is
+ * not immutable (read from the defaults' expression trees and one more catalog read, `./column-rules.ts`). Nothing is
+ * refused here: this is the rules' input.
  */
 export async function catalogTables(read: ConsistentRead): Promise<CatalogTable[]> {
   const tableRows = await read.query(TABLES_SQL);
   const columnRows = await read.query(COLUMNS_SQL);
+  const references = columnRows.map((row): DefaultReference[] =>
+    row.default_tree === null ? [] : defaultReferences(parseExpressionTree(row.default_tree as string)),
+  );
+  const catalog = await defaultCatalog(read, references.flat());
 
   const columnsOf = new Map<string, { readonly number: number; readonly column: CatalogColumn }[]>();
-  for (const row of columnRows) {
+  for (const [index, row] of columnRows.entries()) {
     const id = tableId(row.schema_name as string, row.table_name as string);
     const columns = columnsOf.get(id) ?? [];
     const keyPosition = row.key_position as number | null;
@@ -156,6 +179,8 @@ export async function catalogTables(read: ConsistentRead): Promise<CatalogTable[
         typeKind: row.type_kind as string,
         elementKind: row.element_kind as string | null,
         inPrimaryKey: keyPosition !== null,
+        identity: IDENTITY[row.identity as string] ?? null,
+        notImmutable: notImmutableParts(references[index] as DefaultReference[], catalog),
         keyPosition,
       },
     });
@@ -172,11 +197,36 @@ export async function catalogTables(read: ConsistentRead): Promise<CatalogTable[
 }
 
 /**
- * The public tables of the database `read` sees, in DT-3's order, as DT-2 and DT-3 read them. A table the column-type
- * rules refuse fails with its first refusal (`./column-rules.ts`): the code and the message startup gives (DT-6).
+ * The relations of the public schemas that DT-6 refuses whatever they hold (owner decision Q61), as the catalog
+ * describes them, in DT-3's order (by schema name, then name, as bytes): every sequence (`relkind = 'S'`, an identity
+ * or `serial` column's own included), and every unlogged table, partitioned table or partition
+ * (`relpersistence = 'u'`; a partition holds rows of its partitioned table, so it counts too).
+ */
+export async function catalogRelations(read: ConsistentRead): Promise<RelationFacts[]> {
+  const relations = (await read.query(RELATIONS_SQL)).map(
+    (row): RelationFacts => ({
+      schema: row.schema_name as string,
+      name: row.relation_name as string,
+      kind: row.kind as string,
+      persistence: row.persistence as string,
+    }),
+  );
+  return relations.sort((a, b) => compareUtf8(a.schema, b.schema) || compareUtf8(a.name, b.name));
+}
+
+/**
+ * The public tables of the database `read` sees, in DT-3's order, as DT-2 and DT-3 read them. A database the rules
+ * refuse fails with its first refusal (`databaseRefusals` of `./column-rules.ts`: the tables' refusals in DT-3's order,
+ * then the sequences' and unlogged tables'): the code and the message startup gives (DT-6).
  */
 export async function publicTables(read: ConsistentRead): Promise<PublicTable[]> {
-  return (await catalogTables(read)).map(describeTable);
+  const tables = await catalogTables(read);
+  const [first] = databaseRefusals(tables, await catalogRelations(read));
+  if (first !== undefined) {
+    const { refusal, place } = first;
+    throw new PublicContentsError(refusal.code, place, refusal.column, explainRefusal(refusal));
+  }
+  return tables.map(describeTable);
 }
 
 /** The number of rows of `table`, from the state `read` sees. */
@@ -245,7 +295,9 @@ WHERE ${PUBLIC_TABLE_FILTER}`;
 /**
  * A column's facts (`ColumnFacts` of `./column-rules.ts`): `format_type` without and with the type modifier, the type
  * modifier, `typtype` of the type and — for a true array, the condition under which `format_type` prints `[]`
- * (`IsTrueArrayType` and not plain storage, PostgreSQL's format_type.c) — of its element; and its key position.
+ * (`IsTrueArrayType` and not plain storage, PostgreSQL's format_type.c) — of its element; its key position;
+ * `attidentity`; and its default's expression tree (`pg_attrdef.adbin`), unless the column is generated, whose
+ * expression `pg_attrdef` holds too but which is no default (`attgenerated`, PostgreSQL requires it to be immutable).
  */
 const COLUMNS_SQL = `
 SELECT n.nspname::text AS schema_name, c.relname::text AS table_name, a.attname::text AS column_name,
@@ -254,7 +306,9 @@ SELECT n.nspname::text AS schema_name, c.relname::text AS table_name, a.attname:
        t.typtype::text AS type_kind, e.typtype::text AS element_kind,
        (SELECT k.position::integer
           FROM unnest(i.indkey::smallint[]) WITH ORDINALITY AS k(attnum, position)
-         WHERE k.attnum = a.attnum) AS key_position
+         WHERE k.attnum = a.attnum) AS key_position,
+       a.attidentity::text AS identity,
+       CASE WHEN a.attgenerated = '' THEN d.adbin::text END AS default_tree
 FROM pg_catalog.pg_attribute AS a
 JOIN pg_catalog.pg_class AS c ON c.oid = a.attrelid
 JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
@@ -263,7 +317,75 @@ LEFT JOIN pg_catalog.pg_type AS e
   ON e.oid = t.typelem AND t.typsubscript = 'pg_catalog.array_subscript_handler'::pg_catalog.regproc
  AND t.typstorage <> 'p'
 LEFT JOIN pg_catalog.pg_index AS i ON i.indrelid = c.oid AND i.indisprimary
+LEFT JOIN pg_catalog.pg_attrdef AS d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 WHERE ${PUBLIC_TABLE_FILTER} AND a.attnum > 0 AND NOT a.attisdropped`;
+
+/** `attidentity`: `a` for GENERATED ALWAYS AS IDENTITY, `d` for BY DEFAULT, empty for no identity. */
+const IDENTITY: Readonly<Record<string, "always" | "by default">> = { a: "always", d: "by default" };
+
+/** Sequences and unlogged tables (partitions included) of the public schemas: `design.md` §4's detection. */
+const RELATIONS_SQL = `
+SELECT n.nspname::text AS schema_name, c.relname::text AS relation_name, c.relkind::text AS kind,
+       c.relpersistence::text AS persistence
+FROM pg_catalog.pg_class AS c
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+WHERE (c.relkind = 'S' OR (c.relkind IN ('r', 'p') AND c.relpersistence = 'u'))
+  AND n.nspname NOT IN ('information_schema', 'public') AND left(n.nspname::text, 3) <> 'pg_'`;
+
+/** A function's name for a message, `name()`, qualified by its schema outside `pg_catalog`. */
+const FUNCTION_NAME = (alias: string, schema: string): string =>
+  `CASE WHEN ${schema}.nspname = 'pg_catalog' THEN '' ELSE ${schema}.nspname::text || '.' END ` +
+  `|| ${alias}.proname::text || '()'`;
+
+/**
+ * What the catalog says about the functions, operators and types a set of defaults refers to (`catalogNeeds` of
+ * `./column-rules.ts`): each function's name and `provolatile` and whether it is `nextval(regclass)`, each operator's
+ * function (`oprcode`), each type's name and input and output functions. One statement on the same handle, so the
+ * same snapshot as the trees; none when no default refers to anything. The OIDs are written in as literals: they are
+ * decimal digits, checked when read from the trees.
+ */
+async function defaultCatalog(read: ConsistentRead, references: readonly DefaultReference[]): Promise<DefaultCatalog> {
+  const needs = catalogNeeds(references);
+  const catalog = { functions: new Map<string, CatalogFunction>(), operators: new Map<string, CatalogFunction>() };
+  const types = new Map<string, CatalogType>();
+  if (needs.functions.length + needs.operators.length + needs.types.length === 0) return { ...catalog, types };
+  const oids = (list: readonly string[]): string => `'{${list.join(",")}}'::pg_catalog.oid[]`;
+  const fn = (alias: string, schema: string): string =>
+    `${FUNCTION_NAME(alias, schema)} AS function_name, ${alias}.provolatile::text AS volatility, ` +
+    `${alias}.oid = 'pg_catalog.nextval(pg_catalog.regclass)'::pg_catalog.regprocedure AS nextval`;
+  const rows = await read.query(`
+SELECT 'function' AS entry, p.oid::text AS oid, NULL::text AS type_name, ${fn("p", "pn")},
+       NULL::text AS output_name, NULL::text AS output_volatility
+FROM pg_catalog.pg_proc AS p JOIN pg_catalog.pg_namespace AS pn ON pn.oid = p.pronamespace
+WHERE p.oid = ANY (${oids(needs.functions)})
+UNION ALL
+SELECT 'operator', o.oid::text, NULL, ${fn("p", "pn")}, NULL, NULL
+FROM pg_catalog.pg_operator AS o JOIN pg_catalog.pg_proc AS p ON p.oid = o.oprcode
+JOIN pg_catalog.pg_namespace AS pn ON pn.oid = p.pronamespace
+WHERE o.oid = ANY (${oids(needs.operators)})
+UNION ALL
+SELECT 'type', t.oid::text, pg_catalog.format_type(t.oid, NULL), ${fn("p", "pn")},
+       ${FUNCTION_NAME("q", "qn")} AS output_name, q.provolatile::text AS output_volatility
+FROM pg_catalog.pg_type AS t
+JOIN pg_catalog.pg_proc AS p ON p.oid = t.typinput JOIN pg_catalog.pg_namespace AS pn ON pn.oid = p.pronamespace
+JOIN pg_catalog.pg_proc AS q ON q.oid = t.typoutput JOIN pg_catalog.pg_namespace AS qn ON qn.oid = q.pronamespace
+WHERE t.oid = ANY (${oids(needs.types)})`);
+  for (const row of rows) {
+    const named: CatalogFunction = {
+      name: row.function_name as string,
+      volatility: row.volatility as string,
+      nextval: row.nextval as boolean,
+    };
+    const oid = row.oid as string;
+    if (row.entry === "function") catalog.functions.set(oid, named);
+    if (row.entry === "operator") catalog.operators.set(oid, named);
+    if (row.entry === "type") {
+      const output = { name: row.output_name as string, volatility: row.output_volatility as string, nextval: false };
+      types.set(oid, { name: row.type_name as string, input: named, output });
+    }
+  }
+  return { ...catalog, types };
+}
 
 const utf8 = new TextEncoder();
 
@@ -287,12 +409,8 @@ function fromClause(table: PublicTable): string {
   return `${table.partitioned ? "" : "ONLY "}${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
 }
 
-/** The table as DT-2 and DT-3 read it, or its first refusal by the column-type rules. */
+/** The table as DT-2 and DT-3 read it; every table reaching it passed the rules. */
 function describeTable(table: CatalogTable): PublicTable {
-  const [refusal] = tableRefusals(table);
-  if (refusal !== undefined) {
-    throw new PublicContentsError(refusal.code, table.schema, table.name, refusal.column, explainRefusal(refusal));
-  }
   const key = table.columns
     .map((column, index) => ({ index, position: column.keyPosition }))
     .filter((entry): entry is { index: number; position: number } => entry.position !== null)

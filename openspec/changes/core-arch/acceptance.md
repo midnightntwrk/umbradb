@@ -213,15 +213,19 @@ release assets that CI downloads and verifies.
   table makes the test fail. (DT-4)
 - **A57** `[CI]` Two chains differing only in one module's value at height 7 give equal digests up to 6 and different
   digests from 7; the digest at a height with no change equals `SHA-256(previous ‖ CBOR([]))`. (DT-5)
-- **A58** `[CI]` A migration creating a `serial`, identity, floating-point, or `now()`/`random()`-defaulted column in a
-  public module table refuses startup with `non-deterministic-column`; a table without a primary key with
-  `no-primary-key`; a `numeric`, `jsonb` or array key with `unsupported-key-type`; a `numeric(38,2)`, `timestamptz`,
-  `json`, `char(4)`, `money`, enum or domain column with `unsupported-column-type`. Each message names the module, the
-  table, the column and its type, and gives the reason and the alternative of `design.md` §4's column-type table; the
-  contents hash refuses the same tables with the same codes and messages (Q58). A module without `digest` writing `{"x":
-  1.5}`, `{"x": 1.0}` or `{"x": 100.00}` (Q57), or a JSON integer beyond the signed 64-bit range, to a `jsonb` column,
-  or such a number inside a `jsonb[]`, fails the block, and so does `100.00`, `1.5` or `NaN` in a `numeric` or
-  `numeric[]` column; `{"x": 2}`, `{"x": 1e2}` (stored as `100`) and `100` succeed; on both backends. (DT-6)
+- **A58** `[CI]` A migration creating a `serial`, identity or floating-point column, or a column whose default is not
+  immutable (`now()`, `CURRENT_TIMESTAMP`, `random()`, `gen_random_uuid()`, `nextval()`), in a public module table
+  refuses startup with `non-deterministic-column`, while an immutable default (`'abc'`, `1 + 2`, `lower('X')`) and a
+  stored generated column are accepted; a sequence or an unlogged table in a public module schema with
+  `non-deterministic-table` (Q61); a table without a primary key with `no-primary-key`; a `numeric`, `jsonb` or array
+  key with `unsupported-key-type`; a `numeric(38,2)`, `timestamptz`, `time`, `interval`, `json`, `char(4)`, `money`,
+  enum or domain column with `unsupported-column-type`. Each message names the module, the table or sequence, the column
+  and its type where there is one, and gives the reason and the alternative of `design.md` §4; the contents hash refuses
+  the same tables, sequences and columns with the same codes and messages, including in a public table no module
+  declared (Q58, Q61). A module without `digest` writing `{"x": 1.5}`, `{"x": 1.0}` or `{"x": 100.00}` (Q57), or a JSON
+  integer beyond the signed 64-bit range, to a `jsonb` column, or such a number inside a `jsonb[]`, fails the block, and
+  so does `100.00`, `1.5` or `NaN` in a `numeric` or `numeric[]` column; `{"x": 2}`, `{"x": 1e2}` (stored as `100`) and
+  `100` succeed; on both backends. (DT-6)
 
 ## 7. Storage helpers
 

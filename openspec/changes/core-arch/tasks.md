@@ -146,6 +146,40 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (docs/issues/00006; for task 2.1).
       **Pending (task 2.2):** A54's PGlite half for the `varchar`, `uuid` and `boolean` keys.
 
+- [x] 1.4 Non-deterministic tables and columns (owner decision Q61) and per-type reasons (Q59, Q60): in
+      `column-rules.ts`, detect identity and `serial` columns, defaults that are not immutable (a function marked stable
+      or volatile, or an SQL value function, in `pg_attrdef.adbin`) and public schemas holding a sequence or an unlogged
+      table, with `design.md` §4's reasons and alternatives; the contents hash refuses them now, in any public schema,
+      and task 7.1's startup check calls the same detection; the date and time and floating-point rules' verbatim copies
+      follow §4's amended rows.
+      **Acceptance:** the contents-hash half of A58, its Q61 cases included; the design-table sync test.
+      **Done (2026-10-23):** `column-rules.ts` reads a column's `attidentity` and its default's expression tree
+      (`parseExpressionTree`, tokenized as PostgreSQL's reader does) and lists what in it is not immutable as
+      PostgreSQL's own check, `contain_mutable_functions`, finds it (`defaultReferences`, `notImmutableParts`): every
+      function id (`:funcid`, `:opfuncid`, `:hashfuncid`, `:negfuncid`; an operator stored without one, through
+      `pg_operator`), a conversion through text (`COERCEVIAIO`: the result type's input and the argument type's output
+      function), a row comparison's operators, `SQLVALUEFUNCTION` and `NEXTVALUEEXPR`, each function looked up in
+      `pg_proc.provolatile`; SQL/JSON nodes are refused outright, with a message that says so (Q63). A generated
+      column's expression is no default. `tableRefusals` adds, per column after its type, its identity, a sequence draw
+      (`nextval()`: a `serial` column) and the rest of a default that is not immutable (`non-deterministic-column`);
+      `relationRefusals` refuses every sequence and every unlogged table or partition of a public schema
+      (`non-deterministic-table`); `databaseRefusals` lists the tables' refusals, then the relations' (a `serial` or
+      identity column before its own sequence). `public-tables.ts` reads the facts (`catalogTables`,
+      `catalogRelations`), and the hash refuses with the first refusal, in every public schema.
+      `PublicContentsError` takes a place (`{ schema, table }` or `{ schema, sequence }`). The floating-point and
+      date and time rules' verbatim cells follow the amended rows; each date and time reason names its type. Messages
+      name what is not immutable (`calls now(), which PostgreSQL marks stable`), not the default's text, which depends
+      on the session's `TimeZone`. Tests on PostgreSQL 17: every Q61 case of A58's contents-hash half, the refusal
+      order, the catalog facts, the allowed controls, 36 defaults against PostgreSQL's own check (a stored generated
+      column), the design sync (the rows, the paragraph's refusals, its allowed and detection sentences); 29 negative
+      controls caught. The messages of 11 cases were byte-identical on PostgreSQL 17.11 and PGlite 0.5.10 (a scratch
+      check). Q62–Q64 raised, none blocking: §4's detection sentence misses what the code and PostgreSQL also read
+      (Q62); SQL/JSON defaults are refused outright (Q63); §4 gives no alternative for a sequence or an unlogged table
+      (Q64).
+      **Pending (task 2.2):** the PGlite run of `column-refusals.test.ts`'s A58 cases, with 1.3's.
+      **For task 7.1:** read `catalogTables` and `catalogRelations` (or their SQL) for the module's schemas, call
+      `databaseRefusals`, and refuse with the first: `refusalMessage(refusal, { module, ...place })`.
+
 ## 2. Database API
 
 - [ ] 2.1 `src/db/api.ts` and the PostgreSQL backend (refactored from `src/postgres/client.ts`): writer connection, read
@@ -210,10 +244,10 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 ## 7. Digests
 
 - [ ] 7.1 Change capture (shadow tables and triggers) and `core-digest`; the migration-time check of DT-6 through
-      `column-rules.ts` (no primary key, key and column types, sequences, serial and identity, floats, wall-clock and
-      random defaults; Q58), and the `jsonb` and `numeric` `CHECK`s, arrays included (a `jsonb` number: an integer in
-      the signed 64-bit range whose `jsonpath` `.string()` is `-?[0-9]+`, Q57; a `numeric`: `scale(c) = 0 AND c <>
-      'NaN'`).
+      `column-rules.ts` (no primary key, key and column types, identity and `serial` columns, floats, defaults that are
+      not immutable, sequences and unlogged tables; Q58, Q61; the detection is task 1.4's), and the `jsonb` and
+      `numeric` `CHECK`s, arrays included (a `jsonb` number: an integer in the signed 64-bit range whose `jsonpath`
+      `.string()` is `-?[0-9]+`, Q57; a `numeric`: `scale(c) = 0 AND c <> 'NaN'`).
       **Acceptance:** A56 including its negative control, A57, A58.
 
 ## 8. Admin endpoints
