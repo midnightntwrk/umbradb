@@ -1,23 +1,20 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeCanonical } from "../../src/determinism/cbor.js";
-import {
-  columnVerdict,
-  databaseRefusals,
-  numericScale,
-  refusalMessage,
-  tableRefusals,
-} from "../../src/determinism/column-rules.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
+import { PublicContentsError, publicTables } from "../../src/determinism/public-tables.js";
 import {
   type CatalogTable,
   catalogRelations,
   catalogTables,
   type ConsistentRead,
-  PublicContentsError,
-  publicTables,
-} from "../../src/determinism/public-tables.js";
-import { DETERMINISM_BACKENDS } from "./backends.js";
-import type { TestDatabase, TestServer } from "./postgres-database.js";
+  columnVerdict,
+  databaseRefusals,
+  numericScale,
+  refusalMessage,
+  tableRefusals,
+} from "../../src/deterministic-postgresql/index.js";
+import { DETERMINISM_BACKENDS } from "../determinism/backends.js";
+import type { TestDatabase, TestServer } from "../determinism/postgres-database.js";
 
 /**
  * Tasks 1.3 and 1.4 on PostgreSQL 17 (`postgres:17-alpine`, Testcontainers) and, since task 2.2, on PGlite 0.5.10:

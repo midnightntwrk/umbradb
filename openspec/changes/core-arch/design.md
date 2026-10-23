@@ -13,7 +13,7 @@ this change relies on is restated in `specs/`. Owner decisions cited as Qn are i
 | `src/modules/` | `ModuleDeclaration` and related types, `defineModule`, declaration validation, graph resolution per height range |
 | `src/config/` | `defineConfig`, `coreEntry`, `versionEntry`, the loader, the plain-data check, schema validation, the history comparison, the version check |
 | `src/determinism/` | The canonical CBOR encoder, primary-key order, the contents hash, digests |
-| `src/deterministic-postgresql/` | The `deterministic_postgresql` component (§4, Q69): every rule UmbraDB imposes on PostgreSQL — column types, non-deterministic columns and tables, the `jsonb` and `numeric` checks, rows-only block transactions, the pinned session settings and timeouts, the result mapping and parameter texts; it imports nothing else of `src/`, and its tests are `test/deterministic-postgresql/` |
+| `src/deterministic-postgresql/` | The `deterministic_postgresql` component (§4, Q69): every rule UmbraDB imposes on PostgreSQL — column types, non-deterministic columns and tables, the `jsonb` and `numeric` checks, rows-only block transactions, the pinned session settings and timeouts, the result mapping and parameter texts; and `UmbraError` with its codes, which the mapping throws and `src/db/errors.ts` re-exports (Q79); it imports nothing else of `src/`, and its tests are `test/deterministic-postgresql/` |
 | `src/helpers/` | The cursor table (from `src/postgres/watermarks.ts`) and the height-versioned table (from `src/postgres/temporal-kv.ts`) |
 | `src/node/` | The node client (refactored from `chain-archive-sync/node-rpc-client.ts`): JSON-RPC over WebSocket, subscriptions, reconnect, back-off |
 | `src/backbone/` | `core-chain`, `core-block-fetch` (the queue and the finalized prefetch), `core-block-commit`, `core-digest`; the admin endpoints `core-health`, `core-status`, `core-config` (Q70), each in its own folder with its tests; private: `core-private-source`, `core-key-registry` |
@@ -86,8 +86,8 @@ interface BlockSource {
 - **Reads.** PostgreSQL: `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` on a pool connection; the handle's `height`
   is read from the cursor inside the same transaction. PGlite: one queued job.
 - **Lossless `jsonb`.** Both backends read `json` and `jsonb` with UmbraDB's own reader of RFC 8259's grammar
-  (`parseJsonLossless` in `src/db/mapping.ts`), not `JSON.parse` (Q78). It returns a `bigint` for every integer written
-  outside ±(2^53 − 1) (DB-2), which plain `JSON.parse` rounds (the `postgres` driver uses it,
+  (`parseJsonLossless` in `src/deterministic-postgresql/mapping.ts`), not `JSON.parse` (Q78). It returns a `bigint` for
+  every integer written outside ±(2^53 − 1) (DB-2), which plain `JSON.parse` rounds (the `postgres` driver uses it,
   `node_modules/postgres/src/types.js:18-21`). `JSON.parse` is avoided because of a V8 bug in every Node.js 24 and 26
   release: once a parse in the process has read an object key that is a single backslash, a later parse can silently
   read an object key that is one escape sequence (`"\t"`, `"\n"`, `"\""`, …) as a backslash, so two different documents
@@ -107,15 +107,15 @@ interface BlockSource {
 - **`TRUNCATE`.** Every public module table gets a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger raising
   `truncate-not-allowed` (DB-14).
 - **Column types and stored values (DT-1, DT-2, DT-6, Q57, Q58).** One table of rules,
-  `src/determinism/column-rules.ts`, decides for each column of a public table whether its type is allowed as a value
-  and as a key, with the reason and the alternative of the column-type table below; the contents hash (DT-3) and the
-  migration-time check (DT-6) both use it, so a refusal reads the same in both, and each rule carries a comment with its
-  reason. It reads the catalog: `format_type(atttypid, atttypmod)` for the message, the type's base name for the rule,
-  `numeric`'s declared scale from the type modifier, and `pg_type.typtype` for enums, domains and composite types.
-  `core_chain.jsonb_numbers_ok(jsonb)` (immutable; a `jsonpath` finding any number outside the signed 64-bit range or
-  whose text, `.string()`, is not `-?[0-9]+`, so `1.0` fails too, Q57) and `core_chain.numeric_ok(numeric)` (`scale(c) =
-  0 AND c <> 'NaN'`; `scale('NaN')` is null, so `NaN` fails too; verified on PostgreSQL 17.11 and PGlite 0.5.10), with
-  array forms for `jsonb[]` and `numeric[]`, back a `CHECK` on every such column of a public module table.
+  `src/deterministic-postgresql/column-rules.ts`, decides for each column of a public table whether its type is allowed
+  as a value and as a key, with the reason and the alternative of the column-type table below; the contents hash (DT-3)
+  and the migration-time check (DT-6) both use it, so a refusal reads the same in both, and each rule carries a comment
+  with its reason. It reads the catalog: `format_type(atttypid, atttypmod)` for the message, the type's base name for
+  the rule, `numeric`'s declared scale from the type modifier, and `pg_type.typtype` for enums, domains and composite
+  types. `core_chain.jsonb_numbers_ok(jsonb)` (immutable; a `jsonpath` finding any number outside the signed 64-bit
+  range or whose text, `.string()`, is not `-?[0-9]+`, so `1.0` fails too, Q57) and `core_chain.numeric_ok(numeric)`
+  (`scale(c) = 0 AND c <> 'NaN'`; `scale('NaN')` is null, so `NaN` fails too; verified on PostgreSQL 17.11 and PGlite
+  0.5.10), with array forms for `jsonb[]` and `numeric[]`, back a `CHECK` on every such column of a public module table.
 - **Migrations and setup (DB-9, DB-10).** `core_chain.migrations`; checksum = SHA-256 of the UTF-8 SQL; per part and
   module, pending migrations each in their own transaction with their row, then `on-start-db` in its own transaction.
   Upgrade migrations only add — a module obligation (Q46); `requiresResync` versions are refused on a non-empty

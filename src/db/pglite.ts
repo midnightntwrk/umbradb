@@ -25,15 +25,15 @@
  * `database-error`, `reason: nested-call`. Code a job started that calls after the job's body has ended (a timer it
  * set) is an ordinary caller.
  *
- * **Results and parameters** go through `./mapping.ts`, as on PostgreSQL. PGlite hands over every value as the text
- * PostgreSQL printed — every parser it has is replaced by the identity for each statement, and a type it has no
- * parser for arrives as text anyway — with the column's type OID; `rowMode: "array"` keeps columns that share a
- * name. Every parameter is sent as the text `./mapping.ts` gives it, untyped, through serializers that keep it
- * unchanged (PGlite's own would rewrite `boolean`, `json` and `bytea` texts). The engine must run with
- * {@link PINNED_SETTINGS} as start parameters ({@link PGLITE_START_PARAMS}): they win over the data directory's
- * `postgresql.conf` and `postgresql.auto.conf` (PGlite's initdb writes the host's time zone there) and survive `RESET
- * ALL`, while `ALTER DATABASE … SET` and `ALTER ROLE … SET` are not applied in PGlite's single-user mode at all;
- * {@link openPgliteOn} refuses an engine that does not run with them.
+ * **Results and parameters** go through the `deterministic_postgresql` component's mapping, as on PostgreSQL. PGlite
+ * hands over every value as the text PostgreSQL printed — every parser it has is replaced by the identity for each
+ * statement, and a type it has no parser for arrives as text anyway — with the column's type OID; `rowMode: "array"`
+ * keeps columns that share a name. Every parameter is sent as the text the mapping gives it, untyped, through
+ * serializers that keep it unchanged (PGlite's own would rewrite `boolean`, `json` and `bytea` texts). The engine must
+ * run with the component's {@link PINNED_SETTINGS} as start parameters ({@link PGLITE_START_PARAMS}): they win over
+ * the data directory's `postgresql.conf` and `postgresql.auto.conf` (PGlite's initdb writes the host's time zone there)
+ * and survive `RESET ALL`, while `ALTER DATABASE … SET` and `ALTER ROLE … SET` are not applied in PGlite's single-user
+ * mode at all; {@link openPgliteOn} refuses an engine that does not run with them.
  *
  * **Errors (DB-13).** PGlite runs in this process: there is no connection to lose, so no error of this backend is
  * `connection-lost`, the one retryable code. A statement the server refused (severity `ERROR`) is `database-error`
@@ -50,9 +50,9 @@
 
 import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
 import { PGlite, type QueryOptions, types } from "@electric-sql/pglite";
+import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
 import { commitRolledBack, handleClosed, UmbraError } from "./errors.js";
-import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "./mapping.js";
 import { READS_BYPASS_QUEUE } from "./pglite-build-flags.js";
 
 /**

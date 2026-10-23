@@ -1,6 +1,5 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { UmbraError } from "../../src/db/errors.js";
 import {
   mapRows,
   mapValue,
@@ -8,7 +7,8 @@ import {
   parseArrayText,
   parseJsonLossless,
   RESULT_TYPES,
-} from "../../src/db/mapping.js";
+  UmbraError,
+} from "../../src/deterministic-postgresql/index.js";
 
 /**
  * The database API's result mapping and parameter texts (DB-2), without a database: PostgreSQL's text output as it
@@ -99,7 +99,8 @@ describe("lossless JSON (DB-2)", () => {
   // Node.js 24.9.0's JSON.parse (V8 13.6.233.10) can read such a key as a backslash once an earlier JSON.parse in the
   // process has read the key "\\": two different documents would read back equal, and so would their contents
   // hashes. Whether it does depends on the strings the process already holds, so this test cannot make it happen on
-  // demand; A7's seeded differential round trip (`differential.test.ts`) did, on both backends, and is its reproduction.
+  // demand; A7's seeded differential round trip (`../db/differential.test.ts`) did, on both backends, and is its
+  // reproduction.
   it("reads an object key that is one escape sequence as its character, also after the key \"\\\\\" was read", () => {
     const keys = (text: string): string[] => Object.keys(parseJsonLossless(text) as object);
     expect(keys('{"\\\\": 1}')).toEqual(["\\"]);

@@ -15,10 +15,12 @@
  * process's {@link CommittedHeight} as the first statement — which takes the snapshot — then the body's statements,
  * then `ROLLBACK`, which also undoes any `SET` the body ran, so no setting outlives the read.
  *
- * **Results and parameters** go through `./mapping.ts`: the driver hands over every value as text (raw mode; none of
- * its parsers runs), and every parameter as the text `./mapping.ts` gives it, untyped. Every session pins the output
- * settings the mapping reads ({@link PINNED_SETTINGS}) as startup parameters, which take precedence over the server's,
- * the database's and the role's defaults; a `database` URL that would override one is refused.
+ * **Results and parameters** go through the `deterministic_postgresql` component's mapping
+ * (`../deterministic-postgresql/mapping.ts`): the driver hands over every value as text (raw mode; none of its parsers
+ * runs), and every parameter as the text the mapping gives it, untyped. Every session pins the component's session
+ * settings ({@link PINNED_SETTINGS}, `../deterministic-postgresql/settings.ts`) as startup parameters, which take
+ * precedence over the server's, the database's and the role's defaults; a `database` URL that would override one is
+ * refused.
  *
  * **Errors (DB-13).** A lost connection is `connection-lost` (retryable); every other error of the driver or the server
  * is `database-error` (not retryable), with the server's SQLSTATE and the names it gives (constraint, table, schema,
@@ -26,12 +28,9 @@
  */
 
 import postgres, { type Sql } from "postgres";
+import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
 import { commitRolledBack, handleClosed, UmbraError } from "./errors.js";
-import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "./mapping.js";
-
-/** The session settings every connection starts with (`./mapping.ts`, shared with the PGlite backend). */
-export { PINNED_SETTINGS };
 
 /** Options of {@link openPostgres}. */
 export interface PostgresOptions {
@@ -175,7 +174,7 @@ class Session {
         if (this.state === "open") this.state = "lost";
       },
       connection: { application_name: "umbradb", ...Object.fromEntries(PINNED_SETTINGS) },
-      // Parameters arrive as text (`./mapping.ts`); these types' default serializers would rewrite it.
+      // Parameters arrive as text (the component's `parameterText`); these types' default serializers would rewrite it.
       types: {
         umbradbText: {
           to: 25,

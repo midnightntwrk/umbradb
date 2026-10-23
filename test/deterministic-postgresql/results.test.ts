@@ -2,13 +2,14 @@ import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database, Row } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
-import { RESULT_TYPES } from "../../src/db/mapping.js";
-import { BACKENDS } from "./backends.js";
+import { RESULT_TYPES } from "../../src/deterministic-postgresql/index.js";
+import { BACKENDS } from "../db/backends.js";
 
 /**
  * A9 (DB-2): query results map `bigint` → `bigint`, `bytea` → `Uint8Array`, `numeric` → decimal string, `jsonb` →
- * parsed JSON without loss; and the rest of the mapping (`src/db/mapping.ts`), arrays included — the NULL-element
- * cases of docs/issues/00006 — against a real server, on every backend of `backends.ts`.
+ * parsed JSON without loss; and the rest of the mapping (`src/deterministic-postgresql/mapping.ts`), arrays included
+ * — the NULL-element cases of docs/issues/00006 — and the pinned session settings, against a real server, on every
+ * backend of `../db/backends.ts`.
  */
 
 const SEED = 20261023;

@@ -1,15 +1,16 @@
 /**
  * The column-type rules of DT-1, DT-2 and DT-6 (`openspec/changes/core-arch/specs/determinism/spec.md`, owner decision
- * Q58): for each column of a public table, whether its type may be stored (as a value) and whether it may be part of
- * the primary key (as a key) — and, when it may not, why, and what to use instead. And DT-6's non-deterministic
- * columns and tables (owner decision Q61): identity and `serial` columns, defaults that are not immutable, and public
- * schemas holding a sequence or an unlogged table.
+ * Q58), rules of the `deterministic_postgresql` component (`design.md` §4, owner decision Q69): for each column of a
+ * public table, whether its type may be stored (as a value) and whether it may be part of the primary key (as a key) —
+ * and, when it may not, why, and what to use instead. And DT-6's non-deterministic columns and tables (owner decision
+ * Q61): identity and `serial` columns, defaults that are not immutable, and public schemas holding a sequence or an
+ * unlogged table.
  *
  * **One source.** Every reason and alternative here comes from `design.md` §4's column-type table and the paragraph
  * above it, adapted into sentences for a module developer who has never read DT-1 or DT-6. Each rule keeps its row's
- * four cells, or its sentence, verbatim (`design`), and `test/determinism/column-rules.test.ts` fails when the design
- * and the rules part ways. The contents hash (DT-3) refuses with these rules in every public schema; task 7.1's
- * migration-time check (DT-6) calls the same {@link tableRefusals}, {@link relationRefusals} (or
+ * four cells, or its sentence, verbatim (`design`), and `test/deterministic-postgresql/column-rules.test.ts` fails when
+ * the design and the rules part ways. The contents hash (DT-3) refuses with these rules in every public schema; task
+ * 7.1's migration-time check (DT-6) calls the same {@link tableRefusals}, {@link relationRefusals} (or
  * {@link databaseRefusals}) and {@link refusalMessage}, adding the module's id, so a refusal reads the same in both.
  *
  * **The input** is what PostgreSQL's catalog says about a column ({@link ColumnFacts}), nothing more: the type's name
@@ -23,10 +24,34 @@
  * Two rows of the table give one reason to several types although it is not true of each of them (decision record
  * Q59 and Q60, 2026-10-23): the date and time types and the floating-point types. For those, each type gets the
  * clauses that are true of it, checked on PostgreSQL 17.11 and PGlite 0.5.10
- * (`test/determinism/column-refusals.test.ts` checks them again through the driver).
+ * (`test/deterministic-postgresql/column-refusals.test.ts` checks them again through the driver).
  */
 
-import type { CanonicalEncodingFailure, ColumnType, ScalarColumnType } from "./cbor.js";
+// ── the column types DT-1 encodes ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The column types of DT-1, named as PostgreSQL's `format_type(type, NULL)` names them (`character varying` for
+ * `varchar(n)`; `varchar` and `uuid` since owner decision Q58): the types the rules below allow in a public table, and
+ * their arrays, and the types the canonical encoder (`src/determinism/cbor.ts`) takes.
+ */
+export const SCALAR_COLUMN_TYPES = [
+  "smallint",
+  "integer",
+  "bigint",
+  "numeric",
+  "bytea",
+  "text",
+  "character varying",
+  "uuid",
+  "boolean",
+  "jsonb",
+] as const;
+
+/** A scalar column type of DT-1. */
+export type ScalarColumnType = (typeof SCALAR_COLUMN_TYPES)[number];
+
+/** A column type of DT-1: a scalar type, or an array of one (any number of dimensions, as in PostgreSQL). */
+export type ColumnType = ScalarColumnType | `${ScalarColumnType}[]`;
 
 // ── input: what the catalog says about a column ─────────────────────────────────────────────────────────────────────
 
@@ -772,7 +797,7 @@ export interface PlacedRefusal {
 /**
  * Every refusal of a database's public tables and relations, in a fixed order: each table's refusals
  * ({@link tableRefusals}) in the order the tables are given, then each relation's ({@link relationRefusals}) in the
- * order given — `catalogTables` and `catalogRelations` of `./public-tables.ts` give DT-3's (by schema, then name, as
+ * order given — `catalogTables` and `catalogRelations` of `./catalog.ts` give DT-3's (by schema, then name, as
  * bytes). Tables come first because a column is what a developer wrote: an identity or `serial` column's sequence is
  * refused too, but it is dropped with its column, so the column's refusal is the one to read first.
  */
@@ -840,6 +865,16 @@ export function keyOrder(type: string): KeyOrder | null {
 }
 
 /**
+ * The `ORDER BY` term of a primary-key column `name` of `type` in DT-2's order: the quoted name, with `COLLATE "C"` for
+ * the key types ordered by the bytes of their text (`text`, `character varying`), whose own collation may put "a"
+ * before "B".
+ */
+export function keyOrderTerm(name: string, type: string): string {
+  const collate = keyOrder(type) === "by-bytes-collate-c" ? ' COLLATE "C"' : "";
+  return `${quoteIdentifier(name)}${collate}`;
+}
+
+/**
  * The refusal of a column type known by its name alone, for the encoder, which receives `format_type(atttypid, NULL)`
  * names and no catalog facts: a name a row refuses gets that row's code and reason; any other name — one the encoder
  * does not take, which is never a name a row allows — is "any other type". Without the catalog an enum or a domain is
@@ -853,10 +888,12 @@ export function refusalOfTypeName(type: string): { readonly code: RefusedRule["c
 
 /**
  * Why a stored value of an allowed type could not be encoded, when a stored value can cause it: a `numeric` with a
- * fraction or `NaN`, a `jsonb` number that is not a 64-bit integer (DT-1, DT-6, Q57). Null for failures only a broken
- * read handle can cause (a value of the wrong JavaScript type, a lossy JSON parser, …).
+ * fraction or `NaN`, a `jsonb` number that is not a 64-bit integer (DT-1, DT-6, Q57). `failure` is the canonical
+ * encoder's reason (`CanonicalEncodingFailure` of `src/determinism/cbor.ts`): `numeric-fraction` and `numeric-invalid`
+ * for a `numeric`, `not-integer` and `integer-out-of-range` for a `jsonb`. Null for failures only a broken read handle
+ * can cause (a value of the wrong JavaScript type, a lossy JSON parser, …).
  */
-export function valueFailureBecause(type: string, failure: CanonicalEncodingFailure): Because | null {
+export function valueFailureBecause(type: string, failure: string): Because | null {
   const scalar = type.endsWith("[]") ? type.slice(0, -2) : type;
   if (scalar === "numeric" && (failure === "numeric-fraction" || failure === "numeric-invalid")) return NUMERIC_VALUES;
   if (scalar === "jsonb" && (failure === "not-integer" || failure === "integer-out-of-range")) return JSON_NUMBERS;

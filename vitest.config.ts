@@ -68,6 +68,10 @@ const CORE_ARCH = {
   // §13 keeps at the moved path.
   "**/src/db/**": { lines: 90, branches: 85, perFile: true },
   "**/src/db/errors.ts": { lines: 95, branches: 91, perFile: true },
+  // The `deterministic_postgresql` component (task 2.2a, owner decision Q69), held above the default like determinism;
+  // `UmbraError` moved into it (decision record Q79), and the `errors` floor moved with the class.
+  "**/src/deterministic-postgresql/**": { lines: 95, branches: 90, perFile: true },
+  "**/src/deterministic-postgresql/errors.ts": { lines: 95, branches: 91, perFile: true },
 } as const;
 
 export default defineConfig({

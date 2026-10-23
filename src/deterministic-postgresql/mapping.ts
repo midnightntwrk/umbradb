@@ -1,8 +1,9 @@
 /**
- * The database API's result mapping and parameter texts (DB-2, `openspec/changes/core-arch/design.md` §4), the same on
- * every backend: each backend hands over PostgreSQL's text output of a value with the column's type OID, and this
- * module maps it. No driver parser is involved — `postgres` 3.4.9's array parser reads an unquoted `NULL` element as
- * the text "NULL" (docs/issues/00006), and the two backends' drivers differ in other details.
+ * The database API's result mapping and parameter texts (DB-2, `openspec/changes/core-arch/design.md` §4), a rule of
+ * the `deterministic_postgresql` component, the same on every backend: each backend hands over PostgreSQL's text output
+ * of a value with the column's type OID, and this module maps it. No driver parser is involved — `postgres` 3.4.9's
+ * array parser reads an unquoted `NULL` element as the text "NULL" (docs/issues/00006), and the two backends' drivers
+ * differ in other details. Task 2.2b replaces the date and time mapping here (RFC 3339 text, owner decision Q68).
  *
  * Results, by type (the types `design.md` §4's column-type table names, with `oid`, `name` and `"char"` for catalog
  * queries); every type the table below does not name, and an array of one, is returned as its text:
@@ -20,10 +21,10 @@
  * | `time`, `timetz`, `interval`, `money` | its text |
  * | an array of any of these | a JavaScript array (nested per dimension) of the elements so mapped, `NULL` → `null` |
  *
- * The texts are PostgreSQL's output under the session settings every backend pins ({@link PINNED_SETTINGS}): `bytea`
- * in hex, dates in ISO style, intervals in `postgres` style, time zone UTC, floats in their shortest exact form.
- * Output the mapping cannot read (`bytea` in escape form after a session changed `bytea_output`, say) is refused,
- * never guessed.
+ * The texts are PostgreSQL's output under the session settings every backend pins (`PINNED_SETTINGS`,
+ * `./settings.ts`): `bytea` in hex, dates in ISO style, intervals in `postgres` style, time zone UTC, floats in their
+ * shortest exact form. Output the mapping cannot read (`bytea` in escape form after a session changed `bytea_output`,
+ * say) is refused, never guessed.
  *
  * Parameters are sent as text with no type, so PostgreSQL types each from the statement as it types an untyped
  * literal (write `$1::bigint` where the statement does not say); {@link parameterText} gives each JavaScript value's
@@ -31,21 +32,6 @@
  */
 
 import { UmbraError } from "./errors.js";
-
-/**
- * The session settings every session of the database API starts with — each PostgreSQL connection (`./postgres.ts`)
- * and PGlite's one session (`./pglite.ts`): how PostgreSQL prints values, so that every mapped value and every text
- * the server prints is the same on both backends, on every server and in every database, whatever their defaults —
- * `bytea_output` (the `bytea` mapping reads hex), `DateStyle` (the `Date` mapping reads ISO), `IntervalStyle`,
- * `TimeZone` and `extra_float_digits` (floats printed exactly).
- */
-export const PINNED_SETTINGS: readonly (readonly [string, string])[] = [
-  ["bytea_output", "hex"],
-  ["DateStyle", "ISO, MDY"],
-  ["IntervalStyle", "postgres"],
-  ["TimeZone", "UTC"],
-  ["extra_float_digits", "1"],
-];
 
 /** A result row: column name → mapped value. When two columns share a name, the later one's value is kept. */
 export type Row = Record<string, unknown>;

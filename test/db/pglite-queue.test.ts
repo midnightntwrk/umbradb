@@ -5,8 +5,8 @@ import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
-import { PINNED_SETTINGS } from "../../src/db/mapping.js";
 import { classifyPgliteError, openPglite, openPgliteOn, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
+import { PINNED_SETTINGS } from "../../src/deterministic-postgresql/index.js";
 import { askedLater, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 import { type PgliteTestDatabase, type PgliteTestServer, startPgliteServer } from "./pglite-server.js";
 

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CanonicalEncodingError, type ColumnType, encodeRow, SCALAR_COLUMN_TYPES } from "../../src/determinism/cbor.js";
+import { CanonicalEncodingError, type ColumnType, encodeRow } from "../../src/determinism/cbor.js";
 import {
   type Because,
   type CatalogFunction,
@@ -27,6 +27,7 @@ import {
   refusalMessage,
   refusalOfTypeName,
   relationRefusals,
+  SCALAR_COLUMN_TYPES,
   TABLE_RULES,
   type TableFacts,
   type TableRule,
@@ -34,7 +35,7 @@ import {
   tableRefusals,
   type TypeRule,
   valueFailureBecause,
-} from "../../src/determinism/column-rules.js";
+} from "../../src/deterministic-postgresql/index.js";
 
 /**
  * Tasks 1.3 and 1.4 (owner decisions Q58 to Q61): the column-type rules of DT-1, DT-2 and DT-6, and DT-6's

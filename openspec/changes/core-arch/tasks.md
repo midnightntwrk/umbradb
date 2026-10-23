@@ -259,13 +259,51 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `pglite.ts` 98.44 % lines / 96.61 % branches, `mapping.ts` 100 / 100 (floors `src/db/**` 90/85).
       **Open question (not blocking):** Q78 (`design.md` §4 and §14 still prescribe `JSON.parse`). The CI run is
       pending until the branch is pushed (Phase 3).
-- [ ] 2.2a The `deterministic_postgresql` component (Q69): move into `src/deterministic-postgresql/` the column-type
+- [x] 2.2a The `deterministic_postgresql` component (Q69): move into `src/deterministic-postgresql/` the column-type
       rules with the default detection and the catalog reads they need (`src/determinism/column-rules.ts` and the rule
       parts of `public-tables.ts`), the pinned session settings (`PINNED_SETTINGS`, in `src/db/mapping.ts` since task
       2.2) and the result mapping with the parameter texts and its JSON reader (`src/db/mapping.ts`); `src/db/` and
       `src/determinism/` import every rule from it; their tests move to `test/deterministic-postgresql/` and run on both
       backends; the design-sync test keeps finding §4's table; the coverage floor of §13.
       **Acceptance:** A138; every moved test passes unchanged in what it asserts.
+      **Done (2026-10-23):** `src/deterministic-postgresql/` holds `column-rules.ts` (moved from `src/determinism/`: the
+      column-type rules and the default detection, with `SCALAR_COLUMN_TYPES` and `ColumnType` from `cbor.ts`, and
+      `keyOrderTerm`, the `ORDER BY` term with `COLLATE "C"` that `rowsInKeyOrder` wrote inline), `catalog.ts` (the
+      catalog reads moved from `public-tables.ts`: `catalogTables`, `catalogRelations`, their SQL, and the handle
+      `ConsistentRead`, declared here so nothing of `src/db/` is imported), `settings.ts` (`PINNED_SETTINGS`),
+      `mapping.ts` (moved from `src/db/`: the result mapping, the parameter texts, the JSON reader), `errors.ts`
+      (`UmbraError`, `ERROR_CODES`, `ErrorCode`, `ErrorDetails`, which the mapping throws; `src/db/errors.ts` re-exports
+      them, so `design.md` §12 is unchanged — Q79) and `index.ts`, the entry `src/db/` and `src/determinism/` import
+      every rule from (its comment maps each row of §4's component table to its file, and names where the rows still to
+      be built go). The component imports nothing else of `src/`, and `src/determinism/` no longer imports `src/db/`.
+      `public-tables.ts` keeps `PublicContentsError`, `publicTables`, `countRows` and `rowsInKeyOrder`, and re-exports
+      `ConsistentRead`. Tests moved with `git mv`, only their imports and doc comments changed: `column-rules.test.ts`
+      (no database; with the design sync), `column-refusals.test.ts` (both backends), `mapping.test.ts` (no database),
+      `results.test.ts` (A9, both backends). New, seen failing first (the component missing; the moved tests not yet in
+      the suite): `boundary.test.ts` (the import boundary over every import form, by the TypeScript compiler's parse;
+      "defined nowhere else" checked as names, pinned settings written with their values, `COLLATE "C"`, functions and
+      values defined again under any name, and texts of 30 or more characters, each with a fixture copy),
+      `component-table.test.ts` (§4's component table mirrored row by row: the suite files that run each row, on both
+      backends, and the task each part not built yet waits for, which this file must still list as open) and
+      `both-backends.test.ts` (one fixture on PostgreSQL 17 and PGlite: equal catalog facts, equal refusal messages for
+      every refused row and every refusal of the paragraph, text keys in byte order whatever the collation, the pinned
+      settings and the texts they print). 9 deliberate breaks (four forbidden imports, five rules defined again outside)
+      each caught by the intended test; 36 wrong variants of the component's code: 32 caught by the suite at once, and
+      the other 4 after new tests (`errors.test.ts`: unreadable output's code, never asserted since task 2.1;
+      `UmbraError`'s frozen details; and schemas and tables in byte order with a partitioned table listed once, which
+      only `test/determinism/` had checked) — 36 of 36 on the final suite. Coverage floor
+      `src/deterministic-postgresql/**` 95/90, and the `errors` floor 95/91 at the class's new path, in
+      `vitest.config.ts`; `design.md` §1 and §4 and `docs/issues/00007` name the new paths.
+      **A138 covers now:** the column-type rules with their refusals, the `COLLATE "C"` key order, identity, `serial`
+      and non-immutable defaults, sequences and unlogged tables (rows 1–4), the pinned session settings (row 7) and the
+      result mapping and parameter texts (row 8). **Pending:** the `jsonb` and `numeric` `CHECK`s (row 5, task 7.1); the
+      `BEFORE TRUNCATE` trigger (row 6, task 2.3); the zero timeouts (row 7, task 2.7); date and time as RFC 3339 text
+      (row 8, task 2.2b); the opt-out (row 9: its declaration task 3.1, its skips task 7.1).
+      **For tasks 2.2b, 2.3, 2.7, 3.1 and 7.1:** put each rule in the component (`index.ts` says which file), test it in
+      `test/deterministic-postgresql/` on both backends, and move its part in `component-table.test.ts` from `pending`
+      to `tests`.
+      **Open question (not blocking):** Q79 (where `UmbraError` lives; shipped A). The CI run is pending until the
+      branch is pushed (Phase 3).
 - [ ] 2.2b Date and time (Q68, Q74) and one set of rules (Q75): values as RFC 3339 text in the component's mapping;
       `timestamptz` allowed as a value and a key (the encoder's integer microseconds since 1970, key order by time),
       the other date and time types refused with "use `timestamptz`"; the date-and-time row of `design.md` §4 split

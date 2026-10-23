@@ -2,25 +2,26 @@
  * The database API (`openspec/changes/core-arch/specs/database-api/spec.md`, `design.md` §4): the one interface the
  * runner, the backbone parts and the modules use to read and write a database, over PostgreSQL (`./postgres.ts`) and
  * PGlite (`./pglite.ts`), with the same observable results (DB-1). Its errors are {@link UmbraError}s
- * (`./errors.ts`); its result mapping and parameter texts are `./mapping.ts`'s, the same on both backends.
+ * (`./errors.ts`); its result mapping and parameter texts are the `deterministic_postgresql` component's
+ * (`../deterministic-postgresql/mapping.ts`), the same on both backends.
  *
  * The handles are CORE-ARCH §4.10's. A read handle sees exactly one committed height and reports it (DB-2); the
- * determinism code takes only its `query` (`ConsistentRead`, `../determinism/public-tables.ts`). Writes go through
- * {@link Database.transaction}, one transaction at a time: on PostgreSQL on the writer connection (DB-5); on PGlite
- * as a job of the one queue every read and transaction waits in (DB-4). The block and schema write handles of DB-3
+ * determinism code takes only its `query` (`ConsistentRead`, `../deterministic-postgresql/catalog.ts`). Writes go
+ * through {@link Database.transaction}, one transaction at a time: on PostgreSQL on the writer connection (DB-5); on
+ * PGlite as a job of the one queue every read and transaction waits in (DB-4). The block and schema write handles of DB-3
  * (own schema, `SET LOCAL ROLE`, closing) are built on it by later tasks.
  */
 
-import type { ConsistentRead } from "../determinism/public-tables.js";
+import type { ConsistentRead } from "../deterministic-postgresql/index.js";
 
+export type { Row } from "../deterministic-postgresql/index.js";
 export { ERROR_CODES, type ErrorCode, type ErrorDetails, UmbraError } from "./errors.js";
-export type { Row } from "./mapping.js";
 
 /** One consistent read of committed data (CORE-ARCH §4.10, DB-2). */
 export interface ReadHandle {
   /** The committed height the read sees; null before block S commits. */
   readonly height: bigint | null;
-  /** Runs one statement; parameters as `./mapping.ts`'s `parameterText` sends them; rows mapped as DB-2 says. */
+  /** Runs one statement; parameters as the component's `parameterText` sends them; rows mapped as DB-2 says. */
   query(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
 }
 

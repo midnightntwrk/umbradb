@@ -1,7 +1,8 @@
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UmbraError } from "../../src/db/errors.js";
-import { openPostgres, PINNED_SETTINGS } from "../../src/db/postgres.js";
+import { openPostgres } from "../../src/db/postgres.js";
+import { PINNED_SETTINGS } from "../../src/deterministic-postgresql/index.js";
 import { TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 

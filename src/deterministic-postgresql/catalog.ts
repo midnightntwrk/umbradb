@@ -1,0 +1,255 @@
+/**
+ * The catalog reads of the `deterministic_postgresql` component (`openspec/changes/core-arch/design.md` §4, owner
+ * decision Q69): what PostgreSQL's catalog says about the public tables, their columns and the relations of the public
+ * schemas, read as the column-type rules (`./column-rules.ts`) take it — the rules' input, before any of them is
+ * applied. The contents hash (`src/determinism/public-tables.ts`, DT-2, DT-3) and task 7.1's migration-time check
+ * (DT-6) read the same facts here, so both give the same verdicts.
+ *
+ * **Which tables count.** Every schema of the database counts except those no part or module can own (DB-8's reserved
+ * names): PostgreSQL's own (`pg_catalog`, `pg_toast`, the temporary schemas — every name starting with `pg_`),
+ * `information_schema`, and `public`, where extensions install their tables. A table is an ordinary or a partitioned
+ * table (`relkind` `r` or `p`); a partition is part of its partitioned table, whose rows it holds, not a table of its
+ * own. Views, materialized views, sequences, composite types and foreign tables hold no rows of their own and are not
+ * tables. (Why these schemas and tables: `src/determinism/public-tables.ts`.)
+ *
+ * **How the catalog is read.** By name, never by OID or creation order: schemas and tables are sorted by the bytes of
+ * their names' UTF-8 encoding (DT-3's byte order); a table's columns are in column order (DT-1), its attribute
+ * numbers with dropped columns skipped, which the table's migrations fix (DB-9) and every database built by them
+ * shares; column types are `format_type(atttypid, NULL)`'s names, the column types of DT-1 (`integer`, `bigint[]`,
+ * …); the primary key's columns are in the order the key declares them (`pg_index.indkey`), which may differ from
+ * column order. Each column also carries its declared type, its type modifier, the kind of its type (and of an
+ * array's element), its identity and what in its default is not immutable. Every statement goes through one handle,
+ * so the catalog is read from one committed state (DB-2).
+ */
+
+import {
+  type CatalogFunction,
+  type CatalogType,
+  type ColumnFacts,
+  catalogNeeds,
+  type DefaultCatalog,
+  type DefaultReference,
+  defaultReferences,
+  notImmutableParts,
+  parseExpressionTree,
+  type RelationFacts,
+  type TableFacts,
+} from "./column-rules.js";
+
+/**
+ * A handle every call of which sees the same committed state (DB-2): exactly the `query` of the database API's read
+ * handle (`ReadHandle`, CORE-ARCH §4.10 and `design.md` §4), whose results are mapped as DB-2 maps them (`bigint` to
+ * `bigint`, `bytea` to `Uint8Array`, `numeric` to its decimal text, `jsonb` parsed without loss; `./mapping.ts`). A
+ * `ReadHandle` and a `BlockWriteHandle` are both one. Declared here, not taken from `src/db/api.ts`, so that the
+ * component imports nothing else of `src/` (A138); the database API and the contents hash take it from here.
+ */
+export interface ConsistentRead {
+  query(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
+}
+
+/** A column as the catalog describes it (the column-type rules' input), and its place in the primary key. */
+export interface CatalogColumn extends ColumnFacts {
+  /** Its position in the primary key's declared order (from 1, `pg_index.indkey`), or null outside the key. */
+  readonly keyPosition: number | null;
+}
+
+/** A public table as the catalog describes it: the column-type rules' input, before any of them is applied. */
+export interface CatalogTable extends TableFacts {
+  /** A partitioned table, read whole across its partitions; an ordinary table is read with `ONLY`. */
+  readonly partitioned: boolean;
+  /** In column order. */
+  readonly columns: readonly CatalogColumn[];
+}
+
+/**
+ * The public tables of the database `read` sees, as the catalog describes them, in DT-3's order (by schema name, then
+ * table name, as bytes), each with its columns in column order: their types, identity, and what in their defaults is
+ * not immutable (read from the defaults' expression trees and one more catalog read, `./column-rules.ts`). Nothing is
+ * refused here: this is the rules' input.
+ */
+export async function catalogTables(read: ConsistentRead): Promise<CatalogTable[]> {
+  const tableRows = await read.query(TABLES_SQL);
+  const columnRows = await read.query(COLUMNS_SQL);
+  const references = columnRows.map((row): DefaultReference[] =>
+    row.default_tree === null ? [] : defaultReferences(parseExpressionTree(row.default_tree as string)),
+  );
+  const catalog = await defaultCatalog(read, references.flat());
+
+  const columnsOf = new Map<string, { readonly number: number; readonly column: CatalogColumn }[]>();
+  for (const [index, row] of columnRows.entries()) {
+    const id = tableId(row.schema_name as string, row.table_name as string);
+    const columns = columnsOf.get(id) ?? [];
+    const keyPosition = row.key_position as number | null;
+    columns.push({
+      number: row.column_number as number,
+      column: {
+        name: row.column_name as string,
+        type: row.column_type as string,
+        declaredType: row.declared_type as string,
+        typeModifier: row.type_modifier as number,
+        typeKind: row.type_kind as string,
+        elementKind: row.element_kind as string | null,
+        inPrimaryKey: keyPosition !== null,
+        identity: IDENTITY[row.identity as string] ?? null,
+        notImmutable: notImmutableParts(references[index] as DefaultReference[], catalog),
+        keyPosition,
+      },
+    });
+    columnsOf.set(id, columns);
+  }
+
+  const tables = tableRows.map((row): CatalogTable => {
+    const schema = row.schema_name as string;
+    const name = row.table_name as string;
+    const columns = [...(columnsOf.get(tableId(schema, name)) ?? [])].sort((a, b) => a.number - b.number);
+    return { schema, name, partitioned: row.partitioned as boolean, columns: columns.map((entry) => entry.column) };
+  });
+  return tables.sort((a, b) => compareUtf8(a.schema, b.schema) || compareUtf8(a.name, b.name));
+}
+
+/**
+ * The relations of the public schemas that DT-6 refuses whatever they hold (owner decision Q61), as the catalog
+ * describes them, in DT-3's order (by schema name, then name, as bytes): every sequence (`relkind = 'S'`, an identity
+ * or `serial` column's own included), and every unlogged table, partitioned table or partition
+ * (`relpersistence = 'u'`; a partition holds rows of its partitioned table, so it counts too).
+ */
+export async function catalogRelations(read: ConsistentRead): Promise<RelationFacts[]> {
+  const relations = (await read.query(RELATIONS_SQL)).map(
+    (row): RelationFacts => ({
+      schema: row.schema_name as string,
+      name: row.relation_name as string,
+      kind: row.kind as string,
+      persistence: row.persistence as string,
+    }),
+  );
+  return relations.sort((a, b) => compareUtf8(a.schema, b.schema) || compareUtf8(a.name, b.name));
+}
+
+// ── internals ───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Public tables: ordinary or partitioned tables that are not partitions, outside PostgreSQL's own schemas (`pg_*`),
+ * `information_schema` and the reserved `public`.
+ */
+const PUBLIC_TABLE_FILTER = `
+  c.relkind IN ('r', 'p') AND NOT c.relispartition
+  AND n.nspname NOT IN ('information_schema', 'public') AND left(n.nspname::text, 3) <> 'pg_'`;
+
+const TABLES_SQL = `
+SELECT n.nspname::text AS schema_name, c.relname::text AS table_name, c.relkind = 'p' AS partitioned
+FROM pg_catalog.pg_class AS c
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+WHERE ${PUBLIC_TABLE_FILTER}`;
+
+/**
+ * A column's facts (`ColumnFacts` of `./column-rules.ts`): `format_type` without and with the type modifier, the type
+ * modifier, `typtype` of the type and — for a true array, the condition under which `format_type` prints `[]`
+ * (`IsTrueArrayType` and not plain storage, PostgreSQL's format_type.c) — of its element; its key position;
+ * `attidentity`; and its default's expression tree (`pg_attrdef.adbin`), unless the column is generated, whose
+ * expression `pg_attrdef` holds too but which is no default (`attgenerated`, PostgreSQL requires it to be immutable).
+ */
+const COLUMNS_SQL = `
+SELECT n.nspname::text AS schema_name, c.relname::text AS table_name, a.attname::text AS column_name,
+       a.attnum::integer AS column_number, pg_catalog.format_type(a.atttypid, NULL) AS column_type,
+       pg_catalog.format_type(a.atttypid, a.atttypmod) AS declared_type, a.atttypmod::integer AS type_modifier,
+       t.typtype::text AS type_kind, e.typtype::text AS element_kind,
+       (SELECT k.position::integer
+          FROM unnest(i.indkey::smallint[]) WITH ORDINALITY AS k(attnum, position)
+         WHERE k.attnum = a.attnum) AS key_position,
+       a.attidentity::text AS identity,
+       CASE WHEN a.attgenerated = '' THEN d.adbin::text END AS default_tree
+FROM pg_catalog.pg_attribute AS a
+JOIN pg_catalog.pg_class AS c ON c.oid = a.attrelid
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+JOIN pg_catalog.pg_type AS t ON t.oid = a.atttypid
+LEFT JOIN pg_catalog.pg_type AS e
+  ON e.oid = t.typelem AND t.typsubscript = 'pg_catalog.array_subscript_handler'::pg_catalog.regproc
+ AND t.typstorage <> 'p'
+LEFT JOIN pg_catalog.pg_index AS i ON i.indrelid = c.oid AND i.indisprimary
+LEFT JOIN pg_catalog.pg_attrdef AS d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+WHERE ${PUBLIC_TABLE_FILTER} AND a.attnum > 0 AND NOT a.attisdropped`;
+
+/** `attidentity`: `a` for GENERATED ALWAYS AS IDENTITY, `d` for BY DEFAULT, empty for no identity. */
+const IDENTITY: Readonly<Record<string, "always" | "by default">> = { a: "always", d: "by default" };
+
+/** Sequences and unlogged tables (partitions included) of the public schemas: `design.md` §4's detection. */
+const RELATIONS_SQL = `
+SELECT n.nspname::text AS schema_name, c.relname::text AS relation_name, c.relkind::text AS kind,
+       c.relpersistence::text AS persistence
+FROM pg_catalog.pg_class AS c
+JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+WHERE (c.relkind = 'S' OR (c.relkind IN ('r', 'p') AND c.relpersistence = 'u'))
+  AND n.nspname NOT IN ('information_schema', 'public') AND left(n.nspname::text, 3) <> 'pg_'`;
+
+/** A function's name for a message, `name()`, qualified by its schema outside `pg_catalog`. */
+const FUNCTION_NAME = (alias: string, schema: string): string =>
+  `CASE WHEN ${schema}.nspname = 'pg_catalog' THEN '' ELSE ${schema}.nspname::text || '.' END ` +
+  `|| ${alias}.proname::text || '()'`;
+
+/**
+ * What the catalog says about the functions, operators and types a set of defaults refers to (`catalogNeeds` of
+ * `./column-rules.ts`): each function's name and `provolatile` and whether it is `nextval(regclass)`, each operator's
+ * function (`oprcode`), each type's name and input and output functions. One statement on the same handle, so the
+ * same snapshot as the trees; none when no default refers to anything. The OIDs are written in as literals: they are
+ * decimal digits, checked when read from the trees.
+ */
+async function defaultCatalog(read: ConsistentRead, references: readonly DefaultReference[]): Promise<DefaultCatalog> {
+  const needs = catalogNeeds(references);
+  const catalog = { functions: new Map<string, CatalogFunction>(), operators: new Map<string, CatalogFunction>() };
+  const types = new Map<string, CatalogType>();
+  if (needs.functions.length + needs.operators.length + needs.types.length === 0) return { ...catalog, types };
+  const oids = (list: readonly string[]): string => `'{${list.join(",")}}'::pg_catalog.oid[]`;
+  const fn = (alias: string, schema: string): string =>
+    `${FUNCTION_NAME(alias, schema)} AS function_name, ${alias}.provolatile::text AS volatility, ` +
+    `${alias}.oid = 'pg_catalog.nextval(pg_catalog.regclass)'::pg_catalog.regprocedure AS nextval`;
+  const rows = await read.query(`
+SELECT 'function' AS entry, p.oid::text AS oid, NULL::text AS type_name, ${fn("p", "pn")},
+       NULL::text AS output_name, NULL::text AS output_volatility
+FROM pg_catalog.pg_proc AS p JOIN pg_catalog.pg_namespace AS pn ON pn.oid = p.pronamespace
+WHERE p.oid = ANY (${oids(needs.functions)})
+UNION ALL
+SELECT 'operator', o.oid::text, NULL, ${fn("p", "pn")}, NULL, NULL
+FROM pg_catalog.pg_operator AS o JOIN pg_catalog.pg_proc AS p ON p.oid = o.oprcode
+JOIN pg_catalog.pg_namespace AS pn ON pn.oid = p.pronamespace
+WHERE o.oid = ANY (${oids(needs.operators)})
+UNION ALL
+SELECT 'type', t.oid::text, pg_catalog.format_type(t.oid, NULL), ${fn("p", "pn")},
+       ${FUNCTION_NAME("q", "qn")} AS output_name, q.provolatile::text AS output_volatility
+FROM pg_catalog.pg_type AS t
+JOIN pg_catalog.pg_proc AS p ON p.oid = t.typinput JOIN pg_catalog.pg_namespace AS pn ON pn.oid = p.pronamespace
+JOIN pg_catalog.pg_proc AS q ON q.oid = t.typoutput JOIN pg_catalog.pg_namespace AS qn ON qn.oid = q.pronamespace
+WHERE t.oid = ANY (${oids(needs.types)})`);
+  for (const row of rows) {
+    const named: CatalogFunction = {
+      name: row.function_name as string,
+      volatility: row.volatility as string,
+      nextval: row.nextval as boolean,
+    };
+    const oid = row.oid as string;
+    if (row.entry === "function") catalog.functions.set(oid, named);
+    if (row.entry === "operator") catalog.operators.set(oid, named);
+    if (row.entry === "type") {
+      const output = { name: row.output_name as string, volatility: row.output_volatility as string, nextval: false };
+      types.set(oid, { name: row.type_name as string, input: named, output });
+    }
+  }
+  return { ...catalog, types };
+}
+
+const utf8 = new TextEncoder();
+
+/** Orders strings by the bytes of their UTF-8 encodings (JavaScript's `<` compares UTF-16 code units instead). */
+function compareUtf8(a: string, b: string): number {
+  const x = utf8.encode(a);
+  const y = utf8.encode(b);
+  const n = Math.min(x.length, y.length);
+  for (let i = 0; i < n; i++) {
+    const d = (x[i] as number) - (y[i] as number);
+    if (d !== 0) return d;
+  }
+  return x.length - y.length;
+}
+
+function tableId(schema: string, table: string): string {
+  return JSON.stringify([schema, table]);
+}

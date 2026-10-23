@@ -11,8 +11,21 @@
  * refuses cyclic values. Anything outside the subset fails with a {@link CanonicalEncodingError} naming where it is.
  */
 
-import { UmbraError } from "../db/errors.js";
-import { explain, refusalOfTypeName } from "./column-rules.js";
+import {
+  type ColumnType,
+  explain,
+  refusalOfTypeName,
+  SCALAR_COLUMN_TYPES,
+  type ScalarColumnType,
+  UmbraError,
+} from "../deterministic-postgresql/index.js";
+
+/**
+ * The column types of DT-1 the encoder takes (and their arrays): the `deterministic_postgresql` component's
+ * (`SCALAR_COLUMN_TYPES` of `src/deterministic-postgresql/column-rules.ts`), the types its rules allow in a public
+ * table.
+ */
+export type { ColumnType } from "../deterministic-postgresql/index.js";
 
 /**
  * A value {@link encodeCanonical} accepts: an integer (`number` within ±(2^53 − 1), or `bigint` within CBOR's 64-bit
@@ -27,30 +40,6 @@ export type CanonicalValue =
   | Uint8Array
   | readonly CanonicalValue[]
   | { readonly [key: string]: CanonicalValue };
-
-/**
- * The column types of DT-1, named as PostgreSQL's `format_type(type, NULL)` names them (`character varying` for
- * `varchar(n)`; `varchar` and `uuid` since owner decision Q58). `./column-rules.ts` allows exactly these, and their
- * arrays, in a public table.
- */
-export const SCALAR_COLUMN_TYPES = [
-  "smallint",
-  "integer",
-  "bigint",
-  "numeric",
-  "bytea",
-  "text",
-  "character varying",
-  "uuid",
-  "boolean",
-  "jsonb",
-] as const;
-
-/** A scalar column type of DT-1. */
-export type ScalarColumnType = (typeof SCALAR_COLUMN_TYPES)[number];
-
-/** A column type of DT-1: a scalar type, or an array of one (any number of dimensions, as in PostgreSQL). */
-export type ColumnType = ScalarColumnType | `${ScalarColumnType}[]`;
 
 /** Why a value could not be encoded. */
 export type CanonicalEncodingFailure =
@@ -124,8 +113,8 @@ export function encodeCanonical(value: CanonicalValue): Uint8Array {
  * - `null` for NULL in any column.
  *
  * A column type outside DT-1 fails with the code and the reason of its row in `design.md` §4's column-type table, as
- * far as its name tells (`refusalOfTypeName` of `./column-rules.ts`: without the catalog, an enum or a domain reads as
- * "any other type").
+ * far as its name tells (`refusalOfTypeName` of `src/deterministic-postgresql/column-rules.ts`: without the catalog,
+ * an enum or a domain reads as "any other type").
  */
 export function encodeRow(values: readonly unknown[], types: readonly ColumnType[]): Uint8Array {
   if (values.length !== types.length) {

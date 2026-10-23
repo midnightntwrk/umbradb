@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
-import { RESULT_TYPES } from "../../src/db/mapping.js";
+import { RESULT_TYPES } from "../../src/deterministic-postgresql/index.js";
 import { BACKENDS, TEST_CURSOR, TEST_SCHEMA, type TestBackend, type TestDatabase } from "./backends.js";
 
 /**

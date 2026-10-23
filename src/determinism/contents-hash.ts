@@ -9,8 +9,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { CanonicalEncodingError, type ColumnType, encodeArrayHead, encodeCanonical, encodeRow } from "./cbor.js";
-import { explain, valueFailureBecause } from "./column-rules.js";
+import { type ColumnType, explain, valueFailureBecause } from "../deterministic-postgresql/index.js";
+import { CanonicalEncodingError, encodeArrayHead, encodeCanonical, encodeRow } from "./cbor.js";
 import {
   type ConsistentRead,
   countRows,
@@ -55,7 +55,8 @@ export async function contentsHash(read: ConsistentRead, options: PageOptions = 
 /**
  * A row's encoding; a value DT-1 cannot encode fails naming the table, the column and its declared type, the row by
  * its primary key, what is wrong, and — for a number a stored value can hold (a `numeric` fraction or `NaN`, a `jsonb`
- * number outside the 64-bit integers) — why, and what to store instead (`./column-rules.ts`).
+ * number outside the 64-bit integers) — why, and what to store instead (the `deterministic_postgresql` component's
+ * `valueFailureBecause`).
  */
 function encodeTableRow(table: PublicTable, types: readonly ColumnType[], row: unknown[]): Uint8Array {
   try {
