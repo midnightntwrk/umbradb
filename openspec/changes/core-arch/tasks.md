@@ -147,7 +147,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 ## 7. Digests
 
 - [ ] 7.1 Change capture (shadow tables and triggers) and `core-digest`; the non-deterministic-column check and the
-      `jsonb` number `CHECK`.
+      `jsonb` number `CHECK` (an integer in the signed 64-bit range whose `jsonpath` `.string()` is `-?[0-9]+`, Q57).
       **Acceptance:** A56 including its negative control, A57, A58.
 
 ## 8. Admin endpoints

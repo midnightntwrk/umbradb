@@ -12,8 +12,9 @@ THE system SHALL encode a row as a CBOR array of its column values in column ord
 deterministic encoding: `smallint`/`int`/`bigint` → CBOR integer; `numeric` → text string in canonical form (an optional
 `-`, then digits without leading zeros, `0` for zero, no `+`, fraction or exponent); `bytea` → byte string; `text` →
 text string; `boolean` → `true`/`false`; arrays → arrays; `jsonb` → the JSON value as CBOR with map keys sorted by
-their encoded bytes; `null` → `null`. IF a `numeric` value has a fraction or a `jsonb` value contains a number that is
-not an integer within 64 bits THEN the encoding SHALL fail. THE encoder SHALL be written in this repository for exactly
+their encoded bytes; `null` → `null`. IF a `numeric` value's text has a fraction, a zero fraction such as `100.00`
+included (owner decision Q57), or a `jsonb` value contains a number that is not an integer within 64 bits THEN the
+encoding SHALL fail. THE encoder SHALL be written in this repository for exactly
 this subset (no CBOR dependency).
 
 #### Scenario: RFC test vectors
@@ -75,13 +76,15 @@ changes.
 
 ### Requirement: DT-6 Stored data avoids non-deterministic values
 
-THE database API SHALL refuse, at migration time, a public module table that uses a sequence, serial or identity
-column, a floating-point column, or a column whose default is a wall-clock or random function, naming the module, the
-table and the column. THE database API SHALL add to every `jsonb` column of a public module table a `CHECK` constraint
-that rejects any JSON number that is not an integer within the signed 64-bit range, so such a write fails whether or
-not the module opts into digests. Values a module computes from anything other than the chain, S and the configuration
-(wall-clock time, randomness, process state) are a module developer's error the database cannot see; they are caught by
-the convergence tests (two runs, two backends, restarts) and by digests.
+THE database API SHALL refuse, at migration time, a public module table that uses a sequence, serial or identity column,
+a floating-point column, or a column whose default is a wall-clock or random function, naming the module, the table and
+the column. THE database API SHALL add to every `jsonb` column of a public module table a `CHECK` constraint that
+rejects any JSON number that is not an integer within the signed 64-bit range or whose text has a fraction, a zero
+fraction such as `1.0` included (owner decision Q57: no stored number carries a scale, so equal contents hashes mean
+equal query results), so such a write fails whether or not the module opts into digests. Values a module computes from
+anything other than the chain, S and the configuration (wall-clock time, randomness, process state) are a module
+developer's error the database cannot see; they are caught by the convergence tests (two runs, two backends, restarts)
+and by digests.
 
 #### Scenario: A serial column
 - **WHEN** a test module's migration creates a table with a `serial` column
@@ -89,4 +92,8 @@ the convergence tests (two runs, two backends, restarts) and by digests.
 
 #### Scenario: A fractional JSON number
 - **WHEN** a module without `digest` writes `{"x": 1.5}` to a `jsonb` column in `on-db-write`
+- **THEN** the write fails the `CHECK` and the block rolls back
+
+#### Scenario: A JSON number with a zero fraction
+- **WHEN** a module writes `{"x": 1.0}` to a `jsonb` column in `on-db-write`
 - **THEN** the write fails the `CHECK` and the block rolls back

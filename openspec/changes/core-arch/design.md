@@ -99,8 +99,9 @@ interface BlockSource {
   `core-ledger-state` offers `persist(key)` this way (LG-13).
 - **`TRUNCATE`.** Every public module table gets a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger raising
   `truncate-not-allowed` (DB-14).
-- **`jsonb` values (DT-6).** `core_chain.jsonb_numbers_ok(jsonb)` (immutable; a `jsonpath` finding any number that is
-  not an integer in the signed 64-bit range) backs a `CHECK` added to every `jsonb` column of a public module table.
+- **`jsonb` values (DT-6).** `core_chain.jsonb_numbers_ok(jsonb)` (immutable; a `jsonpath` finding any number outside
+  the signed 64-bit range or whose text, `.string()`, is not `-?[0-9]+`, so `1.0` fails too, Q57) backs a `CHECK` added
+  to every `jsonb` column of a public module table.
 - **Migrations and setup (DB-9, DB-10).** `core_chain.migrations`; checksum = SHA-256 of the UTF-8 SQL; per part and
   module, pending migrations each in their own transaction with their row, then `on-start-db` in its own transaction.
   Upgrade migrations only add — a module obligation (Q46); `requiresResync` versions are refused on a non-empty
@@ -407,6 +408,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | `postgres`: `sql.reserve()` pins a connection; JSON parsed with `JSON.parse`, replaceable | `src/postgres/transaction-lease.ts:135-138, 287-301`; `node_modules/postgres/src/types.js:18-21` (3.4.9) | Verified (installed, in-repo use) |
 | PostgreSQL 17: `SET LOCAL ROLE`, `SECURITY DEFINER`, `REPEATABLE READ READ ONLY`, session advisory locks, `BEFORE TRUNCATE` triggers, `jsonpath` `.type()`/`.floor()` | https://www.postgresql.org/docs/17/ (sql-set-role, sql-createfunction, sql-set-transaction, functions-admin, sql-createtrigger, functions-json) | Version-pinned documentation; re-checked by tests |
 | PGlite: roles, `SET LOCAL ROLE`, cross-schema writes denied, `SECURITY DEFINER` with a fixed `search_path` and `PUBLIC` revoked, PL/pgSQL row triggers, a `BEFORE TRUNCATE` trigger refusing, `jsonpath` `.type()`/`.floor()` in a `CHECK`, advisory-lock functions | Probe against `@electric-sql/pglite` 0.5.10 (published 2026-10-14) in Node.js v24.9.0, 2026-10-22: every item passed | Verified (probe); task 0.1 commits the probe as a test |
+| `jsonpath` `.string()` keeps a JSON number's scale: `1.0` → `"1.0"`, `100.00` → `"100.00"`, `1e2` → `"100"` (Q57) | PostgreSQL 17.11 (`postgres:17-alpine`) and PGlite 0.5.10, 2026-10-23 | Verified (run); task 7.1's test re-checks it |
 | PGlite 0.5.10 embeds PostgreSQL 18.6 (production is PostgreSQL 17) | `select version()` on 0.5.10 | Verified; the cross-backend differentials (A55, A105, A135) are the guard against differences |
 | PGlite does not stop two processes opening one data directory | Probe: two Node.js processes opened and wrote one directory | Verified (probe); hence the operating-system lock of §4 |
 | PGlite with OPFS storage in a browser worker; Web Locks exclusion | Probe in a Chromium-based browser, 2026-10-22: PGlite 0.5.10 in a module worker with `opfs-ahp://` wrote a row, closed, reopened and read it back; a second `navigator.locks.request(…, { ifAvailable: true })` on a held lock got `null` | Verified (probe) |

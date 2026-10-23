@@ -214,7 +214,8 @@ release assets that CI downloads and verifies.
   digests from 7; the digest at a height with no change equals `SHA-256(previous ‖ CBOR([]))`. (DT-5)
 - **A58** `[CI]` A migration creating a `serial`, identity, floating-point, or `now()`/`random()`-defaulted column in a
   public module table refuses startup with `non-deterministic-column`; a module without `digest` writing `{"x": 1.5}`,
-  or a JSON integer beyond the signed 64-bit range, to a `jsonb` column fails the block; `{"x": 2}` succeeds. (DT-6)
+  `{"x": 1.0}` or `{"x": 100.00}` (Q57), or a JSON integer beyond the signed 64-bit range, to a `jsonb` column fails
+  the block; `{"x": 2}` and `{"x": 1e2}` (stored as `100`) succeed; on both backends. (DT-6)
 
 ## 7. Storage helpers
 
