@@ -9,7 +9,10 @@ EARS forms and terms as in `specs/runner/spec.md`. **Lag** is the block source's
 THE process SHALL serve `GET /health/live`, `GET /health/ready`, `GET /status` and `GET /config` on its admin listener
 (default `0.0.0.0:8081`, separate from the module API listener), from process start to exit, from a worker thread of
 its own that answers from a state snapshot the runner publishes to it (shared memory), without database reads, so a
-busy main thread or a held database never delays an answer. Any other method or path SHALL answer 404.
+busy main thread or a held database never delays an answer. Any other method or path SHALL answer 404. Each endpoint
+SHALL be provided by a backbone part, as a function of that snapshot which the admin worker runs: `core-health`
+(`GET /health/live`, `GET /health/ready`), `core-status` (`GET /status`) and `core-config` (`GET /config`); only
+backbone parts SHALL provide admin endpoints — a module's endpoints are on the module API listener (RN-15) (Q70).
 
 #### Scenario: Endpoints answer while the database is busy
 - **WHEN** a PGlite block transaction holds the database queue for 5 s
@@ -36,8 +39,9 @@ definition — long computation belongs in a worker thread (as the ledger's does
 THE process SHALL be in exactly one state — `starting` (startup and migrations), `refused`, `syncing` (lag above the
 following threshold), `following` (lag at or below it; default 3), `stopped`, `halted`, `stopping` (after SIGTERM) —
 with zero or more conditions — `waiting-for-node`, `waiting-for-lockstep`, `finality-stall`, `node-retrying`,
-`database-retrying`, `upgrade-required`. A refused or halted process SHALL stay up and live. **Lag** is, for the core,
-the node's finalized head minus the cursor and, for a private process, the public cursor minus its own.
+`database-retrying`, `upgrade-required`, `slow-block` (RN-17). A refused or halted process SHALL stay up and live.
+**Lag** is, for the core, the node's finalized head minus the cursor and, for a private process, the public cursor minus
+its own.
 
 #### Scenario: A refused start stays up
 - **WHEN** startup refuses because a migration checksum changed
@@ -61,7 +65,8 @@ when no readiness lag is set or the lag is at or below it, and 503 when the lag 
 count, the queue depth, the tip cap and whether finality stalls; per module: id, version, side, start, stop, stopped or
 not, and the digest at the cursor if opted in; the ledger version, package and last root check; private instances (on
 the core: id, connection, lockstep, synced height; on a private process: its cursor, the public cursor, lag, lockstep);
-instance role, uptime and last commit time (wall-clock, reported only). Fields
+instance role, uptime and last commit time (wall-clock, reported only, as RFC 3339 text in UTC, `2025-05-21T14:30:00Z`,
+Q68). Fields
 with no value yet SHALL be `null`. `GET /config` SHALL answer 200 with JSON holding: the entries in effect and the
 configuration history; the operational fields; enabled modules with their declarations (without callbacks); the
 chain identity; the ledger version table in effect with package identities; the database backend and version and

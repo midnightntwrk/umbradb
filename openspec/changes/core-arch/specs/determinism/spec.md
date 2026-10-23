@@ -12,11 +12,12 @@ THE system SHALL encode a row as a CBOR array of its column values in column ord
 deterministic encoding: `smallint`/`int`/`bigint` → CBOR integer; `numeric` without a declared scale above 0 → text
 string in canonical form (an optional `-`, then digits without leading zeros, `0` for zero, no `+`, fraction or
 exponent); `bytea` → byte string; `text` and `varchar(n)` → text string; `uuid` → byte string of its 16 bytes; `boolean`
-→ `true`/`false`; arrays → arrays; `jsonb` → the JSON value as CBOR with map keys sorted by their encoded bytes; `null`
-→ `null`. IF a `numeric` value's text has a fraction, a zero fraction such as `100.00` included (owner decision Q57), or
-a `jsonb` value contains a number that is not an integer within 64 bits THEN the encoding SHALL fail. No other type
-SHALL be encoded (owner decision Q58; `design.md` §4's column-type table gives each refused type's reason). THE encoder
-SHALL be written in this repository for exactly this subset (no CBOR dependency).
+→ `true`/`false`; `timestamptz` → CBOR integer of microseconds since `1970-01-01T00:00:00Z` (owner decision Q74; an
+`infinity` or `-infinity` value fails); arrays → arrays; `jsonb` → the JSON value as CBOR with map keys sorted by their
+encoded bytes; `null` → `null`. IF a `numeric` value's text has a fraction, a zero fraction such as `100.00` included
+(owner decision Q57), or a `jsonb` value contains a number that is not an integer within 64 bits THEN the encoding SHALL
+fail. No other type SHALL be encoded (owner decision Q58; `design.md` §4's column-type table gives each refused type's
+reason). THE encoder SHALL be written in this repository for exactly this subset (no CBOR dependency).
 
 #### Scenario: RFC test vectors
 - **WHEN** the encoder encodes the integer, text, byte-string, array and map examples of RFC 8949 Appendix A that fall
@@ -29,9 +30,9 @@ SHALL be written in this repository for exactly this subset (no CBOR dependency)
 
 ### Requirement: DT-2 Primary-key order
 
-THE system SHALL order rows by their primary-key columns in order, comparing integers numerically, `boolean` with
-`false` first, and `bytea`, `text`, `varchar(n)` and `uuid` by their bytes (`COLLATE "C"` for `text` and `varchar`). A
-primary-key column of any other type is refused (DT-6; owner decision Q58).
+THE system SHALL order rows by their primary-key columns in order, comparing integers numerically, `timestamptz` by time
+(Q74), `boolean` with `false` first, and `bytea`, `text`, `varchar(n)` and `uuid` by their bytes (`COLLATE "C"` for
+`text` and `varchar`). A primary-key column of any other type is refused (DT-6; owner decision Q58).
 
 #### Scenario: Text keys with mixed case
 - **WHEN** a table with a `text` primary key holds `"b"`, `"B"`, `"a"`
@@ -43,9 +44,11 @@ primary-key column of any other type is refused (DT-6; owner decision Q58).
 
 ### Requirement: DT-3 The contents hash
 
-THE system SHALL compute a database's contents hash as SHA-256 of one canonical CBOR array holding, for each public
-schema and then each table in name order (byte order), the array `[schema, table, [column names], [rows in primary-key
-order]]`.
+THE system SHALL compute a database's contents hash — the core's database or a private process's, under the same rules
+(owner decision Q75) — as SHA-256 of one canonical CBOR array holding, for each module schema and then each table in
+name order (byte order), the array `[schema, table, [column names], [rows in primary-key
+order]]`. A table whose module declared it `deterministic: false` (MD-1, owner decision Q76) SHALL appear as
+`[schema, table, null, null]`: its name is hashed, its columns and rows are not.
 
 #### Scenario: Same data, two backends
 - **WHEN** the same rows are written to PostgreSQL and to PGlite
@@ -54,11 +57,12 @@ order]]`.
 ### Requirement: DT-4 Per-block digests for modules that opt in
 
 WHERE a module sets `digest: true`, THE database API SHALL capture, for every row of that module's schema whose primary
-key was written at height h — by any statement, including helper triggers and provider functions — the row at the end
-of h − 1 and the row at the end of h, and SHALL record one change per primary key: `["insert", table, new row]`
-(absent before), `["delete", table, old row]` (absent after) or `["update", table, new row]` (present and different).
-Several writes to one row in a block SHALL give one change; a write that leaves a row as it was SHALL give none.
-`changes at h` SHALL be the canonical CBOR array of the changes, ordered by table name and then primary key.
+key was written at height h, outside the tables it declared `deterministic: false` (Q76) — by any statement, including
+helper triggers and provider functions — the row at the end of h − 1 and the row at the end of h, and SHALL record one
+change per primary key: `["insert", table, new row]` (absent before), `["delete", table, old row]` (absent after) or
+`["update", table, new row]` (present and different). Several writes to one row in a block SHALL give one change; a
+write that leaves a row as it was SHALL give none. `changes at h` SHALL be the canonical CBOR array of the changes,
+ordered by table name and then primary key.
 
 #### Scenario: Insert then update in one block
 - **WHEN** a module inserts row k and then updates it in the same `on-db-write`
@@ -82,17 +86,19 @@ changes.
 
 ### Requirement: DT-6 Stored data avoids non-deterministic values
 
-THE database API SHALL refuse, at migration time, a public module table that has no primary key (`no-primary-key`), a
+THE database API SHALL refuse, at migration time, a module table — in the core's database or a private process's,
+under the same rules (owner decision Q75) and not declared `deterministic: false` by its module (owner decision Q76)
+— that has no primary key (`no-primary-key`), a
 primary-key column of a type DT-2 does not order (`unsupported-key-type`), a column of a type DT-1 does not encode
 (`unsupported-column-type`; a `numeric` with a declared scale above 0 included), an identity column, a floating-point
 column, or a column whose default is not immutable — one that calls a function PostgreSQL marks stable or volatile or
 uses an SQL value function, so `now()`, `CURRENT_TIMESTAMP`, `random()`, `gen_random_uuid()` and a `serial` column's
-`nextval()` included (`non-deterministic-column`); and it SHALL refuse a public schema that holds a sequence or an
+`nextval()` included (`non-deterministic-column`); and it SHALL refuse a module schema that holds a sequence or an
 unlogged table (`non-deterministic-table`; owner decision Q61). Each refusal SHALL name the module, the table or
 sequence, the column and its declared type where there is one, state why it cannot be stored deterministically, and say
 what to use instead, as `design.md` §4 gives them (owner decisions Q58, Q59, Q60); the contents hash (DT-3) SHALL refuse
-the same tables, sequences and columns with the same codes and messages, in any public schema (owner decision Q61). THE
-database API SHALL add to every `jsonb` and `numeric` column of a public module table, and to every array of either, a
+the same tables, sequences and columns with the same codes and messages, in any module schema (owner decision Q61). THE
+database API SHALL add to every `jsonb` and `numeric` column of a module table, and to every array of either, a
 `CHECK` constraint that rejects any JSON number that is not an integer within the signed 64-bit range or whose text has
 a fraction, a zero fraction such as `1.0` included (owner decision Q57: no stored number carries a scale, so equal
 contents hashes mean equal query results), and any `numeric` value with a fraction or `NaN`, so such a write fails

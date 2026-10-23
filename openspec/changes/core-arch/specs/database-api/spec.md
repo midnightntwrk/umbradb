@@ -20,7 +20,13 @@ THE database API SHALL run every read through a read handle that sees exactly on
 (`ReadHandle.height`, `null` before any height commits): on PostgreSQL as one `REPEATABLE READ READ ONLY` transaction
 on a pooled read connection; on PGlite as one queued job. THE database API SHALL map `bigint` to `bigint`, `bytea` to
 `Uint8Array`, `numeric` to a decimal string, and `jsonb` to JSON parsed without loss: a JSON integer outside the safe
-integer range (±(2^53 − 1)) SHALL become a `bigint`, never a rounded `number`.
+integer range (±(2^53 − 1)) SHALL become a `bigint`, never a rounded `number`. THE database API SHALL map `timestamptz`
+to RFC 3339 text in UTC, `2025-05-21T14:30:00Z`, with the fraction only when the value has one (up to microseconds,
+`2025-05-21T14:30:00.123456Z`); `timestamp` to the same text without `Z`; `date` to `2025-05-21`; and `infinity` and
+`-infinity` to those words — whatever the time zone of the process (Q68). Arrays SHALL be mapped element by element,
+`NULL` to `null`; a type the mapping does not name, and an array of one, SHALL come back as PostgreSQL's text for it
+(Q66). Every connection SHALL start with the session settings of the `deterministic_postgresql` component
+(`design.md` §4), so that no server, database or role default changes how a value prints (Q65).
 
 #### Scenario: A multi-statement read does not straddle a commit
 - **WHEN** a read handle runs two statements while the writer commits height h between them
@@ -29,6 +35,11 @@ integer range (±(2^53 − 1)) SHALL become a `bigint`, never a rounded `number`
 #### Scenario: Large JSON integers stay distinct
 - **WHEN** two rows hold the `jsonb` values `9007199254740992` and `9007199254740993`
 - **THEN** reading them returns two different `bigint` values
+
+#### Scenario: Times read the same in every time zone
+- **WHEN** processes whose time zone is `UTC`, `America/New_York` and `Asia/Tokyo` read a `timestamptz` holding
+  `2025-05-21 14:30:00.123456+00` and a `timestamp` holding `2025-05-21 14:30:00`
+- **THEN** each reads `2025-05-21T14:30:00.123456Z` and `2025-05-21T14:30:00`
 
 ### Requirement: DB-3 Writes only through a write handle
 
@@ -45,7 +56,8 @@ callbacks wrote in the same block transaction.
 
 WHERE the backend is PGlite THE database API SHALL run all work as jobs of one queue; a block transaction SHALL be one
 exclusive job, during which only that transaction's own callbacks read and write (through its handle); every read from
-elsewhere SHALL wait until the job ends.
+elsewhere SHALL wait until the job ends. A read or transaction requested from inside the job that would have to wait for
+it SHALL fail at once with `database-error` (`reason: nested-call`) instead of waiting forever (Q73).
 
 #### Scenario: No outside read inside a block transaction
 - **WHEN** reads arrive continuously from an API load generator while blocks commit on PGlite
@@ -212,3 +224,20 @@ the system does not check (Q46).
 #### Scenario: TRUNCATE in a block
 - **WHEN** a module runs `TRUNCATE` on its own table in `on-db-write`
 - **THEN** the statement fails with `truncate-not-allowed` and the block rolls back
+
+### Requirement: DB-15 Timeouts by connection role
+
+THE database API SHALL bound each read made for a module API request (RN-15) by `apiReadTimeoutMs` (CF-4): that read
+SHALL run with `statement_timeout` and `idle_in_transaction_session_timeout` set to it for the read only, and a read
+they end SHALL fail with `query-timeout` (not retryable) and leave its connection usable. THE writer connection,
+migrations, setup and the read handles given to callbacks SHALL run with `statement_timeout`, `lock_timeout` and
+`idle_in_transaction_session_timeout` pinned to 0, whatever the server's, database's or role's defaults, because they
+run work the runner must finish; a slow block is reported (RN-17), never cut off (Q71).
+
+#### Scenario: A hung API query is cut off
+- **WHEN** an API request's read runs `SELECT pg_sleep(60)` with `apiReadTimeoutMs` 1000
+- **THEN** it fails with `query-timeout` after about 1 s, and the next read on the same connection succeeds
+
+#### Scenario: A long migration is never cut off
+- **WHEN** the database's default `statement_timeout` is 1 s and a migration runs for 5 s
+- **THEN** the migration completes

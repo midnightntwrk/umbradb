@@ -91,14 +91,16 @@ module entry's `stop`; the `core` entry's `stop` SHALL be operational (it stops 
 | `snapshotAtStop` | operational | a file path; default absent |
 | `tls` | secret | certificates and trusted roots for opt-in mutual TLS (PP-11); default absent |
 | `livenessTimeoutMs` | operational | integer; 30000 |
+| `apiReadTimeoutMs` | operational | integer; 30000 (DB-15) |
+| `slowBlockMs` | operational | integer; 60000 (RN-17) |
 | `followingThreshold` | operational | integer; 3 |
 | `readinessLag` | operational | integer; absent |
 | `fullPageWritesOffAllowed` | operational | boolean; false (the durability-probe override, DB-12) |
 | `developmentOptIn` | operational | boolean; false |
 
 A private process's `core` entry has, instead of `node` and `lockstepInstances`: `instanceId` (operational, string),
-`publicDatabase` (secret), `coreTransport` (operational, address), `keyApi` (operational, listener address) and
-`testKeys` (CF-11).
+`publicDatabase` (secret), `coreTransport` (operational, address) and `testKeys` (CF-11). A private process has no key
+API listener: keys enter through configured test keys (PP-8, Q70).
 
 #### Scenario: A secret never appears
 - **WHEN** `/config` is read and the logs are collected for a process whose `database` URL contains a password
@@ -186,10 +188,12 @@ and SHALL print each finding with its path.
 
 ### Requirement: CF-11 Test keys in a private configuration
 
-WHERE a private process's `core` entry lists `testKeys` (`{ kind, bytes, start }`), THE system SHALL admit each like a
-key from the key API (PP-8) at its `start`; a test key not yet admitted SHALL have a start above the private cursor; one
-already admitted with the same start SHALL be accepted unchanged at every restart; one admitted with another start
-SHALL refuse startup (`test-key-conflict`); removing a test key from the list SHALL NOT remove the admitted key.
+WHERE a private process's `core` entry lists `testKeys` (`{ kind, bytes, start }`), THE system SHALL admit each through
+the key registry (PP-8) at its `start`; a test key whose kind no configured module declared, or whose bytes fail that
+module's `validateKey`, SHALL refuse startup (`invalid-configuration`); a test key not yet admitted SHALL have a start
+above the private cursor; one already admitted with the same start SHALL be accepted unchanged at every restart; one
+admitted with another start SHALL refuse startup (`test-key-conflict`); removing a test key from the list SHALL NOT
+remove the admitted key.
 
 #### Scenario: Restarting with the same test key
 - **WHEN** a private process restarts with a test key it admitted at its start

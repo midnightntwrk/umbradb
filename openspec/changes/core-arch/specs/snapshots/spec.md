@@ -34,7 +34,8 @@ many row encodings in primary-key order; the contents hash SHALL be computed fro
 THE system SHALL import a snapshot with `umbradb snapshot import <file>` into an empty database only, and SHALL refuse
 IF the format version is unknown; the configuration's history differs from the snapshot's up to its height (versions
 included); the build does not carry the versions of the revisions covering height + 1 or every recorded migration (same
-ids and checksums); the contents hash does not match; the genesis hash differs from the node's; the snapshot's block is
+ids and checksums); the contents hash does not match (a table declared `deterministic: false` is carried with its rows
+but hashed by name only, DT-3, Q76); the genesis hash differs from the node's; the snapshot's block is
 not finalized on the node with the same hash; or, WHERE `core-ledger-state` is in the history, its state root differs
 from the node's at that height.
 

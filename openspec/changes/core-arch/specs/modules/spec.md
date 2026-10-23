@@ -10,8 +10,9 @@ processed, passed in its block context), `table` (stored in the provider's table
 
 THE system SHALL define a module as a TypeScript package exporting a `ModuleDeclaration` with: `id`, `version` (semver),
 `side` (`public` or `private`), `requires` (item names), `provides` (items with lifetimes and, for `table` items,
-schema, tables and kind), `startsMidChain`, optional `needsLockstep`, `developmentOnly`, `digest` and `keyKinds` /
-`validateKey`, `configSchema` (a zod 4 object schema whose every property carries the metadata `kind: "data" |
+schema, tables, kind and an optional `deterministic: false` that opts those tables out of the determinism rules — DT-3,
+DT-4, DT-6, owner decision Q76), `startsMidChain`, optional `needsLockstep`, `developmentOnly`, `digest` and `keyKinds`
+/ `validateKey`, `configSchema` (a zod 4 object schema whose every property carries the metadata `kind: "data" |
 "operational" | "secret"`), `migrations` (`{ id, sql }`, cumulative), optional `ledgerTasks` (LG-17), optional
 `requiresResync` (DB-10) and `points` (callbacks by point name). Ids and item names SHALL match the pattern of DB-8. THE
 host program SHALL import the modules it ships, on the main thread and in the ledger worker's entry (`design.md` §5.5);

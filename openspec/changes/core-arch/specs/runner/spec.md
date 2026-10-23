@@ -33,8 +33,9 @@ them itself.
 
 THE runner SHALL perform only these duties: resolve the module graph into an ordered callback list per point and per
 height range; drive the block source; call the points in order; wait for lockstep reports (PP-6), then open each block's
-transaction, call `on-db-write` and commit; and serve the admin endpoints from its own memory. Configuration checks,
-chain identity, fetching, parsing and writing SHALL be done by callbacks of backbone parts or modules.
+transaction, call `on-db-write` and commit; and publish its state, from its own memory, to the admin worker, where the
+backbone parts `core-health`, `core-status` and `core-config` answer the admin endpoints (AE-1, Q70). Configuration
+checks, chain identity, fetching, parsing and writing SHALL be done by callbacks of backbone parts or modules.
 
 #### Scenario: The runner writes nothing itself
 - **WHEN** a height is processed with only a test backbone and no modules
@@ -65,8 +66,9 @@ write handle for the module's own schema; `on-db-write` a block write handle (co
 wrote for this block, writes to its own schema only); `on-compute` a read handle at committed height h − 1;
 `on-after-db-write` and `on-stop-height` a read handle at h; `on-finalized` a read handle at the cursor; `on-start-api`
 a registry whose handlers get a read handle per request; and no database handle to `on-best-block`, `on-fetch` (core
-side), `on-parse` and `on-rollback`. IF a callback tries to write outside the handle it was given THEN THE runner SHALL
-treat it as a callback error (RN-8).
+side), `on-parse` and `on-rollback`. A module MAY also read through the read-only `db` item (CD-1) for work outside the
+points, as the module guide describes; inside a callback it SHALL use the handle it was given. IF a callback tries to
+write outside the handle it was given THEN THE runner SHALL treat it as a callback error (RN-8).
 
 #### Scenario: `on-compute` sees only committed data
 - **WHEN** module `m` reads its own table in `on-compute` at height h
@@ -217,3 +219,15 @@ height has committed yet THEN THE system SHALL refuse chain-data reads with `no-
 - **WHEN** a module answers a GraphQL query at committed height 120
 - **THEN** the response's `extensions` hold view `finalized`, height 120 and that block's hash, and the body's `data` is
   unchanged
+
+### Requirement: RN-17 A slow block is reported, never cut off
+
+WHEN a height's processing — from its first callback after `on-finalized` to its commit — has run longer than
+`slowBlockMs` (CF-4), THE runner SHALL raise the condition `slow-block` (AE-3) with the height, the point it is in and,
+while a callback runs, the module; it SHALL clear the condition when that height commits or processing halts; and it
+SHALL NOT cancel or retry a height for being slow (Q71).
+
+#### Scenario: A slow callback
+- **WHEN** a test module's `on-compute` awaits 3 s with `slowBlockMs` 1000
+- **THEN** `/status` shows `slow-block` with the height, `on-compute` and the module after about 1 s, the height
+  commits, and the condition is gone after the commit

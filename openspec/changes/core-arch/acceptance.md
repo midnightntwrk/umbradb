@@ -11,6 +11,7 @@ Every criterion is numbered, individually checkable, and tagged with how it is v
 | `[STATIC]` | Static check (type check, lint, a test over repository files) |
 | `[DOC]` | Documentation artifact |
 | `[MANUAL]` | Manual evidence recorded in the pull request |
+| `[MEASURE]` | A measurement run in CI and reported; it fails only if it cannot run, never on its figures (Q72) |
 
 Database tests run against PostgreSQL 17 in Docker (Testcontainers, random free ports ≥ 10000, torn down afterwards)
 and against PGlite in Node.js. "Both backends" means the criterion runs once on each. Tapes (TT-1) are identified by
@@ -91,7 +92,27 @@ release assets that CI downloads and verifies.
   the additive-only rule for upgrade migrations. (DB-10)
 - **A73** `[CI]` On both backends, `TRUNCATE` of a module's own table in `on-db-write` fails with
   `truncate-not-allowed` and the block rolls back; the same statement in a migration succeeds. (DB-14)
+- **A138** `[CI]` The `deterministic_postgresql` suite (`test/deterministic-postgresql/`) runs every rule of
+  `design.md` §4's component table on PostgreSQL 17 and on PGlite and passes on both, with the same refusal messages; a
+  test over the sources finds that `src/deterministic-postgresql/` imports nothing else of `src/`, and that the pinned
+  settings, the column-type rules and the result mapping are defined nowhere else; its coverage floor is 95/90. (DT-6,
+  DB-2, DB-14, DB-15, Q69)
+- **A139** `[DIFF]` On both backends, in processes whose time zone is `UTC`, `America/New_York` and `Asia/Tokyo`: a
+  `timestamptz` `2025-05-21 14:30:00+00` reads as `2025-05-21T14:30:00Z` and `2025-05-21 14:30:00.123456+00` as
+  `2025-05-21T14:30:00.123456Z`; a `timestamp` `2025-05-21 14:30:00` as `2025-05-21T14:30:00`; a `date` as `2025-05-21`;
+  `infinity` and `-infinity` as those words; arrays of them element by element, `NULL` as `null` — identical in every
+  process. (DB-2, Q68)
+- **A141** `[FAULT]` On both backends: a read for an API request running `pg_sleep(60)` with `apiReadTimeoutMs` 1000
+  fails with `query-timeout`, not retryable, within 2 s, and the next read on that connection succeeds; with database
+  defaults `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` of 1 s, a 5 s migration, a
+  block transaction left idle 5 s while a callback awaits, and a callback's read running 5 s all complete, and `SHOW`
+  in each reports 0. (DB-15, Q71)
 
+- **A144** `[CI]` A module that requires `db` gets an object offering `read` only — a type test and a runtime check find
+  no `transaction`, `close` or write; each `db.read` sees one committed height and reports it; on PGlite a `db.read`
+  from inside the module's own `on-db-write` fails at once with `nested-call`, and on PostgreSQL it returns the data
+  committed before the block; `[DOC]` the module guide states when to use the handle and when `db.read`. (CD-1, RN-4,
+  DB-4, Q73)
 ## 3. Modules
 
 - **A20** `[STATIC]` A type test shows a declaration with an unknown point name is a type error; `[CI]` the same
@@ -194,6 +215,10 @@ release assets that CI downloads and verifies.
   `X-Umbra-View: finalized`, `X-Umbra-Height` and `X-Umbra-Hash` of the height it read, a GraphQL response carries the
   same in `extensions` with its `data` unchanged, and a read before block S commits answers 503
   `no-committed-height`. (RN-15, RN-16)
+- **A142** `[CI]` With `slowBlockMs` 1000, a test module whose `on-compute` awaits 3 s: the runner's published state
+  (and `/status`, once `core-status` serves it) shows `slow-block` with the height, `on-compute` and the module within
+  2 s; the height commits once, with no retry; the condition is gone after the commit; with `slowBlockMs` 5000 it never
+  appears. (RN-17, AE-3, Q71)
 
 ## 6. Determinism
 
@@ -213,6 +238,16 @@ release assets that CI downloads and verifies.
   table makes the test fail. (DT-4)
 - **A57** `[CI]` Two chains differing only in one module's value at height 7 give equal digests up to 6 and different
   digests from 7; the digest at a height with no change equals `SHA-256(previous ‖ CBOR([]))`. (DT-5)
+- **A145** `[DIFF]` On both backends: a `timestamptz` column encodes `2025-05-21 14:30:00.123456+00` as the integer
+  1747837800123456, orders as a key by time (a fraction sorts after the whole second it follows), and refuses
+  `infinity` when hashed; a `timestamp`, `date`, `time`, `timetz` or `interval` column is refused at startup with "use
+  `timestamptz`, written with `Z`"; a `bigint` and a `text` column holding times are accepted; the node's block time
+  in milliseconds is stored in `core_block_commit.blocks.block_time` exactly. (DT-1, DT-2, DT-6, Q74)
+- **A147** `[CI]` On both backends, in the core and in a private process: a `table` item declared `deterministic: false`
+  with a `now()` default and a `serial` column starts; two databases differing only in that table's rows have equal
+  contents hashes, and a database without the table hashes differently; a digest-opted module's changes skip it; a
+  snapshot carries its rows and imports with a matching hash; the same table without the flag refuses startup with
+  `non-deterministic-column`. (MD-1, DT-3, DT-4, DT-6, SN-3, Q76)
 - **A58** `[CI]` A migration creating a `serial`, identity or floating-point column, or a column whose default is not
   immutable (`now()`, `CURRENT_TIMESTAMP`, `random()`, `gen_random_uuid()`, `nextval()`), in a public module table
   refuses startup with `non-deterministic-column`, while an immutable default (`'abc'`, `1 + 2`, `lower('X')`) and a
@@ -253,6 +288,10 @@ release assets that CI downloads and verifies.
   `null` before block S commits. (AE-5)
 - **A67** `[CI]` A halt caused by an error whose message contains a secret shows the error code, height, module and
   point, and the secret appears nowhere in the response. (AE-6)
+- **A140** `[CI]` `GET /health/live`, `GET /health/ready`, `GET /status` and `GET /config` are provided by the backbone
+  parts `core-health`, `core-status` and `core-config`, each in its own folder under `src/backbone/` with its tests
+  beside it, and A62–A67 pass through them; the admin server mounts only backbone parts' endpoints; a refused process
+  answers all four. (AE-1, Q70)
 
 ## 9. Test tape
 
@@ -407,13 +446,18 @@ release assets that CI downloads and verifies.
   to run when `hello-ack` says `lockstep: false`. (PP-6)
 - **A118** `[CI]` An instance listed after the public cursor passed it is refused with `lockstep-behind`, and the core
   waits and names it. (PP-7)
-- **A119** `[CI]` The key API answers `400` for an undeclared kind or invalid bytes, `200` for an admitted id, `409`
-  when stopped; a key posted during h's `on-compute` is admitted at h + 1 and answered `201` after that commit; a crash
-  before the commit drops it. (PP-8)
+- **A119** `[CI]` A test key of an undeclared kind, or with bytes its module's `validateKey` rejects, refuses startup
+  with `invalid-configuration`; a test key with start h fires `on-key` once before h's `on-compute` and is stored with
+  `arrived_height` h when h commits; after a crash before that commit it is not stored, and after the restart it is
+  admitted at h. (PP-8, CF-11)
 - **A120** `[CI]` With a registered test key and 100 processed blocks, its bytes appear in no public table, log line,
   status field or API response; the core's `/status` shows only each instance's id, connection, lockstep flag and
   synced height. (PP-9, PP-10)
-- **A121** `[CI]` With `tls` set, a private process or key-API client without a certificate is refused and one with a
+- **A146** `[CI]` A private module table with a `serial` column, a `now()` default or a `double precision` column
+  refuses the private process's startup with the same code and message as in the core; two private instances with the
+  same configuration (test keys included), bound to the same public database, have equal contents hashes at the same
+  height. (DT-3, DT-6, PP-1, Q75)
+- **A121** `[CI]` With `tls` set, a private process without a certificate is refused by the core and one with a
   trusted certificate is accepted. (PP-11)
 - **A122** `[CI]` A private snapshot is refused with `private-snapshot-refused` without the development opt-in. (PP-12)
 - **A123** `[CI]` A private process restarting with a test key it already admitted at its start keeps its
@@ -457,6 +501,11 @@ release assets that CI downloads and verifies.
   in Docker after one warm-up pass, timed from process start to the commit of block 10,000 — is equal to or better than
   the official midnight-indexer's (release/4.4, PostgreSQL backend) on the same machine; the measurements are recorded
   in the pull request. (CORE-ARCH SC-009)
+- **A143** `[MEASURE]` The tape-apply baseline: the first 2,000 blocks of A133's stagenet tape, applied from an empty
+  database with every core module except `-fast`, 5 times on PostgreSQL 17 and 5 times on PGlite; the run reports, per
+  backend, the median total time and the median time per block next to the committed reference
+  (`bench/baselines/tape-apply.json`, which names the machine it was measured on), and whether `slowBlockMs`'s default
+  is at least 10 times the median time per block; the figures are recorded in the pull request. (Q72)
 
 ## 17. Required test ids added to the manifest
 

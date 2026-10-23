@@ -216,10 +216,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       mid-transaction, during a statement and before `COMMIT`, of a reader, of idle connections, a refused connection;
       constraint violations and other errors not retryable). 27 deliberately wrong variants of the sources were each
       caught but one equivalent. Coverage floors `src/db/**` 90/85 and `src/db/errors.ts` 95/91 (§13) added.
-      **Open questions (none blocking):** Q65 (the pinned session settings), Q66 (types the mapping does not name, and
-      DB-2's text for arrays), Q67 (0.9.5's timeouts not carried over). **For task 2.2:** add PGlite to
-      `test/db/backends.ts`; hand over text and map with `src/db/mapping.ts`; pin the same five settings; send the same
-      parameter texts. The CI run is pending until the branch is pushed (Phase 3).
+      **Questions, since decided (2026-10-23):** Q65 (the pinned session settings: A), Q66 (types the mapping does not
+      name: A, and DB-2 now says arrays map element by element), Q67 (0.9.5's timeouts: a redesign, Q70–Q72; Q68 makes
+      date and time values text, task 2.2b). **For task 2.2:** add PGlite to `test/db/backends.ts`; hand over text and
+      map with `src/db/mapping.ts`; pin the same five settings; send the same parameter texts. The CI run is pending
+      until the branch is pushed (Phase 3).
 - [x] 2.2 The PGlite backend with its single queue, behind the same API.
       **Acceptance:** A7, A8 (PGlite), A11 including its negative control.
       **Done (2026-10-23):** `src/db/pglite.ts` (`openPglite({ dataDir, committedHeight })`, `openPgliteOn(engine, …)`,
@@ -258,6 +259,20 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `pglite.ts` 98.44 % lines / 96.61 % branches, `mapping.ts` 100 / 100 (floors `src/db/**` 90/85).
       **Open question (not blocking):** Q78 (`design.md` §4 and §14 still prescribe `JSON.parse`). The CI run is
       pending until the branch is pushed (Phase 3).
+- [ ] 2.2a The `deterministic_postgresql` component (Q69): move into `src/deterministic-postgresql/` the column-type
+      rules with the default detection and the catalog reads they need (`src/determinism/column-rules.ts` and the rule
+      parts of `public-tables.ts`), the pinned session settings (`PINNED_SETTINGS`, in `src/db/mapping.ts` since task
+      2.2) and the result mapping with the parameter texts and its JSON reader (`src/db/mapping.ts`); `src/db/` and
+      `src/determinism/` import every rule from it; their tests move to `test/deterministic-postgresql/` and run on both
+      backends; the design-sync test keeps finding §4's table; the coverage floor of §13.
+      **Acceptance:** A138; every moved test passes unchanged in what it asserts.
+- [ ] 2.2b Date and time (Q68, Q74) and one set of rules (Q75): values as RFC 3339 text in the component's mapping;
+      `timestamptz` allowed as a value and a key (the encoder's integer microseconds since 1970, key order by time),
+      the other date and time types refused with "use `timestamptz`"; the date-and-time row of `design.md` §4 split
+      and reworded, and "public" in its paragraph made "module" (every database), together with their verbatim copies
+      in the component; the A7 differential compares date and time values as values; the module guide says
+      `timestamptz` is the preferred time type, and every time UmbraDB represents uses it and its `Z` form.
+      **Acceptance:** A139, A145 (the column rules and the encoding; the core's `block_time` is task 10.2's).
 - [ ] 2.3 Roles and `SET LOCAL ROLE`, provider functions (fixed `search_path`, `PUBLIC` revoked), the id pattern and
       schema-name collisions, shared-item schemas, and the `TRUNCATE` refusal.
       **Acceptance:** A13 including its negative control, A14, A15, A73.
@@ -270,10 +285,20 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Acceptance:** A17, A18; `durability-probe.test.ts` passes at its new path.
 - [ ] 2.6 Write handles and their closing.
       **Acceptance:** A10.
+- [ ] 2.7 Timeouts by connection role (Q71): a read option bounding one read by `statement_timeout` and
+      `idle_in_transaction_session_timeout` (`SET LOCAL`), `query-timeout`; the zero timeouts pinned on the writer,
+      migrations, setup and callback reads, in the component's session settings; check whether PGlite enforces them
+      (`design.md` §14) and raise a question if it does not.
+      **Acceptance:** A141.
+- [ ] 2.8 The read-only database for the `db` item (Q73): `read` only, nothing that writes, opens a transaction or
+      closes; the `nested-call` refusal on PGlite kept from task 2.2; the module guide's database rules (inside a
+      callback its handle, `db.read` for work outside the points).
+      **Acceptance:** A144.
 
 ## 3. Modules
 
-- [ ] 3.1 Declaration types, `defineModule`, declaration validation.
+- [ ] 3.1 Declaration types, `defineModule`, declaration validation; a `table` item's optional `deterministic: false`
+      (Q76).
       **Acceptance:** A20, A21.
 - [ ] 3.2 Graph resolution per height range, Kahn order, mid-chain rule, development-only rule, shared-item providers.
       **Acceptance:** A22, A23, A24, A25.
@@ -298,12 +323,15 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       cursor table; block context and item sink; per-point handles; the chain-data envelope of module API responses.
       **Acceptance:** A36, A37, A39, A40, A41, A49; RN-16 is covered by A75.
 - [ ] 5.2a Process items (`ProcessContext.publish`) and module API registration (`ApiRegistry` mounted on `listen.api`,
-      WebSocket subscriptions, duplicate routes refused).
-      **Acceptance:** A74, A75.
+      WebSocket subscriptions, duplicate routes refused); each request's read bounded by `apiReadTimeoutMs` (DB-15).
+      **Acceptance:** A74, A75; A141's request half through a registered handler.
 - [ ] 5.3 Revisions and settings; start and stop heights; the upgrade-boundary stop; SIGTERM.
       **Acceptance:** A42, A45, A47, A48.
 - [ ] 5.4 Failure handling and the delivery guarantees after restart.
       **Acceptance:** A43, A44, A46.
+- [ ] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
+      commit; never a cancel or a retry.
+      **Acceptance:** A142.
 
 ## 6. Storage helpers
 
@@ -318,15 +346,23 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `column-rules.ts` (no primary key, key and column types, identity and `serial` columns, floats, defaults that are
       not immutable, sequences and unlogged tables; Q58, Q61; the detection is task 1.4's), and the `jsonb` and
       `numeric` `CHECK`s, arrays included (a `jsonb` number: an integer in the signed 64-bit range whose `jsonpath`
-      `.string()` is `-?[0-9]+`, Q57; a `numeric`: `scale(c) = 0 AND c <> 'NaN'`).
-      **Acceptance:** A56 including its negative control, A57, A58.
+      `.string()` is `-?[0-9]+`, Q57; a `numeric`: `scale(c) = 0 AND c <> 'NaN'`); tables declared
+      `deterministic: false` skipped by the check, the `CHECK`s and change capture, and hashed by name only (Q76).
+      **Acceptance:** A56 including its negative control, A57, A58, A147 (with 14.1 and 15.2 for its private and
+      snapshot parts).
 
 ## 8. Admin endpoints
 
-- [ ] 8.1 The admin server in its own worker thread reading the runner's published state, the main-thread heartbeat,
-      states and conditions, readiness with its precedence, `/status` and `/config` with their JSON schemas, redaction
-      and sanitized errors.
-      **Acceptance:** A62, A63, A64, A65, A66, A67, A29.
+- [ ] 8.1 The admin server in its own worker thread reading the runner's published state, mounting only backbone parts'
+      endpoints (Q70), 404 for anything else; the main-thread heartbeat; states and conditions; the shared redaction and
+      sanitized-error helpers. No endpoint tests exist in 0.9.5 to migrate; each part's tests live in its folder.
+      **Acceptance:** A62 (its 404 and response-time halves), A64.
+- [ ] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
+      **Acceptance:** A63, A65; A140 for these endpoints.
+- [ ] 8.3 `core-status` (`src/backbone/core-status/`): `/status` and its JSON schema, times as RFC 3339 text (Q68).
+      **Acceptance:** A66 (`/status`), A67; A140 for this endpoint.
+- [ ] 8.4 `core-config` (`src/backbone/core-config/`): `/config` and its JSON schema.
+      **Acceptance:** A66 (`/config`), A29; A140 for this endpoint.
 
 ## 9. Test tape
 
@@ -341,8 +377,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       subscriptions, reconnect, timeouts, back-off; delete `chain-archive-sync/indexer-client.ts`.
       **Acceptance:** A83 (`[STATIC]` part); the refactored node-client tests pass.
 - [ ] 10.2 `core-chain` (identity, bootstrap, startup checks) and `core-block-commit` (the `blocks` table from the
-      `chain_archive` store, keeping range partitioning).
-      **Acceptance:** A77, A78, A88, A90.
+      `chain_archive` store, keeping range partitioning; block time as `block_time timestamptz`, converted exactly from
+      the node's milliseconds, never through a floating-point value, Q74).
+      **Acceptance:** A77, A78, A88, A90; A145's block-time part.
 - [ ] 10.3 `core-block-fetch`: finalized processing, the finalized prefetch, the best-block queue with branch switches,
       block 0's fetch path.
       **Acceptance:** A76, A79, A80, A81, A83, A89.
@@ -381,13 +418,15 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 14. Private processes
 
-- [ ] 14.1 The private backbone (`core-private-source`, `core-key-registry`), binding, block intake.
-      **Acceptance:** A112, A113, A114, A116.
+- [ ] 14.1 The private backbone (`core-private-source`, `core-key-registry`), binding, block intake; the determinism
+      rules of DT-6 checked at a private process's startup and its contents hash (Q75).
+      **Acceptance:** A112, A113, A114, A116, A146.
 - [ ] 14.2 The process transport and its messages; opt-in mutual TLS.
       **Acceptance:** A115, A121.
 - [ ] 14.3 Lockstep and the behind-instance refusal.
       **Acceptance:** A117, A118.
-- [ ] 14.4 The key API, test keys, privacy checks, the private-snapshot refusal.
+- [ ] 14.4 Test keys through the key registry (the key API is not core and leaves this change, Q70), privacy checks,
+      the private-snapshot refusal.
       **Acceptance:** A119, A120, A122, A123.
 
 ## 15. Snapshots
@@ -433,6 +472,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Acceptance:** A136.
 - [ ] 18.4 Add the 23 ids of `acceptance.md` §17 to the manifest and set the pinned count to 27.
       **Acceptance:** `npm run test:conformance` passes with every required id reported passed in its file.
+- [ ] 18.5 The tape-apply baseline (Q72): the measurement of A143 in CI, its committed reference
+      (`bench/baselines/tape-apply.json`), and the check of `slowBlockMs`'s default against it.
+      **Acceptance:** A143; its figures recorded in the pull request.
 
 ## 19. Close-out
 

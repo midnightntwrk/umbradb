@@ -61,11 +61,14 @@ split; this change is one feature by the owner's decision, recorded here as the 
 8. **Contract data:** `core-contract-states` (state and zswap-state keys), `core-contract-logs-full`, and the
    development-only `core-contract-logs-fast`.
 9. **Private processes:** binding, block intake from the public database, the process transport, independent and
-   lockstep instances, the key API, opt-in mutual TLS.
+   lockstep instances, the key registry with configured test keys (a key API is not core and is left to a later
+   module, Q70), opt-in mutual TLS on the process transport.
 10. **Determinism tooling, snapshots and storage helpers:** the canonical encoding, contents hash, per-block digests,
-    snapshot export and import, the cursor and height-versioned tables.
-11. **Admin endpoints** (`/health/live`, `/health/ready`, `/status`, `/config`), **the browser build** (development),
-    and **the test tape** (owner decision Q48).
+    snapshot export and import, the cursor and height-versioned tables; the `deterministic_postgresql` component that
+    holds every rule UmbraDB imposes on PostgreSQL, tested alone on both backends (Q69).
+11. **Admin endpoints** (`/health/live`, `/health/ready`, `/status`, `/config`) as the backbone parts `core-health`,
+    `core-status` and `core-config` (Q70), **timeouts by connection role** with the `slow-block` condition (Q71), **the
+    browser build** (development), **the test tape** (owner decision Q48) and **the tape-apply baseline** (Q72).
 
 ## Non-goals (what this change does NOT cover)
 

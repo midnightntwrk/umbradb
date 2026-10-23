@@ -11,7 +11,9 @@ core's `lockstepInstances`).
 
 THE system SHALL run one core process, the only one that talks to the node, owning the public database, and zero or
 more private processes, each owning its own private database. A private process MAY read public data; the public side
-SHALL NOT read private data and MAY call only the private calls of PP-9.
+SHALL NOT read private data and MAY call only the private calls of PP-9. A private database SHALL follow the same
+determinism rules as the public one (DT-3, DT-6; owner decision Q75): it is a function of its public database, its
+configuration (test keys included) and the heights its keys arrived at.
 
 #### Scenario: The core never reads a private database
 - **WHEN** a core process and a private process run with a test private module
@@ -93,21 +95,22 @@ run, because the mutable public state of the heights it missed is gone.
 - **WHEN** an instance at height 100 is added to the lockstep list while the public cursor is 500
 - **THEN** its `hello` is refused with `lockstep-behind`, and the core waits and names it
 
-### Requirement: PP-8 Keys arrive through the key API
+### Requirement: PP-8 Keys enter through the key registry
 
-THE private process SHALL accept keys on its key-API listener: `POST /keys` with `{ "kind", "bytes" }` (hex), where
-`kind` is one a configured private module declared and `bytes` passes that module's `validateKey` (otherwise `400`);
-`key_id` = SHA-256(UTF-8 kind ‖ bytes); an already admitted id SHALL be answered `200` unchanged; a new key SHALL be
-accepted only while `syncing` or `following` (otherwise `409`), fire `on-key`, and become pending. WHEN a block's
-`on-compute` begins, the registry SHALL take every pending key, give it that block's height as `arrived_height`, publish
-the set as the `block` item `admitted-keys`, and write them in that block's `on-db-write`; the request SHALL be answered
-`201` with the id and height after the commit. IF the block does not commit and is processed again THEN its keys SHALL
-be taken again; IF processing halts or the process stops or crashes first THEN pending keys SHALL be dropped and waiting
-requests answered `409` or not at all.
+THE backbone part `core-key-registry` SHALL admit keys whose `kind` a configured private module declared (`keyKinds`)
+and whose `bytes` pass that module's `validateKey`; `key_id` = SHA-256(UTF-8 kind ‖ bytes); an id already admitted SHALL
+be left unchanged. In this change keys enter only as configured test keys (CF-11): an endpoint that accepts keys over
+the network (a key API) is not core and is not part of this change, and a later, non-core module can offer one by
+feeding the registry (Q70). A test key whose `start` is h SHALL become pending, firing `on-key`, before block h's
+`on-compute` begins. WHEN a block's `on-compute` begins, the registry SHALL take every pending key, give it that block's
+height as `arrived_height`, publish the set as the `block` item `admitted-keys`, and write them in that block's
+`on-db-write`. IF the block does not commit and is processed again THEN its keys SHALL be taken again; IF processing
+halts or the process stops or crashes first THEN pending keys SHALL be dropped, and become pending again when their
+block is next processed.
 
-#### Scenario: A key admitted with the next block
-- **WHEN** a key is posted while block h's `on-compute` is running
-- **THEN** it is admitted at h + 1, and the request returns `201` with the id and h + 1 after that commit
+#### Scenario: A test key admitted at its start
+- **WHEN** a private process's configuration lists a test key with start h, and block h commits
+- **THEN** `on-key` fired once before h's `on-compute`, and the key is stored with `arrived_height` h
 
 ### Requirement: PP-9 What the public side may call
 
@@ -129,8 +132,8 @@ the private process; keeping module output private is each module developer's re
 
 ### Requirement: PP-11 Opt-in mutual TLS
 
-WHERE the operator configures certificates and trusted roots (`tls`), THE process transport and the key API SHALL
-require mutual TLS; WHERE not, they SHALL run unauthenticated, for trusted networks, one host, a TEE with its own
+WHERE the operator configures certificates and trusted roots (`tls`), THE process transport SHALL require mutual TLS;
+WHERE not, it SHALL run unauthenticated, for trusted networks, one host, a TEE with its own
 channel, or a browser. TEE attestation is out of scope.
 
 #### Scenario: A client without a certificate

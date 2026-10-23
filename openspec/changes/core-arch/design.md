@@ -9,19 +9,20 @@ this change relies on is restated in `specs/`. Owner decisions cited as Qn are i
 | Path | Contents |
 |---|---|
 | `src/runner/` | Points, dispatch and order, the finalized loop, block context, item sink, start/stop and upgrade-boundary handling, the lockstep wait, heartbeat, process state |
-| `src/db/` | The database API (`api.ts`), the PostgreSQL backend (refactored from `src/postgres/client.ts`), the PGlite backend, roles and grants, migrations (refactored from `src/postgres/migrate.ts`), the writer lock (refactored from `src/postgres/transaction-lease.ts`), the durability probe (moved from `src/postgres/durability-probe.ts`), change capture for digests |
+| `src/db/` | The database API (`api.ts`; its PostgreSQL rules from `src/deterministic-postgresql/`), the PostgreSQL backend (refactored from `src/postgres/client.ts`), the PGlite backend, roles and grants, migrations (refactored from `src/postgres/migrate.ts`), the writer lock (refactored from `src/postgres/transaction-lease.ts`), the durability probe (moved from `src/postgres/durability-probe.ts`), change capture for digests |
 | `src/modules/` | `ModuleDeclaration` and related types, `defineModule`, declaration validation, graph resolution per height range |
 | `src/config/` | `defineConfig`, `coreEntry`, `versionEntry`, the loader, the plain-data check, schema validation, the history comparison, the version check |
 | `src/determinism/` | The canonical CBOR encoder, primary-key order, the contents hash, digests |
+| `src/deterministic-postgresql/` | The `deterministic_postgresql` component (§4, Q69): every rule UmbraDB imposes on PostgreSQL — column types, non-deterministic columns and tables, the `jsonb` and `numeric` checks, rows-only block transactions, the pinned session settings and timeouts, the result mapping and parameter texts; it imports nothing else of `src/`, and its tests are `test/deterministic-postgresql/` |
 | `src/helpers/` | The cursor table (from `src/postgres/watermarks.ts`) and the height-versioned table (from `src/postgres/temporal-kv.ts`) |
 | `src/node/` | The node client (refactored from `chain-archive-sync/node-rpc-client.ts`): JSON-RPC over WebSocket, subscriptions, reconnect, back-off |
-| `src/backbone/` | `core-chain`, `core-block-fetch` (the queue and the finalized prefetch), `core-block-commit`, `core-digest`; private: `core-private-source`, `core-key-registry` |
+| `src/backbone/` | `core-chain`, `core-block-fetch` (the queue and the finalized prefetch), `core-block-commit`, `core-digest`; the admin endpoints `core-health`, `core-status`, `core-config` (Q70), each in its own folder with its tests; private: `core-private-source`, `core-key-registry` |
 | `src/core-modules/` | `core-chain-events`, `core-block-parsed`, `core-tx-results`, `core-ledger-state`, `core-contract-states`, `core-contract-logs-full`, `core-contract-logs-fast` |
 | `src/ledger/` | The `LedgerPackage` adapters (v8 from the 0.9.5 `chain-archive-sync/tx-replay-decoder.ts`, v9), the ledger worker, the node-store bridge, the sweep, the built-in version tables (`networks.json`) |
 | `vendor/ledger/` | Vendored ledger builds: per version the pinned upstream source reference, the patches, the build script and the built WASM with its SHA-256 (§5.2) |
-| `src/private/` | The process transport (core server, private client), the key API, lockstep bookkeeping |
+| `src/private/` | The process transport (core server, private client), lockstep bookkeeping (no key API: not core, Q70) |
 | `src/snapshot/` | Export and import (§9.1) |
-| `src/admin/` | The admin HTTP server (`node:http`) in its own worker thread, reading a state snapshot the runner publishes through a `SharedArrayBuffer` and messages (AE-1) |
+| `src/admin/` | The admin HTTP server (`node:http`) in its own worker thread, reading a state snapshot the runner publishes through a `SharedArrayBuffer` and messages, and running the endpoints of `core-health`, `core-status` and `core-config` on it; 404 for anything else; the redaction and sanitized-error helpers they share (AE-1, AE-6, Q70) |
 | `src/cli/` | The `umbradb` command |
 | `browser/` | The browser build: page, workers and its build script (§9.2) |
 | `tools/tape/` | Tape reader and writer, tape node, recording builder, variant transforms (unexported, for tests) |
@@ -48,7 +49,7 @@ keeping range partitioning by height and the parent-hash and genesis checks.
 | `on-db-write` | Inside the block transaction | Block write handle | In series, fixed order |
 | `on-after-db-write` | After the commit; no `block` items (RN-5) | Read handle at h | In series |
 | `on-stop-height` | After the commit of an entry's stop height; no `block` items | Read handle at h | In series: stopping modules in reverse graph order, then the core |
-| `on-key` | Private: a key was accepted (PP-8) | Read handle at the cursor | In series |
+| `on-key` | Private: a key became pending (PP-8) | Read handle at the cursor | In series |
 
 Parallel callbacks run with `Promise.all` over each "wave" of Kahn's algorithm restricted to the modules registered at
 that point; a module waits only for the modules it requires (transitively, through items). The lockstep wait (PP-6)
@@ -135,7 +136,26 @@ interface BlockSource {
   `on-db-write`, reads each shadow row and the current row, computes the net change, extends the chain, writes
   `core_digest.digests` and deletes the shadow rows, inside the block transaction.
 - **Errors.** `UmbraError { code, retryable, details }`, keeping the 0.9.5 retryable split
-  (`design/design-interfaces.md` §1.1); a lost connection is `connection-lost` (retryable).
+  (`design/design-interfaces.md` §1.1); a lost connection is `connection-lost` (retryable); an API read ended by its
+  timeout is `query-timeout` (not retryable, DB-15).
+- **Session settings (Q65) and timeouts (Q71).** Every connection starts with `bytea_output = hex`, `DateStyle = 'ISO,
+  MDY'`, `IntervalStyle = postgres`, `TimeZone = UTC` and `extra_float_digits = 1` (PostgreSQL: startup parameters;
+  PGlite: start parameters), which take precedence over the server's, the database's and the role's defaults; a
+  `database` URL setting one is refused (`invalid-configuration`). Every connection also starts with
+  `statement_timeout = 0`, `lock_timeout = 0` and `idle_in_transaction_session_timeout = 0`, so the writer, migrations
+  and callback reads are never cut off; a read for a module API request sets `statement_timeout` and
+  `idle_in_transaction_session_timeout` to `apiReadTimeoutMs` with `SET LOCAL`, so they end with that read (DB-15).
+- **Date and time values (Q68).** PostgreSQL prints a `timestamptz` under the pinned settings as
+  `2025-05-21 14:30:00.123456+00`; the mapping rewrites it to `2025-05-21T14:30:00.123456Z` (a `timestamp`'s text the
+  same way, without `Z`; a `date` unchanged), never through a JavaScript `Date`, whose parse of a zone-less text follows
+  the process's time zone and keeps milliseconds only (checked on Node.js v24.9.0, 2026-10-23). `timestamptz` is the
+  preferred time type: the module guide says so, and every time UmbraDB itself represents uses it and its `Z` form
+  (Q68). Every module table may store it, as a value and a key (Q74): the contents hash encodes it as the integer
+  microseconds since `1970-01-01T00:00:00Z`; `bigint` stays allowed, a time in `text` is allowed but not good practice,
+  floats stay refused, `jsonb` keeps its rules, and `timestamp`, `date`, `time`, `timetz` and `interval` stay refused
+  with "use `timestamptz`, written with `Z`". The column-type table's date-and-time row and the word "public" in the
+  paragraph below (every module schema, the core's or a private process's, follows the same rules, Q75) change with
+  their verbatim copies in the code (task 2.2b).
 
 **Column types (Q58).** Every refusal names the module, the table, the column and its declared type, then the reason and
 the alternative of its row. A table without a primary key is refused with `no-primary-key`: rows are hashed and digested
@@ -183,6 +203,25 @@ that can never run still counts, since the tree is read without PostgreSQL's con
 
 The reasons for the time types, `json`, `char(n)` and `numeric(p,s)` were checked on PGlite 0.5.10 and PostgreSQL 17.11
 (2026-10-23, the decision record's Q58).
+
+**The `deterministic_postgresql` component (Q69).** Every rule UmbraDB imposes on PostgreSQL, so that two databases fed
+the same chain hold, hash and read back the same values, is one component, `deterministic_postgresql`, in
+`src/deterministic-postgresql/`. It imports nothing else of `src/`, so it is tested alone: its suite,
+`test/deterministic-postgresql/`, runs every rule on PostgreSQL 17 and on PGlite, under its own coverage floor (§13).
+`src/db/` and `src/determinism/` take every rule from it and repeat none. The requirements keep their ids; the component
+is where they are implemented and tested together:
+
+| Rule | Requirement | Decided in |
+|---|---|---|
+| Column types allowed as values and as keys, each refusal with its reason and alternative (the column-type table above) | DT-1, DT-2, DT-6 | Q57–Q60 |
+| Text keys ordered by bytes (`COLLATE "C"`) | DT-2 | Q58 |
+| Identity, `serial` and non-immutable defaults refused, detected from `pg_attrdef.adbin` as above | DT-6 | Q61–Q63 |
+| Sequences and unlogged tables in public schemas refused | DT-6 | Q61, Q64 |
+| `core_chain.jsonb_numbers_ok` and `core_chain.numeric_ok` and the `CHECK`s they back | DT-1, DT-6 | Q57 |
+| Block transactions change rows only; the `BEFORE TRUNCATE` trigger | DB-14 | — |
+| The pinned session settings, and the zero timeouts of the writer and callback reads | DB-2, DB-15 | Q65, Q71 |
+| The result mapping and parameter texts: lossless `jsonb`, arrays element by element, date and time as RFC 3339 text, other types as their text | DB-2 | Q66, Q68 |
+| The opt-out: a `table` item declared `deterministic: false` — its tables, the sequences their columns own and its unlogged tables are skipped by the refusals and the `CHECK`s; the contents hash records each such table as `[schema, table, null, null]`; digests skip it; snapshots carry its rows unchanged | MD-1, DT-3, DT-4, DT-6, SN-3 | Q76 |
 
 ## 5. Ledger
 
@@ -295,12 +334,16 @@ conversion and the sweep step then run in the worker as part of `on-compute`. Le
 
 ## 6. Modules
 
-The declaration is CORE-ARCH §4.10's `ModuleDeclaration`, plus `requiresResync?: boolean` (DB-10); `ProcessContext`
-also has `publish(item, value)` for `process` items (MD-7). Ids and item names match `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, so
-the schema name (`-` → `_`) is one-to-one (DB-8). `defineModule(declaration)` returns it with a typed
-`entry({ start, stop?, config })` builder (CF-2). Graph resolution computes the boundary heights of every revision,
-resolves providers per range (MD-3), and produces per range and per point an ordered callback list, cached for the
-process; a revision boundary switches lists between heights, never within one.
+The declaration is CORE-ARCH §4.10's `ModuleDeclaration`, plus `requiresResync?: boolean` (DB-10); `ProcessContext` also
+has `publish(item, value)` for `process` items (MD-7). The `db` item is a `ReadOnlyDatabase` — `read(body)` only:
+modules write only through the handles of RN-4 and may read through `db` for work outside the points; the module guide
+gives the rules, and nothing else enforces them (Q73, Q46). A `table` item may declare `deterministic: false` for data
+that is not a function of the chain, such as the time a request arrived (Q76; §4's component table says what it skips);
+the module guide says no deterministic table may be computed from such a table. Ids and item names match
+`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, so the schema name (`-` → `_`) is one-to-one (DB-8). `defineModule(declaration)`
+returns it with a typed `entry({ start, stop?, config })` builder (CF-2). Graph resolution computes the boundary heights
+of every revision, resolves providers per range (MD-3), and produces per range and per point an ordered callback list,
+cached for the process; a revision boundary switches lists between heights, never within one.
 
 ## 7. Configuration
 
@@ -344,8 +387,8 @@ process; a revision boundary switches lists between heights, never within one.
 - **Lockstep.** The core keeps, per listed instance, its last reported height and connection; the runner awaits the
   condition of PP-6 before `BEGIN` with no transaction open; a lockstep instance's consistent read checks
   `public cursor == h`.
-- **Key API.** An HTTP server on `keyApi` (`https` with client certificates when `tls` is set); pending keys live in
-  memory until the next block's `on-compute` takes them (PP-8).
+- **Keys.** Configured test keys are the only key source in this change; a key API is not core and is left to a later
+  module that feeds the registry (Q70). Pending keys live in memory until their block's `on-compute` takes them (PP-8).
 
 ## 9. Snapshots and browser
 
@@ -364,9 +407,9 @@ A start that finds the marker drops every schema the import created, then the ma
 
 `browser/` holds a static page and three worker entry points (core, ledger, private), bundled with `esbuild` (a new
 development dependency, pinned in task 0.1); PGlite runs in the core and private workers with `memory://` or
-`opfs-ahp://` storage (memory by default, OPFS optional; verified by probe, §14); the admin endpoints are message calls;
-the page offers a snapshot file picker. `npm run build:browser` writes `dist-browser/`, which is not part of the npm
-package.
+`opfs-ahp://` storage (memory by default, OPFS optional; verified by probe, §14); the admin endpoints are message calls
+answered by the same backbone parts; the page offers a snapshot file picker. `npm run build:browser` writes
+`dist-browser/`, which is not part of the npm package.
 
 ## 10. Tables
 
@@ -379,7 +422,7 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits) |
 | `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`), version (text), data (jsonb, canonical), data_hash |
 | database API | `core_chain.migrations` | (module, migration_id) | checksum, position (int) |
-| `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_timestamp_ms |
+| `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_time (`timestamptz`, converted exactly from the node's milliseconds, Q74) |
 | `core-block-commit` | `core_block_commit.hashes` (not partitioned) | hash | height — makes a repeated hash fail, which the height-partitioned `blocks` table cannot enforce |
 | `core-digest` | `core_digest.digests` | (height, module) | digest |
 | `core-chain-events` | `core_chain_events.events` | (height, event_index) | phase (text), extrinsic_index (int null), pallet, name (text), bytes (SCALE), fields (jsonb, canonical) |
@@ -446,10 +489,10 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | Required test ids (`test/integration/required-tests.manifest.json`, `EXPECTED_REQUIRED_COUNT = 25`) | Ids 5–25 and the deferred `crash.pg-kill-save.no-duplicate-with-idempotency-key` | Ids 1–4 (`crash-harness.smoke.*`), retargeted to a crash worker that drives the runner | The ids of `acceptance.md` §17; the pinned count becomes 4 + their number |
 | Test files | TemporalKV, CheckpointStore, Lease, `saveAndAdvance`, WalletStateEnvelope and cross-part durability tests; `no-consumer-import-in-bench`; `chain-archive-{migrate,rollover,store}` tests (replaced by the core block table tests); `chain-archive-{sync,sync-retry,replay-decode,preprod-cloud-crossval}` integration tests (they drive the official-indexer client, deleted by rule b); `api-surface/chain-archive-routing`; `no-chain-sync-import-guard` (the folder is gone) | `durability-probe.test.ts`; `migrate`, `migration-lock-timeout`, `client`, `errors` and `chain-archive-sync/node-rpc-client.test.ts` refactored onto `src/db/` and `src/node/`; `watermarks.property.test.ts` (P9) retargeted; `no-sdk-import-guard`; gate machinery | One test file per acceptance group |
 | TransactionHistory tests | — | Moved with the source to `legacy/transaction-history/`, excluded from the run (LS-3) | — |
-| Coverage floors (`vitest.config.ts:47-60`) | `checkpoint-store`, `save-and-advance`, `watermarks`, `temporal-kv`, `transaction-lease` | `durability-probe` 97/92, `migrate` 90/85, `errors` 95/91 (moved paths) | `src/**` 90/85 by default; `src/determinism/**`, `src/helpers/**` and `src/ledger/sweep*` 95/90 |
+| Coverage floors (`vitest.config.ts:47-60`) | `checkpoint-store`, `save-and-advance`, `watermarks`, `temporal-kv`, `transaction-lease` | `durability-probe` 97/92, `migrate` 90/85, `errors` 95/91 (moved paths) | `src/**` 90/85 by default; `src/determinism/**`, `src/deterministic-postgresql/**`, `src/helpers/**` and `src/ledger/sweep*` 95/90 |
 | Mutation (`stryker.conf.json` `mutate`, break 65) | The five 0.9.5 adapters | Break threshold 65 | `src/modules/graph.ts`, `src/runner/order.ts`, `src/config/history.ts`, `src/determinism/cbor.ts`, `src/determinism/digest.ts`, `src/helpers/height-versioned.ts`, `src/helpers/cursor-table.ts`, `src/ledger/sweep.ts`, `src/backbone/block-fetch-queue.ts` |
 | Public API pins (`test/api-surface/*`, `test/smoke/pack-install.mjs`) | The 36-symbol pins, the error-catalog and retryability tables of 0.9.5 | The deep-import block; `package-json-strict` (exports only `"."`) | A sorted-name pin of §12; the pack smoke imports §12, syncs a tape on PostgreSQL in Docker, and runs `umbradb config check` |
-| Benchmarks (`bench/`, non-gating `bench-smoke.yml`) | TemporalKV, Watermarks, CheckpointStore, Lease and TransactionHistory workloads and their baseline | The non-gating job | `runner.commitEmptyBlock` per backend; the ingest comparison with the official indexer (SC-009, `bench/ingest-vs-official/`) |
+| Benchmarks (`bench/`, non-gating `bench-smoke.yml`) | TemporalKV, Watermarks, CheckpointStore, Lease and TransactionHistory workloads and their baseline | The non-gating job | `runner.commitEmptyBlock` per backend; the ingest comparison with the official indexer (SC-009, `bench/ingest-vs-official/`); the tape-apply baseline (A143, Q72), reported and never failing |
 | Scripts | `archive:sync` | — | `build:browser`, `vendor:ledger` |
 | `docs:storage` (`typedoc.json`, not run in CI) | The five 0.9.5 entry points | — | The §12 surface |
 | Documents stating "36 symbols" | — | `docs/releases/v0.9.5.md` unchanged (history) | `ROADMAP.md:455` and `docs/v1-implementation-guideline.md:194` updated at close-out |
@@ -485,6 +528,9 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | Genesis cNight registrations are enumerated by key | `midnight-indexer/chain-indexer/src/infra/subxt_node/runtimes/v2_1_0.rs:403-412` iterates the double map; `state_getKeysPaged` in `midnight-node/docs/openrpc.json:769` | Verified (reference) |
 | RFC 8949 §4.2.1 and Appendix A | https://www.rfc-editor.org/rfc/rfc8949 | Verified (normative text) |
 | TypeScript compiler API for `noEmit` | `typescript` 5.9.3 installed | Verified (installed) |
+| `new Date(text)` reads a zone-less timestamp in the process's time zone and keeps milliseconds only | Node.js v24.9.0, 2026-10-23: `2025-05-21 14:30:00` reads as `14:30Z`, `18:30Z` and `05:30Z` under `TZ` `UTC`, `America/New_York` and `Asia/Tokyo`; `…:00.123456+00` as `…:00.123Z` | Verified (run); the reason for Q68's text mapping |
+| PostgreSQL 17 startup parameters take precedence over server, database and role defaults | Task 2.1, 2026-10-23: with hostile database defaults the five pinned settings won (Q65) | Verified (test) |
+| PGlite 0.5.10 enforces `statement_timeout` and `idle_in_transaction_session_timeout` | Not checked: PGlite runs a statement synchronously in WASM, so a timer may not interrupt it | Unverified; task 2.7 checks it and raises a question if it does not (Q71) |
 
 ## 15. Relation to the existing design documents
 

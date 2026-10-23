@@ -12,7 +12,8 @@ height range.
 
 THE backbone part `core-chain` SHALL provide the `process` items `config`, `node-client`, `db` and `ledger-table`, and
 SHALL store `core_chain.identity` (one row: genesis hash, S, anchor hash — null until block S commits) in addition to
-the configuration history (CF-6, CF-7).
+the configuration history (CF-6, CF-7). The `db` item SHALL be read-only: it offers `read` (DB-2) and nothing that
+writes, opens a transaction or closes the database (Q73).
 
 #### Scenario: Identity after the first block
 - **WHEN** block S commits on an empty database
