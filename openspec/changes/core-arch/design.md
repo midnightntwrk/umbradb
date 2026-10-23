@@ -85,10 +85,16 @@ interface BlockSource {
   `@electric-sql/pglite` (pinned in task 0.1) with a single job queue (DB-4).
 - **Reads.** PostgreSQL: `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` on a pool connection; the handle's `height`
   is read from the cursor inside the same transaction. PGlite: one queued job.
-- **Lossless `jsonb`.** The `postgres` driver parses JSON with plain `JSON.parse`
-  (`node_modules/postgres/src/types.js:18-21`), which rounds integers beyond 2^53. Both backends use a `jsonb` parser
-  whose reviver uses JSON.parse source text access (`context.source`, Node.js v24.9.0) and returns a `bigint` for every
-  integer outside ±(2^53 − 1) (DB-2).
+- **Lossless `jsonb`.** Both backends read `json` and `jsonb` with UmbraDB's own reader of RFC 8259's grammar
+  (`parseJsonLossless` in `src/db/mapping.ts`), not `JSON.parse` (Q78). It returns a `bigint` for every integer written
+  outside ±(2^53 − 1) (DB-2), which plain `JSON.parse` rounds (the `postgres` driver uses it,
+  `node_modules/postgres/src/types.js:18-21`). `JSON.parse` is avoided because of a V8 bug in every Node.js 24 and 26
+  release: once a parse in the process has read an object key that is a single backslash, a later parse can silently
+  read an object key that is one escape sequence (`"\t"`, `"\n"`, `"\""`, …) as a backslash, so two different documents
+  read back, and hash, equal (`nodejs/node#63785`; fixed in V8 by commit `93cd21e`, 2026-09-17; the Node.js backport
+  `nodejs/node#66542` is not merged as of 2026-10-23). Once every Node.js version UmbraDB supports carries that fix, the
+  reader may be replaced by `JSON.parse` with a reviver using source text access (`context.source`), as task 2.1 had it
+  (`docs/issues/00007`).
 - **Roles.** Each module's role is `umbradb_m_<schema>` (`umbradb_i_<item>` for a shared item); `NOLOGIN`, owner of its
   schema; `USAGE` on every other module schema and `SELECT` on its tables (granted when a schema is created and by
   `ALTER DEFAULT PRIVILEGES`). Callbacks and migrations run after `SET LOCAL ROLE` to the module role (DB-6). The writer
@@ -502,7 +508,8 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | Claim | Evidence | Status |
 |---|---|---|
 | Node.js 24 loads `.ts` with type stripping | Installed v24.9.0: `process.features.typescript === "strip"` | Verified (installed) |
-| JSON.parse source text access in revivers | Node.js v24.9.0: `JSON.parse("[1]", (k, v, c) => c?.source ?? v)` gives `"1"` | Verified (installed) |
+| JSON.parse source text access in revivers | Node.js v24.9.0: `JSON.parse("[1]", (k, v, c) => c?.source ?? v)` gives `"1"` | Verified (installed); not used since Q78 |
+| Node.js 24 and 26 `JSON.parse` reads a one-escape object key as a backslash once a parse has read the key `"\\"` | Reproduced on Node.js v24.9.0 (V8 13.6.233.10), 3 runs of 3, not on v24.2.0 or v22.13.1, 2026-10-23; `nodejs/node#63785` (open; reported on 24.13.1–24.21.0 and 26.3.0–26.10.0, not on 22); V8 fix `93cd21e` (2026-09-17); backport `nodejs/node#66542` (open, 2026-10-05) | Verified (run, upstream); the reason for UmbraDB's own JSON reader (§4, Q78, `docs/issues/00007`) |
 | `postgres`: `sql.reserve()` pins a connection; JSON parsed with `JSON.parse`, replaceable | `src/postgres/transaction-lease.ts:135-138, 287-301`; `node_modules/postgres/src/types.js:18-21` (3.4.9) | Verified (installed, in-repo use) |
 | PostgreSQL 17: `SET LOCAL ROLE`, `SECURITY DEFINER`, `REPEATABLE READ READ ONLY`, session advisory locks, `BEFORE TRUNCATE` triggers, `jsonpath` `.type()`/`.floor()` | https://www.postgresql.org/docs/17/ (sql-set-role, sql-createfunction, sql-set-transaction, functions-admin, sql-createtrigger, functions-json) | Version-pinned documentation; re-checked by tests |
 | PGlite: roles, `SET LOCAL ROLE`, cross-schema writes denied, `SECURITY DEFINER` with a fixed `search_path` and `PUBLIC` revoked, PL/pgSQL row triggers, a `BEFORE TRUNCATE` trigger refusing, `jsonpath` `.type()`/`.floor()` in a `CHECK`, advisory-lock functions | Probe against `@electric-sql/pglite` 0.5.10 (published 2026-10-14) in Node.js v24.9.0, 2026-10-22: every item passed | Verified (probe); task 0.1 commits the probe as a test |
