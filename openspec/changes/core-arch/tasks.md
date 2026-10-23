@@ -103,9 +103,17 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       snapshot test with a commit between statements and its control handle; DT-1 failures; the handle's type),
       `postgres-database.ts` (a test-only adapter over `postgres`: one `REPEATABLE READ READ ONLY` transaction per
       read, DB-2's mapping with a lossless `jsonb` parser). 19 deliberately wrong variants of the two source files
-      were each caught. Coverage 100 % lines and branches on both files (`src/determinism/**` floor 95/90). Q58 (open,
-      not blocking): refuse unhashable tables at migration time too (task 7.1)?
+      were each caught. Coverage 100 % lines and branches on both files (`src/determinism/**` floor 95/90). Q58 (owner
+      decision: D plus `boolean` keys) moves these refusals to startup too; its code is task 1.3.
       **Pending:** the PGlite half of A54 and A55, and A55's cross-backend comparison, re-run in task 2.2.
+
+- [ ] 1.3 Column-type rules (owner decision Q58): `src/determinism/column-rules.ts`, one table deciding for each column
+      type whether it is allowed as a value and as a key, with the reason and the alternative of `design.md` §4's
+      column-type table and a comment at each rule, used by the contents hash now and by task 7.1's migration-time
+      check; `varchar(n)` and `uuid` in the encoder; `varchar`, `uuid` and `boolean` keys in the hash; every refusal of
+      the encoder and the hash naming the table, the column and its type, with the reason and what to use instead.
+      **Acceptance:** A52; A54 on PostgreSQL (its PGlite half in task 2.2); the contents-hash half of A58 (same codes
+      and messages as startup).
 
 ## 2. Database API
 
@@ -170,8 +178,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 7. Digests
 
-- [ ] 7.1 Change capture (shadow tables and triggers) and `core-digest`; the non-deterministic-column check and the
-      `jsonb` number `CHECK` (an integer in the signed 64-bit range whose `jsonpath` `.string()` is `-?[0-9]+`, Q57).
+- [ ] 7.1 Change capture (shadow tables and triggers) and `core-digest`; the migration-time check of DT-6 through
+      `column-rules.ts` (no primary key, key and column types, sequences, serial and identity, floats, wall-clock and
+      random defaults; Q58), and the `jsonb` and `numeric` `CHECK`s, arrays included (a `jsonb` number: an integer in
+      the signed 64-bit range whose `jsonpath` `.string()` is `-?[0-9]+`, Q57; a `numeric`: `scale(c) = 0 AND c <>
+      'NaN'`).
       **Acceptance:** A56 including its negative control, A57, A58.
 
 ## 8. Admin endpoints

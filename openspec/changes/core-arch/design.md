@@ -99,9 +99,16 @@ interface BlockSource {
   `core-ledger-state` offers `persist(key)` this way (LG-13).
 - **`TRUNCATE`.** Every public module table gets a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger raising
   `truncate-not-allowed` (DB-14).
-- **`jsonb` values (DT-6).** `core_chain.jsonb_numbers_ok(jsonb)` (immutable; a `jsonpath` finding any number outside
-  the signed 64-bit range or whose text, `.string()`, is not `-?[0-9]+`, so `1.0` fails too, Q57) backs a `CHECK` added
-  to every `jsonb` column of a public module table.
+- **Column types and stored values (DT-1, DT-2, DT-6, Q57, Q58).** One table of rules,
+  `src/determinism/column-rules.ts`, decides for each column of a public table whether its type is allowed as a value
+  and as a key, with the reason and the alternative of the column-type table below; the contents hash (DT-3) and the
+  migration-time check (DT-6) both use it, so a refusal reads the same in both, and each rule carries a comment with its
+  reason. It reads the catalog: `format_type(atttypid, atttypmod)` for the message, the type's base name for the rule,
+  `numeric`'s declared scale from the type modifier, and `pg_type.typtype` for enums, domains and composite types.
+  `core_chain.jsonb_numbers_ok(jsonb)` (immutable; a `jsonpath` finding any number outside the signed 64-bit range or
+  whose text, `.string()`, is not `-?[0-9]+`, so `1.0` fails too, Q57) and `core_chain.numeric_ok(numeric)` (`scale(c) =
+  0 AND c <> 'NaN'`; `scale('NaN')` is null, so `NaN` fails too; verified on PostgreSQL 17.11 and PGlite 0.5.10), with
+  array forms for `jsonb[]` and `numeric[]`, back a `CHECK` on every such column of a public module table.
 - **Migrations and setup (DB-9, DB-10).** `core_chain.migrations`; checksum = SHA-256 of the UTF-8 SQL; per part and
   module, pending migrations each in their own transaction with their row, then `on-start-db` in its own transaction.
   Upgrade migrations only add — a module obligation (Q46); `requiresResync` versions are refused on a non-empty
@@ -129,6 +136,37 @@ interface BlockSource {
   `core_digest.digests` and deletes the shadow rows, inside the block transaction.
 - **Errors.** `UmbraError { code, retryable, details }`, keeping the 0.9.5 retryable split
   (`design/design-interfaces.md` §1.1); a lost connection is `connection-lost` (retryable).
+
+**Column types (Q58).** Every refusal names the module, the table, the column and its declared type, then the reason
+and the alternative of its row. A table without a primary key is refused with `no-primary-key`: rows are hashed and
+digested in primary-key order (DT-2), and without a key there is no order every database agrees on; add a primary key of
+the key types below. A sequence, `serial` or identity column is refused with `non-deterministic-column`: a sequence
+never rolls back, so its next value depends on rolled-back and retried blocks, not only on the chain; derive keys from
+the block (height, transaction index). A wall-clock or random default (`now()`, `random()`, `gen_random_uuid()`) is
+refused with `non-deterministic-column`: each machine gets a different value; compute the value from the block in
+`on-db-write`.
+
+| Type | As a value | As a key | Refused because / use instead |
+|---|---|---|---|
+| `smallint`, `integer`, `bigint` | integer | yes, numerically | — |
+| `numeric`, `numeric(p)`, `numeric(p,0)` | canonical integer text; the `CHECK` refuses a fraction or `NaN` | no | As a key: DT-2 orders keys by value or by bytes, and a `numeric`'s text does not sort by value; use `bigint`, or `bytea` holding a fixed-width big-endian unsigned value |
+| `numeric(p,s)`, s > 0 | refused | refused | Every value prints with s decimals (`100` → `100.00`), and stored numbers are integers so that equal hashes mean equal query results (Q57); store integer smallest units in `numeric(p)` or `bigint` |
+| `bytea` | byte string | yes, by bytes | — |
+| `text`, `varchar(n)` | text string | yes, by bytes (`COLLATE "C"`) | — |
+| `uuid` | byte string of its 16 bytes | yes, by bytes | — (a `gen_random_uuid()` default is still refused as random) |
+| `boolean` | `false` / `true` | yes, `false` first | — |
+| `jsonb` | CBOR, map keys sorted; the `CHECK` on numbers | no | As a key: PostgreSQL's `jsonb` order (by kind, then size, then contents) is not the order of the encoded bytes; use a `text` or `bytea` key |
+| arrays of the value types above | array | no | As a key: PostgreSQL compares arrays element by element, while the encoding puts the length first; use a composite key |
+| `real`, `double precision` | refused (`non-deterministic-column`) | refused | Approximate: a value computed two ways (`0.1 + 0.2`, `0.3`) can differ in its last bits; use integers in fixed units (`bigint`, `numeric(p)`) |
+| `timestamptz`, `timestamp`, `date`, `time`, `timetz`, `interval` | refused | refused | The drivers return a JavaScript `Date`, which keeps milliseconds only (`10:00:00.123456` and `10:00:00.123999` read back equal), and the text depends on `TimeZone`, `DateStyle` and `IntervalStyle`; store `bigint` milliseconds since the epoch, as `core_block_commit.blocks.block_timestamp_ms` does |
+| `json` | refused | refused | PostgreSQL keeps `json`'s input text (spaces, key order, duplicate keys), but the drivers parse it, so different stored texts read back equal; use `jsonb` |
+| `char(n)` | refused | refused | Stored padded with spaces, compared ignoring them and cast to `text` without them, so its value depends on how it is read; use `text` or `varchar(n)` |
+| `money` | refused | refused | Its text depends on the `lc_monetary` setting; use `bigint` smallest units |
+| enums, domains, composite types | refused | refused | User-defined: their labels, base type or fields live in the catalog, not in the row, and no rule here covers them; use the base type (`text` with a `CHECK` for an enum or a domain, separate columns for a composite) |
+| any other type (network, bit-string, XML, geometric, range, full-text, …) | refused | refused | No canonical encoding is defined; the supported types are those above |
+
+The reasons for the time types, `json`, `char(n)` and `numeric(p,s)` were checked on PGlite 0.5.10 and PostgreSQL 17.11
+(2026-10-23, the decision record's Q58).
 
 ## 5. Ledger
 
@@ -347,12 +385,13 @@ per-block tables are append-only and partitioned by height range; no table store
 
 **Startup refuses** (state `refused`, live, not ready), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,
 `changes-past`, `missing-entry`, `not-plain-data`, `invalid-configuration`, `upgrade-required`, `requires-resync`,
-`migration-checksum-changed`, `migration-missing`, `migration-failed`, `non-deterministic-column` (DT-6),
-`shared-item-migrations-differ`, `unknown-point`, `reserved-prefix`, `bad-id`, `schema-collision`, `item-no-provider`,
-`providers-overlap`, `graph-cycle`, `item-not-available`, `no-requirement`, `cannot-start-mid-chain`,
-`process-item-missing`, `duplicate-api-route`, `development-opt-in-required`, `needs-lockstep-not-listed`,
-`private-binding-mismatch`, `test-key-conflict`, `package-hash-mismatch`, `writer-lock-held`, `durability-fsync-off`,
-`durability-pooler`, `durability-full-page-writes-off`, and the snapshot import checks (`snapshot-format-unknown`,
+`migration-checksum-changed`, `migration-missing`, `migration-failed`, `non-deterministic-column`, `no-primary-key`,
+`unsupported-key-type`, `unsupported-column-type` (DT-6, Q58), `shared-item-migrations-differ`, `unknown-point`,
+`reserved-prefix`, `bad-id`, `schema-collision`, `item-no-provider`, `providers-overlap`, `graph-cycle`,
+`item-not-available`, `no-requirement`, `cannot-start-mid-chain`, `process-item-missing`, `duplicate-api-route`,
+`development-opt-in-required`, `needs-lockstep-not-listed`, `private-binding-mismatch`, `test-key-conflict`,
+`package-hash-mismatch`, `writer-lock-held`, `durability-fsync-off`, `durability-pooler`,
+`durability-full-page-writes-off`, and the snapshot import checks (`snapshot-format-unknown`,
 `snapshot-history-mismatch`, `snapshot-build-mismatch`, `contents-hash-mismatch`, `snapshot-genesis-mismatch`,
 `snapshot-block-not-finalized`, `snapshot-root-mismatch`, `snapshot-target-not-empty`, `snapshot-import-interrupted`).
 

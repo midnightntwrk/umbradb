@@ -199,11 +199,12 @@ release assets that CI downloads and verifies.
 
 - **A52** `[CI]` The encoder's output equals RFC 8949 Appendix A for every example in its subset (integers 0, 1, 10,
   23, 24, 100, 1000, 1000000, 1000000000000, 18446744073709551615, −1, −10, −100, −1000; text and byte strings; arrays
-  and maps). (DT-1)
+  and maps); a `varchar` value encodes as the same text string and a `uuid` as a byte string of its 16 bytes (Q58).
+  (DT-1)
 - **A53** `[PROP]` For random `jsonb` objects, encoded map keys are in RFC 8949 §4.2.1 order and the encoding is
   independent of insertion order; `numeric` values with a fraction and non-integer JSON numbers fail to encode. (DT-1)
-- **A54** `[DIFF]` Tables with `text`, `bytea` and `bigint` primary keys list rows in the same order on both backends,
-  matching DT-2 (e.g. `"B" < "a" < "b"`). (DT-2)
+- **A54** `[DIFF]` Tables with `text`, `varchar`, `bytea`, `uuid`, `boolean` and `bigint` primary keys list rows in the
+  same order on both backends, matching DT-2 (e.g. `"B" < "a" < "b"`, `false` before `true`). (DT-2)
 - **A55** `[DIFF]` The same rows give the same contents hash on both backends; changing one byte of one row changes it.
   (DT-3)
 - **A56** `[PROP]` For random sequences of inserts, updates, deletes and same-value rewrites within one block, the
@@ -213,9 +214,14 @@ release assets that CI downloads and verifies.
 - **A57** `[CI]` Two chains differing only in one module's value at height 7 give equal digests up to 6 and different
   digests from 7; the digest at a height with no change equals `SHA-256(previous ‖ CBOR([]))`. (DT-5)
 - **A58** `[CI]` A migration creating a `serial`, identity, floating-point, or `now()`/`random()`-defaulted column in a
-  public module table refuses startup with `non-deterministic-column`; a module without `digest` writing `{"x": 1.5}`,
-  `{"x": 1.0}` or `{"x": 100.00}` (Q57), or a JSON integer beyond the signed 64-bit range, to a `jsonb` column fails
-  the block; `{"x": 2}` and `{"x": 1e2}` (stored as `100`) succeed; on both backends. (DT-6)
+  public module table refuses startup with `non-deterministic-column`; a table without a primary key with
+  `no-primary-key`; a `numeric`, `jsonb` or array key with `unsupported-key-type`; a `numeric(38,2)`, `timestamptz`,
+  `json`, `char(4)`, `money`, enum or domain column with `unsupported-column-type`. Each message names the module, the
+  table, the column and its type, and gives the reason and the alternative of `design.md` §4's column-type table; the
+  contents hash refuses the same tables with the same codes and messages (Q58). A module without `digest` writing `{"x":
+  1.5}`, `{"x": 1.0}` or `{"x": 100.00}` (Q57), or a JSON integer beyond the signed 64-bit range, to a `jsonb` column,
+  or such a number inside a `jsonb[]`, fails the block, and so does `100.00`, `1.5` or `NaN` in a `numeric` or
+  `numeric[]` column; `{"x": 2}`, `{"x": 1e2}` (stored as `100`) and `100` succeed; on both backends. (DT-6)
 
 ## 7. Storage helpers
 
