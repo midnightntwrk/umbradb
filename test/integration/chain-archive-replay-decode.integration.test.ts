@@ -4,6 +4,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
 import { PgChainArchiveStore } from "../../src/postgres/chain-archive-store.js";
 import { bootstrapChainArchiveSchema } from "../../chain-archive-sync/bootstrap.js";
@@ -153,7 +154,7 @@ describe.skipIf(!LEDGER_AVAILABLE || !GROUND_TRUTH_AVAILABLE)(
       zswapTx = readTxRow(zswapId);
       unshieldedDustTx = readTxRow(unshieldedId);
 
-      container = await new PostgreSqlContainer("postgres:17-alpine").start();
+      container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
       sql = createClient({ connectionString: container.getConnectionUri(), schema: SCHEMA });
       await bootstrapChainArchiveSchema(sql, SCHEMA);
       store = new PgChainArchiveStore(sql, SCHEMA);

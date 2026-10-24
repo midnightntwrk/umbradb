@@ -1,12 +1,13 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import postgres, { type Sql } from "postgres";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import type { Database } from "../../src/db/api.js";
 import { openPostgres, type PostgresOptions } from "../../src/db/postgres.js";
 
 /**
- * A PostgreSQL 17 server for the database API's tests (`postgres:17-alpine` through Testcontainers, which maps it to a
- * random free host port — Docker's ephemeral range, above 32768 — and removes the container when {@link
- * PostgresTestServer.stop} runs).
+ * A PostgreSQL 18 server for the database API's tests (the repository's one image, `../postgres-image.ts`, through
+ * Testcontainers, which maps it to a random free host port — Docker's ephemeral range, above 32768 — and removes the
+ * container when {@link PostgresTestServer.stop} runs).
  *
  * Each test gets a fresh database (`CREATE DATABASE`). Setup and fault injection go through `admin`, a plain `postgres`
  * 3.4.9 connection that is not the database API; the database under test is opened with {@link
@@ -27,7 +28,7 @@ export interface PostgresTestDatabase {
   terminate(pid: number): Promise<void>;
 }
 
-/** A PostgreSQL 17 server that hands out empty databases. */
+/** A PostgreSQL 18 server that hands out empty databases. */
 export interface PostgresTestServer {
   readonly container: StartedPostgreSqlContainer;
   createDatabase(): Promise<PostgresTestDatabase>;
@@ -38,7 +39,7 @@ const noCommittedHeight = async (): Promise<bigint | null> => null;
 
 export async function startPostgresServer(): Promise<PostgresTestServer> {
   // Each test database holds an admin connection and the API's own (a writer and its readers): room for many databases.
-  const container = await new PostgreSqlContainer("postgres:17-alpine")
+  const container = await new PostgreSqlContainer(POSTGRES_IMAGE)
     .withCommand(["postgres", "-c", "max_connections=400"])
     .start();
   const root = postgres(container.getConnectionUri(), { max: 1, onnotice: () => undefined });

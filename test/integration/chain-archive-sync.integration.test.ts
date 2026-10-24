@@ -1,5 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
 import { bootstrapChainArchiveSchema } from "../../chain-archive-sync/bootstrap.js";
 import { ChainArchiveSyncService } from "../../chain-archive-sync/sync-service.js";
@@ -52,7 +53,7 @@ describe.skipIf(!up)("ChainArchiveSyncService against the live local devnet (rea
   let sql: UmbraDBSql;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:17-alpine").start();
+    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
     sql = createClient({ connectionString: container.getConnectionUri(), schema: "chain_archive" });
     // The "real invocation path" (task requirement 1): bootstraps the chain_archive schema via
     // runMigrations(sql, { schema, migrations: chainArchiveMigrations }), exercised here against

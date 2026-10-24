@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterEach, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../../postgres-image.js";
 import { PgCheckpointStore } from "../../../src/postgres/checkpoint-store.js";
 import { createClient, type UmbraDBSql } from "../../../src/postgres/client.js";
 import { runMigrations } from "../../../src/postgres/migrate.js";
@@ -664,7 +665,7 @@ describe("T5 keystone — a crash between data and cursor never leaves the water
     // A DEDICATED container with SERVER-LEVEL synchronous_commit=off (`design.md` §1.3 sanctions
     // "the container started with -c synchronous_commit=off"). Killing THIS container's postmaster
     // uncleanly cannot disturb the shared container the other legs use.
-    const container: StartedPostgreSqlContainer = await new PostgreSqlContainer("postgres:17-alpine")
+    const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(POSTGRES_IMAGE)
       .withCommand(["postgres", "-c", "synchronous_commit=off"])
       .start();
     const localPools: UmbraDBSql[] = [];

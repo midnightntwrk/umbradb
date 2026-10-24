@@ -42,8 +42,8 @@ Keys are addressed by namespace, scope and key.
 Everything is imported from the package root. There is no supported deep import: the `exports` map
 exposes a single `"."`, and reaching into internals fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
 
-Node 24 or later. The package is ESM only, so `require()` will not resolve it. PostgreSQL 17 is
-tested and supported; 15 and 16 should work and are untested; below 15 will not work, because the
+Node 24 or later. The package is ESM only, so `require()` will not resolve it. PostgreSQL 18 is
+tested and supported; 15 to 17 should work and are untested; below 15 will not work, because the
 schema uses syntax introduced in 15.
 
 > **Version 0.9.5.** Under SemVer, `0.y.z` carries **no compatibility guarantee yet**. The surface is

@@ -2,21 +2,21 @@ import { execFileSync } from "node:child_process";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createClient, type UmbraDBSql } from "../src/postgres/client.js";
 import { runMigrations } from "../src/postgres/migrate.js";
+import { POSTGRES_IMAGE } from "../test/postgres-image.js";
 
 /** The bench schema — isolated from the test suite's `umbradb_test` so a bench run never collides
  *  with a test container reusing the same daemon. */
 export const BENCH_SCHEMA = "umbradb_bench";
 
 /**
- * Pinned Postgres image (`design.md` §4), pinned by DIGEST. This `postgres@sha256:742f40…2193` is
- * the exact 17-alpine image that produced the committed baseline, resolved from the local image
- * (`docker image inspect postgres:17-alpine` — its RepoDigest). The Testcontainers container now
- * STARTS from this digest, so the pin is enforced at run time rather than merely recorded after the
- * fact. The resolved local image id is still captured into the baseline's
- * `environment.postgresImageId` as corroboration. See `Performance/CEILINGS.md` for the pinning note.
+ * Pinned Postgres image (`design.md` §4), pinned by DIGEST: the repository's one PostgreSQL image,
+ * `test/postgres-image.ts` (PostgreSQL 18; owner decision Q82, `openspec/changes/core-arch` A148).
+ * The Testcontainers container STARTS from this digest, so the pin is enforced at run time rather
+ * than merely recorded after the fact. The resolved local image id is still captured into the
+ * baseline's `environment.postgresImageId` as corroboration. The committed baseline was measured on
+ * the 17-alpine digest it records, before Q82; see `Performance/CEILINGS.md` for the pinning note.
  */
-export const POSTGRES_IMAGE =
-  "postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193";
+export { POSTGRES_IMAGE };
 
 /** Server settings pinned for run-to-run comparability (`design.md` §4). */
 export const PG_SETTINGS = {
@@ -35,7 +35,7 @@ export interface BenchEnv {
 }
 
 /**
- * Start a Testcontainers PG17 with the pinned image + settings, connect via UmbraDB's own
+ * Start a Testcontainers PostgreSQL 18 with the pinned image + settings, connect via UmbraDB's own
  * {@link createClient} (so `types.bigint`/`search_path` are configured exactly as production), and
  * run every migration (000..006, including IS-1 `005` fillfactor + IS-2 `006` size_bytes). The
  * bench drives UmbraDB's OWN adapters against this real Postgres — never a consumer/indexer app

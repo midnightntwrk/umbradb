@@ -7,7 +7,7 @@ import { calledNames, parseSource, REPOSITORY, typeScriptFiles } from "./source-
 
 /**
  * A138's first half (task 2.2a, owner decision Q69): the suite `test/deterministic-postgresql/` runs every rule of
- * `design.md` §4's component table on PostgreSQL 17 and on PGlite. Some rows are built by later tasks; this file is
+ * `design.md` §4's component table on PostgreSQL 18 and on PGlite. Some rows are built by later tasks; this file is
  * where the suite says, row by row, which of its files run the rules built so far and which task builds the rest. A
  * task that builds a row's part moves it from `pending` to `tests` here, with the suite files that run it; a part
  * left pending after its task is checked in `tasks.md` fails this test, and so does a row of the design that this
@@ -174,9 +174,9 @@ describe("A138: the suite runs every rule of design.md §4's component table on 
     expect(ROWS.map((row) => [row.rule, row.requirement])).toEqual(table.rows.map(([rule, requirement]) => [rule, requirement]));
   });
 
-  it("runs on PostgreSQL 17 and on PGlite 0.5.10: the backend lists the suite iterates", () => {
-    expect(BACKENDS.map((backend) => backend.name)).toEqual(["PostgreSQL 17", "PGlite 0.5.10"]);
-    expect(DETERMINISM_BACKENDS.map((backend) => backend.name)).toEqual(["PostgreSQL 17", "PGlite 0.5.10"]);
+  it("runs on PostgreSQL 18 and on PGlite 0.5.10: the backend lists the suite iterates", () => {
+    expect(BACKENDS.map((backend) => backend.name)).toEqual(["PostgreSQL 18", "PGlite 0.5.10"]);
+    expect(DETERMINISM_BACKENDS.map((backend) => backend.name)).toEqual(["PostgreSQL 18", "PGlite 0.5.10"]);
   });
 
   it("runs every suite file that opens a database on both backends", () => {

@@ -2,7 +2,7 @@ import type { ConsistentRead } from "../../src/determinism/module-tables.js";
 import { startPostgresServer } from "../db/postgres-server.js";
 
 /**
- * The PostgreSQL 17 databases of the determinism suites (tasks 1.2–1.4), read through the database API's own
+ * The PostgreSQL 18 databases of the determinism suites (tasks 1.2–1.4), read through the database API's own
  * PostgreSQL backend (task 2.1, `src/db/postgres.ts`): each read is the API's read handle — one `REPEATABLE READ READ
  * ONLY` transaction, results mapped as DB-2 maps them, arrays included (docs/issues/00006). Until task 2.1 this file
  * was a test-only adapter over the `postgres` driver with its own transaction and JSON parser; that part is retired.
@@ -10,7 +10,7 @@ import { startPostgresServer } from "../db/postgres-server.js";
  * What stays here is what the API deliberately does not offer: setup SQL of several statements outside any read (the
  * API runs one statement per call; migrations are task 2.4), and the negative control of the snapshot test.
  *
- * Every test database is a fresh `CREATE DATABASE` on one PostgreSQL 17 container (`../db/postgres-server.ts`). Its
+ * Every test database is a fresh `CREATE DATABASE` on one PostgreSQL 18 container (`../db/postgres-server.ts`). Its
  * PGlite twin, behind the same interfaces, is `pglite-database.ts` (task 2.2); `backends.ts` lists both.
  */
 
@@ -27,7 +27,7 @@ export interface TestDatabase {
   readWithoutSnapshot<T>(body: (read: ConsistentRead) => Promise<T>): Promise<T>;
 }
 
-/** A PostgreSQL 17 server that hands out empty databases. */
+/** A PostgreSQL 18 server that hands out empty databases. */
 export interface TestServer {
   create(): Promise<TestDatabase>;
   stop(): Promise<void>;

@@ -1,5 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
 import { PgChainArchiveStore } from "../../src/postgres/chain-archive-store.js";
 import { BlobIntegrityError, BlobMissingError } from "../../src/interfaces/chain-archive-store.js";
@@ -7,7 +8,7 @@ import { runMigrations } from "../../src/postgres/migrate.js";
 import { chainArchiveMigrations } from "../../src/postgres/migrations/chain_archive/index.js";
 
 /**
- * Real Postgres 17 (testcontainers), not mocked -- exercises `PgChainArchiveStore`
+ * Real Postgres 18 (testcontainers), not mocked -- exercises `PgChainArchiveStore`
  * (`src/postgres/chain-archive-store.ts`) end-to-end against the actual migrated schema, mapped
  * directly to the acceptance criteria the implementation sprint's task requires:
  *
@@ -31,7 +32,7 @@ describe("PgChainArchiveStore", () => {
   const schema = "chain_archive_store_test";
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:17-alpine").start();
+    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
     sql = createClient({ connectionString: container.getConnectionUri(), schema });
     await runMigrations(sql, { schema, migrations: chainArchiveMigrations });
     store = new PgChainArchiveStore(sql, schema);

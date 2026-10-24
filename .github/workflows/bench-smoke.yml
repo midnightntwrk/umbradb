@@ -25,7 +25,7 @@ concurrency:
 jobs:
   bench-smoke:
     # Non-gating advisory job. Uses testcontainers (@testcontainers/postgresql), which starts its
-    # own disposable Postgres 17 container via the Docker daemon present on ubuntu-latest runners —
+    # own disposable Postgres 18 container via the Docker daemon present on ubuntu-latest runners —
     # no `services: postgres` block is needed.
     runs-on: ubuntu-latest
     timeout-minutes: 20

@@ -24,7 +24,7 @@
  *
  * Two rows of the table give one reason to several types although it is not true of each of them (decision record
  * Q59 and Q60, 2026-10-23): the refused date and time types and the floating-point types. For those, each type gets
- * the clauses that are true of it, checked on PostgreSQL 17.11 and PGlite 0.5.10
+ * the clauses that are true of it, checked on PostgreSQL 17.11 and 18.6 and PGlite 0.5.10
  * (`test/deterministic-postgresql/column-refusals.test.ts` checks them again through the database API). Since owner
  * decision Q74 (task 2.2b) `timestamptz` is allowed, as a value and a key, and the other date and time types are
  * refused with "use `timestamptz`, written with `Z`".
@@ -396,10 +396,11 @@ const TIME_OF_DAY: Because = {
 
 // The other date and time types: refused (Q58 kept them out; Q74 allowed `timestamptz` alone), each with the reason
 // true of it (Q59) and "use timestamptz, written with Z" (Q74). None cites the drivers' `Date` any more: the database
-// API reads every date and time value as text (DB-2, Q68). Checked on PostgreSQL 17.11 and PGlite 0.5.10 (2026-10-24):
-// a `timestamp` or a `date` turned into an instant gives a different one in each `TimeZone` (`2025-05-21 14:30:00` is
-// 1747837800 seconds since 1970 in UTC, 1747852200 in New York); `'1 day'::interval = '24 hours'::interval` and
-// `'1 mon' = '30 days'` are true while they print `1 day` and `24:00:00`.
+// API reads every date and time value as text (DB-2, Q68). Checked on PostgreSQL 17.11 and 18.6 and PGlite 0.5.10
+// (2026-10-24): a `timestamp` or a `date` turned into an instant gives a different one in each `TimeZone`
+// (`2025-05-21 14:30:00` is 1747837800 seconds since 1970 in UTC, 1747852200 in New York);
+// `'1 day'::interval = '24 hours'::interval` and `'1 mon' = '30 days'` are true while they print `1 day` and
+// `24:00:00`.
 const DATE_TIME: RefusedRule = {
   id: "date-time",
   design: {
@@ -683,8 +684,9 @@ export const DEFAULT_DESIGN = {
     "An immutable default (`'abc'`, `1 + 2`, `lower('X')`) and a stored generated column, which PostgreSQL requires " +
     "to be immutable, are allowed.",
   detection:
-    "Detection, checked on PostgreSQL 17.11 and PGlite 0.5.10: `pg_attribute.attidentity`; a default's expression " +
-    "tree (`pg_attrdef.adbin`), read as stored, as PostgreSQL's own immutability check reads it (Q62): every " +
+    "Detection, checked on PostgreSQL 17.11 and 18.6 and PGlite 0.5.10: `pg_attribute.attidentity`; a default's " +
+    "expression tree (`pg_attrdef.adbin`), read as stored, as PostgreSQL's own immutability check reads it " +
+    "(Q62): every " +
     "function id (`:funcid`, and `:opfuncid`, `:hashfuncid` and `:negfuncid` for operators, an operator stored " +
     "without one read through `pg_operator`), each looked up in `pg_proc.provolatile`; a conversion through text " +
     "(`COERCEVIAIO`: the result type's input function and the argument type's output function); a row comparison's " +
@@ -939,7 +941,7 @@ export function quoteIdentifier(name: string): string {
 // which refuses some that PostgreSQL would call immutable (decision record Q63). Everything is read as stored, without
 // PostgreSQL's constant folding, so `CASE WHEN true THEN 1 ELSE random() END` is refused although it never calls
 // random(). Aggregates, window functions and subqueries cannot be in a default (PostgreSQL refuses them there).
-// Checked on PostgreSQL 17.11 and PGlite 0.5.10 (PostgreSQL 18.6), whose trees agree.
+// Checked on PostgreSQL 17.11 and 18.6 and PGlite 0.5.10 (PostgreSQL 18.6), whose trees agree.
 
 /** A node of PostgreSQL's expression-tree text: its kind (`FUNCEXPR`, `CONST`, …) and its fields, in order. */
 export interface TreeNode {

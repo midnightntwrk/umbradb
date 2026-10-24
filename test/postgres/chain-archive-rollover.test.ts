@@ -1,5 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
 import { PgChainArchiveStore } from "../../src/postgres/chain-archive-store.js";
 import { rolloverDefaultPartition } from "../../src/postgres/chain-archive-rollover.js";
@@ -33,7 +34,7 @@ describe("AC-6: partition/rollover correctness with a real rollover event", () =
   const net = "rollover_net";
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:17-alpine").start();
+    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
     sql = createClient({ connectionString: container.getConnectionUri(), schema });
     await runMigrations(sql, { schema, migrations: chainArchiveMigrations });
   }, 120_000);

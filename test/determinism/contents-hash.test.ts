@@ -8,7 +8,7 @@ import { DETERMINISM_BACKENDS } from "./backends.js";
 import type { TestDatabase, TestServer } from "./postgres-database.js";
 
 /**
- * A55 (DT-3) on PostgreSQL 17 and on PGlite 0.5.10 (tasks 1.2 and 2.2; the cross-backend comparison is
+ * A55 (DT-3) on PostgreSQL 18 and on PGlite 0.5.10 (tasks 1.2 and 2.2; the cross-backend comparison is
  * `cross-backend.test.ts`).
  *
  * DT-3: the contents hash is SHA-256 of one canonical CBOR array holding, for each module schema and then each table

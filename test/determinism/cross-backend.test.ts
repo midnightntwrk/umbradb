@@ -6,7 +6,7 @@ import { startPostgres, type TestDatabase, type TestServer } from "./postgres-da
 
 /**
  * A55's cross-backend comparison (DT-3, DB-1; tasks 1.2 and 2.2): the same rows, written by the same SQL into a
- * PostgreSQL 17 database and a PGlite 0.5.10 database (PostgreSQL 18.6 inside), give the same contents hash — and the
+ * PostgreSQL 18 database and a PGlite 0.5.10 database (PostgreSQL 18.6 inside), give the same contents hash — and the
  * two hashes are compared with each other, not only each with an expectation. Also compared directly: A54's row
  * orders (DT-2) and A58's refusal messages (DT-6), which the per-backend suites (`module-tables.test.ts`,
  * `column-refusals.test.ts`) check against hand-written expectations on each backend.
@@ -84,7 +84,7 @@ const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 const hashOf = async (db: TestDatabase, pageSize?: number) =>
   hex(await db.read((read) => contentsHash(read, pageSize === undefined ? {} : { pageSize })));
 
-describe("A55 (DT-3) — the same rows give the same contents hash on PostgreSQL 17 and PGlite 0.5.10", () => {
+describe("A55 (DT-3) — the same rows give the same contents hash on PostgreSQL 18 and PGlite 0.5.10", () => {
   it("[[determinism.contents-hash.cross-backend]] gives equal hashes on both backends, at several page sizes", async () => {
     const [tablesOnPostgres, tablesOnPglite] = await Promise.all([
       onPostgres.read((read) => moduleTables(read)),
@@ -167,7 +167,7 @@ describe("A58 (DT-6) — the same refusal, with the same message, on both backen
     ["an infinite timestamptz", "CREATE TABLE r.t (k timestamptz PRIMARY KEY); INSERT INTO r.t VALUES ('-infinity')"],
   ];
 
-  it("refuses each case with the same code and the same message on PostgreSQL 17 and PGlite 0.5.10", async () => {
+  it("refuses each case with the same code and the same message on PostgreSQL 18 and PGlite 0.5.10", async () => {
     const refusal = async (server: TestServer, setup: string) => {
       const db = await server.create();
       await db.exec(`CREATE SCHEMA r; ${setup}`);

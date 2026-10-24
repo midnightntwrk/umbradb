@@ -1,6 +1,7 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { ISql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient } from "../../src/postgres/client.js";
 import { ValidationError } from "../../src/interfaces/storage-errors.js";
 import { MigrationLockTimeoutError, runMigrations } from "../../src/postgres/migrate.js";
@@ -11,7 +12,7 @@ import { MigrationLockTimeoutError, runMigrations } from "../../src/postgres/mig
 describe("G7 bounded migration-lock acquire (design.md §3.2)", () => {
   let container: StartedPostgreSqlContainer;
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:17-alpine").start();
+    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   }, 120_000);
   afterAll(async () => {
     await container?.stop();

@@ -1,5 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient } from "../../src/postgres/client.js";
 import { runMigrations } from "../../src/postgres/migrate.js";
 import { chainArchiveMigrations } from "../../src/postgres/migrations/chain_archive/index.js";
@@ -20,7 +21,7 @@ import {
  * checks) and were silently mislabeled the same way -- actively misleading anyone debugging a
  * real chain-archive data-integrity failure into thinking it was a clock/NTP issue.
  *
- * These tests exercise the translator against REAL errors raised by a real Postgres 17 instance
+ * These tests exercise the translator against REAL errors raised by a real Postgres 18 instance
  * (not synthetic/mocked error objects) for each of the newly-distinguished categories, plus a
  * negative control proving `kv_history_range`'s own -- genuinely unrelated -- 23514 is untouched
  * by this fix and still resolves to `ClockRegressionError` exactly as before.
@@ -29,7 +30,7 @@ describe("translatePostgresError -- Fix 4: constraint-name-aware 23514 routing",
   let container: StartedPostgreSqlContainer;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:17-alpine").start();
+    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   }, 120_000);
 
   afterAll(async () => {

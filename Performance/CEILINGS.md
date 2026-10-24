@@ -16,12 +16,16 @@ schema-conforming artifact; no latency/throughput number is compared.
 
 ## Environment pinning (for reproduction)
 
-- **Image**: pinned by **digest** —
-  `postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193`, the exact
-  17-alpine image that produced this baseline (resolved from the local image's RepoDigest). The
-  harness container **starts from this digest** (`bench/environment.ts`), so the pin is enforced at
-  run time rather than merely recorded after the fact; the resolved local image id is additionally
-  recorded in the baseline's `environment.postgresImageId` as corroboration.
+- **Image**: pinned by **digest**. This baseline was produced on
+  `postgres@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193`, a 17-alpine
+  image (PostgreSQL 17.10; resolved from the local image's RepoDigest and recorded in the
+  baseline's `environment`). Since owner decision Q82 (`openspec/changes/core-arch` task 0.4,
+  acceptance A148) the harness container **starts from** the repository's one PostgreSQL image,
+  `test/postgres-image.ts` (`postgres:18-alpine`, PostgreSQL 18.6, pinned by digest;
+  `bench/environment.ts`), so the pin is enforced at run time and a re-run reproduces the
+  baseline's structure on PostgreSQL 18, not its image. The baseline and its workloads are retired
+  by that change (its `design.md` §13). The resolved local image id is additionally recorded in the
+  baseline's `environment.postgresImageId` as corroboration.
 - **Server settings** (pinned for run-to-run comparability): `shared_buffers=256MB`,
   `work_mem=16MB`, `max_wal_size=2GB`, `max_parallel_workers_per_gather=0`.
 - **Microbench library**: `tinybench` (an explicit UmbraDB `devDependency`, warmup-aware; NOT the

@@ -57,12 +57,30 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       with their SHA-256.
       **Acceptance:** each tape replays against the tape node and its SHA-256 matches; the boundary data is recorded
       with its source. (Runs after task 9.2.)
-- [ ] 0.4 PostgreSQL 18 everywhere (owner decision Q82): every `postgres:17-alpine` pin (test setups, Testcontainers
+- [x] 0.4 PostgreSQL 18 everywhere (owner decision Q82): every `postgres:17-alpine` pin (test setups, Testcontainers
       helpers, benchmarks, the pack smoke test, design documents that name the image) becomes one pinned
       `postgres:18-alpine`, through the supply-chain gate's image-pin agreement; the facts §14 records as checked on
       PostgreSQL 17.11 are re-checked on 18 by the suites that rely on them; the 0.9.5 durability probe's facts too.
       Runs after 2.2b (owner, 2026-10-24).
       **Acceptance:** A148.
+      **Done (2026-10-24):** one pin, `test/postgres-image.ts`'s `POSTGRES_IMAGE` =
+      `postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873` (the official image's
+      index, PostgreSQL 18.6 on Alpine 3.24.2, the tag's build of 2026-09-21, 33 days old when pinned), taken by every
+      `new PostgreSqlContainer(…)`: 15 test files, `bench/environment.ts` (its 17 digest replaced) and
+      `test/smoke/pack-install.mjs`. The supply-chain gate's image-pin agreement step holds the same pin
+      (`EXP_POSTGRES`) and checks `test/postgres-image.ts` against it. A148's test,
+      `test/dependencies/postgres-image.test.ts` (8; seen failing first, naming the 16 `postgres:17-alpine` files and the
+      bench's digest), fails on any other PostgreSQL image named in a code or configuration file and on a container
+      started from anything but the constant; its negative controls plant a second pin (another digest, `17-alpine`, a
+      tag without a digest, a registry path, a digest without a tag, another `EXP_POSTGRES`) and each is caught. The
+      §14 facts re-checked on PostgreSQL 18.6 by the suites that rely on them, and the row that had no PostgreSQL
+      test by a new `test/dependencies/postgresql.test.ts` (12: `SET LOCAL ROLE`, `SECURITY DEFINER` with the `pg_temp`
+      control, triggers, the `TRUNCATE` refusal, the `jsonpath` check and `.string()`, `REPEATABLE READ READ ONLY`,
+      advisory locks); the 0.9.5 durability probe (12) and the crash suites pass on 18. Nothing behaved differently from
+      17. `npm run test:conformance` green on 18: 1,343 tests passed, 17 skipped (the environment-gated ones), 25/25
+      required ids; the pack smoke test passes on 18. §4's detection sentence and §14's rows say what was re-checked;
+      the 0.9.5 research documents under `design/` keep naming the image they were run on (history; nothing reads
+      them). The CI run is pending until the branch is pushed (Phase 3).
 
 ## 1. Determinism primitives
 

@@ -12,7 +12,7 @@ import { runWatermarkWorkloads } from "./workloads/watermarks.js";
 
 /**
  * G14 benchmark harness entrypoint (`design.md` §4/§5). Drives UmbraDB's OWN adapters against a
- * pinned Testcontainers PG17 and emits the committed baseline artifact. Run via `npm run bench`.
+ * pinned Testcontainers PostgreSQL 18 and emits the committed baseline artifact. Run via `npm run bench`.
  *
  * The gate is the ARTIFACT'S EXISTENCE + STRUCTURAL reproducibility, never a number: re-running at
  * {@link HARNESS_VERSION} against the same image + settings emits a schema-conforming artifact; no

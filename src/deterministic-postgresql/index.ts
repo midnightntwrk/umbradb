@@ -1,7 +1,7 @@
 /**
  * The `deterministic_postgresql` component (`openspec/changes/core-arch/design.md` §1 and §4, owner decision Q69):
  * every rule UmbraDB imposes on PostgreSQL, so that two databases fed the same chain hold, hash and read back the same
- * values. It imports nothing else of `src/`, so it is tested alone (`test/deterministic-postgresql/`, on PostgreSQL 17
+ * values. It imports nothing else of `src/`, so it is tested alone (`test/deterministic-postgresql/`, on PostgreSQL 18
  * and on PGlite); `src/db/` and `src/determinism/` take every rule from this entry and repeat none (A138).
  *
  * Where each row of §4's component table is, and where the rows still to be built go:

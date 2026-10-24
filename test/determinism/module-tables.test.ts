@@ -11,7 +11,7 @@ import { DETERMINISM_BACKENDS } from "./backends.js";
 import type { TestDatabase, TestServer } from "./postgres-database.js";
 
 /**
- * A54 (DT-2) and the table list of DT-3, on PostgreSQL 17 and on PGlite 0.5.10 (tasks 1.2, 1.3 and 2.2; the two
+ * A54 (DT-2) and the table list of DT-3, on PostgreSQL 18 and on PGlite 0.5.10 (tasks 1.2, 1.3 and 2.2; the two
  * backends' row orders are also compared directly in `cross-backend.test.ts`).
  *
  * DT-2: rows are ordered by their primary-key columns in order, integers numerically, `boolean` with `false` first, and

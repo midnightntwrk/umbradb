@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
 import { runMigrations } from "../../src/postgres/migrate.js";
 
@@ -23,7 +24,7 @@ let adminSql: UmbraDBSql;
 export const TEST_SCHEMA = "umbradb_test";
 
 export async function startTestDatabase(): Promise<UmbraDBSql> {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   adminSql = createClient({ connectionString: container.getConnectionUri(), schema: TEST_SCHEMA, maxConnections: 5 });
   await runMigrations(adminSql, { schema: TEST_SCHEMA });
   return adminSql;
@@ -122,7 +123,7 @@ export async function backendPid(sql: UmbraDBSql): Promise<number> {
  * occasionally succeed (a flaky required gate). This function makes termination DETERMINISTIC:
  *   1. it calls the PG14+ TWO-arg `pg_terminate_backend(pid, timeout_ms)` with a POSITIVE timeout —
  *      Postgres then WAITS for the backend to actually terminate and returns true ONLY once it is
- *      gone (PG17 / `postgres:17-alpine` supports it); and
+ *      gone (the pinned PostgreSQL 18 image, `../postgres-image.ts`, supports it); and
  *   2. it additionally POLLS `pg_stat_activity` until the backend row has DISAPPEARED, a POSITIVE
  *      proof of death, bounded by {@link waitForBackendGone} so it never hangs.
  * So when this resolves the target backend is PROVABLY dead, and a caller may release work that

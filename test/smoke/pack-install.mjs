@@ -162,7 +162,9 @@ async function dockerIndependentOracles() {
 /** Docker-DEPENDENT oracle (5): migrate + put/get round-trip against a Testcontainers Postgres. */
 async function roundTripOracle() {
   const { PostgreSqlContainer } = await import("@testcontainers/postgresql");
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  // The repository's one PostgreSQL image (owner decision Q82, A148), read by Node's own TypeScript type stripping.
+  const { POSTGRES_IMAGE } = await import("../postgres-image.ts");
+  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   const connectionUri = container.getConnectionUri();
 
   writeFileSync(

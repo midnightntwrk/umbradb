@@ -8,6 +8,7 @@ import {
   DEFAULT_STATEMENT_TIMEOUT_MS,
   type UmbraDBSql,
 } from "../../src/postgres/client.js";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { PgTransactionLeaseLayer } from "../../src/postgres/transaction-lease.js";
 
 // G7 task 2.1 — bounded server-side timeouts on every UmbraDB connection
@@ -18,7 +19,7 @@ const TEST_SCHEMA = "umbradb_test";
 describe("G7 server-side timeouts (design.md §3.1, task 2.1)", () => {
   let container: StartedPostgreSqlContainer;
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:17-alpine").start();
+    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   }, 120_000);
   afterAll(async () => {
     await container?.stop();

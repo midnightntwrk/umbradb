@@ -1,6 +1,7 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import type { ISql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
 import { runMigrations } from "../../src/postgres/migrate.js";
 import {
@@ -29,7 +30,7 @@ import {
 const TEST_SCHEMA = "umbradb_test";
 
 async function startPg(serverArgs: string[]): Promise<StartedPostgreSqlContainer> {
-  const base = new PostgreSqlContainer("postgres:17-alpine");
+  const base = new PostgreSqlContainer(POSTGRES_IMAGE);
   return serverArgs.length > 0 ? base.withCommand(["postgres", ...serverArgs]).start() : base.start();
 }
 

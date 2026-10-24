@@ -6,7 +6,7 @@ import { RESULT_TYPES } from "../../src/deterministic-postgresql/index.js";
 import { BACKENDS, TEST_CURSOR, TEST_SCHEMA, type TestBackend, type TestDatabase } from "./backends.js";
 
 /**
- * A7 [DIFF] (DB-1): the database API gives identical query results on PostgreSQL 17 and PGlite 0.5.10 (PostgreSQL
+ * A7 [DIFF] (DB-1): the database API gives identical query results on PostgreSQL 18 and PGlite 0.5.10 (PostgreSQL
  * 18.6 inside). The same statements, with the same parameters, run on one database of each backend built by the same
  * setup, and the mapped results — every row and every value, its JavaScript type included — are compared with each
  * other (not only with an expectation), as are the rows a write affects and the errors a statement fails with (code,
@@ -193,13 +193,13 @@ async function outcome(run: () => Promise<unknown>): Promise<unknown> {
   }
 }
 
-describe("A7 (DB-1) — identical results on PostgreSQL 17 and PGlite 0.5.10", () => {
+describe("A7 (DB-1) — identical results on PostgreSQL 18 and PGlite 0.5.10", () => {
   const [postgres, pglite] = BACKENDS as readonly [TestBackend, TestBackend];
   let pg: TestDatabase;
   let lite: TestDatabase;
 
   beforeAll(async () => {
-    expect([postgres.name, pglite.name]).toEqual(["PostgreSQL 17", "PGlite 0.5.10"]);
+    expect([postgres.name, pglite.name]).toEqual(["PostgreSQL 18", "PGlite 0.5.10"]);
     await Promise.all([postgres.start(), pglite.start()]);
     [pg, lite] = await Promise.all([postgres.database(SETUP, TEST_CURSOR), pglite.database(SETUP, TEST_CURSOR)]);
   }, 180_000);

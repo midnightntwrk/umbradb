@@ -1,6 +1,7 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { ConnectionError } from "../../src/interfaces/storage-errors.js";
 import { assertValidSchemaName, createClient, type UmbraDBSql } from "../../src/postgres/client.js";
 import { ExclusionViolationError, translatePostgresError } from "../../src/postgres/errors.js";
@@ -10,7 +11,7 @@ describe("runMigrations", () => {
   let container: StartedPostgreSqlContainer;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:17-alpine").start();
+    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   }, 120_000);
 
   afterAll(async () => {
@@ -65,7 +66,7 @@ describe("runMigrations", () => {
     // all -- the test would pass even against a reverted fix. A FRESH, dedicated container
     // (btree_gist genuinely not yet installed) is required to actually exercise the slow
     // first-time installation path where the original race lived.
-    const freshContainer = await new PostgreSqlContainer("postgres:17-alpine").start();
+    const freshContainer = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
     try {
       const schemaA = "ext_race_a";
       const schemaB = "ext_race_b";
@@ -221,7 +222,7 @@ describe("error translation (design.md §4a)", () => {
   }, 10_000);
 
   it("a kv_history_no_overlap violation is identified by SQLSTATE 23P01, not 23505", async () => {
-    const container2 = await new PostgreSqlContainer("postgres:17-alpine").start();
+    const container2 = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
     let sql: UmbraDBSql | undefined;
     try {
       const schema = "exclusion_test";

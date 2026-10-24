@@ -3,7 +3,7 @@ import { type PgliteTestServer, startPgliteServer } from "./pglite-server.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
 /**
- * The backends the database API's backend-neutral tests run on (DB-1, A7): PostgreSQL 17 (task 2.1) and PGlite 0.5.10
+ * The backends the database API's backend-neutral tests run on (DB-1, A7): PostgreSQL 18 (task 2.1) and PGlite 0.5.10
  * (task 2.2). Every suite that iterates {@link BACKENDS} runs on both.
  */
 export interface TestBackend {
@@ -34,7 +34,7 @@ export interface TestDatabase {
 function postgresBackend(): TestBackend {
   let server: PostgresTestServer | undefined;
   return {
-    name: "PostgreSQL 17",
+    name: "PostgreSQL 18",
     singleQueue: false,
     async start() {
       server = await startPostgresServer();

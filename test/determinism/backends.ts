@@ -9,8 +9,8 @@ export interface DeterminismBackend {
   start(): Promise<TestServer>;
 }
 
-/** PostgreSQL 17 (task 2.1's backend) and PGlite 0.5.10 (task 2.2's): every suite that iterates them runs on both. */
+/** PostgreSQL 18 (task 2.1's backend) and PGlite 0.5.10 (task 2.2's): every suite that iterates them runs on both. */
 export const DETERMINISM_BACKENDS: readonly DeterminismBackend[] = [
-  { name: "PostgreSQL 17", singleQueue: false, start: startPostgres },
+  { name: "PostgreSQL 18", singleQueue: false, start: startPostgres },
   { name: "PGlite 0.5.10", singleQueue: true, start: startPglite },
 ];

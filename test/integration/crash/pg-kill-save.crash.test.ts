@@ -407,7 +407,7 @@ describe("Postgres-kill mid-save surfaces a typed error + the retry-duplication 
     expect(await manifestRowCountAtSeq(getSql(), walletId, networkId, 2)).toBe(0);
 
     // ---- Step 3: KILL Postgres (the worker's backend) FIRST — strictly BEFORE the failing op ------
-    // BLOCK 3 (deterministic kill, not a race): pgTerminateBackend uses the PG17 two-arg
+    // BLOCK 3 (deterministic kill, not a race): pgTerminateBackend uses the PG14+ two-arg
     // pg_terminate_backend(pid, timeout_ms) — which WAITS for actual death — AND polls
     // pg_stat_activity to death, so the SIGTERM is not merely delivered but the backend is
     // PROVABLY gone before the worker's COMMIT is ever released.

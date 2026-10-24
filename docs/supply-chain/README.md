@@ -67,6 +67,11 @@ The governing rule differs by ecosystem, because the *security value* of each pi
 - **Docker images (indexer-standalone, proof-server)** — pinned by `@sha256:` digest. Digest
   pinning gives immutability, **not** freedom from CVEs, so the images are watched by a scheduled
   Trivy scan (G18) rather than by version bumps alone. Bump = replace the digest, re-verify.
+- **PostgreSQL test image (`postgres:18-alpine`)** — pinned by `@sha256:` digest, once, in
+  `test/postgres-image.ts` (owner decision Q82); the image-pin agreement step of the supply-chain
+  gate and a conformance test keep every container on it. Bump = replace the digest there, in
+  `supply-chain.yml` (`EXP_POSTGRES`) and in `test/dependencies/postgres-image.test.ts`, with a
+  build at least 7 days old.
 - **Vendored ledger builds (`vendor/ledger/`)** — each ledger version is built in Docker from an
   exact `midnight-ledger` commit plus the patches kept in the repository, with every tool pinned (`Dockerfile`), and
   every output file is pinned by SHA-256 (`SHA256SUMS`). Bump = change the commit in `upstream.json`, rebase the
@@ -94,7 +99,7 @@ blocking/scheduled sub-gates:
    hooks, so any needed build/typecheck must be an explicit CI step — it already is.)
 4. **`gitleaks`** full git-history secret scan, allowlisting exactly the one valueless Preview
    testnet wallet path + its `.example` template.
-5. **`trivy image --severity HIGH,CRITICAL`** on **both** digest-pinned images, on a schedule, with
+5. **`trivy image --severity HIGH,CRITICAL`** on **both** digest-pinned images of the dev stack, on a schedule, with
    the scan targets asserted equal to the `flake.nix` digests so a bump cannot silently diverge.
 6. **`flake.lock` change-control** — fail any PR that changes `flake.lock` unless it carries an
    explicit `flake-lock-update` label, so an unreviewed `nix flake update` cannot land.

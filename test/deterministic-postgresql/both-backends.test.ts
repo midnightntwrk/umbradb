@@ -16,7 +16,7 @@ import { startPglite } from "../determinism/pglite-database.js";
 import { startPostgres, type TestDatabase, type TestServer } from "../determinism/postgres-database.js";
 
 /**
- * A138 (task 2.2a, owner decision Q69): the component's rules give the same results on PostgreSQL 17 and on PGlite
+ * A138 (task 2.2a, owner decision Q69): the component's rules give the same results on PostgreSQL 18 and on PGlite
  * 0.5.10 — read side by side from one fixture on each backend, through the database API's read handles, and compared
  * with each other: the catalog facts the rules read, every refusal with its message (one case of every refused row of
  * `design.md` §4's column-type table and of every refusal of its paragraph), DT-2's byte order of text keys, and the
@@ -71,7 +71,7 @@ interface Backend {
   db?: TestDatabase;
 }
 
-const BOTH: readonly Backend[] = [{ name: "PostgreSQL 17" }, { name: "PGlite 0.5.10" }];
+const BOTH: readonly Backend[] = [{ name: "PostgreSQL 18" }, { name: "PGlite 0.5.10" }];
 
 beforeAll(async () => {
   const [postgres, pglite] = BOTH as [Backend, Backend];
@@ -94,7 +94,7 @@ async function onBoth<T>(body: (read: ConsistentRead) => Promise<T>): Promise<[T
   return results as [T, T];
 }
 
-describe("A138: the component's rules give the same results on PostgreSQL 17 and PGlite 0.5.10", () => {
+describe("A138: the component's rules give the same results on PostgreSQL 18 and PGlite 0.5.10", () => {
   it("reads the same catalog facts on both", async () => {
     const [postgres, pglite] = await onBoth(async (read) => ({
       tables: await catalogTables(read),

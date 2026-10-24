@@ -1,5 +1,6 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient } from "../../src/postgres/client.js";
 import { runMigrations } from "../../src/postgres/migrate.js";
 import { chainArchiveMigrations } from "../../src/postgres/migrations/chain_archive/index.js";
@@ -8,7 +9,7 @@ import { chainArchiveMigrations } from "../../src/postgres/migrations/chain_arch
  * Closes the v3 audit's "no committed automated test for the new lineage" gap
  * (`design/full-chain-storage-design.md` §5's own note that `chainArchiveMigrations` was
  * empirically applied by hand during the v2/v3 revisions but never exercised by a committed
- * test). Real Postgres 17 via testcontainers, matching every other test in this directory —
+ * test). Real Postgres 18 via testcontainers, matching every other test in this directory —
  * not a mock, not an assertion about SQL text.
  *
  * Deliberately ONE test (not a `describe` full of small ones): the task this closes asks for a
@@ -21,7 +22,7 @@ describe("chainArchiveMigrations (design/full-chain-storage-design.md, Tier-1.5)
   let container: StartedPostgreSqlContainer;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:17-alpine").start();
+    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
   }, 120_000);
 
   afterAll(async () => {

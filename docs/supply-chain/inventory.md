@@ -12,6 +12,7 @@ locked rev is the real pin behind a range).
   hash** · 5 packages declare an install script (all dev/optional — see npm-dev note).
 - **Nix:** 6 flake inputs (5 locked + 1 source-only) · 3 pinned release binaries (sha256) ·
   2 Docker images (digest) · ~15 nixpkgs packages.
+- **Test image:** 1 Docker image (digest), the PostgreSQL of the tests, benchmarks and pack smoke test (§5).
 - **Lean:** toolchain `v4.32.0` · 9 Lake packages (mathlib + 8 transitive), each an exact git rev.
 - **Vendored ledger WASM:** 2 runtime packages (ledger v8, v9) built in this repository from pinned
   `midnight-ledger` commits plus the patches in `vendor/ledger/`, every output file pinned by SHA-256 and rebuilt
@@ -109,6 +110,15 @@ freedom — hence the scheduled Trivy scan (G18).
 |---|---|---|---|---|---|
 | `midnightntwrk/indexer-standalone` | 4.3.3 | `sha256:03afd079b00bcd229df29a24771439c5e7695c339cd89216d0763ce40731cc4b` | image digest | Standalone Midnight indexer (test infra) | G18 Trivy scan (weekly) + Midnight releases |
 | `midnightntwrk/proof-server` | 8.1.0 | `sha256:801bbc0340e9e96f16735f77b523f23c7459e3359842f7c79c2c53f4e994d531` | image digest | Midnight proof server | G18 Trivy scan + Midnight releases |
+
+The PostgreSQL image of the tests, their Testcontainers helpers, the benchmarks and the pack smoke test is pinned the
+same way, once, in `test/postgres-image.ts` (owner decision Q82, `openspec/changes/core-arch` A148). The supply-chain
+gate's image-pin agreement step checks it against the reviewed pin, and `test/dependencies/postgres-image.test.ts` fails
+if any file names another PostgreSQL image. It is test infrastructure, not in the Trivy scan.
+
+| Image | Tag | Digest | Pinning | Purpose | Update-watch |
+|---|---|---|---|---|---|
+| `postgres` (official image) | 18-alpine (PostgreSQL 18.6, Alpine 3.24.2) | `sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873` | image index digest (multi-platform) | Disposable PostgreSQL for tests, benchmarks and the pack smoke test | `docker-library/repo-info` `repos/postgres/remote/18-alpine.md`; a build at least 7 days old when bumped |
 
 ---
 

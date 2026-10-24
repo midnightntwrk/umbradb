@@ -17,7 +17,7 @@ import { DETERMINISM_BACKENDS } from "../determinism/backends.js";
 import type { TestDatabase, TestServer } from "../determinism/postgres-database.js";
 
 /**
- * Tasks 1.3 and 1.4 on PostgreSQL 17 (`postgres:17-alpine`, Testcontainers) and, since task 2.2, on PGlite 0.5.10:
+ * Tasks 1.3 and 1.4 on PostgreSQL (Testcontainers; 17 until task 0.4, 18 since) and, since task 2.2, on PGlite 0.5.10:
  * the column-type rules and DT-6's non-deterministic columns and tables read from a real catalog, and the
  * contents-hash half of A58 — the hash refuses what startup will refuse (DT-6), with the same codes and the same
  * messages (owner decisions Q58 and Q61), in every schema it hashes (Q75). The startup half is task 7.1's, which calls the same
