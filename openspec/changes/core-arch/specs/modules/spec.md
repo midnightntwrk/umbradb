@@ -11,7 +11,7 @@ processed, passed in its block context), `table` (stored in the provider's table
 THE system SHALL define a module as a TypeScript package exporting a `ModuleDeclaration` with: `id`, `version` (semver),
 `side` (`public` or `private`), `requires` (item names), `provides` (items with lifetimes and, for `table` items,
 schema, tables, kind and an optional `deterministic: false` that opts those tables out of the determinism rules — DT-3,
-DT-4, DT-6, owner decision Q76), `startsMidChain`, optional `needsLockstep`, `developmentOnly`, `digest` and `keyKinds`
+DT-4, DT-6, owner decision Q76), `startsMidChain`, optional `needsLockstep`, `developmentOnly` and `keyKinds`
 / `validateKey`, `configSchema` (a zod 4 object schema whose every property carries the metadata `kind: "data" |
 "operational" | "secret"`), `migrations` (`{ id, sql }`, cumulative), optional `ledgerTasks` (LG-17), optional
 `requiresResync` (DB-10) and `points` (callbacks by point name). Ids and item names SHALL match the pattern of DB-8. THE
@@ -52,13 +52,13 @@ startup SHALL refuse, naming the range, the module and the item.
 ### Requirement: MD-4 Modules start mid-chain only when they promise it
 
 THE system SHALL let a module start above S (the database's start height) only if it and every provider it requires
-declare `startsMidChain: true`, or the database was restored from a snapshot holding its data (project 6); otherwise
+declare `startsMidChain: true`, or the database was restored from a backup holding its data (BK-3); otherwise
 startup SHALL refuse and name the module. A module declaring `startsMidChain: true` promises that, started at any height
 h with its providers available from h, it writes for every height ≥ h exactly the rows a run from S would write.
 
 #### Scenario: A module that needs history from S
 - **WHEN** a module with `startsMidChain: false` is added with a start above S on a database not restored from a
-  snapshot
+  backup
 - **THEN** startup refuses with `cannot-start-mid-chain` and the module
 
 ### Requirement: MD-5 Development-only modules need the development opt-in

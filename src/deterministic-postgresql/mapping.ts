@@ -107,7 +107,8 @@ const parseDate = (text: string): Date => new Date(text);
  * (`"\t"`, `"\n"`, `"\u00e9"`, …) as a backslash once an earlier `JSON.parse` in the process has read the key `"\\"`
  * — whether it does depends on the strings the process already holds — so two different documents would read back
  * equal, and so would their contents hashes (found by task 2.2's differential round trip; the decision record's Q78).
- * It is a V8 bug in every Node.js 24 and 26 release: https://github.com/nodejs/node/issues/63785, fixed in V8 by
+ * It is a V8 bug in Node.js 24 (reproduced on 24.9.0, not on 24.2.0; reported upstream on 24.13.1–24.21.0) and Node.js
+ * 26 (reported on 26.3.0–26.10.0): https://github.com/nodejs/node/issues/63785, fixed in V8 by
  * commit 93cd21e (https://github.com/v8/v8/commit/93cd21e8254b65c15ff131b2dcadf19beadb559d); the Node.js backport is
  * https://github.com/nodejs/node/pull/66542. Once every Node.js version UmbraDB supports carries the fix, this reader
  * may be replaced by `JSON.parse` with a source-text reviver (`docs/issues/00007`).

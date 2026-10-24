@@ -5,7 +5,7 @@ approval). Then one task at a time, test first: write the tests for the task's c
 intended reason, implement until they pass. One task is one atomic change set; no placeholders, stubs or `TODO`s. After
 each task: `npm run typecheck` and `npm test` green, and the task checked here with the criteria it demonstrated.
 
-Order: sections 0–9 build the platform; 10–16 build the chain, ledger, contract, private, snapshot and browser parts on
+Order: sections 0–9 build the platform; 10–16 build the chain, ledger, contract, private, backup and browser parts on
 it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system checks; 19 closes out.
 
 ## 0. Pins and verification
@@ -51,12 +51,18 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       null (owner decision Q54, task 12.1). Q53 (root counts as signed changes) and Q55 (`stateKey` in
       `LedgerPackage`): owner decisions A. Proposing the patches upstream is the owner's, later (Q56).
 - [ ] 0.3 Tapes: record, with the builder of task 9.2, stagenet 0–10,000, preview 0–10,000 and a preview range across
-      the runtime 1.0.300 upgrade, mainnet ranges around 1,774,492 and 1,788,980 (from snapshots), and a local devnet
+      the runtime 1.0.300 upgrade, mainnet ranges around 1,774,492 and 1,788,980 (from backups), and a local devnet
       that starts on a v8 runtime and enacts the v9 upgrade; read each network's genesis hash, runtime at genesis and
       upgrade boundaries (U and F hashes and `MNSV`) for the built-in tables; publish the tapes as pinned release assets
       with their SHA-256.
       **Acceptance:** each tape replays against the tape node and its SHA-256 matches; the boundary data is recorded
       with its source. (Runs after task 9.2.)
+- [ ] 0.4 PostgreSQL 18 everywhere (owner decision Q82): every `postgres:17-alpine` pin (test setups, Testcontainers
+      helpers, benchmarks, the pack smoke test, design documents that name the image) becomes one pinned
+      `postgres:18-alpine`, through the supply-chain gate's image-pin agreement; the facts §14 records as checked on
+      PostgreSQL 17.11 are re-checked on 18 by the suites that rely on them; the 0.9.5 durability probe's facts too.
+      Runs next, before 2.2b.
+      **Acceptance:** A148.
 
 ## 1. Determinism primitives
 
@@ -302,8 +308,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **For tasks 2.2b, 2.3, 2.7, 3.1 and 7.1:** put each rule in the component (`index.ts` says which file), test it in
       `test/deterministic-postgresql/` on both backends, and move its part in `component-table.test.ts` from `pending`
       to `tests`.
-      **Open question (not blocking):** Q79 (where `UmbraError` lives; shipped A). The CI run is pending until the
-      branch is pushed (Phase 3).
+      **Question, since decided:** Q79 (where `UmbraError` lives): A, by the owner (2026-10-23). The CI run is pending
+      until the branch is pushed (Phase 3).
 - [ ] 2.2b Date and time (Q68, Q74) and one set of rules (Q75): values as RFC 3339 text in the component's mapping;
       `timestamptz` allowed as a value and a key (the encoder's integer microseconds since 1970, key order by time),
       the other date and time types refused with "use `timestamptz`"; the date-and-time row of `design.md` §4 split
@@ -380,14 +386,17 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 7. Digests
 
-- [ ] 7.1 Change capture (shadow tables and triggers) and `core-digest`; the migration-time check of DT-6 through
-      `column-rules.ts` (no primary key, key and column types, identity and `serial` columns, floats, defaults that are
-      not immutable, sequences and unlogged tables; Q58, Q61; the detection is task 1.4's), and the `jsonb` and
+- [ ] 7.1 Change capture (shadow tables and triggers) on every module table not declared `deterministic: false`, and
+      `core-digest` with `core_digest.tables` and the checkpoints at h mod 14,400 = 0 (Q84, Q86; a test may shorten the
+      interval only through a build flag no exported surface reaches, as A11's); the migration-time check of DT-6
+      through `column-rules.ts` (no primary key, key and column types, identity and `serial` columns, floats, defaults
+      that are not immutable, sequences and unlogged tables; Q58, Q61; the detection is task 1.4's), and the `jsonb` and
       `numeric` `CHECK`s, arrays included (a `jsonb` number: an integer in the signed 64-bit range whose `jsonpath`
-      `.string()` is `-?[0-9]+`, Q57; a `numeric`: `scale(c) = 0 AND c <> 'NaN'`); tables declared
-      `deterministic: false` skipped by the check, the `CHECK`s and change capture, and hashed by name only (Q76).
+      `.string()` is `-?[0-9]+`, Q57; a `numeric`: `coalesce(scale(c) = 0, false)`, which also refuses the infinities);
+      tables declared `deterministic: false` skipped by the check, the `CHECK`s and change capture, and hashed by name
+      only (Q76).
       **Acceptance:** A56 including its negative control, A57, A58, A147 (with 14.1 and 15.2 for its private and
-      snapshot parts).
+      backup parts).
 
 ## 8. Admin endpoints
 
@@ -463,20 +472,23 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Acceptance:** A115, A121.
 - [ ] 14.3 Lockstep and the behind-instance refusal.
       **Acceptance:** A117, A118.
-- [ ] 14.4 Test keys through the key registry (the key API is not core and leaves this change, Q70), privacy checks,
-      the private-snapshot refusal.
-      **Acceptance:** A119, A120, A122, A123.
+- [ ] 14.4 Test keys through the key registry (the key API is not core and leaves this change, Q70) and privacy checks
+      (the private-backup refusal is task 15.1's).
+      **Acceptance:** A119, A120, A123.
 
-## 15. Snapshots
+## 15. Backups
 
-- [ ] 15.1 Export (command and at stop) and the file format.
-      **Acceptance:** A124, A125.
-- [ ] 15.2 Import in place with its checks, the import marker and the final identity transaction.
-      **Acceptance:** A126, A127, A128.
+- [ ] 15.1 `umbradb backup` (command and at stop): `pg_dump` 18 on PostgreSQL in the read transaction's snapshot,
+      `pglite-tools` on PGlite in one queued job, both looked up only when the command runs (`backup-tools-missing`),
+      the manifest line; `private-backup-refused` (Q83, Q85).
+      **Acceptance:** A124, A122.
+- [ ] 15.2 `umbradb restore`: the checks before loading, the file's SQL run in one transaction, owners and grants, the
+      contents hash and state root checked before the commit; the operator guide's "restore only trusted backups".
+      **Acceptance:** A125, A126, A127, A128.
 
 ## 16. Browser
 
-- [ ] 16.1 The browser build (page, core, ledger and private workers, PGlite, Web Locks, snapshot picker) and its
+- [ ] 16.1 The browser build (page, core, ledger and private workers, PGlite, Web Locks, backup and restore) and its
       headless-Chrome tests in CI.
       **Acceptance:** A129, A130, A131, A132.
 

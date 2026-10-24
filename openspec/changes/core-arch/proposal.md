@@ -4,7 +4,7 @@
 > adversarial reviews (Codex `gpt-6-astra`), their fixes, and targeted fix checks ending in PASS. Change id `core-arch`;
 > capabilities `library-surface`, `database-api`, `modules`, `configuration`, `runner`, `determinism`,
 > `storage-helpers`, `admin-endpoints`, `test-tape`, `ingest`, `chain-data`, `ledger`, `contract-data`,
-> `private-processes`, `snapshots`, `browser`, and the removal of `temporal-kv`. Stage 2, the test-first build, is
+> `private-processes`, `backups`, `browser`, and the removal of `temporal-kv`. Stage 2, the test-first build, is
 > under way; owner decisions Q53–Q56 (2026-10-23) amend the ledger interface (signed root-count changes, `stateKey`),
 > v8 contract logs (none stored) and LG-5 (the owner proposes the patches upstream later).
 
@@ -63,8 +63,9 @@ split; this change is one feature by the owner's decision, recorded here as the 
 9. **Private processes:** binding, block intake from the public database, the process transport, independent and
    lockstep instances, the key registry with configured test keys (a key API is not core and is left to a later
    module, Q70), opt-in mutual TLS on the process transport.
-10. **Determinism tooling, snapshots and storage helpers:** the canonical encoding, contents hash, per-block digests,
-    snapshot export and import, the cursor and height-versioned tables; the `deterministic_postgresql` component that
+10. **Determinism tooling, backups and storage helpers:** the canonical encoding, contents hash, per-table digests
+    for every module table (Q84, Q86), backup and restore with `pg_dump` (Q83, Q85), the cursor and height-versioned
+    tables; the `deterministic_postgresql` component that
     holds every rule UmbraDB imposes on PostgreSQL, tested alone on both backends (Q69).
 11. **Admin endpoints** (`/health/live`, `/health/ready`, `/status`, `/config`) as the backbone parts `core-health`,
     `core-status` and `core-config` (Q70), **timeouts by connection role** with the `slow-block` condition (Q71), **the

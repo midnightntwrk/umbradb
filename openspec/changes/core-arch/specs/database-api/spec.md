@@ -11,7 +11,7 @@ THE database API SHALL offer the same operations, with the same observable resul
 SHALL be the only way the runner, backbone parts and modules reach a database.
 
 #### Scenario: Same test, two backends
-- **WHEN** the database-API conformance suite runs once on PostgreSQL 17 and once on PGlite
+- **WHEN** the database-API conformance suite runs once on PostgreSQL 18 and once on PGlite
 - **THEN** every test passes on both, with identical query results
 
 ### Requirement: DB-2 A read handle sees one committed height
@@ -113,7 +113,8 @@ another module's, another item's, or a reserved schema (`core_chain`, `core_dige
 starting with `pg_`, `information_schema`, `public`) THEN startup SHALL refuse and name both. WHERE several modules
 provide one shared item, THE database API SHALL create one schema named after the item, owned by a role named after
 the item, under which the provider active at each height writes; IF two providers of one shared item declare different
-migrations (ids or checksums) THEN startup SHALL refuse.
+migrations (ids or checksums), or one declares the item `deterministic: false` and the other does not (MD-1, Q76), THEN
+startup SHALL refuse.
 
 #### Scenario: Two providers of one item with different migrations
 - **WHEN** two test providers of item `shared-x` declare migration `001` with different SQL
@@ -229,10 +230,12 @@ the system does not check (Q46).
 
 THE database API SHALL bound each read made for a module API request (RN-15) by `apiReadTimeoutMs` (CF-4): that read
 SHALL run with `statement_timeout` and `idle_in_transaction_session_timeout` set to it for the read only, and a read
-they end SHALL fail with `query-timeout` (not retryable) and leave its connection usable. THE writer connection,
-migrations, setup and the read handles given to callbacks SHALL run with `statement_timeout`, `lock_timeout` and
-`idle_in_transaction_session_timeout` pinned to 0, whatever the server's, database's or role's defaults, because they
-run work the runner must finish; a slow block is reported (RN-17), never cut off (Q71).
+either ends SHALL fail with `query-timeout` (not retryable). A read ended by `statement_timeout` SHALL leave its
+connection usable; one ended by `idle_in_transaction_session_timeout`, which ends the session, SHALL leave the pool with
+a new connection in its place. THE writer connection, migrations, setup and the read handles given to callbacks SHALL
+run with `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` and `transaction_timeout`
+(PostgreSQL 17 and later) pinned to 0, whatever the server's, database's or role's defaults, because they run work the
+runner must finish; a slow block is reported (RN-17), never cut off (Q71).
 
 #### Scenario: A hung API query is cut off
 - **WHEN** an API request's read runs `SELECT pg_sleep(60)` with `apiReadTimeoutMs` 1000

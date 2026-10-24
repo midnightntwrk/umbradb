@@ -23,21 +23,21 @@ development opt-in.
 ### Requirement: BR-2 The browser starts at the tip
 
 WHEN the browser build creates a database, S SHALL default to the node's finalized head at that moment, recorded as S;
-a module that cannot start mid-chain SHALL be refused unless the database was restored from a snapshot the user
-supplied.
+a module that cannot start mid-chain SHALL be refused unless the database was restored from a backup the user
+supplied (BK-5).
 
-#### Scenario: Ledger state without a snapshot
-- **WHEN** `core-ledger-state` is enabled in the browser without a snapshot and S > 0
+#### Scenario: Ledger state without a backup
+- **WHEN** `core-ledger-state` is enabled in the browser without a restored backup and S > 0
 - **THEN** startup refuses and names the module
 
-### Requirement: BR-3 Only the node and a user's snapshot
+### Requirement: BR-3 Only the node and a user's backup
 
-THE browser build SHALL reach only the configured node — which must allow the page's origin (CORS) — and a snapshot
-file the user picks; the admin endpoints SHALL be calls on the core worker's message channel.
+THE browser build SHALL reach only the configured node — which must allow the page's origin (CORS) — and a backup file
+the user picks; the admin endpoints SHALL be calls on the core worker's message channel.
 
-#### Scenario: Importing a snapshot in the page
-- **WHEN** the user picks a snapshot file in the page
-- **THEN** the core imports it with every check of SN-3 and continues from its height + 1
+#### Scenario: Restoring a backup in the page
+- **WHEN** the user picks a backup file in the page
+- **THEN** the core restores it with every check of BK-3 and continues from its height + 1
 
 ### Requirement: BR-4 Same results as Node.js
 

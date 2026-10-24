@@ -196,7 +196,7 @@ emission order); store per block the state key, state root, zswap first-free ind
 generation first-free indexes and roots (`core_ledger_state.states`); store each segment's success
 (`core_ledger_state.segment_results`) and each ledger event other than logs with its kind, segments, bytes and the
 extracted nullifier, commitment, tree index and contract address (`core_ledger_state.events`). It SHALL NOT start
-mid-chain: it needs history from genesis or a snapshot.
+mid-chain: it needs history from genesis or a backup (BK-3).
 
 #### Scenario: A partially successful transaction
 - **WHEN** a transaction's guaranteed segment succeeds and one fallible segment fails

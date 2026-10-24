@@ -8,7 +8,8 @@
 ## Problem
 
 `src/deterministic-postgresql/mapping.ts` reads `json` and `jsonb` with its own reader of RFC 8259's grammar
-(`parseJsonLossless`) instead of `JSON.parse`, because of a V8 bug in every Node.js 24 and 26 release: once a
+(`parseJsonLossless`) instead of `JSON.parse`, because of a V8 bug in Node.js 24 (reproduced on 24.9.0, not on
+24.2.0; reported upstream on 24.13.1–24.21.0) and Node.js 26 (reported on 26.3.0–26.10.0): once a
 `JSON.parse` in the process has read an object whose key is a single backslash (`{"\\": …}`), a later `JSON.parse` can
 read an object key that is one escape sequence (`"\t"`, `"\n"`, `"\r"`, `"\b"`, `"\f"`, `"\""`, `"\/"`, `"\u00e9"`, …)
 as a backslash, silently. Two different documents then read back equal, and two databases holding the same rows can hash

@@ -59,6 +59,6 @@ mid-chain.
 THE two providers SHALL share the item `contract-logs` and its schema `contract_logs` (DB-8, MD-6): at most one SHALL
 be active at any height, and one MAY stop at a height and the other start at the next, with identical migrations.
 
-#### Scenario: Full until a snapshot, fast after it
-- **WHEN** `-full` stops at h, a snapshot is taken at h, and a restored database continues with `-fast` from h + 1
+#### Scenario: Full until a backup, fast after it
+- **WHEN** `-full` stops at h, a backup is taken at h, and the restored database continues with `-fast` from h + 1
 - **THEN** startup accepts it and `contract_logs.logs` continues without a gap

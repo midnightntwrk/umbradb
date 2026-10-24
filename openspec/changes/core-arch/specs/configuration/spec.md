@@ -88,7 +88,7 @@ module entry's `stop`; the `core` entry's `stop` SHALL be operational (it stops 
 | `tipCap`, `prefetchWindow` | operational | integers; 600, 64 |
 | `backoffCeilingMs` | operational | integer; 30000 |
 | `lockstepInstances` | operational | instance ids; default none |
-| `snapshotAtStop` | operational | a file path; default absent |
+| `backupAtStop` | operational | a file path; default absent (BK-1) |
 | `tls` | secret | certificates and trusted roots for opt-in mutual TLS (PP-11); default absent |
 | `livenessTimeoutMs` | operational | integer; 30000 |
 | `apiReadTimeoutMs` | operational | integer; 30000 (DB-15) |
@@ -162,8 +162,8 @@ run no migration. Revisions starting above cursor + 1 MAY name versions the buil
 ### Requirement: CF-9 The development opt-in gates development-only features
 
 THE system SHALL run development-only features — development-only modules (such as `core-contract-logs-fast`), the
-PGlite backend, `sweep: off` and private snapshots — only when the `core` entry sets `developmentOptIn: true`; otherwise
-startup SHALL refuse and name the feature.
+PGlite backend, `sweep: off` and backups of a private database — only when the `core` entry sets `developmentOptIn:
+true`; otherwise startup SHALL refuse and name the feature.
 
 #### Scenario: PGlite without the opt-in
 - **WHEN** `database` is `pglite:memory` and `developmentOptIn` is false

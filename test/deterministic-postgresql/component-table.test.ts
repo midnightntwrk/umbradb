@@ -66,7 +66,9 @@ const ROWS: readonly RowCoverage[] = [
     pending: { "the BEFORE TRUNCATE trigger refusing truncate-not-allowed": "2.3" },
   },
   {
-    rule: "The pinned session settings, and the zero timeouts of the writer and callback reads",
+    rule:
+      "The pinned session settings, and the zero timeouts (`statement_timeout`, `lock_timeout`, " +
+      "`idle_in_transaction_session_timeout`, `transaction_timeout`) of the writer and callback reads",
     requirement: "DB-2, DB-15",
     tests: ["results.test.ts", "both-backends.test.ts"],
     pending: { "the zero timeouts of the writer, migrations, setup and callback reads": "2.7" },
@@ -83,8 +85,8 @@ const ROWS: readonly RowCoverage[] = [
     rule:
       "The opt-out: a `table` item declared `deterministic: false` — its tables, the sequences their columns own and " +
       "its unlogged tables are skipped by the refusals and the `CHECK`s; the contents hash records each such table as " +
-      "`[schema, table, null, null]`; digests skip it; snapshots carry its rows unchanged",
-    requirement: "MD-1, DT-3, DT-4, DT-6, SN-3",
+      "`[schema, table, null, null]`; digests skip it; backups carry its rows and its sequences' positions",
+    requirement: "MD-1, DT-3, DT-4, DT-6, BK-2",
     tests: [],
     pending: {
       "the declaration deterministic: false on a table item": "3.1",

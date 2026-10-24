@@ -45,8 +45,9 @@ THE system SHALL order rows by their primary-key columns in order, comparing int
 ### Requirement: DT-3 The contents hash
 
 THE system SHALL compute a database's contents hash — the core's database or a private process's, under the same rules
-(owner decision Q75) — as SHA-256 of one canonical CBOR array holding, for each module schema and then each table in
-name order (byte order), the array `[schema, table, [column names], [rows in primary-key
+(owner decision Q75) — as SHA-256 of one canonical CBOR array holding, for each schema of the database except
+PostgreSQL's own (`pg_*`, `information_schema`) and `public` — module schemas and any schema an operator created —
+and then each table in name order (byte order), the array `[schema, table, [column names], [rows in primary-key
 order]]`. A table whose module declared it `deterministic: false` (MD-1, owner decision Q76) SHALL appear as
 `[schema, table, null, null]`: its name is hashed, its columns and rows are not.
 
@@ -54,15 +55,14 @@ order]]`. A table whose module declared it `deterministic: false` (MD-1, owner d
 - **WHEN** the same rows are written to PostgreSQL and to PGlite
 - **THEN** the two contents hashes are equal, and changing one byte of one row changes the hash
 
-### Requirement: DT-4 Per-block digests for modules that opt in
+### Requirement: DT-4 Per-block changes of every module table
 
-WHERE a module sets `digest: true`, THE database API SHALL capture, for every row of that module's schema whose primary
-key was written at height h, outside the tables it declared `deterministic: false` (Q76) — by any statement, including
-helper triggers and provider functions — the row at the end of h − 1 and the row at the end of h, and SHALL record one
-change per primary key: `["insert", table, new row]` (absent before), `["delete", table, old row]` (absent after) or
-`["update", table, new row]` (present and different). Several writes to one row in a block SHALL give one change; a
-write that leaves a row as it was SHALL give none. `changes at h` SHALL be the canonical CBOR array of the changes,
-ordered by table name and then primary key.
+THE database API SHALL capture, for every module table not declared `deterministic: false` (owner decisions Q76, Q84),
+every row whose primary key was written at height h — by any statement, including helper triggers and provider
+functions — as the row at the end of h − 1 and the row at the end of h, and SHALL record one change per primary key:
+`["insert", new row]` (absent before), `["delete", old row]` (absent after) or `["update", new row]` (present and
+different). Several writes to one row in a block SHALL give one change; a write that leaves a row as it was SHALL give
+none. A table's `changes at h` SHALL be the canonical CBOR array of its changes, ordered by primary key.
 
 #### Scenario: Insert then update in one block
 - **WHEN** a module inserts row k and then updates it in the same `on-db-write`
@@ -72,39 +72,49 @@ ordered by table name and then primary key.
 - **WHEN** a module updates row k to the values it already had
 - **THEN** the changes at h contain nothing for k
 
-### Requirement: DT-5 The `core-digest` part chains the digests
+### Requirement: DT-5 The `core-digest` part keeps one digest per table, and checkpoints
 
-THE backbone part `core-digest` SHALL run last in `on-db-write` and SHALL write, for each opted-in module active at h,
-the row `(h, module, digest)` of `core_digest.digests`, where `digest(start) = SHA-256(32 zero bytes ‖ changes at
-start)` and `digest(h) = SHA-256(digest(h − 1) ‖ changes at h)` for every later height, including heights with no
-changes.
+THE backbone part `core-digest` SHALL run last in `on-db-write` and, for each table with changes at h, SHALL set its
+row of `core_digest.tables` — `(schema, table) → (height, digest)` — to `(h, SHA-256(previous ‖ CBOR(h) ‖ changes at
+h))`, where `previous` is the table's digest before h, or 32 zero bytes before its first change; a table without
+changes at h SHALL keep its row (owner decisions Q84, Q86). AT every height h with h mod 14,400 = 0, it SHALL also
+write into `core_digest.checkpoints` the row `(h, schema, table, digest)` for every table that has a row in
+`core_digest.tables`, so every instance checkpoints at the same heights whatever its S; 14,400 (about 24 hours at one
+block per 6 s) is a constant of the build, not a setting. Equal rows of `core_digest.tables` at the same cursor mean
+the tables recorded the same changes at the same heights.
 
 #### Scenario: Two runs, one difference
-- **WHEN** two databases are built from the same blocks, except that one test module writes a different value at
-  height 7
-- **THEN** their digests for that module are equal up to height 6 and differ from height 7 on
+- **WHEN** two databases are built from the same blocks, except that one test module writes a different value into its
+  table t at height 7
+- **THEN** their rows of `core_digest.tables` are equal for every other table, and for t equal up to height 6 and
+  different from height 7 on
+
+#### Scenario: Checkpoints at the same heights
+- **WHEN** two databases with the same history pass height 28,800
+- **THEN** both hold checkpoint rows at heights 14,400 and 28,800, and the rows are equal
 
 ### Requirement: DT-6 Stored data avoids non-deterministic values
 
-THE database API SHALL refuse, at migration time, a module table — in the core's database or a private process's,
-under the same rules (owner decision Q75) and not declared `deterministic: false` by its module (owner decision Q76)
-— that has no primary key (`no-primary-key`), a
-primary-key column of a type DT-2 does not order (`unsupported-key-type`), a column of a type DT-1 does not encode
-(`unsupported-column-type`; a `numeric` with a declared scale above 0 included), an identity column, a floating-point
-column, or a column whose default is not immutable — one that calls a function PostgreSQL marks stable or volatile or
-uses an SQL value function, so `now()`, `CURRENT_TIMESTAMP`, `random()`, `gen_random_uuid()` and a `serial` column's
-`nextval()` included (`non-deterministic-column`); and it SHALL refuse a module schema that holds a sequence or an
-unlogged table (`non-deterministic-table`; owner decision Q61). Each refusal SHALL name the module, the table or
-sequence, the column and its declared type where there is one, state why it cannot be stored deterministically, and say
-what to use instead, as `design.md` §4 gives them (owner decisions Q58, Q59, Q60); the contents hash (DT-3) SHALL refuse
-the same tables, sequences and columns with the same codes and messages, in any module schema (owner decision Q61). THE
-database API SHALL add to every `jsonb` and `numeric` column of a module table, and to every array of either, a
+THE database API SHALL refuse, at migration time, a module table — in the core's database or a private process's, under
+the same rules (owner decision Q75) and not declared `deterministic: false` by its module (owner decision Q76) — that
+has no primary key (`no-primary-key`), a primary-key column of a type DT-2 does not order (`unsupported-key-type`), a
+column of a type DT-1 does not encode (`unsupported-column-type`; a `numeric` with a declared scale above 0 included),
+an identity column, a floating-point column, or a column whose default is not immutable — one that calls a function
+PostgreSQL marks stable or volatile or uses an SQL value function, so `now()`, `CURRENT_TIMESTAMP`, `random()`,
+`gen_random_uuid()` and a `serial` column's `nextval()` included (`non-deterministic-column`); and it SHALL refuse a
+module schema that holds a sequence or an unlogged table (`non-deterministic-table`; owner decision Q61), except a
+sequence owned by a column of a table declared `deterministic: false` and such a table itself when unlogged (owner
+decision Q76). Each refusal SHALL name the module, the table or sequence, the column and its declared type where there
+is one, state why it cannot be stored deterministically, and say what to use instead, as `design.md` §4 gives them
+(owner decisions Q58, Q59, Q60); the contents hash (DT-3) SHALL refuse the same tables, sequences and columns with the
+same codes and messages, in every schema it hashes (DT-3; owner decision Q61). THE database API SHALL add to every
+`jsonb` and `numeric` column of a module table not declared `deterministic: false`, and to every array of either, a
 `CHECK` constraint that rejects any JSON number that is not an integer within the signed 64-bit range or whose text has
 a fraction, a zero fraction such as `1.0` included (owner decision Q57: no stored number carries a scale, so equal
-contents hashes mean equal query results), and any `numeric` value with a fraction or `NaN`, so such a write fails
-whether or not the module opts into digests. Values a module computes from anything other than the chain, S and the
-configuration (wall-clock time, randomness, process state) are a module developer's error the database cannot see; they
-are caught by the convergence tests (two runs, two backends, restarts) and by digests.
+contents hashes mean equal query results), and any `numeric` value with a fraction, `NaN` or an infinity, so such a
+write fails. Values a module computes from anything other than the chain, S
+and the configuration (wall-clock time, randomness, process state) are a module developer's error the database cannot
+see; they are caught by the convergence tests (two runs, two backends, restarts) and by digests.
 
 #### Scenario: A serial column
 - **WHEN** a test module's migration creates a table with a `serial` column
@@ -112,10 +122,9 @@ are caught by the convergence tests (two runs, two backends, restarts) and by di
   says a sequence's next value depends on rolled-back and retried blocks and to derive keys from the block
 
 #### Scenario: A time column
-- **WHEN** a test module's migration creates a table with a `timestamptz` column
+- **WHEN** a test module's migration creates a table with a `timestamp` column
 - **THEN** startup refuses with `unsupported-column-type`; the message names the module, the table, the column and
-  `timestamp with time zone`, says the drivers read it as a millisecond `Date` and its text depends on session
-  settings, and says to store `bigint` milliseconds instead
+  `timestamp without time zone`, says it holds no time zone, and says to use `timestamptz`, written with `Z` (Q74)
 
 #### Scenario: A `CURRENT_TIMESTAMP` default
 - **WHEN** a test module's migration creates a `bigint` column with the default
@@ -138,7 +147,7 @@ are caught by the convergence tests (two runs, two backends, restarts) and by di
   primary-key order
 
 #### Scenario: A fractional JSON number
-- **WHEN** a module without `digest` writes `{"x": 1.5}` to a `jsonb` column in `on-db-write`
+- **WHEN** a module writes `{"x": 1.5}` to a `jsonb` column in `on-db-write`
 - **THEN** the write fails the `CHECK` and the block rolls back
 
 #### Scenario: A JSON number with a zero fraction

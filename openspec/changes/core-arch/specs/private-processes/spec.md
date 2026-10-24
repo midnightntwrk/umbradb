@@ -140,10 +140,11 @@ channel, or a browser. TEE attestation is out of scope.
 - **WHEN** mutual TLS is configured and a private process connects without a client certificate
 - **THEN** the core refuses the connection
 
-### Requirement: PP-12 Private databases are not snapshotted
+### Requirement: PP-12 Private databases are not backed up by UmbraDB
 
-THE system SHALL refuse to export a snapshot of a private database unless the development opt-in is set.
+THE system SHALL refuse `umbradb backup` of a private database unless the development opt-in is set (BK-1). An operator
+can still copy the database with PostgreSQL's own tools; this rule governs only what UmbraDB writes.
 
-#### Scenario: A production private snapshot
-- **WHEN** `umbradb snapshot export` runs against a private process without the development opt-in
-- **THEN** it refuses with `private-snapshot-refused`
+#### Scenario: A production private backup
+- **WHEN** `umbradb backup` runs against a private process without the development opt-in
+- **THEN** it refuses with `private-backup-refused` and writes no file

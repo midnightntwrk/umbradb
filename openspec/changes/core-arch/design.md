@@ -21,7 +21,7 @@ this change relies on is restated in `specs/`. Owner decisions cited as Qn are i
 | `src/ledger/` | The `LedgerPackage` adapters (v8 from the 0.9.5 `chain-archive-sync/tx-replay-decoder.ts`, v9), the ledger worker, the node-store bridge, the sweep, the built-in version tables (`networks.json`) |
 | `vendor/ledger/` | Vendored ledger builds: per version the pinned upstream source reference, the patches, the build script and the built WASM with its SHA-256 (§5.2) |
 | `src/private/` | The process transport (core server, private client), lockstep bookkeeping (no key API: not core, Q70) |
-| `src/snapshot/` | Export and import (§9.1) |
+| `src/backup/` | `umbradb backup` and `umbradb restore` around `pg_dump` and `pglite-tools` (§9.1) |
 | `src/admin/` | The admin HTTP server (`node:http`) in its own worker thread, reading a state snapshot the runner publishes through a `SharedArrayBuffer` and messages, and running the endpoints of `core-health`, `core-status` and `core-config` on it; 404 for anything else; the redaction and sanitized-error helpers they share (AE-1, AE-6, Q70) |
 | `src/cli/` | The `umbradb` command |
 | `browser/` | The browser build: page, workers and its build script (§9.2) |
@@ -88,10 +88,11 @@ interface BlockSource {
 - **Lossless `jsonb`.** Both backends read `json` and `jsonb` with UmbraDB's own reader of RFC 8259's grammar
   (`parseJsonLossless` in `src/deterministic-postgresql/mapping.ts`), not `JSON.parse` (Q78). It returns a `bigint` for
   every integer written outside ±(2^53 − 1) (DB-2), which plain `JSON.parse` rounds (the `postgres` driver uses it,
-  `node_modules/postgres/src/types.js:18-21`). `JSON.parse` is avoided because of a V8 bug in every Node.js 24 and 26
-  release: once a parse in the process has read an object key that is a single backslash, a later parse can silently
-  read an object key that is one escape sequence (`"\t"`, `"\n"`, `"\""`, …) as a backslash, so two different documents
-  read back, and hash, equal (`nodejs/node#63785`; fixed in V8 by commit `93cd21e`, 2026-09-17; the Node.js backport
+  `node_modules/postgres/src/types.js:18-21`). `JSON.parse` is avoided because of a V8 bug in Node.js 24 (reproduced
+  here on 24.9.0, not on 24.2.0; reported upstream on 24.13.1–24.21.0) and Node.js 26 (reported on 26.3.0–26.10.0): once
+  a parse in the process has read an object key that is a single backslash, a later parse can silently read an object
+  key that is one escape sequence (`"\t"`, `"\n"`, `"\""`, …) as a backslash, so two different documents read back, and
+  hash, equal (`nodejs/node#63785`; fixed in V8 by commit `93cd21e`, 2026-09-17; the Node.js backport
   `nodejs/node#66542` is not merged as of 2026-10-23). Once every Node.js version UmbraDB supports carries that fix, the
   reader may be replaced by `JSON.parse` with a reviver using source text access (`context.source`), as task 2.1 had it
   (`docs/issues/00007`).
@@ -114,8 +115,10 @@ interface BlockSource {
   the rule, `numeric`'s declared scale from the type modifier, and `pg_type.typtype` for enums, domains and composite
   types. `core_chain.jsonb_numbers_ok(jsonb)` (immutable; a `jsonpath` finding any number outside the signed 64-bit
   range or whose text, `.string()`, is not `-?[0-9]+`, so `1.0` fails too, Q57) and `core_chain.numeric_ok(numeric)`
-  (`scale(c) = 0 AND c <> 'NaN'`; `scale('NaN')` is null, so `NaN` fails too; verified on PostgreSQL 17.11 and PGlite
-  0.5.10), with array forms for `jsonb[]` and `numeric[]`, back a `CHECK` on every such column of a public module table.
+  (`coalesce(scale(c) = 0, false)`: `scale()` is null for `NaN`, `Infinity` and `-Infinity`, and a `CHECK` passes on
+  null, so the null must become false; checked on PGlite 0.5.10 (PostgreSQL 18.6), 2026-10-23: `'Infinity'` and
+  `'-Infinity'` passed the earlier `scale(c) = 0 AND c <> 'NaN'`, and fail this one), with array forms for `jsonb[]` and
+  `numeric[]`, back a `CHECK` on every such column of a module table not declared `deterministic: false` (Q76).
 - **Migrations and setup (DB-9, DB-10).** `core_chain.migrations`; checksum = SHA-256 of the UTF-8 SQL; per part and
   module, pending migrations each in their own transaction with their row, then `on-start-db` in its own transaction.
   Upgrade migrations only add — a module obligation (Q46); `requiresResync` versions are refused on a non-empty
@@ -136,11 +139,15 @@ interface BlockSource {
   Browser: a Web Locks lock named after the database (BR-1), which the browser releases when the worker ends.
 - **Durability probe.** Moved unchanged in behaviour (`fsync` :72-84, `full_page_writes` with the override :61-66 and
   :86, pooler detection :16 of `src/postgres/durability-probe.ts`); the override is `fullPageWritesOffAllowed`.
-- **Change capture for digests (DT-4).** For a module with `digest: true`, a row-level `AFTER INSERT OR UPDATE OR
-  DELETE` trigger on each of its tables copies, on the first touch of a primary key in the transaction, the old row (or
-  a tombstone) into `core_digest_shadow.t_<first 32 hex digits of SHA-256(schema.table)>`; `core-digest`, last in
-  `on-db-write`, reads each shadow row and the current row, computes the net change, extends the chain, writes
-  `core_digest.digests` and deletes the shadow rows, inside the block transaction.
+- **Change capture for digests (DT-4, DT-5; Q84, Q86).** On every module table not declared `deterministic: false`, a
+  row-level `AFTER INSERT OR UPDATE OR DELETE` trigger copies, on the first touch of a primary key in the transaction,
+  the old row (or a tombstone) into `core_digest_shadow.t_<first 32 hex digits of SHA-256(schema.table)>`;
+  `core-digest`, last in `on-db-write`, reads each shadow row and the current row, computes each table's net changes,
+  updates that table's row of `core_digest.tables`, at h mod 14,400 = 0 copies every table's row into
+  `core_digest.checkpoints`, and deletes the shadow rows, inside the block transaction. The digest tables stay small:
+  one row per table, plus one row per table every 14,400 heights (about 365 a year). A row of `core_digest.tables` is
+  updated in place, so PostgreSQL's MVCC leaves dead tuples that autovacuum reclaims (an `UPDATE` that touches no
+  indexed column is a heap-only update). The cost of the triggers on ingest is measured by A136.
 - **Errors.** `UmbraError { code, retryable, details }`, keeping the 0.9.5 retryable split
   (`design/design-interfaces.md` §1.1); a lost connection is `connection-lost` (retryable); an API read ended by its
   timeout is `query-timeout` (not retryable, DB-15).
@@ -148,9 +155,11 @@ interface BlockSource {
   MDY'`, `IntervalStyle = postgres`, `TimeZone = UTC` and `extra_float_digits = 1` (PostgreSQL: startup parameters;
   PGlite: start parameters), which take precedence over the server's, the database's and the role's defaults; a
   `database` URL setting one is refused (`invalid-configuration`). Every connection also starts with
-  `statement_timeout = 0`, `lock_timeout = 0` and `idle_in_transaction_session_timeout = 0`, so the writer, migrations
-  and callback reads are never cut off; a read for a module API request sets `statement_timeout` and
-  `idle_in_transaction_session_timeout` to `apiReadTimeoutMs` with `SET LOCAL`, so they end with that read (DB-15).
+  `statement_timeout = 0`, `lock_timeout = 0`, `idle_in_transaction_session_timeout = 0` and `transaction_timeout = 0`
+  (PostgreSQL 17 and later), so the writer, migrations and callback reads are never cut off; a read for a module API
+  request sets `statement_timeout` and `idle_in_transaction_session_timeout` to `apiReadTimeoutMs` with `SET LOCAL`, so
+  they end with that read (DB-15). `statement_timeout` cancels the statement and leaves the session usable;
+  `idle_in_transaction_session_timeout` ends the session, so the pool drops that connection and opens a new one.
 - **Date and time values (Q68).** PostgreSQL prints a `timestamptz` under the pinned settings as
   `2025-05-21 14:30:00.123456+00`; the mapping rewrites it to `2025-05-21T14:30:00.123456Z` (a `timestamp`'s text the
   same way, without `Z`; a `date` unchanged), never through a JavaScript `Date`, whose parse of a zone-less text follows
@@ -213,7 +222,7 @@ The reasons for the time types, `json`, `char(n)` and `numeric(p,s)` were checke
 **The `deterministic_postgresql` component (Q69).** Every rule UmbraDB imposes on PostgreSQL, so that two databases fed
 the same chain hold, hash and read back the same values, is one component, `deterministic_postgresql`, in
 `src/deterministic-postgresql/`. It imports nothing else of `src/`, so it is tested alone: its suite,
-`test/deterministic-postgresql/`, runs every rule on PostgreSQL 17 and on PGlite, under its own coverage floor (§13).
+`test/deterministic-postgresql/`, runs every rule on PostgreSQL 18 and on PGlite, under its own coverage floor (§13).
 `src/db/` and `src/determinism/` take every rule from it and repeat none. The requirements keep their ids; the component
 is where they are implemented and tested together:
 
@@ -225,9 +234,9 @@ is where they are implemented and tested together:
 | Sequences and unlogged tables in public schemas refused | DT-6 | Q61, Q64 |
 | `core_chain.jsonb_numbers_ok` and `core_chain.numeric_ok` and the `CHECK`s they back | DT-1, DT-6 | Q57 |
 | Block transactions change rows only; the `BEFORE TRUNCATE` trigger | DB-14 | — |
-| The pinned session settings, and the zero timeouts of the writer and callback reads | DB-2, DB-15 | Q65, Q71 |
+| The pinned session settings, and the zero timeouts (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `transaction_timeout`) of the writer and callback reads | DB-2, DB-15 | Q65, Q71 |
 | The result mapping and parameter texts: lossless `jsonb`, arrays element by element, date and time as RFC 3339 text, other types as their text | DB-2 | Q66, Q68 |
-| The opt-out: a `table` item declared `deterministic: false` — its tables, the sequences their columns own and its unlogged tables are skipped by the refusals and the `CHECK`s; the contents hash records each such table as `[schema, table, null, null]`; digests skip it; snapshots carry its rows unchanged | MD-1, DT-3, DT-4, DT-6, SN-3 | Q76 |
+| The opt-out: a `table` item declared `deterministic: false` — its tables, the sequences their columns own and its unlogged tables are skipped by the refusals and the `CHECK`s; the contents hash records each such table as `[schema, table, null, null]`; digests skip it; backups carry its rows and its sequences' positions | MD-1, DT-3, DT-4, DT-6, BK-2 | Q76 |
 
 ## 5. Ledger
 
@@ -396,26 +405,34 @@ cached for the process; a revision boundary switches lists between heights, neve
 - **Keys.** Configured test keys are the only key source in this change; a key API is not core and is left to a later
   module that feeds the registry (Q70). Pending keys live in memory until their block's `on-compute` takes them (PP-8).
 
-## 9. Snapshots and browser
+## 9. Backups and browser
 
-### 9.1 Snapshots (SN)
+### 9.1 Backups (BK; Q83, Q85)
 
-Export streams one consistent read into a CBOR sequence (manifest, then per table a header item and its rows) and
-computes the contents hash while writing; the manifest's `contentsHash` (a fixed-size CBOR byte string) is written last
-into its reserved slot, so the file is written in one pass. Import runs in the empty target database (SN-4): it writes
-`core_chain.import_marker`, runs the checks of SN-3 that need no tables, runs the recorded migrations unchanged (so
-qualified names, checksums and provider functions stay as recorded), checks columns and types, loads the rows in
-batches, verifies the contents hash, and in one final transaction writes `core_chain.identity` and deletes the marker.
-A start that finds the marker drops every schema the import created, then the marker, and refuses with
-`snapshot-import-interrupted`.
+UmbraDB's own snapshot file is gone: a backup is a `pg_dump` file, and checking that databases agree is the contents
+hash's and the digests' job (DT-3 to DT-5). **Backup.** On PostgreSQL the command opens a `REPEATABLE READ READ ONLY`
+transaction on a read connection, reads the cursor and the chain identity, computes the contents hash, calls
+`pg_export_snapshot()`, and runs the PostgreSQL 18 client's `pg_dump --snapshot=<id> --inserts --no-owner
+--no-privileges`, so the dump and the manifest see one committed height; it writes the manifest line, then the dump.
+`pg_dump` is looked up on `PATH` (or `UMBRADB_PG_DUMP`) when the command runs; a missing tool or a major version below
+18 fails with `backup-tools-missing`. On PGlite the whole backup is one queued job that calls `pgDump` of
+`@electric-sql/pglite-tools` — an optional peer dependency the command imports only when it runs (an install hint
+without it), and that the browser build bundles; its `DEALLOCATE ALL` runs inside the job. Any committed height is a
+block boundary (RN-6), so every dump holds whole blocks. **Restore.** The command reads the manifest line, makes the
+checks of BK-3 that need no tables, then opens one transaction on the writer connection and runs the file's SQL itself
+(no `psql`; statements a tool writes for `psql` alone are handled as `psql` would), creates the module roles the server
+lacks and applies DB-6's and DB-7's owners and grants, recomputes the contents hash, checks the state root, and commits
+only if all hold; on PGlite the same runs as one queued job. A crash mid-restore leaves nothing, since nothing commits
+before the end. A restore runs the file's SQL with the writer's rights, so the operator guide says to restore only
+trusted backups.
 
 ### 9.2 Browser build (BR)
 
 `browser/` holds a static page and three worker entry points (core, ledger, private), bundled with `esbuild` (a new
 development dependency, pinned in task 0.1); PGlite runs in the core and private workers with `memory://` or
 `opfs-ahp://` storage (memory by default, OPFS optional; verified by probe, §14); the admin endpoints are message calls
-answered by the same backbone parts; the page offers a snapshot file picker. `npm run build:browser` writes
-`dist-browser/`, which is not part of the npm package.
+answered by the same backbone parts; the page offers backup and restore of its database (BK-5). `npm run build:browser`
+writes `dist-browser/`, which is not part of the npm package.
 
 ## 10. Tables
 
@@ -430,7 +447,8 @@ per-block tables are append-only and partitioned by height range; no table store
 | database API | `core_chain.migrations` | (module, migration_id) | checksum, position (int) |
 | `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_time (`timestamptz`, converted exactly from the node's milliseconds, Q74) |
 | `core-block-commit` | `core_block_commit.hashes` (not partitioned) | hash | height — makes a repeated hash fail, which the height-partitioned `blocks` table cannot enforce |
-| `core-digest` | `core_digest.digests` | (height, module) | digest |
+| `core-digest` | `core_digest.tables` | (schema, table) | height, digest (DT-5) |
+| `core-digest` | `core_digest.checkpoints` | (height, schema, table) | digest — at every height h with h mod 14,400 = 0 |
 | `core-chain-events` | `core_chain_events.events` | (height, event_index) | phase (text), extrinsic_index (int null), pallet, name (text), bytes (SCALE), fields (jsonb, canonical) |
 | `core-block-parsed` | `core_block_parsed.transactions` | (height, tx_index) | tx_hash, kind (`regular`, `system`), size (int) |
 | `core-tx-results` | `core_tx_results.results` | (height, tx_index) | outcome (`success`, `partial`, `failure`) |
@@ -456,9 +474,10 @@ per-block tables are append-only and partitioned by height range; no table store
 `providers-overlap`, `graph-cycle`, `item-not-available`, `no-requirement`, `cannot-start-mid-chain`,
 `process-item-missing`, `duplicate-api-route`, `development-opt-in-required`, `needs-lockstep-not-listed`,
 `private-binding-mismatch`, `test-key-conflict`, `package-hash-mismatch`, `writer-lock-held`, `durability-fsync-off`,
-`durability-pooler`, `durability-full-page-writes-off`, and the snapshot import checks (`snapshot-format-unknown`,
-`snapshot-history-mismatch`, `snapshot-build-mismatch`, `contents-hash-mismatch`, `snapshot-genesis-mismatch`,
-`snapshot-block-not-finalized`, `snapshot-root-mismatch`, `snapshot-target-not-empty`, `snapshot-import-interrupted`).
+`durability-pooler`, `durability-full-page-writes-off`. **Backup and restore refuse** (the command exits non-zero;
+nothing is written or committed): `backup-tools-missing`, `private-backup-refused`, `backup-format-unknown`,
+`restore-target-not-empty`, `backup-history-mismatch`, `backup-build-mismatch`, `backup-genesis-mismatch`,
+`backup-block-not-finalized`, `contents-hash-mismatch`, `backup-root-mismatch`.
 
 **Processing halts** (state `halted`, live, not ready, the database at the last committed height), with these codes:
 `callback-error` (with point and module), `database-error`, `parent-mismatch`, `finality-conflict`, `node-requirement`,
@@ -477,8 +496,8 @@ private instance, `lockstep-behind` and `report-hash-mismatch`.
 `SchemaWriteHandle`, `ApiRegistry`, `BlockRef`, `BlockSource`, `LedgerPackage`, `Entry`, `CoreVersion`, `UmbraConfig`,
 `ProcessHandle`, `ProcessState`, `ErrorCode`, `ParsedTransaction`, `LedgerTask`.
 
-**Command:** `umbradb run [--config <file>]`, `umbradb config check <file>`, `umbradb snapshot export --out <file>`,
-`umbradb snapshot import <file>`.
+**Command:** `umbradb run [--config <file>]`, `umbradb config check <file>`, `umbradb backup --out <file>`,
+`umbradb restore <file>`.
 
 ## 13. Quality gates: what moves and what is retired (LS-5; for the owner's approval, CORE-ARCH SC-010)
 
@@ -511,10 +530,10 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | JSON.parse source text access in revivers | Node.js v24.9.0: `JSON.parse("[1]", (k, v, c) => c?.source ?? v)` gives `"1"` | Verified (installed); not used since Q78 |
 | Node.js 24 and 26 `JSON.parse` reads a one-escape object key as a backslash once a parse has read the key `"\\"` | Reproduced on Node.js v24.9.0 (V8 13.6.233.10), 3 runs of 3, not on v24.2.0 or v22.13.1, 2026-10-23; `nodejs/node#63785` (open; reported on 24.13.1–24.21.0 and 26.3.0–26.10.0, not on 22); V8 fix `93cd21e` (2026-09-17); backport `nodejs/node#66542` (open, 2026-10-05) | Verified (run, upstream); the reason for UmbraDB's own JSON reader (§4, Q78, `docs/issues/00007`) |
 | `postgres`: `sql.reserve()` pins a connection; JSON parsed with `JSON.parse`, replaceable | `src/postgres/transaction-lease.ts:135-138, 287-301`; `node_modules/postgres/src/types.js:18-21` (3.4.9) | Verified (installed, in-repo use) |
-| PostgreSQL 17: `SET LOCAL ROLE`, `SECURITY DEFINER`, `REPEATABLE READ READ ONLY`, session advisory locks, `BEFORE TRUNCATE` triggers, `jsonpath` `.type()`/`.floor()` | https://www.postgresql.org/docs/17/ (sql-set-role, sql-createfunction, sql-set-transaction, functions-admin, sql-createtrigger, functions-json) | Version-pinned documentation; re-checked by tests |
+| PostgreSQL 18 (checked on 17 before Q82; task 0.4 re-checks on 18): `SET LOCAL ROLE`, `SECURITY DEFINER`, `REPEATABLE READ READ ONLY`, session advisory locks, `BEFORE TRUNCATE` triggers, `jsonpath` `.type()`/`.floor()` | https://www.postgresql.org/docs/18/ (sql-set-role, sql-createfunction, sql-set-transaction, functions-admin, sql-createtrigger, functions-json) | Version-pinned documentation; re-checked by tests |
 | PGlite: roles, `SET LOCAL ROLE`, cross-schema writes denied, `SECURITY DEFINER` with a fixed `search_path` and `PUBLIC` revoked, PL/pgSQL row triggers, a `BEFORE TRUNCATE` trigger refusing, `jsonpath` `.type()`/`.floor()` in a `CHECK`, advisory-lock functions | Probe against `@electric-sql/pglite` 0.5.10 (published 2026-10-14) in Node.js v24.9.0, 2026-10-22: every item passed | Verified (probe); task 0.1 commits the probe as a test |
 | `jsonpath` `.string()` keeps a JSON number's scale: `1.0` → `"1.0"`, `100.00` → `"100.00"`, `1e2` → `"100"` (Q57) | PostgreSQL 17.11 (`postgres:17-alpine`) and PGlite 0.5.10, 2026-10-23 | Verified (run); task 7.1's test re-checks it |
-| PGlite 0.5.10 embeds PostgreSQL 18.6 (production is PostgreSQL 17) | `select version()` on 0.5.10 | Verified; the cross-backend differentials (A55, A105, A135) are the guard against differences |
+| PGlite 0.5.10 embeds PostgreSQL 18.6; production is PostgreSQL 18 too (Q82) | `select version()` on 0.5.10 | Verified; both backends run one major version, and the cross-backend differentials (A55, A105, A135) guard the rest |
 | PGlite does not stop two processes opening one data directory | Probe: two Node.js processes opened and wrote one directory | Verified (probe); hence the operating-system lock of §4 |
 | PGlite with OPFS storage in a browser worker; Web Locks exclusion | Probe in a Chromium-based browser, 2026-10-22: PGlite 0.5.10 in a module worker with `opfs-ahp://` wrote a row, closed, reopened and read it back; a second `navigator.locks.request(…, { ifAvailable: true })` on a held lock got `null` | Verified (probe) |
 | An operating-system lock from Node.js (`node:sqlite`, `BEGIN EXCLUSIVE`) | Probe in Node.js v24.9.0, 2026-10-22: second process refused while the holder ran and while it was stopped; taken at once after `SIGKILL` | Verified (probe); `node:sqlite` is marked experimental in Node.js 24 |

@@ -13,10 +13,10 @@ Every criterion is numbered, individually checkable, and tagged with how it is v
 | `[MANUAL]` | Manual evidence recorded in the pull request |
 | `[MEASURE]` | A measurement run in CI and reported; it fails only if it cannot run, never on its figures (Q72) |
 
-Database tests run against PostgreSQL 17 in Docker (Testcontainers, random free ports ≥ 10000, torn down afterwards)
-and against PGlite in Node.js. "Both backends" means the criterion runs once on each. Tapes (TT-1) are identified by
-their SHA-256; the large ones (stagenet, preview and mainnet ranges, the devnet fork) are stored outside git as pinned
-release assets that CI downloads and verifies.
+Database tests run against PostgreSQL 18 in Docker (owner decision Q82; Testcontainers, random free ports ≥ 10000, torn
+down afterwards) and against PGlite in Node.js. "Both backends" means the criterion runs once on each. Tapes (TT-1) are
+identified by their SHA-256; the large ones (stagenet, preview and mainnet ranges, the devnet fork) are stored outside
+git as pinned release assets that CI downloads and verifies.
 
 ## Definition of done
 
@@ -43,7 +43,7 @@ release assets that CI downloads and verifies.
   `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on any difference.
   (LS-5)
 - **A6** `[CI]` `umbradb sync` and `umbradb` with no argument print the usage and exit 2; `umbradb run`, `config check`,
-  `snapshot export` and `snapshot import` are recognized. (LS-6)
+  `backup` and `restore` are recognized. (LS-6)
 
 ## 2. Database API
 
@@ -68,7 +68,8 @@ release assets that CI downloads and verifies.
   function and is rejected on a direct `UPDATE` of the same table; a module that does not require the provider's item
   is denied `EXECUTE`. (DB-7)
 - **A15** `[CI]` Schemas are named after module ids (`-` → `_`); a shared item gets one schema named after it; two
-  providers of one shared item with different migrations refuse startup naming the item; ids `core_chain`, `A-b`,
+  providers of one shared item with different migrations, or with different `deterministic` flags (Q76), refuse startup
+  naming the item; ids `core_chain`, `A-b`,
   `a--b`, `-a` and a 41-byte id fail with `bad-id`; a module and an item with the same name, and a module named `pg-x`
   or `public`, refuse startup naming both; two 40-byte ids differing only in their last character get two distinct
   roles. (DB-8, MD-2)
@@ -93,7 +94,7 @@ release assets that CI downloads and verifies.
 - **A73** `[CI]` On both backends, `TRUNCATE` of a module's own table in `on-db-write` fails with
   `truncate-not-allowed` and the block rolls back; the same statement in a migration succeeds. (DB-14)
 - **A138** `[CI]` The `deterministic_postgresql` suite (`test/deterministic-postgresql/`) runs every rule of
-  `design.md` §4's component table on PostgreSQL 17 and on PGlite and passes on both, with the same refusal messages; a
+  `design.md` §4's component table on PostgreSQL 18 and on PGlite and passes on both, with the same refusal messages; a
   test over the sources finds that `src/deterministic-postgresql/` imports nothing else of `src/`, and that the pinned
   settings, the column-type rules and the result mapping are defined nowhere else; its coverage floor is 95/90. (DT-6,
   DB-2, DB-14, DB-15, Q69)
@@ -103,16 +104,21 @@ release assets that CI downloads and verifies.
   `infinity` and `-infinity` as those words; arrays of them element by element, `NULL` as `null` — identical in every
   process. (DB-2, Q68)
 - **A141** `[FAULT]` On both backends: a read for an API request running `pg_sleep(60)` with `apiReadTimeoutMs` 1000
-  fails with `query-timeout`, not retryable, within 2 s, and the next read on that connection succeeds; with database
-  defaults `statement_timeout`, `lock_timeout` and `idle_in_transaction_session_timeout` of 1 s, a 5 s migration, a
-  block transaction left idle 5 s while a callback awaits, and a callback's read running 5 s all complete, and `SHOW`
-  in each reports 0. (DB-15, Q71)
+  fails with `query-timeout`, not retryable, within 2 s, and the next read on that connection succeeds; a read for an
+  API request that awaits 2 s between two statements fails with `query-timeout`, and the next read succeeds on a new
+  connection; with database defaults `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` and
+  `transaction_timeout` of 1 s, a 5 s migration, a block transaction left idle 5 s while a callback awaits, and a
+  callback's read running 5 s all complete, and `SHOW` in each reports 0. (DB-15, Q71)
 
 - **A144** `[CI]` A module that requires `db` gets an object offering `read` only — a type test and a runtime check find
   no `transaction`, `close` or write; each `db.read` sees one committed height and reports it; on PGlite a `db.read`
   from inside the module's own `on-db-write` fails at once with `nested-call`, and on PostgreSQL it returns the data
   committed before the block; `[DOC]` the module guide states when to use the handle and when `db.read`. (CD-1, RN-4,
   DB-4, Q73)
+- **A148** `[STATIC]` Every PostgreSQL image the repository pins is one `postgres:18-alpine` pin (tests, Testcontainers
+  helpers, benchmarks, the pack smoke test, the image-pin agreement check), and the conformance suite passes on it; the
+  facts `design.md` §14 records as checked on PostgreSQL 17.11 are re-checked on 18 by the tests that rely on them.
+  (Q82)
 ## 3. Modules
 
 - **A20** `[STATIC]` A type test shows a declaration with an unknown point name is a type error; `[CI]` the same
@@ -197,7 +203,7 @@ release assets that CI downloads and verifies.
   from the cursor. (RN-13)
 - **A49** `[CI]` With the source's head equal to the cursor, no transaction is open (checked in `pg_stat_activity` on
   PostgreSQL) and processing resumes when the head rises. (RN-14)
-- **A50** `[FAULT]` **Crash sweep** on PostgreSQL with 300 heights and four test modules (one with `digest: true`):
+- **A50** `[FAULT]` **Crash sweep** on PostgreSQL with 300 heights and four test modules (all digested, DT-4):
   kill at each mandatory point — inside `on-compute`; inside `on-db-write` after the first and after the last callback;
   just before COMMIT; just after COMMIT, before `on-after-db-write` — and at 100 random points (seeded; the seed is
   recorded; height uniform over the range, point uniform over the instrumented points); after every restart the run
@@ -236,8 +242,12 @@ release assets that CI downloads and verifies.
   recorded changes equal the difference between the table's states before and after the block, on both backends;
   `TRUNCATE` is refused (A73), so no change escapes the triggers; **negative control:** disabling the trigger on one
   table makes the test fail. (DT-4)
-- **A57** `[CI]` Two chains differing only in one module's value at height 7 give equal digests up to 6 and different
-  digests from 7; the digest at a height with no change equals `SHA-256(previous ‖ CBOR([]))`. (DT-5)
+- **A57** `[CI]` Two chains differing only in one module's value in its table t at height 7 give equal rows of
+  `core_digest.tables` for every other table and, for t, the same digest up to height 6 and a different one from 7; a
+  table without changes at a height keeps its row; a table's first digest is `SHA-256(32 zero bytes ‖ CBOR(h) ‖ changes
+  at h)`; checkpoints exist exactly at the heights h ≥ S with h mod 14,400 = 0 and equal the tables' rows at those
+  heights; every module table is digested with no flag set, and a table declared `deterministic: false` is not. (DT-4,
+  DT-5)
 - **A145** `[DIFF]` On both backends: a `timestamptz` column encodes `2025-05-21 14:30:00.123456+00` as the integer
   1747837800123456, orders as a key by time (a fraction sorts after the whole second it follows), and refuses
   `infinity` when hashed; a `timestamp`, `date`, `time`, `timetz` or `interval` column is refused at startup with "use
@@ -245,22 +255,22 @@ release assets that CI downloads and verifies.
   in milliseconds is stored in `core_block_commit.blocks.block_time` exactly. (DT-1, DT-2, DT-6, Q74)
 - **A147** `[CI]` On both backends, in the core and in a private process: a `table` item declared `deterministic: false`
   with a `now()` default and a `serial` column starts; two databases differing only in that table's rows have equal
-  contents hashes, and a database without the table hashes differently; a digest-opted module's changes skip it; a
-  snapshot carries its rows and imports with a matching hash; the same table without the flag refuses startup with
-  `non-deterministic-column`. (MD-1, DT-3, DT-4, DT-6, SN-3, Q76)
+  contents hashes, and a database without the table hashes differently; the digests skip it; a backup carries its rows
+  and its sequence's position, so after a restore the next `serial` value follows the restored ones; the same table
+  without the flag refuses startup with `non-deterministic-column`. (MD-1, DT-3, DT-4, DT-6, BK-2, Q76)
 - **A58** `[CI]` A migration creating a `serial`, identity or floating-point column, or a column whose default is not
-  immutable (`now()`, `CURRENT_TIMESTAMP`, `random()`, `gen_random_uuid()`, `nextval()`), in a public module table
-  refuses startup with `non-deterministic-column`, while an immutable default (`'abc'`, `1 + 2`, `lower('X')`) and a
-  stored generated column are accepted; a sequence or an unlogged table in a public module schema with
-  `non-deterministic-table` (Q61); a table without a primary key with `no-primary-key`; a `numeric`, `jsonb` or array
-  key with `unsupported-key-type`; a `numeric(38,2)`, `timestamptz`, `time`, `interval`, `json`, `char(4)`, `money`,
-  enum or domain column with `unsupported-column-type`. Each message names the module, the table or sequence, the column
-  and its type where there is one, and gives the reason and the alternative of `design.md` §4; the contents hash refuses
-  the same tables, sequences and columns with the same codes and messages, including in a public table no module
-  declared (Q58, Q61). A module without `digest` writing `{"x": 1.5}`, `{"x": 1.0}` or `{"x": 100.00}` (Q57), or a JSON
-  integer beyond the signed 64-bit range, to a `jsonb` column, or such a number inside a `jsonb[]`, fails the block, and
-  so does `100.00`, `1.5` or `NaN` in a `numeric` or `numeric[]` column; `{"x": 2}`, `{"x": 1e2}` (stored as `100`) and
-  `100` succeed; on both backends. (DT-6)
+  immutable (`now()`, `CURRENT_TIMESTAMP`, `random()`, `gen_random_uuid()`, `nextval()`), in a module table refuses
+  startup with `non-deterministic-column`, while an immutable default (`'abc'`, `1 + 2`, `lower('X')`) and a stored
+  generated column are accepted; a sequence or an unlogged table in a module schema with `non-deterministic-table`
+  (Q61); a table without a primary key with `no-primary-key`; a `numeric`, `jsonb` or array key with
+  `unsupported-key-type`; a `numeric(38,2)`, `timestamp`, `date`, `time`, `interval`, `json`, `char(4)`, `money`, enum
+  or domain column with `unsupported-column-type`. Each message names the module, the table or sequence, the column and
+  its type where there is one, and gives the reason and the alternative of `design.md` §4; the contents hash refuses the
+  same tables, sequences and columns with the same codes and messages, including in a table no module declared (Q58,
+  Q61, Q75). A module writing `{"x": 1.5}`, `{"x": 1.0}` or `{"x": 100.00}` (Q57), or a JSON integer
+  beyond the signed 64-bit range, to a `jsonb` column, or such a number inside a `jsonb[]`, fails the block, and so does
+  `100.00`, `1.5`, `NaN`, `Infinity` or `-Infinity` in a `numeric` or `numeric[]` column; `{"x": 2}`, `{"x": 1e2}`
+  (stored as `100`) and `100` succeed; on both backends. (DT-6)
 
 ## 7. Storage helpers
 
@@ -379,7 +389,7 @@ release assets that CI downloads and verifies.
   reloads by its `stateKey` (Q55); the v8 adapter's `decodeLogItem` returns null for every input and its `apply`
   returns no `logs` (Q54). (LG-6, LG-7, CC-2)
 - **A99** `[CI]` State roots match the node's on: a preview range crossing the runtime 1.0.300 upgrade; a mainnet range
-  from a snapshot before block 1,774,492 to 1,780,000; a mainnet range including block 1,788,980. (LG-8)
+  from a backup taken before block 1,774,492 to 1,780,000; a mainnet range including block 1,788,980. (LG-8)
 - **A100** `[CI]` On a devnet that starts on a v8 runtime and enacts the v9 upgrade (tape), the state is converted
   before F is applied, the root at F matches the node's, and the same holds when F has no transactions. (LG-9)
 - **A101** `[CI]` During a 60 s ledger step in the worker, `/health/live` answers 200 and every endpoint answers within
@@ -404,7 +414,7 @@ release assets that CI downloads and verifies.
   that block. (LG-15)
 - **A107** `[CI]` `core_ledger_state.states`, `segment_results` and `events` hold the values of LG-16 for a tape range
   (first-free indexes and roots match the node's runtime calls where the node exposes them); enabling
-  `core-ledger-state` above S without a snapshot refuses with `cannot-start-mid-chain`. (LG-16)
+  `core-ledger-state` above S without a restored backup refuses with `cannot-start-mid-chain`. (LG-16)
 - **A137** `[CI]` A test module's ledger task decodes each contract call's arguments with the native parsed objects
   and `rawPackages()`, and its `on-compute` receives them as its `block` item; with that task and three modules reading
   `block-parsed`, the package's parse function runs once per transaction; a task returning a WASM-backed object, or
@@ -422,7 +432,7 @@ release assets that CI downloads and verifies.
 - **A110** `[DIFF]` A range with literal logs gives identical `contract_logs.logs` with `-full` and `-fast`; a malformed
   wrapper is stored as a version-0 `Misc` log by both; an oversized log is stored by neither; a log of a value read from
   state makes `-fast` halt with `fast-log-unsupported`. (CC-3)
-- **A111** `[CI]` `-full` stopping at h, a snapshot at h, and a restored database continuing with `-fast` from h + 1
+- **A111** `[CI]` `-full` stopping at h, a backup at h, and the restored database continuing with `-fast` from h + 1
   give a continuous `contract_logs.logs`. (CC-4)
 
 ## 14. Private processes
@@ -459,29 +469,34 @@ release assets that CI downloads and verifies.
   height. (DT-3, DT-6, PP-1, Q75)
 - **A121** `[CI]` With `tls` set, a private process without a certificate is refused by the core and one with a
   trusted certificate is accepted. (PP-11)
-- **A122** `[CI]` A private snapshot is refused with `private-snapshot-refused` without the development opt-in. (PP-12)
+- **A122** `[CI]` `umbradb backup` of a private database refuses with `private-backup-refused` without the development
+  opt-in, and writes no file. (PP-12)
 - **A123** `[CI]` A private process restarting with a test key it already admitted at its start keeps its
   `arrived_height`; the same key with another start refuses with `test-key-conflict`. (CF-11)
 
-## 15. Snapshots and browser
+## 15. Backups and browser
 
-- **A124** `[CI]` A snapshot exported while blocks commit holds every table at the manifest's height. (SN-1)
-- **A125** `[DIFF]` Two instances with the same history stopped at the same height with `snapshotAtStop`, on PostgreSQL
-  and PGlite, write snapshots with equal contents hashes. (SN-2)
-- **A126** `[CI]` Each import refusal of SN-3 is triggered and checked, including a one-byte change giving
-  `contents-hash-mismatch` with the target database left empty. (SN-3)
-- **A127** `[FAULT]` An import killed while loading rows leaves the import marker; the next start drops what the import
-  created, removes the marker and refuses with `snapshot-import-interrupted`; a new import into that database then
-  succeeds. (SN-4)
-- **A128** `[DIFF]` A snapshot exported on PostgreSQL at h, imported on PGlite and on PostgreSQL, and continued to
-  h + 100, gives the same contents hash as an instance that never stopped. (SN-5)
+- **A124** `[CI]` On both backends, a backup written while blocks commit holds every table at its manifest's height:
+  restored, its contents hash equals the manifest's and the source's at that height; with `backupAtStop` set, the core's
+  stop writes one backup for that height; without the tool (`pg_dump` 18, or `pglite-tools`), `umbradb backup` fails
+  with `backup-tools-missing`, naming what to install, and writes no file. (BK-1, BK-2)
+- **A125** `[DIFF]` A backup written on PostgreSQL 18 restores on PGlite and one written on PGlite restores on
+  PostgreSQL 18, each with every check of BK-3 passing; a restored database's schemas, tables, sequences and functions
+  have the owners and grants of a database built by migrations (compared in the catalogs). (BK-2, BK-3)
+- **A126** `[CI]` Each restore refusal of BK-3 is triggered and checked before or after loading, as BK-3 orders them,
+  including a changed value in an `INSERT` giving `contents-hash-mismatch`; after every refusal the target is empty.
+  (BK-3)
+- **A127** `[FAULT]` A restore killed while running the file's SQL leaves the target empty, and a new restore into it
+  then succeeds. (BK-3)
+- **A128** `[DIFF]` A backup written on PostgreSQL 18 at h, restored on PGlite and on PostgreSQL 18, and continued to
+  h + 100, gives the same contents hash and the same per-table digests as an instance that never stopped. (BK-4)
 - **A129** `[CI]` In Chrome (headless, in CI), the page runs the core, ledger and a private instance in workers on
   PGlite with the development opt-in, in memory and with OPFS; with OPFS, a reload resumes from the cursor with the same
   contents hash, and a second tab on the same database refuses with `writer-lock-held`. (BR-1)
 - **A130** `[CI]` In Chrome, an empty profile records S as the finalized head at creation; enabling `core-ledger-state`
-  without a snapshot refuses and names it. (BR-2)
-- **A131** `[CI]` In Chrome, the page's network requests go only to the node; importing a snapshot through the page runs
-  every SN-3 check and continues from its height + 1. (BR-3)
+  without a restored backup refuses and names it. (BR-2)
+- **A131** `[CI]` In Chrome, the page's network requests go only to the node; backing up the page's database and
+  restoring the file in a fresh profile runs every BK-3 check and continues from its height + 1. (BR-3, BK-5)
 - **A132** `[DIFF]` The same tape and configuration in Chrome and in Node.js on PGlite give equal contents hashes.
   (BR-4)
 
@@ -496,13 +511,13 @@ release assets that CI downloads and verifies.
   nodes in a transaction of their own is detected. (RN-6, IN-1, LG-11, LG-14)
 - **A135** `[DIFF]` The same range and configuration on PostgreSQL, on PGlite in Node.js and on PGlite in Chrome give
   equal contents hashes. (DT-3, BR-4)
-- **A136** `[MANUAL]` Ingest throughput over stagenet 0–10,000 with every core module except `-fast`, on PostgreSQL 17,
+- **A136** `[MANUAL]` Ingest throughput over stagenet 0–10,000 with every core module except `-fast`, on PostgreSQL 18,
   median of 3 runs — each from an empty database on a freshly started PostgreSQL, against the same local archive node
   in Docker after one warm-up pass, timed from process start to the commit of block 10,000 — is equal to or better than
   the official midnight-indexer's (release/4.4, PostgreSQL backend) on the same machine; the measurements are recorded
   in the pull request. (CORE-ARCH SC-009)
 - **A143** `[MEASURE]` The tape-apply baseline: the first 2,000 blocks of A133's stagenet tape, applied from an empty
-  database with every core module except `-fast`, 5 times on PostgreSQL 17 and 5 times on PGlite; the run reports, per
+  database with every core module except `-fast`, 5 times on PostgreSQL 18 and 5 times on PGlite; the run reports, per
   backend, the median total time and the median time per block next to the committed reference
   (`bench/baselines/tape-apply.json`, which names the machine it was measured on), and whether `slowBlockMs`'s default
   is at least 10 times the median time per block; the figures are recorded in the pull request. (Q72)
@@ -535,5 +550,5 @@ becomes 4 (kept harness ids) + 23.
 | `contract-logs.fast-equals-full` | A110 |
 | `private.lockstep-waits-no-transaction` | A117 |
 | `private.no-key-bytes-public` | A120 |
-| `snapshot.restore-equals-uninterrupted` | A128 |
+| `backup.restore-equals-uninterrupted` | A128 |
 | `core.full-crash-sweep` | A134 |
