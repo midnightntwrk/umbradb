@@ -34,3 +34,51 @@ tables and for anything UmbraDB itself represents (owner decisions Q68 and Q74 o
   instant; an `interval` compares as if a month were 30 days and a day 24 hours, so equal intervals print differently.
   Use `timestamptz`, written with `Z`; for a time of day or a length of time, `bigint` microseconds. Floating-point
   types are refused too, and a time inside `jsonb` is text, with `jsonb`'s rules.
+
+## Migrations
+
+A module creates and changes its tables with migrations: the `migrations` list of its declaration, each `{ id, sql }`,
+in order (DB-9 of the `core-arch` change).
+
+- **Each runs once, in order, with its record.** At every startup, before any block, UmbraDB applies the migrations the
+  database has not applied yet, in the order of the list, one at a time. Each runs in a transaction of its own together
+  with its record in `core_chain.migrations`: the module, the migration's id, the SHA-256 of its SQL as UTF-8, and its
+  position in the list. A migration that fails rolls back with its record, the ones before it stay applied, and startup
+  stops with `migration-failed` and the database's error.
+- **Never change or remove an applied migration.** The checksum covers every byte of the SQL, spaces and comments
+  included. Startup refuses, before any migration runs, a migration a database applied whose SQL changed
+  (`migration-checksum-changed`, with both checksums) or that the build no longer declares (`migration-missing`). Put
+  each change in a new migration at the end of the list: one inserted before an applied migration is refused as well
+  (`migration-missing`, out of order), because another database would apply them in another order.
+- **One migration may hold several statements**, with function bodies and comments. Do not write `BEGIN`, `COMMIT` or
+  `ROLLBACK` in it: UmbraDB runs it inside its own transaction, and a migration that ends that transaction is refused
+  (`migration-failed`), since its changes could no longer be recorded with it.
+- **Your own schema only, every name written with it.** Migrations run under your module's database role (a provider of
+  a shared item: under the item's role), which creates and changes only your schema (the item's) and reads the others.
+  Write every name with its schema, `CREATE TABLE my_module.events (…)`: UmbraDB sets no `search_path`, and a `CREATE`
+  without a schema fails ("permission denied for schema public").
+- **`TRUNCATE` only in a migration.** In a block and in `on-start-db` it fails with `truncate-not-allowed`: `TRUNCATE`
+  fires no row trigger, so the rows it removed would escape the per-block digests. Delete rows with `DELETE`.
+- **Functions other modules call.** A function another module calls to change your tables is created by your
+  migration as `SECURITY DEFINER`, with `SET search_path = pg_catalog, my_module, pg_temp` (`pg_temp` last, so no
+  temporary table can stand in for one of yours). UmbraDB grants `EXECUTE` on it to the modules that require your item,
+  and to no one else; another module cannot change your tables directly.
+- **`on-start-db` after your migrations.** Your `on-start-db` callback runs at every startup, after your migrations, in
+  a transaction of its own under your role. Make it idempotent: it runs again at each restart. Change schemas in
+  migrations, not there.
+
+## Upgrades
+
+A new version of a module runs from a future height, as a new revision of its configuration; the rows written before
+that height stay as the old version wrote them (owner decisions Q33 and Q43 of the `core-arch` change).
+
+- **Upgrade migrations only add.** The list is cumulative: a version keeps every migration of the versions before it
+  and adds its own at the end. A migration applied to tables that already hold rows only adds tables, nullable columns
+  or columns with defaults, indexes, constraints and functions. It never does any of these: drop a table or a column,
+  change a column's type, or change a stored value. UmbraDB does not check this (modules are trusted): a database that
+  synced through the upgrade and one built after it must hold the same rows.
+- **A version that must change stored values requires a resync.** Declare `requiresResync: true` in that version. It is
+  accepted only by a database none of whose committed heights another version of the module covers: a new database,
+  synced with this version from the module's first revision. Any other database refuses it at startup with
+  `requires-resync`, naming the module and the version, before any migration runs. A database built with it restarts
+  normally.

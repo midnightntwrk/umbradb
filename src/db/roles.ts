@@ -16,7 +16,7 @@
  * refuses" is the runner's.
  *
  * **Roles and grants (DB-6, DB-7).** {@link prepareSchemas}, at every startup and before any migration, creates what
- * is missing: the schema `core_chain` (the first step of DB-9's bootstrap, which task 2.4 completes), each role
+ * is missing: the schema `core_chain` (the first step of DB-9's bootstrap, which `./migrate.ts` completes), each role
  * (`NOLOGIN`) and each schema, owned by its role. As each schema's owner (`SET LOCAL ROLE`) it grants every other role
  * of the plan `USAGE` on the schema and `SELECT` on its tables, now and by default privilege; revokes `EXECUTE` on the
  * routines its owner creates from `PUBLIC` (the owner's default privilege, set before any migration creates one); and

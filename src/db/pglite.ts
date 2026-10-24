@@ -14,7 +14,9 @@
  *   the body ran. Nothing commits while the job runs, so every statement sees the height the read reports.
  * - A **transaction**: `BEGIN`; the body's statements; `COMMIT` when the body resolves — a `COMMIT` that PostgreSQL
  *   answers with `ROLLBACK` (a failed statement aborted the transaction and the body caught its error) is an error,
- *   never a commit — or `ROLLBACK` when the body rejects, with the body's own error.
+ *   never a commit — or `ROLLBACK` when the body rejects, with the body's own error. A migration's text of several
+ *   statements runs in it through the engine's `exec`, by the path only the migration runner takes
+ *   (`./multi-statement.ts`).
  * A read handle or transaction used after its job ended fails with `handle-closed`, before anything reaches the engine.
  * A job's body runs in the async context of the code that asked for it, as on PostgreSQL.
  *
@@ -54,6 +56,7 @@ import { PGlite, type QueryOptions, types } from "@electric-sql/pglite";
 import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
 import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
+import { allowMultiStatement } from "./multi-statement.js";
 import { READS_BYPASS_QUEUE } from "./pglite-build-flags.js";
 
 /**
@@ -323,6 +326,10 @@ class PgliteDatabase implements Database {
           query: async (sql, params) => (await statement(sql, params)).rows,
           execute: async (sql, params) => (await statement(sql, params)).count,
         };
+        allowMultiStatement(tx, async (sql) => {
+          if (!open) throw handleClosed("transaction");
+          await this.script(sql);
+        });
         let result: T;
         try {
           result = await body(tx);
@@ -370,26 +377,43 @@ class PgliteDatabase implements Database {
    */
   private async statement(sql: string, params: readonly unknown[] = []): Promise<Outcome> {
     const texts = params.map((value, index) => parameterText(value, index));
+    const result = await this.send(() => this.engine.query<unknown[]>(sql, texts, this.options));
+    const columns = result.fields.map((field) => ({ name: field.name, type: field.dataTypeID }));
+    const rows = mapRows(columns, result.rows as (string | null)[][]);
+    return { rows, count: result.rowCount ?? 0, command: result.command };
+  }
+
+  /**
+   * Sends a text of several statements to the engine (`exec`, the simple protocol), inside the job's transaction (a
+   * migration's, `./multi-statement.ts`); its results are not read. As {@link statement}, nothing is sent after closing
+   * started or the engine failed.
+   */
+  private async script(sql: string): Promise<void> {
+    await this.send(() => this.engine.exec(sql, this.options));
+  }
+
+  /**
+   * Sends one call to the engine unless closing started or the engine failed; a call still running is waited for
+   * before the engine closes. A PGlite error as an {@link UmbraError}; an engine failure is kept, and refuses every
+   * later call.
+   */
+  private async send<T>(call: () => Promise<T>): Promise<T> {
     if (this.closed) throw handleClosed("database");
     if (this.failure !== undefined) throw failedEarlier(this.failure);
-    const sending = this.engine.query<unknown[]>(sql, texts, this.options);
+    const sending = call();
     const settled = sending.then(
       () => undefined,
       () => undefined,
     );
     this.sent.add(settled);
     void settled.then(() => this.sent.delete(settled));
-    let result: Awaited<typeof sending>;
     try {
-      result = await sending;
+      return await sending;
     } catch (error) {
       const classified = classifyPgliteError(error);
       if (classified.details.reason === "engine-failed") this.failure ??= classified;
       throw classified;
     }
-    const columns = result.fields.map((field) => ({ name: field.name, type: field.dataTypeID }));
-    const rows = mapRows(columns, result.rows as (string | null)[][]);
-    return { rows, count: result.rowCount ?? 0, command: result.command };
   }
 
   private async shutDown(): Promise<void> {

@@ -2,14 +2,16 @@
  * The `TRUNCATE` refusal of DB-14, applied (`openspec/changes/core-arch/design.md` §4, "`TRUNCATE`"): the
  * `deterministic_postgresql` component holds the trigger, its function, the migration mark and the rule of which tables
  * it guards (`../deterministic-postgresql/block-transactions.ts`); this file runs them in a transaction of the database
- * API. {@link guardTables} runs at every startup after the migrations (task 2.4), because a migration can add tables;
+ * API. {@link guardTables} runs at every startup — in the bootstrap, before any migration, and again after each part
+ * that applied a migration, before that part's `on-start-db` (`./migrate.ts`) — because a migration can add tables;
  * {@link markMigration} runs first in each migration's transaction, the only transactions in which `TRUNCATE` of a
- * guarded table is allowed (A73).
+ * guarded table is allowed (A73), and {@link stillMarked} tells the runner that the migration's SQL did not end it.
  */
 
 import {
   type GuardTableRow,
   MARK_MIGRATION_SQL,
+  MIGRATION_MARKED_SQL,
   TRUNCATE_GUARD_FUNCTION_SQL,
   TRUNCATE_GUARD_TABLES_SQL,
   truncateGuardStatements,
@@ -34,4 +36,13 @@ export async function guardTables(tx: Transaction, plan: SchemaPlan): Promise<vo
 /** Marks the transaction as a migration's, so that `TRUNCATE` of a guarded table is allowed in it (A73). */
 export async function markMigration(tx: Transaction): Promise<void> {
   await tx.query(MARK_MIGRATION_SQL);
+}
+
+/**
+ * True while `tx` is still the transaction {@link markMigration} marked; false once SQL run in it ended it with a
+ * `COMMIT` or `ROLLBACK` of its own (the migration runner's check, `./migrate.ts`).
+ */
+export async function stillMarked(tx: Transaction): Promise<boolean> {
+  const [row] = await tx.query(MIGRATION_MARKED_SQL);
+  return row?.marked === true;
 }

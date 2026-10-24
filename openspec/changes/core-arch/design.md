@@ -139,11 +139,24 @@ interface BlockSource {
   and `coalesce(scale(c) = 0, false)` alone refused NULL; this form accepts NULL and `1` and refuses `1.5`, `NaN` and
   both infinities), with array forms for `jsonb[]` and
   `numeric[]`, back a `CHECK` on every such column of a module table not declared `deterministic: false` (Q76).
-- **Migrations and setup (DB-9, DB-10).** `core_chain.migrations`; checksum = SHA-256 of the UTF-8 SQL; per part and
-  module, pending migrations each in their own transaction with their row, then `on-start-db` in its own transaction.
-  Upgrade migrations only add — a module obligation (Q46); `requiresResync` versions are refused on a non-empty
-  database built with another version of the module (DB-10). The writer lock is taken before any migration, so the
-  0.9.5 migration advisory lock is gone.
+- **Migrations and setup (DB-9, DB-10).** `src/db/migrate.ts` (`startDatabase`), refactored from 0.9.5's
+  `src/postgres/migrate.ts`. One bootstrap transaction creates `core_chain` with the roles and schemas
+  (`prepareSchemas`) and `core_chain.migrations` (§10: checksum = SHA-256 of the UTF-8 SQL; position = the migration's
+  place in its part's list, from 1; a shared item's migrations recorded under the item's name, DB-8), grants every
+  module role `USAGE` and `SELECT` on `core_chain`, attaches the `TRUNCATE` guard, and checks every part before any
+  migration runs: `requires-resync`, `migration-checksum-changed`, `migration-missing` (also for a pending migration
+  declared before an applied one, `reason: out-of-order`, Q91); a refusal rolls all of it back. Then, per part in
+  RN-3's order, each pending migration in its own transaction: the migration mark first, the part's role (the writer's
+  login for `core-chain` and `core-digest`, whose schemas are reserved), the SQL as one text of several statements on
+  the simple protocol (`src/db/multi-statement.ts`, which only the runner reaches; a `Transaction`'s `query` and
+  `execute` stay one statement each, on the extended protocol), a check that the SQL did not end the transaction
+  (`migration-failed`, `reason: transaction-ended`), then its row — so a failing migration rolls back with its row,
+  the ones before it stay, and startup refuses with `migration-failed`; then the `TRUNCATE` guard again for the tables
+  the part added; then its `on-start-db` in a transaction of its own under its role, unmarked. No `search_path` is
+  set: module SQL names its schema (the module guide). Upgrade migrations only add — a module obligation (Q46, the
+  module guide); a `requiresResync` version is refused while a committed height of the database is covered by a
+  revision of that module with another version (DB-10; the versions come from the configuration history and the
+  cursor). The writer lock is taken before any migration, so the 0.9.5 migration advisory lock is gone.
 - **Identifier lengths (DB-8).** Ids and item names are at most 40 bytes, so `umbradb_m_<schema>` and
   `umbradb_i_<item>` stay within PostgreSQL's 63-byte identifiers; shadow tables are named by hash (below).
 - **Writer lock (DB-11).** PostgreSQL: `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on the writer connection
@@ -473,7 +486,7 @@ per-block tables are append-only and partitioned by height range; no table store
 |---|---|---|---|
 | `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits) |
 | `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`), version (text), data (jsonb, canonical), data_hash |
-| database API | `core_chain.migrations` | (module, migration_id) | checksum, position (int) |
+| database API | `core_chain.migrations` | (module, migration_id) | checksum (SHA-256 of the UTF-8 SQL), position (int, from 1; unique per module) |
 | `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_time (`timestamptz`, converted exactly from the node's milliseconds, Q74) |
 | `core-block-commit` | `core_block_commit.hashes` (not partitioned) | hash | height — makes a repeated hash fail, which the height-partitioned `blocks` table cannot enforce |
 | `core-digest` | `core_digest.tables` | (schema, table) | height, digest (DT-5) |
@@ -541,7 +554,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | `Formal/STORAGE_ALGEBRA.md` and the formalization roadmaps | Laws T1–T4, C1, C2a, C2b, L1 and property tests P1–P8, P10, P11 marked retired (header note, kept as history) | W1/P9 re-bound to the cursor table; T5's half-open rule restated for heights | — |
 | `openspec/changes/v1.1.0-quint-model-checking` (Proposed) | Status set to Archived: its laws (C2a, C2b, L1, T1 cross-writer) are retired | — | — |
 | Required test ids (`test/integration/required-tests.manifest.json`, `EXPECTED_REQUIRED_COUNT = 25`) | Ids 5–25 and the deferred `crash.pg-kill-save.no-duplicate-with-idempotency-key` | Ids 1–4 (`crash-harness.smoke.*`), retargeted to a crash worker that drives the runner | The ids of `acceptance.md` §17; the pinned count becomes 4 + their number |
-| Test files | TemporalKV, CheckpointStore, Lease, `saveAndAdvance`, WalletStateEnvelope and cross-part durability tests; `no-consumer-import-in-bench`; `chain-archive-{migrate,rollover,store}` tests (replaced by the core block table tests); `chain-archive-{sync,sync-retry,replay-decode,preprod-cloud-crossval}` integration tests (they drive the official-indexer client, deleted by rule b); `api-surface/chain-archive-routing`; `no-chain-sync-import-guard` (the folder is gone) | `durability-probe.test.ts`; `migrate`, `migration-lock-timeout`, `client`, `errors` and `chain-archive-sync/node-rpc-client.test.ts` refactored onto `src/db/` and `src/node/`; `watermarks.property.test.ts` (P9) retargeted; `no-sdk-import-guard`; gate machinery | One test file per acceptance group |
+| Test files | TemporalKV, CheckpointStore, Lease, `saveAndAdvance`, WalletStateEnvelope and cross-part durability tests; `no-consumer-import-in-bench`; `chain-archive-{migrate,rollover,store}` tests (replaced by the core block table tests); `chain-archive-{sync,sync-retry,replay-decode,preprod-cloud-crossval}` integration tests (they drive the official-indexer client, deleted by rule b); `api-surface/chain-archive-routing`; `no-chain-sync-import-guard` (the folder is gone) | `durability-probe.test.ts`; `migrate` (as `test/db/migrate.test.ts`), `client`, `errors` and `chain-archive-sync/node-rpc-client.test.ts` refactored onto `src/db/` and `src/node/`; `migration-lock-timeout` retired with the migration advisory lock (§4: the writer lock keeps a second instance from waiting or migrating, A17, and the zero timeouts keep a migration from being cut off, A141); `watermarks.property.test.ts` (P9) retargeted; `no-sdk-import-guard`; gate machinery | One test file per acceptance group |
 | TransactionHistory tests | — | Moved with the source to `legacy/transaction-history/`, excluded from the run (LS-3) | — |
 | Coverage floors (`vitest.config.ts:47-60`) | `checkpoint-store`, `save-and-advance`, `watermarks`, `temporal-kv`, `transaction-lease` | `durability-probe` 97/92, `migrate` 90/85, `errors` 95/91 (moved paths) | `src/**` 90/85 by default; `src/determinism/**`, `src/deterministic-postgresql/**`, `src/helpers/**` and `src/ledger/sweep*` 95/90 |
 | Mutation (`stryker.conf.json` `mutate`, break 65) | The five 0.9.5 adapters | Break threshold 65 | `src/modules/graph.ts`, `src/runner/order.ts`, `src/config/history.ts`, `src/determinism/cbor.ts`, `src/determinism/digest.ts`, `src/helpers/height-versioned.ts`, `src/helpers/cursor-table.ts`, `src/ledger/sweep.ts`, `src/backbone/block-fetch-queue.ts` |

@@ -402,10 +402,49 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       halts" (tasks 2.6, 5.x); A15's "startup refuses" (tasks 3.1, 3.2, 5.x); A73's migration half through the migration
       runner (task 2.4). **Questions, since decided:** Q89 (a `table` item's schema and a shared item's writer) and Q90
       (roles per server and the writer's login): A, by the owner (2026-10-24).
-- [ ] 2.4 Migrations with checksums (refactored from `src/postgres/migrate.ts`), `core_chain.migrations`, setup after
+- [x] 2.4 Migrations with checksums (refactored from `src/postgres/migrate.ts`), `core_chain.migrations`, setup after
       migrations, and `requiresResync`.
       **Acceptance:** A16, A72; the refactored `migrate` and `migration-lock-timeout` tests pass or are retired per
       `design.md` §13.
+      **Done (2026-10-24):** `src/db/migrate.ts` (`startDatabase`) behind a small input — the schema plan of task 2.3,
+      the backbone parts and modules in RN-3's order (`id`, `version`, `requiresResync`, `migrations`, `onStartDb`;
+      tasks 3.1 and 3.2 feed them from the declarations) and, for DB-10, each part's versions whose revisions cover a
+      committed height (task 4.3 reads them from the configuration history and the cursor). One bootstrap transaction
+      runs `prepareSchemas`, creates `core_chain.migrations` (module text, migration id text, checksum `bytea` = SHA-256
+      of the UTF-8 SQL, position from 1; primary key `(module, migration_id)`, `UNIQUE (module, position)`), grants
+      every module role `USAGE` and `SELECT` on `core_chain` (now and by default privilege), attaches the `TRUNCATE`
+      guard, and checks every part before any migration runs: `requires-resync`, `migration-checksum-changed`,
+      `migration-missing` — also, with `reason: out-of-order`, for a pending migration declared before an applied one
+      or a record whose position no longer matches (Q91); a refusal rolls all of it back. Then per part: each pending
+      migration in its own transaction — the migration mark, the part's role (a shared item's provider under the
+      item's, recorded under the item's name; UmbraDB's own `core-chain` and `core-digest` as the login), the SQL as
+      one text of several statements on the simple protocol (`src/db/multi-statement.ts`: registered by both backends
+      for each transaction, reached only by the runner; `Transaction`'s methods stay one statement each), a check that
+      the SQL did not end the transaction, then its row; a failure rolls back with its row and refuses with
+      `migration-failed` (the database's error as its cause), a lost connection stays `connection-lost`; then the
+      `TRUNCATE` guard again for the part's new tables; then its `on-start-db` in a transaction of its own under its
+      role, unmarked. The component gains `MIGRATION_MARKED_SQL`; `ERROR_CODES` gains `migration-checksum-changed`,
+      `migration-missing`, `migration-failed`, `requires-resync`. `docs/module-guide.md` gains "Migrations" and
+      "Upgrades" (the additive-only rule, `requiresResync`). Tests, seen failing first (`Cannot find module
+      '../../src/db/migrate.js'`; the guide's sections missing): `test/db/migrate.test.ts` (A16's three cases on both
+      backends, with its committed negative control — a runner recording each row in a transaction of its own, first
+      or last, fails them; refactored from 0.9.5's `migrate.test.ts`: the idempotent second start, nothing left on the
+      writer's session, a refused connection and one lost during a migration as `connection-lost`),
+      `test/db/requires-resync.test.ts` (A72 on both backends, its control, the `[DOC]` checks),
+      `test/deterministic-postgresql/block-transactions.test.ts` (A73's migration half through the runner;
+      `TRUNCATE` refused in `on-start-db`; the guard at every startup), `test/db/roles-login.test.ts` (the runner under
+      a `CREATEROLE` login). 55 wrong variants of the new and changed code (a scratch runner outside the clone): 45
+      caught on the first run, the 8 survivors that were gaps closed by new tests, 53 of 55 caught on the final
+      sources, 2 equivalent (checking every provider of a shared item, whose lists are equal; the moved `send` not
+      marking a lost session, which the driver's `onclose` marks). `design.md` §4 ("Migrations and setup"), §10
+      (`core_chain.migrations`) and §13 updated: 0.9.5's `migration-lock-timeout` test is retired with the migration
+      advisory lock (§4) — its concerns are A17's and A141's — and 0.9.5's runner and its tests stay until task 17.2
+      removes them with the parts they migrate; the `migrate` floor 90/85 at `**/src/db/migrate.ts`. **Pending:**
+      where `committedVersions` comes from (task 4.3, with the cursor of tasks 5.2/10.2), so A72's "committed blocks"
+      are given as that history would give them; the declarations and RN-3's order fed in (tasks 3.1, 3.2); the
+      refusal state and the writer lock before startup (tasks 5.x, 2.5); the schema write handle around `on-start-db`
+      (task 2.6). **Question:** Q91 (a pending migration declared before an applied one; shipped A, refused with
+      `migration-missing`, `reason: out-of-order`), not blocking.
 - [ ] 2.5 Writer lock (refactored from `src/postgres/transaction-lease.ts`) and the PGlite operating-system lock
       (`node:sqlite` exclusive transaction); the durability probe moved to `src/db/`.
       **Acceptance:** A17, A18; `durability-probe.test.ts` passes at its new path.

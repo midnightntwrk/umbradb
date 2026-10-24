@@ -8,7 +8,9 @@
  * a reserved connection used after its loss crashes the process (`TypeError` in the driver's write, `postgres`
  * 3.4.9). A lost session is never used again: every later statement on it fails with `connection-lost`, and the next
  * read or transaction opens a new one.
- * - The **writer** is one session (DB-5): transactions run on it one at a time, in the order asked for.
+ * - The **writer** is one session (DB-5): transactions run on it one at a time, in the order asked for. A statement
+ *   runs on the extended protocol, one per call; a migration's text of several statements runs on the simple protocol,
+ *   inside the transaction, through the path only the migration runner takes (`./multi-statement.ts`).
  * - **Reads** use a pool of up to `readConnections` sessions (default 10); a read waits for a free one.
  *
  * **Reads (DB-2).** `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`, then the committed height read by the
@@ -32,6 +34,7 @@ import postgres, { type Sql } from "postgres";
 import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
 import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
+import { allowMultiStatement } from "./multi-statement.js";
 
 /** Options of {@link openPostgres}. */
 export interface PostgresOptions {
@@ -205,6 +208,30 @@ class Session {
    */
   async run(text: string, params: readonly unknown[] = [], simple = false): Promise<Outcome> {
     const args = params.map((value, index) => parameterText(value, index));
+    type Raw = Buffer[][] & {
+      columns?: { name: string; type: number }[] | null;
+      count: number | null;
+      command: string;
+    };
+    const result = (await this.send(text, args, simple)) as Raw;
+    const columns = (result.columns ?? []).map((column) => ({ name: column.name, type: column.type }));
+    const rows = mapRows(
+      columns,
+      [...result].map((values) => values.map((value) => (value === null ? null : value.toString("utf8")))),
+    );
+    return { rows, count: result.count ?? 0, command: result.command };
+  }
+
+  /**
+   * Runs a text of several statements on the simple protocol, inside whatever transaction the session has open (a
+   * migration's, `./multi-statement.ts`); its results are not read (the driver gives one per statement).
+   */
+  async script(text: string): Promise<void> {
+    await this.send(text, [], true);
+  }
+
+  /** Sends a text to the server unless the session ended or was lost; a driver error as an {@link UmbraError}. */
+  private async send(text: string, args: readonly (string | null)[], simple: boolean): Promise<unknown> {
     if (this.state === "ended") throw handleClosed("database");
     if (this.state === "lost") {
       throw new UmbraError("connection-lost", `the ${this.role} connection to PostgreSQL was lost`, {
@@ -212,28 +239,16 @@ class Session {
         cause: "lost-earlier",
       });
     }
-    type Raw = Buffer[][] & {
-      columns?: { name: string; type: number }[] | null;
-      count: number | null;
-      command: string;
-    };
-    let result: Raw;
     try {
       // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
       const options = { simple } as unknown as postgres.UnsafeQueryOptions;
-      result = (await this.sql.unsafe(text, args as string[], options).raw()) as unknown as Raw;
+      return await this.sql.unsafe(text, args as string[], options).raw();
     } catch (error) {
       if (this.ended) throw handleClosed("database");
       const classified = classifyDriverError(error, this.role);
       if (classified.code === "connection-lost") this.state = "lost";
       throw classified;
     }
-    const columns = (result.columns ?? []).map((column) => ({ name: column.name, type: column.type }));
-    const rows = mapRows(
-      columns,
-      [...result].map((values) => values.map((value) => (value === null ? null : value.toString("utf8")))),
-    );
-    return { rows, count: result.count ?? 0, command: result.command };
   }
 
   /** Ends the session's connection; later statements fail with `handle-closed`. */
@@ -332,6 +347,10 @@ class Writer {
       query: async (sql, params) => (await statement(sql, params)).rows,
       execute: async (sql, params) => (await statement(sql, params)).count,
     };
+    allowMultiStatement(tx, async (sql) => {
+      if (ended) throw handleClosed("transaction");
+      await session.script(sql);
+    });
     let result: T;
     try {
       result = await body(tx);

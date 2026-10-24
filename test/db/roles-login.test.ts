@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { startDatabase } from "../../src/db/migrate.js";
 import { planSchemas, prepareSchemas, type SchemaModule, type SchemaPlan, setModuleRole } from "../../src/db/roles.js";
 import { guardTables } from "../../src/db/truncate-guard.js";
 import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
@@ -116,6 +117,36 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
     expect(truncate.code).toBe("truncate-not-allowed");
     // Startup again: nothing to create, nothing refused.
     await db.transaction((tx) => prepareSchemas(tx, plan));
+  });
+
+  it("migrates under it: core_chain.migrations is the login's, each module's tables its role's, readable by the other roles (task 2.4)", async () => {
+    const database = await server.createDatabase();
+    const db = await loginOn(database, "writer_migrate", "CREATEROLE", true);
+    const parts = ["mig-a", "mig-b"].map((id) => {
+      const schema = id.replace(/-/g, "_");
+      return {
+        ...tableModule(id),
+        version: "1.0.0",
+        migrations: [{ id: "001", sql: `CREATE TABLE ${schema}.t (k bigint PRIMARY KEY); INSERT INTO ${schema}.t VALUES (1)` }],
+      };
+    });
+    const plan = planSchemas(parts);
+    await startDatabase(db, { plan, parts, committedVersions: new Map() });
+    const owners = await database.admin.unsafe<{ relation: string; owner: string }[]>(`
+      SELECT c.oid::regclass::text AS relation, pg_get_userbyid(c.relowner) AS owner FROM pg_class c
+       WHERE c.oid IN ('core_chain.migrations'::regclass, 'mig_a.t'::regclass, 'mig_b.t'::regclass) ORDER BY 1`);
+    expect([...owners]).toEqual([
+      { relation: "core_chain.migrations", owner: "writer_migrate" },
+      { relation: "mig_a.t", owner: "umbradb_m_mig_a" },
+      { relation: "mig_b.t", owner: "umbradb_m_mig_b" },
+    ]);
+    const seen = await db.transaction(async (tx) => {
+      await setModuleRole(tx, plan, "mig-a");
+      return tx.query("SELECT (SELECT count(*) FROM core_chain.migrations)::int AS rows, (SELECT count(*) FROM mig_b.t)::int AS b");
+    });
+    expect(seen).toEqual([{ rows: 2, b: 1 }]);
+    // Startup again under the same login: nothing to apply, nothing refused.
+    expect(await startDatabase(db, { plan, parts, committedVersions: new Map() })).toEqual([]);
   });
 
   it("uses a role the login created itself beforehand, holding ADMIN only, and grants itself SET and INHERIT", async () => {

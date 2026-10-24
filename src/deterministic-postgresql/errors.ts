@@ -34,6 +34,11 @@ export const ERROR_CODES = [
   "bad-id",
   "schema-collision",
   "shared-item-migrations-differ",
+  // Startup refusals of migrations (DB-9, DB-10, decision record Q91; `src/db/migrate.ts`).
+  "migration-checksum-changed",
+  "migration-missing",
+  "migration-failed",
+  "requires-resync",
   // The canonical encoder's failures (DT-1, `src/determinism/cbor.ts`).
   "not-integer",
   "unsafe-integer",

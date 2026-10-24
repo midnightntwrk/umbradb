@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { planSchemas, prepareSchemas, type SchemaModule, type SchemaPlan, setModuleRole } from "../../src/db/roles.js";
+import { type MigrationPart, startDatabase } from "../../src/db/migrate.js";
 import { guardTables, markMigration } from "../../src/db/truncate-guard.js";
 import {
   MIGRATION_MARK,
@@ -17,10 +18,10 @@ import { BACKENDS } from "../db/backends.js";
  * not declared `deterministic: false` (`src/db/truncate-guard.ts`), refuses it with `truncate-not-allowed` — in a block,
  * in `on-start-db`, anywhere — except in a transaction the migration runner marked as a migration.
  *
- * The block's write handle (task 2.6) and the migration runner (task 2.4) are not built yet: a block is played by a
- * transaction of the database API under the module's role, a migration by one that also sets the migration mark with
- * {@link markMigration}, which is what the runner will call. "The block rolls back" is shown here; the halt is the
- * runner's.
+ * The block's write handle (task 2.6) is not built yet: a block is played by a transaction of the database API under
+ * the module's role. A migration runs through the migration runner (`src/db/migrate.ts`, task 2.4), which marks each
+ * migration's transaction with {@link markMigration}; the mark's own rules are also shown on transactions that set it
+ * directly. "The block rolls back" is shown here; the halt is the runner's.
  */
 
 const MODULE: SchemaModule = {
@@ -109,7 +110,75 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     expect(await db.read((read) => read.query("SELECT k FROM a.t ORDER BY k"))).toEqual([{ k: 1n }, { k: 2n }]);
   });
 
-  it("A73: the same statement in a migration succeeds", async () => {
+  it("A73: the same statement in a migration succeeds, through the migration runner", async () => {
+    const { db } = await backend.database("SELECT 1");
+    const first = [{ id: "001", sql: TABLES.join(";\n") }];
+    const part = (migrations: MigrationPart["migrations"], onStartDb?: MigrationPart["onStartDb"]) => ({
+      ...MODULE,
+      version: "1.0.0",
+      migrations,
+      ...(onStartDb === undefined ? {} : { onStartDb }),
+    });
+    const startup = (migrations: MigrationPart["migrations"], onStartDb?: MigrationPart["onStartDb"]) => {
+      const declared = part(migrations, onStartDb);
+      return startDatabase(db, { plan: planSchemas([declared]), parts: [declared], committedVersions: new Map() });
+    };
+    await startup(first);
+    const plan = planSchemas([part(first)]);
+    // Not vacuous: the table is guarded, and a block's TRUNCATE of it is refused.
+    expectRefused(await outcome(block(db, plan, (tx) => tx.execute("TRUNCATE a.t"))), "t");
+    const applied = await startup([...first, { id: "002", sql: "TRUNCATE a.t; INSERT INTO a.t (k, v) VALUES (3, 'three')" }]);
+    expect(applied).toEqual([{ module: "a", migration: "002", position: 2 }]);
+    expect(await db.read((read) => read.query("SELECT k FROM a.t"))).toEqual([{ k: 3n }]);
+  });
+
+  it("A73: refuses TRUNCATE in on-start-db, which runs unmarked, also of a table a migration of the same startup created", async () => {
+    const { db } = await backend.database("SELECT 1");
+    const declared = (statement: string) => ({
+      ...MODULE,
+      version: "1.0.0",
+      migrations: [{ id: "001", sql: TABLES.join(";\n") }],
+      onStartDb: (tx: Transaction) => tx.execute(statement).then(() => undefined),
+    });
+    const startup = (statement: string) => {
+      const part = declared(statement);
+      return startDatabase(db, { plan: planSchemas([part]), parts: [part], committedVersions: new Map() });
+    };
+    expectRefused(await outcome(startup("TRUNCATE a.t")), "t");
+    // The migration committed before on-start-db ran; its table was guarded in between.
+    expect(await rows(db, "a.t")).toBe(2);
+    expectRefused(await outcome(startup("TRUNCATE a.u")), "u");
+    expect(await rows(db, "a.u")).toBe(1);
+  });
+
+  it("guards at every startup, before any migration: a later build's opt-out, and a table no migration of the startup created", async () => {
+    const { db } = await backend.database("SELECT 1");
+    const migrations = [{ id: "001", sql: TABLES.join(";\n") }];
+    const startup = (provides: SchemaModule["provides"]) => {
+      const declared = { ...MODULE, provides, version: "1.0.0", migrations };
+      return startDatabase(db, { plan: planSchemas([declared]), parts: [declared], committedVersions: new Map() });
+    };
+    await startup(MODULE.provides);
+    const plan = planSchemas([MODULE]);
+    // A table no migration created (as the "late" control above), then a startup with nothing to apply.
+    await db.transaction(async (tx) => {
+      await setModuleRole(tx, plan, "a");
+      await tx.execute("CREATE TABLE a.late (k bigint PRIMARY KEY)");
+      await tx.execute("INSERT INTO a.late VALUES (1)");
+    });
+    expect(await startup(MODULE.provides)).toEqual([]);
+    expectRefused(await outcome(block(db, plan, (tx) => tx.execute("TRUNCATE a.late"))), "late");
+    // A later build opts a.t out, with no new migration: its trigger is gone after startup.
+    const optedOut: SchemaModule["provides"] = [
+      { name: "a-rows", table: { schema: "a", tables: ["p", "u", "late"] } },
+      { name: "a-cache", table: { schema: "a", tables: ["cache", "q", "t"], deterministic: false } },
+    ];
+    expect(await startup(optedOut)).toEqual([]);
+    await block(db, plan, (tx) => tx.execute("TRUNCATE a.t"));
+    expect(await rows(db, "a.t")).toBe(0);
+  });
+
+  it("A73: the mark the migration runner sets allows TRUNCATE in the transaction that carries it", async () => {
     const { db, plan } = await guarded();
     await db.transaction(async (tx) => {
       await setModuleRole(tx, plan, "a");

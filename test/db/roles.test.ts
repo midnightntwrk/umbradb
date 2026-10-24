@@ -10,9 +10,10 @@ import { BACKENDS, type TestDatabase } from "./backends.js";
  * another module's table is rejected by the database, with its negative control), A14 (a provider's `SECURITY DEFINER`
  * function, `EXECUTE` granted only to the modules that require its item), and A15's roles and shared-item schema.
  *
- * Write handles (task 2.6) and migrations (task 2.4) are not built yet: a callback is played here by a transaction of
- * the database API that sets the module's role with {@link setModuleRole} — what the write handle will do — and a
- * migration by a transaction that sets the role and runs DDL. "Processing halts" (A13) is the runner's (tasks 2.6, 5.x).
+ * Write handles (task 2.6) are not built yet: a callback is played here by a transaction of the database API that sets
+ * the module's role with {@link setModuleRole} — what the write handle will do. A migration is played by a transaction
+ * that sets the role and runs DDL, as the migration runner (`src/db/migrate.ts`, `migrate.test.ts`) does with its
+ * record and mark. "Processing halts" (A13) is the runner's (tasks 2.6, 5.x).
  * Every database here is set up by a login that is a superuser (the test server's, PGlite's `postgres`);
  * `roles-login.test.ts` runs the same with a `CREATEROLE` login on PostgreSQL.
  */
@@ -29,7 +30,7 @@ function tableModule(id: string, requires: string[] = []): SchemaModule {
   };
 }
 
-/** Plays the migrations task 2.4 will run: each statement in a transaction of the API, under the module's write role. */
+/** Plays a module's migration: each statement in a transaction of the API, under the module's write role. */
 async function migrate(db: Database, plan: SchemaPlan, moduleId: string, statements: readonly string[]): Promise<void> {
   await db.transaction(async (tx) => {
     await setModuleRole(tx, plan, moduleId);
