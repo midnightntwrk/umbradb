@@ -57,7 +57,8 @@ runs the file's SQL with the writer's rights, THE operator documentation SHALL s
 trusted source.
 
 #### Scenario: A changed row
-- **WHEN** one value in a backup file's `INSERT` statements is changed, in a table not declared `deterministic: false`
+- **WHEN** one value in a backup file's `INSERT` statements is changed, in a row the contents hash covers (DT-3: not in
+  `public` or PostgreSQL's own schemas, nor in a table declared `deterministic: false`)
 - **THEN** restore refuses with `contents-hash-mismatch` and the target stays empty
 
 ### Requirement: BK-4 A restored database continues like one that never stopped

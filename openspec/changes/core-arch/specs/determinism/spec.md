@@ -138,7 +138,7 @@ see; they are caught by the convergence tests (two runs, two backends, restarts)
 
 #### Scenario: A table no module declared
 - **WHEN** an operator creates `ops.notes (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, body text)` in a
-  public schema by hand
+  schema of its own by hand
 - **THEN** the contents hash refuses with `non-deterministic-column`, naming `ops.notes.id`
 
 #### Scenario: A table without a primary key

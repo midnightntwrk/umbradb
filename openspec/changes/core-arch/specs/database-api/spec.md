@@ -218,10 +218,10 @@ caller (project 2's error policy) can retry; every other database error SHALL be
 ### Requirement: DB-14 Block transactions change rows only
 
 THE system SHALL require that `on-db-write` callbacks change rows only (`INSERT`, `UPDATE`, `DELETE`, and provider
-functions that do the same), and that schema changes happen only in migrations. Because `TRUNCATE` fires no row
-triggers and would escape digest capture (DT-4) without an error, THE database API SHALL attach to every table of a
-public module a `BEFORE TRUNCATE` statement trigger that raises `truncate-not-allowed`; DDL in a block is a module error
-the system does not check (Q46).
+functions that do the same), and that schema changes happen only in migrations. Because `TRUNCATE` fires no row triggers
+and would escape digest capture (DT-4) without an error, THE database API SHALL attach to every module table not
+declared `deterministic: false` (Q75, Q76, Q84) a `BEFORE TRUNCATE` statement trigger that raises
+`truncate-not-allowed`; DDL in a block is a module error the system does not check (Q46).
 
 #### Scenario: TRUNCATE in a block
 - **WHEN** a module runs `TRUNCATE` on its own table in `on-db-write`
@@ -241,7 +241,7 @@ given to callbacks SHALL run with `statement_timeout`, `lock_timeout`, `idle_in_
 because they run work the runner must finish; a slow block is reported (RN-17), never cut off (Q71).
 
 #### Scenario: A hung API query is cut off
-- **WHEN** an API request's read runs `SELECT pg_sleep(60)` with `apiReadTimeoutMs` 1000
+- **WHEN** on PostgreSQL an API request's read runs `SELECT pg_sleep(60)` with `apiReadTimeoutMs` 1000
 - **THEN** it fails with `query-timeout` after about 1 s, and the next read on the same connection succeeds
 
 #### Scenario: A long migration is never cut off

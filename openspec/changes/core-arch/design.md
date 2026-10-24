@@ -105,8 +105,8 @@ interface BlockSource {
   schema>, pg_temp` (`pg_temp` last, so no temporary table shadows a provider table); default privileges revoke
   `EXECUTE` from `PUBLIC`; `EXECUTE` is granted to the roles of modules that require the provider's item (DB-7).
   `core-ledger-state` offers `persist(key)` this way (LG-13).
-- **`TRUNCATE`.** Every public module table gets a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger raising
-  `truncate-not-allowed` (DB-14).
+- **`TRUNCATE`.** Every module table not declared `deterministic: false` gets a `BEFORE TRUNCATE … FOR EACH STATEMENT`
+  trigger raising `truncate-not-allowed` (DB-14).
 - **Column types and stored values (DT-1, DT-2, DT-6, Q57, Q58).** One table of rules,
   `src/deterministic-postgresql/column-rules.ts`, decides for each column of a module table, in every database (the
   core's or a private process's, Q75), whether its type is allowed as a value and as a key, with the reason and the alternative of the column-type table below; the contents hash (DT-3)

@@ -485,10 +485,9 @@ git as pinned release assets that CI downloads and verifies.
   PostgreSQL 18, each with every check of BK-3 passing; a restored database's schemas, tables, sequences and functions
   have the owners and grants of a database built by migrations (compared in the catalogs). (BK-2, BK-3)
 - **A126** `[CI]` Each restore refusal of BK-3 is triggered and checked before or after loading, as BK-3 orders them,
-  including a changed value in an `INSERT` of a table not declared `deterministic: false` giving
-  `contents-hash-mismatch`; after every refusal the target is as it was before the restore: unchanged after
-  `restore-target-not-empty`, empty after every other.
-  (BK-3)
+  including a changed value in an `INSERT` of a row the contents hash covers (DT-3) giving `contents-hash-mismatch`;
+  after every refusal the target is as it was before the restore: unchanged after `restore-target-not-empty`, empty
+  after every other. (BK-3)
 - **A127** `[FAULT]` A restore killed while running the file's SQL leaves the target empty, and a new restore into it
   then succeeds. (BK-3)
 - **A128** `[DIFF]` A backup written on PostgreSQL 18 at h, restored on PGlite and on PostgreSQL 18, and continued to
