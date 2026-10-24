@@ -400,8 +400,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       function without its fixed `search_path`, as it names only built-ins). `design.md` §4 ("Roles", "Provider
       functions", "`TRUNCATE`", the component table's row 6) and §14 updated. **Pending:** A13's and A73's "processing
       halts" (tasks 2.6, 5.x); A15's "startup refuses" (tasks 3.1, 3.2, 5.x); A73's migration half through the migration
-      runner (task 2.4). **Questions:** Q89 (a `table` item's schema and a shared item's writer; shipped A) and Q90
-      (roles per server and the writer's login; shipped A), both open.
+      runner (task 2.4). **Questions, since decided:** Q89 (a `table` item's schema and a shared item's writer) and Q90
+      (roles per server and the writer's login): A, by the owner (2026-10-24).
 - [ ] 2.4 Migrations with checksums (refactored from `src/postgres/migrate.ts`), `core_chain.migrations`, setup after
       migrations, and `requiresResync`.
       **Acceptance:** A16, A72; the refactored `migrate` and `migration-lock-timeout` tests pass or are retired per

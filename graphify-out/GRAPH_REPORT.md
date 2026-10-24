@@ -1,17 +1,17 @@
 # Graph Report - UmbraDB
 
 ## Corpus Check
-- 449 files · ~721,390 words
+- 449 files · ~721,460 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 53 file(s) not represented in the graph (top: .lean 25, (none) 13, .patch 8)
 
 ## Summary
-- 4332 nodes · 9568 edges · 237 communities (217 shown, 20 thin omitted)
-- Extraction: 81% EXTRACTED · 19% INFERRED · 0% AMBIGUOUS · INFERRED: 1773 edges (avg confidence: 0.94)
+- 4332 nodes · 9570 edges · 237 communities (217 shown, 20 thin omitted)
+- Extraction: 81% EXTRACTED · 19% INFERRED · 0% AMBIGUOUS · INFERRED: 1775 edges (avg confidence: 0.94)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Corpus fingerprint: `88ba1ff0f3410f17` (449 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
+- Corpus fingerprint: `fcacc3ea1b89b79d` (449 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
 - `npm run graph:check` recomputes it: exit 0 means the graph matches the tracked files.
 - `npm run graph:refresh` rebuilds the graph from scratch (no LLM, deterministic).
 
@@ -1153,7 +1153,7 @@ Nodes (15): CheckpointStore: content-addressed snapshots, Contents, License, Per
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `vitest` connect `vitest` to `module-tables.ts`, `UmbraError`, `StorageError`, `pglite-queue.test.ts`, `PgTemporalKV`, `transaction-history-storage.test.ts`, `watermarks.property.test.ts`, `withSuiteWatchdog`, `postgres/transaction-lease.ts`, `error-catalog-drift.test.ts`, `column-rules.test.ts`, `postgres-image.test.ts`, `createClient`, `ref_node_fs`, `boundary.test.ts`, `migrate.ts`, `storage-errors.ts`, `api.ts`, `pg-tx-history-adapter.ts`, `src/index.ts`, `cursor-durability.crash.test.ts`, `translatePostgresError`, `PgTransactionLeaseLayer`, `lease-nonwedge.crash.test.ts`, `differential-equivalence.test.ts`, `ref_node_crypto`, `full-sync-soak.integration.test.ts`, `setup.ts`, `vendored-ledger-files.test.ts`, `package.json`, `cbor.property.test.ts`, `check-required-tests.ts`, `chain-archive-replay-decode.integration.test.ts`, `postgres/watermarks.ts`, `read-height.property.test.ts`, `cold-boot-recovery.integration.test.ts`, `transaction-history-storage.property.test.ts`, `NodeRpcClient`, `ws-mutual-tls.test.ts`, `mutation-per-adapter.mjs`, `load-under-prune.integration.test.ts`, `CheckpointNotFoundError`, `decode`, `component-table.test.ts`, `node-store-suite.ts`, `IndexerClient`, `facade-merge-loader.ts`, `cbor.test.ts`?**
-  _High betweenness centrality (0.231) - this node is a cross-community bridge._
+  _High betweenness centrality (0.242) - this node is a cross-community bridge._
 - **Are the 21 inferred relationships involving `PgTransactionLeaseLayer` (e.g. with `Boundary held` and `Added`) actually correct?**
   _`PgTransactionLeaseLayer` has 21 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `RFC-3339`, `RFC-8949`, `RFC-3339` to the rest of the system?**
@@ -1161,7 +1161,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `module-tables.ts` be split into smaller, more focused modules?**
   _Cohesion score 0.0521978021978022 - nodes in this community are weakly interconnected._
 - **Why does `block()` connect `block` to `UmbraError`, `ADDED Requirements`, `ADDED Requirements`, `describeNodeStoreExports`, `ADDED Requirements`, `sync-service.ts`, `ADDED Requirements`, `ADDED Requirements`?**
-  _High betweenness centrality (0.067) - this node is a cross-community bridge._
+  _High betweenness centrality (0.068) - this node is a cross-community bridge._
 - **Are the 29 inferred relationships involving `PgCheckpointStore` (e.g. with `Added` and `Phase → current status map`) actually correct?**
   _`PgCheckpointStore` has 29 INFERRED edges - model-reasoned connections that need verification._
 - **Should `UmbraError` be split into smaller, more focused modules?**

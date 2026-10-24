@@ -76,12 +76,13 @@ and reads on a pool of read-only connections that see committed data only.
 ### Requirement: DB-6 Each module's schema is guarded by its own database role
 
 THE database API SHALL create one database role per module, owning that module's schema; SHALL run each `on-db-write`
-callback after `SET LOCAL ROLE` to its module's role, whose role may write only its own schema and read the others; and
-SHALL run each `on-start-db` callback and each migration under the same role. IF a callback writes to another module's
-schema under its own role THEN THE database SHALL reject the statement, and THE runner SHALL halt (RN-8). The same
-mechanism SHALL work on PostgreSQL and on PGlite. Modules are trusted code that the operator builds into the host
-program (owner decision Q46): the roles guard against mistakes, not against a module that deliberately selects another
-role, and THE system SHALL NOT add enforcement beyond them.
+callback after `SET LOCAL ROLE` to its module's role — or, for a module that provides a shared `table` item, to that
+item's role (DB-8, owner decision Q89) — whose role may write only its own schema and read the others; and SHALL run
+each `on-start-db` callback and each migration under the same role. IF a callback writes to another module's schema
+under its own role THEN THE database SHALL reject the statement, and THE runner SHALL halt (RN-8). The same mechanism
+SHALL work on PostgreSQL and on PGlite. Modules are trusted code that the operator builds into the host program (owner
+decision Q46): the roles guard against mistakes, not against a module that deliberately selects another role, and THE
+system SHALL NOT add enforcement beyond them.
 
 #### Scenario: Writing into another module's schema is rejected by the database
 - **WHEN** module `a` executes an `INSERT` into module `b`'s table through its block write handle
@@ -106,16 +107,18 @@ item.
 
 ### Requirement: DB-8 Schema names are unambiguous
 
-THE system SHALL accept module ids and item names that match `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` and are at most 40
-bytes long — so that every derived identifier (`umbradb_m_<schema>`, `umbradb_i_<item>`) stays within PostgreSQL's
-63-byte limit — and SHALL name each module's schema after its id with `-` replaced by `_` (e.g. `core-chain-events` →
+THE system SHALL accept module ids and item names that match `^[a-z][a-z0-9]*(-[a-z0-9]+)*$` and are at most 40 bytes
+long — so that every derived identifier (`umbradb_m_<schema>`, `umbradb_i_<item>`) stays within PostgreSQL's 63-byte
+limit — and SHALL name each module's schema after its id with `-` replaced by `_` (e.g. `core-chain-events` →
 `core_chain_events`), which is one-to-one for such ids. IF a module's schema name or a shared item's schema name equals
 another module's, another item's, or a reserved schema (`core_chain`, `core_digest`, `core_digest_shadow`, any name
-starting with `pg_`, `information_schema`, `public`) THEN startup SHALL refuse and name both. WHERE several modules
-provide one shared item, THE database API SHALL create one schema named after the item, owned by a role named after
-the item, under which the provider active at each height writes; IF two providers of one shared item declare different
-migrations (ids or checksums), or one declares the item `deterministic: false` and the other does not (MD-1, Q76), THEN
-startup SHALL refuse.
+starting with `pg_`, `information_schema`, `public`) THEN startup SHALL refuse and name both. A `table` item's declared
+schema SHALL be its module's schema or, for a shared item, the item's name with `-` replaced by `_`; a `table` item
+declaring any other schema, or a module whose `table` items declare two schemas, SHALL refuse startup with
+`schema-collision` (owner decision Q89). WHERE one or several modules provide a shared item, THE database API SHALL
+create one schema named after the item, owned by a role named after the item, under which the provider active at each
+height writes; IF two providers of one shared item declare different migrations (ids or checksums), or one declares the
+item `deterministic: false` and the other does not (MD-1, Q76), THEN startup SHALL refuse.
 
 #### Scenario: Two providers of one item with different migrations
 - **WHEN** two test providers of item `shared-x` declare migration `001` with different SQL
