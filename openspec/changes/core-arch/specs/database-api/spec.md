@@ -137,10 +137,11 @@ item `deterministic: false` and the other does not (MD-1, Q76), THEN startup SHA
 
 WHEN a process starts, THE database API SHALL first create the schema `core_chain` and its table `core_chain.migrations`
 (module, migration id, checksum, position) if absent; THEN, for each backbone part and each module in the order of RN-3,
-SHALL apply its pending migrations one by one, each in its own transaction together with its `migrations` row, and
-SHALL THEN call its `on-start-db` callback in a further transaction of its own, for setup that is idempotent. THE
-checksum of a migration SHALL be SHA-256 of its UTF-8 SQL text. Migrations SHALL be forward-only and cumulative. IF an
-applied migration's checksum differs from the build's, or a migration recorded as applied is missing from the build,
+SHALL apply its pending migrations one by one, each in its own transaction together with its `migrations` row, and SHALL
+THEN call its `on-start-db` callback in a further transaction of its own, for setup that is idempotent. THE checksum of
+a migration SHALL be SHA-256 of its UTF-8 SQL text. Migrations SHALL be forward-only and cumulative. IF an applied
+migration's checksum differs from the build's, a migration recorded as applied is missing from the build, or the build
+declares a pending migration before an applied one (`migration-missing`, `reason: out-of-order`; owner decision Q91),
 THEN startup SHALL refuse before any migration runs. IF a migration fails THEN its transaction SHALL roll back, the
 migrations before it SHALL stay applied, and startup SHALL refuse.
 

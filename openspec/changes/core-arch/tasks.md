@@ -443,8 +443,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       where `committedVersions` comes from (task 4.3, with the cursor of tasks 5.2/10.2), so A72's "committed blocks"
       are given as that history would give them; the declarations and RN-3's order fed in (tasks 3.1, 3.2); the
       refusal state and the writer lock before startup (tasks 5.x, 2.5); the schema write handle around `on-start-db`
-      (task 2.6). **Question:** Q91 (a pending migration declared before an applied one; shipped A, refused with
-      `migration-missing`, `reason: out-of-order`), not blocking.
+      (task 2.6). **Question, since decided:** Q91 (a pending migration declared before an applied one): A, by the
+      owner (2026-10-24), refused with `migration-missing`, `reason: out-of-order`.
 - [ ] 2.5 Writer lock (refactored from `src/postgres/transaction-lease.ts`) and the PGlite operating-system lock
       (`node:sqlite` exclusive transaction); the durability probe moved to `src/db/`.
       **Acceptance:** A17, A18; `durability-probe.test.ts` passes at its new path.
