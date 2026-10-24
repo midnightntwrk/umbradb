@@ -108,8 +108,8 @@ interface BlockSource {
 - **`TRUNCATE`.** Every public module table gets a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger raising
   `truncate-not-allowed` (DB-14).
 - **Column types and stored values (DT-1, DT-2, DT-6, Q57, Q58).** One table of rules,
-  `src/deterministic-postgresql/column-rules.ts`, decides for each column of a public table whether its type is allowed
-  as a value and as a key, with the reason and the alternative of the column-type table below; the contents hash (DT-3)
+  `src/deterministic-postgresql/column-rules.ts`, decides for each column of a module table, in every database (the
+  core's or a private process's, Q75), whether its type is allowed as a value and as a key, with the reason and the alternative of the column-type table below; the contents hash (DT-3)
   and the migration-time check (DT-6) both use it, so a refusal reads the same in both, and each rule carries a comment
   with its reason. It reads the catalog: `format_type(atttypid, atttypmod)` for the message, the type's base name for
   the rule, `numeric`'s declared scale from the type modifier, and `pg_type.typtype` for enums, domains and composite
@@ -167,17 +167,19 @@ interface BlockSource {
   `idle_in_transaction_session_timeout` above 0 the next statement hung; `electric-sql/pglite#1058`), so on PGlite API
   reads set neither and are not bounded — PGlite is a development backend (DB-12) — and the pinned zeros keep a
   configuration file's timeout from hanging it.
-- **Date and time values (Q68).** PostgreSQL prints a `timestamptz` under the pinned settings as
-  `2025-05-21 14:30:00.123456+00`; the mapping rewrites it to `2025-05-21T14:30:00.123456Z` (a `timestamp`'s text the
-  same way, without `Z`; a `date` unchanged), never through a JavaScript `Date`, whose parse of a zone-less text follows
-  the process's time zone and keeps milliseconds only (checked on Node.js v24.9.0, 2026-10-23). `timestamptz` is the
-  preferred time type: the module guide says so, and every time UmbraDB itself represents uses it and its `Z` form
-  (Q68). Every module table may store it, as a value and a key (Q74): the contents hash encodes it as the integer
-  microseconds since `1970-01-01T00:00:00Z`; `bigint` stays allowed, a time in `text` is allowed but not good practice,
-  floats stay refused, `jsonb` keeps its rules, and `timestamp`, `date`, `time`, `timetz` and `interval` stay refused
-  with "use `timestamptz`, written with `Z`". The column-type table's date-and-time row and the word "public" in the
-  paragraph below (every module schema, the core's or a private process's, follows the same rules, Q75) change with
-  their verbatim copies in the code (task 2.2b).
+- **Date and time values (Q68, Q74).** PostgreSQL prints a `timestamptz` under the pinned settings as
+  `2025-05-21 14:30:00.123456+00`; the mapping (`src/deterministic-postgresql/mapping.ts`) rewrites it to
+  `2025-05-21T14:30:00.123456Z` (a `timestamp`'s text the same way, without `Z`; a `date` unchanged; `infinity` and
+  `-infinity` as those words), never through a JavaScript `Date`, whose parse of a zone-less text follows the process's
+  time zone and keeps milliseconds only (checked on Node.js v24.9.0, 2026-10-23). It reads that form only: a year
+  outside 0001–9999, a BC date, or an offset other than `+00` (a session that changed `TimeZone`) is output it cannot
+  read, refused with `unreadable-result` (Q81). `timestamptz` is the preferred time type: the module guide
+  (`docs/module-guide.md`) says so, and every time UmbraDB itself represents uses it and its `Z` form (Q68). Every
+  module table may store it, as a value and a key (Q74): DT-1 encodes it as the integer microseconds since
+  `1970-01-01T00:00:00Z`, computed in `bigint` (`src/determinism/cbor.ts`), and DT-2 orders it by time, which is the
+  order of those integers; `bigint` stays allowed, a time in `text` is allowed but not good practice, floats stay
+  refused, `jsonb` keeps its rules, and `timestamp`, `date`, `time`, `timetz` and `interval` stay refused with "use
+  `timestamptz`, written with `Z`" (the column-type table below).
 
 **Column types (Q58).** Every refusal names the module, the table, the column and its declared type, then the reason and
 the alternative of its row. A table without a primary key is refused with `no-primary-key`: rows are hashed and digested
@@ -188,13 +190,13 @@ transaction index). A default that is not immutable is refused with `non-determi
 PostgreSQL marks stable or volatile (`now()`, `random()`, `gen_random_uuid()`) or uses an SQL value function
 (`CURRENT_TIMESTAMP`, `CURRENT_USER`), so each machine, or each retry, gets a different value; compute the value from
 the block in `on-db-write`. An immutable default (`'abc'`, `1 + 2`, `lower('X')`) and a stored generated column, which
-PostgreSQL requires to be immutable, are allowed. A public schema holding a sequence is refused with
+PostgreSQL requires to be immutable, are allowed. A module schema holding a sequence is refused with
 `non-deterministic-table` (Q61): module code can draw from a sequence at any time, and its values depend on retries;
-derive values from the block (height, transaction index), and drop the sequence (Q64). A public schema holding an
+derive values from the block (height, transaction index), and drop the sequence (Q64). A module schema holding an
 unlogged table is refused with `non-deterministic-table` (Q61): PostgreSQL empties an unlogged table after a crash,
 while the cursor still records its blocks as committed; make the table logged: create it without `UNLOGGED`, or run
-`ALTER TABLE ... SET LOGGED` (Q64). The contents hash refuses all of these too, with the same codes and messages, in any
-public schema (Q61). Detection, checked on PostgreSQL 17.11 and PGlite 0.5.10: `pg_attribute.attidentity`; a default's
+`ALTER TABLE ... SET LOGGED` (Q64). The contents hash refuses all of these too, with the same codes and messages, in every
+schema it hashes (Q61, Q75). Detection, checked on PostgreSQL 17.11 and PGlite 0.5.10: `pg_attribute.attidentity`; a default's
 expression tree (`pg_attrdef.adbin`), read as stored, as PostgreSQL's own immutability check reads it (Q62): every
 function id (`:funcid`, and `:opfuncid`, `:hashfuncid` and `:negfuncid` for operators, an operator stored without one
 read through `pg_operator`), each looked up in `pg_proc.provolatile`; a conversion through text (`COERCEVIAIO`: the
@@ -213,10 +215,11 @@ that can never run still counts, since the tree is read without PostgreSQL's con
 | `text`, `varchar(n)` | text string | yes, by bytes (`COLLATE "C"`) | — |
 | `uuid` | byte string of its 16 bytes | yes, by bytes | — (a `gen_random_uuid()` default is still refused as random) |
 | `boolean` | `false` / `true` | yes, `false` first | — |
+| `timestamptz` | integer microseconds since `1970-01-01T00:00:00Z`; `infinity` and `-infinity` fail | yes, by time | — (the preferred time type: write every time with an offset, `Z`; Q74) |
 | `jsonb` | CBOR, map keys sorted; the `CHECK` on numbers | no | As a key: PostgreSQL's `jsonb` order (by kind, then size, then contents) is not the order of the encoded bytes; use a `text` or `bytea` key |
 | arrays of the value types above | array | no | As a key: PostgreSQL compares arrays element by element, while the encoding puts the length first; use a composite key |
 | `real`, `double precision` | refused (`non-deterministic-column`) | refused | Approximate: a value computed two ways can differ in its last bits (Q60: in `double precision`, `0.1 + 0.2` is `0.30000000000000004`, not `0.3`; in `real`, `0.1 + 0.6` is `0.70000005`, not `0.7`); use integers in fixed units (`bigint`, `numeric(p)`) |
-| `timestamptz`, `timestamp`, `date`, `time`, `timetz`, `interval` | refused | refused | Per type (Q59): `timestamptz` and `timestamp` — the drivers return a JavaScript `Date`, which keeps milliseconds only (`10:00:00.123456` and `10:00:00.123999` read back equal), and the text depends on `DateStyle` (and, for `timestamptz`, `TimeZone`); `date` — the drivers return a JavaScript `Date`, and the text depends on `DateStyle` (`2026-10-23` or `23/10/2026`); `interval` — the drivers return its text, which depends on `IntervalStyle` (`1 day 02:00:00` or `P1DT2H`); `time` and `timetz` — no canonical encoding is defined for a time of day (the drivers return its text). Store `bigint` milliseconds since the epoch, as `core_block_commit.blocks.block_timestamp_ms` does |
+| `timestamp`, `date`, `time`, `timetz`, `interval` | refused | refused | Per type (Q59, Q74): `timestamp` — it holds no time zone, so one value is a different instant in each time zone (`2025-05-21 14:30:00` is `14:30Z` in UTC and `18:30Z` in New York); `date` — it holds no time zone, so a day starts and ends at a different instant in each time zone; `time` and `timetz` — a time of day is not an instant, and no canonical encoding is defined for it; `interval` — PostgreSQL holds its months, days and microseconds apart but compares them as if a month were 30 days and a day 24 hours, so equal intervals print differently (`1 day` and `24:00:00`), and no canonical encoding is defined for it. Use `timestamptz`, written with `Z`; for a time of day or a length of time, `bigint` microseconds |
 | `json` | refused | refused | PostgreSQL keeps `json`'s input text (spaces, key order, duplicate keys), but the drivers parse it, so different stored texts read back equal; use `jsonb` |
 | `char(n)` | refused | refused | Stored padded with spaces, compared ignoring them and cast to `text` without them, so its value depends on how it is read; use `text` or `varchar(n)` |
 | `money` | refused | refused | Its text depends on the `lc_monetary` setting; use `bigint` smallest units |
@@ -224,7 +227,7 @@ that can never run still counts, since the tree is read without PostgreSQL's con
 | any other type (network, bit-string, XML, geometric, range, full-text, …) | refused | refused | No canonical encoding is defined; the supported types are those above |
 
 The reasons for the time types, `json`, `char(n)` and `numeric(p,s)` were checked on PGlite 0.5.10 and PostgreSQL 17.11
-(2026-10-23, the decision record's Q58).
+(2026-10-23, the decision record's Q58), the date and time ones again after Q74 (2026-10-24, task 2.2b).
 
 **The `deterministic_postgresql` component (Q69).** Every rule UmbraDB imposes on PostgreSQL, so that two databases fed
 the same chain hold, hash and read back the same values, is one component, `deterministic_postgresql`, in
@@ -238,7 +241,7 @@ is where they are implemented and tested together:
 | Column types allowed as values and as keys, each refusal with its reason and alternative (the column-type table above) | DT-1, DT-2, DT-6 | Q57–Q60 |
 | Text keys ordered by bytes (`COLLATE "C"`) | DT-2 | Q58 |
 | Identity, `serial` and non-immutable defaults refused, detected from `pg_attrdef.adbin` as above | DT-6 | Q61–Q63 |
-| Sequences and unlogged tables in public schemas refused | DT-6 | Q61, Q64 |
+| Sequences and unlogged tables in module schemas refused | DT-6 | Q61, Q64 |
 | `core_chain.jsonb_numbers_ok` and `core_chain.numeric_ok` and the `CHECK`s they back | DT-1, DT-6 | Q57 |
 | Block transactions change rows only; the `BEFORE TRUNCATE` trigger | DB-14 | — |
 | The pinned session settings, and the zero timeouts (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `transaction_timeout`) of the writer and callback reads | DB-2, DB-15 | Q65, Q71 |

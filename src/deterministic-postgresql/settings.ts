@@ -13,7 +13,8 @@
  * The session settings every session of the database API starts with — each PostgreSQL connection and PGlite's one
  * session: how PostgreSQL prints values, so that every mapped value and every text the server prints is the same on
  * both backends, on every server and in every database, whatever their defaults — `bytea_output` (the `bytea` mapping
- * reads hex), `DateStyle` (the `Date` mapping reads ISO), `IntervalStyle`, `TimeZone` and `extra_float_digits` (floats
+ * reads hex), `DateStyle` (the date and time mapping reads ISO), `IntervalStyle`, `TimeZone` (the mapping reads a
+ * `timestamptz` printed with `+00`, and a literal without an offset means UTC) and `extra_float_digits` (floats
  * printed exactly). Owner decision Q65.
  */
 export const PINNED_SETTINGS: readonly (readonly [string, string])[] = [

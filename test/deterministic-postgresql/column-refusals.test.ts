@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { encodeCanonical } from "../../src/determinism/cbor.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
-import { PublicContentsError, publicTables } from "../../src/determinism/public-tables.js";
+import { ModuleContentsError, moduleTables } from "../../src/determinism/module-tables.js";
 import {
   type CatalogTable,
   catalogRelations,
@@ -20,7 +20,7 @@ import type { TestDatabase, TestServer } from "../determinism/postgres-database.
  * Tasks 1.3 and 1.4 on PostgreSQL 17 (`postgres:17-alpine`, Testcontainers) and, since task 2.2, on PGlite 0.5.10:
  * the column-type rules and DT-6's non-deterministic columns and tables read from a real catalog, and the
  * contents-hash half of A58 — the hash refuses what startup will refuse (DT-6), with the same codes and the same
- * messages (owner decisions Q58 and Q61), in any public schema. The startup half is task 7.1's, which calls the same
+ * messages (owner decisions Q58 and Q61), in every schema it hashes (Q75). The startup half is task 7.1's, which calls the same
  * `tableRefusals`, `databaseRefusals` and `refusalMessage` with the module's id.
  *
  * Every expected code, location and phrase below is written by hand from `design.md` §4 and DT-6; the code under test
@@ -51,14 +51,14 @@ async function catalogTable(db: TestDatabase, schema: string, name: string): Pro
   return found;
 }
 
-async function refusalOf(run: () => Promise<unknown>): Promise<PublicContentsError> {
+async function refusalOf(run: () => Promise<unknown>): Promise<ModuleContentsError> {
   try {
     await run();
   } catch (error) {
-    if (error instanceof PublicContentsError) return error;
+    if (error instanceof ModuleContentsError) return error;
     throw error;
   }
-  throw new Error("expected a PublicContentsError, but the read succeeded");
+  throw new Error("expected a ModuleContentsError, but the read succeeded");
 }
 
 describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
@@ -99,8 +99,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       ["c_real", "real", "floating-point"],
       ["c_double", "double precision", "floating-point"],
       ["c_float", "float", "floating-point"],
-      ["c_timestamptz", "timestamptz", "date-time"],
-      ["c_timestamptz_3", "timestamptz(3)", "date-time"],
+      ["c_timestamptz", "timestamptz", "timestamptz"],
+      ["c_timestamptz_3", "timestamptz(3)", "timestamptz"],
       ["c_timestamp", "timestamp", "date-time"],
       ["c_date", "date", "date-time"],
       ["c_time", "time", "date-time"],
@@ -117,7 +117,9 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       ["a_domain", "m.positive[]", "user-defined"],
       ["a_composite", "m.pair[]", "user-defined"],
       ["a_numeric_ps", "numeric(38,2)[]", "numeric-scaled"],
-      ["a_timestamptz", "timestamptz[]", "date-time"],
+      ["a_timestamptz", "timestamptz[]", "array"],
+      ["a_timestamp", "timestamp[]", "date-time"],
+      ["a_interval", "interval[]", "date-time"],
       ["a_json", "json[]", "json"],
       ["c_range", "int4range", "other"],
       ["c_multirange", "int4multirange", "other"],
@@ -197,7 +199,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       readonly says: readonly string[];
     }
 
-    const COLUMN_TYPE = "this type cannot be stored in a public table";
+    const COLUMN_TYPE = "this type cannot be stored in a module table";
     const KEY_TYPE = "this type cannot be part of a primary key";
 
     const CASES: readonly Case[] = [
@@ -211,7 +213,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       },
       {
         what: "a table without a primary key and with a refused column: the missing key first",
-        table: "CREATE TABLE m.t (at timestamptz, v text)",
+        table: "CREATE TABLE m.t (at timestamp, v text)",
         code: "no-primary-key",
         column: null,
         declaredType: null,
@@ -279,34 +281,25 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         says: [COLUMN_TYPE, "100 → 100.00"],
       },
       {
-        what: "a timestamptz column",
-        table: "CREATE TABLE m.t (id bigint PRIMARY KEY, at timestamptz)",
-        code: "unsupported-column-type",
-        column: "at",
-        declaredType: "timestamp with time zone",
-        says: [
-          COLUMN_TYPE,
-          "JavaScript Date, which keeps milliseconds only",
-          "10:00:00.123456 and 10:00:00.123999 read back equal",
-          "TimeZone and DateStyle",
-          "store bigint milliseconds since the epoch, as core_block_commit.blocks.block_timestamp_ms does",
-        ],
-      },
-      {
-        what: "a timestamptz key: refused as a column type, which no key can fix",
-        table: "CREATE TABLE m.t (at timestamptz(3) PRIMARY KEY)",
-        code: "unsupported-column-type",
-        column: "at",
-        declaredType: "timestamp(3) with time zone",
-        says: [COLUMN_TYPE, "milliseconds only"],
-      },
-      {
-        what: "a timestamp column",
+        what: "a timestamp column (DT-6's scenario: it holds no time zone; use timestamptz, written with Z)",
         table: "CREATE TABLE m.t (id bigint PRIMARY KEY, at timestamp)",
         code: "unsupported-column-type",
         column: "at",
         declaredType: "timestamp without time zone",
-        says: [COLUMN_TYPE, "milliseconds only", "DateStyle", "bigint milliseconds since the epoch"],
+        says: [
+          COLUMN_TYPE,
+          "A timestamp holds no time zone",
+          "2025-05-21 14:30:00 is 14:30Z in UTC and 18:30Z in New York",
+          "use timestamptz, written with Z",
+        ],
+      },
+      {
+        what: "a timestamp key: refused as a column type, which no key can fix",
+        table: "CREATE TABLE m.t (at timestamp(3) PRIMARY KEY)",
+        code: "unsupported-column-type",
+        column: "at",
+        declaredType: "timestamp(3) without time zone",
+        says: [COLUMN_TYPE, "holds no time zone", "use timestamptz, written with Z"],
       },
       {
         what: "a date column",
@@ -314,7 +307,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         code: "unsupported-column-type",
         column: "day",
         declaredType: "date",
-        says: [COLUMN_TYPE, "JavaScript Date", "DateStyle", "bigint milliseconds since the epoch"],
+        says: [COLUMN_TYPE, "A date holds no time zone", "use timestamptz, written with Z", "2025-05-21T00:00:00Z"],
       },
       {
         what: "a time column",
@@ -322,7 +315,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         code: "unsupported-column-type",
         column: "opens",
         declaredType: "time without time zone",
-        says: [COLUMN_TYPE, "no canonical encoding for a time of day", "store bigint milliseconds"],
+        says: [COLUMN_TYPE, "is not an instant", "use timestamptz, written with Z", "bigint microseconds since midnight"],
       },
       {
         what: "a timetz column",
@@ -330,7 +323,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         code: "unsupported-column-type",
         column: "opens",
         declaredType: "time with time zone",
-        says: [COLUMN_TYPE, "no canonical encoding for a time of day", "store bigint milliseconds"],
+        says: [COLUMN_TYPE, "is not an instant", "use timestamptz, written with Z", "bigint microseconds since midnight"],
       },
       {
         what: "an interval column",
@@ -338,15 +331,15 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         code: "unsupported-column-type",
         column: "span",
         declaredType: "interval",
-        says: [COLUMN_TYPE, "IntervalStyle", "1 day 02:00:00", "P1DT2H", "store bigint milliseconds"],
+        says: [COLUMN_TYPE, "1 day and 24:00:00", "use timestamptz, written with Z", "store bigint microseconds"],
       },
       {
-        what: "a timestamptz[] column",
-        table: "CREATE TABLE m.t (id bigint PRIMARY KEY, ats timestamptz[])",
+        what: "a timestamp[] column",
+        table: "CREATE TABLE m.t (id bigint PRIMARY KEY, ats timestamp[])",
         code: "unsupported-column-type",
         column: "ats",
-        declaredType: "timestamp with time zone[]",
-        says: [COLUMN_TYPE, "milliseconds only"],
+        declaredType: "timestamp without time zone[]",
+        says: [COLUMN_TYPE, "holds no time zone"],
       },
       {
         what: "a json column",
@@ -473,7 +466,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         expect(first?.code).toBe(c.code);
         expect(error.message).toBe(refusalMessage(first as NonNullable<typeof first>, { schema: "m", table: "t" }));
         // And the same refusal when only the table list is read.
-        const listed = await refusalOf(() => db.read((read) => publicTables(read)));
+        const listed = await refusalOf(() => db.read((read) => moduleTables(read)));
         expect(listed.message).toBe(error.message);
       }, 60_000);
     }
@@ -484,21 +477,32 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         CREATE TABLE m.t (
           id uuid, flag boolean, name varchar(32), t text, b bytea, n numeric(38,0), n2 numeric(5,-2), n3 numeric,
           j jsonb, ai integer[], av varchar(8)[], au uuid[], ab boolean[], aj jsonb[], an numeric(10)[], s smallint,
-          i integer, big bigint, PRIMARY KEY (id, flag, name)
+          i integer, big bigint, at timestamptz, at3 timestamptz(3), ats timestamptz[], PRIMARY KEY (id, flag, name)
         );
-        CREATE TABLE m.k (s smallint, i integer, big bigint, b bytea, t text, v varchar, PRIMARY KEY (s, i, big, b, t, v));
+        CREATE TABLE m.k (s smallint, i integer, big bigint, b bytea, t text, v varchar, z timestamptz,
+                          PRIMARY KEY (s, i, big, b, t, v, z));
         INSERT INTO m.t VALUES ('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', true, 'x', 't', '\\x01', 12, 1200, 7,
           '{"a": 1}', '{1,2}', '{a,b}', '{a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11}', '{t,f}', ARRAY['{}'::jsonb], '{3}',
-          1, 2, 3);
-        INSERT INTO m.k VALUES (1, 2, 3, '\\x00', 'a', 'b');
+          1, 2, 3, '2025-05-21 14:30:00.123456+00', '2025-05-21 14:30:00.123+00', '{"2025-05-21 14:30:00+00",NULL}');
+        INSERT INTO m.k VALUES (1, 2, 3, '\\x00', 'a', 'b', '2025-05-21 14:30:00+00');
       `);
       const hash = await db.read((read) => contentsHash(read));
       expect(hash.length).toBe(32);
       expect((await catalogTable(db, "m", "t")).columns.every((c) => columnVerdict(c).allowed)).toBe(true);
+      expect((await catalogTable(db, "m", "k")).columns.every((c) => columnVerdict(c).allowed)).toBe(true);
+    }, 60_000);
+
+    it("A145: a bigint and a text column holding times are accepted (Q74)", async () => {
+      const db = await freshDatabase(`
+        CREATE SCHEMA m;
+        CREATE TABLE m.t (at_ms bigint PRIMARY KEY, at_text text);
+        INSERT INTO m.t VALUES (1747837800123, '2025-05-21T14:30:00.123Z');
+      `);
+      expect((await db.read((read) => contentsHash(read))).length).toBe(32);
     }, 60_000);
   });
 
-  describe("A58 (contents-hash half), Q61: non-deterministic columns and tables, in any public schema", () => {
+  describe("A58 (contents-hash half), Q61: non-deterministic columns and tables, in every schema it hashes", () => {
     interface Case {
       readonly what: string;
       /** Run after `CREATE SCHEMA m` and a table the hash can read, `m.fine`. */
@@ -647,27 +651,27 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         says: [SEQUENCE_DRAW, "identity column", FROM_THE_BLOCK],
       },
       {
-        what: "a sequence in a public schema",
+        what: "a sequence in a module schema",
         setup: "CREATE SEQUENCE m.counter",
         code: "non-deterministic-table",
         place: { schema: "m", sequence: "counter" },
         column: null,
         declaredType: null,
         says: [
-          "a public schema cannot hold a sequence",
+          "a module schema cannot hold a sequence",
           "Module code can draw from a sequence at any time",
           "never rolls back",
           "Instead, derive values from the block (height, transaction index), and drop the sequence.",
         ],
       },
       {
-        what: "an unlogged sequence in a public schema",
+        what: "an unlogged sequence in a module schema",
         setup: "CREATE UNLOGGED SEQUENCE m.counter",
         code: "non-deterministic-table",
         place: { schema: "m", sequence: "counter" },
         column: null,
         declaredType: null,
-        says: ["a public schema cannot hold a sequence"],
+        says: ["a module schema cannot hold a sequence"],
       },
       {
         what: "an unlogged table (DT-6's scenario)",
@@ -677,7 +681,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         column: null,
         declaredType: null,
         says: [
-          "a public schema cannot hold an unlogged table",
+          "a module schema cannot hold an unlogged table",
           "PostgreSQL empties an unlogged table after a crash",
           "the cursor still records its blocks as committed",
           "Instead, make the table logged: create it without UNLOGGED, or run ALTER TABLE ... SET LOGGED.",
@@ -692,7 +696,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         place: { schema: "m", table: "t_1" },
         column: null,
         declaredType: null,
-        says: ["a public schema cannot hold an unlogged table"],
+        says: ["a module schema cannot hold an unlogged table"],
       },
       {
         what: "a conversion to timestamptz through its stable input function",
@@ -807,7 +811,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         expect(first.refusal.code).toBe(c.code);
         expect(error.message).toBe(refusalMessage(first.refusal, first.place));
         // And the same refusal when only the table list is read.
-        const listed = await refusalOf(() => db.read((read) => publicTables(read)));
+        const listed = await refusalOf(() => db.read((read) => moduleTables(read)));
         expect(listed.message).toBe(error.message);
       }, 60_000);
     }
@@ -815,8 +819,9 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
     it("lists a serial column's refusal before its sequence's, and a column's refusals in a fixed order", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA m;
-        CREATE TABLE m.t (id serial PRIMARY KEY, at timestamptz DEFAULT now());
+        CREATE TABLE m.t (id serial PRIMARY KEY, at timestamp DEFAULT now());
       `);
+      // `at` is a `timestamp` (refused as a type, then for its default); a `timestamptz` is allowed since Q74.
       const refusals = await db.read(async (read) =>
         databaseRefusals(await catalogTables(read), await catalogRelations(read)),
       );
@@ -865,7 +870,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       // A generated column's expression is no default, even when PostgreSQL's constant folding hides a random() in it.
       expect(columns.get("g")).toMatchObject({ identity: null, notImmutable: [] });
       expect(columns.get("n")).toMatchObject({ identity: null, notImmutable: [] });
-      // Sequences and unlogged tables of public schemas (the identity's own sequence included), by bytes; not public's.
+      // Sequences and unlogged tables of module schemas (the identity's own sequence included), by bytes; not public's.
       expect(relations).toEqual([
         { schema: "m", name: "t_id_seq", kind: "S", persistence: "p" },
         { schema: "z", name: "B", kind: "S", persistence: "p" },
@@ -874,7 +879,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       ]);
     }, 60_000);
 
-    it("controls: immutable defaults and stored generated columns are hashed; public is no public schema", async () => {
+    it("controls: immutable defaults and stored generated columns are hashed; the schema public is not hashed", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA m;
         CREATE TABLE m.t (
@@ -1005,14 +1010,34 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
     const settings = (read: ConsistentRead, values: string) =>
       Promise.all(values.split(";").map((statement) => read.query(`SET LOCAL ${statement}`)));
 
-    it("timestamps read back as millisecond Dates: .123456 and .123999 are equal", async () => {
-      const rows = await db.read((read) => read.query("SELECT ts, t, ts::text AS text FROM m.times ORDER BY k"));
-      const [first, second] = rows as [Record<string, unknown>, Record<string, unknown>];
-      expect(first.ts).toBeInstanceOf(Date);
-      expect(first.t).toBeInstanceOf(Date);
-      expect((first.ts as Date).getTime()).toBe((second.ts as Date).getTime());
-      expect((first.t as Date).getTime()).toBe((second.t as Date).getTime());
-      expect(first.text).not.toBe(second.text);
+    it("timestamps read back as text with their microseconds: .123456 and .123999 differ (DB-2, Q68)", async () => {
+      const rows = await db.read((read) => read.query("SELECT ts, t FROM m.times ORDER BY k"));
+      expect(rows).toEqual([
+        { ts: "2026-10-23T10:00:00.123456Z", t: "2026-10-23T10:00:00.123456" },
+        { ts: "2026-10-23T10:00:00.123999Z", t: "2026-10-23T10:00:00.123999" },
+      ]);
+    }, 60_000);
+
+    it("a timestamp and a date hold no time zone: the same value is a different instant in each time zone", async () => {
+      const instants = (zone: string) =>
+        db.read(async (read) => {
+          await settings(read, `TimeZone = '${zone}'`);
+          const [row] = await read.query(`SELECT extract(epoch FROM '2025-05-21 14:30:00'::timestamp::timestamptz)::text AS t,
+                                                 extract(epoch FROM '2025-05-21'::date::timestamptz)::text AS d`);
+          return row;
+        });
+      // 14:30 in UTC, then in New York (EDT, UTC-4): 1747837800 and 1747852200 seconds since 1970.
+      expect(await instants("UTC")).toEqual({ t: "1747837800.000000", d: "1747785600.000000" });
+      expect(await instants("America/New_York")).toEqual({ t: "1747852200.000000", d: "1747800000.000000" });
+    }, 60_000);
+
+    it("interval: PostgreSQL compares months as 30 days and days as 24 hours, while equal values print differently", async () => {
+      const [row] = await db.read((read) =>
+        read.query(`SELECT '1 day'::interval = '24 hours'::interval AS day_is_24_hours,
+                           '1 mon'::interval = '30 days'::interval AS month_is_30_days,
+                           '1 day'::interval AS day, '24 hours'::interval AS hours`),
+      );
+      expect(row).toEqual({ day_is_24_hours: true, month_is_30_days: true, day: "1 day", hours: "24:00:00" });
     }, 60_000);
 
     it("date, timestamp and timestamptz text follow DateStyle and TimeZone; interval's follows IntervalStyle", async () => {

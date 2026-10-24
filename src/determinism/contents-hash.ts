@@ -1,9 +1,9 @@
 /**
  * The contents hash of DT-3 (`openspec/changes/core-arch/specs/determinism/spec.md`): SHA-256 of one canonical CBOR
- * array holding, for each public schema and then each table in name order (byte order), the array
+ * array holding, for each module schema and then each table in name order (byte order), the array
  * `[schema, table, [column names], [rows in primary-key order]]`, each row encoded as DT-1 encodes it.
  *
- * Which tables count, how the catalog is read and why one handle reads one snapshot: `./public-tables.ts`. The array
+ * Which tables count, how the catalog is read and why one handle reads one snapshot: `./module-tables.ts`. The array
  * is never built in memory: each table's row count is read first (the same snapshot), so the head of its row array
  * can be written before its rows, and the rows are hashed as they stream from the database.
  */
@@ -15,16 +15,16 @@ import {
   type ConsistentRead,
   countRows,
   type PageOptions,
-  type PublicColumn,
-  PublicContentsError,
-  type PublicTable,
-  publicTables,
+  type ModuleColumn,
+  ModuleContentsError,
+  type ModuleTable,
+  moduleTables,
   rowsInKeyOrder,
-} from "./public-tables.js";
+} from "./module-tables.js";
 
 /** The contents hash (32 bytes) of the database `read` sees, as DT-3 defines it. */
 export async function contentsHash(read: ConsistentRead, options: PageOptions = {}): Promise<Uint8Array> {
-  const tables = await publicTables(read);
+  const tables = await moduleTables(read);
   const hash = createHash("sha256");
   hash.update(encodeArrayHead(tables.length));
   for (const table of tables) {
@@ -41,7 +41,7 @@ export async function contentsHash(read: ConsistentRead, options: PageOptions = 
       rows++;
     }
     if (rows !== count) {
-      throw new PublicContentsError(
+      throw new ModuleContentsError(
         "row-count-changed",
         { schema: table.schema, table: table.name },
         null,
@@ -58,21 +58,21 @@ export async function contentsHash(read: ConsistentRead, options: PageOptions = 
  * number outside the 64-bit integers) — why, and what to store instead (the `deterministic_postgresql` component's
  * `valueFailureBecause`).
  */
-function encodeTableRow(table: PublicTable, types: readonly ColumnType[], row: unknown[]): Uint8Array {
+function encodeTableRow(table: ModuleTable, types: readonly ColumnType[], row: unknown[]): Uint8Array {
   try {
     return encodeRow(row, types);
   } catch (cause) {
     if (!(cause instanceof CanonicalEncodingError)) throw cause;
     // A row's values and types are equally many here, so the path starts with the failing column's index (`$[2]…`).
-    const column = table.columns[Number.parseInt(cause.path.slice(2), 10)] as PublicColumn;
-    const keyNames = table.key.map((index) => (table.columns[index] as PublicColumn).name).join(", ");
+    const column = table.columns[Number.parseInt(cause.path.slice(2), 10)] as ModuleColumn;
+    const keyNames = table.key.map((index) => (table.columns[index] as ModuleColumn).name).join(", ");
     const keyValues = table.key.map((index) => renderKeyValue(row[index])).join(", ");
     const because = valueFailureBecause(column.type, cause.reason);
     const detail =
       `the row with primary key (${keyNames}) = (${keyValues}) cannot be encoded: ${cause.message}` +
       (because === null ? "" : `. ${explain(because)}`);
     const place = { schema: table.schema, table: table.name };
-    throw new PublicContentsError("unencodable-row", place, column, detail, { cause });
+    throw new ModuleContentsError("unencodable-row", place, column, detail, { cause });
   }
 }
 

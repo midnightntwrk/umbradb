@@ -304,13 +304,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       and non-immutable defaults, sequences and unlogged tables (rows 1–4), the pinned session settings (row 7) and the
       result mapping and parameter texts (row 8). **Pending:** the `jsonb` and `numeric` `CHECK`s (row 5, task 7.1); the
       `BEFORE TRUNCATE` trigger (row 6, task 2.3); the zero timeouts (row 7, task 2.7); date and time as RFC 3339 text
-      (row 8, task 2.2b); the opt-out (row 9: its declaration task 3.1, its skips task 7.1).
+      (row 8, task 2.2b, done); the opt-out (row 9: its declaration task 3.1, its skips task 7.1).
       **For tasks 2.2b, 2.3, 2.7, 3.1 and 7.1:** put each rule in the component (`index.ts` says which file), test it in
       `test/deterministic-postgresql/` on both backends, and move its part in `component-table.test.ts` from `pending`
       to `tests`.
       **Question, since decided:** Q79 (where `UmbraError` lives): A, by the owner (2026-10-23). The CI run is pending
       until the branch is pushed (Phase 3).
-- [ ] 2.2b Date and time (Q68, Q74) and one set of rules (Q75): values as RFC 3339 text in the component's mapping;
+- [x] 2.2b Date and time (Q68, Q74) and one set of rules (Q75): values as RFC 3339 text in the component's mapping;
       `timestamptz` allowed as a value and a key (the encoder's integer microseconds since 1970, key order by time),
       the other date and time types refused with "use `timestamptz`"; the date-and-time row of `design.md` §4 split
       and reworded, and "public" in its paragraph made "module" (every database), together with their verbatim copies
@@ -318,6 +318,33 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `timestamptz` is the preferred time type, and every time UmbraDB represents uses it and its `Z` form. Runs next,
       before 0.4 (owner, 2026-10-24); it closes the fix check's TC-01, which the owner accepted until then.
       **Acceptance:** A139, A145 (the column rules and the encoding; the core's `block_time` is task 10.2's).
+      **Done (2026-10-24):** the component's mapping (`mapping.ts`) rewrites PostgreSQL's ISO text by moving its
+      characters, never through a JavaScript `Date`: `timestamptz` → `2025-05-21T14:30:00.123456Z` (the fraction as
+      printed), `timestamp` the same without `Z`, `date` its text, `infinity` and `-infinity` as words, arrays element by
+      element; only the pinned form is read (four-digit year, offset `+00`), so a year outside 0001–9999, BC or another
+      offset is the existing `unreadable-result` (Q81, no new rule); a `Date` parameter is still sent as its ISO text.
+      `timestamptz` is allowed as a value and a key (`column-rules.ts`: rule `timestamptz`, key order `by-time`, which
+      `keyOrderTerm` writes without a collation; `src/determinism/cbor.ts`: the integer microseconds since 1970 in
+      `bigint`, `infinity`/`-infinity` → `timestamptz-infinite`, other text → `timestamptz-invalid`, both in
+      `ERROR_CODES`; `valueFailureBecause` explains an infinite value). `timestamp`, `date`, `time`, `timetz` and
+      `interval` are refused with reasons true of each that no longer cite the drivers' `Date`, and "use timestamptz,
+      written with Z" (plus `bigint` microseconds for a time of day or a length of time, Q87). `design.md` §4: the
+      date-and-time row split into an allowed `timestamptz` row and the five refused types; "module" for "public" in
+      the paragraph, the "Column types and stored values" bullet and the component table's row 4; the "Date and time
+      values" bullet in the present tense. Q75 in the code, where "public" meant DT-3's schemas:
+      `src/determinism/module-tables.ts` (was `public-tables.ts`) with `moduleTables`, `ModuleContentsError`,
+      `ModuleContentsFailure`, `ModuleTable`, `ModuleColumn`; the messages "this type cannot be stored in a module
+      table" and "a module schema cannot hold …". The A7 differential compares date and time values as values, and
+      against values written out by hand. `docs/module-guide.md` created with its "Time values" section. Tests, seen
+      failing first: A139 (`time-values.test.ts`, both backends, three child processes with `TZ` UTC, America/New_York
+      and Asia/Tokyo, with controls that the zones took effect and that the old `Date` mapping differs between them),
+      A145's column rules and encoding (`cbor.test.ts` with 18 hand-computed values, `contents-hash.test.ts` with a
+      hand-written oracle beyond 2^53, `module-tables.test.ts`, `cross-backend.test.ts`, `both-backends.test.ts`,
+      `column-refusals.test.ts`, `column-rules.test.ts` and its design sync at 17 rows), `results.test.ts` (A9's `Date`
+      expectations replaced by DB-2's text) and `mapping.test.ts`; row 8's part of `component-table.test.ts` moved to its
+      tests. 36 wrong variants of the mapping, rules and encoder: 34 caught (two by hanging the suite, recorded as
+      `docs/issues/00008`), 2 equivalent. Closes the fix check's TC-01. **Pending for A145:** the startup refusal (task
+      7.1) and the core's `block_time` (task 10.2). **Question:** Q87 (not blocking, shipped B).
 - [ ] 2.3 Roles and `SET LOCAL ROLE`, provider functions (fixed `search_path`, `PUBLIC` revoked), the id pattern and
       schema-name collisions, shared-item schemas, and the `TRUNCATE` refusal.
       **Acceptance:** A13 including its negative control, A14, A15, A73.

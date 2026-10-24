@@ -8,7 +8,7 @@ import type {
   Transaction,
 } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
-import type { ConsistentRead } from "../../src/determinism/public-tables.js";
+import type { ConsistentRead } from "../../src/determinism/module-tables.js";
 import { askedLater, BACKENDS, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 
 /**

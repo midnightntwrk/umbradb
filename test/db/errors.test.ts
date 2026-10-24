@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { ERROR_CODES, type ErrorCode, UmbraError } from "../../src/db/errors.js";
 import { type CanonicalEncodingFailure, CanonicalEncodingError, encodeCanonical } from "../../src/determinism/cbor.js";
-import { type PublicContentsFailure, PublicContentsError } from "../../src/determinism/public-tables.js";
+import { type ModuleContentsFailure, ModuleContentsError } from "../../src/determinism/module-tables.js";
 
 /**
  * `UmbraError { code, retryable, details }` (`design.md` §4, §12), keeping 0.9.5's split between retryable and
@@ -63,23 +63,23 @@ describe("the determinism errors are UmbraErrors (design.md §12 exports UmbraEr
   });
 
   it("gives a contents failure its reason as its code, not retryable, with the table and the column", () => {
-    const error = new PublicContentsError(
+    const error = new ModuleContentsError(
       "unencodable-row",
       { schema: "m", table: "t" },
       { name: "c", declaredType: "numeric" },
       "a fraction",
     );
     expect(error).toBeInstanceOf(UmbraError);
-    expect(error.name).toBe("PublicContentsError");
+    expect(error.name).toBe("ModuleContentsError");
     expect(error.code).toBe("unencodable-row");
     expect(error.retryable).toBe(false);
     expect(error.details).toEqual({ schema: "m", table: "t", sequence: null, column: "c", declaredType: "numeric" });
-    const sequence = new PublicContentsError("non-deterministic-table", { schema: "m", sequence: "q" }, null, "x");
+    const sequence = new ModuleContentsError("non-deterministic-table", { schema: "m", sequence: "q" }, null, "x");
     expect(sequence.details).toEqual({ schema: "m", table: null, sequence: "q", column: null, declaredType: null });
   });
 
   it("covers every reason of both in ErrorCode", () => {
     expectTypeOf<CanonicalEncodingFailure>().toExtend<ErrorCode>();
-    expectTypeOf<PublicContentsFailure>().toExtend<ErrorCode>();
+    expectTypeOf<ModuleContentsFailure>().toExtend<ErrorCode>();
   });
 });

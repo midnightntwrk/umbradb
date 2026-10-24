@@ -22,7 +22,7 @@ import {
 
 /**
  * The column types of DT-1 the encoder takes (and their arrays): the `deterministic_postgresql` component's
- * (`SCALAR_COLUMN_TYPES` of `src/deterministic-postgresql/column-rules.ts`), the types its rules allow in a public
+ * (`SCALAR_COLUMN_TYPES` of `src/deterministic-postgresql/column-rules.ts`), the types its rules allow in a module
  * table.
  */
 export type { ColumnType } from "../deterministic-postgresql/index.js";
@@ -55,6 +55,10 @@ export type CanonicalEncodingFailure =
   | "numeric-invalid"
   /** A `uuid` value that is not PostgreSQL's output of one: 32 lowercase hex digits in groups 8-4-4-4-12. */
   | "uuid-invalid"
+  /** A `timestamptz` value `infinity` or `-infinity`: it has no microseconds since 1970 (DT-1, owner decision Q74). */
+  | "timestamptz-infinite"
+  /** A `timestamptz` value that is not the database API's RFC 3339 UTC text of a time from 0001 to 9999 (DB-2). */
+  | "timestamptz-invalid"
   /** A text string holding a lone UTF-16 surrogate, which has no UTF-8 encoding. */
   | "lone-surrogate"
   /** A value with no encoding in the subset (`undefined`, a function, a `Map`, a class instance, …). */
@@ -107,6 +111,9 @@ export function encodeCanonical(value: CanonicalValue): Uint8Array {
  * - `uuid` as PostgreSQL prints it, which both drivers return unchanged: 32 lowercase hex digits in groups 8-4-4-4-12,
  *   encoded as the byte string of its 16 bytes; any other form (upper case, braces, no hyphens) cannot have come from
  *   a `uuid` column and fails;
+ * - `timestamptz` (`timestamp with time zone`) as RFC 3339 UTC text (`2025-05-21T14:30:00.123456Z`, DB-2, owner
+ *   decision Q68), encoded as the integer of its microseconds since 1970-01-01T00:00:00Z (owner decision Q74),
+ *   negative before 1970; `infinity` and `-infinity` fail, and so does any other text;
  * - `jsonb` as the value parsed without loss: integers within ±(2^53 − 1) as `number`, others as `bigint`; every
  *   number must be an integer within the signed 64-bit range of DT-6;
  * - an array as a JavaScript array, nested for more dimensions, with `null` elements;
@@ -191,6 +198,15 @@ const NUMERIC_INTEGER = /^(-?)([0-9]+)$/;
 const NUMERIC_FRACTION = /^-?[0-9]+\.[0-9]+$/;
 /** PostgreSQL's output of a `uuid` (`uuid_out`): lowercase hex digits in groups of 8, 4, 4, 4 and 12. */
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/**
+ * The database API's text of a `timestamptz` (DB-2): RFC 3339 in UTC, a four-digit year, and a fraction of up to six
+ * digits only when the value has one (`src/deterministic-postgresql/mapping.ts`).
+ */
+const TIMESTAMPTZ_RFC3339 = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,6}))?Z$/;
+/** Year, month, day, hour, minute and second of {@link TIMESTAMPTZ_RFC3339}'s match. */
+type DateTimeFields = readonly [number, number, number, number, number, number];
+const MICROSECONDS_PER_SECOND = 1_000_000n;
+const SECONDS_PER_DAY = 86_400n;
 /** In a `u` regular expression a well-formed surrogate pair is one code point, so this matches only lone surrogates. */
 const LONE_SURROGATE = /\p{Cs}/u;
 
@@ -527,6 +543,64 @@ function encodeColumnScalar(
       if (typeof value !== "boolean") break;
       writer.head(MAJOR_SIMPLE, value ? SIMPLE_TRUE : SIMPLE_FALSE);
       return;
+    case "timestamp with time zone":
+      if (typeof value !== "string") break;
+      writeInteger(writer, timestamptzMicroseconds(value, path), INT64_MIN, INT64_MAX, path);
+      return;
   }
   fail("type-mismatch", path, `${type} cannot hold ${kindOf(value)}`);
+}
+
+/**
+ * The microseconds since 1970-01-01T00:00:00Z of a `timestamptz` as the database API reads it (DT-1, owner decision
+ * Q74), in `bigint`: the years 0001 to 9999 span about ±2.5 × 10^17 microseconds, beyond 2^53, so a `number` would
+ * round them (253402300799999999, the last microsecond of 9999, would become 253402300800000000). The calendar is the
+ * proleptic Gregorian one PostgreSQL uses; the date must exist (no 29 February 2025, no hour 24, no leap second, which
+ * PostgreSQL never prints). `infinity` and `-infinity` have no such number and fail; so does any other text.
+ */
+function timestamptzMicroseconds(text: string, path: PathNode): bigint {
+  if (text === "infinity" || text === "-infinity") {
+    fail("timestamptz-infinite", path, `${JSON.stringify(text)} has no microseconds since 1970-01-01T00:00:00Z`);
+  }
+  const match = TIMESTAMPTZ_RFC3339.exec(text);
+  if (match === null) return invalidTimestamptz(text, path);
+  const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number) as unknown as DateTimeFields;
+  const exists = year >= 1 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month);
+  if (!exists || hour > 23 || minute > 59 || second > 59) return invalidTimestamptz(text, path);
+  const fraction = BigInt((match[7] ?? "").padEnd(6, "0"));
+  const days = BigInt(daysSince1970(year, month, day));
+  const seconds = days * SECONDS_PER_DAY + BigInt(hour * 3600 + minute * 60 + second);
+  return seconds * MICROSECONDS_PER_SECOND + fraction;
+}
+
+function invalidTimestamptz(text: string, path: PathNode): never {
+  return fail(
+    "timestamptz-invalid",
+    path,
+    `${JSON.stringify(text)} is not a timestamptz as the database API reads it: RFC 3339 UTC text from ` +
+      "0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999Z, up to six fraction digits (2025-05-21T14:30:00.123456Z)",
+  );
+}
+
+function isLeapYear(year: number): boolean {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return isLeapYear(year) ? 29 : 28;
+  return month === 4 || month === 6 || month === 9 || month === 11 ? 30 : 31;
+}
+
+/**
+ * The days from 1970-01-01 to a date of the proleptic Gregorian calendar, negative before it (the civil-to-days
+ * algorithm of H. Hinnant's "chrono-Compatible Low-Level Date Algorithms", in exact integers: years 0001 to 9999 stay
+ * far inside the safe integers).
+ */
+function daysSince1970(year: number, month: number, day: number): number {
+  const y = month <= 2 ? year - 1 : year;
+  const era = Math.floor(y / 400);
+  const yearOfEra = y - era * 400;
+  const dayOfYear = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+  const dayOfEra = yearOfEra * 365 + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100) + dayOfYear;
+  return era * 146_097 + dayOfEra - 719_468;
 }

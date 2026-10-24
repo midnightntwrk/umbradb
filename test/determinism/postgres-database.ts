@@ -1,4 +1,4 @@
-import type { ConsistentRead } from "../../src/determinism/public-tables.js";
+import type { ConsistentRead } from "../../src/determinism/module-tables.js";
 import { startPostgresServer } from "../db/postgres-server.js";
 
 /**

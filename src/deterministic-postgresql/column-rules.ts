@@ -1,15 +1,16 @@
 /**
  * The column-type rules of DT-1, DT-2 and DT-6 (`openspec/changes/core-arch/specs/determinism/spec.md`, owner decision
  * Q58), rules of the `deterministic_postgresql` component (`design.md` §4, owner decision Q69): for each column of a
- * public table, whether its type may be stored (as a value) and whether it may be part of the primary key (as a key) —
- * and, when it may not, why, and what to use instead. And DT-6's non-deterministic columns and tables (owner decision
- * Q61): identity and `serial` columns, defaults that are not immutable, and public schemas holding a sequence or an
+ * module table, in every database (the core's or a private process's, owner decision Q75), whether its type may be
+ * stored (as a value) and whether it may be part of the primary key (as a key) — and, when it may not, why, and what to
+ * use instead. And DT-6's non-deterministic columns and tables (owner decision
+ * Q61): identity and `serial` columns, defaults that are not immutable, and module schemas holding a sequence or an
  * unlogged table.
  *
  * **One source.** Every reason and alternative here comes from `design.md` §4's column-type table and the paragraph
  * above it, adapted into sentences for a module developer who has never read DT-1 or DT-6. Each rule keeps its row's
  * four cells, or its sentence, verbatim (`design`), and `test/deterministic-postgresql/column-rules.test.ts` fails when
- * the design and the rules part ways. The contents hash (DT-3) refuses with these rules in every public schema; task
+ * the design and the rules part ways. The contents hash (DT-3) refuses with these rules in every schema it hashes; task
  * 7.1's migration-time check (DT-6) calls the same {@link tableRefusals}, {@link relationRefusals} (or
  * {@link databaseRefusals}) and {@link refusalMessage}, adding the module's id, so a refusal reads the same in both.
  *
@@ -22,16 +23,19 @@
  * {@link notImmutableParts}); and about a relation ({@link RelationFacts}): `relkind` and `relpersistence`.
  *
  * Two rows of the table give one reason to several types although it is not true of each of them (decision record
- * Q59 and Q60, 2026-10-23): the date and time types and the floating-point types. For those, each type gets the
- * clauses that are true of it, checked on PostgreSQL 17.11 and PGlite 0.5.10
- * (`test/deterministic-postgresql/column-refusals.test.ts` checks them again through the driver).
+ * Q59 and Q60, 2026-10-23): the refused date and time types and the floating-point types. For those, each type gets
+ * the clauses that are true of it, checked on PostgreSQL 17.11 and PGlite 0.5.10
+ * (`test/deterministic-postgresql/column-refusals.test.ts` checks them again through the database API). Since owner
+ * decision Q74 (task 2.2b) `timestamptz` is allowed, as a value and a key, and the other date and time types are
+ * refused with "use `timestamptz`, written with `Z`".
  */
 
 // ── the column types DT-1 encodes ───────────────────────────────────────────────────────────────────────────────────
 
 /**
  * The column types of DT-1, named as PostgreSQL's `format_type(type, NULL)` names them (`character varying` for
- * `varchar(n)`; `varchar` and `uuid` since owner decision Q58): the types the rules below allow in a public table, and
+ * `varchar(n)`, `timestamp with time zone` for `timestamptz`; `varchar` and `uuid` since owner decision Q58,
+ * `timestamptz` since Q74): the types the rules below allow in a module table, and
  * their arrays, and the types the canonical encoder (`src/determinism/cbor.ts`) takes.
  */
 export const SCALAR_COLUMN_TYPES = [
@@ -44,6 +48,7 @@ export const SCALAR_COLUMN_TYPES = [
   "character varying",
   "uuid",
   "boolean",
+  "timestamp with time zone",
   "jsonb",
 ] as const;
 
@@ -96,7 +101,7 @@ export interface TableFacts {
   readonly columns: readonly ColumnFacts[];
 }
 
-/** A relation of a public schema as PostgreSQL's catalog describes it: a table (a partition included) or a sequence. */
+/** A relation of a module schema as PostgreSQL's catalog describes it: a table (a partition included) or a sequence. */
 export interface RelationFacts {
   readonly schema: string;
   readonly name: string;
@@ -116,8 +121,11 @@ export type RefusalCode =
   | "non-deterministic-column"
   | "non-deterministic-table";
 
-/** How DT-2 orders a key column: integers numerically, `boolean` with `false` first, the others by their bytes. */
-export type KeyOrder = "numerically" | "false-first" | "by-bytes" | "by-bytes-collate-c";
+/**
+ * How DT-2 orders a key column: integers numerically, `boolean` with `false` first, `timestamptz` by time (the order of
+ * the integers DT-1 encodes it as), the others by their bytes.
+ */
+export type KeyOrder = "numerically" | "false-first" | "by-time" | "by-bytes" | "by-bytes-collate-c";
 
 /** Why something is refused, as a sentence without its final period, and what to use instead, as a clause. */
 export interface Because {
@@ -272,6 +280,26 @@ const BOOLEAN: AllowedRule = {
   key: "false-first",
 };
 
+// `timestamptz` (owner decisions Q68 and Q74): PostgreSQL stores it as the microseconds since 2000-01-01T00:00:00Z
+// in 64 bits, whatever offset it was written with, and the database API reads it as RFC 3339 UTC text in every
+// process (DB-2), so its value is one instant. DT-1 encodes it as the integer microseconds since
+// 1970-01-01T00:00:00Z (`src/determinism/cbor.ts`); `infinity` and `-infinity` have none and fail to encode. As a key
+// it is ordered by time, which is both PostgreSQL's order for it and the order of those integers (`keyOrderTerm` adds
+// no collation). The preferred time type; a literal without an offset is read in the session's `TimeZone`, which the
+// API pins to UTC, so a module writes every time with an offset, `Z` (the module guide, `docs/module-guide.md`).
+const TIMESTAMPTZ: AllowedRule = {
+  id: "timestamptz",
+  design: {
+    type: "`timestamptz`",
+    value: "integer microseconds since `1970-01-01T00:00:00Z`; `infinity` and `-infinity` fail",
+    key: "yes, by time",
+    because: "— (the preferred time type: write every time with an offset, `Z`; Q74)",
+  },
+  allowed: true,
+  types: ["timestamp with time zone"],
+  key: "by-time",
+};
+
 // `jsonb`: PostgreSQL normalizes it on write; the encoding sorts map keys (RFC 8949 §4.2.1) and task 7.1's `CHECK`
 // keeps its numbers integral (Q57). Not a key: PostgreSQL's jsonb order is not the order of the encoded bytes.
 const JSONB: AllowedRule = {
@@ -317,7 +345,7 @@ const ARRAY: AllowedRule = {
 };
 
 /** The rows whose types may be stored, in the table's order. */
-const ALLOWED: readonly AllowedRule[] = [INTEGERS, NUMERIC, BYTEA, TEXT, UUID, BOOLEAN, JSONB, ARRAY];
+const ALLOWED: readonly AllowedRule[] = [INTEGERS, NUMERIC, BYTEA, TEXT, UUID, BOOLEAN, TIMESTAMPTZ, JSONB, ARRAY];
 
 const KEY_TYPES = ALLOWED.flatMap((rule) => (typeof rule.key === "string" ? rule.types : []));
 const VALUE_TYPES = ALLOWED.flatMap((rule) =>
@@ -358,73 +386,60 @@ const FLOATING_POINT: RefusedRule = {
   },
 };
 
-const SINCE_EPOCH = "store bigint milliseconds since the epoch, as core_block_commit.blocks.block_timestamp_ms does";
-const MILLISECONDS = "store bigint milliseconds, as core_block_commit.blocks.block_timestamp_ms does";
-const MILLISECOND_DATE = (type: string): string =>
-  `The drivers return a ${type} as a JavaScript Date, which keeps milliseconds only (10:00:00.123456 and ` +
-  "10:00:00.123999 read back equal)";
+const USE_TIMESTAMPTZ = "use timestamptz, written with Z";
 const TIME_OF_DAY: Because = {
-  reason:
-    "UmbraDB defines no canonical encoding for a time of day (time, timetz): the drivers return its text, and, as " +
-    "for every date and time type, an encoding would need a rule of its own",
-  alternative: MILLISECONDS,
+  reason: "A time of day (time, timetz) is not an instant, and UmbraDB defines no canonical encoding for it",
+  // Owner decision Q74 gives "use timestamptz, written with Z"; a time of day is no instant, so the message also says
+  // what holds one (decision record Q87, shipped B).
+  alternative: `${USE_TIMESTAMPTZ}, for an instant; for a time of day, store bigint microseconds since midnight`,
 };
 
-// Date and time types: refused (Q58, option D kept them out). `postgres` 3.4.9 (src/types.js:28-32) and PGlite 0.5.10
-// parse `date`, `timestamp` and `timestamptz` into a `Date` (milliseconds only); `time`, `timetz` and `interval` come
-// back as text. `date` and `timestamp` text follows DateStyle, `timestamptz` also TimeZone, `interval` IntervalStyle;
-// `time` and `timetz` text follows no setting (checked on PostgreSQL 17.11 and PGlite 0.5.10, Q59), so their reason is
-// the one Q58 gives for every date and time type: an encoding would need its own rule. Each reason names its type as
-// the row does.
+// The other date and time types: refused (Q58 kept them out; Q74 allowed `timestamptz` alone), each with the reason
+// true of it (Q59) and "use timestamptz, written with Z" (Q74). None cites the drivers' `Date` any more: the database
+// API reads every date and time value as text (DB-2, Q68). Checked on PostgreSQL 17.11 and PGlite 0.5.10 (2026-10-24):
+// a `timestamp` or a `date` turned into an instant gives a different one in each `TimeZone` (`2025-05-21 14:30:00` is
+// 1747837800 seconds since 1970 in UTC, 1747852200 in New York); `'1 day'::interval = '24 hours'::interval` and
+// `'1 mon' = '30 days'` are true while they print `1 day` and `24:00:00`.
 const DATE_TIME: RefusedRule = {
   id: "date-time",
   design: {
-    type: "`timestamptz`, `timestamp`, `date`, `time`, `timetz`, `interval`",
+    type: "`timestamp`, `date`, `time`, `timetz`, `interval`",
     value: "refused",
     key: "refused",
     because:
-      "Per type (Q59): `timestamptz` and `timestamp` — the drivers return a JavaScript `Date`, which keeps " +
-      "milliseconds only (`10:00:00.123456` and `10:00:00.123999` read back equal), and the text depends on " +
-      "`DateStyle` (and, for `timestamptz`, `TimeZone`); `date` — the drivers return a JavaScript `Date`, and the " +
-      "text depends on `DateStyle` (`2026-10-23` or `23/10/2026`); `interval` — the drivers return its text, which " +
-      "depends on `IntervalStyle` (`1 day 02:00:00` or `P1DT2H`); `time` and `timetz` — no canonical encoding is " +
-      "defined for a time of day (the drivers return its text). Store `bigint` milliseconds since the epoch, as " +
-      "`core_block_commit.blocks.block_timestamp_ms` does",
+      "Per type (Q59, Q74): `timestamp` — it holds no time zone, so one value is a different instant in each time " +
+      "zone (`2025-05-21 14:30:00` is `14:30Z` in UTC and `18:30Z` in New York); `date` — it holds no time zone, so " +
+      "a day starts and ends at a different instant in each time zone; `time` and `timetz` — a time of day is not an " +
+      "instant, and no canonical encoding is defined for it; `interval` — PostgreSQL holds its months, days and " +
+      "microseconds apart but compares them as if a month were 30 days and a day 24 hours, so equal intervals print " +
+      "differently (`1 day` and `24:00:00`), and no canonical encoding is defined for it. Use `timestamptz`, written " +
+      "with `Z`; for a time of day or a length of time, `bigint` microseconds",
   },
   allowed: false,
   code: "unsupported-column-type",
-  types: [
-    "timestamp with time zone",
-    "timestamp without time zone",
-    "date",
-    "time without time zone",
-    "time with time zone",
-    "interval",
-  ],
+  types: ["timestamp without time zone", "date", "time without time zone", "time with time zone", "interval"],
   because: {
     byType: {
-      "timestamp with time zone": {
-        reason: `${MILLISECOND_DATE("timestamptz")}, and its text depends on the TimeZone and DateStyle settings`,
-        alternative: SINCE_EPOCH,
-      },
       "timestamp without time zone": {
-        reason: `${MILLISECOND_DATE("timestamp")}, and its text depends on the DateStyle setting`,
-        alternative: SINCE_EPOCH,
+        reason:
+          "A timestamp holds no time zone, so one value is a different instant in each time zone (2025-05-21 " +
+          "14:30:00 is 14:30Z in UTC and 18:30Z in New York)",
+        alternative: `${USE_TIMESTAMPTZ} (2025-05-21T14:30:00Z)`,
       },
       date: {
-        reason:
-          "The drivers return a date as a JavaScript Date, and its text depends on the DateStyle setting (2026-10-23 " +
-          "or 23/10/2026)",
-        alternative: SINCE_EPOCH,
-      },
-      interval: {
-        reason:
-          "The drivers return an interval as its text, which depends on the IntervalStyle setting (1 day 02:00:00 or " +
-          "P1DT2H)",
-        alternative: MILLISECONDS,
+        reason: "A date holds no time zone, so a day starts and ends at a different instant in each time zone",
+        alternative: `${USE_TIMESTAMPTZ} (the day's first instant, 2025-05-21T00:00:00Z)`,
       },
       "time without time zone": TIME_OF_DAY,
       "time with time zone": TIME_OF_DAY,
+      interval: {
+        reason:
+          "PostgreSQL holds an interval's months, days and microseconds apart but compares them as if a month were " +
+          "30 days and a day 24 hours, so equal intervals print differently (1 day and 24:00:00), and UmbraDB " +
+          "defines no canonical encoding for it",
+        alternative:
+          `${USE_TIMESTAMPTZ}, for the instants it lies between; for a length of time, store bigint ` + "microseconds",
+      },
     },
   },
 };
@@ -545,6 +560,7 @@ export const COLUMN_TYPE_RULES: readonly TypeRule[] = [
   TEXT,
   UUID,
   BOOLEAN,
+  TIMESTAMPTZ,
   JSONB,
   ARRAY,
   FLOATING_POINT,
@@ -559,11 +575,11 @@ export const COLUMN_TYPE_RULES: readonly TypeRule[] = [
 // DT-6's sequence and unlogged-table refusals, one sentence each, with its reason and alternative (owner decisions
 // Q61, Q64).
 const SEQUENCE_DESIGN =
-  "A public schema holding a sequence is refused with `non-deterministic-table` (Q61): module code can draw from a " +
+  "A module schema holding a sequence is refused with `non-deterministic-table` (Q61): module code can draw from a " +
   "sequence at any time, and its values depend on retries; derive values from the block (height, transaction index), " +
   "and drop the sequence (Q64).";
 const UNLOGGED_DESIGN =
-  "A public schema holding an unlogged table is refused with `non-deterministic-table` (Q61): PostgreSQL empties an " +
+  "A module schema holding an unlogged table is refused with `non-deterministic-table` (Q61): PostgreSQL empties an " +
   "unlogged table after a crash, while the cursor still records its blocks as committed; make the table logged: " +
   "create it without `UNLOGGED`, or run `ALTER TABLE ... SET LOGGED` (Q64).";
 
@@ -631,7 +647,7 @@ export const TABLE_RULES: {
   // serial rule's, for values as for keys (owner decision Q64).
   sequence: {
     code: "non-deterministic-table",
-    what: "a public schema cannot hold a sequence",
+    what: "a module schema cannot hold a sequence",
     design: SEQUENCE_DESIGN,
     because: {
       reason:
@@ -644,7 +660,7 @@ export const TABLE_RULES: {
   // it held stay committed in the cursor. The alternative is the table made logged (owner decision Q64).
   unloggedTable: {
     code: "non-deterministic-table",
-    what: "a public schema cannot hold an unlogged table",
+    what: "a module schema cannot hold an unlogged table",
     design: UNLOGGED_DESIGN,
     because: {
       reason:
@@ -766,7 +782,7 @@ export function tableRefusals(table: TableFacts): Refusal[] {
 }
 
 /**
- * The refusal of a relation of a public schema: every sequence (an identity or `serial` column's own included), and
+ * The refusal of a relation of a module schema: every sequence (an identity or `serial` column's own included), and
  * every unlogged table, partitioned table or partition; nothing for a logged table (DT-6, owner decision Q61).
  */
 export function relationRefusals(relation: RelationFacts): Refusal[] {
@@ -795,7 +811,7 @@ export interface PlacedRefusal {
 }
 
 /**
- * Every refusal of a database's public tables and relations, in a fixed order: each table's refusals
+ * Every refusal of a database's module tables and relations, in a fixed order: each table's refusals
  * ({@link tableRefusals}) in the order the tables are given, then each relation's ({@link relationRefusals}) in the
  * order given — `catalogTables` and `catalogRelations` of `./catalog.ts` give DT-3's (by schema, then name, as
  * bytes). Tables come first because a column is what a developer wrote: an identity or `serial` column's sequence is
@@ -867,7 +883,9 @@ export function keyOrder(type: string): KeyOrder | null {
 /**
  * The `ORDER BY` term of a primary-key column `name` of `type` in DT-2's order: the quoted name, with `COLLATE "C"` for
  * the key types ordered by the bytes of their text (`text`, `character varying`), whose own collation may put "a"
- * before "B".
+ * before "B". Every other key type is ordered as PostgreSQL orders it, which is DT-2's order: integers by value,
+ * `boolean` with `false` first, `bytea` and `uuid` by their bytes, `timestamptz` by time — the order of its encoded
+ * integers (its microseconds since 1970), whatever offset each value was written with.
  */
 export function keyOrderTerm(name: string, type: string): string {
   const collate = keyOrder(type) === "by-bytes-collate-c" ? ' COLLATE "C"' : "";
@@ -888,15 +906,17 @@ export function refusalOfTypeName(type: string): { readonly code: RefusedRule["c
 
 /**
  * Why a stored value of an allowed type could not be encoded, when a stored value can cause it: a `numeric` with a
- * fraction or `NaN`, a `jsonb` number that is not a 64-bit integer (DT-1, DT-6, Q57). `failure` is the canonical
- * encoder's reason (`CanonicalEncodingFailure` of `src/determinism/cbor.ts`): `numeric-fraction` and `numeric-invalid`
- * for a `numeric`, `not-integer` and `integer-out-of-range` for a `jsonb`. Null for failures only a broken read handle
- * can cause (a value of the wrong JavaScript type, a lossy JSON parser, …).
+ * fraction or `NaN`, a `jsonb` number that is not a 64-bit integer (DT-1, DT-6, Q57), an infinite `timestamptz` (DT-1,
+ * Q74). `failure` is the canonical encoder's reason (`CanonicalEncodingFailure` of `src/determinism/cbor.ts`):
+ * `numeric-fraction` and `numeric-invalid` for a `numeric`, `not-integer` and `integer-out-of-range` for a `jsonb`,
+ * `timestamptz-infinite` for a `timestamptz`. Null for failures only a broken read handle can cause (a value of the
+ * wrong JavaScript type, a lossy JSON parser, a malformed time text, …).
  */
 export function valueFailureBecause(type: string, failure: string): Because | null {
   const scalar = type.endsWith("[]") ? type.slice(0, -2) : type;
   if (scalar === "numeric" && (failure === "numeric-fraction" || failure === "numeric-invalid")) return NUMERIC_VALUES;
   if (scalar === "jsonb" && (failure === "not-integer" || failure === "integer-out-of-range")) return JSON_NUMBERS;
+  if (scalar === "timestamp with time zone" && failure === "timestamptz-infinite") return INFINITE_TIMES;
   return null;
 }
 
@@ -1167,7 +1187,7 @@ export function notImmutableParts(references: readonly DefaultReference[], catal
 
 // ── internals ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-const REFUSED_AS_VALUE = "this type cannot be stored in a public table";
+const REFUSED_AS_VALUE = "this type cannot be stored in a module table";
 const REFUSED_AS_KEY = "this type cannot be part of a primary key";
 
 // The value rows of the table (`numeric`: "the CHECK refuses a fraction or NaN"; `jsonb`: "the CHECK on numbers"), with
@@ -1177,6 +1197,13 @@ const NUMERIC_VALUES: Because = {
     "A stored number must be an integer, so that equal contents hashes mean equal query results: a numeric with a " +
     "fraction, even a zero one such as 100.00, or NaN has no canonical encoding",
   alternative: "store integer smallest units in numeric(p) or bigint",
+};
+// The `timestamptz` row's value cell ("`infinity` and `-infinity` fail", Q74): what DT-1 encodes has no infinity.
+const INFINITE_TIMES: Because = {
+  reason:
+    "A timestamptz is hashed as its microseconds since 1970-01-01T00:00:00Z, and infinity and -infinity have no such " +
+    "number",
+  alternative: "store a finite time, written with Z, and NULL where there is none",
 };
 const JSON_NUMBERS: Because = {
   reason:

@@ -48,7 +48,7 @@ const ROWS: readonly RowCoverage[] = [
     pending: {},
   },
   {
-    rule: "Sequences and unlogged tables in public schemas refused",
+    rule: "Sequences and unlogged tables in module schemas refused",
     requirement: "DT-6",
     tests: ["column-rules.test.ts", "column-refusals.test.ts", "both-backends.test.ts"],
     pending: {},
@@ -78,8 +78,8 @@ const ROWS: readonly RowCoverage[] = [
       "The result mapping and parameter texts: lossless `jsonb`, arrays element by element, date and time as RFC 3339 " +
       "text, other types as their text",
     requirement: "DB-2",
-    tests: ["mapping.test.ts", "results.test.ts"],
-    pending: { "date and time as RFC 3339 text": "2.2b" },
+    tests: ["mapping.test.ts", "results.test.ts", "time-values.test.ts"],
+    pending: {},
   },
   {
     rule:
@@ -211,7 +211,6 @@ describe("A138: the suite runs every rule of design.md §4's component table on 
       "the two functions and the CHECKs on jsonb and numeric columns and their arrays": "7.1",
       "the BEFORE TRUNCATE trigger refusing truncate-not-allowed": "2.3",
       "the zero timeouts of the writer, migrations, setup and callback reads": "2.7",
-      "date and time as RFC 3339 text": "2.2b",
       "the declaration deterministic: false on a table item": "3.1",
       "opted-out tables skipped by the refusals and the CHECKs, and hashed by name only": "7.1",
     });

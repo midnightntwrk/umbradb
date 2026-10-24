@@ -22,6 +22,11 @@ export interface TestBackend {
 
 export interface TestDatabase {
   readonly db: Database;
+  /**
+   * PostgreSQL only: the database's URL, so that another process (a child with another time zone, A139) can open the
+   * same database through the API. A PGlite database lives in this process's memory and has none.
+   */
+  readonly url?: string;
   /** Runs SQL (several statements allowed) outside the API, committed when it returns; never while a read is open. */
   exec(sql: string): Promise<void>;
 }
@@ -43,6 +48,7 @@ function postgresBackend(): TestBackend {
       await database.exec(setup);
       return {
         db: database.open(committedHeight === undefined ? {} : { committedHeight }),
+        url: database.url,
         exec: (sql) => database.exec(sql),
       };
     },

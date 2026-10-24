@@ -32,12 +32,14 @@ export const ERROR_CODES = [
   "numeric-fraction",
   "numeric-invalid",
   "uuid-invalid",
+  "timestamptz-infinite",
+  "timestamptz-invalid",
   "lone-surrogate",
   "unsupported-value",
   "type-mismatch",
   "row-length",
   "cyclic-value",
-  // The public contents' failures (DT-2, DT-3, DT-6, `src/determinism/public-tables.ts`); the first five are also
+  // The module contents' failures (DT-2, DT-3, DT-6, `src/determinism/module-tables.ts`); the first five are also
   // startup refusals (`design.md` §11), decided by this component's rules (`./column-rules.ts`).
   "no-primary-key",
   "unsupported-key-type",
@@ -50,7 +52,7 @@ export const ERROR_CODES = [
 
 /**
  * A code of {@link ERROR_CODES}. The determinism errors pass their `reason` as their code, so the compiler checks there
- * that every `CanonicalEncodingFailure` and `PublicContentsFailure` is one.
+ * that every `CanonicalEncodingFailure` and `ModuleContentsFailure` is one.
  */
 export type ErrorCode = (typeof ERROR_CODES)[number];
 

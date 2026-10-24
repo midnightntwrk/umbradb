@@ -100,10 +100,11 @@ const VALUE_TYPES = [
   "character varying",
   "uuid",
   "boolean",
+  "timestamp with time zone",
   "jsonb",
 ] as const;
 
-describe("DT-1 values: the types a public table may store", () => {
+describe("DT-1 values: the types a module table may store", () => {
   it("allows exactly DT-1's types and their arrays, each encoded as itself", () => {
     for (const type of VALUE_TYPES) {
       for (const name of [type, `${type}[]`]) {
@@ -157,42 +158,50 @@ describe("DT-1 values: the types a public table may store", () => {
     expect(becauseOf(column("real")).reason).not.toContain("0.1 + 0.2");
   });
 
-  it("refuses every date and time type, each with the reason true for it (Q59)", () => {
-    // Each reason names its type as the amended design row does (Q59: `timestamptz` and `timestamp`, `date`,
-    // `interval`, `time` and `timetz`), so a reason can never be read as another type's.
+  it("allows timestamptz as a value and as a key ordered by time, its arrays as values (Q74)", () => {
+    expect(verdictOf(column("timestamp with time zone"))).toEqual(["timestamptz", null]);
+    // A precision is a type modifier: format_type(atttypid, NULL) names the type the same.
+    const precise = column("timestamp with time zone", { declaredType: "timestamp(3) with time zone", typeModifier: 3 });
+    expect(verdictOf(precise)).toEqual(["timestamptz", null]);
+    const asKey = columnVerdict(key("timestamp with time zone"));
+    expect(asKey.allowed && asKey.keyOrder).toBe("by-time");
+    expect(verdictOf(column("timestamp with time zone[]"))).toEqual(["array", null]);
+    expect(verdictOf(key("timestamp with time zone[]"))).toEqual(["array", "unsupported-key-type"]);
+  });
+
+  it("refuses timestamp, date, time, timetz and interval, each with its own reason, and says to use timestamptz", () => {
+    // Each reason names its type as the design row does (Q59), and none cites the drivers' Date any more (Q74): the
+    // mapping reads every date and time value as text (DB-2, Q68).
     const cases: readonly (readonly [string, readonly string[], readonly string[]])[] = [
       [
-        "timestamp with time zone",
-        ["a timestamptz as", "JavaScript Date", "milliseconds only", "TimeZone", "DateStyle"],
-        ["IntervalStyle"],
-      ],
-      [
         "timestamp without time zone",
-        ["a timestamp as", "JavaScript Date", "milliseconds only", "DateStyle"],
-        ["TimeZone"],
+        ["A timestamp holds no time zone", "a different instant in each time zone", "2025-05-21 14:30:00", "14:30Z", "18:30Z"],
+        ["time of day"],
       ],
-      ["date", ["a date as", "JavaScript Date", "DateStyle"], ["milliseconds only", "TimeZone", "IntervalStyle"]],
-      ["interval", ["an interval as", "text", "IntervalStyle"], ["JavaScript Date", "DateStyle", "TimeZone"]],
-      [
-        "time without time zone",
-        ["(time, timetz)", "no canonical encoding"],
-        ["JavaScript Date", "DateStyle", "TimeZone"],
-      ],
-      [
-        "time with time zone",
-        ["(time, timetz)", "no canonical encoding"],
-        ["JavaScript Date", "DateStyle", "TimeZone"],
-      ],
+      ["date", ["A date holds no time zone", "starts and ends at a different instant"], ["time of day"]],
+      ["time without time zone", ["(time, timetz)", "not an instant", "no canonical encoding"], ["time zone"]],
+      ["time with time zone", ["(time, timetz)", "not an instant", "no canonical encoding"], ["time zone"]],
+      ["interval", ["30 days", "24 hours", "1 day and 24:00:00", "no canonical encoding"], ["time zone"]],
     ];
     for (const [type, present, absent] of cases) {
       expect(verdictOf(column(type)), type).toEqual(["date-time", "unsupported-column-type"]);
       const { reason, alternative } = becauseOf(column(type));
       for (const text of present) expect(reason, type).toContain(text);
-      for (const text of absent) expect(reason, type).not.toContain(text);
-      expect(alternative, type).toContain("bigint milliseconds");
-      expect(alternative, type).toContain("core_block_commit.blocks.block_timestamp_ms");
+      for (const text of [...absent, "JavaScript Date", "drivers", "DateStyle", "milliseconds"]) {
+        expect(reason, type).not.toContain(text);
+      }
+      // DT-6's scenario and A145: "use timestamptz, written with Z" (Q74); no message cites the core's old column.
+      expect(alternative, type).toMatch(/^use timestamptz, written with Z\b/);
+      expect(`${reason} ${alternative}`, type).not.toContain("block_timestamp_ms");
     }
-    expect(verdictOf(column("timestamp with time zone[]"))).toEqual(["date-time", "unsupported-column-type"]);
+    // Q87 (shipped B): a time of day and a length of time are no instants; bigint microseconds hold them.
+    expect(becauseOf(column("time without time zone")).alternative).toContain("bigint microseconds since midnight");
+    expect(becauseOf(column("time with time zone")).alternative).toContain("bigint microseconds since midnight");
+    expect(becauseOf(column("interval")).alternative).toContain("for a length of time, store bigint microseconds");
+    expect(becauseOf(column("timestamp without time zone")).alternative).not.toContain("bigint");
+    expect(becauseOf(column("date")).alternative).not.toContain("bigint");
+    expect(verdictOf(column("timestamp without time zone[]"))).toEqual(["date-time", "unsupported-column-type"]);
+    expect(verdictOf(column("interval[]"))).toEqual(["date-time", "unsupported-column-type"]);
   });
 
   it("gives a row with a reason per type a reason for each of its types, and only those", () => {
@@ -250,6 +259,7 @@ describe("DT-2 keys: the types a primary key may use, and how they are ordered",
       ["integer", "numerically"],
       ["bigint", "numerically"],
       ["boolean", "false-first"],
+      ["timestamp with time zone", "by-time"],
       ["bytea", "by-bytes"],
       ["uuid", "by-bytes"],
       ["text", "by-bytes-collate-c"],
@@ -284,7 +294,7 @@ describe("DT-2 keys: the types a primary key may use, and how they are ordered",
   });
 
   it("refuses a key column of a type no table may store with the value's code, not the key's", () => {
-    expect(verdictOf(key("timestamp with time zone"))).toEqual(["date-time", "unsupported-column-type"]);
+    expect(verdictOf(key("timestamp without time zone"))).toEqual(["date-time", "unsupported-column-type"]);
     expect(verdictOf(key("double precision"))).toEqual(["floating-point", "non-deterministic-column"]);
     expect(verdictOf(key("numeric", { declaredType: "numeric(38,2)", typeModifier: 2490374 }))).toEqual([
       "numeric-scaled",
@@ -314,7 +324,7 @@ describe("DT-6 tables: every refusal of a table, in a fixed order", () => {
   it("lists no-primary-key first, then each refused column in column order", () => {
     const refusals = tableRefusals(
       table([
-        column("timestamp with time zone", { name: "at" }),
+        column("timestamp without time zone", { name: "at" }),
         column("text", { name: "ok" }),
         column("real", { name: "price" }),
       ]),
@@ -343,19 +353,18 @@ describe("DT-6 tables: every refusal of a table, in a fixed order", () => {
 describe("refusal messages: what, where, why, and what to use instead", () => {
   const timestamp: Refusal = {
     code: "unsupported-column-type",
-    column: { name: "created_at", declaredType: "timestamp(3) with time zone" },
-    what: "this type cannot be stored in a public table",
-    because: becauseOf(column("timestamp with time zone")),
+    column: { name: "created_at", declaredType: "timestamp(3) without time zone" },
+    what: "this type cannot be stored in a module table",
+    because: becauseOf(column("timestamp without time zone")),
   };
 
   it("reads as one explanation for a developer who has never read DT-1", () => {
     expect(refusalMessage(timestamp, { schema: "shop", table: "orders" })).toBe(
-      'unsupported-column-type: table "shop"."orders", column "created_at" (timestamp(3) with time zone): ' +
-        "this type cannot be stored in a public table. " +
-        "The drivers return a timestamptz as a JavaScript Date, which keeps milliseconds only " +
-        "(10:00:00.123456 and 10:00:00.123999 read back equal), and its text depends on the TimeZone and DateStyle " +
-        "settings. Instead, store bigint milliseconds since the epoch, as " +
-        "core_block_commit.blocks.block_timestamp_ms does.",
+      'unsupported-column-type: table "shop"."orders", column "created_at" (timestamp(3) without time zone): ' +
+        "this type cannot be stored in a module table. " +
+        "A timestamp holds no time zone, so one value is a different instant in each time zone " +
+        "(2025-05-21 14:30:00 is 14:30Z in UTC and 18:30Z in New York). " +
+        "Instead, use timestamptz, written with Z (2025-05-21T14:30:00Z).",
     );
   });
 
@@ -374,7 +383,7 @@ describe("refusal messages: what, where, why, and what to use instead", () => {
       'no-primary-key: table "m"."loose": the table has no primary key. ' +
         "Rows are hashed and digested in primary-key order, and without a key there is no order every database " +
         "agrees on. Instead, add a primary key whose columns are smallint, integer, bigint, bytea, text, character " +
-        "varying, uuid or boolean.",
+        "varying, uuid, boolean or timestamp with time zone.",
     );
     const [numericKey] = tableRefusals({ schema: "m", name: "t", columns: [key("numeric", { name: "id" })] });
     const message = refusalMessage(numericKey as Refusal, { schema: "m", table: "t" });
@@ -398,8 +407,8 @@ describe("the encoder's refusals, by type name alone", () => {
     expect(refusalOfTypeName("json").code).toBe("unsupported-column-type");
     expect(refusalOfTypeName("json").because).toEqual(becauseOf(column("json")));
     expect(refusalOfTypeName("double precision").code).toBe("non-deterministic-column");
-    expect(refusalOfTypeName("timestamp with time zone[]").because).toEqual(
-      becauseOf(column("timestamp with time zone")),
+    expect(refusalOfTypeName("timestamp without time zone[]").because).toEqual(
+      becauseOf(column("timestamp without time zone")),
     );
   });
 
@@ -413,7 +422,7 @@ describe("the encoder's refusals, by type name alone", () => {
   });
 
   it("is what encodeRow throws for a column type outside DT-1", () => {
-    for (const name of ["json", "double precision", "varchar", "money"]) {
+    for (const name of ["json", "double precision", "varchar", "money", "timestamp without time zone", "interval"]) {
       const { code, because } = refusalOfTypeName(name);
       let error: unknown;
       try {
@@ -440,7 +449,17 @@ describe("why a stored number cannot be hashed (DT-1, DT-6, Q57)", () => {
     expect(valueFailureBecause("jsonb[]", "integer-out-of-range")).toEqual(json);
   });
 
+  it("explains an infinite timestamptz, which has no microseconds since 1970 (DT-1, Q74)", () => {
+    const infinite = valueFailureBecause("timestamp with time zone", "timestamptz-infinite");
+    expect(infinite?.reason).toContain("microseconds since 1970-01-01T00:00:00Z");
+    expect(infinite?.reason).toContain("infinity and -infinity");
+    expect(infinite?.alternative).toContain("written with Z");
+    expect(valueFailureBecause("timestamp with time zone[]", "timestamptz-infinite")).toEqual(infinite);
+  });
+
   it("explains nothing for failures no stored value can cause", () => {
+    expect(valueFailureBecause("timestamp with time zone", "timestamptz-invalid")).toBeNull();
+    expect(valueFailureBecause("timestamp with time zone", "type-mismatch")).toBeNull();
     expect(valueFailureBecause("numeric", "type-mismatch")).toBeNull();
     expect(valueFailureBecause("jsonb", "unsupported-value")).toBeNull();
     expect(valueFailureBecause("bigint", "integer-out-of-range")).toBeNull();
@@ -870,13 +889,13 @@ describe("DT-6 (Q61): identity, serial and non-immutable defaults refuse their c
     const refusals = tableRefusals(
       table([
         key("bigint", { name: "id", identity: "always" }),
-        column("timestamp with time zone", { name: "at", notImmutable: NOW }),
+        column("timestamp without time zone", { name: "at", notImmutable: NOW }),
         column("bigint", { name: "n", notImmutable: mixed }),
       ]),
     );
     expect(refusals.map((r) => [r.column?.name, r.code, r.what.split(":")[0]])).toEqual([
       ["id", "non-deterministic-column", "the column draws its values from a sequence"],
-      ["at", "unsupported-column-type", "this type cannot be stored in a public table"],
+      ["at", "unsupported-column-type", "this type cannot be stored in a module table"],
       ["at", "non-deterministic-column", "the column's default is not immutable"],
       ["n", "non-deterministic-column", "the column draws its values from a sequence"],
       ["n", "non-deterministic-column", "the column's default is not immutable"],
@@ -938,7 +957,7 @@ describe("DT-6 (Q61): identity, serial and non-immutable defaults refuse their c
   });
 });
 
-describe("DT-6 (Q61): sequences and unlogged tables refuse their public schema", () => {
+describe("DT-6 (Q61, Q75): sequences and unlogged tables refuse their module schema", () => {
   const relation = (kind: string, persistence: string, name = "r"): RelationFacts => ({
     schema: "m",
     name,
@@ -990,7 +1009,7 @@ describe("DT-6 (Q61): sequences and unlogged tables refuse their public schema",
   it("reads as one explanation, naming the sequence by its schema and name", () => {
     const [sequence] = databaseRefusals([], [relation("S", "p", "counter")]);
     expect(refusalMessage(sequence?.refusal as Refusal, sequence?.place as RefusalPlace)).toBe(
-      'non-deterministic-table: sequence "m"."counter": a public schema cannot hold a sequence. Module code can draw ' +
+      'non-deterministic-table: sequence "m"."counter": a module schema cannot hold a sequence. Module code can draw ' +
         "from a sequence at any time, and a sequence never rolls back, so its values depend on rolled-back and " +
         "retried blocks, not only on the chain. Instead, derive values from the block (height, transaction index), " +
         "and drop the sequence.",
@@ -1002,7 +1021,7 @@ describe("DT-6 (Q61): sequences and unlogged tables refuse their public schema",
     ).toBe(true);
     const [unlogged] = databaseRefusals([], [relation("r", "u", "scratch")]);
     expect(refusalMessage(unlogged?.refusal as Refusal, unlogged?.place as RefusalPlace)).toBe(
-      'non-deterministic-table: table "m"."scratch": a public schema cannot hold an unlogged table. PostgreSQL ' +
+      'non-deterministic-table: table "m"."scratch": a module schema cannot hold an unlogged table. PostgreSQL ' +
         "empties an unlogged table after a crash, while the cursor still records its blocks as committed, so the " +
         "table loses rows the chain still holds. Instead, make the table logged: create it without UNLOGGED, or run " +
         "ALTER TABLE ... SET LOGGED.",
@@ -1058,6 +1077,7 @@ const KEY_CELLS: Readonly<Record<string, string>> = {
   "yes, by bytes": "by-bytes",
   'yes, by bytes (`COLLATE "C"`)': "by-bytes-collate-c",
   "yes, `false` first": "false-first",
+  "yes, by time": "by-time",
 };
 
 /** Every backticked term of a cell, as the rules write it (without backticks). */
@@ -1155,7 +1175,7 @@ describe("design.md §4's column-type table and the rules agree", () => {
 
   it("finds the table once, under openspec/, wherever the change folder is", () => {
     expect(table.path.startsWith(join(REPOSITORY, "openspec"))).toBe(true);
-    expect(table.rows.length).toBe(16);
+    expect(table.rows.length).toBe(17);
   });
 
   it("mirrors every row: the same cells, the same decisions, and every concrete term in the messages", () => {
@@ -1200,6 +1220,10 @@ describe("design.md §4's column-type table and the rules agree", () => {
       const jsonb = at("jsonb");
       expect(
         designDifferences(replaced(indexOf("jsonb"), { ...jsonb, key: "by-bytes" } as TypeRule), table),
+      ).not.toEqual([]);
+      const timestamptz = at("timestamptz");
+      expect(
+        designDifferences(replaced(indexOf("timestamptz"), { ...timestamptz, key: "numerically" } as TypeRule), table),
       ).not.toEqual([]);
       const floats = at("floating-point");
       expect(

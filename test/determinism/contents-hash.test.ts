@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from "vitest"
 import type { BlockWriteHandle, ReadHandle } from "../../src/db/api.js";
 import { CanonicalEncodingError } from "../../src/determinism/cbor.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
-import { type ConsistentRead, PublicContentsError } from "../../src/determinism/public-tables.js";
+import { type ConsistentRead, ModuleContentsError } from "../../src/determinism/module-tables.js";
 import { DETERMINISM_BACKENDS } from "./backends.js";
 import type { TestDatabase, TestServer } from "./postgres-database.js";
 
@@ -11,7 +11,7 @@ import type { TestDatabase, TestServer } from "./postgres-database.js";
  * A55 (DT-3) on PostgreSQL 17 and on PGlite 0.5.10 (tasks 1.2 and 2.2; the cross-backend comparison is
  * `cross-backend.test.ts`).
  *
- * DT-3: the contents hash is SHA-256 of one canonical CBOR array holding, for each public schema and then each table
+ * DT-3: the contents hash is SHA-256 of one canonical CBOR array holding, for each module schema and then each table
  * in name order (byte order), the array `[schema, table, [column names], [rows in primary-key order]]`.
  *
  * The expected hash of the fixed database below is not computed by the code under test: its CBOR bytes are written
@@ -36,14 +36,14 @@ async function hashOf(db: TestDatabase, pageSize?: number): Promise<string> {
   return hex(await db.read((read) => contentsHash(read, pageSize === undefined ? {} : { pageSize })));
 }
 
-async function failure(run: () => Promise<unknown>): Promise<PublicContentsError> {
+async function failure(run: () => Promise<unknown>): Promise<ModuleContentsError> {
   try {
     await run();
   } catch (error) {
-    if (error instanceof PublicContentsError) return error;
+    if (error instanceof ModuleContentsError) return error;
     throw error;
   }
-  throw new Error("expected a PublicContentsError, but the hash succeeded");
+  throw new Error("expected a ModuleContentsError, but the hash succeeded");
 }
 
 describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
@@ -57,8 +57,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
 
   describe("A55 (DT-3) — the contents hash of a fixed database equals a hash computed by hand", () => {
     // Created so that creation (OID) order differs from name order for the schemas and for the tables of each schema,
-    // with a dropped column, a partitioned table, and objects that are not public tables (a table in the reserved
-    // `public` schema, a view, a materialized view, and a sequence in `public`: a sequence in a public schema refuses
+    // with a dropped column, a partitioned table, and objects that are not module tables (a table in the reserved
+    // `public` schema, a view, a materialized view, and a sequence in `public`: a sequence in a module schema refuses
     // the hash, owner decision Q61, `column-refusals.test.ts`).
     const FIXED_DATABASE = `
       CREATE SCHEMA m_x;
@@ -84,9 +84,9 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
 
     // The canonical CBOR of DT-3's array for FIXED_DATABASE, item by item. Schemas by bytes: "m0" (6d 30) before "m_x"
     // (6d 5f 78); tables: "B" (42) before "b" (62), "s" before "t"; the partitions, the view, the materialized view and
-    // `public` (its table and its sequence) are not public tables. Rows in primary-key order; values per DT-1.
+    // `public` (its table and its sequence) are not module tables. Rows in primary-key order; values per DT-1.
     const EXPECTED_CBOR: readonly (readonly [string, string])[] = [
-      ["array(4): the four public tables", "84"],
+      ["array(4): the four module tables", "84"],
 
       ["array(4): m0.\"B\"", "84"],
       ['text(2) "m0"', "62 6d 30"],
@@ -159,7 +159,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
           ('000000000000000000000000000000FF', false, 'Ab', '{x,y}');
       `);
       const cbor: readonly (readonly [string, string])[] = [
-        ["array(1): one public table", "81"],
+        ["array(1): one module table", "81"],
         ["array(4): k.notes", "84"],
         ['text(1) "k"', "61 6b"],
         ['text(5) "notes"', "65 6e6f746573"],
@@ -171,6 +171,44 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         ],
         ["[h'00…00ff', true, null, []]", "84 50 000000000000000000000000000000ff f5 f6 80"],
         ["[h'ffffffff…01', false, \"z\", null]", "84 50 ffffffff000000000000000000000001 f4 61 7a f6"],
+      ];
+      const expected = createHash("sha256")
+        .update(Buffer.from(cbor.map(([, bytes]) => bytes.replace(/ /g, "")).join(""), "hex"))
+        .digest("hex");
+      for (const pageSize of [undefined, 1, 2]) {
+        expect(await hashOf(db, pageSize), `page size ${pageSize ?? "default"}`).toBe(expected);
+      }
+    }, 60_000);
+
+    // Task 2.2b (owner decision Q74; A145): a `timestamptz` is the CBOR integer of its microseconds since
+    // 1970-01-01T00:00:00Z, and rows are keyed by time. The integers are written out below from the dates by hand
+    // arithmetic, independently of the encoder; 253402300799999999 (9999-12-31 23:59:59.999999) is beyond 2^53, so a
+    // computation in `number` would give 253402300800000000 and a different hash. Paged one and two rows at a time,
+    // each next page starts after a key the API read as RFC 3339 text and sent back as a parameter.
+    it("covers timestamptz values and keys: microseconds since 1970 as integers, rows by time", async () => {
+      const db = await freshDatabase(`
+        CREATE SCHEMA k;
+        CREATE TABLE k.times (at timestamptz PRIMARY KEY, seen timestamptz[]);
+        INSERT INTO k.times VALUES
+          ('2025-05-21 16:30:00.123456+02', NULL),
+          ('1969-12-31 23:59:59.5+00', '{"9999-12-31 23:59:59.999999+00",NULL}'),
+          ('0001-01-01 00:00:00+00', '{}'),
+          ('1970-01-01 00:00:00+00', '{"2025-05-21 14:30:00.5+00"}');
+      `);
+      const cbor: readonly (readonly [string, string])[] = [
+        ["array(1): one module table", "81"],
+        ["array(4): k.times", "84"],
+        ['text(1) "k"', "61 6b"],
+        ['text(5) "times"', "65 74696d6573"],
+        ['["at", "seen"]', "82 62 6174 64 7365656e"],
+        ["array(4): rows by time", "84"],
+        ["[-62135596800000000 (0001-01-01T00:00:00Z), []]", "82 3b 00dcbffeff2bbfff 80"],
+        [
+          "[-500000 (1969-12-31T23:59:59.5Z), [253402300799999999 (9999-12-31T23:59:59.999999Z), null]]",
+          "82 3a 0007a11f 82 1b 0384440ccc735fff f6",
+        ],
+        ["[0 (1970-01-01T00:00:00Z), [1747837800500000 (2025-05-21T14:30:00.5Z)]]", "82 00 81 1b 000635a633394b20"],
+        ["[1747837800123456 (2025-05-21T14:30:00.123456Z), null]", "82 1b 000635a633338c40 f6"],
       ];
       const expected = createHash("sha256")
         .update(Buffer.from(cbor.map(([, bytes]) => bytes.replace(/ /g, "")).join(""), "hex"))
@@ -192,7 +230,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         INSERT INTO a.t VALUES (1, ARRAY['x', NULL]), (2, ARRAY['x', 'NULL']), (3, ARRAY[NULL, NULL]::varchar[]);
       `);
       const cbor: readonly (readonly [string, string])[] = [
-        ["array(1): one public table", "81"],
+        ["array(1): one module table", "81"],
         ["array(4): a.t", "84"],
         ['text(1) "a"', "61 61"],
         ['text(1) "t"', "61 74"],
@@ -276,7 +314,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
     `;
     // The same rows, with every incidental difference a database may have: schemas and tables created in another
     // order, other partition bounds, rows inserted in reverse and rewritten afterwards, a dropped column, an extra
-    // index, an empty schema, and objects that are not public tables (a view; a sequence and a table in `public`).
+    // index, an empty schema, and objects that are not module tables (a view; a sequence and a table in `public`).
     const SECOND = `
       CREATE SCHEMA tokens;
       CREATE SCHEMA empty_one;
@@ -543,6 +581,29 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       }
     }, 60_000);
 
+    it("A145: fails on an infinite timestamptz, as a value or in an array, and says why (DT-1, Q74)", async () => {
+      for (const [column, value] of [
+        ["at", "'infinity'"],
+        ["at", "'-infinity'"],
+        ["seen", "'{\"2025-05-21 14:30:00+00\",-infinity}'"],
+      ] as const) {
+        const db = await freshDatabase(`
+          CREATE SCHEMA m;
+          CREATE TABLE m.events (id bigint PRIMARY KEY, at timestamptz, seen timestamptz[]);
+          INSERT INTO m.events (id, ${column}) VALUES (1, ${value});
+        `);
+        const error = await failure(() => db.read((read) => contentsHash(read)));
+        expect([error.reason, error.column, error.declaredType], value).toEqual([
+          "unencodable-row",
+          column,
+          column === "at" ? "timestamp with time zone" : "timestamp with time zone[]",
+        ]);
+        expect((error.cause as CanonicalEncodingError).reason, value).toBe("timestamptz-infinite");
+        expect(error.message, value).toContain("microseconds since 1970-01-01T00:00:00Z");
+        expect(error.message, value).toContain("Instead, ");
+      }
+    }, 60_000);
+
     it("fails on a jsonb number DT-1 refuses", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA m;
@@ -608,7 +669,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
     }, 60_000);
 
     it("names the table but no column when the rows read are not as many as counted", () => {
-      const error = new PublicContentsError(
+      const error = new ModuleContentsError(
         "row-count-changed",
         { schema: "m", table: "b" },
         null,
@@ -647,7 +708,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       await expect(db.read((read) => contentsHash(poisoned(read)))).rejects.toBe(broken);
     }, 60_000);
 
-    it("fails on a public table without a primary key, even when every other table can be hashed", async () => {
+    it("fails on a module table without a primary key, even when every other table can be hashed", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA m;
         CREATE TABLE m.fine (k integer PRIMARY KEY);

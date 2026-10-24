@@ -13,10 +13,10 @@ import { BACKENDS, TEST_CURSOR, TEST_SCHEMA, type TestBackend, type TestDatabase
  * retryability, details, message). The suites that iterate `BACKENDS` (`results.test.ts`, `handles.test.ts`,
  * `read-height.property.test.ts`) show that each backend passes on its own; this file shows the two agree.
  *
- * Date and time values are compared as PostgreSQL's text under the pinned settings (`::text`), not as the JavaScript
- * values the mapping makes of them: that mapping changes with the owner's decision on Q68 (a later task) and is
- * checked by `results.test.ts` as task 2.1 left it. `now()`, `version()` and other values that differ between two
- * servers by nature are not in the corpus.
+ * Date and time values are compared as the values the mapping makes of them (DB-2, owner decision Q68: RFC 3339 text,
+ * `infinity` as the word, arrays element by element; task 2.2b), like every other value, and their case also checks
+ * them against values written out by hand. `now()`, `version()` and other values that differ between two servers by
+ * nature are not in the corpus.
  */
 
 const SEED = 20261023;
@@ -79,12 +79,15 @@ const READS: readonly Case[] = [
                  '{"k":  1, "k": 18446744073709551615}'::json AS i, '"text"'::json AS j`,
   },
   {
-    name: "date and time values as text under the pinned settings",
-    sql: `SELECT '2026-10-23'::date::text AS d, '2026-10-23 10:00:00.123456'::timestamp::text AS ts,
-                 '2026-10-23 10:00:00.123456+02'::timestamptz::text AS tz, '10:00:00.5'::time AS tm,
+    name: "date and time values as values: RFC 3339 text, infinity as the word (Q68)",
+    sql: `SELECT '2026-10-23'::date AS d, '2026-10-23 10:00:00.123456'::timestamp AS ts,
+                 '2026-10-23 10:00:00.123456+02'::timestamptz AS tz, '10:00:00.5'::time AS tm,
                  '10:00:00+02'::timetz AS ttz, '1 day 2 hours 3 minutes'::interval AS iv,
                  '-1 year -2 mons +3 days -04:05:06'::interval AS iv2, 1.5::money AS m, '-1234567.89'::money AS m2,
-                 'infinity'::timestamptz::text AS inf`,
+                 'infinity'::timestamptz AS inf, '-infinity'::timestamp AS ninf, 'infinity'::date AS dinf,
+                 '0001-01-01 00:00:00.000001+00'::timestamptz AS first, '9999-12-31 23:59:59.999999+00'::timestamptz AS
+                 last, ARRAY['2026-10-23 10:00:00+00'::timestamptz, NULL, 'infinity'] AS tzs,
+                 ARRAY['2026-10-23 10:00:00.5'::timestamp, NULL] AS tss, ARRAY[['2026-10-23'::date], [NULL::date]] AS ds`,
   },
   {
     name: "arrays of every named type, with NULL elements, nesting, quoting and lower bounds",
@@ -133,7 +136,7 @@ const READS: readonly Case[] = [
     sql: `SELECT $1::bigint AS big, $2::bytea AS bytes, $3::jsonb AS doc, $4::integer[] AS ints, $5::text[] AS texts,
                  $6::boolean AS flag, $7::numeric AS amount, $8::text AS nothing, $9::bytea[] AS blobs,
                  $10::jsonb[] AS docs, $11::double precision AS half, $12::jsonb AS json_text, $13::smallint AS small,
-                 $14::uuid AS id, $15 || '!' AS untyped_text, $16::timestamptz::text AS at`,
+                 $14::uuid AS id, $15 || '!' AS untyped_text, $16::timestamptz AS at, $17::timestamptz AS at_text`,
     params: [
       9223372036854775807n,
       new Uint8Array([0, 1, 255]),
@@ -151,6 +154,7 @@ const READS: readonly Case[] = [
       "A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11",
       "x",
       new Date("2026-10-23T10:00:00.123Z"),
+      "2026-10-23T10:00:00.123456Z",
     ],
   },
 ];
@@ -250,7 +254,42 @@ describe("A7 (DB-1) — identical results on PostgreSQL 17 and PGlite 0.5.10", (
     });
   }
 
-  it("gives identical rows for the date and time values a query compares (the mapping's own values aside)", async () => {
+  it("gives the date and time values written out by hand, on both backends (DB-2, Q68)", async () => {
+    const dates = READS.find((c) => c.name.startsWith("date and time values as values")) as Case;
+    const [onPostgres, onPglite] = await both((db) => db.read((read) => read.query(dates.sql)));
+    expect(onPglite).toEqual(onPostgres);
+    expect(onPostgres).toEqual({
+      result: [
+        {
+          d: "2026-10-23",
+          ts: "2026-10-23T10:00:00.123456",
+          tz: "2026-10-23T08:00:00.123456Z",
+          tm: "10:00:00.5",
+          ttz: "10:00:00+02",
+          iv: "1 day 02:03:00",
+          iv2: "-1 years -2 mons +3 days -04:05:06",
+          m: "$1.50",
+          m2: "-$1,234,567.89",
+          inf: "infinity",
+          ninf: "-infinity",
+          dinf: "infinity",
+          first: "0001-01-01T00:00:00.000001Z",
+          last: "9999-12-31T23:59:59.999999Z",
+          tzs: ["2026-10-23T10:00:00Z", null, "infinity"],
+          tss: ["2026-10-23T10:00:00.5", null],
+          ds: [["2026-10-23"], [null]],
+        },
+      ],
+    });
+    // A Date parameter and an RFC 3339 text parameter read back as RFC 3339 text.
+    const parameters = READS.find((c) => c.name.startsWith("parameters of every kind")) as Case;
+    const [sent] = await both((db) => db.read((read) => read.query(parameters.sql, parameters.params as unknown[])));
+    expect(sent).toMatchObject({
+      result: [{ at: "2026-10-23T10:00:00.123Z", at_text: "2026-10-23T10:00:00.123456Z" }],
+    });
+  });
+
+  it("gives identical rows for the date and time values a query compares", async () => {
     const sql = `SELECT '2026-10-23'::date = '2026-10-23 00:00:00+00'::timestamptz AS same_instant,
                         extract(epoch FROM '2026-10-23 10:00:00.123456+02'::timestamptz)::text AS epoch,
                         to_char('2026-10-23 10:00:00+00'::timestamptz, 'YYYY-MM-DD"T"HH24:MI:SS') AS formatted`;

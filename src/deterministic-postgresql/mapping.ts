@@ -3,7 +3,7 @@
  * the `deterministic_postgresql` component, the same on every backend: each backend hands over PostgreSQL's text output
  * of a value with the column's type OID, and this module maps it. No driver parser is involved — `postgres` 3.4.9's
  * array parser reads an unquoted `NULL` element as the text "NULL" (docs/issues/00006), and the two backends' drivers
- * differ in other details. Task 2.2b replaces the date and time mapping here (RFC 3339 text, owner decision Q68).
+ * differ in other details.
  *
  * Results, by type (the types `design.md` §4's column-type table names, with `oid`, `name` and `"char"` for catalog
  * queries); every type the table below does not name, and an array of one, is returned as its text:
@@ -16,7 +16,9 @@
  * | `bytea` | `Uint8Array` |
  * | `boolean` | `boolean` |
  * | `json`, `jsonb` | the JSON value; an integer outside ±(2^53 − 1) as a `bigint`, never a rounded `number` |
- * | `date`, `timestamp`, `timestamptz` | a JavaScript `Date`, as both drivers give it (milliseconds only) |
+ * | `timestamptz` | RFC 3339 UTC text, `2025-05-21T14:30:00.123456Z` (a fraction as printed); `infinity`, `-infinity` |
+ * | `timestamp` | the same text without `Z`, `2025-05-21T14:30:00`; `infinity`, `-infinity` |
+ * | `date` | its text, `2025-05-21`; `infinity`, `-infinity` |
  * | `text`, `varchar`, `char(n)` (padded), `name`, `"char"`, `uuid` (lowercase) | its text |
  * | `time`, `timetz`, `interval`, `money` | its text |
  * | an array of any of these | a JavaScript array (nested per dimension) of the elements so mapped, `NULL` → `null` |
@@ -25,6 +27,15 @@
  * `./settings.ts`): `bytea` in hex, dates in ISO style, intervals in `postgres` style, time zone UTC, floats in their
  * shortest exact form. Output the mapping cannot read (`bytea` in escape form after a session changed `bytea_output`,
  * say) is refused, never guessed.
+ *
+ * **Date and time values (DB-2, owner decisions Q68 and Q81)** are rewritten as text, never parsed through a
+ * JavaScript `Date`, whose parse of a text without a time zone follows the process's time zone (`2025-05-21 14:30:00`
+ * is 14:30Z under `TZ=UTC`, 18:30Z in New York) and which keeps milliseconds only: PostgreSQL's ISO text
+ * `2025-05-21 14:30:00.123456+00` becomes `2025-05-21T14:30:00.123456Z` by moving its characters, so the result is the
+ * same in every process. The mapping reads exactly the form PostgreSQL prints under the pinned settings, a four-digit
+ * year and the offset `+00`; anything else — a year above 9999 (`10000-01-01 00:00:00+00`), a BC date
+ * (`0044-03-15 12:00:00+00 BC`), another offset after a session changed `TimeZone` — is output it cannot read, refused
+ * like any other (Q81: no other rule). The fraction is kept as PostgreSQL prints it, without trailing zeros (`.12`).
  *
  * Parameters are sent as text with no type, so PostgreSQL types each from the statement as it types an untyped
  * literal (write `$1::bigint` where the statement does not say); {@link parameterText} gives each JavaScript value's
@@ -92,7 +103,36 @@ function parseBytea(text: string): Uint8Array {
   return new Uint8Array(Buffer.from(text.slice(2), "hex"));
 }
 
-const parseDate = (text: string): Date => new Date(text);
+/** PostgreSQL's ISO text of a `timestamptz` under the pinned settings: date, time (fraction up to 6 digits), `+00`. */
+const TIMESTAMPTZ_TEXT = /^([0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?)\+00$/;
+/** The same for a `timestamp`, which has no offset. */
+const TIMESTAMP_TEXT = /^([0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?)$/;
+/** PostgreSQL's ISO text of a `date`. */
+const DATE_TEXT = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+
+const isInfinity = (text: string): boolean => text === "infinity" || text === "-infinity";
+
+/** A `timestamptz` as RFC 3339 UTC text: `2025-05-21 14:30:00.123456+00` → `2025-05-21T14:30:00.123456Z`. */
+function parseTimestamptz(text: string): string {
+  if (isInfinity(text)) return text;
+  const match = TIMESTAMPTZ_TEXT.exec(text);
+  if (match === null) throw malformed("timestamp with time zone", text);
+  return `${match[1]}T${match[2]}Z`;
+}
+
+/** A `timestamp` as the same text without `Z`, since it holds no time zone: `2025-05-21T14:30:00`. */
+function parseTimestamp(text: string): string {
+  if (isInfinity(text)) return text;
+  const match = TIMESTAMP_TEXT.exec(text);
+  if (match === null) throw malformed("timestamp without time zone", text);
+  return `${match[1]}T${match[2]}`;
+}
+
+/** A `date` as its text, `2025-05-21`, which RFC 3339 writes the same. */
+function parseDateText(text: string): string {
+  if (isInfinity(text) || DATE_TEXT.test(text)) return text;
+  throw malformed("date", text);
+}
 
 /**
  * JSON parsed without loss (DB-2), by a reader of RFC 8259's grammar written here, not `JSON.parse`:
@@ -270,10 +310,10 @@ export const RESULT_TYPES: readonly ResultType[] = [
   { name: "money", oid: 790, arrayOid: 791, parse: asText },
   { name: "character", oid: 1042, arrayOid: 1014, parse: asText },
   { name: "character varying", oid: 1043, arrayOid: 1015, parse: asText },
-  { name: "date", oid: 1082, arrayOid: 1182, parse: parseDate },
+  { name: "date", oid: 1082, arrayOid: 1182, parse: parseDateText },
   { name: "time without time zone", oid: 1083, arrayOid: 1183, parse: asText },
-  { name: "timestamp without time zone", oid: 1114, arrayOid: 1115, parse: parseDate },
-  { name: "timestamp with time zone", oid: 1184, arrayOid: 1185, parse: parseDate },
+  { name: "timestamp without time zone", oid: 1114, arrayOid: 1115, parse: parseTimestamp },
+  { name: "timestamp with time zone", oid: 1184, arrayOid: 1185, parse: parseTimestamptz },
   { name: "interval", oid: 1186, arrayOid: 1187, parse: asText },
   { name: "time with time zone", oid: 1266, arrayOid: 1270, parse: asText },
   { name: "numeric", oid: 1700, arrayOid: 1231, parse: asText },
@@ -417,7 +457,9 @@ function jsonText(value: unknown, index: number): string {
 
 /**
  * The text a parameter value is sent as (`null` for SQL NULL): a string as it is; a number or a `bigint` in decimal; a
- * boolean as `true`/`false`; a `Uint8Array` (a `Buffer` is one) as `bytea` hex (`\x…`); a `Date` as its ISO text; an
+ * boolean as `true`/`false`; a `Uint8Array` (a `Buffer` is one) as `bytea` hex (`\x…`); a `Date` as its ISO text
+ * (`2026-10-23T10:00:00.123Z`, which PostgreSQL reads as that instant; a time read back is RFC 3339 text, which can be
+ * sent back as it is); an
  * array as an array literal of its elements' texts, nested arrays as dimensions, `null` as NULL; a plain object as
  * JSON (lossless: a `bigint` exactly). A JSON array or scalar for a `json`/`jsonb` parameter is passed as its JSON text
  * (a JavaScript array is a PostgreSQL array). Anything else — `undefined`, a function, a symbol, an invalid `Date`, a

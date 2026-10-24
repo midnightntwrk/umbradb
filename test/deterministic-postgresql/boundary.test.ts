@@ -202,7 +202,7 @@ describe("A138: the pinned settings, the column-type rules and the result mappin
       "TimeZone",
       "extra_float_digits",
     ]);
-    expect(COLUMN_TYPE_RULES).toHaveLength(16);
+    expect(COLUMN_TYPE_RULES).toHaveLength(17); // the date-and-time row split in two (task 2.2b, Q74)
     expect(Object.keys(TABLE_RULES)).toHaveLength(5);
     expect(RESULT_TYPES).toHaveLength(24);
   });

@@ -79,7 +79,7 @@ for (const backend of BACKENDS) {
       expect(row.d).toEqual({ n: -9007199254740993n });
     });
 
-    it("maps the types design.md §4 refuses but a query can still return, as the drivers do", async () => {
+    it("maps the types design.md §4 refuses but a query can still return, dates and times as RFC 3339 text", async () => {
       const row = await one(`SELECT true AS yes, 1::smallint AS s, 2::integer AS i, 26::oid AS o,
                                     0.1::real AS r, 'Infinity'::double precision AS d,
                                     'abc'::text AS t, 'abc'::varchar(5) AS v, 'ab'::char(4) AS c, 'n'::name AS n,
@@ -104,8 +104,8 @@ for (const backend of BACKENDS) {
         ch: "x",
         u: "ffffffff-0000-0000-0000-0000000000ab",
         j: { n: 9007199254740993n, k: 1 },
-        day: new Date("2026-10-23T00:00:00.000Z"),
-        at: new Date("2026-10-23T10:00:00.123Z"),
+        day: "2026-10-23",
+        at: "2026-10-23T10:00:00.123456Z",
         tm: "10:00:00",
         tz: "10:00:00+02",
         iv: "1 day 02:00:00",
@@ -116,7 +116,62 @@ for (const backend of BACKENDS) {
         range: "[1,3)",
         ip: "192.168.0.1",
       });
-      expect(row.now).toBeInstanceOf(Date);
+      // DB-2 (Q68): text in UTC with `Z`, the fraction only when there is one, never a JavaScript Date.
+      expect(row.now).toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$/);
+    });
+
+    it("reads date and time values as RFC 3339 text, infinity as the word, arrays element by element (A139)", async () => {
+      const row = await one(`SELECT '2025-05-21 14:30:00+00'::timestamptz AS a, '2025-05-21 16:30:00.123456+02'::timestamptz AS b,
+                                    '2025-05-21 14:30:00'::timestamp AS c, '2025-05-21'::date AS d,
+                                    'infinity'::timestamptz AS e, '-infinity'::timestamp AS f, 'infinity'::date AS g,
+                                    ARRAY['2025-05-21 14:30:00.5+00'::timestamptz, NULL, '-infinity'] AS h,
+                                    ARRAY[['2025-05-21'::date], [NULL::date]] AS i, '0001-01-01 00:00:00+00'::timestamptz AS j,
+                                    '9999-12-31 23:59:59.999999'::timestamp AS k`);
+      expect(row).toEqual({
+        a: "2025-05-21T14:30:00Z",
+        b: "2025-05-21T14:30:00.123456Z",
+        c: "2025-05-21T14:30:00",
+        d: "2025-05-21",
+        e: "infinity",
+        f: "-infinity",
+        g: "infinity",
+        h: ["2025-05-21T14:30:00.5Z", null, "-infinity"],
+        i: [["2025-05-21"], [null]],
+        j: "0001-01-01T00:00:00Z",
+        k: "9999-12-31T23:59:59.999999",
+      });
+    });
+
+    it("refuses a time outside the years 0001–9999 as unreadable output, by the rule it has (Q81)", async () => {
+      for (const value of [
+        "'10000-01-01 00:00:00+00'::timestamptz",
+        "'0044-03-15 12:00:00+00 BC'::timestamptz",
+        "'294276-12-31 23:59:59'::timestamp",
+        "'0001-01-01 BC'::date",
+        "ARRAY['10000-01-01'::date]",
+      ]) {
+        const error = await db.read((read) => read.query(`SELECT ${value} AS v`)).catch((e: unknown) => e);
+        expect(error, value).toBeInstanceOf(UmbraError);
+        expect((error as UmbraError).code, value).toBe("database-error");
+        expect((error as UmbraError).details.reason, value).toBe("unreadable-result");
+      }
+      // The same values are read when a query turns them into text itself.
+      const row = await one("SELECT '10000-01-01 00:00:00+00'::timestamptz::text AS v");
+      expect(row.v).toBe("10000-01-01 00:00:00+00");
+    });
+
+    it("refuses a timestamptz printed in a time zone a session set, rather than guess its instant", async () => {
+      const read = (zone: string) =>
+        db
+          .transaction(async (tx) => {
+            await tx.query(`SET LOCAL TimeZone = '${zone}'`);
+            return tx.query("SELECT '2025-05-21 14:30:00+00'::timestamptz AS v");
+          })
+          .catch((e: unknown) => e);
+      const tokyo = await read("Asia/Tokyo");
+      expect(tokyo).toBeInstanceOf(UmbraError);
+      expect((tokyo as UmbraError).details).toEqual({ reason: "unreadable-result", type: "timestamp with time zone" });
+      expect(await read("UTC")).toEqual([{ v: "2025-05-21T14:30:00Z" }]);
     });
 
     it("maps NULL to null for every named type and its array", async () => {
@@ -149,7 +204,7 @@ for (const backend of BACKENDS) {
         jsonbs: [{ a: 9007199254740993n }, null, null],
         empties: ["", null],
         reals: [0.5, null],
-        dates: [new Date("2026-10-23T00:00:00.000Z"), null],
+        dates: ["2026-10-23", null],
       });
     });
 
@@ -216,7 +271,8 @@ for (const backend of BACKENDS) {
         ints: [1, null, -3],
         texts: ['a"b', "c\\d", "NULL", "", " ", "{,}"],
         flag: true,
-        at: new Date("2026-10-23T10:00:00.123Z"),
+        // A Date parameter is sent as its ISO text (task 2.1) and reads back as RFC 3339 text (DB-2, Q68).
+        at: "2026-10-23T10:00:00.123Z",
         amount: "-12.50",
         nothing: null,
         blobs: [new Uint8Array([1]), null],

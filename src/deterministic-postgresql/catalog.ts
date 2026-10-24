@@ -1,8 +1,8 @@
 /**
  * The catalog reads of the `deterministic_postgresql` component (`openspec/changes/core-arch/design.md` §4, owner
- * decision Q69): what PostgreSQL's catalog says about the public tables, their columns and the relations of the public
+ * decision Q69): what PostgreSQL's catalog says about the module tables, their columns and the relations of the module
  * schemas, read as the column-type rules (`./column-rules.ts`) take it — the rules' input, before any of them is
- * applied. The contents hash (`src/determinism/public-tables.ts`, DT-2, DT-3) and task 7.1's migration-time check
+ * applied. The contents hash (`src/determinism/module-tables.ts`, DT-2, DT-3) and task 7.1's migration-time check
  * (DT-6) read the same facts here, so both give the same verdicts.
  *
  * **Which tables count.** Every schema of the database counts except those no part or module can own (DB-8's reserved
@@ -10,7 +10,7 @@
  * `information_schema`, and `public`, where extensions install their tables. A table is an ordinary or a partitioned
  * table (`relkind` `r` or `p`); a partition is part of its partitioned table, whose rows it holds, not a table of its
  * own. Views, materialized views, sequences, composite types and foreign tables hold no rows of their own and are not
- * tables. (Why these schemas and tables: `src/determinism/public-tables.ts`.)
+ * tables. (Why these schemas and tables: `src/determinism/module-tables.ts`.)
  *
  * **How the catalog is read.** By name, never by OID or creation order: schemas and tables are sorted by the bytes of
  * their names' UTF-8 encoding (DT-3's byte order); a table's columns are in column order (DT-1), its attribute
@@ -53,7 +53,7 @@ export interface CatalogColumn extends ColumnFacts {
   readonly keyPosition: number | null;
 }
 
-/** A public table as the catalog describes it: the column-type rules' input, before any of them is applied. */
+/** A module table as the catalog describes it: the column-type rules' input, before any of them is applied. */
 export interface CatalogTable extends TableFacts {
   /** A partitioned table, read whole across its partitions; an ordinary table is read with `ONLY`. */
   readonly partitioned: boolean;
@@ -62,7 +62,7 @@ export interface CatalogTable extends TableFacts {
 }
 
 /**
- * The public tables of the database `read` sees, as the catalog describes them, in DT-3's order (by schema name, then
+ * The module tables of the database `read` sees, as the catalog describes them, in DT-3's order (by schema name, then
  * table name, as bytes), each with its columns in column order: their types, identity, and what in their defaults is
  * not immutable (read from the defaults' expression trees and one more catalog read, `./column-rules.ts`). Nothing is
  * refused here: this is the rules' input.
@@ -108,7 +108,7 @@ export async function catalogTables(read: ConsistentRead): Promise<CatalogTable[
 }
 
 /**
- * The relations of the public schemas that DT-6 refuses whatever they hold (owner decision Q61), as the catalog
+ * The relations of the module schemas that DT-6 refuses whatever they hold (owner decision Q61), as the catalog
  * describes them, in DT-3's order (by schema name, then name, as bytes): every sequence (`relkind = 'S'`, an identity
  * or `serial` column's own included), and every unlogged table, partitioned table or partition
  * (`relpersistence = 'u'`; a partition holds rows of its partitioned table, so it counts too).
@@ -128,10 +128,11 @@ export async function catalogRelations(read: ConsistentRead): Promise<RelationFa
 // ── internals ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Public tables: ordinary or partitioned tables that are not partitions, outside PostgreSQL's own schemas (`pg_*`),
- * `information_schema` and the reserved `public`.
+ * Module tables: ordinary or partitioned tables that are not partitions, outside PostgreSQL's own schemas (`pg_*`),
+ * `information_schema` and the reserved `public` — in every schema DT-3 hashes, the core's database or a private
+ * process's alike (owner decision Q75).
  */
-const PUBLIC_TABLE_FILTER = `
+const MODULE_TABLE_FILTER = `
   c.relkind IN ('r', 'p') AND NOT c.relispartition
   AND n.nspname NOT IN ('information_schema', 'public') AND left(n.nspname::text, 3) <> 'pg_'`;
 
@@ -139,7 +140,7 @@ const TABLES_SQL = `
 SELECT n.nspname::text AS schema_name, c.relname::text AS table_name, c.relkind = 'p' AS partitioned
 FROM pg_catalog.pg_class AS c
 JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
-WHERE ${PUBLIC_TABLE_FILTER}`;
+WHERE ${MODULE_TABLE_FILTER}`;
 
 /**
  * A column's facts (`ColumnFacts` of `./column-rules.ts`): `format_type` without and with the type modifier, the type
@@ -167,12 +168,12 @@ LEFT JOIN pg_catalog.pg_type AS e
  AND t.typstorage <> 'p'
 LEFT JOIN pg_catalog.pg_index AS i ON i.indrelid = c.oid AND i.indisprimary
 LEFT JOIN pg_catalog.pg_attrdef AS d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
-WHERE ${PUBLIC_TABLE_FILTER} AND a.attnum > 0 AND NOT a.attisdropped`;
+WHERE ${MODULE_TABLE_FILTER} AND a.attnum > 0 AND NOT a.attisdropped`;
 
 /** `attidentity`: `a` for GENERATED ALWAYS AS IDENTITY, `d` for BY DEFAULT, empty for no identity. */
 const IDENTITY: Readonly<Record<string, "always" | "by default">> = { a: "always", d: "by default" };
 
-/** Sequences and unlogged tables (partitions included) of the public schemas: `design.md` §4's detection. */
+/** Sequences and unlogged tables (partitions included) of the module schemas: `design.md` §4's detection. */
 const RELATIONS_SQL = `
 SELECT n.nspname::text AS schema_name, c.relname::text AS relation_name, c.relkind::text AS kind,
        c.relpersistence::text AS persistence

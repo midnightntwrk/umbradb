@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   countRows,
-  PublicContentsError,
-  type PublicContentsFailure,
-  type PublicTable,
-  publicTables,
+  ModuleContentsError,
+  type ModuleContentsFailure,
+  type ModuleTable,
+  moduleTables,
   rowsInKeyOrder,
-} from "../../src/determinism/public-tables.js";
+} from "../../src/determinism/module-tables.js";
 import { DETERMINISM_BACKENDS } from "./backends.js";
 import type { TestDatabase, TestServer } from "./postgres-database.js";
 
@@ -16,7 +16,8 @@ import type { TestDatabase, TestServer } from "./postgres-database.js";
  *
  * DT-2: rows are ordered by their primary-key columns in order, integers numerically, `boolean` with `false` first, and
  * `bytea`, `text`, `varchar(n)` and `uuid` by their bytes (`COLLATE "C"` for `text` and `varchar`; `varchar`, `uuid`
- * and `boolean` since owner decision Q58). DT-3: the public schemas, then each table, in name order (byte order).
+ * and `boolean` since owner decision Q58; `timestamptz` by time since Q74). DT-3: the module schemas (every schema but
+ * `pg_*`, `information_schema` and `public`, owner decision Q75), then each table, in name order (byte order).
  * Every expected order below is written out by hand from those rules (UTF-8 bytes of each text; unsigned bytes, a
  * prefix first; integers by value; `false` before `true`), never computed by the code under test. Rows are inserted
  * in shuffled order and every listing is repeated with page sizes 1, 2, 3 and the default, so a paging error cannot
@@ -34,13 +35,13 @@ async function freshDatabase(setup: string): Promise<TestDatabase> {
   return db;
 }
 
-async function table(db: TestDatabase, schema: string, name: string): Promise<PublicTable> {
-  const found = (await db.read((read) => publicTables(read))).find((t) => t.schema === schema && t.name === name);
-  if (found === undefined) throw new Error(`no public table ${schema}.${name}`);
+async function table(db: TestDatabase, schema: string, name: string): Promise<ModuleTable> {
+  const found = (await db.read((read) => moduleTables(read))).find((t) => t.schema === schema && t.name === name);
+  if (found === undefined) throw new Error(`no module table ${schema}.${name}`);
   return found;
 }
 
-async function listRows(db: TestDatabase, t: PublicTable, pageSize?: number): Promise<unknown[][]> {
+async function listRows(db: TestDatabase, t: ModuleTable, pageSize?: number): Promise<unknown[][]> {
   return db.read(async (read) => {
     const rows: unknown[][] = [];
     for await (const row of rowsInKeyOrder(read, t, pageSize === undefined ? {} : { pageSize })) rows.push(row);
@@ -59,14 +60,14 @@ async function expectKeyOrder(db: TestDatabase, schema: string, name: string, ex
 
 const hex = (bytes: unknown): string => Buffer.from(bytes as Uint8Array).toString("hex");
 
-async function failure(run: () => Promise<unknown>): Promise<PublicContentsError> {
+async function failure(run: () => Promise<unknown>): Promise<ModuleContentsError> {
   try {
     await run();
   } catch (error) {
-    if (error instanceof PublicContentsError) return error;
+    if (error instanceof ModuleContentsError) return error;
     throw error;
   }
-  throw new Error("expected a PublicContentsError, but the read succeeded");
+  throw new Error("expected a ModuleContentsError, but the read succeeded");
 }
 
 function shuffled<T>(values: readonly T[]): T[] {
@@ -163,6 +164,57 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       await expectKeyOrder(db, "m", "i8", bigints);
       await expectKeyOrder(db, "m", "i4", integers);
       await expectKeyOrder(db, "m", "i2", smallints);
+    }, 60_000);
+
+    it("orders timestamptz keys by time: before 1970 first, a fraction after its whole second (DT-2, Q74; A145)", async () => {
+      // Written out by hand in time order, as RFC 3339 text (DB-2): the order of their microseconds since 1970, which
+      // DT-1 encodes, from -62135596800000000 (0001-01-01) to 253402300799999999 (9999-12-31 23:59:59.999999).
+      const times = [
+        "0001-01-01T00:00:00Z",
+        "1969-12-31T23:59:59.5Z",
+        "1970-01-01T00:00:00Z",
+        "1970-01-01T00:00:00.000001Z",
+        "2025-05-21T14:30:00Z",
+        "2025-05-21T14:30:00.000001Z",
+        "2025-05-21T14:30:00.123456Z",
+        "2025-05-21T14:30:00.5Z",
+        "2025-05-21T14:30:01Z",
+        "2025-05-21T14:30:10Z",
+        "9999-12-31T23:59:59.999999Z",
+      ];
+      // One is inserted with another offset (16:30:00+02 is 14:30:00Z). Control: as text, the same strings put a
+      // fraction before its whole second ("." is 2e, "Z" 5a), so the order below is not the text order.
+      expect([...times].sort()).not.toEqual(times);
+      const db = await freshDatabase(`
+        CREATE SCHEMA m;
+        CREATE TABLE m.t (k timestamptz PRIMARY KEY, v text);
+        INSERT INTO m.t VALUES ${shuffled(times)
+          .map((k, i) => `('${k === "2025-05-21T14:30:00Z" ? "2025-05-21 16:30:00+02" : k}', 'v${i}')`)
+          .join(", ")};
+      `);
+      await expectKeyOrder(db, "m", "t", times);
+      const [t] = await db.read((read) => moduleTables(read));
+      expect(t?.columns.map((column) => column.type)).toEqual(["timestamp with time zone", "text"]);
+    }, 60_000);
+
+    it("orders a composite key of timestamptz and text by time first, then by bytes", async () => {
+      const expected: readonly (readonly [string, string])[] = [
+        ["2025-05-21T14:30:00Z", "B"],
+        ["2025-05-21T14:30:00Z", "a"],
+        ["2025-05-21T14:30:00.5Z", "A"],
+        ["2025-05-22T00:00:00Z", "A"],
+      ];
+      const db = await freshDatabase(`
+        CREATE SCHEMA m;
+        CREATE TABLE m.t (at timestamptz, name text COLLATE "und-x-icu", PRIMARY KEY (at, name));
+        INSERT INTO m.t VALUES ${shuffled(expected).map(([at, name]) => `('${at}', '${name}')`).join(", ")};
+      `);
+      const t = await table(db, "m", "t");
+      for (const pageSize of PAGE_SIZES) {
+        expect(await listRows(db, t, pageSize), `page size ${pageSize ?? "default"}`).toEqual(
+          expected.map((row) => [...row]),
+        );
+      }
     }, 60_000);
 
     it("orders composite keys column by column, in the key's declared order rather than the table's", async () => {
@@ -350,7 +402,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
     }, 60_000);
   });
 
-  describe("DT-3's table list — public schemas and tables in name order, read from the catalog", () => {
+  describe("DT-3's table list — module schemas and tables in name order, read from the catalog", () => {
     it("lists schemas and tables by the bytes of their names, not by creation order or locale", async () => {
       // Created in the reverse of the expected order. By bytes: "m0" (6d 30) < "m_x" (6d 5f 78) — a locale puts "_"
       // before digits — and "B" (42) < "a" (61) < "b" (62); U+FF61 (ef bd a1) < U+1F600 (f0 9f 98 80), which
@@ -366,7 +418,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         CREATE TABLE m0.a (k integer PRIMARY KEY);
         CREATE TABLE m0."B" (k integer PRIMARY KEY);
       `);
-      const tables = await db.read((read) => publicTables(read));
+      const tables = await db.read((read) => moduleTables(read));
       expect(tables.map((t) => [t.schema, t.name])).toEqual([
         ["m0", "B"],
         ["m0", "a"],
@@ -378,7 +430,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       ]);
     }, 60_000);
 
-    // A sequence is no table; in a public schema it refuses the list (owner decision Q61, `column-refusals.test.ts`),
+    // A sequence is no table; in a module schema it refuses the list (owner decision Q61, `column-refusals.test.ts`),
     // so the one here is in the reserved `public` schema.
     it("leaves out PostgreSQL's own schemas, the reserved public schema, partitions, views and sequences", async () => {
       const db = await freshDatabase(`
@@ -392,7 +444,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         CREATE SEQUENCE public.q;
         CREATE TYPE m.pair AS (a integer, b integer);
       `);
-      const tables = await db.read((read) => publicTables(read));
+      const tables = await db.read((read) => moduleTables(read));
       expect(tables.map((t) => [t.schema, t.name, t.partitioned])).toEqual([
         ["m", "p", true],
         ["m", "plain", false],
@@ -408,7 +460,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         );
         ALTER TABLE m.t DROP COLUMN gone;
       `);
-      const [t] = await db.read((read) => publicTables(read));
+      const [t] = await db.read((read) => moduleTables(read));
       // The declared type (format_type with the type modifier) is kept for refusal messages (task 1.3).
       expect(t).toEqual({
         schema: "m",
@@ -447,8 +499,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         CREATE UNIQUE INDEX t1_k ON a.t1 (k);
         ALTER TABLE a.t1 ADD PRIMARY KEY USING INDEX t1_k;
       `);
-      const listed = await first.read((read) => publicTables(read));
-      expect(await second.read((read) => publicTables(read))).toEqual(listed);
+      const listed = await first.read((read) => moduleTables(read));
+      expect(await second.read((read) => moduleTables(read))).toEqual(listed);
       expect(listed.map((t) => [t.schema, t.name, t.key])).toEqual([
         ["a", "t1", [0]],
         ["b", "t2", [1, 0]],
@@ -457,17 +509,17 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
 
     async function expectRefusal(
       setup: string,
-      reason: PublicContentsFailure,
+      reason: ModuleContentsFailure,
       where: { schema: string; table: string; column: string | null },
     ) {
       const db = await freshDatabase(setup);
-      const error = await failure(() => db.read((read) => publicTables(read)));
+      const error = await failure(() => db.read((read) => moduleTables(read)));
       expect(error.reason).toBe(reason);
       expect({ schema: error.schema, table: error.table, column: error.column }).toEqual(where);
       expect(error.message).toContain(reason);
     }
 
-    it("refuses a public table without a primary key, which DT-2 cannot order", async () => {
+    it("refuses a module table without a primary key, which DT-2 cannot order", async () => {
       await expectRefusal(
         `CREATE SCHEMA m; CREATE TABLE m.ok (k integer PRIMARY KEY); CREATE TABLE m.loose (k integer UNIQUE);`,
         "no-primary-key",
@@ -495,7 +547,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
     // `varchar` and `uuid` are DT-1 types since owner decision Q58; floating-point columns are refused with
     // `non-deterministic-column`, DT-6's code for them (`design.md` §4's column-type table).
     it("refuses a column whose type DT-1 does not encode", async () => {
-      for (const type of ["timestamp with time zone", "json", "character(4)", "numeric(38,2)"]) {
+      for (const type of ["timestamp without time zone", "date", "interval", "json", "character(4)", "numeric(38,2)"]) {
         await expectRefusal(
           `CREATE SCHEMA m; CREATE TABLE m.t (id bigint PRIMARY KEY, v ${type});`,
           "unsupported-column-type",
@@ -511,12 +563,12 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       }
     }, 60_000);
 
-    // Owner decision Q61: a sequence or an unlogged table in a public schema refuses the list, and with it the hash.
-    it("refuses a public schema holding a sequence or an unlogged table", async () => {
+    // Owner decision Q61: a sequence or an unlogged table in a module schema refuses the list, and with it the hash.
+    it("refuses a module schema holding a sequence or an unlogged table", async () => {
       const sequence = await freshDatabase(`
         CREATE SCHEMA m; CREATE TABLE m.t (k integer PRIMARY KEY); CREATE SEQUENCE m.q;
       `);
-      const error = await failure(() => sequence.read((read) => publicTables(read)));
+      const error = await failure(() => sequence.read((read) => moduleTables(read)));
       expect([error.reason, error.schema, error.table, error.sequence, error.column]).toEqual([
         "non-deterministic-table",
         "m",
@@ -532,12 +584,26 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       );
     }, 60_000);
 
+    it("accepts timestamptz columns, and as keys (Q74)", async () => {
+      const db = await freshDatabase(`
+        CREATE SCHEMA m;
+        CREATE TABLE m.t (a timestamptz, b timestamptz(3), c timestamptz[], PRIMARY KEY (a, b));
+      `);
+      const [t] = await db.read((read) => moduleTables(read));
+      expect(t?.key).toEqual([0, 1]);
+      expect(t?.columns.map((column) => [column.type, column.declaredType])).toEqual([
+        ["timestamp with time zone", "timestamp with time zone"],
+        ["timestamp with time zone", "timestamp(3) with time zone"],
+        ["timestamp with time zone[]", "timestamp with time zone[]"],
+      ]);
+    }, 60_000);
+
     it("accepts varchar, uuid and boolean columns, and as keys", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA m;
         CREATE TABLE m.t (a varchar(4), b uuid, c boolean, d varchar(4)[], e uuid[], PRIMARY KEY (a, b, c));
       `);
-      const [t] = await db.read((read) => publicTables(read));
+      const [t] = await db.read((read) => moduleTables(read));
       expect(t?.key).toEqual([0, 1, 2]);
     }, 60_000);
   });

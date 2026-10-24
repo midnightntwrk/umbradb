@@ -229,10 +229,6 @@ describe("the result mapping by type (DB-2; design.md §4's column-type table)",
     expect(mapValue(oid("double precision"), "-Infinity")).toBe(-Infinity);
     expect(mapValue(oid("text"), "NULL")).toBe("NULL");
     expect(mapValue(oid("uuid"), "00000000-0000-0000-0000-0000000000ff")).toBe("00000000-0000-0000-0000-0000000000ff");
-    expect(mapValue(oid("timestamp with time zone"), "2026-10-23 10:00:00.123456+00")).toEqual(
-      new Date("2026-10-23T10:00:00.123Z"),
-    );
-    expect(mapValue(oid("date"), "2026-10-23")).toEqual(new Date("2026-10-23T00:00:00.000Z"));
     expect(mapValue(oid("interval"), "1 day 02:00:00")).toBe("1 day 02:00:00");
     expect(mapValue(oid("money"), "$1.00")).toBe("$1.00");
   });
@@ -277,6 +273,110 @@ describe("the result mapping by type (DB-2; design.md §4's column-type table)",
     expect(() => mapValue(oid("bytea"), "\\xzz")).toThrow(/bytea/);
     expect(() => mapValue(oid("integer"), "1.5")).toThrow(/integer/);
     expect(() => mapValue(oid("bigint"), "x")).toThrow(/bigint/);
+  });
+
+  describe("date and time as RFC 3339 text (DB-2, owner decisions Q68 and Q81)", () => {
+    // PostgreSQL's output under the pinned settings (`DateStyle = 'ISO, MDY'`, `TimeZone = UTC`), as PostgreSQL 17.11
+    // and PGlite 0.5.10 print it (checked 2026-10-24): the fraction without trailing zeros, the offset always `+00`.
+    const TIMESTAMPTZ: readonly (readonly [string, string])[] = [
+      ["2025-05-21 14:30:00+00", "2025-05-21T14:30:00Z"],
+      ["2025-05-21 14:30:00.123456+00", "2025-05-21T14:30:00.123456Z"],
+      ["2025-05-21 14:30:00.1+00", "2025-05-21T14:30:00.1Z"],
+      ["2025-05-21 14:30:00.12+00", "2025-05-21T14:30:00.12Z"],
+      ["2025-05-21 14:30:00.000001+00", "2025-05-21T14:30:00.000001Z"],
+      ["0001-01-01 00:00:00+00", "0001-01-01T00:00:00Z"],
+      ["0999-01-01 00:00:00+00", "0999-01-01T00:00:00Z"],
+      ["9999-12-31 23:59:59.999999+00", "9999-12-31T23:59:59.999999Z"],
+      ["1969-12-31 23:59:59.5+00", "1969-12-31T23:59:59.5Z"],
+      ["infinity", "infinity"],
+      ["-infinity", "-infinity"],
+    ];
+    const TIMESTAMP: readonly (readonly [string, string])[] = [
+      ["2025-05-21 14:30:00", "2025-05-21T14:30:00"],
+      ["2025-05-21 14:30:00.123456", "2025-05-21T14:30:00.123456"],
+      ["0001-01-01 00:00:00.5", "0001-01-01T00:00:00.5"],
+      ["infinity", "infinity"],
+      ["-infinity", "-infinity"],
+    ];
+    const DATE: readonly string[] = ["2025-05-21", "0001-01-01", "9999-12-31", "infinity", "-infinity"];
+
+    it("maps a timestamptz to RFC 3339 UTC text, with the fraction PostgreSQL prints, and infinity as the word", () => {
+      for (const [text, expected] of TIMESTAMPTZ) {
+        expect(mapValue(oid("timestamp with time zone"), text), text).toBe(expected);
+      }
+    });
+
+    it("maps a timestamp to the same text without Z, and a date to its text", () => {
+      for (const [text, expected] of TIMESTAMP) {
+        expect(mapValue(oid("timestamp without time zone"), text), text).toBe(expected);
+      }
+      for (const text of DATE) expect(mapValue(oid("date"), text), text).toBe(text);
+    });
+
+    it("maps arrays of them element by element, NULL to null", () => {
+      expect(
+        mapValue(
+          arrayOid("timestamp with time zone"),
+          '{"2025-05-21 14:30:00+00",NULL,infinity,"2025-05-21 14:30:00.5+00"}',
+        ),
+      ).toEqual(["2025-05-21T14:30:00Z", null, "infinity", "2025-05-21T14:30:00.5Z"]);
+      expect(mapValue(arrayOid("timestamp without time zone"), '{"2025-05-21 14:30:00",NULL,-infinity}')).toEqual([
+        "2025-05-21T14:30:00",
+        null,
+        "-infinity",
+      ]);
+      expect(mapValue(arrayOid("date"), "{{2025-05-21},{2025-05-22}}")).toEqual([["2025-05-21"], ["2025-05-22"]]);
+      expect(mapValue(arrayOid("date"), "[0:1]={2025-05-21,NULL}")).toEqual(["2025-05-21", null]);
+    });
+
+    it("refuses what it cannot read as unreadable output: years outside 0001–9999, BC, an offset other than +00", () => {
+      const unreadable: readonly (readonly [string, string])[] = [
+        // Q81: PostgreSQL's range reaches 4714 BC and 294276 AD; the mapping reads years 0001–9999 only.
+        ["timestamp with time zone", "10000-01-01 00:00:00+00"],
+        ["timestamp with time zone", "294276-12-31 23:59:59.999999+00"],
+        ["timestamp with time zone", "0044-03-15 12:00:00+00 BC"],
+        ["timestamp with time zone", "4714-11-24 00:00:00+00 BC"],
+        ["timestamp without time zone", "10000-01-01 00:00:00"],
+        ["timestamp without time zone", "0044-03-15 12:00:00 BC"],
+        ["date", "10000-01-01"],
+        ["date", "0044-03-15 BC"],
+        // A session that changed TimeZone or DateStyle: output not in the pinned form is never guessed.
+        ["timestamp with time zone", "2025-05-21 14:30:00+09"],
+        ["timestamp with time zone", "2025-05-21 14:30:00+05:30"],
+        ["timestamp with time zone", "2025-05-21 14:30:00"],
+        ["timestamp with time zone", "21.05.2025 14:30:00 UTC"],
+        ["timestamp without time zone", "2025-05-21 14:30:00+00"],
+        ["timestamp without time zone", "05/21/2025 14:30:00"],
+        ["date", "21.05.2025"],
+        // Not PostgreSQL's output at all: RFC 3339 itself, seven fraction digits, a short year, nothing.
+        ["timestamp with time zone", "2025-05-21T14:30:00Z"],
+        ["timestamp with time zone", "2025-05-21 14:30:00.1234567+00"],
+        ["timestamp with time zone", "2025-05-21 14:30:00.+00"],
+        ["timestamp without time zone", "25-05-21 14:30:00"],
+        ["date", "2025-05-21 "],
+        ["date", "Infinity"],
+        ["date", ""],
+      ];
+      for (const [type, text] of unreadable) {
+        let error: unknown;
+        try {
+          mapValue(oid(type), text);
+        } catch (caught) {
+          error = caught;
+        }
+        expect(error, `${type} ${JSON.stringify(text)}`).toBeInstanceOf(UmbraError);
+        expect((error as UmbraError).code).toBe("database-error");
+        expect((error as UmbraError).details).toEqual({ reason: "unreadable-result", type });
+      }
+      // PostgreSQL quotes an element holding a space: the element is read, and refused, as a date.
+      expect(() => mapValue(arrayOid("date"), '{2025-05-21,"0044-03-15 BC"}')).toThrow(/as date output/);
+    });
+
+    it("returns text, never a JavaScript Date, which keeps milliseconds only (negative control)", () => {
+      for (const [text] of TIMESTAMPTZ) expect(typeof mapValue(oid("timestamp with time zone"), text)).toBe("string");
+      // The mapping task 2.1 shipped, `new Date(text)`, fails the microsecond case above: a Date cannot hold it.
+      expect(new Date("2025-05-21 14:30:00.123456+00").toISOString()).toBe("2025-05-21T14:30:00.123Z");
+    });
   });
 
   it("lists every named type once, by its format_type name, with its array", () => {

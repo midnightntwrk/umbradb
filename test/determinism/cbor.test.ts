@@ -469,6 +469,123 @@ describe("encodeRow — DT-1 column mappings", () => {
     });
   });
 
+  describe("timestamptz: the integer microseconds since 1970-01-01T00:00:00Z (task 2.2b, owner decision Q74; A145)", () => {
+    const TZ = "timestamp with time zone" as ColumnType;
+    // Each value as the database API reads it (DB-2's RFC 3339 text), and its encoding: the microseconds were worked
+    // out from the calendar by hand (days since 1970, leap years, then hours, minutes, seconds and the fraction), not by
+    // the encoder, and written as CBOR heads by RFC 8949 §3's rules.
+    const VALUES: readonly (readonly [string, string])[] = [
+      // In time order, as written here.
+      ["0001-01-01T00:00:00Z", "3b00dcbffeff2bbfff"],
+      ["1601-01-01T00:00:00Z", "3b00295e9648863fff"],
+      ["1900-03-01T00:00:00Z", "3b0007d46d68197fff"], // 1900 is no leap year (divisible by 100)
+      ["1969-12-31T23:59:59.5Z", "3a0007a11f"],
+      ["1969-12-31T23:59:59.999999Z", "20"],
+      ["1970-01-01T00:00:00Z", "00"],
+      ["1970-01-01T00:00:00.000001Z", "01"],
+      ["1970-01-01T00:00:00.000023Z", "17"],
+      ["1970-01-01T00:00:00.000024Z", "1818"],
+      ["1970-01-01T00:00:00.1Z", "1a000186a0"],
+      ["1970-01-01T00:00:00.12Z", "1a0001d4c0"],
+      ["1970-01-01T00:00:00.123Z", "1a0001e078"],
+      ["1970-01-01T01:00:00Z", "1ad693a400"],
+      ["2000-03-01T00:00:00Z", "1b000361b839b26000"], // 2000 is a leap year (divisible by 400)
+      ["2024-02-29T00:00:00Z", "1b00061279f0c44000"], // a leap day
+      ["2025-05-21T14:30:00Z", "1b000635a63331aa00"],
+      ["2025-05-21T14:30:00.5Z", "1b000635a633394b20"],
+      // 253402300799999999 is beyond 2^53: computed in `number` it would be 253402300800000000.
+      ["9999-12-31T23:59:59.999999Z", "1b0384440ccc735fff"],
+    ];
+
+    it("A145: 2025-05-21 14:30:00.123456+00 is the integer 1747837800123456", () => {
+      expect(rowHex(["2025-05-21T14:30:00.123456Z"], [TZ])).toBe("81" + "1b000635a633338c40");
+      expect(BigInt("0x000635a633338c40")).toBe(1747837800123456n);
+    });
+
+    it("encodes each value as its microseconds since 1970, before 1970 as a negative integer", () => {
+      for (const [text, hex] of VALUES) expect(rowHex([text], [TZ]), text).toBe(`81${hex}`);
+      expect(BigInt("0x0384440ccc735fff")).toBe(253402300799999999n);
+      expect(Number(253402300799999999n)).toBe(253402300800000000); // why `number` arithmetic cannot do
+    });
+
+    it("gives later times larger integers: DT-2's order by time is the order of the encoded integers", () => {
+      const decoded = (hex: string): bigint => {
+        const head = Number.parseInt(hex.slice(0, 2), 16);
+        const argument = (head & 0x1f) < 24 ? BigInt(head & 0x1f) : BigInt(`0x${hex.slice(2)}`);
+        return head >> 5 === 1 ? -1n - argument : argument;
+      };
+      const integers = VALUES.map(([text]) => decoded(toHex(encodeRow([text], [TZ])).slice(2)));
+      for (let i = 1; i < integers.length; i++) {
+        expect((integers[i] as bigint) > (integers[i - 1] as bigint), VALUES[i]?.[0]).toBe(true);
+      }
+      // Control: as text, a fraction sorts before its whole second ("." is 2e, "Z" 5a), so text order is not DT-2's.
+      expect([...VALUES.map(([text]) => text)].sort()).not.toEqual(VALUES.map(([text]) => text));
+    });
+
+    it("encodes arrays element by element and null as null", () => {
+      expect(rowHex([["2025-05-21T14:30:00Z", null], null], [`${TZ}[]` as ColumnType, TZ])).toBe(
+        "82" + "82" + "1b000635a63331aa00" + "f6" + "f6",
+      );
+    });
+
+    it("refuses infinity and -infinity: they have no microseconds since 1970", () => {
+      expectFailure(() => encodeRow(["infinity"], [TZ]), "timestamptz-infinite", "$[0]");
+      expectFailure(() => encodeRow(["-infinity"], [TZ]), "timestamptz-infinite", "$[0]");
+      expectFailure(() => encodeRow([["2025-05-21T14:30:00Z", "infinity"]], [`${TZ}[]` as ColumnType]), "timestamptz-infinite", "$[0][1]");
+    });
+
+    it("refuses text that is not the mapping's RFC 3339 UTC form or not a calendar time", () => {
+      const malformed = [
+        "2025-05-21 14:30:00+00", // PostgreSQL's own text, which the mapping rewrites
+        "2025-05-21 14:30:00.123456+00",
+        "2025-05-21T14:30:00", // a timestamp's text: no Z
+        "2025-05-21T14:30:00+00:00",
+        "2025-05-21T16:30:00+02",
+        "2025-05-21t14:30:00z",
+        "2025-05-21T14:30:00.Z",
+        "2025-05-21T14:30:00.1234567Z", // seven fraction digits
+        "2025-05-21T14:30Z",
+        "2025-5-21T14:30:00Z",
+        "+010000-01-01T00:00:00Z", // a year beyond 9999, as JavaScript writes it
+        "0000-01-01T00:00:00Z", // no year 0 in PostgreSQL's AD
+        "2025-00-01T00:00:00Z",
+        "2025-13-01T00:00:00Z",
+        "2025-05-00T00:00:00Z",
+        "2025-04-31T00:00:00Z",
+        "2025-02-29T00:00:00Z", // 2025 is no leap year
+        "1900-02-29T00:00:00Z",
+        "2025-05-21T24:00:00Z",
+        "2025-05-21T14:60:00Z",
+        "2025-05-21T14:30:60Z", // PostgreSQL never prints a leap second
+        "Infinity",
+        "infinity ",
+        "",
+      ];
+      for (const value of malformed) expectFailure(() => encodeRow([value], [TZ]), "timestamptz-invalid", "$[0]");
+      // Valid neighbours of the refused ones.
+      for (const value of ["2024-02-29T00:00:00Z", "2000-02-29T00:00:00Z", "2025-04-30T23:59:59.999999Z"]) {
+        expect(() => encodeRow([value], [TZ]), value).not.toThrow();
+      }
+    });
+
+    it("needs the text the database API gives: a Date, a number or a bigint is a type mismatch", () => {
+      expectFailure(() => encodeRow([new Date("2025-05-21T14:30:00Z")], [TZ]), "type-mismatch", "$[0]");
+      expectFailure(() => encodeRow([1747837800000000], [TZ]), "type-mismatch", "$[0]");
+      expectFailure(() => encodeRow([1747837800000000n], [TZ]), "type-mismatch", "$[0]");
+    });
+
+    it("says what an infinite or a malformed timestamptz is", () => {
+      expect(failure(() => encodeRow(["-infinity"], [TZ])).message).toBe(
+        '$[0]: timestamptz-infinite: "-infinity" has no microseconds since 1970-01-01T00:00:00Z',
+      );
+      expect(failure(() => encodeRow(["2025-02-29T00:00:00Z"], [TZ])).message).toBe(
+        '$[0]: timestamptz-invalid: "2025-02-29T00:00:00Z" is not a timestamptz as the database API reads it: ' +
+          "RFC 3339 UTC text from 0001-01-01T00:00:00Z to 9999-12-31T23:59:59.999999Z, up to six fraction digits " +
+          "(2025-05-21T14:30:00.123456Z)",
+      );
+    });
+  });
+
   describe("integers: smallint, integer and bigint within their PostgreSQL ranges, as number or bigint", () => {
     const CASES: readonly (readonly [ColumnType, bigint, string])[] = [
       ["smallint", -32768n, "397fff"],

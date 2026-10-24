@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { encodeRow } from "../../src/determinism/cbor.js";
 import {
   COLUMN_TYPE_RULES,
   type ConsistentRead,
@@ -59,6 +60,9 @@ const FIXTURE = `
   INSERT INTO m.text_keys VALUES ('b'), ('ä'), ('B'), ('a');
   CREATE TABLE m.varchar_keys (k varchar(4) COLLATE "und-x-icu" PRIMARY KEY);
   INSERT INTO m.varchar_keys VALUES ('b'), ('ä'), ('B'), ('a');
+  CREATE TABLE m.time_keys (k timestamptz PRIMARY KEY);
+  INSERT INTO m.time_keys VALUES ('2025-05-21 14:30:01+00'), ('2025-05-21 16:30:00.5+02'), ('1969-12-31 23:59:59.5+00'),
+    ('2025-05-21 14:30:00+00'), ('0001-01-01 00:00:00+00'), ('9999-12-31 23:59:59.999999+00'), ('1970-01-01 00:00:00+00');
 `;
 
 interface Backend {
@@ -105,6 +109,7 @@ describe("A138: the component's rules give the same results on PostgreSQL 17 and
       "numeric_key",
       "scratch",
       "text_keys",
+      "time_keys",
       "types",
       "varchar_keys",
     ]);
@@ -187,7 +192,35 @@ describe("A138: the component's rules give the same results on PostgreSQL 17 and
       expect(own.map((row) => row.k)).not.toEqual(["B", "a", "b", "ä"]);
     }
     expect(keyOrderTerm("id", "bigint")).toBe('"id"');
+    expect(keyOrderTerm("at", "timestamp with time zone")).toBe('"at"');
     expect(keyOrderTerm('a"b', "text")).toBe('"a""b" COLLATE "C"');
+  });
+
+  it("orders timestamptz keys by time with the key's ORDER BY term on both: the order of their encoded integers", async () => {
+    const sql = `SELECT k FROM m.time_keys ORDER BY ${keyOrderTerm("k", "timestamp with time zone")}`;
+    const [postgres, pglite] = await onBoth((read) => read.query(sql));
+    // By time (Q74): before 1970 first, a fraction after its whole second, 16:30:00.5+02 as 14:30:00.5Z.
+    expect(postgres.map((row) => row.k)).toEqual([
+      "0001-01-01T00:00:00Z",
+      "1969-12-31T23:59:59.5Z",
+      "1970-01-01T00:00:00Z",
+      "2025-05-21T14:30:00Z",
+      "2025-05-21T14:30:00.5Z",
+      "2025-05-21T14:30:01Z",
+      "9999-12-31T23:59:59.999999Z",
+    ]);
+    expect(pglite).toEqual(postgres);
+    // DT-1's integers of the same values, read back from their CBOR heads, increase in that order.
+    const integers = postgres.map((row) => {
+      const bytes = encodeRow([row.k], ["timestamp with time zone"]).subarray(1);
+      const head = bytes[0] as number;
+      const argument = (head & 0x1f) < 24 ? BigInt(head & 0x1f) : BigInt(`0x${Buffer.from(bytes.subarray(1)).toString("hex")}`);
+      return head >> 5 === 1 ? -1n - argument : argument;
+    });
+    for (let i = 1; i < integers.length; i++) expect((integers[i] as bigint) > (integers[i - 1] as bigint)).toBe(true);
+    // Control: the values the API returns, sorted as text, put a fraction before its whole second ("." 2e < "Z" 5a).
+    const keys = postgres.map((row) => row.k as string);
+    expect([...keys].sort()).not.toEqual(keys);
   });
 
   it("pins the same session settings on both, so PostgreSQL prints each value the same", async () => {
