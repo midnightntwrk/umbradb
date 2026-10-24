@@ -194,7 +194,7 @@ describe("DT-1 values: the types a module table may store", () => {
       expect(alternative, type).toMatch(/^use timestamptz, written with Z\b/);
       expect(`${reason} ${alternative}`, type).not.toContain("block_timestamp_ms");
     }
-    // Q87 (shipped B): a time of day and a length of time are no instants; bigint microseconds hold them.
+    // Q87 (owner decision B): a time of day and a length of time are no instants; bigint microseconds hold them.
     expect(becauseOf(column("time without time zone")).alternative).toContain("bigint microseconds since midnight");
     expect(becauseOf(column("time with time zone")).alternative).toContain("bigint microseconds since midnight");
     expect(becauseOf(column("interval")).alternative).toContain("for a length of time, store bigint microseconds");

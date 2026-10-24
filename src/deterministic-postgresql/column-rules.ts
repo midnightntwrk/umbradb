@@ -390,7 +390,7 @@ const USE_TIMESTAMPTZ = "use timestamptz, written with Z";
 const TIME_OF_DAY: Because = {
   reason: "A time of day (time, timetz) is not an instant, and UmbraDB defines no canonical encoding for it",
   // Owner decision Q74 gives "use timestamptz, written with Z"; a time of day is no instant, so the message also says
-  // what holds one (decision record Q87, shipped B).
+  // what holds one (owner decision Q87, B).
   alternative: `${USE_TIMESTAMPTZ}, for an instant; for a time of day, store bigint microseconds since midnight`,
 };
 

@@ -362,7 +362,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       expectations replaced by DB-2's text) and `mapping.test.ts`; row 8's part of `component-table.test.ts` moved to its
       tests. 36 wrong variants of the mapping, rules and encoder: 34 caught (two by hanging the suite, recorded as
       `docs/issues/00008`), 2 equivalent. Closes the fix check's TC-01. **Pending for A145:** the startup refusal (task
-      7.1) and the core's `block_time` (task 10.2). **Question:** Q87 (not blocking, shipped B).
+      7.1) and the core's `block_time` (task 10.2). **Question, since decided:** Q87 B (owner, 2026-10-24).
 - [ ] 2.3 Roles and `SET LOCAL ROLE`, provider functions (fixed `search_path`, `PUBLIC` revoked), the id pattern and
       schema-name collisions, shared-item schemas, and the `TRUNCATE` refusal.
       **Acceptance:** A13 including its negative control, A14, A15, A73.
