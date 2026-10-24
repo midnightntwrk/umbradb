@@ -38,7 +38,8 @@
  * **Errors (DB-13).** PGlite runs in this process: there is no connection to lose, so no error of this backend is
  * `connection-lost`, the one retryable code. A statement the server refused (severity `ERROR`) is `database-error`
  * with the server's SQLSTATE and the names it gives, as on PostgreSQL — never its `detail` (which can hold row values)
- * nor the statement's parameters. Anything else — a `FATAL` or `PANIC`, a WebAssembly trap, an exception inside PGlite
+ * nor the statement's parameters — or `truncate-not-allowed` for the `deterministic_postgresql` component's `TRUNCATE`
+ * refusal (DB-14). Anything else — a `FATAL` or `PANIC`, a WebAssembly trap, an exception inside PGlite
  * — means the engine itself failed: `database-error` with `reason: engine-failed`, not retryable, since no retry on the
  * same engine can succeed; every later read and transaction fails the same way, and only opening the data directory
  * again (a process restart, after the runner halts) recovers.
@@ -52,7 +53,7 @@ import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
 import { PGlite, type QueryOptions, types } from "@electric-sql/pglite";
 import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
-import { commitRolledBack, handleClosed, UmbraError } from "./errors.js";
+import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
 import { READS_BYPASS_QUEUE } from "./pglite-build-flags.js";
 
 /**
@@ -126,7 +127,8 @@ interface ServerErrorFields {
 /**
  * An error PGlite threw for a statement, as an {@link UmbraError} (DB-13): a statement the server refused (severity
  * `ERROR`, with a SQLSTATE) is `database-error` with the SQLSTATE and the constraint, table, schema and column the
- * server named; anything else is the engine failing (`reason: engine-failed`). Neither is retryable.
+ * server named (`truncate-not-allowed` for the component's `TRUNCATE` refusal, DB-14); anything else is the engine
+ * failing (`reason: engine-failed`). Neither is retryable.
  */
 export function classifyPgliteError(error: unknown): UmbraError {
   const fields: ServerErrorFields = typeof error === "object" && error !== null ? (error as ServerErrorFields) : {};
@@ -136,7 +138,7 @@ export function classifyPgliteError(error: unknown): UmbraError {
     for (const name of ["constraint", "table", "schema", "column"] as const) {
       if (typeof fields[name] === "string") details[name] = fields[name];
     }
-    return new UmbraError("database-error", message, details, { cause: error });
+    return statementRefused(message, details, error);
   }
   return new UmbraError("database-error", `the PGlite engine failed: ${message}`, { reason: "engine-failed" }, {
     cause: error,

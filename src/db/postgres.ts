@@ -24,13 +24,14 @@
  *
  * **Errors (DB-13).** A lost connection is `connection-lost` (retryable); every other error of the driver or the server
  * is `database-error` (not retryable), with the server's SQLSTATE and the names it gives (constraint, table, schema,
- * column) — never the server's `detail`, which can hold row values, nor the URL.
+ * column) — never the server's `detail`, which can hold row values, nor the URL — except a `TRUNCATE` the
+ * `deterministic_postgresql` component's trigger refused, which is `truncate-not-allowed` (DB-14).
  */
 
 import postgres, { type Sql } from "postgres";
 import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
-import { commitRolledBack, handleClosed, UmbraError } from "./errors.js";
+import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
 
 /** Options of {@link openPostgres}. */
 export interface PostgresOptions {
@@ -110,8 +111,9 @@ interface DriverError {
 
 /**
  * An error the driver threw for a statement on the `connection` session, as an {@link UmbraError} (DB-13): a lost
- * connection is `connection-lost` (retryable); anything else is `database-error` (not retryable). An error the server
- * sent (it has a `severity`) is told by its SQLSTATE; any other by the driver's code.
+ * connection is `connection-lost` (retryable); anything else is `database-error` (not retryable), or
+ * `truncate-not-allowed` for the component's `TRUNCATE` refusal (DB-14). An error the server sent (it has a
+ * `severity`) is told by its SQLSTATE; any other by the driver's code.
  */
 export function classifyDriverError(error: unknown, connection: Role): UmbraError {
   const fields: DriverError = typeof error === "object" && error !== null ? (error as DriverError) : {};
@@ -140,7 +142,7 @@ export function classifyDriverError(error: unknown, connection: Role): UmbraErro
   } else if (code !== undefined) {
     details.cause = code;
   }
-  return new UmbraError("database-error", message, details, { cause: error });
+  return statementRefused(message, details, error);
 }
 
 /** The value OIDs whose default driver serializer would rewrite a parameter's text (`postgres` 3.4.9 `types.js`). */

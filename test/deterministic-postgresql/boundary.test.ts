@@ -71,6 +71,15 @@ const DEFINITIONS: Readonly<Record<string, readonly string[]>> = {
   ],
   "catalog.ts": ["ConsistentRead", "catalogTables", "catalogRelations"],
   "mapping.ts": ["RESULT_TYPES", "mapValue", "mapRows", "parseArrayText", "parseJsonLossless", "parameterText"],
+  "block-transactions.ts": [
+    "TRUNCATE_NOT_ALLOWED_SQLSTATE",
+    "MIGRATION_MARK",
+    "MARK_MIGRATION_SQL",
+    "TRUNCATE_GUARD_TRIGGER",
+    "TRUNCATE_GUARD_FUNCTION_SQL",
+    "TRUNCATE_GUARD_TABLES_SQL",
+    "truncateGuardStatements",
+  ],
 };
 
 /** The names each file of the component exports by declaring them. */
@@ -155,7 +164,15 @@ describe("A138: src/deterministic-postgresql/ imports nothing else of src/", () 
   it("finds the component's sources: its entry, its error type, the settings, the mapping, the rules, the catalog", () => {
     const names = COMPONENT_FILES.map((file) => relative(COMPONENT, file));
     expect(names).toEqual(
-      expect.arrayContaining(["index.ts", "errors.ts", "settings.ts", "mapping.ts", "column-rules.ts", "catalog.ts"]),
+      expect.arrayContaining([
+        "index.ts",
+        "errors.ts",
+        "settings.ts",
+        "mapping.ts",
+        "column-rules.ts",
+        "catalog.ts",
+        "block-transactions.ts",
+      ]),
     );
     // The scan is not vacuous: the component's files name modules (each other, Node.js built-ins).
     expect(COMPONENT_FILES.flatMap((file) => moduleReferences(parseSource(file))).length).toBeGreaterThan(5);

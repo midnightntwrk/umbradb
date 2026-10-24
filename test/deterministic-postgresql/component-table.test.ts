@@ -62,8 +62,8 @@ const ROWS: readonly RowCoverage[] = [
   {
     rule: "Block transactions change rows only; the `BEFORE TRUNCATE` trigger",
     requirement: "DB-14",
-    tests: [],
-    pending: { "the BEFORE TRUNCATE trigger refusing truncate-not-allowed": "2.3" },
+    tests: ["block-transactions.test.ts"],
+    pending: {},
   },
   {
     rule:
@@ -209,7 +209,6 @@ describe("A138: the suite runs every rule of design.md §4's component table on 
     // What A138 covers now, and what waits for which task (`tasks.md` 2.2a's done note says the same).
     expect(Object.fromEntries(ROWS.flatMap((row) => Object.entries(row.pending)))).toEqual({
       "the two functions and the CHECKs on jsonb and numeric columns and their arrays": "7.1",
-      "the BEFORE TRUNCATE trigger refusing truncate-not-allowed": "2.3",
       "the zero timeouts of the writer, migrations, setup and callback reads": "2.7",
       "the declaration deterministic: false on a table item": "3.1",
       "opted-out tables skipped by the refusals and the CHECKs, and hashed by name only": "7.1",

@@ -5,7 +5,7 @@
  * give alike.
  */
 
-import { UmbraError } from "../deterministic-postgresql/index.js";
+import { TRUNCATE_NOT_ALLOWED_SQLSTATE, UmbraError } from "../deterministic-postgresql/index.js";
 
 export { ERROR_CODES, type ErrorCode, type ErrorDetails, UmbraError } from "../deterministic-postgresql/index.js";
 
@@ -32,4 +32,14 @@ export function commitRolledBack(): UmbraError {
     "the transaction was rolled back, not committed: a statement in it failed, and its error was caught",
     { reason: "commit-rolled-back" },
   );
+}
+
+/**
+ * A statement the server refused, as both backends report it (DB-13): `truncate-not-allowed` when the
+ * `deterministic_postgresql` component's `TRUNCATE` trigger raised it (DB-14, its SQLSTATE in `details.sqlstate`),
+ * `database-error` otherwise. Neither is retryable.
+ */
+export function statementRefused(message: string, details: Record<string, unknown>, cause: unknown): UmbraError {
+  const code = details.sqlstate === TRUNCATE_NOT_ALLOWED_SQLSTATE ? "truncate-not-allowed" : "database-error";
+  return new UmbraError(code, message, details, { cause });
 }

@@ -96,17 +96,35 @@ interface BlockSource {
   `nodejs/node#66542` is not merged as of 2026-10-23). Once every Node.js version UmbraDB supports carries that fix, the
   reader may be replaced by `JSON.parse` with a reviver using source text access (`context.source`), as task 2.1 had it
   (`docs/issues/00007`).
-- **Roles.** Each module's role is `umbradb_m_<schema>` (`umbradb_i_<item>` for a shared item); `NOLOGIN`, owner of its
-  schema; `USAGE` on every other module schema and `SELECT` on its tables (granted when a schema is created and by
-  `ALTER DEFAULT PRIVILEGES`). Callbacks and migrations run after `SET LOCAL ROLE` to the module role (DB-6). The writer
-  connection's own role owns every module role. Modules are trusted code (Q46): the roles stop accidental writes into
-  another module's schema; nothing more is enforced.
+- **Roles.** Each module's role is `umbradb_m_<schema>` (`umbradb_i_<item>` for a shared item, `<item>` in its schema
+  form); `NOLOGIN`, owner of its schema; `USAGE` on every other module schema and `SELECT` on its tables (granted at
+  every startup and by `ALTER DEFAULT PRIVILEGES`, as each schema's owner). Callbacks and migrations run after `SET
+  LOCAL ROLE` to the module role (DB-6). A `table` item declares its schema: its module's own, or the item's name
+  (`-` → `_`), which makes it a shared item; a provider of a shared `table` item writes — callbacks, `on-start-db`,
+  migrations — under the item's role, so every provider can write the item's tables (Q89). Roles belong to the
+  PostgreSQL server, so every UmbraDB database on it shares them (Q90). The writer's login is a superuser, or holds
+  `CREATEROLE` and `CREATE` on the database: PostgreSQL 16 and later give a role's creator `ADMIN` on it only, so the
+  login grants itself each module role `WITH INHERIT TRUE, SET TRUE` (`SET` for `SET LOCAL ROLE` and `CREATE SCHEMA …
+  AUTHORIZATION`, `INHERIT` for its read pool and the `TRUNCATE` triggers); a login lacking a privilege, or facing a
+  role another login created, refuses startup with `invalid-configuration` (`reason: writer-privileges`) naming each
+  and the `GRANT` that fixes it (checked on PostgreSQL 18.6, 2026-10-24, §14). `src/db/roles.ts` (`planSchemas`,
+  `prepareSchemas`, `setModuleRole`). Modules are trusted code (Q46): the roles stop accidental writes into another
+  module's schema; nothing more is enforced.
 - **Provider functions.** `SECURITY DEFINER`, owned by the provider role, with `SET search_path = pg_catalog, <provider
   schema>, pg_temp` (`pg_temp` last, so no temporary table shadows a provider table); default privileges revoke
-  `EXECUTE` from `PUBLIC`; `EXECUTE` is granted to the roles of modules that require the provider's item (DB-7).
-  `core-ledger-state` offers `persist(key)` this way (LG-13).
+  `EXECUTE` from `PUBLIC`; `EXECUTE` on the routines of the schema a provider writes is granted, now and by default
+  privilege, to the roles of modules that require one of its items (DB-7). `core-ledger-state` offers `persist(key)`
+  this way (LG-13).
 - **`TRUNCATE`.** Every module table not declared `deterministic: false` gets a `BEFORE TRUNCATE … FOR EACH STATEMENT`
-  trigger raising `truncate-not-allowed` (DB-14).
+  trigger raising `truncate-not-allowed` (DB-14) — every partition too, since a statement trigger is not copied to
+  partitions, and a partition of an opted-out table is opted out with it. The trigger function,
+  `core_chain.truncate_not_allowed()`, refuses unless the transaction carries the migration mark: the setting
+  `umbradb.migration` equal to the transaction's own `pg_current_xact_id()`, which the migration runner sets first in
+  each migration's transaction, transaction-locally (A73). It fails closed: a block, `on-start-db` or any other
+  unmarked transaction is refused; a mark ends with its transaction, and one left on the session by mistake names an
+  earlier transaction. It raises the SQLSTATE `UM014`, which both backends report as `truncate-not-allowed`. The
+  attachment runs at every startup after the migrations. SQL in `src/deterministic-postgresql/block-transactions.ts`,
+  applied by `src/db/truncate-guard.ts`.
 - **Column types and stored values (DT-1, DT-2, DT-6, Q57, Q58).** One table of rules,
   `src/deterministic-postgresql/column-rules.ts`, decides for each column of a module table, in every database (the
   core's or a private process's, Q75), whether its type is allowed as a value and as a key, with the reason and the alternative of the column-type table below; the contents hash (DT-3)
@@ -244,7 +262,7 @@ is where they are implemented and tested together:
 | Identity, `serial` and non-immutable defaults refused, detected from `pg_attrdef.adbin` as above | DT-6 | Q61–Q63 |
 | Sequences and unlogged tables in module schemas refused | DT-6 | Q61, Q64 |
 | `core_chain.jsonb_numbers_ok` and `core_chain.numeric_ok` and the `CHECK`s they back | DT-1, DT-6 | Q57 |
-| Block transactions change rows only; the `BEFORE TRUNCATE` trigger | DB-14 | — |
+| Block transactions change rows only; the `BEFORE TRUNCATE` trigger | DB-14 | Q46, Q76, Q84 |
 | The pinned session settings, and the zero timeouts (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `transaction_timeout`) of the writer and callback reads | DB-2, DB-15 | Q65, Q71 |
 | The result mapping and parameter texts: lossless `jsonb`, arrays element by element, date and time as RFC 3339 text, other types as their text | DB-2 | Q66, Q68 |
 | The opt-out: a `table` item declared `deterministic: false` — its tables, the sequences their columns own and its unlogged tables are skipped by the refusals and the `CHECK`s; the contents hash records each such table as `[schema, table, null, null]`; digests skip it; backups carry its rows and its sequences' positions | MD-1, DT-3, DT-4, DT-6, BK-2 | Q76 |
@@ -542,6 +560,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | Node.js 24 and 26 `JSON.parse` reads a one-escape object key as a backslash once a parse has read the key `"\\"` | Reproduced on Node.js v24.9.0 (V8 13.6.233.10), 3 runs of 3, not on v24.2.0 or v22.13.1, 2026-10-23; `nodejs/node#63785` (open; reported on 24.13.1–24.21.0 and 26.3.0–26.10.0, not on 22); V8 fix `93cd21e` (2026-09-17); backport `nodejs/node#66542` (open, 2026-10-05) | Verified (run, upstream); the reason for UmbraDB's own JSON reader (§4, Q78, `docs/issues/00007`) |
 | `postgres`: `sql.reserve()` pins a connection; JSON parsed with `JSON.parse`, replaceable | `src/postgres/transaction-lease.ts:135-138, 287-301`; `node_modules/postgres/src/types.js:18-21` (3.4.9) | Verified (installed, in-repo use) |
 | PostgreSQL 18 (checked on 17 before Q82, re-checked on 18.6 by task 0.4): `SET LOCAL ROLE`, `SECURITY DEFINER`, `REPEATABLE READ READ ONLY`, session advisory locks, `BEFORE TRUNCATE` triggers, `jsonpath` `.type()`/`.floor()` | https://www.postgresql.org/docs/18/ (sql-set-role, sql-createfunction, sql-set-transaction, functions-admin, sql-createtrigger, functions-json); `test/dependencies/postgresql.test.ts` on the pinned `postgres:18-alpine` (PostgreSQL 18.6), 2026-10-24: every item passed, the `pg_temp` shadowing control included | Verified (test); version-pinned documentation |
+| PostgreSQL 18: a `CREATEROLE` login that is not a superuser holds a role it created with `ADMIN` only (no `SET`, no `INHERIT`; `createrole_self_grant` empty), may grant it to itself `WITH INHERIT TRUE, SET TRUE`, needs `SET` for `SET ROLE` and `CREATE SCHEMA … AUTHORIZATION` and `INHERIT` (or the role itself) for `ALTER DEFAULT PRIVILEGES`, reading the role's tables and creating triggers on them; another `CREATEROLE` login cannot use or grant that role; a trigger function's `EXECUTE` is not checked when the trigger fires | https://www.postgresql.org/docs/18/runtime-config-client.html (`createrole_self_grant`: "a CREATEROLE user is always implicitly granted ADMIN OPTION on created roles"), sql-createrole, sql-alterdefaultprivileges; probe on the pinned `postgres:18-alpine` (PostgreSQL 18.6), 2026-10-24 (task 2.3); `test/db/roles-login.test.ts` | Verified (test, probe); Q90 |
 | PGlite: roles, `SET LOCAL ROLE`, cross-schema writes denied, `SECURITY DEFINER` with a fixed `search_path` and `PUBLIC` revoked, PL/pgSQL row triggers, a `BEFORE TRUNCATE` trigger refusing, `jsonpath` `.type()`/`.floor()` in a `CHECK`, advisory-lock functions | Probe against `@electric-sql/pglite` 0.5.10 (published 2026-10-14) in Node.js v24.9.0, 2026-10-22: every item passed | Verified (probe); task 0.1 commits the probe as a test |
 | `jsonpath` `.string()` keeps a JSON number's scale: `1.0` → `"1.0"`, `100.00` → `"100.00"`, `1e2` → `"100"` (Q57) | PostgreSQL 17.11 (`postgres:17-alpine`) and PGlite 0.5.10, 2026-10-23; PostgreSQL 18.6 (the pinned `postgres:18-alpine`), 2026-10-24, `test/dependencies/postgresql.test.ts` | Verified (run, test); task 7.1's test re-checks it |
 | PGlite 0.5.10 embeds PostgreSQL 18.6; production is PostgreSQL 18 too (Q82) | `select version()` on 0.5.10; the pinned image reports PostgreSQL 18.6 too (`test/dependencies/postgresql.test.ts`) | Verified; both backends run one major version (in the tests one minor version, 18.6), and the cross-backend differentials (A55, A105, A135) guard the rest |

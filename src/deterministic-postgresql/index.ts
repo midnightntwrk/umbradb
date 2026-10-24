@@ -14,7 +14,7 @@
  * | Sequences and unlogged tables in module schemas refused | `column-rules.ts` (`relationRefusals`, `databaseRefusals`) |
  * | The facts all of these read | `catalog.ts` (`catalogTables`, `catalogRelations`, the handle `ConsistentRead`) |
  * | `jsonb` and `numeric` `CHECK`s | task 7.1, a new `checks.ts` (the functions' SQL and the `CHECK`s each column gets) |
- * | Rows-only block transactions; the `BEFORE TRUNCATE` trigger | task 2.3, a new `block-transactions.ts` (the trigger's SQL) |
+ * | Rows-only block transactions; the `BEFORE TRUNCATE` trigger | `block-transactions.ts` (the trigger's function and its statements, the migration mark, the SQLSTATE); `src/db/truncate-guard.ts` applies them |
  * | The pinned session settings; the zero timeouts | `settings.ts` (`PINNED_SETTINGS`); task 2.7 adds the zero timeouts there |
  * | The result mapping and parameter texts, date and time as RFC 3339 text | `mapping.ts` |
  * | The opt-out (`deterministic: false`) | tasks 3.1 and 7.1: the rules take the opted-out tables as input (`column-rules.ts`, `catalog.ts`) |
@@ -23,6 +23,7 @@
  * record Q79).
  */
 
+export * from "./block-transactions.js";
 export * from "./catalog.js";
 export * from "./column-rules.js";
 export * from "./errors.js";

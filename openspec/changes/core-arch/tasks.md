@@ -321,8 +321,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **A138 covers now:** the column-type rules with their refusals, the `COLLATE "C"` key order, identity, `serial`
       and non-immutable defaults, sequences and unlogged tables (rows 1–4), the pinned session settings (row 7) and the
       result mapping and parameter texts (row 8). **Pending:** the `jsonb` and `numeric` `CHECK`s (row 5, task 7.1); the
-      `BEFORE TRUNCATE` trigger (row 6, task 2.3); the zero timeouts (row 7, task 2.7); date and time as RFC 3339 text
-      (row 8, task 2.2b, done); the opt-out (row 9: its declaration task 3.1, its skips task 7.1).
+      `BEFORE TRUNCATE` trigger (row 6, task 2.3, done); the zero timeouts (row 7, task 2.7); date and time as RFC 3339
+      text (row 8, task 2.2b, done); the opt-out (row 9: its declaration task 3.1, its skips task 7.1).
       **For tasks 2.2b, 2.3, 2.7, 3.1 and 7.1:** put each rule in the component (`index.ts` says which file), test it in
       `test/deterministic-postgresql/` on both backends, and move its part in `component-table.test.ts` from `pending`
       to `tests`.
@@ -363,9 +363,45 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       tests. 36 wrong variants of the mapping, rules and encoder: 34 caught (two by hanging the suite, recorded as
       `docs/issues/00008`), 2 equivalent. Closes the fix check's TC-01. **Pending for A145:** the startup refusal (task
       7.1) and the core's `block_time` (task 10.2). **Question, since decided:** Q87 B (owner, 2026-10-24).
-- [ ] 2.3 Roles and `SET LOCAL ROLE`, provider functions (fixed `search_path`, `PUBLIC` revoked), the id pattern and
+- [x] 2.3 Roles and `SET LOCAL ROLE`, provider functions (fixed `search_path`, `PUBLIC` revoked), the id pattern and
       schema-name collisions, shared-item schemas, and the `TRUNCATE` refusal.
       **Acceptance:** A13 including its negative control, A14, A15, A73.
+      **Done (2026-10-24):** roles, grants and names in `src/db/roles.ts` behind a small input of each module's id,
+      required items, provided items (a `table` item's schema, tables and `deterministic` flag) and migrations, which
+      tasks 3.1 and 3.2 will feed from the real declarations: `planSchemas` checks ids and item names against DB-8's
+      pattern within 40 bytes (`bad-id`), one namespace of module schemas, item names and reserved schemas
+      (`schema-collision`, naming both), a `table` item's declared schema (its module's own, or the item's, which makes
+      a shared item with one schema owned by `umbradb_i_<item>`, written by every provider under that role; Q89) and the
+      providers of one item declared alike — schema, `deterministic` flag, migrations by id and SHA-256 checksum
+      (`shared-item-migrations-differ`); `prepareSchemas`, before any migration, creates `core_chain`, each `NOLOGIN`
+      role and schema and, as each schema's owner, grants `USAGE` and `SELECT` to every other role, revokes `EXECUTE`
+      from `PUBLIC` by default privilege and grants it to the modules requiring an item the schema's writer provides;
+      `setModuleRole` runs `SET LOCAL ROLE`. The writer's login is a superuser, or holds `CREATEROLE` and `CREATE` on
+      the database and grants itself each role `WITH INHERIT TRUE, SET TRUE` (PostgreSQL 16 and later give a role's
+      creator `ADMIN` only; probed on 18.6 and checked against its documentation); lacking a privilege, or facing
+      another login's role, startup refuses with `invalid-configuration` (`reason: writer-privileges`) naming each and
+      its `GRANT` (Q90). The `TRUNCATE` refusal is the component's
+      (`src/deterministic-postgresql/block-transactions.ts`: `core_chain.truncate_not_allowed()`, SQLSTATE `UM014`, the
+      trigger statements; applied by `src/db/truncate-guard.ts`): a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger on
+      every table and partition of the plan's schemas not declared `deterministic: false`, refusing unless the
+      transaction carries the migration mark (`umbradb.migration` = its own `pg_current_xact_id()`, set
+      transaction-locally by `markMigration`), so it fails closed and no mark outlives its transaction; both backends
+      report it as `truncate-not-allowed`. New codes in `ERROR_CODES`: `truncate-not-allowed`, `bad-id`,
+      `schema-collision`, `shared-item-migrations-differ`. Tests, seen failing first: `test/db/schema-names.test.ts`
+      (A15's names and refusals), `test/db/roles.test.ts` (A13 with `[[db.roles.cross-schema-write-rejected]]` and its
+      committed negative control, A14 with task 0.1's `pg_temp` control, A15's roles and shared schema; both backends),
+      `test/db/roles-login.test.ts` (a `CREATEROLE` login on PostgreSQL, Q90),
+      `test/deterministic-postgresql/block-transactions.test.ts` (A73 with `[[db.block.truncate-refused]]`, both
+      backends; row 6 of the component table moved to its tests), `test/db/errors.test.ts`. 73 wrong variants of the new
+      code (a scratch runner outside the clone): 66 caught on the first run; the 5 survivors that were gaps closed by
+      new tests (an id's bytes counted as characters; a role the login created itself beforehand, refused or left
+      without the self-grant; the privilege checks run for a superuser; the migration mark set session-wide); 71 of 73
+      caught on the final sources, 2 equivalent (a schema's owner granted privileges it holds already; the guard
+      function without its fixed `search_path`, as it names only built-ins). `design.md` §4 ("Roles", "Provider
+      functions", "`TRUNCATE`", the component table's row 6) and §14 updated. **Pending:** A13's and A73's "processing
+      halts" (tasks 2.6, 5.x); A15's "startup refuses" (tasks 3.1, 3.2, 5.x); A73's migration half through the migration
+      runner (task 2.4). **Questions:** Q89 (a `table` item's schema and a shared item's writer; shipped A) and Q90
+      (roles per server and the writer's login; shipped A), both open.
 - [ ] 2.4 Migrations with checksums (refactored from `src/postgres/migrate.ts`), `core_chain.migrations`, setup after
       migrations, and `requiresResync`.
       **Acceptance:** A16, A72; the refactored `migrate` and `migration-lock-timeout` tests pass or are retired per

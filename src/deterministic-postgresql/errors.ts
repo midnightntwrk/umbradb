@@ -23,8 +23,17 @@ export const ERROR_CODES = [
   "handle-closed",
   /** A query parameter the API cannot send: `undefined`, a function, a `Map`, a non-finite number in JSON, … */
   "invalid-parameter",
-  /** A setting refused before anything runs: a `database` URL that overrides a pinned session setting. */
+  /**
+   * A setting refused before anything runs: a `database` URL that overrides a pinned session setting, or a database
+   * login that cannot create or use the module roles and schemas (`reason: writer-privileges`, decision record Q90).
+   */
   "invalid-configuration",
+  /** A `TRUNCATE` outside a migration, refused by this component's trigger (DB-14, `./block-transactions.ts`). */
+  "truncate-not-allowed",
+  // Startup refusals of module ids, item names and schema names (DB-8, MD-2, `src/db/roles.ts`).
+  "bad-id",
+  "schema-collision",
+  "shared-item-migrations-differ",
   // The canonical encoder's failures (DT-1, `src/determinism/cbor.ts`).
   "not-integer",
   "unsafe-integer",
