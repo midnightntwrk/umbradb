@@ -17,16 +17,17 @@ SHALL be the only way the runner, backbone parts and modules reach a database.
 ### Requirement: DB-2 A read handle sees one committed height
 
 THE database API SHALL run every read through a read handle that sees exactly one committed height and reports it
-(`ReadHandle.height`, `null` before any height commits): on PostgreSQL as one `REPEATABLE READ READ ONLY` transaction
-on a pooled read connection; on PGlite as one queued job. THE database API SHALL map `bigint` to `bigint`, `bytea` to
+(`ReadHandle.height`, `null` before any height commits): on PostgreSQL as one `REPEATABLE READ READ ONLY` transaction on
+a pooled read connection; on PGlite as one queued job. THE database API SHALL map `bigint` to `bigint`, `bytea` to
 `Uint8Array`, `numeric` to a decimal string, and `jsonb` to JSON parsed without loss: a JSON integer outside the safe
 integer range (±(2^53 − 1)) SHALL become a `bigint`, never a rounded `number`. THE database API SHALL map `timestamptz`
 to RFC 3339 text in UTC, `2025-05-21T14:30:00Z`, with the fraction only when the value has one (up to microseconds,
 `2025-05-21T14:30:00.123456Z`); `timestamp` to the same text without `Z`; `date` to `2025-05-21`; and `infinity` and
-`-infinity` to those words — whatever the time zone of the process (Q68). Arrays SHALL be mapped element by element,
-`NULL` to `null`; a type the mapping does not name, and an array of one, SHALL come back as PostgreSQL's text for it
-(Q66). Every connection SHALL start with the session settings of the `deterministic_postgresql` component
-(`design.md` §4), so that no server, database or role default changes how a value prints (Q65).
+`-infinity` to those words — whatever the time zone of the process (Q68); a year outside 0001–9999 is output the mapping
+cannot read, refused with `unreadable-result` like any other (Q81). Arrays SHALL be mapped element by element, `NULL` to
+`null`; a type the mapping does not name, and an array of one, SHALL come back as PostgreSQL's text for it (Q66). Every
+connection SHALL start with the session settings of the `deterministic_postgresql` component (`design.md` §4), so that
+no server, database or role default changes how a value prints (Q65).
 
 #### Scenario: A multi-statement read does not straddle a commit
 - **WHEN** a read handle runs two statements while the writer commits height h between them
@@ -232,10 +233,12 @@ THE database API SHALL bound each read made for a module API request (RN-15) by 
 SHALL run with `statement_timeout` and `idle_in_transaction_session_timeout` set to it for the read only, and a read
 either ends SHALL fail with `query-timeout` (not retryable). A read ended by `statement_timeout` SHALL leave its
 connection usable; one ended by `idle_in_transaction_session_timeout`, which ends the session, SHALL leave the pool with
-a new connection in its place. THE writer connection, migrations, setup and the read handles given to callbacks SHALL
-run with `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` and `transaction_timeout`
-(PostgreSQL 17 and later) pinned to 0, whatever the server's, database's or role's defaults, because they run work the
-runner must finish; a slow block is reported (RN-17), never cut off (Q71).
+a new connection in its place. WHERE the backend is PGlite, which enforces neither timeout (an
+`idle_in_transaction_session_timeout` above 0 hangs it), THE database API SHALL set neither for API reads, which are
+then not bounded (PGlite is a development backend, DB-12). THE writer connection, migrations, setup and the read handles
+given to callbacks SHALL run with `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` and
+`transaction_timeout` (PostgreSQL 17 and later) pinned to 0, whatever the server's, database's or role's defaults,
+because they run work the runner must finish; a slow block is reported (RN-17), never cut off (Q71).
 
 #### Scenario: A hung API query is cut off
 - **WHEN** an API request's read runs `SELECT pg_sleep(60)` with `apiReadTimeoutMs` 1000

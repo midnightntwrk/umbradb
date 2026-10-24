@@ -61,7 +61,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       helpers, benchmarks, the pack smoke test, design documents that name the image) becomes one pinned
       `postgres:18-alpine`, through the supply-chain gate's image-pin agreement; the facts §14 records as checked on
       PostgreSQL 17.11 are re-checked on 18 by the suites that rely on them; the 0.9.5 durability probe's facts too.
-      Runs next, before 2.2b.
+      Runs after 2.2b (owner, 2026-10-24).
       **Acceptance:** A148.
 
 ## 1. Determinism primitives
@@ -315,7 +315,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the other date and time types refused with "use `timestamptz`"; the date-and-time row of `design.md` §4 split
       and reworded, and "public" in its paragraph made "module" (every database), together with their verbatim copies
       in the component; the A7 differential compares date and time values as values; the module guide says
-      `timestamptz` is the preferred time type, and every time UmbraDB represents uses it and its `Z` form.
+      `timestamptz` is the preferred time type, and every time UmbraDB represents uses it and its `Z` form. Runs next,
+      before 0.4 (owner, 2026-10-24); it closes the fix check's TC-01, which the owner accepted until then.
       **Acceptance:** A139, A145 (the column rules and the encoding; the core's `block_time` is task 10.2's).
 - [ ] 2.3 Roles and `SET LOCAL ROLE`, provider functions (fixed `search_path`, `PUBLIC` revoked), the id pattern and
       schema-name collisions, shared-item schemas, and the `TRUNCATE` refusal.
@@ -331,8 +332,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Acceptance:** A10.
 - [ ] 2.7 Timeouts by connection role (Q71): a read option bounding one read by `statement_timeout` and
       `idle_in_transaction_session_timeout` (`SET LOCAL`), `query-timeout`; the zero timeouts pinned on the writer,
-      migrations, setup and callback reads, in the component's session settings; check whether PGlite enforces them
-      (`design.md` §14) and raise a question if it does not.
+      migrations, setup and callback reads, in the component's session settings; on PGlite, API reads set neither
+      timeout (it enforces neither and hangs on the idle one, `design.md` §14).
       **Acceptance:** A141.
 - [ ] 2.8 The read-only database for the `db` item (Q73): `read` only, nothing that writes, opens a transaction or
       closes; the `nested-call` refusal on PGlite kept from task 2.2; the module guide's database rules (inside a
@@ -392,7 +393,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       through `column-rules.ts` (no primary key, key and column types, identity and `serial` columns, floats, defaults
       that are not immutable, sequences and unlogged tables; Q58, Q61; the detection is task 1.4's), and the `jsonb` and
       `numeric` `CHECK`s, arrays included (a `jsonb` number: an integer in the signed 64-bit range whose `jsonpath`
-      `.string()` is `-?[0-9]+`, Q57; a `numeric`: `coalesce(scale(c) = 0, false)`, which also refuses the infinities);
+      `.string()` is `-?[0-9]+`, Q57; a `numeric`: `c IS NULL OR coalesce(scale(c) = 0, false)`, which refuses the
+      infinities and allows NULL);
       tables declared `deterministic: false` skipped by the check, the `CHECK`s and change capture, and hashed by name
       only (Q76).
       **Acceptance:** A56 including its negative control, A57, A58, A147 (with 14.1 and 15.2 for its private and

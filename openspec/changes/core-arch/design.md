@@ -115,9 +115,11 @@ interface BlockSource {
   the rule, `numeric`'s declared scale from the type modifier, and `pg_type.typtype` for enums, domains and composite
   types. `core_chain.jsonb_numbers_ok(jsonb)` (immutable; a `jsonpath` finding any number outside the signed 64-bit
   range or whose text, `.string()`, is not `-?[0-9]+`, so `1.0` fails too, Q57) and `core_chain.numeric_ok(numeric)`
-  (`coalesce(scale(c) = 0, false)`: `scale()` is null for `NaN`, `Infinity` and `-Infinity`, and a `CHECK` passes on
-  null, so the null must become false; checked on PGlite 0.5.10 (PostgreSQL 18.6), 2026-10-23: `'Infinity'` and
-  `'-Infinity'` passed the earlier `scale(c) = 0 AND c <> 'NaN'`, and fail this one), with array forms for `jsonb[]` and
+  (`c IS NULL OR coalesce(scale(c) = 0, false)`: `scale()` is null for `NaN`, `Infinity` and `-Infinity`, and a
+  `CHECK` passes on null, so that null must become false, while a NULL value stays allowed; checked on PGlite 0.5.10
+  (PostgreSQL 18.6), 2026-10-24: `'Infinity'` and `'-Infinity'` passed the first form, `scale(c) = 0 AND c <> 'NaN'`,
+  and `coalesce(scale(c) = 0, false)` alone refused NULL; this form accepts NULL and `1` and refuses `1.5`, `NaN` and
+  both infinities), with array forms for `jsonb[]` and
   `numeric[]`, back a `CHECK` on every such column of a module table not declared `deterministic: false` (Q76).
 - **Migrations and setup (DB-9, DB-10).** `core_chain.migrations`; checksum = SHA-256 of the UTF-8 SQL; per part and
   module, pending migrations each in their own transaction with their row, then `on-start-db` in its own transaction.
@@ -147,7 +149,8 @@ interface BlockSource {
   `core_digest.checkpoints`, and deletes the shadow rows, inside the block transaction. The digest tables stay small:
   one row per table, plus one row per table every 14,400 heights (about 365 a year). A row of `core_digest.tables` is
   updated in place, so PostgreSQL's MVCC leaves dead tuples that autovacuum reclaims (an `UPDATE` that touches no
-  indexed column is a heap-only update). The cost of the triggers on ingest is measured by A136.
+  indexed column can be a heap-only update when its page has room). The cost of the triggers on ingest is measured by
+  A136.
 - **Errors.** `UmbraError { code, retryable, details }`, keeping the 0.9.5 retryable split
   (`design/design-interfaces.md` §1.1); a lost connection is `connection-lost` (retryable); an API read ended by its
   timeout is `query-timeout` (not retryable, DB-15).
@@ -159,7 +162,11 @@ interface BlockSource {
   (PostgreSQL 17 and later), so the writer, migrations and callback reads are never cut off; a read for a module API
   request sets `statement_timeout` and `idle_in_transaction_session_timeout` to `apiReadTimeoutMs` with `SET LOCAL`, so
   they end with that read (DB-15). `statement_timeout` cancels the statement and leaves the session usable;
-  `idle_in_transaction_session_timeout` ends the session, so the pool drops that connection and opens a new one.
+  `idle_in_transaction_session_timeout` ends the session, so the pool drops that connection and opens a new one. PGlite
+  enforces neither (checked on 0.5.10, 2026-10-24: `pg_sleep(3)` ran 3 s under a 1 s `statement_timeout`, and with an
+  `idle_in_transaction_session_timeout` above 0 the next statement hung; `electric-sql/pglite#1058`), so on PGlite API
+  reads set neither and are not bounded — PGlite is a development backend (DB-12) — and the pinned zeros keep a
+  configuration file's timeout from hanging it.
 - **Date and time values (Q68).** PostgreSQL prints a `timestamptz` under the pinned settings as
   `2025-05-21 14:30:00.123456+00`; the mapping rewrites it to `2025-05-21T14:30:00.123456Z` (a `timestamp`'s text the
   same way, without `Z`; a `date` unchanged), never through a JavaScript `Date`, whose parse of a zone-less text follows
@@ -414,8 +421,8 @@ hash's and the digests' job (DT-3 to DT-5). **Backup.** On PostgreSQL the comman
 transaction on a read connection, reads the cursor and the chain identity, computes the contents hash, calls
 `pg_export_snapshot()`, and runs the PostgreSQL 18 client's `pg_dump --snapshot=<id> --inserts --no-owner
 --no-privileges`, so the dump and the manifest see one committed height; it writes the manifest line, then the dump.
-`pg_dump` is looked up on `PATH` (or `UMBRADB_PG_DUMP`) when the command runs; a missing tool or a major version below
-18 fails with `backup-tools-missing`. On PGlite the whole backup is one queued job that calls `pgDump` of
+`pg_dump` is looked up on `PATH` (or `UMBRADB_PG_DUMP`) when the command runs; a missing tool or a major version other
+than 18 fails with `backup-tools-missing`. On PGlite the whole backup is one queued job that calls `pgDump` of
 `@electric-sql/pglite-tools` — an optional peer dependency the command imports only when it runs (an install hint
 without it), and that the browser build bundles; its `DEALLOCATE ALL` runs inside the job. Any committed height is a
 block boundary (RN-6), so every dump holds whole blocks. **Restore.** The command reads the manifest line, makes the
@@ -556,7 +563,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | TypeScript compiler API for `noEmit` | `typescript` 5.9.3 installed | Verified (installed) |
 | `new Date(text)` reads a zone-less timestamp in the process's time zone and keeps milliseconds only | Node.js v24.9.0, 2026-10-23: `2025-05-21 14:30:00` reads as `14:30Z`, `18:30Z` and `05:30Z` under `TZ` `UTC`, `America/New_York` and `Asia/Tokyo`; `…:00.123456+00` as `…:00.123Z` | Verified (run); the reason for Q68's text mapping |
 | PostgreSQL 17 startup parameters take precedence over server, database and role defaults | Task 2.1, 2026-10-23: with hostile database defaults the five pinned settings won (Q65) | Verified (test) |
-| PGlite 0.5.10 enforces `statement_timeout` and `idle_in_transaction_session_timeout` | Not checked: PGlite runs a statement synchronously in WASM, so a timer may not interrupt it | Unverified; task 2.7 checks it and raises a question if it does not (Q71) |
+| PGlite 0.5.10 enforces `statement_timeout` and `idle_in_transaction_session_timeout` | Checked 2026-10-24 (orchestrator, and the targeted fix check): `pg_sleep(3)` completes after 3 s under `statement_timeout = 1000`; with `idle_in_transaction_session_timeout = 1000`, a statement after 2 s idle hangs (killed after 10 s), with 0 it answers; `electric-sql/pglite#1058` | Verified: it enforces neither; API reads on PGlite are not bounded (DB-15) |
 
 ## 15. Relation to the existing design documents
 

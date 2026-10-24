@@ -103,10 +103,11 @@ git as pinned release assets that CI downloads and verifies.
   `2025-05-21T14:30:00.123456Z`; a `timestamp` `2025-05-21 14:30:00` as `2025-05-21T14:30:00`; a `date` as `2025-05-21`;
   `infinity` and `-infinity` as those words; arrays of them element by element, `NULL` as `null` — identical in every
   process. (DB-2, Q68)
-- **A141** `[FAULT]` On both backends: a read for an API request running `pg_sleep(60)` with `apiReadTimeoutMs` 1000
+- **A141** `[FAULT]` On PostgreSQL: a read for an API request running `pg_sleep(60)` with `apiReadTimeoutMs` 1000
   fails with `query-timeout`, not retryable, within 2 s, and the next read on that connection succeeds; a read for an
   API request that awaits 2 s between two statements fails with `query-timeout`, and the next read succeeds on a new
-  connection; with database defaults `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` and
+  connection. On PGlite an API read sets neither timeout. On both backends, with database (on PGlite: configuration
+  file) defaults `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` and
   `transaction_timeout` of 1 s, a 5 s migration, a block transaction left idle 5 s while a callback awaits, and a
   callback's read running 5 s all complete, and `SHOW` in each reports 0. (DB-15, Q71)
 
@@ -270,7 +271,7 @@ git as pinned release assets that CI downloads and verifies.
   Q61, Q75). A module writing `{"x": 1.5}`, `{"x": 1.0}` or `{"x": 100.00}` (Q57), or a JSON integer
   beyond the signed 64-bit range, to a `jsonb` column, or such a number inside a `jsonb[]`, fails the block, and so does
   `100.00`, `1.5`, `NaN`, `Infinity` or `-Infinity` in a `numeric` or `numeric[]` column; `{"x": 2}`, `{"x": 1e2}`
-  (stored as `100`) and `100` succeed; on both backends. (DT-6)
+  (stored as `100`) and `100` succeed, and so does NULL in a nullable `numeric` column; on both backends. (DT-6)
 
 ## 7. Storage helpers
 
@@ -484,7 +485,9 @@ git as pinned release assets that CI downloads and verifies.
   PostgreSQL 18, each with every check of BK-3 passing; a restored database's schemas, tables, sequences and functions
   have the owners and grants of a database built by migrations (compared in the catalogs). (BK-2, BK-3)
 - **A126** `[CI]` Each restore refusal of BK-3 is triggered and checked before or after loading, as BK-3 orders them,
-  including a changed value in an `INSERT` giving `contents-hash-mismatch`; after every refusal the target is empty.
+  including a changed value in an `INSERT` of a table not declared `deterministic: false` giving
+  `contents-hash-mismatch`; after every refusal the target is as it was before the restore: unchanged after
+  `restore-target-not-empty`, empty after every other.
   (BK-3)
 - **A127** `[FAULT]` A restore killed while running the file's SQL leaves the target empty, and a new restore into it
   then succeeds. (BK-3)

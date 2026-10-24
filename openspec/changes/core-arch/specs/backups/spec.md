@@ -12,7 +12,7 @@ backups.
 THE system SHALL write a backup with `umbradb backup --out <file>` while the process runs, and automatically right
 after the core's `on-stop-height` WHERE `backupAtStop` is set and no backup for that height exists yet. On PostgreSQL it
 SHALL run the PostgreSQL 18 client's `pg_dump`; on PGlite, `pg_dump` of `@electric-sql/pglite-tools`. Neither tool is a
-dependency of UmbraDB: the command SHALL look for it when it runs and, IF it is missing or older than PostgreSQL 18,
+dependency of UmbraDB: the command SHALL look for it when it runs and, IF it is missing or not of major version 18,
 fail with `backup-tools-missing` and say what to install (owner decision Q85). The dump and the manifest SHALL see the
 same committed height: on PostgreSQL the command reads the cursor and computes the contents hash in one `REPEATABLE READ
 READ ONLY` transaction whose snapshot `pg_dump` uses (`--snapshot`); on PGlite all of it runs as one queued job, so
@@ -57,7 +57,7 @@ runs the file's SQL with the writer's rights, THE operator documentation SHALL s
 trusted source.
 
 #### Scenario: A changed row
-- **WHEN** one value in a backup file's `INSERT` statements is changed
+- **WHEN** one value in a backup file's `INSERT` statements is changed, in a table not declared `deterministic: false`
 - **THEN** restore refuses with `contents-hash-mismatch` and the target stays empty
 
 ### Requirement: BK-4 A restored database continues like one that never stopped
