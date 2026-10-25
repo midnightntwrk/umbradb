@@ -67,6 +67,34 @@ in order (DB-9 of the `core-arch` change).
   a transaction of its own under your role. Make it idempotent: it runs again at each restart. Change schemas in
   migrations, not there.
 
+## Stored values and digests
+
+UmbraDB checks the tables your migrations create, and records per block what your callbacks change in them, so that two
+machines fed the same chain can show they hold the same data (DT-4 to DT-6 of the `core-arch` change).
+
+- **Each migration leaves your tables deterministic.** In each migration's own transaction, after its SQL and before
+  its record, UmbraDB reads your schema's tables and refuses what the determinism rules refuse: a table without a
+  primary key (`no-primary-key`), a key column or a column of a type the rules do not allow (`unsupported-key-type`,
+  `unsupported-column-type`; see "Time values" for the date and time types), an identity or `serial` column, a
+  floating-point column, a default that is not immutable such as `now()` or `random()` (`non-deterministic-column`), a
+  sequence or an unlogged table (`non-deterministic-table`). The refusal names your module, the table, the column and
+  its declared type, says why, and says what to use instead. The migration rolls back and is not recorded, so fix its
+  SQL and start again. Create each table with its primary key in one migration, not in a later one. The tables of
+  earlier startups are checked again at every startup, after your pending migrations: one made by hand, or one whose
+  item no longer declares `deterministic: false` (see "Data that is not a function of the chain").
+- **Stored numbers are integers.** Every `jsonb`, `numeric`, `jsonb[]` and `numeric[]` column of your tables gets a
+  `CHECK` named `umbradb_integers_<column>`: a JSON number must be an integer within the signed 64-bit range, written
+  without a fraction (`1.0` and `100.00` are refused; `1e2`, which PostgreSQL stores as `100`, is not), and a `numeric`
+  must have no fraction (`100.00` is refused) and be neither `NaN` nor an infinity. NULL is allowed. A write that breaks
+  it fails the block with `database-error` (SQLSTATE `23514` and the constraint's name). Store amounts in smallest
+  units. Leave these constraints as UmbraDB made them.
+- **What the digests record.** At every height UmbraDB records, per table, the rows the block changed — inserted,
+  deleted, or updated to other values — and chains them into the table's digest in `core_digest.tables`, which every
+  module may read (require the item `digest-tables` to read it in your `on-db-write`, where it holds the digests up to
+  the height before). A row rewritten with its own values is no change, and neither is a row inserted and deleted in
+  one block. What a migration or `on-start-db` writes is not a block's change: the next block finds those rows and
+  compares with them. `TRUNCATE` is refused in a block because it would remove rows without recording them.
+
 ## Writing in callbacks
 
 A module writes its tables in two callbacks only, each through the write handle it is given (DB-3 of the `core-arch`

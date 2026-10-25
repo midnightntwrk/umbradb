@@ -17,21 +17,36 @@ import {
   type PageOptions,
   type ModuleColumn,
   ModuleContentsError,
+  type ModuleTableOptions,
   type ModuleTable,
   moduleTables,
   rowsInKeyOrder,
 } from "./module-tables.js";
 
-/** The contents hash (32 bytes) of the database `read` sees, as DT-3 defines it. */
-export async function contentsHash(read: ConsistentRead, options: PageOptions = {}): Promise<Uint8Array> {
-  const tables = await moduleTables(read);
+/**
+ * The contents hash (32 bytes) of the database `read` sees, as DT-3 defines it. The tables `options.optedOut` names —
+ * the tables declared `deterministic: false`, the schema plan's `optedOut` (MD-1, owner decision Q76) — are recorded by
+ * name only, `[schema, table, null, null]`: two databases that differ only in such a table's rows hash equal, and one
+ * without the table hashes differently. Without the list every table is read, and the rules refuse such a table as any
+ * other.
+ */
+export async function contentsHash(
+  read: ConsistentRead,
+  options: PageOptions & ModuleTableOptions = {},
+): Promise<Uint8Array> {
+  const tables = await moduleTables(read, options);
   const hash = createHash("sha256");
   hash.update(encodeArrayHead(tables.length));
   for (const table of tables) {
-    const count = await countRows(read, table);
     hash.update(encodeArrayHead(4));
     hash.update(encodeCanonical(table.schema));
     hash.update(encodeCanonical(table.name));
+    if (table.deterministic === false) {
+      hash.update(encodeCanonical(null));
+      hash.update(encodeCanonical(null));
+      continue;
+    }
+    const count = await countRows(read, table);
     hash.update(encodeCanonical(table.columns.map((column) => column.name)));
     hash.update(encodeArrayHead(count));
     const types = table.columns.map((column) => column.type);

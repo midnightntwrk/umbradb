@@ -4,7 +4,11 @@ import type { Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { startDatabase } from "../../src/db/migrate.js";
 import { planSchemas, prepareSchemas, type SchemaModule, type SchemaPlan, setModuleRole } from "../../src/db/roles.js";
+import { CORE_DIGEST, digestBlock } from "../../src/backbone/core-digest/index.js";
+import { captureFunctionName, SHADOW_SCHEMA, shadowTableName } from "../../src/db/change-capture.js";
 import { guardTables } from "../../src/db/truncate-guard.js";
+import { openBlockWrites } from "../../src/db/write-handles.js";
+import { migrationPart } from "../../src/modules/adapters.js";
 import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
 /**
@@ -227,5 +231,40 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
       "SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname = 'shared_name'",
     );
     expect([...owner]).toEqual([{ owner: "umbradb_m_shared_name" }]);
+  });
+
+  it("checks, adds the CHECKs and captures changes under it, and core-digest digests (task 7.1)", async () => {
+    const database = await server.createDatabase();
+    const db = await loginOn(database, "writer_digest", "CREATEROLE", true);
+    const module = { ...tableModule("dig-a"), version: "1.0.0" };
+    const part = { ...module, migrations: [{ id: "001", sql: "CREATE TABLE dig_a.t (k bigint PRIMARY KEY, n numeric)" }] };
+    const digest = migrationPart(CORE_DIGEST, { items: new Map(), revisions: [], publish: () => undefined });
+    const plan = planSchemas([module]);
+    await startDatabase(db, { plan, parts: [digest, part], committedVersions: new Map(), handles: { height: null } });
+    const block = (n: string) =>
+      db.transaction(async (tx) => {
+        const writes = openBlockWrites(tx, plan, { height: null });
+        await writes.write("dig-a", (w) => w.execute(`INSERT INTO dig_a.t (k, n) VALUES (1, ${n})`));
+        await writes.write("core-digest", (w) => digestBlock(w, 1n));
+      });
+    // The CHECK the login added refuses a fraction in the module role's write.
+    const refused = await outcome(block("1.5"));
+    expect((refused as UmbraError).details).toMatchObject({ sqlstate: "23514", constraint: "umbradb_integers_n" });
+    expect(await outcome(block("2"))).toBe("resolved");
+    const facts = await database.admin.unsafe<{ name: string; owner: string; definer: boolean | null }[]>(`
+      SELECT c.oid::regclass::text AS name, pg_get_userbyid(c.relowner) AS owner, NULL::boolean AS definer FROM pg_class c
+       WHERE c.oid IN ('core_digest.tables'::regclass, '${SHADOW_SCHEMA}."${shadowTableName("dig_a", "t")}"'::regclass)
+      UNION ALL
+      SELECT p.proname, pg_get_userbyid(p.proowner), p.prosecdef FROM pg_proc p
+       WHERE p.pronamespace = '${SHADOW_SCHEMA}'::regnamespace ORDER BY 1`);
+    expect([...facts]).toEqual([
+      { name: "core_digest.tables", owner: "writer_digest", definer: null },
+      { name: `${SHADOW_SCHEMA}.${shadowTableName("dig_a", "t")}`, owner: "writer_digest", definer: null },
+      { name: captureFunctionName("dig_a", "t"), owner: "writer_digest", definer: true },
+    ].sort((a, b) => (a.name < b.name ? -1 : 1)));
+    const [row] = await database.admin.unsafe<{ height: string }[]>(
+      `SELECT height::text FROM core_digest.tables WHERE "schema" = 'dig_a' AND "table" = 't'`,
+    );
+    expect(row?.height).toBe("1");
   });
 });

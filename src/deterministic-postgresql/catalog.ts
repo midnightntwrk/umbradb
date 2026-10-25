@@ -67,9 +67,10 @@ export interface CatalogTable extends TableFacts {
  * not immutable (read from the defaults' expression trees and one more catalog read, `./column-rules.ts`). Nothing is
  * refused here: this is the rules' input.
  */
-export async function catalogTables(read: ConsistentRead): Promise<CatalogTable[]> {
-  const tableRows = await read.query(TABLES_SQL);
-  const columnRows = await read.query(COLUMNS_SQL);
+export async function catalogTables(read: ConsistentRead, options: CatalogOptions = {}): Promise<CatalogTable[]> {
+  const [filter, params] = schemaFilter(options);
+  const tableRows = await read.query(`${TABLES_SQL}${filter}`, params);
+  const columnRows = await read.query(`${COLUMNS_SQL}${filter}`, params);
   const references = columnRows.map((row): DefaultReference[] =>
     row.default_tree === null ? [] : defaultReferences(parseExpressionTree(row.default_tree as string)),
   );
@@ -114,8 +115,9 @@ export async function catalogTables(read: ConsistentRead): Promise<CatalogTable[
  * (`relpersistence = 'u'`; a partition holds rows of its partitioned table, so it counts too) — each with the table it
  * belongs to, whose declaration `deterministic: false` would cover it (`./opt-out.ts`, owner decision Q76).
  */
-export async function catalogRelations(read: ConsistentRead): Promise<RelationFacts[]> {
-  const relations = (await read.query(RELATIONS_SQL)).map(
+export async function catalogRelations(read: ConsistentRead, options: CatalogOptions = {}): Promise<RelationFacts[]> {
+  const [filter, params] = schemaFilter(options);
+  const relations = (await read.query(`${RELATIONS_SQL}${filter}`, params)).map(
     (row): RelationFacts => ({
       schema: row.schema_name as string,
       name: row.relation_name as string,
@@ -130,7 +132,22 @@ export async function catalogRelations(read: ConsistentRead): Promise<RelationFa
   return relations.sort((a, b) => compareUtf8(a.schema, b.schema) || compareUtf8(a.name, b.name));
 }
 
+/** Which schemas a catalog read covers. */
+export interface CatalogOptions {
+  /**
+   * Only these schemas (the startup check reads a module's own, DT-6); every module schema when absent. A name outside
+   * the module schemas (`public`, `pg_*`, `information_schema`) still gives nothing.
+   */
+  readonly schemas?: readonly string[];
+}
+
 // ── internals ───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The condition {@link CatalogOptions.schemas} adds to a catalog read (on `n`, the relation's schema), and its parameters. */
+function schemaFilter(options: CatalogOptions): [string, unknown[] | undefined] {
+  if (options.schemas === undefined) return ["", undefined];
+  return ["\n  AND n.nspname = ANY($1::text[])", [options.schemas]];
+}
 
 /**
  * Module tables: ordinary or partitioned tables that are not partitions, outside PostgreSQL's own schemas (`pg_*`),
@@ -258,8 +275,11 @@ WHERE t.oid = ANY (${oids(needs.types)})`);
 
 const utf8 = new TextEncoder();
 
-/** Orders strings by the bytes of their UTF-8 encodings (JavaScript's `<` compares UTF-16 code units instead). */
-function compareUtf8(a: string, b: string): number {
+/**
+ * Orders strings by the bytes of their UTF-8 encodings (JavaScript's `<` compares UTF-16 code units instead): DT-3's
+ * order of schemas and tables, which change capture and the digests follow too.
+ */
+export function compareUtf8(a: string, b: string): number {
   const x = utf8.encode(a);
   const y = utf8.encode(b);
   const n = Math.min(x.length, y.length);

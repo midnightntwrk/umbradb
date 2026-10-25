@@ -47,9 +47,11 @@ import {
   describeLocation,
   explainRefusal,
   keyOrderTerm,
+  optOut,
   quoteIdentifier,
   type RefusalCode,
   type RefusalPlace,
+  type TableName,
   UmbraError,
 } from "../deterministic-postgresql/index.js";
 
@@ -68,6 +70,12 @@ export interface ModuleColumn {
 export interface ModuleTable {
   readonly schema: string;
   readonly name: string;
+  /**
+   * `false` for a table declared `deterministic: false` (MD-1, DT-3, owner decision Q76), and absent otherwise: the
+   * contents hash records such a table's schema and name only, `[schema, table, null, null]`, and nothing below
+   * describes it (`columns` and `key` empty), since its columns need not follow the rules.
+   */
+  readonly deterministic?: false;
   /** A partitioned table, read whole across its partitions; an ordinary table is read with `ONLY`. */
   readonly partitioned: boolean;
   /** In column order. */
@@ -80,6 +88,16 @@ export interface ModuleTable {
 export interface PageOptions {
   /** Rows read per statement (default 1,000). It bounds memory and never changes the rows or their order. */
   readonly pageSize?: number;
+}
+
+/** Which tables the module tables' readers skip. */
+export interface ModuleTableOptions {
+  /**
+   * The tables declared `deterministic: false` (MD-1, owner decision Q76; the schema plan's `optedOut`): the rules do
+   * not refuse them, their partitions or the sequences their columns own (the component's `optOut`), and they are
+   * listed by name only ({@link ModuleTable.deterministic} `false`). Every other table is read as without it.
+   */
+  readonly optedOut?: readonly TableName[];
 }
 
 /** Why a database's module contents could not be read in canonical form. */
@@ -139,14 +157,20 @@ export class ModuleContentsError extends UmbraError {
  * refuse fails with its first refusal (`databaseRefusals` of the component's rules: the tables' refusals in DT-3's
  * order, then the sequences' and unlogged tables'): the code and the message startup gives (DT-6).
  */
-export async function moduleTables(read: ConsistentRead): Promise<ModuleTable[]> {
+export async function moduleTables(read: ConsistentRead, options: ModuleTableOptions = {}): Promise<ModuleTable[]> {
   const tables = await catalogTables(read);
-  const [first] = databaseRefusals(tables, await catalogRelations(read));
+  const optedOut = options.optedOut ?? [];
+  const [first] = databaseRefusals(tables, await catalogRelations(read), { optedOut });
   if (first !== undefined) {
     const { refusal, place } = first;
     throw new ModuleContentsError(refusal.code, place, refusal.column, explainRefusal(refusal));
   }
-  return tables.map(describeTable);
+  const out = optOut(optedOut);
+  return tables.map((table) =>
+    out.covers({ schema: table.schema, table: table.name })
+      ? { schema: table.schema, name: table.name, deterministic: false, partitioned: table.partitioned, columns: [], key: [] }
+      : describeTable(table),
+  );
 }
 
 /** The number of rows of `table`, from the state `read` sees. */

@@ -12,12 +12,12 @@
  * | Text keys ordered by bytes (`COLLATE "C"`) | `column-rules.ts` (`keyOrder`, `keyOrderTerm`; `timestamptz` keys by time) |
  * | Identity, `serial` and non-immutable defaults refused | `column-rules.ts` (`TABLE_RULES`, `parseExpressionTree`, `defaultReferences`, `notImmutableParts`) |
  * | Sequences and unlogged tables in module schemas refused | `column-rules.ts` (`relationRefusals`, `databaseRefusals`) |
- * | The facts all of these read | `catalog.ts` (`catalogTables`, `catalogRelations`, the handle `ConsistentRead`) |
- * | `jsonb` and `numeric` `CHECK`s | task 7.1, a new `checks.ts` (the functions' SQL and the `CHECK`s each column gets) |
+ * | The facts all of these read | `catalog.ts` (`catalogTables`, `catalogRelations` — of every module schema, or of the schemas given —, the handle `ConsistentRead`) |
+ * | `jsonb` and `numeric` `CHECK`s | `checks.ts` (`INTEGER_RULES`, `CHECK_FUNCTIONS_SQL`: `core_chain.jsonb_numbers_ok`, `core_chain.numeric_ok` and their array forms; `integerCheckStatements`: the `CHECK` each column gets); `src/db/module-rules.ts` applies them |
  * | Rows-only block transactions; the `BEFORE TRUNCATE` trigger | `block-transactions.ts` (the trigger's function and its statements, the migration mark, the SQLSTATE); `src/db/truncate-guard.ts` applies them |
  * | The pinned session settings; the zero timeouts | `settings.ts` (`PINNED_SETTINGS`, `ZERO_TIMEOUTS`, and `SESSION_SETTINGS`, both, which the backends apply) |
  * | The result mapping and parameter texts, date and time as RFC 3339 text | `mapping.ts` |
- * | The opt-out (`deterministic: false`) | `opt-out.ts` (`optOut`: which tables and relations the declared tables cover), used by `column-rules.ts` (`databaseRefusals`' `optedOut`, with `catalog.ts`'s `belongsTo`) and `block-transactions.ts`; the declaration is `src/modules/` (task 3.1); task 7.1's `CHECK`s, change capture and contents hash use it too |
+ * | The opt-out (`deterministic: false`) | `opt-out.ts` (`optOut`: which tables and relations the declared tables cover), used by `column-rules.ts` (`databaseRefusals`' `optedOut`, with `catalog.ts`'s `belongsTo`), `block-transactions.ts` and `checks.ts`, and outside the component by change capture (`src/db/change-capture.ts`) and the contents hash (`src/determinism/module-tables.ts`); the declaration is `src/modules/` (task 3.1) |
  *
  * `errors.ts` holds `UmbraError` and its codes, which the mapping throws and `src/db/errors.ts` re-exports (decision
  * record Q79).
@@ -25,6 +25,7 @@
 
 export * from "./block-transactions.js";
 export * from "./catalog.js";
+export * from "./checks.js";
 export * from "./column-rules.js";
 export * from "./errors.js";
 export * from "./mapping.js";

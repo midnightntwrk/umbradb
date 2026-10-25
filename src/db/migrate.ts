@@ -22,22 +22,33 @@
  *    (`./truncate-guard.ts`), and then every check, for every part, before any migration runs: `requires-resync`
  *    (DB-10), `migration-checksum-changed`, `migration-missing` (also for a pending migration declared before an
  *    applied one, `reason: out-of-order`, decision record Q91). A refusal rolls the whole bootstrap back.
+ *    The bootstrap also creates (or replaces) the functions of DT-6's `jsonb` and `numeric` `CHECK`s in `core_chain`
+ *    (`./module-rules.ts`).
  * 2. For each part, in order: each pending migration in its own transaction — the migration mark first
  *    (`markMigration`, which lets `TRUNCATE` through in this transaction only, A73), the part's role, the SQL through
  *    the multi-statement path (`./multi-statement.ts`), a check that the SQL did not end the transaction, the login's
- *    role again, and the record last; then, when it applied any, the `TRUNCATE` guard again, so its new tables are
- *    guarded; then its `on-start-db` in a further transaction under its role, unmarked, with a schema write handle
- *    that closes when it returns (`./write-handles.ts`).
+ *    role again, DT-6's check of the part's tables (`./module-rules.ts`: a migration that leaves a table the
+ *    determinism rules refuse rolls back, and startup refuses with the rule's code), and the record last; then, when it
+ *    applied any, the `TRUNCATE` guard again, so its new tables are guarded; then, in a transaction of its own and at
+ *    every startup, DT-6's check of the part's tables again (a table of an earlier startup, or one an opt-out no
+ *    longer covers), their `CHECK`s, and their change capture for the digests (`./change-capture.ts`; once
+ *    `core-digest`'s migrations have created its schemas — the parts before it are captured then — with `SELECT` on
+ *    `core_digest` for every role of the plan); then its `on-start-db` in a further transaction under its role,
+ *    unmarked, with a schema write handle that closes when it returns (`./write-handles.ts`).
+ * 3. When every part has run: the shadow tables of change capture emptied of what the parts' `on-start-db` wrote (no
+ *    block's changes) and those no table uses dropped, in a last transaction.
  *
  * A migration that fails rolls back with its record: the ones before it stay applied, its part's `on-start-db` and
- * every later part do not run, and startup refuses with `migration-failed`. A lost connection is passed on as it is
- * (`connection-lost`, retryable): a migration and its record commit together, so a retried startup finds either both
- * or neither.
+ * every later part do not run, and startup refuses with `migration-failed` — or with DT-6's code, when the migration
+ * left a table the determinism rules refuse. A lost connection is passed on as it is (`connection-lost`, retryable): a
+ * migration and its record commit together, so a retried startup finds either both or neither.
  */
 
 import { quoteIdentifier } from "../deterministic-postgresql/index.js";
 import type { Database, SchemaWriteHandle, Transaction } from "./api.js";
 import { UmbraError } from "./errors.js";
+import { captureReady, captureTables, finishCapture } from "./change-capture.js";
+import { attachIntegerChecks, createCheckFunctions, partSchemas, refuseNonDeterministic } from "./module-rules.js";
 import { runMultiStatement } from "./multi-statement.js";
 import {
   migrationChecksum,
@@ -210,13 +221,45 @@ function checkApplied(runner: Runnable, rows: readonly AppliedRow[]): void {
   }
 }
 
-/** Grants every role of the plan `USAGE` on `core_chain` and `SELECT` on its tables, now and later (DB-6). */
-async function grantCoreChain(tx: Transaction, plan: SchemaPlan): Promise<void> {
+/**
+ * Grants every role of the plan `USAGE` on one of UmbraDB's own schemas — `core_chain`, or `core_digest` once
+ * `core-digest`'s migrations created it — and `SELECT` on its tables, now and later (DB-6).
+ */
+async function grantReads(tx: Transaction, plan: SchemaPlan, schema: "core_chain" | "core_digest"): Promise<void> {
   if (plan.schemas.length === 0) return;
-  const to = plan.schemas.map((schema) => quoteIdentifier(schema.role)).join(", ");
-  await tx.execute(`GRANT USAGE ON SCHEMA core_chain TO ${to}`);
-  await tx.execute(`GRANT SELECT ON ALL TABLES IN SCHEMA core_chain TO ${to}`);
-  await tx.execute(`ALTER DEFAULT PRIVILEGES IN SCHEMA core_chain GRANT SELECT ON TABLES TO ${to}`);
+  const to = plan.schemas.map((planned) => quoteIdentifier(planned.role)).join(", ");
+  await tx.execute(`GRANT USAGE ON SCHEMA ${schema} TO ${to}`);
+  await tx.execute(`GRANT SELECT ON ALL TABLES IN SCHEMA ${schema} TO ${to}`);
+  await tx.execute(`ALTER DEFAULT PRIVILEGES IN SCHEMA ${schema} GRANT SELECT ON TABLES TO ${to}`);
+}
+
+/** What the steps after each part's migrations carry from one part to the next within one startup. */
+interface Settling {
+  /** The schemas of the parts settled before the shadow schema existed: captured once it does (Q95). */
+  deferred: string[];
+  /** Whether this startup granted the reading of `core_digest` already. */
+  digestsGranted: boolean;
+}
+
+/**
+ * The steps after a part's migrations, before its `on-start-db`, in one transaction (see the module comment): DT-6's
+ * check of its tables, their `CHECK`s, and — once `core-digest`'s migrations created the shadow schema — the change
+ * capture of its tables and of every part's settled before that, with the reading of `core_digest` for the plan's roles.
+ */
+async function settle(tx: Transaction, input: StartupInput, part: MigrationPart, settling: Settling): Promise<void> {
+  const schemas = partSchemas(input.plan, part.id);
+  await refuseNonDeterministic(tx, input.plan, part.id, schemas);
+  await attachIntegerChecks(tx, input.plan, schemas);
+  if (!(await captureReady(tx))) {
+    settling.deferred.push(...schemas);
+    return;
+  }
+  await captureTables(tx, input.plan, [...settling.deferred, ...schemas]);
+  settling.deferred = [];
+  if (!settling.digestsGranted) {
+    await grantReads(tx, input.plan, "core_digest");
+    settling.digestsGranted = true;
+  }
 }
 
 /** Runs one migration and writes its record, in one transaction (DB-9). */
@@ -242,7 +285,12 @@ async function apply(
           { ...at, reason: "transaction-ended" },
         );
       }
-      if (runner.underRole) await tx.execute("RESET ROLE");
+      if (runner.underRole) {
+        await tx.execute("RESET ROLE");
+        // DT-6 at migration time: a migration that leaves a table the rules refuse rolls back, and is not recorded.
+        const schemas = partSchemas(input.plan, runner.part.id);
+        await refuseNonDeterministic(tx, input.plan, runner.part.id, schemas, { id: migration.id, position });
+      }
       await tx.execute(RECORD_SQL, [runner.name, migration.id, migrationChecksum(migration.sql), position]);
     });
   } catch (error) {
@@ -279,7 +327,8 @@ export async function startDatabase(db: Database, input: StartupInput): Promise<
   const applied = await db.transaction(async (tx) => {
     await prepareSchemas(tx, input.plan);
     await tx.execute(MIGRATIONS_TABLE_SQL);
-    await grantCoreChain(tx, input.plan);
+    await grantReads(tx, input.plan, "core_chain");
+    await createCheckFunctions(tx);
     await guardTables(tx, input.plan);
     const rows = (await tx.query(APPLIED_SQL)) as unknown as AppliedRow[];
     const recorded = new Map<string, AppliedRow[]>();
@@ -296,6 +345,7 @@ export async function startDatabase(db: Database, input: StartupInput): Promise<
   });
 
   const done: AppliedMigration[] = [];
+  const settling: Settling = { deferred: [], digestsGranted: false };
   for (const runner of runners) {
     const { part } = runner;
     let any = false;
@@ -307,7 +357,9 @@ export async function startDatabase(db: Database, input: StartupInput): Promise<
       any = true;
     }
     if (any) await db.transaction((tx) => guardTables(tx, input.plan));
+    await db.transaction((tx) => settle(tx, input, part, settling));
     if (part.onStartDb !== undefined) await runOnStartDb(db, input.plan, part.id, input.handles, part.onStartDb);
   }
+  await db.transaction((tx) => finishCapture(tx, input.plan));
   return done;
 }

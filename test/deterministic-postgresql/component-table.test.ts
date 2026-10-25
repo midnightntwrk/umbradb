@@ -56,8 +56,9 @@ const ROWS: readonly RowCoverage[] = [
   {
     rule: "`core_chain.jsonb_numbers_ok` and `core_chain.numeric_ok` and the `CHECK`s they back",
     requirement: "DT-1, DT-6",
-    tests: [],
-    pending: { "the two functions and the CHECKs on jsonb and numeric columns and their arrays": "7.1" },
+    // Task 7.1: the functions and their rules, the CHECK on every such column, the writes they refuse (A58).
+    tests: ["checks.test.ts"],
+    pending: {},
   },
   {
     rule: "Block transactions change rows only; the `BEFORE TRUNCATE` trigger",
@@ -88,12 +89,11 @@ const ROWS: readonly RowCoverage[] = [
       "its unlogged tables are skipped by the refusals and the `CHECK`s; the contents hash records each such table as " +
       "`[schema, table, null, null]`; digests skip it; backups carry its rows and its sequences' positions",
     requirement: "MD-1, DT-3, DT-4, DT-6, BK-2",
-    // Task 3.1: the declaration, and the skip written once (`opt-out.ts`), which the refusals and the TRUNCATE guard use.
+    // Task 3.1: the declaration, and the skip written once (`opt-out.ts`), which the refusals and the TRUNCATE guard use;
+    // task 7.1: the startup check, the CHECKs and change capture skip such tables, and the hash records them by name
+    // only (A147's core part).
     tests: ["opt-out.test.ts"],
-    pending: {
-      "the startup check, the CHECKs and change capture skip opted-out tables, and the hash records them by name only":
-        "7.1",
-    },
+    pending: { "backups carry its rows and its sequences' positions": "15.2" },
   },
 ];
 
@@ -210,9 +210,7 @@ describe("A138: the suite runs every rule of design.md §4's component table on 
     expect(done).toEqual([]);
     // What A138 covers now, and what waits for which task (`tasks.md` 2.2a's done note says the same).
     expect(Object.fromEntries(ROWS.flatMap((row) => Object.entries(row.pending)))).toEqual({
-      "the two functions and the CHECKs on jsonb and numeric columns and their arrays": "7.1",
-      "the startup check, the CHECKs and change capture skip opted-out tables, and the hash records them by name only":
-        "7.1",
+      "backups carry its rows and its sequences' positions": "15.2",
     });
   });
 });

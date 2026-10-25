@@ -148,7 +148,17 @@ interface BlockSource {
   (PostgreSQL 18.6), 2026-10-24: `'Infinity'` and `'-Infinity'` passed the first form, `scale(c) = 0 AND c <> 'NaN'`,
   and `coalesce(scale(c) = 0, false)` alone refused NULL; this form accepts NULL and `1` and refuses `1.5`, `NaN` and
   both infinities), with array forms for `jsonb[]` and
-  `numeric[]`, back a `CHECK` on every such column of a module table not declared `deterministic: false` (Q76).
+  `numeric[]`, back a `CHECK` on every such column of a module table not declared `deterministic: false` (Q76). The
+  functions are SQL functions with a standard body, created by the writer's login in the bootstrap at every startup;
+  each `CHECK` is named `umbradb_integers_<column>` (the first 32 hex digits of SHA-256 of the column's name instead,
+  when that name would exceed 63 bytes), added after the table's part's migrations and dropped from a table later
+  declared `deterministic: false`; a `CHECK` on a partitioned table holds on its partitions
+  (`src/deterministic-postgresql/checks.ts`, applied by `src/db/module-rules.ts`). DT-6's refusals run at startup
+  twice per part: in each migration's own transaction, after its SQL and before its record, so a migration leaving a
+  table the rules refuse rolls back unrecorded and startup refuses with the rule's code (fixed, the same build
+  starts); and after the part's migrations, before its `on-start-db`, for the tables of earlier startups. A part's
+  tables are those of the schema its role writes and of its own; the codes are §11's five, and the message is the
+  contents hash's with the module named first.
 - **Migrations and setup (DB-9, DB-10).** `src/db/migrate.ts` (`startDatabase`), refactored from 0.9.5's
   `src/postgres/migrate.ts`. One bootstrap transaction creates `core_chain` with the roles and schemas
   (`prepareSchemas`) and `core_chain.migrations` (§10: checksum = SHA-256 of the UTF-8 SQL; position = the migration's
@@ -161,8 +171,11 @@ interface BlockSource {
   the simple protocol (`src/db/multi-statement.ts`, which only the runner reaches; a `Transaction`'s `query` and
   `execute` stay one statement each, on the extended protocol), a check that the SQL did not end the transaction
   (`migration-failed`, `reason: transaction-ended`), then its row — so a failing migration rolls back with its row,
-  the ones before it stay, and startup refuses with `migration-failed`; then the `TRUNCATE` guard again for the tables
-  the part added; then its `on-start-db` in a transaction of its own under its role, unmarked. No `search_path` is
+  the ones before it stay, and startup refuses with `migration-failed` (or with DT-6's code for a migration leaving a
+  table the rules refuse, above); then the `TRUNCATE` guard again for the tables the part added; then, at every
+  startup, DT-6's check of the part's tables, their `CHECK`s and their change capture (below); then its `on-start-db`
+  in a transaction of its own under its role, unmarked. When every part has run, the shadow tables of change capture
+  are emptied and those no table uses dropped. No `search_path` is
   set: module SQL names its schema (the module guide). Upgrade migrations only add — a module obligation (Q46, the
   module guide); a `requiresResync` version is refused while a committed height of the database is covered by a
   revision of that module with another version (DB-10; the versions come from the configuration history and the
@@ -227,7 +240,22 @@ interface BlockSource {
   one row per table, plus one row per table every 14,400 heights (about 365 a year). A row of `core_digest.tables` is
   updated in place, so PostgreSQL's MVCC leaves dead tuples that autovacuum reclaims (an `UPDATE` that touches no
   indexed column can be a heap-only update when its page has room). The cost of the triggers on ingest is measured by
-  A136.
+  A136. As built (`src/db/change-capture.ts`, task 7.1): each table's trigger (`umbradb_capture_changes`, on a
+  partitioned table and so cloned onto its partitions) calls a function of its own, `core_digest_shadow.f_<the same
+  digits>()`, `SECURITY DEFINER` and owned by the writer's login with `search_path = pg_catalog, pg_temp`, so a module
+  role writes the shadow table through it; the shadow table holds the key, the old row's columns as `c0`, `c1`, … with
+  the module table's types and collations, `existed`, and the transaction's id, so only the block's own touches are read
+  and a touch left by any other transaction is replaced. The function records nothing in a transaction carrying the
+  migration mark: a migration's writes are no block's changes, and a migration may change the table's columns before
+  the function is written again. After each part's migrations the database API writes again the shadow table,
+  function and trigger of each table whose columns changed (a fingerprint in the shadow table's comment), attaches
+  them to new tables, re-enables a disabled trigger and drops the trigger of a table declared `deterministic: false`;
+  the parts before `core-digest` are captured once its migrations created `core_digest_shadow` (Q95). When startup
+  ends, the shadow tables are emptied of what `on-start-db` callbacks wrote and those no table uses are dropped, so they
+  are empty whenever no block is open. A table's changes are read in DT-2's key order (`ONLY` for an ordinary table)
+  and digested by `src/determinism/digest.ts`; `core-digest` (`src/backbone/core-digest/`, migrations only, no
+  `on-start-db`) has its checkpoint interval as a build flag (`build-flags.ts`, like A11's), which only a test's own
+  build changes. Every role of the plan may read `core_digest`.
 - **Errors.** `UmbraError { code, retryable, details }`, keeping the 0.9.5 retryable split
   (`design/design-interfaces.md` §1.1); a lost connection is `connection-lost` (retryable); an API read ended by its
   timeout is `query-timeout` (not retryable, DB-15).
@@ -698,7 +726,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | PostgreSQL 18: a session advisory lock belongs to one database (two databases on one server each take `(3, hashtext('umbradb-writer'))`), while `pg_locks` lists every database's locks (filter by `database`); a terminated backend's advisory locks are gone once `pg_stat_activity` no longer lists it; `pg_try_advisory_xact_lock` in autocommit is released when its statement ends | https://www.postgresql.org/docs/18/explicit-locking.html#ADVISORY-LOCKS, view-pg-locks; `test/db/writer-lock.test.ts` and its negative control on the pinned `postgres:18-alpine` (PostgreSQL 18.6), 2026-10-24 (task 2.5) | Verified (test) |
 | PostgreSQL 18: a `CREATEROLE` login that is not a superuser holds a role it created with `ADMIN` only (no `SET`, no `INHERIT`; `createrole_self_grant` empty), may grant it to itself `WITH INHERIT TRUE, SET TRUE`, needs `SET` for `SET ROLE` and `CREATE SCHEMA … AUTHORIZATION` and `INHERIT` (or the role itself) for `ALTER DEFAULT PRIVILEGES`, reading the role's tables and creating triggers on them; another `CREATEROLE` login cannot use or grant that role; a trigger function's `EXECUTE` is not checked when the trigger fires | https://www.postgresql.org/docs/18/runtime-config-client.html (`createrole_self_grant`: "a CREATEROLE user is always implicitly granted ADMIN OPTION on created roles"), sql-createrole, sql-alterdefaultprivileges; probe on the pinned `postgres:18-alpine` (PostgreSQL 18.6), 2026-10-24 (task 2.3); `test/db/roles-login.test.ts` | Verified (test, probe); Q90 |
 | PGlite: roles, `SET LOCAL ROLE`, cross-schema writes denied, `SECURITY DEFINER` with a fixed `search_path` and `PUBLIC` revoked, PL/pgSQL row triggers, a `BEFORE TRUNCATE` trigger refusing, `jsonpath` `.type()`/`.floor()` in a `CHECK`, advisory-lock functions | Probe against `@electric-sql/pglite` 0.5.10 (published 2026-10-14) in Node.js v24.9.0, 2026-10-22: every item passed | Verified (probe); task 0.1 commits the probe as a test |
-| `jsonpath` `.string()` keeps a JSON number's scale: `1.0` → `"1.0"`, `100.00` → `"100.00"`, `1e2` → `"100"` (Q57) | PostgreSQL 17.11 (`postgres:17-alpine`) and PGlite 0.5.10, 2026-10-23; PostgreSQL 18.6 (the pinned `postgres:18-alpine`), 2026-10-24, `test/dependencies/postgresql.test.ts` | Verified (run, test); task 7.1's test re-checks it |
+| `jsonpath` `.string()` keeps a JSON number's scale: `1.0` → `"1.0"`, `100.00` → `"100.00"`, `1e2` → `"100"` (Q57) | PostgreSQL 17.11 (`postgres:17-alpine`) and PGlite 0.5.10, 2026-10-23; PostgreSQL 18.6 (the pinned `postgres:18-alpine`), 2026-10-24, `test/dependencies/postgresql.test.ts` | Verified (run, test); re-checked by task 7.1's `test/deterministic-postgresql/checks.test.ts` on both backends, 2026-10-25 |
 | PGlite 0.5.10 embeds PostgreSQL 18.6; production is PostgreSQL 18 too (Q82) | `select version()` on 0.5.10; the pinned image reports PostgreSQL 18.6 too (`test/dependencies/postgresql.test.ts`) | Verified; both backends run one major version (in the tests one minor version, 18.6), and the cross-backend differentials (A55, A105, A135) guard the rest |
 | The PostgreSQL image of the tests, benchmarks and pack smoke test (A148): `postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873` is the official image's multi-platform index, PostgreSQL 18.6 on Alpine 3.24.2 | `docker-library/repo-info` `repos/postgres/remote/18-alpine.md` at `23406aef` (the tag's index from 2026-09-21 to 2026-10-22); pulled by digest 2026-10-24: `postgres --version` 18.6, `/etc/alpine-release` 3.24.2 | Verified (pulled); pinned in `test/postgres-image.ts`, checked by the supply-chain gate's image-pin agreement and `test/dependencies/postgres-image.test.ts` |
 | PGlite does not stop two processes opening one data directory | Probe: two Node.js processes opened and wrote one directory | Verified (probe); hence the operating-system lock of §4 |

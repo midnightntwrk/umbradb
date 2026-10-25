@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "../../src/db/api.js";
-import { startDatabase } from "../../src/db/migrate.js";
+import { UmbraError } from "../../src/db/errors.js";
+import { type MigrationPart, startDatabase } from "../../src/db/migrate.js";
 import { planSchemas, type SchemaPlan } from "../../src/db/roles.js";
 import {
   catalogRelations,
@@ -8,12 +10,19 @@ import {
   databaseRefusals,
   optOut,
   type PlacedRefusal,
+  type Refusal,
+  type RefusalPlace,
   type RelationFacts,
+  refusalMessage,
   type TableFacts,
 } from "../../src/deterministic-postgresql/index.js";
 import { migrationPart, schemaModules } from "../../src/modules/adapters.js";
 import { defineModule, type ModuleDeclaration } from "../../src/modules/declaration.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
+import { CAPTURE_TRIGGER, SHADOW_SCHEMA, shadowTableName } from "../../src/db/change-capture.js";
+import { contentsHash } from "../../src/determinism/contents-hash.js";
+import { ModuleContentsError } from "../../src/determinism/module-tables.js";
+import { type Chain, runBlocks, startChain, testModule } from "../backbone/core-digest/chain.js";
 import { BACKENDS } from "../db/backends.js";
 import { declaration, userModules } from "../modules/declarations.js";
 
@@ -130,14 +139,28 @@ describe.each(BACKENDS)("the opt-out from a declaration to the component's rules
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop());
 
-  /** Starts a fresh database with `module` and returns its plan and the module schema's refusals. */
-  async function started(module: ModuleDeclaration): Promise<{ db: Database; plan: SchemaPlan }> {
+  /**
+   * A fresh database with `module`'s schema and plan, and the tables its migration declares. Since task 7.1 startup
+   * refuses a migration that leaves a table the rules refuse, and rolls it back, so the module's tables are made here
+   * outside the migration runner, as the module's role, after a startup that applied none of its migrations; the
+   * startup check over them is the last test of this block.
+   */
+  async function started(module: ModuleDeclaration): Promise<{ db: Database; plan: SchemaPlan; parts: MigrationPart[] }> {
     const { db } = await backend.database("SELECT 1");
     const set = validateDeclarations(userModules([module]));
     const plan = planSchemas(schemaModules(set.user));
-    const parts = set.user.map((d) => migrationPart(d, { items: new Map(), revisions: [], publish: () => {} }));
+    const parts = set.user.map((d) => ({
+      ...migrationPart(d, { items: new Map(), revisions: [], publish: () => {} }),
+      migrations: [],
+    }));
     await startDatabase(db, { plan, parts, committedVersions: new Map(), handles: { height: null } });
-    return { db, plan };
+    await db.transaction(async (tx) => {
+      await tx.execute(`SET LOCAL ROLE ${plan.writeRole(module.id)}`);
+      for (const { sql } of module.migrations) {
+        for (const statement of sql.split(";").map((part) => part.trim())) if (statement !== "") await tx.execute(statement);
+      }
+    });
+    return { db, plan, parts };
   }
 
   async function refusals(db: Database, optedOut?: SchemaPlan["optedOut"]) {
@@ -195,5 +218,184 @@ describe.each(BACKENDS)("the opt-out from a declaration to the component's rules
     const { db: flagged, plan: flaggedPlan } = await started(keysModule({ deterministic: false }));
     expect(await refusals(flagged)).toEqual(all);
     expect(await refusals(flagged, flaggedPlan.optedOut)).toHaveLength(4);
+  }, 60_000);
+
+  it("7.1: startup refuses with the first refusal the opt-out leaves, naming the module (DT-6 at startup)", async () => {
+    const { db, plan, parts } = await started(keysModule({ deterministic: false }));
+    const [first] = await db.read(async (read) =>
+      databaseRefusals(await catalogTables(read), await catalogRelations(read), { optedOut: plan.optedOut }),
+    );
+    expect(first?.place).toEqual({ schema: "keys", table: "counts" });
+    const refused = await startDatabase(db, { plan, parts, committedVersions: new Map(), handles: { height: null } }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(UmbraError);
+    expect((refused as UmbraError).code).toBe(first?.refusal.code);
+    expect((refused as UmbraError).message).toBe(
+      refusalMessage(first?.refusal as Refusal, { module: "keys", ...(first?.place as RefusalPlace) }),
+    );
+  }, 60_000);
+});
+
+/**
+ * A147's core part (MD-1, DT-3, DT-4, DT-6; owner decision Q76; task 7.1), on both backends: a `table` item declared
+ * `deterministic: false` with a `now()` default and a `serial` column starts, and its partitioned table without a
+ * primary key too; its rows — the times `now()` gave, the values `serial` drew, fractional `jsonb` and `numeric` values,
+ * which no `CHECK` refuses there — are hashed by name only, so two databases differing only in them hash equal, and a
+ * database without the tables hashes differently; the digests skip them (no capture trigger on the table or its
+ * partitions, no shadow table, no row of `core_digest.tables`); the same tables without the flag refuse startup with
+ * `non-deterministic-column`. The chains run through `schemaPlan`, `startDatabase` and the block write handles with the
+ * real `core-digest` (`test/backbone/core-digest/chain.ts`). A147's private-process part is task 14.1's, its backup part
+ * task 15.2's.
+ */
+function requestsModule(flag: { readonly deterministic?: false }, note: string): ModuleDeclaration {
+  return testModule("kreq", {
+    provides: [
+      {
+        name: "kreq-requests",
+        lifetimes: ["table"],
+        table: { schema: "kreq", tables: ["requests", "requests_log"], kind: "append-only", ...flag },
+      },
+      { name: "kreq-counts", lifetimes: ["table"], table: { schema: "kreq", tables: ["counts"], kind: "mutable" } },
+    ],
+    migrations: [
+      {
+        id: "001",
+        sql: `CREATE TABLE kreq.requests (
+                id serial PRIMARY KEY, received_at timestamptz NOT NULL DEFAULT now(), note jsonb, amount numeric
+              );
+              CREATE TABLE kreq.requests_log (height bigint NOT NULL, at timestamptz DEFAULT now()) PARTITION BY RANGE (height);
+              CREATE TABLE kreq.requests_log_low PARTITION OF kreq.requests_log FOR VALUES FROM (0) TO (1000);
+              CREATE TABLE kreq.counts (k bigint PRIMARY KEY, n numeric NOT NULL);`,
+      },
+    ],
+    points: {
+      async "on-db-write"(_p, b, w) {
+        await w.execute("INSERT INTO kreq.requests (note, amount) VALUES ($1::jsonb, 1.5)", [note]);
+        await w.execute("INSERT INTO kreq.requests_log (height) VALUES ($1)", [b.height]);
+        await w.execute("INSERT INTO kreq.counts (k, n) VALUES (1, $1) ON CONFLICT (k) DO UPDATE SET n = $1", [b.height]);
+      },
+    },
+  });
+}
+
+describe.each(BACKENDS)("A147: a table declared deterministic: false, on $name (core part)", (backend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop());
+
+  async function chainWith(module: ModuleDeclaration, to: bigint): Promise<Chain> {
+    const { db } = await backend.database("SELECT 1");
+    const chain = await startChain(db, [module]);
+    await runBlocks(chain, to);
+    return chain;
+  }
+
+  const hashOf = (chain: Chain, optedOut?: SchemaPlan["optedOut"]) =>
+    chain.db.read((read) => contentsHash(read, optedOut === undefined ? {} : { optedOut }));
+
+  it("starts with a now() default and a serial column, and stores fractional values no CHECK refuses there", async () => {
+    const chain = await chainWith(requestsModule({ deterministic: false }, '{"x": 1.5}'), 3n);
+    const rows = await chain.db.read((read) => read.query("SELECT id, note, amount FROM kreq.requests ORDER BY id"));
+    expect(rows).toEqual([1, 2, 3].map((id) => ({ id, note: { x: 1.5 }, amount: "1.5" })));
+    const checks = await chain.db.read((read) =>
+      read.query(
+        `SELECT conrelid::regclass::text AS "table" FROM pg_constraint
+          WHERE contype = 'c' AND conname LIKE 'umbradb\\_integers\\_%' AND connamespace = 'kreq'::regnamespace
+          ORDER BY 1`,
+      ),
+    );
+    // Only the deterministic table's numeric column has its CHECK; it refuses there what the opted-out table took.
+    expect(checks).toEqual([{ table: "kreq.counts" }]);
+    const refused = await chain.db
+      .transaction((tx) => tx.execute("INSERT INTO kreq.counts (k, n) VALUES (2, 1.5)"))
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect((refused as UmbraError).details).toMatchObject({ sqlstate: "23514" });
+  }, 120_000);
+
+  it("hashes the opted-out tables by name only: equal for different rows, different without the tables", async () => {
+    const one = await chainWith(requestsModule({ deterministic: false }, '{"x": 1}'), 3n);
+    // Another database: other notes, other times (now()), one more row drawn from the sequence.
+    const two = await chainWith(requestsModule({ deterministic: false }, '{"y": 2.5}'), 3n);
+    await two.db.transaction(async (tx) => {
+      await tx.execute("SET LOCAL ROLE umbradb_m_kreq");
+      await tx.execute("INSERT INTO kreq.requests (note) VALUES ('{}')");
+      await tx.execute("INSERT INTO kreq.requests_log (height) VALUES (999)");
+    });
+    expect(await hashOf(two, two.plan.optedOut)).toEqual(await hashOf(one, one.plan.optedOut));
+    // A third, the same but without the two tables: it hashes differently, for their names alone.
+    const three = await chainWith(requestsModule({ deterministic: false }, '{"x": 1}'), 3n);
+    await three.db.transaction(async (tx) => {
+      await tx.execute("SET LOCAL ROLE umbradb_m_kreq");
+      await tx.execute("DROP TABLE kreq.requests, kreq.requests_log");
+    });
+    expect(await hashOf(three, three.plan.optedOut)).not.toEqual(await hashOf(one, one.plan.optedOut));
+    // Control: without the list, the hash reads the tables as any other, and the rules refuse them.
+    const unlisted = await hashOf(one).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(unlisted).toBeInstanceOf(ModuleContentsError);
+    expect((unlisted as ModuleContentsError).reason).toBe("non-deterministic-column");
+    expect([(unlisted as ModuleContentsError).table, (unlisted as ModuleContentsError).column]).toEqual(["requests", "id"]);
+  }, 180_000);
+
+  it("records an opted-out table as [schema, table, null, null]: the hash against CBOR written out by hand", async () => {
+    const { db } = await backend.database(`
+      CREATE SCHEMA o;
+      CREATE TABLE o.free (at timestamp DEFAULT now(), n double precision);
+      INSERT INTO o.free (n) VALUES (0.5);
+      CREATE TABLE o.t (k bigint PRIMARY KEY);
+      INSERT INTO o.t VALUES (1);`);
+    const hash = await db.read((read) => contentsHash(read, { optedOut: [{ schema: "o", table: "free" }] }));
+    const expected = createHash("sha256")
+      .update(
+        Buffer.from(
+          // [["o", "free", null, null], ["o", "t", ["k"], [[1]]]]
+          "82" + "84" + "616f" + "6466726565" + "f6" + "f6" + "84" + "616f" + "6174" + "81616b" + "81" + "8101",
+          "hex",
+        ),
+      )
+      .digest();
+    expect(Buffer.from(hash).toString("hex")).toBe(expected.toString("hex"));
+  }, 60_000);
+
+  it("leaves the opted-out tables and their partitions out of the digests; digests the module's other table", async () => {
+    const chain = await chainWith(requestsModule({ deterministic: false }, '{"x": 1}'), 3n);
+    const [row] = await chain.db.read((read) =>
+      read.query(
+        `SELECT (SELECT array_agg(tgrelid::regclass::text) FROM pg_trigger
+                  WHERE tgname = '${CAPTURE_TRIGGER}' AND tgrelid::regclass::text LIKE 'kreq.%') AS captured,
+                (SELECT array_agg(c.relname::text) FROM pg_class c
+                  WHERE c.relnamespace = '${SHADOW_SCHEMA}'::regnamespace AND c.relkind = 'r') AS shadows,
+                (SELECT array_agg("schema" || '.' || "table") FROM core_digest.tables) AS digested`,
+      ),
+    );
+    const sorted = (list: unknown) => [...(list as string[])].sort();
+    expect({ captured: sorted(row?.captured), shadows: sorted(row?.shadows), digested: sorted(row?.digested) }).toEqual({
+      captured: ["kreq.counts"],
+      shadows: [shadowTableName("core_block_commit", "blocks"), shadowTableName("kreq", "counts")].sort(),
+      digested: ["core_block_commit.blocks", "kreq.counts"],
+    });
+  }, 120_000);
+
+  it("refuses startup with non-deterministic-column for the same tables without the flag", async () => {
+    const { db } = await backend.database("SELECT 1");
+    const refused = await startChain(db, [requestsModule({}, '{"x": 1}')]).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(UmbraError);
+    const error = refused as UmbraError;
+    expect(error.code).toBe("non-deterministic-column");
+    expect(error.details).toMatchObject({ module: "kreq", schema: "kreq", table: "requests", column: "id", migration: "001" });
+    expect(error.message.startsWith('non-deterministic-column: module "kreq", table "kreq"."requests", column "id" (integer): ')).toBe(true);
+    // The migration rolled back with the refusal: none of its tables exists.
+    expect(await db.read((read) => read.query("SELECT to_regclass('kreq.requests') AS t, to_regclass('kreq.counts') AS c"))).toEqual([
+      { t: null, c: null },
+    ]);
   }, 60_000);
 });

@@ -39,13 +39,21 @@ export const MIGRATION_MARK = "umbradb.migration";
 export const MARK_MIGRATION_SQL = `SELECT set_config('${MIGRATION_MARK}', pg_current_xact_id()::text, true)`;
 
 /**
+ * The condition, true exactly in a transaction that carries its own migration mark, for SQL that must tell a
+ * migration's transaction from any other: {@link MIGRATION_MARKED_SQL}, and the change-capture triggers of the digests
+ * (`src/db/change-capture.ts`), which record nothing in a migration (DT-4: a migration's writes are no block's changes).
+ * Its functions are `pg_catalog`'s, written qualified, so it means the same under any `search_path`.
+ */
+export const MIGRATION_MARKED_CONDITION =
+  `pg_catalog.current_setting('${MIGRATION_MARK}', true) IS NOT DISTINCT FROM pg_catalog.pg_current_xact_id()::text`;
+
+/**
  * Whether the transaction it runs in still carries its own mark (`marked`): true from {@link MARK_MIGRATION_SQL} to the
  * end of the migration's transaction; false once a `COMMIT` or `ROLLBACK` inside the migration's SQL ended that
  * transaction, since the mark ended with it and what runs next is another transaction, with another id. The migration
  * runner checks it after the migration's SQL, before writing the migration's row (`src/db/migrate.ts`).
  */
-export const MIGRATION_MARKED_SQL = `SELECT current_setting('${MIGRATION_MARK}', true)
-         IS NOT DISTINCT FROM pg_current_xact_id()::text AS marked`;
+export const MIGRATION_MARKED_SQL = `SELECT ${MIGRATION_MARKED_CONDITION} AS marked`;
 
 /** The name of the trigger on each guarded table. */
 export const TRUNCATE_GUARD_TRIGGER = "umbradb_truncate_not_allowed";

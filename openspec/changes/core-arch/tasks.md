@@ -322,9 +322,10 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `vitest.config.ts`; `design.md` §1 and §4 and `docs/issues/00007` name the new paths.
       **A138 covers now:** the column-type rules with their refusals, the `COLLATE "C"` key order, identity, `serial`
       and non-immutable defaults, sequences and unlogged tables (rows 1–4), the pinned session settings (row 7) and the
-      result mapping and parameter texts (row 8). **Pending:** the `jsonb` and `numeric` `CHECK`s (row 5, task 7.1); the
-      `BEFORE TRUNCATE` trigger (row 6, task 2.3, done); the zero timeouts (row 7, task 2.7); date and time as RFC 3339
-      text (row 8, task 2.2b, done); the opt-out (row 9: its declaration task 3.1, its skips task 7.1).
+      result mapping and parameter texts (row 8). **Pending:** the `jsonb` and `numeric` `CHECK`s (row 5, task 7.1,
+      done); the `BEFORE TRUNCATE` trigger (row 6, task 2.3, done); the zero timeouts (row 7, task 2.7); date and time
+      as RFC 3339 text (row 8, task 2.2b, done); the opt-out (row 9: its declaration task 3.1, its skips task 7.1, done;
+      backups carrying its rows, task 15.2).
       **For tasks 2.2b, 2.3, 2.7, 3.1 and 7.1:** put each rule in the component (`index.ts` says which file), test it in
       `test/deterministic-postgresql/` on both backends, and move its part in `component-table.test.ts` from `pending`
       to `tests`.
@@ -809,7 +810,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 7. Digests
 
-- [ ] 7.1 Change capture (shadow tables and triggers) on every module table not declared `deterministic: false`, and
+- [x] 7.1 Change capture (shadow tables and triggers) on every module table not declared `deterministic: false`, and
       `core-digest` with `core_digest.tables` and the checkpoints at h mod 14,400 = 0 (Q84, Q86; a test may shorten the
       interval only through a build flag no exported surface reaches, as A11's); the migration-time check of DT-6
       through `column-rules.ts` (no primary key, key and column types, identity and `serial` columns, floats, defaults
@@ -821,6 +822,50 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       only (Q76).
       **Acceptance:** A56 including its negative control, A57, A58, A147 (with 14.1 and 15.2 for its private and
       backup parts).
+      **Done (2026-10-25):** `core-digest`, a backbone part (`src/backbone/core-digest/`): `CORE_DIGEST`, declared with
+      `defineModule` (its id in `BACKBONE_ORDER`), requires `blocks` and provides `digest-tables` and
+      `digest-checkpoints`; its migration creates `core_digest.tables (schema, table) → (height, digest)`,
+      `core_digest.checkpoints (height, schema, table) → digest` and the schema `core_digest_shadow`; its `on-db-write`,
+      last of the block, sets each changed table's row to `SHA-256(previous ‖ CBOR(h) ‖ changes at h)` (32 zero bytes
+      before the first) and at each h with h mod 14,400 = 0 copies every row into the checkpoints, `0` included; no
+      `on-start-db` (what startup does for the digests must follow every module's migrations, which come after
+      `core-digest`'s, Q95). The interval is a build flag (`build-flags.ts`), which only a test's own build changes
+      (`vi.mock`, as A11's). DT-4's changes and DT-5's digest as pure functions: `src/determinism/digest.ts`. Change
+      capture in the database API (`src/db/change-capture.ts`): on every table of the plan's schemas not declared
+      `deterministic: false` (a partitioned table's trigger cloned onto its partitions), a row trigger with a function
+      of the table's own (`SECURITY DEFINER`, the login's) records each key's first touch in the transaction — its old
+      row, or none — in `core_digest_shadow.t_<32 hex digits>`, stamped with the transaction; nothing in a migration
+      (the migration mark), so a migration's writes are no block's changes and it may change the table's columns; after
+      each part's migrations the capture is attached, rewritten (a fingerprint), re-enabled or dropped for the opt-out
+      (the parts before `core-digest` once its migration ran); when startup ends the shadow tables are emptied of what
+      `on-start-db` wrote and the unused ones dropped; `core_digest` readable by every role. DT-6 at startup
+      (`src/db/module-rules.ts`, task 1.4's detection through the component's `databaseRefusals` with `plan.optedOut`
+      and `refusalMessage` with the module): in each migration's own transaction before its record — a migration leaving
+      a table the rules refuse rolls back unrecorded, and startup refuses with the rule's code (§11's five), module,
+      table or sequence, column, type and migration — and after each part's migrations at every startup, over the schema
+      the part writes and its own. The `jsonb` and `numeric` `CHECK`s (the component's `checks.ts`:
+      `core_chain.jsonb_numbers_ok` and `numeric_ok` with their array forms, created in the bootstrap; one
+      `umbradb_integers_<column>` `CHECK` per such column, dropped on opt-out). The contents hash records opted-out
+      tables as `[schema, table, null, null]` (`contentsHash(read, { optedOut })`). `design.md` §4 and §14, the module
+      guide's "Stored values and digests". Question Q-7.1-1 (the contents hash reads the scratch schema
+      `core_digest_shadow`; shipped A, DT-3 as written; not blocking). Issue `TBD-7.1` (a nondeterministic collation
+      compares differently on PGlite). Tests, seen failing first on the base sources (the new modules missing; startup
+      not refusing — 29 tests per backend got `started`; the component's `checks.ts` and `compareUtf8` absent):
+      `test/determinism/digest.test.ts` (hand-written CBOR and SHA-256), `test/deterministic-postgresql/checks.test.ts`
+      (A58's writes, both backends, with each rule's negative control), `startup-check.test.ts` (A58's startup half,
+      A145's), `opt-out.test.ts` (A147's core part; its 3.1 setup now makes the refused tables by hand, since startup
+      refuses them), `test/backbone/core-digest/` (`changes.property.test.ts` A56 with its negative control,
+      `digests.test.ts` and `checkpoints.build-flag.test.ts` A57, `capture.test.ts` startups), `test/db/roles-login` (a
+      `CREATEROLE` login); `component-table.test.ts` rows 5 and 9, `boundary.test.ts` the new names. Committed negative
+      controls: A56's (the trigger disabled on one table fails the property), A57's (capture skipping the opt-out
+      digests the opted-out table), each `CHECK` rule's (the functions built without it let exactly its cases through),
+      the CHECKs dropped (every refused value stored), A147's (the hash without the list refuses the table). 74 wrong
+      variants on the final sources (a scratch runner outside the clone): 71 caught, 3 equivalent (a byte comparison
+      without its length test, CBOR rows being prefix-free; `lax` for `strict` in the `jsonpath`; DT-6's check after the
+      record, in the same transaction); a first run's 4 other survivors were gaps, closed by tests.
+      **Pending:** A147's private-process part (14.1) and backup part (15.2); A56/A57 through the real runner (5.2) and
+      `core-block-commit` (10.2, `blocks`); "startup refuses" through the runner's refusal state (5.x); the ingest cost
+      of the triggers (A136, 18.3).
 
 ## 8. Admin endpoints
 
