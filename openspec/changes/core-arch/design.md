@@ -252,7 +252,9 @@ interface BlockSource {
   them to new tables, re-enables a disabled trigger and drops the trigger of a table declared `deterministic: false`;
   the parts before `core-digest` are captured once its migrations created `core_digest_shadow` (Q95). When startup
   ends, the shadow tables are emptied of what `on-start-db` callbacks wrote and those no table uses are dropped, so they
-  are empty whenever no block is open. A table's changes are read in DT-2's key order (`ONLY` for an ordinary table)
+  are empty whenever no block is open; the contents hash leaves `core_digest_shadow` out (DT-3, Q101, task 7.1a), so
+  a later change to the capture's layout keeps hashes comparable. A table's changes are read in DT-2's key order
+  (`ONLY` for an ordinary table)
   and digested by `src/determinism/digest.ts`; `core-digest` (`src/backbone/core-digest/`, migrations only, no
   `on-start-db`) has its checkpoint interval as a build flag (`build-flags.ts`, like A11's), which only a test's own
   build changes. Every role of the plan may read `core_digest`.
@@ -519,7 +521,8 @@ one only the union of the ranges has (`graph-cycle`), and a start above 0 (genes
 (decision record Q96), of a module that does not declare `startsMidChain: true`, or whose provider not active at the
 height before the start does not (`cannot-start-mid-chain`, MD-4, Q98). Startup checks the ranges that hold a height
 above the cursor (on a new database, every range from S), a range that ends at the cursor for a cycle only (RN-11
-re-delivers there), the starts above the cursor and the development-only modules active at the cursor or later (Q97).
+re-delivers there), the starts above the cursor and the development-only modules active at the cursor or later (Q97);
+the union's cycle check covers every range, past ones included, since startup orders every part by it (Q99).
 Each range's order is the backbone parts present in a fixed order — `core-chain`, `core-block-fetch`,
 `core-block-commit`, `core-private-source`, `core-key-registry`, `core-digest`, the admin parts — then Kahn's algorithm
 over the active modules, the ready one with the smallest id by UTF-8 bytes first; at `on-db-write` `core-digest` moves

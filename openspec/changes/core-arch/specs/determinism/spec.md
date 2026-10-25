@@ -46,7 +46,9 @@ THE system SHALL order rows by their primary-key columns in order, comparing int
 
 THE system SHALL compute a database's contents hash — the core's database or a private process's, under the same rules
 (owner decision Q75) — as SHA-256 of one canonical CBOR array holding, for each schema of the database except
-PostgreSQL's own (`pg_*`, `information_schema`) and `public` — module schemas and any schema an operator created —
+PostgreSQL's own (`pg_*`, `information_schema`), `public` and change capture's scratch schema `core_digest_shadow`,
+whose tables are empty whenever no block is open (owner decision Q101) — module schemas and any schema an operator
+created —
 and then each table in name order (byte order), the array `[schema, table, [column names], [rows in primary-key
 order]]`. A table whose module declared it `deterministic: false` (MD-1, owner decision Q76) SHALL appear as
 `[schema, table, null, null]`: its name is hashed, its columns and rows are not.

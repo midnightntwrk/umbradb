@@ -102,6 +102,16 @@ A private process's `core` entry has, instead of `node` and `lockstepInstances`:
 `publicDatabase` (secret), `coreTransport` (operational, address) and `testKeys` (CF-11). A private process has no key
 API listener: keys enter through configured test keys (PP-8, Q70).
 
+A process SHALL take every operational and secret field of the `core` entry from the latest `core` revision whose
+version is the build's (by start), for its whole run; the operational and secret fields of the other `core` revisions
+SHALL be validated (CF-3) but not used. The data fields of each `core` revision apply from its start, like any entry's
+(owner decision Q102).
+
+#### Scenario: Two `core` revisions with different databases
+- **WHEN** the file holds `core` revisions from 0 (`database: A`, `node: N1`) and from 9,000 (`database: B`, `node: N2`,
+  `developmentOptIn: true`), both of the build's version, and the cursor is 5,000
+- **THEN** the process opens `B`, reads from `N2` and has the development opt-in from startup to exit
+
 #### Scenario: A secret never appears
 - **WHEN** `/config` is read and the logs are collected for a process whose `database` URL contains a password
 - **THEN** the URL appears only as `[redacted]`

@@ -841,8 +841,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 - [ ] 5.2a Process items (`ProcessContext.publish`) and module API registration (`ApiRegistry` mounted on `listen.api`,
       WebSocket subscriptions, duplicate routes refused); each request's read bounded by `apiReadTimeoutMs` (DB-15).
       **Acceptance:** A74, A75; A141's request half through a registered handler.
-- [ ] 5.3 Revisions and settings; start and stop heights; the upgrade-boundary stop; SIGTERM.
-      **Acceptance:** A42, A45, A47, A48.
+- [ ] 5.3 Revisions and settings; start and stop heights; the upgrade-boundary stop; SIGTERM; the `core` entry's
+      operational fields from its latest revision of the build's version (Q102).
+      **Acceptance:** A42, A45, A47, A48, A149.
 - [ ] 5.4 Failure handling and the delivery guarantees after restart.
       **Acceptance:** A43, A44, A46.
 - [ ] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
@@ -914,6 +915,10 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** A147's private-process part (14.1) and backup part (15.2); A56/A57 through the real runner (5.2) and
       `core-block-commit` (10.2, `blocks`); "startup refuses" through the runner's refusal state (5.x); the ingest cost
       of the triggers (A136, 18.3).
+- [ ] 7.1a The owner's answer Q101 B: the contents hash leaves out `core_digest_shadow` (DT-3) — in every place that
+      lists the hashed schemas (`MODULE_TABLE_FILTER` in `src/deterministic-postgresql/catalog.ts`,
+      `src/determinism/module-tables.ts`), each other user of those lists checked to keep its own scope.
+      **Acceptance:** A150.
 
 ## 8. Admin endpoints
 

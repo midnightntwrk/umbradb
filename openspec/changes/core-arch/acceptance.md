@@ -130,7 +130,8 @@ git as pinned release assets that CI downloads and verifies.
   names. (MD-2)
 - **A22** `[CI]` A table-driven test triggers each refusal of MD-3 (missing provider, overlapping providers, cycle,
   uncovered range) and checks the code, range, module and item; a fault only in ranges that end at or below the cursor
-  is not refused, except a cycle in the range that ends at the cursor. (MD-3, Q97)
+  is not refused, except a cycle in the range that ends at the cursor and a cycle of the union of every range's
+  requirements, which orders startup (RN-3). (MD-3, Q97, Q99)
 - **A23** `[CI]` A module with `startsMidChain: false` starting above S, or at an S above 0, is refused; with `true` it
   is accepted, also when a provider it requires cannot start mid-chain but is active at the height before its start, and
   refused when such a provider starts with it; a start at or below the cursor is not checked. (MD-4, Q96, Q97, Q98)
@@ -166,6 +167,10 @@ git as pinned release assets that CI downloads and verifies.
   each refuse with `upgrade-required` (entry, needed, build), and no `core_chain.migrations` row is added. (CF-8)
 - **A34** `[CI]` PGlite and a development-only module each refuse without `developmentOptIn`, naming the feature.
   (CF-9)
+- **A149** `[CI]` With two `core` revisions of the build's version whose `database`, `node` and `developmentOptIn`
+  differ, and the cursor below the later one's start, the process opens the later revision's database and uses its
+  node and opt-in for its whole run; the earlier revision's operational fields are validated, and an invalid one
+  refuses startup. (CF-3, CF-4, Q102)
 - **A35** `[CI]` `umbradb config check` exits 0 on a valid file; on a file with one type error and one schema error it
   prints both with their paths and exits non-zero, opening no database, and says the history checks were not run; with
   `--database` it reports `changes-past` for a changed recorded entry, exits non-zero, and leaves the database unchanged
@@ -244,6 +249,9 @@ git as pinned release assets that CI downloads and verifies.
   same order on both backends, matching DT-2 (e.g. `"B" < "a" < "b"`, `false` before `true`). (DT-2)
 - **A55** `[DIFF]` The same rows give the same contents hash on both backends; changing one byte of one row changes it.
   (DT-3)
+- **A150** `[CI]` On both backends, the contents hash leaves out `core_digest_shadow`: adding a column to a shadow
+  table, or a shadow table, leaves the hash unchanged, while the same change in a module schema changes it. (DT-3,
+  Q101)
 - **A56** `[PROP]` For random sequences of inserts, updates, deletes and same-value rewrites within one block, the
   recorded changes equal the difference between the table's states before and after the block, on both backends;
   `TRUNCATE` is refused (A73), so no change escapes the triggers; **negative control:** disabling the trigger on one

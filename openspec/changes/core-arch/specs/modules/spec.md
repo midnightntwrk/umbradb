@@ -43,7 +43,8 @@ startup SHALL refuse, naming the range, the module and the item. Startup SHALL c
 above the cursor (on a new database, every range from S) and, in a range that ends at the cursor, only that its graph
 has no cycle, since RN-11 re-delivers the cursor's callbacks in RN-3's order; a fault that only ranges ending at or
 below the cursor have was judged by the builds that processed them, as a build carries one version of each module (Q43,
-Q97).
+Q97), except a cycle of the union of every range's requirements, past ranges included, which RN-3 refuses because it
+orders every part's migrations and `on-start-db` at startup (Q95, Q99).
 
 #### Scenario: A consumer starts before its provider
 - **WHEN** `consumer` starts at 10 and its provider starts at 20
