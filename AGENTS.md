@@ -20,10 +20,12 @@ or better**. Each run records the exact model id it used, in the PR or `AUTONOMO
    source and cite `file:line`; anything unverified is marked "unconfirmed" and not built on.
    **Gate:** the cold adversarial lane reviews the spec (bounded review, below) and the owner
    approves it. No implementation code before this gate.
-2. **Build.** One `tasks.md` task at a time, test first: write the test for each acceptance criterion,
-   watch it fail for the intended reason, then implement until it passes. For a reported bug, the first
-   test reproduces the bug and is seen failing before any fix is written. Never weaken or edit an
-   acceptance test to force green. One task is one atomic change set, with no unrelated edits. No
+2. **Build.** One `tasks.md` task per change set, test first: write the test for each acceptance
+   criterion, watch it fail for the intended reason, then implement until it passes. For a reported bug,
+   the first test reproduces the bug and is seen failing before any fix is written. Never weaken or edit
+   an acceptance test to force green. One task is one atomic change set, with no unrelated edits.
+   Independent tasks may be built at the same time, each in its own worktree and branch; each is still
+   verified on its own and integrated onto the change's branch one at a time, so history stays linear. No
    placeholders, stubs, or `TODO`s. Run `npm run typecheck` and `npm test`, and keep their output and a
    mapping from each acceptance criterion to the test that proves it for the PR.
 3. **Automated checks.** Every required CI job is green before stage-4 review starts: conformance

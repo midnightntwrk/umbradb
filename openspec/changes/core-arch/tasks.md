@@ -1,9 +1,11 @@
 # Tasks — CORE-ARCH: the standalone indexer's core architecture
 
 No implementation code before the stage-1 gate (the cold adversarial review of this spec, its fix check, and the owner's
-approval). Then one task at a time, test first: write the tests for the task's criteria, watch them fail for the
-intended reason, implement until they pass. One task is one atomic change set; no placeholders, stubs or `TODO`s. After
-each task: `npm run typecheck` and `npm test` green, and the task checked here with the criteria it demonstrated.
+approval). Then one task per change set, test first: write the tests for the task's criteria, watch them fail for the
+intended reason, implement until they pass. One task is one atomic change set; no placeholders, stubs or `TODO`s.
+Independent tasks may be built at the same time in separate worktrees, each verified on its own and integrated one at a
+time (AGENTS.md stage 2). After each task: `npm run typecheck` and `npm test` green, and the task checked here with the
+criteria it demonstrated.
 
 Order: sections 0–9 build the platform; 10–16 build the chain, ledger, contract, private, backup and browser parts on
 it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system checks; 19 closes out.
