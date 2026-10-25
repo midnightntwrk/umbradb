@@ -51,9 +51,17 @@ keeping range partitioning by height and the parent-hash and genesis checks.
 | `on-stop-height` | After the commit of an entry's stop height; no `block` items | Read handle at h | In series: stopping modules in reverse graph order, then the core |
 | `on-key` | Private: a key became pending (PP-8) | Read handle at the cursor | In series |
 
-Parallel callbacks run with `Promise.all` over each "wave" of Kahn's algorithm restricted to the modules registered at
-that point; a module waits only for the modules it requires (transitively, through items). The lockstep wait (PP-6)
-sits between `on-compute` and `BEGIN`.
+Parallel callbacks run in the "waves" of Kahn's algorithm restricted to the modules registered at that point: a module
+goes one wave after the latest registered module on a requirement path from it, through modules that do not register
+the point too, so it waits for every module it requires (transitively, through items); each wave's callbacks start in
+RN-3's order and are awaited together (`Promise.allSettled`) before the next wave starts, so a module may also wait for
+modules of the previous wave it does not require. The backbone parts registered at such a point run first, in series in
+their fixed order (RN-3's Kahn order covers the other modules). A failing callback ends the point: no later callback in
+series and nothing of the next wave runs; the wave's other callbacks are awaited, never cancelled (RN-17), and the first
+failure in the point's order is reported with the point and the module (RN-8). At `on-stop-height` the core's parts run
+in their fixed order after the stopping modules. Each callback is called as a method of its declaration's `points`,
+with its module's process context first (`src/runner/dispatch.ts`, task 5.1). The lockstep wait (PP-6) sits between
+`on-compute` and `BEGIN`.
 
 ## 3. Block source and ingest
 

@@ -750,8 +750,42 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 5. Runner
 
-- [ ] 5.1 Point dispatch and order within points; parallel waves.
+- [x] 5.1 Point dispatch and order within points; parallel waves.
       **Acceptance:** A38.
+      **Done (2026-10-25):** `src/runner/dispatch.ts`: given a resolved range and a point, `scheduleAt` gives the parts
+      registered there in RN-3's order as waves — in series one part per wave, `writeOrder` at `on-db-write`
+      (`core-digest` last), `order` at the other points in series; at `on-fetch`, `on-parse` and `on-compute`
+      (`PARALLEL_POINTS`, checked against `design.md` §2's table) the backbone parts in series in their fixed order,
+      then the other modules in Kahn's waves restricted to the modules registered at the point, a module one wave
+      after the latest registered module on a requirement path from it, through modules that do not register the
+      point too; `startHeightSchedule` (the core's parts first when the core's entry starts, then the starting
+      modules in order, RN-9) and `stopHeightSchedule` (the stopping modules in reverse order, then the core's parts
+      in their fixed order, RN-10); `seriesOf` for an order given (startup's `on-start-api`); `scheduleAt` refuses
+      `on-start-db` (the migration runner's) and the start and stop points. `runSchedule(schedule, { contextOf,
+      invoke })` calls each callback as a method of its declaration's `points`, its module's process context first,
+      then the arguments `invoke` hands it (task 5.2's handles, block context and sink); a wave's callbacks start in
+      order and are all awaited (`Promise.allSettled`); a failure ends the point — nothing later in series, nothing
+      of the next wave, the wave's others awaited, never cancelled — and rejects with a `CallbackFailure` (point,
+      module, the error unchanged as `cause`) for the first failing part in the point's order. `design.md` §2's wave
+      paragraph says what was built; the `src/runner/**` coverage floor (90/85) is added. Tests, seen failing first
+      (`tsc`: `src/runner/dispatch.js` missing; both suites failed to load): `test/runner/dispatch.test.ts` (the
+      points' modes against design §2's table; `this`, the context and the arguments at every point; RN-3's two
+      scenarios; series and waves, transitive waits, the backbone at parallel points, each range's providers, a core
+      module; a failing callback in series and in a wave, two failures, a wave that does not settle, a failing
+      backbone part, a malformed schedule; the start and stop orders) and `test/runner/order.property.test.ts` (A38:
+      random acyclic graphs of up to 12 modules through `resolveGraph`, seed 20261025, 200 runs, against the test's
+      own oracle, with committed negative controls: ties by the order given, by Czech and by numeric collation fail
+      only the `on-db-write` order; all callbacks at once, and waits on direct providers only, fail only the parallel
+      waits; `core-digest` in its backbone place fails only "core-digest last"). Wrong variants (a scratch runner
+      outside the clone): 59 of 62 caught on the first run; of the 3 survivors one was equivalent (a filter of empty
+      waves, which never occur; removed) and two were gaps — a core module's `core-` id read as a backbone part's, an
+      unfrozen wave — closed by tests; on the final sources 61 of 61 caught. Question Q-5.1-1 raised (the read
+      handles RN-4 and design §2 give `on-finalized`, `on-start-height`, `on-stop-height` and `on-key` are not in
+      `PointCallbacks`; not blocking 5.1).
+      **Pending:** the finalized loop calling the dispatch per height with the handles, block context and item sink
+      `invoke` hands each callback, and A38 through it (5.2); the process contexts shared with `migrationPart`, and
+      `on-start-api` (5.2a); which entries start and stop at a height, and their arguments (5.3); the halt on a
+      `CallbackFailure` (5.4); the slow-block watchdog around `invoke` (5.5).
 - [ ] 5.2 The finalized loop over the block-source interface; `InMemoryBlockSource` with its `core-block-commit`
       cursor table; block context and item sink; per-point handles; the chain-data envelope of module API responses.
       **Acceptance:** A36, A37, A39, A40, A41, A49; RN-16 is covered by A75.
