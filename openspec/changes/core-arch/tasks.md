@@ -481,7 +481,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       stay until task 17.2. **Pending:** the refused state ("stays up, not ready", "startup refuses") and the halt on
       `writer-lock-lost` (task 5.x); the configuration's `developmentOptIn` and `fullPageWritesOffAllowed` (task 4.x);
       "continues from the cursor" with the runner's cursor (tasks 5.2, 5.4, 10.2, 18.1); the browser's Web Locks (task
-      16.1). **Question:** Q92 (`busy_timeout` 100 ms instead of design §4's 0), not blocking, shipped A.
+      16.1). **Question, since decided:** Q92 (`busy_timeout` 100 ms instead of design §4's 0): A, by the
+      owner (2026-10-25).
 - [ ] 2.6 Write handles and their closing.
       **Acceptance:** A10.
 - [ ] 2.7 Timeouts by connection role (Q71): a read option bounding one read by `statement_timeout` and
