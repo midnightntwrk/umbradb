@@ -30,9 +30,12 @@ export const ERROR_CODES = [
   "invalid-parameter",
   /**
    * A setting refused before anything runs: a `database` URL that overrides a pinned session setting, or a database
-   * login that cannot create or use the module roles and schemas (`reason: writer-privileges`, decision record Q90).
+   * login that cannot create or use the module roles and schemas (`reason: writer-privileges`, decision record Q90); or
+   * a configuration file that cannot be loaded (`reason`: `file-not-found`, `load-failed`, `no-default-export`; CF-1).
    */
   "invalid-configuration",
+  /** The configuration file's default export holds a value that is not plain data, at `details.path` (CF-1). */
+  "not-plain-data",
   /** A `TRUNCATE` outside a migration, refused by this component's trigger (DB-14, `./block-transactions.ts`). */
   "truncate-not-allowed",
   // Startup refusals of module ids, item names and schema names (DB-8, MD-2, `src/db/roles.ts`).

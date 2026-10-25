@@ -25,9 +25,9 @@ THE system SHALL NOT load a module by name at run time.
 ### Requirement: MD-2 Declarations are validated at startup
 
 IF a declaration has an id used by another module, an id or item name that does not match the pattern of DB-8, a user
-module's id that starts with `core-` or `on-`, a schema name that collides as DB-8 describes, no required item, an item
-provided without a lifetime, a `table` item without a kind, or a field of `configSchema` without a `kind`, THEN startup
-SHALL refuse and name the module and the cause.
+module's id that is `core` (the `core` entry's id, CF-2) or starts with `core-` or `on-`, a schema name that collides as
+DB-8 describes, no required item, an item provided without a lifetime, a `table` item without a kind, or a field of
+`configSchema` without a `kind`, THEN startup SHALL refuse and name the module and the cause.
 
 #### Scenario: A user module named like a core module
 - **WHEN** the host ships a user module with id `core-x`

@@ -452,13 +452,15 @@ committed data only; the module guide gives the rules, and nothing else enforces
 declare `deterministic: false` for data that is not a function of the chain, such as the time a request arrived (Q76;
 §4's component table says what it skips); the module guide says no deterministic table may be computed from such a
 table. Ids and item names match `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, so the schema name (`-` → `_`) is one-to-one (DB-8).
-`defineModule(declaration)` returns it with a typed `entry({ start, stop?, config })` builder (CF-2); its type also
+`defineModule(declaration)` returns it with a typed `entry({ start, stop?, config })` builder (CF-2), a non-enumerable
+property the validation does not see (task 4.1); its type also
 refuses a callback under a name that is not a point in a declaration built first and passed later, which
 `Partial<PointCallbacks>` alone accepts (A20). Declarations are validated at startup without their types
 (`src/modules/validation.ts`, task 3.1), so a module written in JavaScript or built at run time is held to the same
 declaration: the set has three lists — UmbraDB's backbone parts, its core modules, the host's user modules — and every
 shape the type forbids is refused with `invalid-declaration`, naming the field; then MD-2's causes, one rule and one
-code each (`bad-id` through the schema plan's own check, `reserved-prefix` for user modules only, `duplicate-id`,
+code each (`bad-id` through the schema plan's own check, `reserved-prefix` for user modules only — also for the id
+`core`, the `core` entry's (task 4.1) —, `duplicate-id`,
 `no-requirement` except for backbone parts, `item-no-lifetime`, `table-item-no-kind`, `field-no-kind` read as
 `schema.shape[field].meta().kind`, and MD-1's `unknown-point`; Q94). `src/modules/adapters.ts` turns a validated
 declaration into the schema plan's module (`schemaModule`; `schemaModules` leaves out `OWN_PARTS`) and the migration
@@ -497,9 +499,28 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
 ## 7. Configuration
 
 - **Loading.** `await import(pathToFileURL(file).href)` on Node.js ≥ 24 with type stripping (v24.9.0 reports
-  `process.features.typescript === "strip"`); erasable TypeScript only.
-- **Plain-data check.** A recursive walk accepting plain objects, arrays, strings, booleans, `null` and safe
-  non-negative integers, reporting the first offending path (CF-1).
+  `process.features.typescript === "strip"`); erasable TypeScript only. `loadConfig({ file?, cwd? })`
+  (`src/config/load.ts`, task 4.1) resolves the file against the working directory (default `umbradb.config.ts`; 4.4's
+  `--config` gives another), imports it, takes its default export and returns `{ file, data }`, `data` the plain-data
+  check's frozen copy. It refuses with `invalid-configuration` naming the file and a `reason` — `file-not-found`,
+  `load-failed` (the error as the cause, its `code` as `errorCode`; Node.js's own for syntax it cannot erase),
+  `no-default-export` — or with `not-plain-data`. The browser build bundles its configuration and calls `plainData`.
+- **Plain-data check.** A walk accepting plain objects (prototype `Object.prototype` or `null`), arrays (prototype
+  `Array.prototype`), strings, booleans, `null` and the integers from 0 to 2^53 − 1 (−0 read as 0), reporting the first
+  offending place, depth first in property order, as `not-plain-data` with `details.path` (`entries[1].config.onError`;
+  a key that is not an identifier as `["feed-url"]`; `""` for the default export) and `details.found` (CF-1). Its
+  rules (`PLAIN_DATA_RULES`, `src/config/plain-data.ts`): an empty array slot, a property of an array besides its
+  elements, a symbol key, a non-enumerable property, a getter or setter (never called), `undefined`, a function, a
+  bigint, a symbol, a non-integer, a negative integer, an integer above 2^53 − 1 (not exact: 2^53 + 1 reads as 2^53), a
+  class instance, a cycle. It returns a deeply frozen copy, so later changes to the module's export reach nothing.
+- **Builders** (`src/config/entries.ts`, task 4.1). `defineConfig` returns its argument; `coreEntry`, `versionEntry`
+  and a module's `entry` build a new entry — the id and version theirs, every other field given passed through for
+  validation, a field that is `undefined` left out — and return plain data. `coreEntry`'s version is
+  `buildCoreVersion()` (`src/config/build.ts`: `UMBRADB_VERSION`, a constant held equal to `package.json`, since the
+  browser cannot read the file; no ledger versions until tasks 12.1–12.2); its `config` is typed as CF-4's table, a
+  public process's fields or a private one's. `defineModule` adds `entry` to the declaration as a non-enumerable
+  property, typed by `z.input` of its `configSchema`. `versionEntry`'s `version` is a `CoreVersion` for `core`, and its
+  `config` is typed as plain data only.
 - **Schemas.** zod 4 (installed 4.4.3; Q45): a module's `configSchema` is a `z.object` whose fields carry `kind` in
   their metadata (`schema.shape[field].meta().kind`, verified on 4.4.3); only revisions whose version is this build's
   are validated against this build's schema; a `versionEntry` revision is compared with its recorded row, or — when it

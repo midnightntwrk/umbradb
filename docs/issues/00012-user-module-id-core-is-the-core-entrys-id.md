@@ -1,6 +1,7 @@
 # 00012 — A user module may be named `core`, the id of the `core` configuration entry
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed by task 4.1 of `openspec/changes/core-arch` (2026-10-25): declaration validation refuses
+  a user module whose id is `core` with `reserved-prefix`, and MD-2 and A21 name the case (see "Resolution").
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-25, during task 3.2 of `openspec/changes/core-arch` (graph resolution per height range), while
   deciding what the graph does with an entry whose id is `core`.
@@ -33,3 +34,15 @@ UmbraDB's own), or name the case in MD-2 ("a user module's id that is `core` or 
 row in A21's table. Task 4.1 or 4.3 could also refuse a module entry whose id is `core`, but the declaration is where the
 name is chosen. The requirement graph (task 3.2) takes module entries only and throws for an entry whose id no module of
 the build has, so with the fix an entry `core` can never reach it as a module's.
+
+## Resolution
+
+Fixed in the declaration, where the name is chosen, as suggested: MD-2's `reserved-prefix` rule
+(`src/modules/validation.ts`, `reservedPrefix`) now refuses a user module whose id is `CORE_ENTRY_ID` (`core`,
+`src/config/entries.ts`, the id `coreEntry` fills), with `details: { module: "core" }` and a message saying that the
+configuration identifies an entry by its id and start (CF-2, CF-5) and could not tell the module's revisions from the
+core's. MD-2's text and A21 name the case, and A21's table has its row (`test/modules/validation.test.ts`, "the id core,
+the core entry's"); the controls keep `cores`, `corelog`, `online-stats` and `on` as ordinary user ids. Refusing it in
+the configuration's entries instead was not possible: an entry `{ id: "core" }` is the core's own, so the entries cannot
+tell a module of that name from the core. Backbone parts and core modules are UmbraDB's own and are not checked (none is
+named `core`).

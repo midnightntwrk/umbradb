@@ -17,12 +17,12 @@ import { declaration, userModules } from "./declarations.js";
 
 /**
  * A21 (MD-2; task 3.1): declarations are validated at startup, and each cause MD-2 names refuses with its code, naming
- * the module and what is wrong — a duplicate id, a user module's id starting with `core-` or `on-`, no requirement,
- * an item without a lifetime, a `table` item without a kind, a settings field without a kind. MD-2's other causes are
- * checked by the same validation (`bad-id`, below) or by the schema plan it feeds (`schema-collision` and
- * `shared-item-migrations-differ`, `planSchemas`, task 2.3, A15). Everything else the declaration's type forbids is
- * refused as well (`invalid-declaration`), so a module built without types is held to the same declaration (A20).
- * "Startup refuses" is the runner's (task 5.x); here the validation is called directly.
+ * the module and what is wrong — a duplicate id, a user module's id that is `core` (the `core` entry's, task 4.1) or
+ * starts with `core-` or `on-`, no requirement, an item without a lifetime, a `table` item without a kind, a settings
+ * field without a kind. MD-2's other causes are checked by the same validation (`bad-id`, below) or by the schema plan
+ * it feeds (`schema-collision` and `shared-item-migrations-differ`, `planSchemas`, task 2.3, A15). Everything else the
+ * declaration's type forbids is refused as well (`invalid-declaration`), so a module built without types is held to the
+ * same declaration (A20). "Startup refuses" is the runner's (task 5.x); here the validation is called directly.
  */
 
 /** The refusal `run` throws, or undefined when it returns. */
@@ -97,6 +97,13 @@ const A21: readonly Case[] = [
     code: "reserved-prefix",
     details: { module: "on-chain-stats", prefix: "on-" },
     says: ['user module on-chain-stats has an id starting with "on-"', "point names", "choose an id"],
+  },
+  {
+    name: "the id core, the core entry's (docs/issues/00012)",
+    set: userModules([declaration("core")]),
+    code: "reserved-prefix",
+    details: { module: "core" },
+    says: ['user module core has the id "core"', "the core's own configuration entries", "choose another id"],
   },
   {
     name: "no requirement: a user module",
@@ -248,8 +255,9 @@ describe("A21: each refusal of MD-2, with its code and names", () => {
       backbone: [declaration("core-chain", { requires: [] })],
       // UmbraDB's own core modules carry the core- prefix.
       core: [declaration("core-chain-events")],
-      // Only "core-" and "on-" are reserved: "core", "corelog", "online-stats" and "on" are user ids like any.
-      user: [declaration("core"), declaration("corelog"), declaration("online-stats"), declaration("on")],
+      // Only the id "core" and the prefixes "core-" and "on-" are reserved: "cores", "corelog", "online-stats" and
+      // "on" are user ids like any.
+      user: [declaration("cores"), declaration("corelog"), declaration("online-stats"), declaration("on")],
     };
     const validated = validateDeclarations(set);
     expect(validated).toEqual(set);

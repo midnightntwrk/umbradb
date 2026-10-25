@@ -125,8 +125,9 @@ git as pinned release assets that CI downloads and verifies.
 
 - **A20** `[STATIC]` A type test shows a declaration with an unknown point name is a type error; `[CI]` the same
   declaration built without types is refused at startup with `unknown-point`. (MD-1)
-- **A21** `[CI]` A table-driven test triggers each refusal of MD-2 (duplicate id, `core-` and `on-` prefixes, no
-  requirement, item without lifetime, table item without kind, field without kind) and checks its code and names. (MD-2)
+- **A21** `[CI]` A table-driven test triggers each refusal of MD-2 (duplicate id, the id `core`, `core-` and `on-`
+  prefixes, no requirement, item without lifetime, table item without kind, field without kind) and checks its code and
+  names. (MD-2)
 - **A22** `[CI]` A table-driven test triggers each refusal of MD-3 (missing provider, overlapping providers, cycle,
   uncovered range) and checks the code, range, module and item; a fault only in ranges that end at or below the cursor
   is not refused, except a cycle in the range that ends at the cursor. (MD-3, Q97)

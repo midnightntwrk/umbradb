@@ -5,7 +5,8 @@
  * `ProcessContext` also has `publish` for `process` items (MD-7). Ids and item names match DB-8's pattern
  * (`src/db/roles.ts`).
  *
- * {@link defineModule} is the module author's entry point: it returns the declaration it is given, and its type refuses
+ * {@link defineModule} is the module author's entry point: it returns the declaration it is given, with the module's
+ * typed `entry` builder for the configuration (CF-2) added as a property enumeration does not see, and its type refuses
  * a callback under a name that is not a point (A20) — also in a declaration built first and passed later, which
  * `Partial<PointCallbacks>` alone would accept. Startup validates every declaration again without the types
  * (`./validation.ts`), so a module written in JavaScript or built at run time is held to the same declaration.
@@ -16,6 +17,7 @@
  */
 
 import type { z } from "zod";
+import { type EntryBuilder, moduleEntryBuilder } from "../config/entries.js";
 import type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "../db/api.js";
 
 /** The points, in `design.md` §2's order: the steps of the runner where callbacks attach (RN-1). */
@@ -209,11 +211,35 @@ export type KnownPointsOnly<D extends ModuleDeclaration> = {
   };
 };
 
+/** A declaration `defineModule` returned: the declaration, with its `entry` builder (CF-2). */
+export type DefinedModule<D extends ModuleDeclaration> = D & {
+  /**
+   * The module's configuration entry for one revision (CF-2): `{ id, start, stop?, version, config }`, its id and
+   * version the declaration's, its `config` typed by the module's settings schema. A module package exports it.
+   */
+  readonly entry: EntryBuilder<D>;
+};
+
 /**
- * Declares a module (MD-1): returns `declaration` itself. Its type checks the declaration — and, unlike
+ * Declares a module (MD-1): returns `declaration` itself, with its `entry` builder (CF-2) defined on it as a
+ * non-enumerable, read-only property — so `Object.keys`, a spread, JSON and the validation (`./validation.ts`, whose
+ * known properties do not include it) see the declaration unchanged. Its type checks the declaration — and, unlike
  * `ModuleDeclaration` alone, refuses a callback under a name that is not a point also when the declaration was built
- * first and passed later (A20). Startup validates it again at run time (`./validation.ts`).
+ * first and passed later (A20). Startup validates it again at run time. Throws a `TypeError` for a declaration that
+ * cannot take a property (frozen, sealed or not extensible): freeze it after `defineModule`.
  */
-export function defineModule<D extends ModuleDeclaration>(declaration: D & KnownPointsOnly<D>): D {
-  return declaration;
+export function defineModule<D extends ModuleDeclaration>(declaration: D & KnownPointsOnly<D>): DefinedModule<D> {
+  if (!Object.isExtensible(declaration)) {
+    throw new TypeError(
+      `defineModule adds the entry builder to the declaration of ${String(declaration.id)}, which is frozen, sealed or ` +
+        "not extensible (CF-2): freeze the declaration after defineModule, not before",
+    );
+  }
+  Object.defineProperty(declaration, "entry", {
+    value: moduleEntryBuilder<D>(declaration),
+    enumerable: false,
+    writable: false,
+    configurable: true,
+  });
+  return declaration as DefinedModule<D>;
 }

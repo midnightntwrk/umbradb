@@ -11,20 +11,22 @@
  *
  * **MD-2's causes**, each a rule of {@link DECLARATION_RULES} with its own code, checked in that order over every
  * declaration once their shapes are valid: an id or item name DB-8's pattern does not allow (`bad-id`, the same check
- * as the schema plan's, `src/db/roles.ts`); a user module's id starting with `core-` or `on-` (`reserved-prefix`); an
- * id another declaration has (`duplicate-id` — refused here as itself, before the schema plan would call it a schema
- * collision); a module, or a core module, that requires nothing (`no-requirement`; backbone parts may); an item without
- * a lifetime (`item-no-lifetime`); a `table` item without a kind (`table-item-no-kind`); a settings field without a
- * kind (`field-no-kind`, read as `schema.shape[field].meta().kind`, design §7); and a callback under a name that is not
- * a point (`unknown-point`, MD-1). MD-2's last cause, a schema name that collides, is the schema plan's
- * (`planSchemas`, with `shared-item-migrations-differ`), which takes the declarations of one database through
- * `./adapters.ts`; the requirement graph is task 3.2's.
+ * as the schema plan's, `src/db/roles.ts`); a user module's id that is `core` — the id of the core's own configuration
+ * entries (CF-2) — or starts with `core-` or `on-` (`reserved-prefix`); an id another declaration has (`duplicate-id`
+ * — refused here as itself, before the schema plan would call it a schema collision); a module, or a core module, that
+ * requires nothing (`no-requirement`; backbone parts may); an item without a lifetime (`item-no-lifetime`); a `table`
+ * item without a kind (`table-item-no-kind`); a settings field without a kind (`field-no-kind`, read as
+ * `schema.shape[field].meta().kind`, design §7); and a callback under a name that is not a point (`unknown-point`,
+ * MD-1). MD-2's last cause, a schema name that collides, is the schema plan's (`planSchemas`, with
+ * `shared-item-migrations-differ`), which takes the declarations of one database through `./adapters.ts`; the
+ * requirement graph is task 3.2's.
  *
  * **Who declares what.** The set has three lists: UmbraDB's own backbone parts, the core modules it ships, and the
  * host's user modules. Only user modules are refused a reserved prefix, and only backbone parts may require nothing
  * (CORE-ARCH §4.11: `core-chain` and the admin endpoints' parts require no item).
  */
 
+import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkNames } from "../db/roles.js";
 import { type ErrorCode, UmbraError } from "../db/errors.js";
 import {
@@ -380,13 +382,27 @@ const badId: DeclarationRule = {
 
 const PREFIXES = ["core-", "on-"];
 
-/** MD-2: a user module's id starting with `core-` or `on-`. */
+/**
+ * MD-2: a user module's id that is `core` or starts with `core-` or `on-`. `core` is the id of the core's own entries in
+ * the configuration (CF-2), which identifies an entry by its id and start (CF-5): a module with that id could not be
+ * told from the core there (docs/issues/00012).
+ */
 const reservedPrefix: DeclarationRule = {
   code: "reserved-prefix",
   check: (declarations) =>
     first(declarations, ({ origin, declaration: { id } }) => {
+      if (origin !== "user") return undefined;
+      if (id === CORE_ENTRY_ID) {
+        return new UmbraError(
+          "reserved-prefix",
+          `the user module core has the id "core", which is the id of the core's own configuration entries: the ` +
+            "configuration identifies each entry by its id and start, so it could not tell this module's revisions " +
+            "from the core's (MD-2, CF-2, CF-5); choose another id",
+          { module: id },
+        );
+      }
       const prefix = PREFIXES.find((candidate) => id.startsWith(candidate));
-      if (origin !== "user" || prefix === undefined) return undefined;
+      if (prefix === undefined) return undefined;
       return new UmbraError(
         "reserved-prefix",
         `the user module ${id} has an id starting with ${JSON.stringify(prefix)}: ids starting with "core-" are ` +

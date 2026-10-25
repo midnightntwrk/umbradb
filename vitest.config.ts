@@ -76,6 +76,8 @@ const CORE_ARCH = {
   "**/src/db/durability-probe.ts": { lines: 97, branches: 92, perFile: true },
   // §13's default for `src/**`, added with the modules' directory (task 3.1).
   "**/src/modules/**": { lines: 90, branches: 85, perFile: true },
+  // §13's default for `src/**`, added with the configuration's directory (task 4.1).
+  "**/src/config/**": { lines: 90, branches: 85, perFile: true },
   // The `deterministic_postgresql` component (task 2.2a, owner decision Q69), held above the default like determinism;
   // `UmbraError` moved into it (decision record Q79), and the `errors` floor moved with the class.
   "**/src/deterministic-postgresql/**": { lines: 95, branches: 90, perFile: true },

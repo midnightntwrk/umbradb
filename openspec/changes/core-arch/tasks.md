@@ -694,8 +694,52 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 4. Configuration
 
-- [ ] 4.1 `defineConfig`, `coreEntry`, `versionEntry`, the module `entry` builder; the loader; the plain-data check.
+- [x] 4.1 `defineConfig`, `coreEntry`, `versionEntry`, the module `entry` builder; the loader; the plain-data check.
       **Acceptance:** A26, A27.
+      **Done (2026-10-25):** `src/config/` (design §1, §7). `entries.ts`: `defineConfig` (returns its argument),
+      `coreEntry` (the id `core`, `CORE_ENTRY_ID`, and the build's core version), `versionEntry` (a version the build
+      does not carry: a `CoreVersion` for `core`, a semver string for a module; its `config` typed as plain data and
+      absent for a scheduled revision), `moduleEntryBuilder`, and the types `Entry`, `UmbraConfig` and `CoreSettings`
+      (CF-4's table: a public process's fields with `node`, or a private one's with `instanceId`, each excluding the
+      other's); every builder returns a new plain entry — its own id and version, every other field given passed
+      through for task 4.2 to refuse, a field that is `undefined` left out. `build.ts`: `buildCoreVersion()`
+      (`{ umbradb, ledgers }`), with `UMBRADB_VERSION` a constant held equal to `package.json` (the browser cannot
+      read the file) and no ledger version until tasks 12.1–12.2. `defineModule` (`src/modules/declaration.ts`) adds
+      the module's `entry` builder to the declaration it returns, a non-enumerable, read-only property typed by
+      `z.input` of its `configSchema`, so validation and copies see the declaration unchanged; a frozen declaration
+      gets a `TypeError`. `plain-data.ts`: `plainData(value, file?)`, CF-1's definition as fourteen rules checked at
+      each place, depth first in property order (`PLAIN_DATA_RULES`: an empty array slot, a property of an array
+      besides its elements, a symbol key, a non-enumerable property, a getter or setter — never called —,
+      `undefined`, a function, a bigint, a symbol, a non-integer, a negative integer, an integer above 2^53 − 1, a
+      class instance, a cycle), refusing with `not-plain-data` and `details { path, found, file? }`
+      (`entries[1].config.onError`; `["feed-url"]` for a key that is not an identifier; `""` for the default export)
+      and returning a deeply frozen copy (−0 as 0, a key `__proto__` kept as data). `load.ts`: `loadConfig({ file?,
+      cwd? })` — `umbradb.config.ts` in the working directory by default, imported (on Node.js through its type
+      stripping), its default export checked and returned as `{ file, data }`; `invalid-configuration` with
+      `details.reason` `file-not-found`, `load-failed` (the cause and its `errorCode`; Node.js's refusal of an `enum`
+      adds "erasable TypeScript only") or `no-default-export`. One code joins `ERROR_CODES`, `not-plain-data`
+      (already in design §11). `docs/issues/00012` closed: MD-2's validation refuses a user module whose id is `core`
+      with `reserved-prefix`, and MD-2's text and A21 name the case. Tests, seen failing first (`tsc` exit 2, 41
+      lines: the `src/config/` modules missing, 12 `@ts-expect-error` lines unused, `entry` missing on declarations,
+      `not-plain-data` not an `ErrorCode`; three suites failed to load; the compiler test found `Cannot find module`;
+      A21's `core` row accepted): `test/config/plain-data.test.ts` (A26's seven values, each in a configuration file
+      loaded by `loadConfig`, with code, path, found and words; 19 more values, one rule each; paths; accepted values
+      and the frozen copy; a getter never read; its committed negative control: the check without one rule fails
+      exactly that rule's rows), `test/config/builders.test.ts` (A27: `@ts-expect-error` on a misspelled core field,
+      a wrong field type and a module `entry` given another module's settings — each shown needed, its error the
+      intended one on its line — and the committed negative control, a builder typed loosely that accepts all three;
+      the builders at run time), `test/config/typed-config.test.ts` (the TypeScript compiler on a configuration file:
+      each fault at its line with its words, the corrected file clean), `test/config/load.test.ts` (the loader; and in
+      a plain Node.js process, the loader bundled with esbuild: erasable TypeScript loads, an `enum` is refused), and
+      `test/modules/validation.test.ts` (A21's `core` row). 97 wrong variants (a scratch runner outside the clone): 90
+      caught on the first run; the 7 survivors were gaps — array properties named like elements (`"01"`, `"1.5"`), a
+      getter read, and four in the types (`node` and `instanceId` required; the exclusions, which only an object built
+      first exercises) — closed by tests; on the final sources 101 of 101 are caught (4 variants added for the other
+      exclusions), none equivalent.
+      **Pending:** "startup refuses" through the runner's refused state (task 5.x, which calls the loader); the
+      entries' shape, the settings schemas, the `core` fields' kinds, defaults and validation, and the redaction
+      (4.2); the history, the effective stops for the graph and the version check (4.3); `umbradb config check` and
+      `--config` (4.4); the ledger versions of the core version (12.1–12.2).
 - [ ] 4.2 Schema validation with kinds, defaults and the `core` fields of CF-4; secret redaction helper.
       **Acceptance:** A28; A29 (completed in 8.1).
 - [ ] 4.3 `core-chain`'s configuration history: revisions, future-only comparison, `data_hash`, the version check, the
