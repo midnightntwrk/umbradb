@@ -132,7 +132,7 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
     const db = openPostgres({ url: container.getConnectionUri(), committedHeight: noHeight, ...options });
     try {
       const { durabilityWarnings } = await startWriter(db);
-      await startDatabase(db, { plan: planSchemas([]), parts: [], committedVersions: new Map() });
+      await startDatabase(db, { plan: planSchemas([]), parts: [], committedVersions: new Map(), handles: { height: null } });
       const [row] = await db.read((read) => read.query("SELECT to_regclass('core_chain.migrations') IS NOT NULL AS made"));
       expect(row?.made).toBe(true);
       return durabilityWarnings;

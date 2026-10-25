@@ -483,8 +483,34 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       "continues from the cursor" with the runner's cursor (tasks 5.2, 5.4, 10.2, 18.1); the browser's Web Locks (task
       16.1). **Question, since decided:** Q92 (`busy_timeout` 100 ms instead of design §4's 0): A, by the
       owner (2026-10-25).
-- [ ] 2.6 Write handles and their closing.
+- [x] 2.6 Write handles and their closing.
       **Acceptance:** A10.
+      **Done (2026-10-25):** `src/db/write-handles.ts` — `openBlockWrites(tx, plan, { height, onClosedUse })` runs the
+      parts' `on-db-write` callbacks inside the block transaction the runner opens, one `write(part, callback)` at a time
+      (one asked for while another runs is refused before anything is sent): each callback first sets its part's role —
+      `SET LOCAL ROLE` to its write role (a shared item's provider: the item's, Q89), or `RESET ROLE` for `core-chain`
+      and `core-digest`, which write as the login — so no part runs under the role the one before it left, and after a
+      callback that returned `RESET ROLE` returns the block to the login, also undoing a role the callback selected
+      itself; `runOnStartDb` runs `on-start-db` the same way in a transaction of its own, and `startDatabase` calls it
+      (`StartupInput.handles`: the cursor at startup and the report hook; `MigrationPart.onStartDb` takes a
+      `SchemaWriteHandle`). A handle offers exactly `height`, `query` and `execute` — not the transaction, not the
+      migrations' script path, never the migration mark (A73's block test now goes through it). When its callback
+      returns or throws the handle closes: every later `query` or `execute` — a stored reference, a timer, during the
+      block or after it — fails at once with `handle-closed` (`details { handle, module, point }`, `writeHandleClosed` in
+      `src/db/errors.ts`) before anything is sent, so never under the role of the part that runs now, and on PGlite
+      without waiting in the queue; each such use is also passed to `onClosedUse`, so the runner halts even when the
+      module's own code caught the error. `OWN_PARTS` moved to `src/db/roles.ts` (re-exported by `migrate.ts`). Tests,
+      seen failing first (`Cannot find module '../../src/db/write-handles.js'`): `test/db/write-handles.test.ts` (both
+      backends); A13's and A73's helpers in `roles.test.ts` and `block-transactions.test.ts` now run the body as an
+      `on-db-write` callback through the real handle, their assertions unchanged. Committed negative controls: a block
+      whose handles never close fails A10's in-block check (the kept handle of `a` writes `b`'s table under `b`'s role),
+      and a block that keeps the first callback's role fails the role check. 31 wrong variants of the new and changed
+      code (a scratch runner outside the clone): 29 caught on the first run; the two survivors were gaps (`SET ROLE` for
+      `SET LOCAL ROLE`; `startDatabase` dropping the height), closed by tests; on the final sources all 31 are caught.
+      `design.md` §4 ("Write handles") and the module guide's "Writing in callbacks" added. **Pending:** "which halts
+      processing" — the runner turns a callback's error and every `onClosedUse` report into the `callback-error` halt
+      with the point and the module (task 5.x, with A13's and A73's halts); the runner's loop over the parts in RN-3's
+      order and the cursor it passes as `height` (tasks 3.2, 5.x).
 - [ ] 2.7 Timeouts by connection role (Q71): a read option bounding one read by `statement_timeout` and
       `idle_in_transaction_session_timeout` (`SET LOCAL`), `query-timeout`; the zero timeouts pinned on the writer,
       migrations, setup and callback reads, in the component's session settings; on PGlite, API reads set neither

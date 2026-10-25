@@ -9,7 +9,7 @@
  * The backends register that path for every transaction they open ({@link allowMultiStatement}), keyed by the
  * transaction object itself; nothing else holds it. {@link runMultiStatement} is called by the migration runner
  * (`./migrate.ts`) and nothing else. A `Transaction` keeps exactly `query` and `execute`, so a handle built on one —
- * the write handles of task 2.6, which callbacks get — offers no way to the script path, and any object that is not a
+ * the write handles callbacks get (`./write-handles.ts`) — offers no way to the script path, and any object that is not a
  * transaction a backend opened is refused. Modules are trusted (Q46): this keeps the path out of the callbacks' reach
  * by construction, not against a module that imports UmbraDB's internals.
  */

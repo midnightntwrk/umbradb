@@ -105,12 +105,12 @@ describe("the PostgreSQL writer lock (DB-11)", () => {
     await startWriter(a);
     const b = database.open();
     const plan = planSchemas([]);
-    const refused = await rejection(() => startDatabase(b, { plan, parts: [], committedVersions: new Map() }));
+    const refused = await rejection(() => startDatabase(b, { plan, parts: [], committedVersions: new Map(), handles: { height: null } }));
     expect(refused.code).toBe("writer-lock-held");
     const [row] = await database.admin.unsafe("SELECT to_regnamespace('core_chain') IS NULL AS absent");
     expect(row?.absent).toBe(true);
     // The holder's startup runs.
-    await startDatabase(a, { plan, parts: [], committedVersions: new Map() });
+    await startDatabase(a, { plan, parts: [], committedVersions: new Map(), handles: { height: null } });
     const [after] = await database.admin.unsafe("SELECT to_regnamespace('core_chain') IS NULL AS absent");
     expect(after?.absent).toBe(false);
   }, 60_000);

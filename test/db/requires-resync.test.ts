@@ -43,7 +43,7 @@ const M2 = module("m", "2.0.0", [{ id: "001", sql: M_001 }, { id: "002", sql: M_
 const N = module("n", "1.0.0", [{ id: "001", sql: N_001 }]);
 
 function startup(db: Database, parts: readonly TestPart[], committed: Record<string, readonly string[]>) {
-  return startDatabase(db, { plan: planSchemas(parts), parts, committedVersions: new Map(Object.entries(committed)) });
+  return startDatabase(db, { plan: planSchemas(parts), parts, committedVersions: new Map(Object.entries(committed)), handles: { height: null } });
 }
 
 async function migrations(db: Database): Promise<string[]> {

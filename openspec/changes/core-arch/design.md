@@ -157,6 +157,22 @@ interface BlockSource {
   module guide); a `requiresResync` version is refused while a committed height of the database is covered by a
   revision of that module with another version (DB-10; the versions come from the configuration history and the
   cursor). The writer lock is taken before any migration, so the 0.9.5 migration advisory lock is gone.
+- **Write handles (DB-3, RN-4).** `src/db/write-handles.ts`, on a `Transaction` of the API. The runner opens the block
+  transaction and runs each part's `on-db-write` through `openBlockWrites(tx, plan, { height, onClosedUse })`, one
+  `write(part, callback)` at a time in RN-3's order (one asked for while another runs is refused, a programming error).
+  Each callback starts by setting its part's role — `SET LOCAL ROLE` to its write role (a shared item's provider: the
+  item's, Q89), `RESET ROLE` for `core-chain` and `core-digest`, which write as the login — so it never runs under the
+  role the callback before it left; after a callback that returned, `RESET ROLE` returns the block to the login, also
+  undoing a role the callback selected itself. `on-start-db` runs through `runOnStartDb` in a transaction of its own
+  the same way (the migration runner calls it). A handle offers exactly `height`, `query` and `execute` (CORE-ARCH
+  §4.10): not the transaction, not the migrations' script path, never the migration mark (so `TRUNCATE` stays refused,
+  A73). `height` is what the runner gives: the cursor before the block (h − 1, null for the first block), the cursor at
+  startup. When its callback returns or throws, the handle closes: every later `query` or `execute` — from a stored
+  reference or a timer, during the block or after it — fails at once with `handle-closed` (`details: { handle:
+  "block-write" | "schema-write", module, point }`) before anything is sent, so never under the role of the part that
+  runs now, and on PGlite without waiting in the queue; each such use is also passed to `onClosedUse`, so the runner
+  halts with `callback-error` whether or not the module's own code caught it (DB-3, RN-8, A10). A statement a callback
+  sent and did not await still runs under its role: both backends send a transaction's statements in order.
 - **Identifier lengths (DB-8).** Ids and item names are at most 40 bytes, so `umbradb_m_<schema>` and
   `umbradb_i_<item>` stay within PostgreSQL's 63-byte identifiers; shadow tables are named by hash (below).
 - **Writer lock (DB-11).** PostgreSQL: `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on the writer connection

@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Database, Transaction } from "../../src/db/api.js";
+import type { BlockWriteHandle, Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { planSchemas, prepareSchemas, type SchemaModule, type SchemaPlan, setModuleRole } from "../../src/db/roles.js";
 import { guardTables } from "../../src/db/truncate-guard.js";
+import { openBlockWrites } from "../../src/db/write-handles.js";
 import { BACKENDS, type TestDatabase } from "./backends.js";
 
 /**
@@ -10,10 +11,11 @@ import { BACKENDS, type TestDatabase } from "./backends.js";
  * another module's table is rejected by the database, with its negative control), A14 (a provider's `SECURITY DEFINER`
  * function, `EXECUTE` granted only to the modules that require its item), and A15's roles and shared-item schema.
  *
- * Write handles (task 2.6) are not built yet: a callback is played here by a transaction of the database API that sets
- * the module's role with {@link setModuleRole} — what the write handle will do. A migration is played by a transaction
- * that sets the role and runs DDL, as the migration runner (`src/db/migrate.ts`, `migrate.test.ts`) does with its
- * record and mark. "Processing halts" (A13) is the runner's (tasks 2.6, 5.x).
+ * A callback is played here by one module's `on-db-write` in a block transaction of the database API, with the block
+ * write handle it would get (`src/db/write-handles.ts`, task 2.6), under its module's role. A migration is played by a
+ * transaction that sets the role with {@link setModuleRole} and runs DDL, as the migration runner (`src/db/migrate.ts`,
+ * `migrate.test.ts`) does with its record and mark. "Processing halts" (A13) is the runner's (task 5.x: a callback's
+ * error is the `callback-error` halt, RN-8).
  * Every database here is set up by a login that is a superuser (the test server's, PGlite's `postgres`);
  * `roles-login.test.ts` runs the same with a `CREATEROLE` login on PostgreSQL.
  */
@@ -38,12 +40,9 @@ async function migrate(db: Database, plan: SchemaPlan, moduleId: string, stateme
   });
 }
 
-/** Runs `body` as a callback of `moduleId`: in one transaction, after the module's role is set. */
-function asModule<T>(db: Database, plan: SchemaPlan, moduleId: string, body: (tx: Transaction) => Promise<T>): Promise<T> {
-  return db.transaction(async (tx) => {
-    await setModuleRole(tx, plan, moduleId);
-    return body(tx);
-  });
+/** Runs `body` as the `on-db-write` callback of `moduleId`: in one block transaction, with its block write handle. */
+function asModule<T>(db: Database, plan: SchemaPlan, moduleId: string, body: (w: BlockWriteHandle) => Promise<T>): Promise<T> {
+  return db.transaction((tx) => openBlockWrites(tx, plan, { height: null }).write(moduleId, body));
 }
 
 /** What `run` rejects with, or "resolved". */

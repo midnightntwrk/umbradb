@@ -61,7 +61,7 @@ function plan(parts: readonly TestPart[]): SchemaPlan {
 }
 
 function startup(db: Database, parts: readonly TestPart[], committed: ReadonlyMap<string, readonly string[]> = new Map()) {
-  return startDatabase(db, { plan: plan(parts), parts, committedVersions: committed });
+  return startDatabase(db, { plan: plan(parts), parts, committedVersions: committed, handles: { height: null } });
 }
 
 /** SHA-256 of the UTF-8 SQL, in hex, computed here independently of the runner (DB-9). */
@@ -348,7 +348,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     const db = await fresh();
     const parts = [part("a", [{ id: "001", sql: A_001 }])];
     const planned = plan(parts);
-    await startDatabase(db, { plan: planned, parts, committedVersions: new Map() });
+    await startDatabase(db, { plan: planned, parts, committedVersions: new Map(), handles: { height: null } });
     const rows = await db.transaction(async (tx) => {
       await setModuleRole(tx, planned, "a");
       return tx.query("SELECT module, migration_id FROM core_chain.migrations");
@@ -452,7 +452,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
       ];
       const parts = [part("a", [])];
       const planned = plan(parts);
-      await startDatabase(db, { plan: planned, parts, committedVersions: new Map() });
+      await startDatabase(db, { plan: planned, parts, committedVersions: new Map(), handles: { height: null } });
       const record = (migration: SchemaMigration, position: number) => (tx: Transaction) =>
         tx.execute(
           "INSERT INTO core_chain.migrations (module, migration_id, checksum, position) VALUES ($1, $2, decode($3, 'hex'), $4::integer)",
@@ -574,7 +574,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     });
     const parts = [coreChain, part("a", [{ id: "001", sql: A_001 }])];
     const planned = plan(parts);
-    await startDatabase(db, { plan: planned, parts, committedVersions: new Map() });
+    await startDatabase(db, { plan: planned, parts, committedVersions: new Map(), handles: { height: null } });
     expect(await owner(db, "core_chain.identity")).toBe(login?.login);
     // Created by a migration after the bootstrap's grants: module roles read it by the login's default privilege.
     const read = await db.transaction(async (tx) => {
@@ -591,7 +591,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     const coreChain = part("core-chain", [{ id: "001", sql: "CREATE TABLE core_chain.identity (id smallint PRIMARY KEY)" }], {
       provides: [],
     });
-    expect(await startDatabase(db, { plan: planSchemas([]), parts: [coreChain], committedVersions: new Map() })).toEqual([
+    expect(await startDatabase(db, { plan: planSchemas([]), parts: [coreChain], committedVersions: new Map(), handles: { height: null } })).toEqual([
       { module: "core-chain", migration: "001", position: 1 },
     ]);
     expect(await exists(db, "core_chain.identity")).toBe(true);
@@ -600,7 +600,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
   it("refuses a part given twice, before anything is created", async () => {
     const db = await fresh();
     const a = part("a", [{ id: "001", sql: A_001 }]);
-    await expect(startDatabase(db, { plan: plan([a]), parts: [a, a], committedVersions: new Map() })).rejects.toThrow(
+    await expect(startDatabase(db, { plan: plan([a]), parts: [a, a], committedVersions: new Map(), handles: { height: null } })).rejects.toThrow(
       /the part a is given twice/,
     );
     expect(await exists(db, "core_chain.migrations")).toBe(false);
@@ -610,7 +610,7 @@ describe.each(BACKENDS)("migrations and setup on $name (DB-9, A16)", (backend) =
     const db = await fresh();
     const parts = [part("a", [{ id: "001", sql: A_001 }])];
     await expect(
-      startDatabase(db, { plan: planSchemas([]), parts, committedVersions: new Map() }),
+      startDatabase(db, { plan: planSchemas([]), parts, committedVersions: new Map(), handles: { height: null } }),
     ).rejects.toThrow(/a.*neither in the schema plan nor one of UmbraDB's own parts/);
     expect(await exists(db, "core_chain.migrations")).toBe(false);
   });

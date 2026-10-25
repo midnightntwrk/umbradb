@@ -23,6 +23,21 @@ export function handleClosed(handle: "read" | "transaction" | "database"): Umbra
 }
 
 /**
+ * `handle-closed` for a write handle used after its callback returned or threw (DB-3, A10; `./write-handles.ts`): the
+ * same code as {@link handleClosed}, naming the handle, the part whose callback it was given to and the point. The
+ * runner treats it as that part's callback error (RN-8).
+ */
+export function writeHandleClosed(handle: "block-write" | "schema-write", part: string): UmbraError {
+  const [kind, point] = handle === "block-write" ? ["block", "on-db-write"] : ["schema", "on-start-db"];
+  return new UmbraError(
+    "handle-closed",
+    `a ${kind} write handle of ${part} was used after its ${point} callback ended: a write handle is valid only while ` +
+      "its callback runs (DB-3); use the handle each callback is given, and keep none",
+    { handle, module: part, point },
+  );
+}
+
+/**
  * A `COMMIT` that PostgreSQL answered with `ROLLBACK`, because a failed statement aborted the transaction and the body
  * caught its error: never reported as a commit, on either backend.
  */

@@ -64,7 +64,7 @@ describe("A18's negative control: a durability probe that ignores fsync", () => 
     const db = openPostgres({ url: fsyncOff.getConnectionUri(), committedHeight: async () => null });
     try {
       expect(await startWriter(db)).toEqual({ durabilityWarnings: [] });
-      await startDatabase(db, { plan: planSchemas([]), parts: [], committedVersions: new Map() });
+      await startDatabase(db, { plan: planSchemas([]), parts: [], committedVersions: new Map(), handles: { height: null } });
       const [row] = await db.read((read) => read.query("SELECT current_setting('fsync') AS fsync"));
       expect(row?.fsync).toBe("off");
     } finally {

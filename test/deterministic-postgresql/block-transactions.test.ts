@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Database, Transaction } from "../../src/db/api.js";
+import type { BlockWriteHandle, Database, SchemaWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { planSchemas, prepareSchemas, type SchemaModule, type SchemaPlan, setModuleRole } from "../../src/db/roles.js";
 import { type MigrationPart, startDatabase } from "../../src/db/migrate.js";
 import { guardTables, markMigration } from "../../src/db/truncate-guard.js";
+import { openBlockWrites } from "../../src/db/write-handles.js";
 import {
   MIGRATION_MARK,
   TRUNCATE_GUARD_TRIGGER,
@@ -18,10 +19,11 @@ import { BACKENDS } from "../db/backends.js";
  * not declared `deterministic: false` (`src/db/truncate-guard.ts`), refuses it with `truncate-not-allowed` — in a block,
  * in `on-start-db`, anywhere — except in a transaction the migration runner marked as a migration.
  *
- * The block's write handle (task 2.6) is not built yet: a block is played by a transaction of the database API under
- * the module's role. A migration runs through the migration runner (`src/db/migrate.ts`, task 2.4), which marks each
- * migration's transaction with {@link markMigration}; the mark's own rules are also shown on transactions that set it
- * directly. "The block rolls back" is shown here; the halt is the runner's.
+ * A block is played by module `a`'s `on-db-write` in a block transaction of the database API, through the block write
+ * handle it would get (`src/db/write-handles.ts`, task 2.6), which never carries the migration mark. A migration runs
+ * through the migration runner (`src/db/migrate.ts`, task 2.4), which marks each migration's transaction with
+ * {@link markMigration}; the mark's own rules are also shown on transactions that set it directly. "The block rolls
+ * back" is shown here; the halt is the runner's (task 5.x).
  */
 
 const MODULE: SchemaModule = {
@@ -73,12 +75,9 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     return { db, plan };
   }
 
-  /** Runs `body` as module `a`'s block: one transaction under its role. */
-  function block<T>(db: Database, plan: SchemaPlan, body: (tx: Transaction) => Promise<T>): Promise<T> {
-    return db.transaction(async (tx) => {
-      await setModuleRole(tx, plan, "a");
-      return body(tx);
-    });
+  /** Runs `body` as module `a`'s `on-db-write` in a block: one transaction, with its block write handle. */
+  function block<T>(db: Database, plan: SchemaPlan, body: (w: BlockWriteHandle) => Promise<T>): Promise<T> {
+    return db.transaction((tx) => openBlockWrites(tx, plan, { height: null }).write("a", body));
   }
 
   async function rows(db: Database, table: string): Promise<number> {
@@ -121,7 +120,7 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     });
     const startup = (migrations: MigrationPart["migrations"], onStartDb?: MigrationPart["onStartDb"]) => {
       const declared = part(migrations, onStartDb);
-      return startDatabase(db, { plan: planSchemas([declared]), parts: [declared], committedVersions: new Map() });
+      return startDatabase(db, { plan: planSchemas([declared]), parts: [declared], committedVersions: new Map(), handles: { height: null } });
     };
     await startup(first);
     const plan = planSchemas([part(first)]);
@@ -138,11 +137,11 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
       ...MODULE,
       version: "1.0.0",
       migrations: [{ id: "001", sql: TABLES.join(";\n") }],
-      onStartDb: (tx: Transaction) => tx.execute(statement).then(() => undefined),
+      onStartDb: (w: SchemaWriteHandle) => w.execute(statement).then(() => undefined),
     });
     const startup = (statement: string) => {
       const part = declared(statement);
-      return startDatabase(db, { plan: planSchemas([part]), parts: [part], committedVersions: new Map() });
+      return startDatabase(db, { plan: planSchemas([part]), parts: [part], committedVersions: new Map(), handles: { height: null } });
     };
     expectRefused(await outcome(startup("TRUNCATE a.t")), "t");
     // The migration committed before on-start-db ran; its table was guarded in between.
@@ -156,7 +155,7 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     const migrations = [{ id: "001", sql: TABLES.join(";\n") }];
     const startup = (provides: SchemaModule["provides"]) => {
       const declared = { ...MODULE, provides, version: "1.0.0", migrations };
-      return startDatabase(db, { plan: planSchemas([declared]), parts: [declared], committedVersions: new Map() });
+      return startDatabase(db, { plan: planSchemas([declared]), parts: [declared], committedVersions: new Map(), handles: { height: null } });
     };
     await startup(MODULE.provides);
     const plan = planSchemas([MODULE]);

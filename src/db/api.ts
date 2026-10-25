@@ -9,7 +9,7 @@
  * determinism code takes only its `query` (`ConsistentRead`, `../deterministic-postgresql/catalog.ts`). Writes go
  * through {@link Database.transaction}, one transaction at a time: on PostgreSQL on the writer connection (DB-5); on
  * PGlite as a job of the one queue every read and transaction waits in (DB-4). The block and schema write handles of DB-3
- * (own schema, `SET LOCAL ROLE`, closing) are built on it by later tasks.
+ * (own schema, `SET LOCAL ROLE`, closing) are built on it in `./write-handles.ts`.
  */
 
 import type { ConsistentRead } from "../deterministic-postgresql/index.js";
@@ -25,13 +25,17 @@ export interface ReadHandle {
   query(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
 }
 
-/** Inside the block transaction, under the module's role (CORE-ARCH §4.10; built in task 2.6). */
+/**
+ * Inside the block transaction, under the module's role (CORE-ARCH §4.10, DB-3): reads committed data plus what earlier
+ * callbacks wrote in the block; closed once its `on-db-write` callback ends (`handle-closed`). Built in
+ * `./write-handles.ts`.
+ */
 export interface BlockWriteHandle extends ReadHandle {
   /** Runs one statement and returns the number of rows it affected; own schema only. */
   execute(sql: string, params?: unknown[]): Promise<number>;
 }
 
-/** `on-start-db`: own schema, own transaction (CORE-ARCH §4.10; built in task 2.6). */
+/** `on-start-db`: own schema, own transaction, closed once its callback ends (CORE-ARCH §4.10, DB-3; `./write-handles.ts`). */
 export interface SchemaWriteHandle extends BlockWriteHandle {}
 
 /** One transaction on the writer connection: what the write handles, migrations and the runner's commit build on. */

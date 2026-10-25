@@ -131,7 +131,7 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
       };
     });
     const plan = planSchemas(parts);
-    await startDatabase(db, { plan, parts, committedVersions: new Map() });
+    await startDatabase(db, { plan, parts, committedVersions: new Map(), handles: { height: null } });
     const owners = await database.admin.unsafe<{ relation: string; owner: string }[]>(`
       SELECT c.oid::regclass::text AS relation, pg_get_userbyid(c.relowner) AS owner FROM pg_class c
        WHERE c.oid IN ('core_chain.migrations'::regclass, 'mig_a.t'::regclass, 'mig_b.t'::regclass) ORDER BY 1`);
@@ -146,7 +146,7 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
     });
     expect(seen).toEqual([{ rows: 2, b: 1 }]);
     // Startup again under the same login: nothing to apply, nothing refused.
-    expect(await startDatabase(db, { plan, parts, committedVersions: new Map() })).toEqual([]);
+    expect(await startDatabase(db, { plan, parts, committedVersions: new Map(), handles: { height: null } })).toEqual([]);
   });
 
   it("uses a role the login created itself beforehand, holding ADMIN only, and grants itself SET and INHERIT", async () => {

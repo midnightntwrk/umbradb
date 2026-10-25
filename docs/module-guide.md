@@ -67,6 +67,21 @@ in order (DB-9 of the `core-arch` change).
   a transaction of its own under your role. Make it idempotent: it runs again at each restart. Change schemas in
   migrations, not there.
 
+## Writing in callbacks
+
+A module writes its tables in two callbacks only, each through the write handle it is given (DB-3 of the `core-arch`
+change): `on-db-write`, inside the block's transaction, and `on-start-db`, at every startup after your migrations.
+
+- **Use the handle while your callback runs, and keep none.** A write handle closes when its callback returns or
+  throws. A handle used later — stored for the next block, used from a timer, or from another callback — fails with
+  `handle-closed`, and processing halts, even if your code catches that error.
+- **Your own schema only, every name written with it,** as in migrations: callbacks run under your module's database
+  role (a provider of a shared item: under the item's), and UmbraDB sets no `search_path`.
+- **One statement per call.** `query` returns rows, `execute` the number of rows changed. Change rows only, never
+  schemas, and do not change the role or the session's settings.
+- **Await every statement before you return.** A statement you sent but did not await still runs, under your role, but
+  its failure fails the block without telling you which statement it was.
+
 ## Upgrades
 
 A new version of a module runs from a future height, as a new revision of its configuration; the rows written before

@@ -26,7 +26,8 @@
  *    (`markMigration`, which lets `TRUNCATE` through in this transaction only, A73), the part's role, the SQL through
  *    the multi-statement path (`./multi-statement.ts`), a check that the SQL did not end the transaction, the login's
  *    role again, and the record last; then, when it applied any, the `TRUNCATE` guard again, so its new tables are
- *    guarded; then its `on-start-db` in a further transaction under its role, unmarked.
+ *    guarded; then its `on-start-db` in a further transaction under its role, unmarked, with a schema write handle
+ *    that closes when it returns (`./write-handles.ts`).
  *
  * A migration that fails rolls back with its record: the ones before it stay applied, its part's `on-start-db` and
  * every later part do not run, and startup refuses with `migration-failed`. A lost connection is passed on as it is
@@ -35,11 +36,12 @@
  */
 
 import { quoteIdentifier } from "../deterministic-postgresql/index.js";
-import type { Database, Transaction } from "./api.js";
+import type { Database, SchemaWriteHandle, Transaction } from "./api.js";
 import { UmbraError } from "./errors.js";
 import { runMultiStatement } from "./multi-statement.js";
 import {
   migrationChecksum,
+  OWN_PARTS,
   type PlannedSchema,
   prepareSchemas,
   type SchemaMigration,
@@ -47,12 +49,10 @@ import {
   setModuleRole,
 } from "./roles.js";
 import { guardTables, markMigration, stillMarked } from "./truncate-guard.js";
+import { runOnStartDb, type WriteHandleOptions } from "./write-handles.js";
 
-/**
- * UmbraDB's own backbone parts whose schemas are reserved (`./roles.ts`, `RESERVED_SCHEMAS`): not in a schema plan, so
- * their migrations and `on-start-db` run as the writer's login.
- */
-export const OWN_PARTS: readonly string[] = ["core-chain", "core-digest"];
+/** UmbraDB's own parts, which run as the writer's login (`./roles.ts`); re-exported for the runner. */
+export { OWN_PARTS };
 
 /** What the runner needs of one backbone part or module (MD-1, DB-9, DB-10). */
 export interface MigrationPart {
@@ -65,10 +65,10 @@ export interface MigrationPart {
   readonly migrations: readonly SchemaMigration[];
   /**
    * `on-start-db`: idempotent setup after the part's migrations, at every startup, in a transaction of its own under
-   * the part's role (DB-9, RN-4). Task 2.6 hands the callback a schema write handle built on this transaction. Its
-   * error is passed on as it is.
+   * the part's role, with a schema write handle that closes when it returns (DB-3, DB-9, RN-4; `./write-handles.ts`).
+   * Its error is passed on as it is.
    */
-  readonly onStartDb?: (tx: Transaction) => Promise<void>;
+  readonly onStartDb?: (w: SchemaWriteHandle) => Promise<void>;
 }
 
 /** The input of {@link startDatabase}. */
@@ -82,6 +82,11 @@ export interface StartupInput {
    * the map has none, as on an empty database.
    */
   readonly committedVersions: ReadonlyMap<string, readonly string[]>;
+  /**
+   * What each `on-start-db`'s schema write handle reports as `height` — the cursor at startup, null before any height
+   * commits — and whom it tells of a use after its callback ended (`./write-handles.ts`).
+   */
+  readonly handles: WriteHandleOptions;
 }
 
 /** A migration applied by this startup, under the name it is recorded with. */
@@ -302,13 +307,7 @@ export async function startDatabase(db: Database, input: StartupInput): Promise<
       any = true;
     }
     if (any) await db.transaction((tx) => guardTables(tx, input.plan));
-    const onStartDb = part.onStartDb;
-    if (onStartDb !== undefined) {
-      await db.transaction(async (tx) => {
-        if (runner.underRole) await setModuleRole(tx, input.plan, part.id);
-        await onStartDb(tx);
-      });
-    }
+    if (part.onStartDb !== undefined) await runOnStartDb(db, input.plan, part.id, input.handles, part.onStartDb);
   }
   return done;
 }

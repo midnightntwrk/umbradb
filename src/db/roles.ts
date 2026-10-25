@@ -62,6 +62,13 @@ export const RESERVED_SCHEMAS: readonly string[] = [
   "public",
 ];
 
+/**
+ * UmbraDB's own backbone parts whose schemas are reserved ({@link RESERVED_SCHEMAS}: `core_chain`, `core_digest`): not in
+ * a schema plan, so their migrations (`./migrate.ts`) and their callbacks' write handles (`./write-handles.ts`) run as
+ * the writer's login, which owns those schemas.
+ */
+export const OWN_PARTS: readonly string[] = ["core-chain", "core-digest"];
+
 /** A module's or item's schema name: its id with `-` replaced by `_` (DB-8). */
 export function schemaName(id: string): string {
   return id.replace(/-/g, "_");

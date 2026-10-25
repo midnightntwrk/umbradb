@@ -39,7 +39,7 @@ export async function expectRefusedBeforeAnyWrite(
     expect(refusedWrite.code).toBe(code);
     expect(bodyRan).toBe(false);
     const refusedStartup = await rejection(() =>
-      startDatabase(db, { plan: planSchemas([]), parts: [], committedVersions: new Map() }),
+      startDatabase(db, { plan: planSchemas([]), parts: [], committedVersions: new Map(), handles: { height: null } }),
     );
     expect(refusedStartup.code).toBe(code);
     const [schema] = await admin.unsafe("SELECT to_regnamespace('core_chain') IS NULL AS absent");
