@@ -17,17 +17,23 @@
  * process's {@link CommittedHeight} as the first statement — which takes the snapshot — then the body's statements,
  * then `ROLLBACK`, which also undoes any `SET` the body ran, so no setting outlives the read.
  *
+ * **Timeouts by connection role (DB-15, owner decision Q71).** Every session starts with every server-side timeout at
+ * 0 (the component's zero timeouts, part of its session settings below), so the writer — migrations, setup, block
+ * transactions — and the reads given to callbacks are never cut off. A read with the read option (`timeoutMs`, a module
+ * API request's `apiReadTimeoutMs`) is bounded instead: {@link BoundedRead}.
+ *
  * **Results and parameters** go through the `deterministic_postgresql` component's mapping
  * (`../deterministic-postgresql/mapping.ts`): the driver hands over every value as text (raw mode; none of its parsers
  * runs), and every parameter as the text the mapping gives it, untyped. Every session pins the component's session
- * settings ({@link PINNED_SETTINGS}, `../deterministic-postgresql/settings.ts`) as startup parameters, which take
- * precedence over the server's, the database's and the role's defaults; a `database` URL that would override one is
- * refused.
+ * settings ({@link SESSION_SETTINGS}, `../deterministic-postgresql/settings.ts`: the five that decide how values print,
+ * and the zero timeouts) as startup parameters, which take precedence over the server's, the database's and the role's
+ * defaults; a `database` URL that would override one is refused.
  *
  * **Errors (DB-13).** A lost connection is `connection-lost` (retryable); every other error of the driver or the server
  * is `database-error` (not retryable), with the server's SQLSTATE and the names it gives (constraint, table, schema,
  * column) — never the server's `detail`, which can hold row values, nor the URL — except a `TRUNCATE` the
- * `deterministic_postgresql` component's trigger refused, which is `truncate-not-allowed` (DB-14).
+ * `deterministic_postgresql` component's trigger refused, which is `truncate-not-allowed` (DB-14), and a bounded read
+ * one of its timeouts ended, which is `query-timeout` (DB-15; only such a read reports it).
  *
  * **The writer lock and the durability probe (DB-11, DB-12).** Every writer session takes the writer lock when it
  * opens, before its first transaction (`./writer-lock.ts`). The first one then runs the durability probe on the same
@@ -37,16 +43,17 @@
  */
 
 import postgres, { type Sql } from "postgres";
-import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
-import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
+import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../deterministic-postgresql/index.js";
+import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
 import { type DurabilityWarning, probeDurability } from "./durability-probe.js";
-import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
+import { commitRolledBack, handleClosed, queryTimeout, statementRefused, UmbraError } from "./errors.js";
 import { allowMultiStatement } from "./multi-statement.js";
+import { readTimeoutMs } from "./read-options.js";
 import { allowWriterStart, takeWriterLock, type WriterSession } from "./writer-lock.js";
 
 /** Options of {@link openPostgres}. */
 export interface PostgresOptions {
-  /** A PostgreSQL URL (the `database` setting, CF-4). It must not set a {@link PINNED_SETTINGS} name. */
+  /** A PostgreSQL URL (the `database` setting, CF-4). It must not set a {@link SESSION_SETTINGS} name. */
   readonly url: string;
   /** How a read learns its committed height (DB-2). */
   readonly committedHeight: CommittedHeight;
@@ -188,7 +195,7 @@ class Session {
       onclose: () => {
         if (this.state === "open") this.state = "lost";
       },
-      connection: { application_name: "umbradb", ...Object.fromEntries(PINNED_SETTINGS) },
+      connection: { application_name: "umbradb", ...Object.fromEntries(SESSION_SETTINGS) },
       // Parameters arrive as text (the component's `parameterText`); these types' default serializers would rewrite it.
       types: {
         umbradbText: {
@@ -265,6 +272,73 @@ class Session {
   async end(): Promise<void> {
     this.state = "ended";
     await this.sql.end({ timeout: 0 }).catch(() => undefined);
+  }
+}
+
+/** How every read's transaction starts (DB-2). */
+const READ_BEGIN = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY";
+
+/**
+ * A read bounded by the read option (DB-15) on its session. Its transaction starts with `statement_timeout` and
+ * `idle_in_transaction_session_timeout` set to the timeout (`SET LOCAL`, in the `BEGIN`'s message, so they end with the
+ * read's `ROLLBACK` and the session returns to the pool with its zeros). The server cancels a statement that runs that
+ * long (`57014`; the session stays usable), and ends the session once the read has been idle in its transaction that
+ * long — which never reaches the caller as an error: `postgres` 3.4.9 drops a server error that arrives while no
+ * statement is pending (`connection.js`, `ErrorResponse`), and the session is merely lost (`onclose`). So the read tells
+ * that one by its own clock: once it has been idle since its last statement settled for its timeout, the server has
+ * ended its session (its idle time started first, when it sent the last answer), and the read is over: its next
+ * statement, and the read itself when the body settles, fail with `query-timeout` (its `ROLLBACK` then finds the
+ * session lost, and the pool drops it). Once a timeout ended the read, every later statement — and one still running
+ * with the cancelled one — and the read itself fail with that error, also when the body caught it. A statement cannot
+ * stay in flight for the timeout (`statement_timeout` cancels it first), so the clock never counts one as idle time.
+ *
+ * In a bounded read every `57014` is taken for its timeout (a `pg_cancel_backend` too: the server's message is the only
+ * difference, and it is translated). A statement sent in the instant between the server ending an idle session and the
+ * read's own clock reaching the timeout can find the session lost first: `connection-lost`.
+ */
+class BoundedRead {
+  /** When the read's last statement settled (its `BEGIN` first); undefined while a statement of it is in flight. */
+  private idleSince: number | undefined;
+  /** The timeout that ended the read, once one did. */
+  private ended: UmbraError | undefined;
+
+  constructor(
+    private readonly session: Session,
+    private readonly timeoutMs: number,
+  ) {}
+
+  /** Starts the read's transaction with its two timeouts. */
+  async begin(): Promise<void> {
+    const ms = this.timeoutMs;
+    await this.session.script(
+      `${READ_BEGIN}; SET LOCAL statement_timeout = ${ms}; SET LOCAL idle_in_transaction_session_timeout = ${ms}`,
+    );
+    this.idleSince = performance.now();
+  }
+
+  /** Runs one statement of the read, unless a timeout ended the read. */
+  async run(text: string, params?: readonly unknown[]): Promise<Outcome> {
+    this.check();
+    this.idleSince = undefined;
+    try {
+      return await this.session.run(text, params);
+    } catch (error) {
+      // A cancel by the read's statement_timeout ends the read; an error after that is the timeout's; any other passes.
+      if (this.ended === undefined && error instanceof UmbraError && error.details.sqlstate === "57014") {
+        this.ended = queryTimeout(this.timeoutMs, "statement_timeout", error);
+      }
+      throw this.ended ?? error;
+    } finally {
+      this.idleSince = performance.now();
+    }
+  }
+
+  /** Throws the timeout that ended the read, if one did — also by the read having been idle for it until now. */
+  check(): void {
+    if (this.ended === undefined && this.idleSince !== undefined && performance.now() - this.idleSince >= this.timeoutMs) {
+      this.ended = queryTimeout(this.timeoutMs, "idle_in_transaction_session_timeout");
+    }
+    if (this.ended !== undefined) throw this.ended;
   }
 }
 
@@ -432,7 +506,7 @@ async function rollBack(session: Session): Promise<void> {
 
 /** Opens the PostgreSQL backend on the database at `options.url`. No connection is made until it is needed. */
 export function openPostgres(options: PostgresOptions): Database {
-  const overriding = overridingUrlParameter(options.url, PINNED_SETTINGS.map(([name]) => name));
+  const overriding = overridingUrlParameter(options.url, SESSION_SETTINGS.map(([name]) => name));
   if (overriding !== undefined) {
     throw new UmbraError(
       "invalid-configuration",
@@ -452,18 +526,29 @@ export function openPostgres(options: PostgresOptions): Database {
   let closed = false;
 
   const database: Database = {
-    async read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T> {
+    async read<T>(body: (read: ReadHandle) => Promise<T>, readOptions?: ReadOptions): Promise<T> {
+      const timeoutMs = readTimeoutMs(readOptions);
       if (closed) throw handleClosed("database");
       const reader = await pool.acquire();
+      const bound = timeoutMs === undefined ? undefined : new BoundedRead(reader, timeoutMs);
       let open = true;
       try {
-        await reader.run("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY", [], true);
+        if (bound === undefined) await reader.run(READ_BEGIN, [], true);
+        else await bound.begin();
         const query = async (sql: string, params?: unknown[]): Promise<Row[]> => {
           if (!open) throw handleClosed("read");
-          return (await reader.run(sql, params)).rows;
+          return (await (bound ?? reader).run(sql, params)).rows;
         };
-        const height = await options.committedHeight({ query });
-        return await body({ height, query });
+        let result: T;
+        try {
+          const height = await options.committedHeight({ query });
+          result = await body({ height, query });
+        } catch (error) {
+          bound?.check();
+          throw error;
+        }
+        bound?.check();
+        return result;
       } finally {
         open = false;
         await rollBack(reader);

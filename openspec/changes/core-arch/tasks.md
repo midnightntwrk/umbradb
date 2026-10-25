@@ -511,11 +511,44 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       processing" — the runner turns a callback's error and every `onClosedUse` report into the `callback-error` halt
       with the point and the module (task 5.x, with A13's and A73's halts); the runner's loop over the parts in RN-3's
       order and the cursor it passes as `height` (tasks 3.2, 5.x).
-- [ ] 2.7 Timeouts by connection role (Q71): a read option bounding one read by `statement_timeout` and
+- [x] 2.7 Timeouts by connection role (Q71): a read option bounding one read by `statement_timeout` and
       `idle_in_transaction_session_timeout` (`SET LOCAL`), `query-timeout`; the zero timeouts pinned on the writer,
       migrations, setup and callback reads, in the component's session settings; on PGlite, API reads set neither
       timeout (it enforces neither and hangs on the idle one, `design.md` §14).
       **Acceptance:** A141.
+      **Done (2026-10-25):** the zero timeouts are the component's `ZERO_TIMEOUTS` (`statement_timeout`, `lock_timeout`,
+      `idle_in_transaction_session_timeout`, `transaction_timeout` and — decision record Q93, shipped pending the owner
+      — `idle_session_timeout`, each 0), next to `PINNED_SETTINGS` in `src/deterministic-postgresql/settings.ts`;
+      `SESSION_SETTINGS` (both) is what every session starts with: PostgreSQL startup parameters of the writer and every
+      pooled read connection (so the reads given to callbacks, and migrations, setup and blocks on the writer, run with
+      them), refused in a `database` URL like the five; PGlite `-c` start parameters, checked by `checkPinnedSettings`.
+      The read option is `db.read(body, { timeoutMs })` (`ReadOptions`, `src/db/api.ts`; a whole number of milliseconds
+      from 1 to 2147483647, else `invalid-configuration`, checked alike on both backends, `src/db/read-options.ts`): on
+      PostgreSQL the read's `BEGIN` message also sets the two timeouts with `SET LOCAL`; a `57014` in it, and the read
+      having been idle in its transaction for the timeout (told by its own clock: `postgres` 3.4.9 drops the server's
+      `25P03`, which arrives while no statement is pending), fail with `query-timeout` (`details { timeoutMs, setting }`,
+      not retryable; a new code), the first keeping the connection, the second leaving the session to the pool to drop;
+      once ended, every later statement and the read itself fail with it, even when the body caught it; elsewhere a
+      `57014` stays `database-error` and a lost session `connection-lost`. On PGlite the option is checked and sets
+      nothing. Tests, seen failing first (the 1 s database defaults reaching the API's sessions; `pg_sleep(60)` running
+      its 60 s; the option's `SHOW` reading 0; `SESSION_SETTINGS` undefined): `test/deterministic-postgresql/
+      zero-timeouts.test.ts` (both backends, under database — PGlite: configuration-file — defaults of 1 s for all five:
+      a 5 s migration, setup idle 2 s, a block idle 5 s while a callback awaits, a callback's 5 s read on its block write
+      handle and on a read handle outside the block, the writer idle 2 s between blocks, a writer transaction waiting
+      2 s for a lock (PostgreSQL), each completing with `SHOW` 0), `test/db/read-timeouts.test.ts` (A141's request half
+      in the database API; the option checked on both), `test/db/pglite-timeouts.test.ts` (PGlite in processes of their
+      own, killed when a statement hangs). Committed negative controls: a build without the zeros (`vi.mock`) has every
+      long-work check cut off on PostgreSQL, and its session and lock lost after 2 s idle; on PGlite the start
+      parameters without the zeros read the file's 1 s and hang; a read that sets the two timeouts fails PGlite's check
+      (it reads 1 s and hangs); a `57014` reported as anything but `query-timeout` fails A141's check. 42 wrong variants
+      of the new and changed code (a scratch runner outside the clone): 37 caught on the first run; of the 5 survivors 2
+      are equivalent (`SET` for `SET LOCAL` in a read that always rolls back; `>` for `>=` on a real clock) and 3 were
+      gaps (an engine without the zeros not refused; a read idle from its `BEGIN` with no statement; a statement in
+      flight counted as idle), closed by tests; on the final sources 40 of 42 are caught, the 2 equivalent ones survive.
+      `design.md` §4's "Session settings (Q65) and timeouts (Q71)" bullet and §14's PGlite row updated; §4's component
+      table row 7 now runs its zero timeouts in `zero-timeouts.test.ts`. **Pending:** "a read for an API request"
+      through a registered handler, with `apiReadTimeoutMs` from the configuration (tasks 5.2a, 4.2); the owner's answer
+      to Q93 (A shipped: if not A, remove `idle_session_timeout` from `ZERO_TIMEOUTS` and its tests).
 - [ ] 2.8 The read-only database for the `db` item (Q73): `read` only, nothing that writes, opens a transaction or
       closes; the `nested-call` refusal on PGlite kept from task 2.2; the module guide's database rules (inside a
       callback its handle, `db.read` for work outside the points).

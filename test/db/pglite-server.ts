@@ -1,5 +1,8 @@
 import { PGlite } from "@electric-sql/pglite";
-import type { CommittedHeight, Database, ReadHandle, Transaction } from "../../src/db/api.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "../../src/db/api.js";
 import { openPgliteOn, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
 
 /**
@@ -14,6 +17,10 @@ import { openPgliteOn, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
  * Setup and changes outside the API go through {@link PgliteTestDatabase.exec}, which runs on the engine itself —
  * PGlite's own `exec`, not the database API — and refuses to run while a read or a transaction of the API is open on
  * the engine (it would run inside that job's transaction).
+ *
+ * A database whose configuration file must set something (`configuration`) lives in a temporary data directory
+ * instead, loaded from the same template, its settings written with `ALTER SYSTEM` (`postgresql.auto.conf`) by an
+ * engine started without the backend's start parameters; the directory is deleted by {@link PgliteTestServer.stop}.
  */
 
 /** How many engines stay open at once. */
@@ -27,11 +34,20 @@ export interface PgliteTestDatabase {
   exec(sql: string): Promise<void>;
   /** Opens the API's PGlite backend on the engine; closed by {@link PgliteTestServer.stop} if not before. */
   open(options?: { readonly committedHeight?: CommittedHeight }): Promise<Database>;
+  /**
+   * With `configuration`: what an engine started without the backend's start parameters reports for each of its
+   * names (`current_setting`), read before the engine under test started — the control that the configuration file is
+   * in effect. Empty without `configuration`.
+   */
+  readonly unpinned: Readonly<Record<string, string>>;
 }
 
 /** Hands out empty PGlite databases. */
 export interface PgliteTestServer {
-  createDatabase(): Promise<PgliteTestDatabase>;
+  /** A new database; with `configuration`, `[name, value]` pairs its data directory's configuration file sets. */
+  createDatabase(options?: {
+    readonly configuration?: readonly (readonly [string, string])[];
+  }): Promise<PgliteTestDatabase>;
   stop(): Promise<void>;
 }
 
@@ -48,7 +64,31 @@ export async function startPgliteServer(): Promise<PgliteTestServer> {
   const template = await first.dumpDataDir("none");
   await first.close();
   const opened: Opened[] = [];
+  const directories: string[] = [];
   let clock = 0;
+
+  /**
+   * A data directory from the template whose configuration file sets `configuration`, and what an engine without the
+   * backend's start parameters reports for each name there. That engine runs one statement right after it starts and
+   * closes, so a timeout it reads (a nonzero `idle_session_timeout` hangs PGlite once it fires) cannot fire.
+   */
+  const configuredDirectory = async (
+    configuration: readonly (readonly [string, string])[],
+  ): Promise<{ readonly directory: string; readonly unpinned: Record<string, string> }> => {
+    const directory = mkdtempSync(join(tmpdir(), "umbradb-pglite-configured-"));
+    directories.push(directory);
+    const writer = await PGlite.create(directory, { loadDataDir: template });
+    for (const [name, value] of configuration) await writer.exec(`ALTER SYSTEM SET ${name} = '${value}'`);
+    await writer.close();
+    const plain = await PGlite.create(directory);
+    try {
+      const shown = configuration.map(([name]) => `current_setting('${name}') AS "${name}"`).join(", ");
+      const { rows } = await plain.query<Record<string, string>>(`SELECT ${shown}`);
+      return { directory, unpinned: { ...rows[0] } };
+    } finally {
+      await plain.close();
+    }
+  };
 
   const release = async (entry: Opened) => {
     opened.splice(opened.indexOf(entry), 1);
@@ -57,12 +97,21 @@ export async function startPgliteServer(): Promise<PgliteTestServer> {
   };
 
   return {
-    async createDatabase() {
+    async createDatabase(options) {
       while (opened.length >= KEEP_OPEN) {
         const oldest = opened.reduce((a, b) => (a.lastUse <= b.lastUse ? a : b));
         await release(oldest);
       }
-      const engine = await PGlite.create("memory://", { startParams: [...PGLITE_START_PARAMS], loadDataDir: template });
+      const configuration = options?.configuration ?? [];
+      let engine: PGlite;
+      let unpinned: Record<string, string> = {};
+      if (configuration.length === 0) {
+        engine = await PGlite.create("memory://", { startParams: [...PGLITE_START_PARAMS], loadDataDir: template });
+      } else {
+        const configured = await configuredDirectory(configuration);
+        unpinned = configured.unpinned;
+        engine = await PGlite.create(configured.directory, { startParams: [...PGLITE_START_PARAMS] });
+      }
       const entry: Opened = { engine, database: undefined, lastUse: clock++ };
       opened.push(entry);
       const touch = () => {
@@ -70,6 +119,7 @@ export async function startPgliteServer(): Promise<PgliteTestServer> {
       };
       return {
         engine,
+        unpinned,
         async exec(sql) {
           touch();
           if (engine.isInTransaction()) {
@@ -82,9 +132,9 @@ export async function startPgliteServer(): Promise<PgliteTestServer> {
           const database = await openPgliteOn(engine, { committedHeight: options?.committedHeight ?? noCommittedHeight });
           entry.database = database;
           return {
-            read<T>(body: (read: ReadHandle) => Promise<T>) {
+            read<T>(body: (read: ReadHandle) => Promise<T>, readOptions?: ReadOptions) {
               touch();
-              return database.read(body);
+              return database.read(body, readOptions);
             },
             transaction<T>(body: (tx: Transaction) => Promise<T>) {
               touch();
@@ -97,6 +147,7 @@ export async function startPgliteServer(): Promise<PgliteTestServer> {
     },
     async stop() {
       await Promise.allSettled([...opened].map((entry) => release(entry)));
+      for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
     },
   };
 }

@@ -8,8 +8,8 @@ import {
   columnVerdict,
   databaseRefusals,
   keyOrderTerm,
-  PINNED_SETTINGS,
   refusalMessage,
+  SESSION_SETTINGS,
   TABLE_RULES,
 } from "../../src/deterministic-postgresql/index.js";
 import { startPglite } from "../determinism/pglite-database.js";
@@ -223,8 +223,8 @@ describe("A138: the component's rules give the same results on PostgreSQL 18 and
     expect([...keys].sort()).not.toEqual(keys);
   });
 
-  it("pins the same session settings on both, so PostgreSQL prints each value the same", async () => {
-    const settings = PINNED_SETTINGS.map(([name], index) => `current_setting('${name}') AS s${index}`).join(", ");
+  it("pins the same session settings on both — how values print, and the zero timeouts — so each value prints the same", async () => {
+    const settings = SESSION_SETTINGS.map(([name], index) => `current_setting('${name}') AS s${index}`).join(", ");
     const [postgres, pglite] = await onBoth(async (read) => ({
       settings: await read.query(`SELECT ${settings}`),
       texts: await read.query(`
@@ -232,7 +232,7 @@ describe("A138: the component's rules give the same results on PostgreSQL 18 and
                '2026-10-23'::date::text AS day, '1 day 2 hours'::interval::text AS span,
                0.1::double precision::text AS double, 0.1::real::text AS single`),
     }));
-    expect(postgres.settings).toEqual([Object.fromEntries(PINNED_SETTINGS.map(([, value], index) => [`s${index}`, value]))]);
+    expect(postgres.settings).toEqual([Object.fromEntries(SESSION_SETTINGS.map(([, value], index) => [`s${index}`, value]))]);
     expect(postgres.texts).toEqual([
       {
         bytes: "\\x00ff",

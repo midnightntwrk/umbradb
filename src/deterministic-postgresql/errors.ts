@@ -21,6 +21,11 @@ export const ERROR_CODES = [
   "database-error",
   /** A read handle, a transaction or the database itself was used after it ended (A10's code). */
   "handle-closed",
+  /**
+   * A read bounded by the read option — a read for a module API request, `apiReadTimeoutMs` — was ended by it: a
+   * statement ran, or the read stayed idle in its transaction, for that long (DB-15, `src/db/postgres.ts`).
+   */
+  "query-timeout",
   /** A query parameter the API cannot send: `undefined`, a function, a `Map`, a non-finite number in JSON, … */
   "invalid-parameter",
   /**

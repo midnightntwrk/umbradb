@@ -26,6 +26,13 @@ export interface PostgresTestDatabase {
   open(options?: Partial<PostgresOptions>): Database;
   /** Terminates a backend with `pg_terminate_backend` and waits until PostgreSQL no longer lists it. */
   terminate(pid: number): Promise<void>;
+  /**
+   * Sets `[name, value]` pairs as this database's defaults — `ALTER DATABASE … SET` and `ALTER ROLE <the login> IN
+   * DATABASE … SET` (a session of the login on this database takes the role's) — and returns what a new session that
+   * pins nothing then starts with, for each name: the control that they are in effect. Sessions already open keep their
+   * values (`admin`'s among them).
+   */
+  setDefaults(defaults: readonly (readonly [string, string])[]): Promise<Record<string, string>>;
 }
 
 /** A PostgreSQL 18 server that hands out empty databases. */
@@ -74,6 +81,21 @@ export async function startPostgresServer(): Promise<PostgresTestServer> {
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
           throw new Error(`backend ${pid} still listed after pg_terminate_backend`);
+        },
+        async setDefaults(defaults) {
+          if (defaults.length === 0) return {};
+          for (const [setting, value] of defaults) {
+            await admin.unsafe(`ALTER DATABASE ${name} SET ${setting} = '${value}'`);
+            await admin.unsafe(`ALTER ROLE CURRENT_USER IN DATABASE ${name} SET ${setting} = '${value}'`);
+          }
+          const plain = postgres(url.toString(), { max: 1, onnotice: () => undefined });
+          try {
+            const shown = defaults.map(([setting]) => `current_setting('${setting}') AS "${setting}"`).join(", ");
+            const [row] = await plain.unsafe(`SELECT ${shown}`);
+            return { ...(row as Record<string, string>) };
+          } finally {
+            await plain.end({ timeout: 5 });
+          }
         },
       };
     },

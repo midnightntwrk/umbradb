@@ -70,8 +70,8 @@ const ROWS: readonly RowCoverage[] = [
       "The pinned session settings, and the zero timeouts (`statement_timeout`, `lock_timeout`, " +
       "`idle_in_transaction_session_timeout`, `transaction_timeout`) of the writer and callback reads",
     requirement: "DB-2, DB-15",
-    tests: ["results.test.ts", "both-backends.test.ts"],
-    pending: { "the zero timeouts of the writer, migrations, setup and callback reads": "2.7" },
+    tests: ["results.test.ts", "both-backends.test.ts", "zero-timeouts.test.ts"],
+    pending: {},
   },
   {
     rule:
@@ -209,7 +209,6 @@ describe("A138: the suite runs every rule of design.md §4's component table on 
     // What A138 covers now, and what waits for which task (`tasks.md` 2.2a's done note says the same).
     expect(Object.fromEntries(ROWS.flatMap((row) => Object.entries(row.pending)))).toEqual({
       "the two functions and the CHECKs on jsonb and numeric columns and their arrays": "7.1",
-      "the zero timeouts of the writer, migrations, setup and callback reads": "2.7",
       "the declaration deterministic: false on a table item": "3.1",
       "opted-out tables skipped by the refusals and the CHECKs, and hashed by name only": "7.1",
     });

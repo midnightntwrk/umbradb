@@ -37,6 +37,25 @@ export function writeHandleClosed(handle: "block-write" | "schema-write", part: 
   );
 }
 
+/** The read timeout that ended a bounded read (DB-15). */
+export type ReadTimeoutSetting = "statement_timeout" | "idle_in_transaction_session_timeout";
+
+/**
+ * `query-timeout` (DB-15): a read bounded by the read option (`ReadOptions.timeoutMs`, a module API request's
+ * `apiReadTimeoutMs`) that `setting` ended — a statement ran for `timeoutMs` (`statement_timeout`), or the read stayed
+ * idle in its transaction that long (`idle_in_transaction_session_timeout`). Not retryable: the same read would run as
+ * long again.
+ */
+export function queryTimeout(timeoutMs: number, setting: ReadTimeoutSetting, cause?: unknown): UmbraError {
+  const what = setting === "statement_timeout" ? "a statement ran" : "the read stayed idle in its transaction";
+  return new UmbraError(
+    "query-timeout",
+    `the read was ended by its timeout: ${what} for ${timeoutMs} ms (${setting})`,
+    { timeoutMs, setting },
+    cause === undefined ? undefined : { cause },
+  );
+}
+
 /**
  * A `COMMIT` that PostgreSQL answered with `ROLLBACK`, because a failed statement aborted the transaction and the body
  * caught its error: never reported as a commit, on either backend.

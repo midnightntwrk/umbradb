@@ -16,9 +16,18 @@ export interface TestBackend {
   readonly singleQueue: boolean;
   start(): Promise<void>;
   stop(): Promise<void>;
-  /** A fresh, empty database with `setup` applied outside the API, opened through the API. */
-  database(setup: string, committedHeight?: CommittedHeight): Promise<TestDatabase>;
+  /**
+   * A fresh, empty database with `setup` applied outside the API, opened through the API. With `defaults`, the
+   * database's own defaults set each `[name, value]` before the API opens it — on PostgreSQL `ALTER DATABASE … SET` and
+   * `ALTER ROLE <the login> IN DATABASE … SET`, on PGlite the data directory's configuration file (`ALTER SYSTEM`,
+   * `postgresql.auto.conf`), PGlite's single-user mode applying neither of the others — so that a test can show the
+   * API's own session settings win over them (DB-2, DB-15).
+   */
+  database(setup: string, committedHeight?: CommittedHeight, defaults?: Settings): Promise<TestDatabase>;
 }
+
+/** Setting names with their values, `[name, value]`, as PostgreSQL's `SET` takes them. */
+export type Settings = readonly (readonly [string, string])[];
 
 export interface TestDatabase {
   readonly db: Database;
@@ -29,6 +38,11 @@ export interface TestDatabase {
   readonly url?: string;
   /** Runs SQL (several statements allowed) outside the API, committed when it returns; never while a read is open. */
   exec(sql: string): Promise<void>;
+  /**
+   * With `defaults`: what a session that pins nothing starts with, for each of their names (`current_setting`), read
+   * outside the API once the defaults were set — the control that they are in effect. Empty without `defaults`.
+   */
+  readonly unpinned: Readonly<Record<string, string>>;
 }
 
 function postgresBackend(): TestBackend {
@@ -42,14 +56,16 @@ function postgresBackend(): TestBackend {
     async stop() {
       await server?.stop();
     },
-    async database(setup, committedHeight) {
+    async database(setup, committedHeight, defaults = []) {
       if (server === undefined) throw new Error("backend not started");
       const database = await server.createDatabase();
       await database.exec(setup);
+      const unpinned = await database.setDefaults(defaults);
       return {
         db: database.open(committedHeight === undefined ? {} : { committedHeight }),
         url: database.url,
         exec: (sql) => database.exec(sql),
+        unpinned,
       };
     },
   };
@@ -66,13 +82,14 @@ function pgliteBackend(): TestBackend {
     async stop() {
       await server?.stop();
     },
-    async database(setup, committedHeight) {
+    async database(setup, committedHeight, defaults = []) {
       if (server === undefined) throw new Error("backend not started");
-      const database = await server.createDatabase();
+      const database = await server.createDatabase({ configuration: defaults });
       await database.exec(setup);
       return {
         db: await database.open(committedHeight === undefined ? {} : { committedHeight }),
         exec: (sql) => database.exec(sql),
+        unpinned: database.unpinned,
       };
     },
   };

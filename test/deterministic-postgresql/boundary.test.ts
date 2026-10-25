@@ -6,7 +6,9 @@ import {
   ERROR_CODES,
   PINNED_SETTINGS,
   RESULT_TYPES,
+  SESSION_SETTINGS,
   TABLE_RULES,
+  ZERO_TIMEOUTS,
 } from "../../src/deterministic-postgresql/index.js";
 import {
   boundaryViolations,
@@ -51,7 +53,7 @@ const where = (file: string, line: number): string => `${relative(REPOSITORY, fi
 
 /** Where the rules A138 names are defined: each name declared and exported by that file of the component. */
 const DEFINITIONS: Readonly<Record<string, readonly string[]>> = {
-  "settings.ts": ["PINNED_SETTINGS"],
+  "settings.ts": ["PINNED_SETTINGS", "ZERO_TIMEOUTS", "SESSION_SETTINGS"],
   "column-rules.ts": [
     "SCALAR_COLUMN_TYPES",
     "COLUMN_TYPE_RULES",
@@ -105,10 +107,10 @@ function redeclared(files: readonly string[], exported: ReadonlyMap<string, stri
   return out;
 }
 
-/** Every pinned setting written with its value outside the component. */
+/** Every session setting — a pinned setting or a zero timeout — written with its value outside the component. */
 function settingsElsewhere(files: readonly string[]): string[] {
   return files.flatMap((file) =>
-    settingsWritten(parseSource(file), PINNED_SETTINGS).map((found) => `${where(file, found.line)}: writes ${found.setting}`),
+    settingsWritten(parseSource(file), SESSION_SETTINGS).map((found) => `${where(file, found.line)}: writes ${found.setting}`),
   );
 }
 
@@ -157,14 +159,18 @@ function componentCode(): Map<string, string> {
 }
 
 /**
- * The component's strings of 30 characters or more, except its error codes: `ERROR_CODES` is the database API's
- * vocabulary (decision record Q79 put `UmbraError` and its codes here), which every module that refuses or fails with
- * a code names — `durability-full-page-writes-off` (DB-12) is the first code that long.
+ * The component's strings of 30 characters or more, except its error codes and the names of its session settings:
+ * `ERROR_CODES` is the database API's vocabulary (decision record Q79 put `UmbraError` and its codes here), which every
+ * module that refuses or fails with a code names — `durability-full-page-writes-off` (DB-12) is the first code that
+ * long; and a setting's name is PostgreSQL's, which code outside the component names too — `src/db/postgres.ts` sets
+ * two of the timeouts for a bounded read, and 0.9.5's client refuses them in a URL — while a setting written with the
+ * component's value is what {@link settingsElsewhere} checks (`idle_in_transaction_session_timeout`, task 2.7, is the
+ * first name that long).
  */
 function componentTexts(): string[] {
-  const codes: ReadonlySet<string> = new Set(ERROR_CODES);
+  const vocabulary: ReadonlySet<string> = new Set([...ERROR_CODES, ...SESSION_SETTINGS.map(([name]) => name)]);
   return CODE_FILES.flatMap((file) => stringLiterals(parseSource(file)).map((literal) => literal.text)).filter(
-    (text) => text.length >= MINIMUM_TEXT && !codes.has(text),
+    (text) => text.length >= MINIMUM_TEXT && !vocabulary.has(text),
   );
 }
 
@@ -227,6 +233,14 @@ describe("A138: the pinned settings, the column-type rules and the result mappin
       "TimeZone",
       "extra_float_digits",
     ]);
+    expect(ZERO_TIMEOUTS.map(([name]) => name)).toEqual([
+      "statement_timeout",
+      "lock_timeout",
+      "idle_in_transaction_session_timeout",
+      "transaction_timeout",
+      "idle_session_timeout",
+    ]);
+    expect(SESSION_SETTINGS).toEqual([...PINNED_SETTINGS, ...ZERO_TIMEOUTS]);
     expect(COLUMN_TYPE_RULES).toHaveLength(17); // the date-and-time row split in two (task 2.2b, Q74)
     expect(Object.keys(TABLE_RULES)).toHaveLength(5);
     expect(RESULT_TYPES).toHaveLength(24);
@@ -238,10 +252,11 @@ describe("A138: the pinned settings, the column-type rules and the result mappin
     expect(redeclared(OUTSIDE_FILES, exported)).toEqual([]);
   });
 
-  it("writes none of the pinned settings with its value anywhere else in src/", () => {
-    // Not vacuous: the component's own settings file writes all five.
-    const own = settingsWritten(parseSource(join(COMPONENT, "settings.ts")), PINNED_SETTINGS);
-    expect(new Set(own.map((found) => found.setting)).size).toBe(PINNED_SETTINGS.length);
+  it("writes none of the session settings — pinned settings and zero timeouts — with its value anywhere else in src/", () => {
+    // Not vacuous: the component's own settings file writes all ten.
+    const own = settingsWritten(parseSource(join(COMPONENT, "settings.ts")), SESSION_SETTINGS);
+    expect(new Set(own.map((found) => found.setting)).size).toBe(SESSION_SETTINGS.length);
+    expect(SESSION_SETTINGS).toHaveLength(10);
     expect(settingsElsewhere(OUTSIDE_FILES)).toEqual([]);
   });
 
@@ -263,12 +278,20 @@ describe("A138: the pinned settings, the column-type rules and the result mappin
     expect(copiedTexts(OUTSIDE_FILES, texts)).toEqual([]);
   });
 
-  it("leaves out of the component's texts its error codes only, which the rest of src/ names", () => {
+  it("leaves out of the component's texts its error codes and its settings' names only, which the rest of src/ names", () => {
     const all = CODE_FILES.flatMap((file) => stringLiterals(parseSource(file)).map((literal) => literal.text));
     const kept: ReadonlySet<string> = new Set(componentTexts());
     const left = all.filter((text) => text.length >= MINIMUM_TEXT && !kept.has(text));
     expect(left.length).toBeGreaterThan(0);
-    expect(left.every((text) => (ERROR_CODES as readonly string[]).includes(text))).toBe(true);
+    const names: readonly string[] = SESSION_SETTINGS.map(([name]) => name);
+    expect(left.every((text) => (ERROR_CODES as readonly string[]).includes(text) || names.includes(text))).toBe(true);
+    // The one name that long, and a setting written with the component's value outside it is still caught.
+    expect(left.filter((text) => names.includes(text))).toEqual(["idle_in_transaction_session_timeout"]);
+    const file = join(SRC, "db", "fixture.ts");
+    const written = parseSource(file, 'const sql = "SET idle_in_transaction_session_timeout = 0";');
+    expect(settingsWritten(written, SESSION_SETTINGS).map((found) => found.setting)).toEqual([
+      "idle_in_transaction_session_timeout = 0",
+    ]);
   });
 
   it("fixture: a copy under another name is caught by each check", () => {

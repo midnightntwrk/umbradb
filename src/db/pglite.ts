@@ -32,10 +32,17 @@
  * statement, and a type it has no parser for arrives as text anyway — with the column's type OID; `rowMode: "array"`
  * keeps columns that share a name. Every parameter is sent as the text the mapping gives it, untyped, through
  * serializers that keep it unchanged (PGlite's own would rewrite `boolean`, `json` and `bytea` texts). The engine must
- * run with the component's {@link PINNED_SETTINGS} as start parameters ({@link PGLITE_START_PARAMS}): they win over
+ * run with the component's {@link SESSION_SETTINGS} as start parameters ({@link PGLITE_START_PARAMS}): they win over
  * the data directory's `postgresql.conf` and `postgresql.auto.conf` (PGlite's initdb writes the host's time zone there)
  * and survive `RESET ALL`, while `ALTER DATABASE … SET` and `ALTER ROLE … SET` are not applied in PGlite's single-user
  * mode at all; {@link openPgliteOn} refuses an engine that does not run with them.
+ *
+ * **Timeouts (DB-15, owner decision Q71).** PGlite enforces no server-side timeout, and one that fires hangs the engine —
+ * the whole process, synchronously: a nonzero `idle_in_transaction_session_timeout`, `transaction_timeout` or
+ * `idle_session_timeout` once its time passed (`electric-sql/pglite#1058`; checked on 0.5.10, 2026-10-25). The
+ * session settings' zero timeouts keep a configuration file's from reaching the engine, and a read with the read option
+ * (`timeoutMs`, a module API request's) sets neither of the two a PostgreSQL read sets: on PGlite, a development
+ * backend (DB-12), API reads are not bounded. The option is checked as on PostgreSQL (DB-1).
  *
  * **Errors (DB-13).** PGlite runs in this process: there is no connection to lose, so no error of this backend is
  * `connection-lost`, the one retryable code. A statement the server refused (severity `ERROR`) is `database-error`
@@ -59,22 +66,23 @@
 
 import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
 import { PGlite, type QueryOptions, types } from "@electric-sql/pglite";
-import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
-import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
+import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../deterministic-postgresql/index.js";
+import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
 import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
 import { pgliteNeedsDevelopmentOptIn } from "./durability-probe.js";
 import { allowMultiStatement } from "./multi-statement.js";
 import { READS_BYPASS_QUEUE } from "./pglite-build-flags.js";
 import { acquirePgliteLock } from "./pglite-lock.js";
+import { readTimeoutMs } from "./read-options.js";
 import { allowWriterStart } from "./writer-lock.js";
 
 /**
  * The start parameters of every PGlite engine the database API uses: PGlite's own (`PGlite.defaultStartParams`, which
- * a `startParams` option replaces rather than extends), then `-c name=value` for each of {@link PINNED_SETTINGS}.
+ * a `startParams` option replaces rather than extends), then `-c name=value` for each of {@link SESSION_SETTINGS}.
  */
 export const PGLITE_START_PARAMS: readonly string[] = [
   ...PGlite.defaultStartParams,
-  ...PINNED_SETTINGS.flatMap(([name, value]) => ["-c", `${name}=${value}`]),
+  ...SESSION_SETTINGS.flatMap(([name, value]) => ["-c", `${name}=${value}`]),
 ];
 
 /** Options of {@link openPglite}. */
@@ -123,8 +131,8 @@ export async function openPglite(options: PgliteOptions): Promise<Database> {
 /**
  * Opens the PGlite backend on an engine that is already open — the database API's only user of it from now on, which
  * closes it when the database closes. The engine must have been started with {@link PGLITE_START_PARAMS}: an engine
- * whose session, or whose `RESET` values, differ from a pinned setting is refused with `invalid-configuration`, naming
- * the setting, and left open.
+ * whose session, or whose `RESET` values, differ from a session setting (a pinned one or a zero timeout) is refused with
+ * `invalid-configuration`, naming the setting, and left open.
  */
 export async function openPgliteOn(
   engine: PGlite,
@@ -264,7 +272,13 @@ class PgliteDatabase implements Database {
     this.options = { rowMode: "array", parsers, serializers: TEXT_SERIALIZERS };
   }
 
-  read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T> {
+  read<T>(body: (read: ReadHandle) => Promise<T>, options?: ReadOptions): Promise<T> {
+    // Checked as on PostgreSQL, and then not applied: PGlite enforces neither timeout and hangs once one fires (DB-15).
+    try {
+      readTimeoutMs(options);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     const refused = this.refusal("read");
     if (refused !== undefined) return Promise.reject(refused);
     const outer = currentJob.getStore();
@@ -293,21 +307,22 @@ class PgliteDatabase implements Database {
     return this.closed;
   }
 
-  /** Refuses the engine unless every pinned setting is the session's value and its `RESET` value. */
+  /** Refuses the engine unless every session setting is the session's value and its `RESET` value. */
   async checkPinnedSettings(): Promise<void> {
-    const names = PINNED_SETTINGS.map(([name]) => name.toLowerCase());
+    const names = SESSION_SETTINGS.map(([name]) => name.toLowerCase());
     const { rows } = await this.statement(
       "SELECT lower(name) AS name, setting, reset_val FROM pg_settings WHERE lower(name) = ANY($1::text[])",
       [names],
     );
-    for (const [name, value] of PINNED_SETTINGS) {
+    for (const [name, value] of SESSION_SETTINGS) {
       const row = rows.find((candidate) => candidate.name === name.toLowerCase());
       if (row?.setting !== value || row.reset_val !== value) {
         throw new UmbraError(
           "invalid-configuration",
           `the PGlite engine runs with ${name} = ${JSON.stringify(row?.setting)} (after RESET: ` +
             `${JSON.stringify(row?.reset_val)}), not ${JSON.stringify(value)}: start it with PGLITE_START_PARAMS ` +
-            "(src/db/pglite.ts), which pins the settings the database API's result mapping reads",
+            "(src/db/pglite.ts), which pins the settings the database API relies on: how values print, and the zero " +
+            "timeouts",
           { parameter: name },
         );
       }

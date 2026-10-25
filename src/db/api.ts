@@ -54,15 +54,36 @@ export interface Transaction {
  */
 export type CommittedHeight = (read: ConsistentRead) => Promise<bigint | null>;
 
+/**
+ * Options of one read (`Database.read`; DB-15, owner decision Q71). Without them a read is not bounded: the read
+ * handles given to callbacks, like the writer, run with every server-side timeout at 0 (the component's
+ * `ZERO_TIMEOUTS`), because they run work the runner must finish.
+ */
+export interface ReadOptions {
+  /**
+   * Bounds this read, as a read for a module API request is bounded by `apiReadTimeoutMs` (CF-4; the module API passes
+   * it, task 5.2a): milliseconds, a whole number from 1 to 2147483647 (PostgreSQL's limit), else the read is refused
+   * with `invalid-configuration` before anything runs. On PostgreSQL the read runs with `statement_timeout` and
+   * `idle_in_transaction_session_timeout` set to it, for this read only (`SET LOCAL`), and fails with `query-timeout`
+   * (not retryable) once either ends it: a statement that ran that long (the connection stays in the pool), or the read
+   * idle in its transaction that long — between two statements, or after its last one while `body` still runs — which
+   * ends the session (the pool opens a new one). It fails so even when `body` caught the statement's error. On PGlite,
+   * which enforces neither timeout and hangs once the second fires (`design.md` §14), it sets neither: the read is not
+   * bounded.
+   */
+  readonly timeoutMs?: number;
+}
+
 /** A database, opened on one backend. */
 export interface Database {
   /**
    * Runs `body` with a read handle that sees one committed height (DB-2): on PostgreSQL one `REPEATABLE READ READ
    * ONLY` transaction on a pooled read connection, on PGlite one job of its queue (DB-4); its height read first by
    * {@link CommittedHeight}. The handle closes when `body` settles; using it afterwards fails with `handle-closed`.
-   * Resolves with `body`'s result; rejects with `body`'s own error unchanged, or with an {@link UmbraError}.
+   * Resolves with `body`'s result; rejects with `body`'s own error unchanged, or with an {@link UmbraError} — with
+   * `query-timeout` when {@link ReadOptions.timeoutMs} ended the read.
    */
-  read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T>;
+  read<T>(body: (read: ReadHandle) => Promise<T>, options?: ReadOptions): Promise<T>;
   /**
    * Runs `body` in one transaction — on PostgreSQL on the writer connection (DB-5), on PGlite as one exclusive job of
    * its queue (DB-4): it commits when `body` resolves and rolls back when `body` rejects (with `body`'s own error,

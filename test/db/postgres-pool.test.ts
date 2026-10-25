@@ -2,7 +2,7 @@ import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UmbraError } from "../../src/db/errors.js";
 import { openPostgres } from "../../src/db/postgres.js";
-import { PINNED_SETTINGS } from "../../src/deterministic-postgresql/index.js";
+import { SESSION_SETTINGS } from "../../src/deterministic-postgresql/index.js";
 import { TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
@@ -134,8 +134,9 @@ describe("A12 (DB-5) — a reader never sees a block's rows before its COMMIT", 
 });
 
 describe("the database URL (CF-4's `database`)", () => {
-  it("refuses a URL query parameter that would override a pinned setting, before connecting", () => {
-    for (const name of PINNED_SETTINGS.map(([setting]) => setting)) {
+  it("refuses a URL query parameter that would override a session setting (pinned or a zero timeout), before connecting", () => {
+    expect(SESSION_SETTINGS.map(([setting]) => setting)).toContain("idle_session_timeout");
+    for (const name of SESSION_SETTINGS.map(([setting]) => setting)) {
       for (const spelling of [name, name.toLowerCase(), name.toUpperCase()]) {
         let error: unknown;
         try {

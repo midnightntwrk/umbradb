@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { classifyPgliteError, openPglite, openPgliteOn, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
-import { PINNED_SETTINGS } from "../../src/deterministic-postgresql/index.js";
+import { PINNED_SETTINGS, SESSION_SETTINGS } from "../../src/deterministic-postgresql/index.js";
 import { askedLater, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 import { type PgliteTestDatabase, type PgliteTestServer, startPgliteServer } from "./pglite-server.js";
 
@@ -384,11 +384,12 @@ describe("opening (DB-1, Q65)", () => {
     for (const made of directories) rmSync(made, { recursive: true, force: true });
   });
 
-  it("starts the engine with PGlite's own start parameters and the five pinned settings", () => {
+  it("starts the engine with PGlite's own start parameters and the session settings: the five pinned, the zero timeouts", () => {
     expect(PGLITE_START_PARAMS.slice(0, PGlite.defaultStartParams.length)).toEqual(PGlite.defaultStartParams);
     expect(PGLITE_START_PARAMS.slice(PGlite.defaultStartParams.length)).toEqual(
-      PINNED_SETTINGS.flatMap(([name, value]) => ["-c", `${name}=${value}`]),
+      SESSION_SETTINGS.flatMap(([name, value]) => ["-c", `${name}=${value}`]),
     );
+    expect(SESSION_SETTINGS.slice(0, PINNED_SETTINGS.length)).toEqual(PINNED_SETTINGS);
   });
 
   it("opens an in-memory database with the pinned settings, and closes it", async () => {
@@ -462,6 +463,24 @@ describe("opening (DB-1, Q65)", () => {
     const error = await failure(() => openPgliteOn(engine, { committedHeight: async () => null }));
     expect(error.code).toBe("invalid-configuration");
     expect(error.details).toEqual({ parameter: "bytea_output" });
+    await engine.close();
+  }, 60_000);
+
+  it("refuses an engine started without the zero timeouts, naming the first that differs (DB-15)", async () => {
+    // `lock_timeout` above 0 is one PGlite does not hang on (task 2.7's probe), so the engine stays usable to close.
+    const engine = await PGlite.create("memory://", {
+      startParams: [
+        ...PGlite.defaultStartParams,
+        ...PINNED_SETTINGS.flatMap(([name, value]) => ["-c", `${name}=${value}`]),
+        "-c",
+        "lock_timeout=1000",
+      ],
+    });
+    const error = await failure(() => openPgliteOn(engine, { committedHeight: async () => null }));
+    expect(error.code).toBe("invalid-configuration");
+    expect(error.details).toEqual({ parameter: "lock_timeout" });
+    expect(error.message).toContain("zero timeouts");
+    expect(engine.closed).toBe(false);
     await engine.close();
   }, 60_000);
 

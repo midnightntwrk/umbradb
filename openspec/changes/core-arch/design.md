@@ -226,14 +226,26 @@ interface BlockSource {
   PGlite: start parameters), which take precedence over the server's, the database's and the role's defaults; a
   `database` URL setting one is refused (`invalid-configuration`). Every connection also starts with
   `statement_timeout = 0`, `lock_timeout = 0`, `idle_in_transaction_session_timeout = 0` and `transaction_timeout = 0`
-  (PostgreSQL 17 and later), so the writer, migrations and callback reads are never cut off; a read for a module API
-  request sets `statement_timeout` and `idle_in_transaction_session_timeout` to `apiReadTimeoutMs` with `SET LOCAL`, so
-  they end with that read (DB-15). `statement_timeout` cancels the statement and leaves the session usable;
-  `idle_in_transaction_session_timeout` ends the session, so the pool drops that connection and opens a new one. PGlite
-  enforces neither (checked on 0.5.10, 2026-10-24: `pg_sleep(3)` ran 3 s under a 1 s `statement_timeout`, and with an
-  `idle_in_transaction_session_timeout` above 0 the next statement hung; `electric-sql/pglite#1058`), so on PGlite API
-  reads set neither and are not bounded — PGlite is a development backend (DB-12) — and the pinned zeros keep a
-  configuration file's timeout from hanging it.
+  (PostgreSQL 17 and later), and `idle_session_timeout = 0` (Q93, shipped pending the owner: a default for it ends the
+  writer's session between blocks, and the writer lock with it), so the writer, migrations, setup and callback reads are
+  never cut off; they are applied and refused in a URL the same way (`src/deterministic-postgresql/settings.ts`:
+  `PINNED_SETTINGS`, `ZERO_TIMEOUTS`, and `SESSION_SETTINGS`, both, which the backends apply). A read for a module API
+  request is `db.read(body, { timeoutMs: apiReadTimeoutMs })` (`ReadOptions`, a whole number of milliseconds from 1 to
+  2147483647, else `invalid-configuration`; a read without it is not bounded); it sets `statement_timeout` and
+  `idle_in_transaction_session_timeout` to it with `SET LOCAL` in the message of its `BEGIN`, so they end with that read
+  (DB-15). `statement_timeout` cancels the statement (`57014`) and leaves the session usable;
+  `idle_in_transaction_session_timeout` ends the session, so the pool drops that connection and opens a new one. A read
+  either ends fails with `query-timeout` (`details: { timeoutMs, setting }`), also when its body caught the statement's
+  error; only such a read reports it (a `57014` or a lost session elsewhere keeps its meaning). The idle end never
+  reaches the caller as an error — `postgres` 3.4.9 drops a server error that arrives while no statement is pending, so
+  the session is merely lost (checked on PostgreSQL 18.6, 2026-10-25) — so the read tells it by its own clock: once it
+  has been idle in its transaction for its timeout, its next statement, and the read itself when its body settles, fail
+  with `query-timeout` (`src/db/postgres.ts`, `BoundedRead`). PGlite enforces neither (checked on 0.5.10, 2026-10-24:
+  `pg_sleep(3)` ran 3 s under a 1 s `statement_timeout`, and with an `idle_in_transaction_session_timeout` above 0 the
+  next statement hung; `electric-sql/pglite#1058`; 2026-10-25: so do `transaction_timeout` and, outside a transaction,
+  `idle_session_timeout` above 0, and the hang stops the whole process), so on PGlite API reads set neither and are not
+  bounded — PGlite is a development backend (DB-12) — and the pinned zeros keep a configuration file's timeout from
+  hanging it.
 - **Date and time values (Q68, Q74).** PostgreSQL prints a `timestamptz` under the pinned settings as
   `2025-05-21 14:30:00.123456+00`; the mapping (`src/deterministic-postgresql/mapping.ts`) rewrites it to
   `2025-05-21T14:30:00.123456Z` (a `timestamp`'s text the same way, without `Z`; a `date` unchanged; `infinity` and
@@ -637,7 +649,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | TypeScript compiler API for `noEmit` | `typescript` 5.9.3 installed | Verified (installed) |
 | `new Date(text)` reads a zone-less timestamp in the process's time zone and keeps milliseconds only | Node.js v24.9.0, 2026-10-23: `2025-05-21 14:30:00` reads as `14:30Z`, `18:30Z` and `05:30Z` under `TZ` `UTC`, `America/New_York` and `Asia/Tokyo`; `…:00.123456+00` as `…:00.123Z` | Verified (run); the reason for Q68's text mapping |
 | PostgreSQL startup parameters take precedence over server, database and role defaults | Task 2.1, 2026-10-23, on PostgreSQL 17.11: with hostile database defaults the five pinned settings won (Q65); the same test (`test/db/results.test.ts`) on PostgreSQL 18.6, 2026-10-24 (task 0.4) | Verified (test) |
-| PGlite 0.5.10 enforces `statement_timeout` and `idle_in_transaction_session_timeout` | Checked 2026-10-24 (orchestrator, and the targeted fix check): `pg_sleep(3)` completes after 3 s under `statement_timeout = 1000`; with `idle_in_transaction_session_timeout = 1000`, a statement after 2 s idle hangs (killed after 10 s), with 0 it answers; `electric-sql/pglite#1058` | Verified: it enforces neither; API reads on PGlite are not bounded (DB-15) |
+| PGlite 0.5.10 enforces `statement_timeout` and `idle_in_transaction_session_timeout` | Checked 2026-10-24 (orchestrator, and the targeted fix check): `pg_sleep(3)` completes after 3 s under `statement_timeout = 1000`; with `idle_in_transaction_session_timeout = 1000`, a statement after 2 s idle hangs (killed after 10 s), with 0 it answers; `electric-sql/pglite#1058`. Probe and tests, 2026-10-25 (task 2.7): with each of `idle_in_transaction_session_timeout`, `transaction_timeout` and (outside a transaction) `idle_session_timeout` at 1 s in `postgresql.auto.conf`, the statement after 2.5 s idle hangs and the process's event loop stops; `-c name=0` start parameters win over the file and it answers (`test/db/pglite-timeouts.test.ts`, in processes of their own) | Verified: it enforces neither, and a timeout that fires hangs it; API reads on PGlite are not bounded, and every session pins the zeros (DB-15, Q93) |
 
 ## 15. Relation to the existing design documents
 
