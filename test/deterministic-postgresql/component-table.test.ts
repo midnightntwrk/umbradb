@@ -88,10 +88,11 @@ const ROWS: readonly RowCoverage[] = [
       "its unlogged tables are skipped by the refusals and the `CHECK`s; the contents hash records each such table as " +
       "`[schema, table, null, null]`; digests skip it; backups carry its rows and its sequences' positions",
     requirement: "MD-1, DT-3, DT-4, DT-6, BK-2",
-    tests: [],
+    // Task 3.1: the declaration, and the skip written once (`opt-out.ts`), which the refusals and the TRUNCATE guard use.
+    tests: ["opt-out.test.ts"],
     pending: {
-      "the declaration deterministic: false on a table item": "3.1",
-      "opted-out tables skipped by the refusals and the CHECKs, and hashed by name only": "7.1",
+      "the startup check, the CHECKs and change capture skip opted-out tables, and the hash records them by name only":
+        "7.1",
     },
   },
 ];
@@ -210,8 +211,8 @@ describe("A138: the suite runs every rule of design.md §4's component table on 
     // What A138 covers now, and what waits for which task (`tasks.md` 2.2a's done note says the same).
     expect(Object.fromEntries(ROWS.flatMap((row) => Object.entries(row.pending)))).toEqual({
       "the two functions and the CHECKs on jsonb and numeric columns and their arrays": "7.1",
-      "the declaration deterministic: false on a table item": "3.1",
-      "opted-out tables skipped by the refusals and the CHECKs, and hashed by name only": "7.1",
+      "the startup check, the CHECKs and change capture skip opted-out tables, and the hash records them by name only":
+        "7.1",
     });
   });
 });

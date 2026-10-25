@@ -582,9 +582,42 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 3. Modules
 
-- [ ] 3.1 Declaration types, `defineModule`, declaration validation; a `table` item's optional `deterministic: false`
+- [x] 3.1 Declaration types, `defineModule`, declaration validation; a `table` item's optional `deterministic: false`
       (Q76).
       **Acceptance:** A20, A21.
+      **Done (2026-10-25):** `src/modules/declaration.ts`: CORE-ARCH §4.10's types (`ModuleDeclaration` with
+      `requiresResync?`, `ItemDeclaration`, `Lifetime`, `FieldKind`, `FieldSchema`, `Migration`, `Revision`,
+      `ProcessContext` with MD-7's `publish`, `BlockContext`, `ItemSink`, `ApiRegistry`, `PointCallbacks`, and
+      `BlockHeader` and `PendingKey`, which CORE-ARCH names without defining), `POINTS` (design §2's thirteen, in order)
+      and `defineModule`, which returns its argument and whose type refuses a callback under a name that is not a point,
+      also in a declaration built first and passed later. `src/modules/validation.ts`: `validateDeclarations({ backbone,
+      core, user })` validates declarations given as `unknown`, so a module built without types is held to the same
+      declaration: every shape the type forbids is refused with `invalid-declaration` naming the field (plus a `table` on
+      an item without the `table` lifetime, an item provided twice, a table listed by two items, `keyKinds` without
+      `validateKey`), then MD-2's causes, one rule and one code each (`DECLARATION_RULES`): `bad-id` (the schema plan's
+      own check, `checkNames`, now exported by `src/db/roles.ts`), `reserved-prefix` (user modules), `duplicate-id`
+      (before the schema plan would call it a schema collision), `no-requirement` (not for backbone parts),
+      `item-no-lifetime`, `table-item-no-kind`, `field-no-kind` (the field's outermost schema's `meta().kind`), and MD-1's
+      `unknown-point`; every message names the module, the cause and the fix. Five codes are new in `design.md` §11
+      (decision record Q94, open, shipped A). `src/modules/adapters.ts`: `schemaModule`/`schemaModules` (`OWN_PARTS`
+      left out) for `planSchemas`, and `migrationPart(declaration, context)` for `startDatabase` (`on-start-db` called as a
+      method of `points` with the module's process context). `deterministic: false`: carried to the schema plan's
+      `optedOut`; the skip is the component's, written once in `src/deterministic-postgresql/opt-out.ts` (`optOut`), which
+      `databaseRefusals(tables, relations, { optedOut })` (each relation now knows the table it belongs to:
+      `catalogRelations`' `belongsTo`) and the `TRUNCATE` guard use; `docs/module-guide.md`'s "Data that is not a function
+      of the chain". Tests, seen failing first (`tsc`: A20's five `@ts-expect-error` lines unused, the modules missing;
+      the suites failed to load; `column-refusals.test.ts` without `belongsTo`; the `[DOC]` checks before the section):
+      `test/modules/declarations.test.ts` (A20 — the type test with its committed negative control, a loose definer
+      that accepts `on-fetched`; the runtime half for the same declaration built anyway and written in JavaScript),
+      `test/modules/validation.test.ts` (A21's table, 14 cases with code, names and words, and its committed negative
+      control: the validation without one rule fails exactly that rule's cases; `bad-id`; 49 shapes the type forbids),
+      `test/modules/adapters.test.ts` and `test/deterministic-postgresql/opt-out.test.ts` (both backends).
+      71 wrong variants (a scratch runner outside the clone): 68 caught on the first run; the 3 survivors were gaps — a
+      declaration without `requires`, one item listing a table twice, how a shape refusal names a declaration with an id —
+      closed by tests; on the final sources 71 of 71 are caught, none equivalent.
+      **Pending:** "refused at startup" through the runner's refusal state (task 5.x, which calls the validation first);
+      the requirement graph and the plan's module set (3.2); the startup check, `CHECK`s, change capture and contents
+      hash that skip opted-out tables (7.1); `ledgerTasks` in the declaration (12.6); CF-2's `entry` builder (4.1).
 - [ ] 3.2 Graph resolution per height range, Kahn order, mid-chain rule, development-only rule, shared-item providers.
       **Acceptance:** A22, A23, A24, A25.
 

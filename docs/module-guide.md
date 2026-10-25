@@ -105,7 +105,8 @@ here (modules are trusted code).
 - **Write nothing derived from a `db.read`.** It reads whatever height is committed when it runs, which no block
   decides. The rows your callbacks write must come from what the points give them — the block, its items, your settings
   and the handles — or two machines fed the same chain could write different rows (only a table declared
-  `deterministic: false` may hold data that is not a function of the chain).
+  `deterministic: false` may hold data that is not a function of the chain: see "Data that is not a function of the
+  chain").
 - **The read option.** `db.read(body)` is not bounded. `db.read(body, { timeoutMs })` bounds it on PostgreSQL: a
   statement running `timeoutMs` milliseconds, or the read left idle that long — between two statements, or after its
   last one while your body still runs — ends it with `query-timeout` (not retryable), even if your code caught the
@@ -115,6 +116,48 @@ here (modules are trusted code).
 - **Keep reads short, and keep no read handle.** A read handle closes when your body settles; using it later fails with
   `handle-closed`. On PGlite a read holds the one queue while its body runs, so the next block waits for it; on
   PostgreSQL it holds one of the pooled read connections.
+
+## Data that is not a function of the chain
+
+Most of a module's data is computed from the chain: the block, its items and the module's settings. Two machines fed
+the same chain then hold the same rows, and UmbraDB checks that they do (the contents hash, the per-block digests). Some
+data is not a function of the chain by nature: the time an API request arrived, a cache, an operator's notes. Keep such
+data in tables declared `deterministic: false` (MD-1 of the `core-arch` change, owner decision Q76).
+
+- **Declare it on the `table` item.** The flag goes on the item's `table` and covers every table the item lists:
+
+  ```ts
+  provides: [
+    {
+      name: "key-requests",
+      lifetimes: ["table"],
+      table: { schema: "keys", tables: ["requests"], kind: "append-only", deterministic: false },
+    },
+  ],
+  ```
+
+  A table is deterministic unless declared so, and only `false` may be written: `deterministic: true` is refused at
+  startup (`invalid-declaration`).
+- **What it skips.** The determinism rules do not apply to the tables it lists, to their partitions, or to the sequences
+  their columns own: such a table may have a `serial` or identity column, a `now()` default, a `timestamp` or a
+  floating-point column, no primary key, and it may be unlogged. Its `jsonb` and `numeric` columns get no `CHECK`, and
+  the contents hash records its schema and name only: two databases that differ only in its rows hash equal, and a
+  database without the table hashes differently. The per-block digests skip it, and `TRUNCATE` is not refused on it,
+  since that refusal exists to keep the digests complete.
+- **What it keeps.** Everything else is as for any table: your module's role and schema, your migrations (once, in
+  order, checksummed), and backups, which carry its rows and its sequences' positions. And the flag is per item, so
+  every other table of the module is still checked.
+- **Nothing deterministic may be computed from such a table.** No row of a table without the flag may depend on what a
+  table with it holds: not through a query in a callback, not through a value your code keeps, not in any other way.
+  Data derived from a `db.read`, which reads whatever height is committed when it runs, belongs only in such a table
+  too (see "Reading through `db`"). Read these tables to answer API requests or for work outside the points. These are
+  guidelines: UmbraDB cannot see what your code computes from what (modules are trusted code), but two machines whose
+  deterministic rows differ show it in their contents hashes and digests.
+- **Keep the two kinds apart.** A table that would hold both kinds of data cannot be half declared: split it in two,
+  one table in an item with the flag and one in an item without it. A table is listed by one item only.
+- **Shared items.** An item several modules provide is declared alike by each, with the same schema and migrations,
+  and every provider of a shared item declares the same flag; otherwise startup refuses with
+  `shared-item-migrations-differ`.
 
 ## Upgrades
 

@@ -110,8 +110,8 @@ export interface SchemaMigration {
 }
 
 /**
- * What the roles and schemas need of a module's declaration (MD-1); tasks 3.1 and 3.2 take it from the real
- * `ModuleDeclaration`s of one process.
+ * What the roles and schemas need of a module's declaration (MD-1): `schemaModule` (`src/modules/adapters.ts`, task 3.1)
+ * takes it from a validated `ModuleDeclaration`; task 3.2 decides which declarations a plan holds.
  */
 export interface SchemaModule {
   readonly id: string;
@@ -173,6 +173,18 @@ function collision(schema: string, first: string, second: string): UmbraError {
   );
 }
 
+/**
+ * Refuses with `bad-id` the first id or item name of `module` that DB-8's pattern and length do not allow: its id,
+ * then each item it provides, then each item it requires (MD-2). {@link planSchemas} checks every module of a plan with
+ * it, and declaration validation (`src/modules/validation.ts`) every declaration of a build, before anything else
+ * reads their names.
+ */
+export function checkNames(module: Pick<SchemaModule, "id" | "provides" | "requires">): void {
+  checkId(module.id, "module", undefined);
+  for (const item of module.provides) checkId(item.name, "item", module.id);
+  for (const name of module.requires) checkId(name, "item", module.id);
+}
+
 function isReserved(schema: string): boolean {
   return RESERVED_SCHEMAS.includes(schema) || schema.startsWith("pg_");
 }
@@ -215,11 +227,7 @@ function provisionDifference(first: Provision, other: Provision): Difference | u
  * `schema-collision` or `shared-item-migrations-differ` (not retryable), naming what collides or differs.
  */
 export function planSchemas(modules: readonly SchemaModule[]): SchemaPlan {
-  for (const module of modules) {
-    checkId(module.id, "module", undefined);
-    for (const item of module.provides) checkId(item.name, "item", module.id);
-    for (const name of module.requires) checkId(name, "item", module.id);
-  }
+  for (const module of modules) checkNames(module);
 
   // Each module writes one schema: its own, or a shared item's (Q89).
   const writeSchemas = new Map<string, string>();

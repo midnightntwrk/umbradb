@@ -20,7 +20,9 @@
  * enums, domains, composite, range and multirange types apart, whatever their name) and of an array's element, whether
  * the column is in the primary key, whether it is an identity column (`attidentity`), and what in its default is not
  * immutable (read from `pg_attrdef.adbin` by {@link parseExpressionTree}, {@link defaultReferences} and
- * {@link notImmutableParts}); and about a relation ({@link RelationFacts}): `relkind` and `relpersistence`.
+ * {@link notImmutableParts}); and about a relation ({@link RelationFacts}): `relkind`, `relpersistence` and the table
+ * it belongs to. The tables a module declared `deterministic: false` (MD-1, owner decision Q76) are given to
+ * {@link databaseRefusals}, which skips them with what belongs to them (`./opt-out.ts`).
  *
  * Two rows of the table give one reason to several types although it is not true of each of them (decision record
  * Q59 and Q60, 2026-10-23): the refused date and time types and the floating-point types. For those, each type gets
@@ -29,6 +31,8 @@
  * decision Q74 (task 2.2b) `timestamptz` is allowed, as a value and a key, and the other date and time types are
  * refused with "use `timestamptz`, written with `Z`".
  */
+
+import { optOut, type TableName } from "./opt-out.js";
 
 // ── the column types DT-1 encodes ───────────────────────────────────────────────────────────────────────────────────
 
@@ -109,6 +113,13 @@ export interface RelationFacts {
   readonly kind: string;
   /** `pg_class.relpersistence`: `p` permanent, `u` unlogged. */
   readonly persistence: string;
+  /**
+   * The table whose declaration `deterministic: false` would cover the relation (`./opt-out.ts`): for a table, itself,
+   * or for a partition its partitioned table (the root of its tree); for a sequence, the table one of whose columns
+   * owns it (an identity or `serial` column, or `OWNED BY`), at the root of that table's tree; null for a sequence no
+   * column owns.
+   */
+  readonly belongsTo: TableName | null;
 }
 
 // ── the rules ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -812,23 +823,38 @@ export interface PlacedRefusal {
   readonly place: RefusalPlace;
 }
 
+/** What {@link databaseRefusals} skips. */
+export interface RefusalOptions {
+  /**
+   * The tables declared `deterministic: false` (MD-1, DT-6, owner decision Q76; the schema plan's `optedOut`): each is
+   * skipped with its partitions and the sequences its columns own, and so is such a table when unlogged
+   * (`./opt-out.ts`). Every other table and relation is refused as without it.
+   */
+  readonly optedOut?: readonly TableName[];
+}
+
 /**
  * Every refusal of a database's module tables and relations, in a fixed order: each table's refusals
  * ({@link tableRefusals}) in the order the tables are given, then each relation's ({@link relationRefusals}) in the
  * order given — `catalogTables` and `catalogRelations` of `./catalog.ts` give DT-3's (by schema, then name, as
  * bytes). Tables come first because a column is what a developer wrote: an identity or `serial` column's sequence is
- * refused too, but it is dropped with its column, so the column's refusal is the one to read first.
+ * refused too, but it is dropped with its column, so the column's refusal is the one to read first. Tables and
+ * relations the opt-out covers ({@link RefusalOptions.optedOut}) have none.
  */
 export function databaseRefusals(
   tables: readonly TableFacts[],
   relations: readonly RelationFacts[],
+  options: RefusalOptions = {},
 ): PlacedRefusal[] {
+  const out = optOut(options.optedOut ?? []);
   const placed: PlacedRefusal[] = [];
   for (const table of tables) {
     const place = { schema: table.schema, table: table.name };
+    if (out.covers(place)) continue;
     for (const refusal of tableRefusals(table)) placed.push({ refusal, place });
   }
   for (const relation of relations) {
+    if (out.covers(relation.belongsTo)) continue;
     const place =
       relation.kind === "S"
         ? { schema: relation.schema, sequence: relation.name }

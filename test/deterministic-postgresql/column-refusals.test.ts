@@ -872,10 +872,10 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       expect(columns.get("n")).toMatchObject({ identity: null, notImmutable: [] });
       // Sequences and unlogged tables of module schemas (the identity's own sequence included), by bytes; not public's.
       expect(relations).toEqual([
-        { schema: "m", name: "t_id_seq", kind: "S", persistence: "p" },
-        { schema: "z", name: "B", kind: "S", persistence: "p" },
-        { schema: "z", name: "a", kind: "S", persistence: "p" },
-        { schema: "z", name: "scratch", kind: "r", persistence: "u" },
+        { schema: "m", name: "t_id_seq", kind: "S", persistence: "p", belongsTo: { schema: "m", table: "t" } },
+        { schema: "z", name: "B", kind: "S", persistence: "p", belongsTo: null },
+        { schema: "z", name: "a", kind: "S", persistence: "p", belongsTo: null },
+        { schema: "z", name: "scratch", kind: "r", persistence: "u", belongsTo: { schema: "z", table: "scratch" } },
       ]);
     }, 60_000);
 

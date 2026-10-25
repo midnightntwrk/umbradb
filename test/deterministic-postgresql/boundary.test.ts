@@ -73,6 +73,7 @@ const DEFINITIONS: Readonly<Record<string, readonly string[]>> = {
     "notImmutableParts",
   ],
   "catalog.ts": ["ConsistentRead", "catalogTables", "catalogRelations"],
+  "opt-out.ts": ["TableName", "OptOut", "optOut"],
   "mapping.ts": ["RESULT_TYPES", "mapValue", "mapRows", "parseArrayText", "parseJsonLossless", "parameterText"],
   "block-transactions.ts": [
     "TRUNCATE_NOT_ALLOWED_SQLSTATE",
@@ -186,6 +187,7 @@ describe("A138: src/deterministic-postgresql/ imports nothing else of src/", () 
         "column-rules.ts",
         "catalog.ts",
         "block-transactions.ts",
+        "opt-out.ts",
       ]),
     );
     // The scan is not vacuous: the component's files name modules (each other, Node.js built-ins).

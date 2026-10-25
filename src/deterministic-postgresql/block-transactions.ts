@@ -21,6 +21,7 @@
  */
 
 import { quoteIdentifier } from "./column-rules.js";
+import { optOut, type TableName } from "./opt-out.js";
 
 /**
  * The SQLSTATE the trigger raises: in class `UM`, which neither the SQL standard (classes `0`–`4`, `A`–`H`) nor
@@ -95,27 +96,20 @@ export interface GuardTableRow {
   readonly guarded: boolean;
 }
 
-/** A table by schema and name. */
-export interface TableName {
-  readonly schema: string;
-  readonly table: string;
-}
-
 /**
  * The statements that make the trigger guard exactly the listed tables that are not opted out: created on each one
  * that lacks it, dropped from each one that has it but is now declared `deterministic: false` (DB-14 covers only the
- * tables not declared so). A partition counts as opted out when its partition tree's root is: `TRUNCATE` of a
- * partitioned table fires the triggers of its partitions too, while a statement trigger on the partitioned table is
- * not copied to its partitions, so each partition of a guarded tree carries its own.
+ * tables not declared so). A partition counts as opted out when its partition tree's root is (`./opt-out.ts`):
+ * `TRUNCATE` of a partitioned table fires the triggers of its partitions too, while a statement trigger on the
+ * partitioned table is not copied to its partitions, so each partition of a guarded tree carries its own.
  */
 export function truncateGuardStatements(tables: readonly GuardTableRow[], optedOut: readonly TableName[]): string[] {
-  const out = new Set(optedOut.map(({ schema, table }) => JSON.stringify([schema, table])));
+  const out = optOut(optedOut);
   const statements: string[] = [];
   for (const row of tables) {
-    const declared = out.has(JSON.stringify([row.schema, row.table]));
-    const rootDeclared = row.root_table !== null && out.has(JSON.stringify([row.root_schema, row.root_table]));
+    const root = row.root_table === null ? null : { schema: row.root_schema as string, table: row.root_table };
     const target = `${quoteIdentifier(row.schema)}.${quoteIdentifier(row.table)}`;
-    if (declared || rootDeclared) {
+    if (out.covers({ schema: row.schema, table: row.table }) || out.covers(root)) {
       if (row.guarded) statements.push(`DROP TRIGGER ${TRUNCATE_GUARD_TRIGGER} ON ${target}`);
     } else if (!row.guarded) {
       statements.push(

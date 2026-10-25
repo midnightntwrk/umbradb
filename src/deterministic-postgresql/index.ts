@@ -17,7 +17,7 @@
  * | Rows-only block transactions; the `BEFORE TRUNCATE` trigger | `block-transactions.ts` (the trigger's function and its statements, the migration mark, the SQLSTATE); `src/db/truncate-guard.ts` applies them |
  * | The pinned session settings; the zero timeouts | `settings.ts` (`PINNED_SETTINGS`, `ZERO_TIMEOUTS`, and `SESSION_SETTINGS`, both, which the backends apply) |
  * | The result mapping and parameter texts, date and time as RFC 3339 text | `mapping.ts` |
- * | The opt-out (`deterministic: false`) | tasks 3.1 and 7.1: the rules take the opted-out tables as input (`column-rules.ts`, `catalog.ts`) |
+ * | The opt-out (`deterministic: false`) | `opt-out.ts` (`optOut`: which tables and relations the declared tables cover), used by `column-rules.ts` (`databaseRefusals`' `optedOut`, with `catalog.ts`'s `belongsTo`) and `block-transactions.ts`; the declaration is `src/modules/` (task 3.1); task 7.1's `CHECK`s, change capture and contents hash use it too |
  *
  * `errors.ts` holds `UmbraError` and its codes, which the mapping throws and `src/db/errors.ts` re-exports (decision
  * record Q79).
@@ -28,4 +28,5 @@ export * from "./catalog.js";
 export * from "./column-rules.js";
 export * from "./errors.js";
 export * from "./mapping.js";
+export * from "./opt-out.js";
 export * from "./settings.js";

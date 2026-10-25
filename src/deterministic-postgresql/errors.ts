@@ -39,6 +39,16 @@ export const ERROR_CODES = [
   "bad-id",
   "schema-collision",
   "shared-item-migrations-differ",
+  // Startup refusals of module declarations (MD-1, MD-2, `src/modules/validation.ts`; the four MD-2 causes `design.md`
+  // §11 names no code for, and `invalid-declaration`, are decision record Q94's).
+  "unknown-point",
+  "reserved-prefix",
+  "duplicate-id",
+  "no-requirement",
+  "item-no-lifetime",
+  "table-item-no-kind",
+  "field-no-kind",
+  "invalid-declaration",
   // Startup refusals of migrations (DB-9, DB-10, decision record Q91; `src/db/migrate.ts`).
   "migration-checksum-changed",
   "migration-missing",

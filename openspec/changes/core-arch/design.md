@@ -450,7 +450,20 @@ sees committed data only; the module guide gives the rules, and nothing else enf
 that is not a function of the chain, such as the time a request arrived (Q76; §4's component table says what it skips);
 the module guide says no deterministic table may be computed from such a table. Ids and item names match
 `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, so the schema name (`-` → `_`) is one-to-one (DB-8). `defineModule(declaration)`
-returns it with a typed `entry({ start, stop?, config })` builder (CF-2). Graph resolution computes the boundary heights
+returns it with a typed `entry({ start, stop?, config })` builder (CF-2); its type also refuses a callback under a name
+that is not a point in a declaration built first and passed later, which `Partial<PointCallbacks>` alone accepts (A20).
+Declarations are validated at startup without their types (`src/modules/validation.ts`, task 3.1), so a module written in
+JavaScript or built at run time is held to the same declaration: the set has three lists — UmbraDB's backbone parts,
+its core modules, the host's user modules — and every shape the type forbids is refused with `invalid-declaration`,
+naming the field; then MD-2's causes, one rule and one code each (`bad-id` through the schema plan's own check,
+`reserved-prefix` for user modules only, `duplicate-id`, `no-requirement` except for backbone parts,
+`item-no-lifetime`, `table-item-no-kind`, `field-no-kind` read as `schema.shape[field].meta().kind`, and MD-1's
+`unknown-point`; Q94). `src/modules/adapters.ts` turns a validated declaration into the schema plan's module
+(`schemaModule`; `schemaModules` leaves out `OWN_PARTS`) and the migration runner's part (`migrationPart`, whose
+`onStartDb` calls `points["on-start-db"]` with the module's process context). The opt-out's skip is the component's,
+written once (`src/deterministic-postgresql/opt-out.ts`): the refusals take the opted-out tables
+(`databaseRefusals(tables, relations, { optedOut })`, each relation with the table it belongs to), and so do the
+`TRUNCATE` guard and task 7.1's `CHECK`s, change capture and hash. Graph resolution computes the boundary heights
 of every revision, resolves providers per range (MD-3), and produces per range and per point an ordered callback list,
 cached for the process; a revision boundary switches lists between heights, never within one.
 
@@ -564,8 +577,9 @@ per-block tables are append-only and partitioned by height range; no table store
 `changes-past`, `missing-entry`, `not-plain-data`, `invalid-configuration`, `upgrade-required`, `requires-resync`,
 `migration-checksum-changed`, `migration-missing`, `migration-failed`, `non-deterministic-column`,
 `non-deterministic-table`, `no-primary-key`, `unsupported-key-type`, `unsupported-column-type` (DT-6, Q58, Q61),
-`shared-item-migrations-differ`, `unknown-point`, `reserved-prefix`, `bad-id`, `schema-collision`, `item-no-provider`,
-`providers-overlap`, `graph-cycle`, `item-not-available`, `no-requirement`, `cannot-start-mid-chain`,
+`shared-item-migrations-differ`, `unknown-point`, `reserved-prefix`, `bad-id`, `schema-collision`, `duplicate-id`,
+`item-no-lifetime`, `table-item-no-kind`, `field-no-kind`, `invalid-declaration` (these five: decision record Q94),
+`item-no-provider`, `providers-overlap`, `graph-cycle`, `item-not-available`, `no-requirement`, `cannot-start-mid-chain`,
 `process-item-missing`, `duplicate-api-route`, `development-opt-in-required`, `needs-lockstep-not-listed`,
 `private-binding-mismatch`, `test-key-conflict`, `package-hash-mismatch`, `writer-lock-held`, `durability-fsync-off`,
 `durability-pooler`, `durability-full-page-writes-off`. **Backup and restore refuse** (the command exits non-zero;

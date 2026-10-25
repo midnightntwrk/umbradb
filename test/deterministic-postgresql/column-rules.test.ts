@@ -963,6 +963,7 @@ describe("DT-6 (Q61, Q75): sequences and unlogged tables refuse their module sch
     name,
     kind,
     persistence,
+    belongsTo: kind === "S" ? null : { schema: "m", table: name },
   });
 
   it("refuses every sequence, logged or not, and every unlogged table or partitioned table", () => {
@@ -994,9 +995,9 @@ describe("DT-6 (Q61, Q75): sequences and unlogged tables refuse their module sch
       { schema: "a", name: "t", columns: [key("bigint", { name: "id", identity: "always" })] },
       { schema: "b", name: "fine", columns: [key("bigint", { name: "id" })] },
     ];
-    const relations = [
-      { schema: "a", name: "t_id_seq", kind: "S", persistence: "p" },
-      { schema: "b", name: "scratch", kind: "r", persistence: "u" },
+    const relations: RelationFacts[] = [
+      { schema: "a", name: "t_id_seq", kind: "S", persistence: "p", belongsTo: { schema: "a", table: "t" } },
+      { schema: "b", name: "scratch", kind: "r", persistence: "u", belongsTo: { schema: "b", table: "scratch" } },
     ];
     expect(databaseRefusals(tables, relations).map(({ refusal, place }) => [refusal.code, place])).toEqual([
       ["non-deterministic-column", { schema: "a", table: "t" }],

@@ -111,7 +111,8 @@ export async function catalogTables(read: ConsistentRead): Promise<CatalogTable[
  * The relations of the module schemas that DT-6 refuses whatever they hold (owner decision Q61), as the catalog
  * describes them, in DT-3's order (by schema name, then name, as bytes): every sequence (`relkind = 'S'`, an identity
  * or `serial` column's own included), and every unlogged table, partitioned table or partition
- * (`relpersistence = 'u'`; a partition holds rows of its partitioned table, so it counts too).
+ * (`relpersistence = 'u'`; a partition holds rows of its partitioned table, so it counts too) — each with the table it
+ * belongs to, whose declaration `deterministic: false` would cover it (`./opt-out.ts`, owner decision Q76).
  */
 export async function catalogRelations(read: ConsistentRead): Promise<RelationFacts[]> {
   const relations = (await read.query(RELATIONS_SQL)).map(
@@ -120,6 +121,10 @@ export async function catalogRelations(read: ConsistentRead): Promise<RelationFa
       name: row.relation_name as string,
       kind: row.kind as string,
       persistence: row.persistence as string,
+      belongsTo:
+        row.belongs_table === null
+          ? null
+          : { schema: row.belongs_schema as string, table: row.belongs_table as string },
     }),
   );
   return relations.sort((a, b) => compareUtf8(a.schema, b.schema) || compareUtf8(a.name, b.name));
@@ -173,12 +178,26 @@ WHERE ${MODULE_TABLE_FILTER} AND a.attnum > 0 AND NOT a.attisdropped`;
 /** `attidentity`: `a` for GENERATED ALWAYS AS IDENTITY, `d` for BY DEFAULT, empty for no identity. */
 const IDENTITY: Readonly<Record<string, "always" | "by default">> = { a: "always", d: "by default" };
 
-/** Sequences and unlogged tables (partitions included) of the module schemas: `design.md` §4's detection. */
+/**
+ * Sequences and unlogged tables (partitions included) of the module schemas: `design.md` §4's detection. Each with the
+ * table it belongs to: a table's own, or the sequence's owning table — the column dependency an identity column
+ * (`deptype` `i`) or `serial` and `OWNED BY` (`a`) records in `pg_depend` — taken at the root of its partition tree
+ * (`pg_partition_root`, null for a table in none).
+ */
 const RELATIONS_SQL = `
 SELECT n.nspname::text AS schema_name, c.relname::text AS relation_name, c.relkind::text AS kind,
-       c.relpersistence::text AS persistence
+       c.relpersistence::text AS persistence, bn.nspname::text AS belongs_schema, bc.relname::text AS belongs_table
 FROM pg_catalog.pg_class AS c
 JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+CROSS JOIN LATERAL (
+  SELECT CASE WHEN c.relkind = 'S' THEN (
+           SELECT d.refobjid FROM pg_catalog.pg_depend AS d
+            WHERE d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass AND d.objid = c.oid
+              AND d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass AND d.refobjsubid > 0
+              AND d.deptype IN ('a', 'i'))
+         ELSE c.oid END AS owner) AS o
+LEFT JOIN pg_catalog.pg_class AS bc ON bc.oid = coalesce(pg_catalog.pg_partition_root(o.owner), o.owner)
+LEFT JOIN pg_catalog.pg_namespace AS bn ON bn.oid = bc.relnamespace
 WHERE (c.relkind = 'S' OR (c.relkind IN ('r', 'p') AND c.relpersistence = 'u'))
   AND n.nspname NOT IN ('information_schema', 'public') AND left(n.nspname::text, 3) <> 'pg_'`;
 
