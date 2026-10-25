@@ -588,7 +588,7 @@ describe("Q97: a fault only at or below the cursor was judged by the builds that
     expect(graph.segments.get("m")).toEqual([range(500, null)]);
   });
 
-  it("refuses a cycle only in ranges ending below the cursor through the union's check (Q95; Q-3.2a-1)", () => {
+  it("refuses a cycle only in ranges ending below the cursor through the union's check (Q95; Q99)", () => {
     // RN-3's startup order runs every part of the database, past ones included, over the union of every range's
     // requirements: a cycle there leaves it no order, wherever the cycle lies.
     const error = refusal(() =>

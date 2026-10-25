@@ -1,4 +1,4 @@
-# TBD-7.1 — A nondeterministic collation compares differently on PGlite and on PostgreSQL
+# 00013 — A nondeterministic collation compares differently on PGlite and on PostgreSQL
 
 - **Status:** OPEN
 - **GitHub:** NOT IN GITHUB ISSUE

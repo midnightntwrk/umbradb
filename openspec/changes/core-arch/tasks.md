@@ -688,7 +688,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       at or below it; checking the range that ends at the cursor whole refuses MD-3's "An upgrade adds a requirement".
       Wrong variants (a scratch runner outside the clone): 30 of 32 caught on the first run, the 2 survivors gaps (h − 2
       read for h − 1, the backbone check in the cursor's range) closed by tests; on the final sources 34 of 34 caught,
-      none equivalent. Question Q-3.2a-1 raised (A22's "not refused" against Q95's union over every range; shipped as
+      none equivalent. Question Q99 raised (A22's "not refused" against Q95's union over every range; shipped as
       RN-3 says, not blocking 5.1).
       **Pending:** the cursor passed, and "startup refuses" through the runner's refusal state (5.x); A34's module half
       with a configuration (4.3); every backbone part declaring `startsMidChain: true` (10.x).
@@ -780,7 +780,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       waits; `core-digest` in its backbone place fails only "core-digest last"). Wrong variants (a scratch runner
       outside the clone): 59 of 62 caught on the first run; of the 3 survivors one was equivalent (a filter of empty
       waves, which never occur; removed) and two were gaps — a core module's `core-` id read as a backbone part's, an
-      unfrozen wave — closed by tests; on the final sources 61 of 61 caught. Question Q-5.1-1 raised (the read
+      unfrozen wave — closed by tests; on the final sources 61 of 61 caught. Question Q100 raised (the read
       handles RN-4 and design §2 give `on-finalized`, `on-start-height`, `on-stop-height` and `on-key` are not in
       `PointCallbacks`; not blocking 5.1).
       **Pending:** the finalized loop calling the dispatch per height with the handles, block context and item sink
@@ -847,9 +847,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `core_chain.jsonb_numbers_ok` and `numeric_ok` with their array forms, created in the bootstrap; one
       `umbradb_integers_<column>` `CHECK` per such column, dropped on opt-out). The contents hash records opted-out
       tables as `[schema, table, null, null]` (`contentsHash(read, { optedOut })`). `design.md` §4 and §14, the module
-      guide's "Stored values and digests". Question Q-7.1-1 (the contents hash reads the scratch schema
-      `core_digest_shadow`; shipped A, DT-3 as written; not blocking). Issue `TBD-7.1` (a nondeterministic collation
-      compares differently on PGlite). Tests, seen failing first on the base sources (the new modules missing; startup
+      guide's "Stored values and digests". Question Q101 (the contents hash reads the scratch schema
+      `core_digest_shadow`; shipped A, DT-3 as written; not blocking). Issue `docs/issues/00013` (a nondeterministic
+      collation compares differently on PGlite). Tests, seen failing first on the base sources (the new modules missing; startup
       not refusing — 29 tests per backend got `started`; the component's `checks.ts` and `compareUtf8` absent):
       `test/determinism/digest.test.ts` (hand-written CBOR and SHA-256), `test/deterministic-postgresql/checks.test.ts`
       (A58's writes, both backends, with each rule's negative control), `startup-check.test.ts` (A58's startup half,
