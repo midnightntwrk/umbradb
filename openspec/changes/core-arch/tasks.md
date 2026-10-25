@@ -659,12 +659,38 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** "startup refuses" through the runner's refusal state, the dispatch per point and A38's property test
       (5.x, 5.1); the entries with their effective stops from the configuration history, and A34's module half with a
       configuration (4.3); the providers' writes through the real block loop (5.2); Q96–Q98 (task 3.2a).
-- [ ] 3.2a The owner's answers Q96, Q97 and Q98 in the resolver (`src/modules/graph.ts`): a start above 0 (genesis) is a
+- [x] 3.2a The owner's answers Q96, Q97 and Q98 in the resolver (`src/modules/graph.ts`): a start above 0 (genesis) is a
       mid-chain start, at an S above 0 too (Q96); startup checks the ranges that hold a height above the cursor, a range
       that ends at the cursor for a cycle only, the starts above the cursor and the development-only modules active at
       the cursor or later, with the cursor as the resolver's input (Q97); a provider active at the height before a
       module's start needs no `startsMidChain: true` (Q98).
       **Acceptance:** A22, A23, A24 (as amended for Q96–Q98).
+      **Done (2026-10-25):** `GraphInput.cursor`, `bigint | null`: the last committed height, null on a new database; a
+      cursor below S, or one neither a bigint nor null, is the caller's error (thrown). A range is checked `whole` when
+      it holds a height above the cursor (every range on a new database), for a `cycle` only when it ends at the cursor,
+      and not at all when it ends below it (`RangeCheck`); a refusal names the span of its checked ranges. Q95's union
+      of every range's requirements, past ranges included, still orders startup and refuses its cycles. The result's
+      `ranges` start at the range holding the cursor (`rangeAt` is undefined below it); `providerOf` holds the items
+      exactly one active part provides — in the range ending at the cursor, whose providers are not checked, an item
+      several parts provide is left out —; `modules` and `segments` still hold every part from S. MD-4: every segment
+      start above 0 and above the cursor, backbone parts' included, needs `startsMidChain: true` (Q96), and so does each
+      provider of a required item there that is not active at the start − 1 (at a start at S none is; Q98); at one
+      start a refusal naming a provider comes before a module's own, so a module and the provider starting with it are
+      named together. MD-5: only a development-only module with a segment holding the cursor or a later height (any
+      segment on a new database). `design.md` §6 gains one clause on the result's ranges and `providerOf`. Tests changed
+      to the owner's rules, each naming its decision: a start at S = 1 is now mid-chain (Q96; the genesis cases start at
+      S = 0), MD-4's provider case (Q98: the provider now starts with the module); added: the new scenarios of MD-3 and
+      MD-4, the cursor's boundaries, the result's ranges, the caller's error — `graph.test.ts` from 66 to 101 tests.
+      Seen failing first: `tsc` (`cursor` not in `GraphInput`) and, types stripped, 27 of the then 96 tests (every
+      range and start checked whatever the cursor, a start at S accepted, 3.2's messages). Committed negative controls:
+      A22's table without one rule fails exactly that rule's cases; ignoring the cursor refuses each of the 11 faults
+      at or below it; checking the range that ends at the cursor whole refuses MD-3's "An upgrade adds a requirement".
+      Wrong variants (a scratch runner outside the clone): 30 of 32 caught on the first run, the 2 survivors gaps (h − 2
+      read for h − 1, the backbone check in the cursor's range) closed by tests; on the final sources 34 of 34 caught,
+      none equivalent. Question Q-3.2a-1 raised (A22's "not refused" against Q95's union over every range; shipped as
+      RN-3 says, not blocking 5.1).
+      **Pending:** the cursor passed, and "startup refuses" through the runner's refusal state (5.x); A34's module half
+      with a configuration (4.3); every backbone part declaring `startsMidChain: true` (10.x).
 
 ## 4. Configuration
 

@@ -7,7 +7,10 @@ import { declaration } from "./declarations.js";
  * Declarations and inputs for the requirement graph's tests (task 3.2; MD-3–MD-6, RN-3): a test backbone shaped like
  * CORE-ARCH §4.11's (`core-chain`, `core-block-fetch`, `core-block-commit`, `core-digest`, each able to start mid-chain,
  * as the backbone runs from whatever S a database has), modules that provide or require named items, and the input
- * `resolveGraph` takes, with S = 1 unless a test says otherwise.
+ * `resolveGraph` takes, with S = 1 and a new database (cursor null) unless a test says otherwise. Since S = 1 is
+ * above 0 (genesis), every part starting at S here starts mid-chain (MD-4, Q96): the test backbone and the modules of
+ * `declaration` declare `startsMidChain: true`, and a test of a module that cannot start mid-chain sets S = 0 or a
+ * cursor at or above its start.
  */
 
 /** S in these tests: the first `core` entry's start. */
@@ -108,7 +111,10 @@ export function range(from: number, to: number | null): HeightRange {
   return { from: BigInt(from), to: to === null ? null : BigInt(to) };
 }
 
-/** What `resolveGraph` takes: the test backbone, `user` modules (and `core` ones), validated; S = 1; no opt-in. */
+/**
+ * What `resolveGraph` takes: the test backbone, `user` modules (and `core` ones), validated; S = 1; no opt-in; a new
+ * database (cursor null) unless `cursor` gives the last committed height.
+ */
 export function graphInput(
   user: readonly ModuleDeclaration[],
   entries: readonly EntryRange[],
@@ -117,6 +123,7 @@ export function graphInput(
     readonly backbone?: readonly ModuleDeclaration[];
     readonly start?: bigint;
     readonly developmentOptIn?: boolean;
+    readonly cursor?: bigint | null;
   } = {},
 ): GraphInput {
   return {
@@ -124,5 +131,11 @@ export function graphInput(
     start: rest.start ?? S,
     entries,
     developmentOptIn: rest.developmentOptIn ?? false,
+    cursor: rest.cursor ?? null,
   };
+}
+
+/** The test backbone with `id`'s part declaring `startsMidChain: false` (MD-4 applies to backbone parts too, Q96). */
+export function backboneWithout(id: string): ModuleDeclaration[] {
+  return BACKBONE.map((part) => (part.id === id ? { ...part, startsMidChain: false } : part));
 }

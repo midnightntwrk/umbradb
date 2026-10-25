@@ -489,8 +489,10 @@ last (RN-3). Startup (DB-9) runs every part of the database — the backbone and
 or not — in one order: the backbone, then Kahn over the union of the ranges' requirements, so `core_digest` exists
 before any module migrates (Q95, RN-3). The result gives `startDatabase` its parts (`modules.map(migrationPart)`) and
 the schema plan its modules (`schemaPlan(modules)`, whose namespace also holds the items of `core-chain` and
-`core-digest`, DB-8), and the runner each range's `order`, `writeOrder` and `providerOf`, computed once for the process;
-a revision boundary switches ranges between heights, never within one.
+`core-digest`, DB-8), and the runner each range's `order`, `writeOrder` and `providerOf`, computed once for the process,
+from the range holding the cursor on: the ranges ending below it are left out, and in the one ending at the cursor,
+whose providers are not checked, `providerOf` leaves out an item several parts provide (RN-11's re-delivery reads no
+`block` items); a revision boundary switches ranges between heights, never within one.
 
 ## 7. Configuration
 
