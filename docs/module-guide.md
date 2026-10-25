@@ -82,6 +82,40 @@ change): `on-db-write`, inside the block's transaction, and `on-start-db`, at ev
 - **Await every statement before you return.** A statement you sent but did not await still runs, under your role, but
   its failure fails the block without telling you which statement it was.
 
+## Reading through `db`
+
+A module that requires the `process` item `db` gets a read-only database: it offers `read` and nothing else (CD-1 and
+RN-4 of the `core-arch` change, owner decision Q73). You cannot write, open a transaction or close the database through
+it: a module writes only through the handles its callbacks are given. These are guidelines; nothing enforces them beyond what is said
+here (modules are trusted code).
+
+- **Inside a callback, use the handle it is given.** `on-db-write`'s block write handle reads the committed data plus
+  what this block's earlier callbacks, and your own, wrote; `on-start-db`'s schema write handle reads the committed data
+  plus your setup's own writes; a read handle reads the height the runner gives its point (for example `on-compute` the
+  height before the block, `on-after-db-write` the block's). The write handles and the read handles of the points are
+  never cut off by a timeout; only the read of a module API request is bounded, by `apiReadTimeoutMs`.
+- **Use `db.read` for work outside the points:** a timer, a background job, a check at startup. `db.read(async (read)
+  => …)` reads the latest committed height and reports it as `read.height` (`null` before any block commits); every
+  statement of one read sees that height. It reads any module's tables: write every name with its schema.
+- **Never call `db.read` inside a callback that has a handle.** On PGlite all database work is one queue that runs one
+  job at a time, and such a callback runs inside its handle's job — the block's transaction, `on-start-db`'s
+  transaction, the point's read — so the read could never start: it fails at once with `database-error`,
+  `reason: nested-call`. On PostgreSQL it runs on another connection and reads committed data only: inside `on-db-write`
+  it sees the state before the block, without any of the block's writes, so whatever you compute from it misses them.
+- **Write nothing derived from a `db.read`.** It reads whatever height is committed when it runs, which no block
+  decides. The rows your callbacks write must come from what the points give them — the block, its items, your settings
+  and the handles — or two machines fed the same chain could write different rows (only a table declared
+  `deterministic: false` may hold data that is not a function of the chain).
+- **The read option.** `db.read(body)` is not bounded. `db.read(body, { timeoutMs })` bounds it on PostgreSQL: a
+  statement running `timeoutMs` milliseconds, or the read left idle that long — between two statements, or after its
+  last one while your body still runs — ends it with `query-timeout` (not retryable), even if your code caught the
+  statement's error. Do slow work that is not the database's outside the read. PGlite enforces neither timeout, so there
+  the read is not bounded. On both, `timeoutMs` must be a whole number from 1 to 2147483647, else the read is refused
+  with `invalid-configuration` before it starts.
+- **Keep reads short, and keep no read handle.** A read handle closes when your body settles; using it later fails with
+  `handle-closed`. On PGlite a read holds the one queue while its body runs, so the next block waits for it; on
+  PostgreSQL it holds one of the pooled read connections.
+
 ## Upgrades
 
 A new version of a module runs from a future height, as a new revision of its configuration; the rows written before

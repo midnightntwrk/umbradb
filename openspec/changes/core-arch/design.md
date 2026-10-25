@@ -440,9 +440,13 @@ conversion and the sweep step then run in the worker as part of `on-compute`. Le
 ## 6. Modules
 
 The declaration is CORE-ARCH §4.10's `ModuleDeclaration`, plus `requiresResync?: boolean` (DB-10); `ProcessContext` also
-has `publish(item, value)` for `process` items (MD-7). The `db` item is a `ReadOnlyDatabase` — `read(body)` only:
-modules write only through the handles of RN-4 and may read through `db` for work outside the points; the module guide
-gives the rules, and nothing else enforces them (Q73, Q46). A `table` item may declare `deterministic: false` for data
+has `publish(item, value)` for `process` items (MD-7). The `db` item is a `ReadOnlyDatabase` — `read(body, options?)`
+only, the database API's `read` with its read option (DB-15) passed through unchanged (task 2.8: `src/db/read-only.ts`,
+`readOnlyDatabase(db)`, a frozen object whose one property is `read`, so no property, prototype or value leads to the
+`Database`; frozen because one item is shared by every module that requires it): modules write only through the
+handles of RN-4 and may read through `db` for work outside the points; on PGlite a `db.read` from inside a callback's
+own job — `on-db-write`, `on-start-db`, a point's read — fails at once with `nested-call` (DB-4), and on PostgreSQL it
+sees committed data only; the module guide gives the rules, and nothing else enforces them (Q73, Q46). A `table` item may declare `deterministic: false` for data
 that is not a function of the chain, such as the time a request arrived (Q76; §4's component table says what it skips);
 the module guide says no deterministic table may be computed from such a table. Ids and item names match
 `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, so the schema name (`-` → `_`) is one-to-one (DB-8). `defineModule(declaration)`

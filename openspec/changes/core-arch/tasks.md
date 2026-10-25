@@ -549,10 +549,36 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       table row 7 now runs its zero timeouts in `zero-timeouts.test.ts`. **Pending:** "a read for an API request"
       through a registered handler, with `apiReadTimeoutMs` from the configuration (tasks 5.2a, 4.2); the owner's answer
       to Q93 (A shipped: if not A, remove `idle_session_timeout` from `ZERO_TIMEOUTS` and its tests).
-- [ ] 2.8 The read-only database for the `db` item (Q73): `read` only, nothing that writes, opens a transaction or
+- [x] 2.8 The read-only database for the `db` item (Q73): `read` only, nothing that writes, opens a transaction or
       closes; the `nested-call` refusal on PGlite kept from task 2.2; the module guide's database rules (inside a
       callback its handle, `db.read` for work outside the points).
       **Acceptance:** A144.
+      **Done (2026-10-25):** `ReadOnlyDatabase` (`src/db/api.ts`: `read<T>(body, options?: ReadOptions)`, typed as
+      `Database["read"]`) and `readOnlyDatabase(db)` (`src/db/read-only.ts`), which `core-chain` will publish as the
+      `db` item: a frozen object whose one property is `read`, an arrow function holding the database in its closure
+      only, so `Object.keys`, `in` and property reads find no `transaction`, `close`, write or anything else of the
+      database, and no property, prototype or value leads to it; frozen because one item is shared by every module that
+      requires it, so an assignment (a mistake in one module) throws instead of changing it for the others. The body and
+      the read option reach the database's `read` unchanged (the same objects; no default timeout), and its result and
+      error come back unchanged; a destructured `read` works. On PGlite a `db.read` from inside a running job — a
+      callback in the block's transaction, `on-start-db`'s, a read's body — fails at once with `nested-call` (task 2.2's
+      guard, unchanged); on PostgreSQL, from inside `on-db-write`, it reports h − 1 and sees none of the block's rows.
+      Tests, seen failing first (`Cannot find module '../../src/db/read-only.js'`; `tsc`: no exported member
+      `ReadOnlyDatabase`; the `[DOC]` checks against the guide before this task): `test/db/read-only-database.test.ts`
+      (the type test with `@ts-expect-error` on `transaction`, `close`, `execute`, `query`; A144's runtime check; one
+      committed height per read; A144's `on-db-write` case and the same from `on-start-db` and a read's body, on both
+      backends; the read option passed through; the item over `openPglite`'s own object; the guide). Committed negative
+      controls: the type predicate is false for `Database` and for the item plus `transaction`, `close` or a `database`
+      property; the runtime check finds the database itself, `transaction` or `close` beside `read`, a prototype path,
+      `Object.create(db)`, a held database. 18 wrong variants (a scratch runner outside the clone): 16 caught on the
+      first run; of the 2 survivors one is equivalent (`read: db.read.bind(db)`) and one was a gap (`read: db.read`,
+      which breaks on `openPglite`'s own object, whose `read` uses `this`, while the test server's PGlite wrapper hid
+      it), closed by a test over that object; on the final sources 17 of 18 are caught, the equivalent one survives.
+      `docs/module-guide.md`'s "Reading through `db`" (A144's `[DOC]`) and `design.md` §6 (`read(body, options?)`, the
+      file, the frozen object) added. **Pending:** "a module that requires `db` gets" it through `ProcessContext.items`
+      — `core-chain` publishing `readOnlyDatabase(db)` as the item (task 10.2) and the runner handing process items to
+      modules (task 5.2a); the `on-db-write` case through the runner's own block loop, where a `nested-call` rejects the
+      callback (`callback-error`, tasks 5.2 and 5.x).
 
 ## 3. Modules
 

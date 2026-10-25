@@ -9,7 +9,8 @@
  * determinism code takes only its `query` (`ConsistentRead`, `../deterministic-postgresql/catalog.ts`). Writes go
  * through {@link Database.transaction}, one transaction at a time: on PostgreSQL on the writer connection (DB-5); on
  * PGlite as a job of the one queue every read and transaction waits in (DB-4). The block and schema write handles of DB-3
- * (own schema, `SET LOCAL ROLE`, closing) are built on it in `./write-handles.ts`.
+ * (own schema, `SET LOCAL ROLE`, closing) are built on it in `./write-handles.ts`. The `db` item a module may require
+ * is a {@link ReadOnlyDatabase} over a database: its `read` and nothing else (`./read-only.ts`, Q73).
  */
 
 import type { ConsistentRead } from "../deterministic-postgresql/index.js";
@@ -96,4 +97,17 @@ export interface Database {
   transaction<T>(body: (tx: Transaction) => Promise<T>): Promise<T>;
   /** Closes every connection; later reads and transactions fail with `handle-closed`. Closing twice is harmless. */
   close(): Promise<void>;
+}
+
+/**
+ * The `db` item (CD-1, RN-4; owner decision Q73): a database a module reads through for work outside the points — a
+ * timer, a background job, a check at startup. It offers {@link Database.read} and nothing that writes, opens a
+ * transaction or closes the database; modules write only through the handles of RN-4. Made by `readOnlyDatabase`
+ * (`./read-only.ts`). Inside a callback a module uses the handle it was given: on PGlite a `read` from inside a callback
+ * that runs in a job of the queue fails at once with `nested-call` (DB-4), and on PostgreSQL it runs on another
+ * connection and sees committed data only (the module guide, `docs/module-guide.md`).
+ */
+export interface ReadOnlyDatabase {
+  /** {@link Database.read}, with the same arguments and results: the read option is passed through unchanged. */
+  read<T>(body: (read: ReadHandle) => Promise<T>, options?: ReadOptions): Promise<T>;
 }
