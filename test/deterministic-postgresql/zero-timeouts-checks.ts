@@ -13,8 +13,8 @@ import type { Settings } from "../db/backends.js";
  * awaits, and a callback's read running 5 s all complete, and `SHOW` in each reports 0. Each check does the work and
  * returns what it saw; it rejects when the work fails, which is what the negative control asserts.
  *
- * The five timeouts are DB-15's four and `idle_session_timeout` (decision record Q93): a server, database or role
- * default for it would end the writer's session between blocks, and the writer lock with it (DB-11).
+ * The five timeouts are DB-15's (`idle_session_timeout` by owner decision Q93): a server, database or role default
+ * for it would end the writer's session between blocks, and the writer lock with it (DB-11).
  */
 
 /** Every server-side timeout at 1 s: A141's hostile defaults. */

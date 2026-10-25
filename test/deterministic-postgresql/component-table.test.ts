@@ -68,7 +68,8 @@ const ROWS: readonly RowCoverage[] = [
   {
     rule:
       "The pinned session settings, and the zero timeouts (`statement_timeout`, `lock_timeout`, " +
-      "`idle_in_transaction_session_timeout`, `transaction_timeout`) of the writer and callback reads",
+      "`idle_in_transaction_session_timeout`, `transaction_timeout`, `idle_session_timeout`) of the writer and " +
+      "callback reads",
     requirement: "DB-2, DB-15",
     tests: ["results.test.ts", "both-backends.test.ts", "zero-timeouts.test.ts"],
     pending: {},

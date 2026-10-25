@@ -226,8 +226,8 @@ interface BlockSource {
   PGlite: start parameters), which take precedence over the server's, the database's and the role's defaults; a
   `database` URL setting one is refused (`invalid-configuration`). Every connection also starts with
   `statement_timeout = 0`, `lock_timeout = 0`, `idle_in_transaction_session_timeout = 0` and `transaction_timeout = 0`
-  (PostgreSQL 17 and later), and `idle_session_timeout = 0` (Q93, shipped pending the owner: a default for it ends the
-  writer's session between blocks, and the writer lock with it), so the writer, migrations, setup and callback reads are
+  (PostgreSQL 17 and later), and `idle_session_timeout = 0` (Q93: a default for it would end the writer's
+  session between blocks, and the writer lock with it), so the writer, migrations, setup and callback reads are
   never cut off; they are applied and refused in a URL the same way (`src/deterministic-postgresql/settings.ts`:
   `PINNED_SETTINGS`, `ZERO_TIMEOUTS`, and `SESSION_SETTINGS`, both, which the backends apply). A read for a module API
   request is `db.read(body, { timeoutMs: apiReadTimeoutMs })` (`ReadOptions`, a whole number of milliseconds from 1 to
@@ -324,7 +324,7 @@ is where they are implemented and tested together:
 | Sequences and unlogged tables in module schemas refused | DT-6 | Q61, Q64 |
 | `core_chain.jsonb_numbers_ok` and `core_chain.numeric_ok` and the `CHECK`s they back | DT-1, DT-6 | Q57 |
 | Block transactions change rows only; the `BEFORE TRUNCATE` trigger | DB-14 | Q46, Q76, Q84 |
-| The pinned session settings, and the zero timeouts (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `transaction_timeout`) of the writer and callback reads | DB-2, DB-15 | Q65, Q71 |
+| The pinned session settings, and the zero timeouts (`statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `transaction_timeout`, `idle_session_timeout`) of the writer and callback reads | DB-2, DB-15 | Q65, Q71, Q93 |
 | The result mapping and parameter texts: lossless `jsonb`, arrays element by element, date and time as RFC 3339 text, other types as their text | DB-2 | Q66, Q68 |
 | The opt-out: a `table` item declared `deterministic: false` — its tables, the sequences their columns own and its unlogged tables are skipped by the refusals and the `CHECK`s; the contents hash records each such table as `[schema, table, null, null]`; digests skip it; backups carry its rows and its sequences' positions | MD-1, DT-3, DT-4, DT-6, BK-2 | Q76 |
 

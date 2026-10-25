@@ -517,7 +517,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       timeout (it enforces neither and hangs on the idle one, `design.md` §14).
       **Acceptance:** A141.
       **Done (2026-10-25):** the zero timeouts are the component's `ZERO_TIMEOUTS` (`statement_timeout`, `lock_timeout`,
-      `idle_in_transaction_session_timeout`, `transaction_timeout` and — decision record Q93, shipped pending the owner
+      `idle_in_transaction_session_timeout`, `transaction_timeout` and — decision record Q93, owner's answer A
       — `idle_session_timeout`, each 0), next to `PINNED_SETTINGS` in `src/deterministic-postgresql/settings.ts`;
       `SESSION_SETTINGS` (both) is what every session starts with: PostgreSQL startup parameters of the writer and every
       pooled read connection (so the reads given to callbacks, and migrations, setup and blocks on the writer, run with
@@ -547,8 +547,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       flight counted as idle), closed by tests; on the final sources 40 of 42 are caught, the 2 equivalent ones survive.
       `design.md` §4's "Session settings (Q65) and timeouts (Q71)" bullet and §14's PGlite row updated; §4's component
       table row 7 now runs its zero timeouts in `zero-timeouts.test.ts`. **Pending:** "a read for an API request"
-      through a registered handler, with `apiReadTimeoutMs` from the configuration (tasks 5.2a, 4.2); the owner's answer
-      to Q93 (A shipped: if not A, remove `idle_session_timeout` from `ZERO_TIMEOUTS` and its tests).
+      through a registered handler, with `apiReadTimeoutMs` from the configuration (tasks 5.2a, 4.2). Q93 resolved A
+      (owner, 2026-10-25): DB-15, its new scenario and A141 now name `idle_session_timeout`.
 - [x] 2.8 The read-only database for the `db` item (Q73): `read` only, nothing that writes, opens a transaction or
       closes; the `nested-call` refusal on PGlite kept from task 2.2; the module guide's database rules (inside a
       callback its handle, `db.read` for work outside the points).

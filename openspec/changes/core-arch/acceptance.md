@@ -103,13 +103,14 @@ git as pinned release assets that CI downloads and verifies.
   `2025-05-21T14:30:00.123456Z`; a `timestamp` `2025-05-21 14:30:00` as `2025-05-21T14:30:00`; a `date` as `2025-05-21`;
   `infinity` and `-infinity` as those words; arrays of them element by element, `NULL` as `null` — identical in every
   process. (DB-2, Q68)
-- **A141** `[FAULT]` On PostgreSQL: a read for an API request running `pg_sleep(60)` with `apiReadTimeoutMs` 1000
-  fails with `query-timeout`, not retryable, within 2 s, and the next read on that connection succeeds; a read for an
-  API request that awaits 2 s between two statements fails with `query-timeout`, and the next read succeeds on a new
+- **A141** `[FAULT]` On PostgreSQL: a read for an API request running `pg_sleep(60)` with `apiReadTimeoutMs` 1000 fails
+  with `query-timeout`, not retryable, within 2 s, and the next read on that connection succeeds; a read for an API
+  request that awaits 2 s between two statements fails with `query-timeout`, and the next read succeeds on a new
   connection. On PGlite an API read sets neither timeout. On both backends, with database (on PGlite: configuration
-  file) defaults `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` and
-  `transaction_timeout` of 1 s, a 5 s migration, a block transaction left idle 5 s while a callback awaits, and a
-  callback's read running 5 s all complete, and `SHOW` in each reports 0. (DB-15, Q71)
+  file) defaults `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `transaction_timeout` and
+  `idle_session_timeout` of 1 s, a 5 s migration, a block transaction left idle 5 s while a callback awaits, a
+  callback's read running 5 s, and a writer left idle 2 s between two blocks all complete, the writer keeping its
+  session and with it the writer lock, and `SHOW` in each reports 0. (DB-15, Q71, Q93)
 
 - **A144** `[CI]` A module that requires `db` gets an object offering `read` only — a type test and a runtime check find
   no `transaction`, `close` or write; each `db.read` sees one committed height and reports it; on PGlite a `db.read`

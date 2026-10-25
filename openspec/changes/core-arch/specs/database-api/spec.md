@@ -240,9 +240,10 @@ connection usable; one ended by `idle_in_transaction_session_timeout`, which end
 a new connection in its place. WHERE the backend is PGlite, which enforces neither timeout (an
 `idle_in_transaction_session_timeout` above 0 hangs it), THE database API SHALL set neither for API reads, which are
 then not bounded (PGlite is a development backend, DB-12). THE writer connection, migrations, setup and the read handles
-given to callbacks SHALL run with `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout` and
-`transaction_timeout` (PostgreSQL 17 and later) pinned to 0, whatever the server's, database's or role's defaults,
-because they run work the runner must finish; a slow block is reported (RN-17), never cut off (Q71).
+given to callbacks SHALL run with `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`,
+`transaction_timeout` (PostgreSQL 17 and later) and `idle_session_timeout` pinned to 0, whatever the server's,
+database's or role's defaults, because they run work the runner must finish, and the writer's session, which holds the
+writer lock (DB-11), waits idle between blocks; a slow block is reported (RN-17), never cut off (Q71, Q93).
 
 #### Scenario: A hung API query is cut off
 - **WHEN** on PostgreSQL an API request's read runs `SELECT pg_sleep(60)` with `apiReadTimeoutMs` 1000
@@ -251,3 +252,7 @@ because they run work the runner must finish; a slow block is reported (RN-17), 
 #### Scenario: A long migration is never cut off
 - **WHEN** the database's default `statement_timeout` is 1 s and a migration runs for 5 s
 - **THEN** the migration completes
+
+#### Scenario: The writer keeps its session between blocks
+- **WHEN** the database's default `idle_session_timeout` is 1 s and the writer waits 2 s between two blocks
+- **THEN** the next block runs on the same session, so the writer keeps the writer lock

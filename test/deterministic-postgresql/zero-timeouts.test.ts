@@ -27,7 +27,7 @@ import {
  * handles given to callbacks run work the runner must finish. Here every one of them defaults to 1 s, and a 5 s
  * migration, setup idle 2 s, a block transaction left idle 5 s while a callback awaits, a callback's read running 5 s
  * (on the block write handle, and on a read handle outside the block) and the writer idle 2 s between blocks all
- * complete, with `SHOW` reporting 0 in each. `idle_session_timeout` is decision record Q93's (not DB-15's four).
+ * complete, with `SHOW` reporting 0 in each. `idle_session_timeout` is DB-15's fifth (owner decision Q93).
  *
  * Before its long work, each test checks that a read and a transaction report the zeros: on PGlite a nonzero
  * `idle_in_transaction_session_timeout`, `transaction_timeout` or `idle_session_timeout` hangs the engine — the whole

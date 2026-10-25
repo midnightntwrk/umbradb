@@ -32,9 +32,9 @@ export const PINNED_SETTINGS: readonly (readonly [string, string])[] = [
  * cut off (`transaction_timeout`, PostgreSQL 17 and later; RN-17). A read for a module API request sets two of them
  * for that read only (`SET LOCAL`, `src/db/postgres.ts`).
  *
- * `idle_session_timeout` (PostgreSQL 14 and later) is not one of DB-15's four: decision record Q93. A default for it
- * would end the writer's session while it waits between blocks, and the writer lock with it (DB-11), and would end idle
- * pooled read connections; so it is pinned to 0 with the others. Reverting Q93 is removing its entry here.
+ * `idle_session_timeout` (PostgreSQL 14 and later) is DB-15's fifth (owner decision Q93): a default for it would end
+ * the writer's session while it waits between blocks, and the writer lock with it (DB-11), and would end idle pooled
+ * read connections.
  *
  * PGlite enforces none of them, but one that fires hangs it — synchronously, the whole process — as a nonzero
  * `idle_in_transaction_session_timeout`, `transaction_timeout` or `idle_session_timeout` does once its time passes
