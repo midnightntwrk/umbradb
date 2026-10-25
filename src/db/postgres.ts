@@ -28,13 +28,21 @@
  * is `database-error` (not retryable), with the server's SQLSTATE and the names it gives (constraint, table, schema,
  * column) — never the server's `detail`, which can hold row values, nor the URL — except a `TRUNCATE` the
  * `deterministic_postgresql` component's trigger refused, which is `truncate-not-allowed` (DB-14).
+ *
+ * **The writer lock and the durability probe (DB-11, DB-12).** Every writer session takes the writer lock when it
+ * opens, before its first transaction (`./writer-lock.ts`). The first one then runs the durability probe on the same
+ * session (`./durability-probe.ts`): a refusal ends that session, so a refused writer holds no lock and wrote nothing.
+ * A session opened after a lost one only takes the lock again; finding it taken is `writer-lock-lost`, after which the
+ * writer never writes again. The read pool's sessions take no lock.
  */
 
 import postgres, { type Sql } from "postgres";
 import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
+import { type DurabilityWarning, probeDurability } from "./durability-probe.js";
 import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
 import { allowMultiStatement } from "./multi-statement.js";
+import { allowWriterStart, takeWriterLock, type WriterSession } from "./writer-lock.js";
 
 /** Options of {@link openPostgres}. */
 export interface PostgresOptions {
@@ -46,6 +54,8 @@ export interface PostgresOptions {
   readonly readConnections?: number;
   /** How long opening a connection may take, in seconds; default the driver's 30. */
   readonly connectTimeoutSeconds?: number;
+  /** The core entry's `fullPageWritesOffAllowed` (CF-4): the durability probe's override; default false (DB-12). */
+  readonly fullPageWritesOffAllowed?: boolean;
 }
 
 /**
@@ -172,7 +182,7 @@ class Session {
       max: 1,
       fetch_types: false,
       prepare: false,
-      // Never recycled: the writer's connection will hold the writer lock for the process's life (DB-11).
+      // Never recycled: the writer's connection holds the writer lock for as long as it lives (DB-11, ./writer-lock.ts).
       max_lifetime: null,
       onnotice: () => undefined,
       onclose: () => {
@@ -311,18 +321,34 @@ class ReadPool {
   }
 }
 
-/** The writer: one session, transactions one at a time. */
+/**
+ * The writer: one session, transactions one at a time. Each session takes the writer lock when it opens; the first also
+ * runs the durability probe (see the module comment).
+ */
 class Writer {
   private session: Session | undefined;
   private queue: Promise<unknown> = Promise.resolve();
   private closed = false;
+  /** The first probe's warnings, once a session held the lock and passed the probe. */
+  private started: readonly DurabilityWarning[] | undefined;
+  /** Set when a new session found the lock taken: this writer never writes again. */
+  private lost: UmbraError | undefined;
 
-  constructor(private readonly open: () => Session) {}
+  constructor(
+    private readonly open: () => Session,
+    private readonly fullPageWritesOffAllowed: boolean,
+  ) {}
 
   transaction<T>(body: (tx: Transaction) => Promise<T>): Promise<T> {
-    const run = this.queue.then(() => this.run(body));
-    this.queue = run.catch(() => undefined);
-    return run;
+    return this.enqueue(() => this.run(body));
+  }
+
+  /** Opens the writer's session now, if it has none: the lock, and the first time the probe. */
+  start(): Promise<readonly DurabilityWarning[]> {
+    return this.enqueue(async () => {
+      await this.ready();
+      return this.started!;
+    });
   }
 
   async close(): Promise<void> {
@@ -330,13 +356,40 @@ class Writer {
     await this.session?.end();
   }
 
-  private async run<T>(body: (tx: Transaction) => Promise<T>): Promise<T> {
+  private enqueue<T>(job: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(job);
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  /** The writer's session, holding the writer lock: the current one while usable, else a new one. */
+  private async ready(): Promise<Session> {
     if (this.closed) throw handleClosed("database");
-    if (this.session === undefined || !this.session.usable) {
-      void this.session?.end();
-      this.session = this.open();
+    if (this.lost !== undefined) throw this.lost;
+    if (this.session !== undefined && this.session.usable) return this.session;
+    void this.session?.end();
+    const session = this.open();
+    this.session = session;
+    const statements: WriterSession = { query: async (sql, params) => (await session.run(sql, params)).rows };
+    try {
+      if (this.started === undefined) {
+        await takeWriterLock(statements, "first");
+        this.started = await probeDurability(statements, { fullPageWritesOffAllowed: this.fullPageWritesOffAllowed });
+      } else {
+        await takeWriterLock(statements, "again");
+      }
+    } catch (error) {
+      // A session without the lock, or whose server the probe refused, is never used: ending it releases what it took.
+      this.session = undefined;
+      await session.end();
+      if (error instanceof UmbraError && error.code === "writer-lock-lost") this.lost = error;
+      throw error;
     }
-    const session = this.session;
+    return session;
+  }
+
+  private async run<T>(body: (tx: Transaction) => Promise<T>): Promise<T> {
+    const session = await this.ready();
     await session.run("BEGIN", [], true);
     let ended = false;
     const statement = (sql: string, params: unknown[] | undefined) => {
@@ -394,11 +447,11 @@ export function openPostgres(options: PostgresOptions): Database {
     throw new UmbraError("invalid-configuration", message, { parameter: "readConnections" });
   }
   const session = (role: Role) => () => new Session(options.url, role, options.connectTimeoutSeconds);
-  const writer = new Writer(session("writer"));
+  const writer = new Writer(session("writer"), options.fullPageWritesOffAllowed ?? false);
   const pool = new ReadPool(readConnections, session("reader"));
   let closed = false;
 
-  return {
+  const database: Database = {
     async read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T> {
       if (closed) throw handleClosed("database");
       const reader = await pool.acquire();
@@ -426,4 +479,7 @@ export function openPostgres(options: PostgresOptions): Database {
       await Promise.all([writer.close(), pool.close()]);
     },
   };
+  // A closed database's writer refuses with `handle-closed` itself (`close` closes it first).
+  allowWriterStart(database, async () => ({ durabilityWarnings: await writer.start() }));
+  return database;
 }

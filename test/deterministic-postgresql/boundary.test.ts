@@ -3,6 +3,7 @@ import { basename, join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   COLUMN_TYPE_RULES,
+  ERROR_CODES,
   PINNED_SETTINGS,
   RESULT_TYPES,
   TABLE_RULES,
@@ -155,9 +156,15 @@ function componentCode(): Map<string, string> {
   return code;
 }
 
+/**
+ * The component's strings of 30 characters or more, except its error codes: `ERROR_CODES` is the database API's
+ * vocabulary (decision record Q79 put `UmbraError` and its codes here), which every module that refuses or fails with
+ * a code names — `durability-full-page-writes-off` (DB-12) is the first code that long.
+ */
 function componentTexts(): string[] {
+  const codes: ReadonlySet<string> = new Set(ERROR_CODES);
   return CODE_FILES.flatMap((file) => stringLiterals(parseSource(file)).map((literal) => literal.text)).filter(
-    (text) => text.length >= MINIMUM_TEXT,
+    (text) => text.length >= MINIMUM_TEXT && !codes.has(text),
   );
 }
 
@@ -254,6 +261,14 @@ describe("A138: the pinned settings, the column-type rules and the result mappin
     const texts = componentTexts();
     expect(texts.length).toBeGreaterThan(100);
     expect(copiedTexts(OUTSIDE_FILES, texts)).toEqual([]);
+  });
+
+  it("leaves out of the component's texts its error codes only, which the rest of src/ names", () => {
+    const all = CODE_FILES.flatMap((file) => stringLiterals(parseSource(file)).map((literal) => literal.text));
+    const kept: ReadonlySet<string> = new Set(componentTexts());
+    const left = all.filter((text) => text.length >= MINIMUM_TEXT && !kept.has(text));
+    expect(left.length).toBeGreaterThan(0);
+    expect(left.every((text) => (ERROR_CODES as readonly string[]).includes(text))).toBe(true);
   });
 
   it("fixture: a copy under another name is caught by each check", () => {

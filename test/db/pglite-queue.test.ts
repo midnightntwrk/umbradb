@@ -392,7 +392,7 @@ describe("opening (DB-1, Q65)", () => {
   });
 
   it("opens an in-memory database with the pinned settings, and closes it", async () => {
-    const db = await openPglite({ dataDir: "memory://", committedHeight: async () => null });
+    const db = await openPglite({ dataDir: "memory://", committedHeight: async () => null, developmentOptIn: true });
     expect(await db.read((read) => read.query(settings))).toEqual([PINNED]);
     expect(await db.transaction((tx) => tx.query(settings))).toEqual([PINNED]);
     await db.close();
@@ -419,7 +419,7 @@ describe("opening (DB-1, Q65)", () => {
     ]);
     await control.close();
 
-    const db = await openPglite({ dataDir, committedHeight: async () => null });
+    const db = await openPglite({ dataDir, committedHeight: async () => null, developmentOptIn: true });
     expect(await db.read((read) => read.query(settings))).toEqual([PINNED]);
     const [row] = await db.read((read) =>
       read.query("SELECT '\\x00ff'::bytea AS bytes, '1 day 2 hours'::interval AS iv, 0.1::float4 AS f"),
@@ -430,14 +430,14 @@ describe("opening (DB-1, Q65)", () => {
 
   it("keeps committed rows across closing and reopening a data directory", async () => {
     const dataDir = directory();
-    const first = await openPglite({ dataDir, committedHeight: TEST_CURSOR });
+    const first = await openPglite({ dataDir, committedHeight: TEST_CURSOR, developmentOptIn: true });
     await first.transaction(async (tx) => {
       await tx.execute("CREATE SCHEMA t");
       await tx.execute("CREATE TABLE t.blocks (height bigint PRIMARY KEY)");
       await tx.execute("INSERT INTO t.blocks VALUES (7)");
     });
     await first.close();
-    const second = await openPglite({ dataDir, committedHeight: TEST_CURSOR });
+    const second = await openPglite({ dataDir, committedHeight: TEST_CURSOR, developmentOptIn: true });
     expect(await second.read(async (read) => read.height)).toBe(7n);
     await second.close();
   }, 60_000);
@@ -477,7 +477,7 @@ describe("opening (DB-1, Q65)", () => {
   it("reports an engine that cannot open as database-error, not retryable", async () => {
     const file = join(directory(), "not-a-directory");
     writeFileSync(file, "x");
-    const error = await failure(() => openPglite({ dataDir: file, committedHeight: async () => null }));
+    const error = await failure(() => openPglite({ dataDir: file, committedHeight: async () => null, developmentOptIn: true }));
     expect(error.code).toBe("database-error");
     expect(error.retryable).toBe(false);
     expect(error.details).toEqual({ reason: "open-failed" });

@@ -39,6 +39,16 @@ export const ERROR_CODES = [
   "migration-missing",
   "migration-failed",
   "requires-resync",
+  /** Another process holds the database's writer lock: startup refuses (DB-11, `src/db/writer-lock.ts`, `pglite-lock.ts`). */
+  "writer-lock-held",
+  /** The writer reconnected and found its lock taken by another process: processing halts, for good (DB-11). */
+  "writer-lock-lost",
+  // Startup refusals of the durability probe (DB-12, `src/db/durability-probe.ts`) and of a development-only feature
+  // without the development opt-in (CF-9; for PGlite, DB-12).
+  "durability-fsync-off",
+  "durability-full-page-writes-off",
+  "durability-pooler",
+  "development-opt-in-required",
   // The canonical encoder's failures (DT-1, `src/determinism/cbor.ts`).
   "not-integer",
   "unsafe-integer",

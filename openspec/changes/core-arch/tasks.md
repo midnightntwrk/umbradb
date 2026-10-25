@@ -445,9 +445,43 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       refusal state and the writer lock before startup (tasks 5.x, 2.5); the schema write handle around `on-start-db`
       (task 2.6). **Question, since decided:** Q91 (a pending migration declared before an applied one): A, by the
       owner (2026-10-24), refused with `migration-missing`, `reason: out-of-order`.
-- [ ] 2.5 Writer lock (refactored from `src/postgres/transaction-lease.ts`) and the PGlite operating-system lock
+- [x] 2.5 Writer lock (refactored from `src/postgres/transaction-lease.ts`) and the PGlite operating-system lock
       (`node:sqlite` exclusive transaction); the durability probe moved to `src/db/`.
       **Acceptance:** A17, A18; `durability-probe.test.ts` passes at its new path.
+      **Done (2026-10-24):** `src/db/writer-lock.ts` — the PostgreSQL writer lock, `pg_try_advisory_lock(3,
+      hashtext('umbradb-writer'))`, taken by the writer whenever it opens a session, before that session's first
+      transaction (from 0.9.5's lease: a session advisory lock on a connection of its own, taken without waiting, its
+      loss the connection's): the first time another holder is `writer-lock-held` and nothing was written; on a session
+      opened after a lost one, `writer-lock-lost`, after which that database never writes again — and `startWriter(db)`,
+      startup's first step (lock, then probe, before `startDatabase`), reached through a registry both backends fill.
+      `src/db/postgres.ts` wires both into the writer; `PostgresOptions.fullPageWritesOffAllowed` (CF-4).
+      `src/db/pglite-lock.ts` — the PGlite operating-system lock: `<data directory>.lock.sqlite` opened with `node:sqlite`
+      (loaded only then), `busy_timeout` 100 ms (decision record Q92: with 0, ten processes started together could all
+      refuse), `BEGIN EXCLUSIVE`, never committed, held for the process's life; the path resolved and its links followed,
+      so every spelling of a directory shares one lock; the same process may reopen a directory it closed, one opening at
+      a time; none for `memory://`; `idb://` and `opfs-ahp://` refused in Node.js. `openPglite` refuses without
+      `developmentOptIn` (`development-opt-in-required`) before anything is created, then locks, then opens PGlite.
+      `src/db/durability-probe.ts` — 0.9.5's probe unchanged in behaviour (`fsync`, `full_page_writes` with the
+      override, the pooler check, the `synchronous_commit` warning), now with §11's codes (`durability-fsync-off`,
+      `durability-full-page-writes-off`, `durability-pooler`) and run on the writer's session right after the lock; a
+      refused writer ends its session and holds no lock. `ERROR_CODES` gains those, `writer-lock-held`,
+      `writer-lock-lost` and `development-opt-in-required`; the `durability-probe` floor 97/92 at
+      `**/src/db/durability-probe.ts`. Tests, seen failing first (`Cannot find module '../../src/db/writer-lock.js'`,
+      `…/durability-probe.js`, `…/pglite-lock.js`): `test/db/writer-lock.test.ts` (`[[db.writer-lock.single-writer]]`,
+      PostgreSQL and PGlite in one test; the re-take checked from inside the next transaction; `writer-lock-lost` for
+      good; the PGlite lock in this process), `test/db/pglite-writer-processes.test.ts` (child processes: a writer
+      stopped with `SIGSTOP` for A17's full 5 minutes — `UMBRADB_A17_SIGSTOP_SECONDS` shortens it for iteration only —,
+      `SIGKILL` and a restart from the cursor, ten processes started together), `test/db/durability-probe.test.ts`
+      (0.9.5's cases at the new path on six PostgreSQL 18 servers; a pooler simulated by statements alternating between
+      two backends; A18's PGlite half). Committed negative controls: a lock released when its statement ends (PostgreSQL
+      `pg_try_advisory_xact_lock`; PGlite `BEGIN EXCLUSIVE; COMMIT`) and a writer that skips the re-take each fail A17's
+      checks (`writer-lock.negative-control.test.ts`, `pglite-writer-processes.test.ts`); a probe that ignores `fsync`
+      fails A18's (`durability-probe.negative-control.test.ts`). 65 wrong variants of the new and changed code (a scratch runner outside the clone): 62 caught on the first run; the three survivors were two gaps (the probe run before the lock; a directory not created yet written as `…/new/.`), closed by tests, and one equivalent check, removed from the source as redundant; on the final sources all 64 are caught — `busy_timeout` 0 by a test that holds a SHARED lock on the lock file for 50 ms, since the ten-process races catch it only some of the time. `design.md` §4 ("Writer lock",
+      "Durability probe"), §13 and §14 updated. 0.9.5's `transaction-lease.ts`, `durability-probe.ts` and their tests
+      stay until task 17.2. **Pending:** the refused state ("stays up, not ready", "startup refuses") and the halt on
+      `writer-lock-lost` (task 5.x); the configuration's `developmentOptIn` and `fullPageWritesOffAllowed` (task 4.x);
+      "continues from the cursor" with the runner's cursor (tasks 5.2, 5.4, 10.2, 18.1); the browser's Web Locks (task
+      16.1). **Question:** Q92 (`busy_timeout` 100 ms instead of design §4's 0), not blocking, shipped A.
 - [ ] 2.6 Write handles and their closing.
       **Acceptance:** A10.
 - [ ] 2.7 Timeouts by connection role (Q71): a read option bounding one read by `statement_timeout` and

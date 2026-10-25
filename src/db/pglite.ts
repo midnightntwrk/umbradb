@@ -49,6 +49,12 @@
  * **Closing.** Once closing starts, nothing more reaches the engine: the jobs still waiting and the running job's later
  * statements fail with `handle-closed`, and a transaction whose `COMMIT` was not yet sent is not committed (the engine
  * discards it when it closes). A statement already sent is waited for, then the engine is closed.
+ *
+ * **One writer, development only (DB-11, DB-12).** {@link openPglite} refuses without the development opt-in
+ * (`development-opt-in-required`: PGlite runs without fsync), then takes the data directory's operating-system lock
+ * (`./pglite-lock.ts`; none for `memory://`) before PGlite opens it, so a second process refuses with
+ * `writer-lock-held` and never opens the directory; the lock is held for the process's life. {@link openPgliteOn}, the
+ * seam for an engine already open, checks neither: whoever opened the engine did.
  */
 
 import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
@@ -56,8 +62,11 @@ import { PGlite, type QueryOptions, types } from "@electric-sql/pglite";
 import { mapRows, PINNED_SETTINGS, parameterText, type Row } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, Transaction } from "./api.js";
 import { commitRolledBack, handleClosed, statementRefused, UmbraError } from "./errors.js";
+import { pgliteNeedsDevelopmentOptIn } from "./durability-probe.js";
 import { allowMultiStatement } from "./multi-statement.js";
 import { READS_BYPASS_QUEUE } from "./pglite-build-flags.js";
+import { acquirePgliteLock } from "./pglite-lock.js";
+import { allowWriterStart } from "./writer-lock.js";
 
 /**
  * The start parameters of every PGlite engine the database API uses: PGlite's own (`PGlite.defaultStartParams`, which
@@ -74,18 +83,26 @@ export interface PgliteOptions {
   readonly dataDir: string;
   /** How a read learns its committed height (DB-2). */
   readonly committedHeight: CommittedHeight;
+  /** The core entry's `developmentOptIn` (CF-4, CF-9): PGlite opens only under it (DB-12). */
+  readonly developmentOptIn: boolean;
 }
 
 /**
- * Opens the PGlite backend on the database at `options.dataDir`, creating it if the directory is empty: one engine
- * started with {@link PGLITE_START_PARAMS}. An engine that cannot open is `database-error` (`reason: open-failed`),
- * not retryable.
+ * Opens the PGlite backend on the database at `options.dataDir`, creating it if the directory is empty: refuses without
+ * the development opt-in (`development-opt-in-required`) before anything is opened or created; takes the directory's
+ * writer lock (`writer-lock-held` when another process, or another opening in this one, holds it); then starts one
+ * engine with {@link PGLITE_START_PARAMS}. A directory or engine that cannot open is `database-error` (`reason:
+ * open-failed`), not retryable.
  */
 export async function openPglite(options: PgliteOptions): Promise<Database> {
+  if (options.developmentOptIn !== true) throw pgliteNeedsDevelopmentOptIn();
+  const lock = await acquirePgliteLock(options.dataDir);
+  const endUse = () => lock?.endUse();
   let engine: PGlite;
   try {
     engine = await PGlite.create(options.dataDir, { startParams: [...PGLITE_START_PARAMS] });
   } catch (error) {
+    endUse();
     const message = error instanceof Error ? error.message : String(error);
     throw new UmbraError(
       "database-error",
@@ -95,9 +112,10 @@ export async function openPglite(options: PgliteOptions): Promise<Database> {
     );
   }
   try {
-    return await openPgliteOn(engine, { committedHeight: options.committedHeight });
+    return await openOn(engine, options.committedHeight, endUse);
   } catch (error) {
     await engine.close().catch(() => undefined);
+    endUse();
     throw error;
   }
 }
@@ -112,8 +130,17 @@ export async function openPgliteOn(
   engine: PGlite,
   options: { readonly committedHeight: CommittedHeight },
 ): Promise<Database> {
-  const database = new PgliteDatabase(engine, options.committedHeight);
+  return openOn(engine, options.committedHeight, () => undefined);
+}
+
+/** {@link openPgliteOn}, with what to do once the database has closed its engine. */
+async function openOn(engine: PGlite, committedHeight: CommittedHeight, afterClose: () => void): Promise<Database> {
+  const database = new PgliteDatabase(engine, committedHeight, afterClose);
   await database.checkPinnedSettings();
+  allowWriterStart(database, async () => {
+    if (database.isClosed) throw handleClosed("database");
+    return { durabilityWarnings: [] };
+  });
   return database;
 }
 
@@ -228,6 +255,7 @@ class PgliteDatabase implements Database {
   constructor(
     private readonly engine: PGlite,
     private readonly committedHeight: CommittedHeight,
+    private readonly afterClose: () => void,
   ) {
     // An identity for every type PGlite has a parser for — its defaults, and the array types it registered when it
     // started — so that none of its parsers runs; a type it has no parser for comes back as text anyway.
@@ -258,6 +286,11 @@ class PgliteDatabase implements Database {
       this.closing = this.shutDown();
     }
     return this.closing;
+  }
+
+  /** True once closing started. */
+  get isClosed(): boolean {
+    return this.closed;
   }
 
   /** Refuses the engine unless every pinned setting is the session's value and its `RESET` value. */
@@ -420,5 +453,6 @@ class PgliteDatabase implements Database {
     this.queue.refuseWaiting(() => handleClosed("database"));
     await Promise.all(this.sent);
     if (!this.engine.closed) await this.engine.close().catch(() => undefined);
+    this.afterClose();
   }
 }

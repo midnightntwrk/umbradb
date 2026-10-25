@@ -69,7 +69,8 @@ describe("A12 (DB-5) — a reader never sees a block's rows before its COMMIT", 
         phase = "committing";
       });
       phase = "committed";
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Until a poll that started after the COMMIT has finished (a fixed wait failed under the suites' full load).
+      await expect.poll(() => polls.some((poll) => poll.start === "committed"), { timeout: 10_000, interval: 5 }).toBe(true);
     } finally {
       polling = false;
       await poller;
@@ -119,7 +120,8 @@ describe("A12 (DB-5) — a reader never sees a block's rows before its COMMIT", 
       await held;
       order.push("first ends");
     });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Until the first read holds the one connection (a fixed wait failed under the suites' full load).
+    await expect.poll(() => order.includes("first starts"), { timeout: 10_000, interval: 5 }).toBe(true);
     const second = db.read(async () => {
       order.push("second starts");
     });
