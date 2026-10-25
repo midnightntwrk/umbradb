@@ -4,8 +4,9 @@
  *
  * **Names (DB-8).** Module ids and item names match {@link ID_PATTERN} within {@link ID_MAX_BYTES} bytes, so a module's
  * schema — its id with `-` → `_` — is one-to-one, and its role `umbradb_m_<schema>` (an item's
- * `umbradb_i_<schema>`) stays within PostgreSQL's 63-byte names. Module schemas and item names share one namespace
- * that excludes the schemas UmbraDB itself creates ({@link RESERVED_SCHEMAS}, and every name starting with `pg_`). A
+ * `umbradb_i_<schema>`) stays within PostgreSQL's 63-byte names. Module schemas and item names — the items of UmbraDB's
+ * own parts ({@link OwnPart}) included — share one namespace that excludes the schemas UmbraDB itself creates
+ * ({@link RESERVED_SCHEMAS}, and every name starting with `pg_`). A
  * `table` item declares its schema (CORE-ARCH §4.10): its module's own, or the item's name (`-` → `_`), which makes the
  * item a *shared* item with one schema, owned by its own role, whoever provides it (Q89). A provider of a shared
  * `table` item writes under the item's role — its callbacks, `on-start-db` and migrations — so the item's tables
@@ -111,7 +112,8 @@ export interface SchemaMigration {
 
 /**
  * What the roles and schemas need of a module's declaration (MD-1): `schemaModule` (`src/modules/adapters.ts`, task 3.1)
- * takes it from a validated `ModuleDeclaration`; task 3.2 decides which declarations a plan holds.
+ * takes it from a validated `ModuleDeclaration`; the requirement graph (`src/modules/graph.ts`, task 3.2) decides which
+ * declarations a plan holds: every module of the database.
  */
 export interface SchemaModule {
   readonly id: string;
@@ -223,11 +225,24 @@ function provisionDifference(first: Provision, other: Provision): Difference | u
 }
 
 /**
- * Checks the names of one database's modules (DB-8, MD-2) and plans their schemas and roles. Throws `bad-id`,
- * `schema-collision` or `shared-item-migrations-differ` (not retryable), naming what collides or differs.
+ * One of UmbraDB's own parts whose schemas are reserved ({@link OWN_PARTS}): no module of a plan, but the names of the
+ * items it provides belong to the plan's one namespace like any other item's (DB-8), so that no module takes one as its
+ * id — a user module named `db` or `config` would otherwise share a name with `core-chain`'s items.
  */
-export function planSchemas(modules: readonly SchemaModule[]): SchemaPlan {
+export interface OwnPart {
+  readonly id: string;
+  readonly provides: readonly { readonly name: string }[];
+}
+
+/**
+ * Checks the names of one database's modules (DB-8, MD-2) and plans their schemas and roles; `ownParts` are UmbraDB's
+ * own parts of the same database, whose items' names join the namespace and nothing else (task 3.2,
+ * `src/modules/adapters.ts`'s `schemaPlan` gives them). Throws `bad-id`, `schema-collision` or
+ * `shared-item-migrations-differ` (not retryable), naming what collides or differs.
+ */
+export function planSchemas(modules: readonly SchemaModule[], ownParts: readonly OwnPart[] = []): SchemaPlan {
   for (const module of modules) checkNames(module);
+  for (const part of ownParts) checkNames({ id: part.id, provides: part.provides, requires: [] });
 
   // Each module writes one schema: its own, or a shared item's (Q89).
   const writeSchemas = new Map<string, string>();
@@ -259,18 +274,23 @@ export function planSchemas(modules: readonly SchemaModule[]): SchemaPlan {
     writeSchemas.set(module.id, declared[0] ?? own);
   }
 
-  // One namespace: module schemas, item names, reserved schemas.
+  // One namespace: module schemas, item names (the own parts' too), reserved schemas.
   const providers = new Map<string, Provision[]>();
+  const providerIds = new Map<string, string[]>();
   for (const module of modules) {
     for (const item of module.provides) {
       providers.set(item.name, [...(providers.get(item.name) ?? []), { module, item }]);
+      providerIds.set(item.name, [...(providerIds.get(item.name) ?? []), module.id]);
     }
+  }
+  for (const part of ownParts) {
+    for (const item of part.provides) providerIds.set(item.name, [...(providerIds.get(item.name) ?? []), part.id]);
   }
   const names: [string, string][] = [
     ...modules.map((module): [string, string] => [schemaName(module.id), `module ${module.id}`]),
-    ...[...providers].map(([name, provisions]): [string, string] => [
+    ...[...providerIds].map(([name, ids]): [string, string] => [
       schemaName(name),
-      `item ${name} (provided by ${provisions.map((provision) => provision.module.id).join(", ")})`,
+      `item ${name} (provided by ${ids.join(", ")})`,
     ]),
   ];
   const seen = new Map<string, string>();

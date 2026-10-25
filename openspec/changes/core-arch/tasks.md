@@ -618,8 +618,44 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** "refused at startup" through the runner's refusal state (task 5.x, which calls the validation first);
       the requirement graph and the plan's module set (3.2); the startup check, `CHECK`s, change capture and contents
       hash that skip opted-out tables (7.1); `ledgerTasks` in the declaration (12.6); CF-2's `entry` builder (4.1).
-- [ ] 3.2 Graph resolution per height range, Kahn order, mid-chain rule, development-only rule, shared-item providers.
+- [x] 3.2 Graph resolution per height range, Kahn order, mid-chain rule, development-only rule, shared-item providers.
       **Acceptance:** A22, A23, A24, A25.
+      **Done (2026-10-25):** `src/modules/graph.ts`: `resolveGraph({ declarations, start, entries, developmentOptIn })`,
+      pure, takes 3.1's validated declarations, S, every revision of every module entry with its effective stop (task
+      4.3 gives them) and the `core` entry's development opt-in; backbone parts run from S with no stop, and a module is
+      enabled when it has an entry. Heights split at S, every revision's start and every stop + 1 into closed ranges
+      `[from, to]` — adjacent providers share no height, overlapping ones share one —; a module's revisions continue
+      each other where one's stop + 1 is the next's start (CF-5), and after a gap the next one starts it again. The
+      refusals, as rules checked in order (`GRAPH_RULES`), each naming its range — merged over consecutive ranges —,
+      module and item: `development-opt-in-required` (MD-5, `details.feature` `development-only-module`),
+      `providers-overlap` (MD-3, MD-6), `item-no-provider`, `item-not-available` (MD-3's uncovered range),
+      `graph-cycle` (in a range, or only in the union of the ranges, which leaves startup no order), and
+      `cannot-start-mid-chain` (MD-4: the module, or its provider at that height). The order (RN-3): the backbone in
+      `BACKBONE_ORDER`, then Kahn's algorithm with the smallest id by UTF-8 bytes first (`utf8Order`); `core-digest`
+      last at `on-db-write`, after the core and private processes' parts everywhere else and at startup. The outputs:
+      `modules`, every part of the database in startup order — `startDatabase`'s parts through `migrationPart`, the
+      plan through `schemaPlan` (`src/modules/adapters.ts`) —, `segments`, and per range `order`, `writeOrder` and
+      `providerOf`, with `rangeAt(h)`. The `db`/`config` name gap is closed in `planSchemas`, whose one namespace now
+      holds the items of `core-chain` and `core-digest` (`OwnPart`): a user module named `db` or `config` is refused
+      with `schema-collision`. Five codes join `ERROR_CODES` (all in `design.md` §11); §6 and §4 describe the rest.
+      Decision record Q95 (`core-digest`'s place at startup and one startup order), Q96 (a start at S above genesis)
+      and Q97 (which ranges are checked) are open, each shipped A. Tests, seen failing first (`tsc`: `graph.js`,
+      `schemaPlan`, the codes and `planSchemas`' second argument missing; the suites failed to load; three of
+      `schema-names`' new tests): `test/modules/graph.test.ts` (A22's table with A23's, A24's and A25's refusals — code,
+      details with range, module and item, words — and its committed negative control: the resolution without one rule
+      fails exactly that rule's cases; the acceptances; RN-3's order with committed negative controls: a tie-break by the
+      order given, by Czech or by numeric collation gives another order; the ranges; the startup order; the name gap;
+      the caller's errors, thrown), `test/modules/graph-database.test.ts` (both backends: A25's two providers with
+      adjacent ranges writing one table under the item's role, which the consumer reads whole at every height; the
+      provider's migrations before its consumer's view, with the control in plain id order), `test/db/schema-names.test.ts`
+      (the own parts' items). 68 wrong variants (a scratch runner outside the clone): 64 caught on the first run; of the
+      4 survivors 3 were gaps — a cross-range cycle's requirement named by its last span, the order dropping a cycle's
+      modules without the cycle rule, every module's items passed as own items — closed by tests; on the final sources
+      67 of 68 are caught, the survivor equivalent (activity read at a range's last height instead of its first).
+      `docs/issues/00012` recorded (a user module may be named `core`).
+      **Pending:** "startup refuses" through the runner's refusal state, the dispatch per point and A38's property test
+      (5.x, 5.1); the entries with their effective stops from the configuration history, and A34's module half with a
+      configuration (4.3); the providers' writes through the real block loop (5.2); Q95–Q97.
 
 ## 4. Configuration
 

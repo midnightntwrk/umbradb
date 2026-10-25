@@ -310,3 +310,50 @@ describe("A15: the providers of one shared item must declare it alike (DB-8, Q76
     expect(error.details).toMatchObject({ item: "shared-x", providers: ["p1", "p2"], schemas: ["shared_x", "p2"] });
   });
 });
+
+describe("DB-8: the items of UmbraDB's own parts share the one namespace (task 3.2)", () => {
+  // `core-chain` and `core-digest` are no modules of a plan (their schemas are reserved), yet their items' names are
+  // names like any other: a module may not take one as its id.
+  const coreChain = { id: "core-chain", provides: [{ name: "db" }, { name: "config" }] };
+  const coreDigest = { id: "core-digest", provides: [{ name: "digest-tables" }] };
+
+  it("refuses a module named after an own part's item, naming both", () => {
+    for (const [id, own] of [
+      ["db", "core-chain"],
+      ["config", "core-chain"],
+      ["digest-tables", "core-digest"],
+    ] as const) {
+      const error = refusal(() => planSchemas([module(id, { provides: [] })], [coreChain, coreDigest]));
+      expect(error.code).toBe("schema-collision");
+      const schema = schemaName(id);
+      expect(error.details).toEqual({ schema, first: `module ${id}`, second: `item ${id} (provided by ${own})` });
+    }
+  });
+
+  it("refuses nothing without the own parts, as before", () => {
+    expect(() => planSchemas([module("db", { provides: [] })])).not.toThrow();
+  });
+
+  it("names every provider of an item that an own part and a module both provide", () => {
+    const both = [module("x", { provides: [{ name: "config" }] }), module("config", { provides: [] })];
+    const error = refusal(() => planSchemas(both, [coreChain]));
+    expect(error.details).toEqual({
+      schema: "config",
+      first: "module config",
+      second: "item config (provided by x, core-chain)",
+    });
+    // Alone, the two providers collide with no schema: two providers of one item are the graph's to refuse (MD-6).
+    expect(() => planSchemas([module("x", { provides: [{ name: "config" }] })], [coreChain])).not.toThrow();
+  });
+
+  it("checks an own part's item names with bad-id", () => {
+    const error = refusal(() => planSchemas([], [{ id: "core-chain", provides: [{ name: "Db" }] }]));
+    expect(error.code).toBe("bad-id");
+    expect(error.details).toMatchObject({ id: "Db", of: "item", module: "core-chain" });
+  });
+
+  it("plans no schema or role for an own part's item", () => {
+    const plan = planSchemas([module("a")], [coreChain, coreDigest]);
+    expect(plan.schemas.map((schema) => schema.name)).toEqual(["a"]);
+  });
+});

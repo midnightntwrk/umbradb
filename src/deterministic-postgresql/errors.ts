@@ -49,6 +49,13 @@ export const ERROR_CODES = [
   "table-item-no-kind",
   "field-no-kind",
   "invalid-declaration",
+  // Startup refusals of the requirement graph per height range (MD-3, MD-4, MD-6, `src/modules/graph.ts`; MD-5's is
+  // `development-opt-in-required`, below).
+  "item-no-provider",
+  "providers-overlap",
+  "graph-cycle",
+  "item-not-available",
+  "cannot-start-mid-chain",
   // Startup refusals of migrations (DB-9, DB-10, decision record Q91; `src/db/migrate.ts`).
   "migration-checksum-changed",
   "migration-missing",
