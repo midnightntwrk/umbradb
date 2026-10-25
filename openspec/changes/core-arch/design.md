@@ -558,9 +558,32 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   property, typed by `z.input` of its `configSchema`. `versionEntry`'s `version` is a `CoreVersion` for `core`, and its
   `config` is typed as plain data only.
 - **Schemas.** zod 4 (installed 4.4.3; Q45): a module's `configSchema` is a `z.object` whose fields carry `kind` in
-  their metadata (`schema.shape[field].meta().kind`, verified on 4.4.3); only revisions whose version is this build's
-  are validated against this build's schema; a `versionEntry` revision is compared with its recorded row, or — when it
-  is a later version not yet recorded — recorded as written and validated by the build that carries its version (CF-3).
+  their metadata (`schema.shape[field].meta().kind`, verified on 4.4.3); the `core` entry's are `PUBLIC_CORE_SCHEMA` and
+  `PRIVATE_CORE_SCHEMA` (`src/config/core-settings.ts`, task 4.2): CF-4's table with its kinds and defaults, strict at
+  every depth, `genesisHash` required with `custom` and refused otherwise, hashes 32 bytes of lowercase hex,
+  `apiReadTimeoutMs` from 1 to 2,147,483,647, `testKeys` secret; the builders' `CoreSettings` is held equal to their
+  input types by a type test. Only revisions whose version is this build's are validated against this build's schema; a
+  `versionEntry` revision is compared with its recorded row, or — when it is a later version not yet recorded — recorded
+  as written and validated by the build that carries its version (CF-3).
+- **Validation** (`src/config/validate.ts`, task 4.2). `validateConfig({ config, declarations, side })` takes the loaded
+  data, the validated declarations and the process's side, and runs rules that each report every violation they find,
+  all at once (`invalid-configuration`, `details { file, reason: "invalid-entries", findings }`, each finding naming
+  its path, its entry `{ index, id, start }` and its field, its message never a setting's value): the top level is
+  `{ entries }`; each entry is `{ id, start, stop?, version, config }` with no other property, its id `core` or a core
+  or user module (a backbone part's refused), `stop ≥ start`, a semver version or a core version with hex hashes, an
+  object `config`, required for a revision of the build's version; `(id, start)` once; a `core` entry; no lone UTF-16
+  surrogate (the history could not hash it); and, for each revision of the build's version, no setting its schema lacks
+  (a key check against `schema.shape`, since `z.object` strips unknown keys), the schema's own `safeParse` (its messages
+  redacted), and settings that stay plain data. It returns every revision with its parsed settings (defaults applied),
+  kinds and data fields, and S. `entriesAtCursor(checked, cursor)`, once the database is open, refuses a `versionEntry`
+  above the cursor that carries a `config` and one at or below it without one, and places each revision (`started`,
+  `scheduled`) for the history's comparison (CF-6).
+- **Redaction** (`src/config/redact.ts`, task 4.2; CF-4, AE-6). `configRedactor(checked)` knows the configuration's
+  secret strings — each string of a `secret` field, the password of every URL with credentials in the other fields —
+  and hides each, as written, decoded and in each encoding a text may hold (URI-component with upper- or lower-case hex,
+  form, WHATWG userinfo, JSON), in any text, together with a URL's userinfo and its credential query parameters;
+  `settings(values, kinds)` shows a `secret` field, or one of unknown kind, as `[redacted]`. `/config`, `/status` and
+  the logs use it (tasks 5.x, 8.x).
 - **Core stop.** Operational: not stored (`core_chain.config.stop` is null for `core`), changeable at any restart.
 - **History.** `core_chain.config`, compared and extended by `core-chain`'s `on-start-db` (CF-6); the version check
   (CF-8) runs before any `on-start-db`.

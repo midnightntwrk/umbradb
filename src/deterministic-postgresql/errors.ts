@@ -31,7 +31,8 @@ export const ERROR_CODES = [
   /**
    * A setting refused before anything runs: a `database` URL that overrides a pinned session setting, or a database
    * login that cannot create or use the module roles and schemas (`reason: writer-privileges`, decision record Q90); or
-   * a configuration file that cannot be loaded (`reason`: `file-not-found`, `load-failed`, `no-default-export`; CF-1).
+   * a configuration file that cannot be loaded (`reason`: `file-not-found`, `load-failed`, `no-default-export`; CF-1),
+   * or whose entries the validation refuses (`reason: invalid-entries`, `details.findings`; CF-3, `src/config/`).
    */
   "invalid-configuration",
   /** The configuration file's default export holds a value that is not plain data, at `details.path` (CF-1). */

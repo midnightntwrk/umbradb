@@ -187,6 +187,50 @@ data in tables declared `deterministic: false` (MD-1 of the `core-arch` change, 
   and every provider of a shared item declares the same flag; otherwise startup refuses with
   `shared-item-migrations-differ`.
 
+## Settings
+
+A module's settings are its `configSchema`, a zod 4 object schema. An operator writes them in the module's
+configuration entry, `entry({ start, config })`, and startup validates them against the schema of the version the
+build carries (CF-3 and CF-4 of the `core-arch` change).
+
+- **Every setting has a kind.** `data` if it can change what the module stores: it is recorded in the configuration
+  history and can change only from a future height. `operational` if it cannot: it is not recorded and may change at
+  any restart. `secret` for an operational setting that is never shown, logged or reported: it reads `[redacted]`. Set
+  the kind with `.meta({ kind })` on the field's outermost schema, after `.default()` or `.optional()`, which hide
+  metadata set before them; startup refuses a setting without one (`field-no-kind`).
+
+  ```ts
+  configSchema: z.object({
+    batchSize: z.number().int().min(1).default(100).meta({ kind: "data" }),
+    pollMs: z.number().int().meta({ kind: "operational" }),
+    apiKey: z.string().meta({ kind: "secret" }),
+    feed: z
+      .strictObject({ url: z.string(), retries: z.number().int().default(3) })
+      .prefault({ url: "https://feed.example" })
+      .meta({ kind: "operational" }),
+  }),
+  ```
+
+- **Defaults fill what is left out.** A setting left out takes its `.default()`. The parsed settings, every default
+  applied, are what your callbacks get and what the history records. For an object setting whose own fields have
+  defaults, use `.prefault(…)`: zod 4's `.default({})` gives `{}` as it is, without filling the fields inside.
+- **An unknown setting is refused.** Startup refuses a setting your schema does not declare, whether the schema is
+  `z.object` or not (`z.object` alone would drop it without a word). Inside a setting, declare objects with
+  `z.strictObject`, so that a misspelled field there is refused too rather than dropped.
+- **Settings are plain data, in and out.** A configuration holds objects, arrays, strings, booleans, `null` and integers
+  from 0 to 2^53 − 1 only (CF-1), so a setting typed `z.bigint()`, `z.date()` or a fraction can never be given: write
+  heights and counts as numbers and times as RFC 3339 text. Your schema's output is recorded and shown, so it must be
+  plain data too: do not coerce or transform a setting into a bigint, a `Date`, a `Map` or a class instance (startup
+  refuses it). Byte values are `0x`-prefixed lowercase hex strings; `hexBytes()` (`src/config/core-settings.ts`) checks
+  one. The schema parses synchronously and refuses a value with an issue, never by throwing.
+- **Keep secrets in `secret` settings.** UmbraDB redacts every `secret` setting's value, in every form it knows, from
+  what it shows and logs, and from every message it builds from your schema's issues; a custom message should still
+  not repeat the value it refuses. Credentials inside a URL are redacted in any setting, but a URL that carries them
+  belongs in a `secret` setting.
+- **A new version may rename a setting.** Only the revisions whose version is the build's are validated against its
+  schema. An earlier revision is written with `versionEntry({ id, start, version, config })`, its `config` the data
+  recorded for it, which startup compares with the history.
+
 ## Upgrades
 
 A new version of a module runs from a future height, as a new revision of its configuration; the rows written before

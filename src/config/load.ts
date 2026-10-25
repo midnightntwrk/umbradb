@@ -4,7 +4,7 @@
  * given with `--config` (task 4.4) — by importing it, on Node.js ≥ 24 through Node.js's built-in type stripping, so the
  * file holds erasable TypeScript only (no `enum`, `namespace` or parameter property); and takes its default export,
  * built with `defineConfig({ entries: [ … ] })` (`./entries.ts`), checked to be plain data (`./plain-data.ts`). It
- * returns that data as a deeply frozen copy: what startup validates (task 4.2), compares with the history and records
+ * returns that data as a deeply frozen copy: what startup validates (`./validate.ts`), compares with the history and records
  * (task 4.3), and shows, is the evaluated data, never the source text or the module's live export.
  *
  * A `.ts` file is an ES module when the nearest `package.json` says `"type": "module"`, or when Node.js detects ES

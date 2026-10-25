@@ -15,7 +15,7 @@
  * The builders return plain data: they copy the fields given into a new entry, leave out each of its own fields that is
  * absent or `undefined` (which is not plain data), and pass the `config` object itself through. They check nothing
  * else: types are gone at run time, so the loader checks the plain data (`./load.ts`) and startup validates every entry
- * (task 4.2) — which is why a property a builder does not know, given without types, is passed through to be refused
+ * (`./validate.ts`) — which is why a property a builder does not know, given without types, is passed through to be refused
  * there, while the identity and version are always the build's.
  */
 
@@ -27,7 +27,7 @@ import type { PlainObject } from "./plain-data.js";
 /** The id of the core's own entries (CF-2); no module may have it (MD-2, `../modules/validation.ts`). */
 export const CORE_ENTRY_ID = "core";
 
-/** A network the core knows, or `custom` (then `genesisHash` is required, task 4.2). */
+/** A network the core knows, or `custom` (then `genesisHash` is required, `./core-settings.ts`). */
 export type Network = "mainnet" | "preprod" | "preview" | "stagenet" | "custom";
 
 /** A row of the ledger version table (LG-1): `spec_version` from `specVersionMin` to `specVersionMax` → `ledger`. */
@@ -59,7 +59,10 @@ export type TlsSettings = {
 /** A test key of a private process (CF-11): admitted through the key registry at `start`; `bytes` as `0x` hex. */
 export type TestKey = { readonly kind: string; readonly bytes: string; readonly start: number };
 
-/** The `core` entry's fields every process has (CF-4); each field's kind, default and validation are task 4.2's. */
+/**
+ * The `core` entry's fields every process has (CF-4). Each field's kind, default and validation are the schemas'
+ * (`./core-settings.ts`), whose input types `test/config/core-settings.test.ts` holds equal to these.
+ */
 export type CoreSettingsBase = {
   readonly network: Network;
   readonly genesisHash?: string;
@@ -77,7 +80,7 @@ export type CoreSettingsBase = {
   readonly backupAtStop?: string;
   readonly tls?: TlsSettings;
   readonly livenessTimeoutMs?: number;
-  /** A whole number from 1 to 2,147,483,647 (DB-15, task 4.2). */
+  /** A whole number from 1 to 2,147,483,647 (DB-15, `./core-settings.ts`). */
   readonly apiReadTimeoutMs?: number;
   readonly slowBlockMs?: number;
   readonly followingThreshold?: number;
@@ -186,7 +189,7 @@ export function defineConfig(config: UmbraConfig): UmbraConfig {
 
 /**
  * A new entry: whatever `given` holds besides the builder's own fields (so that startup refuses what a builder does
- * not know, task 4.2), then `id`, `start`, `stop`, `version` and `config`, each left out when it is `undefined` (an
+ * not know, `./validate.ts`), then `id`, `start`, `stop`, `version` and `config`, each left out when it is `undefined` (an
  * absent `stop`, a scheduled revision's `config`, or a field missing from a call made without types, which startup
  * then names as missing) — the id and the version as the builder gives them, whatever `given` says.
  */

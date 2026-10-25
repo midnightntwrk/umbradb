@@ -5,7 +5,14 @@ import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildCoreVersion } from "../../src/config/build.js";
 import { loadConfig } from "../../src/config/load.js";
-import { PLAIN_DATA_RULES, type PlainDataRule, plainData, plainDataWith } from "../../src/config/plain-data.js";
+import {
+  PLAIN_DATA_RULES,
+  type PlainData,
+  type PlainDataRule,
+  plainData,
+  plainDataWith,
+  samePlainData,
+} from "../../src/config/plain-data.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { CORE_SETTINGS, REPOSITORY } from "./config-fixtures.js";
 
@@ -521,5 +528,30 @@ describe("CF-1: plain data is accepted, and the check returns a frozen copy of i
     const error = await refusal(() => plainData({ x: () => 0 }, "/etc/umbradb.config.ts"));
     expect(error.details).toEqual({ file: "/etc/umbradb.config.ts", path: "x", found: "a function" });
     expect(error.message).toMatch(/^\/etc\/umbradb\.config\.ts: the configuration's value at x is a function/);
+  });
+});
+
+describe("CF-3: plain data equal field for field (task 4.2)", () => {
+  it("is equal whatever the order of an object's keys, at any depth", () => {
+    expect(samePlainData({ a: 1, b: [{ c: "x", d: null }] }, { b: [{ d: null, c: "x" }], a: 1 })).toBe(true);
+    expect(samePlainData([], [])).toBe(true);
+    expect(samePlainData("x", "x")).toBe(true);
+  });
+
+  it("differs in a value, a key, a length, an order of elements or a type", () => {
+    expect(samePlainData({ a: 1 }, { a: 2 })).toBe(false);
+    expect(samePlainData({ a: 1 }, { b: 1 })).toBe(false);
+    expect(samePlainData({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+    expect(samePlainData([1, 2], [2, 1])).toBe(false);
+    expect(samePlainData([1], [1, 1])).toBe(false);
+    expect(samePlainData([], {})).toBe(false);
+    expect(samePlainData({}, [])).toBe(false);
+    expect(samePlainData({ a: null }, { a: {} })).toBe(false);
+    expect(samePlainData(null, {})).toBe(false);
+    expect(samePlainData(1, "1")).toBe(false);
+    // A key the other object does not have of its own, though every object inherits it.
+    const own = JSON.parse('{"__proto__": {}}') as PlainData;
+    expect(samePlainData(own, { x: 1 })).toBe(false);
+    expect(samePlainData({ constructor: {} } as PlainData, { x: {} })).toBe(false);
   });
 });

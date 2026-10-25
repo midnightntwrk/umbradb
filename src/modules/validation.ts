@@ -91,8 +91,11 @@ const ITEM_PROPERTIES = ["name", "lifetimes", "table"];
 const TABLE_PROPERTIES = ["schema", "tables", "kind", "deterministic"];
 const MIGRATION_PROPERTIES = ["id", "sql"];
 
-/** semver 2.0.0's grammar (semver.org, "Is there a suggested regular expression"). */
-const SEMVER =
+/**
+ * semver 2.0.0's grammar (semver.org, "Is there a suggested regular expression"); the configuration's versions are
+ * checked with it too (`src/config/validate.ts`).
+ */
+export const SEMVER =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 
 /** Two or more names, quoted: `"a", "b" or "c"`. */

@@ -741,8 +741,56 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       entries' shape, the settings schemas, the `core` fields' kinds, defaults and validation, and the redaction
       (4.2); the history, the effective stops for the graph and the version check (4.3); `umbradb config check` and
       `--config` (4.4); the ledger versions of the core version (12.1–12.2).
-- [ ] 4.2 Schema validation with kinds, defaults and the `core` fields of CF-4; secret redaction helper.
+- [x] 4.2 Schema validation with kinds, defaults and the `core` fields of CF-4; secret redaction helper.
       **Acceptance:** A28; A29 (completed in 8.1).
+      **Done (2026-10-25):** `src/config/` (design §7). `core-settings.ts`: `PUBLIC_CORE_SCHEMA` and
+      `PRIVATE_CORE_SCHEMA`, CF-4's table as zod 4 objects strict at every depth, each field's kind on its outermost
+      schema and its default (`ledgerSources` each `vendored`, `sweep` `on`, `retainStates` 0, `listen.admin`
+      `0.0.0.0:8081`, 600, 64, 30000, no lockstep instance, 30000, 30000, 60000, 3, false, false; `testKeys` a secret,
+      default none); `genesisHash` required with `custom` and refused with the four known networks; hashes 32 bytes,
+      byte values `0x` lowercase hex (`hexBytes`, `hashHex`); addresses `host:port`; `apiReadTimeoutMs` from 1 to
+      2,147,483,647; `CORE_VERSION_SCHEMA`; the builders' `CoreSettings` held equal to the schemas' input types by a
+      type test. `validate.ts`: `validateConfig({ config, declarations, side })`, fourteen rules (`CONFIG_RULES`) each
+      reporting every violation at once as `invalid-configuration`, `details { file, reason: "invalid-entries",
+      findings }`, each finding with its path (`entries[1].config.pollMs`), its entry `{ index, id, start }`, its field
+      and a message that never holds a setting's value: the top level `{ entries }`; each entry an object with no
+      unknown property, an id of `core` or of a core or user module (a backbone part's refused), heights with `stop ≥
+      start`, a semver version or a core version, an object `config`, required for the build's version; `(id, start)`
+      once; a `core` entry; no lone UTF-16 surrogate (the history could not hash it); for a revision of the build's
+      version, no setting its schema lacks (a key check against `schema.shape`, since `z.object` strips unknown keys;
+      the other side's `core` fields named as such; a likely misspelling suggested), the schema's own `safeParse` (its
+      messages and errors redacted) and settings that stay plain data. It returns every revision with its parsed
+      settings (defaults applied), kinds and data fields, and S; a `versionEntry` revision is not validated against this
+      build's schema. `entriesAtCursor(checked, cursor)` (`CURSOR_RULES`) refuses a scheduled `versionEntry` carrying a
+      `config` and an earlier one without its recorded `config`, and places each revision (`started`, `scheduled`).
+      `redact.ts`: `configRedactor(checked)` (`text`, `settings`), `redactor`, `redactorWith`, `secretStrings`,
+      `REDACTED`: each string of a `secret` field, and the password of every URL in the other fields, hidden as written,
+      decoded and in each encoding (`SECRET_PARTS`, `SECRET_ENCODINGS`), URL userinfo and credential query parameters
+      in any text (`TEXT_PATTERNS`); `settings` shows a `secret` field, or one of unknown kind, as `[redacted]`.
+      `plain-data.ts`: `samePlainData` and `pathOf` exported. Module guide: "Settings". No code added to
+      `ERROR_CODES`. Q102 raised (not blocking: which `core` revision's operational fields a process uses).
+      Tests, seen failing first (`tsc` exit 2, 37 lines: the three new modules missing; the three new suites failed to
+      load):
+      `test/config/validate.test.ts` (A28's table of 61 rows, one rule each, through `validateConfig`, checking code,
+      details, path, entry, field and words; the defaults; kinds and data fields; the output; CF-3's `versionEntry`
+      scenarios; 4 cursor rows; no secret in a refusal; a file through the loader; the committed negative controls — the
+      validation without one rule loses exactly that rule's findings, row by row, and zod's own parse accepts the
+      misspelled setting the validation refuses), `core-settings.test.ts` (CF-4's table, written out, against both
+      schemas: kinds, defaults, required fields; the formats; the type test), `redact.test.ts` (A29's helper half: the
+      password of a `database` URL in none of its six forms in `/config`'s settings or in eight texts built from the
+      setting; URL credentials in any field and text; the committed negative control — without one part, encoding
+      or pattern, exactly the texts that need it leak), `plain-data.test.ts` (`samePlainData`). 177 wrong variants (a
+      scratch runner outside the clone): 168 caught on the first run; of the 9 survivors 8 were gaps — the private
+      schema's genesis rule and strictness, heights given without the plain-data check, a surrogate pair taken for a
+      lone surrogate, the first rather than the closest suggestion, an inherited key in `samePlainData` and the kinds, a
+      URL password not decoded — closed by tests; on the final sources 176 of 177 are caught, the survivor equivalent
+      (an unknown setting's value never reaches the schema, so no message to redact can hold it).
+      **Pending:** "startup refuses" through the runner's refused state, and which `core` revision's operational
+      settings the process uses (task 5.x, Q102); the history — a `versionEntry` equal to or differing from its
+      recorded row, a scheduled one recorded with id, start, stop and version, an entry above the cursor re-recorded —,
+      effective stops and overlapping revisions, `missing-entry`, the version check and CF-9's development opt-in (task
+      4.3); `umbradb config check` (task 4.4); `/config`, `/status` and the logs through the redaction (A29, tasks
+      8.1–8.4 and 5.x); `ledgerTable`'s default, the built-in table (task 12.2).
 - [ ] 4.3 `core-chain`'s configuration history: revisions, future-only comparison, `data_hash`, the version check, the
       development opt-in.
       **Acceptance:** A30, A31, A32, A33, A34.

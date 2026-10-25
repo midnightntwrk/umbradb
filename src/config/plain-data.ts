@@ -179,8 +179,11 @@ export const PLAIN_DATA_RULES: readonly PlainDataRule[] = Object.freeze([
 
 const IDENTIFIER = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
 
-/** The path of `key` in the container at `path`: `entries[1].config.onError`, `config["feed-url"]`, `x[Symbol(t)]`. */
-function pathOf(path: string, key: string | symbol | number): string {
+/**
+ * The path of `key` in the container at `path`: `entries[1].config.onError`, `config["feed-url"]`, `x[Symbol(t)]`. The
+ * schema validation (`./validate.ts`) names its findings in the same format.
+ */
+export function pathOf(path: string, key: string | symbol | number): string {
   if (typeof key === "number") return `${path}[${key}]`;
   if (typeof key === "symbol") return `${path}[${String(key)}]`;
   if (IDENTIFIER.test(key)) return path === "" ? key : `${path}.${key}`;
@@ -295,4 +298,23 @@ export function plainDataWith(value: unknown, rules: readonly PlainDataRule[], f
 /** Checks that `value` is plain data (CF-1) with {@link PLAIN_DATA_RULES}: see the module comment. */
 export function plainData(value: unknown, file?: string): PlainData {
   return plainDataWith(value, PLAIN_DATA_RULES, file);
+}
+
+/**
+ * True when `a` and `b` are the same plain data, whatever the order of their objects' keys: what CF-3 calls equal
+ * "field for field" (a core version against the build's, a `versionEntry`'s `config` against its recorded row).
+ */
+export function samePlainData(a: PlainData, b: PlainData): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a)) {
+    return Array.isArray(b) && a.length === b.length && a.every((value, i) => samePlainData(value, b[i] as PlainData));
+  }
+  if (typeof a !== "object" || a === null || typeof b !== "object" || b === null || Array.isArray(b)) return false;
+  const one = a as PlainObject;
+  const other = b as PlainObject;
+  const keys = Object.keys(one);
+  return (
+    keys.length === Object.keys(other).length &&
+    keys.every((key) => Object.hasOwn(other, key) && samePlainData(one[key] as PlainData, other[key] as PlainData))
+  );
 }
