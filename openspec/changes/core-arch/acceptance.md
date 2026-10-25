@@ -128,10 +128,13 @@ git as pinned release assets that CI downloads and verifies.
 - **A21** `[CI]` A table-driven test triggers each refusal of MD-2 (duplicate id, `core-` and `on-` prefixes, no
   requirement, item without lifetime, table item without kind, field without kind) and checks its code and names. (MD-2)
 - **A22** `[CI]` A table-driven test triggers each refusal of MD-3 (missing provider, overlapping providers, cycle,
-  uncovered range) and checks the code, range, module and item. (MD-3)
-- **A23** `[CI]` A module with `startsMidChain: false` starting above S is refused; with `true` and mid-chain providers
-  it is accepted. (MD-4)
-- **A24** `[CI]` A development-only module without the opt-in is refused, and accepted with it. (MD-5)
+  uncovered range) and checks the code, range, module and item; a fault only in ranges that end at or below the cursor
+  is not refused, except a cycle in the range that ends at the cursor. (MD-3, Q97)
+- **A23** `[CI]` A module with `startsMidChain: false` starting above S, or at an S above 0, is refused; with `true` it
+  is accepted, also when a provider it requires cannot start mid-chain but is active at the height before its start, and
+  refused when such a provider starts with it; a start at or below the cursor is not checked. (MD-4, Q96, Q97, Q98)
+- **A24** `[CI]` A development-only module without the opt-in is refused, and accepted with it; one whose entries all
+  end below the cursor is not refused. (MD-5, Q97)
 - **A25** `[CI]` Two providers of one shared item with adjacent ranges are accepted and a consumer reads one continuous
   table; overlapping ranges are refused. (MD-6)
 

@@ -445,49 +445,52 @@ The declaration is CORE-ARCH §4.10's `ModuleDeclaration`, plus `requiresResync?
 has `publish(item, value)` for `process` items (MD-7). The `db` item is a `ReadOnlyDatabase` — `read(body, options?)`
 only, the database API's `read` with its read option (DB-15) passed through unchanged (task 2.8: `src/db/read-only.ts`,
 `readOnlyDatabase(db)`, a frozen object whose one property is `read`, so no property, prototype or value leads to the
-`Database`; frozen because one item is shared by every module that requires it): modules write only through the
-handles of RN-4 and may read through `db` for work outside the points; on PGlite a `db.read` from inside a callback's
-own job — `on-db-write`, `on-start-db`, a point's read — fails at once with `nested-call` (DB-4), and on PostgreSQL it
-sees committed data only; the module guide gives the rules, and nothing else enforces them (Q73, Q46). A `table` item may declare `deterministic: false` for data
-that is not a function of the chain, such as the time a request arrived (Q76; §4's component table says what it skips);
-the module guide says no deterministic table may be computed from such a table. Ids and item names match
-`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, so the schema name (`-` → `_`) is one-to-one (DB-8). `defineModule(declaration)`
-returns it with a typed `entry({ start, stop?, config })` builder (CF-2); its type also refuses a callback under a name
-that is not a point in a declaration built first and passed later, which `Partial<PointCallbacks>` alone accepts (A20).
-Declarations are validated at startup without their types (`src/modules/validation.ts`, task 3.1), so a module written in
-JavaScript or built at run time is held to the same declaration: the set has three lists — UmbraDB's backbone parts,
-its core modules, the host's user modules — and every shape the type forbids is refused with `invalid-declaration`,
-naming the field; then MD-2's causes, one rule and one code each (`bad-id` through the schema plan's own check,
-`reserved-prefix` for user modules only, `duplicate-id`, `no-requirement` except for backbone parts,
-`item-no-lifetime`, `table-item-no-kind`, `field-no-kind` read as `schema.shape[field].meta().kind`, and MD-1's
-`unknown-point`; Q94). `src/modules/adapters.ts` turns a validated declaration into the schema plan's module
-(`schemaModule`; `schemaModules` leaves out `OWN_PARTS`) and the migration runner's part (`migrationPart`, whose
-`onStartDb` calls `points["on-start-db"]` with the module's process context). The opt-out's skip is the component's,
-written once (`src/deterministic-postgresql/opt-out.ts`): the refusals take the opted-out tables
-(`databaseRefusals(tables, relations, { optedOut })`, each relation with the table it belongs to), and so do the
-`TRUNCATE` guard and task 7.1's `CHECK`s, change capture and hash. Graph resolution (`src/modules/graph.ts`, task
-3.2, `resolveGraph`) takes the validated declarations, S, every revision of every module entry with its effective stop
-(task 4.3) and the development opt-in. Backbone parts run with the core, from S with no stop (the core's `stop` is
-operational and ends processing for every part); a module is enabled when it has an entry. Heights are split at S, at
-every revision's start and after every revision's stop into closed ranges `[from, to]` (`to` null for no end), as entries
-are closed (RN-7): two providers are adjacent when one's last height + 1 is the other's first, and overlap when they
-share a height (MD-6); revisions continue each other when one's stop + 1 is the next's start (CF-5), and after a gap the
-next one starts the module again. In each range it resolves the providers and refuses, in this order, each fault naming
-its range (merged over consecutive ranges with the same fault), module and item: an enabled development-only module
-without the opt-in (`development-opt-in-required`, `details.feature` `development-only-module`, MD-5), two providers of
-one item at a common height (`providers-overlap`), a required item no enabled module provides (`item-no-provider`) or
-none where its module runs (`item-not-available`), a cycle in a range or one only the union of the ranges has
-(`graph-cycle`), and a start above S of a module that does not declare `startsMidChain: true`, or whose provider there
-does not (`cannot-start-mid-chain`, MD-4). Every range from S and every start above S are checked (decision record
-Q97); a start at S is never mid-chain (Q96). Each range's order is the backbone parts present in a fixed order —
-`core-chain`, `core-block-fetch`, `core-block-commit`, `core-private-source`, `core-key-registry`, `core-digest`, the admin
-parts — then Kahn's algorithm over the active modules, the ready one with the smallest id by UTF-8 bytes first; at
-`on-db-write` `core-digest` moves last (RN-3). Startup (DB-9) runs every part of the database — the backbone and every
-enabled module, its revisions ended or not — in one order: the backbone, then Kahn over the union of the ranges'
-requirements, so `core_digest` exists before any module migrates (Q95). The result gives `startDatabase` its parts
-(`modules.map(migrationPart)`) and the schema plan its modules (`schemaPlan(modules)`, whose namespace also holds the items
-of `core-chain` and `core-digest`, DB-8), and the runner each range's `order`, `writeOrder` and `providerOf`, computed
-once for the process; a revision boundary switches ranges between heights, never within one.
+`Database`; frozen because one item is shared by every module that requires it): modules write only through the handles
+of RN-4 and may read through `db` for work outside the points; on PGlite a `db.read` from inside a callback's own job —
+`on-db-write`, `on-start-db`, a point's read — fails at once with `nested-call` (DB-4), and on PostgreSQL it sees
+committed data only; the module guide gives the rules, and nothing else enforces them (Q73, Q46). A `table` item may
+declare `deterministic: false` for data that is not a function of the chain, such as the time a request arrived (Q76;
+§4's component table says what it skips); the module guide says no deterministic table may be computed from such a
+table. Ids and item names match `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`, so the schema name (`-` → `_`) is one-to-one (DB-8).
+`defineModule(declaration)` returns it with a typed `entry({ start, stop?, config })` builder (CF-2); its type also
+refuses a callback under a name that is not a point in a declaration built first and passed later, which
+`Partial<PointCallbacks>` alone accepts (A20). Declarations are validated at startup without their types
+(`src/modules/validation.ts`, task 3.1), so a module written in JavaScript or built at run time is held to the same
+declaration: the set has three lists — UmbraDB's backbone parts, its core modules, the host's user modules — and every
+shape the type forbids is refused with `invalid-declaration`, naming the field; then MD-2's causes, one rule and one
+code each (`bad-id` through the schema plan's own check, `reserved-prefix` for user modules only, `duplicate-id`,
+`no-requirement` except for backbone parts, `item-no-lifetime`, `table-item-no-kind`, `field-no-kind` read as
+`schema.shape[field].meta().kind`, and MD-1's `unknown-point`; Q94). `src/modules/adapters.ts` turns a validated
+declaration into the schema plan's module (`schemaModule`; `schemaModules` leaves out `OWN_PARTS`) and the migration
+runner's part (`migrationPart`, whose `onStartDb` calls `points["on-start-db"]` with the module's process context). The
+opt-out's skip is the component's, written once (`src/deterministic-postgresql/opt-out.ts`): the refusals take the
+opted-out tables (`databaseRefusals(tables, relations, { optedOut })`, each relation with the table it belongs to), and
+so do the `TRUNCATE` guard and task 7.1's `CHECK`s, change capture and hash. Graph resolution (`src/modules/graph.ts`,
+task 3.2, `resolveGraph`) takes the validated declarations, S, every revision of every module entry with its effective
+stop (task 4.3), the development opt-in and the cursor (null on a new database; Q97). Backbone parts run with the core,
+from S with no stop (the core's `stop` is operational and ends processing for every part); a module is enabled when it
+has an entry. Heights are split at S, at every revision's start and after every revision's stop into closed ranges
+`[from, to]` (`to` null for no end), as entries are closed (RN-7): two providers are adjacent when one's last height + 1
+is the other's first, and overlap when they share a height (MD-6); revisions continue each other when one's stop + 1 is
+the next's start (CF-5), and after a gap the next one starts the module again. In each range it resolves the providers
+and refuses, in this order, each fault naming its range (merged over consecutive ranges with the same fault), module and
+item: an enabled development-only module without the opt-in (`development-opt-in-required`, `details.feature`
+`development-only-module`, MD-5), two providers of one item at a common height (`providers-overlap`), a required item no
+enabled module provides (`item-no-provider`) or none where its module runs (`item-not-available`), a cycle in a range or
+one only the union of the ranges has (`graph-cycle`), and a start above 0 (genesis), a start at an S above 0 included
+(decision record Q96), of a module that does not declare `startsMidChain: true`, or whose provider not active at the
+height before the start does not (`cannot-start-mid-chain`, MD-4, Q98). Startup checks the ranges that hold a height
+above the cursor (on a new database, every range from S), a range that ends at the cursor for a cycle only (RN-11
+re-delivers there), the starts above the cursor and the development-only modules active at the cursor or later (Q97).
+Each range's order is the backbone parts present in a fixed order — `core-chain`, `core-block-fetch`,
+`core-block-commit`, `core-private-source`, `core-key-registry`, `core-digest`, the admin parts — then Kahn's algorithm
+over the active modules, the ready one with the smallest id by UTF-8 bytes first; at `on-db-write` `core-digest` moves
+last (RN-3). Startup (DB-9) runs every part of the database — the backbone and every enabled module, its revisions ended
+or not — in one order: the backbone, then Kahn over the union of the ranges' requirements, so `core_digest` exists
+before any module migrates (Q95, RN-3). The result gives `startDatabase` its parts (`modules.map(migrationPart)`) and
+the schema plan its modules (`schemaPlan(modules)`, whose namespace also holds the items of `core-chain` and
+`core-digest`, DB-8), and the runner each range's `order`, `writeOrder` and `providerOf`, computed once for the process;
+a revision boundary switches ranges between heights, never within one.
 
 ## 7. Configuration
 

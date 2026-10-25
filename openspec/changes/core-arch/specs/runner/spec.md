@@ -43,13 +43,17 @@ checks, chain identity, fetching, parsing and writing SHALL be done by callbacks
 
 ### Requirement: RN-3 Callbacks within a point run in a fixed order
 
-THE runner SHALL call the callbacks registered at a point in this order: first the backbone parts present, in the
-fixed order `core-chain`, `core-block-fetch`, `core-block-commit`; then every other module in the requirement graph's
+THE runner SHALL call the callbacks registered at a point in this order: first the backbone parts present, in the fixed
+order `core-chain`, `core-block-fetch`, `core-block-commit`; then every other module in the requirement graph's
 topological order computed by Kahn's algorithm, choosing among ready modules the smallest id by UTF-8 byte order; and,
-at `on-db-write` only, the backbone part `core-digest` last. WHERE a point is marked "in series" (§ table in
-`design.md` §2) THE runner SHALL await each callback before calling the next. WHERE a point is marked "parallel where
-the graph allows" (`on-fetch`, `on-parse`, `on-compute`) THE runner MAY run concurrently callbacks with no requirement
-path between them, and SHALL start a callback only after every callback of a module it requires has completed.
+at `on-db-write` only, the backbone part `core-digest` last. WHERE a point is marked "in series" (§ table in `design.md`
+§2) THE runner SHALL await each callback before calling the next. WHERE a point is marked "parallel where the graph
+allows" (`on-fetch`, `on-parse`, `on-compute`) THE runner MAY run concurrently callbacks with no requirement path
+between them, and SHALL start a callback only after every callback of a module it requires has completed. At startup
+(DB-9) THE runner SHALL run the parts' migrations and `on-start-db` in one order: the backbone parts present in their
+fixed order, with `core-digest` right after the core's and the private processes' own parts, so that its tables exist
+before any module migrates; then every other module by Kahn's algorithm over the union of every range's requirements,
+the smallest id by UTF-8 byte order first; a cycle only that union has SHALL refuse startup with `graph-cycle` (Q95).
 
 #### Scenario: Unrelated modules write in id order
 - **WHEN** modules `b-mod` and `a-mod`, with no requirement path between them, both write in `on-db-write`

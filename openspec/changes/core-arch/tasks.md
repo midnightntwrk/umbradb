@@ -599,7 +599,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (before the schema plan would call it a schema collision), `no-requirement` (not for backbone parts),
       `item-no-lifetime`, `table-item-no-kind`, `field-no-kind` (the field's outermost schema's `meta().kind`), and MD-1's
       `unknown-point`; every message names the module, the cause and the fix. Five codes are new in `design.md` §11
-      (decision record Q94, open, shipped A). `src/modules/adapters.ts`: `schemaModule`/`schemaModules` (`OWN_PARTS`
+      (decision record Q94, owner's answer A). `src/modules/adapters.ts`: `schemaModule`/`schemaModules` (`OWN_PARTS`
       left out) for `planSchemas`, and `migrationPart(declaration, context)` for `startDatabase` (`on-start-db` called as a
       method of `points` with the module's process context). `deterministic: false`: carried to the schema plan's
       `optedOut`; the skip is the component's, written once in `src/deterministic-postgresql/opt-out.ts` (`optOut`), which
@@ -638,8 +638,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `providerOf`, with `rangeAt(h)`. The `db`/`config` name gap is closed in `planSchemas`, whose one namespace now
       holds the items of `core-chain` and `core-digest` (`OwnPart`): a user module named `db` or `config` is refused
       with `schema-collision`. Five codes join `ERROR_CODES` (all in `design.md` §11); §6 and §4 describe the rest.
-      Decision record Q95 (`core-digest`'s place at startup and one startup order), Q96 (a start at S above genesis)
-      and Q97 (which ranges are checked) are open, each shipped A. Tests, seen failing first (`tsc`: `graph.js`,
+      Decision record Q95 (`core-digest`'s place at startup and one startup order) resolved A as shipped; Q96 (a start
+      at S above genesis), Q97 (which ranges are checked) and Q98 (MD-4's providers) resolved B (owner, 2026-10-25),
+      applied by task 3.2a. Tests, seen failing first (`tsc`: `graph.js`,
       `schemaPlan`, the codes and `planSchemas`' second argument missing; the suites failed to load; three of
       `schema-names`' new tests): `test/modules/graph.test.ts` (A22's table with A23's, A24's and A25's refusals — code,
       details with range, module and item, words — and its committed negative control: the resolution without one rule
@@ -655,7 +656,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `docs/issues/00012` recorded (a user module may be named `core`).
       **Pending:** "startup refuses" through the runner's refusal state, the dispatch per point and A38's property test
       (5.x, 5.1); the entries with their effective stops from the configuration history, and A34's module half with a
-      configuration (4.3); the providers' writes through the real block loop (5.2); Q95–Q97.
+      configuration (4.3); the providers' writes through the real block loop (5.2); Q96–Q98 (task 3.2a).
+- [ ] 3.2a The owner's answers Q96, Q97 and Q98 in the resolver (`src/modules/graph.ts`): a start above 0 (genesis) is a
+      mid-chain start, at an S above 0 too (Q96); startup checks the ranges that hold a height above the cursor, a range
+      that ends at the cursor for a cycle only, the starts above the cursor and the development-only modules active at
+      the cursor or later, with the cursor as the resolver's input (Q97); a provider active at the height before a
+      module's start needs no `startsMidChain: true` (Q98).
+      **Acceptance:** A22, A23, A24 (as amended for Q96–Q98).
 
 ## 4. Configuration
 

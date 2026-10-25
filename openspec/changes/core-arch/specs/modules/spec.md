@@ -39,7 +39,11 @@ WHEN a process starts, THE runner SHALL resolve the requirement graph separately
 boundaries (every start and stop of every revision), and IF in some range a required item has no enabled provider, two
 enabled providers of one item overlap, the graph has a cycle, or a module's [start, stop] is not covered by the
 availability of every item it requires (an item is available from its provider's start to its provider's stop) THEN
-startup SHALL refuse, naming the range, the module and the item.
+startup SHALL refuse, naming the range, the module and the item. Startup SHALL check every range that holds a height
+above the cursor (on a new database, every range from S) and, in a range that ends at the cursor, only that its graph
+has no cycle, since RN-11 re-delivers the cursor's callbacks in RN-3's order; a fault that only ranges ending at or
+below the cursor have was judged by the builds that processed them, as a build carries one version of each module (Q43,
+Q97).
 
 #### Scenario: A consumer starts before its provider
 - **WHEN** `consumer` starts at 10 and its provider starts at 20
@@ -49,22 +53,41 @@ startup SHALL refuse, naming the range, the module and the item.
 - **WHEN** module `a` requires `b`'s item and `b` requires `a`'s item
 - **THEN** startup refuses with `graph-cycle` naming both modules
 
+#### Scenario: An upgrade adds a requirement
+- **WHEN** module `m` ran from 500 without requiring `tx-results`, the cursor is 9,999, and a build whose `m` requires
+  `tx-results`, provided from 10,000, runs `m`'s new revision from 10,000
+- **THEN** startup accepts: the range 500–9,999 ends at the cursor and is checked for a cycle only
+
 ### Requirement: MD-4 Modules start mid-chain only when they promise it
 
-THE system SHALL let a module start above S (the database's start height) only if it and every provider it requires
-declare `startsMidChain: true`, or the database was restored from a backup holding its data (BK-3); otherwise
-startup SHALL refuse and name the module. A module declaring `startsMidChain: true` promises that, started at any height
-h with its providers available from h, it writes for every height ≥ h exactly the rows a run from S would write.
+THE system SHALL let a module start at a height h above 0 (genesis) — a mid-chain start, a start at an S above 0
+included (Q96) — only if it declares `startsMidChain: true` and so does every provider it requires that is not active at
+h − 1 (a provider active at h − 1, with h − 1 ≥ S, has run without a gap and holds its data from h on; Q98); otherwise
+startup SHALL refuse with `cannot-start-mid-chain` and name the module and, for a provider, the provider and the item.
+Startup SHALL check only the starts above the cursor (on a new database, every start): a start at or below the cursor
+was judged by the build that processed it, and a database restored from a backup (BK-3) carries the backup's cursor
+(Q97). A module declaring `startsMidChain: true` promises that, started at any height h with its providers available
+from h, it writes for every height ≥ h exactly the rows a run from S would write.
 
 #### Scenario: A module that needs history from S
 - **WHEN** a module with `startsMidChain: false` is added with a start above S on a database not restored from a
   backup
 - **THEN** startup refuses with `cannot-start-mid-chain` and the module
 
+#### Scenario: A module that needs history, at an S above genesis
+- **WHEN** a new database has S = 2,000,000 and enables a module with `startsMidChain: false` from S
+- **THEN** startup refuses with `cannot-start-mid-chain` and the module
+
+#### Scenario: A late module on a provider that has run all along
+- **WHEN** a database synced from 0 runs a provider with `startsMidChain: false`, and a module with
+  `startsMidChain: true` that requires the provider's item starts at 3,000,000, above the cursor
+- **THEN** startup accepts the module
+
 ### Requirement: MD-5 Development-only modules need the development opt-in
 
-IF a module with `developmentOnly: true` is enabled and the core entry does not set the development opt-in THEN startup
-SHALL refuse and name the module.
+IF a module with `developmentOnly: true` is enabled at the cursor or above (on a new database, at any height) and the
+core entry does not set the development opt-in THEN startup SHALL refuse and name the module; one whose entries all end
+below the cursor is not refused (Q97).
 
 #### Scenario: A development-only module in production
 - **WHEN** a configuration enables a development-only test module without `developmentOptIn`
