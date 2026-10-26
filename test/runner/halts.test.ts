@@ -10,9 +10,9 @@ import type { ProcessReason } from "../../src/runner/failures.js";
 import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, type HeightRun, type LoopEnd, type LoopInput } from "../../src/runner/loop.js";
-import { type ProcessingEnd, type ProcessStatus, startProcess } from "../../src/runner/process.js";
+import type { ProcessingEnd, ProcessStatus } from "../../src/runner/process.js";
 import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
-import { core, entryOf, loggingModule, testBuild } from "./process-build.js";
+import { core, entryOf, loggingModule, startProcess, testBuild } from "./process-build.js";
 
 /**
  * A43 (task 5.4; RN-8) through the process from its configuration, on PostgreSQL 18 and PGlite: a thrown error in each

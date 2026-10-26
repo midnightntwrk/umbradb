@@ -5,9 +5,9 @@ import { UmbraError } from "../../src/db/errors.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { BlockRef, BlockSource } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { type ProcessHandle, type ProcessStatus, startProcess } from "../../src/runner/process.js";
+import type { ProcessHandle, ProcessStatus } from "../../src/runner/process.js";
 import { cursorIn, pairs, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
-import { core, entryOf, loggingModule, settle, testBuild } from "./process-build.js";
+import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
  * What the process retries instead of halting (task 5.4; IN-10, RN-8's "an error other than a lost connection",

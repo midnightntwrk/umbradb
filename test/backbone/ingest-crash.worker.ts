@@ -2,7 +2,7 @@ import postgres from "postgres";
 import { NodeBlockSource, nodeSourceOf } from "../../src/backbone/core-block-fetch/index.js";
 import type { MetadataBlock, RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import type { NodeClient } from "../../src/node/client.js";
-import { startProcess } from "../../src/runner/process.js";
+import { startProcess } from "../runner/process-build.js";
 import { chainDeclarations } from "./chain-build.js";
 import { fenceAt, watched, watcher } from "./ingest-harness.js";
 

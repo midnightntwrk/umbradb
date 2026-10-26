@@ -5,9 +5,9 @@ import { type EntryBoundary, isBackbonePart, type PointSchedule, seriesOf } from
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, HeightFailure, type LoopInput } from "../../src/runner/loop.js";
-import { type ProcessingEnd, type ProcessStatus, startProcess } from "../../src/runner/process.js";
+import type { ProcessingEnd, ProcessStatus } from "../../src/runner/process.js";
 import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
-import { core, entryOf, loggingModule, settle, testBuild } from "./process-build.js";
+import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
  * Start and stop heights through the process (task 5.3; RN-9, RN-10, RN-11's re-delivery at the cursor, CF-6's raised

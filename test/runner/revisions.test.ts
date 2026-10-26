@@ -5,9 +5,8 @@ import { defineModule } from "../../src/modules/declaration.js";
 import type { EntryBoundary } from "../../src/runner/dispatch.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/loop.js";
-import { startProcess } from "../../src/runner/process.js";
 import { PROCESS_BACKENDS, pairs, type ProcessDatabase } from "./process-backends.js";
-import { core, settle, testBuild } from "./process-build.js";
+import { core, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
  * A42 (RN-7; task 5.3): a module's revisions continue each other — the settings switch at the later revision's start,

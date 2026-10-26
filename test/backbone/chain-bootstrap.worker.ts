@@ -1,5 +1,5 @@
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { startProcess } from "../../src/runner/process.js";
+import { startProcess } from "../runner/process-build.js";
 import { type WorkEvent, workModule } from "../runner/sigterm-module.js";
 import { chainDeclarations } from "./chain-build.js";
 

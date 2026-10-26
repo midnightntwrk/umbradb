@@ -12,11 +12,10 @@ import type { BlockRef } from "../../src/runner/block-source.js";
 import type { EntryBoundary } from "../../src/runner/dispatch.js";
 import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import { FinalizedLoop, type HeightRun, type LoopInput } from "../../src/runner/loop.js";
-import { startProcess } from "../../src/runner/process.js";
 import { type CrashCall, type CrashEvent, crashModule } from "./crash-module.js";
 import type { CrashJob, CrashWorkerEvent } from "./crash.worker.js";
 import { cursorIn, pairs, PROCESS_BACKENDS, type ProcessBackend } from "./process-backends.js";
-import { core, settle, testBuild } from "./process-build.js";
+import { core, settle, startProcess, testBuild } from "./process-build.js";
 import { spawnChild } from "../child-processes.js";
 
 /**

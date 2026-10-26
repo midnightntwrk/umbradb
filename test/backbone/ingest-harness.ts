@@ -4,10 +4,10 @@ import { type BodyExtrinsic, NodeBlockSource, nodeSourceOf } from "../../src/bac
 import type { RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import type { BlockHeader, ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { NodeClient } from "../../src/node/client.js";
-import { type ProcessHandle, type SourceShared, startProcess } from "../../src/runner/process.js";
+import type { ProcessHandle, SourceShared } from "../../src/runner/process.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
-import { core, entryOf } from "../runner/process-build.js";
+import { core, entryOf, startProcess } from "../runner/process-build.js";
 import { chainDeclarations } from "./chain-build.js";
 import { hex } from "./fetch-fixtures.js";
 

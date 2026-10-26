@@ -85,10 +85,11 @@
  * retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
  * `processing retries in <ms> ms (<condition>, attempt <n>): …`, `startup retries …`).
  *
- * **The admin endpoints** (AE-1, AE-2; task 8.1, `../admin/`), with {@link ProcessInput.admin}: the heartbeat ticks
- * from `startProcess` on and publishes `status()` to the admin worker; the admin listener starts on `listen.admin` once
- * the process's `core` revision is known, before the database opens (a listener that cannot listen refuses startup,
- * `listen-failed`), or at a refusal before that; it closes after the database at {@link ProcessHandle.stop}.
+ * **The admin endpoints** (AE-1, AE-2; task 8.1, `../admin/`), unless {@link ProcessInput.admin} is `false` (owner
+ * decision Q128 B, task 8.1a): the heartbeat ticks from `startProcess` on and publishes `status()` to the admin worker;
+ * the admin listener starts on `listen.admin` once the process's `core` revision is known, before the database opens
+ * (a listener that cannot listen — an address another listener holds — refuses startup, `listen-failed`), or at a
+ * refusal before that; it closes after the database at {@link ProcessHandle.stop}.
  */
 
 import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
@@ -172,9 +173,11 @@ export interface ProcessInput {
   /** The negative controls' choice of the process's `core` revision; `processCoreEntry` (Q102) unless given. */
   readonly processCore?: (config: CheckedConfig) => CheckedEntry;
   /**
-   * The admin endpoints (AE-1, AE-2; `../admin/`): `true` serves them on `listen.admin` from the admin worker, with the
-   * heartbeat, from startup until {@link ProcessHandle.stop}; a starter serves them through it (the negative
-   * controls'); none when absent or false (decision record Q128: opt-in; `umbradb run` serves them).
+   * The admin endpoints (AE-1, AE-2; `../admin/`), served unless `false` (decision record Q128 B: opt-out): absent or
+   * `true` serves them on `listen.admin` from the admin worker, with the heartbeat, from startup until
+   * {@link ProcessHandle.stop}; a starter serves them through it (the negative controls'). A program or a test that
+   * starts several processes gives each its own `listen.admin` (port 0 for a free one) or opts out: a second process
+   * on one address refuses startup with `listen-failed` before its database opens.
    */
   readonly admin?: boolean | AdminStarter;
 }
@@ -484,13 +487,13 @@ class Process implements ProcessHandle {
     this.#input = input;
     const { admin } = input;
     this.#admin =
-      admin === undefined || admin === false
+      admin === false
         ? undefined
         : new ProcessAdmin({
             status: () => this.status(),
             log: (line) => this.#log(line),
             side: input.side ?? "public",
-            ...(admin === true ? {} : { start: admin }),
+            ...(typeof admin === "function" ? { start: admin } : {}),
           });
     this.closed = new Promise((resolve) => {
       this.#resolveClosed = resolve;

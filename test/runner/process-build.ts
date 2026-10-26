@@ -6,7 +6,12 @@ import type { HistoryOptions } from "../../src/config/history.js";
 import type { BlockContext, ModuleDeclaration, PointName } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
 import type { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import type { ProcessHandle, ProcessingEnd } from "../../src/runner/process.js";
+import {
+  type ProcessHandle,
+  type ProcessingEnd,
+  type ProcessInput,
+  startProcess as startRunnerProcess,
+} from "../../src/runner/process.js";
 import { LOOP_BACKBONE } from "./loop-harness.js";
 
 /**
@@ -22,6 +27,17 @@ import { LOOP_BACKBONE } from "./loop-harness.js";
  *
  * Imports nothing of Vitest, so that a worker process (`sigterm.worker.ts`) builds the same declarations.
  */
+
+/**
+ * The runner's `startProcess` for the tests that start a process: without the admin endpoints unless the test asks
+ * for them with `admin`. The runner serves them by default (AE-1; owner decision Q128 B, task 8.1a) on `listen.admin`,
+ * CF-4's `0.0.0.0:8081` unless configured, and test processes run in parallel on a shared machine: each opts out here,
+ * or asks for them and listens on a port of its own (`127.0.0.1:0`, as `test/admin/admin-harness.ts` does). A test
+ * outside `test/admin/` that takes the runner's own fails `test/admin/test-processes.test.ts`.
+ */
+export function startProcess(input: ProcessInput): ProcessHandle {
+  return startRunnerProcess({ ...input, admin: input.admin ?? false });
+}
 
 /** What the `core-chain` stand-in saw. */
 export interface CoreSeen {

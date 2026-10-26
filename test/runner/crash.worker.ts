@@ -1,8 +1,7 @@
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { startProcess } from "../../src/runner/process.js";
 import type { PointName } from "../../src/modules/declaration.js";
 import { type CrashEvent, crashModule } from "./crash-module.js";
-import { testBuild } from "./process-build.js";
+import { startProcess, testBuild } from "./process-build.js";
 
 /**
  * A process for A44's and A46's crash tests (task 5.4; RN-9, RN-11), started by `crash.test.ts` with `node --import tsx`

@@ -14,7 +14,8 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { FinalizedLoop, LoopInput } from "../../src/runner/loop.js";
-import { type ProcessHandle, startProcess } from "../../src/runner/process.js";
+import type { ProcessHandle } from "../../src/runner/process.js";
+import { startProcess } from "../runner/process-build.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
 import { REACH_TIMEOUT_MS } from "./backends.js";
 

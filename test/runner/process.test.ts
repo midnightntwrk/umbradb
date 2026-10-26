@@ -17,14 +17,13 @@ import {
   processRevisions,
   type ProcessHandle,
   type ProcessStatus,
-  startProcess,
   statusOf,
   terminationSignal,
   upgradeBoundary,
 } from "../../src/runner/process.js";
 import { declaration } from "../modules/declarations.js";
 import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
-import { core, coreSettings, entryOf, loggingModule, settle, testBuild } from "./process-build.js";
+import { core, coreSettings, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
  * The process (task 5.3): `startProcess` assembles the runner's startup — the declarations validated, the configuration

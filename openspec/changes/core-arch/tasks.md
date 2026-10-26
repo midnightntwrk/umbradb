@@ -1596,13 +1596,34 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (8.3), A66's `/config`, A29, A140 (8.4); the conditions `slow-block` (5.5), `finality-stall` (10.3),
       `waiting-for-lockstep` (14.3); the private process's lag (14.x); `umbradb run` passing `admin: true` (Q128; the
       task that wires `run` to `startProcess`); the browser's message channel (16.1).
-- [ ] 8.1a The owner's answer Q128 B: `startProcess` serves the admin endpoints unless its caller passes `admin: false`
+- [x] 8.1a The owner's answer Q128 B: `startProcess` serves the admin endpoints unless its caller passes `admin: false`
       (opt-out, as AE-1 says); `umbradb run` needs no flag; an admin address that is taken refuses startup with
       `listen-failed` before the database opens (the owner: "check if free; or it does not start"); every existing test
       that starts a process opts out or listens on a port of its own (port 0), so parallel tests never collide on
       `0.0.0.0:8081`.
       **Acceptance:** A62, A64 with the default; a process started without `admin` answers on its admin listener; a
       second process given the same admin address refuses with `listen-failed` and opens no database session.
+      **Done (2026-10-26):** `src/runner/process.ts`: `ProcessInput.admin` is opt-out — absent or `true` serves the
+      admin endpoints on `listen.admin` from the admin worker, a starter through it, `false` none — so `umbradb run`
+      needs no flag; the listener still starts once the process's `core` revision is known, before the database
+      opens, and an address another listener holds refuses startup with `listen-failed` (task 8.1's path, now the
+      default's); a refusal before the validation listens where task 8.1 listens (Q127, open, unchanged). `design.md`
+      §1's `src/admin/` row. The tests: `test/runner/process-build.ts` gives them `startProcess`, the runner's with
+      `admin: false` unless the test passes one; the 16 files outside `test/admin/` that took the runner's own take it
+      (one import each); `test/admin/` passes `admin` everywhere already (8.1–8.4: a starter on `127.0.0.1:0`).
+      Tests, seen failing first (`tsc` exit 2: the shared `startProcess` missing; 12 of 14 tests failing — no admin
+      listener by default, a second process on a taken address started and ran, the 16 files found): new
+      `test/admin/default.test.ts` (both backends: a process started without `admin` answers on its admin listener;
+      A62's routes and A64's `following` and `refused` through it; a second process given the same admin address
+      refuses with `listen-failed`, stays up and opens no database session — PostgreSQL's cumulative session count of
+      its database unchanged, PGlite's data directory absent — while the first still answers) and
+      `test/admin/test-processes.test.ts` (the guard: any file under `test/` outside `test/admin/` that takes the
+      runner's `startProcess` — named, renamed, namespace, dynamic, re-exported, from `process` or `index` — fails;
+      the shared one opts out unless asked, `admin: undefined` included). Committed negative controls: task 8.1's
+      opt-in default fails "a process started without `admin` answers" (ECONNREFUSED on all four); a process that
+      opens and reads its database before listening (an admin starter) fails "opens no database session" (one session
+      on PostgreSQL, the directory on PGlite). Wrong variants (a scratch runner outside the clone): 25, 24
+      caught; the survivor equivalent (the 8.1 spread `{ start: undefined }`, which `ProcessAdmin` takes for none).
 - [x] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
       **Acceptance:** A63, A65; A140 for these endpoints.
       **Done (2026-10-26):** the part in its own folder: its declaration `CORE_HEALTH` (`core-health.ts`: a backbone

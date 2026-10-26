@@ -7,9 +7,9 @@ import { defineModule, type ModuleDeclaration, type PointName } from "../../src/
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, type LoopInput } from "../../src/runner/loop.js";
-import { type ProcessingEnd, type ProcessStatus, startProcess } from "../../src/runner/process.js";
+import type { ProcessingEnd, ProcessStatus } from "../../src/runner/process.js";
 import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
-import { core, entryOf, loggingModule, settle, testBuild } from "./process-build.js";
+import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
  * The upgrade boundary (task 5.3; RN-12, CF-3, CF-8, decision record Q43): A47 — a build carrying module `m` 1.0.0 at

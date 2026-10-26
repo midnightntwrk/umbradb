@@ -1,6 +1,6 @@
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { startProcess, terminationSignal } from "../../src/runner/process.js";
-import { testBuild } from "./process-build.js";
+import { terminationSignal } from "../../src/runner/process.js";
+import { startProcess, testBuild } from "./process-build.js";
 import { type WorkEvent, workModule } from "./sigterm-module.js";
 
 /**

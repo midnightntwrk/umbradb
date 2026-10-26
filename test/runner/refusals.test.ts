@@ -4,9 +4,9 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { type ProcessHandle, startProcess } from "../../src/runner/process.js";
+import type { ProcessHandle } from "../../src/runner/process.js";
 import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
-import { core, entryOf, loggingModule, settle, testBuild } from "./process-build.js";
+import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
  * The `refused` state (task 5.4; IN-12, AE-3, AE-4, AE-5; `design.md` §11; CORE-ARCH §4.17): a startup that refuses
