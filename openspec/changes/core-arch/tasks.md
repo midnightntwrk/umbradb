@@ -52,7 +52,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the devnet tape of task 0.3, which runs after task 9.2. No v8 `decodeLogItem` patch: the v8 adapter returns
       null (owner decision Q54, task 12.1). Q53 (root counts as signed changes) and Q55 (`stateKey` in
       `LedgerPackage`): owner decisions A. Proposing the patches upstream is the owner's, later (Q56).
-- [ ] 0.3 Tapes (owner decisions Q123, Q130): record, with the builder of task 9.2, mainnet ranges around 1,774,492 and
+- [x] 0.3 Tapes (owner decisions Q123, Q130): record, with the builder of task 9.2, mainnet ranges around 1,774,492 and
       1,788,980 (`rpc.mainnet.midnight.network`), preview 0–10,000 and a preview range across the runtime 1.0.300
       upgrade (`rpc.preview`), preprod 0–10,000 (`rpc.preprod`), and an undeployed devnet we build (`midnight-node` 2.x
       in Docker; no public network runs ledger v9) that starts on a v8 runtime, enacts the v9 upgrade and carries our
@@ -68,6 +68,28 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Acceptance:** each tape replays against the tape node and its SHA-256 matches; the boundary data is recorded
       with its source; every IN-8 call of every height is on the tape; a test whose tape is absent is reported as
       skipped with the tape's name. (Runs after task 9.2, when first needed.)
+      **Done (2026-10-26):** seven tapes recorded through the builder and kept in `~/todo/Umbra/tapes/` (none in the
+      repository), listed with name, network, range, SHA-256, size, records, endpoint, node version, day and why their
+      bounds in `test/tape/real/manifest.json`: `preview-0-10000`, `preview-1073620-1075620` (the 1.0.300 upgrade, U
+      1,074,620), `preprod-0-10000`, `mainnet-1774000-1780000` (the 1.0 pin, U 1,774,491, F 1,774,492),
+      `mainnet-1780000-1790000` (contiguous with it, block 1,788,980), `stagenet-0-10000` (third-party node, runtime
+      2.0 since genesis) and `devnet-v8-v9-0-235` (ours: `tools/devnet/devnet.sh`, images by digest, v8 traffic, the
+      governance upgrade to 2.1 enacted at U 102, v9 traffic; TxApplied, TxPartialSuccess, ExtrinsicFailed — governance
+      — and SystemTransactionApplied, contract deploys, calls and maintenance on both ledgers). **Recording**
+      (`tools/tape/range.ts`, `npx tsx tools/tape/main.ts range`): per height `chain_getBlockHash`, then at its hash
+      `chain_getHeader`, `chain_getBlock`, `state_getRuntimeVersion`, `state_getStorage [System.Events]`,
+      `midnight_ledgerStateRoot`; `state_getMetadata` at the range's first block and at each runtime change (Q135:
+      not at every height, about 200 KB a call); block 0's `system_properties` and every page of the cNight
+      registrations with their values; a 60 s live window of both head subscriptions, last; one session, 500 heights a
+      connection, at most 8 requests in flight (about 5.2 heights a second from the public nodes), a failed chunk
+      recorded again after a back-off. **Lookup** (`test/tape/real/real-tapes.ts`): `UMBRADB_TAPES` names the
+      directory; an absent tape skips its test with the tape's name (`tapeTest`), a tape of another size or SHA-256 is
+      refused. **Checks** (`test/tape/real/`): each tape replays against the tape node through the node client
+      (`tools/tape/replay-tape.ts`) and holds every IN-8 call of every height (`tools/tape/completeness.ts`); negative
+      controls: a byte changed is refused, a height's call removed fails, an absent tape is reported skipped by Vitest
+      itself. **Boundary data** (`tools/tape/boundaries.ts`, `… main.ts boundaries`): every network's genesis hash and
+      runtime and every boundary to the head, read from its node, in `src/ledger/networks.json` with the node's answers
+      in `test/ledger/fixtures/networks/` — mainnet's two pins (1,774,492 and 2,738,211), preprod's two, preview's one.
 - [x] 0.4 PostgreSQL 18 everywhere (owner decision Q82): every `postgres:17-alpine` pin (test setups, Testcontainers
       helpers, benchmarks, the pack smoke test, design documents that name the image) becomes one pinned
       `postgres:18-alpine`, through the supply-chain gate's image-pin agreement; the facts §14 records as checked on

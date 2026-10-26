@@ -282,6 +282,182 @@
         "servesOnItsOwn": "decoding, events and outcomes across the 1.0.300 upgrade (U decoded with the old metadata, F with the new; LG-4, A89)",
         "needs": "the ledger state at 1,073,620 for state roots (A99)"
       }
+    },
+    {
+      "name": "stagenet-0-10000",
+      "file": "stagenet-0-10000.tape.jsonl",
+      "network": "stagenet",
+      "from": 0,
+      "to": 10000,
+      "sha256": "a21d1ca8e0665c53e1545c3ce3683ea471cbdfb81f75821e66df6ff5a24d80ee",
+      "bytes": 50052119,
+      "records": 60036,
+      "source": {
+        "endpoint": "wss://rpc.stagenet.shielded.tools",
+        "nodeVersion": "2.0.0-d9729c13",
+        "recorded": "2026-10-26"
+      },
+      "bounds": "Stagenet from genesis, recorded from a third-party node (stagenet is a temporary network with no midnight.network node): block 0 and the first 10,000 blocks, all of runtime 2_000_000 (ledger v9 since genesis, so no v8 to v9 upgrade); 14 blocks carry Midnight transactions (unshielded transfers, heights 4,950 to 5,117) and 50 the node's own system transactions. From genesis, so it serves state roots on its own (A99-style, ledger v9); 853 of its midnight_ledgerStateRoot answers are a 971-byte root node rather than a 33-byte key.",
+      "notes": {
+        "recordedWith": "npx tsx tools/tape/main.ts range --node wss://rpc.stagenet.shielded.tools --from 0 --to 10000 --live-seconds 60 (concurrency 8, 500 heights a connection)",
+        "requests": 60014,
+        "seconds": 1896.4,
+        "requestsPerSecond": 31.6,
+        "heightsPerSecond": 5.3,
+        "chunksRecordedAgain": 0,
+        "liveWindowSeconds": 60,
+        "runtimes": [
+          {
+            "height": 0,
+            "specVersion": 2000000
+          }
+        ],
+        "metadataHeights": [
+          0
+        ],
+        "boundaries": [],
+        "genesis": {
+          "hash": "0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491",
+          "specVersion": 2000000
+        },
+        "blocksWithMidnightTransactions": 14,
+        "eventKinds": {
+          "Midnight.TxApplied": 14,
+          "Midnight.UnshieldedTokens": 14,
+          "MidnightSystem.SystemTransactionApplied": 50,
+          "CNightObservation.SystemTransactionApplied": 50,
+          "CNightObservation.Registration": 3014,
+          "CNightObservation.Deregistration": 1181,
+          "CNightObservation.MappingAdded": 3470,
+          "CNightObservation.MappingRemoved": 1153
+        },
+        "servesOnItsOwn": "every criterion that replays from genesis on ledger v9 (no contract actions, no upgrade)",
+        "needs": "nothing; it cannot show the v8 to v9 upgrade (A96, A100, LG-9), which only the devnet tape holds"
+      }
+    },
+    {
+      "name": "devnet-v8-v9-0-235",
+      "file": "devnet-v8-v9-0-235.tape.jsonl",
+      "network": "custom",
+      "from": 0,
+      "to": 235,
+      "sha256": "02c20204dcb5557b88c6e8d372ba0cdeaf9f949f5e8a5a5eadc7908cbff9f9c5",
+      "bytes": 4237638,
+      "records": 1531,
+      "source": {
+        "endpoint": "ws://127.0.0.1:48120",
+        "nodeVersion": "2.1.0-1b2b31c7",
+        "recorded": "2026-10-26"
+      },
+      "bounds": "Our undeployed devnet (tools/devnet/devnet.sh), from genesis to height 235: the 2.1.0-rc.4 node on midnight-node 1.0.0's dev chain-spec, runtime 1_000_000 (ledger v8) to the governance upgrade enacted at U 102 (0x381f…99a8, MNSV 1_000_000), F 103 (0xba69…824d, MNSV 2_001_000, ledger v9) with the state conversion and the node's DUST reapply system transactions at F; our own traffic on each side. It holds every outcome kind the core stores: TxApplied (17), TxPartialSuccess (31 v8, 136 v9), ExtrinsicFailed (34 v8, 139 v9: governance proposals by non-members), SystemTransactionApplied (61, 103 three times, 166, 193, 230), and contract deploys, calls and maintenance on both ledgers. From genesis, so it serves state roots and the conversion (A100, LG-9) on its own.",
+      "notes": {
+        "recordedWith": "WORK=<dir> TAPES=~/todo/Umbra/tapes tools/devnet/devnet.sh (it runs tools/tape/main.ts range --from 0 --to 235 --live-seconds 60)",
+        "images": {
+          "chainSpec": "midnightntwrk/midnight-node@sha256:ede01da35e982b6a4b85461ad8492ae2753ef14246fba33c8039b782aa8e39fb (1.0.0)",
+          "node": "midnightntwrk/midnight-node@sha256:9040c346c27f569b72dfbbad9420cf38fc7cc6a13b38adf814a925bbe9311678 (2.1.0-rc.4)",
+          "toolkitV8": "midnightntwrk/midnight-node-toolkit@sha256:41f55d35c9acc4f527f4afd168ad4d071f745dca65b60cdfdc9d886645e78442 (1.0.0)",
+          "toolkitV9": "midnightntwrk/midnight-node-toolkit@sha256:b17370121f4e438eaf7d0b466cbe5f7df391b8b39418d5d5892b6a6a0b4737b6 (2.1.0-rc.4)"
+        },
+        "chainSpecSha256": "67facd3abc5844fbbd76173e66ada195af444a270401d70320ce50346badb7cb (bootNodes emptied)",
+        "runtimeWasmSha256": "f3447cdf9027b73fe3ccb119da7b01b6f0d600bef9f09f7458c061ecaf8498d4 (artifacts-arm64/midnight_node_runtime.compact.compressed.wasm)",
+        "genesis": {
+          "hash": "0xe624f91737add2cf1a6658b3cf3a5524d633faea8c943702b435820316d9e21e",
+          "specVersion": 1000000
+        },
+        "boundaries": [
+          {
+            "u": {
+              "height": 102,
+              "hash": "0x381f2c5b126467ee81f527b3c0c0d62d679a18fa6cd61933e86e1e2b543599a8",
+              "specVersion": 1000000
+            },
+            "f": {
+              "height": 103,
+              "hash": "0xba69a4457e19d335a16d60f9399201a3b46f92c536cc5d33a3d051d9f620824d",
+              "specVersion": 2001000
+            }
+          }
+        ],
+        "boundaryRecord": "test/tape/real/devnet-v8-v9-0-235.boundaries.json",
+        "runtimes": [
+          {
+            "height": 0,
+            "specVersion": 1000000
+          },
+          {
+            "height": 102,
+            "specVersion": 2001000
+          }
+        ],
+        "metadataHeights": [
+          0,
+          102
+        ],
+        "requests": 1509,
+        "liveWindowSeconds": 60,
+        "traffic": {
+          "v8": {
+            "transfer": 7,
+            "deploy": 11,
+            "call": 16,
+            "maintenance": 23,
+            "partialSuccess": [
+              30,
+              31
+            ],
+            "extrinsicFailed": 34,
+            "governanceSystemTransaction": 61,
+            "blockLimitTransfers": 69
+          },
+          "v9": {
+            "dustRegistrations": [
+              107,
+              110,
+              113
+            ],
+            "transfer": 117,
+            "deploy": 121,
+            "call": 125,
+            "maintenance": 131,
+            "partialSuccess": 136,
+            "extrinsicFailed": 139,
+            "governanceSystemTransactions": [
+              166,
+              193,
+              230
+            ],
+            "blockLimitTransfers": [
+              202,
+              203
+            ]
+          }
+        },
+        "eventKinds": {
+          "Midnight.TxApplied": 17,
+          "Midnight.TxPartialSuccess": 2,
+          "Midnight.ContractDeploy": 2,
+          "Midnight.ContractCall": 2,
+          "Midnight.ContractMaintain": 2,
+          "Midnight.UnshieldedTokens": 11,
+          "MidnightSystem.SystemTransactionApplied": 7,
+          "System.ExtrinsicFailed": 2,
+          "System.CodeUpdated": 1,
+          "System.UpgradeAuthorized": 1,
+          "MultiBlockMigrations.UpgradeStarted": 1,
+          "MultiBlockMigrations.UpgradeCompleted": 1,
+          "CNightObservation.DustReapplyStarted": 1,
+          "CNightObservation.DustReapplyCompleted": 1
+        },
+        "notProduced": {
+          "ExtrinsicFailed of a Midnight transaction": "a double spend is dropped by the pool (validation dry-runs the guaranteed segment against the state), and two transfers over a lowered block_usage limit were applied in consecutive blocks (202, 203), not failed; a contract whose guaranteed transcript two calls make conflict at apply would produce it",
+          "Midnight.ClaimRewards": "no claimable rewards on the dev chain: claim-rewards is refused by the pool",
+          "Midnight.PayoutMinted": "declared by pallet-midnight at node-2.1.0-rc.4 but deposited nowhere in its code",
+          "CNightObservation.SystemTransactionApplied": "the dev chain's mock bridge repeats one registration; no cNight UTXO observation creates a system transaction"
+        },
+        "a71ManualCheck": "npx tsx tools/tape/main.ts check --node ws://127.0.0.1:48120 --out a71-devnet.tape.jsonl: fc1895ac1a3714c10c9196d724ce6a6e754d757abd0157fabb33ef28773b5d29; identical: 1 connections, 12 frames sent and 16 received, byte for byte (A71)",
+        "servesOnItsOwn": "every criterion that replays from genesis, the v8 to v9 upgrade and conversion (A96, A100, LG-9, 0.2 second item), A91 events at U, A93 outcomes",
+        "needs": "nothing"
+      }
     }
   ]
 }

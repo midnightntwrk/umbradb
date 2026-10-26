@@ -1,7 +1,7 @@
 {
   "format": "umbradb-ledger-networks",
   "version": 1,
-  "about": "The built-in ledger version tables (openspec/changes/core-arch/specs/ledger/spec.md LG-1 to LG-3; CORE-ARCH section 4.8), one per known network, keyed by its genesis hash; read and checked by src/ledger/networks.ts. rows: LG-3's runtime-to-ledger mapping, the same for every network: spec_version 22000-22999 (runtime 0.22) and 1000000-1999999 (runtime 1.0.x) to ledger v8, 2000000-2999999 (runtimes 2.0 and 2.1) to v9. genesis: the hash of the network's block 0 and the spec_version of its runtime at genesis, as read from the network's node (source: the node, the day it was read, and the file in this repository holding its answers); null where not read yet, and specVersion null where the runtime at genesis was not read. boundaries: each runtime upgrade, U the block that enacts it and F = U + 1 the first block of the new runtime, each with its height, hash and MNSV spec_version as read from the network's node (source); the F of each boundary is a pin. A boundary not read from a node is not listed (LG-3). Read by task 0.3 on 2026-10-26 with tools/tape/main.ts boundaries (chain_getBlockHash, chain_getHeader and state_getRuntimeVersion at block 0; state_getRuntimeVersion every 1,000 blocks to the finalized head, each change bisected to its U, and U's and F's headers' MNSV digests checked), from each network's public node: every genesis and every boundary up to the finalized head of that day; stagenet's genesis is added with its tape.",
+  "about": "The built-in ledger version tables (openspec/changes/core-arch/specs/ledger/spec.md LG-1 to LG-3; CORE-ARCH section 4.8), one per known network, keyed by its genesis hash; read and checked by src/ledger/networks.ts. rows: LG-3's runtime-to-ledger mapping, the same for every network: spec_version 22000-22999 (runtime 0.22) and 1000000-1999999 (runtime 1.0.x) to ledger v8, 2000000-2999999 (runtimes 2.0 and 2.1) to v9. genesis: the hash of the network's block 0 and the spec_version of its runtime at genesis, as read from the network's node (source: the node, the day it was read, and the file in this repository holding its answers); null where not read yet, and specVersion null where the runtime at genesis was not read. boundaries: each runtime upgrade, U the block that enacts it and F = U + 1 the first block of the new runtime, each with its height, hash and MNSV spec_version as read from the network's node (source); the F of each boundary is a pin. A boundary not read from a node is not listed (LG-3). Read by task 0.3 on 2026-10-26 with tools/tape/main.ts boundaries (chain_getBlockHash, chain_getHeader and state_getRuntimeVersion at block 0; state_getRuntimeVersion every 1,000 blocks to the finalized head, each change bisected to its U, and U's and F's headers' MNSV digests checked), from each network's node — the public rpc.<network>.midnight.network nodes, and for stagenet, a temporary network with no such node, the third-party rpc.stagenet.shielded.tools —: every genesis and every boundary up to the finalized head of that day (stagenet has none: runtime 2_000_000 since genesis).",
   "networks": [
     {
       "network": "mainnet",
@@ -107,7 +107,15 @@
     },
     {
       "network": "stagenet",
-      "genesis": null,
+      "genesis": {
+        "hash": "0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491",
+        "specVersion": 2000000,
+        "source": {
+          "node": "wss://rpc.stagenet.shielded.tools",
+          "read": "2026-10-26",
+          "record": "test/ledger/fixtures/networks/stagenet.json"
+        }
+      },
       "rows": [
         { "specVersionMin": 22000, "specVersionMax": 22999, "ledger": "v8" },
         { "specVersionMin": 1000000, "specVersionMax": 1999999, "ledger": "v8" },

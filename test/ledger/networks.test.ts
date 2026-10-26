@@ -55,23 +55,26 @@ describe("the committed file (LG-3)", () => {
 
   it("keys each network by the genesis hash and runtime its node reported (task 0.3's records)", () => {
     // Read by task 0.3 (2026-10-26) from each network's node with tools/tape/main.ts boundaries; the record holds the
-    // node's answers. Stagenet's genesis is added with its tape (task 0.3's second commit).
+    // node's answers. Stagenet, a temporary network with no midnight.network node, from the third-party
+    // rpc.stagenet.shielded.tools.
     const read = (network: string) =>
       JSON.parse(readFileSync(repository(`test/ledger/fixtures/networks/${network}.json`), "utf8")) as {
         node: string;
         recorded: string;
         genesis: { hash: string; specVersion: number };
       };
-    for (const network of ["mainnet", "preprod", "preview"] as const) {
+    for (const network of ["mainnet", "preprod", "preview", "stagenet"] as const) {
       const record = read(network);
       expect(builtInNetwork(network)?.genesis, network).toEqual({
         hash: record.genesis.hash,
         specVersion: record.genesis.specVersion,
         source: { node: record.node, read: record.recorded, record: `test/ledger/fixtures/networks/${network}.json` },
       });
-      expect(record.node, network).toBe(`wss://rpc.${network}.midnight.network`);
+      expect(record.node, network).toBe(
+        network === "stagenet" ? "wss://rpc.stagenet.shielded.tools" : `wss://rpc.${network}.midnight.network`,
+      );
     }
-    expect(BUILT_IN_NETWORKS.map((entry) => entry.genesis?.specVersion ?? null)).toEqual([22_000, 22_000, 1_000_000, null]);
+    expect(BUILT_IN_NETWORKS.map((entry) => entry.genesis?.specVersion ?? null)).toEqual([22_000, 22_000, 1_000_000, 2_000_000]);
     // The hashes task 0.2 read on 2026-10-23 for mainnet and preview (node-roots.json) are the same blocks.
     const roots = JSON.parse(readFileSync(repository("test/ledger/fixtures/genesis/node-roots.json"), "utf8")) as {
       states: { network: string; node: string; block0: string }[];
