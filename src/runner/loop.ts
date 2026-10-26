@@ -46,8 +46,9 @@
  * and point, and fails the height in progress before its `COMMIT`, or stops once the height's last point ended, or before
  * the next height. So is a `publish` the process contexts refuse (MD-7, `./process-context.ts`), which they report to
  * the loop ({@link LoopInput.misuses}): named by its module and the point the loop was dispatching, none while it waits.
- * The halt — the state `halted`, its code, the process staying up — and the retries of a lost connection are task 5.4's
- * (RN-8, IN-10).
+ * The halt — the state `halted` with its reason, the process staying up — and the retries of a lost connection or an
+ * unreachable node, which run the loop again from the cursor, are the process's (`./process.ts`, `./failures.ts`; RN-8,
+ * IN-10).
  */
 
 import { CURSOR_TABLE, readCursor } from "../backbone/core-block-commit/core-block-commit.js";
@@ -147,6 +148,17 @@ export interface HeightRun {
 
 /** Opens a read for one callback, and runs `body` inside it. */
 export type ReadOpener = <T>(body: (read: ReadHandle) => Promise<T>) => Promise<T>;
+
+/**
+ * The loop's check before the `COMMIT` that the block transaction left the cursor at the height with the block's hash
+ * failed: the halt `unexpected-cursor` (`design.md` §11).
+ */
+export class UnexpectedCursor extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UnexpectedCursor";
+  }
+}
 
 /** Why the loop stopped: the height, and the point and module when a callback failed (RN-8). */
 export class HeightFailure extends Error {
@@ -397,7 +409,7 @@ export class FinalizedLoop {
           : cursor.height === run.height
             ? `height ${run.height} with another hash`
             : `height ${cursor.height}`;
-      throw new Error(
+      throw new UnexpectedCursor(
         `the block transaction of height ${run.height} left the cursor at ${left}, not at height ${run.height} with ` +
           `the block's hash: core-block-commit writes the block's row of ${CURSOR_TABLE} first in every block (CD-3)`,
       );
@@ -405,15 +417,23 @@ export class FinalizedLoop {
   }
 
   /**
-   * The points after the `COMMIT`: `on-after-db-write`, each callback with a read at h and no `block` items, then
-   * `on-stop-height` ({@link stopHeight}).
+   * The points after the `COMMIT`: `on-after-db-write`, each callback with a read at h and no `block` items
+   * ({@link afterWriteItems}), then `on-stop-height` ({@link stopHeight}).
    */
   protected async after(run: HeightRun): Promise<void> {
     await this.#dispatch(run.range, "on-after-db-write", (part, call) => {
-      const context = this.#context(run, part, new Map());
+      const context = this.#context(run, part, this.afterWriteItems(run));
       return this.input.db.read((read) => call(context, read));
     });
     await this.stopHeight(run);
+  }
+
+  /**
+   * The `block` items of an `on-after-db-write` callback's context at the height of `run`: none, a map of its own (RN-5),
+   * so the same context can be rebuilt after a restart (RN-11); a negative control's seam.
+   */
+  protected afterWriteItems(_run: HeightRun): ReadonlyMap<string, unknown> {
+    return new Map();
   }
 
   /** Processes `height` above the cursor `previous`; resolves with the new cursor. */

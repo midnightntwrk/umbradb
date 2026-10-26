@@ -46,6 +46,8 @@ export interface TestBuildOptions {
   readonly history?: HistoryOptions;
   /** A log every recording part of the build appends to, in order (also `core-chain`'s notifications). */
   readonly log?: string[];
+  /** Replaces a backbone part of the build (a test's failing `core-block-commit`); each part unchanged unless given. */
+  readonly backbone?: (part: ModuleDeclaration) => ModuleDeclaration;
 }
 
 /** A build of the test backbone with `user` modules (see the module comment). */
@@ -84,7 +86,8 @@ export function testBuild(user: readonly ModuleDeclaration[], options: TestBuild
       },
     },
   };
-  const backbone = LOOP_BACKBONE.map((part) => (part.id === "core-chain" ? chain : part));
+  const replace = options.backbone ?? ((part: ModuleDeclaration) => part);
+  const backbone = LOOP_BACKBONE.map((part) => replace(part.id === "core-chain" ? chain : part));
   return {
     declarations: { backbone, core: options.core ?? [], user },
     onChecked: (given) => {

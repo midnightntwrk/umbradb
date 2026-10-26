@@ -103,9 +103,25 @@ upgrade boundary — the lowest start of a scheduled revision (RN-12) —, and t
 module API still answering, with `upgrade-required` (entry, needed, build) at a boundary. The state is `starting`,
 then `syncing` or `following` by the lag (the head the loop last read minus the cursor) against `followingThreshold`,
 `stopped`, `stopping`; ready when `following` or `stopped`, or `syncing` within a set `readinessLag` (`refused` and
-`halted` are task 5.4's). SIGTERM (`terminationSignal`) or `stop()`: `stopping`, the loop's signal aborted and the
+`halted` below). SIGTERM (`terminationSignal`) or `stop()`: `stopping`, the loop's signal aborted and the
 loop awaited — the height in progress, its transaction included, finishes —, then the module API and the database
 closed. Log lines go through the configuration's redaction.
+
+**Failures** (task 5.4: `src/runner/failures.ts`, `process.ts`). A startup refusal leaves the process up in `refused`
+(IN-12, AE-3), its database closed and its writer lock released; a failure of the loop leaves it up in `halted` (RN-8)
+— before the `COMMIT` the loop rolled the height back, after it the height stays committed —, the module API answering
+at the cursor and the database open until `stop()`. Both are not ready and carry a reason: a code of §11, the height,
+the module and the point, never a message (AE-5, AE-6). The code is the failure's own where §11 lists it (an
+`UmbraError`'s: a refusal's, `truncate-not-allowed`, `writer-lock-lost`, `node-requirement`, `database-error`), else
+`callback-error` for a callback's failure or misuse — a failing `on-start-db` or `on-start-api` too, which name their
+point and module —, `unexpected-cursor` for the loop's cursor check before the `COMMIT`, `listen-failed` for a module
+API listener that cannot listen (decision record Q115), and `database-error` for anything else. The two retryable
+codes never halt or refuse (IN-10): `connection-lost` raises `database-retrying`, `node-unreachable` `node-retrying`
+(with the attempts and the height); after IN-10's back-off (1 s doubling up to `backoffCeilingMs`) startup runs again
+from its database steps, or the loop runs again from the cursor, which it re-delivers, so a height whose transaction
+was lost is processed again and one whose `COMMIT` landed continues with its `on-after-db-write`. The condition clears
+once startup completes, a height commits or the loop has nothing to process; a stop ends the wait. Task 10.4 refines
+the retry (IN-10's items kept, IN-11's cursor check) and keeps §11's registry.
 
 ## 3. Block source and ingest
 

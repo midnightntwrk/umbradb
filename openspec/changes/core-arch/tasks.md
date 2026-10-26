@@ -1112,8 +1112,60 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (10.2); the node block source made from the process's `core` revision (10.3); the admin endpoints over
       `status()` (8.x); the backup at the core's stop (15.x); the exports `startProcess`, `ProcessHandle` and
       `ProcessState` (17.x); the required id in the manifest (18.4).
-- [ ] 5.4 Failure handling and the delivery guarantees after restart.
+- [x] 5.4 Failure handling and the delivery guarantees after restart.
       **Acceptance:** A43, A44, A46.
+      **Done (2026-10-26):** `src/runner/process.ts`: the states `refused` and `halted` (`ProcessState`'s seven, AE-3),
+      not ready (AE-4), each with its reason (`ProcessStatus.reason`: a code of design §11, the height, the module and
+      the point, never a message; AE-5, AE-6), kept once the process is `stopping`. A startup refusal leaves the
+      process up in `refused`, its database closed and its writer lock released; a failure of the loop leaves it up in
+      `halted` (RN-8: before the `COMMIT` the loop rolled the height back, after it the height stays committed), the
+      module API answering at the cursor and the database open until `stop()`. A failing `on-start-db` names its point
+      and module (a `CallbackFailure`, as a failing `on-start-api`'s). The retries (IN-10, CORE-ARCH §4.6): a lost
+      database connection (`connection-lost`) or an unreachable node (`node-unreachable`), wherever startup's database
+      steps or the loop meet them, never halts or refuses — the condition `database-retrying` or `node-retrying` with
+      the attempts and the height, IN-10's back-off (1 s doubling up to the process revision's `backoffCeilingMs`), then
+      startup again from its database steps or the loop again from the cursor, which it re-delivers (so a height whose
+      transaction was lost is processed again and one whose `COMMIT` landed continues with its `on-after-db-write`);
+      the condition clears once startup completes, a height commits or the loop has nothing to process, and a stop ends
+      the wait. A writer that finds its lock taken when it reconnects halts with `writer-lock-lost`, for good. Logs:
+      `startup refused: <code>: …`, `processing halted (<code>): …`, `processing retries in <ms> ms (<condition>,
+      attempt <n>): …`. `src/runner/failures.ts` (new): `reasonOf` — the failure's own code where §11 lists it
+      (`REFUSAL_CODES`, `HALT_CODES`, bound to §11's text by a test), else `callback-error` for a callback's failure or
+      misuse, `unexpected-cursor` for the loop's cursor check, `listen-failed` for a listener that cannot listen
+      (Q115), `database-error` otherwise — and `retryOf`. `src/runner/loop.ts`: the cursor check throws
+      `UnexpectedCursor`; `afterWriteItems` (none, a map per callback; a negative control's seam).
+      RN-9's at-least-once and RN-11's re-delivery were built by 5.3; A44 and A46 add their crash tests. `design.md` §2
+      gains "Failures"; the module guide gains "When a callback fails". Question Q115 raised (refusal codes for a
+      failing `on-start-db` or `on-start-api` and for a listener; shipped A, not blocking 5.5 or 8.1); issues
+      `docs/issues/00020-reserved-word-module-ids.md` and `00021-pglite-queue-test-leaves-lock-files.md` recorded
+      (OPEN). Tests, seen failing first (`tsc` exit 2, 14 errors: `src/runner/failures.js` missing, `UnexpectedCursor`
+      not exported, `reason` and the two states unknown, `afterWriteItems` not in the loop; the suites that loaded
+      failed 40 of 44 tests — every state, reason and retry assertion, A43's table ("Cannot read properties of undefined
+      (reading 'code')": no reason) and its controls, and the A46 control needing the seam; A44, A46 and two of their
+      controls passed against 5.3's code, which built what they check): `test/runner/halts.test.ts` (A43's table in one
+      test over both backends — `on-fetch`, `on-parse`, `on-start-height`, `on-compute`, the first `on-db-write`
+      callback (`core-block-commit`, after the cursor row) and the last (after every module's row), `on-after-db-write`
+      and `on-stop-height` — and the halts' codes through the process: `truncate-not-allowed`, `database-error`,
+      `callback-error` for a kept handle, `unexpected-cursor`, a source's failure, `node-requirement`, a halt while
+      stopping), `refusals.test.ts` (AE-3's changed migration checksum, `on-start-db`, `on-start-api`, `EADDRINUSE`, a
+      refusal without a database, a value thrown that is no `Error`), `retries.test.ts` (an unreachable node, a lost
+      connection at the cursor read, a stop during the back-off, the condition clearing; PostgreSQL: the writer
+      terminated during `on-db-write` and during `on-start-db`, and `writer-lock-lost`), `failures.test.ts`
+      (`reasonOf`, `retryOf`, §11's lists, `statusOf`), `crash.test.ts` with `crash.worker.ts` and `crash-module.ts`
+      (A44 and A46 with a real process and SIGKILL, on both backends, the worker with 5.3's orphan guard);
+      `process.test.ts` and `stop-heights.test.ts` updated (a failing `on-start-db` names its point and module; the
+      halt's log line carries its code). Committed negative controls: a loop that commits h despite a failure in the
+      last `on-db-write`, and a process whose state stays `syncing` after a halt, fail A43; a restart that skips the
+      re-delivered `on-start-height` fails A44; a re-delivered `on-after-db-write` carrying block items, and one after a
+      callback of h + 1, fail A46. Wrong variants (a scratch runner outside the clone): 69, 68 caught (2 by `tsc`, none
+      hitting the run's limit), the survivor equivalent (a `HeightFailure`'s point and module preferred over its
+      cause's, which the loop always gives the same). Every file of `src/runner/` 100 % statements, branches, functions
+      and lines.
+      **Pending:** IN-10's refinement — the items published before `on-compute` kept and h redone from `on-compute`
+      (A85), the node client's own retries reported as `node-retrying` — and IN-11's cursor check after an uncertain
+      `COMMIT` (A86), §11's registry (A87) with Q115's codes (10.4); the `slow-block` condition (5.5); the admin
+      endpoints over `status()` (8.1–8.3); `umbradb run` staying up on a refusal (4.4); the required ids in the manifest
+      (18.4).
 - [ ] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
       commit; never a cancel or a retry.
       **Acceptance:** A142.

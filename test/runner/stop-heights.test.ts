@@ -434,7 +434,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
         const failure = (ended as { error: unknown }).error;
         expect(failure).toBeInstanceOf(HeightFailure);
         expect(failure).toMatchObject({ height, point, module: "failing", committed });
-        expect(lines).toEqual([`processing stopped: ${(failure as Error).message}`]);
+        expect(lines).toEqual([`processing halted (callback-error): ${(failure as Error).message}`]);
         expect(lines[0]).toContain(`${point} fails`);
         expect(await cursorIn(db)).toBe(cursor);
       }

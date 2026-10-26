@@ -2,7 +2,9 @@ import { PGlite } from "@electric-sql/pglite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import type { Sql } from "postgres";
+import { TAKE_WRITER_LOCK_SQL, WRITER_LOCK_HOLDER_SQL } from "../../src/db/writer-lock.js";
 import { startPostgresServer, type PostgresTestServer } from "../db/postgres-server.js";
 
 /**
@@ -22,6 +24,13 @@ export interface ProcessDatabase {
   query(sql: string): Promise<Record<string, unknown>[]>;
   /** PostgreSQL only: the plain driver connection. */
   readonly admin?: Sql;
+  /**
+   * PostgreSQL only (task 5.4's retries): terminates the backend holding the process's writer lock — its writer session
+   * — with `pg_terminate_backend`, and waits until PostgreSQL no longer lists it; resolves with its pid.
+   */
+  terminateWriter?(): Promise<number>;
+  /** PostgreSQL only: takes the writer lock on the plain driver connection (one session), as another process would. */
+  takeWriterLock?(): Promise<boolean>;
   /** PGlite only: the data directory. */
   readonly directory?: string;
 }
@@ -49,10 +58,26 @@ function postgresBackend(): ProcessBackend {
     async database() {
       if (server === undefined) throw new Error("backend not started");
       const database = await server.createDatabase();
+      const { admin } = database;
       return {
         setting: database.url,
-        admin: database.admin,
-        query: async (sql) => [...(await database.admin.unsafe(sql))] as Record<string, unknown>[],
+        admin,
+        query: async (sql) => [...(await admin.unsafe(sql))] as Record<string, unknown>[],
+        async terminateWriter() {
+          const [holder] = await admin.unsafe(WRITER_LOCK_HOLDER_SQL);
+          const pid = Number(holder?.pid);
+          if (!Number.isSafeInteger(pid)) throw new Error("no session holds the writer lock");
+          await admin.unsafe("SELECT pg_terminate_backend($1)", [pid]);
+          for (let attempt = 0; attempt < 400; attempt++) {
+            if ((await admin.unsafe("SELECT 1 FROM pg_stat_activity WHERE pid = $1", [pid])).length === 0) return pid;
+            await sleep(25);
+          }
+          throw new Error(`backend ${pid} still listed after pg_terminate_backend`);
+        },
+        async takeWriterLock() {
+          const [row] = await admin.unsafe(TAKE_WRITER_LOCK_SQL);
+          return row?.locked === true;
+        },
       };
     },
   };

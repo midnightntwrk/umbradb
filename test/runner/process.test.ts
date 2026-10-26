@@ -521,6 +521,7 @@ describe("statusOf: the state and its readiness (CORE-ARCH §4.18)", () => {
     readinessLag: null,
     conditions: [],
     ended: null,
+    reason: null,
   };
 
   it("is following within the threshold and syncing beyond it, ready unless a readiness lag is exceeded", () => {
@@ -699,7 +700,7 @@ describe("startProcess without a database", () => {
     expect(written).toEqual(["startup refused: invalid-configuration\n"]);
   });
 
-  it("logs a refusal after the configuration was validated with its message; a value thrown that is no Error as text", async () => {
+  it("logs a refusal after the configuration was validated with its code and message; a value thrown that is no Error as text", async () => {
     const lines: string[] = [];
     const throwing = loggingModule("throwing", [], [], {
       points: {
@@ -716,9 +717,17 @@ describe("startProcess without a database", () => {
       onChecked: build.onChecked,
       log: (line) => lines.push(line),
     });
-    await expect(handle.started).rejects.toBe("on-start-db throws a string");
+    // A failing on-start-db names its point and module (task 5.4), its cause the value thrown.
+    await expect(handle.started).rejects.toMatchObject({
+      name: "CallbackFailure",
+      point: "on-start-db",
+      module: "throwing",
+      cause: "on-start-db throws a string",
+    });
     await handle.stop();
-    expect(lines).toEqual(["startup refused: string: on-start-db throws a string"]);
+    expect(lines).toEqual([
+      "startup refused: callback-error: the on-start-db callback of throwing failed: on-start-db throws a string",
+    ]);
   });
 
   it("holds configuration data to CF-1's plain data: a function refuses with not-plain-data at its path", async () => {

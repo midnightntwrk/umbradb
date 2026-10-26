@@ -1,6 +1,7 @@
 /**
- * The process (`openspec/changes/core-arch/specs/runner/spec.md` RN-1, RN-7, RN-9–RN-13; `specs/configuration/spec.md`
- * CF-3, CF-4, CF-6, CF-8; `design.md` §1, §2, §7; CORE-ARCH §4.12, §4.15, §4.18; decision records Q43, Q102): what
+ * The process (`openspec/changes/core-arch/specs/runner/spec.md` RN-1, RN-7–RN-13; `specs/configuration/spec.md`
+ * CF-3, CF-4, CF-6, CF-8; `specs/ingest/spec.md` IN-10, IN-12; `specs/admin-endpoints/spec.md` AE-3, AE-4; `design.md`
+ * §1, §2, §7, §11; CORE-ARCH §4.6, §4.12, §4.15, §4.17, §4.18; decision records Q43, Q102): what
  * `umbradb run` starts (task 4.4) — {@link startProcess} assembles the runner's startup from the build's declarations,
  * the configuration and a block source, runs the finalized loop, and publishes the process's state.
  *
@@ -17,19 +18,35 @@
  *    migration); the facts handed to {@link ProcessInput.onChecked};
  * 6. the graph resolved from the check (`resolveGraph`, `graphInputOf`), the schema plan, the process contexts with each
  *    part's revisions ({@link processRevisions}), the migrations and `on-start-db` (`startDatabase`, through each
- *    context's publishing window), the seal (`process-item-missing`), `on-start-api` and the module API on `listen.api`
+ *    context's publishing window; a failing `on-start-db` names its point and module, a `CallbackFailure` as a failing
+ *    `on-start-api`'s), the seal (`process-item-missing`), `on-start-api` and the module API on `listen.api`
  *    (`startModuleApi`);
  * 7. the finalized loop, with the core's stop and RN-12's upgrade boundary ({@link upgradeBoundary}).
- * A refusal or failure closes what startup opened — the module API, the database — and rejects
- * {@link ProcessHandle.started} with it; the `refused` state, and the process staying up, are task 5.4's.
+ * A refusal closes what startup opened — the database, its writer lock released — and rejects
+ * {@link ProcessHandle.started} with it; the process stays up, `refused` with the refusal's reason, until stopped
+ * (IN-12, AE-3). A retryable failure of steps 4 to 6 (`connection-lost`, `node-unreachable`) refuses nothing: steps 4 to
+ * 7 run again after IN-10's back-off (see **Retries**).
  *
- * **The state** ({@link ProcessStatus}, CORE-ARCH §4.18, this task's part): `starting` until the loop runs; then
- * `syncing` or `following` by the lag — the finalized head the loop last read minus the cursor — against the
- * `followingThreshold`; `stopped` once processing ended at the core's stop or before an upgrade boundary, with the
+ * **The state** ({@link ProcessStatus}, CORE-ARCH §4.18, AE-3): `starting` until the loop runs; `refused` when startup
+ * refused; then `syncing` or `following` by the lag — the finalized head the loop last read minus the cursor — against
+ * the `followingThreshold`; `stopped` once processing ended at the core's stop or before an upgrade boundary, with the
  * condition `upgrade-required` at a boundary (RN-12), the process still up and the module API answering at the
- * cursor; `stopping` from {@link ProcessHandle.stop} on. Ready (`/health/ready`) when `following` or `stopped`, or
- * `syncing` unless a set `readinessLag` is exceeded. A failure of the loop ends processing with the state unchanged and
- * the process up (RN-8's `halted` is task 5.4's); the admin endpoints that show all this are tasks 8.x.
+ * cursor; `halted` when processing failed (RN-8): the failure before the `COMMIT` left nothing of its height (the loop
+ * rolled it back), one after it left the height committed, and the process stays up, the module API answering at the
+ * cursor and the database open until stopped; `stopping` from {@link ProcessHandle.stop} on. `refused` and `halted`
+ * carry their reason ({@link ProcessReason}: §11's code, the height, the module and the point; `./failures.ts`). Ready
+ * (`/health/ready`, AE-4) when `following` or `stopped`, or `syncing` unless a set `readinessLag` is exceeded; never
+ * `starting`, `refused`, `halted` or `stopping`. The admin endpoints that show all this are tasks 8.1–8.3.
+ *
+ * **Retries** (IN-10, CORE-ARCH §4.6): a lost database connection (`connection-lost`) or an unreachable node
+ * (`node-unreachable`) — the two retryable codes, wherever startup's later steps or the loop meet them — never halts or
+ * refuses: the process raises the condition `database-retrying` or `node-retrying` with the attempts and the height,
+ * waits IN-10's back-off (`backoffDelay`: 1 s doubling up to the process revision's `backoffCeilingMs`), and runs
+ * again — startup from its database steps, or the loop, which reads the cursor again and re-delivers it (RN-11), so a
+ * height whose transaction was lost (the writer re-takes its lock, DB-11) is processed again from `on-fetch`, and one
+ * whose `COMMIT` landed continues with its `on-after-db-write`. The condition clears, and the back-off starts again
+ * from 1 s, once startup completes, a height commits or the loop finds nothing to process. A stop ends the wait at once.
+ * Task 10.4 refines it (IN-10's items kept from before `on-compute`, IN-11's cursor check after an uncertain `COMMIT`).
  *
  * **SIGTERM** (RN-13): {@link terminationSignal} gives the signal SIGTERM aborts; aborting
  * {@link ProcessInput.signal}, or calling {@link ProcessHandle.stop}, enters `stopping`, aborts the loop's signal — the
@@ -38,7 +55,9 @@
  * it stops before the next step.
  *
  * **Logs** go through the configuration's redaction (`configRedactor`, CF-4, AE-6) once it is validated; before that,
- * a refusal is logged by its code only, since nothing yet knows which strings are secret.
+ * a refusal is logged by its code only, since nothing yet knows which strings are secret. A refusal, a halt and each
+ * retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
+ * `processing retries in <ms> ms (<condition>, attempt <n>): …`, `startup retries …`).
  */
 
 import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
@@ -54,17 +73,18 @@ import { processCoreEntry } from "../config/process.js";
 import { configRedactor, type Redactor } from "../config/redact.js";
 import { type CheckedConfig, type CheckedEntry, validateConfig } from "../config/validate.js";
 import type { Database } from "../db/api.js";
-import { UmbraError } from "../db/errors.js";
-import { startDatabase } from "../db/migrate.js";
+import { type MigrationPart, startDatabase } from "../db/migrate.js";
 import { startWriter } from "../db/writer-lock.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
+import { backoffDelay } from "../node/backoff.js";
 import { resolveGraph } from "../modules/graph.js";
 import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
 import { type StartedModuleApi, startModuleApi } from "./api-server.js";
 import type { BlockRef, BlockSource } from "./block-source.js";
-import { isBackbonePart } from "./dispatch.js";
-import { FinalizedLoop, type LoopEnd, type LoopInput } from "./loop.js";
+import { CallbackFailure, isBackbonePart } from "./dispatch.js";
+import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failures.js";
+import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput } from "./loop.js";
 import { ProcessContexts } from "./process-context.js";
 
 /**
@@ -119,8 +139,8 @@ export interface ProcessInput {
   readonly processCore?: (config: CheckedConfig) => CheckedEntry;
 }
 
-/** The process's state (CORE-ARCH §4.18): this task's states; `refused` and `halted` are task 5.4's. */
-export type ProcessState = "starting" | "syncing" | "following" | "stopped" | "stopping";
+/** The process's state (CORE-ARCH §4.18, AE-3): exactly one at a time. */
+export type ProcessState = "starting" | "refused" | "syncing" | "following" | "stopped" | "halted" | "stopping";
 
 /** One entry at an upgrade boundary (RN-12): its id, the revision's start, the version it needs, the build's. */
 export interface UpgradeEntry {
@@ -136,13 +156,24 @@ export interface UpgradeBoundary {
   readonly entries: readonly UpgradeEntry[];
 }
 
-/** A condition of the process (CORE-ARCH §4.18): this task raises `upgrade-required` at a boundary (RN-12). */
+/** A condition of the process (CORE-ARCH §4.18): `upgrade-required` at a boundary (RN-12). */
 export interface UpgradeCondition extends UpgradeBoundary {
   readonly code: "upgrade-required";
 }
 
-/** The process's conditions. */
-export type ProcessCondition = UpgradeCondition;
+/**
+ * A condition of the process (IN-10, AE-3): a failure is being retried — `database-retrying` for a lost database
+ * connection, `node-retrying` for an unreachable node —, after `attempts` failures since startup completed or the last
+ * commit, at `height` (null at startup, or at the loop's cursor read).
+ */
+export interface RetryCondition {
+  readonly code: RetryCode;
+  readonly attempts: number;
+  readonly height: bigint | null;
+}
+
+/** The process's conditions (AE-3); `slow-block` is task 5.5's, the others' their tasks'. */
+export type ProcessCondition = UpgradeCondition | RetryCondition;
 
 /** How processing ended. */
 export type ProcessingEnd =
@@ -152,10 +183,10 @@ export type ProcessingEnd =
   | { readonly kind: "signal" }
   /** Startup refused or failed: `error` is what {@link ProcessHandle.started} rejected with. */
   | { readonly kind: "refused"; readonly error: unknown }
-  /** The loop failed (a `HeightFailure`, or the first cursor read's error); the process stays up (5.4: `halted`). */
+  /** The loop failed and did not retry (a `HeightFailure`, or a cursor read's error); the process is `halted`, up. */
   | { readonly kind: "failed"; readonly error: unknown };
 
-/** The process's state now (CORE-ARCH §4.18, this task's part). */
+/** The process's state now (CORE-ARCH §4.18, AE-3, AE-4). */
 export interface ProcessStatus {
   readonly state: ProcessState;
   /** Whether it should receive API traffic (`/health/ready`). */
@@ -169,6 +200,11 @@ export interface ProcessStatus {
   readonly lag: bigint | null;
   /** How processing ended, or null while it has not. */
   readonly ended: ProcessingEnd | null;
+  /**
+   * Why startup refused or processing halted (AE-5's reason, height, module and point; never a message, AE-6), null
+   * before either; kept once the process is `stopping`.
+   */
+  readonly reason: ProcessReason | null;
 }
 
 /** What a process that started gives. */
@@ -198,7 +234,7 @@ export interface ProcessHandle {
 
 /** What {@link statusOf} computes the state from. */
 export interface StatusFacts {
-  readonly phase: "starting" | "running" | "stopped" | "stopping";
+  readonly phase: "starting" | "refused" | "running" | "stopped" | "halted" | "stopping";
   /** S, once the configuration is validated. */
   readonly start: bigint | null;
   readonly cursor: bigint | null;
@@ -207,6 +243,7 @@ export interface StatusFacts {
   readonly readinessLag: number | null;
   readonly conditions: readonly ProcessCondition[];
   readonly ended: ProcessingEnd | null;
+  readonly reason: ProcessReason | null;
 }
 
 /** The process's state from `facts` (see the module comment): pure. */
@@ -220,7 +257,8 @@ export function statusOf(facts: StatusFacts): ProcessStatus {
     state === "following" ||
     state === "stopped" ||
     (state === "syncing" && (readinessLag === null || (lag !== null && lag <= BigInt(readinessLag))));
-  return Object.freeze({ state, ready, conditions: Object.freeze([...facts.conditions]), cursor, head, lag, ended: facts.ended });
+  const conditions = Object.freeze([...facts.conditions]);
+  return Object.freeze({ state, ready, conditions, cursor, head, lag, ended: facts.ended, reason: facts.reason });
 }
 
 /**
@@ -312,14 +350,51 @@ const standardError = (line: string): void => {
 /** An error's message, or the value as text. */
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-/** An error's code: an `UmbraError`'s, else its name. */
-const codeOf = (error: unknown): string =>
-  error instanceof UmbraError ? error.code : error instanceof Error ? error.name : typeof error;
+/**
+ * `part` whose `on-start-db` fails with a `CallbackFailure` naming the point and the part — as a failing `on-start-api`
+ * does (`registerModuleApis`) —, its error the cause: the refusal's reason names them (AE-5).
+ */
+function namedStartDb(part: MigrationPart): MigrationPart {
+  const setup = part.onStartDb;
+  if (setup === undefined) return part;
+  return {
+    ...part,
+    onStartDb: async (w) => {
+      try {
+        await setup(w);
+      } catch (error) {
+        throw new CallbackFailure("on-start-db", part.id, error);
+      }
+    },
+  };
+}
+
+/** Resolves after `ms`, or as soon as `signal` aborts. */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
 
 /** What startup leaves for the loop. */
 interface Startup {
   readonly loop: FinalizedLoop;
   readonly started: StartedProcess;
+}
+
+/** What startup has once the database opened: what its later steps — run again on a retryable failure — need. */
+interface Opened {
+  readonly declarations: DeclarationSet<ModuleDeclaration>;
+  readonly checked: CheckedConfig;
+  readonly core: CheckedEntry;
+  readonly source: BlockSource;
+  readonly db: Database;
 }
 
 /** A process (see the module comment). */
@@ -340,6 +415,10 @@ class Process implements ProcessHandle {
   #upgrade: UpgradeBoundary | null = null;
   #conditions: ProcessCondition[] = [];
   #end: ProcessingEnd | null = null;
+  #reason: ProcessReason | null = null;
+  /** The failure being retried (IN-10), and the failures since startup completed or a height committed. */
+  #retrying: RetryCondition | null = null;
+  #attempts = 0;
   #db: Database | undefined;
   #api: StartedModuleApi | undefined;
 
@@ -367,8 +446,9 @@ class Process implements ProcessHandle {
       head: this.#head,
       followingThreshold: (settings?.followingThreshold as number | undefined) ?? 0,
       readinessLag: (settings?.readinessLag as number | undefined) ?? null,
-      conditions: this.#conditions,
+      conditions: this.#retrying === null ? this.#conditions : [...this.#conditions, this.#retrying],
       ended: this.#end,
+      reason: this.#reason,
     });
   }
 
@@ -417,77 +497,125 @@ class Process implements ProcessHandle {
       this.#start = BigInt(checked.start);
       const core = (input.processCore ?? processCoreEntry)(checked);
       this.#core = core;
-      const settings = core.settings as PlainObject;
       const source = typeof input.source === "function" ? input.source(core) : input.source;
       const db = await openConfiguredDatabase(core, { committedHeight: cursorHeight });
       this.#db = db;
-      this.#step();
-      const { durabilityWarnings } = await startWriter(db);
-      for (const warning of durabilityWarnings) this.#log(`durability: ${warning.message}`);
-      this.#step();
-      const { cursor, history } = await db.read(async (read) => ({
-        cursor: await source.cursor(read),
-        history: await readHistory(read),
-      }));
-      this.#step();
-      this.#cursor = cursor?.height ?? null;
-      const check = checkHistory({ config: checked, cursor: this.#cursor, declarations, history });
-      input.onChecked?.(Object.freeze({ config: checked, declarations, cursor, check, db }));
-      const graph = resolveGraph(graphInputOf(check, declarations));
-      const plan = schemaPlan(graph.modules);
-      const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, core) });
-      await startDatabase(db, {
-        plan,
-        parts: graph.modules.map((part) => contexts.startDbPart(part)),
-        committedVersions: check.committedVersions,
-        handles: { height: this.#cursor },
-      });
-      this.#step();
-      contexts.seal();
-      const { api: address } = settings.listen as { readonly api?: string };
-      this.#api = await startModuleApi({
-        graph,
-        contexts,
-        db,
-        ...(address === undefined ? {} : { address }),
-        apiReadTimeoutMs: settings.apiReadTimeoutMs as number,
-        onError: (error, where) => this.#log(`module API: ${where.route} of ${where.module} failed: ${messageOf(error)}`),
-      });
-      this.#step();
-      this.#upgrade = upgradeBoundary(check, declarations);
-      const Loop = input.loop ?? FinalizedLoop;
-      const loop = new Loop({
-        db,
-        graph,
-        plan,
-        source,
-        contextOf: (id) => contexts.of(id),
-        misuses: contexts,
-        signal: this.#stop.signal,
-        coreStop: core.stop === null ? null : BigInt(core.stop),
-        boundary: this.#upgrade?.height ?? null,
-        observer: {
-          head: (head) => {
-            this.#head = head.height;
-          },
-          committed: (block) => {
-            this.#cursor = block.height;
-          },
-        },
-      });
-      const { server } = this.#api;
-      const api = server === null ? null : Object.freeze({ host: server.host, port: server.port });
-      // Not stopping (the step above): from here on a stop finds the loop running.
-      this.#phase = "running";
-      return { loop, started: Object.freeze({ core, api }) };
+      for (;;) {
+        this.#step();
+        try {
+          const startup = await this.#open({ declarations, checked, core, source, db });
+          this.#recovered();
+          return startup;
+        } catch (error) {
+          const code = retryOf(error);
+          if (code === null || !(await this.#retry("startup", code, error, null))) throw error;
+        }
+      }
     } catch (error) {
       if (!this.#stop.signal.aborted) {
-        this.#log(`startup refused: ${codeOf(error)}${this.#redactor === undefined ? "" : `: ${messageOf(error)}`}`);
+        const { code } = reasonOf(error);
+        this.#log(`startup refused: ${code}${this.#redactor === undefined ? "" : `: ${messageOf(error)}`}`);
       }
       // The module API opens in the last step, after which only a stop throws: the stop closes it.
       await this.#db?.close();
       throw error;
     }
+  }
+
+  /** Startup's steps once the database opened (4 to 7 of the module comment), run again after a retryable failure. */
+  async #open({ declarations, checked, core, source, db }: Opened): Promise<Startup> {
+    const input = this.#input;
+    const settings = core.settings as PlainObject;
+    const { durabilityWarnings } = await startWriter(db);
+    for (const warning of durabilityWarnings) this.#log(`durability: ${warning.message}`);
+    this.#step();
+    const { cursor, history } = await db.read(async (read) => ({
+      cursor: await source.cursor(read),
+      history: await readHistory(read),
+    }));
+    this.#step();
+    this.#cursor = cursor?.height ?? null;
+    const check = checkHistory({ config: checked, cursor: this.#cursor, declarations, history });
+    input.onChecked?.(Object.freeze({ config: checked, declarations, cursor, check, db }));
+    const graph = resolveGraph(graphInputOf(check, declarations));
+    const plan = schemaPlan(graph.modules);
+    const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, core) });
+    await startDatabase(db, {
+      plan,
+      parts: graph.modules.map((part) => namedStartDb(contexts.startDbPart(part))),
+      committedVersions: check.committedVersions,
+      handles: { height: this.#cursor },
+    });
+    this.#step();
+    contexts.seal();
+    const { api: address } = settings.listen as { readonly api?: string };
+    this.#api = await startModuleApi({
+      graph,
+      contexts,
+      db,
+      ...(address === undefined ? {} : { address }),
+      apiReadTimeoutMs: settings.apiReadTimeoutMs as number,
+      onError: (error, where) => this.#log(`module API: ${where.route} of ${where.module} failed: ${messageOf(error)}`),
+    });
+    this.#step();
+    this.#upgrade = upgradeBoundary(check, declarations);
+    const Loop = input.loop ?? FinalizedLoop;
+    const loop = new Loop({
+      db,
+      graph,
+      plan,
+      source,
+      contextOf: (id) => contexts.of(id),
+      misuses: contexts,
+      signal: this.#stop.signal,
+      coreStop: core.stop === null ? null : BigInt(core.stop),
+      boundary: this.#upgrade?.height ?? null,
+      observer: {
+        head: (head) => {
+          this.#head = head.height;
+          // Nothing to process (the loop waits): whatever was retried works again.
+          if (head.height < (this.#cursor === null ? graph.start : this.#cursor + 1n)) this.#recovered();
+        },
+        committed: (block) => {
+          this.#cursor = block.height;
+          this.#recovered();
+        },
+      },
+    });
+    const { server } = this.#api;
+    const api = server === null ? null : Object.freeze({ host: server.host, port: server.port });
+    // Not stopping (the step above): from here on a stop finds the loop running.
+    this.#phase = "running";
+    return { loop, started: Object.freeze({ core, api }) };
+  }
+
+  /**
+   * IN-10's retry of `error`, which `where` met at `height` (`code` its condition): the condition raised, the failure
+   * logged, the back-off waited — ended at once by a stop. Resolves true to run again, false when the process stops.
+   */
+  async #retry(where: "startup" | "processing", code: RetryCode, error: unknown, height: bigint | null): Promise<boolean> {
+    if (this.#stop.signal.aborted) return false;
+    this.#attempts += 1;
+    const delay = backoffDelay(this.#attempts, (this.#core?.settings as PlainObject).backoffCeilingMs as number);
+    this.#retrying = Object.freeze({ code, attempts: this.#attempts, height });
+    this.#log(`${where} retries in ${delay} ms (${code}, attempt ${this.#attempts}): ${messageOf(error)}`);
+    await pause(delay, this.#stop.signal);
+    return !this.#stop.signal.aborted;
+  }
+
+  /** What was retried works again: no condition, and the next retry's back-off starts from 1 s. */
+  #recovered(): void {
+    this.#retrying = null;
+    this.#attempts = 0;
+  }
+
+  /** Records why startup refused or processing halted, and enters that state unless the process is stopping. */
+  #fail(phase: "refused" | "halted", error: unknown): ProcessReason {
+    const reason = reasonOf(error);
+    this.#reason = reason;
+    this.#retrying = null;
+    if (this.#phase !== "stopping") this.#phase = phase;
+    return reason;
   }
 
   /** Startup, then the loop: resolves with how processing ended (see {@link ProcessingEnd}). */
@@ -496,14 +624,25 @@ class Process implements ProcessHandle {
     try {
       ({ loop } = await startup);
     } catch (error) {
-      return this.#ended(this.#stop.signal.aborted ? { kind: "signal" } : { kind: "refused", error });
+      if (this.#stop.signal.aborted) return this.#ended({ kind: "signal" });
+      this.#fail("refused", error);
+      return this.#ended({ kind: "refused", error });
     }
     let end: LoopEnd;
-    try {
-      end = await loop.run();
-    } catch (error) {
-      this.#log(`processing stopped: ${messageOf(error)}`);
-      return this.#ended({ kind: "failed", error });
+    for (;;) {
+      try {
+        end = await loop.run();
+        break;
+      } catch (error) {
+        const code = retryOf(error);
+        if (code === null) {
+          const { code: halt } = this.#fail("halted", error);
+          this.#log(`processing halted (${halt}): ${messageOf(error)}`);
+          return this.#ended({ kind: "failed", error });
+        }
+        const height = error instanceof HeightFailure ? error.height : null;
+        if (!(await this.#retry("processing", code, error, height))) return this.#ended({ kind: "signal" });
+      }
     }
     if (end.kind === "signal") return this.#ended(end);
     const upgrade = end.boundary === null ? null : this.#upgrade;

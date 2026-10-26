@@ -381,3 +381,27 @@ RN-9 to RN-12 of the `core-arch` change).
   done) with the condition `upgrade-required`, ready and serving reads there. Start the build that carries the
   version, its `m.entry({ start, config })` in the configuration: it continues from `start`, and your module does not
   start again there.
+
+## When a callback fails
+
+A callback that throws stops processing for good, and the process stays up to say why (RN-8, RN-11, IN-10 and IN-12
+of the `core-arch` change).
+
+- **Before the commit, nothing of the height stays.** An error in `on-fetch`, `on-parse`, `on-start-height`,
+  `on-compute` or `on-db-write` at h rolls the block back: no row of h is kept, in your tables or any other, and the
+  cursor stays at h − 1. An error in `on-after-db-write` or `on-stop-height` leaves h committed. Either way the process
+  enters the state `halted` with the reason's code (`callback-error`, or the error's own code where it has one, such
+  as `truncate-not-allowed`), the height, your module and the point. It stays up, not ready, its module API answering
+  at the cursor, until it is stopped; fix the cause and restart it.
+- **The reason never carries your message.** `/status` shows the code, the height, the module and the point, never an
+  error's text, which may hold a credential; the full error goes to the process's log, redacted.
+- **A failing `on-start-db` or `on-start-api` refuses startup.** The process enters `refused`, with `callback-error`,
+  your module and the point, and its database is closed, so a fixed build can start at once.
+- **A lost connection is retried, not a failure.** When the database connection is lost, or the node cannot be
+  reached, the process waits and runs again from the cursor (the condition `database-retrying` or `node-retrying`): a
+  height whose transaction was lost runs again from `on-fetch`, and `on-after-db-write` of the cursor fires again.
+  Catching such an error and throwing your own turns it into a failure that halts.
+- **After a crash, some points run again.** `on-db-write` runs exactly once per committed height: a block that did not
+  commit left nothing. `on-start-height` fires again if your start height had not committed, and `on-after-db-write`
+  and `on-stop-height` fire again for the cursor; `on-fetch`, `on-parse` and `on-compute` may run again for a height.
+  `on-after-db-write` never gets `block` items, re-delivered or not: read what your `on-db-write` stored instead.
