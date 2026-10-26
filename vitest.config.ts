@@ -80,6 +80,8 @@ const CORE_ARCH = {
   "**/src/config/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the runner's directory (task 5.1).
   "**/src/runner/**": { lines: 90, branches: 85, perFile: true },
+  // §13's default for `src/**`, added with the `umbradb` command's directory (task 4.4).
+  "**/src/cli/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the backbone parts' directory (tasks 7.1 and 5.2: `core-digest`,
   // `core-block-commit`'s cursor table).
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
@@ -104,6 +106,9 @@ export default defineConfig({
       include: ["src/**/*.ts"],
       exclude: [
         "src/**/index.ts",
+        // The `umbradb` command's `bin` entry runs only as a process of its own (`test/cli/umbradb.test.ts`, the pack
+        // smoke test), outside coverage; what it calls, `runMain`, is covered (task 4.4).
+        "src/cli/main.ts",
         // Deferred full-chain-archival track — out of 1.0.0 (acceptance-criteria I6).
         "src/postgres/chain-archive-store.ts",
         "src/postgres/chain-archive-rollover.ts",

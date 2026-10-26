@@ -679,9 +679,19 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   writes in that transaction — every entry above the cursor that differs from its row or has none, and a module's stop
   changed above the cursor. `openConfiguredDatabase` (`src/config/database.ts`) opens what `database` names
   (`pglite:memory`, `pglite:<directory>`, a PostgreSQL URL), PGlite refusing without the opt-in (CF-9, DB-12).
-- **`umbradb config check`.** The TypeScript compiler API (`typescript` becomes a runtime dependency; 5.9.3 installed)
-  with `noEmit`, then the loader, the plain-data check and schema validation; with `--database`, a read-only connection
-  that reads `core_chain.config` and runs the history checks, with no migration and no write (CF-10).
+- **`umbradb config check`** (`src/cli/`, task 4.4; CF-10). Three checks, every finding of each reported with its path
+  in one run: the TypeScript compiler (`typescript`, a runtime dependency, 5.9.3 installed) with `noEmit` and fixed
+  options, those of a Node.js ES module loaded by type stripping (`NodeNext`, `erasableSyntaxOnly`,
+  `verbatimModuleSyntax`, `allowImportingTsExtensions`, `strict`, `skipLibCheck`; a `.ts` file whose nearest
+  `package.json` has no `type` is read as an ES module, as Node.js detects it), each diagnostic at `file:line:column`;
+  then the loader, the plain-data check, the validation and the process's `core` revision (Q102); then, with
+  `--database` only, the cursor and `core_chain.config` read in one read-only read (PostgreSQL: a read connection, no
+  writer lock, so beside a running process; PGlite: under the file's opt-in, the directory's lock taken, a directory
+  holding no database yet checked as a new one and not created) and `entriesAtCursor` and `historyFindings` run on
+  them; without it no database is opened and the report says the history checks were not run. The side comes from
+  the file (`instanceId` and no `node`: private); the modules are the command's build's (its backbone parts and core
+  modules: no user module, MD-1), and a host program calls `configCheck` with its own. Every text is redacted
+  (`configSecrets`, the `--database` value, the URL patterns). Exit 0 only if every check that ran passed, else 1.
 
 ## 8. Private processes (PP)
 
@@ -803,8 +813,10 @@ private instance, `lockstep-behind` and `report-hash-mismatch`.
 `SchemaWriteHandle`, `ApiRegistry`, `BlockRef`, `BlockSource`, `LedgerPackage`, `Entry`, `CoreVersion`, `UmbraConfig`,
 `ProcessHandle`, `ProcessState`, `ErrorCode`, `ParsedTransaction`, `LedgerTask`.
 
-**Command:** `umbradb run [--config <file>]`, `umbradb config check <file>`, `umbradb backup --out <file>`,
-`umbradb restore <file>`.
+**Command:** `umbradb run [--config <file>]`, `umbradb config check <file> [--database <url>]`, `umbradb backup --out
+<file>`, `umbradb restore <file>` — `package.json`'s `bin` `umbradb` (`dist/cli/main.js`, task 4.4). No command, or
+any other, prints the usage and exits 2; a failed check exits 1; until tasks 5.x and 15.x build them, `run`, `backup`
+and `restore` exit 3, not available in this build.
 
 ## 13. Quality gates: what moves and what is retired (LS-5; for the owner's approval, CORE-ARCH SC-010)
 

@@ -856,8 +856,65 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `core-chain`'s declaration calling `recordHistory` (10.2); `umbradb config check --database` (4.4); `/config`
       showing a `versionEntry`'s settings once checked (8.4); the ledger versions in the core version (12.1–12.2);
       private backups under the opt-in (15.x).
-- [ ] 4.4 `umbradb config check` and the `umbradb` command.
+- [x] 4.4 `umbradb config check` and the `umbradb` command.
       **Acceptance:** A35, A6.
+      **Done (2026-10-25):** `src/cli/` (design §1, §7, §12): `main.ts`, the package's `bin` `umbradb`
+      (`dist/cli/main.js`, a node shebang; in `package.json` and the lockfile's root entry), running `runMain`;
+      `command.ts` — `runCommand` over `COMMANDS` (`run`, `config`, `backup`, `restore`), arguments by Node.js's
+      `util.parseArgs` (no dependency), the usage (design §12's forms, the exit statuses: 0 passed, 1 a check failed or
+      could not be completed, 2 the usage, 3 not available in this build). No command, an unknown one (`sync`, 0.9.5's
+      archive sync, among them) or a wrong argument of `config check` prints a one-line reason and the usage on stderr
+      and exits 2; `--help` or `-h` alone prints it on stdout and exits 0; `run`, `backup` and `restore` are recognized
+      and exit 3, "not available in this build", whatever their arguments, until tasks 5.x and 15.x replace their
+      entries; a `--database` value (once, a value, the `database` setting's format, not `pglite:memory`) is never
+      echoed, and any argument a message repeats has its URL credentials hidden. `config-check.ts` — `configCheck`
+      runs three checks (`CHECK_STEPS`) and reports every finding of each with its path: the type check
+      (`type-check.ts`: the TypeScript compiler — `typescript`, a runtime dependency since task 0.1, loaded when a file
+      is checked — with `noEmit` and fixed options, those of a Node.js ES module under type stripping: `NodeNext`,
+      `erasableSyntaxOnly`, `verbatimModuleSyntax`, `allowImportingTsExtensions`, `strict`, `skipLibCheck`; a `.ts` file
+      under a `package.json` without `type` read as an ES module, as Node.js detects it; each diagnostic at
+      `file:line:column`, a package's left out); the configuration (the loader, which runs the operator's code, Q44;
+      the validation, every finding at once; the process's `core` revision, Q102); and, with `--database` only, the
+      history (`database.ts`: the cursor and `core_chain.config` in one read-only read — PostgreSQL through a read
+      connection, no writer lock, so beside a running process; PGlite under the file's opt-in, its directory's lock
+      taken, a directory without `PG_VERSION` checked as a new database and not created —, then `entriesAtCursor` and
+      `historyFindings`, every finding of every code). Without `--database` no database is opened and the report says
+      the history checks were not run. The side comes from the file (`inferSide`); the modules are the command's
+      build's (`build-modules.ts`: `core-block-commit`, `core-digest`; no user module, MD-1), a host program passing
+      its own to `configCheck` (question Q106). Every text is redacted (`configSecrets`, new in
+      `src/config/validate.ts`; the `--database` value; the URL patterns). Design §7's bullet and §12's command say
+      what was built; the `src/cli/**` coverage floor (90/85) is added and `main.ts`, run only as a process, left out
+      of coverage; the pack smoke test runs the installed command (oracle 4b). Tests, seen failing first (`tsc` exit 2,
+      29 lines: `src/cli/command.js`, `config-check.js`, `build-modules.js` missing and the implicit `any`s that
+      follow; the four suites failed to load, `Cannot find module`; oracle 4b failed with no `umbradb` in
+      `node_modules/.bin` while `bin` was left out): `test/cli/command.test.ts` (A6 in this process: the usage and exit
+      2 for no argument, `sync` and 15 other commands, `--help`, the four commands recognized, `config check`'s 9
+      argument errors, no `--database` echoed, `runMain`, the `bin` entry; the committed controls: a command table
+      recognizing `sync` fails A6's check, one printing the usage for `run` fails "recognized"),
+      `config-check.test.ts` (A35 without `--database`: a valid file, a type error and a schema error printed with
+      their paths, CF-10's scenario found by both checks, CF-1's refusals, an `enum`, the module formats, the options,
+      local and package files, the side, a host's declarations, no database opened — a TCP listener counting 0
+      connections, a PGlite directory not created —, no secret printed; the committed controls: a check stopping at
+      its first finding fails "prints both", one without the redaction prints the `--database` password),
+      `config-check-database.test.ts` (A35 with `--database` on PostgreSQL 18.6 and PGlite 0.5.10: `changes-past`, exit
+      1, the database unchanged — every table's row count and the rows of `core_chain.migrations` and
+      `core_chain.config` with their `xmin` —; the same file passing; every finding of every code; CF-3's cursor rules;
+      new, empty and uncommitted databases; the opt-in; a held PGlite directory; PostgreSQL beside a running writer;
+      the committed control: recording the history, or running the migrations, changes the snapshot),
+      `umbradb.test.ts` (the command bundled with esbuild and run by Node.js in a child process: A6; A35 without and
+      with `--database` on both backends; Node.js's own `enum` refusal; the module formats; a PGlite directory another
+      process holds). Wrong variants (a scratch runner outside the clone): 127 of 144 caught on the first run; of the 17
+      survivors one was redundant code (the type finding's message repeating its path; removed) and 16 were gaps — a
+      URL typed as a command, `--help` with more arguments, commands named like `Object.prototype` members, `config`
+      alone, the backends' own refusals shown as they are, the report's findings redacted, `strict`, `skipLibCheck`,
+      the target's library, declaration and `.cts` files' format, a directory below a CommonJS package, a package's
+      TypeScript sources, a directory as the file, an empty PGlite directory — closed by tests; on the final sources
+      143 of 143 caught, none equivalent. Question Q106 raised (not blocking); issue
+      `docs/issues/00014-history-start-above-cursor-throws.md` recorded (OPEN).
+      **Pending:** `umbradb run` (tasks 5.x) and `backup`, `restore` (15.1, 15.2); an operator's user modules in the
+      command (Q106); `core-chain`'s declaration and the core modules in the command's build (10.2, 11.x–13.x); the
+      §12 surface and the pack smoke's rewrite with §12's imports (17.3); a file whose S is above the cursor refused
+      with a code (the issue).
 
 ## 5. Runner
 

@@ -304,16 +304,35 @@ function inputSecrets(entries: readonly EntryView[]): string[] {
   });
 }
 
-/** What the rules check, from the validation's input. */
-function contextOf(input: ConfigInput): ConfigContext {
+/** The build's core and user modules by id, and every entry as the rules see it (null with no list of entries). */
+function viewsOf(input: ConfigInput): {
+  readonly modules: ReadonlyMap<string, ModuleDeclaration>;
+  readonly entries: readonly EntryView[] | null;
+} {
   const { data } = input.config;
   const modules = new Map<string, ModuleDeclaration>();
   for (const declaration of [...input.declarations.core, ...input.declarations.user]) modules.set(declaration.id, declaration);
   const list = isObject(data) && Array.isArray(data.entries) ? (data.entries as readonly PlainData[]) : null;
-  const entries = list === null ? null : list.map((value, index) => viewOf(value, index, modules, input.side));
+  return { modules, entries: list === null ? null : list.map((value, index) => viewOf(value, index, modules, input.side)) };
+}
+
+/**
+ * The secret strings of the configuration as the validation reads them before it checks anything — every string of a
+ * `secret` setting or of one of no known kind (fail closed), and the URL passwords of the others — for a caller that
+ * shows text built from the configuration before, or without, its validation (`umbradb config check`, task 4.4: the
+ * compiler's messages, which may quote a literal). Never throws.
+ */
+export function configSecrets(input: ConfigInput): string[] {
+  const { entries } = viewsOf(input);
+  return entries === null ? [] : inputSecrets(entries);
+}
+
+/** What the rules check, from the validation's input. */
+function contextOf(input: ConfigInput): ConfigContext {
+  const { modules, entries } = viewsOf(input);
   const { text } = redactor(entries === null ? [] : inputSecrets(entries));
   return {
-    data,
+    data: input.config.data,
     side: input.side,
     modules,
     backbone: new Set(input.declarations.backbone.map((declaration) => declaration.id)),

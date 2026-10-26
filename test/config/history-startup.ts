@@ -88,6 +88,8 @@ export interface StartupOptions {
    * of `core-chain`'s, and run only after `startDatabase` — after the migrations.
    */
   readonly versionCheckAfterMigrations?: boolean;
+  /** More backbone parts, after the stand-ins (task 4.4's tests add `core-block-commit`, whose table holds the cursor). */
+  readonly backbone?: readonly ModuleDeclaration[];
 }
 
 /** What a startup that was accepted gives. */
@@ -103,7 +105,8 @@ export interface Started {
 /** Runs one startup on `db` (see the module comment); rejects with the first refusal. */
 export async function startup(db: Database, options: StartupOptions): Promise<Started> {
   const holder: Holder = {};
-  const declarations = validateDeclarations({ backbone: [coreChain(holder), BLOCK_FETCH], core: [], user: options.user });
+  const backbone = [coreChain(holder), BLOCK_FETCH, ...(options.backbone ?? [])];
+  const declarations = validateDeclarations({ backbone, core: [], user: options.user });
   const config = validateConfig({ config: { file: FILE, data: plainData({ entries: options.entries }) }, declarations, side: "public" });
   const all = options.rules ?? HISTORY_RULES;
   const rules = options.versionCheckAfterMigrations === true ? all.filter((rule) => rule.name !== "build-version") : all;

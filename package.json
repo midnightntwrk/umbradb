@@ -13,6 +13,9 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "umbradb": "dist/cli/main.js"
+  },
   "files": [
     "dist",
     "README.md",

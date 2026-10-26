@@ -17,6 +17,11 @@
  *        INSTALLED package's `exports.types`; assert zero errors and no implicit-any / missing-
  *        declaration diagnostic. This proves the shipped `.d.ts` actually types a consumer (A5).
  *
+ *     4b. run the INSTALLED `umbradb` command (package.json `bin`, task 4.4 of the core-arch change; LS-6, A6, CF-10):
+ *        with no argument and with `sync` it prints the usage and exits 2; `run` exits 3 (not in this build yet);
+ *        `config check` on a configuration written as plain data exits 0 having run the TypeScript compiler -- so the
+ *        bin entry, its shebang and its runtime dependency on `typescript` work from the tarball.
+ *
  *   Docker-dependent (gated):
  *     5. from the scratch project, `import { createClient, runMigrations, PgTemporalKV, StorageError }
  *        from "umbradb"`, run `runMigrations` + a `PgTemporalKV.put`/`get` round-trip against a
@@ -29,7 +34,7 @@
  * `npm run test:smoke` runs `npm run build` first (task 3 dist dependency).
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -157,6 +162,44 @@ async function dockerIndependentOracles() {
     fail(`packed-.d.ts consumer compile surfaced an implicit-any / missing-declaration diagnostic (A5):\n${tscOut}`);
   }
   console.log("pack-install smoke: scratch TS consumer compiled against the installed umbradb .d.ts under --strict/noImplicitAny with zero errors (A5).");
+
+  // ---- 4b. the INSTALLED umbradb command (package.json bin; core-arch task 4.4: LS-6, A6, CF-10) ---------------
+  const umbradb = join(scratch, "node_modules", ".bin", shell ? "umbradb.cmd" : "umbradb");
+  if (!existsSync(umbradb)) fail(`the installed package has no umbradb command at ${umbradb} (package.json bin, LS-6).`);
+  const command = (args) => run(umbradb, args, { cwd: scratch });
+  for (const args of [[], ["sync"]]) {
+    const usage = command(args);
+    if (usage.status !== 2 || !usage.stderr.includes("Usage: umbradb <command>") || usage.stdout !== "") {
+      fail(`umbradb ${args.join(" ")} did not print the usage and exit 2 (A6):\n${usage.status}\n${usage.stdout}\n${usage.stderr}`);
+    }
+  }
+  const unavailable = command(["run"]);
+  if (unavailable.status !== 3 || !unavailable.stderr.includes("umbradb run: not available in this build")) {
+    fail(`umbradb run did not exit 3 as not available in this build (A6):\n${unavailable.status}\n${unavailable.stderr}`);
+  }
+  // A configuration as plain data (no import: the package's "." export is still 0.9.5's until task 17.3).
+  writeFileSync(
+    join(scratch, "umbradb.config.ts"),
+    [
+      "export default {",
+      "  entries: [",
+      '    { id: "core", start: 0, version: { umbradb: "' + JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version + '", ledgers: [] },',
+      '      config: { network: "preprod", node: "ws://127.0.0.1:9944", database: "postgres://indexer@127.0.0.1:1/indexer" } },',
+      "  ],",
+      "};",
+      "",
+    ].join("\n"),
+  );
+  const check = command(["config", "check", "umbradb.config.ts"]);
+  if (
+    check.status !== 0 ||
+    !/^type check \(TypeScript \d+\.\d+\.\d+, noEmit\): passed$/m.test(check.stdout) ||
+    !check.stdout.includes("configuration (CF-1, CF-3): passed") ||
+    !check.stdout.includes("history checks were not run")
+  ) {
+    fail(`umbradb config check did not pass a valid file (A35, CF-10):\n${check.status}\n${check.stdout}\n${check.stderr}`);
+  }
+  console.log("pack-install smoke: the installed umbradb command prints its usage (exit 2), knows run (exit 3), and config check passes a valid file (exit 0) -- LS-6, A6, A35.");
 }
 
 /** Docker-DEPENDENT oracle (5): migrate + put/get round-trip against a Testcontainers Postgres. */
@@ -206,7 +249,7 @@ async function main() {
   // The migrate + round-trip is the ONLY Docker-dependent oracle.
   if (dockerAvailable) {
     await roundTripOracle();
-    console.log("\npack-install smoke: PASS -- packed surface resolves for a fresh consumer; deep import blocked; .d.ts shipped AND type-checks a consumer; migrate + round-trip OK.");
+    console.log("\npack-install smoke: PASS -- packed surface resolves for a fresh consumer; deep import blocked; .d.ts shipped AND type-checks a consumer; the umbradb command runs; migrate + round-trip OK.");
   } else if (isCI) {
     // A required CI workflow must never report green having tested nothing (audit BLOCK 9).
     fail("Docker is REQUIRED in CI (ubuntu-latest ships Docker) but `docker info` failed -- the runMigrations + round-trip oracle cannot run and MUST NOT be silently skipped. The Docker-independent oracles (pack/install/import/deep-import/type-declaration) all ran; only the round-trip is missing, and in CI that is a failure.");
