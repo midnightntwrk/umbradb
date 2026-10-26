@@ -151,6 +151,7 @@ async function rejection(run: Promise<unknown>): Promise<unknown> {
 }
 
 const never = new AbortController().signal;
+const sameHash = (a: Uint8Array, b: Uint8Array): boolean => hex(a) === hex(b);
 
 /**
  * A call record the test itself makes, through the client, to let the notifications after it go out (TT-3: a
@@ -683,6 +684,74 @@ describe("the best-block queue (IN-6)", () => {
     for (const h of [101n, 102n, 103n]) expect((await source.prepared(h)).block.hash).toEqual(B(Number(h)).hash);
     expect([101, 102, 103].map((h) => node.count("chain_getBlock", [B(h).hex]))).toEqual([1, 1, 1]);
     expect(runner.calls).toHaveLength(7);
+  }, PATIENCE_MS);
+
+  it("queues a best block the finalized head reached while it was prepared, and uses it at finality, unfetched", async () => {
+    // Task 11.1 (A92: each transaction parsed once): the head's notification of 101 comes while 101's prepare runs.
+    const records: TapeRecord[] = [
+      newHead(A(101)),
+      fetched(A(101)),
+      finalizedHead(A(101)),
+      { method: "chain_getBlockHash", params: [101], result: A(101).hex },
+    ];
+    let release: () => void = () => undefined;
+    const { source, runner, node } = await following(records);
+    runner.hold = () => new Promise<void>((resolve) => (release = resolve));
+    await until(() => runner.calls.includes("prepare 101A"), "101 being prepared");
+    await source.waitForHead(100n, never);
+    expect((await source.finalizedHead()).height).toBe(101n);
+    release();
+    await source.idle();
+    const prepared = await source.prepared(101n);
+    expect(prepared.block.hash).toEqual(A(101).hash);
+    expect(node.count("chain_getBlock", [A(101).hex])).toBe(1);
+    expect(runner.calls).toEqual(["best 101A", "prepare 101A"]);
+  }, PATIENCE_MS);
+
+  it("drops such a block with on-rollback when the head reached its height with another hash, and fetches that one", async () => {
+    const records: TapeRecord[] = [
+      newHead(A(101)),
+      fetched(A(101)),
+      finalizedHead(B(101)),
+      { method: "chain_getBlockHash", params: [101], result: B(101).hex },
+      fetched(B(101)),
+    ];
+    let release: () => void = () => undefined;
+    const { source, runner, node } = await following(records);
+    runner.hold = (block) => (sameHash(block.hash, A(101).hash) ? new Promise<void>((resolve) => (release = resolve)) : Promise.resolve());
+    await until(() => runner.calls.includes("prepare 101A"), "101 being prepared");
+    await source.waitForHead(100n, never);
+    release();
+    await source.idle();
+    expect((await source.prepared(101n)).block.hash).toEqual(B(101).hash);
+    expect(runner.calls).toEqual(["best 101A", "prepare 101A", "rollback 101A", "prepare 101B"]);
+    expect(node.count("chain_getBlock", [B(101).hex])).toBe(1);
+  }, PATIENCE_MS);
+
+  it("does not queue a competing block at a height the head reached while it was prepared, when the queue holds one there", async () => {
+    // 101 queued; 101′ announced and held in its prepare; the head reaches 101 (101's hash): 101′ is not queued beside
+    // it, so the next best block, 102 over 101, is appended with no on-rollback of 101′.
+    const records: TapeRecord[] = [
+      newHead(A(101)),
+      fetched(A(101)),
+      newHead(B(101)),
+      fetched(B(101)),
+      finalizedHead(A(101)),
+      { method: "chain_getBlockHash", params: [101], result: A(101).hex },
+      newHead(A(102)),
+      fetched(A(102)),
+    ];
+    let release: () => void = () => undefined;
+    const { source, runner } = await following(records);
+    runner.hold = (block) => (sameHash(block.hash, B(101).hash) ? new Promise<void>((resolve) => (release = resolve)) : Promise.resolve());
+    await until(() => runner.calls.includes("prepare 101B"), "101′ being prepared");
+    await source.waitForHead(100n, never);
+    release();
+    await source.idle();
+    expect((await source.prepared(101n)).block.hash).toEqual(A(101).hash);
+    await until(() => runner.calls.includes("prepare 102A"), "102 prepared");
+    await source.idle();
+    expect(runner.calls).toEqual(["best 101A", "prepare 101A", "best 101B", "prepare 101B", "best 102A", "prepare 102A"]);
   }, PATIENCE_MS);
 
   it("holds at most tipCap blocks: while full the next best block is not queued, and finality-stall is reported", async () => {

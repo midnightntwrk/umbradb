@@ -466,3 +466,33 @@ require it (CD-2, IN-4 to IN-7 of the `core-arch` change).
 - **Testing with `InMemoryBlockSource`.** With UmbraDB's backbone, `core-block-fetch` puts the in-memory source's own
   items: blocks of runtime 2.0 (`spec_version` 2,000,000, ledger `v9`), six seconds apart, with no extrinsics and empty
   metadata, unless its `items` option gives a block's own runtime, time or ledger.
+
+## Chain events, transactions and their outcomes
+
+The core modules `core-chain-events`, `core-block-parsed` and `core-tx-results` (CD-4 to CD-6 of the `core-arch`
+change) give every block's chain events, its Midnight transactions and their outcomes. They are off unless the
+configuration enables them (each with an entry and a start height, as any module); a module that requires one of their
+items needs them enabled where it runs.
+
+- **`chain-events`** (from `on-fetch` on): the block's `System::Events` in their order, each with its index, phase
+  (`initialization`, `apply-extrinsic` with the extrinsic's index, `finalization`), pallet and event name, its fields
+  decoded with the metadata of the runtime in the block's parent's state — the runtime that wrote them, also at an
+  upgrade's enacting block — its topics and its SCALE bytes. A field's value: integers up to 32 bits as numbers, wider
+  ones as `bigint`s, byte strings as `Uint8Array`s, a struct as an object by field name, a newtype as its one field, an
+  enum as its variant's name or `{ <variant>: <fields> }`. Stored in `core_chain_events.events`, the fields as JSON
+  (64-bit and wider integers as decimal text, bytes as `0x` hex) and the bytes as the node sent them, so a reader with
+  the metadata can decode more.
+- **`block-parsed`** (from `on-parse` on): `{ ledger, transactions }`, the transactions in the order the ledger applied
+  them — the order of their chain events, a system transaction where its `SystemTransactionApplied` is; block 0's in
+  body order —, each parsed once with the block's ledger version: its index, hash, kind (`regular` or `system`), size,
+  bytes and segments (the calls and deploys of each), and where the chain put it (phase, extrinsic index, event index).
+  Use these plain data; do not parse the bytes again. Stored in `core_block_parsed.transactions` (hash, kind, size).
+- **`tx-results`** (from `on-parse` on): one outcome per transaction, in `block-parsed`'s order — `success`
+  (`TxApplied`, `SystemTransactionApplied`), `partial` (`TxPartialSuccess`) or `failure` (`ExtrinsicFailed`; the chain
+  left its state as it was) —, block 0's all `success`. Which segments failed is not here (the chain's event does not
+  say): `core-ledger-state` gives it. Stored in `core_tx_results.results`.
+- **A block whose events do not account for its transactions is refused**: a Midnight transaction with no outcome event
+  or with two, an outcome under an extrinsic that carries no Midnight transaction. Processing halts there at a finalized
+  height (a best block is dropped and fetched again at finality).
+- **Testing with `InMemoryBlockSource`**: its blocks have no extrinsics and no events, so the three items are empty;
+  the node source over a tape node gives them their content.

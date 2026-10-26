@@ -55,6 +55,10 @@
  * block fetched, the ledger table (`selectLedgerVersion`, LG-1, LG-2) and the metadata of the runtime in its parent's
  * state (`RuntimeMetadata.forBlock`, LG-4: one `state_getRuntimeVersion` a block, one `state_getMetadata` a runtime),
  * which decodes its extrinsics. Every call it makes is one of IN-8's.
+ *
+ * **A block's chain events** ({@link NodeBlockSource.blockEvents}, `./events.ts`; task 11.1): `System::Events` read with
+ * `state_getStorage` at the block's own hash, for `core-chain-events` (CD-4), which decodes them; a queued best block's
+ * without retries, as its other calls (IN-10).
  */
 
 import { UmbraError } from "../../db/errors.js";
@@ -74,6 +78,7 @@ import type {
 import { readCursor } from "../core-block-commit/core-block-commit.js";
 import { blockTimeOf, decodeExtrinsics } from "./extrinsics.js";
 import { headerHash } from "./header.js";
+import { type BlockEventSource, systemEventsKey } from "./events.js";
 import type { BlockItemSource, CoreBlockItems } from "./items.js";
 import { readRuntimeMetadata, type RuntimeMetadataView } from "./metadata.js";
 
@@ -136,7 +141,7 @@ function refOf(header: NodeHeader, hash: Uint8Array): BlockRef {
 }
 
 /** The block source over the node (see the module comment). */
-export class NodeBlockSource implements BlockSource, BlockItemSource {
+export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEventSource {
   /** The node client, the process's one connection. */
   protected readonly client: NodeClient;
   readonly #window: number;
@@ -340,6 +345,15 @@ export class NodeBlockSource implements BlockSource, BlockItemSource {
       "runtime-metadata": metadata,
       "ledger-version": ledger,
     });
+  }
+
+  /**
+   * `block`'s chain events as the node stores them: `System::Events` in its own state, `state_getStorage` at its hash
+   * (`./events.ts`); a best block's read without retries (IN-10). Null when the state holds no value there.
+   */
+  async blockEvents(block: BlockRef): Promise<Uint8Array | null> {
+    const best = this.#fetched.get(hexOf(block.hash))?.best ?? false;
+    return this.client.storage(systemEventsKey(), block.hash, best ? { retry: false } : undefined);
   }
 
   // ── seams (a negative control's) ────────────────────────────────────────────────────────────────────────────────
@@ -662,6 +676,13 @@ export class NodeBlockSource implements BlockSource, BlockItemSource {
     const { block } = entry;
     const top = this.#queue.at(-1)?.block ?? (this.#head as BlockRef);
     if (top.height === block.height - 1n && sameBytes(top.hash, block.parentHash)) {
+      this.#queue.push(entry);
+      return;
+    }
+    // The finalized head reached the block's height while it was being prepared (task 11.1: a fast-finalizing chain):
+    // queued as it is, above every queued block, so the prefetch's take at its height — which runs after this — uses it
+    // when it is the finalized block, and drops it with `on-rollback` when not; it is never fetched and parsed again.
+    if (block.height <= (this.#head as BlockRef).height && this.#queue.every((queued) => queued.block.height < block.height)) {
       this.#queue.push(entry);
       return;
     }

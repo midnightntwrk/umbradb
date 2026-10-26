@@ -12,7 +12,9 @@
  * probe; the record).
  *
  * The value read is frozen: types by id, and the pallets in their order with their index (the byte that opens their
- * calls) and the type id of their call enum (`calls`). Pure: no Node.js import.
+ * calls), the type ids of their call, event and error enums, and their storage entries — the storage prefix and, per
+ * entry, its name, modifier and types (task 11.1: `core-chain-events` finds `System::Events`' type there, CD-4). Pure: no
+ * Node.js import.
  */
 
 import { ScaleError, ScaleReader } from "./scale.js";
@@ -71,13 +73,52 @@ export interface MetadataType {
   readonly def: TypeDef;
 }
 
-/** A pallet: its name, its index, and the type ids of its call, event and error enums (null for none). */
+/** The storage hashers, in their encoding's order (`frame-metadata`'s `StorageHasher`). */
+export const STORAGE_HASHERS = Object.freeze([
+  "Blake2_128",
+  "Blake2_256",
+  "Blake2_128Concat",
+  "Twox128",
+  "Twox256",
+  "Twox64Concat",
+  "Identity",
+] as const);
+
+/** One storage entry of a pallet (`StorageEntryMetadata`): its name, its modifier and its types. */
+export type MetadataStorageEntry =
+  | {
+      readonly name: string;
+      readonly modifier: "optional" | "default";
+      readonly kind: "plain";
+      /** The value's type id. */
+      readonly value: number;
+    }
+  | {
+      readonly name: string;
+      readonly modifier: "optional" | "default";
+      readonly kind: "map";
+      readonly hashers: readonly (typeof STORAGE_HASHERS)[number][];
+      readonly key: number;
+      readonly value: number;
+    };
+
+/** A pallet's storage (`PalletStorageMetadata`): the prefix its keys start with (hashed), and its entries in order. */
+export interface MetadataStorage {
+  readonly prefix: string;
+  readonly entries: readonly MetadataStorageEntry[];
+}
+
+/**
+ * A pallet: its name, its index, the type ids of its call, event and error enums (null for none), and its storage (null
+ * for none).
+ */
 export interface MetadataPallet {
   readonly name: string;
   readonly index: number;
   readonly calls: number | null;
   readonly event: number | null;
   readonly error: number | null;
+  readonly storage: MetadataStorage | null;
 }
 
 /** What `core-block-fetch` reads of a runtime's metadata. */
@@ -165,34 +206,41 @@ export function readTypeRegistry(r: ScaleReader): Map<number, MetadataType> {
   return types;
 }
 
-/** One `StorageEntryMetadata`, read to step over it. */
-function storageEntry(r: ScaleReader): void {
-  r.string();
-  const modifier = r.u8();
-  if (modifier > 1) throw r.error(`a storage modifier ${modifier}, not Optional (0) or Default (1)`);
+/** One `StorageEntryMetadata`: its name, modifier and types; its default value and documentation stepped over. */
+function storageEntry(r: ScaleReader): MetadataStorageEntry {
+  const name = r.string();
+  const modifierByte = r.u8();
+  if (modifierByte > 1) throw r.error(`a storage modifier ${modifierByte}, not Optional (0) or Default (1)`);
+  const modifier = modifierByte === 0 ? "optional" : "default";
   const at = r.offset;
   const kind = r.u8();
+  let entry: MetadataStorageEntry;
   if (kind === 0) {
-    r.count();
+    entry = { name, modifier, kind: "plain", value: r.count() };
   } else if (kind === 1) {
-    r.vector(() => {
-      const hasher = r.u8();
-      if (hasher > 6) throw r.error(`a storage hasher ${hasher}, beyond Identity (6)`);
-    });
-    r.count();
-    r.count();
+    const hashers = Object.freeze(
+      r.vector(() => {
+        const hasher = r.u8();
+        const known = STORAGE_HASHERS[hasher];
+        if (known === undefined) throw r.error(`a storage hasher ${hasher}, beyond Identity (6)`);
+        return known;
+      }),
+    );
+    const key = r.count();
+    entry = { name, modifier, kind: "map", hashers, key, value: r.count() };
   } else {
     throw new ScaleError("the runtime metadata", at, `a storage entry type ${kind}, not Plain (0) or Map (1)`);
   }
   r.byteString();
   strings(r);
+  return Object.freeze(entry);
 }
 
 function pallet(r: ScaleReader, version: 14 | 15): MetadataPallet {
   const name = r.string();
-  r.option(() => {
-    r.string();
-    r.vector(() => storageEntry(r));
+  const storage = r.option(() => {
+    const prefix = r.string();
+    return Object.freeze({ prefix, entries: Object.freeze(r.vector(() => storageEntry(r))) });
   });
   const calls = r.option(() => r.count());
   const event = r.option(() => r.count());
@@ -205,7 +253,7 @@ function pallet(r: ScaleReader, version: 14 | 15): MetadataPallet {
   const error = r.option(() => r.count());
   const index = r.u8();
   if (version === 15) strings(r);
-  return Object.freeze({ name, index, calls, event, error });
+  return Object.freeze({ name, index, calls, event, error, storage });
 }
 
 /** V14's extrinsic metadata and the runtime's type, read to check the metadata's end. */
@@ -244,10 +292,11 @@ export function readRuntimeMetadata(bytes: Uint8Array): RuntimeMetadataView {
     r.end();
   }
   const indices = new Set<number>();
-  for (const { name, index, calls, event, error } of pallets) {
+  for (const { name, index, calls, event, error, storage } of pallets) {
     if (indices.has(index)) throw new ScaleError("the runtime metadata", 0, `two pallets with the index ${index}`);
     indices.add(index);
-    for (const type of [calls, event, error]) {
+    const stored = (storage?.entries ?? []).flatMap((entry) => (entry.kind === "plain" ? [entry.value] : [entry.key, entry.value]));
+    for (const type of [calls, event, error, ...stored]) {
       if (type !== null && !types.has(type)) {
         throw new ScaleError("the runtime metadata", 0, `the pallet ${name} names the type ${type}, which the registry lacks`);
       }

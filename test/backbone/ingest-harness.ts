@@ -137,6 +137,8 @@ export interface IngestOptions {
   readonly client?: (client: NodeClient) => NodeClient;
   /** More user modules. */
   readonly user?: readonly ModuleDeclaration[];
+  /** Core modules of the build, each enabled from S (task 11.1's). */
+  readonly core?: readonly ModuleDeclaration[];
 }
 
 /** A process over a tape node. */
@@ -156,12 +158,12 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
   const user = [watcher(seen), ...(options.user ?? [])];
   const entries = [
     core(db.setting, Number(options.start), { extra: { node: node.url, ...options.settings } }),
-    ...user.map((module) => entryOf(module, Number(options.start))),
+    ...[...(options.core ?? []), ...user].map((module) => entryOf(module, Number(options.start))),
   ];
   const lines: string[] = [];
   const Source = options.Source ?? NodeBlockSource;
   const handle = startProcess({
-    declarations: chainDeclarations(user),
+    declarations: chainDeclarations(user, { core: options.core ?? [] }),
     config: { data: { entries } },
     source: (entry, shared: SourceShared) => {
       if (Source === NodeBlockSource && options.client === undefined) return nodeSourceOf(entry, shared);

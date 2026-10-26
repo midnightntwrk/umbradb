@@ -99,7 +99,8 @@ and its writer started, the cursor, the history and the chain's identity read in
 module's from its entries with their effective stops; every backbone part's the `core` entry's, each one's data fields
 with the process revision's other fields), `core-chain` bound to its context with what startup checked and opened
 (`bindCoreChain`: the node client and the revision's ledger table among them), `core-block-fetch` to the block source
-(`bindCoreBlockFetch`), `startDatabase`, the seal, on a database without a cursor the bootstrap's wait while S is above
+(`bindCoreBlockFetch`) and, when enabled, the core module `core-chain-events` too (`bindCoreChainEvents`, task 11.1),
+`startDatabase`, the seal, on a database without a cursor the bootstrap's wait while S is above
 the head (`waiting-for-node`, still `starting`, IN-2), `startModuleApi`, then the loop. A refusal closes what startup
 opened and rejects `started`. The loop fires
 `on-start-height` between `on-parse` and `on-compute` for the core's parts at S and the modules a segment of which
@@ -185,7 +186,23 @@ interface QueueRunner {                                      // given by the fin
   `runtime-metadata` (`RuntimeMetadata.forBlock`: the runtime in the parent's state, block 0's own; LG-4) and
   `ledger-version` (`selectLedgerVersion` over the `ledger-table` item, as text). The metadata is read as V14 — what
   `state_getMetadata` answers — or V15 up to its pallets. Block 0 (IN-7) takes the same path; its ledger path is 12.3's.
-  Queue-side callbacks get no database handle.
+  Queue-side callbacks get no database handle. The source also gives a block's raw chain events (`blockEvents`,
+  `src/backbone/core-block-fetch/events.ts`, task 11.1): `System::Events` read with `state_getStorage` at the block's
+  own hash, a best block's without retries, null where the state holds none (block 0); `core-chain-events` decodes them
+  (CD-4). A best block the finalized head reaches while it is being prepared is queued as it is, so that its height's
+  take uses it or drops it with `on-rollback` instead of fetching and parsing it again (task 11.1).
+- **The chain-data core modules** (task 11.1; CD-4 to CD-6; off unless configured): `core-chain-events` (requires
+  `block-header`, `runtime-metadata`) decodes at `on-fetch` the events its bound source gives with the
+  `runtime-metadata` item — the runtime in the parent's state, which wrote them —, every type of the registry read
+  (`scale-value.ts`); `core-block-parsed` (requires `block-body`, `runtime-metadata` for the call arguments,
+  `ledger-version`, `chain-events`) places at `on-parse` the block's transactions in the order of their chain events,
+  each outcome event matched to its extrinsic by its phase (`TxApplied`, `TxPartialSuccess`, `ExtrinsicFailed` under
+  `ApplyExtrinsic(i)` for the regular transaction of extrinsic `i`; `MidnightSystem::SystemTransactionApplied` for a
+  system transaction, its bytes the event's), block 0's in body order, refusing a block whose events do not account for
+  each Midnight transaction exactly once (decision record question Q132), and has them parsed once
+  (`TransactionParser`: in the module's thread with the block's ledger adapter until task 12.3's ledger worker takes
+  the parse, Q49); `core-tx-results` (requires `chain-events`, `block-parsed`) reads each transaction's outcome from the
+  event that placed it, block 0's `success`, and puts `tx-results` in the form `ApplyInput.outcomes` takes (task 12.1a).
 - **`InMemoryBlockSource`** (exported) keeps blocks in memory, for tests and module authors, with the same cursor,
   `core-block-commit`'s blocks table (`src/runner/in-memory-source.ts`, task 5.2): a finalized head that only rises
   (`finalize`), the blocks it was given or else a default chain whose hashes link (`inMemoryBlock`: SHA-256 of
@@ -981,9 +998,9 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-block-commit` | `core_block_commit.hashes` (not partitioned) | hash | height — makes a repeated hash fail, which the height-partitioned `blocks` table cannot enforce |
 | `core-digest` | `core_digest.tables` | (schema, table) | height, digest (DT-5) |
 | `core-digest` | `core_digest.checkpoints` | (height, schema, table) | digest — at every height h with h mod 14,400 = 0 |
-| `core-chain-events` | `core_chain_events.events` | (height, event_index) | phase (text), extrinsic_index (int null), pallet, name (text), bytes (SCALE), fields (jsonb, canonical) |
-| `core-block-parsed` | `core_block_parsed.transactions` | (height, tx_index) | tx_hash, kind (`regular`, `system`), size (int) |
-| `core-tx-results` | `core_tx_results.results` | (height, tx_index) | outcome (`success`, `partial`, `failure`) |
+| `core-chain-events` | `core_chain_events.events` | (height, event_index) | phase (text: `initialization`, `apply-extrinsic`, `finalization`), extrinsic_index (int null; set exactly under `apply-extrinsic`, a `CHECK`), pallet, name (text), bytes (SCALE: the event record's own bytes — phase, event, topics — so the count and the rows give `System::Events` back), fields (jsonb, canonical: keys sorted, integers of 64 bits and wider as decimal text, bytes as `0x` hex) — migration `001`, range-partitioned by height (task 11.1) |
+| `core-block-parsed` | `core_block_parsed.transactions` | (height, tx_index) | tx_hash (32 bytes, the ledger's), kind (`regular`, `system`), size (int > 0) — range-partitioned by height (task 11.1) |
+| `core-tx-results` | `core_tx_results.results` | (height, tx_index) | outcome (`success`, `partial`, `failure`) — range-partitioned by height (task 11.1) |
 | `core-ledger-state` | `core_ledger_state.nodes` | node_key | data, children (ledger serialization) |
 | `core-ledger-state` | `core_ledger_state.root_counts` | node_key | count (int > 0) |
 | `core-ledger-state` | `core_ledger_state.states` | height | state_key, state_root, zswap_first_free, zswap_root, dust_commitment_first_free, dust_commitment_root, dust_generation_first_free, dust_generation_root |

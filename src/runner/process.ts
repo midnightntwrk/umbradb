@@ -26,8 +26,10 @@
  *    part's revisions ({@link processRevisions}), `core-chain` bound to its context with what startup checked and
  *    opened (`bindCoreChain`: the configuration, the declarations, the cursor, the database, S, the genesis hash, the
  *    node client, the revision's ledger table), `core-block-fetch` bound to the block source (`bindCoreBlockFetch`, when
- *    the source gives block items), the migrations and `on-start-db` (`startDatabase`, through each context's publishing
- *    window — `core-chain`'s records the history and the identity and publishes its `process` items —; a failing
+ *    the source gives block items), and so is the core module `core-chain-events` when enabled (`bindCoreChainEvents`,
+ *    when the source gives a block's events; task 11.1), the migrations and `on-start-db` (`startDatabase`, through each
+ *    context's publishing window — `core-chain`'s records the history and the identity and publishes its `process`
+ *    items —; a failing
  *    `on-start-db` names its point and module, a `CallbackFailure` as a failing `on-start-api`'s), the seal
  *    (`process-item-missing`);
  * 8. on a database without a cursor, the bootstrap's wait while S is above the node's finalized head (`waitForNode`,
@@ -91,6 +93,8 @@
 
 import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
 import { bindCoreBlockFetch, CORE_BLOCK_FETCH_ID, isBlockItemSource } from "../backbone/core-block-fetch/core-block-fetch.js";
+import { isBlockEventSource } from "../backbone/core-block-fetch/events.js";
+import { bindCoreChainEvents, CORE_CHAIN_EVENTS_ID } from "../backbone/core-chain-events/core-chain-events.js";
 import {
   bindCoreChain,
   type ChainCheck,
@@ -659,6 +663,9 @@ class Process implements ProcessHandle {
     });
     if (graph.modules.some((part) => part.id === CORE_BLOCK_FETCH_ID) && isBlockItemSource(source)) {
       bindCoreBlockFetch(contexts.of(CORE_BLOCK_FETCH_ID), source);
+    }
+    if (graph.modules.some((part) => part.id === CORE_CHAIN_EVENTS_ID) && isBlockEventSource(source)) {
+      bindCoreChainEvents(contexts.of(CORE_CHAIN_EVENTS_ID), source);
     }
     await startDatabase(db, {
       plan,

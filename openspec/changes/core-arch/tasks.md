@@ -1855,8 +1855,49 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 11. Chain data
 
-- [ ] 11.1 `core-chain-events`, `core-block-parsed`, `core-tx-results`.
+- [x] 11.1 `core-chain-events`, `core-block-parsed`, `core-tx-results`.
       **Acceptance:** A91, A92, A93.
+      **Done (2026-10-26):** three core modules, off unless configured, each with its `block` item and an append-only
+      table range-partitioned by height (`design.md` §10), in the build's core list. **`core-chain-events`**
+      (`src/backbone/core-chain-events/`): at `on-fetch` the block's `System::Events` — read by the block source it is
+      bound to (`bindCoreChainEvents`; the node source's `blockEvents`: `state_getStorage` of `twox128(System) ++
+      twox128(Events)` at the block's own hash, a best block's without retries; the in-memory source has none) — decoded
+      with the `runtime-metadata` item, the runtime in the parent's state that wrote them, as `chain-events` (index,
+      phase, extrinsic index, pallet, name, fields, topics, the record's SCALE bytes) and one row per event, the fields
+      as canonical JSON (64-bit and wider integers as text). The metadata reader now keeps each pallet's storage
+      entries; every type of the registry is read (`scale-value.ts`); the encoding is pinned against `polkadot-sdk`
+      `stable2606` (`frame_system`'s `Events`, `EventRecord`, `Phase`) and `midnight-node` 2.1.0-rc.4.
+      **`core-block-parsed`**: at `on-parse` the transactions placed in the order of their chain events, each outcome
+      event matched to its extrinsic by phase, a system transaction's bytes from its
+      `MidnightSystem::SystemTransactionApplied`, block 0's in body order (`placement.ts`); a block whose events do not
+      account for each Midnight transaction exactly once is refused (Q132); each transaction parsed once through a
+      `TransactionParser` — in this thread with the block's ledger adapter until 12.3's ledger worker — and its kind
+      checked against the chain's, as `block-parsed` (`{ ledger, transactions }`: the ledger's `ParsedTransaction` and
+      the phase, extrinsic and event indices) and rows (hash, kind, size). **`core-tx-results`**: each outcome from the
+      event that placed it — `TxApplied` and `SystemTransactionApplied` `success`, `TxPartialSuccess` `partial`,
+      `ExtrinsicFailed` `failure`, block 0's `success` — as `tx-results`, the form `ApplyInput.outcomes` takes, and
+      rows. **The node source** (10.3's): a best block the finalized head reaches while it is being prepared is now
+      queued as it is and used, or dropped with `on-rollback`, at its height's take — before, it was dropped and fetched
+      and parsed again (found by A92's counted parses). Tests (seen failing against `76de1b1`'s sources: `tsc` 64 errors
+      — the eight new modules missing, no `blockEvents` —, 6 of 6 Vitest files):
+      `test/backbone/chain-events-decode.test.ts` (25: the key against XXH64 written in the test, storage entries, every
+      value kind and refusal, canonical JSON, a block's events with every phase, topics and bytes, an upgrade block
+      against both runtimes' metadata, the types found by name), `chain-events-source.test.ts` (3),
+      `chain-placement.test.ts` (19: the official indexer's cases, each divergence refused, outcomes, the parse),
+      `chain-data.test.ts` (14, through `startProcess` over the node source on PostgreSQL 18.6 and PGlite 0.5.10: A91's
+      range and upgrade, A92 with counted native parses — the system transaction between two regular ones, a queued best
+      block, block 0 —, A93), three `node-source.test.ts` cases (the queue's change and its order guard); synthetic
+      tapes (`chain-data-tapes.ts`, `events-fixtures.ts`) with real ledger v9 transactions. Committed negative controls
+      (`chain-data.negative-control.test.ts`, both backends): events decoded with the block's own state's metadata halt
+      at U; a parse counted twice and a body-order placement fail A92; outcomes matched by event order fail A93. A probe
+      decoded the official indexer's recorded devnet blocks (`System::Events` as the node served them) with the node's
+      metadata registries byte for byte, and placed their transactions as its golden summaries (the 26 genesis
+      transactions in body order included). Wrong variants (a scratch copy, outside the clone): 91, 84 caught; of the 7
+      survivors 5 gaps closed by tests seen failing on them, 1 redundant check removed, 1 equivalent (a copy of the
+      bytes before the parse: the item keeps the parsed array); on the final sources 47 of 48 rerun caught, the one
+      survivor that equivalent.
+      **Pending:** A91's real devnet upgrade tape and every criterion on real tapes (0.3); CD-5's parse in the ledger
+      worker (12.3); Q132 (owner).
 
 ## 12. Ledger
 

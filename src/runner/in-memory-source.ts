@@ -15,6 +15,7 @@
  * backbone runs on this source too. Its blocks have the runtime {@link IN_MEMORY_SPEC_VERSION}, the ledger
  * {@link IN_MEMORY_LEDGER}, the time {@link IN_MEMORY_START_MS} + height × 6,000 ms (6-second blocks), no extrinsics and
  * empty metadata, unless the options give a block's own (`items`). It decodes nothing: the `ledger-table` is not read.
+ * Its blocks have no chain events ({@link InMemoryBlockSource.blockEvents}: none, for `core-chain-events`, task 11.1).
  */
 
 import { createHash } from "node:crypto";
@@ -180,6 +181,11 @@ export class InMemoryBlockSource implements BlockSource {
       "runtime-metadata": Object.freeze({ specVersion, metadata: new Uint8Array(0) }),
       "ledger-version": own.ledger ?? IN_MEMORY_LEDGER,
     });
+  }
+
+  /** A block's chain events for `core-chain-events` (CD-4): none, as its blocks have no extrinsics. */
+  async blockEvents(_block: BlockRef): Promise<Uint8Array | null> {
+    return null;
   }
 
   /**

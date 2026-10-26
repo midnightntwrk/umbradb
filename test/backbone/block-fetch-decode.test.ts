@@ -171,7 +171,7 @@ describe("the runtime metadata V14 (state_getMetadata's answer)", () => {
     expect(() => readTypeRegistry(r([8, 0, 0, 0, 5, 3, 0, 0, 0, 0, 5, 3, 0]))).toThrow(/type id 0 given twice/);
   });
 
-  it("steps over storage entries of both kinds and refuses malformed ones", () => {
+  it("reads storage entries of both kinds and refuses malformed ones", () => {
     // Metadata with one pallet whose storage holds a plain and a map entry, built by hand around metadataOf's registry.
     const base = metadataOf([]);
     // The registry ends where the (empty) pallet list, one byte, starts; the tail is 4 bytes (the extrinsic type, the
@@ -186,7 +186,23 @@ describe("the runtime metadata V14 (state_getMetadata's answer)", () => {
     const plain = [0, ...compact(1)];
     const map = (hashers: number[]) => [1, ...compact(hashers.length), ...hashers, ...compact(1), ...compact(1)];
     const view = readRuntimeMetadata(build(storage([entry(0, plain), entry(1, map([0, 6]))])));
-    expect(view.pallets).toEqual([{ name: "Pool", index: 7, calls: null, event: null, error: null }]);
+    // Task 11.1 reads the entries (core-chain-events finds System::Events' type there); each is read whole.
+    expect(view.pallets).toEqual([
+      {
+        name: "Pool",
+        index: 7,
+        calls: null,
+        event: null,
+        error: null,
+        storage: {
+          prefix: "Pool",
+          entries: [
+            { name: "item", modifier: "optional", kind: "plain", value: 1 },
+            { name: "item", modifier: "default", kind: "map", hashers: ["Blake2_128", "Identity"], key: 1, value: 1 },
+          ],
+        },
+      },
+    ]);
     expect(() => readRuntimeMetadata(build(storage([entry(2, plain)])))).toThrow(/storage modifier 2/);
     expect(() => readRuntimeMetadata(build(storage([entry(0, [2, ...compact(1)])])))).toThrow(/storage entry type 2/);
     expect(() => readRuntimeMetadata(build(storage([entry(0, map([7]))])))).toThrow(/storage hasher 7/);

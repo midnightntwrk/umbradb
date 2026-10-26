@@ -46,6 +46,11 @@ export class ScaleReader {
     return new ScaleError(this.#what, this.#offset, why);
   }
 
+  /** A {@link ScaleError} at the byte `offset`, one read earlier. */
+  errorAt(offset: number, why: string): ScaleError {
+    return new ScaleError(this.#what, offset, why);
+  }
+
   /** The next `length` bytes, as a view of the input. */
   bytes(length: number): Uint8Array {
     if (length > this.remaining) {
