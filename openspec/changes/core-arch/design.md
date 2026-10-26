@@ -780,6 +780,21 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-key-registry` (private) | `core_key_registry.keys` | key_id | kind (text), key_bytes, arrived_height |
 | `core-private-source` (private) | `core_private_source.cursor` | id = 1 | height (null), hash (null), public_genesis_hash, public_start_height |
 
+**Storage helpers' tables (SH-1, SH-2; CORE-ARCH §4.11a, Q30).** A helper's table belongs to the module that calls the
+helper: a migration the module includes in its own `migrations` creates it in the module's schema, and the module writes
+it through its own handles only, so the rules above, §4's module rules, change capture and backups treat it as any other
+table of the module, and other modules may read it but not write it (DB-6). The cursor table
+(`src/helpers/cursor-table.ts`, task 6.1, from 0.9.5's Watermarks): `cursorTable({ schema, table })` gives
+`<schema>.<table> (key text PRIMARY KEY, value jsonb NOT NULL) WITH (fillfactor = 90)` — the key unique by bytes and
+read in DT-2's order by the component's `keyOrderTerm`, so the table names no collation (A138); the value under Q57's
+`CHECK`; the fill factor and the rule never to index `value` kept from 0.9.5, for heap-only updates — as
+`migration(id)`, whose SQL text never changes (it is in the module's checksum, DB-9); `write(w, key, value)` through the
+block write handle, one upsert, so the last write of a key wins, within a block too (SH-3's one write per key per block
+is the height-versioned table's); and `read(handle, key)` through any handle's `query`, `undefined` for a key never
+written (JSON `null` is a value). 0.9.5's `kind` column (SH-1 has one key) and `updated_at DEFAULT now()` (no wall-clock
+time, a non-immutable default) are gone; a value is written as JSON text by the database API's parameter mapping and
+read back by its lossless reader (DB-2), so integers beyond 2^53 stay exact.
+
 ## 11. Refusals and halts (IN-12)
 
 **Startup refuses** (state `refused`, live, not ready), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,

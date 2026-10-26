@@ -1059,8 +1059,49 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 6. Storage helpers
 
-- [ ] 6.1 Cursor table (refactored from `src/postgres/watermarks.ts`); P9 retargeted.
+- [x] 6.1 Cursor table (refactored from `src/postgres/watermarks.ts`); P9 retargeted.
       **Acceptance:** A59.
+      **Done (2026-10-26):** `src/helpers/cursor-table.ts` (design §1, §10, §12; SH-1; Q27, Q30): `cursorTable({ schema,
+      table })`, a library function — no module, no point, no connection or transaction of its own; the file imports
+      types only, which a test checks — giving a frozen value with the table's `schema` and `table`, `migration(id)` for
+      the module's own `migrations` (`CREATE TABLE "<schema>"."<table>" (key text PRIMARY KEY, value jsonb NOT NULL)
+      WITH (fillfactor = 90)`, a fixed text whose bytes and SHA-256 a test pins, since it is in each module's migration
+      checksum, DB-9), `write(w, key, value)` through the block write handle of `on-db-write` (one upsert: inside the
+      block's transaction, under the module's role; the last write wins) and `read(handle, key)` through any handle's
+      `query` (`undefined` for a key never written, JSON `null` a value). Schema and table are lowercase identifiers of
+      at most 63 bytes, quoted in the SQL, else a `TypeError`. From 0.9.5's Watermarks: last write wins, `fillfactor =
+      90` and no index on `value` kept; `kind` (SH-1 has one key) and `updated_at DEFAULT now()` (wall-clock time, a
+      non-immutable default) gone; values sent as JSON text by the API's parameter mapping (a `bigint` exact, so 0.9.5's
+      decimal-string convention is gone; `invalid-parameter`, nothing sent, for what JSON cannot hold) and held to Q57's
+      `CHECK` (a fraction or an integer beyond 64 bits fails the block, `23514`); the key a plain `text`: unique by
+      bytes, read in DT-2's byte order by the component, so the table names no collation (A138, Q69: the first
+      conformance run failed A138's boundary test while the table wrote `COLLATE "C"`). SH-3 is not the cursor table's
+      (SH-3 names the height-versioned table; SH-1 says the last write wins): a second write of a key in one block
+      replaces the first. Writing only from `on-db-write` is the module's obligation (Q46; a schema write handle has the
+      same shape). 0.9.5's `PgWatermarks`, `src/interfaces/watermarks.ts`, `003_watermarks.ts` and their tests are
+      unchanged, for the 0.9.5 code that still uses them (`saveAndAdvance`, the chain archive, the crash and soak tests,
+      `src/index.ts`), until 17.2. P9 retargeted as a copy: `test/helpers/cursor-table.property.test.ts` (A59 on
+      PostgreSQL 18.6 and PGlite 0.5.10, seed 20261026: 40 sequences of up to 10 blocks through the real block write
+      handles, some rolling back; 140 overwrites, 91 rewrites within a block, 69 rolled-back writes, 935 reads checked),
+      the old `test/postgres/watermarks.property.test.ts` kept on `PgWatermarks` until 17.2;
+      `test/helpers/cursor-table.test.ts` (the helper; on both backends the table as made — owner, columns, collation,
+      the key's index only, fill factor, the `CHECK` —, values, both refusals, SH-3 not shared, the role-and-transaction
+      check, another module's write refused `42501` while its read works, a kept handle `handle-closed`, digests per
+      block (DT-4), DT-2's byte order and the contents hash, SH-1's scenario through the finalized loop; with the cases
+      of 0.9.5's `watermarks.test.ts` that still apply); `test/helpers/cursor-harness.ts`. Seen failing first: `tsc`
+      exit 2 (the module missing, the implicit `any`s and the type tests), both suites failing to load (`Cannot find
+      module '../../src/helpers/cursor-table.js'`). Committed controls: a helper keeping each key's first write fails
+      A59 on both backends (at the first run, "expected { ref: null } to deeply equal false"); one writing on a
+      connection of its own (PostgreSQL: as the login, in another transaction, kept after its block rolled back) or in a
+      transaction of its own (PGlite: refused, `nested-call`) fails the role-and-transaction check. Wrong variants (a
+      scratch runner outside the clone): 39 of 41 caught; the 2 survivors are equivalent (the read taking the last row
+      of a unique key's one; the write sent through `query` instead of `execute`); the 10 table and migration variants
+      are caught again with the SQL pin left out. Design §10 says what was built; the module guide has "Cursor tables";
+      the `**/src/helpers/**` floor (95/90) is added. Question Q108 raised (not blocking).
+      **Pending:** `cursorTable` in `src/index.ts` (17.3); `PgWatermarks`, its interface, migration and two test files,
+      the `**/postgres/watermarks.ts` floor, its mutation target and the re-binding of W1/P9 in
+      `Formal/STORAGE_ALGEBRA.md` and `ROADMAP.md` (17.2, with Q108 for `test/postgres/watermarks.test.ts`); the
+      mutation target `src/helpers/cursor-table.ts` (17.2); the height-versioned table, A60 and A61 (6.2).
 - [ ] 6.2 Height-versioned table (refactored from `src/postgres/temporal-kv.ts`).
       **Acceptance:** A60, A61.
 

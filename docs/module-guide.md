@@ -110,6 +110,37 @@ change): `on-db-write`, inside the block's transaction, and `on-start-db`, at ev
 - **Await every statement before you return.** A statement you sent but did not await still runs, under your role, but
   its failure fails the block without telling you which statement it was.
 
+## Cursor tables
+
+A module that keeps one value per key — a cursor per wallet, per contract, per key id — can let the cursor-table helper
+define the table (SH-1 of the `core-arch` change, owner decision Q30). The helper is a library, not a module: the table
+is yours, in your schema, with your other tables.
+
+```ts
+const cursors = cursorTable({ schema: "my_module", table: "cursors" });
+
+// In the declaration:
+//   migrations: [cursors.migration("001"), …your later migrations],
+//   points: {
+//     async "on-db-write"(p, b, w) { await cursors.write(w, "wallet-1", { height: b.height }); },
+//     async "on-after-db-write"(p, b, read) { const cursor = await cursors.read(read, "wallet-1"); … },
+//   },
+```
+
+- **Include its migration once, and keep it.** `migration(id)` creates `my_module.cursors (key text PRIMARY KEY, value
+  jsonb NOT NULL)`; its SQL never changes, so its checksum stays valid. Change the table, if you must, in a later
+  migration of your own; never index `value`.
+- **Write in `on-db-write`, through its handle.** `write(w, key, value)` runs inside the block's transaction, under your
+  role: a block that fails takes its writes with it. Nothing stops a write through `on-start-db`'s handle, but such a
+  write is no block's change; keep to `on-db-write`.
+- **The last write of a key wins,** also within one block: there is no history. For a value as of a past height, use the
+  height-versioned table.
+- **Values are JSON, with stored numbers as integers** (see "Stored values and digests"): a fraction, or an integer
+  beyond the signed 64-bit range, fails the block. Integers beyond 2^53 are kept exactly: write and read them as
+  `bigint`. `null` is a value; `read` gives `undefined` for a key never written.
+- **Read through any handle.** `read(handle, key)` through a read handle sees the height it reads; through your block
+  write handle it sees the block's writes so far. Other modules may read your cursor table; only you write it.
+
 ## Reading through `db`
 
 A module that requires the `process` item `db` gets a read-only database: it offers `read` and nothing else (CD-1 and

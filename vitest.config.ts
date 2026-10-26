@@ -90,6 +90,8 @@ const CORE_ARCH = {
   // The test tape (task 9.1): not in the package, but the tests of ingest, faults and differentials stand on it, so it
   // is measured and held to §13's default like `src/**`.
   "**/tools/tape/**": { lines: 90, branches: 85, perFile: true },
+  // The storage helpers (§13: held above the default like determinism), added with the cursor table (task 6.1).
+  "**/src/helpers/**": { lines: 95, branches: 90, perFile: true },
   // The `deterministic_postgresql` component (task 2.2a, owner decision Q69), held above the default like determinism;
   // `UmbraError` moved into it (decision record Q79), and the `errors` floor moved with the class.
   "**/src/deterministic-postgresql/**": { lines: 95, branches: 90, perFile: true },
