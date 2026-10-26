@@ -8,9 +8,10 @@ import { type EntryRange, type ResolvedGraph, resolveGraph } from "../../src/mod
 import { validateDeclarations } from "../../src/modules/validation.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { FinalizedLoop, type LoopInput } from "../../src/runner/loop.js";
+import { blockFetchStandIn } from "../backbone/block-fetch-stand-in.js";
 import { startPgliteServer, type PgliteTestServer } from "../db/pglite-server.js";
 import { startPostgresServer, type PostgresTestServer } from "../db/postgres-server.js";
-import { CORE_BLOCK_FETCH, CORE_CHAIN, CORE_DIGEST } from "../modules/graph-fixtures.js";
+import { CORE_CHAIN, CORE_DIGEST } from "../modules/graph-fixtures.js";
 import { Contexts } from "./fixtures.js";
 
 /**
@@ -90,11 +91,12 @@ function pgliteRunner(): RunnerBackend {
 export const RUNNER_BACKENDS: readonly RunnerBackend[] = [postgresRunner(), pgliteRunner()];
 
 /**
- * The test backbone (`test/modules/graph-fixtures.ts`) with the real cursor table, `core-block-commit`
- * (`src/backbone/core-block-commit/`): `core-chain`, `core-block-fetch` (its block items, no points), the cursor table
- * and `core-digest` (its schema, no points), in RN-3's fixed order.
+ * The test backbone (`test/modules/graph-fixtures.ts`) with the real blocks table, `core-block-commit`
+ * (`src/backbone/core-block-commit/`): `core-chain` (its items, no points), the stand-in `core-block-fetch` of
+ * `test/backbone/block-fetch-stand-in.ts` (task 10.2: it puts the `block-header` and `ledger-version` items the blocks
+ * table's row needs), the blocks table and `core-digest` (its schema, no points), in RN-3's fixed order.
  */
-export const LOOP_BACKBONE: readonly ModuleDeclaration[] = [CORE_CHAIN, CORE_BLOCK_FETCH, CORE_BLOCK_COMMIT, CORE_DIGEST];
+export const LOOP_BACKBONE: readonly ModuleDeclaration[] = [CORE_CHAIN, blockFetchStandIn(), CORE_BLOCK_COMMIT, CORE_DIGEST];
 
 /** A database started as the runner starts one, and what the loop is given. */
 export interface Started {

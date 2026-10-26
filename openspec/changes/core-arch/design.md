@@ -89,11 +89,15 @@ build's declarations, the configuration (a file, CF-1, or its data) and a block 
 starts up: the declarations validated, the configuration loaded and validated, the `core` entry's operational and
 secret fields taken from its latest revision of the build's version for the whole run (Q102: the database, the node —
 a block source given as a function is made from that revision —, `listen.api`, the timeouts, the opt-in, the core's
-stop), the database opened and its writer started, the cursor and the history read in one read and checked
-(`checkHistory`), the facts handed to the backbone (`onChecked`, until task 10.2 builds `core-chain`), the graph, the
-schema plan, the contexts with each part's revisions (a module's from its entries with their effective stops; every
-backbone part's the `core` entry's, each one's data fields with the process revision's other fields), `startDatabase`,
-the seal, `startModuleApi`, then the loop. A refusal closes what startup opened and rejects `started`. The loop fires
+stop), the database opened and its writer started, the cursor, the history and the chain's identity read in one read
+and the history checked (`checkHistory`), `core-chain`'s startup checks against the node through the block source
+(`checkChain`, task 10.2: `genesis-mismatch`, a wait with `waiting-for-node` while the head is below the cursor,
+`cursor-hash-mismatch`; before any migration), the graph, the schema plan, the contexts with each part's revisions (a
+module's from its entries with their effective stops; every backbone part's the `core` entry's, each one's data fields
+with the process revision's other fields), `core-chain` bound to its context with what startup checked and opened
+(`bindCoreChain`), `startDatabase`, the seal, on a database without a cursor the bootstrap's wait while S is above the
+head (`waiting-for-node`, still `starting`, IN-2), `startModuleApi`, then the loop. A refusal closes what startup
+opened and rejects `started`. The loop fires
 `on-start-height` between `on-parse` and `on-compute` for the core's parts at S and the modules a segment of which
 (revisions continuing each other are one) starts at h, each with a read at h − 1, and `on-stop-height` after
 `on-after-db-write` for the modules a segment of which ends at h, in reverse order, then the core's parts at its stop,
@@ -104,8 +108,8 @@ module API still answering, with `upgrade-required` (entry, needed, build) at a 
 then `syncing` or `following` by the lag (the head the loop last read minus the cursor) against `followingThreshold`,
 `stopped`, `stopping`; ready when `following` or `stopped`, or `syncing` within a set `readinessLag` (`refused` and
 `halted` below). SIGTERM (`terminationSignal`) or `stop()`: `stopping`, the loop's signal aborted and the
-loop awaited — the height in progress, its transaction included, finishes —, then the module API and the database
-closed. Log lines go through the configuration's redaction.
+loop awaited — the height in progress, its transaction included, finishes —, then the module API, `core-chain`'s node
+client and the database closed. Log lines go through the configuration's redaction.
 
 **Failures** (task 5.4: `src/runner/failures.ts`, `process.ts`). A startup refusal leaves the process up in `refused`
 (IN-12, AE-3), its database closed and its writer lock released; a failure of the loop leaves it up in `halted` (RN-8)
@@ -141,18 +145,31 @@ interface BlockSource {
   finalized prefetch keeps at most `prefetchWindow` parsed blocks above the cursor (a `Map` keyed by height, filled by
   a bounded pool); the best-block queue is an array of parsed blocks above the finalized head, with the common-ancestor
   walk of IN-6 over `chain_getHeader` of parents. Queue-side callbacks get no database handle.
-- **`InMemoryBlockSource`** (exported) keeps blocks in memory, for tests and module authors, with the same
-  `core-block-commit` cursor table (`src/runner/in-memory-source.ts`, task 5.2): a finalized head that only rises
+- **`InMemoryBlockSource`** (exported) keeps blocks in memory, for tests and module authors, with the same cursor,
+  `core-block-commit`'s blocks table (`src/runner/in-memory-source.ts`, task 5.2): a finalized head that only rises
   (`finalize`), the blocks it was given or else a default chain whose hashes link (`inMemoryBlock`: SHA-256 of
   `umbradb in-memory block <h>`, block 0's parent 32 zero bytes), and `waiting(above)`, which tells a test that a runner
   has processed everything up to `above` and waits. It holds no queue: `on-best-block` and `on-rollback` are the node
-  source's (IN-6), and so are IN-4's parent-hash and finality checks.
-- **The cursor table** is `core-block-commit`'s `core_block_commit.blocks` (`src/backbone/core-block-commit/`, task
-  5.2: height, hash, parent hash; task 10.2 adds §10's other columns, `hashes` and `duplicate-block-hash`). The part
-  writes the block's row from the block context first in every block (CD-3), so the cursor is inside the block's
-  transaction; `readCursor` reads the highest row through a read or the block's transaction (none before the table
-  exists), each source's `cursor` is it, and the database API's committed height is its height (`cursorHeight`), so a
-  read's height and its snapshot are one.
+  source's (IN-6), and so is IN-4's finality check; IN-4's parent check is `core-block-commit`'s, for every source.
+- **The cursor (the blocks table)** is the last row of `core-block-commit`'s `core_block_commit.blocks`
+  (`src/backbone/core-block-commit/`, tasks 5.2 and 10.2; §10's columns, range-partitioned by height). The part writes
+  the block's row first in every block (CD-3) — from the block context and the `block` items `block-header` (spec
+  version, the block's own time in milliseconds, converted to `block_time` exactly by PostgreSQL's integer interval
+  input, never through a float, Q74) and `ledger-version` —, so the cursor is inside the block's transaction; then the
+  hash's row in the unpartitioned `core_block_commit.hashes`, whose primary key fails a repeated hash with
+  `duplicate-block-hash`; then IN-4's parent check against the block stored at h − 1 (`parent-mismatch`; the anchor S
+  has none), after the duplicate so that an earlier block delivered again is named for what it is. `readCursor` reads
+  the highest row through a read or the block's transaction (none before the table exists), each source's `cursor` is
+  it, and the database API's committed height is its height (`cursorHeight`), so a read's height and its snapshot are
+  one. (The cursor-table helper of SH-1, `cursorTable`, is another thing.)
+- **`core-chain`** (`src/backbone/core-chain/`, task 10.2) asks the block source — the node, through `core-block-fetch`
+  (task 10.3), or the in-memory source — for what IN-2 and IN-3 ask of the node: the genesis hash (block 0's), the
+  finalized head (`finalizedHead`, `waitForHead`) and the finalized hash at the cursor (`block`). Its declaration is a
+  constant (`CORE_CHAIN`); the runner binds it to its process context with what startup checked and opened
+  (`bindCoreChain`), and its `on-start-db` records the history and, before block S commits, the genesis hash and S, and
+  publishes `config`, `node-client` (a `NodeClient` from the process's `node`, closed at stop), `db`
+  (`readOnlyDatabase`) and `ledger-table` (no rows or pins until tasks 12.x); its `on-db-write` records the anchor
+  hash in block S's transaction.
 - **The finalized loop** (`src/runner/loop.ts`, task 5.2) processes every height from cursor + 1 (S on a new database)
   to the source's finalized head, then waits (`waitForHead`) with no read or transaction open (RN-6, RN-14). Per new
   head it calls `on-finalized` once, before the head's heights, for the modules active at the first of them, each
@@ -859,10 +876,10 @@ per-block tables are append-only and partitioned by height range; no table store
 
 | Owner | Table | Primary key | Other columns |
 |---|---|---|---|
-| `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits) |
+| `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits; recorded in block S's transaction) — migration `002`; genesis hash and S recorded at every start until S commits (IN-2) |
 | `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`, a `CHECK`), version (text), data (jsonb, canonical; null for a scheduled revision, CF-3), data_hash (32 bytes; null with data, a `CHECK`) |
 | database API | `core_chain.migrations` | (module, migration_id) | checksum (SHA-256 of the UTF-8 SQL), position (int, from 1; unique per module) |
-| `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_time (`timestamptz`, converted exactly from the node's milliseconds, Q74) |
+| `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_time (`timestamptz`, converted exactly from the node's milliseconds by PostgreSQL's integer interval input, never through a float, Q74) — range-partitioned by height as 0.9.5's `chain_archive` store was: 1,000,000 heights per partition, five from 0 and a default (`src/backbone/height-partitions.ts`, task 10.2) |
 | `core-block-commit` | `core_block_commit.hashes` (not partitioned) | hash | height — makes a repeated hash fail, which the height-partitioned `blocks` table cannot enforce |
 | `core-digest` | `core_digest.tables` | (schema, table) | height, digest (DT-5) |
 | `core-digest` | `core_digest.checkpoints` | (height, schema, table) | digest — at every height h with h mod 14,400 = 0 |

@@ -26,6 +26,9 @@ tables and for anything UmbraDB itself represents (owner decisions Q68 and Q74 o
   machine a different value, and startup refuses it (`non-deterministic-column`).
 - **`bigint` is allowed** for a time as a number, for example milliseconds since 1970, the form the node gives block
   times in. Present it as `timestamptz` text where people read it.
+- **A block's own time is in the blocks table.** `core_block_commit.blocks.block_time`, a `timestamptz`, holds each
+  committed block's time, converted exactly from the node's milliseconds. Require the item `blocks` and read it there
+  (`SELECT block_time FROM core_block_commit.blocks WHERE height = $1`) rather than keeping a copy.
 - **A time in `text` is allowed, but it is not good practice.** Nothing checks its form, two spellings of one instant
   (`2025-05-21T14:30:00Z` and `2025-05-21T16:30:00+02:00`) hash and compare as different values, and it sorts as text,
   not by time.
@@ -324,6 +327,9 @@ RN-16 of the `core-arch` change).
   another provider of it: one value per item for the whole process), and when called anywhere but your own
   `on-start-db` — a later point, a timer, another module's callback. Such a call fails your callback even if you catch
   the error, so startup refuses, or processing stops at the block in progress.
+- **UmbraDB's own process items** come from the backbone part `core-chain`: `config` (the validated configuration),
+  `node-client` (the node client, on a process that has a node), `db` (the database, for reads only: see "Reading
+  through `db`") and `ledger-table` (the ledger version table; empty until the ledger's tasks fill it).
 - **Read it from `on-start-api` on.** `p.items` holds the published items your module requires or provides; it is
   empty during `on-start-db`, so no setup depends on the order of other modules' setups. If an item a running module
   requires was not published once every `on-start-db` has run, startup refuses with `process-item-missing`, naming the

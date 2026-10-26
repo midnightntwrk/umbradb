@@ -112,7 +112,6 @@ async function a42Run(db: ProcessDatabase, loop?: new (input: LoopInput) => Fina
       declarations: build.declarations,
       config: { data: { entries } },
       source,
-      onChecked: build.onChecked,
       log: () => undefined,
       ...(loop === undefined ? {} : { loop }),
     });

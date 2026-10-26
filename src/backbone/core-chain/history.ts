@@ -3,9 +3,8 @@
  * CF-5 to CF-8; `design.md` §7, §10; CORE-ARCH §4.12): the table, created by `core-chain`'s migration as the writer's
  * login (`core_chain` is a reserved schema, one of UmbraDB's own parts', DB-8, task 2.4's note (i)); reading its rows;
  * and recording a startup's configuration in it. What is compared and recorded is `src/config/history.ts`'s
- * (`checkHistory`); the backbone part `core-chain` itself — its declaration, its other tables and its `on-start-db` —
- * is task 10.2's, which lists {@link CORE_CHAIN_MIGRATIONS} first among its migrations and calls {@link recordHistory}
- * in its `on-start-db`.
+ * (`checkHistory`); the backbone part `core-chain` itself (`./core-chain.ts`, task 10.2) lists {@link CONFIG_MIGRATION}
+ * first among its migrations and calls {@link recordHistory} in its `on-start-db`.
  *
  * **The table** (`design.md` §10): `(entry_id, start)` the key; `stop` null when absent and always for `core` (a
  * `CHECK`: its stop is operational, CF-4); `version` text, a module's semver or the core version's canonical JSON;
@@ -32,13 +31,13 @@ import type { ReadHandle, Transaction } from "../../db/api.js";
 import { keyOrderTerm } from "../../deterministic-postgresql/index.js";
 
 /**
- * `core-chain`'s migrations (DB-9): applied once, in order, recorded under `core-chain`; never changed (each checksum
- * is fixed by the databases that applied it). Task 10.2 adds its other tables as later migrations.
+ * `core-chain`'s migration `001` (DB-9), the history's table: applied once, recorded under `core-chain`; never changed
+ * (its checksum is fixed by the databases that applied it). The part's other migrations follow it
+ * (`CORE_CHAIN_MIGRATIONS`, `./core-chain.ts`).
  */
-export const CORE_CHAIN_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  {
-    id: "001",
-    sql: `CREATE TABLE core_chain.config (
+export const CONFIG_MIGRATION: { readonly id: string; readonly sql: string } = Object.freeze({
+  id: "001",
+  sql: `CREATE TABLE core_chain.config (
   entry_id text NOT NULL,
   start bigint NOT NULL CHECK (start >= 0),
   stop bigint CHECK (stop >= start),
@@ -49,8 +48,7 @@ export const CORE_CHAIN_MIGRATIONS: readonly { readonly id: string; readonly sql
   CHECK ((data IS NULL AND data_hash IS NULL) OR (data IS NOT NULL AND octet_length(data_hash) = 32)),
   CHECK (entry_id <> 'core' OR stop IS NULL)
 );`,
-  },
-]);
+});
 
 const PRESENT_SQL = "SELECT to_regclass('core_chain.config') IS NOT NULL AS present";
 

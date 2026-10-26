@@ -139,7 +139,7 @@ async function a48Run(backend: ProcessBackend, mode: Job["mode"]): Promise<A48Ob
     const seen: WorkEvent[] = [];
     const build = testBuild([workModule({ rows: ROWS, report: (event) => seen.push(event) })]);
     const source = new InMemoryBlockSource({ head: BigInt(HEAD) });
-    const handle = startProcess({ declarations: build.declarations, config: { file: configFile }, source, onChecked: build.onChecked, log: () => undefined });
+    const handle = startProcess({ declarations: build.declarations, config: { file: configFile }, source, log: () => undefined });
     try {
       expect(await settle(handle, source, BigInt(HEAD))).toBe("waiting");
     } finally {

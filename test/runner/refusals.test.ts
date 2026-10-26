@@ -37,7 +37,6 @@ async function startOn(
       },
     },
     source,
-    onChecked: build.onChecked,
     log: (line) => lines.push(line),
   });
   await handle.started.catch(() => undefined);

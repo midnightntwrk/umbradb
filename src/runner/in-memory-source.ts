@@ -3,11 +3,11 @@
  * block-source interface over blocks held in memory, for tests and module authors. Its finalized head only rises
  * ({@link InMemoryBlockSource.finalize}), as a node's does; the block at each height up to it is the one it was given,
  * or else {@link inMemoryBlock}'s, a chain whose hashes link; {@link InMemoryBlockSource.waitForHead} waits for the
- * head to pass a height; and its cursor is the cursor table's, read through the read it is given
+ * head to pass a height; and its cursor is the blocks table's last row, read through the read it is given
  * (`core-block-commit`, `src/backbone/core-block-commit/`), the same table the node-backed source reads.
  *
  * It holds no queue and no best blocks: `on-best-block` and `on-rollback` are the node-backed source's (IN-6, task 10.3),
- * and so are the parent-hash and finality checks of IN-4.
+ * and so is IN-4's finality check; IN-4's parent check is `core-block-commit`'s, for every source (task 10.2).
  */
 
 import { createHash } from "node:crypto";

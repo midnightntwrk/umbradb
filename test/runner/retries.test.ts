@@ -59,7 +59,6 @@ function start(
     declarations: build.declarations,
     config: { data: { entries: [core(db.setting, 1, { extra }), ...user.map((part) => entryOf(part, 1))] } },
     source,
-    onChecked: build.onChecked,
     log: (line) => lines.push(line),
   });
   return { handle, lines };

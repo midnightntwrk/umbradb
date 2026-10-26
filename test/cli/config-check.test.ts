@@ -442,7 +442,7 @@ describe("modules: the build's, or a host program's", () => {
 
   it("the build's modules are its backbone parts with declarations, validated", () => {
     const build = buildDeclarations();
-    expect(build.backbone.map((part) => part.id)).toEqual(["core-block-commit", "core-digest"]);
+    expect(build.backbone.map((part) => part.id)).toEqual(["core-chain", "core-block-commit", "core-digest"]);
     expect(build.core).toEqual([]);
     expect(Object.isFrozen(build)).toBe(true);
   });

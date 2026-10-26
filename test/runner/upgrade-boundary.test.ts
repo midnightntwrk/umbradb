@@ -98,7 +98,6 @@ async function phase(
     declarations: build.declarations,
     config: { data: { entries } },
     source,
-    onChecked: build.onChecked,
     log: () => undefined,
     ...(controls.loop === undefined ? {} : { loop: controls.loop }),
   });

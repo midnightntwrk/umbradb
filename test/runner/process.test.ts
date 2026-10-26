@@ -94,7 +94,6 @@ async function a149Run(
         sourceNode = entry.settings?.node;
         return source;
       },
-      onChecked: build.onChecked,
       log: () => undefined,
       ...(processCore === undefined ? {} : { processCore }),
     });
@@ -170,7 +169,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         declarations: build.declarations,
         config: { data: { entries: a149Entries(earlier.setting, later.setting, devtool, { apiReadTimeoutMs: 0 }) } },
         source: new InMemoryBlockSource({ head: 5n }),
-        onChecked: build.onChecked,
         log: () => undefined,
       });
       const refusal = await handle.started.then(() => undefined, (error: unknown) => error);
@@ -215,7 +213,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         writeFileSync(file, `export default ${JSON.stringify({ entries })};\n`);
         const build = testBuild([]);
         const source = new InMemoryBlockSource({ head: 2n });
-        const handle = startProcess({ declarations: build.declarations, config: { file }, source, onChecked: build.onChecked, log: () => undefined });
+        const handle = startProcess({ declarations: build.declarations, config: { file }, source, log: () => undefined });
         expect(await settle(handle, source, 2n)).toBe("waiting");
         const started = await handle.started;
         expect(started.api?.host).toBe("127.0.0.1");
@@ -261,7 +259,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
             },
           },
           source,
-          onChecked: build.onChecked,
           log: () => undefined,
         });
         try {
@@ -287,7 +284,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
           declarations: build.declarations,
           config: { data: { entries: [core(db.setting)] } },
           source,
-          onChecked: build.onChecked,
           log: (line) => lines.push(line),
         });
         try {
@@ -317,7 +313,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
           declarations: build.declarations,
           config: { data: { entries: [core(db.setting), entryOf(setup, 1)] } },
           source,
-          onChecked: build.onChecked,
           log: () => undefined,
         });
         try {
@@ -343,7 +338,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting), entryOf(failing, 1)] } },
         source: new InMemoryBlockSource({ head: 2n }),
-        onChecked: build.onChecked,
         log: () => undefined,
       });
       await expect(refused.started).rejects.toMatchObject({ name: "CallbackFailure", point: "on-start-api", module: "failing" });
@@ -357,7 +351,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         declarations: next.declarations,
         config: { data: { entries: [core(db.setting), entryOf(quiet, 1)] } },
         source,
-        onChecked: next.onChecked,
         log: () => undefined,
       });
       expect(await settle(handle, source, 2n)).toBe("waiting");
@@ -384,7 +377,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting, 1, { extra: { listen: { api: "127.0.0.1:0" } } }), entryOf(leaky, 1)] } },
         source,
-        onChecked: build.onChecked,
         log: (line) => lines.push(line),
       });
       try {
@@ -440,7 +432,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting, 1, { extra: { followingThreshold: 3, readinessLag: 5 } }), entryOf(slow, 1)] } },
         source,
-        onChecked: build.onChecked,
         log: () => undefined,
       });
       expect(handle.status()).toMatchObject({ state: "starting", ready: false, cursor: null, head: null, lag: null });
@@ -471,7 +462,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting)] } },
         source: new InMemoryBlockSource({ head: 2n }),
-        onChecked: build.onChecked,
         signal: controller.signal,
         log: () => undefined,
       });
@@ -486,7 +476,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting)] } },
         source,
-        onChecked: build.onChecked,
         signal: later.signal,
         log: () => undefined,
       });
@@ -500,7 +489,6 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting)] } },
         source,
-        onChecked: build.onChecked,
         log: () => undefined,
       });
       expect(await settle(next, source, 2n)).toBe("waiting");
@@ -715,7 +703,6 @@ describe("startProcess without a database", () => {
       declarations: build.declarations,
       config: { data: { entries: [core("pglite:memory"), entryOf(throwing, 1)] } },
       source: new InMemoryBlockSource({ head: 1n }),
-      onChecked: build.onChecked,
       log: (line) => lines.push(line),
     });
     // A failing on-start-db names its point and module (task 5.4), its cause the value thrown.
@@ -785,7 +772,6 @@ describe("startProcess without a database", () => {
       declarations: build.declarations,
       config: { data: { entries: [core("pglite:memory")] } },
       source: failing,
-      onChecked: build.onChecked,
       log: () => undefined,
     });
     await expect(handle.started).rejects.toThrow("the source cannot read the cursor");

@@ -54,7 +54,6 @@ const handle = startProcess({
   declarations: build.declarations,
   config: { file: job.configFile },
   source: new InMemoryBlockSource({ head: BigInt(job.head) }),
-  onChecked: build.onChecked,
   ...(termination === undefined ? {} : { signal: termination.signal }),
   log: (line) => report({ event: "log", line }),
 });

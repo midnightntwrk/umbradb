@@ -13,19 +13,30 @@
  *    this revision when given as a function —, `listen.api`, the timeouts, the development opt-in, the core's stop;
  * 4. the database that revision names opened (`openConfiguredDatabase`, CF-9: PGlite refuses without its opt-in), its
  *    writer started (`startWriter`: the lock, the durability probe, whose warnings are logged);
- * 5. the cursor (the block source's, RN-14) and the configuration history (`readHistory`) read in one read, and the
- *    history checked against the configuration (`checkHistory`, CF-5, CF-6, CF-8: every refusal before any
- *    migration); the facts handed to {@link ProcessInput.onChecked};
- * 6. the graph resolved from the check (`resolveGraph`, `graphInputOf`), the schema plan, the process contexts with each
- *    part's revisions ({@link processRevisions}), the migrations and `on-start-db` (`startDatabase`, through each
- *    context's publishing window; a failing `on-start-db` names its point and module, a `CallbackFailure` as a failing
- *    `on-start-api`'s), the seal (`process-item-missing`), `on-start-api` and the module API on `listen.api`
- *    (`startModuleApi`);
- * 7. the finalized loop, with the core's stop and RN-12's upgrade boundary ({@link upgradeBoundary}).
- * A refusal closes what startup opened — the database, its writer lock released — and rejects
- * {@link ProcessHandle.started} with it; the process stays up, `refused` with the refusal's reason, until stopped
- * (IN-12, AE-3). A retryable failure of steps 4 to 6 (`connection-lost`, `node-unreachable`) refuses nothing: steps 4 to
- * 7 run again after IN-10's back-off (see **Retries**).
+ * 5. the cursor (the block source's, RN-14), the configuration history (`readHistory`) and the chain's identity
+ *    (`readIdentity`) read in one read, and the history checked against the configuration (`checkHistory`, CF-5,
+ *    CF-6, CF-8: every refusal before any migration);
+ * 6. `core-chain`'s startup checks against the node, through the block source (`checkChain`, IN-3, task 10.2): its
+ *    genesis hash, and on a database with a cursor the stored genesis hash (`genesis-mismatch`), a wait while the
+ *    node's finalized head is below the cursor (the condition `waiting-for-node`), and the node's hash at the cursor
+ *    (`cursor-hash-mismatch`) — also before any migration;
+ * 7. the graph resolved from the check (`resolveGraph`, `graphInputOf`), the schema plan, the process contexts with each
+ *    part's revisions ({@link processRevisions}), `core-chain` bound to its context with what startup checked and
+ *    opened (`bindCoreChain`: the configuration, the declarations, the cursor, the database, S, the genesis hash, the
+ *    node client's options), the migrations and `on-start-db` (`startDatabase`, through each context's publishing
+ *    window — `core-chain`'s records the history and the identity and publishes its `process` items —; a failing
+ *    `on-start-db` names its point and module, a `CallbackFailure` as a failing `on-start-api`'s), the seal
+ *    (`process-item-missing`);
+ * 8. on a database without a cursor, the bootstrap's wait while S is above the node's finalized head (`waitForNode`,
+ *    IN-2: still `starting`, with the condition `waiting-for-node`), every bootstrap step having run;
+ * 9. `on-start-api` and the module API on `listen.api` (`startModuleApi`);
+ * 10. the finalized loop, with the core's stop and RN-12's upgrade boundary ({@link upgradeBoundary}).
+ * A refusal closes what startup opened — `core-chain`'s node client, the database, its writer lock released — and
+ * rejects {@link ProcessHandle.started} with it; the process stays up, `refused` with the refusal's reason, until
+ * stopped (IN-12, AE-3). A retryable failure of steps 4 to 8 (`connection-lost`, `node-unreachable`) refuses nothing:
+ * steps 4 to 10 run again after IN-10's back-off (see **Retries**), with new process contexts and a new binding of
+ * `core-chain` (the earlier one's node client closed). The waits come before the module API, so a retry never meets it
+ * open.
  *
  * **The state** ({@link ProcessStatus}, CORE-ARCH §4.18, AE-3): `starting` until the loop runs; `refused` when startup
  * refused; then `syncing` or `following` by the lag — the finalized head the loop last read minus the cursor — against
@@ -36,7 +47,9 @@
  * cursor and the database open until stopped; `stopping` from {@link ProcessHandle.stop} on. `refused` and `halted`
  * carry their reason ({@link ProcessReason}: §11's code, the height, the module and the point; `./failures.ts`). Ready
  * (`/health/ready`, AE-4) when `following` or `stopped`, or `syncing` unless a set `readinessLag` is exceeded; never
- * `starting`, `refused`, `halted` or `stopping`. The admin endpoints that show all this are tasks 8.1–8.3.
+ * `starting`, `refused`, `halted` or `stopping`. While startup waits for the node (steps 6 and 8) the process is
+ * `starting` with the condition `waiting-for-node`, beside a retry's condition when one is raised. The admin endpoints
+ * that show all this are tasks 8.1–8.3.
  *
  * **Retries** (IN-10, CORE-ARCH §4.6): a lost database connection (`connection-lost`) or an unreachable node
  * (`node-unreachable`) — the two retryable codes, wherever startup's later steps or the loop meet them — never halts or
@@ -51,8 +64,8 @@
  * **SIGTERM** (RN-13): {@link terminationSignal} gives the signal SIGTERM aborts; aborting
  * {@link ProcessInput.signal}, or calling {@link ProcessHandle.stop}, enters `stopping`, aborts the loop's signal — the
  * loop finishes the height in progress, so a block whose transaction is open commits, and starts no other —, awaits
- * it, then closes the module API (WebSocket clients get 1001, every connection ends) and the database. During startup
- * it stops before the next step.
+ * it, then closes the module API (WebSocket clients get 1001, every connection ends), `core-chain`'s node client and the
+ * database. During startup it stops before the next step, and ends a wait for the node at once.
  *
  * **Logs** go through the configuration's redaction (`configRedactor`, CF-4, AE-6) once it is validated; before that,
  * a refusal is logged by its code only, since nothing yet knows which strings are secret. A refusal, a halt and each
@@ -61,7 +74,19 @@
  */
 
 import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
-import { readHistory } from "../backbone/core-chain/history.js";
+import {
+  bindCoreChain,
+  type ChainCheck,
+  type ChainCheckInput,
+  checkChain,
+  CORE_CHAIN_ID,
+  type CoreChainBinding,
+  type NodeWait,
+  nodeOptionsOf,
+  readHistory,
+  readIdentity,
+  waitForNode,
+} from "../backbone/core-chain/index.js";
 import { buildCoreVersion, type CoreVersion } from "../config/build.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import { openConfiguredDatabase } from "../config/database.js";
@@ -93,25 +118,12 @@ import { ProcessContexts } from "./process-context.js";
  */
 export type ProcessConfig = LoadOptions | { readonly data: unknown; readonly file?: string };
 
-/** What startup has checked when it hands the facts on (see {@link ProcessInput.onChecked}). */
-export interface StartupFacts {
-  /** The validated configuration. */
-  readonly config: CheckedConfig;
-  /** The build's validated declarations. */
-  readonly declarations: DeclarationSet<ModuleDeclaration>;
-  /** The cursor: the last committed block, null on a new database. */
-  readonly cursor: BlockRef | null;
-  /** The history's check at the cursor (`checkHistory`). */
-  readonly check: HistoryCheck;
-  /** The database, opened and its writer started. */
-  readonly db: Database;
-}
-
 /** What {@link startProcess} takes. */
 export interface ProcessInput {
   /**
-   * The build's declarations, not yet validated: UmbraDB's backbone parts, its core modules, the host's user modules.
-   * Until tasks 10.2 and 10.3 build `core-chain` and `core-block-fetch`, the backbone is the caller's.
+   * The build's declarations, not yet validated: UmbraDB's backbone parts — `core-chain` (`CORE_CHAIN`, which startup
+   * binds to its process context, task 10.2) among them; until task 10.3 builds `core-block-fetch`, the caller's
+   * stand-in —, its core modules, the host's user modules.
    */
   readonly declarations: DeclarationSet;
   /** The configuration; `umbradb.config.ts` in the working directory when absent (CF-1). */
@@ -127,12 +139,8 @@ export interface ProcessInput {
   readonly signal?: AbortSignal;
   /** Where each log line goes, redacted (see the module comment); standard error when absent. */
   readonly log?: (line: string) => void;
-  /**
-   * Told what startup checked, after the history's check and before the migrations: the hand-over to the backbone parts
-   * that need it — `core-chain`'s `on-start-db` records the history with it (`recordHistory`, CF-6) and publishes the
-   * database read-only — until task 10.2 builds `core-chain` with the runner.
-   */
-  readonly onChecked?: (facts: StartupFacts) => void;
+  /** The negative controls' startup checks against the node; `core-chain`'s `checkChain` (IN-3) unless given. */
+  readonly checkChain?: (input: ChainCheckInput) => Promise<ChainCheck>;
   /** The negative controls' loop; the finalized loop unless given. */
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
   /** The negative controls' choice of the process's `core` revision; `processCoreEntry` (Q102) unless given. */
@@ -172,8 +180,16 @@ export interface RetryCondition {
   readonly height: bigint | null;
 }
 
+/**
+ * The condition `waiting-for-node` (IN-2, IN-3; task 10.2): startup waits, `starting`, for the node's finalized head to
+ * reach `height` — S on a new database, the cursor on one with a cursor —; `head` is the node's head when it began.
+ */
+export interface WaitingCondition extends NodeWait {
+  readonly code: "waiting-for-node";
+}
+
 /** The process's conditions (AE-3); `slow-block` is task 5.5's, the others' their tasks'. */
-export type ProcessCondition = UpgradeCondition | RetryCondition;
+export type ProcessCondition = UpgradeCondition | RetryCondition | WaitingCondition;
 
 /** How processing ended. */
 export type ProcessingEnd =
@@ -421,6 +437,7 @@ class Process implements ProcessHandle {
   #attempts = 0;
   #db: Database | undefined;
   #api: StartedModuleApi | undefined;
+  #chain: CoreChainBinding | undefined;
 
   constructor(input: ProcessInput) {
     this.#input = input;
@@ -465,6 +482,7 @@ class Process implements ProcessHandle {
     try {
       await this.#api?.close();
     } finally {
+      await this.#chain?.close();
       await this.#db?.close();
       this.#resolveClosed();
     }
@@ -478,6 +496,12 @@ class Process implements ProcessHandle {
   /** Throws the stop's reason when the process is stopping: startup's steps end there. */
   #step(): void {
     this.#stop.signal.throwIfAborted();
+  }
+
+  /** The condition `waiting-for-node` while startup waits for the node (`wait`), removed when the wait ends (null). */
+  #waiting(wait: NodeWait | null): void {
+    this.#conditions = this.#conditions.filter((condition) => condition.code !== "waiting-for-node");
+    if (wait !== null) this.#conditions.push(Object.freeze({ code: "waiting-for-node", ...wait }));
   }
 
   /** Startup (see the module comment); on a refusal or a stop, closes what it opened and rejects. */
@@ -517,6 +541,7 @@ class Process implements ProcessHandle {
         this.#log(`startup refused: ${code}${this.#redactor === undefined ? "" : `: ${messageOf(error)}`}`);
       }
       // The module API opens in the last step, after which only a stop throws: the stop closes it.
+      await this.#chain?.close();
       await this.#db?.close();
       throw error;
     }
@@ -529,17 +554,39 @@ class Process implements ProcessHandle {
     const { durabilityWarnings } = await startWriter(db);
     for (const warning of durabilityWarnings) this.#log(`durability: ${warning.message}`);
     this.#step();
-    const { cursor, history } = await db.read(async (read) => ({
+    const { cursor, history, identity } = await db.read(async (read) => ({
       cursor: await source.cursor(read),
       history: await readHistory(read),
+      identity: await readIdentity(read),
     }));
     this.#step();
     this.#cursor = cursor?.height ?? null;
     const check = checkHistory({ config: checked, cursor: this.#cursor, declarations, history });
-    input.onChecked?.(Object.freeze({ config: checked, declarations, cursor, check, db }));
+    const waiting = (wait: NodeWait | null): void => this.#waiting(wait);
+    const { genesisHash } = await (input.checkChain ?? checkChain)({
+      source,
+      identity,
+      cursor,
+      signal: this.#stop.signal,
+      onWaiting: waiting,
+    });
+    this.#step();
     const graph = resolveGraph(graphInputOf(check, declarations));
     const plan = schemaPlan(graph.modules);
     const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, core) });
+    const start = BigInt(checked.start);
+    // An earlier attempt's binding (a retried startup) is another context's: its node client closed first.
+    await this.#chain?.close();
+    // Every build has core-chain, the first backbone part (`contexts.of` throws for a graph without it).
+    this.#chain = bindCoreChain(contexts.of(CORE_CHAIN_ID), {
+      config: checked,
+      declarations,
+      cursor: this.#cursor,
+      db,
+      start,
+      genesisHash,
+      node: nodeOptionsOf(settings),
+    });
     await startDatabase(db, {
       plan,
       parts: graph.modules.map((part) => namedStartDb(contexts.startDbPart(part))),
@@ -548,6 +595,10 @@ class Process implements ProcessHandle {
     });
     this.#step();
     contexts.seal();
+    // The bootstrap's wait (IN-2): every bootstrap step has run, and nothing is processed until block S commits; before
+    // the module API, so that a retried startup (a node unreachable meanwhile) never finds it listening.
+    if (cursor === null) await waitForNode(source, start, this.#stop.signal, waiting);
+    this.#step();
     const { api: address } = settings.listen as { readonly api?: string };
     this.#api = await startModuleApi({
       graph,

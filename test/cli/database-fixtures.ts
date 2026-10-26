@@ -58,10 +58,14 @@ const TABLES_SQL = `SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relnam
 
 const rowsSql = (table: string) => `SELECT row_to_json(t)::text || ' xmin ' || t.xmin::text AS row FROM ${table} t`;
 
-/** Commits the blocks 0 to `cursor` into `core_block_commit.blocks` (hash and parent hash from the height). */
+/**
+ * Commits the blocks 0 to `cursor` into `core_block_commit.blocks` (hash and parent hash from the height; the spec
+ * version, ledger version and block time of task 10.2's columns fixed).
+ */
 const blocksSql = (cursor: bigint) =>
-  `INSERT INTO core_block_commit.blocks (height, hash, parent_hash)
-   SELECT g, decode(lpad(to_hex(g + 1), 64, '0'), 'hex'), decode(lpad(to_hex(g), 64, '0'), 'hex')
+  `INSERT INTO core_block_commit.blocks (height, hash, parent_hash, spec_version, ledger_version, block_time)
+   SELECT g, decode(lpad(to_hex(g + 1), 64, '0'), 'hex'), decode(lpad(to_hex(g), 64, '0'), 'hex'), 2000000, 'v9',
+     timestamptz '2025-06-15T15:06:40Z' + g * interval '6 seconds'
    FROM generate_series(0, ${cursor}) AS g`;
 
 /** The snapshot through `query`, which runs one statement outside the API and returns its rows. */

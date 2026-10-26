@@ -690,8 +690,9 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     async function rowCounts(started: Started): Promise<Map<string, number>> {
       return started.db.read(async (read) => {
         const tables = await read.query(
+          // A partitioned table counts once, through its root (its partitions' rows are its own).
           "SELECT n.nspname AS schema, c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
-            "WHERE c.relkind IN ('r', 'p') AND n.nspname NOT IN ('pg_catalog', 'information_schema') " +
+            "WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND n.nspname NOT IN ('pg_catalog', 'information_schema') " +
             "AND n.nspname NOT LIKE 'pg\\_%' ORDER BY 1, 2",
         );
         const counts = new Map<string, number>();
@@ -774,7 +775,8 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     it("after 50 heights, every row is in an allowed schema and every row there was written through a handle", async () => {
       const { started, written, source } = await fifty();
       expect(await problems(started, written)).toEqual([]);
-      expect(written.rows).toBe(200);
+      // Per height: the three modules' rows, and core-block-commit's two (its blocks and hashes rows, task 10.2).
+      expect(written.rows).toBe(250);
       // The cursor table holds one row per height, written by core-block-commit's callback from the source's blocks.
       const blocks = await started.db.read((read) =>
         read.query("SELECT height, hash, parent_hash FROM core_block_commit.blocks ORDER BY height"),
@@ -786,6 +788,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
         "alpha.rows",
         "beta.rows",
         "core_block_commit.blocks",
+        "core_block_commit.hashes",
         "core_chain.migrations",
         "gamma.rows",
       ]);
@@ -801,7 +804,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       const { started, written } = await fifty(WritingLoop);
       const found = await problems(started, written);
       expect(found).toEqual([
-        "the plan's schemas hold 250 rows; 200 were written through handles",
+        "the plan's schemas hold 300 rows; 250 were written through handles",
         `50 rows of alpha.rows were not written under ${started.plan.writeRole("alpha")}`,
         "alpha.rows holds 100 rows, not 50",
       ]);
@@ -957,7 +960,8 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
 
     for (const [what, hashOf] of [
       ["another hash than the block's", () => new Uint8Array(32).fill(7)],
-      ["the block's hash cut short", (b: BlockContext) => b.hash.slice(0, 31)],
+      // Its last byte changed: a hash of another length the blocks table's CHECK refuses (task 10.2).
+      ["the block's hash with one byte changed", (b: BlockContext) => Uint8Array.from(b.hash, (x, i) => (i === 31 ? x ^ 1 : x))],
     ] as const) {
       it(`a cursor row with ${what} stops it before COMMIT`, async () => {
         const { db } = await backend.database();
@@ -968,7 +972,8 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
                 points: {
                   async "on-db-write"(_p: unknown, b: BlockContext, w: BlockWriteHandle) {
                     await w.execute(
-                      "INSERT INTO core_block_commit.blocks (height, hash, parent_hash) VALUES ($1, $2, $3)",
+                      "INSERT INTO core_block_commit.blocks (height, hash, parent_hash, spec_version, ledger_version, " +
+                        "block_time) VALUES ($1, $2, $3, 2000000, 'v9', timestamptz 'epoch')",
                       [b.height, hashOf(b), b.parentHash],
                     );
                   },

@@ -37,7 +37,6 @@ const handle = startProcess({
   declarations: build.declarations,
   config: { file: job.configFile },
   source: new InMemoryBlockSource({ head: BigInt(job.head) }),
-  onChecked: build.onChecked,
   log: () => undefined,
 });
 handle.started.then(

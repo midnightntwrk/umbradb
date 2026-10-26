@@ -1526,10 +1526,72 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       connection check already implies); a first run's 6 other survivors were gaps, closed by tests.
       **Pending:** A83's `[CI]` half, a 1,000-height sync against the tape node (9.1, 10.3); the node half of A85
       against a tape (9.x, 10.4); the halts these errors lead to (10.4); the hash of a notified header (10.3).
-- [ ] 10.2 `core-chain` (identity, bootstrap, startup checks) and `core-block-commit` (the `blocks` table from the
+- [x] 10.2 `core-chain` (identity, bootstrap, startup checks) and `core-block-commit` (the `blocks` table from the
       `chain_archive` store, keeping range partitioning; block time as `block_time timestamptz`, converted exactly from
       the node's milliseconds, never through a floating-point value, Q74).
       **Acceptance:** A77, A78, A88, A90; A145's block-time part.
+      **Done (2026-10-26):** `core-block-commit` completed (`src/backbone/core-block-commit/`, its migration `001`
+      replaced — no database exists): `core_block_commit.blocks (height) → hash, parent_hash, spec_version,
+      ledger_version, block_time`, range-partitioned by height as 0.9.5's `chain_archive` store was — 1,000,000 heights
+      per partition, five from 0 and a default (`src/backbone/height-partitions.ts`, new, for every per-block table) —,
+      and the unpartitioned `core_block_commit.hashes (hash) → height`; per block the block's row (the cursor, first)
+      from the block context and the `block` items it now requires, `block-header` (`specVersion`, `timestampMs`) and
+      `ledger-version`, refused before anything is sent when unreadable, the time converted by PostgreSQL's integer
+      interval input (`'<ms> milliseconds'`), never through a float — `to_timestamp` and `bigint * interval` round far
+      from 1970 —; then the hash's row, whose primary-key violation is `duplicate-block-hash`; then IN-4's parent check
+      against the block stored at h − 1 (`parent-mismatch`; none for the anchor), after the duplicate, for every block
+      source. `BLOCKS_TABLE` and `HASHES_TABLE`; `CURSOR_TABLE` kept as a deprecated alias for the loop (task 6.1's
+      note). `core-chain` (`src/backbone/core-chain/core-chain.ts`, new): a constant declaration `CORE_CHAIN` that the
+      runner binds to its process context (`bindCoreChain`) with what startup checked and opened; migrations `001` (task
+      4.3's `core_chain.config`, its text unchanged, now `CONFIG_MIGRATION`) and `002` (`core_chain.identity`: genesis
+      hash, S, anchor hash); its `on-start-db` records the history (CF-6), the genesis hash and S on a database without
+      a cursor — at every start until block S commits, so an interrupted bootstrap is repeated (IN-2) —, and publishes
+      `config`, `node-client` (a `NodeClient` from the process's `node`, closed at stop), `db` (`readOnlyDatabase`) and
+      `ledger-table` (empty until tasks 12.x); its `on-db-write` records the anchor hash in block S's transaction. Its
+      startup checks ask the block source (RN-14) — the node through `core-block-fetch` (task 10.3), or the in-memory
+      source —: `checkChain` reads the genesis hash (block 0's) and on a database with a cursor refuses another one
+      (`genesis-mismatch`), waits while the head is below the cursor (`waiting-for-node`) and refuses another hash at
+      the cursor (`cursor-hash-mismatch`), all before any migration; `waitForNode` is the bootstrap's wait while S is
+      above the head. `src/runner/process.ts`: `onChecked` replaced — the identity read with the cursor and the history,
+      `checkChain` after the history's check (a negative controls' seam `checkChain`), `core-chain` bound after the
+      contexts (again, the earlier binding closed, when task 5.4 retries startup), the bootstrap's wait after the seal
+      and before `startModuleApi` (still `starting`; so a retried startup never finds the module API listening), the
+      condition `waiting-for-node` (the height waited for, the head) while either wait runs, beside 5.4's
+      `node-retrying` or `database-retrying` when a retry is raised; a refused startup closes the node client with the
+      database, and `stop()` closes it. Rebased onto task 5.4 (`d0e989a`): the four codes in 5.4's `REFUSAL_CODES`
+      (`genesis-mismatch`, `cursor-hash-mismatch`) and `HALT_CODES` (`duplicate-block-hash`, `parent-mismatch`), so a
+      refused start is `refused` and a repeated hash `halted` with the code as its reason; the `onChecked` lines of
+      5.4's tests removed. `buildDeclarations()` holds `core-chain`. Codes `genesis-mismatch`, `cursor-hash-mismatch`,
+      `duplicate-block-hash`, `parent-mismatch` in `ERROR_CODES`. `design.md` §2, §3, §10; the module guide ("Time
+      values", "Process items and APIs"). Questions Q118 (CD-3's "first" against RN-3's order once `core-chain`
+      writes the anchor at `on-db-write`; shipped A), Q119 (the partitions past 5,000,000; shipped A) and Q120
+      (the node's genesis hash not compared with the configured network's; shipped A) raised, none blocking. Tests, seen
+      failing first (`tsc` exit 2, 45 errors: the new exports, `height-partitions.js`, the seam and the condition
+      missing; Vitest 58 of 58 failed): `test/backbone/core-block-commit.test.ts` (rewritten: the declaration, migration
+      `001` pinned, the partitions, the items' refusals; on both backends the tables' shape, A145's five times exact, a
+      duplicate in another partition, `parent-mismatch`, the anchor, the precedence, the cursor across partitions),
+      `core-chain.test.ts` (the declaration and migrations; `checkChain` and `waitForNode`; on both backends the
+      identity's table, its bootstrap and repeat, the anchor in S's transaction, the four items — `db` by 2.8's runtime
+      check, moved to `test/db/read-only-checks.ts` —, the node client closed), `chain-process.test.ts` (through the
+      process on PostgreSQL 18.6 and PGlite 0.5.10: A77 — with a real SIGKILL while waiting and inside block S's
+      transaction, `chain-bootstrap.worker.ts` —, A88 at S = 0 and 12, A78, a failing bootstrap wait, A90 from S =
+      999,998 across partitions p0 and p1, A145, A144 through the real part), with `chain-build.ts` and
+      `block-fetch-stand-in.ts` (the `core-block-fetch` stand-in putting the items, also in `LOOP_BACKBONE`). The
+      5.2–5.3 runner tests follow the new contract without a weaker assertion (`onChecked` lines removed,
+      `process-build.ts`'s `core-chain` the real one, A37 counting a partitioned table once and `core-block-commit`'s
+      two rows per height). Committed negative controls: an anchor recorded in the next block's transaction fails A77; a
+      startup check that skips the genesis or the cursor's hash comparison fails A78; no hash row (the repeat commits,
+      the next block halts with `parent-mismatch`) and the parent check first (an earlier block delivered again named
+      `parent-mismatch`) fail A90; a block time through `to_timestamp` fails A145 on 99,999,999,999,999 and
+      253,402,300,799,999 ms. Wrong variants (a scratch runner outside the clone): 106 on the first run, 103 caught —
+      the 3 survivors one gap (the hash row's translation keyed on the constraint alone; closed by a test) and 2
+      equivalent (the parent comparison's length check, both hashes being 32 bytes by the blocks table's `CHECK`s; the
+      bootstrap's wait also at a start with a cursor, whose head is then already at or above S) —; on the final sources
+      104 of 106 caught, the 2 survivors equivalent.
+      **Pending:** the node source answering
+      `core-chain`'s checks, the real `core-block-fetch` putting the items, one node connection, IN-4's finality check
+      (10.3); `node-retrying` during the startup waits and the halt registry (10.4); the ledger table (12.x); the
+      exports and codes in the surface pin (17.x); Q118 to Q120 (owner).
 - [ ] 10.3 `core-block-fetch`: finalized processing, the finalized prefetch, the best-block queue with branch switches,
       block 0's fetch path.
       **Acceptance:** A76, A79, A80, A81, A83, A89.

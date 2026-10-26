@@ -153,6 +153,14 @@ export const ERROR_CODES = [
    * its manifest (LG-5, `src/ledger/identity.ts`, task 12.2). Startup refuses.
    */
   "package-hash-mismatch",
+  // The chain's identity and its blocks (IN-3, IN-4, CD-3; task 10.2, `src/backbone/core-chain/`,
+  // `src/backbone/core-block-commit/`): two startup refusals — the node's genesis hash, or its finalized hash at the
+  // cursor's height, is not the database's — and two halts — a block whose hash an earlier block already has, and one
+  // whose parent is not the block stored below it.
+  "genesis-mismatch",
+  "cursor-hash-mismatch",
+  "duplicate-block-hash",
+  "parent-mismatch",
 ] as const;
 
 /**

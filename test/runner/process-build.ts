@@ -1,23 +1,21 @@
 import { z } from "zod";
-import { CORE_CHAIN_MIGRATIONS, recordHistory } from "../../src/backbone/core-chain/index.js";
+import { CORE_CHAIN, coreChainStartDb } from "../../src/backbone/core-chain/index.js";
 import { coreEntry } from "../../src/config/entries.js";
 import type { HistoryOptions } from "../../src/config/history.js";
-import { readOnlyDatabase } from "../../src/db/read-only.js";
 import type { BlockContext, ModuleDeclaration, PointName } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
 import type { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import type { ProcessHandle, ProcessingEnd, StartupFacts } from "../../src/runner/process.js";
-import { CORE_CHAIN } from "../modules/graph-fixtures.js";
+import type { ProcessHandle, ProcessingEnd } from "../../src/runner/process.js";
 import { LOOP_BACKBONE } from "./loop-harness.js";
 
 /**
  * A build for the process's tests (task 5.3; RN-7, RN-9–RN-13, CF-3, CF-4, Q102): the test backbone of
- * `loop-harness.ts` — the real cursor table of `core-block-commit`, stand-ins for `core-block-fetch` and `core-digest`
- * — with a `core-chain` that does what task 10.2's will at startup: its migrations create `core_chain.config` (task
- * 4.3's `001`) and `core_chain.identity` (`002`); its `on-start-db` records the configuration history
- * (`recordHistory`, CF-6), with the facts the runner hands over once it checked the history (`onChecked`), and publishes
- * its four process items, `db` as the read-only database. It also records its start and stop notifications, and its
- * settings at each height, which are the `core` entry's (Q102: operational fields from the process's revision, data
+ * `loop-harness.ts` — the real `core-block-commit`, stand-ins for `core-block-fetch` and `core-digest` — with the real
+ * `core-chain` (task 10.2), which the runner binds to its process context: its migrations create `core_chain.config`
+ * and `core_chain.identity`, its `on-start-db` records the configuration history (CF-6, with `options.history` — a
+ * negative control's `recordedData` — when given) and the identity and publishes its four process items, its
+ * `on-db-write` records the anchor at S. The build adds to it the recording of its start and stop notifications, and of
+ * its settings at each height, which are the `core` entry's (Q102: operational fields from the process's revision, data
  * fields from the revision covering the height).
  *
  * Imports nothing of Vitest, so that a worker process (`sigterm.worker.ts`) builds the same declarations.
@@ -31,10 +29,9 @@ export interface CoreSeen {
   readonly settings: Map<bigint, Readonly<Record<string, unknown>>>;
 }
 
-/** A build: the declarations, the hand-over the runner calls, and what `core-chain` saw. */
+/** A build: the declarations, and what `core-chain` saw. */
 export interface TestBuild {
   readonly declarations: DeclarationSet;
-  readonly onChecked: (facts: StartupFacts) => void;
   readonly core: CoreSeen;
 }
 
@@ -52,7 +49,6 @@ export interface TestBuildOptions {
 
 /** A build of the test backbone with `user` modules (see the module comment). */
 export function testBuild(user: readonly ModuleDeclaration[], options: TestBuildOptions = {}): TestBuild {
-  let facts: StartupFacts | undefined;
   const core: CoreSeen = { calls: [], settings: new Map() };
   const note = (point: PointName, e: { readonly entryId: string; readonly height: bigint }) => {
     const line = `${point}@${e.height} ${e.entryId}`;
@@ -61,19 +57,10 @@ export function testBuild(user: readonly ModuleDeclaration[], options: TestBuild
   };
   const chain: ModuleDeclaration = {
     ...CORE_CHAIN,
-    migrations: [
-      ...CORE_CHAIN_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
-      ...CORE_CHAIN.migrations.map((migration) => ({ ...migration, id: "002" })),
-    ],
     points: {
+      ...CORE_CHAIN.points,
       async "on-start-db"(p, w) {
-        if (facts === undefined) throw new Error("core-chain's on-start-db ran before the runner handed over the facts");
-        const { config, declarations, cursor } = facts;
-        await recordHistory(w, { config, declarations, cursor: cursor?.height ?? null }, options.history ?? {});
-        p.publish("config", config);
-        p.publish("node-client", Object.freeze({ kind: "test node client" }));
-        p.publish("db", readOnlyDatabase(facts.db));
-        p.publish("ledger-table", Object.freeze({ rows: [] }));
+        await coreChainStartDb(p, w, options.history === undefined ? {} : { history: options.history });
       },
       async "on-start-height"(_p, e) {
         note("on-start-height", e);
@@ -88,13 +75,7 @@ export function testBuild(user: readonly ModuleDeclaration[], options: TestBuild
   };
   const replace = options.backbone ?? ((part: ModuleDeclaration) => part);
   const backbone = LOOP_BACKBONE.map((part) => replace(part.id === "core-chain" ? chain : part));
-  return {
-    declarations: { backbone, core: options.core ?? [], user },
-    onChecked: (given) => {
-      facts = given;
-    },
-    core,
-  };
+  return { declarations: { backbone, core: options.core ?? [], user }, core };
 }
 
 /** The `core` entry's settings for a process on `database`: a public process on preprod, with the development opt-in. */

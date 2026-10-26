@@ -9,6 +9,7 @@ import { type CursorTable, cursorTable } from "../../src/helpers/cursor-table.js
 import { migrationPart, schemaPlan } from "../../src/modules/adapters.js";
 import type { BlockContext, Migration, ModuleDeclaration, PointCallbacks } from "../../src/modules/declaration.js";
 import { inMemoryBlock } from "../../src/runner/in-memory-source.js";
+import { standInItems } from "../backbone/block-fetch-stand-in.js";
 import type { TestBackend, TestDatabase } from "../db/backends.js";
 import { declaration } from "../modules/declarations.js";
 import { Contexts } from "../runner/fixtures.js";
@@ -151,7 +152,8 @@ export async function helperDatabase(
       const height = (committed ?? 0n) + 1n;
       const b: BlockContext = Object.freeze({
         ...inMemoryBlock(height),
-        items: new Map<string, unknown>(),
+        // The block items core-block-commit's row needs (task 10.2), as core-block-fetch puts them.
+        items: standInItems(height),
         settings: Object.freeze({}),
         active: () => true,
       });

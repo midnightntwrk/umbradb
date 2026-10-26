@@ -2,7 +2,8 @@
  * The node client (`openspec/changes/core-arch/design.md` §1 `src/node/`, §3; specs/ingest IN-8, IN-9, IN-10; task
  * 10.1): JSON-RPC 2.0 over one WebSocket to the Midnight node, refactored out of 0.9.5's
  * `chain-archive-sync/node-rpc-client.ts` (one HTTP POST per call, no subscriptions, no retry). It is the `node-client`
- * item `core-chain` provides; `core-chain` (task 10.2) and `core-block-fetch` (task 10.3) read the chain through it.
+ * item `core-chain` provides (task 10.2), and `core-block-fetch` (task 10.3) reads the chain through it; `core-chain`'s
+ * startup checks ask the block source, which the node-backed source answers from the node.
  *
  * **Calls (IN-8).** One method per IN-8 call, with its parameters typed and its answer read into typed values
  * (`./decode.ts`); a block is always named by its hash or its height, never left to the node's best block, so every

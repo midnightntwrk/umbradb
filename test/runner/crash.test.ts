@@ -127,7 +127,6 @@ async function crashRun(
       declarations: build.declarations,
       config: { file: configFile },
       source,
-      onChecked: build.onChecked,
       log: () => undefined,
       ...(loop === undefined ? {} : { loop }),
     });
@@ -222,9 +221,13 @@ function a46Problems(observed: CrashObservation): string[] {
       if (call.point === "on-after-db-write" && call.items?.length !== 0 && call !== redelivered) {
         problems.push(`in ${name} on-after-db-write at ${call.height} received block items ${call.items?.join(",")}`);
       }
-      // The items the check relies on exist: each height's on-compute sees c's note.
-      if (call.point === "on-compute" && call.items?.join(",") !== "c-note") {
-        problems.push(`in ${name} on-compute at ${call.height} saw the items ${call.items?.join(",")}, not c-note`);
+      // The items the check relies on exist: each height's on-compute sees c's note, after the two the backbone's
+      // core-block-fetch stand-in puts at on-fetch (task 10.2: core-block-commit reads them).
+      if (call.point === "on-compute" && call.items?.join(",") !== "block-header,ledger-version,c-note") {
+        problems.push(
+          `in ${name} on-compute at ${call.height} saw the items ${call.items?.join(",")}, not block-header, ledger-version ` +
+            "and c-note",
+        );
       }
     }
   }

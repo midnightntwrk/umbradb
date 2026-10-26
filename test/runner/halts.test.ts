@@ -148,7 +148,6 @@ async function a43Run(
     declarations: build.declarations,
     config: { data: { entries: a43Entries(db.setting, user) } },
     source,
-    onChecked: build.onChecked,
     log: (line) => lines.push(line),
     ...(loop === undefined ? {} : { loop }),
   });
@@ -259,7 +258,6 @@ async function haltOf(
     declarations: build.declarations,
     config: { data: { entries: [core(db.setting), ...user.map((part) => entryOf(part, 1))] } },
     source,
-    onChecked: build.onChecked,
     log: (line) => lines.push(line),
   });
   try {
@@ -471,7 +469,6 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting), entryOf(late, 1)] } },
         source: new InMemoryBlockSource({ head: HEAD }),
-        onChecked: build.onChecked,
         log: (line) => lines.push(line),
       });
       await atThree;
@@ -503,7 +500,6 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting), entryOf(failing, 1)] } },
         source: new InMemoryBlockSource({ head: HEAD }),
-        onChecked: build.onChecked,
         log: () => undefined,
       });
       expect(await handle.ended).toMatchObject({ kind: "failed" });

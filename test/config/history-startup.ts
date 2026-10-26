@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CORE_CHAIN_MIGRATIONS, readHistory, recordHistory } from "../../src/backbone/core-chain/index.js";
+import { CONFIG_MIGRATION, readHistory, recordHistory } from "../../src/backbone/core-chain/index.js";
 import {
   checkHistory,
   graphInputOf,
@@ -32,13 +32,19 @@ import { FILE } from "./history-fixtures.js";
  * cursor to the next startup, as task 2.4's A72 test gave the history.
  */
 
-/** A stand-in for `core-block-fetch`: the `block-header` item every test module requires. */
+/**
+ * A stand-in for `core-block-fetch`: the `block-header` item every test module requires, and the `ledger-version` item
+ * the real `core-block-commit` requires (task 4.4's tests add it).
+ */
 const BLOCK_FETCH = defineModule({
   id: "core-block-fetch",
   version: "0.10.0",
   side: "public",
   requires: [],
-  provides: [{ name: "block-header", lifetimes: ["block"] }],
+  provides: [
+    { name: "block-header", lifetimes: ["block"] },
+    { name: "ledger-version", lifetimes: ["block"] },
+  ],
   startsMidChain: true,
   configSchema: z.object({}),
   migrations: [],
@@ -52,7 +58,10 @@ interface Holder {
   check?: HistoryCheck;
 }
 
-/** A stand-in for `core-chain`: `core_chain.config`'s migration, and the history recorded in its `on-start-db`. */
+/**
+ * A stand-in for `core-chain`: `core_chain.config`'s migration (`001`; the real part's `002`, its identity, is task
+ * 10.2's and not needed here), and the history recorded in its `on-start-db`.
+ */
 function coreChain(holder: Holder): ModuleDeclaration {
   return defineModule({
     id: "core-chain",
@@ -62,7 +71,7 @@ function coreChain(holder: Holder): ModuleDeclaration {
     provides: [],
     startsMidChain: true,
     configSchema: z.object({}),
-    migrations: CORE_CHAIN_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
+    migrations: [{ id: CONFIG_MIGRATION.id, sql: CONFIG_MIGRATION.sql }],
     points: {
       async "on-start-db"(_p, w) {
         if (holder.input === undefined) throw new Error("core-chain's on-start-db ran before the history was checked");

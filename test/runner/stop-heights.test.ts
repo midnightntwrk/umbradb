@@ -78,7 +78,6 @@ async function run(
     declarations: build.declarations,
     config: { data: { entries: entries(db.setting, user, stop) } },
     source,
-    onChecked: build.onChecked,
     log: (line) => lines.push(line),
     ...(loop === undefined ? {} : { loop }),
   });
@@ -227,7 +226,6 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting, 1, { stop: 3 }), entryOf(stopper, 1)] } },
         source,
-        onChecked: build.onChecked,
         log: () => undefined,
       });
       expect(await handles.current.ended).toEqual({ kind: "stopped", height: 3n, core: true, upgrade: null });
@@ -304,7 +302,6 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting), entryOf(probe, 4, {}, 6)] } },
         source,
-        onChecked: build.onChecked,
         log: () => undefined,
       });
       try {
@@ -332,7 +329,6 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
           declarations: build.declarations,
           config: { data: { entries: [core(db.setting), entryOf(flaky, 1)] } },
           source,
-          onChecked: build.onChecked,
           log: () => undefined,
         });
         const ended = await settle(handle, source, head);
@@ -384,7 +380,6 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
           declarations: build.declarations,
           config: { data: { entries: [core(db.setting), entryOf(sneaky, 1, {}, 3)] } },
           source,
-          onChecked: build.onChecked,
           log: () => undefined,
         });
         const ended = await settle(handle, source, head);
@@ -425,7 +420,6 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
           declarations: build.declarations,
           config: { data: { entries: [core(db.setting), entryOf(failing, 4, {}, 6)] } },
           source,
-          onChecked: build.onChecked,
           log: (line) => lines.push(line),
         });
         const ended = await settle(handle, source, 8n);
