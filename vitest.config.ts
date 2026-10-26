@@ -87,6 +87,9 @@ const CORE_ARCH = {
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the node client's directory (task 10.1).
   "**/src/node/**": { lines: 90, branches: 85, perFile: true },
+  // §13's default for `src/**`, added with the ledger adapters' directory (task 12.1); `src/ledger/sweep*` gets §13's
+  // 95/90 with the sweep (task 12.5).
+  "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
   // The test tape (task 9.1): not in the package, but the tests of ingest, faults and differentials stand on it, so it
   // is measured and held to §13's default like `src/**`.
   "**/tools/tape/**": { lines: 90, branches: 85, perFile: true },

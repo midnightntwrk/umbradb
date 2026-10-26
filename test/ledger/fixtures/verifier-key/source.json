@@ -1,0 +1,11 @@
+{
+  "description": "A verifier key in the ledger's tagged form (midnight:verifier-key[v6]), given to the contract operation the adapter tests deploy (test/ledger/adapter-fixtures.ts): a deploy needs one for every operation, and with contract proof checks off (LG-15) the ledger never verifies a proof against it. The file is byte-identical to zswap/static/spend.verifier of midnightntwrk/midnight-ledger, Apache-2.0, at ledger-8.1.0, 9.1.0.0-rc.3 and 9.1.0.0-rc.5 alike.",
+  "file": "spend.verifier",
+  "repository": "https://github.com/midnightntwrk/midnight-ledger",
+  "path": "zswap/static/spend.verifier",
+  "commit": "67f9f97246339539af0091c4d8c6bc5ab236a191",
+  "tag": "ledger-9.1.0.0-rc.5",
+  "license": "Apache-2.0",
+  "sha256": "544554effd7ae9fb9063be52a9ec2a986756301071fcd97bb4598fb45a335658",
+  "recorded": "2026-10-26"
+}

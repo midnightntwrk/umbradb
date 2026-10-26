@@ -469,11 +469,12 @@ interface LedgerPackage {                                  // one per ledger ver
   ledger: "v8" | "v9" | "v10";
   versionName: string;                                     // the ledger release the packages were built from
   rawPackages(): Readonly<Record<string, unknown>>;        // the loaded WASM packages, unwrapped, by package name
-  parseTransaction(bytes: Uint8Array): ParsedTransaction;
-  emptyState(): StateHandle;                               // block 0 (IN-7)
+  parseTransaction(bytes: Uint8Array, index: number): ParsedTransaction;  // parsed once per Uint8Array (LG-7)
+  nativeTransaction(bytes: Uint8Array): unknown;           // the native object that parse made, for ledger tasks
+  emptyState(): StateHandle;                               // block 0 (IN-7), of the adapter's network id
   genesisState(bytes: Uint8Array): StateHandle;            // from system_properties.genesis_state
   load(stateKey: Uint8Array, store: NodeStore): StateHandle;
-  apply(state: StateHandle, block: ApplyInput): ApplyOutput;   // LG-8
+  apply(state: StateHandle, block: ApplyInput): AppliedBlock;  // LG-8; `state` itself unchanged
   stateRoot(state: StateHandle): Uint8Array;               // compared with midnight_ledgerStateRoot (LG-15)
   stateKey(state: StateHandle): Uint8Array;                // its root node's key, what `load` takes (Q55)
   flush(): NodeBatch;                                      // nodes created, and root-count changes, since the last flush
@@ -488,10 +489,18 @@ interface LedgerPackage {                                  // one per ledger ver
 }
 interface ApplyInput { transactions: Uint8Array[]; height: bigint; hash: Uint8Array; parentHash: Uint8Array;
   timestampMs: bigint; parentTimestampMs: bigint; firstRegularAtParentTime: boolean }
+interface AppliedBlock { state: StateHandle; output: ApplyOutput }   // the state stays in the worker
 interface ApplyOutput {
   results: { outcome: "success" | "partial" | "failure"; segments: { segment: number; success: boolean }[] }[];
-  events: LedgerEvent[]; logs: LogItem[]; parameters: Uint8Array;
+  events: LedgerEvent[]; logs: VmLog[]; parameters: Uint8Array;
 }
+interface LedgerEvent { transaction: number; kind: LedgerEventKind;   // every event but contract logs (LG-16)
+  logicalSegment: number; physicalSegment: number; bytes: Uint8Array;
+  nullifier: Uint8Array | null; commitment: Uint8Array | null; treeIndex: bigint | null;
+  contractAddress: Uint8Array | null }
+interface LogItem { version: number; eventType: LogEventType; data: Uint8Array }   // CC-3
+interface VmLog extends LogItem { transaction: number; index: number; address: Uint8Array; entryPoint: Uint8Array;
+  logicalSegment: number; physicalSegment: number }                   // numbered per block in emission order
 interface NodeStore { get(key: Uint8Array): { data: Uint8Array; children: Uint8Array } | null }
 interface NodeBatch { inserts: { key: Uint8Array; data: Uint8Array; children: Uint8Array }[];
   rootCounts: { key: Uint8Array; delta: number }[] }       // signed change of each changed root count (Q53)
@@ -523,6 +532,19 @@ reaches 0. `stateKey` gives the 32-byte key of a state's root node, which `core_
 and `load` takes; it cannot be derived from `stateRoot`, which for a state under the ledger's 1,024-byte embedding
 limit is the state itself (Q55). The v8 adapter's `decodeLogItem` returns null and its `apply` returns no `logs`: a
 v8 `ContractLog` carries a raw value, not a MIP-0002 event (Q54).
+
+As built (task 12.1, `src/ledger/`; question Q114): `apply` returns the state after the block with the plain
+output, which is what crosses to the main thread; `parseTransaction` takes the transaction's index (CD-5's order,
+which the bytes do not carry) and keeps the native object under that very `Uint8Array`, so `apply` and
+`nativeTransaction` reuse it; an adapter is made for one network id (`loadLedgerPackage(ledger, { networkId })`, which
+imports the version's vendored Node.js entry when it is first asked for). A transaction's hash is SHA-256 over the
+package's serialization of it, the ledger's own definition for both kinds. `apply` follows the official indexer's
+replay (strictness without proof checks or balancing; a malformed transaction, one whose cost cannot be computed and
+one the ledger fails are a `failure` that leaves the state as it was; the post-block update given the block's
+normalized fullness, zero when nothing applied). The published packages take that fullness as JavaScript numbers and
+expose no system-transaction cost, so a block with transactions may not reach the node's root through them
+(question Q113, before task 12.3's A99). `LedgerEventKind` also has `contract-deploy`, which §10's kinds of
+`core_ledger_state.events` lack though LG-16 stores every event but logs (task 12.3 settles the table).
 
 ### 5.2 Vendored builds (LG-5)
 

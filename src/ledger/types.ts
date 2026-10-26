@@ -1,0 +1,240 @@
+/**
+ * The `LedgerPackage` interface (`openspec/changes/core-arch/design.md` §5.1; `specs/ledger/spec.md` LG-6, LG-7;
+ * task 12.1): one adapter per ledger version, so that the ledger worker and ledger tasks use every version the same
+ * way. The adapters are `./v8.ts` and `./v9.ts`, built on `./adapter.ts`; `./load.ts` loads them in Node.js.
+ *
+ * **What crosses threads (LG-7, owner decision Q49).** The native objects of a ledger package — its ledger states
+ * ({@link StateHandle}), its parsed transactions ({@link LedgerPackage.nativeTransaction}), the packages themselves
+ * ({@link LedgerPackage.rawPackages}) and the {@link NodeStore} it reads through — stay in the thread that made them,
+ * the ledger worker (task 12.3): Node.js's structured clone drops their prototypes. Everything else an adapter returns
+ * is plain, structured-cloneable data made of objects, arrays, strings, numbers, booleans, `bigint`s, `null` and
+ * `Uint8Array`s — {@link ParsedTransaction}, {@link ApplyOutput}, {@link NodeBatch}, keys, roots and {@link LogItem}s —
+ * and is what the worker posts to the main thread. An adapter works the same in any thread: nothing in it is tied to
+ * the main thread or to a worker.
+ *
+ * **Refinements of `design.md` §5.1 (task 12.1, question Q114).** §5.1's `apply` returns no state, its
+ * `parseTransaction` can neither number a transaction nor hand on the native object a ledger task needs, and §5.1
+ * leaves `LedgerEvent` and `LogItem` undefined: `apply` returns the state after the block with its output
+ * ({@link AppliedBlock}); `parseTransaction` takes the transaction's index; {@link LedgerPackage.nativeTransaction}
+ * gives the native object one parse made; an adapter is made for one network id (for
+ * {@link LedgerPackage.emptyState}).
+ */
+
+import type { LedgerName } from "../config/build.js";
+
+export type { LedgerName };
+
+declare const stateHandle: unique symbol;
+
+/**
+ * A ledger state of one ledger package: the package's own native object, opaque outside its adapter. It never leaves
+ * the thread that made it (Q49); the adapter that made it is the only one that may be given it.
+ */
+export interface StateHandle {
+  readonly [stateHandle]: "ledger-state";
+}
+
+/**
+ * A synchronous store of ledger nodes, in the node's `layout-v2` storage (LG-11): a node under its 32-byte key with its
+ * payload and the serialization of its child list. The ledger worker's store reads the database through the node-store
+ * bridge (`design.md` §5.3, task 12.3). `get` must not call into the ledger package.
+ */
+export interface NodeStore {
+  get(key: Uint8Array): { data: Uint8Array; children: Uint8Array } | null;
+}
+
+/** A ledger node as `core_ledger_state.nodes` stores it (LG-11). */
+export interface StoredNode {
+  key: Uint8Array;
+  data: Uint8Array;
+  children: Uint8Array;
+}
+
+/**
+ * What a flush gives the writer (LG-11): the nodes created since the previous flush that a key whose root count rose
+ * reaches, and the signed change of each root count changed since then (owner decision Q53); both in key order.
+ */
+export interface NodeBatch {
+  inserts: StoredNode[];
+  rootCounts: { key: Uint8Array; delta: number }[];
+}
+
+/** A block to apply (LG-8): its transactions in application order (CD-5), as the chain carries them. */
+export interface ApplyInput {
+  transactions: Uint8Array[];
+  height: bigint;
+  hash: Uint8Array;
+  parentHash: Uint8Array;
+  timestampMs: bigint;
+  parentTimestampMs: bigint;
+  /**
+   * True for blocks built by runtimes 0.22, 1.0 below 1.0.300 and 2.0, and never for block 0 (LG-8): the first regular
+   * transaction to apply, and any failed regular transactions before it, are then also accepted when they are well
+   * formed at the parent block's timestamp + 12,000 ms.
+   */
+  firstRegularAtParentTime: boolean;
+}
+
+/** How a transaction applied, and each of its segments: 0, the guaranteed one, then the fallible ones in order. */
+export interface TransactionResult {
+  outcome: "success" | "partial" | "failure";
+  segments: { segment: number; success: boolean }[];
+}
+
+/** The kinds of ledger event `apply` reports: every event but contract logs (LG-16), named as `design.md` §10 does. */
+export type LedgerEventKind =
+  | "zswap-input"
+  | "zswap-output"
+  | "contract-deploy"
+  | "param-change"
+  | "dust-initial-utxo"
+  | "dust-generation-dtime-update"
+  | "dust-spend-processed";
+
+/** A ledger event other than a contract log, as LG-16 stores it. */
+export interface LedgerEvent {
+  /** The index of its transaction in {@link ApplyInput.transactions}. */
+  transaction: number;
+  kind: LedgerEventKind;
+  logicalSegment: number;
+  physicalSegment: number;
+  /** The ledger's tagged serialization of the event. */
+  bytes: Uint8Array;
+  /** A zswap input's nullifier, or a DUST spend's (32 bytes, the field element little-endian). */
+  nullifier: Uint8Array | null;
+  /** A zswap output's commitment, or a DUST spend's new commitment (32 bytes, as `nullifier`). */
+  commitment: Uint8Array | null;
+  /** A zswap output's tree index, a DUST spend's commitment index, or a DUST initial UTXO's generation index. */
+  treeIndex: bigint | null;
+  /** The contract a zswap input or output belongs to, or the contract a deploy created. */
+  contractAddress: Uint8Array | null;
+}
+
+/** The event types of a MIP-0002 contract log, as the ledger names them. */
+export type LogEventType =
+  | "ShieldedSpend"
+  | "ShieldedReceive"
+  | "ShieldedMint"
+  | "ShieldedBurn"
+  | "UnshieldedSpend"
+  | "UnshieldedReceive"
+  | "UnshieldedMint"
+  | "UnshieldedBurn"
+  | "Paused"
+  | "Unpaused"
+  | "Misc";
+
+/** A contract log as the VM decodes it (CC-3): `data` is the tagged serialization of the logged value. */
+export interface LogItem {
+  version: number;
+  eventType: LogEventType;
+  data: Uint8Array;
+}
+
+/** A contract log an applied segment emitted (LG-16's `vm-logs`, CC-2's `contract_logs.logs`). */
+export interface VmLog extends LogItem {
+  /** The index of its transaction in {@link ApplyInput.transactions}. */
+  transaction: number;
+  /** Its number within the block, in emission order, from 0. */
+  index: number;
+  address: Uint8Array;
+  entryPoint: Uint8Array;
+  logicalSegment: number;
+  physicalSegment: number;
+}
+
+/** What applying a block produced (LG-8, LG-16): plain data. */
+export interface ApplyOutput {
+  /** One per transaction, in {@link ApplyInput.transactions}' order. */
+  results: TransactionResult[];
+  events: LedgerEvent[];
+  /** Ledger v8 never has any (owner decision Q54). */
+  logs: VmLog[];
+  /** The ledger parameters after the block, in the ledger's tagged serialization. */
+  parameters: Uint8Array;
+}
+
+/** {@link LedgerPackage.apply}'s result: the state after the block, which stays in the worker, and the plain output. */
+export interface AppliedBlock {
+  state: StateHandle;
+  output: ApplyOutput;
+}
+
+/** What modules on the main thread receive as `block-parsed` (Q49, LG-7): plain, structured-cloneable data. */
+export interface ParsedTransaction {
+  /** Application order (CD-5). */
+  index: number;
+  hash: Uint8Array;
+  kind: "regular" | "system";
+  size: number;
+  bytes: Uint8Array;
+  segments: {
+    segment: number;
+    calls: { address: Uint8Array; entryPoint: Uint8Array }[];
+    deploys: { address: Uint8Array }[];
+  }[];
+}
+
+/** A module's ledger task (LG-17, task 12.6), run in the ledger worker once per block. */
+export interface LedgerTask {
+  name: string;
+  /** True: the module must require `ledger-state` (LG-17). */
+  needsState: boolean;
+  run(block: {
+    height: bigint;
+    /** The native parsed objects ({@link LedgerPackage.nativeTransaction}). */
+    transactions: unknown[];
+    /** Only when `needsState`. */
+    stateBefore?: StateHandle;
+    packages: Readonly<Record<string, unknown>>;
+  }): unknown;
+}
+
+/** One ledger version's adapter (LG-6). */
+export interface LedgerPackage {
+  readonly ledger: LedgerName;
+  /** The ledger release the packages were built from (`vendor/ledger/<version>/upstream.json`). */
+  readonly versionName: string;
+  /** The loaded WASM packages, unwrapped, by package name. */
+  rawPackages(): Readonly<Record<string, unknown>>;
+  /**
+   * Parses a transaction as the chain carries it, once (LG-7): the native object is kept for this very `Uint8Array`, so
+   * {@link apply} and {@link nativeTransaction} do not parse it again. Throws when the bytes are not a transaction of
+   * this ledger version.
+   */
+  parseTransaction(bytes: Uint8Array, index: number): ParsedTransaction;
+  /** The native parsed transaction for these bytes, parsed now if they were not before; for ledger tasks (LG-17). */
+  nativeTransaction(bytes: Uint8Array): unknown;
+  /** A blank state of the adapter's network id: block 0's empty state (IN-7). */
+  emptyState(): StateHandle;
+  /** The state `system_properties.genesis_state` carries (IN-7). */
+  genesisState(bytes: Uint8Array): StateHandle;
+  /** The state whose root node has key `stateKey`, read from `store` as needed (LG-11). */
+  load(stateKey: Uint8Array, store: NodeStore): StateHandle;
+  /** Applies a block with the replay rules of LG-8; `state` itself is unchanged. */
+  apply(state: StateHandle, block: ApplyInput): AppliedBlock;
+  /** Compared with `midnight_ledgerStateRoot` (LG-15). */
+  stateRoot(state: StateHandle): Uint8Array;
+  /** Its root node's 32-byte key, what {@link load} takes (owner decision Q55). */
+  stateKey(state: StateHandle): Uint8Array;
+  /** Nodes created, and root-count changes, since the last flush. */
+  flush(): NodeBatch;
+  persist(key: Uint8Array): void;
+  release(key: Uint8Array): void;
+  /** A node's by-reference keys, through embedded children. */
+  childRefs(children: Uint8Array): Uint8Array[];
+  /** Drops swept nodes from the package's caches. */
+  evict(keys: Uint8Array[]): void;
+  contractStateKey(state: StateHandle, address: Uint8Array): Uint8Array | null;
+  contractZswapStateKey(state: StateHandle, address: Uint8Array): Uint8Array | null;
+  /** The VM's own log decoding (CC-3); ledger v8: null for every input (owner decision Q54). */
+  decodeLogItem(value: Uint8Array): LogItem | null;
+  /** Ledger v9 only (LG-9). */
+  convertFromV8?(v8StateKey: Uint8Array, store: NodeStore): StateHandle;
+}
+
+/** What an adapter is made for. */
+export interface LedgerPackageOptions {
+  /** The network id of the chain, for {@link LedgerPackage.emptyState}. */
+  readonly networkId: string;
+}

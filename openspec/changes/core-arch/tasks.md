@@ -1491,9 +1491,65 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 12. Ledger
 
-- [ ] 12.1 The `LedgerPackage` adapters for v8 (from `chain-archive-sync/tx-replay-decoder.ts`) and v9 (the v8
+- [x] 12.1 The `LedgerPackage` adapters for v8 (from `chain-archive-sync/tx-replay-decoder.ts`) and v9 (the v8
       adapter's `decodeLogItem` returns null and its `apply` no logs, Q54); the adapter test suite.
       **Acceptance:** A98.
+      **Done (2026-10-26):** in `src/ledger/` (internal; task 17.3 exports §12's `LedgerPackage`, `ParsedTransaction`
+      and `LedgerTask` from `types.ts`). **The interface** (`types.ts`): §5.1's, with the refinements of Q114
+      (shipped A, recorded in `design.md` §5.1): `apply` returns `{ state, output }`; `parseTransaction(bytes, index)`
+      parses once per `Uint8Array` (a `WeakMap`), which `apply` and the new `nativeTransaction(bytes)` (for ledger
+      tasks) reuse; an adapter is made for one network id; `LedgerEvent`, `LogItem`, `VmLog` and an opaque
+      `StateHandle` defined. **The adapters:** `adapter.ts`, shared, refactored from 0.9.5's replay decoder (the
+      self-tag, the deserialization markers — now read from the tag —, the walk over the intents by segment); `v8.ts`
+      (ledger-8.1.2: `decodeLogItem` null for every input, `apply` with no logs and no contract-log events, Q54; no
+      `convertFromV8`); `v9.ts` (ledger-9.1.0.0-rc.5: the VM's `decodeLogItem`, each contract log as a `VmLog` whose
+      value is `serializeStateValue`'s, `convertFromV8`); `releases.ts` (`LEDGER_RELEASES`, each version's release and
+      package name and version, held equal to `vendor/ledger`'s records); `load.ts` (`loadLedgerPackage(ledger,
+      { networkId })`: the version's vendored Node.js entry, imported when first asked for, so a thread pays only for
+      the packages it loads; a browser build calls `createV8Adapter`/`createV9Adapter` with its own entry, 16.1).
+      `apply` replays as the official indexer and the node do (LG-8: well formed at the block time or — for the
+      regular transactions up to the first that applies, where `firstRegularAtParentTime` — at the parent's time
+      + 12 s; no proof checks and no balancing, LG-15; a malformed, uncostable or ledger-failed transaction is a
+      `failure` that leaves the state as it was; the post-block update gets the summed stateless cost normalized and
+      its largest dimension, zero when nothing applied); a transaction's hash is SHA-256 of its serialization, the
+      ledger's own definition; every event but contract logs is a `LedgerEvent` with LG-16's fields (its kinds add
+      `contract-deploy`, which §10 lacks); the packages' `successfulSegments` is true for the segments that **failed**,
+      which the adapter inverts (issue 00018-wasm-successful-segments-are-failed-segments). **What crosses
+      threads** (LG-7, Q49): `ParsedTransaction`, `ApplyOutput`, `NodeBatch`, keys and roots, all plain (structured
+      clone round trips); states, parsed transactions, the packages and the node store stay in the thread that made
+      them. **Q113** (raised; not blocking 12.1, to be answered before 12.3's A99): the published API takes the
+      post-block fullness as JavaScript numbers (the node's `FixedPoint` loses its low bits), has no
+      system-transaction cost and no block limits, and `ApplyInput` has no dispatch outcomes — shipped C, the
+      published API, exact for blocks that apply nothing. `buildCoreVersion()`'s ledgers (4.1's note (e)) are left to
+      12.2, which checks the identity they record. Tests (`test/ledger/`, no node and no network; 4 files, 72 tests):
+      `adapter-suite.ts`, the one suite, its Q54 clause the parameter `logs`, run by `adapter-v8.test.ts` and
+      `adapter-v9.test.ts` (the latter also `convertFromV8` from a v8 state the v8 adapter stored, in a fresh worker and
+      here); `adapter-core.test.ts` (the event and log mapping, and `apply` on a package that records what it is
+      handed: block context, current state, strictness, times, fullness, largest dimension); fixtures
+      `adapter-fixtures.ts` (deploys proven with an empty prover and bound, proof-erased calls and zswap outputs as
+      `midnight-ledger`'s own tests apply them, 0.9.5's `DistributeReserve` sample, a reference replay with the
+      published API), `adapter-worker-host.ts` (bundles `fixtures/adapter-worker.ts` with esbuild, the vendored entries
+      left external, and runs it in a fresh worker), `fixtures/verifier-key/` (`midnight-ledger`'s `spend.verifier`,
+      Apache-2.0, its source recorded). Seen failing first: `Cannot find module '../../src/ledger/load.js'` (3 files);
+      the first run after the code, 7 of 43 failing, showed two wrong expectations, both fixed in the tests: `evictKeys`
+      does not refuse a live state's root (issue 00019-evict-keys-does-not-refuse-a-live-states-root; the test now
+      evicts a contract state's child nodes), and the ledger's replay protection fails at the block time a
+      transaction whose TTL is too far ahead even when it is well formed at the parent's time + 12 s (the replay-rule
+      tests now spy on the times each transaction is checked at). Oracles: the node's block-0 roots of mainnet, preview
+      and an undeployed devnet, reached and reloaded by `stateKey`; the vendor records; the reference replay's root and
+      parameters. Committed negative controls (`adapter.negative-control.test.ts`): a v8 adapter whose `decodeLogItem`
+      returns a value, or whose `apply` reports a log, fails Q54's clause; a `stateKey` taken from `stateRoot` fails
+      Q55's reload of a blank state (below the embedding limit); the v9 package, or its release, under the v8 adapter
+      fails the `rawPackages()` check. Wrong variants (a scratch runner outside the clone, the covering files only, the
+      tree checked byte for byte after): a first run of 130 left 11 survivors — 10 gaps, closed by tests (the state a
+      transaction context is given, segment order and segment 0 of a fallible offer, the intents' order, a maintenance
+      update among an intent's actions, a UTF-8 entry point, tags that are almost a transaction's), 1 redundant check,
+      removed —; the final run on the final sources, 130 variants: 130 caught, none equivalent. Coverage of
+      `src/ledger/` 100 %; its floor 90/85 (§13's default) added to `vitest.config.ts`.
+      **Pending:** Q113 (before 12.3's A99) and Q114; the two issues; 12.2 (the core version's ledgers and the
+      package identity check); 16.1 (the browser entry, `node:crypto` and `Buffer`); 17.2 (0.9.5's decoder, still used
+      by `test/integration/chain-archive-replay-decode.integration.test.ts`); 17.3 (the surface and `package.json`'s
+      `files`).
 - [ ] 12.2 Version selection, the built-in tables (`networks.json`, from task 0.3), pins, package identity checks,
       metadata selection at upgrades.
       **Acceptance:** A94, A95, A96, A97.
