@@ -13,22 +13,38 @@
  *   ({@link ProcessAdmin.refused}) still answers — on the configuration's `listen.admin` as loaded when it is an
  *   address ({@link earlyAdminAddress}), else on CF-4's default (Q127, shipped A) —, its reason redacted by the
  *   configuration's secrets as the validation reads them; a listener that cannot listen then is logged.
+ * - **What `/status` shows besides `status()`** (AE-5): the process's side and `instanceId`, its revision's `tipCap`,
+ *   the wall-clock time of the last commit ({@link ProcessAdmin.committed}, which the loop's commit observer calls),
+ *   and, once startup has resolved the graph and migrated the database ({@link ProcessAdmin.opened}), every part of the
+ *   database with its revisions and its tables' rows of `core_digest.tables` (DT-5), which it reads from the process's
+ *   database on the main thread — at most one read at a time, at a publication after a commit — so the worker still
+ *   reads none.
  * - **At `stop()`**, after the database closed: {@link ProcessAdmin.close} ends the heartbeat and the listener's
  *   thread. Nothing of it is left to keep Node.js alive.
  */
 
 import { buildCoreVersion } from "../config/build.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
-import { DEFAULT_ADMIN_ADDRESS } from "../config/core-settings.js";
+import { DEFAULT_ADMIN_ADDRESS, type ProcessSide } from "../config/core-settings.js";
 import { type PlainData, samePlainData } from "../config/plain-data.js";
 import { configRedactor, type Redactor } from "../config/redact.js";
 import type { CheckedConfig, CheckedEntry, ConfigInput } from "../config/validate.js";
+import type { Database } from "../db/api.js";
+import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
+import type { DeclarationSet } from "../modules/validation.js";
 import { parseAddress } from "../runner/api-server.js";
 import { Heartbeat } from "../runner/heartbeat.js";
 import type { ProcessStatus } from "../runner/process.js";
 import { earlyRedactor, shownSettings } from "./redaction.js";
 import { type AdminServer, type AdminStarter, startAdminServer } from "./server.js";
-import { DEFAULT_LIVENESS_TIMEOUT_MS, snapshotOf } from "./snapshot.js";
+import {
+  DEFAULT_LIVENESS_TIMEOUT_MS,
+  DEFAULT_TIP_CAP,
+  type DigestRow,
+  type ModuleFacts,
+  snapshotOf,
+  tableKey,
+} from "./snapshot.js";
 import type { AdminSnapshot, ConfigSnapshot } from "./types.js";
 
 /** Whether `value` is an object (not null, not a list). */
@@ -73,6 +89,46 @@ export interface ProcessAdminOptions {
   readonly log: (line: string) => void;
   /** How the listener starts: {@link startAdminServer} (its worker thread) unless given (the negative controls'). */
   readonly start?: AdminStarter;
+  /** The process's side (CF-4), the instance role `/status` shows: public (the core) unless given. */
+  readonly side?: ProcessSide;
+}
+
+/** What startup has resolved once the database is migrated ({@link ProcessAdmin.opened}). */
+export interface OpenedFacts {
+  /** The build's declarations, validated: which list each part comes from. */
+  readonly declarations: DeclarationSet<ModuleDeclaration>;
+  /** Every part of the database, in startup order: the resolved graph's `modules`. */
+  readonly modules: readonly ModuleDeclaration[];
+  /** Each part's revisions (the runner's `processRevisions`). */
+  readonly revisionsOf: (id: string) => readonly Revision[];
+  /** The process's database, from which `core_digest.tables` is read. */
+  readonly db: Pick<Database, "read">;
+}
+
+/** DT-5's digest rows: one per module table that has changed. */
+export const DIGESTS_SQL = 'SELECT "schema", "table", height, digest FROM core_digest.tables';
+
+/** The parts of `facts` as `/status` shows them, besides their digests. */
+export function moduleFacts(facts: OpenedFacts): ModuleFacts[] {
+  const { backbone, core } = facts.declarations;
+  const originOf = (id: string): ModuleFacts["origin"] =>
+    backbone.some((part) => part.id === id) ? "backbone" : core.some((part) => part.id === id) ? "core" : "user";
+  return facts.modules.map((part) => {
+    const revisions = facts.revisionsOf(part.id);
+    return Object.freeze({
+      id: part.id,
+      version: part.version,
+      side: part.side,
+      origin: originOf(part.id),
+      start: revisions[0]?.start ?? null,
+      stop: revisions.at(-1)?.stop ?? null,
+      tables: Object.freeze(
+        part.provides.flatMap((item) =>
+          item.table === undefined ? [] : item.table.tables.map((table) => Object.freeze({ schema: item.table!.schema, table })),
+        ),
+      ),
+    });
+  });
 }
 
 /** The runner's side of the admin endpoints (see the module comment). */
@@ -81,9 +137,20 @@ export class ProcessAdmin {
   readonly #log: (line: string) => void;
   readonly #start: AdminStarter;
   readonly #heartbeat: Heartbeat;
+  readonly #side: ProcessSide;
+  readonly #startedNs = process.hrtime.bigint();
   #redactor: Redactor = earlyRedactor(undefined);
   #liveness = DEFAULT_LIVENESS_TIMEOUT_MS;
   #readinessLag: number | null = null;
+  #instanceId: string | null = null;
+  #tipCap = DEFAULT_TIP_CAP;
+  #lastCommitMs: number | null = null;
+  #modules: readonly ModuleFacts[] | null = null;
+  #db: OpenedFacts["db"] | undefined;
+  #digests: ReadonlyMap<string, DigestRow> = new Map();
+  /** Whether `core_digest.tables` may have changed since it was last read, and whether a read is running. */
+  #digestsStale = false;
+  #reading = false;
   #config: ConfigSnapshot = Object.freeze({ core: null });
   #loaded: ConfigInput | undefined;
   /** The listener: starting, listening, or failed (once tried, never again). */
@@ -98,6 +165,7 @@ export class ProcessAdmin {
     this.#status = options.status;
     this.#log = options.log;
     this.#start = options.start ?? startAdminServer;
+    this.#side = options.side ?? "public";
     this.#heartbeat = new Heartbeat(() => this.publish());
   }
 
@@ -118,6 +186,8 @@ export class ProcessAdmin {
     this.#redactor = configRedactor(checked);
     this.#liveness = settings.livenessTimeoutMs as number;
     this.#readinessLag = (settings.readinessLag as number | undefined) ?? null;
+    this.#instanceId = (settings.instanceId as string | undefined) ?? null;
+    this.#tipCap = settings.tipCap as number;
     this.#config = Object.freeze({ core: Object.freeze({ start: core.start, settings: shownSettings(this.#redactor, core) }) });
     const { admin } = settings.listen as { readonly admin: string };
     await this.#listen(admin, true);
@@ -130,6 +200,53 @@ export class ProcessAdmin {
   async refused(): Promise<void> {
     if (this.#closed || this.#listening !== undefined) return;
     await this.#listen(earlyAdminAddress(this.#loaded?.config.data), false);
+  }
+
+  /**
+   * Startup has resolved the graph and migrated the database (`facts`; again after a retried startup): `/status` shows
+   * every part of the database from now on, and their digests once `core_digest.tables` is read — at the next
+   * publication, as after every commit.
+   */
+  opened(facts: OpenedFacts): void {
+    this.#modules = Object.freeze(moduleFacts(facts));
+    this.#db = facts.modules.some((part) => part.id === "core-digest") ? facts.db : undefined;
+    this.#digestsStale = true;
+    this.publish();
+  }
+
+  /** A height committed (the loop's commit observer): its wall-clock time, and the digests to read again. */
+  committed(): void {
+    this.#lastCommitMs = Date.now();
+    this.#digestsStale = true;
+  }
+
+  /**
+   * Reads `core_digest.tables` when it may have changed and no read runs, then publishes; a read that fails (the
+   * database closing at the stop) leaves the rows as last read, until the next commit.
+   */
+  #readDigests(): void {
+    const db = this.#db;
+    // Only `publish` calls it, which a closed admin returns from first.
+    if (!this.#digestsStale || this.#reading || db === undefined) return;
+    this.#digestsStale = false;
+    this.#reading = true;
+    void db
+      .read((read) => read.query(DIGESTS_SQL))
+      .then(
+        (rows) => {
+          this.#digests = new Map(
+            rows.map((row) => {
+              const digest = { schema: row.schema as string, table: row.table as string, height: row.height as bigint, digest: row.digest as Uint8Array };
+              return [tableKey(digest), Object.freeze(digest)] as const;
+            }),
+          );
+        },
+        () => undefined,
+      )
+      .finally(() => {
+        this.#reading = false;
+        this.publish();
+      });
   }
 
   /** Starts the listener at `address`; its failure rejects when `rethrow`, else is logged. */
@@ -166,12 +283,20 @@ export class ProcessAdmin {
       readinessLag: this.#readinessLag,
       redactor: this.#redactor,
       config: this.#config,
+      startedNs: this.#startedNs,
+      side: this.#side,
+      instanceId: this.#instanceId,
+      tipCap: this.#tipCap,
+      lastCommitMs: this.#lastCommitMs,
+      modules: this.#modules,
+      digests: this.#digests,
     });
   }
 
   /** Publishes the snapshot of `status()` to the listener when it changed since the last one it was sent. */
   publish(): void {
     if (this.#closed || this.#server === undefined) return;
+    this.#readDigests();
     const snapshot = this.#snapshot();
     const text = JSON.stringify(snapshot);
     if (text === this.#published) return;

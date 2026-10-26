@@ -64,7 +64,8 @@ export function serveAdmin(options: AdminServeOptions): void {
 
   // A server's request always has its method and URL.
   const respond = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    const view: AdminView = { snapshot, beatAgeMs: tickAgeMs(beat) };
+    const nowNs = process.hrtime.bigint();
+    const view: AdminView = { snapshot, beatAgeMs: tickAgeMs(beat, nowNs), nowNs };
     const { status, body } = await Promise.resolve()
       .then(() => answer(request.method as string, request.url as string, view))
       .catch(() => FAILED);

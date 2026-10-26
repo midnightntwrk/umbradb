@@ -1582,8 +1582,42 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       scratch copy of the tree): 33, all caught. Also changed: `src/runner/process.ts` (`statusOf`'s `ready`, one
       import, one comment line), `src/admin/` (the snapshot's `readinessLag`), `test/admin/` (the bodies, the build's
       `ADMIN_BACKBONE`), `test/cli/config-check.test.ts` (the build's backbone ids).
-- [ ] 8.3 `core-status` (`src/backbone/core-status/`): `/status` and its JSON schema, times as RFC 3339 text (Q68).
+- [x] 8.3 `core-status` (`src/backbone/core-status/`): `/status` and its JSON schema, times as RFC 3339 text (Q68).
       **Acceptance:** A66 (`/status`), A67; A140 for this endpoint.
+      **Done (2026-10-26):** the part as `core-health`'s: its declaration `CORE_STATUS` (no points, no items; after
+      `core-health` in RN-3's order and in the command's build) and its endpoint `CORE_STATUS_ENDPOINTS`: 200 with the
+      published status and `uptimeMs`, computed at the request from the published start (`process.hrtime.bigint()`,
+      the clock every thread reads alike; the view now carries the request's clock, `nowNs`). AE-5's fields
+      (`src/admin/snapshot.ts`, `types.ts`): the state, readiness, conditions, cursor, head, lag and reason as before;
+      `instance` (`core` or `private` with its `instanceId`); `lastCommitAt`, the wall-clock time of the last commit as
+      RFC 3339 UTC text with the fraction only when it has one (`utcText`, Q68; the loop's commit observer calls
+      `ProcessAdmin.committed`); `node` on the core (the finalized head the loop read, `node-retrying`'s attempts,
+      `tipCap`, whether `finality-stall` is raised; best head, connection and queue depth null until 10.3 reports
+      them); `modules`, every part of the database in startup order with its origin, version, side, first start, last
+      stop, whether the cursor reached it, and each table item's row of `core_digest.tables` (DT-5) — read on the main
+      thread from the process's database at a publication after a commit, one read at a time (`ProcessAdmin.opened`,
+      called in `#open` once the database is migrated) —; `public` on a private process (the public cursor; lockstep
+      null until 14.3); `ledger` and `privateInstances` null until 12.x and 14.x. The JSON schema
+      `test/backbone/core-status/status.schema.json` (draft 2020-12), checked by Ajv 8.18.0 in strict mode
+      (`test/admin/json-schema.ts`; `ajv` an exact development dependency, already in the tree as Stryker's: zod's
+      `fromJSONSchema` accepts a misspelled keyword silently). Tests (`test/backbone/core-status/`, seen failing first:
+      `tsc` exit 2, 51 lines; 28 of 33 tests): A66 through the process on PostgreSQL 18.6 and PGlite 0.5.10 — every
+      body validates while migrating, waiting for the node, following, retrying, at an upgrade boundary, past a
+      module's stop, stopping, halted, refused before and after the validation; `cursor` null before S commits (while
+      migrating and while S is above the head); the digests shown equal `core_digest.tables`; the uptime grows —; A67 on
+      both: a callback's error holding a secret in six forms (the `node` URL's password, a module's `secret` setting,
+      on PostgreSQL the `database` URL's password) halts, `/status` shows code, height, module and point, and no form is
+      in any of the four bodies or any log line; A140: mounted as the part gives it, its folder and tests, a refused
+      process (public and private) answering it. Committed negative controls: a body missing each required field, with
+      an extra one, or with 14 wrong forms fails the schema; a `/status` that adds the exception's message shows the
+      secret, and the search finds it. Wrong variants (a scratch copy of the tree): 53; 49 caught, 2 equivalent (their
+      redundant code removed), 2 gaps closed by tests (a table of one name in two schemas; a declaration with a
+      callback), both caught on the final sources. The tests ask for the admin endpoints explicitly, each process on
+      `127.0.0.1:0` (so they hold when Q128's default flips, task 8.1a). Also changed:
+      `src/runner/process.ts` (the admin's side, `opened` after the seal, `committed` in the commit observer),
+      `src/admin/serve.ts` (`nowNs`), `package.json` and `package-lock.json` (`ajv` 8.18.0),
+      `test/dependencies/pins.test.ts`, `design.md` §14 (the Ajv row), `test/admin/` (the snapshot helpers, `side`),
+      `test/cli/config-check.test.ts`.
 - [ ] 8.4 `core-config` (`src/backbone/core-config/`): `/config` and its JSON schema.
       **Acceptance:** A66 (`/config`), A29; A140 for this endpoint.
 

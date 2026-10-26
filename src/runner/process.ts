@@ -486,7 +486,12 @@ class Process implements ProcessHandle {
     this.#admin =
       admin === undefined || admin === false
         ? undefined
-        : new ProcessAdmin({ status: () => this.status(), log: (line) => this.#log(line), ...(admin === true ? {} : { start: admin }) });
+        : new ProcessAdmin({
+            status: () => this.status(),
+            log: (line) => this.#log(line),
+            side: input.side ?? "public",
+            ...(admin === true ? {} : { start: admin }),
+          });
     this.closed = new Promise((resolve) => {
       this.#resolveClosed = resolve;
     });
@@ -673,6 +678,8 @@ class Process implements ProcessHandle {
     });
     this.#step();
     contexts.seal();
+    // `/status` shows every part of the database and its digests from here on (AE-5, task 8.3).
+    this.#admin?.opened({ declarations, modules: graph.modules, revisionsOf: processRevisions(check, core), db });
     // The bootstrap's wait (IN-2): every bootstrap step has run, and nothing is processed until block S commits; before
     // the module API, so that a retried startup (a node unreachable meanwhile) never finds it listening.
     if (cursor === null) await waitForNode(source, start, this.#stop.signal, waiting);
@@ -708,6 +715,7 @@ class Process implements ProcessHandle {
         committed: (block) => {
           this.#cursor = block.height;
           this.#recovered();
+          this.#admin?.committed();
         },
       },
     });

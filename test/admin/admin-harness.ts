@@ -6,8 +6,9 @@ import { z } from "zod";
 import { serveAdmin, type FromAdmin } from "../../src/admin/serve.js";
 import { type AdminServer, type AdminStarter, startAdminServer } from "../../src/admin/server.js";
 import { answerAdmin, ADMIN_ROUTES } from "../../src/admin/routes.js";
-import type { AdminAnswer, AdminView } from "../../src/admin/types.js";
+import type { AdminAnswer, AdminSnapshot, AdminView, StatusSnapshot } from "../../src/admin/types.js";
 import { CORE_HEALTH } from "../../src/backbone/core-health/index.js";
+import { CORE_STATUS } from "../../src/backbone/core-status/index.js";
 import { coreEntry } from "../../src/config/entries.js";
 import type { ReadOnlyDatabase } from "../../src/db/api.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -77,9 +78,39 @@ export function dbKeeper(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaratio
 
 /**
  * The backbone parts of the admin endpoints that have a declaration, which the tests' build carries beside the test
- * backbone (`testBuild`), as the command's build does (`src/cli/build-modules.ts`): `core-health` (task 8.2).
+ * backbone (`testBuild`), as the command's build does (`src/cli/build-modules.ts`): `core-health` (task 8.2) and
+ * `core-status` (task 8.3).
  */
-export const ADMIN_BACKBONE = [CORE_HEALTH] as const;
+export const ADMIN_BACKBONE = [CORE_HEALTH, CORE_STATUS] as const;
+
+/**
+ * A published status for the endpoints' unit tests: a public process `following` at 3, ready, `given` over it; what
+ * nothing has reported yet null (AE-5).
+ */
+export function statusSnapshot(given: Partial<StatusSnapshot> = {}): StatusSnapshot {
+  return {
+    state: "following",
+    ready: true,
+    conditions: [],
+    cursor: "3",
+    head: "3",
+    lag: "0",
+    reason: null,
+    instance: { role: "core", id: null },
+    lastCommitAt: null,
+    node: { finalizedHead: "3", bestHead: null, connection: null, retries: 0, queueDepth: null, tipCap: 600, finalityStall: false },
+    modules: null,
+    ledger: null,
+    privateInstances: null,
+    public: null,
+    ...given,
+  };
+}
+
+/** A whole snapshot for the endpoints' unit tests: {@link statusSnapshot}'s, CF-4's defaults, `given` over it. */
+export function adminSnapshot(given: Partial<AdminSnapshot> = {}): AdminSnapshot {
+  return { livenessTimeoutMs: 30_000, readinessLag: null, startedNs: "0", status: statusSnapshot(), config: { core: null }, ...given };
+}
 
 /** The four endpoints (AE-1). */
 export const ENDPOINTS = ["/health/live", "/health/ready", "/status", "/config"] as const;
@@ -191,6 +222,8 @@ export interface AdminRunOptions {
   readonly build?: TestBuildOptions;
   /** Adds {@link dbKeeper} (and its entry from 1), so that {@link AdminRun.db} gives the process's database. */
   readonly keepDb?: boolean;
+  /** The process's side; public unless given. */
+  readonly side?: "public" | "private";
 }
 
 /** A process started with its admin endpoints. */
@@ -248,6 +281,7 @@ export function startWithAdmin(options: AdminRunOptions): AdminRun {
     declarations: { ...build.declarations, backbone: [...build.declarations.backbone, ...ADMIN_BACKBONE] },
     config: { data: { entries } },
     source,
+    ...(options.side === undefined ? {} : { side: options.side }),
     log: (line) => lines.push(line),
     admin: async (start) => {
       asked(start.address);
@@ -543,7 +577,8 @@ export function databaseReadingAdmin(database: () => Promise<ReadOnlyDatabase>):
     if (method === "GET" && url === "/status") {
       const db = await database();
       const rows = await db.read((read) => read.query("SELECT max(height)::text AS h FROM core_block_commit.blocks"));
-      return { status: 200, body: { ...view.snapshot.status, cursor: (rows[0]?.h as string | null | undefined) ?? null } };
+      const cursor = (rows[0]?.h as string | null | undefined) ?? null;
+      return { status: 200, body: { ...view.snapshot.status, cursor, uptimeMs: 0 } };
     }
     return answerAdmin(ADMIN_ROUTES, method, url, view);
   });

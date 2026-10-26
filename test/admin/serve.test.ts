@@ -11,7 +11,7 @@ import { ADMIN_CLOSE_TIMEOUT_MS, type AdminServer, startAdminServer, workerEntry
 import type { AdminSnapshot } from "../../src/admin/types.js";
 import { reasonOf } from "../../src/runner/failures.js";
 import { Heartbeat } from "../../src/runner/heartbeat.js";
-import { ask, ENDPOINTS, newHold, startProber, timingProblems } from "./admin-harness.js";
+import { ask, ENDPOINTS, newHold, startProber, statusSnapshot, timingProblems } from "./admin-harness.js";
 
 /**
  * The admin listener without a process (task 8.1; AE-1, AE-2): `serveAdmin` — `node:http` answering the route table
@@ -27,7 +27,8 @@ function snapshot(state: AdminSnapshot["status"]["state"] = "following", ready =
   return {
     livenessTimeoutMs: liveness,
     readinessLag: null,
-    status: { state, ready, conditions: [], cursor: "3", head: "3", lag: "0", reason: null },
+    startedNs: "0",
+    status: statusSnapshot({ state, ready }),
     config: { core: null },
   };
 }

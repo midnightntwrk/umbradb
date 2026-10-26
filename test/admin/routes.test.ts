@@ -3,9 +3,9 @@ import { ADMIN_PARTS, ADMIN_ROUTES, adminRoutes, answerAdmin, NOT_FOUND } from "
 import type { AdminSnapshot, AdminView } from "../../src/admin/types.js";
 import { CORE_CONFIG } from "../../src/backbone/core-config/index.js";
 import { CORE_HEALTH_ENDPOINTS } from "../../src/backbone/core-health/index.js";
-import { CORE_STATUS } from "../../src/backbone/core-status/index.js";
+import { CORE_STATUS_ENDPOINTS } from "../../src/backbone/core-status/index.js";
 import { BACKBONE_ORDER } from "../../src/modules/graph.js";
-import { OTHER_REQUESTS } from "./admin-harness.js";
+import { OTHER_REQUESTS, statusSnapshot } from "./admin-harness.js";
 
 /**
  * The admin route table (task 8.1; AE-1, AE-2, Q70): the endpoints of the backbone parts `core-health`
@@ -22,16 +22,17 @@ function snapshot(liveness = 30_000, ready = true): AdminSnapshot {
   return {
     livenessTimeoutMs: liveness,
     readinessLag: null,
-    status: { state: ready ? "following" : "halted", ready, conditions: [], cursor: "3", head: "3", lag: "0", reason: null },
+    startedNs: "0",
+    status: statusSnapshot({ state: ready ? "following" : "halted", ready }),
     config: { core: { start: 1, settings: { network: "preprod", database: "[redacted]" } } },
   };
 }
 
-const view = (beatAgeMs: number, given: AdminSnapshot = snapshot()): AdminView => ({ snapshot: given, beatAgeMs });
+const view = (beatAgeMs: number, given: AdminSnapshot = snapshot()): AdminView => ({ snapshot: given, beatAgeMs, nowNs: 0n });
 
 describe("the admin route table (AE-1, Q70)", () => {
   it("mounts exactly the backbone parts core-health, core-status and core-config, with the four paths", () => {
-    expect(ADMIN_PARTS).toEqual([CORE_HEALTH_ENDPOINTS, CORE_STATUS, CORE_CONFIG]);
+    expect(ADMIN_PARTS).toEqual([CORE_HEALTH_ENDPOINTS, CORE_STATUS_ENDPOINTS, CORE_CONFIG]);
     expect(ADMIN_PARTS.map((part) => part.id)).toEqual(["core-health", "core-status", "core-config"]);
     for (const part of ADMIN_PARTS) expect(BACKBONE_ORDER).toContain(part.id);
     expect([...ADMIN_ROUTES.keys()]).toEqual(["/health/live", "/health/ready", "/status", "/config"]);
@@ -62,8 +63,9 @@ describe("the admin route table (AE-1, Q70)", () => {
   });
 
   it("answers GET of a mounted path from the snapshot, the query aside; anything else 404 not-found", () => {
-    expect(answerAdmin(ADMIN_ROUTES, "GET", "/status", view(0))).toEqual({ status: 200, body: snapshot().status });
-    expect(answerAdmin(ADMIN_ROUTES, "GET", "/status?verbose=1", view(0))).toEqual({ status: 200, body: snapshot().status });
+    const status = { ...snapshot().status, uptimeMs: 0 };
+    expect(answerAdmin(ADMIN_ROUTES, "GET", "/status", view(0))).toEqual({ status: 200, body: status });
+    expect(answerAdmin(ADMIN_ROUTES, "GET", "/status?verbose=1", view(0))).toEqual({ status: 200, body: status });
     expect(answerAdmin(ADMIN_ROUTES, "GET", "/config?", view(0))).toEqual({ status: 200, body: snapshot().config });
     for (const [method, path] of [...OTHER_REQUESTS, ["GET", ""], ["GET", "?/status"], ["get", "/status"]] as const) {
       expect(answerAdmin(ADMIN_ROUTES, method, path, view(0)), `${method} ${path}`).toBe(NOT_FOUND);
@@ -116,7 +118,7 @@ describe("the backbone parts' minimal endpoints (8.2–8.4 complete them)", () =
 
   it("core-status /status and core-config /config: 200 with the published status and configuration", () => {
     const given = snapshot();
-    expect(answerAdmin(ADMIN_ROUTES, "GET", "/status", view(0, given)).body).toBe(given.status);
+    expect(answerAdmin(ADMIN_ROUTES, "GET", "/status", view(0, given)).body).toEqual({ ...given.status, uptimeMs: 0 });
     expect(answerAdmin(ADMIN_ROUTES, "GET", "/config", view(0, given)).body).toBe(given.config);
     const halted = { ...given, status: { ...given.status, state: "halted" as const, ready: false } };
     expect(answerAdmin(ADMIN_ROUTES, "GET", "/status", view(99_999, halted)).status).toBe(200);

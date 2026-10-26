@@ -33,7 +33,71 @@ export interface SanitizedError {
   readonly details: PlainObject;
 }
 
-/** `status()` as the admin endpoints show it (see the module comment). */
+/** Which process this is (AE-5's instance role): the core, or a private process with its `instanceId` (CF-4). */
+export interface InstanceStatus {
+  readonly role: "core" | "private";
+  /** A private process's `instanceId`; null on the core. */
+  readonly id: string | null;
+}
+
+/**
+ * The node as the core sees it (AE-5): what the runner knows of it, `null` where nothing reports a value yet (the
+ * block source's best head, connection and queue are task 10.3's).
+ */
+export interface NodeStatus {
+  /** The node's finalized head the loop last read (decimal text), null before it read one. */
+  readonly finalizedHead: string | null;
+  /** The node's best head (decimal text); null until the block source reports it. */
+  readonly bestHead: string | null;
+  /** The node connection's state; null until the block source reports it. */
+  readonly connection: null;
+  /** The failures of the node being retried now (`node-retrying`'s attempts, IN-10); 0 when none is. */
+  readonly retries: number;
+  /** The best-block queue's depth (IN-6); null until the block source reports it. */
+  readonly queueDepth: number | null;
+  /** The best-block queue's cap: the process revision's `tipCap` (CF-4, IN-6). */
+  readonly tipCap: number;
+  /** Whether the condition `finality-stall` is raised (IN-6, AE-3). */
+  readonly finalityStall: boolean;
+}
+
+/** One table of a module, with its row of `core_digest.tables` (DT-5): its last-changed height and digest. */
+export interface ModuleTableStatus {
+  readonly schema: string;
+  readonly table: string;
+  /** The height its digest last changed at (decimal text); null while it has no row (never changed). */
+  readonly height: string | null;
+  /** Its digest, `0x`-prefixed lowercase hex; null while it has no row. */
+  readonly digest: string | null;
+}
+
+/** One part of the database as `/status` shows it (AE-5's "per module"). */
+export interface ModuleStatus {
+  readonly id: string;
+  /** The version the build carries. */
+  readonly version: string;
+  readonly side: "public" | "private";
+  /** Whether it is a backbone part, a core module or a user module. */
+  readonly origin: "backbone" | "core" | "user";
+  /** Its first revision's start (decimal text); null for a part without a revision. */
+  readonly start: string | null;
+  /** Its last revision's stop (decimal text); null when it has none. */
+  readonly stop: string | null;
+  /** Whether the cursor has reached its stop: it processes no more heights. */
+  readonly stopped: boolean;
+  /** Its table items' tables, each with its digest row. */
+  readonly tables: readonly ModuleTableStatus[];
+}
+
+/** A private process's view of the public side (AE-5). */
+export interface PublicStatus {
+  /** The public cursor: the public database's last committed height, as the private source last read it. */
+  readonly cursor: string | null;
+  /** Whether the private process runs in lockstep; null until task 14.3 reports it. */
+  readonly lockstep: null;
+}
+
+/** `status()` as the admin endpoints show it (see the module comment): `/status` without its uptime. */
 export interface StatusSnapshot {
   readonly state: ProcessState;
   /** Whether it is ready: `status()`'s, by AE-4's order (`core-health`'s `readinessOf`, as `/health/ready` decides). */
@@ -47,6 +111,19 @@ export interface StatusSnapshot {
   readonly lag: string | null;
   /** Why the process is refused or halted (kept once it is stopping); null before either. */
   readonly reason: SanitizedError | null;
+  readonly instance: InstanceStatus;
+  /** When the last height committed, by the wall clock, as RFC 3339 UTC text (Q68); null before any commit. */
+  readonly lastCommitAt: string | null;
+  /** The node, on the core; null on a private process (it never talks to the node). */
+  readonly node: NodeStatus | null;
+  /** Every part of the database, in startup order; null until startup resolved them. */
+  readonly modules: readonly ModuleStatus[] | null;
+  /** The ledger version in effect, its package and its last root check; null until the ledger tasks (12.x) report it. */
+  readonly ledger: null;
+  /** On the core, its private instances; null until the private-process tasks (14.x) report them. */
+  readonly privateInstances: null;
+  /** On a private process, the public side; null on the core. */
+  readonly public: PublicStatus | null;
 }
 
 /** The configuration as the admin endpoints show it. */
@@ -68,21 +145,31 @@ export interface AdminSnapshot {
    * revision is known; `/health/ready` decides from it with the state and the lag (`core-health`, task 8.2).
    */
   readonly readinessLag: number | null;
+  /** When the process started, `process.hrtime.bigint()` as decimal text: `/status` computes its uptime from it. */
+  readonly startedNs: string;
   readonly status: StatusSnapshot;
   readonly config: ConfigSnapshot;
 }
 
-/** What an endpoint sees at a request: the latest snapshot, and the heartbeat's age measured then. */
+/** What an endpoint sees at a request: the latest snapshot, the heartbeat's age and the clock, read at the request. */
 export interface AdminView {
   readonly snapshot: AdminSnapshot;
   /** Milliseconds since the runner's last heartbeat tick, as the worker read it at this request. */
   readonly beatAgeMs: number;
+  /** `process.hrtime.bigint()` at this request: the monotonic clock every thread of the process reads alike. */
+  readonly nowNs: bigint;
 }
 
 /** An endpoint's answer: its status and its body, written as JSON. */
 export interface AdminAnswer {
   readonly status: number;
-  readonly body: PlainData | StatusSnapshot | ConfigSnapshot;
+  readonly body: PlainData | StatusBody | ConfigSnapshot;
+}
+
+/** `/status`'s body: the published status and the uptime at the request. */
+export interface StatusBody extends StatusSnapshot {
+  /** Milliseconds since the process started, by the monotonic clock. */
+  readonly uptimeMs: number;
 }
 
 /** One admin endpoint: `GET` of its path, answered by a function of the snapshot (it reads no database). */

@@ -33,6 +33,12 @@ describe("dependency pins", () => {
     expect(locked("esbuild")).toMatchObject({ version: "0.28.2", dev: true });
   });
 
+  it("pins ajv 8.18.0 exactly as a development dependency (task 8.3: the admin endpoints' JSON schemas, A66)", () => {
+    expect(manifest.devDependencies["ajv"]).toBe("8.18.0");
+    expect(manifest.dependencies["ajv"]).toBeUndefined();
+    expect(locked("ajv")).toMatchObject({ version: "8.18.0", dev: true });
+  });
+
   it("has typescript as a runtime dependency only", () => {
     expect(manifest.dependencies["typescript"]).toBeDefined();
     expect(manifest.devDependencies["typescript"]).toBeUndefined();

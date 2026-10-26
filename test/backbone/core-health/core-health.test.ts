@@ -12,7 +12,7 @@ import { UMBRADB_VERSION } from "../../../src/config/build.js";
 import { BACKBONE_ORDER, resolveGraph } from "../../../src/modules/graph.js";
 import { validateDeclarations } from "../../../src/modules/validation.js";
 import type { ProcessState } from "../../../src/runner/process.js";
-import { ask, startWithAdmin, statusWhen } from "../../admin/admin-harness.js";
+import { ask, startWithAdmin, statusSnapshot, statusWhen } from "../../admin/admin-harness.js";
 import { LOOP_BACKBONE } from "../../runner/loop-harness.js";
 
 /**
@@ -33,12 +33,13 @@ function snapshot(
   return {
     livenessTimeoutMs: liveness,
     readinessLag,
-    status: { state, ready: false, conditions: [], cursor: "3", head: "3", lag, reason: null },
+    startedNs: "0",
+    status: statusSnapshot({ state, ready: false, lag }),
     config: { core: null },
   };
 }
 
-const view = (given: AdminSnapshot, beatAgeMs = 0): AdminView => ({ snapshot: given, beatAgeMs });
+const view = (given: AdminSnapshot, beatAgeMs = 0): AdminView => ({ snapshot: given, beatAgeMs, nowNs: 0n });
 const get = (path: string, given: AdminView) => answerAdmin(ADMIN_ROUTES, "GET", path, given);
 
 describe("core-health's declaration (CORE-ARCH §4.11: no points, requires nothing, provides the endpoints)", () => {
@@ -53,6 +54,8 @@ describe("core-health's declaration (CORE-ARCH §4.11: no points, requires nothi
       migrations: [],
       points: {},
     });
+    // `toMatchObject` takes `points: {}` as a subset: no callback at all is checked here.
+    expect(Object.keys(CORE_HEALTH.points)).toEqual([]);
     expect(Object.isFrozen(CORE_HEALTH)).toBe(true);
     expect(BACKBONE_ORDER).toContain(CORE_HEALTH.id);
     const set = validateDeclarations({ backbone: [CORE_CHAIN, CORE_BLOCK_COMMIT, CORE_DIGEST, CORE_HEALTH], core: [], user: [] });

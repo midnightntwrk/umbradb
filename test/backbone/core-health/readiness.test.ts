@@ -8,6 +8,7 @@ import type { BlockItemSource } from "../../../src/backbone/core-block-fetch/ind
 import type { BlockRef, BlockSource } from "../../../src/runner/block-source.js";
 import { type ProcessState, statusOf } from "../../../src/runner/process.js";
 import {
+  adminSnapshot,
   adminSource,
   type AdminRun,
   ask,
@@ -15,6 +16,7 @@ import {
   gate,
   mainThreadAdmin,
   startWithAdmin,
+  statusSnapshot,
   statusWhen,
 } from "../../admin/admin-harness.js";
 import { PROCESS_BACKENDS } from "../../runner/process-backends.js";
@@ -117,20 +119,18 @@ describe("readinessOf: AE-4's order", () => {
       const conditions = c.conditions.map((code) => ({ code }));
       const answer = answerAdmin(ADMIN_ROUTES, "GET", "/health/ready", {
         beatAgeMs: 0,
-        snapshot: {
-          livenessTimeoutMs: 30_000,
+        nowNs: 0n,
+        snapshot: adminSnapshot({
           readinessLag: c.readinessLag,
-          status: {
+          status: statusSnapshot({
             state: c.state,
             ready: !c.ready,
             conditions,
             cursor: "1",
             head: null,
             lag: c.lag === null ? null : String(c.lag),
-            reason: null,
-          },
-          config: { core: null },
-        },
+          }),
+        }),
       });
       expect(answer.status, caseText(c)).toBe(c.ready ? 200 : 503);
     }
