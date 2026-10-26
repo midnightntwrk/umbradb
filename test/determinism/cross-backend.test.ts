@@ -71,7 +71,12 @@ let onPostgres: TestDatabase;
 let onPglite: TestDatabase;
 
 beforeAll(async () => {
-  [postgres, pglite] = await Promise.all([startPostgres(), startPglite()]);
+  // Each server kept as soon as it starts, so that `afterAll` stops it also when the other one failed to start.
+  const started = await Promise.allSettled([
+    startPostgres().then((server) => (postgres = server)),
+    startPglite().then((server) => (pglite = server)),
+  ]);
+  for (const result of started) if (result.status === "rejected") throw result.reason;
   [onPostgres, onPglite] = await Promise.all([postgres.create(), pglite.create()]);
   await Promise.all([onPostgres.exec(DATABASE), onPglite.exec(DATABASE)]);
 }, 180_000);

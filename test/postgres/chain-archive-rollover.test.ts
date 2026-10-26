@@ -6,6 +6,7 @@ import { PgChainArchiveStore } from "../../src/postgres/chain-archive-store.js";
 import { rolloverDefaultPartition } from "../../src/postgres/chain-archive-rollover.js";
 import { runMigrations } from "../../src/postgres/migrate.js";
 import { chainArchiveMigrations } from "../../src/postgres/migrations/chain_archive/index.js";
+import { startContainer } from "../containers.js";
 
 /**
  * AC-6 (partition/rollover correctness, verified with a real rollover event). The real migrated
@@ -34,7 +35,7 @@ describe("AC-6: partition/rollover correctness with a real rollover event", () =
   const net = "rollover_net";
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+    container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
     sql = createClient({ connectionString: container.getConnectionUri(), schema });
     await runMigrations(sql, { schema, migrations: chainArchiveMigrations });
   }, 120_000);

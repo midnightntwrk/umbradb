@@ -9,6 +9,7 @@ import { planSchemas } from "../../src/db/roles.js";
 import { startWriter } from "../../src/db/writer-lock.js";
 import { expectRefusedBeforeAnyWrite } from "./durability-checks.js";
 import { WRITER_LOCK_HOLDERS_SQL } from "./writer-lock-checks.js";
+import { startContainer } from "../containers.js";
 
 /**
  * A18's committed negative control (DB-12): a durability probe that ignores `fsync` must make A18's `fsync=off` check
@@ -37,7 +38,7 @@ vi.mock("../../src/db/durability-probe.js", async (importOriginal) => {
 let fsyncOff: StartedPostgreSqlContainer;
 
 beforeAll(async () => {
-  fsyncOff = await new PostgreSqlContainer(POSTGRES_IMAGE).withCommand(["postgres", "-c", "fsync=off"]).start();
+  fsyncOff = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE).withCommand(["postgres", "-c", "fsync=off"]));
 }, 180_000);
 
 afterAll(async () => {

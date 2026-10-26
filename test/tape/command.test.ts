@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +13,7 @@ import { REPOSITORY } from "../node/in8.js";
 import { until } from "../node/manual-timers.js";
 import { RawClient } from "./raw-client.js";
 import { type Script, ScriptedNode } from "./scripted-node.js";
+import { spawnChild } from "../child-processes.js";
 
 /**
  * The tape tools' command (`tools/tape/main.ts`, its logic in `tools/tape/command.ts`; task 9.2): `record` starts the
@@ -214,7 +214,7 @@ describe("the tape command", { timeout: TEST_TIMEOUT_MS }, () => {
   it("runs as a process of its own: record until SIGINT, then the tape and its SHA-256", async () => {
     await withScripted(echo, async (node) => {
       const out = join(directory, "process.tape.jsonl");
-      const child = spawn(
+      const child = spawnChild(
         process.execPath,
         ["--import", "tsx", join(REPOSITORY, "tools/tape/main.ts"), "record", "--node", node.url, "--out", out],
         { cwd: REPOSITORY, stdio: ["ignore", "pipe", "pipe"] },
@@ -240,7 +240,7 @@ describe("the tape command", { timeout: TEST_TIMEOUT_MS }, () => {
       const bytes = readFileSync(out);
       expect(stdout).toContain(`${tapeId(bytes)}  ${out}\n1 records in 1 sessions\n`);
       expect(stdout).toContain("session 1 ended by the client: 1 records\n");
-      const usage = spawn(process.execPath, ["--import", "tsx", join(REPOSITORY, "tools/tape/main.ts")], {
+      const usage = spawnChild(process.execPath, ["--import", "tsx", join(REPOSITORY, "tools/tape/main.ts")], {
         cwd: REPOSITORY,
         stdio: "ignore",
       });

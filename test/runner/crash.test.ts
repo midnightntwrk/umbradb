@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,6 +17,7 @@ import { type CrashCall, type CrashEvent, crashModule } from "./crash-module.js"
 import type { CrashJob, CrashWorkerEvent } from "./crash.worker.js";
 import { cursorIn, pairs, PROCESS_BACKENDS, type ProcessBackend } from "./process-backends.js";
 import { core, settle, testBuild } from "./process-build.js";
+import { spawnChild } from "../child-processes.js";
 
 /**
  * A44 and A46 (task 5.4; RN-5, RN-9, RN-11) with a real process killed by SIGKILL at the stated points, on PostgreSQL 18
@@ -48,7 +49,7 @@ interface Worker {
 }
 
 function startWorker(job: CrashJob): Worker {
-  const child = spawn(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
+  const child = spawnChild(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
     cwd: REPOSITORY,
     stdio: ["ignore", "pipe", "pipe"],
   });

@@ -6,6 +6,7 @@ import { PgChainArchiveStore } from "../../src/postgres/chain-archive-store.js";
 import { BlobIntegrityError, BlobMissingError } from "../../src/interfaces/chain-archive-store.js";
 import { runMigrations } from "../../src/postgres/migrate.js";
 import { chainArchiveMigrations } from "../../src/postgres/migrations/chain_archive/index.js";
+import { startContainer } from "../containers.js";
 
 /**
  * Real Postgres 18 (testcontainers), not mocked -- exercises `PgChainArchiveStore`
@@ -32,7 +33,7 @@ describe("PgChainArchiveStore", () => {
   const schema = "chain_archive_store_test";
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+    container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
     sql = createClient({ connectionString: container.getConnectionUri(), schema });
     await runMigrations(sql, { schema, migrations: chainArchiveMigrations });
     store = new PgChainArchiveStore(sql, schema);

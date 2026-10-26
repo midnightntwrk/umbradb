@@ -195,11 +195,12 @@ const keepsFirst: Access = {
   },
 };
 
-// The suite starts a database and runs about 40 sequences of up to 10 blocks; under the full parallel conformance run
-// (load average 20-35) a run of the property takes tens of seconds, so each test has 10 minutes.
+// The suite starts a database and runs about 40 sequences of up to 10 blocks. The property's run took 9 s on a quiet
+// machine and 307 s at a load average of about 77 (task 0.5, 2026-10-26), half of the 10 minutes it had; each test has
+// 20 minutes, as the height-versioned table's property (`height-versioned.property.test.ts`).
 const TITLE = "A59: the cursor table returns each key's last write, on $name (SH-1, P9)";
 
-describe.each(BACKENDS)(TITLE, { timeout: 600_000 }, (backend) => {
+describe.each(BACKENDS)(TITLE, { timeout: 1_200_000 }, (backend) => {
   let database: CursorDatabase;
 
   beforeAll(async () => {

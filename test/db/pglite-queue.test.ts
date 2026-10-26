@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
@@ -374,14 +374,19 @@ describe("opening (DB-1, Q65)", () => {
     ["TimeZone", "Asia/Tokyo"],
     ["extra_float_digits", "0"],
   ];
-  const directories: string[] = [];
+  // Every data directory inside one temporary root, removed with it: the PGlite lock keeps its file beside the data
+  // directory (`<directory>.lock.sqlite`, src/db/pglite-lock.ts), which removing the directory alone would leave in the
+  // system's temporary folder (docs/issues/00021).
+  let root: string | undefined;
+  let made = 0;
   const directory = () => {
-    const made = mkdtempSync(join(tmpdir(), "umbradb-pglite-test-"));
-    directories.push(made);
-    return made;
+    root ??= mkdtempSync(join(tmpdir(), "umbradb-pglite-test-"));
+    const dataDir = join(root, `db-${++made}`);
+    mkdirSync(dataDir);
+    return dataDir;
   };
   afterAll(() => {
-    for (const made of directories) rmSync(made, { recursive: true, force: true });
+    if (root !== undefined) rmSync(root, { recursive: true, force: true });
   });
 
   it("starts the engine with PGlite's own start parameters and the session settings: the five pinned, the zero timeouts", () => {

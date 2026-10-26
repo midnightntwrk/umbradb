@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -6,6 +5,7 @@ import { build } from "esbuild";
 import ts from "typescript";
 import { type CommandIo, runCommand } from "../../src/cli/command.js";
 import { REPOSITORY } from "../config/config-fixtures.js";
+import { spawnChild } from "../child-processes.js";
 
 export { REPOSITORY };
 
@@ -149,7 +149,7 @@ export function inChild(
   options: { readonly cwd?: string; readonly env?: Readonly<Record<string, string>>; readonly timeoutMs?: number } = {},
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [project.cli, ...argv], {
+    const child = spawnChild(process.execPath, [project.cli, ...argv], {
       cwd: options.cwd ?? project.dir,
       env: { ...process.env, ...options.env },
       stdio: ["ignore", "pipe", "pipe"],

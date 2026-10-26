@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,6 +13,7 @@ import { cursorIn, pairs, PROCESS_BACKENDS, type ProcessBackend, type ProcessDat
 import { core, entryOf, settle, testBuild } from "./process-build.js";
 import { type WorkEvent, workModule } from "./sigterm-module.js";
 import type { Job, WorkerEvent } from "./sigterm.worker.js";
+import { spawnChild } from "../child-processes.js";
 
 /**
  * A48 (task 5.3; RN-13) with a real process and a real signal: SIGTERM during `on-db-write` of h ends with h fully
@@ -46,7 +47,7 @@ interface Worker {
 }
 
 function startWorker(job: Job): Worker {
-  const child = spawn(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
+  const child = spawnChild(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
     cwd: REPOSITORY,
     stdio: ["ignore", "pipe", "pipe"],
   });

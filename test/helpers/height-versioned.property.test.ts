@@ -333,11 +333,12 @@ const noCounts = (): Counts => ({
 });
 
 // The suite starts a database and runs 40 sequences of up to 10 blocks, each block followed by reads at every
-// height; under the full parallel conformance run (load average 20-35) a run takes tens of seconds, so each test has
-// 10 minutes.
+// height. The property's run on PostgreSQL took 47 s on a quiet machine, 221–398 s at a load average of about 61 and
+// 554 s at up to 85, and passed 600 s at a median of 77 (task 0.5, 2026-10-26), where the timed-out run went on against
+// the shared database and failed the next test; so each test has 20 minutes, twice the slowest run that completed.
 const TITLE = "A60: the height-versioned table reads as its model at every height, on $name (SH-2)";
 
-describe.each(BACKENDS)(TITLE, { timeout: 600_000 }, (backend) => {
+describe.each(BACKENDS)(TITLE, { timeout: 1_200_000 }, (backend) => {
   let database: HelperDatabase;
 
   beforeAll(async () => {

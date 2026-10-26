@@ -1,5 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import type { Job, WorkerEvent } from "./pglite-writer.worker.js";
+import { spawnChild } from "../child-processes.js";
 
 /**
  * The parent side of A17's process tests (DB-11): PGlite writers in processes of their own (`pglite-writer.worker.ts`,
@@ -44,7 +45,7 @@ export function workDirectory(): string {
 
 /** Starts a worker process on `job`. */
 export function startWriterProcess(job: Job): WriterProcess {
-  const child = spawn(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
+  const child = spawnChild(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
     cwd: REPOSITORY,
     stdio: ["ignore", "pipe", "pipe"],
   });

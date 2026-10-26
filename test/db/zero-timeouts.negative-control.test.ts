@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
+import type { SchemaPlan } from "../../src/db/roles.js";
 import type * as SettingsModule from "../../src/deterministic-postgresql/settings.js";
 import { SESSION_SETTINGS, ZERO_TIMEOUTS } from "../../src/deterministic-postgresql/index.js";
 import {
@@ -37,6 +38,27 @@ vi.mock("../../src/deterministic-postgresql/settings.js", async (importOriginal)
 const SETTINGS_SOURCE = fileURLToPath(new URL("../../src/deterministic-postgresql/settings.ts", import.meta.url));
 const TEST_TIMEOUT = 60_000;
 const postgres = BACKENDS.find((backend) => !backend.singleQueue)!;
+
+/** How many times the checks' setup is tried, while the database's 1 s timeouts cut it off. */
+const SETUP_ATTEMPTS = 5;
+
+/**
+ * The checks' setup (`migrated`), tried again while it fails with `connection-lost`: with every timeout 1 s and no
+ * zeros, a loaded machine can take more than 1 s for the setup's own migration transaction (`transaction_timeout`), and
+ * the server ends the session before the step a test checks has begun (seen 2026-10-26 at a load average of about 85:
+ * "the writer connection to PostgreSQL was lost (CONNECTION_CLOSED)" in `captureReady`, during `startDatabase`). The
+ * startup is atomic per migration and repeatable, so a new attempt starts on a new session; what each test asserts is
+ * the step after it.
+ */
+async function setUp(db: Database): Promise<SchemaPlan> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await migrated(db);
+    } catch (error) {
+      if (attempt >= SETUP_ATTEMPTS || !(error instanceof UmbraError) || error.code !== "connection-lost") throw error;
+    }
+  }
+}
 
 /** What `run` rejects with; fails the test if it resolves. */
 async function rejection(run: Promise<unknown>): Promise<unknown> {
@@ -82,14 +104,14 @@ describe("negative control: without the zero timeouts, A141's long work is cut o
 
   it("ends the block transaction left idle 5 s while a callback awaits", async () => {
     const db = await hostile();
-    const plan = await migrated(db);
+    const plan = await setUp(db);
     const error = await rejection(idleBlock(db, plan, 1n));
     expect(error).toMatchObject({ code: "connection-lost" });
   }, TEST_TIMEOUT);
 
   it("cuts off a callback's read running 5 s on its block write handle", async () => {
     const db = await hostile();
-    const plan = await migrated(db);
+    const plan = await setUp(db);
     const error = await rejection(slowReadInBlock(db, plan, 2n));
     expect(error).toBeInstanceOf(UmbraError);
   }, TEST_TIMEOUT);

@@ -3,6 +3,7 @@ import postgres, { type Sql } from "postgres";
 import { POSTGRES_IMAGE } from "../postgres-image.js";
 import type { Database } from "../../src/db/api.js";
 import { openPostgres, type PostgresOptions } from "../../src/db/postgres.js";
+import { startContainer } from "../containers.js";
 
 /**
  * A PostgreSQL 18 server for the database API's tests (the repository's one image, `../postgres-image.ts`, through
@@ -44,11 +45,14 @@ export interface PostgresTestServer {
 
 const noCommittedHeight = async (): Promise<bigint | null> => null;
 
+/** How long a terminated backend may take to leave `pg_stat_activity`: it leaves at once; this is load's margin. */
+const BACKEND_END_MS = 30_000;
+
 export async function startPostgresServer(): Promise<PostgresTestServer> {
   // Each test database holds an admin connection and the API's own (a writer and its readers): room for many databases.
-  const container = await new PostgreSqlContainer(POSTGRES_IMAGE)
-    .withCommand(["postgres", "-c", "max_connections=400"])
-    .start();
+  const container = await startContainer(
+    new PostgreSqlContainer(POSTGRES_IMAGE).withCommand(["postgres", "-c", "max_connections=400"]),
+  );
   const root = postgres(container.getConnectionUri(), { max: 1, onnotice: () => undefined });
   const admins: Sql[] = [];
   const opened: Database[] = [];
@@ -75,12 +79,13 @@ export async function startPostgresServer(): Promise<PostgresTestServer> {
         },
         async terminate(pid) {
           await admin.unsafe("SELECT pg_terminate_backend($1)", [pid]);
-          for (let attempt = 0; attempt < 200; attempt++) {
+          const deadline = Date.now() + BACKEND_END_MS;
+          while (Date.now() < deadline) {
             const rows = await admin.unsafe("SELECT 1 FROM pg_stat_activity WHERE pid = $1", [pid]);
             if (rows.length === 0) return;
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
-          throw new Error(`backend ${pid} still listed after pg_terminate_backend`);
+          throw new Error(`backend ${pid} still listed ${BACKEND_END_MS / 1_000} s after pg_terminate_backend`);
         },
         async setDefaults(defaults) {
           if (defaults.length === 0) return {};

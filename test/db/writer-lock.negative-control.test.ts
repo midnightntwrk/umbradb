@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Database, Transaction } from "../../src/db/api.js";
 import type * as WriterLock from "../../src/db/writer-lock.js";
 import { startWriter } from "../../src/db/writer-lock.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -7,6 +8,7 @@ import {
   expectLockLostWhenTakenMeanwhile,
   expectLockRetakenAfterTermination,
   expectSecondPostgresWriterRefused,
+  nextTransaction,
   writerLockHolders,
   writesTable,
 } from "./writer-lock-checks.js";
@@ -97,4 +99,52 @@ describe("A17's negative controls on PostgreSQL (DB-11)", () => {
     const lost = await assertionFailure(expectLockLostWhenTakenMeanwhile(await server.createDatabase()));
     expect(lost.message).toMatch(/expected an UmbraError, but the call resolved/);
   }, 120_000);
+});
+
+/**
+ * A writer whose transactions fail as `failures` says, in order — `connection-lost` before or after the body ran, or
+ * another error — and then run the body: the shapes {@link nextTransaction} must tell apart.
+ */
+function scripted(failures: readonly ("lost-before" | "lost-after" | "held")[]): {
+  readonly db: Pick<Database, "transaction">;
+  readonly attempts: () => number;
+} {
+  let attempts = 0;
+  const lost = () =>
+    new UmbraError("connection-lost", "the writer connection to PostgreSQL was lost", { connection: "writer" });
+  return {
+    attempts: () => attempts,
+    db: {
+      async transaction<T>(body: (tx: Transaction) => Promise<T>): Promise<T> {
+        const failure = failures[attempts++];
+        if (failure === "lost-before") throw lost();
+        if (failure === "held") throw new UmbraError("writer-lock-held", "held", {});
+        const result = await body({} as Transaction);
+        if (failure === "lost-after") throw lost();
+        return result;
+      },
+    },
+  };
+}
+
+describe("the checks' allowance for a loss the driver had not seen yet (nextTransaction, A153)", () => {
+  it("runs the transaction once more after one connection-lost before its body", async () => {
+    const writer = scripted(["lost-before"]);
+    expect(await nextTransaction(writer.db, async () => "ran")).toBe("ran");
+    expect(writer.attempts()).toBe(2);
+  });
+
+  it("allows one only: a second connection-lost fails the check", async () => {
+    const writer = scripted(["lost-before", "lost-before"]);
+    await expect(nextTransaction(writer.db, async () => "ran")).rejects.toMatchObject({ code: "connection-lost" });
+    expect(writer.attempts()).toBe(2);
+  });
+
+  it("never retries a transaction whose body ran before the loss, nor another error", async () => {
+    for (const failure of ["lost-after", "held"] as const) {
+      const writer = scripted([failure]);
+      await expect(nextTransaction(writer.db, async () => "ran"), failure).rejects.toBeInstanceOf(UmbraError);
+      expect(writer.attempts(), failure).toBe(1);
+    }
+  });
 });

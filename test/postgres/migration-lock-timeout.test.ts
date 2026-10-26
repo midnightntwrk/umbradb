@@ -5,6 +5,7 @@ import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient } from "../../src/postgres/client.js";
 import { ValidationError } from "../../src/interfaces/storage-errors.js";
 import { MigrationLockTimeoutError, runMigrations } from "../../src/postgres/migrate.js";
+import { startContainer } from "../containers.js";
 
 // G7 task 2.2 — the migration advisory-lock acquire is bounded and fails fast with a typed error
 // (openspec/changes/v1.0.0-durable-checkpoint-cursor: design.md §3.2; roadmap T8).
@@ -12,7 +13,7 @@ import { MigrationLockTimeoutError, runMigrations } from "../../src/postgres/mig
 describe("G7 bounded migration-lock acquire (design.md §3.2)", () => {
   let container: StartedPostgreSqlContainer;
   beforeAll(async () => {
-    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+    container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
   }, 120_000);
   afterAll(async () => {
     await container?.stop();

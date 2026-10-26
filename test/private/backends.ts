@@ -170,8 +170,18 @@ function pgliteBackend(): PrivateBackend {
 /** PostgreSQL 18 and PGlite 0.5.10. */
 export const PRIVATE_BACKENDS: readonly PrivateBackend[] = [postgresBackend(), pgliteBackend()];
 
-/** How long a test of these files may take on a loaded machine. */
-export const TEST_TIMEOUT_MS = 480_000;
+/**
+ * How long a test of these files may take on a loaded machine: the longest, A116's, took 30 s on a quiet machine and
+ * 342 s at a load average of about 77 (task 0.5, 2026-10-26), its wait for the private process ({@link
+ * REACH_TIMEOUT_MS}) included.
+ */
+export const TEST_TIMEOUT_MS = 900_000;
+
+/**
+ * How long a test waits for a private process to reach a height (`PrivateProcess.reach`): A116's catch-up of 10 heights
+ * after its restart did not end within the former 180 s at a load average of about 77 (task 0.5, 2026-10-26).
+ */
+export const REACH_TIMEOUT_MS = 600_000;
 
 /** How long starting a backend (a container) may take on a loaded machine. */
 export const START_TIMEOUT_MS = 180_000;

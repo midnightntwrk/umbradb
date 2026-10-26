@@ -15,6 +15,7 @@ import {
   TransactionPoolerDetectedError,
   type DurabilityWarning,
 } from "../../src/postgres/durability-probe.js";
+import { startContainers } from "../containers.js";
 
 // G6 — Durability startup probe + binding contract
 // (openspec/changes/v1.0.0-durable-checkpoint-cursor: design.md §2, tasks 1.1/1.2, acceptance B1–B8)
@@ -29,9 +30,10 @@ import {
 
 const TEST_SCHEMA = "umbradb_test";
 
-async function startPg(serverArgs: string[]): Promise<StartedPostgreSqlContainer> {
+/** A server started with `serverArgs` (not started yet: `startContainers` starts them together). */
+function pg(serverArgs: string[]): PostgreSqlContainer {
   const base = new PostgreSqlContainer(POSTGRES_IMAGE);
-  return serverArgs.length > 0 ? base.withCommand(["postgres", ...serverArgs]).start() : base.start();
+  return serverArgs.length > 0 ? base.withCommand(["postgres", ...serverArgs]) : base;
 }
 
 function firstMigrationExists(sql: UmbraDBSql): Promise<boolean> {
@@ -98,12 +100,13 @@ describe("G6 durability probe — live against Testcontainers Postgres", () => {
   let syncLocal: StartedPostgreSqlContainer;
 
   beforeAll(async () => {
-    [healthy, fsyncOff, fpwOff, syncOff, syncLocal] = await Promise.all([
-      startPg([]),
-      startPg(["-c", "fsync=off"]),
-      startPg(["-c", "full_page_writes=off"]),
-      startPg(["-c", "synchronous_commit=off"]),
-      startPg(["-c", "synchronous_commit=local"]),
+    // Started together; if one fails, the others are stopped (`startContainers`), so a failed setup leaves none.
+    [healthy, fsyncOff, fpwOff, syncOff, syncLocal] = await startContainers([
+      pg([]),
+      pg(["-c", "fsync=off"]),
+      pg(["-c", "full_page_writes=off"]),
+      pg(["-c", "synchronous_commit=off"]),
+      pg(["-c", "synchronous_commit=local"]),
     ]);
   }, 240_000);
 

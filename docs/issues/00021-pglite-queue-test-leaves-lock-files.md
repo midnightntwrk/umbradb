@@ -1,6 +1,8 @@
 # 00021 — `pglite-queue.test.ts` removes its PGlite data directories but leaves their lock files in the temp folder
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-26 by task 0.5 of `openspec/changes/core-arch` (owner decision Q122), in the task's
+  local commit: `test/db/pglite-queue.test.ts` makes its data directories inside one temporary root and removes the
+  root, lock files included. See "Resolution" below.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 5.4 of `openspec/changes/core-arch`, checking the temporary folder for anything its
   test runs left: a run of the suite adds up to three `umbradb-pglite-test-<random>.lock.sqlite` files (and their
@@ -35,3 +37,12 @@ Make the test's directories inside one temporary root (`mkdtempSync(join(tmpdir(
 then `join(root, "db-<n>")` per directory) and remove the root in `afterAll`, as `process-backends.ts` does; or remove
 `<directory>.lock.sqlite` and its `-journal` beside each directory. The files already left can be deleted by hand
 (`umbradb-pglite-test-*.lock.sqlite*` in the temporary folder) once no test run is in progress.
+
+## Resolution
+
+Task 0.5 took the first suggested fix: the PGlite settings tests of `test/db/pglite-queue.test.ts` make one temporary
+root (`umbradb-pglite-test-<random>`) and each data directory inside it (`db-<n>`), and `afterAll` removes the root, so
+each directory's `<directory>.lock.sqlite` and its journal go with it. Checked by running the suite with `TMPDIR` set to
+an empty scratch directory: nothing of the suite was left there, where the version before the fix left two
+`umbradb-pglite-test-*.lock.sqlite` files. The 1,132 such files (and journals) earlier runs had left in the system's
+temporary folder — none with its directory beside it, all older than an hour — were deleted by hand.

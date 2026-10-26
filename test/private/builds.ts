@@ -16,6 +16,7 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { FinalizedLoop, LoopInput } from "../../src/runner/loop.js";
 import { type ProcessHandle, startProcess } from "../../src/runner/process.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
+import { REACH_TIMEOUT_MS } from "./backends.js";
 
 /**
  * Builds and processes for the private processes' tests (task 14.1; PP-1–PP-5, DT-3, DT-6, Q75): a public core — the
@@ -359,7 +360,7 @@ export function launchPrivate(options: PrivateOptions): PrivateProcess {
   return {
     handle,
     intake,
-    async reach(height, timeoutMs = 180_000) {
+    async reach(height, timeoutMs = REACH_TIMEOUT_MS) {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
         const status = handle.status();

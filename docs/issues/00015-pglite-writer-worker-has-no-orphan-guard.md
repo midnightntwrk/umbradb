@@ -1,6 +1,9 @@
 # 00015 — The PGlite writer worker of A17's tests runs for ever once its test process is gone
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-26 by task 0.5 of `openspec/changes/core-arch` (owner decision Q122), in the task's
+  local commit: every test starts its child processes with `spawnChild` (`test/child-processes.ts`), whose watcher kills
+  them when the test process ends; the PGlite writer worker is started through it (`test/db/pglite-processes.ts`). See
+  "Resolution" below.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 5.3 of `openspec/changes/core-arch` (the process and SIGTERM), after its mutation
   pass left 66 of its own SIGTERM workers running.
@@ -32,3 +35,16 @@ No orphan of this worker was seen running during task 5.3; the fault is read fro
 Give `pglite-writer.worker.ts` the guard `sigterm.worker.ts` now has: remember `process.ppid` at start and exit from an
 interval once it changes (the parent died, the worker was reparented), or a bounded orphan timer as the crash worker's.
 A16/A17's own behaviour is unchanged: the parent kills its workers long before either fires.
+
+## Resolution
+
+Task 0.5 gave every test child process one guard instead of a check inside each worker: `spawnChild`
+(`test/child-processes.ts`) is `node:child_process`'s `spawn` with the child listed with a watcher process of the test
+process's own (`test/orphan-watcher.mjs`), which reads the child pids from a pipe and kills every child still listed
+(SIGKILL) as soon as that pipe closes — when the test process ends, however it ends. An in-process check such as
+task 5.3's (`process.ppid` polled from an interval) cannot end a worker that is stopped (A17's `SIGSTOP` pause, in
+`expectPausedWriterKeepsLock`) or whose event loop is blocked; the watcher ends both. `test/db/pglite-processes.ts`
+starts the writer worker through it, so a worker in `lock` mode or `write` mode without `blocks` no longer outlives its
+test. `test/child-processes.test.ts` orphans children on purpose (running, stopped, blocked, and after SIGTERM to the
+parent's whole process group) with a negative control of plain `spawn`, and fails if any file under `test/` starts a
+child process without `spawnChild`.

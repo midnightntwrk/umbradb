@@ -16,6 +16,7 @@ import {
   loadLedgerV8,
   type DecodedArchivedTransaction,
 } from "../../chain-archive-sync/tx-replay-decoder.js";
+import { startContainer } from "../containers.js";
 
 /**
  * AC-4 (replay-recoverability for every deferred data category, the hard gate --
@@ -154,7 +155,7 @@ describe.skipIf(!LEDGER_AVAILABLE || !GROUND_TRUTH_AVAILABLE)(
       zswapTx = readTxRow(zswapId);
       unshieldedDustTx = readTxRow(unshieldedId);
 
-      container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+      container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
       sql = createClient({ connectionString: container.getConnectionUri(), schema: SCHEMA });
       await bootstrapChainArchiveSchema(sql, SCHEMA);
       store = new PgChainArchiveStore(sql, SCHEMA);

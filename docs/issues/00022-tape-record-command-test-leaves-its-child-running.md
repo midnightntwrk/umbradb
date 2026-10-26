@@ -1,6 +1,8 @@
 # 00022 — The tape `record` command's process test leaves its child running when the test process is gone
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-26 by task 0.5 of `openspec/changes/core-arch` (owner decision Q122), in the task's
+  local commit: `test/tape/command.test.ts` starts `tools/tape/main.ts` with `spawnChild` (`test/child-processes.ts`),
+  whose watcher kills the child when the test process ends. See "Resolution" below.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, by the orchestrator, after task 12.2's runner reported two processes it had not started in lane
   3's worktree.
@@ -27,3 +29,13 @@ Give `tools/tape/main.ts` (in `record` mode, and any other mode that waits) the 
 `test/runner/sigterm.worker.ts`: exit when the parent dies (poll `process.ppid` or watch a pipe from the parent), and
 in the test, kill the child in a `finally` as well. Tasks 18.x, which start many child processes, should use one shared
 helper for it.
+
+## Resolution
+
+Task 0.5 put the guard on the test's side, not in `tools/tape/main.ts`: a `record` that exits once its parent has gone
+would end a recording an operator started in a terminal and then left (`nohup`, a closed terminal) — the command's
+own behaviour is right for its users. The test starts both of its children (`record` and the usage run) with
+`spawnChild` (`test/child-processes.ts`): the child is listed with the test process's watcher
+(`test/orphan-watcher.mjs`), which kills it with SIGKILL as soon as the test process ends, however it ends — `--bail`,
+a timeout, Vitest killed. This is the one shared helper the issue asks of tasks 18.x: every file under `test/` that
+starts a child process uses it, and `test/child-processes.test.ts` fails on any that does not.

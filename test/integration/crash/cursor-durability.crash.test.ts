@@ -17,6 +17,7 @@ import {
   withSuiteWatchdog,
   type CrashWorkerHandle,
 } from "../../postgres/setup.js";
+import { startContainer } from "../../containers.js";
 
 /**
  * T5 — crash between data and cursor, the KEYSTONE (`design.md` §2.3; `tasks.md` §3.1/§3.2;
@@ -665,9 +666,9 @@ describe("T5 keystone — a crash between data and cursor never leaves the water
     // A DEDICATED container with SERVER-LEVEL synchronous_commit=off (`design.md` §1.3 sanctions
     // "the container started with -c synchronous_commit=off"). Killing THIS container's postmaster
     // uncleanly cannot disturb the shared container the other legs use.
-    const container: StartedPostgreSqlContainer = await new PostgreSqlContainer(POSTGRES_IMAGE)
-      .withCommand(["postgres", "-c", "synchronous_commit=off"])
-      .start();
+    const container: StartedPostgreSqlContainer = await startContainer(
+      new PostgreSqlContainer(POSTGRES_IMAGE).withCommand(["postgres", "-c", "synchronous_commit=off"]),
+    );
     const localPools: UmbraDBSql[] = [];
     let bodyOk = false; // NIT 14: track normal completion so teardown can SURFACE a container.stop() leak
     try {

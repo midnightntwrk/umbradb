@@ -4,6 +4,7 @@ import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient } from "../../src/postgres/client.js";
 import { runMigrations } from "../../src/postgres/migrate.js";
 import { chainArchiveMigrations } from "../../src/postgres/migrations/chain_archive/index.js";
+import { startContainer } from "../containers.js";
 
 /**
  * Closes the v3 audit's "no committed automated test for the new lineage" gap
@@ -22,7 +23,7 @@ describe("chainArchiveMigrations (design/full-chain-storage-design.md, Tier-1.5)
   let container: StartedPostgreSqlContainer;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+    container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
   }, 120_000);
 
   afterAll(async () => {

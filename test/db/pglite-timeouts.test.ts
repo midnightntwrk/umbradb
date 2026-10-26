@@ -1,5 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -15,6 +15,7 @@ import {
   ONE_SECOND_TIMEOUTS,
 } from "../deterministic-postgresql/zero-timeouts-checks.js";
 import type { Job, WorkerEvent } from "./pglite-timeouts.worker.js";
+import { spawnChild } from "../child-processes.js";
 
 /**
  * DB-15 on PGlite 0.5.10, where a timeout that fires hangs the engine — the whole process, synchronously (design §14,
@@ -53,7 +54,7 @@ afterAll(() => {
 
 /** Runs `job` in a worker process until it exits, or kills it {@link HANG_MS} after `sent` without `answered`. */
 async function run(job: Job): Promise<Run> {
-  const child = spawn(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
+  const child = spawnChild(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
     cwd: REPOSITORY,
     stdio: ["ignore", "pipe", "pipe"],
   });

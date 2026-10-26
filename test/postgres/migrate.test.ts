@@ -6,12 +6,13 @@ import { ConnectionError } from "../../src/interfaces/storage-errors.js";
 import { assertValidSchemaName, createClient, type UmbraDBSql } from "../../src/postgres/client.js";
 import { ExclusionViolationError, translatePostgresError } from "../../src/postgres/errors.js";
 import { runMigrations } from "../../src/postgres/migrate.js";
+import { startContainer } from "../containers.js";
 
 describe("runMigrations", () => {
   let container: StartedPostgreSqlContainer;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+    container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
   }, 120_000);
 
   afterAll(async () => {
@@ -66,7 +67,7 @@ describe("runMigrations", () => {
     // all -- the test would pass even against a reverted fix. A FRESH, dedicated container
     // (btree_gist genuinely not yet installed) is required to actually exercise the slow
     // first-time installation path where the original race lived.
-    const freshContainer = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+    const freshContainer = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
     try {
       const schemaA = "ext_race_a";
       const schemaB = "ext_race_b";
@@ -222,7 +223,7 @@ describe("error translation (design.md §4a)", () => {
   }, 10_000);
 
   it("a kv_history_no_overlap violation is identified by SQLSTATE 23P01, not 23505", async () => {
-    const container2 = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+    const container2 = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
     let sql: UmbraDBSql | undefined;
     try {
       const schema = "exclusion_test";

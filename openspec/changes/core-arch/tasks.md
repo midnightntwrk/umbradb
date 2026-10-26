@@ -86,10 +86,52 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       required ids; the pack smoke test passes on 18. §4's detection sentence and §14's rows say what was re-checked;
       the 0.9.5 research documents under `design/` keep naming the image they were run on (history; nothing reads
       them). The CI run is pending until the branch is pushed (Phase 3).
-- [ ] 0.5 Load-sensitive tests (owner decision Q122): explicit timeouts fit for PostgreSQL under load in the database
+- [x] 0.5 Load-sensitive tests (owner decision Q122): explicit timeouts fit for PostgreSQL under load in the database
       suites the plan's Phase 3 "Load-sensitive tests" lists, the writer-lock negative control's lost connection, the
       Testcontainers start-up timeout, and an orphan guard for every test child process (issues 00015, 00021, 00022).
       **Acceptance:** A153.
+      **Done (2026-10-26):** the causes, found in full runs at load averages of 20–100 (before the fix, one at 60–85
+      failed 27 tests in five of the listed files; the other listed failures are the plan's and task 8.1's runs). (1)
+      Vitest's default 5 s in the database suites and the static scans (`test/db/migrate.test.ts`, `roles.test.ts`,
+      `roles-login.test.ts`, `requires-resync.test.ts`, `test/config/history-database.test.ts`,
+      `development-opt-in.test.ts`, `test/postgres/checkpoint-store.test.ts`,
+      `test/node/no-indexer-or-wallet-sdk.test.ts`, `test/deterministic-postgresql/checks.test.ts`,
+      `block-transactions.test.ts`): a budget too short for a loaded machine — the tests await database work or parse
+      files, none waits on wall time; `vitest.config.ts` sets `testTimeout` 60 s, about three times the slowest such
+      test measured (21.0 s at a median load average of 77), and `test/timeouts/timeouts.test.ts` runs a fixture under
+      the repository's configuration: a 6 s test passes, one that never ends fails at 60 s. The longest tests' own
+      budgets, overrun at a median of 77, were raised the same way: the A59 and A60 property suites 10 → 20 min (the
+      timed-out A60 run went on against the shared database and failed the next test), `test/private/` 480 → 900 s per
+      test and 180 → 600 s for a private process to reach a height. (2) The writer-lock negative control's
+      `CONNECTION_CLOSED` on `BEGIN`: a race in A17's checks, not in the API — `terminate` returns once PostgreSQL no
+      longer lists the backend, but the driver learns of the close only when it comes through Docker's port proxy, and a
+      transaction begun before then fails on its `BEGIN` with `connection-lost` (DB-13: retryable, its body not run), as
+      `postgres-faults.test.ts`'s "at most one connection-lost" says; reproduced by a probe (1 of 40 rounds at load
+      about 22). The re-take and lost-lock checks (`writer-lock-checks.ts`) allow one `connection-lost` before the body
+      (`nextTransaction`, its cases tested in the negative-control file), and their waits for a backend's end are 30 s
+      deadlines instead of 5 s. (3) Testcontainers' "ports to be bound" 10 s is fixed in its code
+      (`inspectContainerUntilPortsExposed`, out of `withStartupTimeout`'s reach) and left the container running:
+      `test/containers.ts`'s `startContainer` removes what a failed attempt left and tries again (4 attempts) and labels
+      every container (repository, pid); `startContainers` stops the started ones when one fails (both durability-probe
+      setups, which had left six containers); every container start under `test/` goes through them (static check). (4)
+      The pool keeps Vitest's default: capped at 8 workers the tail was shorter but the run 28 % longer at the same
+      load, and neither failed. (5) An orphan guard for every test child and container: `spawnChild`
+      (`test/child-processes.ts`) lists each child with a watcher of the test process (`test/orphan-watcher.mjs`) that
+      kills it with SIGKILL when that process ends — also a stopped child or one with a blocked event loop, which an
+      in-process check cannot end — and removes the process's labelled containers; every async child start under `test/`
+      (11 files) uses it; `test/child-processes.test.ts` and `test/containers.test.ts` orphan children and a container
+      on purpose, with negative controls (plain `spawn`, Testcontainers' own `start`), and fail on any other start. (6)
+      `test/db/pglite-queue.test.ts` keeps its data directories in one temporary root. (7)
+      `test/db/zero-timeouts.negative-control.test.ts`'s setup, cut by its own 1 s timeouts at load 85, is tried again
+      on `connection-lost`. Issues 00015, 00021, 00022 closed. Mutation pass over the new helpers: 46 wrong variants of
+      the watcher, `spawnChild`, `guardPid`, `guardContainers`, `startContainer(s)` and `nextTransaction`, run in a
+      scratch copy (`RESTORED-OK`): 39 caught, 7 survived, each equivalent (a second check dropping pids 0 and 1 that
+      the first already drops, `end` beside `close`, the watcher's own exit, one of the two label filters, unlisting an
+      exited pid, the error handler of a watcher that died). A153: six consecutive `npm run test:conformance` runs,
+      started 11:33–12:32 at load averages of 40–55 (the other lanes and the mutation pass; medians 42–64, peaks up to
+      111; no CPU burner needed), each exit 0, `Test Files 196 passed | 1 skipped (197)`, 3,890 tests passed, all 25
+      required ids, 449–690 s, the last on the committed sources (after a fix to the new container test's cleanup);
+      after each, no container of this worktree's labels and no test child process left.
 
 ## 1. Determinism primitives
 

@@ -1,10 +1,11 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { spawnChild } from "../child-processes.js";
 
 // Task 0.1 of `openspec/changes/core-arch` (design.md §4 "Writer lock" and §14, owner decision Q50): characterization
 // test of the operating-system lock the PGlite backend takes in Node.js. A process opens `<data directory>.lock.sqlite`
@@ -44,7 +45,7 @@ const children: ChildProcess[] = [];
 
 /** Starts a lock process and resolves with its first report, together with the process. */
 async function startLockProcess(mode: "hold" | "try"): Promise<{ child: ChildProcess; result: LockResult }> {
-  const child = spawn(process.execPath, ["--no-warnings", "-e", LOCK_PROCESS, lockFile, mode], {
+  const child = spawnChild(process.execPath, ["--no-warnings", "-e", LOCK_PROCESS, lockFile, mode], {
     stdio: ["ignore", "pipe", "pipe"],
   });
   children.push(child);

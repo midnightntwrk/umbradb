@@ -111,6 +111,22 @@ export default defineConfig({
     // inline afterAll (e.g. chain-archive-rollover) inherit this global so coverage-instrumented,
     // fully-parallel runs don't flake on teardown. Inline explicit timeouts still win.
     hookTimeout: 60_000,
+    // Each test's budget (core-arch task 0.5, owner decision Q122, acceptance A153), for the same reason: Vitest's
+    // default of 5 s is a unit test's. The database suites' tests — a fresh PostgreSQL database or PGlite engine,
+    // migrations, several transactions through Docker's port proxy — take 0.2–3 s on a quiet machine and over 5 s on a
+    // loaded one (the plan's Phase 3 "Load-sensitive tests": `test/db/migrate.test.ts`,
+    // `test/config/history-database.test.ts`, `test/deterministic-postgresql/checks.test.ts`, … each failing at
+    // 5,000–5,023 ms and passing alone), as do the static scans that parse every source file. The slowest such test
+    // measured 10.1 s in a full run at a median load average of 61 (peak 95), and 21.0 s at a median of 77 (peak 100)
+    // (2026-10-26); 60 s is about three times that. A test that really hangs still fails, at 60 s
+    // (`test/timeouts/timeouts.test.ts`). A test that waits longer on purpose keeps its own, larger timeout.
+    //
+    // The pool keeps Vitest's default size (one worker fewer than the CPUs; 15 here, 3 on a 4-CPU CI runner). Measured
+    // under the same load (load average 20 at the start, 61 at the median): capped at 8 workers the tests' tail was
+    // shorter (99th percentile 17 s instead of 27 s) but the run 28 % longer (773 s instead of 604 s), and with the
+    // budget above neither run failed, so there is no cap. On a crowded machine, `npm run test:conformance --
+    // --maxWorkers=<n>` sets one for a run.
+    testTimeout: 60_000,
     coverage: {
       provider: "v8",
       all: true,

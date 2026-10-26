@@ -1,9 +1,9 @@
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Database } from "../../src/db/api.js";
 import { BACKENDS } from "../db/backends.js";
 import { MARKER } from "./time-values.worker.js";
+import { spawnChild } from "../child-processes.js";
 
 /**
  * A139 [DIFF] (DB-2, owner decisions Q68 and Q81): on both backends, in processes whose time zone is `UTC`,
@@ -113,7 +113,7 @@ interface Report {
 /** Runs the worker in a child process whose time zone is `zone` and returns its report. */
 function inTimeZone(zone: string, job: Record<string, unknown>): Promise<Report> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
+    const child = spawnChild(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
       cwd: REPOSITORY,
       env: { ...process.env, TZ: zone },
       stdio: ["ignore", "pipe", "pipe"],

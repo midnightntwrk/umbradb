@@ -21,7 +21,8 @@ import { planSchemas } from "../../src/db/roles.js";
 import { startWriter } from "../../src/db/writer-lock.js";
 import { expectRefusedBeforeAnyWrite } from "./durability-checks.js";
 import { cleanUp, workDirectory } from "./pglite-processes.js";
-import { rejection, WRITER_LOCK_HOLDERS_SQL } from "./writer-lock-checks.js";
+import { BACKEND_END_MS, rejection, WRITER_LOCK_HOLDERS_SQL } from "./writer-lock-checks.js";
+import { startContainers } from "../containers.js";
 
 /**
  * The durability probe at its new path (`src/db/durability-probe.ts`, moved from 0.9.5's
@@ -44,10 +45,11 @@ import { rejection, WRITER_LOCK_HOLDERS_SQL } from "./writer-lock-checks.js";
 
 const noHeight = async (): Promise<bigint | null> => null;
 
-async function startServer(settings: string[]): Promise<StartedPostgreSqlContainer> {
+/** A server started with `-c` for each of `settings` (not started yet: {@link startContainers} starts them together). */
+function server(settings: string[]): PostgreSqlContainer {
   const container = new PostgreSqlContainer(POSTGRES_IMAGE);
   const args = settings.flatMap((setting) => ["-c", setting]);
-  return args.length > 0 ? container.withCommand(["postgres", ...args]).start() : container.start();
+  return args.length > 0 ? container.withCommand(["postgres", ...args]) : container;
 }
 
 describe("the durability probe — classifiers, no server (DB-12)", () => {
@@ -113,13 +115,14 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
   let syncLocal: StartedPostgreSqlContainer;
 
   beforeAll(async () => {
-    [healthy, fsyncOff, fullPageWritesOff, bothOff, syncOff, syncLocal] = await Promise.all([
-      startServer([]),
-      startServer(["fsync=off"]),
-      startServer(["full_page_writes=off"]),
-      startServer(["fsync=off", "full_page_writes=off"]),
-      startServer(["synchronous_commit=off"]),
-      startServer(["synchronous_commit=local"]),
+    // Started together; if one fails, the others are stopped (`startContainers`), so a failed setup leaves none.
+    [healthy, fsyncOff, fullPageWritesOff, bothOff, syncOff, syncLocal] = await startContainers([
+      server([]),
+      server(["fsync=off"]),
+      server(["full_page_writes=off"]),
+      server(["fsync=off", "full_page_writes=off"]),
+      server(["synchronous_commit=off"]),
+      server(["synchronous_commit=local"]),
     ]);
   }, 240_000);
 
@@ -146,7 +149,9 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
   async function released(container: StartedPostgreSqlContainer): Promise<void> {
     const admin = postgres(container.getConnectionUri(), { max: 1, onnotice: () => undefined });
     try {
-      await expect.poll(async () => (await admin.unsafe(WRITER_LOCK_HOLDERS_SQL)).length, { timeout: 5_000 }).toBe(0);
+      await expect
+        .poll(async () => (await admin.unsafe(WRITER_LOCK_HOLDERS_SQL)).length, { timeout: BACKEND_END_MS })
+        .toBe(0);
     } finally {
       await admin.end({ timeout: 5 });
     }

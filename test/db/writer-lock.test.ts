@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -22,6 +21,7 @@ import {
   rejection,
   writerLockHolders,
 } from "./writer-lock-checks.js";
+import { spawnChild } from "../child-processes.js";
 
 /**
  * A17 [FAULT] (DB-11): exactly one process writes each database. This file holds the halves that run in this process
@@ -259,7 +259,7 @@ describe("the PGlite operating-system lock (DB-11, owner decision Q50)", () => {
     // would be refused although nobody holds it.
     const dataDir = join(workDirectory(), "pgdata");
     const lockFile = pgliteLockFile(dataDir)!;
-    const reader = spawn(process.execPath, ["--no-warnings", "-e", SHARED_FOR_A_MOMENT, lockFile], { stdio: ["ignore", "pipe", "pipe"] });
+    const reader = spawnChild(process.execPath, ["--no-warnings", "-e", SHARED_FOR_A_MOMENT, lockFile], { stdio: ["ignore", "pipe", "pipe"] });
     const lines = createInterface({ input: reader.stdout! });
     const reports: Record<string, number> = {};
     const shared = new Promise<void>((resolve) =>

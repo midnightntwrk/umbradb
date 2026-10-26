@@ -1,5 +1,5 @@
 import { expect } from "vitest";
-import type { Database } from "../../src/db/api.js";
+import type { Database, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { startWriter } from "../../src/db/writer-lock.js";
 import { firstOf, startWriterProcess, type WriterProcess } from "./pglite-processes.js";
@@ -27,13 +27,20 @@ export async function writerLockHolders(database: PostgresTestDatabase): Promise
   return (await database.admin.unsafe(WRITER_LOCK_HOLDERS_SQL)).map((row) => Number(row.pid));
 }
 
-/** Waits until no session holds the writer lock (a closed session's backend ends a moment after the client closes). */
+/** How long a closed or terminated session's backend may take to end: it ends at once; this is load's margin (A153). */
+export const BACKEND_END_MS = 30_000;
+
+/**
+ * Waits until no session holds the writer lock (a closed session's backend ends a moment after the client closes), at
+ * most {@link BACKEND_END_MS}.
+ */
 export async function lockReleased(database: PostgresTestDatabase): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt++) {
+  const deadline = Date.now() + BACKEND_END_MS;
+  while (Date.now() < deadline) {
     if ((await writerLockHolders(database)).length === 0) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error("the writer lock is still held 5 s after its holder closed");
+  throw new Error(`the writer lock is still held ${BACKEND_END_MS / 1_000} s after its holder closed`);
 }
 
 /** The error `run` rejects with; an assertion failure when it resolves. */
@@ -49,6 +56,31 @@ export async function rejection(run: () => Promise<unknown>): Promise<UmbraError
 
 const pidOf = async (handle: { query(sql: string): Promise<Record<string, unknown>[]> }): Promise<number> =>
   (await handle.query("SELECT pg_backend_pid() AS pid"))[0]?.pid as number;
+
+/**
+ * The writer's next transaction after its backend was terminated: `db.transaction(body)`, run once more if it failed
+ * with `connection-lost` before its body ran. `terminate` returns once PostgreSQL no longer lists the backend, but the
+ * driver learns of the loss only when the server's close reaches it — through Docker's port proxy, later on a loaded
+ * machine (reproduced 2026-10-26: 1 of 40 rounds at a load average of about 22) — and a transaction started before then
+ * fails on its `BEGIN` with `connection-lost` (DB-13: retryable, nothing written), as `postgres-faults.test.ts`'s "at
+ * most one connection-lost" shows; the next one opens a new session. The retried attempt is the one the check judges.
+ */
+export async function nextTransaction<T>(
+  db: Pick<Database, "transaction">,
+  body: (tx: Transaction) => Promise<T>,
+): Promise<T> {
+  let ran = false;
+  try {
+    return await db.transaction((tx) => {
+      ran = true;
+      return body(tx);
+    });
+  } catch (error) {
+    if (!(error instanceof UmbraError) || error.code !== "connection-lost" || ran) throw error;
+    expect(error.retryable).toBe(true);
+    return db.transaction(body);
+  }
+}
 
 /** Creates the table the checks write: one row per write, naming the writer. */
 export async function writesTable(database: PostgresTestDatabase): Promise<void> {
@@ -93,9 +125,9 @@ export async function expectSecondPostgresWriterRefused(database: PostgresTestDa
 }
 
 /**
- * PostgreSQL, the re-take: after `a`'s writer backend is terminated, `a`'s next transaction runs on a new session that
- * holds the writer lock before the transaction's first statement (checked from inside it), and a second writer is
- * still refused.
+ * PostgreSQL, the re-take: after `a`'s writer backend is terminated, `a`'s next transaction (after at most one
+ * `connection-lost` before its body, {@link nextTransaction}) runs on a new session that holds the writer lock before
+ * the transaction's first statement (checked from inside it), and a second writer is still refused.
  */
 export async function expectLockRetakenAfterTermination(database: PostgresTestDatabase): Promise<void> {
   await writesTable(database);
@@ -105,7 +137,7 @@ export async function expectLockRetakenAfterTermination(database: PostgresTestDa
   await database.terminate(firstPid);
   expect(await writerLockHolders(database)).toEqual([]);
 
-  const seenInside = await a.transaction(async (tx) => {
+  const seenInside = await nextTransaction(a, async (tx) => {
     const pid = await pidOf(tx);
     const holders = (await tx.query(WRITER_LOCK_HOLDERS_SQL)).map((row) => Number(row.pid));
     await tx.execute("INSERT INTO w.writes (writer, n) VALUES ('a', 1)");
@@ -121,8 +153,9 @@ export async function expectLockRetakenAfterTermination(database: PostgresTestDa
 
 /**
  * PostgreSQL, the lock taken meanwhile: `a`'s writer backend is terminated, `b` starts its writer and takes the lock;
- * `a`'s next transaction fails with `writer-lock-lost` (not retryable) before its body runs, and so does every later
- * one — also after `b` closed and released the lock — while `b` wrote.
+ * `a`'s next transaction (after at most one `connection-lost` before its body, {@link nextTransaction}) fails with
+ * `writer-lock-lost` (not retryable) before its body runs, and so does every later one — also after `b` closed and
+ * released the lock — while `b` wrote.
  */
 export async function expectLockLostWhenTakenMeanwhile(database: PostgresTestDatabase): Promise<void> {
   await writesTable(database);
@@ -137,7 +170,7 @@ export async function expectLockLostWhenTakenMeanwhile(database: PostgresTestDat
 
   let bodyRan = false;
   const lost = await rejection(() =>
-    a.transaction(async (tx) => {
+    nextTransaction(a, async (tx) => {
       bodyRan = true;
       await tx.execute("INSERT INTO w.writes (writer, n) VALUES ('a', 2)");
     }),

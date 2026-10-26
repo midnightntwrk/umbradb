@@ -1,4 +1,5 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { spawnChild } from "../child-processes.js";
 import { once } from "node:events";
 import { createServer } from "node:net";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -810,7 +811,7 @@ interface Worker {
 }
 
 function startWorker(job: Job): Worker {
-  const child = spawn(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
+  const child = spawnChild(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], {
     cwd: REPOSITORY,
     stdio: ["ignore", "pipe", "pipe"],
   });

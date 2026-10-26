@@ -1,10 +1,12 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { afterAll, beforeAll } from "vitest";
 import { POSTGRES_IMAGE } from "../postgres-image.js";
 import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
 import { runMigrations } from "../../src/postgres/migrate.js";
+import { spawnChild } from "../child-processes.js";
+import { startContainer } from "../containers.js";
 
 /**
  * One shared, session-scoped Postgres container for the whole test run
@@ -24,7 +26,7 @@ let adminSql: UmbraDBSql;
 export const TEST_SCHEMA = "umbradb_test";
 
 export async function startTestDatabase(): Promise<UmbraDBSql> {
-  container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+  container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
   adminSql = createClient({ connectionString: container.getConnectionUri(), schema: TEST_SCHEMA, maxConnections: 5 });
   await runMigrations(adminSql, { schema: TEST_SCHEMA });
   return adminSql;
@@ -354,7 +356,7 @@ export function spawnCrashWorker(opts: SpawnCrashWorkerOptions): CrashWorkerHand
   if (opts.kvValue !== undefined) env.UMBRADB_CRASH_KV_VALUE = JSON.stringify(opts.kvValue);
   if (opts.extraEnv !== undefined) Object.assign(env, opts.extraEnv);
 
-  const child = spawn(process.execPath, ["--import", "tsx", WORKER_ENTRYPOINT], {
+  const child = spawnChild(process.execPath, ["--import", "tsx", WORKER_ENTRYPOINT], {
     cwd: REPO_ROOT,
     env,
     // stdin is a PIPE (was "ignore") so the parent can send the T2 "proceed" line (`sendLine`).

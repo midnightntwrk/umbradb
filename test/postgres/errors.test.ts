@@ -10,6 +10,7 @@ import {
   ClockRegressionError,
   translatePostgresError,
 } from "../../src/postgres/errors.js";
+import { startContainer } from "../containers.js";
 
 /**
  * Sprint-fix round Fix 4 (MEDIUM): before this fix, EVERY SQLSTATE 23514 (check_violation) --
@@ -30,7 +31,7 @@ describe("translatePostgresError -- Fix 4: constraint-name-aware 23514 routing",
   let container: StartedPostgreSqlContainer;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
+    container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
   }, 120_000);
 
   afterAll(async () => {
