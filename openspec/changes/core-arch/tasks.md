@@ -1167,8 +1167,49 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 9. Test tape
 
-- [ ] 9.1 Tape reader and writer (including `delayMs`); the tape node.
+- [x] 9.1 Tape reader and writer (including `delayMs`); the tape node.
       **Acceptance:** A68, A69, A70.
+      **Done (2026-10-25):** the test tape in `tools/tape/` (design §1: unexported, outside `tsconfig.build.json` and
+      the package; tests import `tools/tape/index.js`; `tsconfig.json` and the coverage take `tools/**`, held to §13's
+      default as `**/tools/tape/**` 90/85, design §13). **Format and reader/writer** (`records.ts`, `tape.ts`): TT-1's
+      five kinds as plain values, each field checked (an unknown or missing field, `result` and `error` both or
+      neither, `delayMs` outside 0 to 2^31 − 1, an id that is not a string or a safe integer, a `fault` other than
+      `timeout`/`error`, a `code` that is not an integer; a field set to `undefined` is left out), and TT-3's rules
+      across lines (a subscription id unique in its session, each notification after its `subscribe` in the same
+      session); one form per record — fields in TT-1's order, JSON without spaces as `JSON.stringify` writes it, big
+      integers as digits (read without loss by the own JSON reader, Q78) — and a newline after each; the reader
+      accepts a line only in that form (`not-canonical`, naming the line the writer would write), so every readable
+      tape round-trips byte for byte and has one id (Q107, shipped A); the tape id is the SHA-256 of the bytes.
+      `bad-tape-record` is the tools' `TapeError` (line, `reason`), not an `UmbraError` code (design §11 now says
+      so). **The tape node** (`node.ts`, `session.ts`, `rules.ts`, `port.ts`): WebSocket JSON-RPC 2.0 on 127.0.0.1 at
+      a random free port ≥ 10000; the k-th connection gets the k-th session (the records up to each `disconnect`),
+      one beyond the last an empty session; in a session the k-th request of a method and params pair (params
+      compared as JSON values) gets the pair's k-th call, subscription or fault record, then the last call record
+      again (a subscription is not repeated); none: `not-on-tape` (JSON-RPC −32090, naming the method, with params and
+      session in `data`), which the node client reads as `node-error` `rpc-error` and never retries; `delayMs` on the
+      node's clock (injectable; a timer that fires early is set again, so no answer leaves early); notifications in
+      file order, each once every record before it is done, as Substrate's `chain_newHead`/`chain_finalizedHead`; a
+      `disconnect` drops the connection (1006) once the frames before it are written out, answering nothing
+      meanwhile, and a session starting with one drops at once (an outage is a run of them); a timeout fault answers
+      nothing, an error fault `{ code (−32603 without one), "tape fault: <method>" }`; a call log (session, method,
+      params, occurrence, record line, outcome) with `count(method, params?)`. Tests, seen failing first (all four
+      files: `Cannot find module '../../tools/tape/index.js'`): `test/tape/format.test.ts` (A68: the committed
+      `fixtures/every-kind.tape.jsonl`, written by hand, against the writer both ways, its pinned SHA-256; a seeded
+      property; 53 malformed lines at line 12 with their reasons, file-level refusals, 18 writer refusals),
+      `node.test.ts` (A69, A70 over a bare WebSocket client: exact frames, `not-on-tape`, `delayMs` on a hand-moved
+      clock and its lower bound on the real one, notifications, sessions, disconnects, faults, the call log, malformed
+      frames, the port and clock), `node-client.test.ts` (A69, A70 through `src/node/`'s `NodeClient`, unchanged:
+      occurrence, `not-on-tape` an unretried `node-error`, delays, headers after their calls, TT-3's reconnect with
+      `restarted`, an outage's back-off, both faults; every request inside IN-8). Committed negative controls
+      (`tape.negative-control.test.ts`): a writer ordering fields otherwise, a node answering by first match, one
+      ignoring `delayMs`, one delaying the next record too, one delivering a notification before the calls ahead of
+      it — each fails its check. 176 wrong variants on the final sources (a scratch runner outside the clone, the
+      tree checked byte for byte after): 174 caught, 2 equivalent (the tape id taken from the written bytes, which
+      equal the bytes read; a fired delay timer left in the set `close` clears); a first run's 4 other survivors were
+      redundant code, removed.
+      **Pending:** the recording builder and the variant transforms (9.2); the real tapes (0.3); A83's `[CI]` sync
+      through the tape node (10.3); A84 and A85 against tapes (10.4); restarted processes against one tape node (18.1,
+      18.2).
 - [ ] 9.2 The recording builder and the variant transforms.
       **Acceptance:** A71 (`[CI]` part); the `[MANUAL]` record-and-replay against a real node is recorded for the PR.
 

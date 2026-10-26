@@ -87,6 +87,9 @@ const CORE_ARCH = {
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the node client's directory (task 10.1).
   "**/src/node/**": { lines: 90, branches: 85, perFile: true },
+  // The test tape (task 9.1): not in the package, but the tests of ingest, faults and differentials stand on it, so it
+  // is measured and held to §13's default like `src/**`.
+  "**/tools/tape/**": { lines: 90, branches: 85, perFile: true },
   // The `deterministic_postgresql` component (task 2.2a, owner decision Q69), held above the default like determinism;
   // `UmbraError` moved into it (decision record Q79), and the `errors` floor moved with the class.
   "**/src/deterministic-postgresql/**": { lines: 95, branches: 90, perFile: true },
@@ -103,12 +106,13 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       all: true,
-      include: ["src/**/*.ts"],
+      include: ["src/**/*.ts", "tools/**/*.ts"],
       exclude: [
         "src/**/index.ts",
         // The `umbradb` command's `bin` entry runs only as a process of its own (`test/cli/umbradb.test.ts`, the pack
         // smoke test), outside coverage; what it calls, `runMain`, is covered (task 4.4).
         "src/cli/main.ts",
+        "tools/**/index.ts",
         // Deferred full-chain-archival track — out of 1.0.0 (acceptance-criteria I6).
         "src/postgres/chain-archive-store.ts",
         "src/postgres/chain-archive-rollover.ts",
