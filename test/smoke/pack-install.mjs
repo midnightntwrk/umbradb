@@ -42,7 +42,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const shell = process.platform === "win32";
@@ -191,13 +191,21 @@ async function dockerIndependentOracles() {
   if (unavailable.status !== 3 || !unavailable.stderr.includes("umbradb run: not available in this build")) {
     fail(`umbradb run did not exit 3 as not available in this build (A6):\n${unavailable.status}\n${unavailable.stderr}`);
   }
-  // A configuration as plain data (no import: the package's "." export is still 0.9.5's until task 17.3).
+  // A configuration as plain data (no import: the package's "." export is still 0.9.5's until task 17.3). Its core
+  // version is the installed build's (the UmbraDB version and the ledger packages it carries, task 12.2), read from the
+  // installed file by its path, which the strict "exports" map does not cover.
+  const installedBuild = join(scratch, "node_modules", "umbradb", "dist", "config", "build.js");
+  const { buildCoreVersion } = await import(pathToFileURL(installedBuild).href);
+  const coreVersion = buildCoreVersion();
+  if (coreVersion.umbradb !== JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version) {
+    fail(`the installed build's core version names UmbraDB ${coreVersion.umbradb}, not the package's version.`);
+  }
   writeFileSync(
     join(scratch, "umbradb.config.ts"),
     [
       "export default {",
       "  entries: [",
-      '    { id: "core", start: 0, version: { umbradb: "' + JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version + '", ledgers: [] },',
+      '    { id: "core", start: 0, version: ' + JSON.stringify(coreVersion) + ",",
       '      config: { network: "preprod", node: "ws://127.0.0.1:9944", database: "postgres://indexer@127.0.0.1:1/indexer" } },',
       "  ],",
       "};",

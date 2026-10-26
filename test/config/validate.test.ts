@@ -21,6 +21,7 @@ import {
   validateConfig,
 } from "../../src/config/validate.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { builtInLedgerTable } from "../../src/ledger/networks.js";
 import { defineModule, type ModuleDeclaration } from "../../src/modules/declaration.js";
 import { declaration } from "../modules/declarations.js";
 import type { PlainData } from "../../src/config/plain-data.js";
@@ -113,6 +114,9 @@ const withEntry = (entry: unknown) => ({ entries: [CORE, entry] });
 
 const HASH = `0x${"ab".repeat(32)}`;
 const UPPER_HASH = `0x${"AB".repeat(32)}`;
+
+/** A custom network's own ledger table (LG-3): every spec_version to v8. */
+const CUSTOM_TABLE = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v8" }] };
 
 /** An earlier core version, with one ledger package, whose hash is `sha256`. */
 const earlierCore = (sha256: string): CoreVersion => ({
@@ -428,7 +432,8 @@ const A28: readonly Row[] = [
   {
     name: "bad hex in the genesis hash (A28)",
     rule: "settings-schema",
-    config: () => withCore({ ...CORE_SETTINGS, network: "custom", genesisHash: UPPER_HASH }),
+    // With its own ledger table, which a custom network sets (LG-3), so that the hash alone is refused.
+    config: () => withCore({ ...CORE_SETTINGS, network: "custom", genesisHash: UPPER_HASH, ledgerTable: CUSTOM_TABLE }),
     findings: [
       { path: "entries[0].config.genesisHash", entry: core0, field: "genesisHash", says: ["0x-prefixed lowercase hex"] },
     ],
@@ -464,7 +469,8 @@ const A28: readonly Row[] = [
   {
     name: "a custom network without its genesis hash",
     rule: "settings-schema",
-    config: () => withCore({ ...CORE_SETTINGS, network: "custom" }),
+    // With its own ledger table, which a custom network sets (LG-3), so that the genesis rule alone refuses it.
+    config: () => withCore({ ...CORE_SETTINGS, network: "custom", ledgerTable: CUSTOM_TABLE }),
     findings: [
       { path: "entries[0].config.genesisHash", entry: core0, field: "genesisHash", says: ["a custom network needs genesisHash"] },
     ],
@@ -841,6 +847,7 @@ describe("A28: absent fields take their declared defaults (CF-3, CF-4)", () => {
     const checked = validateConfig(input({ entries: [CORE] }));
     expect(checked.entries[0]?.settings).toEqual({
       network: "preprod",
+      ledgerTable: builtInLedgerTable("preprod"),
       ledgerSources: { v8: "vendored", v9: "vendored", v10: "vendored" },
       sweep: "on",
       retainStates: 0,
@@ -864,6 +871,7 @@ describe("A28: absent fields take their declared defaults (CF-3, CF-4)", () => {
     const checked = validateConfig(input(withPrivateCore({ ...PRIVATE_SETTINGS }), "private"));
     expect(checked.entries[0]?.settings).toEqual({
       network: "preprod",
+      ledgerTable: builtInLedgerTable("preprod"),
       ledgerSources: { v8: "vendored", v9: "vendored", v10: "vendored" },
       sweep: "on",
       retainStates: 0,

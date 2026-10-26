@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { buildCoreVersion } from "../../src/config/build.js";
+import { buildCoreVersion, type CoreVersion, UMBRADB_VERSION } from "../../src/config/build.js";
 import { versionEntry } from "../../src/config/entries.js";
 import {
   canonicalJson,
@@ -46,6 +46,19 @@ import {
   Simulation,
   type Start,
 } from "./history-fixtures.js";
+import { LEDGER_RELEASES } from "../../src/ledger/releases.js";
+
+/** The build's core version as canonical JSON, written out: keys sorted, no whitespace (RFC 8785). */
+const BUILD_CORE_VERSION_TEXT =
+  '{"ledgers":[' +
+  (["v8", "v9"] as const)
+    .map((ledger) => {
+      const { versionName, packages } = LEDGER_RELEASES[ledger];
+      const [{ name, sha256, version }] = packages;
+      return `{"ledger":"${ledger}","packages":[{"name":"${name}","sha256":"${sha256}","version":"${version}"}],"versionName":"${versionName}"}`;
+    })
+    .join(",") +
+  '],"umbradb":"0.9.5"}';
 
 /**
  * The configuration history (task 4.3; CF-5 to CF-9, `design.md` §7, §10): `core-chain` compares the configuration
@@ -127,7 +140,7 @@ describe("CF-7: the history row of a revision, its canonical JSON and its data_h
 
   it("gives a module's version as written and the core version as its canonical JSON", () => {
     expect(versionText("1.2.0")).toBe("1.2.0");
-    expect(versionText(buildCoreVersion())).toBe('{"ledgers":[],"umbradb":"0.9.5"}');
+    expect(versionText(buildCoreVersion())).toBe(BUILD_CORE_VERSION_TEXT);
     const ledgers = [{ versionName: "v9.0.0", ledger: "v9" as const, packages: [{ sha256: "0x00", version: "9.0.0", name: "p" }] }];
     expect(versionText({ ledgers, umbradb: "1.0.0" })).toBe(
       '{"ledgers":[{"ledger":"v9","packages":[{"name":"p","sha256":"0x00","version":"9.0.0"}],"versionName":"v9.0.0"}],' +
@@ -171,7 +184,7 @@ describe("CF-7: the history row of a revision, its canonical JSON and its data_h
       id: "core",
       start: 0n,
       stop: null,
-      version: '{"ledgers":[],"umbradb":"0.9.5"}',
+      version: BUILD_CORE_VERSION_TEXT,
       data: { ...CORE_DATA, retainStates: 4 },
       dataHash: dataHash({ ...CORE_DATA, retainStates: 4 }),
     });
@@ -728,8 +741,12 @@ describe("A28's history half: versionEntry revisions against their recorded rows
   });
 });
 
-/** The core version a build of UmbraDB `umbradb` would carry, with no ledger version (task 4.1). */
-const coreVersion = (umbradb: string) => ({ umbradb, ledgers: [] });
+/**
+ * The core version a build of UmbraDB `umbradb` would carry: this build's for its own version (with its ledger
+ * packages, task 12.2), and one with no ledger version for any other.
+ */
+const coreVersion = (umbradb: string): CoreVersion =>
+  umbradb === UMBRADB_VERSION ? buildCoreVersion() : { umbradb, ledgers: [] };
 
 /** A recorded `core` row of UmbraDB `umbradb` from `start`, with the data of `CORE`. */
 function coreRow(start: number, umbradb: string): HistoryRow {

@@ -44,7 +44,8 @@ export const ERROR_CODES = [
    * a configuration file that cannot be loaded (`reason`: `file-not-found`, `load-failed`, `no-default-export`; CF-1),
    * or whose entries the validation refuses (`reason: invalid-entries`, `details.findings`; CF-3, `src/config/`), or
    * that has no `core` revision of the build's version to run with (`reason: no-build-core-revision`; decision record
-   * Q102, `src/config/process.ts`).
+   * Q102, `src/config/process.ts`); or whose `ledgerSources` names a source this build carries no package from
+   * (`reason: ledger-source-unavailable`, `src/ledger/identity.ts`).
    */
   "invalid-configuration",
   /** The configuration file's default export holds a value that is not plain data, at `details.path` (CF-1). */
@@ -140,6 +141,18 @@ export const ERROR_CODES = [
    * frame of the wrong shape, a method outside IN-8. Not retryable.
    */
   "node-error",
+  // The halts of each block's ledger version and metadata (LG-1, LG-2, LG-4, `design.md` §11; `src/ledger/
+  // version-table.ts`, `metadata.ts`, task 12.2): a spec_version no row (or more than one) maps; no MNSV digest, several,
+  // or a malformed one; a block contradicting a pin of the ledger table; a parent runtime other than the block's MNSV.
+  "unknown-runtime",
+  "bad-version-digest",
+  "pin-mismatch",
+  "metadata-mismatch",
+  /**
+   * A ledger package's files are not the ones the core version records: its manifest's SHA-256, or a file's against
+   * its manifest (LG-5, `src/ledger/identity.ts`, task 12.2). Startup refuses.
+   */
+  "package-hash-mismatch",
 ] as const;
 
 /**

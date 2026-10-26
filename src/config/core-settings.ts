@@ -12,17 +12,26 @@
  * `test/config/core-settings.test.ts` holds them equal to these schemas' input types, so the two cannot drift apart.
  *
  * Choices CF-4 leaves open (task 4.2): `genesisHash` is a data field, required with `network: "custom"` and refused
- * with the four known networks, whose genesis hashes are built in; hashes are 32 bytes; `ledgerTable` has no default
- * yet — the built-in table for each network is task 12.2's, which adds it here; `ledgerSources` names each of the
- * three ledger versions, `vendored` unless given; `testKeys` is a secret field (key bytes are never shown, AE-6) and
+ * with the four known networks, whose genesis hashes are built in; hashes are 32 bytes; `ledgerSources` names each of
+ * the three ledger versions, `vendored` unless given; `testKeys` is a secret field (key bytes are never shown, AE-6) and
  * defaults to none; `listen.admin` defaults to `0.0.0.0:8081` also when `listen` is given without it; addresses are
  * `host:port` (a host name, an IPv4 address or a bracketed IPv6 address; the port from 0 to 65535); the integers are
  * the plain data's (0 to 2^53 − 1), and `apiReadTimeoutMs` is from 1 to {@link MAX_READ_TIMEOUT_MS}, the read
  * option's bounds (DB-15). Every nested object is strict: a field it does not have is refused, not dropped.
+ *
+ * **`ledgerTable`** (LG-1 to LG-3, task 12.2): its default is the network's built-in table (`../ledger/networks.json`),
+ * and a configured table adds to or replaces parts of it (`../ledger/version-table.ts`). Both schemas check LG-1 and
+ * LG-2's rules on a configured table — `spec_version`s are `u32`s, a row's bounds the smaller first, its ledger one this
+ * build carries, no `spec_version` in two configured rows, one pin a height, each pin's version covered by a row — and
+ * that a `custom` network sets its own rows, each finding with its path inside `ledgerTable`; then they give the table
+ * in effect as the parsed `ledgerTable` (`.overwrite`, which keeps the object schema, so `shape` and the kinds still
+ * read as above), so that the history records the table a revision ran with (CF-7: every default applied).
  */
 
 import { z } from "zod";
 import { MAX_READ_TIMEOUT_MS } from "../db/read-options.js";
+import { ledgerTableIssuesOf, ledgerTableOf } from "../ledger/networks.js";
+import type { ConfiguredLedgerTable } from "../ledger/version-table.js";
 import { SEMVER } from "../modules/validation.js";
 
 /** Which process a configuration is for: the public (core) process, or a private one (CF-4, PP). */
@@ -146,6 +155,21 @@ function genesisHashRule(settings: { network: string; genesisHash?: string | und
   }
 }
 
+/** The `core` settings `ledgerTable` reads: the network, and the table as configured. */
+type LedgerTableSettings = { network: string; ledgerTable?: ConfiguredLedgerTable | undefined };
+
+/** LG-1 to LG-3's rules on a configured `ledgerTable`, for its network (`../ledger/version-table.ts`). */
+function ledgerTableRule(settings: LedgerTableSettings, context: z.RefinementCtx) {
+  for (const issue of ledgerTableIssuesOf(settings.network, settings.ledgerTable)) {
+    context.addIssue({ code: "custom", path: ["ledgerTable", ...issue.path], message: issue.message });
+  }
+}
+
+/** The settings with the table in effect as `ledgerTable`: the configured one over the network's built-in one (LG-3). */
+function withLedgerTable<S extends LedgerTableSettings>(settings: S): S {
+  return { ...settings, ledgerTable: ledgerTableOf(settings.network, settings.ledgerTable) };
+}
+
 /** The public (core) process's `core` entry (CF-4): the node's URL and the lockstep list. */
 export const PUBLIC_CORE_SCHEMA = z
   .strictObject({
@@ -153,7 +177,9 @@ export const PUBLIC_CORE_SCHEMA = z
     node: z.string().regex(NODE, { error: "expected the node's WebSocket URL, ws:// or wss:// (CF-4)" }).meta(SECRET),
     lockstepInstances: z.array(text()).default([]).meta(OPERATIONAL),
   })
-  .superRefine(genesisHashRule);
+  .superRefine(genesisHashRule)
+  .superRefine(ledgerTableRule)
+  .overwrite(withLedgerTable);
 
 /** A test key of a private process (CF-11): its kind, its bytes as a byte value, and the height it is admitted at. */
 const TEST_KEY = z.strictObject({ kind: text(), bytes: hexBytes(), start: count() });
@@ -167,7 +193,9 @@ export const PRIVATE_CORE_SCHEMA = z
     coreTransport: address().optional().meta(OPERATIONAL),
     testKeys: z.array(TEST_KEY).default([]).meta(SECRET),
   })
-  .superRefine(genesisHashRule);
+  .superRefine(genesisHashRule)
+  .superRefine(ledgerTableRule)
+  .overwrite(withLedgerTable);
 
 /** The `core` entry's schema for a process of `side`. */
 export function coreSettingsSchema(side: ProcessSide): typeof PUBLIC_CORE_SCHEMA | typeof PRIVATE_CORE_SCHEMA {

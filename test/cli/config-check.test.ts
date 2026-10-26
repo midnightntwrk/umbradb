@@ -8,6 +8,7 @@ import { CHECK_STEPS, type CheckStep, configCheck, type ConfigCheckReport, HISTO
 import { buildDeclarations } from "../../src/cli/build-modules.js";
 import { inferSide } from "../../src/cli/config-check.js";
 import { EXIT } from "../../src/cli/command.js";
+import { buildCoreVersion } from "../../src/config/build.js";
 import { defineModule } from "../../src/modules/declaration.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
 import { type CliProject, cliProject, configText, coreSettings, inProcess, lineOf, treeOf } from "./cli-fixtures.js";
@@ -535,7 +536,7 @@ describe("the type check's view of the file's surroundings", () => {
   });
 
   /** A plain-data configuration with no import, so that it needs no package. */
-  const plain = `export default { entries: [{ id: "core", start: 0, version: { umbradb: "0.9.5", ledgers: [] }, config: ${coreSettings(
+  const plain = `export default { entries: [{ id: "core", start: 0, version: ${JSON.stringify(buildCoreVersion())}, config: ${coreSettings(
     "postgres://indexer@127.0.0.1:1/indexer",
   )} }] };\n`;
 

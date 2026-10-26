@@ -24,7 +24,9 @@ Each version directory holds:
 - `build.sh <out-dir>` — rebuilds the package into an empty directory, in Docker;
 - `pkg/` — the built package (the WASM module, the JavaScript bindings, the TypeScript declarations, a Node.js entry
   `*_fs.js`, a browser entry, `package.json`);
-- `SHA256SUMS` — the SHA-256 of every file in `pkg/`.
+- `SHA256SUMS` — the SHA-256 of every file in `pkg/`. Its own SHA-256 is the package's identity in the core version
+  (LG-5; `src/ledger/releases.ts`), and startup refuses with `package-hash-mismatch` when it, or any file it lists, is
+  not the recorded one (`src/ledger/identity.ts`).
 
 ## Rebuilding
 
@@ -81,4 +83,6 @@ is stable (owner decision Q56); each is dropped once upstream releases it (LG-5)
 
 Change `commit`, `tag` and `versionName` in `upstream.json`, rebase the patches onto the new commit (regenerate the
 `Cargo.lock` hunks with `cargo`), run `npm run vendor:ledger -- --record <version>`, then `npm test`
-(`test/ledger/`), and commit `upstream.json`, `patches/`, `pkg/` and `SHA256SUMS` together.
+(`test/ledger/`), and commit `upstream.json`, `patches/`, `pkg/` and `SHA256SUMS` together. A rewritten `SHA256SUMS`
+(new patches too) changes the package's identity: set its `sha256` in `src/ledger/releases.ts` to the new manifest's
+SHA-256, which `test/ledger/package-identity.test.ts` prints; the core version changes with it.

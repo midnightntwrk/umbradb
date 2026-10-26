@@ -1605,6 +1605,51 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 - [ ] 12.2 Version selection, the built-in tables (`networks.json`, from task 0.3), pins, package identity checks,
       metadata selection at upgrades.
       **Acceptance:** A94, A95, A96, A97.
+      **Partial (2026-10-26):** in `src/ledger/`. **Selection** (`version-table.ts`, LG-1, LG-2):
+      `selectLedgerVersion(table, { height, hash, digest })` reads the one `MNSV` digest — the header's
+      `DigestItem::Consensus(*b"MNSV", u32)`, as the node's version pallet writes and reads it, ten bytes — then checks
+      every pin at the block's height, then takes the one row covering the version; it throws `bad-version-digest`
+      (`missing`, `several`, `malformed`), `pin-mismatch` (what differs: the hash, the `spec_version`) and
+      `unknown-runtime` (no row, or two and more in a table no validation checked), typed `UmbraError`s the loop turns
+      into §11's halts (5.4). **The built-in tables** (`networks.json`, read and checked by `networks.ts` when it loads,
+      every problem with its path): per known network its `genesis` (hash and runtime at genesis with their source:
+      the node, the day, the file of this repository holding the answers), LG-3's `rows`, and its `boundaries` (U and F,
+      each height, hash and `MNSV` version, read from the node, with the source); each boundary's F is a pin and nothing
+      else is. The file holds LG-3's rows for mainnet, preprod, preview and stagenet, and the genesis hashes of mainnet
+      and preview that task 0.2 read from their nodes; no runtime at genesis, no boundary and so no pin is recorded
+      yet (task 0.3). **The table in effect** (LG-3; `ledgerTableOf`): a configured row maps the versions it covers, the
+      built-in rows the rest (cut around it); a configured pin replaces the built-in one at its height or adds one; a
+      `custom` network sets its own rows. Both `core` schemas check LG-1 and LG-2's rules on the configured table
+      (`u32` versions, bounds in order, a ledger the build carries, no version in two configured rows, one pin a height,
+      each pin's version covered) and give the table in effect as the parsed `ledgerTable` (`.overwrite`), so the
+      history records it (CF-7); `ledgerTable` had no default until now. **Metadata** (`metadata.ts`, LG-4):
+      `RuntimeMetadata.forBlock` reads the runtime version at the parent's hash (block 0: its own), halts with
+      `metadata-mismatch` unless it is the block's `MNSV` version, and returns that version's metadata read once at that
+      hash (concurrent first reads share one call, a failed read is not kept); `forState(hash)` is the runtime of a
+      block's own state. **Package identity** (`identity.ts`, `releases.ts`, LG-5): a package's SHA-256 is its
+      `SHA256SUMS` manifest's, which lists every file with its own; `buildCoreVersion()` now lists v8 and v9, each with
+      its release and its package's name, version and SHA-256 (constants, held equal to the manifests by a test); the
+      startup check `verifyLedgerPackages` refuses with `package-hash-mismatch` (the version, the file, `changed`,
+      `missing` or `malformed`, expected and found) and refuses a `released` source with `invalid-configuration`
+      (`ledger-source-unavailable`, Q116). The CI rebuild is task 0.2's `vendored-ledger.yml`, its own workflow
+      outside `npm test`; no job added. `ERROR_CODES` gains the five codes. Tests (`test/ledger/`, no node and no
+      network): `version-selection.test.ts` (A94's three halts on synthetic tables and headers; the real mainnet header
+      of block 3,174,332, whose digest is the `spec_version` its node reported, through the node client's decoder),
+      `networks.test.ts` (the committed file; A95 `[STATIC]`; A94's last clause over every built-in pin and its
+      recorded header; 29 format rows), `ledger-table-config.test.ts` (the default, the layering, the rules; A95's
+      synthetic `[CI]` half: "every `spec_version` → v8" selecting and parsing with v8),
+      `runtime-metadata.test.ts` (A96 on a synthetic devnet upgrade tape through the tape node and the node client),
+      `package-identity.test.ts` (A97: every file of both packages, and each manifest, changed by one byte refuses),
+      `version-checks.ts`, and the committed negative controls `version.negative-control.test.ts` (a selector ignoring
+      pins fails A94's pin clause; a cache keyed by the block's own version and state fails A96; a check skipping a
+      package file fails A97). Seen failing first: `Cannot find module` for the new modules, and the core version's
+      `ledgers: []`. Wrong variants: 145 on the first run, 129 caught, 16 survivors — 13 gaps closed by tests, 1
+      redundant check removed (the date's pattern), 2 equivalent —; the final run on the final sources: 144 variants,
+      142 caught, the 2 survivors equivalent. Coverage of the new code 100 %.
+      **Pending (task 0.3):** A94's last clause (the mainnet pin at 1,774,492 and its header), A95's real `[CI]` half
+      (task 0.3's devnet tape, with 10.3/11.1's extraction of transactions), A96 on the real devnet upgrade tape, the
+      built-in tables' remaining data (preprod's and stagenet's genesis, every runtime at genesis, every boundary);
+      A97's CI rebuild runs when the branch is pushed (Phase 3). Q116 and Q117 (not blocking).
 - [ ] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
       root check, outputs.
       **Acceptance:** A82, A99, A101, A106, A107.

@@ -580,6 +580,45 @@ the rc.5 crates, so the vendored v9 package and the conversion are both built fr
 (task 0.2). It compiles for `wasm32-unknown-unknown` with `getrandom`'s `wasm_js` backend. CI rebuilds each vendored
 package and compares the SHA-256.
 
+As built (task 12.2, `src/ledger/identity.ts`, `releases.ts`): a package's SHA-256 in the core version (CF-2) is the
+SHA-256 of its `SHA256SUMS`, which lists every file of the package with its own SHA-256, so it commits to every file;
+`releases.ts` holds it as a constant (the browser build reads no file), equal to the manifest's by a test. At startup,
+before any package loads, `verifyLedgerPackages` checks each version the build carries — the manifest's SHA-256, then
+every file it lists — and refuses with `package-hash-mismatch` (the version, the file, `changed`, `missing` or
+`malformed`, the expected and the found SHA-256); a version whose `ledgerSources` is `released` refuses with
+`invalid-configuration` (`reason: ledger-source-unavailable`), since this build carries vendored packages only (question
+Q116). The CI job is task 0.2's `.github/workflows/vendored-ledger.yml`, its own workflow (Docker, up to two hours
+per version and runner), outside `npm test`: a rebuild that matches `SHA256SUMS` has the recorded identity.
+
+### 5.6 Version selection, the built-in tables and the metadata at upgrades (LG-1 to LG-4)
+
+As built (task 12.2, `src/ledger/version-table.ts`, `networks.ts`, `networks.json`, `metadata.ts`):
+
+- **The `MNSV` digest** is the header's one `DigestItem::Consensus(*b"MNSV", spec_version.encode())` (`0x04`, `MNSV`,
+  SCALE length 4, the `u32` little-endian; `midnight-node` `pallets/version/src/lib.rs`), read as the node reads it: a
+  PreRuntime or Seal item with that engine is not it. `selectLedgerVersion(table, { height, hash, digest })` halts with
+  `bad-version-digest` (`missing`, `several`, `malformed`), then with `pin-mismatch` for a block that contradicts any
+  pin at its height (naming what differs), then with `unknown-runtime` unless exactly one row covers the version
+  (`details.rows`: 0, or 2 and more in a table no validation checked); every halt is a typed `UmbraError` the
+  finalized loop turns into its halt (task 5.4). `core-block-fetch` (task 10.3) calls it per block with the
+  `ledger-table` item.
+- **The built-in tables** are `src/ledger/networks.json` (format `umbradb-ledger-networks`, version 1), checked when the
+  module loads: per known network its `genesis` (hash and runtime at genesis, each read from the network's node, with
+  the source — node, day, and the file in this repository holding the answers — or null until read), LG-3's `rows`,
+  and its `boundaries` (U and F, each height, hash and `MNSV` version, read from the node, with the source); each
+  boundary's F is a pin, and a boundary not read from a node is not listed. The file holds LG-3's rows for the four
+  known networks and the genesis hashes of mainnet and preview (read by task 0.2); task 0.3 adds the rest.
+- **The table in effect** (`ledgerTableOf(network, configured)`): a configured row maps the `spec_version`s it covers,
+  the built-in rows the rest (cut around it); a configured pin replaces the built-in one at its height and adds one at
+  any other; `custom` has no built-in table and must set rows. The `core` schemas check LG-1 and LG-2's rules on the
+  configured table (u32 versions, bounds in order, a ledger this build carries, no version in two configured rows, one
+  pin a height, each pin's version covered) and give the table in effect as the parsed `ledgerTable` (`.overwrite`), so
+  the history records the table a revision ran with.
+- **Metadata** (`RuntimeMetadata`): `forBlock(block)` reads the runtime version at the parent hash (block 0: its own),
+  halts with `metadata-mismatch` unless its `spec_version` is the block's `MNSV` version, and returns that version's
+  metadata, read once at that hash and cached under it (concurrent first reads share one call; a failed read is not
+  kept); `forState(hash)` gives the runtime of a block's own state, which differs from its content's only at U.
+
 ### 5.3 The ledger worker and the node-store bridge (LG-10, LG-11)
 
 Ledger work runs in a worker thread. The ledger reads nodes synchronously, so `NodeStore.get` in the worker posts a
@@ -687,18 +726,19 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   and a module's `entry` build a new entry — the id and version theirs, every other field given passed through for
   validation, a field that is `undefined` left out — and return plain data. `coreEntry`'s version is
   `buildCoreVersion()` (`src/config/build.ts`: `UMBRADB_VERSION`, a constant held equal to `package.json`, since the
-  browser cannot read the file; no ledger versions until tasks 12.1–12.2); its `config` is typed as CF-4's table, a
-  public process's fields or a private one's. `defineModule` adds `entry` to the declaration as a non-enumerable
-  property, typed by `z.input` of its `configSchema`. `versionEntry`'s `version` is a `CoreVersion` for `core`, and its
-  `config` is typed as plain data only.
+  browser cannot read the file; its `ledgers` each ledger version's release and packages, §5.2); its `config` is typed
+  as CF-4's table, a public process's fields or a private one's. `defineModule` adds `entry` to the declaration as a
+  non-enumerable property, typed by `z.input` of its `configSchema`. `versionEntry`'s `version` is a `CoreVersion` for
+  `core`, and its `config` is typed as plain data only.
 - **Schemas.** zod 4 (installed 4.4.3; Q45): a module's `configSchema` is a `z.object` whose fields carry `kind` in
   their metadata (`schema.shape[field].meta().kind`, verified on 4.4.3); the `core` entry's are `PUBLIC_CORE_SCHEMA` and
   `PRIVATE_CORE_SCHEMA` (`src/config/core-settings.ts`, task 4.2): CF-4's table with its kinds and defaults, strict at
   every depth, `genesisHash` required with `custom` and refused otherwise, hashes 32 bytes of lowercase hex,
-  `apiReadTimeoutMs` from 1 to 2,147,483,647, `testKeys` secret; the builders' `CoreSettings` is held equal to their
-  input types by a type test. Only revisions whose version is this build's are validated against this build's schema; a
-  `versionEntry` revision is compared with its recorded row, or — when it is a later version not yet recorded — recorded
-  as written and validated by the build that carries its version (CF-3).
+  `apiReadTimeoutMs` from 1 to 2,147,483,647, `testKeys` secret, `ledgerTable` the table in effect (§5.6); the
+  builders' `CoreSettings` is held equal to their input types by a type test. Only revisions whose version is this
+  build's are validated against this build's schema; a `versionEntry` revision is compared with its recorded row, or —
+  when it is a later version not yet recorded — recorded as written and validated by the build that carries its
+  version (CF-3).
 - **Validation** (`src/config/validate.ts`, task 4.2). `validateConfig({ config, declarations, side })` takes the loaded
   data, the validated declarations and the process's side, and runs rules that each report every violation they find,
   all at once (`invalid-configuration`, `details { file, reason: "invalid-entries", findings }`, each finding naming

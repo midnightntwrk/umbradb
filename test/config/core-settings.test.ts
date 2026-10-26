@@ -15,6 +15,7 @@ import { buildCoreVersion } from "../../src/config/build.js";
 import type { PrivateCoreSettings, PublicCoreSettings } from "../../src/config/entries.js";
 import { fieldKinds } from "../../src/config/validate.js";
 import { MAX_READ_TIMEOUT_MS } from "../../src/db/read-options.js";
+import { builtInLedgerTable } from "../../src/ledger/networks.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
 import { declaration } from "../modules/declarations.js";
 
@@ -33,7 +34,8 @@ type Absent = { readonly default: unknown } | "required" | "absent";
 const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   network: ["data", "required"],
   genesisHash: ["data", "absent"],
-  ledgerTable: ["data", "absent"],
+  // The network's built-in table (task 12.2); the required settings below name preprod.
+  ledgerTable: ["data", { default: builtInLedgerTable("preprod") }],
   ledgerSources: ["data", { default: { v8: "vendored", v9: "vendored", v10: "vendored" } }],
   sweep: ["data", { default: "on" }],
   retainStates: ["data", { default: 0 }],
@@ -204,11 +206,13 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
       [PUBLIC_CORE_SCHEMA, REQUIRED_PUBLIC],
       [PRIVATE_CORE_SCHEMA, REQUIRED_PRIVATE],
     ] as const) {
+      // A custom network also sets its own ledger table (LG-3, task 12.2): given here, so the genesis rule alone speaks.
+      const ledgerTable = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v8" }] };
       const paths = (settings: Record<string, unknown>) =>
         (schema.safeParse({ ...required, ...settings }).error?.issues ?? []).map((issue) => issue.path);
-      expect(paths({ network: "custom" })).toEqual([["genesisHash"]]);
+      expect(paths({ network: "custom", ledgerTable })).toEqual([["genesisHash"]]);
       expect(paths({ network: "preprod", genesisHash: hash })).toEqual([["genesisHash"]]);
-      expect(paths({ network: "custom", genesisHash: hash })).toEqual([]);
+      expect(paths({ network: "custom", genesisHash: hash, ledgerTable })).toEqual([]);
     }
   });
 

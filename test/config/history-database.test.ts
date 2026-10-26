@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { recordHistory } from "../../src/backbone/core-chain/index.js";
+import { buildCoreVersion } from "../../src/config/build.js";
 import { versionEntry } from "../../src/config/entries.js";
 import { canonicalJson, dataHash } from "../../src/config/history.js";
 import type { Database } from "../../src/db/api.js";
@@ -44,7 +45,7 @@ function m(start: number, config: Record<string, unknown> = {}, stop?: number) {
 const M_DEFAULTS = { limit: 10, mode: "full" } as const;
 
 /** The core version's canonical JSON, as `core_chain.config.version` holds it. */
-const CORE_VERSION_TEXT = '{"ledgers":[],"umbradb":"0.9.5"}';
+const CORE_VERSION_TEXT = canonicalJson(buildCoreVersion());
 
 describe.each(BACKENDS)("the configuration history in core_chain.config, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
@@ -377,7 +378,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
         const error = (await rejection(startup(db, { entries: [oldCore(0, umbradb), core(100), m(0)], user: [M_1_0], cursor: 20n }))) as UmbraError;
         expect(error.code).toBe("upgrade-required");
         expect(error.details.entries).toEqual([
-          { id: "core", start: 0, needed: { umbradb, ledgers: [] }, build: { umbradb: "0.9.5", ledgers: [] } },
+          { id: "core", start: 0, needed: { umbradb, ledgers: [] }, build: buildCoreVersion() },
         ]);
         expect(await state(db)).toEqual(before);
       }

@@ -74,15 +74,20 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "durability-fsync-off",
   "durability-pooler",
   "durability-full-page-writes-off",
+  "package-hash-mismatch",
 ] as const);
 
 /**
  * `design.md` §11's processing halts that are `UmbraError` codes today; `callback-error` and `unexpected-cursor` are the
- * runner's own ({@link ReasonCode}), and the node's, ledger's and private instances' halts come with their tasks.
+ * runner's own ({@link ReasonCode}), and the node's other halts and the private instances' come with their tasks.
  */
 export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
   "database-error",
   "node-requirement",
+  "unknown-runtime",
+  "bad-version-digest",
+  "pin-mismatch",
+  "metadata-mismatch",
   "writer-lock-lost",
   "truncate-not-allowed",
 ] as const);

@@ -1,0 +1,63 @@
+{
+  "format": "umbradb-ledger-networks",
+  "version": 1,
+  "about": "The built-in ledger version tables (openspec/changes/core-arch/specs/ledger/spec.md LG-1 to LG-3; CORE-ARCH section 4.8), one per known network, keyed by its genesis hash; read and checked by src/ledger/networks.ts. rows: LG-3's runtime-to-ledger mapping, the same for every network: spec_version 22000-22999 (runtime 0.22) and 1000000-1999999 (runtime 1.0.x) to ledger v8, 2000000-2999999 (runtimes 2.0 and 2.1) to v9. genesis: the hash of the network's block 0 and the spec_version of its runtime at genesis, as read from the network's node (source: the node, the day it was read, and the file in this repository holding its answers); null where not read yet, and specVersion null where the runtime at genesis was not read. boundaries: each runtime upgrade, U the block that enacts it and F = U + 1 the first block of the new runtime, each with its height, hash and MNSV spec_version as read from the network's node (source); the F of each boundary is a pin. A boundary not read from a node is not listed (LG-3). Task 0.3 reads the genesis of preprod and stagenet, every runtime at genesis and every boundary.",
+  "networks": [
+    {
+      "network": "mainnet",
+      "genesis": {
+        "hash": "0x1941ca8e2bb88146c14dea084d3be7eb6e96ca7135429c543848b628124f2854",
+        "specVersion": null,
+        "source": {
+          "node": "https://rpc.mainnet.midnight.network",
+          "read": "2026-10-23",
+          "record": "test/ledger/fixtures/genesis/node-roots.json"
+        }
+      },
+      "rows": [
+        { "specVersionMin": 22000, "specVersionMax": 22999, "ledger": "v8" },
+        { "specVersionMin": 1000000, "specVersionMax": 1999999, "ledger": "v8" },
+        { "specVersionMin": 2000000, "specVersionMax": 2999999, "ledger": "v9" }
+      ],
+      "boundaries": []
+    },
+    {
+      "network": "preprod",
+      "genesis": null,
+      "rows": [
+        { "specVersionMin": 22000, "specVersionMax": 22999, "ledger": "v8" },
+        { "specVersionMin": 1000000, "specVersionMax": 1999999, "ledger": "v8" },
+        { "specVersionMin": 2000000, "specVersionMax": 2999999, "ledger": "v9" }
+      ],
+      "boundaries": []
+    },
+    {
+      "network": "preview",
+      "genesis": {
+        "hash": "0x3c096de209e06a1a8c52be7bda109ee8c891a42288c0a9db5495f9616dd13796",
+        "specVersion": null,
+        "source": {
+          "node": "https://rpc.preview.midnight.network",
+          "read": "2026-10-23",
+          "record": "test/ledger/fixtures/genesis/node-roots.json"
+        }
+      },
+      "rows": [
+        { "specVersionMin": 22000, "specVersionMax": 22999, "ledger": "v8" },
+        { "specVersionMin": 1000000, "specVersionMax": 1999999, "ledger": "v8" },
+        { "specVersionMin": 2000000, "specVersionMax": 2999999, "ledger": "v9" }
+      ],
+      "boundaries": []
+    },
+    {
+      "network": "stagenet",
+      "genesis": null,
+      "rows": [
+        { "specVersionMin": 22000, "specVersionMax": 22999, "ledger": "v8" },
+        { "specVersionMin": 1000000, "specVersionMax": 1999999, "ledger": "v8" },
+        { "specVersionMin": 2000000, "specVersionMax": 2999999, "ledger": "v9" }
+      ],
+      "boundaries": []
+    }
+  ]
+}

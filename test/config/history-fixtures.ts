@@ -10,6 +10,7 @@ import {
 import { plainData, type PlainObject } from "../../src/config/plain-data.js";
 import { type CheckedConfig, validateConfig } from "../../src/config/validate.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { builtInLedgerTable } from "../../src/ledger/networks.js";
 import { defineModule, type ModuleDeclaration } from "../../src/modules/declaration.js";
 import { type DeclarationSet, validateDeclarations } from "../../src/modules/validation.js";
 import { declaration } from "../modules/declarations.js";
@@ -78,9 +79,13 @@ export const M_BAR = defineModule({
   migrations: [M_001, M_002],
 });
 
-/** The data fields of a public `core` entry written with {@link CORE_SETTINGS} only: CF-4's defaults applied. */
+/**
+ * The data fields of a public `core` entry written with {@link CORE_SETTINGS} only: CF-4's defaults applied, the
+ * ledger table among them (the network's built-in one, task 12.2).
+ */
 export const CORE_DATA = {
   network: "preprod",
+  ledgerTable: plainData(builtInLedgerTable("preprod")) as PlainObject,
   ledgerSources: { v8: "vendored", v9: "vendored", v10: "vendored" },
   sweep: "on",
   retainStates: 0,

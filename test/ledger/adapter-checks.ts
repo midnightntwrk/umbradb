@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import fc from "fast-check";
 import { expect } from "vitest";
@@ -56,7 +57,14 @@ export function expectRecordedRelease(adapter: LedgerPackage, ledger: Ledger, ra
   expect(Object.isFrozen(packages)).toBe(true);
   expect(LEDGER_RELEASES[ledger]).toEqual({
     versionName: upstream.versionName,
-    packages: [{ name: manifest.name, version: manifest.version }],
+    // The package's identity (task 12.2): the SHA-256 of its manifest, which lists every file of the package.
+    packages: [
+      {
+        name: manifest.name,
+        version: manifest.version,
+        sha256: `0x${createHash("sha256").update(readFileSync(vendored(ledger, "SHA256SUMS"))).digest("hex")}`,
+      },
+    ],
   });
   expect(manifest.version).toBe(upstream.package.version);
 }

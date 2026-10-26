@@ -14,6 +14,7 @@ import {
   versionEntry,
 } from "../../src/config/entries.js";
 import { plainData } from "../../src/config/plain-data.js";
+import { LEDGER_RELEASES } from "../../src/ledger/releases.js";
 import { defineModule, type ModuleDeclaration } from "../../src/modules/declaration.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
 import { declaration, userModules } from "../modules/declarations.js";
@@ -304,7 +305,14 @@ describe("CF-2: the build's core version", () => {
 
   it("is { umbradb: the package's version, ledgers: one item per ledger version the build carries }", () => {
     expect(UMBRADB_VERSION).toBe(manifest.version);
-    expect(buildCoreVersion()).toEqual({ umbradb: manifest.version, ledgers: [] });
+    expect(buildCoreVersion()).toEqual({
+      umbradb: manifest.version,
+      ledgers: (["v8", "v9"] as const).map((ledger) => ({
+        ledger,
+        versionName: LEDGER_RELEASES[ledger].versionName,
+        packages: LEDGER_RELEASES[ledger].packages.map(({ name, version, sha256 }) => ({ name, version, sha256 })),
+      })),
+    });
   });
 
   it("is a new plain object at every call", () => {

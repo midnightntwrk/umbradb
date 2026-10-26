@@ -3,8 +3,9 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildCoreVersion } from "../../src/config/build.js";
 import { coreEntry } from "../../src/config/entries.js";
-import { checkHistory } from "../../src/config/history.js";
+import { canonicalJson, checkHistory } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
 import { type CheckedConfig, type CheckedEntry, validateConfig } from "../../src/config/validate.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -609,7 +610,7 @@ describe("upgradeBoundary: RN-12's first height of a version the build does not 
     const { check, declarations } = checked(entries, []);
     expect(upgradeBoundary(check, declarations)).toEqual({
       height: 30n,
-      entries: [{ id: "core", start: 30, needed: newer, build: { umbradb: "0.9.5", ledgers: [] } }],
+      entries: [{ id: "core", start: 30, needed: newer, build: buildCoreVersion() }],
     });
   });
 });
@@ -652,7 +653,7 @@ describe("processRevisions: each part's revisions for its process context (RN-7,
     expect(second?.settings).toMatchObject({ database: "pglite:/b", node: N2, developmentOptIn: true, retainStates: 4 });
     expect(scheduled?.settings).toMatchObject({ database: "pglite:/b", node: N2 });
     expect(scheduled?.settings).not.toHaveProperty("retainStates");
-    expect(first?.version).toBe('{"ledgers":[],"umbradb":"0.9.5"}');
+    expect(first?.version).toBe(canonicalJson(buildCoreVersion()));
     expect(revisions("core-block-commit")).toBe(revisions("core-chain"));
     // A control's process revision: the first one's operational fields.
     const firstRevision = processRevisions(check, check.entries[0] as CheckedEntry)("core-chain");
