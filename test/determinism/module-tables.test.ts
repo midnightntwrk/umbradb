@@ -17,7 +17,8 @@ import type { TestDatabase, TestServer } from "./postgres-database.js";
  * DT-2: rows are ordered by their primary-key columns in order, integers numerically, `boolean` with `false` first, and
  * `bytea`, `text`, `varchar(n)` and `uuid` by their bytes (`COLLATE "C"` for `text` and `varchar`; `varchar`, `uuid`
  * and `boolean` since owner decision Q58; `timestamptz` by time since Q74). DT-3: the module schemas (every schema but
- * `pg_*`, `information_schema` and `public`, owner decision Q75), then each table, in name order (byte order).
+ * `pg_*`, `information_schema`, `public` and `core_digest_shadow`, owner decisions Q75 and Q101; A150 is
+ * `shadow-schema.test.ts`), then each table, in name order (byte order).
  * Every expected order below is written out by hand from those rules (UTF-8 bytes of each text; unsigned bytes, a
  * prefix first; integers by value; `false` before `true`), never computed by the code under test. Rows are inserted
  * in shuffled order and every listing is repeated with page sizes 1, 2, 3 and the default, so a paging error cannot

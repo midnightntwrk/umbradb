@@ -22,7 +22,9 @@
  * transaction carrying the migration mark (`MIGRATION_MARKED_CONDITION` of the component), so a migration's rows are no
  * block's changes, and a migration may change the table's columns before its function is rewritten. A part's
  * `on-start-db` writes are captured into the shadow tables, and {@link finishCapture} empties them when startup ends,
- * before any block, so every shadow table is empty whenever no block is open (the contents hash, DT-3, reads them).
+ * before any block, so every shadow table is empty whenever no block is open. The contents hash (DT-3) leaves the
+ * shadow schema out (owner decision Q101), so the layout of the shadow tables may change in a release without changing
+ * it.
  *
  * **When.** The shadow schema is `core-digest`'s (its migrations create it, Q95); until it exists nothing is captured.
  * After each part's migrations and DT-6's check, before its `on-start-db`, {@link captureTables} makes the capture of
@@ -131,8 +133,8 @@ export async function captureTables(tx: Transaction, plan: SchemaPlan, schemas: 
 /**
  * At the end of startup, before any block: drops the shadow tables and functions no module table of the plan uses any
  * more (a table dropped or renamed, or declared `deterministic: false`), and empties the others — the rows a part's
- * `on-start-db` wrote are no block's changes, and the contents hash reads the shadow tables. A no-op before
- * `core-digest`'s migrations created the shadow schema.
+ * `on-start-db` wrote are no block's changes, and the shadow tables are empty whenever no block is open (`design.md`
+ * §4). A no-op before `core-digest`'s migrations created the shadow schema.
  */
 export async function finishCapture(tx: Transaction, plan: SchemaPlan): Promise<void> {
   if (!(await captureReady(tx))) return;

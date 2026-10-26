@@ -3,16 +3,18 @@
  * (`openspec/changes/core-arch/specs/determinism/spec.md`), read through a read handle of the database API.
  *
  * **Which tables count.** DT-3 hashes every schema of a database — the core's database or a private process's, under
- * the same rules (owner decision Q75) — except those no part or module can own (DB-8's reserved names): PostgreSQL's
- * own (`pg_catalog`, `pg_toast`, the temporary schemas — every name starting with `pg_`), `information_schema`, and
- * `public`, where extensions install their tables. Those it hashes are the module schemas — the backbone's
- * (`core_chain`, `core_block_commit`, `core_digest`, …), the core modules', the user modules' and the shared items' —
- * and any schema an operator created; "module tables" and "module schemas" below mean these (never the schema named
- * `public`, which is left out). A table is an ordinary or a partitioned table (`relkind` `r` or
- * `p`); a partition is part of its partitioned table, whose rows it holds, not a table of its own, so the storage
- * layout of a height-partitioned table (`design.md` §10) never reaches the hash. Views, materialized views,
- * sequences, composite types and foreign tables hold no rows of their own and are not tables. An ordinary table is
- * read with `ONLY`, so a table inheriting from it is listed once, as itself.
+ * the same rules (owner decision Q75) — except PostgreSQL's own (`pg_catalog`, `pg_toast`, the temporary schemas —
+ * every name starting with `pg_`), `information_schema`, `public`, where extensions install their tables, and
+ * `core_digest_shadow`, change capture's scratch schema (`src/db/change-capture.ts`; owner decision Q101): its shadow
+ * tables are empty whenever no block is open, and their layout is UmbraDB's own, so a release that changes the capture
+ * keeps contents hashes comparable — whatever that schema holds, the hash neither reads nor refuses it. Those it hashes
+ * are the module schemas — the backbone's (`core_chain`, `core_block_commit`, `core_digest`, …: the digests are
+ * covered), the core modules', the user modules' and the shared items' — and any schema an operator created; "module
+ * tables" and "module schemas" below mean these (never the schema named `public`, which is left out). A table is an
+ * ordinary or a partitioned table (`relkind` `r` or `p`); a partition is part of its partitioned table, whose rows it
+ * holds, not a table of its own, so the storage layout of a height-partitioned table (`design.md` §10) never reaches
+ * the hash. Views, materialized views, sequences, composite types and foreign tables hold no rows of their own and are
+ * not tables. An ordinary table is read with `ONLY`, so a table inheriting from it is listed once, as itself.
  *
  * **How the catalog is read.** By name, never by OID or creation order: schemas and tables are sorted by the bytes of
  * their names' UTF-8 encoding (DT-3's byte order); a table's columns are in column order (DT-1), its attribute

@@ -5,12 +5,14 @@
  * applied. The contents hash (`src/determinism/module-tables.ts`, DT-2, DT-3) and task 7.1's migration-time check
  * (DT-6) read the same facts here, so both give the same verdicts.
  *
- * **Which tables count.** Every schema of the database counts except those no part or module can own (DB-8's reserved
- * names): PostgreSQL's own (`pg_catalog`, `pg_toast`, the temporary schemas — every name starting with `pg_`),
- * `information_schema`, and `public`, where extensions install their tables. A table is an ordinary or a partitioned
- * table (`relkind` `r` or `p`); a partition is part of its partitioned table, whose rows it holds, not a table of its
- * own. Views, materialized views, sequences, composite types and foreign tables hold no rows of their own and are not
- * tables. (Why these schemas and tables: `src/determinism/module-tables.ts`.)
+ * **Which tables count.** Every schema of the database counts — the schemas DT-3 hashes — except PostgreSQL's own
+ * (`pg_catalog`, `pg_toast`, the temporary schemas — every name starting with `pg_`), `information_schema`, `public`,
+ * where extensions install their tables, and `core_digest_shadow`, change capture's scratch schema, whose tables are
+ * empty whenever no block is open (owner decision Q101). Of DB-8's other reserved names, `core_chain` and `core_digest`
+ * count. A table is an ordinary or a partitioned table (`relkind` `r` or `p`); a partition is part of its partitioned
+ * table, whose rows it holds, not a table of its own. Views, materialized views, sequences, composite types and
+ * foreign tables hold no rows of their own and are not tables. (Why these schemas and tables:
+ * `src/determinism/module-tables.ts`.)
  *
  * **How the catalog is read.** By name, never by OID or creation order: schemas and tables are sorted by the bytes of
  * their names' UTF-8 encoding (DT-3's byte order); a table's columns are in column order (DT-1), its attribute
@@ -136,7 +138,7 @@ export async function catalogRelations(read: ConsistentRead, options: CatalogOpt
 export interface CatalogOptions {
   /**
    * Only these schemas (the startup check reads a module's own, DT-6); every module schema when absent. A name outside
-   * the module schemas (`public`, `pg_*`, `information_schema`) still gives nothing.
+   * the module schemas (`public`, `pg_*`, `information_schema`, `core_digest_shadow`) still gives nothing.
    */
   readonly schemas?: readonly string[];
 }
@@ -150,13 +152,20 @@ function schemaFilter(options: CatalogOptions): [string, unknown[] | undefined] 
 }
 
 /**
- * Module tables: ordinary or partitioned tables that are not partitions, outside PostgreSQL's own schemas (`pg_*`),
- * `information_schema` and the reserved `public` — in every schema DT-3 hashes, the core's database or a private
- * process's alike (owner decision Q75).
+ * The module schemas, the schemas DT-3 hashes, as a condition on `n`, a relation's schema: every schema but
+ * PostgreSQL's own (`pg_*`), `information_schema`, the reserved `public`, and change capture's scratch schema
+ * `core_digest_shadow` (owner decision Q101: its shadow tables are empty at rest, and their layout is UmbraDB's, so a
+ * release that changes it keeps contents hashes comparable) — the core's database or a private process's alike (owner
+ * decision Q75). `core_chain` and `core_digest` are module schemas here: the digests are covered by the hash. Both
+ * catalog reads take their schemas from it, so the tables and the relations the rules see are of the same schemas.
  */
+const MODULE_SCHEMA_FILTER = `n.nspname NOT IN ('core_digest_shadow', 'information_schema', 'public')
+  AND left(n.nspname::text, 3) <> 'pg_'`;
+
+/** Module tables: ordinary or partitioned tables that are not partitions, in the module schemas. */
 const MODULE_TABLE_FILTER = `
   c.relkind IN ('r', 'p') AND NOT c.relispartition
-  AND n.nspname NOT IN ('information_schema', 'public') AND left(n.nspname::text, 3) <> 'pg_'`;
+  AND ${MODULE_SCHEMA_FILTER}`;
 
 const TABLES_SQL = `
 SELECT n.nspname::text AS schema_name, c.relname::text AS table_name, c.relkind = 'p' AS partitioned
@@ -216,7 +225,7 @@ CROSS JOIN LATERAL (
 LEFT JOIN pg_catalog.pg_class AS bc ON bc.oid = coalesce(pg_catalog.pg_partition_root(o.owner), o.owner)
 LEFT JOIN pg_catalog.pg_namespace AS bn ON bn.oid = bc.relnamespace
 WHERE (c.relkind = 'S' OR (c.relkind IN ('r', 'p') AND c.relpersistence = 'u'))
-  AND n.nspname NOT IN ('information_schema', 'public') AND left(n.nspname::text, 3) <> 'pg_'`;
+  AND ${MODULE_SCHEMA_FILTER}`;
 
 /** A function's name for a message, `name()`, qualified by its schema outside `pg_catalog`. */
 const FUNCTION_NAME = (alias: string, schema: string): string =>

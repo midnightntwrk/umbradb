@@ -1022,10 +1022,35 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** A147's private-process part (14.1) and backup part (15.2); A56/A57 through the real runner (5.2) and
       `core-block-commit` (10.2, `blocks`); "startup refuses" through the runner's refusal state (5.x); the ingest cost
       of the triggers (A136, 18.3).
-- [ ] 7.1a The owner's answer Q101 B: the contents hash leaves out `core_digest_shadow` (DT-3) — in every place that
+- [x] 7.1a The owner's answer Q101 B: the contents hash leaves out `core_digest_shadow` (DT-3) — in every place that
       lists the hashed schemas (`MODULE_TABLE_FILTER` in `src/deterministic-postgresql/catalog.ts`,
       `src/determinism/module-tables.ts`), each other user of those lists checked to keep its own scope.
       **Acceptance:** A150.
+      **Done (2026-10-25):** one list of the hashed schemas, `MODULE_SCHEMA_FILTER` in the component's `catalog.ts`
+      (every schema but `pg_*`, `information_schema`, `public` and `core_digest_shadow`), which both catalog reads take:
+      `MODULE_TABLE_FILTER` (the tables and their columns) and the relations' statement, which held its own copy of the
+      list before. Per user: the contents hash (`moduleTables`, every module schema) leaves the scratch schema out —
+      its tables, rows, and what the rules would refuse there; DT-6 at startup and the `CHECK`s (`module-rules.ts`,
+      the part's schemas) are unaffected, since DB-8 keeps reserved names out of a plan, and the filter now leaves the
+      scratch schema out even when it is asked for; the `TRUNCATE` guard and change capture keep their own lists
+      (`TRUNCATE_GUARD_TABLES_SQL`, the plan's schemas; the shadow schema by name) and their scope; DB-8's
+      `RESERVED_SCHEMAS` keeps the name. No split was needed. `core_chain` and `core_digest` stay hashed (Q101 rejected
+      C). The comments of `module-tables.ts` and `change-capture.ts` (which said the hash reads the shadow tables)
+      corrected. Tests: `test/determinism/shadow-schema.test.ts` (A150, 21 per backend): a database built by hand,
+      hashed against CBOR written out by hand — `core_chain`, `core_digest`, an operator's `core_digest_shadow_x` and a
+      module schema in, the scratch schema out with a row, a table without a key, a `timestamp` defaulting to `now()`,
+      an unlogged table and a sequence; a column, a shadow table, a row, a refused table, a sequence and an unlogged
+      table added there leave the hash unchanged, the same in `m`, `core_digest`, `core_chain`,
+      `core_digest_shadow_x` and `pgx` change it, and the refused table in `m` refuses the hash; the catalog reads
+      given schemas skip the scratch schema; two chains through the real capture, one with a column more in every
+      shadow table and an orphan shadow table holding a row, hash and digest equal, and the same change in `m` changes
+      the hash. Seen failing first on the old filter, all 40 (`no-primary-key: table
+      "core_digest_shadow"."t_nokey"`; the catalog reads listing 5 tables for `m`'s 1; the chains' hashes `97b6…`
+      against `6676…`). Committed negative controls: the scratch schema back in the list (a handle rewriting the 3
+      catalog statements of a hash) refuses the hand-built database and splits the two chains; `core_digest` left out
+      too (option C) gives another hash and misses a changed digest. 20 wrong variants of the changed lines (a scratch
+      runner outside the clone): all 20 caught on the final sources; the first run's one survivor (`'pg'` for `'pg_'`)
+      was a gap, closed by the `pgx` case. A55 and every neighbouring suite pass.
 
 ## 8. Admin endpoints
 
