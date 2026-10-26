@@ -427,18 +427,22 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
       ]);
     });
 
-    it("throws when a system transaction fails, or when the block's fullness exceeds the block limits", {
+    it("throws when a system transaction fails, and clamps a block's fullness above the block limits as the node does", {
       timeout: LONG,
     }, async () => {
       const failing = block([zswapOutputTransaction(raw), failingSystemTransaction(subject.ledger)]);
       expect(() => adapter.apply(adapter.emptyState(), failing)).toThrow(/system transaction 1 of block 1 failed/);
-      // 20 deploys write more than the block limit of 50,000 bytes.
+      // 20 deploys write more than the block limit of 50,000 bytes: the node clamps the fullness to the limits (task
+      // 12.1a, owner decision Q113 A; task 12.1's adapter threw here). `post-block-update.test.ts` holds the fee prices
+      // against the node's arithmetic.
       const deploys = await Promise.all(
         Array.from({ length: 20 }, () => contractFixture(raw).then((fixture) => fixture.deploy)),
       );
-      expect(() => adapter.apply(adapter.emptyState(), block(deploys, { height: 7n }))).toThrow(
-        /block 7's fullness exceeds the block limits/,
-      );
+      const input = block(deploys, { height: 7n });
+      const { state, output } = adapter.apply(adapter.emptyState(), input);
+      expect(output.results.map((result) => result.outcome)).toEqual(deploys.map(() => "success"));
+      const reference = referenceReplay(raw, raw.LedgerState.blank(NETWORK_ID), input);
+      expect(hex(adapter.stateRoot(state))).toBe(hex(raw.stateRoot(reference.state)));
     });
   });
 

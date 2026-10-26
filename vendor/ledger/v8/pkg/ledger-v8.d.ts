@@ -3305,3 +3305,35 @@ export function contractStateKey(state: LedgerState, address: Uint8Array): Uint8
 
 /** The key of the node holding a contract's zswap state, or `null` without that contract. */
 export function contractZswapStateKey(state: LedgerState, address: Uint8Array): Uint8Array | null;
+
+// UmbraDB additions: the node's end-of-block update, with no JavaScript number in between.
+
+/**
+ * A block's fullness as the node computes it at the end of a block, each value a `FixedPoint`
+ * as the integer `value × 2^64` it holds: per dimension, the block's summed cost clamped to the
+ * block limit and divided by it (rounded up), and `overall`, the largest of the five.
+ */
+export interface ExactBlockFullness {
+  readTime: bigint;
+  computeTime: bigint;
+  blockUsage: bigint;
+  bytesWritten: bigint;
+  bytesChurned: bigint;
+  overall: bigint;
+}
+
+/**
+ * The fullness the node's post-block update takes for a block whose transactions cost
+ * `fullness` in all, against the block limits of `params`.
+ */
+export function blockFullness(params: LedgerParameters, fullness: SyntheticCost): ExactBlockFullness;
+
+/**
+ * The node's post-block update: `fullness`, the summed cost of the block's transactions, as
+ * `blockFullness` gives it against this state's block limits (clamped, never refused), then the
+ * ledger's post-block update at `tblock`.
+ */
+export function postBlockUpdateExact(state: LedgerState, tblock: Date, fullness: SyntheticCost): LedgerState;
+
+/** A system transaction's cost, which the node adds to the block's fullness. */
+export function systemTransactionCost(transaction: SystemTransaction, params: LedgerParameters): SyntheticCost;

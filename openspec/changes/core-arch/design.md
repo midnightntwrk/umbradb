@@ -528,8 +528,10 @@ interface LedgerPackage {                                  // one per ledger ver
   decodeLogItem(value: Uint8Array): LogItem | null;        // the VM's own log decoding (CC-3); v8: null (Q54)
   convertFromV8?(v8StateKey: Uint8Array, store: NodeStore): StateHandle;  // v9 only (LG-9)
 }
-interface ApplyInput { transactions: Uint8Array[]; height: bigint; hash: Uint8Array; parentHash: Uint8Array;
+interface ApplyInput { transactions: Uint8Array[]; outcomes?: ChainOutcome[];   // one per transaction (Q113)
+  height: bigint; hash: Uint8Array; parentHash: Uint8Array;
   timestampMs: bigint; parentTimestampMs: bigint; firstRegularAtParentTime: boolean }
+type ChainOutcome = "success" | "partial" | "failure";   // CD-5's events, in CD-6's words
 interface AppliedBlock { state: StateHandle; output: ApplyOutput }   // the state stays in the worker
 interface ApplyOutput {
   results: { outcome: "success" | "partial" | "failure"; segments: { segment: number; success: boolean }[] }[];
@@ -582,9 +584,14 @@ imports the version's vendored Node.js entry when it is first asked for). A tran
 package's serialization of it, the ledger's own definition for both kinds. `apply` follows the official indexer's
 replay (strictness without proof checks or balancing; a malformed transaction, one whose cost cannot be computed and
 one the ledger fails are a `failure` that leaves the state as it was; the post-block update given the block's
-normalized fullness, zero when nothing applied). The published packages take that fullness as JavaScript numbers and
-expose no system-transaction cost, so a block with transactions may not reach the node's root through them
-(question Q113, before task 12.3's A99). `LedgerEventKind` also has `contract-deploy`, which §10's kinds of
+fullness, zero when nothing applied). Task 12.1a (owner decision Q113 A) makes the replay the node's: the post-block
+update is the node's (`postBlockUpdateExact`, §5.2: the summed cost clamped to the block limits and normalized in the
+package, with no JavaScript number in between, so a block above its limits is clamped, not refused), each system
+transaction's cost joins the fullness (`systemTransactionCost`), the costs add up saturating as the ledger's do, and
+an extrinsic whose `outcomes` entry is `failure` is skipped as the official indexer skips it (not given to the ledger,
+no cost, not the first regular transaction of LG-8's rule). Without `outcomes` every transaction is replayed and the
+ledger decides; a chain block gives them (task 12.3), since the v9 node also fails an extrinsic whose cost would take
+the block over its limits. `LedgerEventKind` also has `contract-deploy`, which §10's kinds of
 `core_ledger_state.events` lack though LG-16 stores every event but logs (task 12.3 settles the table).
 
 ### 5.2 Vendored builds (LG-5)
@@ -595,7 +602,11 @@ expose no system-transaction cost, so a block with transactions may not reach th
 `npm run vendor:ledger` rebuilds every version and compares. The functions `LedgerPackage` needs that the published
 packages lack (`load`, `stateRoot`, `stateKey`, `flush`, `persist`, `release`, `childRefs`, `evict`, the contract keys,
 v9's `decodeLogItem`, the conversion) are the patches; the v9 package also exports `serializeStateValue`, which turns a
-native state value into `decodeLogItem`'s input. `vendor/ledger/README.md` lists each patch and what it adds; the owner
+native state value into `decodeLogItem`'s input. Both packages also export the node's end-of-block update (task
+12.1a, Q113): `postBlockUpdateExact(state, tblock, fullness)`, `blockFullness(params, fullness)` (the `FixedPoint`s it
+uses, each as the integer `value × 2^64`) and `systemTransactionCost(tx, params)`, following `midnight-node`
+2.1.0-rc.4's `clamp_and_normalize`, `compute_overall_fullness`, `apply_post_block_update` and `apply_system_tx`.
+`vendor/ledger/README.md` lists each patch and what it adds; the owner
 proposes them upstream, as a few pull requests, once `midnight-ledger` is stable (Q56). v8 is `ledger-8.1.2`, the v8
 ledger `midnight-node` 2.1.0-rc.4 pins (`Cargo.toml:86`). v9 is `midnight-ledger` `ledger-9.1.0.0-rc.5` (the reference
 used for CORE-ARCH). The v8→v9 conversion is the crate `v8-to-v9-state-translation` at `midnight-ledger` rev

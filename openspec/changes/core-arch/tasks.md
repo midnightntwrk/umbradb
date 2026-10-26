@@ -1833,11 +1833,49 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (task 0.3's devnet tape, with 10.3/11.1's extraction of transactions), A96 on the real devnet upgrade tape, the
       built-in tables' remaining data (preprod's and stagenet's genesis, every runtime at genesis, every boundary);
       A97's CI rebuild runs when the branch is pushed (Phase 3). Q116 and Q117 (not blocking).
-- [ ] 12.1a The owner's answer Q113 A: patches for v8 and v9 exporting the node's exact post-block update (the summed
+- [x] 12.1a The owner's answer Q113 A: patches for v8 and v9 exporting the node's exact post-block update (the summed
       `SyntheticCost` normalized and clamped to the block limits in Rust) and a system transaction's cost; the packages
       rebuilt and their `SHA256SUMS` re-recorded; `ApplyInput` gains each transaction's chain outcome, and the adapters
       skip an extrinsic the chain reports failed, as the official indexer does.
       **Acceptance:** A151; A97 with the rebuilt packages.
+      **Done (2026-10-26):** **The patches** `vendor/ledger/v8/patches/0004-ledger-wasm-exact-post-block-update.patch`
+      and `v9/patches/0006-…` add to `ledger-wasm/src/umbradb.rs` and the declarations, following `midnight-node`
+      2.1.0-rc.4 (each function cited in the code): `postBlockUpdateExact(state, tblock, fullness)` — the summed cost
+      clamped to the state's block limits and normalized (`ledger/helpers/src/ledger_8/mod.rs` `clamp_and_normalize`),
+      its largest dimension (`compute_overall_fullness`), then the ledger's `post_block_update` (v8) or
+      `apply_post_block_update` (v9), as `Ledger::apply_post_block_update` runs them in `on_finalize`; no JavaScript
+      number in between, and no refusal above the limits —, `blockFullness(params, fullness)` (those `FixedPoint`s,
+      each the integer `value × 2^64`) and `systemTransactionCost(tx, params)` (`Ledger::apply_system_tx`'s
+      `tx.cost`). **Rebuilt** twice in Docker (`npm run vendor:ledger -- --record`, 8 min 49 s; then
+      `npm run vendor:ledger`, 5 min 38 s: both versions match, exit 0); `SHA256SUMS` re-recorded (v8 `0x9c0167…05f5`,
+      v9 `0xd70c49…7cc9`, the constants in `src/ledger/releases.ts`). **`ApplyInput.outcomes?: ChainOutcome[]`**
+      (`"success" | "partial" | "failure"`, CD-6's words for CD-5's events), one per transaction or refused
+      (`RangeError`): a `failure` is skipped as the official indexer skips it (`failed_regular_transaction`: not given
+      to the ledger, a failure of every segment, no cost, not the first regular transaction of LG-8's rule; a system
+      transaction alike); absent, every transaction is replayed and the ledger decides (12.1's behaviour), exact
+      wherever the chain applied them all or the ledger fails each one the chain failed — task 12.3 passes them.
+      **The adapter** (`adapter.ts`): system transactions' costs join the fullness, taken with the parameters before
+      each applies; costs add up saturating at 2^64 − 1 (`addCosts`, `COST_MAX`); the post-block update is
+      `postBlockUpdateExact` (12.1's throw above the limits is gone: the adapter suite's expectation changed to the
+      node's clamp). The reference replay (`test/ledger/adapter-fixtures.ts`) follows the same algorithm. **The node's
+      values:** `test/ledger/fixtures/post-block-update/` — `oracle/main.rs` and `run.sh`, built natively in the
+      vendored build image against unpatched `midnight-ledger` at each pinned commit, with the node's two helpers
+      copied; `expected.json` for 12 block costs (among them 2,635 of 200,000: `FixedPoint(243035853171123343)`, the
+      round trip `…328`; costs above the limits and the saturated sum; blocks of the fixtures' deploy, a deploy and a
+      call, twenty deploys above the bytes-written limit, the system transaction with a deploy and a call) and two
+      system transactions. **Tests** (`test/ledger/post-block-update.test.ts`, `post-block-update-checks.ts`,
+      `adapter-core.test.ts`): A151 on both versions — the packages' fullness, fee prices and state roots equal the
+      node's for every case; the adapter's fee prices after blocks of fixture transactions; each system transaction's
+      cost; a chain-failed extrinsic skipped (the ledger not asked, the state as without it, the reference replay
+      agreeing, the first-regular rule kept). Seen failing first, on 71e019f's packages and adapter: `raw.blockFullness
+      is not a function`; `v8, a block of one deploy: the fee prices after the block: expected … to contain …`; `the
+      ledger is asked about the applied transaction only: expected "wellFormed" to be called 1 times, but got 2`; 54 of
+      82. **Committed negative controls** (`post-block-update.negative-control.test.ts`): the published round trip
+      loses the `FixedPoint` fullness, fee prices and root in 5 cases and refuses 3; an adapter on the published
+      update, one without system-transaction costs, and one ignoring the outcomes each fail their check; A97's byte
+      change is `package-identity.test.ts`'s, on the rebuilt packages. **Wrong variants:** 30 over the new adapter
+      logic, first run 28 caught, 2 survivors (the saturation bound) closed by a test with `u64::MAX` written out;
+      final run 30 of 30 caught. Coverage of `src/ledger/` 100 %. No question raised.
 - [ ] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
       root check, outputs.
       **Acceptance:** A82, A99, A101, A106, A107.

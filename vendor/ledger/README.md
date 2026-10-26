@@ -75,6 +75,23 @@ profiling timers zero on `wasm32`, where `std::time::Instant` panics). The expor
 before the module aborts (the build aborts on panic, so a panic is fatal to the instance). Builds keep the node's
 storage layout (`layout-v2`, `gc-v1`). `v8/patches/0002-…` moves ledger-8.1.2 from wasm-bindgen 0.2.104 to 0.2.108 (above).
 
+The node's end-of-block update (`v8/patches/0004-…`, `v9/patches/0006-…`; owner decision Q113 A, task 12.1a). The
+published `LedgerParameters.normalizeFullness` and `LedgerState.postBlockUpdate` pass a block's fullness through
+JavaScript numbers, which cannot hold a `FixedPoint` (a deploy's block usage of 2,635 of 200,000 is the node's
+`FixedPoint(243035853171123343)` and comes back as `…328`), and refuse a block above its limits; the published
+`SystemTransaction` has no cost. Both packages export, following `midnight-node` 2.1.0-rc.4:
+
+- `postBlockUpdateExact(state, tblock, fullness)`: the node's post-block update (`Ledger::apply_post_block_update`,
+  which `pallet-midnight`'s `on_finalize` runs) for a block whose transactions cost `fullness` in all — clamped to the
+  state's block limits and normalized to them (`clamp_and_normalize`), its largest dimension taken
+  (`compute_overall_fullness`), then the ledger's `post_block_update` (v8) or `apply_post_block_update` (v9);
+- `blockFullness(params, fullness)`: the `FixedPoint`s that update uses, each as the integer `value × 2^64`;
+- `systemTransactionCost(tx, params)`: a system transaction's cost, which the node adds to the block's fullness
+  (`Ledger::apply_system_tx`).
+
+`test/ledger/fixtures/post-block-update/` holds the node's values for a table of block costs, computed in Rust at the
+pinned commits (`oracle/`), which `test/ledger/post-block-update.test.ts` checks the packages and the adapters against.
+
 The v8 package has no `decodeLogItem`: v8 contract logs are not MIP-0002 events, and the v8 adapter returns null for
 them (owner decision Q54). The owner proposes these patches upstream, as a few pull requests, once `midnight-ledger`
 is stable (owner decision Q56); each is dropped once upstream releases it (LG-5).

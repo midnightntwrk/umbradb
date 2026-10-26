@@ -16,11 +16,16 @@
  * and agrees (`test/ledger/adapter-suite.ts`).
  *
  * **Applying a block (LG-8), as the official indexer does** (`midnight-indexer`
- * `chain-indexer/src/domain/ledger_state.rs` `apply_transactions`; `indexer-common/src/domain/ledger/ledger_state.rs`
- * `apply_regular_transaction`,
- * `apply_system_transaction`, `finalize_apply_transactions`) and the node (`midnight-node`
- * `ledger/src/ledger_8/api/ledger.rs` `apply_verified_transaction`, `post_block_update`):
- * - a system transaction is applied at the block time; one that fails cannot be replayed, so `apply` throws;
+ * `chain-indexer/src/domain/ledger_state.rs` `apply_transactions`, `failed_regular_transaction`;
+ * `indexer-common/src/domain/ledger/ledger_state.rs` `apply_regular_transaction`, `apply_system_transaction`,
+ * `finalize_apply_transactions`) and the node (`midnight-node` 2.1.0-rc.4 `ledger/src/ledger_8/api/ledger.rs` and
+ * `ledger_9/api/ledger.rs` `apply_verified_transaction`, `apply_system_tx`, `apply_post_block_update`):
+ * - a transaction the chain reports failed (its {@link ApplyInput.outcomes} entry is `failure`) failed at dispatch
+ *   and left the node's state as it was: it is skipped — no well-formedness check, no cost, a `failure` whose segments
+ *   all failed — and is not the first regular transaction to apply (task 12.1a, owner decision Q113 A);
+ * - a system transaction is applied at the block time and adds its cost, taken with the parameters before it applies
+ *   (the patches' `systemTransactionCost`), to the block's fullness; one that fails cannot be replayed, so `apply`
+ *   throws;
  * - a regular transaction must be well formed at the block time, or, while no regular transaction of the block has
  *   applied and `firstRegularAtParentTime` is set, at the parent block's timestamp + 12,000 ms; well-formedness checks
  *   no proof (LG-15) and does not enforce balancing (as the official indexer), but checks signatures and limits;
@@ -29,10 +34,10 @@
  *   cost is not counted;
  * - every other one is applied at the block time with the block's context (`tblock_err` 30 s, the parent's hash and
  *   time) and adds its stateless cost to the block's fullness;
- * - after the last, the post-block update runs with that fullness normalized to the block limits and its largest
- *   dimension — explicitly zero for a block that applied nothing, never the package's default of one half.
- * The published API takes the normalized fullness as JavaScript numbers and has no system-transaction cost, so a
- * block with transactions may not reach the node's state root this way (question Q113, for task 12.3's A99).
+ * - the costs add up as the ledger adds them, each dimension saturating at 2^64 − 1 (`SyntheticCost`'s `Add`);
+ * - after the last, the node's post-block update runs (the patches' `postBlockUpdateExact`): that fullness — zero
+ *   for a block that applied nothing — clamped to the block limits and normalized to them as `FixedPoint`s in the
+ *   package, with no JavaScript number in between, so a block above its limits is clamped, not refused.
  *
  * **Results and events (LG-16).** A success lists segment 0 and every fallible segment (the intents' and fallible
  * offers' segments, `ledger/src/structure.rs` `fallible_segments`) as successful; a partial success gives the
@@ -70,17 +75,7 @@ export interface SyntheticCost {
   bytesChurned: bigint;
 }
 
-/** A cost as a fraction of the block limits (`NormalizedCost`). */
-export interface NormalizedCost {
-  readTime: number;
-  computeTime: number;
-  blockUsage: number;
-  bytesWritten: number;
-  bytesChurned: number;
-}
-
 export interface RawParameters {
-  normalizeFullness(fullness: SyntheticCost): NormalizedCost;
   serialize(): Uint8Array;
 }
 
@@ -100,7 +95,6 @@ export interface RawTransactionResult {
 export interface RawState {
   apply(transaction: object, context: object): [RawState, RawTransactionResult];
   applySystemTx(transaction: object, tblock: Date): [RawState, RawEvent[]];
-  postBlockUpdate(tblock: Date, detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number): RawState;
   readonly parameters: RawParameters;
 }
 
@@ -155,6 +149,10 @@ export interface RawLedgerPackage {
   evictKeys(keys: Uint8Array[]): void;
   contractStateKey(state: RawState, address: Uint8Array): Uint8Array | null;
   contractZswapStateKey(state: RawState, address: Uint8Array): Uint8Array | null;
+  /** The node's post-block update for a block whose transactions cost `fullness` in all (task 12.1a). */
+  postBlockUpdateExact(state: RawState, tblock: Date, fullness: SyntheticCost): RawState;
+  /** A system transaction's cost, which the node adds to the block's fullness (task 12.1a). */
+  systemTransactionCost(transaction: RawSystemTransaction, params: RawParameters): SyntheticCost;
 }
 
 /** A contract log event's logged item as the package gives it (`loggedItem`), ledger v9. */
@@ -191,6 +189,9 @@ export const PARENT_TIME_BUMP_MS = 12_000n;
 export const BLOCK_TIME_ERROR_SECONDS = 30;
 
 const NO_COST: SyntheticCost = { readTime: 0n, computeTime: 0n, blockUsage: 0n, bytesWritten: 0n, bytesChurned: 0n };
+
+/** The largest value of a cost's dimension (`u64`), where the ledger's sum of costs saturates. */
+export const COST_MAX = 2n ** 64n - 1n;
 
 const LOG_EVENT_TYPES: Readonly<Record<string, LogEventType>> = {
   "shielded-spend": "ShieldedSpend",
@@ -393,13 +394,15 @@ export function vmLogOf(
   };
 }
 
-function add(a: SyntheticCost, b: SyntheticCost): SyntheticCost {
+/** The sum of two costs as the ledger adds them: each dimension saturating at {@link COST_MAX}. */
+export function addCosts(a: SyntheticCost, b: SyntheticCost): SyntheticCost {
+  const sum = (x: bigint, y: bigint): bigint => (x + y > COST_MAX ? COST_MAX : x + y);
   return {
-    readTime: a.readTime + b.readTime,
-    computeTime: a.computeTime + b.computeTime,
-    blockUsage: a.blockUsage + b.blockUsage,
-    bytesWritten: a.bytesWritten + b.bytesWritten,
-    bytesChurned: a.bytesChurned + b.bytesChurned,
+    readTime: sum(a.readTime, b.readTime),
+    computeTime: sum(a.computeTime, b.computeTime),
+    blockUsage: sum(a.blockUsage, b.blockUsage),
+    bytesWritten: sum(a.bytesWritten, b.bytesWritten),
+    bytesChurned: sum(a.bytesChurned, b.bytesChurned),
   };
 }
 
@@ -447,6 +450,12 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
   }
 
   function apply(handle: StateHandle, input: ApplyInput): AppliedBlock {
+    const outcomes = input.outcomes;
+    if (outcomes !== undefined && outcomes.length !== input.transactions.length) {
+      throw new RangeError(
+        `block ${input.height}: ${outcomes.length} chain outcomes for ${input.transactions.length} transactions`,
+      );
+    }
     const strictness = new raw.WellFormedStrictness();
     strictness.enforceBalancing = false;
     strictness.verifyNativeProofs = false;
@@ -487,7 +496,15 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
     try {
       input.transactions.forEach((bytes, index) => {
         const native = nativeOf(bytes);
+        const failedOnChain = outcomes?.[index] === "failure";
         if (native.kind === "system") {
+          if (failedOnChain) {
+            results.push({ outcome: "failure", segments: [] });
+            return;
+          }
+          const parameters = state.parameters;
+          const cost = raw.systemTransactionCost(native.transaction, parameters);
+          free(parameters);
           let applied: [RawState, RawEvent[]];
           try {
             applied = state.applySystemTx(native.transaction, blockTime);
@@ -498,6 +515,7 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
           }
           made.push(applied[0]);
           state = applied[0];
+          fullness = addCosts(fullness, cost);
           results.push({ outcome: "success", segments: [] });
           collect(applied[1], index);
           return;
@@ -508,6 +526,10 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
           outcome: "failure",
           segments: segments.map((segment) => ({ segment, success: false })),
         };
+        if (failedOnChain) {
+          results.push(failure);
+          return;
+        }
         const verified =
           wellFormedAt(transaction, blockTime) ??
           (input.firstRegularAtParentTime && !regularApplied ? wellFormedAt(transaction, parentTime) : null);
@@ -539,7 +561,7 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
         made.push(next);
         state = next;
         regularApplied = true;
-        fullness = add(fullness, cost);
+        fullness = addCosts(fullness, cost);
         if (result.type === "success") {
           results.push({ outcome: "success", segments: segments.map((segment) => ({ segment, success: true })) });
         } else {
@@ -555,25 +577,7 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
         free(result);
       });
 
-      const parameters = state.parameters;
-      let normalized: NormalizedCost;
-      try {
-        normalized = parameters.normalizeFullness(fullness);
-      } catch (error) {
-        throw new Error(`ledger ${spec.ledger}: block ${input.height}'s fullness exceeds the block limits`, {
-          cause: error,
-        });
-      } finally {
-        free(parameters);
-      }
-      const overall = Math.max(
-        normalized.readTime,
-        normalized.computeTime,
-        normalized.blockUsage,
-        normalized.bytesWritten,
-        normalized.bytesChurned,
-      );
-      const after = state.postBlockUpdate(blockTime, normalized, overall);
+      const after = raw.postBlockUpdateExact(state, blockTime, fullness);
       const afterParameters = after.parameters;
       const serialized = afterParameters.serialize();
       free(afterParameters);

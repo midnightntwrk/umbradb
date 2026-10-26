@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import * as v8 from "../../vendor/ledger/v8/pkg/midnight_ledger_wasm_fs.js";
 import {
+  addCosts,
+  COST_MAX,
   createLedgerAdapter,
   eventKindOf,
   fieldBytes,
   ledgerEventOf,
-  type NormalizedCost,
   type RawEvent,
   type RawLedgerPackage,
   type RawState,
@@ -23,8 +24,9 @@ import { block, contractFixture, hex, NETWORK_ID, RAW } from "./adapter-fixtures
 // (`src/ledger/adapter.ts`) on inputs the fixture blocks cannot give it — events shaped as the packages' declarations
 // give them (`vendor/ledger/<version>/pkg/ledger-v*.d.ts`, `EventDetails`) for the kinds no fixture block emits without
 // a wallet (zswap inputs, DUST events, parameter changes); a package that records what `apply` hands it (the block
-// context, the strictness, the times, the fullness and its largest dimension), which a real package does not show;
-// and a cost the package cannot compute.
+// context, the strictness, the times, the fullness the post-block update gets, the parameters a system transaction's
+// cost is taken with, what a transaction the chain reports failed is spared — task 12.1a), which a real package does
+// not show; and a cost the package cannot compute.
 
 const SOURCE = { logicalSegment: 1, physicalSegment: 2 };
 const SERIALIZED = Uint8Array.of(0x6d, 0x69);
@@ -213,7 +215,6 @@ describe("loadLedgerPackage", () => {
 const REGULAR_TAG = "midnight:transaction[v9](signature[v1],proof,pedersen-schnorr[v1]):";
 const SYSTEM_TAG = "midnight:system-transaction[v6]:";
 const ZERO: SyntheticCost = { readTime: 0n, computeTime: 0n, blockUsage: 0n, bytesWritten: 0n, bytesChurned: 0n };
-const DIMENSIONS = ["readTime", "computeTime", "blockUsage", "bytesWritten", "bytesChurned"] as const;
 
 interface FakeTransaction {
   /** The times it is malformed at (ms); any other is well formed. */
@@ -228,9 +229,10 @@ interface Recorded {
   wellFormed: { state: string; time: number; strictness: Record<string, boolean> }[];
   contexts: unknown[];
   applied: string[];
+  costs: string[];
   system: number[];
-  fullness: SyntheticCost[];
-  post: { state: string; time: number; normalized: NormalizedCost; overall: number } | null;
+  systemCosts: string[];
+  post: { state: string; time: number; fullness: SyntheticCost } | null;
 }
 
 const regular = (n: number): Uint8Array => Uint8Array.from([...Buffer.from(REGULAR_TAG, "latin1"), n]);
@@ -240,23 +242,25 @@ const result = (
   successfulSegments?: Map<number, boolean>,
 ): RawTransactionResult => Object.assign({ type, successfulSegments, events: [] }, { free() {} });
 
-function fakePackage(transactions: FakeTransaction[], normalized: NormalizedCost): {
-  adapter: LedgerPackage;
-  recorded: Recorded;
-} {
-  const recorded: Recorded = { wellFormed: [], contexts: [], applied: [], system: [], fullness: [], post: null };
+/** A package whose transactions are `transactions` and whose system transactions cost `systemCost`. */
+function fakePackage(
+  transactions: FakeTransaction[],
+  systemCost: SyntheticCost = ZERO,
+): { adapter: LedgerPackage; recorded: Recorded } {
+  const recorded: Recorded = {
+    wellFormed: [],
+    contexts: [],
+    applied: [],
+    costs: [],
+    system: [],
+    systemCosts: [],
+    post: null,
+  };
   let made = 0;
   class State implements RawState {
     constructor(readonly name: string) {}
     get parameters() {
-      return {
-        normalizeFullness(fullness: SyntheticCost) {
-          recorded.fullness.push(fullness);
-          return normalized;
-        },
-        serialize: () => Uint8Array.of(7),
-        free() {},
-      };
+      return { of: this.name, serialize: () => Uint8Array.of(7), free() {} };
     }
     apply(verified: object, context: object): [RawState, RawTransactionResult] {
       const { name, outcome } = verified as { name: string; outcome: RawTransactionResult };
@@ -268,10 +272,6 @@ function fakePackage(transactions: FakeTransaction[], normalized: NormalizedCost
     applySystemTx(_transaction: object, tblock: Date): [RawState, RawEvent[]] {
       recorded.system.push(tblock.getTime());
       return [new State(`after system (${made++})`), []];
-    }
-    postBlockUpdate(tblock: Date, detailed?: NormalizedCost, overall?: number): RawState {
-      recorded.post = { state: this.name, time: tblock.getTime(), normalized: detailed!, overall: overall! };
-      return new State("after the block");
     }
     free() {}
   }
@@ -301,7 +301,10 @@ function fakePackage(transactions: FakeTransaction[], normalized: NormalizedCost
             if (spec.malformedAt?.includes(tblock.getTime())) throw new Error("malformed");
             return { name: `tx ${n}`, outcome: spec.result ?? result("success"), free() {} };
           },
-          cost: () => spec.cost ?? ZERO,
+          cost: (params) => {
+            recorded.costs.push(`tx ${n} with ${(params as unknown as { of: string }).of}`);
+            return spec.cost ?? ZERO;
+          },
           serialize: () => bytes,
           intents: keys(spec.intents ?? [1]),
           fallibleOffer: keys(spec.fallibleOffer),
@@ -319,6 +322,14 @@ function fakePackage(transactions: FakeTransaction[], normalized: NormalizedCost
     WellFormedStrictness: Strictness,
     ContractCall: class {},
     ContractDeploy: class {},
+    systemTransactionCost(_transaction: unknown, params: { of: string }) {
+      recorded.systemCosts.push(params.of);
+      return systemCost;
+    },
+    postBlockUpdateExact(state: State, tblock: Date, fullness: SyntheticCost) {
+      recorded.post = { state: state.name, time: tblock.getTime(), fullness };
+      return new State("after the block");
+    },
   } as unknown as RawLedgerPackage;
   const adapter = createLedgerAdapter({
     ledger: "v9",
@@ -331,13 +342,6 @@ function fakePackage(transactions: FakeTransaction[], normalized: NormalizedCost
   return { adapter, recorded };
 }
 
-const NORMALIZED: NormalizedCost = {
-  readTime: 0.1,
-  computeTime: 0.2,
-  blockUsage: 0.3,
-  bytesWritten: 0.4,
-  bytesChurned: 0.5,
-};
 const T = 1_750_000_000_000;
 const input = (transactions: Uint8Array[], options: Partial<ApplyInput> = {}): ApplyInput => ({
   transactions,
@@ -349,10 +353,17 @@ const input = (transactions: Uint8Array[], options: Partial<ApplyInput> = {}): A
   firstRegularAtParentTime: false,
   ...options,
 });
+const cost = (n: bigint): SyntheticCost => ({
+  readTime: n,
+  computeTime: 2n * n,
+  blockUsage: 3n * n,
+  bytesWritten: 4n * n,
+  bytesChurned: 5n * n,
+});
 
 describe("apply, on a package that records what it is handed (LG-8, LG-15)", () => {
   it("gives the ledger the block's context, the current state, a strictness without proof checks or balancing", () => {
-    const { adapter, recorded } = fakePackage([{}, {}], NORMALIZED);
+    const { adapter, recorded } = fakePackage([{}, {}]);
     adapter.apply(adapter.emptyState(), input([regular(0), regular(1)]));
     const block = {
       secondsSinceEpoch: BigInt(T / 1000),
@@ -378,50 +389,100 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
   });
 
   it("applies a system transaction at the block time", () => {
-    const { adapter, recorded } = fakePackage([], NORMALIZED);
+    const { adapter, recorded } = fakePackage([]);
     const { output } = adapter.apply(adapter.emptyState(), input([system()]));
     expect(recorded.system).toEqual([T]);
     expect(output.results).toEqual([{ outcome: "success", segments: [] }]);
     expect(recorded.post!.state).toBe("after system (0)");
   });
 
-  it("sums the costs of the transactions that applied; the post-block update gets their normalized sum", () => {
-    const cost = (n: bigint): SyntheticCost => ({
-      readTime: n,
-      computeTime: 2n * n,
-      blockUsage: 3n * n,
-      bytesWritten: 4n * n,
-      bytesChurned: 5n * n,
-    });
-    for (const largest of DIMENSIONS) {
-      const normalized = { ...NORMALIZED, [largest]: 0.9 };
-      const { adapter, recorded } = fakePackage(
-        [
-          { cost: cost(1n) },
-          { cost: cost(10n) },
-          { cost: cost(100n), result: result("failure") },
-          { cost: cost(7n), malformedAt: [T] },
-        ],
-        normalized,
-      );
-      const transactions = [regular(0), regular(1), regular(2), regular(3)];
-      const { state } = adapter.apply(adapter.emptyState(), input(transactions));
-      expect(recorded.fullness).toEqual([cost(11n)]);
-      expect(recorded.post).toEqual({ state: "after tx 1 (1)", time: T, normalized, overall: 0.9 });
-      expect((state as unknown as { name: string }).name).toBe("after the block");
-    }
+  it("sums the costs of the transactions that applied, exactly; the post-block update gets the sum at the block time", () => {
+    const { adapter, recorded } = fakePackage([
+      { cost: cost(1n) },
+      { cost: cost(10n) },
+      { cost: cost(100n), result: result("failure") },
+      { cost: cost(7n), malformedAt: [T] },
+    ]);
+    const transactions = [regular(0), regular(1), regular(2), regular(3)];
+    const { state } = adapter.apply(adapter.emptyState(), input(transactions));
+    expect(recorded.post).toEqual({ state: "after tx 1 (1)", time: T, fullness: cost(11n) });
+    expect((state as unknown as { name: string }).name).toBe("after the block");
+  });
+
+  it("adds a system transaction's cost, taken with the parameters of the state before it (task 12.1a)", () => {
+    const { adapter, recorded } = fakePackage([{ cost: cost(1n) }, { cost: cost(10n) }], cost(1_000n));
+    adapter.apply(adapter.emptyState(), input([regular(0), system(), regular(1)]));
+    expect(recorded.systemCosts).toEqual(["after tx 0 (0)"]);
+    expect(recorded.costs).toEqual([`tx 0 with blank ${NETWORK_ID}`, "tx 1 with after system (1)"]);
+    expect(recorded.post).toEqual({ state: "after tx 1 (2)", time: T, fullness: cost(1_011n) });
+  });
+
+  it("adds the costs as the ledger does, each dimension saturating at 2^64 - 1 (task 12.1a)", () => {
+    // `u64::MAX`, written out: the largest cost the package's `SyntheticCost` takes.
+    const U64_MAX = 18_446_744_073_709_551_615n;
+    expect(COST_MAX).toBe(U64_MAX);
+    const near = { ...cost(1n), readTime: U64_MAX - 1n, bytesChurned: U64_MAX };
+    const { adapter, recorded } = fakePackage([{ cost: near }, { cost: cost(2n) }]);
+    adapter.apply(adapter.emptyState(), input([regular(0), regular(1)]));
+    expect(recorded.post!.fullness).toEqual({ ...cost(3n), readTime: U64_MAX, bytesChurned: U64_MAX });
+    expect(addCosts({ ...ZERO, blockUsage: U64_MAX - 1n }, { ...ZERO, blockUsage: 1n }).blockUsage).toBe(U64_MAX);
+    expect(addCosts({ ...ZERO, blockUsage: 2n ** 63n }, { ...ZERO, blockUsage: 2n ** 63n - 2n }).blockUsage).toBe(
+      U64_MAX - 1n,
+    );
   });
 
   it("gives a block that applied nothing a zero fullness", () => {
-    const { adapter, recorded } = fakePackage([{ malformedAt: [T] }], NORMALIZED);
+    const { adapter, recorded } = fakePackage([{ malformedAt: [T] }]);
     adapter.apply(adapter.emptyState(), input([regular(0)]));
-    expect(recorded.fullness).toEqual([ZERO]);
-    expect(recorded.post!.state).toBe(`blank ${NETWORK_ID}`);
+    expect(recorded.post).toEqual({ state: `blank ${NETWORK_ID}`, time: T, fullness: ZERO });
+  });
+
+  it("does not ask the ledger about a transaction the chain reports failed, nor count its cost (task 12.1a)", () => {
+    const { adapter, recorded } = fakePackage(
+      [{ cost: cost(1n), intents: [1, 2] }, { cost: cost(10n) }, { cost: cost(100n) }],
+      cost(1_000n),
+    );
+    const { output } = adapter.apply(
+      adapter.emptyState(),
+      input([regular(0), system(), regular(1), regular(2)], {
+        outcomes: ["failure", "failure", "partial", "success"],
+      }),
+    );
+    expect(output.results).toEqual([
+      { outcome: "failure", segments: [0, 1, 2].map((segment) => ({ segment, success: false })) },
+      { outcome: "failure", segments: [] },
+      { outcome: "success", segments: [0, 1].map((segment) => ({ segment, success: true })) },
+      { outcome: "success", segments: [0, 1].map((segment) => ({ segment, success: true })) },
+    ]);
+    expect(recorded.wellFormed.map((check) => check.state)).toEqual([`blank ${NETWORK_ID}`, "after tx 1 (0)"]);
+    expect(recorded.costs).toEqual([`tx 1 with blank ${NETWORK_ID}`, "tx 2 with after tx 1 (0)"]);
+    expect(recorded.applied).toEqual(["tx 1", "tx 2"]);
+    expect([recorded.system, recorded.systemCosts]).toEqual([[], []]);
+    expect(recorded.post).toEqual({ state: "after tx 2 (1)", time: T, fullness: cost(110n) });
+  });
+
+  it("keeps the parent's time for the first regular transaction after one the chain reports failed (task 12.1a)", () => {
+    const { adapter, recorded } = fakePackage([{}, { malformedAt: [T] }]);
+    const skewed = input([regular(0), regular(1)], { firstRegularAtParentTime: true, outcomes: ["failure", "success"] });
+    const { output } = adapter.apply(adapter.emptyState(), skewed);
+    expect(recorded.wellFormed.map((check) => check.time - T)).toEqual([0, 6_000]);
+    expect(output.results.map((r) => r.outcome)).toEqual(["failure", "success"]);
+  });
+
+  it("refuses chain outcomes that are not one per transaction (task 12.1a)", () => {
+    const { adapter, recorded } = fakePackage([{}]);
+    expect(() => adapter.apply(adapter.emptyState(), input([regular(0)], { outcomes: [] }))).toThrow(
+      new RangeError("block 9: 0 chain outcomes for 1 transactions"),
+    );
+    expect(() =>
+      adapter.apply(adapter.emptyState(), input([regular(0)], { outcomes: ["success", "failure"] })),
+    ).toThrow(RangeError);
+    expect([recorded.wellFormed, recorded.post]).toEqual([[], null]);
   });
 
   it("gives a partial success's segments in segment order, the package's failed flags inverted", () => {
     const partial = result("partialSuccess", new Map([[2, true], [0, false], [1, false]]));
-    const { adapter } = fakePackage([{ intents: [1, 2], result: partial }], NORMALIZED);
+    const { adapter } = fakePackage([{ intents: [1, 2], result: partial }]);
     const { output } = adapter.apply(adapter.emptyState(), input([regular(0)]));
     expect(output.results).toEqual([
       {
@@ -436,13 +497,10 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
   });
 
   it("counts a fallible offer's segments among a transaction's, in segment order, segment 0 once", () => {
-    const { adapter } = fakePackage(
-      [
-        { intents: [2], fallibleOffer: [0, 3, 1] },
-        { intents: [4, 2], malformedAt: [T] },
-      ],
-      NORMALIZED,
-    );
+    const { adapter } = fakePackage([
+      { intents: [2], fallibleOffer: [0, 3, 1] },
+      { intents: [4, 2], malformedAt: [T] },
+    ]);
     const { output } = adapter.apply(adapter.emptyState(), input([regular(0), regular(1)]));
     expect(output.results).toEqual([
       { outcome: "success", segments: [0, 1, 2, 3].map((segment) => ({ segment, success: true })) },
@@ -451,12 +509,12 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
   });
 
   it("parses a transaction's intents in segment order, whatever order the package gives them in", () => {
-    const { adapter } = fakePackage([{ intents: [3, 1, 2] }], NORMALIZED);
+    const { adapter } = fakePackage([{ intents: [3, 1, 2] }]);
     expect(adapter.parseTransaction(regular(0), 0).segments.map((segment) => segment.segment)).toEqual([1, 2, 3]);
   });
 
   it("checks a malformed first regular transaction again at the parent's time + 12 s where it is skewed", () => {
-    const { adapter, recorded } = fakePackage([{ malformedAt: [T] }, { malformedAt: [T] }], NORMALIZED);
+    const { adapter, recorded } = fakePackage([{ malformedAt: [T] }, { malformedAt: [T] }]);
     const skewed = input([regular(0), regular(1)], { firstRegularAtParentTime: true });
     const { output } = adapter.apply(adapter.emptyState(), skewed);
     expect(recorded.wellFormed.map((check) => check.time - T)).toEqual([0, 6_000, 0]);

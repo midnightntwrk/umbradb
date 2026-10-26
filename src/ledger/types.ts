@@ -59,9 +59,28 @@ export interface NodeBatch {
   rootCounts: { key: Uint8Array; delta: number }[];
 }
 
+/**
+ * A transaction's outcome as the chain recorded it, in CD-6's words: `success` (`TxApplied`, and a system transaction's
+ * `SystemTransactionApplied`), `partial` (`TxPartialSuccess`), `failure` (`ExtrinsicFailed`: the extrinsic failed at
+ * dispatch, so the node left the state as it was).
+ */
+export type ChainOutcome = "success" | "partial" | "failure";
+
 /** A block to apply (LG-8): its transactions in application order (CD-5), as the chain carries them. */
 export interface ApplyInput {
   transactions: Uint8Array[];
+  /**
+   * Each transaction's chain outcome, in {@link transactions}' order, as many as there are transactions (task 12.1a,
+   * owner decision Q113 A). A transaction whose outcome is `failure` is skipped, as the official indexer skips it
+   * (`midnight-indexer` `chain-indexer/src/domain/ledger_state.rs` `apply_transactions`, `failed_regular_transaction`):
+   * the ledger is not asked, its result is a `failure`, its cost is not counted, and it is not the first regular
+   * transaction LG-8's rule looks for. Any other is replayed and the ledger decides its result. Absent: no outcome is
+   * known (a block built offline, as in tests), and every transaction is replayed — exact wherever the chain applied
+   * them all or the ledger itself fails each one the chain failed; the v9 node also fails an extrinsic whose cost would
+   * take the block over its limits (`midnight-node` `ledger/src/ledger_9/post_block_update.rs`
+   * `prevalidate_post_block_update`), which only the outcome shows, so a chain block always gives them (task 12.3).
+   */
+  outcomes?: readonly ChainOutcome[];
   height: bigint;
   hash: Uint8Array;
   parentHash: Uint8Array;

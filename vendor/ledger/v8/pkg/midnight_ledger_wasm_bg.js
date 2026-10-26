@@ -7823,6 +7823,24 @@ export function bigIntToValue(x) {
 }
 
 /**
+ * The fullness the node's post-block update takes for a block whose transactions cost
+ * `fullness` in all, against the block limits of `params`: `{ readTime, computeTime, blockUsage,
+ * bytesWritten, bytesChurned, overall }`, each a `FixedPoint` as the integer `value × 2^64` it
+ * holds.
+ * @param {LedgerParameters} params
+ * @param {any} fullness
+ * @returns {any}
+ */
+export function blockFullness(params, fullness) {
+    _assertClass(params, LedgerParameters);
+    const ret = wasm.blockFullness(params.__wbg_ptr, fullness);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * The keys of the by-reference children in a node's serialized child list, including those
  * inside embedded children.
  * @param {Uint8Array} children
@@ -8606,6 +8624,27 @@ export function persistentHash(align, val) {
 }
 
 /**
+ * The post-block update the node runs at the end of every block (`midnight-node`
+ * `ledger/src/ledger_8/api/ledger.rs` `Ledger::apply_post_block_update`, which
+ * `pallet-midnight`'s `on_finalize` calls, and `ledger/src/ledger_8/post_block_update.rs`
+ * `apply_post_block_update`): `fullness`, the summed cost of the block's transactions, as
+ * `blockFullness` gives it against this state's block limits (clamped, never refused), then
+ * the ledger's `post_block_update`, which a clamped fullness cannot make refuse at `tblock`.
+ * @param {LedgerState} state
+ * @param {Date} tblock
+ * @param {any} fullness
+ * @returns {LedgerState}
+ */
+export function postBlockUpdateExact(state, tblock, fullness) {
+    _assertClass(state, LedgerState);
+    const ret = wasm.postBlockUpdateExact(state.__wbg_ptr, tblock, fullness);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return LedgerState.__wrap(ret[0]);
+}
+
+/**
  * @param {any} input
  * @param {any} output
  * @param {any} public_transcript
@@ -8971,6 +9010,24 @@ export function stateKey(state) {
 export function stateRoot(state) {
     _assertClass(state, LedgerState);
     const ret = wasm.stateRoot(state.__wbg_ptr);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
+ * A system transaction's cost, which the node adds to the block's fullness (`midnight-node`
+ * `ledger/src/ledger_8/api/ledger.rs` `Ledger::apply_system_tx`: `tx.cost(&sp.state.parameters)`,
+ * with the parameters of the state before it applies).
+ * @param {SystemTransaction} transaction
+ * @param {LedgerParameters} params
+ * @returns {any}
+ */
+export function systemTransactionCost(transaction, params) {
+    _assertClass(transaction, SystemTransaction);
+    _assertClass(params, LedgerParameters);
+    const ret = wasm.systemTransactionCost(transaction.__wbg_ptr, params.__wbg_ptr);
     if (ret[2]) {
         throw takeFromExternrefTable0(ret[1]);
     }

@@ -263,13 +263,17 @@ export function markersOf(bytes: Uint8Array): ["signature", "proof" | "no-proof"
 }
 
 /**
- * The reference replay of one block with the published API alone, written from the official indexer's algorithm
- * (`midnight-indexer` `chain-indexer/src/domain/ledger_state.rs` `apply_transactions`,
- * `indexer-common/src/domain/ledger/ledger_state.rs` `apply_regular_transaction`, `apply_system_transaction`,
- * `finalize_apply_transactions`) and the node's (`midnight-node` `ledger/src/ledger_8/api/ledger.rs`
- * `apply_verified_transaction`: a ledger failure fails the extrinsic, which leaves the state as it was), for the
- * adapters' results to be compared with. Returns the state after the block, each transaction's result type, and the
- * ledger's name for each event it emitted (the variant its own `Debug` rendering names, e.g. `ContractLog`).
+ * The reference replay of one block with the packages' own API — the published one and the patches'
+ * `systemTransactionCost` and `postBlockUpdateExact` (task 12.1a), never the adapters — written from the official
+ * indexer's algorithm (`midnight-indexer` `chain-indexer/src/domain/ledger_state.rs` `apply_transactions`,
+ * `failed_regular_transaction`; `indexer-common/src/domain/ledger/ledger_state.rs` `apply_regular_transaction`,
+ * `apply_system_transaction`, `finalize_apply_transactions`) and the node's (`midnight-node` 2.1.0-rc.4
+ * `ledger/src/ledger_8/api/ledger.rs` `apply_verified_transaction`: a ledger failure fails the extrinsic, which leaves
+ * the state as it was; `apply_system_tx`: a system transaction's cost, with the parameters before it, joins the block's
+ * fullness; `apply_post_block_update`), for the adapters' results to be compared with. A transaction whose chain
+ * outcome (`input.outcomes`) is `failure` is skipped: never given to the ledger, `chain-failure`. Returns the state
+ * after the block, each transaction's result type, and the ledger's name for each event it emitted (the variant its
+ * own `Debug` rendering names, e.g. `ContractLog`).
  */
 export function referenceReplay(
   raw: RawPackage,
@@ -283,17 +287,36 @@ export function referenceReplay(
   const blockTime = new Date(Number(input.timestampMs));
   const bumped = new Date(Number(input.parentTimestampMs) + 12_000);
   let state = start;
-  let fullness = { readTime: 0n, computeTime: 0n, blockUsage: 0n, bytesWritten: 0n, bytesChurned: 0n };
+  let fullness: v9.SyntheticCost = { readTime: 0n, computeTime: 0n, blockUsage: 0n, bytesWritten: 0n, bytesChurned: 0n };
+  // The ledger's sum of costs: each dimension a `u64` that saturates.
+  const saturating = (a: bigint, b: bigint): bigint => (a + b > 2n ** 64n - 1n ? 2n ** 64n - 1n : a + b);
+  const add = (cost: v9.SyntheticCost): void => {
+    fullness = {
+      readTime: saturating(fullness.readTime, cost.readTime),
+      computeTime: saturating(fullness.computeTime, cost.computeTime),
+      blockUsage: saturating(fullness.blockUsage, cost.blockUsage),
+      bytesWritten: saturating(fullness.bytesWritten, cost.bytesWritten),
+      bytesChurned: saturating(fullness.bytesChurned, cost.bytesChurned),
+    };
+  };
   let regularApplied = false;
   const types: string[] = [];
   const events: string[][] = [];
   const names = (emitted: v9.Event[]): string[] =>
     emitted.map((event) => /content: ([A-Za-z]+)/.exec(event.toString(true))?.[1] ?? "?");
-  for (const bytes of input.transactions) {
+  for (const [index, bytes] of input.transactions.entries()) {
+    if (input.outcomes?.[index] === "failure") {
+      types.push("chain-failure");
+      events.push([]);
+      continue;
+    }
     const tag = Buffer.from(bytes.subarray(0, 40)).toString("latin1");
     if (tag.startsWith("midnight:system-transaction")) {
-      const [next, emitted] = state.applySystemTx(raw.SystemTransaction.deserialize(bytes), blockTime);
+      const system = raw.SystemTransaction.deserialize(bytes);
+      const cost = raw.systemTransactionCost(system, state.parameters);
+      const [next, emitted] = state.applySystemTx(system, blockTime);
       state = next;
+      add(cost);
       types.push("system");
       events.push(names(emitted));
       continue;
@@ -325,23 +348,9 @@ export function referenceReplay(
     if (result.type === "failure") continue;
     state = next;
     regularApplied = true;
-    fullness = {
-      readTime: fullness.readTime + cost.readTime,
-      computeTime: fullness.computeTime + cost.computeTime,
-      blockUsage: fullness.blockUsage + cost.blockUsage,
-      bytesWritten: fullness.bytesWritten + cost.bytesWritten,
-      bytesChurned: fullness.bytesChurned + cost.bytesChurned,
-    };
+    add(cost);
   }
-  const normalized = state.parameters.normalizeFullness(fullness);
-  const overall = Math.max(
-    normalized.readTime,
-    normalized.computeTime,
-    normalized.blockUsage,
-    normalized.bytesWritten,
-    normalized.bytesChurned,
-  );
-  return { state: state.postBlockUpdate(blockTime, normalized, overall), types, events };
+  return { state: raw.postBlockUpdateExact(state, blockTime, fullness), types, events };
 }
 
 /** Frees each ledger object now (see `free` in node-format.ts). */
