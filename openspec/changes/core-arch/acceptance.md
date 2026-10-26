@@ -245,10 +245,11 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A75** `[CI]` Module HTTP handlers answer on `listen.api` with a read handle at the latest committed height that
   reports its view, height and hash; a subscription registered by a module is notified from its `on-after-db-write` with
   the value the module emitted; two modules registering the same route or subscription name refuse startup with
-  `duplicate-api-route`; the core leaves a module's answer as the module wrote it, and the helpers write `X-Umbra-View:
-  finalized`, `X-Umbra-Height` and `X-Umbra-Hash`, or the same in a GraphQL response's `extensions` with its `data`
-  unchanged; a read before block S commits fails with `no-committed-height`, answered 503 when the handler does not
-  catch it. (RN-15, RN-16, Q104, Q105)
+  `duplicate-api-route`; the core leaves a module's answer as the module wrote it but for `X-Umbra-Version`, set to the
+  build's version on every answer and on the subscription upgrade response (a module's own header of that name
+  replaced), and the helpers write `X-Umbra-View: finalized`, `X-Umbra-Height` and `X-Umbra-Hash`, or the same in a
+  GraphQL response's `extensions` with its `data` unchanged; a read before block S commits fails with
+  `no-committed-height`, answered 503 when the handler does not catch it. (RN-15, RN-16, Q104, Q105, Q131)
 - **A142** `[CI]` With `slowBlockMs` 1000, a test module whose `on-compute` awaits 3 s: the runner's published state
   (and `/status`, once `core-status` serves it) shows `slow-block` with the height, `on-compute` and the module within
   2 s; the height commits once, with no retry; the condition is gone after the commit; with `slowBlockMs` 5000 it never

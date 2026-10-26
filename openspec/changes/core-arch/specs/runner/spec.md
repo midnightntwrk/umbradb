@@ -217,10 +217,13 @@ the module's `on-after-db-write` through `emit`.
 THE system SHALL answer every module API request from finalized data only: each request's read SHALL report its view
 (`finalized`), the committed height it read and that block's hash, and IF no height has committed yet THEN the read
 SHALL fail with `no-committed-height`, which a handler that does not catch it answers with HTTP 503. A module SHALL
-decide what its answers and its subscriptions' notifications carry: THE system SHALL NOT change a module's answer, and
-SHALL provide helpers a module may use to state the view, height and hash it read — the `X-Umbra-View`, `X-Umbra-Height`
-and `X-Umbra-Hash` headers on HTTP, or the `extensions` object of a GraphQL response — so its bodies stay compatible
-with existing clients (owner decisions Q104, Q105).
+decide what its answers and its subscriptions' notifications carry: THE system SHALL NOT change a module's answer,
+except that it SHALL set the header `X-Umbra-Version` to the build's version on every HTTP answer on `listen.api`, the
+subscription upgrade response included (owner decision Q131). The `X-Umbra-` prefix SHALL hold the headers shared by
+every module: the core owns `X-Umbra-Version`, replacing a module's own header of that name, and SHALL provide helpers a
+module may use to state the view, height and hash it read — the `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`
+headers on HTTP, or the `extensions` object of a GraphQL response — so its bodies stay compatible with existing clients
+(owner decisions Q104, Q105).
 
 #### Scenario: A GraphQL module states its height
 - **WHEN** a module answers a GraphQL query at committed height 120 through the extensions helper
@@ -229,7 +232,11 @@ with existing clients (owner decisions Q104, Q105).
 
 #### Scenario: The core leaves an answer as the module wrote it
 - **WHEN** a module answers `{ "data": … }` without the helpers
-- **THEN** the response's body and headers are the module's own
+- **THEN** the response's body and headers are the module's own, with `X-Umbra-Version` added
+
+#### Scenario: Every answer names its build
+- **WHEN** a build of version 0.10.0 answers any request on `listen.api`, a module's own `X-Umbra-Version: 9` included
+- **THEN** the response carries `X-Umbra-Version: 0.10.0` once and its body is the module's
 
 ### Requirement: RN-17 A slow block is reported, never cut off
 

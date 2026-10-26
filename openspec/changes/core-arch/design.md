@@ -75,8 +75,9 @@ revisions all ended below it serves no API. Its routes (`GET`/`POST`, `/` and se
 winning over a parameter) and subscription names are refused with `duplicate-api-route` when two have one method and
 path (parameters' names aside) or one name, before anything listens (RN-15). Each request is one `db.read` at the
 latest committed height bounded by `apiReadTimeoutMs` (DB-15), the handler inside it and its answer as the handler
-wrote it: the core adds no header and no `extensions` to it and tells no GraphQL response apart (RN-16, Q104, Q105;
-task 5.2b), and the helpers below are the module's to use. Bodies are
+wrote it but for one header, `X-Umbra-Version` (the build's `UMBRADB_VERSION`, Q131; task 5.2c): the core adds no
+other header and no `extensions` and tells no GraphQL response apart (RN-16, Q104, Q105; task 5.2b), and the helpers
+below are the module's to use. Bodies are
 JSON (a `bigint` as decimal text, bytes as `0x` hex) unless the handler typed its text or bytes; errors are `{ error: {
 code, message } }`: 400 `invalid-request`, 404 `not-found`, 405 `method-not-allowed`, 413 `request-too-large`, 500
 `internal-error` (a fixed message; the error goes to the runner's log), 503 `no-committed-height`, 504

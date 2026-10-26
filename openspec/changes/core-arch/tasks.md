@@ -1278,6 +1278,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the clone): 12, all caught — the 503's mapping, message and reporting, the envelope's headers and extensions put
       back, the handler skipped before S, the module's answer changed. Issue
       `docs/issues/00024-api-413-closes-before-body-read.md` recorded (OPEN).
+- [ ] 5.2c The owner's answer Q131 A: the module API sets `X-Umbra-Version` to the build's version (`UMBRADB_VERSION`)
+      on every HTTP answer on `listen.api` — handler answers, the module API's own errors (400, 404, 405, 413, 500, 503,
+      504) and the subscription upgrade response — replacing a module's own header of that name, and changes nothing
+      else; the module guide says the `X-Umbra-` prefix holds the shared headers.
+      **Acceptance:** A75 (as amended), RN-16's scenario "Every answer names its build".
 - [ ] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
       commit; never a cancel or a retry.
       **Acceptance:** A142.
