@@ -121,6 +121,18 @@ git as pinned release assets that CI downloads and verifies.
   helpers, benchmarks, the pack smoke test, the image-pin agreement check), and the conformance suite passes on it; the
   facts `design.md` §14 records as checked on PostgreSQL 17.11 are re-checked on 18 by the tests that rely on them.
   (Q82)
+- **A151** `[CI]` For each vendored ledger version, the adapter's post-block update gives exactly the node's
+  `FixedPoint` fullness and fee prices for a table of block costs (2,635 of 200,000 among them,
+  `FixedPoint(243035853171123343)`), adds each system transaction's cost and clamps to the block limits as the node
+  does; an extrinsic the chain reports failed is skipped; the rebuilt packages' `SHA256SUMS` are recorded and A97's
+  rebuild reproduces them. (LG-5, LG-8, LG-15, Q113)
+- **A152** `[CI]` `umbradb config check` on a file that exports `modules = [stats]` and lists `stats.entry({ … })`
+  checks the entry against `stats`'s schema, reporting a wrong setting with its path; `umbradb run` on it runs `stats`;
+  a file listing a module that neither it exports nor UmbraDB ships is refused, naming the module. (CF-1, CF-10, LS-6,
+  MD-1, Q106)
+- **A153** `[MANUAL]` Five consecutive `npm run test:conformance` runs at a load average of at least 20 pass with no
+  timeout or start-up failure in the files the plan's Phase 3 "Load-sensitive tests" lists, and no test child process or
+  container outlives its run. (Q122)
 ## 3. Modules
 
 - **A20** `[STATIC]` A type test shows a declaration with an unknown point name is a type error; `[CI]` the same
@@ -154,8 +166,10 @@ git as pinned release assets that CI downloads and verifies.
   change between restarts and is re-recorded. (CF-3, CF-6)
 - **A29** `[CI]` With a password in `database`, the password appears in neither `/config`, `/status` nor the captured
   logs. (CF-4, AE-6)
-- **A30** `[CI]` A configuration omitting a recorded entry refuses with `missing-entry`; a later revision with the same
-  id supersedes the earlier one from its start. (CF-5)
+- **A30** `[CI]` A configuration omitting a recorded entry that starts at or below the cursor refuses with
+  `missing-entry`; one omitting or moving a recorded entry that starts above the cursor is accepted, the old row deleted
+  and the new one recorded in one transaction; a later revision with the same id supersedes the earlier one from its
+  start. (CF-5, Q103)
 - **A31** `[CI]` With cursor c: changing a data field or the version of an entry starting ≤ c refuses with
   `changes-past`; changing a `stop` that is above c in both values is accepted; a revision starting above c is
   accepted and recorded in the same transaction; changing an operational field leaves `core_chain.config` unchanged;
@@ -293,10 +307,8 @@ git as pinned release assets that CI downloads and verifies.
 - **A60** `[PROP]` For random sequences of writes, same-value writes and deletes over heights, reading the
   height-versioned table at every height equals a reference model; versions of a key never overlap and consecutive
   versions meet at their boundary (`to` of one = `from` of the next, unless deleted between). (SH-2)
-- **A61** `[CI]` A second write of one key in one block fails the block. (SH-3)
-
-## 8. Admin endpoints
-
+- **A61** `[CI]` A second change of one key in one block fails the block; a write that changes nothing does not. (SH-3,
+  Q110)
 - **A62** `[CI]` The four endpoints answer on the admin listener and other paths answer 404; while a PGlite job holds
   the queue for 5 s, and while a callback runs a 10 s synchronous loop on the main thread, each answers within 1 s.
   (AE-1)
@@ -339,9 +351,10 @@ git as pinned release assets that CI downloads and verifies.
 - **A77** `[CI]` With S above the node's finalized head, the process stays `starting` with `waiting-for-node` and
   commits S once the head reaches it, with the anchor recorded in S's transaction; a bootstrap killed before S commits
   is repeated on the next start without error. (IN-2)
-- **A78** `[CI]` A node with another genesis hash refuses startup with `genesis-mismatch`; a node whose finalized hash
-  at the cursor differs refuses with `cursor-hash-mismatch`; a node whose head is below the cursor makes the process
-  wait with `waiting-for-node`. (IN-3)
+- **A78** `[CI]` A node with another genesis hash than the stored one, or than the configured network's (also on an
+  empty database), refuses startup with `genesis-mismatch`; a known network whose built-in table records no genesis hash
+  refuses; a node whose finalized hash at the cursor differs refuses with `cursor-hash-mismatch`; a node whose head is
+  below the cursor makes the process wait with `waiting-for-node`. (IN-3, Q117, Q120)
 - **A79** `[CI]` With a tape whose finalized notifications report 10, 13, 13, 12, then a disconnect, then 20, heights
   11–20 commit once each in order; a block whose parent hash differs from the cursor halts with `parent-mismatch`; a
   finalized notification at or below the cursor with another hash halts with `finality-conflict`. (IN-4)

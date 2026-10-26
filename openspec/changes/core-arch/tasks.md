@@ -56,9 +56,12 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the runtime 1.0.300 upgrade, mainnet ranges around 1,774,492 and 1,788,980 (from backups), and a local devnet
       that starts on a v8 runtime and enacts the v9 upgrade; read each network's genesis hash, runtime at genesis and
       upgrade boundaries (U and F hashes and `MNSV`) for the built-in tables; publish the tapes as pinned release assets
-      with their SHA-256.
+      with their SHA-256. Recorded once, when a task first needs real data (12.3's A99, 18.2), with a complete
+      per-height recording: every IN-8 call for every height of each range and both head subscriptions, so any client
+      that makes any subset of those calls replays against the same tape; checked for completeness and replayed before
+      publishing, and never recorded again (owner decision Q123).
       **Acceptance:** each tape replays against the tape node and its SHA-256 matches; the boundary data is recorded
-      with its source. (Runs after task 9.2.)
+      with its source; every IN-8 call of every height is on the tape. (Runs after task 9.2, when first needed.)
 - [x] 0.4 PostgreSQL 18 everywhere (owner decision Q82): every `postgres:17-alpine` pin (test setups, Testcontainers
       helpers, benchmarks, the pack smoke test, design documents that name the image) becomes one pinned
       `postgres:18-alpine`, through the supply-chain gate's image-pin agreement; the facts §14 records as checked on
@@ -83,6 +86,10 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       required ids; the pack smoke test passes on 18. §4's detection sentence and §14's rows say what was re-checked;
       the 0.9.5 research documents under `design/` keep naming the image they were run on (history; nothing reads
       them). The CI run is pending until the branch is pushed (Phase 3).
+- [ ] 0.5 Load-sensitive tests (owner decision Q122): explicit timeouts fit for PostgreSQL under load in the database
+      suites the plan's Phase 3 "Load-sensitive tests" lists, the writer-lock negative control's lost connection, the
+      Testcontainers start-up timeout, and an orphan guard for every test child process (issues 00015, 00021, 00022).
+      **Acceptance:** A153.
 
 ## 1. Determinism primitives
 
@@ -915,6 +922,12 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       command (Q106); `core-chain`'s declaration and the core modules in the command's build (10.2, 11.x–13.x); the
       §12 surface and the pack smoke's rewrite with §12's imports (17.3); a file whose S is above the cursor refused
       with a code (the issue).
+- [ ] 4.3a The owner's answer Q103 B: a recorded entry that starts above the cursor may be omitted or moved; its history
+      row is deleted in the transaction that records the configuration.
+      **Acceptance:** A30 (as amended).
+- [ ] 4.4a The owner's answer Q106 B: the configuration file's exported `modules` are the build's user modules for
+      `umbradb config check` and `umbradb run`, next to UmbraDB's own.
+      **Acceptance:** A152.
 
 ## 5. Runner
 
@@ -1597,6 +1610,10 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Acceptance:** A76, A79, A80, A81, A83, A89.
 - [ ] 10.4 Error handling, retries and halts; recovery after an uncertain COMMIT; the refusal and halt registry.
       **Acceptance:** A84, A85, A86, A87.
+- [ ] 10.2a The owner's answers Q117 A and Q120 B: the node's genesis hash compared with the configured network's at
+      every start (built in, or `genesisHash` for `custom`); a known network whose built-in table records no genesis
+      hash is refused until task 0.3 records it.
+      **Acceptance:** A78 (as amended).
 
 ## 11. Chain data
 
@@ -1712,6 +1729,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (task 0.3's devnet tape, with 10.3/11.1's extraction of transactions), A96 on the real devnet upgrade tape, the
       built-in tables' remaining data (preprod's and stagenet's genesis, every runtime at genesis, every boundary);
       A97's CI rebuild runs when the branch is pushed (Phase 3). Q116 and Q117 (not blocking).
+- [ ] 12.1a The owner's answer Q113 A: patches for v8 and v9 exporting the node's exact post-block update (the summed
+      `SyntheticCost` normalized and clamped to the block limits in Rust) and a system transaction's cost; the packages
+      rebuilt and their `SHA256SUMS` re-recorded; `ApplyInput` gains each transaction's chain outcome, and the adapters
+      skip an extrinsic the chain reports failed, as the official indexer does.
+      **Acceptance:** A151; A97 with the rebuilt packages.
 - [ ] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
       root check, outputs.
       **Acceptance:** A82, A99, A101, A106, A107.
@@ -1827,7 +1849,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       benchmarks, manifest ids, coverage floors and mutation targets exactly as listed in `design.md` §13, and update
       the aggregators it lists; mark the retired laws in `Formal/STORAGE_ALGEBRA.md` and the roadmaps; set
       `openspec/changes/v1.1.0-quint-model-checking`'s status to Archived with the reason; remove the `archive:sync`
-      script.
+      script; drop `legacy/transaction-history/`'s TypeScript program from `npm run typecheck` and its Vitest
+      configuration and `test:live`, keeping its files, and name in its README the last commit where it compiled and its
+      tests passed (owner decision Q112).
       **Acceptance:** A5; `lake build --wfail` and the trust audit pass; `npm run test:mutation:ci` passes at break 65
       on the new targets.
 - [ ] 17.3 `src/index.ts` with exactly the §12 surface; the surface pin; the `umbradb` command; the pack smoke rewritten

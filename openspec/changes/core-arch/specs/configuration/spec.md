@@ -13,8 +13,16 @@ THE process SHALL load one configuration file at startup — `umbradb.config.ts`
 the path given with `--config` — through Node.js's built-in type stripping, and SHALL take its default export, built
 with `defineConfig({ entries: [ … ] })`. IF the evaluated export contains anything other than plain data — objects,
 arrays, strings, booleans, `null` and integers from 0 to 2^53 − 1 (a function, class instance, `undefined`, bigint or
-non-integer number) — THEN startup SHALL refuse and name the path inside the configuration. Only the evaluated data,
-not the source text, SHALL be validated, compared with the history, recorded and shown.
+non-integer number) — THEN startup SHALL refuse and name the path inside the configuration. Only the evaluated data, not
+the source text, SHALL be validated, compared with the history, recorded and shown. The file MAY also export `modules`,
+the declarations of the host's user modules (`export const modules = [stats]`), which it imports like any other import;
+`umbradb run` and `umbradb config check` SHALL take the build's user modules from it, next to UmbraDB's own backbone
+parts and core modules, so a configuration that lists user modules is checked and run by the command (owner decision
+Q106). No module is loaded by name: the file is then MD-1's host program.
+
+#### Scenario: A user module from the configuration file
+- **WHEN** `umbradb.config.ts` imports module `stats`, exports `modules = [stats]` and lists `stats.entry({ … })`
+- **THEN** `umbradb config check` checks the entry against `stats`'s schema, and `umbradb run` runs `stats`
 
 #### Scenario: A function in the configuration
 - **WHEN** a module's `config` contains `{ onError: () => 0 }`
@@ -120,11 +128,18 @@ SHALL be validated (CF-3) but not used. The data fields of each `core` revision 
 
 THE system SHALL identify an entry by `(id, start)`. WHEN a later entry has the same id, THE system SHALL treat the
 earlier one as stopping at the later one's start − 1 and the module as continuing without a mid-chain start. IF the
-configuration omits an entry recorded in the history THEN startup SHALL refuse and name it.
+configuration omits an entry recorded in the history that starts at or below the cursor THEN startup SHALL refuse and
+name it. A recorded entry that starts above the cursor has affected no stored data: the configuration MAY omit it or
+move it to another start, and its history row SHALL then be deleted in the transaction that records the configuration
+(owner decision Q103).
 
 #### Scenario: A recorded entry is missing
-- **WHEN** the history holds `(m, 1)` and `(m, 50)` and the file lists only `(m, 1)`
+- **WHEN** the history holds `(m, 1)` and `(m, 50)`, the cursor is at or above 50, and the file lists only `(m, 1)`
 - **THEN** startup refuses with `missing-entry` and `(m, 50)`
+
+#### Scenario: A scheduled entry is moved
+- **WHEN** the history holds `(m, 50)`, the cursor is 20, and the file lists `(m, 100)` in its place
+- **THEN** startup accepts it, and `(m, 50)` is deleted and `(m, 100)` recorded in one transaction
 
 ### Requirement: CF-6 Configuration changes only the future
 
@@ -185,8 +200,9 @@ THE package SHALL provide the command `umbradb config check <file> [--database <
 the TypeScript compiler (`noEmit`), evaluates it, and runs CF-1 and the schema checks of CF-3 for the revisions whose
 version is the build's, without starting a process. WITHOUT `--database` it SHALL open no database and SHALL report that
 the history checks (CF-3 for `versionEntry` revisions, CF-5, CF-6, CF-8) were not run; WITH `--database` it SHALL read
-the history read-only — no migration, no write — and run them too. It SHALL exit 0 only if every check it ran passes,
-and SHALL print each finding with its path.
+the history read-only — no migration, no write — and run them too. It SHALL check the entries of the file's exported
+user modules (CF-1, Q106) as it checks UmbraDB's own. It SHALL exit 0 only if every check it ran passes, and SHALL print
+each finding with its path.
 
 #### Scenario: A file with a type error and a schema error
 - **WHEN** `umbradb config check` runs on a file with one unknown property and one wrong type

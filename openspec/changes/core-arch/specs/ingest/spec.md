@@ -27,11 +27,19 @@ SHALL be idempotent and nothing SHALL be processed until block S commits.
 - **WHEN** S is 1,000 and the node's finalized head is 990
 - **THEN** the process stays `starting` with `waiting-for-node` and commits block 1,000 once the head reaches it
 
-### Requirement: IN-3 Startup checks on an existing database
+### Requirement: IN-3 Startup checks
 
-WHEN the process starts on a database with a cursor, THE system SHALL refuse startup IF the node's genesis hash differs
-from the stored one or the node's finalized hash at the cursor height differs from the cursor's hash; and WHILE the
-node's finalized head is below the cursor THE process SHALL wait with the condition `waiting-for-node`.
+WHEN the process starts, on an empty database or not, THE system SHALL refuse startup with `genesis-mismatch` IF the
+node's genesis hash differs from the configured network's — built in for `mainnet`, `preprod`, `preview` and `stagenet`
+(LG-3's table), the `core` entry's `genesisHash` for `custom` (owner decision Q120) — and SHALL refuse a known network
+whose built-in table records no genesis hash yet, until a build records it (Q117). WHEN the database has a cursor, THE
+system SHALL also refuse startup IF the node's genesis hash differs from the stored one or the node's finalized hash at
+the cursor height differs from the cursor's hash; and WHILE the node's finalized head is below the cursor THE process
+SHALL wait with the condition `waiting-for-node`.
+
+#### Scenario: A node of another network on an empty database
+- **WHEN** a configuration for `mainnet` points `node` at a preprod node, on an empty database
+- **THEN** startup refuses with `genesis-mismatch`, naming mainnet's genesis hash and the node's, before any migration
 
 #### Scenario: A node of another network
 - **WHEN** the configured node reports another genesis hash

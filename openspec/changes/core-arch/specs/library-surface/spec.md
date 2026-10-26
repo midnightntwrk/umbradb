@@ -60,9 +60,8 @@ nothing else SHALL be weakened.
 ### Requirement: LS-6 The `umbradb` command
 
 THE package SHALL provide the `umbradb` command with the subcommands `run` (start a core or private process from its
-configuration), `config check` (CF-10), `backup` and `restore` (BK-1, BK-3); any other
-subcommand
-SHALL exit 2 with a usage message.
+configuration, with the user modules the configuration file exports, CF-1, Q106), `config check` (CF-10), `backup` and
+`restore` (BK-1, BK-3); any other subcommand SHALL exit 2 with a usage message.
 
 #### Scenario: An unknown subcommand
 - **WHEN** `umbradb sync` is invoked

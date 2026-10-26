@@ -29,11 +29,13 @@ the block's content with the metadata of the runtime in its parent's state (LG-4
 - **WHEN** a module requiring `block-body` runs `on-parse` at h
 - **THEN** it reads h's extrinsics as fetched by `core-block-fetch`
 
-### Requirement: CD-3 `core-block-commit` writes the cursor first
+### Requirement: CD-3 `core-block-commit` writes the cursor before every module
 
-THE backbone part `core-block-commit` SHALL run first in every block's `on-db-write` and SHALL write the row of
-`core_block_commit.blocks` for h — hash, parent hash, `spec_version`, ledger version and the block's own
-timestamp in milliseconds — which is also the cursor; it SHALL provide the `table` item `blocks` (append-only).
+THE backbone part `core-block-commit` SHALL run in every block's `on-db-write` before every module — right after
+`core-chain`, in RN-3's fixed backbone order, which writes only the anchor and only at S (owner decision Q118) — and
+SHALL write the row of `core_block_commit.blocks` for h — hash, parent hash, `spec_version`, ledger version and
+`block_time` (`timestamptz`, the node's milliseconds converted exactly, Q74) — which is also the cursor; it SHALL
+provide the `table` item `blocks` (append-only).
 
 THE part SHALL also write `(hash, height)` to the unpartitioned table `core_block_commit.hashes`, whose primary key is
 the hash, in the same transaction, so a repeated hash fails the block with `duplicate-block-hash` (raised from that

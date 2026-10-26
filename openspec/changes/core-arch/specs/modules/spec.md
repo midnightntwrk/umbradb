@@ -16,7 +16,8 @@ DT-4, DT-6, owner decision Q76), `startsMidChain`, optional `needsLockstep`, `de
 "operational" | "secret"`), `migrations` (`{ id, sql }`, cumulative), optional `ledgerTasks` (LG-17), optional
 `requiresResync` (DB-10) and `points` (callbacks by point name). Ids and item names SHALL match the pattern of DB-8. THE
 host program SHALL import the modules it ships, on the main thread and in the ledger worker's entry (`design.md` §5.5);
-THE system SHALL NOT load a module by name at run time.
+for the `umbradb` command the host program is the configuration file, which exports its user modules (CF-1, owner
+decision Q106); THE system SHALL NOT load a module by name at run time.
 
 #### Scenario: A declaration with an unknown point name
 - **WHEN** a module declares a callback under `on-fetched`

@@ -27,11 +27,12 @@ from h; deleting k at h SHALL close it at h without a new one; writing the value
 - **WHEN** k is written with value A at 10, value B at 20, and deleted at 30
 - **THEN** reading k at 9 returns nothing, at 10–19 returns A, at 20–29 returns B, and at 30 or later returns nothing
 
-### Requirement: SH-3 One write per key per block
+### Requirement: SH-3 One change per key per block
 
-IF a module writes the same key of a height-versioned table twice in one block THEN THE helper SHALL fail the write,
-which is a callback error (RN-8).
+IF a module changes the same key of a height-versioned table twice in one block — a write or delete of a key whose value
+already changed at that height — THEN THE helper SHALL fail the write, which is a callback error (RN-8); a write that
+leaves the key's value as it is changes nothing and is neither refused nor counted (owner decision Q110).
 
-#### Scenario: A second write in the same block
-- **WHEN** a module writes k twice in one `on-db-write`
+#### Scenario: A second change in the same block
+- **WHEN** a module writes two different values of k in one `on-db-write`
 - **THEN** the second write fails and the block rolls back
