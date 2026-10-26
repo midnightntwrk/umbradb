@@ -40,7 +40,7 @@ keeping range partitioning by height and the parent-hash and genesis checks.
 | `on-start-db` | Once per process start, after the module's pending migrations (DB-9) | Schema write handle (own schema, own transaction) | In series |
 | `on-start-api` | Once per process start | `ApiRegistry`; each request gets a read handle | In series |
 | `on-best-block` | The node announced a new best block, before it is fetched (IN-6) | None | In series |
-| `on-fetch` | A block is read: in the core from the node; in a private process from the public database at a committed height | Core: none. Private: a read of public data at h | Parallel where the graph allows |
+| `on-fetch` | A block is read: in the core from the node; in a private process from the public database at a committed height | Core: none. Private: a read of public data, at the public cursor (at least h; task 14.1) | Parallel where the graph allows |
 | `on-parse` | After the items it requires are published | None | Parallel where the graph allows |
 | `on-rollback` | Queued blocks were dropped (IN-4, IN-6) | None | In series |
 | `on-finalized` | A new finalized head (core) or public commit (private), before its heights | Read handle at the cursor | In series |
@@ -166,7 +166,10 @@ interface BlockSource {
   has none), after the duplicate so that an earlier block delivered again is named for what it is. `readCursor` reads
   the highest row through a read or the block's transaction (none before the table exists), each source's `cursor` is
   it, and the database API's committed height is its height (`cursorHeight`), so a read's height and its snapshot are
-  one. (The cursor-table helper of SH-1, `cursorTable`, is another thing.)
+  one. (The cursor-table helper of SH-1, `cursorTable`, is another thing.) A private process's source is
+  `core-private-source`'s (§8, task 14.1): its cursor is `core_private_source.cursor`, read as the source's `cursor`
+  and its `committedHeight`; the loop's check before the `COMMIT` reads the source's `cursor` in the block's
+  transaction, whichever it is.
 - **`core-chain`** (`src/backbone/core-chain/`, task 10.2) asks the block source — the node, through `core-block-fetch`
   (task 10.3), or the in-memory source — for what IN-2 and IN-3 ask of the node: the genesis hash (block 0's), the
   finalized head (`finalizedHead`, `waitForHead`) and the finalized hash at the cursor (`block`). Its declaration is a
@@ -687,9 +690,10 @@ refuses a callback under a name that is not a point in a declaration built first
 `Partial<PointCallbacks>` alone accepts (A20). Declarations are validated at startup without their types
 (`src/modules/validation.ts`, task 3.1), so a module written in JavaScript or built at run time is held to the same
 declaration: the set has three lists — UmbraDB's backbone parts, its core modules, the host's user modules — and every
-shape the type forbids is refused with `invalid-declaration`, naming the field; then MD-2's causes, one rule and one
-code each (`bad-id` through the schema plan's own check, `reserved-prefix` for user modules only — also for the id
-`core`, the `core` entry's (task 4.1) —, `duplicate-id`,
+shape the type forbids is refused with `invalid-declaration`, naming the field — a public module's `keyKinds`,
+`validateKey` or `needsLockstep`, a private module's own fields (PP-6, PP-8; task 14.1), included —; then MD-2's
+causes, one rule and one code each (`bad-id` through the schema plan's own check, `reserved-prefix` for user modules
+only — also for the id `core`, the `core` entry's (task 4.1) —, `duplicate-id`,
 `no-requirement` except for backbone parts, `item-no-lifetime`, `table-item-no-kind`, `field-no-kind` read as
 `schema.shape[field].meta().kind`, and MD-1's `unknown-point`; Q94). `src/modules/adapters.ts` turns a validated
 declaration into the schema plan's module (`schemaModule`; `schemaModules` leaves out `OWN_PARTS`) and the migration
@@ -766,14 +770,15 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   all at once (`invalid-configuration`, `details { file, reason: "invalid-entries", findings }`, each finding naming
   its path, its entry `{ index, id, start }` and its field, its message never a setting's value): the top level is
   `{ entries }`; each entry is `{ id, start, stop?, version, config }` with no other property, its id `core` or a core
-  or user module (a backbone part's refused), `stop ≥ start`, a semver version or a core version with hex hashes, an
-  object `config`, required for a revision of the build's version; `(id, start)` once; a `core` entry; no lone UTF-16
-  surrogate (the history could not hash it); and, for each revision of the build's version, no setting its schema lacks
-  (a key check against `schema.shape`, since `z.object` strips unknown keys), the schema's own `safeParse` (its messages
-  redacted), and settings that stay plain data. It returns every revision with its parsed settings (defaults applied),
-  kinds and data fields, and S. `entriesAtCursor(checked, cursor)`, once the database is open, refuses a `versionEntry`
-  above the cursor that carries a `config` and one at or below it without one, and places each revision (`started`,
-  `scheduled`) for the history's comparison (CF-6).
+  or user module (a backbone part's refused) of the process's side (`entry-side`, PP-1; task 14.1: a private process
+  runs private modules only, the core public ones), `stop ≥ start`, a semver version or a core version with hex
+  hashes, an object `config`, required for a revision of the build's version; `(id, start)` once; a `core` entry; no
+  lone UTF-16 surrogate (the history could not hash it); and, for each revision of the build's version, no setting its
+  schema lacks (a key check against `schema.shape`, since `z.object` strips unknown keys), the schema's own `safeParse`
+  (its messages redacted), and settings that stay plain data. It returns every revision with its parsed settings
+  (defaults applied), kinds and data fields, and S. `entriesAtCursor(checked, cursor)`, once the database is open,
+  refuses a `versionEntry` above the cursor that carries a `config` and one at or below it without one, and places each
+  revision (`started`, `scheduled`) for the history's comparison (CF-6).
 - **Redaction** (`src/config/redact.ts`, task 4.2; CF-4, AE-6). `configRedactor(checked)` knows the configuration's
   secret strings — each string of a `secret` field, the password of every URL with credentials in the other fields —
   and hides each, as written, decoded and in each encoding a text may hold (URI-component with upper- or lower-case hex,
@@ -835,14 +840,47 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
 
   `Value` is `null`, a boolean, a string (text; `bigint` and `numeric` as decimal strings; `bytea` as `X`), or JSON (for
   `jsonb`); the column types of the statement say how to read each string back.
-- **Taking blocks.** `core-private-source` reads the public cursor (directly from the public database on PostgreSQL; via
-  `read` messages when it is PGlite) and processes each height with `on-finalized`, `on-fetch` (a read of public data at
-  h), `on-parse`, `on-compute`, its own block transaction, `on-after-db-write`.
+- **The private process** (task 14.1) is task 5.3's `startProcess` with `side: "private"`: the private `core` schema,
+  its own database (`database`), and a backbone of `core-chain` (task 10.2's, unchanged: its configuration history, its
+  identity, the process items `config`, `db` and `ledger-table`; no node client), then `src/backbone/private.ts`'s
+  `core-private-source`, `core-key-registry` and `core-digest` (the core's part, requiring `core-private-source`'s
+  `private-cursor` where the core's requires `blocks`), in RN-3's fixed order; no `core-block-fetch` or
+  `core-block-commit`. Its modules are `side: "private"` (an entry of another side's module refuses, `entry-side`), and
+  their tables are checked by DT-6, digested and hashed as the core's (Q75); the states, reasons and retries of 5.4,
+  and 5.2a's process contexts and module API, are the same. One `privateIntake()` per start gives the process its
+  part and its block source, which share the public database: `ProcessInput.source` is the intake's `source(core)`,
+  made from the process's `core` revision (Q102), which the part's `on-start-db` then reads. `core-chain`'s startup
+  checks against a node (IN-3, `checkChain`) do not apply — a private process never talks to the node (PP-1) —: the
+  process runs its source's own check instead (`BlockSource.checkChain`, `PrivateBlockSource.checkChain`), which reads
+  the public database's identity, refuses `public-not-started` (Q125) before any migration, and gives `core-chain` the
+  public genesis hash, recorded with the private S in the private database's `core_chain.identity` (and the anchor at
+  block S); the bootstrap's wait (IN-2) waits, with `waiting-for-node`, for the public cursor to reach the private S.
+- **Binding** (PP-2). `core-private-source`'s `on-start-db`, before any private module migrates, reads the public
+  database's identity (`core_chain.identity`: `genesis_hash`, `start_height`, task 10.2's table); on the first start it
+  records them in `core_private_source.cursor`; on every start a recorded genesis hash or S that differs, or a private S
+  below the public S, refuses with `private-binding-mismatch` (`details.reason` `genesis`, `start`,
+  `private-start-below`), and so does a public database whose core has never started (`public-not-started`, Q125).
+- **Taking blocks** (PP-3, PP-5). `core-private-source`'s block source (`PrivateBlockSource`) runs under the finalized
+  loop unchanged: its `cursor` and `committedHeight` are the private cursor's; its finalized head is the public cursor
+  (`core-block-commit`'s `readCursor` in a read of the public database; before the core's first commit the height
+  before the public S); its block at h is the public block at h (height, hash, parent hash of
+  `core_block_commit.blocks`, which 10.2's other columns do not change); `waitForHead` reads the public cursor each
+  time the process is woken, so it never depends on a message; and `fetchRead` gives each `on-fetch` callback its own
+  read of the public database at its cursor, at least h (Q100). Every read of public tables is in
+  `src/backbone/core-private-source/public-database.ts`. The part's `on-db-write` moves the private cursor first in each
+  block. The public database is read directly on PostgreSQL (`publicDatabase`, a login that may only read: reads only,
+  no writer, no lock); through `read` messages when it is PGlite, which only the core opens — task 14.2's transport,
+  so this task refuses a PGlite or missing `publicDatabase` (`invalid-configuration`, `public-database-transport`).
+  What wakes the wait is `PublicWakes`: task 14.2's `committed` messages and every (re)connection; until then a poll of
+  the public cursor every second (`pollingWakes`). An independent instance lags as it needs: nothing makes the core
+  wait for it (PP-5); the lockstep wait is task 14.3's.
 - **Lockstep.** The core keeps, per listed instance, its last reported height and connection; the runner awaits the
   condition of PP-6 before `BEGIN` with no transaction open; a lockstep instance's consistent read checks
   `public cursor == h`.
 - **Keys.** Configured test keys are the only key source in this change; a key API is not core and is left to a later
   module that feeds the registry (Q70). Pending keys live in memory until their block's `on-compute` takes them (PP-8).
+  Task 14.1 builds `core-key-registry`'s table and its `admitted-keys` item, put at every `on-compute`; making test keys
+  pending, `on-key`, the cutoff and their writing are task 14.4's, so until then the set is empty.
 
 ## 9. Backups and browser
 
@@ -901,7 +939,7 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-contract-states` | `core_contract_states.states` | (contract_address, height) | state_key, zswap_state_key |
 | `core-contract-logs-*` | `contract_logs.logs` | (height, tx_index, log_index) | contract_address, entry_point, logical_segment (int), log_version (bigint), event_type (text), data (ledger serialization) |
 | `core-key-registry` (private) | `core_key_registry.keys` | key_id | kind (text), key_bytes, arrived_height |
-| `core-private-source` (private) | `core_private_source.cursor` | id = 1 | height (null), hash (null), public_genesis_hash, public_start_height |
+| `core-private-source` (private) | `core_private_source.cursor` | id = 1 | height (null), hash (null), parent_hash (null; Q124), public_genesis_hash, public_start_height |
 
 **Storage helpers' tables (SH-1, SH-2; CORE-ARCH §4.11a, Q30).** A helper's table belongs to the module that calls the
 helper: a migration the module includes in its own `migrations` creates it in the module's schema, and the module writes

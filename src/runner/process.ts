@@ -67,6 +67,13 @@
  * it, then closes the module API (WebSocket clients get 1001, every connection ends), `core-chain`'s node client and the
  * database. During startup it stops before the next step, and ends a wait for the node at once.
  *
+ * **A private process** (`side: "private"`, PP-1; task 14.1) starts the same way with the private `core` schema (CF-4):
+ * its block source is `core-private-source`'s (`src/backbone/core-private-source/`), whose cursor and committed height
+ * are the private cursor's and whose blocks are the public database's; step 6 is that source's own check (it reads the
+ * public database's chain identity, whose genesis hash `core-chain` records; PP-2's binding is the part's), the
+ * bootstrap's wait of step 8 waits for the public cursor to reach the private S, and the source is closed with the
+ * database.
+ *
  * **Logs** go through the configuration's redaction (`configRedactor`, CF-4, AE-6) once it is validated; before that,
  * a refusal is logged by its code only, since nothing yet knows which strings are secret. A refusal, a halt and each
  * retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
@@ -436,6 +443,7 @@ class Process implements ProcessHandle {
   #retrying: RetryCondition | null = null;
   #attempts = 0;
   #db: Database | undefined;
+  #source: BlockSource | undefined;
   #api: StartedModuleApi | undefined;
   #chain: CoreChainBinding | undefined;
 
@@ -484,6 +492,7 @@ class Process implements ProcessHandle {
     } finally {
       await this.#chain?.close();
       await this.#db?.close();
+      await this.#source?.close?.();
       this.#resolveClosed();
     }
   }
@@ -522,7 +531,9 @@ class Process implements ProcessHandle {
       const core = (input.processCore ?? processCoreEntry)(checked);
       this.#core = core;
       const source = typeof input.source === "function" ? input.source(core) : input.source;
-      const db = await openConfiguredDatabase(core, { committedHeight: cursorHeight });
+      this.#source = source;
+      // A read's height is the cursor's (DB-2): the core's cursor table, or a private process's own (its source's).
+      const db = await openConfiguredDatabase(core, { committedHeight: source.committedHeight ?? cursorHeight });
       this.#db = db;
       for (;;) {
         this.#step();
@@ -543,6 +554,7 @@ class Process implements ProcessHandle {
       // The module API opens in the last step, after which only a stop throws: the stop closes it.
       await this.#chain?.close();
       await this.#db?.close();
+      await this.#source?.close?.();
       throw error;
     }
   }
@@ -563,7 +575,8 @@ class Process implements ProcessHandle {
     this.#cursor = cursor?.height ?? null;
     const check = checkHistory({ config: checked, cursor: this.#cursor, declarations, history });
     const waiting = (wait: NodeWait | null): void => this.#waiting(wait);
-    const { genesisHash } = await (input.checkChain ?? checkChain)({
+    // A private process's source checks its chain itself (PP-1: it never talks to the node).
+    const { genesisHash } = await (input.checkChain ?? source.checkChain?.bind(source) ?? checkChain)({
       source,
       identity,
       cursor,

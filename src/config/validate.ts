@@ -21,7 +21,8 @@
  * named by its position, id and start (CF-5's identity). The shape (CF-3): the default export is `{ entries }` and
  * nothing else; each entry is `{ id, start, stop?, version, config }` with no other property — the builders pass a
  * property they do not know through (`./entries.ts`) to be refused here —, its id `core` or a module of the build
- * (never a backbone part's, which runs with the core), its start and stop heights with `stop ≥ start`, its version a
+ * (never a backbone part's, which runs with the core) of the process's side (PP-1: a private process runs private
+ * modules, the core public ones), its start and stop heights with `stop ≥ start`, its version a
  * semver string for a module and a core version for `core` (`CORE_VERSION_SCHEMA`), its `config` an object, required
  * for a revision of the build's version; `(id, start)` once; at least one `core` entry, whose earliest start is S; and
  * no string or key holding a lone UTF-16 surrogate (which has no UTF-8 form, so the history could not record or hash it,
@@ -513,6 +514,27 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
           `this build has no module ${id}: an entry's id is core or the id of one of the build's modules ` +
             `(${ids.length === 0 ? "it has none" : ids.join(", ")}) (CF-3)`,
         );
+      }),
+  },
+  {
+    // A process runs the modules of its side only (PP-1, MD-1; task 14.1).
+    name: "entry-side",
+    check: (context) =>
+      objects(context).flatMap((view) => {
+        const { id } = view.object;
+        const module = typeof id === "string" ? context.modules.get(id) : undefined;
+        if (module === undefined || module.side === context.side) return [];
+        return [
+          finding(
+            "entry-side",
+            `${view.path}.id`,
+            view,
+            "id",
+            `${module.id} is a ${module.side} module, and this configuration is a ${context.side} process's, which ` +
+              `runs ${context.side} modules only (PP-1, MD-1): enable it in a ${module.side} process's configuration, ` +
+              "or remove this entry",
+          ),
+        ];
       }),
   },
   {

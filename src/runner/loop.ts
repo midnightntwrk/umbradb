@@ -6,14 +6,15 @@
  * **Per new head** the loop calls `on-finalized` once, before the head's heights, each callback with its own read handle
  * at the cursor. **Per height h**, through the point dispatch (`./dispatch.ts`) in the order of the range of the
  * resolved graph holding h:
- * 1. `on-fetch` and `on-parse` — the block context and an item sink, no database handle;
+ * 1. `on-fetch` and `on-parse` — the block context and an item sink, no database handle; on a private process each
+ *    `on-fetch` callback also gets its own read of public data (the block source's `fetchRead`, PP-3, Q100);
  * 2. `on-compute` — the block context, a read handle at h − 1 and an item sink; each callback runs inside its own read
  *    (`Database.read`), so on PGlite a `db.read` from inside it fails with `nested-call` rather than waiting (DB-4, Q73),
  *    and a callback's failing statement aborts no other callback's read;
  * 3. the block transaction (RN-6): one `BEGIN … COMMIT` holding every `on-db-write` callback of h, each with its block
  *    write handle (`src/db/write-handles.ts`), in RN-3's order — `core-block-commit` first, which writes the cursor row
- *    (CD-3) — and, before the `COMMIT`, a check that the cursor is h with the block's hash; nothing else of the loop
- *    writes (RN-2);
+ *    (CD-3), or on a private process `core-private-source` — and, before the `COMMIT`, a check that the block source's
+ *    cursor is h with the block's hash; nothing else of the loop writes (RN-2);
  * 4. `on-after-db-write` — the block context without `block` items and a read handle at h, each callback in its own read.
  * Between `on-parse` and `on-compute`, `on-start-height` for the entries starting at h (RN-9): the core's parts when h is
  * S, then the modules one of whose segments of the graph (`ResolvedGraph.segments`) starts at h — revisions continuing
@@ -51,7 +52,7 @@
  * IN-10).
  */
 
-import { CURSOR_TABLE, readCursor } from "../backbone/core-block-commit/core-block-commit.js";
+import { BLOCKS_TABLE } from "../backbone/core-block-commit/core-block-commit.js";
 import type { Database, ReadHandle, Transaction } from "../db/api.js";
 import type { UmbraError } from "../db/errors.js";
 import type { SchemaPlan } from "../db/roles.js";
@@ -366,8 +367,19 @@ export class FinalizedLoop {
     return stopHeightSchedule(range, stopping);
   }
 
-  /** `on-fetch` or `on-parse`: each callback with its block context and an item sink. */
+  /**
+   * `on-fetch` or `on-parse`: each callback with its block context and an item sink; at `on-fetch` on a private process
+   * also with its own read of public data, inside which it runs (the block source's `fetchRead`).
+   */
   protected async blockPoint(run: HeightRun, point: "on-fetch" | "on-parse"): Promise<void> {
+    const open = this.input.source.fetchRead;
+    if (point === "on-fetch" && open !== undefined) {
+      await this.#dispatch(run.range, "on-fetch", (part, call) => {
+        const context = this.#context(run, part, run.items.visible());
+        return open((read) => run.items.collect(part, "on-fetch", (sink) => call(context, sink, read)));
+      });
+      return;
+    }
     await this.#dispatch(run.range, point, (part, call) => {
       const context = this.#context(run, part, run.items.visible());
       return run.items.collect(part, point, (sink) => call(context, sink));
@@ -389,7 +401,8 @@ export class FinalizedLoop {
 
   /**
    * Inside the block transaction `tx`: every `on-db-write` callback with its block write handle, in order; then, before
-   * the `COMMIT`, a misuse during the block fails it, and the cursor must be the height with the block's hash.
+   * the `COMMIT`, a misuse during the block fails it, and the block source's cursor, read in `tx`, must be the height
+   * with the block's hash.
    */
   protected async write(tx: Transaction, run: HeightRun): Promise<void> {
     const writes = openBlockWrites(tx, this.input.plan, {
@@ -401,7 +414,7 @@ export class FinalizedLoop {
       return writes.write(part.id, (w) => call(context, w));
     });
     this.#check();
-    const cursor = await readCursor(tx);
+    const cursor = await this.input.source.cursor(tx);
     if (cursor === null || cursor.height !== run.height || !sameBytes(cursor.hash, run.block.hash)) {
       const left =
         cursor === null
@@ -411,7 +424,8 @@ export class FinalizedLoop {
             : `height ${cursor.height}`;
       throw new UnexpectedCursor(
         `the block transaction of height ${run.height} left the cursor at ${left}, not at height ${run.height} with ` +
-          `the block's hash: core-block-commit writes the block's row of ${CURSOR_TABLE} first in every block (CD-3)`,
+          `the block's hash: core-block-commit writes the block's row of ${BLOCKS_TABLE} first in every block (CD-3), ` +
+          "and core-private-source the private cursor on a private process (PP-3)",
       );
     }
   }

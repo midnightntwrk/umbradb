@@ -201,6 +201,20 @@ const A28: readonly Row[] = [
     ],
   },
   {
+    name: "a public module's entry in a private process's configuration (task 14.1)",
+    rule: "entry-side",
+    side: "private",
+    config: () => ({ entries: [...withPrivateCore(PRIVATE_SETTINGS).entries, STATS] }),
+    findings: [
+      {
+        path: "entries[1].id",
+        entry: stats1,
+        field: "id",
+        says: ["stats is a public module", "a private process's, which runs private modules only"],
+      },
+    ],
+  },
+  {
     name: "no id",
     rule: "entry-id",
     config: () => withEntry({ start: 0, version: "1.2.0", config: { pollMs: 1000 } }),

@@ -187,13 +187,15 @@ export interface ApiRegistry {
 /**
  * The callbacks a module may register, by point (CORE-ARCH §4.10; `design.md` §2 gives each its handle). The read
  * handles of `on-finalized` (at the cursor), `on-start-height` (at h − 1), `on-stop-height` (at h) and `on-key` (at
- * the cursor) are RN-4's and design §2's (decision record Q100, option A).
+ * the cursor) are RN-4's and design §2's (decision record Q100, option A); so is a private process's `on-fetch` read
+ * of public data (PP-3, task 14.1): a read of the public database at its committed height — the public cursor, at
+ * least h, so a module reads the public tables it needs by height (PP-5) —, and none in the core (RN-4).
  */
 export interface PointCallbacks {
   "on-start-db"(p: ProcessContext, w: SchemaWriteHandle): Promise<void>;
   "on-start-api"(p: ProcessContext, api: ApiRegistry): Promise<void>;
   "on-best-block"(p: ProcessContext, header: BlockHeader): Promise<void>;
-  "on-fetch"(p: ProcessContext, b: BlockContext, out: ItemSink): Promise<void>;
+  "on-fetch"(p: ProcessContext, b: BlockContext, out: ItemSink, read?: ReadHandle): Promise<void>;
   "on-parse"(p: ProcessContext, b: BlockContext, out: ItemSink): Promise<void>;
   "on-rollback"(p: ProcessContext, dropped: BlockHeader[]): Promise<void>;
   "on-finalized"(p: ProcessContext, head: { height: bigint; hash: Uint8Array }, read: ReadHandle): Promise<void>;

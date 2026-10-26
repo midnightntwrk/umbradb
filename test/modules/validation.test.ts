@@ -474,6 +474,25 @@ const SHAPES: readonly ShapeCase[] = [
   },
   { name: "no startsMidChain", build: () => loose("stats", (d) => void delete d.startsMidChain), field: "startsMidChain" },
   { name: "needsLockstep not a boolean", build: () => loose("stats", (d) => void (d.needsLockstep = "yes")), field: "needsLockstep" },
+  // A private module's own fields on a public module (PP-6, PP-8; task 14.1).
+  {
+    name: "keyKinds on a public module",
+    build: () => loose("stats", (d) => Object.assign(d, { keyKinds: ["viewing"], validateKey: () => true })),
+    field: "keyKinds",
+    says: ["is a public module and declares keyKinds", 'declare the module side: "private"'],
+  },
+  {
+    name: "validateKey on a public module",
+    build: () => loose("stats", (d) => Object.assign(d, { validateKey: () => true })),
+    field: "validateKey",
+    says: ["is a public module and declares validateKey"],
+  },
+  {
+    name: "needsLockstep on a public module",
+    build: () => loose("stats", (d) => Object.assign(d, { needsLockstep: false })),
+    field: "needsLockstep",
+    says: ["is a public module and declares needsLockstep", "only a private module declares"],
+  },
   { name: "developmentOnly not a boolean", build: () => loose("stats", (d) => void (d.developmentOnly = 1)), field: "developmentOnly" },
   {
     name: "requiresResync not a boolean",

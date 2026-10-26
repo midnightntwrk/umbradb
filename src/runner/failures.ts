@@ -33,8 +33,7 @@ import { HeightFailure, UnexpectedCursor } from "./loop.js";
 
 /**
  * `design.md` §11's startup refusals that are `UmbraError` codes today (the others — `needs-lockstep-not-listed`,
- * `private-binding-mismatch`, `test-key-conflict` — come with the tasks that raise them, which add them here; task
- * 10.4's registry checks §11).
+ * `test-key-conflict` — come with the tasks that raise them, which add them here; task 10.4's registry checks §11).
  */
 export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "genesis-mismatch",
@@ -77,6 +76,7 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "durability-pooler",
   "durability-full-page-writes-off",
   "package-hash-mismatch",
+  "private-binding-mismatch",
 ] as const);
 
 /**

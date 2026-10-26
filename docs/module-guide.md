@@ -411,3 +411,28 @@ of the `core-arch` change).
   commit left nothing. `on-start-height` fires again if your start height had not committed, and `on-after-db-write`
   and `on-stop-height` fire again for the cursor; `on-fetch`, `on-parse` and `on-compute` may run again for a height.
   `on-after-db-write` never gets `block` items, re-delivered or not: read what your `on-db-write` stored instead.
+
+## Private modules
+
+A private module runs in a private process, next to its own private database, and takes its blocks from the public
+database the core writes (PP-1 to PP-5 of the `core-arch` change).
+
+- **Declare `side: "private"`.** A private process runs private modules only, the core public ones: an entry for a
+  module of the other side refuses the configuration. `keyKinds`, `validateKey` and `needsLockstep` are a private
+  module's own: a public module that declares one is refused.
+- **Your `on-fetch` reads public data.** In a private process `on-fetch(p, b, out, read)` gets a fourth argument, a
+  read of the public database at its committed height — the public cursor, at least `b.height`, and maybe above it
+  when your process lags. Read public tables by height (`WHERE height = $1`, or `<=`), and only append-only ones: the
+  rows of a height never change once committed, so you read the same whenever you run (PP-5). A mutable public table
+  would show you a later height than the one you process; that needs lockstep (task 14.3). The core's `on-fetch`
+  gets no such argument.
+- **Require private items.** Your requirements order you among the private process's parts: the core's process items
+  `config`, `db` and `ledger-table` (no node client: a private process never talks to the node),
+  `core-private-source`'s `private-cursor` and `core-key-registry`'s `admitted-keys`. A public table you read in
+  `on-fetch` is not a requirement here.
+- **The same determinism rules.** Your private tables are checked, digested and hashed as the core's are (Q75): the
+  sections above all apply, `deterministic: false` included. Two private processes with the same configuration, bound
+  to the same public database, hold the same private data at the same height.
+- **Your database is bound to one public database.** Its first start records the public database's genesis hash and
+  start height; a later start against another public database is refused (`private-binding-mismatch`), and so is one
+  whose start height is below the public one's.

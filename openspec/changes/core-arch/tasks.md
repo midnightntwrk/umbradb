@@ -1758,9 +1758,67 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 14. Private processes
 
-- [ ] 14.1 The private backbone (`core-private-source`, `core-key-registry`), binding, block intake; the determinism
+- [x] 14.1 The private backbone (`core-private-source`, `core-key-registry`), binding, block intake; the determinism
       rules of DT-6 checked at a private process's startup and its contents hash (Q75).
       **Acceptance:** A112, A113, A114, A116, A146.
+      **Done (2026-10-26):** a private process is task 5.3's `startProcess` with `side: "private"`: the private `core`
+      schema, its own database, and the private backbone — `core-chain` (task 10.2's, unchanged: its history, its
+      identity, the items `config`, `db`, `ledger-table`), then `src/backbone/private.ts`'s `core-private-source`,
+      `core-key-registry` and `core-digest` (the core's part, requiring `private-cursor` where the core's requires
+      `blocks`), in RN-3's order; no `core-block-fetch` or `core-block-commit`; its states, reasons and retries are
+      5.4's, and 5.2a's process contexts and module API serve it unchanged (5.2a's note (g)). `core-private-source`
+      (`src/backbone/core-private-source/`, new): `privateIntake()` gives one start its part and its block source, which
+      share the public database. Its table `core_private_source.cursor` (one row: the private cursor — height, hash and
+      `parent_hash`, Q124 — and the binding). Its `on-start-db` binds (PP-2): the public identity
+      (`core_chain.identity`'s genesis hash and S, 10.2's table) recorded at the first start, and on every start a
+      different genesis hash or S, or a private S below the public S, refused with `private-binding-mismatch` (new
+      `ErrorCode`, in `REFUSAL_CODES`), as is a public database whose core never started (Q125) — the latter already at
+      startup's chain check, which on a private process is its source's (`PrivateBlockSource.checkChain`, in place of
+      `core-chain`'s checks against a node, which a private process never talks to): it reads the public identity and
+      gives `core-chain` the public genesis hash, which it records with the private S; the bootstrap's wait waits for
+      the public cursor to reach the private S. Its `PrivateBlockSource` runs under the finalized loop unchanged (PP-3,
+      PP-5): its cursor and committed height the private cursor's, its head the public cursor (`readCursor` on the
+      public database), its block at h the public block at h, its `waitForHead` reading the public cursor at every
+      wake-up (`PublicWakes`: a 1 s poll until 14.2's `committed` messages and reconnections), and `fetchRead`, each
+      private `on-fetch` callback's read of public data at the public cursor, at least h (Q100;
+      `PointCallbacks["on-fetch"]` gains its optional `read`). Every read of public tables is in `public-database.ts`;
+      the public database is read directly on PostgreSQL (`publicDatabase`, reads only), and a PGlite or missing one is
+      refused until 14.2's transport (`public-database-transport`). `core-key-registry` (new): its table
+      `core_key_registry.keys` and the item `admitted-keys`, empty at every `on-compute` until 14.4. The runner
+      (`src/runner/`): `BlockSource` gains the optional `fetchRead`, `committedHeight`, `checkChain` and `close`; the
+      loop gives on-fetch its read and checks the source's cursor before the `COMMIT`; the process opens its database
+      with the source's committed height and closes the source with it. Which side runs what (3.1's note (g)): a public
+      declaration with `keyKinds`, `validateKey` or `needsLockstep` is `invalid-declaration`; a configuration entry of
+      the other side's module is refused (`entry-side`). DT-6 and the contents hash need nothing new on a private plan
+      (7.1's machinery, Q75). `design.md` §2, §3, §6, §7, §8, §10; the module guide's "Private modules". Questions Q124
+      (the cursor's parent hash; shipped A), Q125 (a public database never started; shipped A) and Q126 (a private
+      module's requirement on a public `table` item; shipped A, nothing changed) raised, none blocking. Tests, seen
+      failing first (`tsc` exit 2, 12 errors: the modules `core-private-source` and `private` missing, `on-fetch` with
+      no fourth parameter; the five suites failed to load): `test/private/` — `separation.test.ts` (A112: every session
+      of each PostgreSQL database logged by a login event trigger, by login; every PGlite engine by the process that
+      opened it), `binding.test.ts` (A113, a public database never started), `intake.test.ts` (A114 with `link.ts`, the
+      transport's stand-in, dropped while the core commits 50 heights; A116, the instance stopped for 100 blocks),
+      `determinism.test.ts` (A146: `serial`, `now()` and `double precision` refused with the core's code and message;
+      three instances' contents hashes; A147's private part) — on PostgreSQL 18.6 and PGlite 0.5.10, a core and each
+      private process with its own database, on 10.2's real backbone (a custom network with its own ledger table, its
+      genesis the in-memory chain's block 0), the PGlite public database read by direct calls through the core's `db`
+      item; `test/backbone/core-private-source.test.ts` (the source, the poll, the binding's refusals,
+      `openPublicDatabase`); rows in `test/modules/validation.test.ts` and `test/config/validate.test.ts`. Committed
+      negative controls: a private process reaching its database through the core's settings fails A112; a binding check
+      that compares nothing fails A113; an intake that skips a height after a reconnect fails A114; a core that waits
+      for an independent instance fails A116; a private plan without DT-6's check
+      (`determinism.negative-control.test.ts`) accepts the `serial` column and fails A146. Wrong variants (a scratch
+      runner outside the clone), 62 over two runs on the final sources: run 1, 53, 52 caught (10 by `tsc`, one at the
+      run's limit), the survivor a gap — a refused private process kept its public database's connections until it was
+      stopped — closed by `binding.test.ts` counting them while it is refused; run 2, eight of run 1's `tsc`-caught
+      variants written to type-check and the survivor again, 9 of 9 caught; run 3, after the rebase onto 10.2, 4 on the
+      source's chain check and the identity read, 4 caught; no equivalent survivor. Every new file of `src/backbone/`
+      100 %, `src/runner/` still 100 %.
+      **Pending:** the process transport, `hello`/`hello-ack`/`committed`/`read` and the PGlite public database (14.2,
+      which replaces `PublicWakes`' poll and `openPublicDatabase`'s refusal); lockstep and its check in the read of
+      public data (14.3); test keys made pending, `on-key`, the admission cutoff and CF-11's checks, and A146 with the
+      keys admitted (14.4); the configured network's genesis check (10.2a, Q117, Q120) on a private process; the
+      private-backup refusal (15.1); the browser's transport (16.1); Q126's graph (a later task, by its answer).
 - [ ] 14.2 The process transport and its messages; opt-in mutual TLS.
       **Acceptance:** A115, A121.
 - [ ] 14.3 Lockstep and the behind-instance refusal.

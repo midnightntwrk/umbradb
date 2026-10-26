@@ -161,6 +161,12 @@ export const ERROR_CODES = [
   "cursor-hash-mismatch",
   "duplicate-block-hash",
   "parent-mismatch",
+  /**
+   * A private process's startup refusal (PP-2, `src/backbone/core-private-source/`, task 14.1): its private database is
+   * bound to another public database — another genesis hash or S than the one it recorded at its first start —, its S is
+   * below the public S, or the public database's core has never started (`details.reason`). Not retryable.
+   */
+  "private-binding-mismatch",
 ] as const;
 
 /**
