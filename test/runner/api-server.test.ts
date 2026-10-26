@@ -363,7 +363,8 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     await third.until(1);
     source.finalize(3n);
     await runLoop(process, source, 3n);
-    expect((await third.until(2))[1]).toEqual(notified(3, "c"));
+    // The loop run again at cursor 2 re-delivers 2's on-after-db-write first (RN-11; task 5.3), then goes on at 3.
+    expect((await third.until(3)).slice(1)).toEqual([notified(2, "c"), notified(3, "c")]);
     expect(first.messages).toHaveLength(5);
     await first.close();
     await third.close();
@@ -421,11 +422,16 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     await runLoop(process, new InMemoryBlockSource({ head: 2n }), 2n);
     const height = (h: number): string[] =>
       ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"].map((p) => `${p}@${h}`);
+    // The recorder's entry starts at 1: on-start-height between on-parse and on-compute there (RN-1, RN-9; task 5.3).
+    const [fetch1, parse1, ...rest1] = height(1);
     expect(seen.map((c) => (c.height === undefined ? c.point : `${c.point}@${c.height}`))).toEqual([
       "on-start-db",
       "on-start-api",
       "on-finalized@2",
-      ...height(1),
+      fetch1,
+      parse1,
+      "on-start-height@1",
+      ...rest1,
       ...height(2),
     ]);
     expect(Object.keys(registry as object).sort()).toEqual(["http", "subscription"]);

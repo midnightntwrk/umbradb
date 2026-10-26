@@ -81,13 +81,16 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       const height = (h: number): string[] =>
         ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"].map((p) => `${p}@${h}`);
       const calls = () => seen.map((c) => (c.height === undefined ? c.point : `${c.point}@${c.height}`));
-      // on-start-db ran at startup (startDatabase); RN-1's scenario: head 3 on an empty database, S = 1.
-      expect(calls()).toEqual(["on-start-db", "on-finalized@3", ...height(1), ...height(2), ...height(3)]);
+      // on-start-db ran at startup (startDatabase); RN-1's scenario: head 3 on an empty database, S = 1. The recorder's
+      // entry starts at 1: on-start-height between on-parse and on-compute there (RN-1, RN-9; task 5.3).
+      const [fetch1, parse1, ...rest1] = height(1);
+      expect(calls()).toEqual(["on-start-db", "on-finalized@3", fetch1, parse1, "on-start-height@1", ...rest1, ...height(2), ...height(3)]);
 
-      // The head rises: one on-finalized for the new head, before its heights, from the cursor on.
+      // The head rises: a loop run again re-delivers the cursor's on-after-db-write (RN-11; task 5.3), then one
+      // on-finalized for the new head, before its heights, from the cursor on.
       source.finalize(5n);
       await runUntilWaiting(started, source, 5n);
-      expect(calls().slice(17)).toEqual(["on-finalized@5", ...height(4), ...height(5)]);
+      expect(calls().slice(18)).toEqual(["on-after-db-write@3", "on-finalized@5", ...height(4), ...height(5)]);
       expect(seen.some((c) => c.point === "on-best-block" || c.point === "on-rollback")).toBe(false);
       expect(await heightsIn(db, "recorder.rows")).toEqual([1n, 2n, 3n, 4n, 5n]);
       expect(await cursorOf(db)).toBe(5n);
@@ -195,7 +198,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
         contextOf: (id) => started.contexts.of(id),
         signal: controller.signal,
       });
-      await expect(loop.run()).resolves.toBeUndefined();
+      await expect(loop.run()).resolves.toEqual({ kind: "signal" });
       expect(seen.map((c) => c.point)).toEqual(["on-start-db"]);
       expect(await cursorOf(db)).toBeNull();
     }, 60_000);
@@ -1084,7 +1087,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
         contextOf: (id: string) => started.contexts.of(id),
         signal: controller.signal,
       };
-      await expect(new FinalizedLoop(input).run()).resolves.toBeUndefined();
+      await expect(new FinalizedLoop(input).run()).resolves.toEqual({ kind: "signal" });
       expect(await heightsIn(db, "m.rows")).toEqual([1n, 2n]);
       expect(await cursorOf(db)).toBe(2n);
     }, 60_000);
@@ -1106,7 +1109,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       await source.waiting(1n);
       source.finalize(3n);
       controller.abort();
-      await expect(running).resolves.toBeUndefined();
+      await expect(running).resolves.toEqual({ kind: "signal" });
       expect(await cursorOf(db)).toBe(1n);
       expect(seen.filter((c) => c.point === "on-finalized")).toHaveLength(1);
     }, 60_000);

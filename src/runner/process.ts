@@ -1,0 +1,531 @@
+/**
+ * The process (`openspec/changes/core-arch/specs/runner/spec.md` RN-1, RN-7, RN-9–RN-13; `specs/configuration/spec.md`
+ * CF-3, CF-4, CF-6, CF-8; `design.md` §1, §2, §7; CORE-ARCH §4.12, §4.15, §4.18; decision records Q43, Q102): what
+ * `umbradb run` starts (task 4.4) — {@link startProcess} assembles the runner's startup from the build's declarations,
+ * the configuration and a block source, runs the finalized loop, and publishes the process's state.
+ *
+ * **Startup**, in this order, each step's refusal the step's own typed error:
+ * 1. the build's declarations validated (`validateDeclarations`, task 3.1);
+ * 2. the configuration loaded (`loadConfig`, CF-1: the file, or data given) and validated (`validateConfig`, task 4.2);
+ * 3. the `core` entry's operational and secret fields from its latest revision of the build's version, for the whole
+ *    run (`processCoreEntry`, decision record Q102 resolved A): the database, the node — the block source is made from
+ *    this revision when given as a function —, `listen.api`, the timeouts, the development opt-in, the core's stop;
+ * 4. the database that revision names opened (`openConfiguredDatabase`, CF-9: PGlite refuses without its opt-in), its
+ *    writer started (`startWriter`: the lock, the durability probe, whose warnings are logged);
+ * 5. the cursor (the block source's, RN-14) and the configuration history (`readHistory`) read in one read, and the
+ *    history checked against the configuration (`checkHistory`, CF-5, CF-6, CF-8: every refusal before any
+ *    migration); the facts handed to {@link ProcessInput.onChecked};
+ * 6. the graph resolved from the check (`resolveGraph`, `graphInputOf`), the schema plan, the process contexts with each
+ *    part's revisions ({@link processRevisions}), the migrations and `on-start-db` (`startDatabase`, through each
+ *    context's publishing window), the seal (`process-item-missing`), `on-start-api` and the module API on `listen.api`
+ *    (`startModuleApi`);
+ * 7. the finalized loop, with the core's stop and RN-12's upgrade boundary ({@link upgradeBoundary}).
+ * A refusal or failure closes what startup opened — the module API, the database — and rejects
+ * {@link ProcessHandle.started} with it; the `refused` state, and the process staying up, are task 5.4's.
+ *
+ * **The state** ({@link ProcessStatus}, CORE-ARCH §4.18, this task's part): `starting` until the loop runs; then
+ * `syncing` or `following` by the lag — the finalized head the loop last read minus the cursor — against the
+ * `followingThreshold`; `stopped` once processing ended at the core's stop or before an upgrade boundary, with the
+ * condition `upgrade-required` at a boundary (RN-12), the process still up and the module API answering at the
+ * cursor; `stopping` from {@link ProcessHandle.stop} on. Ready (`/health/ready`) when `following` or `stopped`, or
+ * `syncing` unless a set `readinessLag` is exceeded. A failure of the loop ends processing with the state unchanged and
+ * the process up (RN-8's `halted` is task 5.4's); the admin endpoints that show all this are tasks 8.x.
+ *
+ * **SIGTERM** (RN-13): {@link terminationSignal} gives the signal SIGTERM aborts; aborting
+ * {@link ProcessInput.signal}, or calling {@link ProcessHandle.stop}, enters `stopping`, aborts the loop's signal — the
+ * loop finishes the height in progress, so a block whose transaction is open commits, and starts no other —, awaits
+ * it, then closes the module API (WebSocket clients get 1001, every connection ends) and the database. During startup
+ * it stops before the next step.
+ *
+ * **Logs** go through the configuration's redaction (`configRedactor`, CF-4, AE-6) once it is validated; before that,
+ * a refusal is logged by its code only, since nothing yet knows which strings are secret.
+ */
+
+import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
+import { readHistory } from "../backbone/core-chain/history.js";
+import { buildCoreVersion, type CoreVersion } from "../config/build.js";
+import type { ProcessSide } from "../config/core-settings.js";
+import { openConfiguredDatabase } from "../config/database.js";
+import { CORE_ENTRY_ID } from "../config/entries.js";
+import { checkHistory, graphInputOf, type HistoryCheck, versionText } from "../config/history.js";
+import { loadConfig, type LoadOptions } from "../config/load.js";
+import { type PlainObject, plainData } from "../config/plain-data.js";
+import { processCoreEntry } from "../config/process.js";
+import { configRedactor, type Redactor } from "../config/redact.js";
+import { type CheckedConfig, type CheckedEntry, validateConfig } from "../config/validate.js";
+import type { Database } from "../db/api.js";
+import { UmbraError } from "../db/errors.js";
+import { startDatabase } from "../db/migrate.js";
+import { startWriter } from "../db/writer-lock.js";
+import { schemaPlan } from "../modules/adapters.js";
+import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
+import { resolveGraph } from "../modules/graph.js";
+import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
+import { type StartedModuleApi, startModuleApi } from "./api-server.js";
+import type { BlockRef, BlockSource } from "./block-source.js";
+import { isBackbonePart } from "./dispatch.js";
+import { FinalizedLoop, type LoopEnd, type LoopInput } from "./loop.js";
+import { ProcessContexts } from "./process-context.js";
+
+/**
+ * The configuration a process runs with: a file to load (CF-1), or its data — a browser's bundle, a test's —, which
+ * startup holds to CF-1's plain data as it holds a file's default export (`plainData`).
+ */
+export type ProcessConfig = LoadOptions | { readonly data: unknown; readonly file?: string };
+
+/** What startup has checked when it hands the facts on (see {@link ProcessInput.onChecked}). */
+export interface StartupFacts {
+  /** The validated configuration. */
+  readonly config: CheckedConfig;
+  /** The build's validated declarations. */
+  readonly declarations: DeclarationSet<ModuleDeclaration>;
+  /** The cursor: the last committed block, null on a new database. */
+  readonly cursor: BlockRef | null;
+  /** The history's check at the cursor (`checkHistory`). */
+  readonly check: HistoryCheck;
+  /** The database, opened and its writer started. */
+  readonly db: Database;
+}
+
+/** What {@link startProcess} takes. */
+export interface ProcessInput {
+  /**
+   * The build's declarations, not yet validated: UmbraDB's backbone parts, its core modules, the host's user modules.
+   * Until tasks 10.2 and 10.3 build `core-chain` and `core-block-fetch`, the backbone is the caller's.
+   */
+  readonly declarations: DeclarationSet;
+  /** The configuration; `umbradb.config.ts` in the working directory when absent (CF-1). */
+  readonly config?: ProcessConfig;
+  /**
+   * The block source (RN-14) — the in-memory one until task 10.3 —, or how to make it from the process's `core`
+   * revision (Q102: its `node`), called once, after the configuration is validated.
+   */
+  readonly source: BlockSource | ((core: CheckedEntry) => BlockSource);
+  /** The process's side: which `core` schema applies (CF-4); public unless given. */
+  readonly side?: ProcessSide;
+  /** Stops the process when it aborts (RN-13; {@link terminationSignal} for SIGTERM). */
+  readonly signal?: AbortSignal;
+  /** Where each log line goes, redacted (see the module comment); standard error when absent. */
+  readonly log?: (line: string) => void;
+  /**
+   * Told what startup checked, after the history's check and before the migrations: the hand-over to the backbone parts
+   * that need it — `core-chain`'s `on-start-db` records the history with it (`recordHistory`, CF-6) and publishes the
+   * database read-only — until task 10.2 builds `core-chain` with the runner.
+   */
+  readonly onChecked?: (facts: StartupFacts) => void;
+  /** The negative controls' loop; the finalized loop unless given. */
+  readonly loop?: new (input: LoopInput) => FinalizedLoop;
+  /** The negative controls' choice of the process's `core` revision; `processCoreEntry` (Q102) unless given. */
+  readonly processCore?: (config: CheckedConfig) => CheckedEntry;
+}
+
+/** The process's state (CORE-ARCH §4.18): this task's states; `refused` and `halted` are task 5.4's. */
+export type ProcessState = "starting" | "syncing" | "following" | "stopped" | "stopping";
+
+/** One entry at an upgrade boundary (RN-12): its id, the revision's start, the version it needs, the build's. */
+export interface UpgradeEntry {
+  readonly id: string;
+  readonly start: number;
+  readonly needed: string | CoreVersion;
+  readonly build: string | CoreVersion;
+}
+
+/** RN-12's upgrade boundary: its height and the entries whose revision starting there this build does not carry. */
+export interface UpgradeBoundary {
+  readonly height: bigint;
+  readonly entries: readonly UpgradeEntry[];
+}
+
+/** A condition of the process (CORE-ARCH §4.18): this task raises `upgrade-required` at a boundary (RN-12). */
+export interface UpgradeCondition extends UpgradeBoundary {
+  readonly code: "upgrade-required";
+}
+
+/** The process's conditions. */
+export type ProcessCondition = UpgradeCondition;
+
+/** How processing ended. */
+export type ProcessingEnd =
+  /** At its last height: the core's stop (`core`), or before an upgrade boundary (`upgrade`); the process is `stopped`. */
+  | { readonly kind: "stopped"; readonly height: bigint; readonly core: boolean; readonly upgrade: UpgradeBoundary | null }
+  /** Stopped by {@link ProcessHandle.stop} or the signal, during startup or processing. */
+  | { readonly kind: "signal" }
+  /** Startup refused or failed: `error` is what {@link ProcessHandle.started} rejected with. */
+  | { readonly kind: "refused"; readonly error: unknown }
+  /** The loop failed (a `HeightFailure`, or the first cursor read's error); the process stays up (5.4: `halted`). */
+  | { readonly kind: "failed"; readonly error: unknown };
+
+/** The process's state now (CORE-ARCH §4.18, this task's part). */
+export interface ProcessStatus {
+  readonly state: ProcessState;
+  /** Whether it should receive API traffic (`/health/ready`). */
+  readonly ready: boolean;
+  readonly conditions: readonly ProcessCondition[];
+  /** The last committed height, null before any. */
+  readonly cursor: bigint | null;
+  /** The finalized head the loop last read, null before it read one. */
+  readonly head: bigint | null;
+  /** The head minus the cursor (minus S − 1 before any height committed), at least 0; null without a head. */
+  readonly lag: bigint | null;
+  /** How processing ended, or null while it has not. */
+  readonly ended: ProcessingEnd | null;
+}
+
+/** What a process that started gives. */
+export interface StartedProcess {
+  /** The `core` revision whose operational and secret fields the process runs with (Q102). */
+  readonly core: CheckedEntry;
+  /** Where the module API listens (`listen.api`), or null without it. */
+  readonly api: { readonly host: string; readonly port: number } | null;
+}
+
+/** A process {@link startProcess} started. */
+export interface ProcessHandle {
+  /** The process's state now. */
+  status(): ProcessStatus;
+  /** Resolves once startup completed and the loop runs; rejects with startup's refusal or failure. */
+  readonly started: Promise<StartedProcess>;
+  /** Resolves with how processing ended (also when startup did not complete); never rejects. */
+  readonly ended: Promise<ProcessingEnd>;
+  /**
+   * Stops the process (RN-13): `stopping`; the loop's signal aborted and the loop awaited; the module API, then the
+   * database, closed. Resolves once all of it is done; calling it again returns the same promise.
+   */
+  stop(): Promise<void>;
+  /** Resolves once {@link stop} completed. */
+  readonly closed: Promise<void>;
+}
+
+/** What {@link statusOf} computes the state from. */
+export interface StatusFacts {
+  readonly phase: "starting" | "running" | "stopped" | "stopping";
+  /** S, once the configuration is validated. */
+  readonly start: bigint | null;
+  readonly cursor: bigint | null;
+  readonly head: bigint | null;
+  readonly followingThreshold: number;
+  readonly readinessLag: number | null;
+  readonly conditions: readonly ProcessCondition[];
+  readonly ended: ProcessingEnd | null;
+}
+
+/** The process's state from `facts` (see the module comment): pure. */
+export function statusOf(facts: StatusFacts): ProcessStatus {
+  const { phase, start, cursor, head, readinessLag } = facts;
+  const behind = head === null || start === null ? null : head - (cursor ?? start - 1n);
+  const lag = behind === null || behind > 0n ? behind : 0n;
+  const following = lag !== null && lag <= BigInt(facts.followingThreshold);
+  const state: ProcessState = phase === "running" ? (following ? "following" : "syncing") : phase;
+  const ready =
+    state === "following" ||
+    state === "stopped" ||
+    (state === "syncing" && (readinessLag === null || (lag !== null && lag <= BigInt(readinessLag))));
+  return Object.freeze({ state, ready, conditions: Object.freeze([...facts.conditions]), cursor, head, lag, ended: facts.ended });
+}
+
+/**
+ * RN-12's upgrade boundary for a startup's history check: the lowest start of a scheduled revision — one above the
+ * cursor whose version this build does not carry —, with every entry whose scheduled revision starts there, in the
+ * configuration's order, and the version the build carries for it; null when no revision is scheduled. The check's
+ * version rule (CF-8) has made sure the revision covering cursor + 1 is the build's, so the boundary is above it.
+ */
+export function upgradeBoundary(
+  check: HistoryCheck,
+  declarations: DeclarationSet<ModuleDeclaration>,
+): UpgradeBoundary | null {
+  const scheduled = check.entries.filter((entry) => entry.scheduled);
+  if (scheduled.length === 0) return null;
+  const height = Math.min(...scheduled.map((entry) => entry.start));
+  const builds = new Map([...declarations.core, ...declarations.user].map((declaration) => [declaration.id, declaration.version]));
+  const entries = scheduled
+    .filter((entry) => entry.start === height)
+    .map((entry) =>
+      Object.freeze({
+        id: entry.id,
+        start: entry.start,
+        needed: entry.version,
+        build: entry.id === CORE_ENTRY_ID ? buildCoreVersion() : (builds.get(entry.id) as string),
+      }),
+    );
+  return Object.freeze({ height: BigInt(height), entries: Object.freeze(entries) });
+}
+
+/** A revision of the process contexts (MD-7): frozen. */
+function revisionOf(entry: CheckedEntry, stop: bigint | null, settings: PlainObject): Revision {
+  return Object.freeze({ start: BigInt(entry.start), stop, version: versionText(entry.version), settings: Object.freeze(settings) });
+}
+
+/**
+ * Each part's revisions for its process context, in start order (RN-7: a callback's settings are its revision's at the
+ * height): a module's from the history check's entries, with their effective stops (CF-5, `graphEntries`) and their
+ * settings — the parsed settings of the build's version, defaults applied, or an earlier `versionEntry`'s `config` as
+ * recorded, none for a scheduled one —; every backbone part's are the `core` entry's (the backbone runs with the core),
+ * each one's data fields with every operational and secret field of `process`, the process's `core` revision (Q102:
+ * data fields apply from each revision's start, the others are the process's for its whole run).
+ */
+export function processRevisions(check: HistoryCheck, process: CheckedEntry): (id: string) => readonly Revision[] {
+  const byId = new Map<string, Revision[]>();
+  const modules = check.entries.filter((entry) => entry.id !== CORE_ENTRY_ID);
+  modules.forEach((entry, index) => {
+    // `graphEntries` keeps the module revisions in the configuration's order.
+    const { stop } = check.graphEntries[index] as { readonly stop: bigint | null };
+    byId.set(entry.id, [...(byId.get(entry.id) ?? []), revisionOf(entry, stop, entry.settings ?? {})]);
+  });
+  const kinds = process.kinds as Readonly<Record<string, string>>;
+  const own = Object.fromEntries(Object.entries(process.settings as PlainObject).filter(([field]) => kinds[field] !== "data"));
+  const cores = check.entries.filter((entry) => entry.id === CORE_ENTRY_ID).sort((a, b) => a.start - b.start);
+  const core = Object.freeze(
+    cores.map((entry, index) => {
+      const next = cores[index + 1];
+      const data = (entry.buildVersion ? entry.data : entry.settings) ?? {};
+      return revisionOf(entry, next === undefined ? null : BigInt(next.start - 1), { ...own, ...data });
+    }),
+  );
+  const ordered = new Map(
+    [...byId].map(([id, list]) => [id, Object.freeze(list.sort((a, b) => (a.start < b.start ? -1 : 1)))]),
+  );
+  return (id) => (isBackbonePart({ id }) ? core : (ordered.get(id) ?? Object.freeze([])));
+}
+
+/** What listens to a process's signals: `process` itself, or a test's emitter. */
+export interface SignalTarget {
+  once(event: "SIGTERM", listener: () => void): unknown;
+  removeListener(event: "SIGTERM", listener: () => void): unknown;
+}
+
+/**
+ * RN-13 for a Node.js process: a signal that the first SIGTERM `target` receives aborts — {@link ProcessInput.signal}
+ * for `umbradb run` —, and `dispose`, which stops listening.
+ */
+export function terminationSignal(target: SignalTarget = process): { readonly signal: AbortSignal; dispose(): void } {
+  const controller = new AbortController();
+  const listener = (): void => controller.abort();
+  target.once("SIGTERM", listener);
+  return Object.freeze({ signal: controller.signal, dispose: () => void target.removeListener("SIGTERM", listener) });
+}
+
+/** A log line to standard error. */
+const standardError = (line: string): void => {
+  process.stderr.write(`${line}\n`);
+};
+
+/** An error's message, or the value as text. */
+const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** An error's code: an `UmbraError`'s, else its name. */
+const codeOf = (error: unknown): string =>
+  error instanceof UmbraError ? error.code : error instanceof Error ? error.name : typeof error;
+
+/** What startup leaves for the loop. */
+interface Startup {
+  readonly loop: FinalizedLoop;
+  readonly started: StartedProcess;
+}
+
+/** A process (see the module comment). */
+class Process implements ProcessHandle {
+  readonly started: Promise<StartedProcess>;
+  readonly ended: Promise<ProcessingEnd>;
+  readonly closed: Promise<void>;
+  readonly #input: ProcessInput;
+  readonly #stop = new AbortController();
+  #resolveClosed!: () => void;
+  #closing: Promise<void> | undefined;
+  #phase: StatusFacts["phase"] = "starting";
+  #redactor: Redactor | undefined;
+  #core: CheckedEntry | undefined;
+  #start: bigint | null = null;
+  #cursor: bigint | null = null;
+  #head: bigint | null = null;
+  #upgrade: UpgradeBoundary | null = null;
+  #conditions: ProcessCondition[] = [];
+  #end: ProcessingEnd | null = null;
+  #db: Database | undefined;
+  #api: StartedModuleApi | undefined;
+
+  constructor(input: ProcessInput) {
+    this.#input = input;
+    this.closed = new Promise((resolve) => {
+      this.#resolveClosed = resolve;
+    });
+    const startup = this.#startup();
+    this.started = startup.then(({ started }) => started);
+    // `ended` tells a refusal too: a caller that awaits only `ended` leaves no rejection unhandled.
+    this.started.catch(() => undefined);
+    this.ended = this.#run(startup);
+    const { signal } = input;
+    if (signal?.aborted === true) void this.stop();
+    else signal?.addEventListener("abort", () => void this.stop(), { once: true });
+  }
+
+  status(): ProcessStatus {
+    const settings = this.#core?.settings;
+    return statusOf({
+      phase: this.#phase,
+      start: this.#start,
+      cursor: this.#cursor,
+      head: this.#head,
+      followingThreshold: (settings?.followingThreshold as number | undefined) ?? 0,
+      readinessLag: (settings?.readinessLag as number | undefined) ?? null,
+      conditions: this.#conditions,
+      ended: this.#end,
+    });
+  }
+
+  stop(): Promise<void> {
+    this.#closing ??= this.#close();
+    return this.#closing;
+  }
+
+  /** {@link stop}'s work. */
+  async #close(): Promise<void> {
+    this.#phase = "stopping";
+    this.#stop.abort();
+    await this.ended;
+    try {
+      await this.#api?.close();
+    } finally {
+      await this.#db?.close();
+      this.#resolveClosed();
+    }
+  }
+
+  /** A log line, through the configuration's redaction once it is known. */
+  #log(text: string): void {
+    (this.#input.log ?? standardError)(this.#redactor === undefined ? text : this.#redactor.text(text));
+  }
+
+  /** Throws the stop's reason when the process is stopping: startup's steps end there. */
+  #step(): void {
+    this.#stop.signal.throwIfAborted();
+  }
+
+  /** Startup (see the module comment); on a refusal or a stop, closes what it opened and rejects. */
+  async #startup(): Promise<Startup> {
+    // Begins on the next microtask, so that a signal aborted before `startProcess` returned stops it before anything.
+    await Promise.resolve();
+    const input = this.#input;
+    try {
+      this.#step();
+      const declarations = validateDeclarations(input.declarations);
+      const given = input.config ?? {};
+      const loaded =
+        "data" in given ? { file: given.file, data: plainData(given.data, given.file) } : await loadConfig(given);
+      this.#step();
+      const checked = validateConfig({ config: loaded, declarations, side: input.side ?? "public" });
+      this.#redactor = configRedactor(checked);
+      this.#start = BigInt(checked.start);
+      const core = (input.processCore ?? processCoreEntry)(checked);
+      this.#core = core;
+      const settings = core.settings as PlainObject;
+      const source = typeof input.source === "function" ? input.source(core) : input.source;
+      const db = await openConfiguredDatabase(core, { committedHeight: cursorHeight });
+      this.#db = db;
+      this.#step();
+      const { durabilityWarnings } = await startWriter(db);
+      for (const warning of durabilityWarnings) this.#log(`durability: ${warning.message}`);
+      this.#step();
+      const { cursor, history } = await db.read(async (read) => ({
+        cursor: await source.cursor(read),
+        history: await readHistory(read),
+      }));
+      this.#step();
+      this.#cursor = cursor?.height ?? null;
+      const check = checkHistory({ config: checked, cursor: this.#cursor, declarations, history });
+      input.onChecked?.(Object.freeze({ config: checked, declarations, cursor, check, db }));
+      const graph = resolveGraph(graphInputOf(check, declarations));
+      const plan = schemaPlan(graph.modules);
+      const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, core) });
+      await startDatabase(db, {
+        plan,
+        parts: graph.modules.map((part) => contexts.startDbPart(part)),
+        committedVersions: check.committedVersions,
+        handles: { height: this.#cursor },
+      });
+      this.#step();
+      contexts.seal();
+      const { api: address } = settings.listen as { readonly api?: string };
+      this.#api = await startModuleApi({
+        graph,
+        contexts,
+        db,
+        ...(address === undefined ? {} : { address }),
+        apiReadTimeoutMs: settings.apiReadTimeoutMs as number,
+        onError: (error, where) => this.#log(`module API: ${where.route} of ${where.module} failed: ${messageOf(error)}`),
+      });
+      this.#step();
+      this.#upgrade = upgradeBoundary(check, declarations);
+      const Loop = input.loop ?? FinalizedLoop;
+      const loop = new Loop({
+        db,
+        graph,
+        plan,
+        source,
+        contextOf: (id) => contexts.of(id),
+        misuses: contexts,
+        signal: this.#stop.signal,
+        coreStop: core.stop === null ? null : BigInt(core.stop),
+        boundary: this.#upgrade?.height ?? null,
+        observer: {
+          head: (head) => {
+            this.#head = head.height;
+          },
+          committed: (block) => {
+            this.#cursor = block.height;
+          },
+        },
+      });
+      const { server } = this.#api;
+      const api = server === null ? null : Object.freeze({ host: server.host, port: server.port });
+      // Not stopping (the step above): from here on a stop finds the loop running.
+      this.#phase = "running";
+      return { loop, started: Object.freeze({ core, api }) };
+    } catch (error) {
+      if (!this.#stop.signal.aborted) {
+        this.#log(`startup refused: ${codeOf(error)}${this.#redactor === undefined ? "" : `: ${messageOf(error)}`}`);
+      }
+      // The module API opens in the last step, after which only a stop throws: the stop closes it.
+      await this.#db?.close();
+      throw error;
+    }
+  }
+
+  /** Startup, then the loop: resolves with how processing ended (see {@link ProcessingEnd}). */
+  async #run(startup: Promise<Startup>): Promise<ProcessingEnd> {
+    let loop: FinalizedLoop;
+    try {
+      ({ loop } = await startup);
+    } catch (error) {
+      return this.#ended(this.#stop.signal.aborted ? { kind: "signal" } : { kind: "refused", error });
+    }
+    let end: LoopEnd;
+    try {
+      end = await loop.run();
+    } catch (error) {
+      this.#log(`processing stopped: ${messageOf(error)}`);
+      return this.#ended({ kind: "failed", error });
+    }
+    if (end.kind === "signal") return this.#ended(end);
+    const upgrade = end.boundary === null ? null : this.#upgrade;
+    if (upgrade !== null) this.#conditions.push(Object.freeze({ code: "upgrade-required", ...upgrade }));
+    // A stop during the last height leaves the process stopping.
+    if (this.#phase === "running") this.#phase = "stopped";
+    const why = [end.core ? "the core's stop" : null, upgrade === null ? null : `an upgrade boundary at ${upgrade.height}`];
+    this.#log(`processing stopped at ${end.height}: ${why.filter((text) => text !== null).join(" and ")}`);
+    return this.#ended(Object.freeze({ kind: "stopped", height: end.height, core: end.core, upgrade }));
+  }
+
+  /** Records how processing ended. */
+  #ended(end: ProcessingEnd): ProcessingEnd {
+    this.#end = end;
+    return end;
+  }
+}
+
+/**
+ * Starts a process (see the module comment): returns its handle at once, startup running — `started` tells when it
+ * completed, `ended` how processing ended, `status()` the state meanwhile.
+ */
+export function startProcess(input: ProcessInput): ProcessHandle {
+  return new Process(input);
+}

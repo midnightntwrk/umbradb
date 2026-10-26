@@ -33,6 +33,7 @@
  * the halt it leads to is the runner's (RN-8, task 5.4). When the dispatch settles, no callback of the point is running.
  */
 
+import { CORE_ENTRY_ID } from "../config/entries.js";
 import { BACKBONE_ORDER, type HeightRange, type ResolvedRange } from "../modules/graph.js";
 import type { ModuleDeclaration, PointCallbacks, PointName, ProcessContext } from "../modules/declaration.js";
 
@@ -103,8 +104,17 @@ export class CallbackFailure extends Error {
 /** Whether `part` registers a callback at `point`. */
 const registers = (part: ModuleDeclaration, point: PointName): boolean => typeof part.points[point] === "function";
 
-/** The backbone parts — the core's, which run with the core entry — are those of RN-3's fixed order. */
-const isBackbone = (part: ModuleDeclaration): boolean => BACKBONE_ORDER.includes(part.id);
+/** Whether `part` is a backbone part — the core's, which runs with the core entry —: one of RN-3's fixed order. */
+export const isBackbonePart = (part: Pick<ModuleDeclaration, "id">): boolean => BACKBONE_ORDER.includes(part.id);
+
+
+/**
+ * The entry whose start or stop `on-start-height` and `on-stop-height` announce to `part` (RN-9, RN-10): `core` for a
+ * backbone part, which runs with the core entry; the module's own id for a module.
+ */
+export function entryIdOf(part: Pick<ModuleDeclaration, "id">): string {
+  return isBackbonePart(part) ? CORE_ENTRY_ID : part.id;
+}
 
 /** A range in words: `10–19`, or `from 20 on`. */
 const span = (range: HeightRange): string => (range.to === null ? `from ${range.from} on` : `${range.from}–${range.to}`);
@@ -139,7 +149,7 @@ function moduleWaves(range: ResolvedRange, point: PointName): ModuleDeclaration[
       return after.get(provider) as number;
     });
     const wave = Math.max(0, ...firsts);
-    if (isBackbone(part) || !registers(part, point)) {
+    if (isBackbonePart(part) || !registers(part, point)) {
       after.set(part.id, wave);
       continue;
     }
@@ -171,13 +181,13 @@ export function scheduleAt<P extends PointName>(range: ResolvedRange, point: P):
   }
   if (point === "on-db-write") return seriesOf(point, range.writeOrder);
   if (!isParallelPoint(point)) return seriesOf(point, range.order);
-  const backbone = seriesOf(point, range.order.filter(isBackbone)).waves;
+  const backbone = seriesOf(point, range.order.filter(isBackbonePart)).waves;
   return scheduled(point, [...backbone, ...moduleWaves(range, point)]);
 }
 
 /** The modules of `boundary`, checked to be modules active in `range`, as a set. */
 function boundaryModules(range: ResolvedRange, boundary: EntryBoundary, builder: string): Set<string> {
-  const modules = new Set(range.order.filter((part) => !isBackbone(part)).map((part) => part.id));
+  const modules = new Set(range.order.filter((part) => !isBackbonePart(part)).map((part) => part.id));
   for (const id of boundary.modules) {
     if (!modules.has(id)) {
       throw new Error(
@@ -196,7 +206,7 @@ function boundaryModules(range: ResolvedRange, boundary: EntryBoundary, builder:
  */
 export function startHeightSchedule(range: ResolvedRange, starting: EntryBoundary): PointSchedule<"on-start-height"> {
   const modules = boundaryModules(range, starting, "startHeightSchedule");
-  const parts = range.order.filter((part) => (isBackbone(part) ? starting.core : modules.has(part.id)));
+  const parts = range.order.filter((part) => (isBackbonePart(part) ? starting.core : modules.has(part.id)));
   return seriesOf("on-start-height", parts);
 }
 
@@ -208,8 +218,8 @@ export function startHeightSchedule(range: ResolvedRange, starting: EntryBoundar
  */
 export function stopHeightSchedule(range: ResolvedRange, stopping: EntryBoundary): PointSchedule<"on-stop-height"> {
   const modules = boundaryModules(range, stopping, "stopHeightSchedule");
-  const stopped = range.order.filter((part) => !isBackbone(part) && modules.has(part.id)).reverse();
-  const core = stopping.core ? range.order.filter(isBackbone) : [];
+  const stopped = range.order.filter((part) => !isBackbonePart(part) && modules.has(part.id)).reverse();
+  const core = stopping.core ? range.order.filter(isBackbonePart) : [];
   return seriesOf("on-stop-height", [...stopped, ...core]);
 }
 

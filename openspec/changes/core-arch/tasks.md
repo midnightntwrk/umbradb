@@ -1048,9 +1048,70 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `refused` state for `process-item-missing`, `duplicate-api-route`, a failing `on-start-db` or `on-start-api` and a
       listener that cannot listen, and the `halted` state for a refused publish (5.4); `core-chain` publishing the real
       process items (10.2); the browser's `postMessage` transport (16.1); the exports (17.x).
-- [ ] 5.3 Revisions and settings; start and stop heights; the upgrade-boundary stop; SIGTERM; the `core` entry's
+- [x] 5.3 Revisions and settings; start and stop heights; the upgrade-boundary stop; SIGTERM; the `core` entry's
       operational fields from its latest revision of the build's version (Q102).
       **Acceptance:** A42, A45, A47, A48, A149.
+      **Done (2026-10-25):** `src/runner/process.ts`: `startProcess({ declarations, config, source, signal?, log?,
+      onChecked? })` returns a handle at once and starts up — the declarations validated, the configuration loaded (a
+      file, CF-1, or its data, held to CF-1's plain data) and validated, the `core` entry's operational and secret
+      fields from its latest revision of the build's version for the whole run (`processCoreEntry`, Q102: the database,
+      the node — a block source given as a function is made from that revision —, `listen.api`, `apiReadTimeoutMs`, the
+      opt-in, `followingThreshold`, `readinessLag`, the core's stop), the database opened and its writer started (the
+      durability probe's warnings logged), the cursor and the history read in one read and checked (`checkHistory`:
+      CF-5, CF-6, CF-8 before any migration), the facts handed to the backbone (`onChecked`: until task 10.2 builds
+      `core-chain`, which records the history and publishes the database read-only with them), the graph, the schema
+      plan, the process contexts with each part's revisions (`processRevisions`: a module's from its entries with their
+      effective stops and settings; every backbone part's the `core` entry's, each revision's data fields with the
+      process revision's operational and secret fields), `startDatabase`, the seal, `startModuleApi`, then the finalized
+      loop with the core's stop and the upgrade boundary (`upgradeBoundary`: the lowest start of a scheduled revision,
+      with each entry starting there, the version needed and the build's). A refusal closes what startup opened and
+      rejects `started` with its typed error; `ended` tells how processing ended (`stopped`, `signal`, `refused`,
+      `failed`). The state (`statusOf`, CORE-ARCH §4.18's part of this task): `starting`, `syncing` or `following` by
+      the lag against `followingThreshold`, `stopped` (with `upgrade-required` at a boundary), `stopping`; ready when
+      `following` or `stopped`, or `syncing` within a set `readinessLag`. `terminationSignal` (SIGTERM aborts it) and
+      `stop()`: `stopping`, the loop's signal aborted and the loop awaited — the height in progress, its transaction
+      included, finishes —, then the module API and the database closed; during startup it stops before the next step.
+      Log lines go through `configRedactor(checked).text`; a refusal before the configuration is validated is logged by
+      its code only. `src/runner/loop.ts`: `on-start-height` between `on-parse` and `on-compute` for the core's parts at
+      S and the modules a segment of which starts at h (revisions continuing each other are one segment, CF-5), each
+      with its entry and a read at h − 1; `on-stop-height` after `on-after-db-write` for the modules a segment of which
+      ends at h, in reverse order, then the core's parts at and above its stop, each with a read at h; RN-11's
+      re-delivery of the cursor's `on-after-db-write` and `on-stop-height` at every `run()` before c + 1; the loop ends
+      after its last height — the core's stop, or the height before the upgrade boundary, the lower — and at a restart
+      at or above the core's stop processes nothing; `run()` resolves with a `LoopEnd`; `LoopInput` gains `coreStop`,
+      `boundary` and an `observer` (heads read, heights committed). `src/runner/dispatch.ts`: `isBackbonePart` and
+      `entryIdOf` exported. `design.md` §2 says what was built; the module guide gains "Start and stop heights".
+      Question Q109 raised (the core's stop lowered below the cursor; shipped A, not blocking 5.4); issue
+      `docs/issues/00015-pglite-writer-worker-has-no-orphan-guard.md` recorded (OPEN). Tests, seen failing first
+      (`tsc` exit 2, 21 errors: `src/runner/process.js` missing, `isBackbonePart` not exported, the loop's new seams and
+      `boundary` unknown; the five suites failed to load): `test/runner/revisions.test.ts` (A42), `stop-heights.test.ts`
+      (A45; RN-9's and RN-10's orders and handles, a raised and a lowered core stop, failures, the re-delivery),
+      `upgrade-boundary.test.ts` (A47; the core's stop beside the boundary; the old build refused at the boundary;
+      DB-10), `process.test.ts` (A149; startup, refusals, logs, the state, the signal; `statusOf`, `upgradeBoundary`,
+      `processRevisions`, `terminationSignal`), `sigterm.test.ts` with `sigterm.worker.ts` (A48 with a real process and
+      a real SIGTERM), with `process-build.ts`, `process-backends.ts` and `sigterm-module.ts`, on PostgreSQL 18.6 and
+      PGlite 0.5.10; committed negative controls: a loop that fires `on-start-height` at a continuing revision fails
+      A42; one whose core gets `on-stop-height` before the stopping modules, and one that does not re-deliver after a
+      restart at the stop, fail A45; one that commits the boundary height, and a recording that stores the revision's
+      operational and secret settings, fail A47; a process that exits on SIGTERM without awaiting the block fails A48
+      (no stop completed; PostgreSQL counts its sessions abandoned, PGlite's `pg_control` stays in production); a
+      process taking the first `core` revision's operational fields fails A149. `loop.test.ts` and `api-server.test.ts`
+      updated for RN-9 and RN-11 (the recording module sees `on-start-height` at its start; a loop run again re-delivers
+      the cursor's `on-after-db-write`; `run()` resolves `{ kind: "signal" }`). Wrong variants (a scratch runner outside
+      the clone): 105 of 123 caught on the first run; of the 18 survivors one was equivalent (closing the module API
+      again in a refused startup, which only a stop reaches after the API opens, and the stop closes it; removed), one
+      was caught by `process-context.test.ts`, which the runner's file list left out, and 16 were gaps (the core
+      revisions out of order, a caller awaiting only `ended`, a lag within `followingThreshold`, the module API and the
+      database closed by `stop()` and before `closed`, configuration data held to CF-1, the control's backbone settings,
+      DB-10's committed versions, `on-start-db`'s height, `apiReadTimeoutMs`, a refusal releasing the database without
+      `stop()`, the logs of a failure and of a stop, `status().ended`, a misuse in a re-delivered `on-stop-height`, a
+      frozen entry), closed by tests; on the final sources 122 of 122 caught.
+      **Pending:** the `refused` and `halted` states, their codes and the process staying up after a refusal, A43, A44
+      and A46's fault tests (5.4); the slow-block watchdog around the loop's points (5.5); `umbradb run` calling
+      `startProcess` with `terminationSignal` (4.4); `core-chain` built with the runner instead of `onChecked`
+      (10.2); the node block source made from the process's `core` revision (10.3); the admin endpoints over
+      `status()` (8.x); the backup at the core's stop (15.x); the exports `startProcess`, `ProcessHandle` and
+      `ProcessState` (17.x); the required id in the manifest (18.4).
 - [ ] 5.4 Failure handling and the delivery guarantees after restart.
       **Acceptance:** A43, A44, A46.
 - [ ] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the

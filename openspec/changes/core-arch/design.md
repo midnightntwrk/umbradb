@@ -84,6 +84,29 @@ any path (`subscribe` → `subscribed`, `next`; `unsubscribe` → `complete`; `e
 behind is disconnected, so a module's `emit` from `on-after-db-write` never waits. Without `listen.api` nothing
 listens, and `on-start-api` and its checks still run.
 
+**The process** (task 5.3: `src/runner/process.ts`, the loop's start and stop in `loop.ts`). `startProcess` takes the
+build's declarations, the configuration (a file, CF-1, or its data) and a block source, returns a handle at once and
+starts up: the declarations validated, the configuration loaded and validated, the `core` entry's operational and
+secret fields taken from its latest revision of the build's version for the whole run (Q102: the database, the node —
+a block source given as a function is made from that revision —, `listen.api`, the timeouts, the opt-in, the core's
+stop), the database opened and its writer started, the cursor and the history read in one read and checked
+(`checkHistory`), the facts handed to the backbone (`onChecked`, until task 10.2 builds `core-chain`), the graph, the
+schema plan, the contexts with each part's revisions (a module's from its entries with their effective stops; every
+backbone part's the `core` entry's, each one's data fields with the process revision's other fields), `startDatabase`,
+the seal, `startModuleApi`, then the loop. A refusal closes what startup opened and rejects `started`. The loop fires
+`on-start-height` between `on-parse` and `on-compute` for the core's parts at S and the modules a segment of which
+(revisions continuing each other are one) starts at h, each with a read at h − 1, and `on-stop-height` after
+`on-after-db-write` for the modules a segment of which ends at h, in reverse order, then the core's parts at its stop,
+each with a read at h; at a restart it first re-delivers the cursor's `on-after-db-write` and `on-stop-height` (RN-11).
+It ends after the core's stop (with the cursor at or above it, processing nothing) and after the height before the
+upgrade boundary — the lowest start of a scheduled revision (RN-12) —, and the process enters `stopped`, ready, the
+module API still answering, with `upgrade-required` (entry, needed, build) at a boundary. The state is `starting`,
+then `syncing` or `following` by the lag (the head the loop last read minus the cursor) against `followingThreshold`,
+`stopped`, `stopping`; ready when `following` or `stopped`, or `syncing` within a set `readinessLag` (`refused` and
+`halted` are task 5.4's). SIGTERM (`terminationSignal`) or `stop()`: `stopping`, the loop's signal aborted and the
+loop awaited — the height in progress, its transaction included, finishes —, then the module API and the database
+closed. Log lines go through the configuration's redaction.
+
 ## 3. Block source and ingest
 
 ```ts

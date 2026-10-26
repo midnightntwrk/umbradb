@@ -316,3 +316,32 @@ RN-16 of the `core-arch` change).
   throws at your `emit`. Clients speak JSON messages over WebSocket on the API listener: `subscribe` (`id`, `name`,
   `args`), answered `subscribed`, then `next` with each value; `unsubscribe`, answered `complete`; `error` for what
   cannot be done.
+
+## Start and stop heights
+
+A module's entries say from which height to which height it runs; UmbraDB tells it when it starts and stops (RN-7,
+RN-9 to RN-12 of the `core-arch` change).
+
+- **Revisions that follow each other are one run.** `m.entry({ start: 1, config: { k: 1 } })` and `m.entry({ start: 5,
+  config: { k: 2 } })` give your callbacks `b.settings.k` 1 at heights 1 to 4 and 2 from 5, and the module does not
+  start again at 5. A revision with its own `stop` below the next one's start leaves a gap: the module stops at that
+  stop and starts again at the next revision.
+- **`on-start-height` comes before your first work.** It fires at your entry's start (its first height processed),
+  after `on-parse` and before `on-compute`, with `{ entryId, height }` and a read at h − 1; the core's first, then the
+  modules in graph order. It fires again after a restart if the start height had not committed: make it idempotent.
+- **`on-stop-height` comes after your last block.** It fires once the stop height has committed, after
+  `on-after-db-write`, with a read at h; the stopping modules in reverse graph order, then the core. Your callbacks
+  are not called after it, and your tables stay as they were at that height.
+- **Both after-commit points are delivered at least once.** At a restart with the cursor c, `on-after-db-write` for
+  c and `on-stop-height` for the entries stopping at c fire again, with c's block context and no `block` items,
+  before c + 1: a crash may have come before they completed. They are the callbacks of the build now running, even
+  when c belongs to an earlier version's revision. Make them idempotent: they write nothing, but a notification you
+  send from them may go out twice.
+- **The core's stop ends processing.** After it the process stays up in the state `stopped`, ready, serving reads at
+  that height; restarted at or above the stop it processes nothing and fires the core's `on-stop-height` again. The
+  core's stop is operational: raise or remove it at a restart and processing goes on.
+- **A new version stops the old build at its boundary.** A `versionEntry({ id, start, version })` naming a version the
+  build does not carry stops processing after `start − 1` (committed, its `on-after-db-write` and `on-stop-height`
+  done) with the condition `upgrade-required`, ready and serving reads there. Start the build that carries the
+  version, its `m.entry({ start, config })` in the configuration: it continues from `start`, and your module does not
+  start again there.
