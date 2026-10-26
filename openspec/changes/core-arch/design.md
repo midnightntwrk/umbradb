@@ -818,6 +818,29 @@ written (JSON `null` is a value). 0.9.5's `kind` column (SH-1 has one key) and `
 time, a non-immutable default) are gone; a value is written as JSON text by the database API's parameter mapping and
 read back by its lossless reader (DB-2), so integers beyond 2^53 stay exact.
 
+The height-versioned table (`src/helpers/height-versioned.ts`, task 6.2, from 0.9.5's TemporalKV, with block heights for
+its wall-clock times): `heightVersionedTable({ schema, table })` gives, as `migration(id)` (its SQL fixed), the current
+table `<schema>.<table> (key text PRIMARY KEY, value jsonb NOT NULL, from_height bigint NOT NULL) WITH (fillfactor =
+90)`, the history table `<table>_history (key text, from_height bigint, to_height bigint, value jsonb)` keyed by `(key,
+from_height)` with `CHECK (from_height < to_height)`, and the trigger `versions` (`BEFORE INSERT OR UPDATE OR DELETE
+… FOR EACH ROW`; its PL/pgSQL function `<table>_versions()` is the module role's, not `SECURITY DEFINER`) that fills
+the history (SH-2): `write(w, b, key, value)`, one upsert at `b.height` — the block write handle's own `height` is the
+cursor before the block, null for the first one, so the block is passed —, closes the key's current version at h and
+makes the value current from h; the value the key has already adds no version (jsonb equality; the row is left as it
+is, so nothing is captured); `delete(w, b, key)` closes it at h, in one `DELETE` that first sets the transaction-local
+`umbradb.delete_height` for the trigger, as a `DELETE` cannot hand a trigger a value; `read(handle, key, height?)`
+returns the version with `from_height ≤ h < to_height`, or without a height the current value. SH-3: the trigger
+refuses a write or delete of a key that already changed at h — its version starts at h, or its last closed version
+ends at h — with SQLSTATE `23505`, so the write rejects with `database-error`, a callback error that halts with
+`callback-error` (RN-8), and the failed statement leaves the block's transaction unable to commit even if the module
+catches the error; writes that change nothing (the value the key has, a delete of a key with none) are neither refused
+nor counted (task 6.2's question Q110). The trigger also refuses a change at a height below the key's versions
+(`23P01`, the code of 0.9.5's exclusion constraint), a `DELETE` not made by `delete` and an `UPDATE` changing a key
+(`0A000`). Gone from 0.9.5: `ns` and `scope`, the version counter, the wall-clock `updated_at`, `valid_from` and
+`valid_to`, the transaction id `updated_xact`, the `bigserial` id, and the `tstzrange` column with its gist exclusion
+constraint (which needed `btree_gist`); both tables get Q57's `CHECK`, change capture and the `TRUNCATE` guard as any
+module table.
+
 ## 11. Refusals and halts (IN-12)
 
 **Startup refuses** (state `refused`, live, not ready), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,

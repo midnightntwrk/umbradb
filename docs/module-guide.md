@@ -141,6 +141,42 @@ const cursors = cursorTable({ schema: "my_module", table: "cursors" });
 - **Read through any handle.** `read(handle, key)` through a read handle sees the height it reads; through your block
   write handle it sees the block's writes so far. Other modules may read your cursor table; only you write it.
 
+## Height-versioned tables
+
+A module that answers "what was this key's value at block h" — a token's metadata as of a height — can let the
+height-versioned-table helper define the tables (SH-2 and SH-3 of the `core-arch` change, owner decision Q30). Like the
+cursor table, it is a library, not a module: the tables are yours, in your schema, with your other tables.
+
+```ts
+const metadata = heightVersionedTable({ schema: "my_module", table: "metadata" });
+
+// In the declaration:
+//   migrations: [metadata.migration("001"), …your later migrations],
+//   points: {
+//     async "on-db-write"(p, b, w) { await metadata.write(w, b, "token-1", { name: "Night" }); },
+//     async "on-after-db-write"(p, b, read) { const then = await metadata.read(read, "token-1", b.height - 10n); … },
+//   },
+```
+
+- **Include its migration once, and keep it.** `migration(id)` creates `my_module.metadata (key, value, from_height)`
+  with each key's current version, `my_module.metadata_history (key, from_height, to_height, value)` with the closed
+  ones, each covering the heights `[from_height, to_height)`, and the trigger that fills the history; its SQL never
+  changes. The table's name has at most 54 bytes, so that the history table and the trigger's function fit
+  PostgreSQL's 63. If you declare a `table` item for them, list both tables.
+- **Write and delete in `on-db-write`, at the block you are given.** `write(w, b, key, value)` and `delete(w, b, key)`
+  take that callback's block write handle and block: the change is at `b.height`, where the key's current version
+  closes. Writing the value a key has already adds no version and changes nothing.
+- **Change each key at most once per block.** A second change of a key in one block — another value, or a write and a
+  delete — fails the block (`database-error`, SQLSTATE `23505`), and processing halts, even if your code catches the
+  error: the failed statement ended the block's transaction. Gather a block's changes of a key, then write it once.
+- **Write the tables only through the helper.** Its trigger refuses a `DELETE` of your own and an `UPDATE` changing a
+  key (SQLSTATE `0A000`), and a change at a height below the key's versions (`23P01`).
+- **Read through any handle.** `read(handle, key, height)` gives the value as of `height`, `undefined` if the key had
+  none then; `read(handle, key)` the current one. Through a read handle you see what the height it reads knows; through
+  your block write handle, also your block's changes, at its height. Values follow the cursor table's rules (JSON,
+  stored numbers integers within 64 bits, `bigint` beyond 2^53). Other modules may read your tables; only you write
+  them.
+
 ## Reading through `db`
 
 A module that requires the `process` item `db` gets a read-only database: it offers `read` and nothing else (CD-1 and

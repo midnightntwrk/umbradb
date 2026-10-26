@@ -21,7 +21,8 @@ import { Contexts } from "../runner/fixtures.js";
  * real `core-digest`, so that change capture runs on the helper's table as on any module table (DT-4) — and a block as
  * the runner writes one: one transaction of the database API, its `on-db-write` callbacks through the real block write
  * handles (`openBlockWrites`, DB-3), `core-block-commit`'s row first (CD-3), then one module's callback, then
- * `core-digest`'s.
+ * `core-digest`'s. The height-versioned table's tests (task 6.2, `height-versioned-harness.ts`) start the same way with
+ * their own modules, through {@link helperDatabase}.
  */
 
 /** The cursor table of `wallet-scan`, in its own schema. */
@@ -69,22 +70,22 @@ export function walletScan(points: ModuleDeclaration["points"] = {}): ModuleDecl
 /** `token-scan`: another module, with nothing of its own to write; it reads `wallet-scan`'s tables (DB-6). */
 export const TOKEN_SCAN: ModuleDeclaration = declaration("token-scan", { provides: [], migrations: [] });
 
-/** The parts of a cursor database, in RN-3's order. */
-const PARTS: readonly ModuleDeclaration[] = [CORE_BLOCK_COMMIT, walletScan(), TOKEN_SCAN, CORE_DIGEST];
-
 /** The role `wallet-scan` writes under (DB-6). */
 export const WALLET_SCAN_ROLE = "umbradb_m_wallet_scan";
 
 /** Options of one block. */
 export interface BlockOptions {
-  /** The part whose `on-db-write` runs `body` (default `wallet-scan`). */
+  /** The part whose `on-db-write` runs `body` (default: the database's main module, `wallet-scan` for a cursor one). */
   readonly part?: string;
   /** DB-3's report of a write handle used after its callback ended. */
   readonly onClosedUse?: (error: UmbraError) => void;
 }
 
-/** A started cursor database, and blocks on it. */
-export interface CursorDatabase {
+/**
+ * A started database of the storage helpers' tests (the cursor table's, task 6.1, and the height-versioned table's,
+ * task 6.2), and blocks on it.
+ */
+export interface HelperDatabase {
   readonly db: Database;
   readonly plan: SchemaPlan;
   /** The test's own access to the database, outside the API (`backends.ts`). */
@@ -101,6 +102,9 @@ export interface CursorDatabase {
   block(body: (w: BlockWriteHandle, b: BlockContext) => Promise<void>, options?: BlockOptions): Promise<void>;
 }
 
+/** A started cursor database. */
+export type CursorDatabase = HelperDatabase;
+
 /** A fresh database on `backend`, opened through the API with the cursor's committed height, nothing started. */
 export async function freshDatabase(backend: TestBackend): Promise<TestDatabase> {
   return backend.database("SELECT 1", cursorHeight);
@@ -108,16 +112,29 @@ export async function freshDatabase(backend: TestBackend): Promise<TestDatabase>
 
 /** A database on `backend` started with the cursor database's parts, as the runner starts one. */
 export async function cursorDatabase(backend: TestBackend): Promise<CursorDatabase> {
+  return helperDatabase(backend, [walletScan(), TOKEN_SCAN]);
+}
+
+/**
+ * A database on `backend` started, as the runner starts one, with the parts `core-block-commit`, `modules` and the real
+ * `core-digest`, in RN-3's order; its blocks run the first of `modules` unless told otherwise.
+ */
+export async function helperDatabase(
+  backend: TestBackend,
+  modules: readonly [ModuleDeclaration, ...ModuleDeclaration[]],
+): Promise<HelperDatabase> {
+  const parts: readonly ModuleDeclaration[] = [CORE_BLOCK_COMMIT, ...modules, CORE_DIGEST];
   const outside = await freshDatabase(backend);
   const { db } = outside;
   const contexts = new Contexts();
-  const plan = schemaPlan(PARTS);
+  const plan = schemaPlan(parts);
   await startDatabase(db, {
     plan,
-    parts: PARTS.map((part) => migrationPart(part, contexts.of(part.id))),
+    parts: parts.map((part) => migrationPart(part, contexts.of(part.id))),
     committedVersions: new Map(),
     handles: { height: null },
   });
+  const main = modules[0].id;
   const [row] = await db.transaction((tx) => tx.query("SELECT current_user AS login"));
   const commitRow = CORE_BLOCK_COMMIT.points["on-db-write"] as PointCallbacks["on-db-write"];
   const digest = CORE_DIGEST.points["on-db-write"] as PointCallbacks["on-db-write"];
@@ -138,7 +155,7 @@ export async function cursorDatabase(backend: TestBackend): Promise<CursorDataba
         settings: Object.freeze({}),
         active: () => true,
       });
-      const part = options.part ?? "wallet-scan";
+      const part = options.part ?? main;
       await db.transaction(async (tx) => {
         const writes = openBlockWrites(tx, plan, {
           height: committed,

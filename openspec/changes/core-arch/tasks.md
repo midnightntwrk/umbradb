@@ -1163,8 +1163,70 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the `**/postgres/watermarks.ts` floor, its mutation target and the re-binding of W1/P9 in
       `Formal/STORAGE_ALGEBRA.md` and `ROADMAP.md` (17.2, with Q108 for `test/postgres/watermarks.test.ts`); the
       mutation target `src/helpers/cursor-table.ts` (17.2); the height-versioned table, A60 and A61 (6.2).
-- [ ] 6.2 Height-versioned table (refactored from `src/postgres/temporal-kv.ts`).
+- [x] 6.2 Height-versioned table (refactored from `src/postgres/temporal-kv.ts`).
       **Acceptance:** A60, A61.
+      **Done (2026-10-26):** `src/helpers/height-versioned.ts` (design §1, §10, §12; SH-2, SH-3; Q27, Q30), in the
+      cursor table's shape: `heightVersionedTable({ schema, table })`, a library function — no module, no point, no
+      connection or transaction of its own; the file imports types only, which a test checks — giving a frozen value
+      with `schema`, `table`, `historyTable` (`<table>_history`), `migration(id)` (one fixed SQL text whose bytes and
+      SHA-256 a test pins: the current table `<table> (key text PRIMARY KEY, value jsonb NOT NULL, from_height bigint
+      NOT NULL) WITH (fillfactor = 90)`, the history table `<table>_history (key, from_height, to_height, value)` keyed
+      by `(key, from_height)` with `CHECK (from_height < to_height)`, and the trigger `versions`, `BEFORE INSERT OR
+      UPDATE OR DELETE … FOR EACH ROW`, whose PL/pgSQL function `<table>_versions()` is the module role's and fills the
+      history), `write(w, b, key, value)` and `delete(w, b, key)` through the block write handle of `on-db-write` at
+      `b.height` (the block is passed: the handle's own `height` is the cursor before the block, null for the first),
+      and `read(handle, key, height?)` through any handle's `query` (as of a height: the version with `from_height ≤ h
+      < to_height`; without one, the current value; `undefined` for none). SH-2: a write closes the key's current
+      version at h and makes the value current from h; the value the key has adds no version (jsonb equality; the row
+      is left untouched, so nothing is captured or digested); a delete closes it at h with no new one, in one `DELETE`
+      that first sets the transaction-local `umbradb.delete_height` for the trigger. SH-3: the trigger refuses a write
+      or delete of a key that already changed at h (its version starts at h, or its last closed version ends at h) with
+      SQLSTATE `23505`, so the write rejects with `database-error` (`details.sqlstate`, `schema`, `table`), a callback
+      error that halts the loop at that height (`HeightFailure`, the module, `on-db-write`); a module catching it cannot
+      commit the block (its next statement fails with `25P02`); writes that change nothing (the value a key has, a
+      delete of a key with none) are neither refused nor counted (Q110, shipped A). The trigger also refuses a height
+      below the key's versions (`23P01`) and a `DELETE` or key change the helper did not make (`0A000`). Table names at
+      most 54 bytes (so that `<table>_versions` and `<table>_history` fit 63), schemas 63, else a `TypeError`; the name
+      rule is the cursor table's but not shared (a shared file would be a value import, which both helpers' types-only
+      rule forbids). From 0.9.5's TemporalKV: the trigger-filled history, the half-open ranges (T5, now heights), one
+      write per key per block (its per-transaction rule, `UB001`, now SH-3's `23505`), `fillfactor = 90` and no index on
+      the current `value` kept; `ns`/`scope`, the version counter and CAS, the wall-clock times, `updated_xact`, the
+      `bigserial` id, the `tstzrange` column and its `btree_gist` exclusion constraint gone. 0.9.5's `PgTemporalKV`,
+      `src/interfaces/temporal-kv.ts`, migrations `001_temporal_kv.ts` and `005_kv_current_fillfactor.ts` and their
+      tests are unchanged, for the 0.9.5 code that still uses them (`src/index.ts`, the benchmarks, the other 0.9.5
+      interfaces' shared validators), until 17.2. Tests (PostgreSQL 18.6 and PGlite 0.5.10, through the real block write
+      handles and the real `core-digest`): `test/helpers/height-versioned.property.test.ts` (A60, seed 20261026: 40
+      sequences of up to 10 blocks, each changing up to 4 of 5 keys once — writes, same-value writes, deletes — some
+      rolling back; after each block, every key's stored versions checked for overlaps, empty versions and gaps where
+      nothing was deleted, and against the model, and the key read at every height of the sequence; 65 versions closed
+      by writes, 23 by deletes, 14 same-value writes, 35 deletes of keys with none, 76 rolled-back changes, 14 gaps,
+      4,540 height reads per backend); `test/helpers/height-versioned.test.ts` (the helper alone: the pinned SQL, frozen
+      values, name refusals, handle types, types-only imports; on both backends: both tables, the trigger and its
+      function as made, SH-2's scenario through the finalized loop (A at 10, B at 20, deleted at 30, read at heights 0
+      to 40), reads through the block write handle, same-value writes (members reordered, `1` as `1n`; the row's `xmin`
+      unchanged, no digest), JSON null, lossless values, Q57's refusal, `invalid-parameter`, A61 — a new key twice, two
+      values, a write then a delete, a delete then a write, after several versions, caught or not, through the
+      finalized loop — and its control, what SH-3 does not refuse (Q110), the misuse refusals, `42501` for another
+      module, `handle-closed`, digests of both tables per block, DT-2's byte order and the contents hash, a rolled-back
+      block); `test/helpers/height-versioned-harness.ts`; `test/helpers/cursor-harness.ts` generalized
+      (`helperDatabase`). Seen failing first: `tsc` exit 2 (12 errors: `Cannot find module
+      '../../src/helpers/height-versioned.js'` three times and the type tests that follow); both suites failed to load
+      (`Cannot find module`). Committed controls: a table closing versions one height late fails A60 ("the versions
+      [148, 150) and [149, …) overlap"), one closing them a height early fails it ("a gap between [152, 152) and [153,
+      …), where nothing was deleted"), each at its second run on both backends; a table letting a second change through
+      (SH-3's refusal left out) fails A61's check; the cursor table still lets it through (6.1's test unchanged).
+      Wrong variants (a scratch runner outside the clone, the SQL pin test left out): 83 (the tables 8, the trigger 37,
+      reads 13, writes and deletes 9, names and the returned value 16), 78 caught (1 by the type check alone), the 5
+      survivors equivalent — the value compared as jsonb text instead of by jsonb equality (equal for every value the
+      helper can send), the closed-version read without `LIMIT 1` and the read taking its last row (versions never
+      overlap, so at most one row), and the write and the delete sent through `query` instead of `execute`; the first
+      run left 2 more, both closed by new tests (the trigger reading a key's first closed version instead of its last; a
+      same-value write rewriting the row with its own contents). Design §10 says what was built; the module guide has
+      "Height-versioned tables". Question Q110 raised (not blocking).
+      **Pending:** `heightVersionedTable` in `src/index.ts` (17.3); `PgTemporalKV`, its interface, its two migrations,
+      its two test files, the required id `property.p3.replay-fold-equivalence`, the `**/postgres/temporal-kv.ts` floor,
+      its mutation target and benchmark workload, and the restatement of T5 for heights in `Formal/STORAGE_ALGEBRA.md`
+      (17.2); the mutation target `src/helpers/height-versioned.ts` (17.2); Q110's answer (SH-3 and A61's wording).
 
 ## 7. Digests
 
