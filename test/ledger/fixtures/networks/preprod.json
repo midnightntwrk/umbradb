@@ -1,0 +1,764 @@
+{
+  "description": "Answers of the node wss://rpc.preprod.midnight.network to the calls below, read by tools/tape/main.ts boundaries on 2026-10-26 (task 0.3): block 0's hash, header and runtime version; and for each runtime upgrade, the block hashes of U - 1, U and F = U + 1, the headers of U and F (whose MNSV digests name the old and the new runtime) and the runtime versions at U - 1 and U (the state's runtime before and after the upgrade). The upgrades were found by reading state_getRuntimeVersion every step blocks up to the finalized head and bisecting each change.",
+  "recorded": "2026-10-26",
+  "node": "wss://rpc.preprod.midnight.network",
+  "nodeVersion": "1.0.400-c338b9ac",
+  "genesis": {
+    "hash": "0xdf831b09a8baa92badf47762ce5ac439b7e47e3ed3d39600cfdd44fad552361b",
+    "specVersion": 22000
+  },
+  "head": {
+    "height": 3151040,
+    "hash": "0x71b4e22f121fb15921c1651f1060a3f0bf93301a3b8d872aa4bf84e4a426334d"
+  },
+  "boundaries": [
+    {
+      "u": {
+        "height": 1568257,
+        "hash": "0x482d3452c30811f10098602352a8d2d69d69fbb42a19a003c240be1b0625b39b",
+        "specVersion": 22000
+      },
+      "f": {
+        "height": 1568258,
+        "hash": "0x76ebc93eaaeab7b99b3125ef64cc635e16f23a9773c132f0726a388ca52eb48b",
+        "specVersion": 1000000
+      }
+    },
+    {
+      "u": {
+        "height": 2648468,
+        "hash": "0x6f6c0eae18c293898344964bdd83c6a30381ca5aa391ece74c4cbb363227229a",
+        "specVersion": 1000000
+      },
+      "f": {
+        "height": 2648469,
+        "hash": "0xbe07360de1b8cb67817b8a4e606622d4fa85e34ca5b0d9eb5126dd75ce04c471",
+        "specVersion": 1000300
+      }
+    }
+  ],
+  "calls": [
+    {
+      "method": "chain_getBlockHash",
+      "params": [
+        0
+      ],
+      "result": "0xdf831b09a8baa92badf47762ce5ac439b7e47e3ed3d39600cfdd44fad552361b"
+    },
+    {
+      "method": "chain_getHeader",
+      "params": [
+        "0xdf831b09a8baa92badf47762ce5ac439b7e47e3ed3d39600cfdd44fad552361b"
+      ],
+      "result": {
+        "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "number": "0x0",
+        "stateRoot": "0xf65155ad0b8861db6d0398d84bb6943b75fe7ea37b9db6cf428410f84846d0e9",
+        "extrinsicsRoot": "0x95d634559031c845aa0def324151757cf9c52bf32747164d84e612901f4c474b",
+        "digest": {
+          "logs": [
+            "0x044d4e535610f0550000"
+          ]
+        }
+      }
+    },
+    {
+      "method": "state_getRuntimeVersion",
+      "params": [
+        "0xdf831b09a8baa92badf47762ce5ac439b7e47e3ed3d39600cfdd44fad552361b"
+      ],
+      "result": {
+        "specName": "midnight",
+        "implName": "midnight",
+        "authoringVersion": 1,
+        "specVersion": 22000,
+        "implVersion": 0,
+        "apis": [
+          [
+            "0xf78b278be53f454c",
+            2
+          ],
+          [
+            "0x279a32908e96410d",
+            1
+          ],
+          [
+            "0xbc9d89904f5b923f",
+            1
+          ],
+          [
+            "0xdd718d5cc53262d4",
+            1
+          ],
+          [
+            "0xa897625b130086bd",
+            1
+          ],
+          [
+            "0xfbc577b9d747efd6",
+            1
+          ],
+          [
+            "0xdf6acb689907609b",
+            5
+          ],
+          [
+            "0x49eaaf1b548a0cb0",
+            5
+          ],
+          [
+            "0x393b2599ea57bca2",
+            1
+          ],
+          [
+            "0xa0c89371ec56244c",
+            1
+          ],
+          [
+            "0xab3c0572291feb8b",
+            1
+          ],
+          [
+            "0x2a5e924655399e60",
+            1
+          ],
+          [
+            "0x37e397fc7c91f5e4",
+            2
+          ],
+          [
+            "0xc3c222f40af6f42b",
+            1
+          ],
+          [
+            "0x22a0eaa81c05f0d3",
+            1
+          ],
+          [
+            "0x0093e736d7484c30",
+            1
+          ],
+          [
+            "0xd9bc84ac3bfb8a0c",
+            1
+          ],
+          [
+            "0xd2bc9897eed08f15",
+            3
+          ],
+          [
+            "0x40fe3ad401f8959a",
+            6
+          ],
+          [
+            "0xed99c5acb25eedf5",
+            3
+          ],
+          [
+            "0xc7805fd5ec973a86",
+            1
+          ],
+          [
+            "0x19dba14093498f16",
+            2
+          ],
+          [
+            "0x7d699da8a672e867",
+            5
+          ],
+          [
+            "0x91d5df18b0d2cf58",
+            2
+          ]
+        ],
+        "transactionVersion": 2,
+        "systemVersion": 1,
+        "stateVersion": 1
+      }
+    },
+    {
+      "method": "chain_getBlockHash",
+      "params": [
+        1568256
+      ],
+      "result": "0x569f1a13ce2aece39bd17e4a9313122376fb2d520b9c58b2f78c87eec96b1553"
+    },
+    {
+      "method": "chain_getBlockHash",
+      "params": [
+        1568257
+      ],
+      "result": "0x482d3452c30811f10098602352a8d2d69d69fbb42a19a003c240be1b0625b39b"
+    },
+    {
+      "method": "chain_getBlockHash",
+      "params": [
+        1568258
+      ],
+      "result": "0x76ebc93eaaeab7b99b3125ef64cc635e16f23a9773c132f0726a388ca52eb48b"
+    },
+    {
+      "method": "chain_getHeader",
+      "params": [
+        "0x482d3452c30811f10098602352a8d2d69d69fbb42a19a003c240be1b0625b39b"
+      ],
+      "result": {
+        "parentHash": "0x569f1a13ce2aece39bd17e4a9313122376fb2d520b9c58b2f78c87eec96b1553",
+        "number": "0x17ee01",
+        "stateRoot": "0x47da74dd6447c004895b249ad966f35c760fedb4624ae0634f7bc8fb11d2d968",
+        "extrinsicsRoot": "0x52b377aeb7de37df1408412f38d43b184dfb32e0cd03dd5bde9a56b27c6423f2",
+        "digest": {
+          "logs": [
+            "0x06617572612009bab71100000000",
+            "0x066d63736880349eb847e89afb212ca289c12448cbaf52d71cf2b014fe4e49838f3973fba3f0",
+            "0x044d4e535610f0550000",
+            "0x0442454546840343fe6dec3023049e31253a5fabbf8e5837f7057369fd0e8ffdda85c8bce9a312",
+            "0x08",
+            "0x0561757261010108fa3f039e1248a3fc93e59cc47180d9645740eca1bd419b99d09e483c8d17476cc010f56ff38078a269afe915b69d685ee9cad2b9d192959d2780b7d34e928a"
+          ]
+        }
+      }
+    },
+    {
+      "method": "chain_getHeader",
+      "params": [
+        "0x76ebc93eaaeab7b99b3125ef64cc635e16f23a9773c132f0726a388ca52eb48b"
+      ],
+      "result": {
+        "parentHash": "0x482d3452c30811f10098602352a8d2d69d69fbb42a19a003c240be1b0625b39b",
+        "number": "0x17ee02",
+        "stateRoot": "0xb1f915d4928c8073c3e690b3e706ce6899f0700d9911bb86dd04ef31dc1431e7",
+        "extrinsicsRoot": "0xdbbbfb5913c2605b8bb8ec6b314e260946a4c2e81ed05680119c673ce43528a5",
+        "digest": {
+          "logs": [
+            "0x0661757261200abab71100000000",
+            "0x066d63736880349eb847e89afb212ca289c12448cbaf52d71cf2b014fe4e49838f3973fba3f0",
+            "0x044d4e53561040420f00",
+            "0x0442454546840311dfa2d9038b66457d5295336fb2ec34a0913fe40d6dccb947f3fab5ffea77fa",
+            "0x0561757261010194f5edacb0c562075e897b26783e187bdb99d4b4239107fe1479f1c3b3a4086768ecacb66400ef46b20177e21ec4de195909c5bda7b595c031c8893cfae07f82"
+          ]
+        }
+      }
+    },
+    {
+      "method": "state_getRuntimeVersion",
+      "params": [
+        "0x569f1a13ce2aece39bd17e4a9313122376fb2d520b9c58b2f78c87eec96b1553"
+      ],
+      "result": {
+        "specName": "midnight",
+        "implName": "midnight",
+        "authoringVersion": 1,
+        "specVersion": 22000,
+        "implVersion": 0,
+        "apis": [
+          [
+            "0xf78b278be53f454c",
+            2
+          ],
+          [
+            "0x279a32908e96410d",
+            1
+          ],
+          [
+            "0xbc9d89904f5b923f",
+            1
+          ],
+          [
+            "0xdd718d5cc53262d4",
+            1
+          ],
+          [
+            "0xa897625b130086bd",
+            1
+          ],
+          [
+            "0xfbc577b9d747efd6",
+            1
+          ],
+          [
+            "0xdf6acb689907609b",
+            5
+          ],
+          [
+            "0x49eaaf1b548a0cb0",
+            5
+          ],
+          [
+            "0x393b2599ea57bca2",
+            1
+          ],
+          [
+            "0xa0c89371ec56244c",
+            1
+          ],
+          [
+            "0xab3c0572291feb8b",
+            1
+          ],
+          [
+            "0x2a5e924655399e60",
+            1
+          ],
+          [
+            "0x37e397fc7c91f5e4",
+            2
+          ],
+          [
+            "0xc3c222f40af6f42b",
+            1
+          ],
+          [
+            "0x22a0eaa81c05f0d3",
+            1
+          ],
+          [
+            "0x0093e736d7484c30",
+            1
+          ],
+          [
+            "0xd9bc84ac3bfb8a0c",
+            1
+          ],
+          [
+            "0xd2bc9897eed08f15",
+            3
+          ],
+          [
+            "0x40fe3ad401f8959a",
+            6
+          ],
+          [
+            "0xed99c5acb25eedf5",
+            3
+          ],
+          [
+            "0xc7805fd5ec973a86",
+            1
+          ],
+          [
+            "0x19dba14093498f16",
+            2
+          ],
+          [
+            "0x7d699da8a672e867",
+            5
+          ],
+          [
+            "0x91d5df18b0d2cf58",
+            2
+          ]
+        ],
+        "transactionVersion": 2,
+        "systemVersion": 1,
+        "stateVersion": 1
+      }
+    },
+    {
+      "method": "state_getRuntimeVersion",
+      "params": [
+        "0x482d3452c30811f10098602352a8d2d69d69fbb42a19a003c240be1b0625b39b"
+      ],
+      "result": {
+        "specName": "midnight",
+        "implName": "midnight",
+        "authoringVersion": 1,
+        "specVersion": 1000000,
+        "implVersion": 0,
+        "apis": [
+          [
+            "0xa0c89371ec56244c",
+            1
+          ],
+          [
+            "0xf78b278be53f454c",
+            2
+          ],
+          [
+            "0x91d5df18b0d2cf58",
+            3
+          ],
+          [
+            "0xd9bc84ac3bfb8a0c",
+            1
+          ],
+          [
+            "0x7d699da8a672e867",
+            5
+          ],
+          [
+            "0x393b2599ea57bca2",
+            1
+          ],
+          [
+            "0xbc9d89904f5b923f",
+            1
+          ],
+          [
+            "0x49eaaf1b548a0cb0",
+            6
+          ],
+          [
+            "0x40fe3ad401f8959a",
+            6
+          ],
+          [
+            "0x2a5e924655399e60",
+            1
+          ],
+          [
+            "0xdd718d5cc53262d4",
+            1
+          ],
+          [
+            "0xc3c222f40af6f42b",
+            1
+          ],
+          [
+            "0xc7805fd5ec973a86",
+            1
+          ],
+          [
+            "0x279a32908e96410d",
+            1
+          ],
+          [
+            "0xfbc577b9d747efd6",
+            1
+          ],
+          [
+            "0x22a0eaa81c05f0d3",
+            1
+          ],
+          [
+            "0x19dba14093498f16",
+            2
+          ],
+          [
+            "0x0093e736d7484c30",
+            1
+          ],
+          [
+            "0x37e397fc7c91f5e4",
+            2
+          ],
+          [
+            "0xd2bc9897eed08f15",
+            3
+          ],
+          [
+            "0xab3c0572291feb8b",
+            2
+          ],
+          [
+            "0xa897625b130086bd",
+            1
+          ],
+          [
+            "0xed99c5acb25eedf5",
+            3
+          ],
+          [
+            "0xdf6acb689907609b",
+            5
+          ]
+        ],
+        "transactionVersion": 3,
+        "systemVersion": 1,
+        "stateVersion": 1
+      }
+    },
+    {
+      "method": "chain_getBlockHash",
+      "params": [
+        2648467
+      ],
+      "result": "0x3a482d7f138f8a6e3cbccca14a107cb640995d5cb08082552750163ff1c559ea"
+    },
+    {
+      "method": "chain_getBlockHash",
+      "params": [
+        2648468
+      ],
+      "result": "0x6f6c0eae18c293898344964bdd83c6a30381ca5aa391ece74c4cbb363227229a"
+    },
+    {
+      "method": "chain_getBlockHash",
+      "params": [
+        2648469
+      ],
+      "result": "0xbe07360de1b8cb67817b8a4e606622d4fa85e34ca5b0d9eb5126dd75ce04c471"
+    },
+    {
+      "method": "chain_getHeader",
+      "params": [
+        "0x6f6c0eae18c293898344964bdd83c6a30381ca5aa391ece74c4cbb363227229a"
+      ],
+      "result": {
+        "parentHash": "0x3a482d7f138f8a6e3cbccca14a107cb640995d5cb08082552750163ff1c559ea",
+        "number": "0x286994",
+        "stateRoot": "0x47b6c27e1a046d0dc9238764157f7159e730c9c539280cf4a636dd78cd3a47f7",
+        "extrinsicsRoot": "0x19d60e272ba18388245e110e72c07a3216685885f4821d810a147eaa64835cb4",
+        "digest": {
+          "logs": [
+            "0x066175726120e636c81100000000",
+            "0x066d63736880251d90cd1d53d928df74dfeeb87d62b488951bbbdf3e07c4a0b7a7d46ef4cc37",
+            "0x044d4e53561040420f00",
+            "0x04424545468403277eaa808a626d6fc18c94b2822518c1731373d493ee5e8811254848d3680ea0",
+            "0x08",
+            "0x056175726101016a7ddbf757ac707afed3da10f0b4d00d7a42d72aeaf99a3ae23fb3bd27027e093e51a5c005e996a5010b92bf1d817bbb31e25e611f19c0baed3b8d458c1e7387"
+          ]
+        }
+      }
+    },
+    {
+      "method": "chain_getHeader",
+      "params": [
+        "0xbe07360de1b8cb67817b8a4e606622d4fa85e34ca5b0d9eb5126dd75ce04c471"
+      ],
+      "result": {
+        "parentHash": "0x6f6c0eae18c293898344964bdd83c6a30381ca5aa391ece74c4cbb363227229a",
+        "number": "0x286995",
+        "stateRoot": "0xa527dfe7a74bb6cef3a3698275278387668bdd05f39838e63de18472dad1dc2f",
+        "extrinsicsRoot": "0x4a43e6814703fd9c5469dbbc695689b3600caf9d302ce34ac81ad83226f2c025",
+        "digest": {
+          "logs": [
+            "0x066175726120e736c81100000000",
+            "0x066d63736880251d90cd1d53d928df74dfeeb87d62b488951bbbdf3e07c4a0b7a7d46ef4cc37",
+            "0x044d4e5356106c430f00",
+            "0x04424545468403e8d4ee91636e9c64062f476cc9ea038d11209f8956f8054b917e558fa7989af7",
+            "0x0561757261010196d23fdb9ebb79afb11f7db675dc6d43ade60d0281e31ff8f10ed64dda25c30506599f091f67f588231b5a9023b3ac8adb1830866cbc0bfd01a26b28da7e5f8f"
+          ]
+        }
+      }
+    },
+    {
+      "method": "state_getRuntimeVersion",
+      "params": [
+        "0x3a482d7f138f8a6e3cbccca14a107cb640995d5cb08082552750163ff1c559ea"
+      ],
+      "result": {
+        "specName": "midnight",
+        "implName": "midnight",
+        "authoringVersion": 1,
+        "specVersion": 1000000,
+        "implVersion": 0,
+        "apis": [
+          [
+            "0xa0c89371ec56244c",
+            1
+          ],
+          [
+            "0xf78b278be53f454c",
+            2
+          ],
+          [
+            "0x91d5df18b0d2cf58",
+            3
+          ],
+          [
+            "0xd9bc84ac3bfb8a0c",
+            1
+          ],
+          [
+            "0x7d699da8a672e867",
+            5
+          ],
+          [
+            "0x393b2599ea57bca2",
+            1
+          ],
+          [
+            "0xbc9d89904f5b923f",
+            1
+          ],
+          [
+            "0x49eaaf1b548a0cb0",
+            6
+          ],
+          [
+            "0x40fe3ad401f8959a",
+            6
+          ],
+          [
+            "0x2a5e924655399e60",
+            1
+          ],
+          [
+            "0xdd718d5cc53262d4",
+            1
+          ],
+          [
+            "0xc3c222f40af6f42b",
+            1
+          ],
+          [
+            "0xc7805fd5ec973a86",
+            1
+          ],
+          [
+            "0x279a32908e96410d",
+            1
+          ],
+          [
+            "0xfbc577b9d747efd6",
+            1
+          ],
+          [
+            "0x22a0eaa81c05f0d3",
+            1
+          ],
+          [
+            "0x19dba14093498f16",
+            2
+          ],
+          [
+            "0x0093e736d7484c30",
+            1
+          ],
+          [
+            "0x37e397fc7c91f5e4",
+            2
+          ],
+          [
+            "0xd2bc9897eed08f15",
+            3
+          ],
+          [
+            "0xab3c0572291feb8b",
+            2
+          ],
+          [
+            "0xa897625b130086bd",
+            1
+          ],
+          [
+            "0xed99c5acb25eedf5",
+            3
+          ],
+          [
+            "0xdf6acb689907609b",
+            5
+          ]
+        ],
+        "transactionVersion": 3,
+        "systemVersion": 1,
+        "stateVersion": 1
+      }
+    },
+    {
+      "method": "state_getRuntimeVersion",
+      "params": [
+        "0x6f6c0eae18c293898344964bdd83c6a30381ca5aa391ece74c4cbb363227229a"
+      ],
+      "result": {
+        "specName": "midnight",
+        "implName": "midnight",
+        "authoringVersion": 1,
+        "specVersion": 1000300,
+        "implVersion": 0,
+        "apis": [
+          [
+            "0xa0c89371ec56244c",
+            1
+          ],
+          [
+            "0xf78b278be53f454c",
+            2
+          ],
+          [
+            "0x91d5df18b0d2cf58",
+            3
+          ],
+          [
+            "0xd9bc84ac3bfb8a0c",
+            1
+          ],
+          [
+            "0x7d699da8a672e867",
+            5
+          ],
+          [
+            "0x393b2599ea57bca2",
+            1
+          ],
+          [
+            "0xbc9d89904f5b923f",
+            1
+          ],
+          [
+            "0x49eaaf1b548a0cb0",
+            6
+          ],
+          [
+            "0x40fe3ad401f8959a",
+            6
+          ],
+          [
+            "0x2a5e924655399e60",
+            1
+          ],
+          [
+            "0xdd718d5cc53262d4",
+            1
+          ],
+          [
+            "0xc3c222f40af6f42b",
+            1
+          ],
+          [
+            "0xc7805fd5ec973a86",
+            1
+          ],
+          [
+            "0x279a32908e96410d",
+            1
+          ],
+          [
+            "0xfbc577b9d747efd6",
+            1
+          ],
+          [
+            "0x22a0eaa81c05f0d3",
+            1
+          ],
+          [
+            "0x19dba14093498f16",
+            2
+          ],
+          [
+            "0x0093e736d7484c30",
+            1
+          ],
+          [
+            "0x37e397fc7c91f5e4",
+            2
+          ],
+          [
+            "0xd2bc9897eed08f15",
+            3
+          ],
+          [
+            "0xab3c0572291feb8b",
+            2
+          ],
+          [
+            "0xa897625b130086bd",
+            1
+          ],
+          [
+            "0xed99c5acb25eedf5",
+            3
+          ],
+          [
+            "0xdf6acb689907609b",
+            5
+          ]
+        ],
+        "transactionVersion": 3,
+        "systemVersion": 3,
+        "stateVersion": 3
+      }
+    }
+  ]
+}

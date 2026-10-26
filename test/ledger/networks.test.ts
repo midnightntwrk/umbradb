@@ -22,7 +22,8 @@ import { hashAnswer, headerAnswer } from "../../src/node/decode.js";
  *   hashes; the format makes a pin of nothing else (a pin is a boundary's F). Each source's record exists and holds the
  *   hashes it vouches for.
  * - **A94's last clause:** each built-in pin passes the header its boundary's record holds, through the node client's
- *   decoder. The tables hold no boundary until task 0.3 reads them from the nodes, so this runs over none today.
+ *   decoder — the boundaries task 0.3 read from the nodes (`test/ledger/fixtures/networks/*.json`), the mainnet pin at
+ *   1,774,492 among them.
  * - **The format:** `networksFileProblems` refuses every way a file can break it, one rule per row below.
  */
 
@@ -52,21 +53,49 @@ describe("the committed file (LG-3)", () => {
     expect(builtInLedgerTable("constructor")).toBeNull();
   });
 
-  it("keys mainnet and preview by the genesis hash their nodes reported (task 0.2's node-roots.json)", () => {
+  it("keys each network by the genesis hash and runtime its node reported (task 0.3's records)", () => {
+    // Read by task 0.3 (2026-10-26) from each network's node with tools/tape/main.ts boundaries; the record holds the
+    // node's answers. Stagenet's genesis is added with its tape (task 0.3's second commit).
+    const read = (network: string) =>
+      JSON.parse(readFileSync(repository(`test/ledger/fixtures/networks/${network}.json`), "utf8")) as {
+        node: string;
+        recorded: string;
+        genesis: { hash: string; specVersion: number };
+      };
+    for (const network of ["mainnet", "preprod", "preview"] as const) {
+      const record = read(network);
+      expect(builtInNetwork(network)?.genesis, network).toEqual({
+        hash: record.genesis.hash,
+        specVersion: record.genesis.specVersion,
+        source: { node: record.node, read: record.recorded, record: `test/ledger/fixtures/networks/${network}.json` },
+      });
+      expect(record.node, network).toBe(`wss://rpc.${network}.midnight.network`);
+    }
+    expect(BUILT_IN_NETWORKS.map((entry) => entry.genesis?.specVersion ?? null)).toEqual([22_000, 22_000, 1_000_000, null]);
+    // The hashes task 0.2 read on 2026-10-23 for mainnet and preview (node-roots.json) are the same blocks.
     const roots = JSON.parse(readFileSync(repository("test/ledger/fixtures/genesis/node-roots.json"), "utf8")) as {
       states: { network: string; node: string; block0: string }[];
     };
     for (const network of ["mainnet", "preview"] as const) {
-      const recorded = roots.states.find((state) => state.network === network);
-      expect(builtInNetwork(network)?.genesis, network).toMatchObject({
-        hash: recorded?.block0,
-        source: { node: recorded?.node, record: "test/ledger/fixtures/genesis/node-roots.json" },
-      });
+      expect(builtInNetwork(network)?.genesis?.hash, network).toBe(roots.states.find((state) => state.network === network)?.block0);
     }
-    // Not read from the nodes yet (task 0.3): no genesis for preprod and stagenet, and no runtime at genesis anywhere.
-    expect(builtInNetwork("preprod")?.genesis).toBeNull();
-    expect(builtInNetwork("stagenet")?.genesis).toBeNull();
-    expect(BUILT_IN_NETWORKS.map((entry) => entry.genesis?.specVersion ?? null)).toEqual([null, null, null, null]);
+  });
+
+  it("pins every boundary each node reported, the mainnet 1.0 pin at F = 1,774,492 among them (LG-2, LG-3)", () => {
+    const pins = (network: string) => builtInLedgerTable(network)?.pins.map((pin) => [pin.height, pin.specVersion]);
+    expect(pins("mainnet")).toEqual([
+      [1_774_492, 1_000_000],
+      [2_738_211, 1_000_300],
+    ]);
+    expect(builtInLedgerTable("mainnet")?.pins[0]?.hash).toBe(
+      "0x380266656e11208adbcaa5ab62a6beb9c09ef86de1cb886eac721099177a1a0b",
+    );
+    expect(pins("preprod")).toEqual([
+      [1_568_258, 1_000_000],
+      [2_648_469, 1_000_300],
+    ]);
+    expect(pins("preview")).toEqual([[1_074_621, 1_000_300]]);
+    expect(pins("stagenet")).toEqual([]);
   });
 
   it("is frozen", () => {

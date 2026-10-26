@@ -1,17 +1,17 @@
 {
   "format": "umbradb-ledger-networks",
   "version": 1,
-  "about": "The built-in ledger version tables (openspec/changes/core-arch/specs/ledger/spec.md LG-1 to LG-3; CORE-ARCH section 4.8), one per known network, keyed by its genesis hash; read and checked by src/ledger/networks.ts. rows: LG-3's runtime-to-ledger mapping, the same for every network: spec_version 22000-22999 (runtime 0.22) and 1000000-1999999 (runtime 1.0.x) to ledger v8, 2000000-2999999 (runtimes 2.0 and 2.1) to v9. genesis: the hash of the network's block 0 and the spec_version of its runtime at genesis, as read from the network's node (source: the node, the day it was read, and the file in this repository holding its answers); null where not read yet, and specVersion null where the runtime at genesis was not read. boundaries: each runtime upgrade, U the block that enacts it and F = U + 1 the first block of the new runtime, each with its height, hash and MNSV spec_version as read from the network's node (source); the F of each boundary is a pin. A boundary not read from a node is not listed (LG-3). Task 0.3 reads the genesis of preprod and stagenet, every runtime at genesis and every boundary.",
+  "about": "The built-in ledger version tables (openspec/changes/core-arch/specs/ledger/spec.md LG-1 to LG-3; CORE-ARCH section 4.8), one per known network, keyed by its genesis hash; read and checked by src/ledger/networks.ts. rows: LG-3's runtime-to-ledger mapping, the same for every network: spec_version 22000-22999 (runtime 0.22) and 1000000-1999999 (runtime 1.0.x) to ledger v8, 2000000-2999999 (runtimes 2.0 and 2.1) to v9. genesis: the hash of the network's block 0 and the spec_version of its runtime at genesis, as read from the network's node (source: the node, the day it was read, and the file in this repository holding its answers); null where not read yet, and specVersion null where the runtime at genesis was not read. boundaries: each runtime upgrade, U the block that enacts it and F = U + 1 the first block of the new runtime, each with its height, hash and MNSV spec_version as read from the network's node (source); the F of each boundary is a pin. A boundary not read from a node is not listed (LG-3). Read by task 0.3 on 2026-10-26 with tools/tape/main.ts boundaries (chain_getBlockHash, chain_getHeader and state_getRuntimeVersion at block 0; state_getRuntimeVersion every 1,000 blocks to the finalized head, each change bisected to its U, and U's and F's headers' MNSV digests checked), from each network's public node: every genesis and every boundary up to the finalized head of that day; stagenet's genesis is added with its tape.",
   "networks": [
     {
       "network": "mainnet",
       "genesis": {
         "hash": "0x1941ca8e2bb88146c14dea084d3be7eb6e96ca7135429c543848b628124f2854",
-        "specVersion": null,
+        "specVersion": 22000,
         "source": {
-          "node": "https://rpc.mainnet.midnight.network",
-          "read": "2026-10-23",
-          "record": "test/ledger/fixtures/genesis/node-roots.json"
+          "node": "wss://rpc.mainnet.midnight.network",
+          "read": "2026-10-26",
+          "record": "test/ledger/fixtures/networks/mainnet.json"
         }
       },
       "rows": [
@@ -19,27 +19,73 @@
         { "specVersionMin": 1000000, "specVersionMax": 1999999, "ledger": "v8" },
         { "specVersionMin": 2000000, "specVersionMax": 2999999, "ledger": "v9" }
       ],
-      "boundaries": []
+      "boundaries": [
+        {
+          "u": { "height": 1774491, "hash": "0x40e3f67939e6f53e9f36b0a19fd27d484d29c008698f3a2336c5f2529a85dd23", "specVersion": 22000 },
+          "f": { "height": 1774492, "hash": "0x380266656e11208adbcaa5ab62a6beb9c09ef86de1cb886eac721099177a1a0b", "specVersion": 1000000 },
+          "source": {
+            "node": "wss://rpc.mainnet.midnight.network",
+            "read": "2026-10-26",
+            "record": "test/ledger/fixtures/networks/mainnet.json"
+          }
+        },
+        {
+          "u": { "height": 2738210, "hash": "0x1fa92e04fce6e75b39d15366bd3519bf11f1d46bfb5c14aafb66e537c27889c4", "specVersion": 1000000 },
+          "f": { "height": 2738211, "hash": "0x3e27012bba3192e4d6b9b631c7bd5b0aabacc31ebf93e48620c68346b04e3a74", "specVersion": 1000300 },
+          "source": {
+            "node": "wss://rpc.mainnet.midnight.network",
+            "read": "2026-10-26",
+            "record": "test/ledger/fixtures/networks/mainnet.json"
+          }
+        }
+      ]
     },
     {
       "network": "preprod",
-      "genesis": null,
+      "genesis": {
+        "hash": "0xdf831b09a8baa92badf47762ce5ac439b7e47e3ed3d39600cfdd44fad552361b",
+        "specVersion": 22000,
+        "source": {
+          "node": "wss://rpc.preprod.midnight.network",
+          "read": "2026-10-26",
+          "record": "test/ledger/fixtures/networks/preprod.json"
+        }
+      },
       "rows": [
         { "specVersionMin": 22000, "specVersionMax": 22999, "ledger": "v8" },
         { "specVersionMin": 1000000, "specVersionMax": 1999999, "ledger": "v8" },
         { "specVersionMin": 2000000, "specVersionMax": 2999999, "ledger": "v9" }
       ],
-      "boundaries": []
+      "boundaries": [
+        {
+          "u": { "height": 1568257, "hash": "0x482d3452c30811f10098602352a8d2d69d69fbb42a19a003c240be1b0625b39b", "specVersion": 22000 },
+          "f": { "height": 1568258, "hash": "0x76ebc93eaaeab7b99b3125ef64cc635e16f23a9773c132f0726a388ca52eb48b", "specVersion": 1000000 },
+          "source": {
+            "node": "wss://rpc.preprod.midnight.network",
+            "read": "2026-10-26",
+            "record": "test/ledger/fixtures/networks/preprod.json"
+          }
+        },
+        {
+          "u": { "height": 2648468, "hash": "0x6f6c0eae18c293898344964bdd83c6a30381ca5aa391ece74c4cbb363227229a", "specVersion": 1000000 },
+          "f": { "height": 2648469, "hash": "0xbe07360de1b8cb67817b8a4e606622d4fa85e34ca5b0d9eb5126dd75ce04c471", "specVersion": 1000300 },
+          "source": {
+            "node": "wss://rpc.preprod.midnight.network",
+            "read": "2026-10-26",
+            "record": "test/ledger/fixtures/networks/preprod.json"
+          }
+        }
+      ]
     },
     {
       "network": "preview",
       "genesis": {
         "hash": "0x3c096de209e06a1a8c52be7bda109ee8c891a42288c0a9db5495f9616dd13796",
-        "specVersion": null,
+        "specVersion": 1000000,
         "source": {
-          "node": "https://rpc.preview.midnight.network",
-          "read": "2026-10-23",
-          "record": "test/ledger/fixtures/genesis/node-roots.json"
+          "node": "wss://rpc.preview.midnight.network",
+          "read": "2026-10-26",
+          "record": "test/ledger/fixtures/networks/preview.json"
         }
       },
       "rows": [
@@ -47,7 +93,17 @@
         { "specVersionMin": 1000000, "specVersionMax": 1999999, "ledger": "v8" },
         { "specVersionMin": 2000000, "specVersionMax": 2999999, "ledger": "v9" }
       ],
-      "boundaries": []
+      "boundaries": [
+        {
+          "u": { "height": 1074620, "hash": "0xc8240ede42ea576b668cb7f17628768c61d80059b1abbfa26916e29507de019e", "specVersion": 1000000 },
+          "f": { "height": 1074621, "hash": "0xd4f9ab73e87b22fe2b4fd930368fe4bc1da3446c93a2cbb04f5b749f3c067d83", "specVersion": 1000300 },
+          "source": {
+            "node": "wss://rpc.preview.midnight.network",
+            "read": "2026-10-26",
+            "record": "test/ledger/fixtures/networks/preview.json"
+          }
+        }
+      ]
     },
     {
       "network": "stagenet",

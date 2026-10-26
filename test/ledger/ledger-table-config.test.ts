@@ -206,7 +206,10 @@ describe("adding and replacing rows and pins (LG-3)", () => {
   it("gives the configuration's table in effect as the revision's setting", () => {
     const pin = { height: 5, hash: H(5), specVersion: 1_000_000 };
     const entry = coreSettingsOf(withCore({ network: "mainnet", ledgerTable: { pins: [pin] } }));
-    expect(entry.data?.ledgerTable).toEqual({ rows: BUILT_IN_MAINNET.rows, pins: [...BUILT_IN_MAINNET.pins, pin] });
+    // The pins in effect in height order: the configured one at 5, then mainnet's built-in pins (task 0.3's boundaries).
+    const inEffect = [...BUILT_IN_MAINNET.pins, pin].sort((a, b) => a.height - b.height);
+    expect(inEffect[0]).toBe(pin);
+    expect(entry.data?.ledgerTable).toEqual({ rows: BUILT_IN_MAINNET.rows, pins: inEffect });
   });
 });
 
@@ -318,7 +321,10 @@ describe("LG-1 and LG-2's rules on a configured table, each finding with its pat
         pins: [{ height: 3, hash: H(3), specVersion: U32_MAX }],
       },
     });
-    expect(coreSettingsOf(config).data?.ledgerTable).toMatchObject({ pins: [{ height: 3, specVersion: U32_MAX }] });
+    // The configured pin at 3, before the network's built-in pins (task 0.3's boundaries).
+    expect(coreSettingsOf(config).data?.ledgerTable).toMatchObject({
+      pins: [{ height: 3, specVersion: U32_MAX }, ...BUILT_IN_PREPROD.pins],
+    });
   });
 
   it("checks no rule on a revision of another version (CF-3: compared with its recorded row instead)", () => {
