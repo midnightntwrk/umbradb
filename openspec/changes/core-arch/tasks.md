@@ -2053,7 +2053,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       final run 30 of 30 caught. Coverage of `src/ledger/` 100 %. No question raised.
 - [ ] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
       root check, outputs.
-      **Acceptance:** A82, A99, A101, A106, A107.
+      **Acceptance:** A82, A99 (the ranges from genesis, Q133), A101, A106, A107.
 - [ ] 12.4 Storage of the ledger state, restart, retention, contract-key persistence, the v8→v9 conversion.
       **Acceptance:** A100, A102, A103, A104.
 - [ ] 12.5 The fixed-budget mark-and-sweep.
@@ -2242,8 +2242,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       negative control; the restart-20 and cross-backend differential.
       **Acceptance:** A50, A51; required ids 1–4 pass.
 - [ ] 18.2 The full-core runs: stagenet and preview 0–10,000 from genesis; the full-core crash sweep and its negative
-      control; the three-backend comparison.
-      **Acceptance:** A133, A134, A135.
+      control; the three-backend comparison; the full syncs of preview and mainnet from genesis compared with the node's
+      roots (Q133).
+      **Acceptance:** A133, A134, A135, A154.
 - [ ] 18.3 The ingest benchmark against the official indexer (`bench/ingest-vs-official/`), recorded in the PR.
       **Acceptance:** A136.
 - [ ] 18.4 Add the 23 ids of `acceptance.md` §17 to the manifest and set the pinned count to 27.

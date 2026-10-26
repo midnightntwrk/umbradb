@@ -419,8 +419,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   `rawPackages()` return the recorded release and packages; a state under the ledger's 1,024-byte embedding limit
   reloads by its `stateKey` (Q55); the v8 adapter's `decodeLogItem` returns null for every input and its `apply`
   returns no `logs` (Q54). (LG-6, LG-7, CC-2)
-- **A99** `[CI]` State roots match the node's on: a preview range crossing the runtime 1.0.300 upgrade; a mainnet range
-  from a backup taken before block 1,774,492 to 1,780,000; a mainnet range including block 1,788,980. (LG-8)
+- **A99** `[CI]` State roots match the node's on every range from genesis that task 0.3 recorded — preview 0–10,000,
+  preprod 0–10,000 and the undeployed devnet across its v8 → v9 upgrade (stagenet 0–10,000 if kept) —, each skipped by
+  name when its tape is absent; the preview range across the runtime 1.0.300 upgrade and the mainnet ranges are A154's.
+  (LG-8, Q133)
 - **A100** `[CI]` On a devnet that starts on a v8 runtime and enacts the v9 upgrade (tape), the state is converted
   before F is applied, the root at F matches the node's, and the same holds when F has no transactions. (LG-9)
 - **A101** `[CI]` During a 60 s ledger step in the worker, `/health/live` answers 200 and every endpoint answers within
@@ -536,6 +538,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 
 - **A133** `[CI]` Stagenet blocks 0–10,000 and preview blocks 0–10,000, from genesis, with every core module except
   `-fast`, sync with every state root matching the node's. (IN-4, LG-15)
+- **A154** `[MANUAL]` A full sync from genesis against the public archive nodes, with every core module except `-fast`,
+  matches every state root the node reports: preview past height 1,075,000 (across the runtime 1.0.300 upgrade at
+  1,074,620) and mainnet past 1,789,000 (blocks 1,774,492 and 1,788,980 included); the run's node versions, rate and
+  duration are recorded in the pull request. (LG-8, LG-15, Q133)
 - **A134** `[FAULT]` The crash sweep of A50 repeated on the stagenet 0–10,000 tape with every core module except
   `-fast`: every mandatory point (inside `on-compute`; inside `on-db-write` after the first and the last callback; just
   before and just after COMMIT; during a sweep step) and 100 seeded random points leave no partial block, no skipped

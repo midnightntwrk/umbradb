@@ -68,11 +68,21 @@ the ledger package of the block's ledger version (LG-1, LG-7), publish their pla
 transaction in `core_block_parsed.transactions` (hash, kind `regular` or `system`, size). It SHALL number transactions
 within a block in the order the ledger applies them — the order of their chain events (`TxApplied`,
 `TxPartialSuccess` or `ExtrinsicFailed` for regular transactions, `SystemTransactionApplied` for system transactions),
-from 0 — and, for block 0, in body order (IN-7). It MAY start mid-chain.
+from 0 — and, for block 0, in body order (IN-7). IF a block's chain events do not account for each of its Midnight
+transactions exactly once — a Midnight transaction with no outcome event or with two, or an outcome event under an
+extrinsic that carries no Midnight transaction — THEN processing SHALL halt at that height with `callback-error`, its
+message naming the block, the event and the extrinsic, and a best block holding it SHALL be dropped (owner decision
+Q132). It MAY start mid-chain.
 
 #### Scenario: A system transaction between regular ones
 - **WHEN** a block holds regular transaction R1, then a system transaction applied by the runtime, then R2
 - **THEN** they are stored as 0 = R1, 1 = system, 2 = R2
+
+#### Scenario: A transaction no event accounts for
+- **WHEN** finalized block N's extrinsic 2 carries a Midnight transaction and no `TxApplied`, `TxPartialSuccess` or
+  `ExtrinsicFailed` is recorded under `ApplyExtrinsic(2)`
+- **THEN** processing halts at N with `callback-error` naming N, extrinsic 2 and the missing event, and nothing of N is
+  stored
 
 ### Requirement: CD-6 `core-tx-results` stores outcomes from the chain events
 
