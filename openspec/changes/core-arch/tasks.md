@@ -1430,10 +1430,67 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 8. Admin endpoints
 
-- [ ] 8.1 The admin server in its own worker thread reading the runner's published state, mounting only backbone parts'
+- [x] 8.1 The admin server in its own worker thread reading the runner's published state, mounting only backbone parts'
       endpoints (Q70), 404 for anything else; the main-thread heartbeat; states and conditions; the shared redaction and
       sanitized-error helpers. No endpoint tests exist in 0.9.5 to migrate; each part's tests live in its folder.
       **Acceptance:** A62 (its 404 and response-time halves), A64.
+      **Done (2026-10-26):** `src/admin/` (new): the admin listener in a worker thread of its own (`server.ts` starts
+      `worker.ts`, which runs `serve.ts`: `node:http` on `listen.admin`, parsed by the module API's `parseAddress`, the
+      one thing the two listeners share), answering the admin route table (`routes.ts`) from the snapshot the runner
+      publishes, never the database. The snapshot (`snapshot.ts`, `types.ts`): `status()` — 5.3's and 5.4's states,
+      readiness, conditions and reason, the one source, not redefined — encoded on the main thread for JSON (heights as
+      decimal text, the conditions as raised, the reason a sanitized error, never `ended`), with the process revision's
+      `livenessTimeoutMs` and its redacted `core` settings; it crosses whole as one message, and the worker answers each
+      request from the one it holds (no torn read). The heartbeat (`src/runner/heartbeat.ts`, AE-2): the main thread
+      ticks every second into one 64-bit slot of a `SharedArrayBuffer` (`process.hrtime.bigint()`, one `Atomics.store`),
+      which the worker reads at each request (one `Atomics.load`). The route table mounts only backbone parts' endpoints
+      (Q70; any other part is refused): `core-health` (`/health/live` 200 while the last tick is within the liveness
+      timeout, else 503; `/health/ready` from the published readiness), `core-status` (`/status`, the published status),
+      `core-config` (`/config`, the process's `core` revision redacted), each in `src/backbone/<part>/`, minimal
+      functions of the snapshot that 8.2–8.4 complete; `GET` of their paths only (the query aside), anything else 404
+      `not-found`; a throwing endpoint 500 with a fixed message. The shared helpers: `redaction.ts` (`shownSettings`
+      over 4.2's `configRedactor`, a `versionEntry` redacted until recorded; `earlyRedactor` over 4.4's
+      `configSecrets`), `errors.ts` (`sanitizedError`: the reason's code, height, module and point, a message from those
+      alone, and the allowlisted details of its own `UmbraError` — `reason`, `migration`, invalid-configuration's
+      `findings` — each checked and redacted, AE-6). The runner's side (`process-admin.ts`, `ProcessAdmin`) and
+      `src/runner/process.ts`'s wiring: `startProcess({ admin: true })` (Q128) runs the heartbeat from `startProcess`
+      on, publishing at each tick when the snapshot changed and at once when startup ends, processing ends and the stop
+      begins; the listener starts on `listen.admin` once the process's `core` revision is chosen, before the database
+      opens (a listener that cannot listen refuses with `listen-failed`, Q115's code), or at a refusal before that on
+      the configuration's `listen.admin` as loaded, else `0.0.0.0:8081` (Q127); at `stop()`, after the database, the
+      heartbeat and the thread end. Questions Q127 (where a refusal before the validation listens; shipped A) and Q128
+      (whether `startProcess` serves them unless told not to; shipped A, opt-in) raised, neither blocking. Tests, seen
+      failing first (`tsc` exit 2, 47 lines: `src/admin/*.js` and `src/runner/heartbeat.js` missing, `admin` not in
+      `ProcessInput`, the implicit `any`s that follow; all 7 suites failed to load): `test/admin/admin-server.test.ts`
+      (A62 on both backends: the four endpoints and 23 other methods and paths, a module's own route among them, which
+      answers on `listen.api` only; a 10 s synchronous loop on the main thread and a 5 s held block transaction —
+      PGlite's one queue, checked held by a read that waits; PostgreSQL's writer `idle in transaction` — each endpoint
+      timed by `prober.mjs`, a worker thread of the test's own, from the request on the shared monotonic clock, at least
+      4 requests of each inside the hold, each answered within 1 s), `states.test.ts` (A64 on both: `starting` — also
+      with `waiting-for-node` (task 10.2) while S is above the head —, `refused` — AE-3's changed migration checksum,
+      up, live 200, ready 503 —, `syncing`, `following`, `stopped` at the core's stop and at an upgrade boundary with
+      `upgrade-required`, `halted` with its reason and no message, `stopping`, then the listener closed; `node-retrying`
+      and `database-retrying`), `lifecycle.test.ts` (`admin: true`, the listen failure before the database opens, the
+      early refusal's address, findings and redaction, publication at once, a stop while the listener starts,
+      `ProcessAdmin`, and real child processes — running, refused, and with its admin port taken, started through task
+      0.5's `spawnChild` — that stay up until SIGTERM and then exit by themselves), `serve.test.ts`, `routes.test.ts`,
+      `snapshot.test.ts`, `test/runner/heartbeat.test.ts`: 91 tests, 2 of them for one backend only; on task 10.2's real
+      `core-chain`, the network `custom` with its own ledger table and the in-memory chain's genesis, the process's
+      database read through a user module keeping the `db` item. Committed negative controls: an admin server on the
+      main thread fails A62's loop case; one whose `/status` reads the database fails A62's held-queue case (PGlite); a
+      route table that serves a module's path fails A62's 404 case; a refused start that stops the process fails A64's
+      live-200 check. Wrong variants (a scratch runner outside the clone): 128 on the first run, 120 caught (5 by
+      `tsc`); of the 8 survivors 4 were equivalent — 2 of them guarding redundant code, removed (a `HEAD` body Node.js
+      never sends, a snapshot not posted to a closing worker) — and 4 gaps, closed by tests (the configuration's
+      redaction after `serve`, the early one after `loaded`, an admin closed before it listened, the listener closed
+      after the database). On the final sources 126, 124 caught; the 2 survivors equivalent (a plain store of the tick
+      for `Atomics.store`, untearable on a 64-bit platform; the listener told before the tick is written, which no
+      reader sees). Every new file 100 % statements, branches, functions and lines (`src/admin/worker.ts`, the thread's
+      entry, out of coverage like `src/cli/main.ts`; `**/src/admin/**` floor 90/85).
+      **Pending:** the endpoints' full bodies, their declarations and A63, A65, A140 (8.2), A66's `/status`, A67, A140
+      (8.3), A66's `/config`, A29, A140 (8.4); the conditions `slow-block` (5.5), `finality-stall` (10.3),
+      `waiting-for-lockstep` (14.3); the private process's lag (14.x); `umbradb run` passing `admin: true` (Q128; the
+      task that wires `run` to `startProcess`); the browser's message channel (16.1).
 - [ ] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
       **Acceptance:** A63, A65; A140 for these endpoints.
 - [ ] 8.3 `core-status` (`src/backbone/core-status/`): `/status` and its JSON schema, times as RFC 3339 text (Q68).

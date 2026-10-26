@@ -87,6 +87,8 @@ const CORE_ARCH = {
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the node client's directory (task 10.1).
   "**/src/node/**": { lines: 90, branches: 85, perFile: true },
+  // §13's default for `src/**`, added with the admin endpoints' directory (task 8.1).
+  "**/src/admin/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the ledger adapters' directory (task 12.1); `src/ledger/sweep*` gets §13's
   // 95/90 with the sweep (task 12.5).
   "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
@@ -140,6 +142,9 @@ export default defineConfig({
         // The tape command's entry runs only as a process of its own (`test/tape/command.test.ts`); what it calls,
         // `runTapeCommand`, is covered (task 9.2).
         "tools/tape/main.ts",
+        // The admin worker thread's entry runs only as a thread of its own (`test/admin/`); what it runs, `serveAdmin`,
+        // is covered on the main thread too (task 8.1).
+        "src/admin/worker.ts",
         // Deferred full-chain-archival track — out of 1.0.0 (acceptance-criteria I6).
         "src/postgres/chain-archive-store.ts",
         "src/postgres/chain-archive-rollover.ts",

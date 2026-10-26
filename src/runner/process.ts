@@ -78,6 +78,11 @@
  * a refusal is logged by its code only, since nothing yet knows which strings are secret. A refusal, a halt and each
  * retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
  * `processing retries in <ms> ms (<condition>, attempt <n>): …`, `startup retries …`).
+ *
+ * **The admin endpoints** (AE-1, AE-2; task 8.1, `../admin/`), with {@link ProcessInput.admin}: the heartbeat ticks
+ * from `startProcess` on and publishes `status()` to the admin worker; the admin listener starts on `listen.admin` once
+ * the process's `core` revision is known, before the database opens (a listener that cannot listen refuses startup,
+ * `listen-failed`), or at a refusal before that; it closes after the database at {@link ProcessHandle.stop}.
  */
 
 import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
@@ -110,6 +115,8 @@ import { startWriter } from "../db/writer-lock.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
+import { ProcessAdmin } from "../admin/process-admin.js";
+import type { AdminStarter } from "../admin/server.js";
 import { resolveGraph } from "../modules/graph.js";
 import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
 import { type StartedModuleApi, startModuleApi } from "./api-server.js";
@@ -152,6 +159,12 @@ export interface ProcessInput {
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
   /** The negative controls' choice of the process's `core` revision; `processCoreEntry` (Q102) unless given. */
   readonly processCore?: (config: CheckedConfig) => CheckedEntry;
+  /**
+   * The admin endpoints (AE-1, AE-2; `../admin/`): `true` serves them on `listen.admin` from the admin worker, with the
+   * heartbeat, from startup until {@link ProcessHandle.stop}; a starter serves them through it (the negative
+   * controls'); none when absent or false (decision record Q128: opt-in; `umbradb run` serves them).
+   */
+  readonly admin?: boolean | AdminStarter;
 }
 
 /** The process's state (CORE-ARCH §4.18, AE-3): exactly one at a time. */
@@ -446,9 +459,15 @@ class Process implements ProcessHandle {
   #source: BlockSource | undefined;
   #api: StartedModuleApi | undefined;
   #chain: CoreChainBinding | undefined;
+  readonly #admin: ProcessAdmin | undefined;
 
   constructor(input: ProcessInput) {
     this.#input = input;
+    const { admin } = input;
+    this.#admin =
+      admin === undefined || admin === false
+        ? undefined
+        : new ProcessAdmin({ status: () => this.status(), log: (line) => this.#log(line), ...(admin === true ? {} : { start: admin }) });
     this.closed = new Promise((resolve) => {
       this.#resolveClosed = resolve;
     });
@@ -457,6 +476,7 @@ class Process implements ProcessHandle {
     // `ended` tells a refusal too: a caller that awaits only `ended` leaves no rejection unhandled.
     this.started.catch(() => undefined);
     this.ended = this.#run(startup);
+    this.#admin?.follow(startup, this.ended);
     const { signal } = input;
     if (signal?.aborted === true) void this.stop();
     else signal?.addEventListener("abort", () => void this.stop(), { once: true });
@@ -485,6 +505,7 @@ class Process implements ProcessHandle {
   /** {@link stop}'s work. */
   async #close(): Promise<void> {
     this.#phase = "stopping";
+    this.#admin?.publish();
     this.#stop.abort();
     await this.ended;
     try {
@@ -493,6 +514,7 @@ class Process implements ProcessHandle {
       await this.#chain?.close();
       await this.#db?.close();
       await this.#source?.close?.();
+      if (this.#admin !== undefined) await this.#admin.close();
       this.#resolveClosed();
     }
   }
@@ -524,12 +546,17 @@ class Process implements ProcessHandle {
       const given = input.config ?? {};
       const loaded =
         "data" in given ? { file: given.file, data: plainData(given.data, given.file) } : await loadConfig(given);
+      this.#admin?.loaded({ config: loaded, declarations, side: input.side ?? "public" });
       this.#step();
       const checked = validateConfig({ config: loaded, declarations, side: input.side ?? "public" });
       this.#redactor = configRedactor(checked);
       this.#start = BigInt(checked.start);
       const core = (input.processCore ?? processCoreEntry)(checked);
       this.#core = core;
+      if (this.#admin !== undefined) {
+        await this.#admin.serve(checked, core);
+        this.#step();
+      }
       const source = typeof input.source === "function" ? input.source(core) : input.source;
       this.#source = source;
       // A read's height is the cursor's (DB-2): the core's cursor table, or a private process's own (its source's).
@@ -550,6 +577,7 @@ class Process implements ProcessHandle {
       if (!this.#stop.signal.aborted) {
         const { code } = reasonOf(error);
         this.#log(`startup refused: ${code}${this.#redactor === undefined ? "" : `: ${messageOf(error)}`}`);
+        if (this.#admin !== undefined) await this.#admin.refused();
       }
       // The module API opens in the last step, after which only a stop throws: the stop closes it.
       await this.#chain?.close();
