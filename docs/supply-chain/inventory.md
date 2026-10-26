@@ -48,7 +48,7 @@ tooling only — never shipped in the runtime path.
 | `esbuild` | **0.28.2** | exact (no caret) | registry.npmjs.org | `sha512-HKVLS8dv…h32wIA==` | MIT | Bundler for the browser build (page and workers with WASM assets) | esbuild releases / advisories |
 | `@types/ws` | **8.18.2** | exact (no caret) | registry.npmjs.org | `sha512-67MQl+fp…iVd0/w==` | MIT | Type declarations for `ws` | DefinitelyTyped |
 | `vitest` | `^4.1.10` → **4.1.10** | range → locked | registry.npmjs.org | `sha512-R9jUTe5S…GUPw==` | MIT | Test runner (conformance + live tiers) | vitest releases / advisories |
-| `tsx` | `^4.23.1` → **4.23.1** | range → locked | registry.npmjs.org | `sha512-GQHnkIfx…2wcWQ==` | MIT | TS execution for the `archive:sync` CLI | advisories (pulls `esbuild`) |
+| `tsx` | `^4.23.1` → **4.23.1** | range → locked | registry.npmjs.org | `sha512-GQHnkIfx…2wcWQ==` | MIT | TS execution for the `bench` scripts | advisories (pulls `esbuild`) |
 | `typedoc` | `^0.28.0` → **0.28.20** | range → locked | registry.npmjs.org | `sha512-uSKqkh8C…mplg==` | Apache-2.0 | API docs generation (`docs:storage`) | typedoc releases |
 | `@testcontainers/postgresql` | `^12.0.4` → **12.0.4** | range → locked | registry.npmjs.org | `sha512-a/pLU6j5…qhgZA==` | MIT | Disposable Postgres container for conformance tests | testcontainers releases |
 | `@types/node` | `^26.1.1` → **26.1.1** | range → locked | registry.npmjs.org | `sha512-nxAkRSVk…GgZREw==` | MIT | Node type definitions (matches Node ≥24) | DefinitelyTyped |

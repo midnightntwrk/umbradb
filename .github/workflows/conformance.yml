@@ -62,8 +62,6 @@ jobs:
         # Suites that ALWAYS self-skip in CI (reported SKIPPED, never silently counted as passed;
         # none are `"required"` manifest ids, so they cannot make the reconciliation red):
         #   - the two live/cold-boot integration tests (gated behind UMBRADB_LIVE_PREPROD);
-        #   - test/integration/chain-archive-sync.integration.test.ts (needs a live local Midnight
-        #     devnet: node RPC :9944 + indexer :8088, not provisioned here);
         #   - test/integration/chain-archive-replay-decode.integration.test.ts (needs a built
         #     sibling midnight-wallet checkout + a captured indexer SQLite DB, absent in CI).
         # A green CI run therefore says NOTHING about those suites beyond clean collection.

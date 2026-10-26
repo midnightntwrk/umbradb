@@ -2,6 +2,14 @@
 
 **Status:** implemented on `feature/full-chain-storage-implementation` (latest commit `5bcbebe`), **not yet merged to `main`** (`main` is at `b1ecc53` as of this writing — a docs-only commit; this branch was cut before it and has not been rebased/merged back). Verify `git log origin/main -1 --oneline` vs `git log origin/feature/full-chain-storage-implementation -1 --oneline` before treating anything below as "in main."
 
+> **Superseded in part (2026-10-25, `openspec/changes/core-arch` task 10.1).** The indexer reads only from the node
+> (IN-8), so `chain-archive-sync/indexer-client.ts` is deleted, and with it the sync path that needed it:
+> `sync-service.ts` (`ChainArchiveSyncService`), `sync-cli.ts`, the `archive:sync` script, and the tests that drove it
+> (`test/integration/chain-archive-sync`, `chain-archive-sync-retry` and `chain-archive-preprod-cloud-crossval`).
+> `node-rpc-client.ts` is refactored into the node client of `src/node/` (JSON-RPC over WebSocket), with its tests in
+> `test/node/`. `bootstrap.ts`, `tx-replay-decoder.ts` and the `chain_archive` store stay until tasks 12.1 and 17.2;
+> the rest of this page describes 0.9.5 as it was.
+
 The design rationale lives in `design/full-chain-storage-design.md` (present on the implementation branch, v4, revised through three rounds of design-council audit). The acceptance gate lives on a separate branch, `spec/full-chain-storage-acceptance-criteria`, at `openspec/changes/full-chain-storage-acceptance-criteria/specs/full-chain-archive-verification/spec.md`. This document summarizes both but focuses on the implementation as it actually exists on the implementation branch today.
 
 ## 1. Overview / purpose

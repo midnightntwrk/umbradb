@@ -55,8 +55,10 @@ describe("the component's errors", () => {
     expect(error.message).toMatch(/^parameter \$3 cannot be sent: /);
   });
 
-  it("is retryable for connection-lost only, and keeps a frozen copy of its details", () => {
-    for (const code of ERROR_CODES) expect(new UmbraError(code, "m").retryable, code).toBe(code === "connection-lost");
+  it("is retryable for connection-lost and node-unreachable only, and keeps a frozen copy of its details", () => {
+    for (const code of ERROR_CODES) {
+      expect(new UmbraError(code, "m").retryable, code).toBe(code === "connection-lost" || code === "node-unreachable");
+    }
     const details = { table: "t" };
     const error = new UmbraError("database-error", "m", details);
     details.table = "changed";

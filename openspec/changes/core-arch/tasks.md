@@ -1049,9 +1049,48 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 10. Node client and ingest
 
-- [ ] 10.1 The node client (refactored from `chain-archive-sync/node-rpc-client.ts`): JSON-RPC over WebSocket,
+- [x] 10.1 The node client (refactored from `chain-archive-sync/node-rpc-client.ts`): JSON-RPC over WebSocket,
       subscriptions, reconnect, timeouts, back-off; delete `chain-archive-sync/indexer-client.ts`.
       **Acceptance:** A83 (`[STATIC]` part); the refactored node-client tests pass.
+      **Done (2026-10-25):** the node client, `NodeClient` (`src/node/`): JSON-RPC 2.0 over one WebSocket (`ws`,
+      behind a small transport interface, `socket.ts`, so the browser build and the tests give their own), one method
+      per IN-8 call — `finalizedHead`, `blockHash(height)`, `header(hash)`, `block(hash)`, `runtimeVersion(at)`,
+      `metadata(at)`, `storage(key, at)`, `storageKeys(prefix, count, startKey, at)`, `ledgerStateRoot(at)`,
+      `systemProperties()` — each naming its block (never the node's best block) and reading the answer into frozen
+      typed values (32-byte hashes; a header with `parentHash`, `number` as a `bigint`, `stateRoot`, `extrinsicsRoot`
+      and its digest items; a block's extrinsics; a runtime version; the ledger root from its byte array); `call()`
+      refuses a method outside IN-8 before sending (`NODE_METHODS`, bound to IN-8's text by a test); and
+      `subscribeNewHeads`, `subscribeFinalizedHeads`, cancelled on the client's side only (IN-8 has no unsubscribe
+      call) and made again after a reconnect, the subscriber told (`restarted`) before its next header. One connection
+      from the first use until `close()`, connected again after IN-10's back-off (1 s doubling up to
+      `backoffCeilingMs`, without limit, counted over the connections the node did not answer on); a heartbeat (30 s)
+      ends a connection that answers no ping; each try of a call has a timeout (30 s by default), and a call retries a
+      retryable failure with its own back-off unless `retry: false` (the best-block queue's calls). Errors are
+      `UmbraError`s with three new codes: `node-unreachable`, retryable (`UmbraError.retryable` is now true for it and
+      `connection-lost`): a connection failed, lost or refused with HTTP 429 or 5xx, a timeout, the node's rate limit
+      (`-32999`, the open connection's form of 429); `node-requirement`, IN-9's halt: a `null` block, or Substrate's
+      "State already discarded"; `node-error`: any other error answer, handshake status, malformed answer or frame, or
+      a method outside IN-8. None shows the node's URL (CF-4). `chain-archive-sync/indexer-client.ts` deleted, with the
+      0.9.5 sync path that needed it (`sync-service.ts`, `sync-cli.ts`, the `archive:sync` script) and the tests that
+      drove it (`test/integration/chain-archive-{sync,sync-retry,preprod-cloud-crossval}`, retired by `design.md`
+      §13); `node-rpc-client.ts` and its test refactored into `src/node/` and
+      `test/node/refactored-node-rpc-client.test.ts` (each assertion that still applies kept; the `fetch` signal and
+      "carrying the URL" no longer apply). `design.md` §3 and §14, `docs/features/full-chain-storage.md`. No question
+      raised. Tests, seen failing first (the modules missing; A83's scan finding 0.9.5's indexer client and its users
+      in `chain-archive-sync/`, 13 findings; `node-unreachable` not a code): `test/node/` — `client.test.ts` (a
+      scripted node on a random port ≥ 10000, the client's clock moved by hand: every call against the recorded
+      answers of a mainnet node, subscriptions, reconnects, the back-off to the millisecond, timeouts, which failures
+      are retried and which halt, the URL kept out of every error, `close()`, abort signals, the heartbeat),
+      `classification.test.ts`, `methods.test.ts`, `refactored-node-rpc-client.test.ts`,
+      `no-indexer-or-wallet-sdk.test.ts` (A83 `[STATIC]`); `test/db/errors.test.ts` and
+      `test/deterministic-postgresql/errors.test.ts` (the retryable codes). Committed negative controls: A83's fixtures
+      (every import form of a forbidden package caught, a clean file not, a forbidden run-time dependency caught);
+      IN-8's check of every request the fake nodes received, with its control naming `rpc_methods`; halting errors
+      sent once with retries on; the back-off's exact delays. 113 wrong variants (a scratch runner outside the clone,
+      the tree checked byte for byte after): 112 caught, 1 equivalent (`#try`'s check that the client is open, which the
+      connection check already implies); a first run's 6 other survivors were gaps, closed by tests.
+      **Pending:** A83's `[CI]` half, a 1,000-height sync against the tape node (9.1, 10.3); the node half of A85
+      against a tape (9.x, 10.4); the halts these errors lead to (10.4); the hash of a notified header (10.3).
 - [ ] 10.2 `core-chain` (identity, bootstrap, startup checks) and `core-block-commit` (the `blocks` table from the
       `chain_archive` store, keeping range partitioning; block time as `block_time timestamptz`, converted exactly from
       the node's milliseconds, never through a floating-point value, Q74).

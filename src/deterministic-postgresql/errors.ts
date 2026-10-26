@@ -4,9 +4,11 @@
  * structured `details`.
  *
  * It keeps 0.9.5's split between retryable and not-retryable errors (`design/design-interfaces.md` §1.1: thrown errors
- * discriminated by `code`, each saying whether a retry can clear it), with DB-13 deciding the split: a lost database
- * connection is the one retryable error (`connection-lost`), so that the caller can reconnect and retry; every other
- * error is not retryable. Retryability follows from the code alone, so two errors with one code never disagree.
+ * discriminated by `code`, each saying whether a retry can clear it), with DB-13 deciding the split for the database —
+ * a lost connection is its one retryable error (`connection-lost`), so that the caller can reconnect and retry — and
+ * IN-10 for the node: a node that could not be reached or did not answer in time is its one (`node-unreachable`,
+ * task 10.1). Every other error is not retryable. Retryability follows from the code alone, so two errors with one code
+ * never disagree.
  *
  * It is defined here, in the `deterministic_postgresql` component, because the component's result mapping and
  * parameter texts throw it and the component imports nothing else of `src/` (A138); `src/db/errors.ts` re-exports it,
@@ -19,7 +21,7 @@ export const ERROR_CODES = [
   "connection-lost",
   /** Any other error the database reported: a constraint violation, a syntax error, a refused login, … (DB-13). */
   "database-error",
-  /** A read handle, a transaction or the database itself was used after it ended (A10's code). */
+  /** A read handle, a transaction, the database itself or the node client was used after it ended (A10's code). */
   "handle-closed",
   /**
    * A read bounded by the read option — a read for a module API request, `apiReadTimeoutMs` — was ended by it: a
@@ -31,7 +33,10 @@ export const ERROR_CODES = [
    * answered 503 (RN-16, `src/runner/envelope.ts`).
    */
   "no-committed-height",
-  /** A query parameter the API cannot send: `undefined`, a function, a `Map`, a non-finite number in JSON, … */
+  /**
+   * A query parameter the API cannot send: `undefined`, a function, a `Map`, a non-finite number in JSON, …; or a node
+   * call's parameter the node client cannot send (a hash that is not 32 bytes, a negative height; `src/node/`).
+   */
   "invalid-parameter",
   /**
    * A setting refused before anything runs: a `database` URL that overrides a pinned session setting, or a database
@@ -111,6 +116,20 @@ export const ERROR_CODES = [
   "non-deterministic-table",
   "unencodable-row",
   "row-count-changed",
+  // The node client's failures (IN-9, IN-10, `src/node/`, task 10.1); `node-requirement` is also a halt of §11.
+  /**
+   * The node could not be reached or did not answer in time: a connection that could not be made, was lost, or whose
+   * handshake was refused with HTTP 429 or a 5xx status; a call with no answer within its timeout; the node's own rate
+   * limit. Retryable: IN-10 retries it with back-off.
+   */
+  "node-unreachable",
+  /** The node answered that a block, or the state at a block, is unavailable (pruned): IN-9's halt. Not retryable. */
+  "node-requirement",
+  /**
+   * Any other failure of a node call: a JSON-RPC error answer, a handshake refused with another status, an answer or a
+   * frame of the wrong shape, a method outside IN-8. Not retryable.
+   */
+  "node-error",
 ] as const;
 
 /**
@@ -122,18 +141,21 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 /** The structured part of an error: names and values a caller or a status page may show. */
 export type ErrorDetails = Readonly<Record<string, unknown>>;
 
+/** The codes a retry can clear: a lost database connection (DB-13) and an unreachable node (IN-10). */
+const RETRYABLE: ReadonlySet<ErrorCode> = new Set<ErrorCode>(["connection-lost", "node-unreachable"]);
+
 /** An error of UmbraDB: `code` says what failed, `retryable` whether retrying can succeed, `details` where and why. */
 export class UmbraError extends Error {
   override readonly name: string = "UmbraError";
   readonly code: ErrorCode;
-  /** True for `connection-lost` only (DB-13). */
+  /** True for `connection-lost` (DB-13) and `node-unreachable` (IN-10) only. */
   readonly retryable: boolean;
   readonly details: ErrorDetails;
 
   constructor(code: ErrorCode, message: string, details: Record<string, unknown> = {}, options?: ErrorOptions) {
     super(message, options);
     this.code = code;
-    this.retryable = code === "connection-lost";
+    this.retryable = RETRYABLE.has(code);
     this.details = Object.freeze({ ...details });
   }
 }

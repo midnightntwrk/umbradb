@@ -118,8 +118,21 @@ interface BlockSource {
   response's `extensions`, its `data` unchanged; `answerChainData` answers a request with the module's answer and the
   headers, or, before block S commits, 503 with `{ error: { code: "no-committed-height", message } }`. Mounting it on
   `listen.api` is task 5.2a's.
-- **The node client** retries per IN-10; every request has a timeout; subscriptions are re-established after a
-  reconnect, and the runner re-reads the finalized head instead of trusting lost notifications.
+- **The node client** (`src/node/`, task 10.1) retries per IN-10; every request has a timeout; subscriptions are
+  re-established after a reconnect, and the runner re-reads the finalized head instead of trusting lost notifications.
+  It sends IN-8's methods only, each naming its block by hash or height (never the node's best block), and reads every
+  answer into typed values: a 32-byte hash; a header (`parentHash`, `number` as a `bigint`, `stateRoot`,
+  `extrinsicsRoot`, its digest items as bytes); a block's extrinsics; a runtime version; storage values and keys; the
+  ledger root; `system_properties`. A malformed answer is an error, never a guess. It keeps one WebSocket from its
+  first use, connected again after a back-off of 1 s doubling up to `backoffCeilingMs`, counted over the connections
+  the node did not answer on, and ends a connection that answers no ping for two heartbeats (30 s each). A try of a
+  call times out after 30 s by default; a call retries unless told not to (the best-block queue's calls, IN-10). A
+  subscription is cancelled on the client's side only (IN-8 has no unsubscribe call; the node ends it with the
+  connection), and after a reconnect it is made again and its subscriber told before its next header. Its errors are
+  `UmbraError`s: `node-unreachable`, retryable — a connection that failed or was lost, a handshake refused with HTTP
+  429 or a 5xx status, a timeout, the node's rate limit (`-32999`, the open connection's form of 429);
+  `node-requirement`, IN-9's halt — a block the node lacks (`null`), or a state it discarded; `node-error` — any other
+  error answer, handshake status or malformed answer, or a method outside IN-8. None shows the node's URL (CF-4).
 
 ## 4. The database API
 
@@ -817,6 +830,9 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | `ws`: WebSocket server over `https` requiring client certificates | Probe on `ws` 8.22.0 (2026-09-26), 2026-10-22: with a certificate connected; without, `ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED` | Verified (probe) |
 | `esbuild` bundles a worker entry with a WASM asset | Probe on `esbuild` 0.28.2 (2026-08-08), 2026-10-22: 0 errors, the asset emitted | Verified (probe) |
 | `midnight_ledgerStateRoot(at)` | `midnight-node/pallets/midnight/rpc/src/lib.rs:60-61` (node 2.1.0-rc.4) | Verified (reference) |
+| `midnight_ledgerStateRoot` answers a JSON array of byte values (a `Vec<u8>`, 33 bytes); head notifications (`chain_newHead`, `chain_finalizedHead`) carry the header without its hash; `system_properties.genesis_state` is hex without `0x` | `rpc.mainnet.midnight.network`, 2026-10-25: the answers recorded in `test/node/fixtures/mainnet-answers.json` (its `genesis_state` is `test/ledger/fixtures/genesis/genesis_state_mainnet.mn`) | Verified (run); the node client's readers (task 10.1) |
+| Substrate answers a call over the node's RPC rate limit with `-32999` "RPC rate limit exceeded", and a state the node discarded (pruned) with `4003` "Client error: UnknownBlock: State already discarded for 0x…" | `polkadot-sdk` stable2606 at `660acefe`: `substrate/client/rpc-servers/src/middleware/mod.rs:151`, `substrate/client/db/src/lib.rs:2833`, `substrate/client/rpc-api/src/state/error.rs:67` (the node builds the `shieldedtech` fork of stable2606 at `6b0ce48`, not read) | Verified (reference, upstream branch); no pruned node was available to observe it |
+| `ws` 8.22.0: a handshake answered with a status other than 101 is reported by `unexpected-response` (with the status); a connection refused reports its system code (`ECONNREFUSED`) on `error`, then `close` 1006 | Probe on `ws` 8.22.0, 2026-10-25 (statuses 200, 404, 429, 503; a closed port); `test/node/client.test.ts` | Verified (probe, test) |
 | `system_properties.genesis_state` holds the genesis ledger state | `midnight-indexer/chain-indexer/src/infra/subxt_node.rs:562-575` | Verified (reference) |
 | One `MNSV` digest per block, block 0 included | `midnight-node/pallets/version/src/lib.rs:32,55`; `midnight-node/node/src/service.rs:172-190` | Verified (reference) |
 | Content decoded with the parent state's metadata at an upgrade | `midnight-indexer/chain-indexer/src/infra/subxt_node.rs:185-200,266-290` | Verified (reference) |

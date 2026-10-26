@@ -8,7 +8,8 @@ import { TRUNCATE_NOT_ALLOWED_SQLSTATE } from "../../src/deterministic-postgresq
 
 /**
  * `UmbraError { code, retryable, details }` (`design.md` §4, §12), keeping 0.9.5's split between retryable and
- * not-retryable errors (`design/design-interfaces.md` §1.1): DB-13 makes a lost connection the one retryable error.
+ * not-retryable errors (`design/design-interfaces.md` §1.1): DB-13 makes a lost connection the one retryable database
+ * error, and IN-10 an unreachable node the one retryable node error (task 10.1).
  */
 
 describe("UmbraError", () => {
@@ -24,12 +25,15 @@ describe("UmbraError", () => {
     expect(error.cause).toBe(cause);
   });
 
-  it("is retryable for a lost connection only (DB-13)", () => {
+  it("is retryable for a lost database connection (DB-13) and an unreachable node (IN-10) only", () => {
     for (const code of ERROR_CODES) {
-      expect(new UmbraError(code, "m").retryable, code).toBe(code === "connection-lost");
+      expect(new UmbraError(code, "m").retryable, code).toBe(code === "connection-lost" || code === "node-unreachable");
     }
     expect(ERROR_CODES).toContain("connection-lost");
     expect(ERROR_CODES).toContain("database-error");
+    expect(ERROR_CODES).toContain("node-unreachable");
+    expect(ERROR_CODES).toContain("node-requirement");
+    expect(ERROR_CODES).toContain("node-error");
     expect(new Set(ERROR_CODES).size).toBe(ERROR_CODES.length);
   });
 
