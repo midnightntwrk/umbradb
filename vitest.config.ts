@@ -115,6 +115,9 @@ export default defineConfig({
         // smoke test), outside coverage; what it calls, `runMain`, is covered (task 4.4).
         "src/cli/main.ts",
         "tools/**/index.ts",
+        // The tape command's entry runs only as a process of its own (`test/tape/command.test.ts`); what it calls,
+        // `runTapeCommand`, is covered (task 9.2).
+        "tools/tape/main.ts",
         // Deferred full-chain-archival track — out of 1.0.0 (acceptance-criteria I6).
         "src/postgres/chain-archive-store.ts",
         "src/postgres/chain-archive-rollover.ts",

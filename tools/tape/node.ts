@@ -37,7 +37,8 @@ import { createServer, type Server } from "node:http";
 import { performance } from "node:perf_hooks";
 import { type WebSocket, WebSocketServer } from "ws";
 import { FAULT_RPC_CODE, NOT_ON_TAPE_RPC_CODE } from "./errors.js";
-import { type Json, jsonText, parseJsonText, sortedJsonText } from "./json.js";
+import { errorFrame, notificationFrame, notificationMethod, readRequest, resultFrame } from "./frames.js";
+import { type Json, jsonText, sortedJsonText } from "./json.js";
 import { listenOnRandomPort } from "./port.js";
 import {
   type CallRecord,
@@ -104,20 +105,6 @@ export interface TapeNodeOptions {
   readonly clock?: TapeClock;
 }
 
-/** The notification method of each subscription method, as Substrate names them. */
-const NOTIFICATION_METHODS: ReadonlyMap<string, string> = new Map([
-  ["chain_subscribeNewHeads", "chain_newHead"],
-  ["chain_subscribeFinalizedHeads", "chain_finalizedHead"],
-]);
-
-/** The method a notification of a subscription made with `method` carries. */
-export function notificationMethod(method: string): string {
-  return NOTIFICATION_METHODS.get(method) ?? method;
-}
-
-const PARSE_ERROR = { code: -32700, message: "Parse error" } as const;
-const INVALID_REQUEST = { code: -32600, message: "Invalid Request" } as const;
-
 interface Connection {
   readonly socket: WebSocket;
   readonly session: Session;
@@ -127,42 +114,6 @@ interface Connection {
   sending: number;
   /** The session's disconnect was reached: the connection ends once every frame is written out. */
   dropping: boolean;
-}
-
-/** A request read from a frame, or why it is not one. */
-type Read =
-  | { readonly valid: true; readonly id: string | number; readonly method: string; readonly params: Json }
-  | { readonly valid: false; readonly id: string | number | null; readonly error: { code: number; message: string } };
-
-/** Whether a value read from JSON text is an object or an array (JSON-RPC 2.0's structured value). */
-function isStructured(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isId(value: unknown): value is string | number {
-  return typeof value === "string" || Number.isSafeInteger(value);
-}
-
-/** Reads a frame as a JSON-RPC 2.0 request: an id that is a string or a safe integer, a method, params or none. */
-function readRequest(text: string): Read {
-  let message: unknown;
-  try {
-    message = parseJsonText(text);
-  } catch {
-    return { valid: false, id: null, error: PARSE_ERROR };
-  }
-  // A batch (an array) is no request: it has no `jsonrpc` field, so it is refused below.
-  if (!isStructured(message)) return { valid: false, id: null, error: INVALID_REQUEST };
-  const id = isId(message.id) ? message.id : null;
-  const params = Object.hasOwn(message, "params") ? message.params : [];
-  if (message.jsonrpc !== "2.0" || typeof message.method !== "string" || id === null || !isStructured(params)) {
-    return { valid: false, id, error: INVALID_REQUEST };
-  }
-  return { valid: true, id, method: message.method, params: params as Json };
-}
-
-function errorFrame(id: string | number | null, error: { code: number; message: string; data?: Json }): string {
-  return `{"jsonrpc":"2.0","id":${jsonText(id)},"error":${jsonText(error)}}`;
 }
 
 export class TapeNode {
@@ -295,17 +246,16 @@ export class TapeNode {
       this.#log({ session, method, params, occurrence, line, outcome: repeat ? "repeated" : "answered" });
       const record = entry.record as CallRecord;
       const answer = hasField(record, "result")
-        ? `"result":${jsonText((record as { result: Json }).result)}`
-        : `"error":${jsonText((record as { error: Json }).error)}`;
+        ? resultFrame(id, (record as { result: Json }).result)
+        : errorFrame(id, (record as { error: Json }).error);
       this.#later(connection, answerDelay(record), () => {
-        this.#send(connection, `{"jsonrpc":"2.0","id":${jsonText(id)},${answer}}`);
+        this.#send(connection, answer);
         // A repeat's record was answered first (it came first, with the same delay): marking it again changes nothing.
         this.#done(connection, entry);
       });
     } else if (entry.kind === "subscribe") {
       this.#log({ session, method, params, occurrence, line, outcome: "subscribed" });
-      const subscription = jsonText((entry.record as SubscribeRecord).subscribe);
-      this.#send(connection, `{"jsonrpc":"2.0","id":${jsonText(id)},"result":${subscription}}`);
+      this.#send(connection, resultFrame(id, (entry.record as SubscribeRecord).subscribe));
       this.#done(connection, entry);
     } else {
       const record = entry.record as FaultRecord;
@@ -351,10 +301,8 @@ export class TapeNode {
         continue;
       }
       const record = entry.record as NotifyRecord;
-      const subscription = jsonText(record.notify);
-      const method = notificationMethod(connection.session.plan.subscriptions.get(subscription) as string);
-      const params = `{"subscription":${subscription},"result":${jsonText(record.result)}}`;
-      this.#send(connection, `{"jsonrpc":"2.0","method":${JSON.stringify(method)},"params":${params}}`);
+      const method = notificationMethod(connection.session.plan.subscriptions.get(jsonText(record.notify)) as string);
+      this.#send(connection, notificationFrame(method, record.notify, record.result));
     }
   }
 

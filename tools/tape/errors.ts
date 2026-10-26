@@ -1,8 +1,8 @@
 /**
- * The test tape's two errors (TT-1, TT-2; task 9.1). Neither is an `UmbraError` code: the tape is test tooling, not
+ * The test tape's errors (TT-1 to TT-4; tasks 9.1, 9.2). None is an `UmbraError` code: the tape is test tooling, not
  * part of the package (`openspec/changes/core-arch/design.md` §1: `tools/tape/`, unexported), and `ERROR_CODES` is the
- * vocabulary of the exported `ErrorCode` (§12), which §11's refusals and halts draw on; neither error is a refusal or a
- * halt of the indexer.
+ * vocabulary of the exported `ErrorCode` (§12), which §11's refusals and halts draw on; none is a refusal or a halt of
+ * the indexer.
  *
  * - **`bad-tape-record`** ({@link TapeError}): a tape the reader cannot read, or records the writer or the tape node
  *   cannot take, with the line it is at (counting from 1) and why (`reason`).
@@ -10,6 +10,9 @@
  *   node client (`src/node/`) reads it as a `node-error` (`reason: rpc-error`), which it never retries; it halts the
  *   part that made the call (IN-9 and RN-8), so a test whose indexer calls something its tape lacks fails at once,
  *   naming the method, instead of hanging on retries.
+ * - **`cannot-record`** ({@link RecordingError}): a frame the recording builder cannot record so that the tape node
+ *   replays it byte for byte (TT-4), with the session, the side it came from and why (`reason`); the recording is void.
+ * - **`bad-transform`** ({@link TransformError}): a variant transform asked for what the tape lacks or cannot hold.
  */
 
 /** Why a line is not a tape record (`TapeError.reason`). */
@@ -79,3 +82,82 @@ export const NOT_ON_TAPE_RPC_CODE = -32090;
 
 /** The code of a `fault: "error"` record without one: JSON-RPC 2.0's "Internal error". */
 export const FAULT_RPC_CODE = -32603;
+
+/** Why the recording builder cannot record a frame (`RecordingError.reason`). */
+export type RecordingProblem =
+  /** A frame from the client that is not a JSON-RPC 2.0 request the tape node answers. */
+  | "bad-request"
+  /** A request whose id an earlier request of the connection, still unanswered, holds. */
+  | "duplicate-id"
+  /** A frame from the node that is not a JSON-RPC 2.0 answer or subscription notification the tape can hold. */
+  | "not-json-rpc"
+  /** An answer whose id names no request of the connection waiting for one. */
+  | "unknown-answer"
+  /** A notification of a subscription not made on the connection. */
+  | "unknown-subscription"
+  /** A notification under another method than the tape node sends for its subscription. */
+  | "notification-method"
+  /**
+   * A notification of a subscription whose answer came before an earlier request of the same method and params was
+   * answered: the tape, which answers by occurrence, cannot place it.
+   */
+  | "out-of-order"
+  /** The record the frame gives is not a tape record (a subscription id the tape cannot hold, or one in use). */
+  | "bad-record"
+  /** A frame whose bytes differ from those the tape node sends for its record, so a replay could not equal it. */
+  | "not-replayable";
+
+/** The longest part of a frame an error shows. */
+const SHOWN = 200;
+
+/** `cannot-record`: a frame the recording builder cannot record; the recording is void. */
+export class RecordingError extends Error {
+  readonly code = "cannot-record";
+
+  constructor(
+    /** The session (the connection the builder accepted), counting from 1. */
+    readonly session: number,
+    /** Which side sent the frame. */
+    readonly from: "client" | "node",
+    readonly reason: RecordingProblem,
+    detail: string,
+    /** The frame's text (or a description of a binary frame). */
+    frame: string,
+  ) {
+    const shown = frame.length > SHOWN ? `${frame.slice(0, SHOWN)}…` : frame;
+    super(`cannot-record in session ${session}, a frame from the ${from} (${reason}): ${detail}; the frame: ${shown}`);
+    this.name = "RecordingError";
+  }
+}
+
+/** Why a variant transform refuses (`TransformError.reason`). */
+export type TransformProblem =
+  /** A line outside the tape. */
+  | "no-such-line"
+  /** A selected line that is not a call record. */
+  | "not-a-call"
+  /** A selection of no record. */
+  | "selects-nothing"
+  /** A session the tape does not have. */
+  | "no-such-session"
+  /** A subscription no `subscribe` record of the session holds. */
+  | "no-such-subscription"
+  /** A notification the subscription does not have in its session. */
+  | "no-such-notification"
+  /** A count, a delay or an error value out of range. */
+  | "bad-argument"
+  /** A call that names no block for "state unavailable", without a block given. */
+  | "no-block-hash";
+
+/** `bad-transform`: a variant transform asked for something the tape lacks or cannot hold. */
+export class TransformError extends Error {
+  readonly code = "bad-transform";
+
+  constructor(
+    readonly reason: TransformProblem,
+    detail: string,
+  ) {
+    super(`bad-transform: ${detail}`);
+    this.name = "TransformError";
+  }
+}

@@ -1374,8 +1374,61 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** the recording builder and the variant transforms (9.2); the real tapes (0.3); A83's `[CI]` sync
       through the tape node (10.3); A84 and A85 against tapes (10.4); restarted processes against one tape node (18.1,
       18.2).
-- [ ] 9.2 The recording builder and the variant transforms.
+- [x] 9.2 The recording builder and the variant transforms.
       **Acceptance:** A71 (`[CI]` part); the `[MANUAL]` record-and-replay against a real node is recorded for the PR.
+      **Done (2026-10-26):** in `tools/tape/` (unexported, as 9.1). **The builder** (`builder.ts`, its recorder
+      `recording.ts`): `TapeBuilder.start({ node })`, a WebSocket proxy on 127.0.0.1 at a random free port ≥ 10000;
+      each accepted connection opens its own to the node (`ws://` or `wss://`, never shown in an error) and is one
+      session, in accept order; frames pass unchanged both ways (the client's held while the node's connection opens;
+      pings answered by `ws`); `stop()` ends what is open and returns the records, checked as a tape, for
+      `writeTapeFile`. It records a call with the params the client sent (absent: `[]`), an answer to a head
+      subscription as `subscribe`, each notification as it came, a request still waiting when its connection ended as
+      a `timeout` fault, and a `disconnect` after each session but the last (and the last too when the node ended it);
+      no delays. Records follow the node's frames, except that answers of one method and params are written in request
+      order (a later one waits behind an earlier one, TT-2's occurrence rule). Each answer and notification must be the
+      very text the tape node writes for its record (`frames.ts`, now shared with `node.ts`: `jsonrpsee`'s field
+      order, the tape's JSON form), else the recording is void: `cannot-record` (`RecordingError`: session, side,
+      `reason` — `bad-request`, `duplicate-id`, `not-json-rpc`, `unknown-answer`, `unknown-subscription`,
+      `notification-method`, `out-of-order`, `bad-record`, `not-replayable`), every connection closed with 1011,
+      `failed` resolved, `stop()` rejected; strict on spelling (Q111, shipped A). A node that ends a connection
+      (or whose handshake fails: an empty session) has the client's dropped without a close frame once the frames
+      before are written out, as the tape node drops it. **The transforms** (`transforms.ts`, helpers `select.ts`),
+      pure, input and output checked with `checkTape`, `bad-transform` (`TransformError`) otherwise:
+      `dropNotifications` (from the `from`-th on), `skipNotifications` (`count` from the `from`-th),
+      `repeatNotification` (`times` copies after the `nth`), `insertDisconnect` (`count` disconnects after a line, a
+      `subscribe` record per live subscription in the next session, ids kept), `delayAnswers` (exactly the selected
+      calls), `replaceWithError`, `stateUnavailable` (Substrate's 4003 "State already discarded for <block>", the block
+      the call's last parameter), `spliceNotifications` (a range replaced one for one by another tape's, under the
+      target's id). **A71's `[MANUAL]` check** (`replay-check.ts`): `recordAndReplay` runs a `NodeClient` session
+      (default: the IN-8 tour, every IN-8 call once at the finalized head, then one new and two finalized heads)
+      through the builder, replays the tape to a new client and compares every frame of every connection.
+      **The command** (`command.ts`, entry `main.ts`, left out of coverage like `src/cli/main.ts`):
+      `npx tsx tools/tape/main.ts record --node <ws-url> --out <file>` (until Ctrl-C) and
+      `… check --node <ws-url> --out <file>`. Tests, seen failing first (6 files, 107 tests:
+      `Cannot read properties of undefined (reading 'start')`, `insertDisconnect is not a function`, …):
+      `test/tape/builder.test.ts` (A71 against the scripted server `scripted-node.ts`, which writes its frames with
+      `JSON.stringify`: record → replay byte-identical per connection, the committed `fixtures/a71-recorded.tape.jsonl`
+      written by hand and its SHA-256, frames forwarded unchanged; ordering, ends, concurrency, start and stop; 40
+      tests of refusals), `frames.test.ts`, `transforms.test.ts` (each transform against its committed expected output
+      in `fixtures/transforms/`, made from the recorded tape by line edits, with its SHA-256; the delay on exactly lines
+      5 and 19; refusals), `record-and-replay.test.ts` (through `src/node/`'s `NodeClient`, unchanged: the IN-8 tour on
+      the recorded mainnet answers, and a session with a drop, the back-off, the new subscription and the retried
+      call), `command.test.ts` (in this process and as a process of its own, Ctrl-C as SIGINT). Committed negative
+      controls: a builder that drops a notification, or records params other than the client's, fails the
+      byte-identical replay (`builder.negative-control.test.ts`); a delay set on an unselected call fails its expected
+      output, and an "insert a disconnect" that does not subscribe again fails its replay — no tape, or the client's
+      new subscription `not-on-tape` (`transforms.negative-control.test.ts`). Wrong variants (a scratch runner outside
+      the clone, the tree checked byte for byte after): a first full run of 191 left 26 survivors — 15 gaps, closed by
+      tests; 5 redundant checks, removed; 6 equivalent —; the final run on the final sources, 189 variants: 183 caught
+      (7 by the typecheck, whose type-correct forms the tests catch), 6 equivalent survivors (checks a tape already
+      passes by construction: the joined sessions and each transform's output; the `return` after a refusal, whose
+      sockets are already ending; a `disconnect` record's own session; a repeat placed before or after its equal).
+      Coverage of `tools/tape/` 100 %.
+      **`[MANUAL]`, for the owner with 0.3:** against a local devnet or Stagenet node,
+      `npx tsx tools/tape/main.ts check --node <ws-url> --out a71-<network>.tape.jsonl`: exit 0 and `identical: …`;
+      the PR records the network, the node's version, the command and the printed `<sha256>  <file>` line.
+      **Pending:** the `[MANUAL]` run (owner, with 0.3); the real tapes (0.3, best recorded through the builder by the
+      client that replays them); Q111; `docs/issues/00016-heartbeat-above-timer-limit.md`.
 
 ## 10. Node client and ingest
 

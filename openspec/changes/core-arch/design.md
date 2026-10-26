@@ -863,11 +863,14 @@ nothing is written or committed): `backup-tools-missing`, `private-backup-refuse
 `fast-log-unsupported`, `unexpected-cursor`, `writer-lock-lost`, `truncate-not-allowed` (a callback error); for a
 private instance, `lockstep-behind` and `report-hash-mismatch`.
 
-**The test tape's two errors are not `UmbraError` codes** (task 9.1): the tape is test tooling (`tools/tape/`, §1), and
-`ERROR_CODES` is the exported `ErrorCode` (§12). `bad-tape-record` is the tape tools' own `TapeError` (the line,
+**The test tape's errors are not `UmbraError` codes** (tasks 9.1, 9.2): the tape is test tooling (`tools/tape/`, §1),
+and `ERROR_CODES` is the exported `ErrorCode` (§12). `bad-tape-record` is the tape tools' own `TapeError` (the line,
 counting from 1, and a `reason`); `not-on-tape` is the tape node's JSON-RPC error (code −32090, message
 `not-on-tape: <method>`), which the node client reads as `node-error` (`rpc-error`) and never retries, so a test whose
-indexer calls something its tape lacks fails at once, naming the method, instead of retrying.
+indexer calls something its tape lacks fails at once, naming the method, instead of retrying. The recording builder's
+`cannot-record` (`RecordingError`: the session, the side the frame came from, a `reason`) voids a recording with a
+frame the tape node could not give back byte for byte; the variant transforms' `bad-transform` (`TransformError`, a
+`reason`) refuses what a tape lacks or cannot hold.
 
 ## 12. Exported surface and command (LS-1, LS-6)
 
