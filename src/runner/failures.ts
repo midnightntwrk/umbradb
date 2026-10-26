@@ -86,6 +86,7 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
 export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
   "database-error",
   "parent-mismatch",
+  "finality-conflict",
   "node-requirement",
   "duplicate-block-hash",
   "unknown-runtime",

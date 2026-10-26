@@ -17,7 +17,9 @@
  * 2. the runner binds the part to its process context ({@link bindCoreChain}) with what it checked and opened, and runs
  *    the migrations; the part's `on-start-db` ({@link coreChainStartDb}) records the configuration history (CF-6), on a
  *    database without a cursor records the genesis hash and S — again at every start until block S commits, so an
- *    interrupted bootstrap is repeated (IN-2) —, and publishes its four `process` items (MD-7);
+ *    interrupted bootstrap is repeated (IN-2) —, and publishes its four `process` items (MD-7): `node-client` the
+ *    process's one node client — the one its block source, `core-block-fetch`'s node source, reads the chain through
+ *    (task 10.3) —, `ledger-table` the `core` revision's table in effect (`ledgerTable`, LG-3, task 12.2);
  * 3. on a database without a cursor, once the module API listens, {@link waitForNode} waits, `starting` with
  *    `waiting-for-node`, while S is above the node's finalized head (IN-2).
  *
@@ -37,9 +39,10 @@ import type { CheckedConfig } from "../../config/validate.js";
 import type { BlockWriteHandle, Database, ReadHandle, SchemaWriteHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { readOnlyDatabase } from "../../db/read-only.js";
+import type { LedgerTable } from "../../ledger/version-table.js";
 import { type BlockContext, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
 import type { DeclarationSet } from "../../modules/validation.js";
-import { NodeClient, type NodeClientOptions } from "../../node/client.js";
+import type { NodeClient, NodeClientOptions } from "../../node/client.js";
 import type { BlockRef, BlockSource } from "../../runner/block-source.js";
 import { CONFIG_MIGRATION, recordHistory } from "./history.js";
 
@@ -65,16 +68,6 @@ export const CORE_CHAIN_MIGRATIONS: readonly { readonly id: string; readonly sql
   CONFIG_MIGRATION,
   IDENTITY_MIGRATION,
 ]);
-
-/**
- * The `ledger-table` item until tasks 12.x give it (CORE-ARCH §4.8: the built-in table for the network, rows
- * `{ specVersionMin, specVersionMax, ledger }` and pins `{ height, hash, specVersion }`, with the `core` entry's
- * `ledgerTable` and package sources): no rows and no pins.
- */
-export const PENDING_LEDGER_TABLE: { readonly rows: readonly never[]; readonly pins: readonly never[] } = Object.freeze({
-  rows: Object.freeze([]),
-  pins: Object.freeze([]),
-});
 
 /** The chain's identity as `core_chain.identity` holds it (CD-1). */
 export interface ChainIdentity {
@@ -210,7 +203,8 @@ export async function checkChain(input: ChainCheckInput): Promise<ChainCheck> {
 
 /**
  * The node client's options from the process's `core` settings (CF-4, Q102): its `node` and `backoffCeilingMs`; null for
- * a process without a node (a private process, whose `core` entry has none).
+ * a process without a node (a private process, whose `core` entry has none). The process makes its one node client
+ * from them (`src/runner/process.ts`).
  */
 export function nodeOptionsOf(settings: Readonly<Record<string, unknown>>): NodeClientOptions | null {
   if (typeof settings.node !== "string") return null;
@@ -231,22 +225,24 @@ export interface CoreChainFacts {
   readonly start: bigint;
   /** The node's genesis hash, as {@link checkChain} found it. */
   readonly genesisHash: Uint8Array;
-  /** The node client's options (`nodeOptionsOf`), or null for none: no `node-client` item is then published. */
-  readonly node: NodeClientOptions | null;
+  /**
+   * The process's node client, published as `node-client` — the one connection its block source shares (task 10.3) —,
+   * which the process closes; or null for none: no `node-client` item is then published.
+   */
+  readonly nodeClient: NodeClient | null;
+  /** The `core` revision's ledger table in effect (`ledgerTable`, LG-3), published as `ledger-table`. */
+  readonly ledgerTable: LedgerTable;
 }
 
 /** A process's `core-chain`, bound by {@link bindCoreChain}. */
 export interface CoreChainBinding {
   /** The node client it publishes as `node-client`, or null. */
   readonly nodeClient: NodeClient | null;
-  /** Closes what the part opened: its node client (every call and subscription ends with `handle-closed`). */
-  close(): Promise<void>;
 }
 
 /** What a bound context holds. */
 interface Bound {
   readonly facts: CoreChainFacts;
-  readonly nodeClient: NodeClient | null;
   /** The `db` item, made once and shared by every module that requires it (task 2.8's note (b)). */
   readonly db: ReturnType<typeof readOnlyDatabase>;
 }
@@ -255,19 +251,12 @@ const BOUND = new WeakMap<ProcessContext, Bound>();
 
 /**
  * Binds `core-chain` to its process context `context` with the process's `facts` (see the module comment), before
- * `startDatabase` runs its `on-start-db`: makes the node client (no connection until its first call) and the read-only
- * `db` item. Throws when `context` is bound already.
+ * `startDatabase` runs its `on-start-db`: makes the read-only `db` item. Throws when `context` is bound already.
  */
 export function bindCoreChain(context: ProcessContext, facts: CoreChainFacts): CoreChainBinding {
   if (BOUND.has(context)) throw new Error("bindCoreChain: core-chain is bound once per process context");
-  const nodeClient = facts.node === null ? null : new NodeClient(facts.node);
-  BOUND.set(context, Object.freeze({ facts, nodeClient, db: readOnlyDatabase(facts.db) }));
-  return Object.freeze({
-    nodeClient,
-    close: async () => {
-      await nodeClient?.close();
-    },
-  });
+  BOUND.set(context, Object.freeze({ facts, db: readOnlyDatabase(facts.db) }));
+  return Object.freeze({ nodeClient: facts.nodeClient });
 }
 
 /** What the runner bound to `p`; throws for a context no runner bound. */
@@ -293,13 +282,13 @@ export async function coreChainStartDb(
   w: SchemaWriteHandle,
   options: { readonly history?: HistoryOptions } = {},
 ): Promise<void> {
-  const { facts, nodeClient, db } = boundTo(p, "on-start-db");
+  const { facts, db } = boundTo(p, "on-start-db");
   await recordHistory(w, { config: facts.config, declarations: facts.declarations, cursor: facts.cursor }, options.history);
   if (facts.cursor === null) await w.execute(RECORD_IDENTITY_SQL, [facts.genesisHash, facts.start]);
   p.publish("config", facts.config);
-  if (nodeClient !== null) p.publish("node-client", nodeClient);
+  if (facts.nodeClient !== null) p.publish("node-client", facts.nodeClient);
   p.publish("db", db);
-  p.publish("ledger-table", PENDING_LEDGER_TABLE);
+  p.publish("ledger-table", facts.ledgerTable);
 }
 
 /**

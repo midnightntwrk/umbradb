@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CORE_BLOCK_FETCH } from "../../src/backbone/core-block-fetch/index.js";
 import { CORE_CHAIN, coreChainStartDb } from "../../src/backbone/core-chain/index.js";
 import { coreEntry } from "../../src/config/entries.js";
 import type { HistoryOptions } from "../../src/config/history.js";
@@ -10,8 +11,9 @@ import { LOOP_BACKBONE } from "./loop-harness.js";
 
 /**
  * A build for the process's tests (task 5.3; RN-7, RN-9–RN-13, CF-3, CF-4, Q102): the test backbone of
- * `loop-harness.ts` — the real `core-block-commit`, stand-ins for `core-block-fetch` and `core-digest` — with the real
- * `core-chain` (task 10.2), which the runner binds to its process context: its migrations create `core_chain.config`
+ * `loop-harness.ts` — the real `core-block-commit`, a stand-in for `core-digest` — with the real `core-block-fetch`
+ * (task 10.3: the runner binds it to the process's block source, whose items it puts) and the real `core-chain` (task
+ * 10.2), which the runner binds to its process context: its migrations create `core_chain.config`
  * and `core_chain.identity`, its `on-start-db` records the configuration history (CF-6, with `options.history` — a
  * negative control's `recordedData` — when given) and the identity and publishes its four process items, its
  * `on-db-write` records the anchor at S. The build adds to it the recording of its start and stop notifications, and of
@@ -74,7 +76,9 @@ export function testBuild(user: readonly ModuleDeclaration[], options: TestBuild
     },
   };
   const replace = options.backbone ?? ((part: ModuleDeclaration) => part);
-  const backbone = LOOP_BACKBONE.map((part) => replace(part.id === "core-chain" ? chain : part));
+  const real = (part: ModuleDeclaration): ModuleDeclaration =>
+    part.id === "core-chain" ? chain : part.id === "core-block-fetch" ? CORE_BLOCK_FETCH : part;
+  const backbone = LOOP_BACKBONE.map((part) => replace(real(part)));
   return { declarations: { backbone, core: options.core ?? [], user }, core };
 }
 

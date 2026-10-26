@@ -33,9 +33,9 @@ import type { Job, WorkerEvent } from "./chain-bootstrap.worker.js";
 
 /**
  * The chain's identity, bootstrap and startup checks, and the blocks table, through the real process (task 10.2):
- * `startProcess` with UmbraDB's backbone parts — `core-chain`, `core-block-commit`, `core-digest`, and the stand-in
- * `core-block-fetch` of task 10.3's (`./chain-build.ts`) — over an in-memory block source, on PostgreSQL 18 and PGlite
- * 0.5.10, each process opening its database from the configuration's `database` setting.
+ * `startProcess` with UmbraDB's backbone parts — `core-chain`, `core-block-fetch` (task 10.3: the in-memory source's
+ * block items), `core-block-commit`, `core-digest` (`./chain-build.ts`) — over an in-memory block source, on PostgreSQL
+ * 18 and PGlite 0.5.10, each process opening its database from the configuration's `database` setting.
  *
  * - A77 (IN-2): with S above the source's finalized head the process stays `starting` with `waiting-for-node`, its
  *   bootstrap done, and commits S once the head reaches it, the anchor recorded in S's transaction; a bootstrap killed
@@ -723,16 +723,16 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       "9999-12-31T23:59:59.999Z",
     ];
     const seen: Seen = { blocks: new Map() };
-    const source = new InMemoryBlockSource({ head: 5n });
-    const handle = chainProcess(db, 1n, source, {
-      user: [recorder(seen)],
-      build: {
-        fetch: {
-          header: (b) => ({ specVersion: STAND_IN_SPEC_VERSION + Number(b.height), timestampMs: times[Number(b.height) - 1] }),
-          ledger: (b) => (b.height < 3n ? "v8" : "v9"),
-        },
-      },
+    // Each block's own items, which the real core-block-fetch puts from the source (task 10.3).
+    const source = new InMemoryBlockSource({
+      head: 5n,
+      items: (b) => ({
+        specVersion: STAND_IN_SPEC_VERSION + Number(b.height),
+        timestampMs: times[Number(b.height) - 1] as bigint,
+        ledger: b.height < 3n ? "v8" : "v9",
+      }),
     });
+    const handle = chainProcess(db, 1n, source, { user: [recorder(seen)] });
     try {
       expect(await settle(handle, source, 5n)).toBe("waiting");
     } finally {

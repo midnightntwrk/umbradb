@@ -1709,9 +1709,79 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `core-chain`'s checks, the real `core-block-fetch` putting the items, one node connection, IN-4's finality check
       (10.3); `node-retrying` during the startup waits and the halt registry (10.4); the ledger table (12.x); the
       exports and codes in the surface pin (17.x); Q118 to Q120 (owner).
-- [ ] 10.3 `core-block-fetch`: finalized processing, the finalized prefetch, the best-block queue with branch switches,
+- [x] 10.3 `core-block-fetch`: finalized processing, the finalized prefetch, the best-block queue with branch switches,
       block 0's fetch path.
       **Acceptance:** A76, A79, A80, A81, A83, A89.
+      **Done (2026-10-26):** `core-block-fetch` (`src/backbone/core-block-fetch/`, new): the declaration
+      `CORE_BLOCK_FETCH` (requires `node-client` and `ledger-table`; at `on-fetch` it puts the four `block` items its
+      block source gives, through `bindCoreBlockFetch`) and the node-backed block source `NodeBlockSource`
+      (`nodeSourceOf(core, { nodeClient })`, what `umbradb run` passes as `source`). **The finalized head** (IN-4): at
+      first use the source subscribes to the finalized and the new heads, then reads the head (`chain_getFinalizedHead`,
+      `chain_getHeader`); notifications only raise it, a reconnect (`restarted`) reads it again; a notified header's
+      hash is BLAKE2b-256 of its SCALE encoding (`blake2b.ts`, `header.ts`: checked against RFC 7693's and Python's
+      vectors and the real mainnet header of 3,174,332). **`finality-conflict`** (new `ErrorCode` and halt): a finalized
+      notification naming another hash than the one the source read at its height, or at or below the loop's cursor the
+      database's (`QueueRunner.storedHash`), fails the source and the loop halts at its next call. **The finalized
+      prefetch** (IN-5): from the cursor + 1 to the lower of the cursor + `prefetchWindow` and the head the loop last
+      read (so its `on-finalized` comes first), eight heights at a time: `chain_getBlockHash`, then the queued block of
+      that hash — the heights looking into the queue in height order — or `chain_getBlock`, and `on-fetch`/`on-parse`
+      through the runner. **The best-block queue** (IN-6), one change at a time: `on-best-block`, `chain_getBlock`,
+      `on-fetch`/`on-parse`, appended on its parent or the walk over `chain_getHeader` to a queued block or the head,
+      the blocks above the ancestor dropped with one `on-rollback` and the branch fetched; calls without retries, any
+      error dropping the block (IN-10); `tipCap` with the condition `finality-stall` (`status().conditions`); queued
+      only while the head is within `prefetchWindow` of the cursor (Q129); a head naming another hash at a queued
+      height drops from there; at finality a queued block with the finalized hash goes on with its items, unfetched;
+      `close` ends the subscriptions and every pending wait and later call. **The runner** (`src/runner/`):
+      `BlockSource` gains optional `attach` (the loop gives a `QueueRunner` — `prepare` (`on-fetch`, `on-parse`),
+      `bestBlock`, `rollback`, `storedHash` — for each run and takes it back at its end; RN-1: the queue's points only
+      through it), `prepared` (the loop goes on from `on-start-height` with the source's items, `HeightRun.prepared`)
+      and `conditions` (`close`, task 14.1's, the node source has too); the in-memory source gives `core-block-fetch`
+      its own items (`blockItems`: runtime 2.0, `v9`, six-second blocks, or a block's own through `items`). **The
+      items** (CD-2): `block-header` (heights, hashes, roots, digest, the `MNSV` `spec_version`, the time from the
+      `Timestamp::set` inherent, 0 for a block 0 without one), `block-body` (each extrinsic's version and, unsigned, its
+      call named by the metadata: `extrinsics.ts`), `runtime-metadata` (`RuntimeMetadata.forBlock`: the parent's state's
+      runtime, block 0's own, LG-4) and `ledger-version` (`selectLedgerVersion` over `ledger-table`, as text); the
+      metadata read as V14 — what `state_getMetadata` answers — or V15 to its pallets (`metadata.ts`, `scale.ts`; the
+      type registry reader checked on the six Midnight node metadata files of `midnight-indexer` 2.1.0-rc.4, in a
+      scratch probe). **Block 0** (IN-7) takes the same path. **The wiring** (`src/runner/process.ts`): the process
+      makes its one `NodeClient` from the `core` revision's `node`, gives it to the source factory and to `core-chain`,
+      whose `node-client` it is, binds `core-block-fetch` to the source, shows the source's conditions in `status()` and
+      closes the client and, after the database, the source at stop or refusal (14.1's order); `core-chain` publishes
+      the revision's ledger table in effect as `ledger-table` (`PENDING_LEDGER_TABLE` removed); `buildDeclarations()`
+      holds `CORE_BLOCK_FETCH`. `design.md` §2, §3; the module guide ("Blocks from the node"). Question Q129 (best
+      blocks during a catch-up: IN-6 against A80) raised, not blocking, shipped B. Tests, seen failing first against the
+      task's starting sources (`src/` stashed: `tsc` exit 2, 50 errors — `Cannot find module` for
+      `src/backbone/core-block-fetch/*` (12), the missing exports and `blockItems` —; Vitest: the three suites written
+      first failed to load; `core-block-fetch.test.ts`, the controls and `ingest-crash.test.ts`, written next, were seen
+      failing through their controls and the wrong variants): `test/backbone/block-fetch-decode.test.ts` (22: BLAKE2b,
+      the mainnet header's hash, SCALE, metadata V14/V15 and refusals, the real mainnet block 3,174,332's seven
+      extrinsics named and its time 2026-10-25T22:20:12Z), `node-source.test.ts` (47: the head, reconnects, close,
+      conflicts, the prefetch's window, bound, concurrency and runs, the queue's appends, switches, walks, `tipCap`,
+      errors without retries, drops at finality in height order, the items), `core-block-fetch.test.ts` (6),
+      `ingest.test.ts` (20, through the process on PostgreSQL 18.6 and PGlite 0.5.10: A79's three cases, A80 and A83
+      over 1,000 heights (200 on PostgreSQL, whose 1,000 one-transaction heights outlast the gate under load), A81's
+      switch and `tipCap`, A89 at a synthetic upgrade, block 0 with and without `Timestamp::set`, the stop closing the
+      client, then the source), `ingest-crash.test.ts` (A76 with a real SIGKILL, PostgreSQL and PGlite, and its restart;
+      tagged `[[ingest.no-unfinalized-rows-after-crash]]`); synthetic tapes in the node's answer shapes
+      (`fetch-fixtures.ts`, `ingest-tapes.ts`). Committed negative controls (`ingest.negative-control.test.ts`,
+      `ingest-crash.test.ts`): a source writing best blocks to the database fails A76; one not reading the head again
+      misses A79's heights after the disconnect; a prefetch without a window fails A80; a switch fetching 101′ again
+      fails A81's counts; a source asking a method outside IN-8 fails A83; a decode with the block's own metadata fails
+      A89 at U. Process tests run the real `core-block-fetch` (the stand-in stays for the loop's own tests);
+      `core-chain`'s tests give the shared client and the table. Wrong variants (scratch runners over copies of the
+      clone, outside it: each alone, `tsc` and its group's suites, per-test timeouts, no `--bail`, a suite over 900 s
+      counted caught): 157 run on three copies, 144 caught (5 by `tsc`, 3 by the time limit), 13 survived — 10 gaps,
+      each closed by a test seen failing on the variant; 2 the process cannot reach (the last run's head kept as the
+      prefetch's bound, which every run reads again first; the best-block check against a cursor above the head, which
+      the loop never attaches with), closed at the source's API; 1 on code since changed (`close` now fails the source,
+      its new variant caught) —; the 6 caught only by the time limit or by the A80 PostgreSQL wait timing out under load
+      were given direct tests, one of which showed the prefetch looking into the queue in the order its hash reads came
+      back (a drop at finality could be two `on-rollback`s, the higher first: now in height order). On the final sources
+      the 29 variants of the survivors, the changed functions and the load-only catches, rerun: 29 caught.
+      **Pending:** IN-10's items kept across a retried height and IN-11 with the node source, `node-retrying` from the
+      client, the registry (10.4); `chain-events`, the ledger transactions and signed extrinsics' calls (11.1); block
+      0's ledger path (12.3); real tapes for every criterion (0.3, 18.2); `/status` serving `finality-stall` (8.3);
+      `umbradb run` passing `nodeSourceOf` (4.4); Q129 (owner).
 - [ ] 10.4 Error handling, retries and halts; recovery after an uncertain COMMIT; the refusal and halt registry.
       **Acceptance:** A84, A85, A86, A87.
 - [ ] 10.2a The owner's answers Q117 A and Q120 B: the node's genesis hash compared with the configured network's at

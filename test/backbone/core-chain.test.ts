@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { cursorHeight, readCursor } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { bindCoreBlockFetch, CORE_BLOCK_FETCH_ID } from "../../src/backbone/core-block-fetch/index.js";
 import {
   bindCoreChain,
   checkChain,
@@ -12,13 +13,14 @@ import {
   IDENTITY_MIGRATION,
   IDENTITY_TABLE,
   nodeOptionsOf,
-  PENDING_LEDGER_TABLE,
   readHistory,
   readIdentity,
   waitForNode,
   type NodeWait,
 } from "../../src/backbone/core-chain/index.js";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
+import { ledgerTableOf } from "../../src/ledger/networks.js";
+import type { LedgerTable } from "../../src/ledger/version-table.js";
 import { checkHistory, graphInputOf } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
 import { type CheckedConfig, validateConfig } from "../../src/config/validate.js";
@@ -108,13 +110,6 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
     expect(sha(CONFIG_MIGRATION.sql)).toBe(CONFIG_MIGRATION_SHA256);
     expect(sha(IDENTITY_MIGRATION.sql)).toBe(IDENTITY_MIGRATION_SHA256);
     expect(Object.isFrozen(CORE_CHAIN_MIGRATIONS)).toBe(true);
-  });
-
-  it("publishes a ledger table with no rows and no pins until tasks 12.x give it", () => {
-    expect(PENDING_LEDGER_TABLE).toEqual({ rows: [], pins: [] });
-    expect(Object.isFrozen(PENDING_LEDGER_TABLE)).toBe(true);
-    expect(Object.isFrozen(PENDING_LEDGER_TABLE.rows)).toBe(true);
-    expect(Object.isFrozen(PENDING_LEDGER_TABLE.pins)).toBe(true);
   });
 
   it("makes the node client's options from the process's core settings: its node and back-off ceiling, none without a node", () => {
@@ -282,7 +277,12 @@ interface ChainStarted {
   readonly contexts: ProcessContexts;
   readonly facts: CoreChainFacts;
   readonly binding: ReturnType<typeof bindCoreChain>;
+  /** Closes what the test made for it: the node client (the process closes its own, task 10.3). */
+  close(): Promise<void>;
 }
+
+/** The `core` revision's ledger table in effect the tests give `core-chain` (task 12.2's preprod table, LG-3). */
+const LEDGER_TABLE: LedgerTable = ledgerTableOf("preprod", undefined);
 
 /** The configuration of the chain's tests: a `core` entry from each of `starts` (S is the lowest). */
 function configOf(declarations: DeclarationSet<ModuleDeclaration>, starts: readonly bigint[] = [S]): CheckedConfig {
@@ -317,9 +317,14 @@ async function startChain(
     db,
     start: BigInt(config.start),
     genesisHash: options.genesis ?? inMemoryBlock(0n).hash,
-    node: options.node === false ? null : { url: NODE, backoffCeilingMs: 30_000 },
+    nodeClient: options.node === false ? null : new NodeClient({ url: NODE, backoffCeilingMs: 30_000 }),
+    ledgerTable: LEDGER_TABLE,
   };
   const binding = bindCoreChain(contexts.of(CORE_CHAIN_ID), facts);
+  // core-block-fetch puts the in-memory source's block items (task 10.3): every in-memory source gives the same ones.
+  if (graph.modules.some((part) => part.id === CORE_BLOCK_FETCH_ID)) {
+    bindCoreBlockFetch(contexts.of(CORE_BLOCK_FETCH_ID), new InMemoryBlockSource({ head: 0n }));
+  }
   await startDatabase(db, {
     plan: schemaPlan(graph.modules),
     parts: graph.modules.map((part) => contexts.startDbPart(part)),
@@ -327,7 +332,7 @@ async function startChain(
     handles: { height: cursor?.height ?? null },
   });
   contexts.seal();
-  return { db, graph, contexts, facts, binding };
+  return { db, graph, contexts, facts, binding, close: async () => facts.nodeClient?.close() };
 }
 
 /** Runs the finalized loop of `started` over `source` until it waits above `head`. */
@@ -405,7 +410,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
       return tx.query("SELECT count(*)::int AS n FROM core_chain.identity");
     });
     expect(asRole).toEqual([{ n: 1 }]);
-    await started.binding.close();
+    await started.close();
   }, 120_000);
 
   it("records the genesis hash and S on a new database, the anchor still null, in its on-start-db (IN-2)", async () => {
@@ -417,7 +422,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     expect(Object.isFrozen(await db.read((read) => readIdentity(read)))).toBe(true);
     // The history was recorded in the same callback (CF-6): the core entry's row.
     expect((await db.read((read) => readHistory(read))).map((h) => [h.id, h.start])).toEqual([["core", S]]);
-    await started.binding.close();
+    await started.close();
   }, 120_000);
 
   it("reads no identity before the table exists, nor while it holds no row", async () => {
@@ -430,13 +435,13 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
   it("repeats an interrupted bootstrap: before block S commits, a new start records the genesis hash and S again", async () => {
     const { db } = await backend.database("SELECT 1", cursorHeight);
     const first = await startChain(db);
-    await first.binding.close();
+    await first.close();
     // Another node's genesis, and S moved down by a core revision from 3: nothing was processed yet, so the bootstrap
     // is repeated (IN-2), not refused (IN-3 compares the genesis hash on a database with a cursor).
     const second = await startChain(db, { genesis: OTHER_GENESIS.hash, starts: [3n, S] });
     const [row] = await identityRow(db);
     expect(row).toMatchObject({ genesis_hash: OTHER_GENESIS.hash, start_height: 3n, anchor_hash: null });
-    await second.binding.close();
+    await second.close();
   }, 120_000);
 
   it("records the anchor hash in block S's own transaction, writing nothing at any other height (IN-2, CD-1)", async () => {
@@ -455,18 +460,18 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     await runTo(started, source, S + 3n);
     const [after] = await identityRow(db);
     expect(after).toEqual(row);
-    await started.binding.close();
+    await started.close();
   }, 120_000);
 
   it("leaves the identity unchanged at a start on a database with a cursor", async () => {
     const { db } = await backend.database("SELECT 1", cursorHeight);
     const first = await startChain(db);
     await runTo(first, new InMemoryBlockSource({ head: S + 1n }), S + 1n);
-    await first.binding.close();
+    await first.close();
     const [before] = await identityRow(db);
     const second = await startChain(db);
     expect(await identityRow(db)).toEqual([before]);
-    await second.binding.close();
+    await second.close();
   }, 120_000);
 
   it("fails block S when the identity holds an anchor already, or no row, rather than overwrite it", async () => {
@@ -476,7 +481,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     const error = await rejectionOf(runTo(started, new InMemoryBlockSource({ head: S }), S));
     expect((error as Error).message).toMatch(/anchor/);
     expect(await db.read((read) => readCursor(read))).toBeNull();
-    await started.binding.close();
+    await started.close();
   }, 120_000);
 
   it("publishes config, node-client, db read-only and ledger-table from its on-start-db, once (MD-7, CD-1, A144)", async () => {
@@ -487,13 +492,15 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     expect(items.get("config")).toBe(started.facts.config);
     expect(items.get("node-client")).toBeInstanceOf(NodeClient);
     expect(items.get("node-client")).toBe(started.binding.nodeClient);
-    expect(items.get("ledger-table")).toBe(PENDING_LEDGER_TABLE);
+    expect(items.get("node-client")).toBe(started.facts.nodeClient);
+    // The core revision's table in effect, as the process gives it (task 10.3; 12.2's note (c)).
+    expect(items.get("ledger-table")).toBe(LEDGER_TABLE);
     const item = items.get("db") as object;
     expect(readOnlyProblems(item, db)).toEqual([]);
     expect(Object.isFrozen(item)).toBe(true);
     expect(await (item as { read: Database["read"] }).read(async (read) => read.height)).toBeNull();
-    // Closing the binding closes the node client: its calls end with handle-closed.
-    await started.binding.close();
+    // The published client is the very one given: closed by its owner, its calls end with handle-closed.
+    await started.close();
     expect(await rejectionOf((items.get("node-client") as NodeClient).finalizedHead())).toMatchObject({ code: "handle-closed" });
   }, 120_000);
 
@@ -503,7 +510,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     const started = await startChain(db, { node: false, backbone: [CORE_CHAIN] });
     expect([...started.contexts.of(CORE_CHAIN_ID).items.keys()]).toEqual(["config", "db", "ledger-table"]);
     expect(started.binding.nodeClient).toBeNull();
-    await started.binding.close();
+    await started.close();
   }, 120_000);
 });
 
@@ -521,9 +528,9 @@ describe("core-chain outside a process", () => {
 
   it("is bound once per process context", () => {
     const context = Object.freeze({ items: new Map(), revisions: [], publish: () => undefined });
-    const facts = { node: null } as unknown as CoreChainFacts;
+    const facts = { nodeClient: null } as unknown as CoreChainFacts;
     const binding = bindCoreChain(context, { ...facts, db: { read: async () => undefined } as unknown as Database });
+    expect(binding.nodeClient).toBeNull();
     expect(() => bindCoreChain(context, { ...facts, db: { read: async () => undefined } as unknown as Database })).toThrow(/once/);
-    void binding.close();
   });
 });

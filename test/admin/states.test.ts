@@ -3,7 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { versionEntry } from "../../src/config/entries.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
-import type { BlockSource } from "../../src/runner/block-source.js";
+import type { BlockItemSource } from "../../src/backbone/core-block-fetch/index.js";
+import type { BlockRef, BlockSource } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { PROCESS_BACKENDS, type ProcessDatabase } from "../runner/process-backends.js";
 import { entryOf, loggingModule, settle } from "../runner/process-build.js";
@@ -73,7 +74,7 @@ function failingSource(
   source: InMemoryBlockSource,
   fails: { readonly block?: bigint; readonly cursor?: boolean; readonly code: "node-unreachable" | "connection-lost" },
   healed: () => boolean,
-): BlockSource {
+): BlockSource & BlockItemSource {
   const failure = () => new UmbraError(fails.code, `the test's ${fails.code}`);
   return {
     cursor: async (read) => {
@@ -82,6 +83,8 @@ function failingSource(
     },
     finalizedHead: () => source.finalizedHead(),
     waitForHead: (above, signal) => source.waitForHead(above, signal),
+    // core-block-fetch's items, as the source gives them (task 10.3).
+    blockItems: (block: BlockRef) => source.blockItems(block),
     block: async (height) => {
       if (height === fails.block && !healed()) throw failure();
       return source.block(height);

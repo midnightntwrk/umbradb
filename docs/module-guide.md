@@ -328,8 +328,9 @@ RN-16 of the `core-arch` change).
   `on-start-db` — a later point, a timer, another module's callback. Such a call fails your callback even if you catch
   the error, so startup refuses, or processing stops at the block in progress.
 - **UmbraDB's own process items** come from the backbone part `core-chain`: `config` (the validated configuration),
-  `node-client` (the node client, on a process that has a node), `db` (the database, for reads only: see "Reading
-  through `db`") and `ledger-table` (the ledger version table; empty until the ledger's tasks fill it).
+  `node-client` (the process's one node client, on a process that has a node: the connection its block source reads
+  the chain through), `db` (the database, for reads only: see "Reading through `db`") and `ledger-table` (the ledger
+  version table in effect: the network's built-in table with the configuration's rows and pins).
 - **Read it from `on-start-api` on.** `p.items` holds the published items your module requires or provides; it is
   empty during `on-start-db`, so no setup depends on the order of other modules' setups. If an item a running module
   requires was not published once every `on-start-db` has run, startup refuses with `process-item-missing`, naming the
@@ -436,3 +437,25 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
 - **Your database is bound to one public database.** Its first start records the public database's genesis hash and
   start height; a later start against another public database is refused (`private-binding-mismatch`), and so is one
   whose start height is below the public one's.
+
+## Blocks from the node
+
+The backbone part `core-block-fetch` reads the chain from the node and gives every block's data to the modules that
+require it (CD-2, IN-4 to IN-7 of the `core-arch` change).
+
+- **Four `block` items, from `on-fetch` on.** `block-header` (height, hash, parent hash, roots, digest items, the
+  `spec_version` of the runtime that built the block and its own time in milliseconds), `block-body` (the extrinsics as
+  fetched, in body order, each with its version and, for an unsigned one, its call — pallet and call by name — decoded
+  with the metadata of the runtime in the block's parent's state), `runtime-metadata` (that runtime's `spec_version` and
+  metadata bytes, to decode the rest with: at a runtime upgrade the enacting block is still decoded with the old one)
+  and `ledger-version` (`v8`, `v9`). Require the ones you read; a signed extrinsic's call is left for you to decode.
+- **`on-fetch` and `on-parse` may run ahead, and more than once.** They run for finalized heights fetched ahead of the
+  cursor (up to `prefetchWindow` of them, several at once) and for best blocks the node announces while processing
+  follows the head; a best block that is then finalized goes on to `on-compute` with the items it has, and one that is
+  not is announced to `on-rollback`. Keep these callbacks free of state that outlives the block — they write nothing and
+  read nothing stored — and key anything you keep from `on-best-block` by the block's hash.
+- **`on-best-block` and `on-rollback` get headers only** (height, hash, parent hash) and no database handle;
+  `on-rollback` names the dropped blocks lowest first, once per switch. Nothing of a best block is ever stored.
+- **Testing with `InMemoryBlockSource`.** With UmbraDB's backbone, `core-block-fetch` puts the in-memory source's own
+  items: blocks of runtime 2.0 (`spec_version` 2,000,000, ledger `v9`), six seconds apart, with no extrinsics and empty
+  metadata, unless its `items` option gives a block's own runtime, time or ledger.

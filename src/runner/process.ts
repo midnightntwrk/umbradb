@@ -9,8 +9,10 @@
  * 1. the build's declarations validated (`validateDeclarations`, task 3.1);
  * 2. the configuration loaded (`loadConfig`, CF-1: the file, or data given) and validated (`validateConfig`, task 4.2);
  * 3. the `core` entry's operational and secret fields from its latest revision of the build's version, for the whole
- *    run (`processCoreEntry`, decision record Q102 resolved A): the database, the node — the block source is made from
- *    this revision when given as a function —, `listen.api`, the timeouts, the development opt-in, the core's stop;
+ *    run (`processCoreEntry`, decision record Q102 resolved A): the database, the node — the process's one node client
+ *    is made from this revision's `node` (`nodeOptionsOf`), and the block source, when given as a function, from the
+ *    revision and that client (task 10.3: `core-block-fetch`'s node source, `nodeSourceOf`) —, `listen.api`, the
+ *    timeouts, the development opt-in, the core's stop;
  * 4. the database that revision names opened (`openConfiguredDatabase`, CF-9: PGlite refuses without its opt-in), its
  *    writer started (`startWriter`: the lock, the durability probe, whose warnings are logged);
  * 5. the cursor (the block source's, RN-14), the configuration history (`readHistory`) and the chain's identity
@@ -23,7 +25,8 @@
  * 7. the graph resolved from the check (`resolveGraph`, `graphInputOf`), the schema plan, the process contexts with each
  *    part's revisions ({@link processRevisions}), `core-chain` bound to its context with what startup checked and
  *    opened (`bindCoreChain`: the configuration, the declarations, the cursor, the database, S, the genesis hash, the
- *    node client's options), the migrations and `on-start-db` (`startDatabase`, through each context's publishing
+ *    node client, the revision's ledger table), `core-block-fetch` bound to the block source (`bindCoreBlockFetch`, when
+ *    the source gives block items), the migrations and `on-start-db` (`startDatabase`, through each context's publishing
  *    window — `core-chain`'s records the history and the identity and publishes its `process` items —; a failing
  *    `on-start-db` names its point and module, a `CallbackFailure` as a failing `on-start-api`'s), the seal
  *    (`process-item-missing`);
@@ -31,12 +34,12 @@
  *    IN-2: still `starting`, with the condition `waiting-for-node`), every bootstrap step having run;
  * 9. `on-start-api` and the module API on `listen.api` (`startModuleApi`);
  * 10. the finalized loop, with the core's stop and RN-12's upgrade boundary ({@link upgradeBoundary}).
- * A refusal closes what startup opened — `core-chain`'s node client, the database, its writer lock released — and
- * rejects {@link ProcessHandle.started} with it; the process stays up, `refused` with the refusal's reason, until
- * stopped (IN-12, AE-3). A retryable failure of steps 4 to 8 (`connection-lost`, `node-unreachable`) refuses nothing:
- * steps 4 to 10 run again after IN-10's back-off (see **Retries**), with new process contexts and a new binding of
- * `core-chain` (the earlier one's node client closed). The waits come before the module API, so a retry never meets it
- * open.
+ * A refusal closes what startup opened — the node client, the database, its writer lock released, then the block
+ * source — and rejects {@link ProcessHandle.started} with it; the process stays up, `refused` with the refusal's
+ * reason, until stopped (IN-12, AE-3). A retryable failure of steps 4 to 8 (`connection-lost`, `node-unreachable`) refuses nothing:
+ * steps 4 to 10 run again after IN-10's back-off (see **Retries**), with new process contexts and new bindings of
+ * `core-chain` and `core-block-fetch` (the node client and the block source kept). The waits come before the module
+ * API, so a retry never meets it open.
  *
  * **The state** ({@link ProcessStatus}, CORE-ARCH §4.18, AE-3): `starting` until the loop runs; `refused` when startup
  * refused; then `syncing` or `following` by the lag — the finalized head the loop last read minus the cursor — against
@@ -48,8 +51,9 @@
  * carry their reason ({@link ProcessReason}: §11's code, the height, the module and the point; `./failures.ts`). Ready
  * (`/health/ready`, AE-4) when `following` or `stopped`, or `syncing` unless a set `readinessLag` is exceeded; never
  * `starting`, `refused`, `halted` or `stopping`. While startup waits for the node (steps 6 and 8) the process is
- * `starting` with the condition `waiting-for-node`, beside a retry's condition when one is raised. The admin endpoints
- * that show all this are tasks 8.1–8.3.
+ * `starting` with the condition `waiting-for-node`, beside a retry's condition when one is raised; the block source's
+ * own conditions (`finality-stall` while the node source's queue is full, IN-6) are the process's too. The admin
+ * endpoints that show all this are tasks 8.1–8.3.
  *
  * **Retries** (IN-10, CORE-ARCH §4.6): a lost database connection (`connection-lost`) or an unreachable node
  * (`node-unreachable`) — the two retryable codes, wherever startup's later steps or the loop meet them — never halts or
@@ -64,8 +68,8 @@
  * **SIGTERM** (RN-13): {@link terminationSignal} gives the signal SIGTERM aborts; aborting
  * {@link ProcessInput.signal}, or calling {@link ProcessHandle.stop}, enters `stopping`, aborts the loop's signal — the
  * loop finishes the height in progress, so a block whose transaction is open commits, and starts no other —, awaits
- * it, then closes the module API (WebSocket clients get 1001, every connection ends), `core-chain`'s node client and the
- * database. During startup it stops before the next step, and ends a wait for the node at once.
+ * it, then closes the module API (WebSocket clients get 1001, every connection ends), the node client, the database and
+ * the block source. During startup it stops before the next step, and ends a wait for the node at once.
  *
  * **A private process** (`side: "private"`, PP-1; task 14.1) starts the same way with the private `core` schema (CF-4):
  * its block source is `core-private-source`'s (`src/backbone/core-private-source/`), whose cursor and committed height
@@ -86,13 +90,13 @@
  */
 
 import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
+import { bindCoreBlockFetch, CORE_BLOCK_FETCH_ID, isBlockItemSource } from "../backbone/core-block-fetch/core-block-fetch.js";
 import {
   bindCoreChain,
   type ChainCheck,
   type ChainCheckInput,
   checkChain,
   CORE_CHAIN_ID,
-  type CoreChainBinding,
   type NodeWait,
   nodeOptionsOf,
   readHistory,
@@ -112,15 +116,17 @@ import { type CheckedConfig, type CheckedEntry, validateConfig } from "../config
 import type { Database } from "../db/api.js";
 import { type MigrationPart, startDatabase } from "../db/migrate.js";
 import { startWriter } from "../db/writer-lock.js";
+import type { LedgerTable } from "../ledger/version-table.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
 import { ProcessAdmin } from "../admin/process-admin.js";
 import type { AdminStarter } from "../admin/server.js";
+import { NodeClient } from "../node/client.js";
 import { resolveGraph } from "../modules/graph.js";
 import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
 import { type StartedModuleApi, startModuleApi } from "./api-server.js";
-import type { BlockRef, BlockSource } from "./block-source.js";
+import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failures.js";
 import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput } from "./loop.js";
@@ -143,10 +149,11 @@ export interface ProcessInput {
   /** The configuration; `umbradb.config.ts` in the working directory when absent (CF-1). */
   readonly config?: ProcessConfig;
   /**
-   * The block source (RN-14) — the in-memory one until task 10.3 —, or how to make it from the process's `core`
-   * revision (Q102: its `node`), called once, after the configuration is validated.
+   * The block source (RN-14), or how to make it — `nodeSourceOf` for the node (task 10.3) — from the process's `core`
+   * revision (Q102) and what the process shares with it, its node client: called once, after the configuration is
+   * validated, before the database opens.
    */
-  readonly source: BlockSource | ((core: CheckedEntry) => BlockSource);
+  readonly source: BlockSource | ((core: CheckedEntry, shared: SourceShared) => BlockSource);
   /** The process's side: which `core` schema applies (CF-4); public unless given. */
   readonly side?: ProcessSide;
   /** Stops the process when it aborts (RN-13; {@link terminationSignal} for SIGTERM). */
@@ -165,6 +172,12 @@ export interface ProcessInput {
    * controls'); none when absent or false (decision record Q128: opt-in; `umbradb run` serves them).
    */
   readonly admin?: boolean | AdminStarter;
+}
+
+/** What the process shares with the block source it makes (task 10.3): its one node connection. */
+export interface SourceShared {
+  /** The node client made from the process's `core` revision (`nodeOptionsOf`), or null for a revision with no node. */
+  readonly nodeClient: NodeClient | null;
 }
 
 /** The process's state (CORE-ARCH §4.18, AE-3): exactly one at a time. */
@@ -208,8 +221,11 @@ export interface WaitingCondition extends NodeWait {
   readonly code: "waiting-for-node";
 }
 
-/** The process's conditions (AE-3); `slow-block` is task 5.5's, the others' their tasks'. */
-export type ProcessCondition = UpgradeCondition | RetryCondition | WaitingCondition;
+/**
+ * The process's conditions (AE-3); the block source's own (`finality-stall`, IN-6) among them; `slow-block` is task
+ * 5.5's, the others' their tasks'.
+ */
+export type ProcessCondition = UpgradeCondition | RetryCondition | WaitingCondition | SourceCondition;
 
 /** How processing ended. */
 export type ProcessingEnd =
@@ -458,8 +474,9 @@ class Process implements ProcessHandle {
   #db: Database | undefined;
   #source: BlockSource | undefined;
   #api: StartedModuleApi | undefined;
-  #chain: CoreChainBinding | undefined;
   readonly #admin: ProcessAdmin | undefined;
+  /** The process's one node client (task 10.3), shared by `core-chain`'s `node-client` item and the block source. */
+  #nodeClient: NodeClient | null = null;
 
   constructor(input: ProcessInput) {
     this.#input = input;
@@ -491,7 +508,11 @@ class Process implements ProcessHandle {
       head: this.#head,
       followingThreshold: (settings?.followingThreshold as number | undefined) ?? 0,
       readinessLag: (settings?.readinessLag as number | undefined) ?? null,
-      conditions: this.#retrying === null ? this.#conditions : [...this.#conditions, this.#retrying],
+      conditions: [
+        ...this.#conditions,
+        ...(this.#source?.conditions?.() ?? []),
+        ...(this.#retrying === null ? [] : [this.#retrying]),
+      ],
       ended: this.#end,
       reason: this.#reason,
     });
@@ -511,12 +532,17 @@ class Process implements ProcessHandle {
     try {
       await this.#api?.close();
     } finally {
-      await this.#chain?.close();
+      await this.#closeNode();
       await this.#db?.close();
       await this.#source?.close?.();
       if (this.#admin !== undefined) await this.#admin.close();
       this.#resolveClosed();
     }
+  }
+
+  /** Closes the process's node client (every call and subscription ends with `handle-closed`). */
+  async #closeNode(): Promise<void> {
+    await this.#nodeClient?.close();
   }
 
   /** A log line, through the configuration's redaction once it is known. */
@@ -557,7 +583,10 @@ class Process implements ProcessHandle {
         await this.#admin.serve(checked, core);
         this.#step();
       }
-      const source = typeof input.source === "function" ? input.source(core) : input.source;
+      const nodeOptions = nodeOptionsOf(core.settings as PlainObject);
+      this.#nodeClient = nodeOptions === null ? null : new NodeClient(nodeOptions);
+      const source =
+        typeof input.source === "function" ? input.source(core, { nodeClient: this.#nodeClient }) : input.source;
       this.#source = source;
       // A read's height is the cursor's (DB-2): the core's cursor table, or a private process's own (its source's).
       const db = await openConfiguredDatabase(core, { committedHeight: source.committedHeight ?? cursorHeight });
@@ -580,7 +609,7 @@ class Process implements ProcessHandle {
         if (this.#admin !== undefined) await this.#admin.refused();
       }
       // The module API opens in the last step, after which only a stop throws: the stop closes it.
-      await this.#chain?.close();
+      await this.#closeNode();
       await this.#db?.close();
       await this.#source?.close?.();
       throw error;
@@ -616,18 +645,21 @@ class Process implements ProcessHandle {
     const plan = schemaPlan(graph.modules);
     const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, core) });
     const start = BigInt(checked.start);
-    // An earlier attempt's binding (a retried startup) is another context's: its node client closed first.
-    await this.#chain?.close();
-    // Every build has core-chain, the first backbone part (`contexts.of` throws for a graph without it).
-    this.#chain = bindCoreChain(contexts.of(CORE_CHAIN_ID), {
+    // Every build has core-chain, the first backbone part (`contexts.of` throws for a graph without it); a retried
+    // startup binds its new contexts, the node client kept.
+    bindCoreChain(contexts.of(CORE_CHAIN_ID), {
       config: checked,
       declarations,
       cursor: this.#cursor,
       db,
       start,
       genesisHash,
-      node: nodeOptionsOf(settings),
+      nodeClient: this.#nodeClient,
+      ledgerTable: settings.ledgerTable as unknown as LedgerTable,
     });
+    if (graph.modules.some((part) => part.id === CORE_BLOCK_FETCH_ID) && isBlockItemSource(source)) {
+      bindCoreBlockFetch(contexts.of(CORE_BLOCK_FETCH_ID), source);
+    }
     await startDatabase(db, {
       plan,
       parts: graph.modules.map((part) => namedStartDb(contexts.startDbPart(part))),

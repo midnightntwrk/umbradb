@@ -167,6 +167,11 @@ export const ERROR_CODES = [
    * below the public S, or the public database's core has never started (`details.reason`). Not retryable.
    */
   "private-binding-mismatch",
+  /**
+   * A finalized-head notification at a height whose finalized block the indexer already knows — the database's, or a
+   * finalized hash it read — names another block (IN-4; task 10.3, `src/backbone/core-block-fetch/`): processing halts.
+   */
+  "finality-conflict",
 ] as const;
 
 /**

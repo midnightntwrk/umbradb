@@ -89,15 +89,17 @@ listens, and `on-start-api` and its checks still run.
 build's declarations, the configuration (a file, CF-1, or its data) and a block source, returns a handle at once and
 starts up: the declarations validated, the configuration loaded and validated, the `core` entry's operational and
 secret fields taken from its latest revision of the build's version for the whole run (Q102: the database, the node —
-a block source given as a function is made from that revision —, `listen.api`, the timeouts, the opt-in, the core's
-stop), the database opened and its writer started, the cursor, the history and the chain's identity read in one read
-and the history checked (`checkHistory`), `core-chain`'s startup checks against the node through the block source
+the process's one node client is made from it, and a block source given as a function from that revision and that
+client, task 10.3's `nodeSourceOf` —, `listen.api`, the timeouts, the opt-in, the core's stop), the database opened
+and its writer started, the cursor, the history and the chain's identity read in one read and the history checked
+(`checkHistory`), `core-chain`'s startup checks against the node through the block source
 (`checkChain`, task 10.2: `genesis-mismatch`, a wait with `waiting-for-node` while the head is below the cursor,
 `cursor-hash-mismatch`; before any migration), the graph, the schema plan, the contexts with each part's revisions (a
 module's from its entries with their effective stops; every backbone part's the `core` entry's, each one's data fields
 with the process revision's other fields), `core-chain` bound to its context with what startup checked and opened
-(`bindCoreChain`), `startDatabase`, the seal, on a database without a cursor the bootstrap's wait while S is above the
-head (`waiting-for-node`, still `starting`, IN-2), `startModuleApi`, then the loop. A refusal closes what startup
+(`bindCoreChain`: the node client and the revision's ledger table among them), `core-block-fetch` to the block source
+(`bindCoreBlockFetch`), `startDatabase`, the seal, on a database without a cursor the bootstrap's wait while S is above
+the head (`waiting-for-node`, still `starting`, IN-2), `startModuleApi`, then the loop. A refusal closes what startup
 opened and rejects `started`. The loop fires
 `on-start-height` between `on-parse` and `on-compute` for the core's parts at S and the modules a segment of which
 (revisions continuing each other are one) starts at h, each with a read at h − 1, and `on-stop-height` after
@@ -108,9 +110,10 @@ upgrade boundary — the lowest start of a scheduled revision (RN-12) —, and t
 module API still answering, with `upgrade-required` (entry, needed, build) at a boundary. The state is `starting`,
 then `syncing` or `following` by the lag (the head the loop last read minus the cursor) against `followingThreshold`,
 `stopped`, `stopping`; ready when `following` or `stopped`, or `syncing` within a set `readinessLag` (`refused` and
-`halted` below). SIGTERM (`terminationSignal`) or `stop()`: `stopping`, the loop's signal aborted and the
-loop awaited — the height in progress, its transaction included, finishes —, then the module API, `core-chain`'s node
-client and the database closed. Log lines go through the configuration's redaction.
+`halted` below); the block source's conditions (`finality-stall`) are the process's too. SIGTERM (`terminationSignal`)
+or `stop()`: `stopping`, the loop's signal aborted and the loop awaited — the height in progress, its transaction
+included, finishes —, then the module API, the node client, the database and the block source closed. Log lines go
+through the configuration's redaction.
 
 **Failures** (task 5.4: `src/runner/failures.ts`, `process.ts`). A startup refusal leaves the process up in `refused`
 (IN-12, AE-3), its database closed and its writer lock released; a failure of the loop leaves it up in `halted` (RN-8)
@@ -138,20 +141,58 @@ interface BlockSource {
   finalizedHead(): Promise<BlockRef>;                        // the highest height the runner may process
   waitForHead(above: bigint, signal: AbortSignal): Promise<void>;  // resolves when the head exceeds `above`
   block(height: bigint): Promise<BlockRef>;                  // the finalized block at `height`
+  // A source that fetches ahead (the node source, task 10.3):
+  attach?(runner: QueueRunner): () => void;                  // the runner's queue interface, for one run of the loop
+  prepared?(height: bigint): Promise<{ block: BlockRef; items: BlockItems }>;  // on-fetch and on-parse already run
+  conditions?(): readonly { code: "finality-stall"; tipCap: number; height: bigint }[];
+  close?(): Promise<void>;
+}
+
+interface QueueRunner {                                      // given by the finalized loop (RN-1: the queue's points)
+  prepare(block: BlockRef): Promise<BlockItems>;             // on-fetch, then on-parse
+  bestBlock(header: BlockRef): Promise<void>;                // on-best-block
+  rollback(dropped: readonly BlockRef[]): Promise<void>;     // on-rollback
+  storedHash(height: bigint): Promise<Uint8Array | null>;    // the blocks table's hash at a height (IN-4)
 }
 ```
 
-- **`core-block-fetch`** implements it over the node client: `chain_getFinalizedHead` at start, then
-  `chain_subscribeFinalizedHeads` as a bound; per height `chain_getBlockHash`, `chain_getBlock`, `chain_getHeader`; the
-  finalized prefetch keeps at most `prefetchWindow` parsed blocks above the cursor (a `Map` keyed by height, filled by
-  a bounded pool); the best-block queue is an array of parsed blocks above the finalized head, with the common-ancestor
-  walk of IN-6 over `chain_getHeader` of parents. Queue-side callbacks get no database handle.
+- **`core-block-fetch`** (`src/backbone/core-block-fetch/`, task 10.3) implements it over the process's one node
+  client (`NodeBlockSource`, made by `nodeSourceOf(core, { nodeClient })`, what `umbradb run` passes as `source`):
+  at its first use it subscribes to the finalized and the new heads, then reads the head (`chain_getFinalizedHead`,
+  `chain_getHeader`); finalized notifications only raise the head, and after a reconnect the head is read again. A
+  notified header's hash is BLAKE2b-256 of its SCALE encoding (notifications carry none). IN-4's finality check: a
+  finalized notification at a height whose finalized hash the source read, or at or below the cursor the database's
+  (`QueueRunner.storedHash`), naming another hash fails the source with `finality-conflict`, a halt at the loop's next
+  call. While the loop runs (`attach`), the **finalized prefetch** prepares the heights from the cursor + 1 to the lower
+  of the cursor + `prefetchWindow` and the head the loop last read (so that head's `on-finalized` comes first), eight at
+  a time: per height `chain_getBlockHash`, then the queued block of that hash, or `chain_getBlock` and `on-fetch` and
+  `on-parse` through the runner; the loop takes each height prepared (`prepared`) and goes on to `on-start-height`.
+  The **best-block queue** (IN-6), one change at a time: per new-heads notification above the finalized head and the
+  cursor, `on-best-block`, `chain_getBlock` and `on-fetch`/`on-parse`; appended when its parent is the top (the head
+  for an empty queue), else the walk over `chain_getHeader` of parents to a queued block or the head, the queued blocks
+  above that ancestor dropped with one `on-rollback` (lowest first) and the branch between fetched; its calls without
+  retries, any error dropping the block (IN-10); at most `tipCap` blocks, while full none queued and the condition
+  `finality-stall` (the process's `status().conditions`); a block queued only while the head is within
+  `prefetchWindow` of the cursor (decision record question Q129); a queued block at a height the finalized head
+  names with another hash dropped with those above it. At finality a queued block with the finalized hash goes on with
+  its items, unfetched (A81); one with another hash is dropped with those above (`on-rollback`) and the block fetched —
+  the heights look into the queue in height order, so that is one `on-rollback`, from the lowest. Its `close` (the
+  process's stop) ends its subscriptions and ends every pending wait and later call with an error. The part's
+  `on-fetch` puts the four `block` items (CD-2) the bound source gives (`bindCoreBlockFetch`): for the node source
+  `block-header` (height, hashes, roots, digest, the `MNSV` `spec_version`, the time from the `Timestamp::set`
+  inherent, 0 for a block 0 without one), `block-body` (the extrinsics, each unsigned one's call named by the metadata),
+  `runtime-metadata` (`RuntimeMetadata.forBlock`: the runtime in the parent's state, block 0's own; LG-4) and
+  `ledger-version` (`selectLedgerVersion` over the `ledger-table` item, as text). The metadata is read as V14 — what
+  `state_getMetadata` answers — or V15 up to its pallets. Block 0 (IN-7) takes the same path; its ledger path is 12.3's.
+  Queue-side callbacks get no database handle.
 - **`InMemoryBlockSource`** (exported) keeps blocks in memory, for tests and module authors, with the same cursor,
   `core-block-commit`'s blocks table (`src/runner/in-memory-source.ts`, task 5.2): a finalized head that only rises
   (`finalize`), the blocks it was given or else a default chain whose hashes link (`inMemoryBlock`: SHA-256 of
   `umbradb in-memory block <h>`, block 0's parent 32 zero bytes), and `waiting(above)`, which tells a test that a runner
   has processed everything up to `above` and waits. It holds no queue: `on-best-block` and `on-rollback` are the node
-  source's (IN-6), and so is IN-4's finality check; IN-4's parent check is `core-block-commit`'s, for every source.
+  source's (IN-6), and so is IN-4's finality check; IN-4's parent check is `core-block-commit`'s, for every source. It
+  gives `core-block-fetch` its own block items (`blockItems`): runtime 2.0's `v9` blocks six seconds apart, with no
+  extrinsics and empty metadata, or a block's own runtime, time and ledger from its `items` option (task 10.3).
 - **The cursor (the blocks table)** is the last row of `core-block-commit`'s `core_block_commit.blocks`
   (`src/backbone/core-block-commit/`, tasks 5.2 and 10.2; §10's columns, range-partitioned by height: five
   partitions of 1,000,000 heights created by migration `001` (`src/backbone/height-partitions.ts`) and a default that
@@ -175,9 +216,9 @@ interface BlockSource {
   finalized head (`finalizedHead`, `waitForHead`) and the finalized hash at the cursor (`block`). Its declaration is a
   constant (`CORE_CHAIN`); the runner binds it to its process context with what startup checked and opened
   (`bindCoreChain`), and its `on-start-db` records the history and, before block S commits, the genesis hash and S, and
-  publishes `config`, `node-client` (a `NodeClient` from the process's `node`, closed at stop), `db`
-  (`readOnlyDatabase`) and `ledger-table` (no rows or pins until tasks 12.x); its `on-db-write` records the anchor
-  hash in block S's transaction.
+  publishes `config`, `node-client` (the process's one `NodeClient`, made from its `node` and shared with the block
+  source, closed by the process at stop; task 10.3), `db` (`readOnlyDatabase`) and `ledger-table` (the `core`
+  revision's table in effect, `ledgerTable`); its `on-db-write` records the anchor hash in block S's transaction.
 - **The finalized loop** (`src/runner/loop.ts`, task 5.2) processes every height from cursor + 1 (S on a new database)
   to the source's finalized head, then waits (`waitForHead`) with no read or transaction open (RN-6, RN-14). Per new
   head it calls `on-finalized` once, before the head's heights, for the modules active at the first of them, each

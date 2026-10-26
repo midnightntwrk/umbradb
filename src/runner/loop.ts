@@ -50,6 +50,13 @@
  * The halt — the state `halted` with its reason, the process staying up — and the retries of a lost connection or an
  * unreachable node, which run the loop again from the cursor, are the process's (`./process.ts`, `./failures.ts`; RN-8,
  * IN-10).
+ *
+ * **A source that fetches ahead** (`core-block-fetch`'s node source, task 10.3; IN-4 to IN-6) is given, for each run,
+ * the runner's dispatch interface for its queue ({@link QueueRunner}: `on-fetch` and `on-parse` of a block it fetched
+ * ahead, `on-best-block`, `on-rollback`, and the hash stored at a height), taken back when the run ends; and the loop
+ * takes each height from it prepared (`BlockSource.prepared`) — `on-fetch` and `on-parse` already run, their items in
+ * the height's — and goes on to `on-start-height` and `on-compute` with them. The queue's callbacks run outside the
+ * loop's points, each with its block context as the loop builds it.
  */
 
 import { BLOCKS_TABLE } from "../backbone/core-block-commit/core-block-commit.js";
@@ -65,7 +72,7 @@ import type {
 } from "../modules/declaration.js";
 import type { HeightRange, ResolvedGraph, ResolvedRange } from "../modules/graph.js";
 import { BlockItems, revisionAt } from "./block-context.js";
-import type { BlockRef, BlockSource } from "./block-source.js";
+import type { BlockRef, BlockSource, QueueRunner } from "./block-source.js";
 import {
   CallbackFailure,
   type EntryBoundary,
@@ -145,6 +152,8 @@ export interface HeightRun {
   readonly items: BlockItems;
   /** The cursor before the height: null before the first block, and at a re-delivery (RN-11), which writes nothing. */
   readonly previous: BlockRef | null;
+  /** True when the source prepared the height (`BlockSource.prepared`): its `on-fetch` and `on-parse` ran already. */
+  readonly prepared?: boolean;
 }
 
 /** Opens a read for one callback, and runs `body` inside it. */
@@ -235,8 +244,18 @@ export class FinalizedLoop {
     }
   }
 
-  /** {@link run}, while the process contexts' refusals are reported to the loop. */
+  /** {@link run}, while the process contexts' refusals are reported to the loop, and the source has its queue runner. */
   async #run(): Promise<LoopEnd> {
+    const detach = this.input.source.attach?.(this.#queueRunner());
+    try {
+      return await this.#follow();
+    } finally {
+      detach?.();
+    }
+  }
+
+  /** The loop's work in {@link run} (see the module comment). */
+  async #follow(): Promise<LoopEnd> {
     const { db, graph, source, observer } = this.input;
     let cursor = await db.read((read) => source.cursor(read));
     if (cursor !== null) await this.redeliver(cursor);
@@ -322,8 +341,10 @@ export class FinalizedLoop {
    * `on-compute` with a read at h − 1.
    */
   protected async prepare(run: HeightRun): Promise<void> {
-    await this.blockPoint(run, "on-fetch");
-    await this.blockPoint(run, "on-parse");
+    if (run.prepared !== true) {
+      await this.blockPoint(run, "on-fetch");
+      await this.blockPoint(run, "on-parse");
+    }
     await this.startHeight(run);
     await this.compute(run, (body) => this.input.db.read(body));
   }
@@ -454,8 +475,11 @@ export class FinalizedLoop {
   async #process(height: bigint, previous: BlockRef | null): Promise<BlockRef> {
     let committed = false;
     try {
-      const block = await this.input.source.block(height);
-      const run: HeightRun = { height, block, range: this.#rangeAt(height), items: this.itemsAt(height), previous };
+      const { source } = this.input;
+      const prepared = source.prepared === undefined ? undefined : await source.prepared(height);
+      const block = prepared?.block ?? (await source.block(height));
+      const items = prepared?.items ?? this.itemsAt(height);
+      const run: HeightRun = { height, block, range: this.#rangeAt(height), items, previous, prepared: prepared !== undefined };
       await this.prepare(run);
       await this.commit(run);
       committed = true;
@@ -474,6 +498,61 @@ export class FinalizedLoop {
     await this.#dispatch(this.#rangeAt(next), "on-finalized", (_part, call) =>
       this.input.db.read((read) => call(announced, read)),
     );
+  }
+
+  /**
+   * The runner's dispatch interface for the source's queue (see the module comment): each point through
+   * `runSchedule` with the process contexts, outside the loop's own points; the item sinks' late uses are the loop's
+   * misuses, as at its own points.
+   */
+  #queueRunner(): QueueRunner {
+    const { contextOf, db } = this.input;
+    const queuePoint = async (run: HeightRun, point: "on-fetch" | "on-parse"): Promise<void> => {
+      await runSchedule(scheduleAt(run.range, point), {
+        contextOf,
+        invoke: (part, call) => {
+          const context = this.#context(run, part, run.items.visible());
+          return run.items.collect(part, point, (sink) => call(context, sink));
+        },
+      });
+    };
+    const header = (block: BlockRef): BlockRef =>
+      Object.freeze({ height: block.height, hash: block.hash, parentHash: block.parentHash });
+    return Object.freeze({
+      prepare: async (block: BlockRef) => {
+        const run: HeightRun = {
+          height: block.height,
+          block,
+          range: this.#rangeAt(block.height),
+          items: this.itemsAt(block.height),
+          previous: null,
+        };
+        await queuePoint(run, "on-fetch");
+        await queuePoint(run, "on-parse");
+        return run.items;
+      },
+      bestBlock: async (block: BlockRef) => {
+        const announced = header(block);
+        await runSchedule(scheduleAt(this.#rangeAt(block.height), "on-best-block"), {
+          contextOf,
+          invoke: (_part, call) => call(announced),
+        });
+      },
+      rollback: async (dropped: readonly BlockRef[]) => {
+        const first = dropped[0];
+        if (first === undefined) return;
+        const headers = Object.freeze(dropped.map(header)) as BlockRef[];
+        await runSchedule(scheduleAt(this.#rangeAt(first.height), "on-rollback"), {
+          contextOf,
+          invoke: (_part, call) => call(headers),
+        });
+      },
+      storedHash: (height: bigint) =>
+        db.read(async (read) => {
+          const [row] = await read.query(`SELECT hash FROM ${BLOCKS_TABLE} WHERE height = $1`, [height]);
+          return row === undefined ? null : (row.hash as Uint8Array);
+        }),
+    });
   }
 
   /** Runs `point` in `range`, each callback through `invoke`, after checking no misuse is pending. */

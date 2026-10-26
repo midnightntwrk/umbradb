@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { BlockItemSource } from "../../src/backbone/core-block-fetch/index.js";
 import type { BlockWriteHandle, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { BlockContext, ModuleDeclaration, PointName } from "../../src/modules/declaration.js";
@@ -394,10 +395,12 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
 
     it("a block whose cursor row is not the height's halts with unexpected-cursor, naming no module or point", async () => {
       const source = new InMemoryBlockSource({ head: HEAD });
-      const blocks: BlockSource = {
+      const blocks: BlockSource & BlockItemSource = {
         cursor: (read) => source.cursor(read),
         finalizedHead: () => source.finalizedHead(),
         waitForHead: (above, signal) => source.waitForHead(above, signal),
+        // core-block-fetch's items, as the source gives them (task 10.3).
+        blockItems: (block: BlockRef) => source.blockItems(block),
         // The source answers height 3 with the block of height 4: core-block-commit writes the cursor row at 4.
         block: async (height): Promise<BlockRef> => (height === 3n ? inMemoryBlock(4n) : source.block(height)),
       };
@@ -413,10 +416,12 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
 
     it("a source that cannot give a block halts with database-error at that height, naming no module or point", async () => {
       const source = new InMemoryBlockSource({ head: HEAD });
-      const failing: BlockSource = {
+      const failing: BlockSource & BlockItemSource = {
         cursor: (read) => source.cursor(read),
         finalizedHead: () => source.finalizedHead(),
         waitForHead: (above, signal) => source.waitForHead(above, signal),
+        // core-block-fetch's items, as the source gives them (task 10.3).
+        blockItems: (block: BlockRef) => source.blockItems(block),
         block: async (height) => {
           if (height === 6n) throw new Error("the source lost block 6");
           return source.block(height);

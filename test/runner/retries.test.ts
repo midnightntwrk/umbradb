@@ -1,8 +1,9 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { BlockItemSource } from "../../src/backbone/core-block-fetch/index.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
-import type { BlockSource } from "../../src/runner/block-source.js";
+import type { BlockRef, BlockSource } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { type ProcessHandle, type ProcessStatus, startProcess } from "../../src/runner/process.js";
 import { cursorIn, pairs, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
@@ -29,7 +30,7 @@ const CEILING = 20;
 function flakySource(
   source: InMemoryBlockSource,
   fail: (method: "cursor" | "block", height: bigint | null) => Error | undefined,
-): BlockSource {
+): BlockSource & BlockItemSource {
   return {
     cursor: async (read) => {
       const error = fail("cursor", null);
@@ -38,6 +39,8 @@ function flakySource(
     },
     finalizedHead: () => source.finalizedHead(),
     waitForHead: (above, signal) => source.waitForHead(above, signal),
+    // core-block-fetch's items, as the source gives them (task 10.3).
+    blockItems: (block: BlockRef) => source.blockItems(block),
     block: async (height) => {
       const error = fail("block", height);
       if (error !== undefined) throw error;
