@@ -1,4 +1,5 @@
 import { once } from "node:events";
+import { UNVALIDATED_CONFIG } from "../../src/admin/configuration.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
@@ -29,7 +30,7 @@ function snapshot(state: AdminSnapshot["status"]["state"] = "following", ready =
     readinessLag: null,
     startedNs: "0",
     status: statusSnapshot({ state, ready }),
-    config: { core: null },
+    config: UNVALIDATED_CONFIG,
   };
 }
 
@@ -100,7 +101,7 @@ describe("serveAdmin (the worker's server, run here on this thread)", () => {
 
   it("answers JSON with Content-Type, Content-Length (in bytes) and Cache-Control: no-store", async () => {
     // A setting's text that is not ASCII: its length in bytes is not its length in characters.
-    const given = { ...snapshot(), config: { core: { start: 1, settings: { label: "héllo ✓ 指数" } } } };
+    const given = { ...snapshot(), config: { ...UNVALIDATED_CONFIG, core: { start: 1, settings: { label: "héllo ✓ 指数" } } } };
     const served = inThread({ host: "127.0.0.1", port: 0, beat: beat().buffer, snapshot: given });
     const { port } = (await served.next("listening")) as Extract<FromAdmin, { type: "listening" }>;
     const answers = await new Promise<{ headers: Record<string, unknown>; body: string }>((resolve, reject) => {
@@ -270,7 +271,9 @@ describe("startAdminServer: the admin listener in a worker thread of its own", (
       { address: "127.0.0.1:0", beat: beat().buffer, snapshot: snapshot(), onFailure: (error) => failures.push(error) },
       failing,
     );
-    for (let tries = 0; server.threadId !== -1; tries++) {
+    // The worker's `threadId` reads -1 as soon as its thread ended, which on a loaded machine can be before the main
+    // thread was told of its error: wait for the error, then for the thread's end.
+    for (let tries = 0; failures.length === 0 || server.threadId !== -1; tries++) {
       expect(tries).toBeLessThan(400);
       await new Promise((resolve) => setTimeout(resolve, 10));
     }

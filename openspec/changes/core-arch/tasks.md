@@ -1618,8 +1618,42 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `src/admin/serve.ts` (`nowNs`), `package.json` and `package-lock.json` (`ajv` 8.18.0),
       `test/dependencies/pins.test.ts`, `design.md` §14 (the Ajv row), `test/admin/` (the snapshot helpers, `side`),
       `test/cli/config-check.test.ts`.
-- [ ] 8.4 `core-config` (`src/backbone/core-config/`): `/config` and its JSON schema.
+- [x] 8.4 `core-config` (`src/backbone/core-config/`): `/config` and its JSON schema.
       **Acceptance:** A66 (`/config`), A29; A140 for this endpoint.
+      **Done (2026-10-26):** the part as `core-health`'s: its declaration `CORE_CONFIG` (no points, no items; last in
+      RN-3's order and in the command's build) and its endpoint `CORE_CONFIG_ENDPOINTS`: 200 with the published
+      configuration, built on the main thread by `configOf` (`src/admin/configuration.ts`; AE-5): `core`, the process's
+      revision (Q102); `entries`, every revision as validated, each one's settings through 4.2's redaction (secret
+      fields and URL credentials `[redacted]`, a `versionEntry`'s fields all redacted until the history check found it
+      equal to its row, then shown as data), placed against startup's cursor (`started`, `scheduled`) once read;
+      `history`, `core_chain.config` as recorded after startup (the rows read, replaced and added to by the check's
+      writes: `recordedHistory`), data fields with URL credentials redacted, heights as decimal text, `dataHash` as
+      `0x` hex; `modules`, every part of the database with its declaration without callbacks (items with their tables,
+      kinds and determinism, the flags, key kinds, each setting's kind, migrations by id and checksum, the points it
+      has); `chain` (network, genesis hash — configured, then the chain's —, S, the anchor once block S committed);
+      `ledger` (the process revision's `ledgerTable` in effect and the build's package identities); `database`
+      (backend, the server's `server_version` read once, the writer lock as the process knows it: from the writer's
+      start, not while a lost connection is retried, never after `writer-lock-lost`); `build` (UmbraDB's version;
+      `commit` null — no build records one: question Q134). Before the validation, the build only. `ProcessAdmin`
+      reads the version, the anchor and the digests each in a read of its own (one that fails leaves the others). The
+      JSON schema `test/backbone/core-config/config.schema.json` (draft 2020-12, Ajv 8.18.0 strict, as 8.3's). Tests
+      (`test/backbone/core-config/`, seen failing first: `tsc` exit 2, 15 lines; A29 failing on the old `/config`): A66
+      through the process on PostgreSQL 18.6 and PGlite 0.5.10 — refused before the validation, refused after it,
+      running (the history equal to `core_chain.config`, the anchor to `core_chain.identity`), a recorded
+      `versionEntry` shown as data —; A29 on PostgreSQL (a login role whose password is the test secret, in six forms,
+      also in a halting callback's error with the URL): in neither `/config`, `/status` nor any log line; A140: mounted
+      as the part gives it, its folder and tests, a refused process answering it. Committed negative controls: a body
+      without each required field, with an extra one, or with 14 wrong forms fails the schema; a `/config` showing the
+      settings without the redaction shows the password, and the search finds it. Wrong variants (a scratch copy of the
+      tree): 54; 49 caught, 4 gaps closed by tests (an unplaced `versionEntry`, the chain's genesis over the
+      configured one, key kinds, the history's read rows), caught on the final sources, 1 equivalent (the identity
+      passed from startup: `ProcessAdmin` reads it, so the argument was removed). The tests ask for the admin
+      endpoints explicitly, each process on `127.0.0.1:0` (task 8.1a's flip). Found by the conformance run and fixed:
+      8.1's `serve.test.ts` waited for the worker's `threadId` to read -1 before its error was reported, which a loaded
+      machine reorders (the test now waits for both). Also changed: `src/runner/process.ts` (`opened`'s facts: the
+      check, the history, the genesis hash), `src/admin/` (`ConfigSnapshot`'s fields, `ProcessAdmin`'s reads: the
+      identity read there), `test/admin/` and the 8.2–8.3 tests (the configuration's new fields),
+      `test/cli/config-check.test.ts`.
 
 ## 9. Test tape
 

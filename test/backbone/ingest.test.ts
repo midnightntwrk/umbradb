@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { UNVALIDATED_CONFIG } from "../../src/admin/configuration.js";
 import { snapshotOf } from "../../src/admin/snapshot.js";
 import { NodeBlockSource } from "../../src/backbone/core-block-fetch/index.js";
 import type { NodeClient } from "../../src/node/client.js";
@@ -241,7 +242,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
         livenessTimeoutMs: 1,
         readinessLag: null,
         redactor: null,
-        config: { core: null },
+        config: UNVALIDATED_CONFIG,
         startedNs: 0n,
         side: "public",
         instanceId: null,

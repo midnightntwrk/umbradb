@@ -442,7 +442,7 @@ describe("modules: the build's, or a host program's", () => {
 
   it("the build's modules are its backbone parts and core modules with declarations, validated", () => {
     const build = buildDeclarations();
-    expect(build.backbone.map((part) => part.id)).toEqual(["core-chain", "core-block-fetch", "core-block-commit", "core-digest", "core-health", "core-status"]);
+    expect(build.backbone.map((part) => part.id)).toEqual(["core-chain", "core-block-fetch", "core-block-commit", "core-digest", "core-health", "core-status", "core-config"]);
     // Task 11.1's core modules, off unless a configuration enables them.
     expect(build.core.map((part) => part.id)).toEqual(["core-chain-events", "core-block-parsed", "core-tx-results"]);
     expect(Object.isFrozen(build)).toBe(true);

@@ -118,7 +118,7 @@ export interface StatusSnapshot {
   readonly node: NodeStatus | null;
   /** Every part of the database, in startup order; null until startup resolved them. */
   readonly modules: readonly ModuleStatus[] | null;
-  /** The ledger version in effect, its package and its last root check; null until the ledger tasks (12.x) report it. */
+  /** The ledger version in effect, its package and its last root check: null until the ledger tasks (12.x) give it. */
   readonly ledger: null;
   /** On the core, its private instances; null until the private-process tasks (14.x) report them. */
   readonly privateInstances: null;
@@ -126,7 +126,84 @@ export interface StatusSnapshot {
   readonly public: PublicStatus | null;
 }
 
-/** The configuration as the admin endpoints show it. */
+/** One revision of the configuration, as `/config` shows it (AE-5's "entries in effect"). */
+export interface EntryView {
+  readonly id: string;
+  /** As written in the configuration (CF-3): a whole number. */
+  readonly start: number;
+  readonly stop: number | null;
+  /** A module's semver version, or for `core` the core version (CF-2). */
+  readonly version: PlainData;
+  /** Whether the version is this build's (CF-3). */
+  readonly buildVersion: boolean;
+  /** Whether it started at or below the cursor startup read (CF-6: compared with its recorded row); null before. */
+  readonly started: boolean | null;
+  /** Whether it is scheduled: above that cursor, of a version this build does not carry (RN-12); null before. */
+  readonly scheduled: boolean | null;
+  /** Its settings as they may be shown (secrets and URL credentials redacted, a `versionEntry` until recorded). */
+  readonly settings: PlainObject;
+}
+
+/** One row of the configuration history, `core_chain.config` (CF-7), as `/config` shows it. */
+export interface RecordedView {
+  readonly id: string;
+  /** Decimal text. */
+  readonly start: string;
+  readonly stop: string | null;
+  /** A module's semver, or the core version's canonical JSON. */
+  readonly version: string;
+  /** The data fields recorded, URL credentials redacted; null for a scheduled revision. */
+  readonly data: PlainObject | null;
+  /** SHA-256 of the data's canonical encoding, `0x` hex; null with `data`. */
+  readonly dataHash: string | null;
+}
+
+/** An item a part provides, as its declaration states it (MD-1). */
+export interface ItemView {
+  readonly name: string;
+  readonly lifetimes: readonly string[];
+  readonly table: {
+    readonly schema: string;
+    readonly tables: readonly string[];
+    readonly kind: string;
+    /** False for an item opted out of the determinism rules (Q76). */
+    readonly deterministic: boolean;
+  } | null;
+}
+
+/** A part's declaration without its callbacks (AE-5). */
+export interface DeclarationView {
+  readonly id: string;
+  readonly version: string;
+  readonly side: "public" | "private";
+  readonly origin: "backbone" | "core" | "user";
+  readonly requires: readonly string[];
+  readonly provides: readonly ItemView[];
+  readonly startsMidChain: boolean;
+  readonly developmentOnly: boolean;
+  readonly requiresResync: boolean;
+  readonly needsLockstep: boolean;
+  readonly keyKinds: readonly string[] | null;
+  /** Each setting with its kind (CF-4). */
+  readonly settings: Readonly<Record<string, string>>;
+  /** Each migration by its id and checksum (SHA-256 of its SQL, lowercase hex, DB-9). */
+  readonly migrations: readonly { readonly id: string; readonly checksum: string }[];
+  /** The points it has a callback for, in MD-1's order. */
+  readonly points: readonly string[];
+}
+
+/** The chain's identity (CD-1; AE-5). */
+export interface ChainView {
+  readonly network: string;
+  /** The chain's genesis hash, `0x` hex: configured (network `custom`) until startup checked the chain's. */
+  readonly genesisHash: string | null;
+  /** S, decimal text. */
+  readonly start: string;
+  /** The hash of block S, `0x` hex; null until block S commits. */
+  readonly anchorHash: string | null;
+}
+
+/** The configuration as the admin endpoints show it (AE-5, AE-6): null where nothing is known yet. */
 export interface ConfigSnapshot {
   /**
    * The process's `core` revision (Q102: the latest of the build's version gives every operational and secret field):
@@ -134,6 +211,19 @@ export interface ConfigSnapshot {
    * configuration is validated.
    */
   readonly core: { readonly start: number; readonly settings: PlainObject } | null;
+  /** Every revision of the configuration, in its order. */
+  readonly entries: readonly EntryView[] | null;
+  /** The configuration history as startup read it. */
+  readonly history: readonly RecordedView[] | null;
+  /** Every part of the database, in startup order, with its declaration. */
+  readonly modules: readonly DeclarationView[] | null;
+  readonly chain: ChainView | null;
+  /** The ledger version table in effect (the process revision's `ledgerTable`) and the build's ledger packages. */
+  readonly ledger: { readonly table: PlainData; readonly packages: PlainData } | null;
+  /** The database: its backend, the server's version, and whether this process holds its writer lock (DB-11). */
+  readonly database: { readonly backend: "postgres" | "pglite"; readonly version: string | null; readonly writerLock: boolean } | null;
+  /** The build: UmbraDB's version and the commit it was built from (no build records one yet). */
+  readonly build: { readonly umbradb: string; readonly commit: null };
 }
 
 /** What the runner publishes to the admin worker (see the module comment). */

@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import { UNVALIDATED_CONFIG } from "../../../src/admin/configuration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ADMIN_ROUTES, answerAdmin } from "../../../src/admin/routes.js";
 import { CORE_DIGEST } from "../../../src/backbone/core-digest/index.js";
@@ -55,7 +56,7 @@ function body(): Record<string, unknown> {
     livenessTimeoutMs: 30_000,
     readinessLag: null,
     redactor: null,
-    config: { core: null },
+    config: UNVALIDATED_CONFIG,
     startedNs: 0n,
     side: "public",
     instanceId: null,
@@ -214,6 +215,7 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
       "backbone core-digest",
       "backbone core-health",
       "backbone core-status",
+      "backbone core-config",
       "user keeper",
       "user m",
     ]);

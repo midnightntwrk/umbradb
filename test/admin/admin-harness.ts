@@ -9,6 +9,8 @@ import { answerAdmin, ADMIN_ROUTES } from "../../src/admin/routes.js";
 import type { AdminAnswer, AdminSnapshot, AdminView, StatusSnapshot } from "../../src/admin/types.js";
 import { CORE_HEALTH } from "../../src/backbone/core-health/index.js";
 import { CORE_STATUS } from "../../src/backbone/core-status/index.js";
+import { CORE_CONFIG } from "../../src/backbone/core-config/index.js";
+import { UNVALIDATED_CONFIG } from "../../src/admin/configuration.js";
 import { coreEntry } from "../../src/config/entries.js";
 import type { ReadOnlyDatabase } from "../../src/db/api.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -78,10 +80,10 @@ export function dbKeeper(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaratio
 
 /**
  * The backbone parts of the admin endpoints that have a declaration, which the tests' build carries beside the test
- * backbone (`testBuild`), as the command's build does (`src/cli/build-modules.ts`): `core-health` (task 8.2) and
- * `core-status` (task 8.3).
+ * backbone (`testBuild`), as the command's build does (`src/cli/build-modules.ts`): `core-health`, `core-status` and
+ * `core-config` (tasks 8.2–8.4).
  */
-export const ADMIN_BACKBONE = [CORE_HEALTH, CORE_STATUS] as const;
+export const ADMIN_BACKBONE = [CORE_HEALTH, CORE_STATUS, CORE_CONFIG] as const;
 
 /**
  * A published status for the endpoints' unit tests: a public process `following` at 3, ready, `given` over it; what
@@ -109,7 +111,7 @@ export function statusSnapshot(given: Partial<StatusSnapshot> = {}): StatusSnaps
 
 /** A whole snapshot for the endpoints' unit tests: {@link statusSnapshot}'s, CF-4's defaults, `given` over it. */
 export function adminSnapshot(given: Partial<AdminSnapshot> = {}): AdminSnapshot {
-  return { livenessTimeoutMs: 30_000, readinessLag: null, startedNs: "0", status: statusSnapshot(), config: { core: null }, ...given };
+  return { livenessTimeoutMs: 30_000, readinessLag: null, startedNs: "0", status: statusSnapshot(), config: UNVALIDATED_CONFIG, ...given };
 }
 
 /** The four endpoints (AE-1). */

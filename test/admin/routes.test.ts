@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { UNVALIDATED_CONFIG } from "../../src/admin/configuration.js";
 import { ADMIN_PARTS, ADMIN_ROUTES, adminRoutes, answerAdmin, NOT_FOUND } from "../../src/admin/routes.js";
 import type { AdminSnapshot, AdminView } from "../../src/admin/types.js";
-import { CORE_CONFIG } from "../../src/backbone/core-config/index.js";
+import { CORE_CONFIG_ENDPOINTS } from "../../src/backbone/core-config/index.js";
 import { CORE_HEALTH_ENDPOINTS } from "../../src/backbone/core-health/index.js";
 import { CORE_STATUS_ENDPOINTS } from "../../src/backbone/core-status/index.js";
 import { BACKBONE_ORDER } from "../../src/modules/graph.js";
@@ -24,7 +25,7 @@ function snapshot(liveness = 30_000, ready = true): AdminSnapshot {
     readinessLag: null,
     startedNs: "0",
     status: statusSnapshot({ state: ready ? "following" : "halted", ready }),
-    config: { core: { start: 1, settings: { network: "preprod", database: "[redacted]" } } },
+    config: { ...UNVALIDATED_CONFIG, core: { start: 1, settings: { network: "preprod", database: "[redacted]" } } },
   };
 }
 
@@ -32,7 +33,7 @@ const view = (beatAgeMs: number, given: AdminSnapshot = snapshot()): AdminView =
 
 describe("the admin route table (AE-1, Q70)", () => {
   it("mounts exactly the backbone parts core-health, core-status and core-config, with the four paths", () => {
-    expect(ADMIN_PARTS).toEqual([CORE_HEALTH_ENDPOINTS, CORE_STATUS_ENDPOINTS, CORE_CONFIG]);
+    expect(ADMIN_PARTS).toEqual([CORE_HEALTH_ENDPOINTS, CORE_STATUS_ENDPOINTS, CORE_CONFIG_ENDPOINTS]);
     expect(ADMIN_PARTS.map((part) => part.id)).toEqual(["core-health", "core-status", "core-config"]);
     for (const part of ADMIN_PARTS) expect(BACKBONE_ORDER).toContain(part.id);
     expect([...ADMIN_ROUTES.keys()]).toEqual(["/health/live", "/health/ready", "/status", "/config"]);

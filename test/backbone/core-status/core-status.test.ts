@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
+import { UNVALIDATED_CONFIG } from "../../../src/admin/configuration.js";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -49,12 +50,15 @@ function status(facts: Partial<StatusFacts> = {}) {
   });
 }
 
+/** What `ProcessAdmin.opened` takes besides the parts and the database (`/config`'s, task 8.4). */
+const OPENED = { check: { entries: [], writes: [] }, history: [], genesisHash: new Uint8Array(32) };
+
 /** The facts of a core process before startup resolved its parts. */
 const FACTS: SnapshotFacts = {
   livenessTimeoutMs: 30_000,
   readinessLag: null,
   redactor: null,
-  config: { core: null },
+  config: UNVALIDATED_CONFIG,
   startedNs: 5_000_000n,
   side: "public",
   instanceId: null,
@@ -179,7 +183,6 @@ describe("what /status shows besides status() (AE-5)", () => {
       declarations,
       modules: [CORE_CHAIN, CORE_DIGEST, core, m],
       revisionsOf: (id) => revisions[id] ?? [revision(1n, null)],
-      db: { read: async () => [] as never },
     });
     expect(facts).toEqual([
       { id: "core-chain", version: CORE_CHAIN.version, side: "public", origin: "backbone", start: 1n, stop: null, tables: [{ schema: "core_chain", table: "identity" }] },
@@ -252,6 +255,8 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
       read: async <T>(body: (read: { query(sql: string): Promise<Record<string, unknown>[]> }) => Promise<T>): Promise<T> =>
         body({
           query: async (sql: string) => {
+            // The server's version (task 8.4's) is answered at once; the digest reads wait for the test.
+            if (sql !== DIGESTS_SQL) return [{ version: "18.6" }];
             queries.push(sql);
             await new Promise<void>((resolve) => {
               release = resolve;
@@ -262,7 +267,8 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     };
     const m = loggingModule("m", [], ["on-db-write"]);
     const declarations = validateDeclarations({ backbone: [CORE_CHAIN, CORE_BLOCK_COMMIT, CORE_DIGEST], core: [], user: [m] });
-    admin.opened({ declarations, modules: [CORE_CHAIN, CORE_BLOCK_COMMIT, CORE_DIGEST, m], revisionsOf: () => [], db: db as never });
+    admin.opened({ declarations, modules: [CORE_CHAIN, CORE_BLOCK_COMMIT, CORE_DIGEST, m], revisionsOf: () => [], db: db as never, ...OPENED });
+    await sleep(10);
     expect(queries).toEqual([DIGESTS_SQL]);
     expect(fake.published.at(-1)?.status.modules?.map((part) => part.id)).toEqual(["core-chain", "core-block-commit", "core-digest", "m"]);
     // While the read runs, a commit and a publication start no other.
@@ -300,13 +306,17 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     let reads = 0;
     let fail = false;
     const db = {
-      read: async () => {
-        reads += 1;
-        if (fail) throw new Error("handle-closed");
-        return [{ schema: "core_digest", table: "tables", height: 2n, digest: DIGEST }];
-      },
+      read: async <T>(body: (read: { query(sql: string): Promise<Record<string, unknown>[]> }) => Promise<T>): Promise<T> =>
+        body({
+          query: async (sql) => {
+            if (sql !== DIGESTS_SQL) return [{ version: "18.6" }];
+            reads += 1;
+            if (fail) throw new Error("handle-closed");
+            return [{ schema: "core_digest", table: "tables", height: 2n, digest: DIGEST }];
+          },
+        }),
     };
-    admin.opened({ declarations: validateDeclarations({ backbone: [CORE_DIGEST], core: [], user: [] }), modules: [CORE_DIGEST], revisionsOf: () => [], db: db as never });
+    admin.opened({ declarations: validateDeclarations({ backbone: [CORE_DIGEST], core: [], user: [] }), modules: [CORE_DIGEST], revisionsOf: () => [], db: db as never, ...OPENED });
     await sleep(10);
     const tables = () => fake.published.at(-1)?.status.modules?.[0]?.tables;
     expect(tables()?.[0]).toMatchObject({ height: "2", digest: DIGEST_HEX });
@@ -327,13 +337,16 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     const admin = new ProcessAdmin({ status: () => status(), log: () => undefined, start: fake.start, side: "private" });
     const config = checked("private");
     await admin.serve(config, config.entries[0] as never);
-    let reads = 0;
-    const db = { read: async () => (reads++, []) };
-    admin.opened({ declarations: validateDeclarations({ backbone: [CORE_CHAIN], core: [], user: [] }), modules: [CORE_CHAIN], revisionsOf: () => [], db: db as never });
+    const queries: string[] = [];
+    const db = {
+      read: async <T>(body: (read: { query(sql: string): Promise<Record<string, unknown>[]> }) => Promise<T>): Promise<T> =>
+        body({ query: async (sql: string) => (queries.push(sql), []) }),
+    };
+    admin.opened({ declarations: validateDeclarations({ backbone: [CORE_CHAIN], core: [], user: [] }), modules: [CORE_CHAIN], revisionsOf: () => [], db: db as never, ...OPENED });
     admin.committed();
     admin.publish();
     await sleep(10);
-    expect(reads).toBe(0);
+    expect(queries).not.toContain(DIGESTS_SQL);
     expect(fake.published.at(-1)?.status).toMatchObject({ instance: { role: "private", id: "wallet-a" }, node: null, public: { cursor: "9", lockstep: null } });
     await admin.close();
   });

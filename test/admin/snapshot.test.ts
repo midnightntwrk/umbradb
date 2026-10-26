@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { UNVALIDATED_CONFIG } from "../../src/admin/configuration.js";
 import { ALLOWED_DETAILS, errorMessage, MAX_FINDINGS, sanitizedError } from "../../src/admin/errors.js";
 import { earlyRedactor, shownSettings } from "../../src/admin/redaction.js";
 import { DEFAULT_LIVENESS_TIMEOUT_MS, jsonReady, snapshotOf } from "../../src/admin/snapshot.js";
@@ -46,7 +47,7 @@ function status(facts: Partial<StatusFacts> = {}): ProcessStatus {
 /** What a snapshot of a core process holds besides `status()` before startup resolved its parts (task 8.3). */
 const FACTS = {
   redactor: null,
-  config: { core: null },
+  config: UNVALIDATED_CONFIG,
   startedNs: 0n,
   side: "public" as const,
   instanceId: null,
@@ -94,7 +95,7 @@ describe("the snapshot of status() (AE-1, AE-3)", () => {
         privateInstances: null,
         public: null,
       },
-      config: { core: null },
+      config: UNVALIDATED_CONFIG,
     });
     expect(JSON.stringify(snapshot)).not.toContain(PASSWORD);
     expect(Object.isFrozen(snapshot) && Object.isFrozen(snapshot.status) && Object.isFrozen(snapshot.status.conditions)).toBe(true);

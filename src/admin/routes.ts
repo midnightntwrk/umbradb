@@ -11,7 +11,7 @@
  * channel (task 16.x).
  */
 
-import { CORE_CONFIG } from "../backbone/core-config/core-config.js";
+import { CORE_CONFIG_ENDPOINTS } from "../backbone/core-config/endpoints.js";
 import { CORE_HEALTH_ENDPOINTS } from "../backbone/core-health/endpoints.js";
 import { CORE_STATUS_ENDPOINTS } from "../backbone/core-status/endpoints.js";
 import { BACKBONE_ORDER } from "../modules/graph.js";
@@ -21,7 +21,7 @@ import type { AdminAnswer, AdminEndpoint, AdminPart, AdminView } from "./types.j
 export type AdminRoutes = ReadonlyMap<string, AdminEndpoint>;
 
 /** The backbone parts that provide the admin endpoints, in `BACKBONE_ORDER`'s order. */
-export const ADMIN_PARTS: readonly AdminPart[] = Object.freeze([CORE_HEALTH_ENDPOINTS, CORE_STATUS_ENDPOINTS, CORE_CONFIG]);
+export const ADMIN_PARTS: readonly AdminPart[] = Object.freeze([CORE_HEALTH_ENDPOINTS, CORE_STATUS_ENDPOINTS, CORE_CONFIG_ENDPOINTS]);
 
 /** A frozen map: `set`, `delete` and `clear` throw. */
 function frozenMap<K, V>(entries: Iterable<readonly [K, V]>): ReadonlyMap<K, V> {

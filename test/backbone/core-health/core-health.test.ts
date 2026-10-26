@@ -1,4 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
+import { UNVALIDATED_CONFIG } from "../../../src/admin/configuration.js";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ADMIN_PARTS, ADMIN_ROUTES, answerAdmin } from "../../../src/admin/routes.js";
@@ -35,7 +36,7 @@ function snapshot(
     readinessLag,
     startedNs: "0",
     status: statusSnapshot({ state, ready: false, lag }),
-    config: { core: null },
+    config: UNVALIDATED_CONFIG,
   };
 }
 

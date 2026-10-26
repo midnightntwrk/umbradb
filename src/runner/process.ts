@@ -678,8 +678,16 @@ class Process implements ProcessHandle {
     });
     this.#step();
     contexts.seal();
-    // `/status` shows every part of the database and its digests from here on (AE-5, task 8.3).
-    this.#admin?.opened({ declarations, modules: graph.modules, revisionsOf: processRevisions(check, core), db });
+    // `/status` and `/config` show the database's parts from here on, and what startup read (AE-5, tasks 8.3, 8.4).
+    this.#admin?.opened({
+      declarations,
+      modules: graph.modules,
+      revisionsOf: processRevisions(check, core),
+      db,
+      check,
+      history,
+      genesisHash,
+    });
     // The bootstrap's wait (IN-2): every bootstrap step has run, and nothing is processed until block S commits; before
     // the module API, so that a retried startup (a node unreachable meanwhile) never finds it listening.
     if (cursor === null) await waitForNode(source, start, this.#stop.signal, waiting);

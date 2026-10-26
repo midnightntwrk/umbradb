@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import { UNVALIDATED_CONFIG } from "../../src/admin/configuration.js";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
@@ -258,7 +259,7 @@ describe("a startup refused before its configuration was validated (Q127, shippe
         findings: [{ path: "entries[0].config.livenessTimeoutMs", message: expect.stringContaining("livenessTimeoutMs") }],
       },
     });
-    expect(seen.config.json).toEqual({ core: null });
+    expect(seen.config.json).toEqual(JSON.parse(JSON.stringify(UNVALIDATED_CONFIG)));
     for (const answer of Object.values(seen)) expect(answer.text).not.toContain(PASSWORD);
     expect(run.lines[0]).toMatch(/^startup refused: invalid-configuration$/);
     expect(run.lines[1]).toMatch(/^admin endpoints listening on 127\.0\.0\.1:\d+$/);
