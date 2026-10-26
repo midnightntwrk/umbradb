@@ -80,7 +80,8 @@ const CORE_ARCH = {
   "**/src/config/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the runner's directory (task 5.1).
   "**/src/runner/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the backbone parts' directory (task 7.1, `core-digest`).
+  // §13's default for `src/**`, added with the backbone parts' directory (tasks 7.1 and 5.2: `core-digest`,
+  // `core-block-commit`'s cursor table).
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
   // The `deterministic_postgresql` component (task 2.2a, owner decision Q69), held above the default like determinism;
   // `UmbraError` moved into it (decision record Q79), and the `errors` floor moved with the class.

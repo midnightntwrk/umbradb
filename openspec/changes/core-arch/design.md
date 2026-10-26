@@ -69,7 +69,7 @@ with its module's process context first (`src/runner/dispatch.ts`, task 5.1). Th
 interface BlockRef { height: bigint; hash: Uint8Array; parentHash: Uint8Array }
 
 interface BlockSource {
-  cursor(read: ReadHandle): Promise<BlockRef | null>;       // last committed block, null before S
+  cursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null>;  // last committed block, null before S
   finalizedHead(): Promise<BlockRef>;                        // the highest height the runner may process
   waitForHead(above: bigint, signal: AbortSignal): Promise<void>;  // resolves when the head exceeds `above`
   block(height: bigint): Promise<BlockRef>;                  // the finalized block at `height`
@@ -82,7 +82,42 @@ interface BlockSource {
   a bounded pool); the best-block queue is an array of parsed blocks above the finalized head, with the common-ancestor
   walk of IN-6 over `chain_getHeader` of parents. Queue-side callbacks get no database handle.
 - **`InMemoryBlockSource`** (exported) keeps blocks in memory, for tests and module authors, with the same
-  `core-block-commit` cursor table.
+  `core-block-commit` cursor table (`src/runner/in-memory-source.ts`, task 5.2): a finalized head that only rises
+  (`finalize`), the blocks it was given or else a default chain whose hashes link (`inMemoryBlock`: SHA-256 of
+  `umbradb in-memory block <h>`, block 0's parent 32 zero bytes), and `waiting(above)`, which tells a test that a runner
+  has processed everything up to `above` and waits. It holds no queue: `on-best-block` and `on-rollback` are the node
+  source's (IN-6), and so are IN-4's parent-hash and finality checks.
+- **The cursor table** is `core-block-commit`'s `core_block_commit.blocks` (`src/backbone/core-block-commit/`, task
+  5.2: height, hash, parent hash; task 10.2 adds §10's other columns, `hashes` and `duplicate-block-hash`). The part
+  writes the block's row from the block context first in every block (CD-3), so the cursor is inside the block's
+  transaction; `readCursor` reads the highest row through a read or the block's transaction (none before the table
+  exists), each source's `cursor` is it, and the database API's committed height is its height (`cursorHeight`), so a
+  read's height and its snapshot are one.
+- **The finalized loop** (`src/runner/loop.ts`, task 5.2) processes every height from cursor + 1 (S on a new database)
+  to the source's finalized head, then waits (`waitForHead`) with no read or transaction open (RN-6, RN-14). Per new
+  head it calls `on-finalized` once, before the head's heights, for the modules active at the first of them, each
+  callback with its own read at the cursor; per height, through the dispatch in the order of the range holding it:
+  `on-fetch` and `on-parse` with the block context and an item sink; `on-compute` with a read at h − 1 and a sink, each
+  callback inside its own `Database.read` (on PGlite a `db.read` from inside it then fails with `nested-call`, and a
+  failing statement aborts no sibling's read); one `BEGIN … COMMIT` holding every `on-db-write` through
+  `openBlockWrites` (the handles' height the cursor before h) and, before the `COMMIT`, a check that the cursor is h
+  with the block's hash; `on-after-db-write` with a read at h, each callback in its own read, and no `block` items. A
+  block context holds the block's height, hash and parent hash, the items published before its callback started, the
+  module's settings for the revision covering h (the last one starting at or before h whose stop, if any, is not below
+  it) and `active(id)` from the graph's segments. Items (`src/runner/block-context.ts`): a callback's puts are buffered
+  and published when it completes, dropped when it fails; only the module declaring an item with the `block` lifetime
+  may put it, once per block; a refused put fails its callback even when caught, and one from a kept sink is reported. A
+  failure stops the loop with a `HeightFailure` (height, point, module, whether h committed); a use of a closed write
+  handle or a kept sink is a callback error the loop keeps and names — before h's `COMMIT`, once h's last point ended,
+  or before the next height. `on-start-height`, `on-stop-height`, the lockstep wait, RN-11's re-delivery and the halt
+  itself are tasks 5.3, 14.x and 5.4's.
+- **The chain-data envelope** (`src/runner/envelope.ts`, task 5.2; RN-16): `readChainDataView(read)` is the view
+  `finalized`, the read's committed height and that block's hash, read in the same read; `chainDataHeaders` writes
+  `X-Umbra-View`, `X-Umbra-Height` (decimal) and `X-Umbra-Hash` (`0x`-prefixed lowercase hex, as the process transport
+  writes hashes, CORE-ARCH §4.14); `withViewExtensions` adds `view`, `height` (a decimal string) and `hash` to a GraphQL
+  response's `extensions`, its `data` unchanged; `answerChainData` answers a request with the module's answer and the
+  headers, or, before block S commits, 503 with `{ error: { code: "no-committed-height", message } }`. Mounting it on
+  `listen.api` is task 5.2a's.
 - **The node client** retries per IN-10; every request has a timeout; subscriptions are re-established after a
   reconnect, and the runner re-reads the finalized head instead of trusting lost notifications.
 

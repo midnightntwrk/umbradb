@@ -113,13 +113,13 @@ export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Objec
   "on-fetch": [BLOCK, SINK],
   "on-parse": [BLOCK, SINK],
   "on-rollback": [[HEADER]],
-  "on-finalized": [{ height: 1n, hash: HASH }],
-  "on-start-height": [{ entryId: "m", height: 1n }],
+  "on-finalized": [{ height: 1n, hash: HASH }, READ],
+  "on-start-height": [{ entryId: "m", height: 1n }, READ],
   "on-compute": [BLOCK, READ, SINK],
   "on-db-write": [BLOCK, WRITE],
   "on-after-db-write": [BLOCK, READ],
-  "on-stop-height": [{ entryId: "m", height: 1n }],
-  "on-key": [KEY],
+  "on-stop-height": [{ entryId: "m", height: 1n }, READ],
+  "on-key": [KEY, READ],
 });
 
 /** One process context per module, made on first use and the same object afterwards (MD-7). */

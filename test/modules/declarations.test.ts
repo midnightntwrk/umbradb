@@ -11,6 +11,7 @@ import {
   defineModule,
   type ItemSink,
   type ModuleDeclaration,
+  type PendingKey,
   type PointCallbacks,
   type PointName,
   POINTS,
@@ -99,9 +100,22 @@ describe("A20: the points (MD-1, design.md §2)", () => {
           "on-db-write": async (_p, _b, w) => {
             expectTypeOf(w).toEqualTypeOf<BlockWriteHandle>();
           },
+          "on-after-db-write": async (_p, b, read) => {
+            expectTypeOf(b).toEqualTypeOf<BlockContext>();
+            expectTypeOf(read).toEqualTypeOf<ReadHandle>();
+          },
         },
       }),
     );
+    // The read handles RN-4 and design.md §2 give these points (decision record Q100, option A): `on-finalized` at
+    // the cursor, `on-start-height` at h − 1, `on-stop-height` at h, `on-key` at the cursor.
+    type Rest<P extends PointName> = PointCallbacks[P] extends (p: ProcessContext, ...rest: infer R) => Promise<void>
+      ? R
+      : never;
+    expectTypeOf<Rest<"on-finalized">>().toEqualTypeOf<[head: { height: bigint; hash: Uint8Array }, read: ReadHandle]>();
+    expectTypeOf<Rest<"on-start-height">>().toEqualTypeOf<[e: { entryId: string; height: bigint }, read: ReadHandle]>();
+    expectTypeOf<Rest<"on-stop-height">>().toEqualTypeOf<[e: { entryId: string; height: bigint }, read: ReadHandle]>();
+    expectTypeOf<Rest<"on-key">>().toEqualTypeOf<[key: PendingKey, read: ReadHandle]>();
     expectTypeOf(typed).toMatchTypeOf<ModuleDeclaration>();
   });
 });

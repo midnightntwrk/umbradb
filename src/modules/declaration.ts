@@ -184,7 +184,11 @@ export interface ApiRegistry {
   subscription(name: string, handler: (args: unknown, emit: (value: unknown) => void) => () => void): void;
 }
 
-/** The callbacks a module may register, by point (CORE-ARCH §4.10; `design.md` §2 gives each its handle). */
+/**
+ * The callbacks a module may register, by point (CORE-ARCH §4.10; `design.md` §2 gives each its handle). The read
+ * handles of `on-finalized` (at the cursor), `on-start-height` (at h − 1), `on-stop-height` (at h) and `on-key` (at
+ * the cursor) are RN-4's and design §2's (decision record Q100, option A).
+ */
 export interface PointCallbacks {
   "on-start-db"(p: ProcessContext, w: SchemaWriteHandle): Promise<void>;
   "on-start-api"(p: ProcessContext, api: ApiRegistry): Promise<void>;
@@ -192,13 +196,13 @@ export interface PointCallbacks {
   "on-fetch"(p: ProcessContext, b: BlockContext, out: ItemSink): Promise<void>;
   "on-parse"(p: ProcessContext, b: BlockContext, out: ItemSink): Promise<void>;
   "on-rollback"(p: ProcessContext, dropped: BlockHeader[]): Promise<void>;
-  "on-finalized"(p: ProcessContext, head: { height: bigint; hash: Uint8Array }): Promise<void>;
-  "on-start-height"(p: ProcessContext, e: { entryId: string; height: bigint }): Promise<void>;
+  "on-finalized"(p: ProcessContext, head: { height: bigint; hash: Uint8Array }, read: ReadHandle): Promise<void>;
+  "on-start-height"(p: ProcessContext, e: { entryId: string; height: bigint }, read: ReadHandle): Promise<void>;
   "on-compute"(p: ProcessContext, b: BlockContext, read: ReadHandle, out: ItemSink): Promise<void>;
   "on-db-write"(p: ProcessContext, b: BlockContext, w: BlockWriteHandle): Promise<void>;
   "on-after-db-write"(p: ProcessContext, b: BlockContext, read: ReadHandle): Promise<void>;
-  "on-stop-height"(p: ProcessContext, e: { entryId: string; height: bigint }): Promise<void>;
-  "on-key"(p: ProcessContext, key: PendingKey): Promise<void>;
+  "on-stop-height"(p: ProcessContext, e: { entryId: string; height: bigint }, read: ReadHandle): Promise<void>;
+  "on-key"(p: ProcessContext, key: PendingKey, read: ReadHandle): Promise<void>;
 }
 
 /**

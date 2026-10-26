@@ -835,9 +835,54 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `invoke` hands each callback, and A38 through it (5.2); the process contexts shared with `migrationPart`, and
       `on-start-api` (5.2a); which entries start and stop at a height, and their arguments (5.3); the halt on a
       `CallbackFailure` (5.4); the slow-block watchdog around `invoke` (5.5).
-- [ ] 5.2 The finalized loop over the block-source interface; `InMemoryBlockSource` with its `core-block-commit`
+- [x] 5.2 The finalized loop over the block-source interface; `InMemoryBlockSource` with its `core-block-commit`
       cursor table; block context and item sink; per-point handles; the chain-data envelope of module API responses.
       **Acceptance:** A36, A37, A39, A40, A41, A49; RN-16 is covered by A75.
+      **Done (2026-10-25):** `src/runner/loop.ts`: `FinalizedLoop` processes every height from the cursor + 1 (S on a
+      new database) up to the block source's finalized head, then waits for it to rise (`waitForHead`) with no read or
+      transaction open. Per new head `on-finalized` runs once, before the head's heights, for the modules active at the
+      first of them, each callback with its own read at the cursor. Per height, through task 5.1's dispatch in the order
+      of the range holding it: `on-fetch` and `on-parse` (the block context and an item sink); `on-compute` (a read at
+      h − 1 and a sink, each callback inside its own `Database.read`, so on PGlite a `db.read` from it fails with
+      `nested-call`, and a failing statement aborts no other callback's read); one `BEGIN … COMMIT` holding every
+      `on-db-write` through `openBlockWrites` (the handles' height the cursor before h) and, before the `COMMIT`, a
+      check that the cursor is h with the block's hash; then `on-after-db-write` (a read at h, no `block` items). A
+      failure stops the loop with a `HeightFailure` (height, point, module, whether h committed); a use of a closed
+      write handle or of a kept item sink is one too, even when no callback rejects with it (kept first, named, checked
+      before each point, before the `COMMIT` and after the height's last point). `src/runner/block-context.ts`:
+      `BlockItems` — a callback's puts buffered and published when it completes, dropped when it fails, a callback
+      seeing the items published before it started; only the module declaring an item with the `block` lifetime may put
+      it, once per block; a refused put fails its callback even when caught; a put from a kept sink is reported — and
+      `revisionAt` (a block context's settings: the revision covering h). `src/runner/block-source.ts`: `BlockRef` and
+      `BlockSource` (design §3). `src/runner/in-memory-source.ts`: `InMemoryBlockSource` (a head that only rises, the
+      blocks given or a default linked chain, `waiting(above)`) and `inMemoryBlock`.
+      `src/backbone/core-block-commit/core-block-commit.ts`: the cursor table `core_block_commit.blocks` (height, hash,
+      parent hash), written first in every block by the part's `on-db-write`; `readCursor`, and `cursorHeight` for the
+      database API's committed height. `src/runner/envelope.ts`: `readChainDataView`, `chainDataHeaders`
+      (`X-Umbra-View`, `X-Umbra-Height` in decimal, `X-Umbra-Hash` in `0x`-prefixed hex), `withViewExtensions` (a
+      GraphQL response's `extensions`, `data` unchanged), `answerChainData` (503 `no-committed-height` before block S
+      commits; the code joins `ERROR_CODES`). Q100 resolved A (owner, 2026-10-25): `on-finalized`, `on-start-height`,
+      `on-stop-height` and `on-key` take a `read: ReadHandle` (`src/modules/declaration.ts`). `design.md` §3 says what
+      was built; the `src/backbone/**` coverage floor (90/85) is added. Tests, seen failing first (`tsc` exit 2, 81
+      errors: the six new modules missing, Q100's four signatures in the type test, the dispatch fixtures' arguments;
+      six suites failed to load): `test/runner/loop.test.ts` (A36, A37, A39, A40; failures and stopping; A10's and
+      A144's halves through the loop; the block context), `test/runner/catch-up.test.ts` (A41, A49),
+      `block-context.test.ts`, `in-memory-source.test.ts`, `envelope.test.ts` and
+      `test/backbone/core-block-commit.test.ts`, on PostgreSQL 18.6 and PGlite 0.5.10, with committed negative controls:
+      two heights in one transaction fail A41, waiting inside a read fails A49, a put published at once or items kept
+      for h + 1 fail A40, `on-compute` given a read at h fails A39, a loop writing a row itself fails A37. Wrong
+      variants (a scratch runner outside the clone): 150 of 162 caught on the first run; of the 12 survivors, four were
+      redundant code (the wait's stop result, which the loop's own stop check made unreachable, and a second height
+      check in the source's `block`; removed), two are equivalent (a block context built before or inside `collect`,
+      which calls its body at once; the order of the envelope's header spread, after a filter that leaves no name in
+      common) and six were gaps (a loop woken by a rising head announcing the old head again, one read shared by a
+      wave's `on-compute` callbacks, a failure after the commit that is no callback's, `HeightFailure`'s name, a header
+      name in another case, the cursor not frozen), closed by tests; on the final sources 157 of 159 caught, the two
+      survivors equivalent.
+      **Pending:** `on-start-api` (5.2a); `on-start-height` and `on-stop-height` through the loop, and the settings'
+      switch (5.3); the `halted` state, retries and RN-11's re-delivery (5.4); the watchdog (5.5); the node source
+      and IN-4's parent check (10.3); the cursor table's other columns and `duplicate-block-hash` (10.2);
+      `core-digest` through the loop (7.1, 5.x); the exports (17.x).
 - [ ] 5.2a Process items (`ProcessContext.publish`) and module API registration (`ApiRegistry` mounted on `listen.api`,
       WebSocket subscriptions, duplicate routes refused); each request's read bounded by `apiReadTimeoutMs` (DB-15).
       **Acceptance:** A74, A75; A141's request half through a registered handler.

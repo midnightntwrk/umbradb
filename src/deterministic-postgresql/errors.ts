@@ -26,6 +26,11 @@ export const ERROR_CODES = [
    * statement ran, or the read stayed idle in its transaction, for that long (DB-15, `src/db/postgres.ts`).
    */
   "query-timeout",
+  /**
+   * A chain-data read before block S commits, which has no committed height to answer from: a module API request is
+   * answered 503 (RN-16, `src/runner/envelope.ts`).
+   */
+  "no-committed-height",
   /** A query parameter the API cannot send: `undefined`, a function, a `Map`, a non-finite number in JSON, … */
   "invalid-parameter",
   /**
