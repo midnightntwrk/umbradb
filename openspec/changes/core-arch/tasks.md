@@ -1300,11 +1300,37 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the clone): 12, all caught — the 503's mapping, message and reporting, the envelope's headers and extensions put
       back, the handler skipped before S, the module's answer changed. Issue
       `docs/issues/00024-api-413-closes-before-body-read.md` recorded (OPEN).
-- [ ] 5.2c The owner's answer Q131 A: the module API sets `X-Umbra-Version` to the build's version (`UMBRADB_VERSION`)
+- [x] 5.2c The owner's answer Q131 A: the module API sets `X-Umbra-Version` to the build's version (`UMBRADB_VERSION`)
       on every HTTP answer on `listen.api` — handler answers, the module API's own errors (400, 404, 405, 413, 500, 503,
       504) and the subscription upgrade response — replacing a module's own header of that name, and changes nothing
       else; the module guide says the `X-Umbra-` prefix holds the shared headers.
       **Acceptance:** A75 (as amended), RN-16's scenario "Every answer names its build".
+      **Done (2026-10-26):** `src/runner/api-server.ts`: the listener sets `X-Umbra-Version` (`VERSION_HEADER`) to
+      `UMBRADB_VERSION` on every HTTP answer it gives, once, a header of that name in any letter case replaced, nothing
+      else changed — every answer written through its response class `VersionedResponse` (`writeHead` in each form:
+      an object, a flat list, with a status message, implicit): the handlers' answers, the module API's own errors
+      (400, 404, 405, 413, 500, 503, 504) and the answers Node.js writes itself through a response (400 without
+      `Host`, 417 for an unmet `Expect`); the subscription upgrade's 101 (`ws`'s `headers` event); `ws`'s refusals of
+      an upgrade it cannot complete, written as `ws` writes them with the header (`wsClientError`: 405 for a method
+      other than GET, else 400, `Sec-WebSocket-Version: 13, 8` for a version it does not speak); Node.js's answers to
+      bytes that are no request (`clientError`, `unreadableAnswer`: 400, 408, 413, 431). A `100 Continue` is an
+      interim answer; WebSocket messages and closes have no headers. `ModuleApi.answer` is unchanged (another
+      transport, task 16.x, carries the answer as the handler gave it). `ModuleApiServerOptions.response` (the
+      answers' class) is the negative controls' seam. `docs/module-guide.md`: the header, and the `X-Umbra-` prefix
+      holding the shared headers; comments of `module-api.ts` and `envelope.ts`. Tests, seen failing first (`tsc`
+      exit 2, 5 errors: the three exports and the option missing; 12 of 37 tests failing, the header absent):
+      `test/runner/api-server.test.ts` — A75's "as the module wrote it but for `X-Umbra-Version`"
+      (`untouchedProblems`, `GET /raw` with its own `x-Umbra-version: 9`), RN-16's "Every answer names its build"
+      (`versionProblems` on both backends, before and after block S: handler answers, 404, 405, two 400s, 500, 503,
+      504, the 101), `VersionedResponse` in every form of `writeHead`, the listener's own and Node.js's answers, a
+      client reset in a request's head, `unreadableAnswer`, the 101 and `ws`'s four refusals, a refused upgrade
+      closed for a half-open client. Committed negative controls: a module API that sets the version on the handlers'
+      answers only (`VersionsAnswersOnly`, served by Node.js's own response) fails `versionProblems` on every error,
+      before S and after; one that sends it beside a module's own (`AppendsVersion`) fails on `GET /raw`
+      (`["9","0.9.5"]`); Node.js's own response leaves it out of every answer written through one. Wrong variants (a
+      scratch runner outside the clone): 34, 33 caught on the first run, the survivor (a refused upgrade's socket not
+      destroyed) closed by the half-open test; 34 of 34 caught on the final sources. Issue
+      `docs/issues/00025-non-websocket-upgrade-refused.md` recorded (OPEN).
 - [ ] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
       commit; never a cancel or a retry.
       **Acceptance:** A142.

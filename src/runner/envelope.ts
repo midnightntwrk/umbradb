@@ -5,9 +5,11 @@
  * was told without the body changing: over HTTP as the headers `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`
  * ({@link chainDataHeaders}, {@link answerChainData}), and in a GraphQL response's `extensions`, its `data` unchanged
  * ({@link withViewExtensions}). The core applies none of them: a module's answer is the module's (owner decisions Q104,
- * Q105; task 5.2b). Before block S commits there is no committed height, and the read's view
- * ({@link readChainDataView}) fails with `no-committed-height`, which the module API answers with HTTP 503 when the
- * handler does not catch it.
+ * Q105; task 5.2b). The `X-Umbra-` prefix holds the headers every module shares: these three, which a module writes
+ * with the helpers, and `X-Umbra-Version`, the build's version, which the module API's listener sets on every HTTP
+ * answer itself (`./api-server.ts`; owner decision Q131, task 5.2c). Before block S commits there is no committed
+ * height, and the read's view ({@link readChainDataView}) fails with `no-committed-height`, which the module API
+ * answers with HTTP 503 when the handler does not catch it.
  *
  * Heights are written as decimal strings and hashes as `0x`-prefixed lowercase hex, as the process transport writes
  * them (CORE-ARCH §4.14). The hash is read in the request's own read, so it is the hash of the height that read reports.

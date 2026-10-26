@@ -1,7 +1,16 @@
 import { once } from "node:events";
+import {
+  createServer as createHttpServer,
+  type IncomingMessage,
+  type OutgoingHttpHeader,
+  type OutgoingHttpHeaders,
+  request as httpRequest,
+  ServerResponse,
+} from "node:http";
 import { createServer, type Server, Socket } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { UMBRADB_VERSION } from "../../src/config/build.js";
 import type { BlockWriteHandle, Database, ReadHandle, ReadOptions } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { ApiRegistry, ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -11,6 +20,9 @@ import {
   type ModuleApiServer,
   parseAddress,
   startModuleApi,
+  unreadableAnswer,
+  VERSION_HEADER,
+  VersionedResponse,
 } from "../../src/runner/api-server.js";
 import {
   answerChainData,
@@ -41,7 +53,10 @@ import {
  * module wrote it — status, headers and body: the core adds no envelope header and no `extensions` and tells no GraphQL
  * response apart (owner decisions Q104, Q105) —; a module that states the view, height and hash it read does so with
  * the envelope's helpers (`X-Umbra-View`, `X-Umbra-Height`, `X-Umbra-Hash`; a GraphQL response's `extensions`), and the
- * view's `no-committed-height` before block S commits, uncaught, is answered 503; subscriptions on WebSocket at the
+ * view's `no-committed-height` before block S commits, uncaught, is answered 503; but for one header: every HTTP answer
+ * on the listener — a handler's, the module API's own errors, the answers Node.js and `ws` write themselves, the
+ * subscription's upgrade — carries `X-Umbra-Version` with the build's version, once, a module's own header of that
+ * name replaced (owner decision Q131, task 5.2c); subscriptions on WebSocket at the
  * same listener, notified from the module's `on-after-db-write` through `emit` with exactly the values it emitted; two
  * modules registering one route or subscription name refuse startup with `duplicate-api-route` before anything listens.
  * Over a database on both backends, through the runner's startup and loop; the server's own behaviour (the WebSocket
@@ -123,6 +138,56 @@ async function listening(port: number): Promise<boolean> {
   });
 }
 
+/** Whether `name` is `X-Umbra-Version`'s, in any letter case. */
+const isVersion = (name: string): boolean => name.toLowerCase() === "x-umbra-version";
+
+/** The values of the `X-Umbra-Version` lines among raw headers (name, value, name, value, …), each line one value. */
+const versionsOf = (rawHeaders: readonly string[]): string[] =>
+  rawHeaders.flatMap((name, index) => (index % 2 === 0 && isVersion(name) ? [String(rawHeaders[index + 1])] : []));
+
+/** The values of the `X-Umbra-Version` lines in the head of a raw HTTP answer. */
+function versionsInHead(text: string): string[] {
+  const lines = (text.split("\r\n\r\n")[0] ?? "").split("\r\n").slice(1);
+  return lines.flatMap((line) => {
+    const colon = line.indexOf(":");
+    return colon > 0 && isVersion(line.slice(0, colon)) ? [line.slice(colon + 1).trim()] : [];
+  });
+}
+
+/** One HTTP exchange on a connection of its own: the answer's status, its header lines as sent, its body. */
+async function exchange(
+  url: string,
+  method: string,
+  path: string,
+  body?: string | Uint8Array,
+): Promise<{ status: number; rawHeaders: string[]; body: Buffer }> {
+  const { hostname, port } = new URL(url);
+  return new Promise((resolve, reject) => {
+    const outgoing = httpRequest({ hostname, port, method, path, agent: false }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => {
+        const status = response.statusCode as number;
+        resolve({ status, rawHeaders: response.rawHeaders, body: Buffer.concat(chunks) });
+      });
+    });
+    outgoing.on("error", reject);
+    outgoing.end(body);
+  });
+}
+
+/** What the listener on `port` of 127.0.0.1 writes back to `text`, until it closes the connection. */
+async function rawExchange(port: number, text: string): Promise<string> {
+  return new Promise((resolve) => {
+    const socket = new Socket();
+    let answer = "";
+    socket.on("data", (chunk) => (answer += String(chunk)));
+    socket.on("error", () => undefined);
+    socket.on("close", () => resolve(answer));
+    socket.connect(port, "127.0.0.1", () => socket.write(text));
+  });
+}
+
 /** What `chain-api`'s `GET /raw` answers besides its read's height: its own status, headers and bytes. */
 const RAW = Object.freeze({
   status: 203,
@@ -130,6 +195,8 @@ const RAW = Object.freeze({
     "Content-Type": "application/x-chain-api",
     "Cache-Control": "no-store",
     "X-Umbra-Height": "the module's own",
+    // The core's header (Q131), in another letter case: replaced by the build's version, never sent beside it.
+    "x-Umbra-version": "9",
   }),
   body: Uint8Array.of(0, 1, 2, 0x7f, 0x80, 0xfe, 0xff),
 });
@@ -140,7 +207,8 @@ const TRANSPORT_HEADERS = new Set(["date", "connection", "keep-alive", "content-
 /**
  * The module `chain-api` of A75: its rows; routes that state their view with the envelope's helpers (`GET /height`,
  * `GET /rows/:height`, `POST /graphql`) and routes that do not (`POST /plain`, a GraphQL response's shape, and `GET
- * /raw`, its own status, headers and bytes); a subscription notified from its `on-after-db-write`.
+ * /raw`, its own status, headers and bytes); routes whose handlers fail (`GET /fails`: 500, `GET /timeout`: a read's
+ * `query-timeout`, 504); a subscription notified from its `on-after-db-write`.
  */
 function chainApi() {
   const calls: string[] = [];
@@ -180,6 +248,12 @@ function chainApi() {
           headers: { ...RAW.headers, "X-Read": String(read.height) },
           body: RAW.body,
         }));
+        api.http("GET", "/fails", async () => {
+          throw new Error("chain-api failed");
+        });
+        api.http("GET", "/timeout", async () => {
+          throw new UmbraError("query-timeout", "the read of GET /timeout ran past apiReadTimeoutMs");
+        });
         api.subscription("heights", (args, emit) => {
           listeners.add(emit);
           if (args !== null && typeof args === "object" && "hello" in args) emit({ hello: (args as { hello: unknown }).hello });
@@ -266,25 +340,35 @@ async function helperProblems(url: string, height: bigint, hash: Uint8Array): Pr
  * A75's "the core leaves a module's answer as the module wrote it" (RN-16's scenario, Q104, Q105) over a process
  * serving `chain-api` whose reads see `height` (null before block S): the problems found on the routes whose handlers
  * call no helper — `GET /raw` (its own status, headers, an `X-Umbra-Height` of its own among them, and bytes) and `POST
- * /plain` (a GraphQL response's shape, written as JSON) — none when the client gets each exactly as written: the
- * status, the module's headers with their values and no others but HTTP's own (and, for a body the module gave as an
- * object, the JSON type its encoding writes), and the body byte for byte.
+ * /plain` (a GraphQL response's shape, written as JSON) — none when the client gets each exactly as written but for
+ * the core's `X-Umbra-Version` (Q131): the status, the module's headers with their values and no others but HTTP's own
+ * (and, for a body the module gave as an object, the JSON type its encoding writes), the build's version in place of
+ * the module's own header of that name, and the body byte for byte.
  */
 async function untouchedProblems(url: string, height: bigint | null): Promise<string[]> {
   const problems: string[] = [];
-  const names = (response: Response) => [...response.headers.keys()].filter((name) => !TRANSPORT_HEADERS.has(name));
+  const names = (response: Response) =>
+    [...response.headers.keys()].filter((name) => !TRANSPORT_HEADERS.has(name) && !isVersion(name));
+  /** The core's header: the build's version, once (a second line would show as two values joined by a comma). */
+  const version = (what: string, response: Response) => {
+    const got = response.headers.get(VERSION_HEADER);
+    if (got !== UMBRADB_VERSION) problems.push(`${what}: X-Umbra-Version ${String(got)}`);
+  };
   const raw = await fetch(`${url}/raw`);
   const written = { ...RAW.headers, "X-Read": String(height) };
   if (raw.status !== RAW.status) problems.push(`GET /raw: status ${raw.status}`);
   for (const [name, value] of Object.entries(written)) {
+    if (isVersion(name)) continue;
     if (raw.headers.get(name) !== value) problems.push(`GET /raw: ${name} ${String(raw.headers.get(name))}`);
   }
+  version("GET /raw", raw);
   const extra = names(raw).filter((name) => !Object.keys(written).some((own) => own.toLowerCase() === name));
   if (extra.length > 0) problems.push(`GET /raw: headers added ${extra.join(", ")}`);
   const bytes = new Uint8Array(await raw.arrayBuffer());
   if (hex(bytes) !== hex(RAW.body)) problems.push(`GET /raw: body ${hex(bytes)}`);
   const plain = await fetch(`${url}/plain`, { method: "POST", body: JSON.stringify({ query: "{ x }" }) });
   if (plain.status !== 200) problems.push(`POST /plain: status ${plain.status}`);
+  version("POST /plain", plain);
   const added = names(plain).filter((name) => name !== "content-type");
   if (added.length > 0) problems.push(`POST /plain: headers added ${added.join(", ")}`);
   if (plain.headers.get("content-type") !== "application/json; charset=utf-8") {
@@ -293,6 +377,56 @@ async function untouchedProblems(url: string, height: bigint | null): Promise<st
   const text = await plain.text();
   const expected = JSON.stringify({ data: { echo: "{ x }", read: height === null ? null : String(height) } });
   if (text !== expected) problems.push(`POST /plain: body ${text}`);
+  return problems;
+}
+
+/**
+ * RN-16's "every answer names its build" and A75's `X-Umbra-Version` (Q131) over a listener serving `chain-api`, block
+ * S committed (`committed`) or not: the problems found on its answers — the handlers' (`GET /raw`'s with the module's
+ * own `x-Umbra-version`, a handler's 404), the module API's own errors (404, 405, 400 for a path and for a body, 500,
+ * 503 before S, 504) and the subscription's upgrade (101) — none when each has the status asked for and exactly one
+ * `X-Umbra-Version` line, the build's version. (A WebSocket message or close after the upgrade has no headers.)
+ */
+async function versionProblems(url: string, ws: string, committed: boolean): Promise<string[]> {
+  const query = JSON.stringify({ query: "{ x }" });
+  const asked: readonly (readonly [what: string, method: string, path: string, status: number, body?: string])[] = [
+    ...(committed
+      ? ([
+          ["GET /height", "GET", "/height", 200],
+          ["GET /rows/1", "GET", "/rows/1", 200],
+          ["GET /rows/999", "GET", "/rows/999", 404],
+          ["POST /graphql", "POST", "/graphql", 200, query],
+        ] as const)
+      : ([["GET /height", "GET", "/height", 503]] as const)),
+    ["POST /plain", "POST", "/plain", 200, query],
+    ["GET /raw", "GET", "/raw", 203],
+    ["GET /nothing", "GET", "/nothing", 404],
+    ["POST /raw", "POST", "/raw", 405],
+    ["GET /%ff", "GET", "/%ff", 400],
+    ["POST /plain with {", "POST", "/plain", 400, "{"],
+    ["GET /fails", "GET", "/fails", 500],
+    ["GET /timeout", "GET", "/timeout", 504],
+  ];
+  const problems: string[] = [];
+  const check = (what: string, status: number, wanted: number, versions: readonly string[]) => {
+    if (status !== wanted) problems.push(`${what}: status ${status}`);
+    if (versions.length !== 1 || versions[0] !== UMBRADB_VERSION) {
+      problems.push(`${what} (${status}): X-Umbra-Version ${JSON.stringify(versions)}`);
+    }
+  };
+  for (const [what, method, path, status, body] of asked) {
+    const answer = await exchange(url, method, path, body);
+    check(what, answer.status, status, versionsOf(answer.rawHeaders));
+  }
+  const socket = new WebSocket(ws);
+  // ws emits open right after upgrade, in the same turn: both are listened for at once.
+  const opened = once(socket, "open");
+  const [upgrade] = (await once(socket, "upgrade")) as [IncomingMessage];
+  check("the upgrade", upgrade.statusCode as number, 101, versionsOf(upgrade.rawHeaders));
+  await opened;
+  const closed = once(socket, "close");
+  socket.close();
+  await closed;
   return problems;
 }
 
@@ -366,6 +500,37 @@ class AddsExtensions extends ModuleApi {
   }
 }
 
+/**
+ * A negative control (Q131): a module API that sets the build's version on the handlers' answers only — a module's own
+ * header of that name replaced —, served by Node.js's own response, so the module API's errors go without it.
+ */
+class VersionsAnswersOnly extends ModuleApi {
+  protected override async handle(
+    route: HttpRoute,
+    req: Parameters<HttpHandler>[0],
+    read: ReadHandle,
+  ): Promise<ChainDataAnswer> {
+    const answered = await super.handle(route, req, read);
+    const own = Object.entries(answered.headers ?? {}).filter(([name]) => !isVersion(name));
+    return { ...answered, headers: { ...Object.fromEntries(own), [VERSION_HEADER]: UMBRADB_VERSION } };
+  }
+}
+
+/**
+ * A negative control (Q131): answers given the build's version beside, not in place of, a header of that name in
+ * another letter case — a module's `x-Umbra-version` then sent too. (Only `writeHead`'s object form, the module API's.)
+ */
+class AppendsVersion<Request extends IncomingMessage = IncomingMessage> extends ServerResponse<Request> {
+  override writeHead(
+    statusCode: number,
+    headers?: string | OutgoingHttpHeaders | OutgoingHttpHeader[],
+    _more?: OutgoingHttpHeaders | OutgoingHttpHeader[],
+  ): this {
+    const given = headers as OutgoingHttpHeaders | undefined;
+    return super.writeHead(statusCode, { ...given, [VERSION_HEADER]: UMBRADB_VERSION });
+  }
+}
+
 describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, RN-16)", (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
@@ -422,6 +587,60 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     const missing = await fetch(`${process.url}/nothing`);
     expect([missing.status, missing.headers.get("x-umbra-height")]).toEqual([404, null]);
     expect(((await missing.json()) as { error: { code: string } }).error.code).toBe("not-found");
+  }, 120_000);
+
+  it("names its build on every answer: X-Umbra-Version once, the build's, a module's own replaced, the body the module's (Q131)", async () => {
+    const { db } = await backend.database();
+    const api = chainApi();
+    const process = await started(db, [api.module], [entry("chain-api", 1)]);
+    expect(await versionProblems(process.url, process.ws, false)).toEqual([]);
+    await runLoop(process, new InMemoryBlockSource({ head: 2n }), 2n);
+    expect(await versionProblems(process.url, process.ws, true)).toEqual([]);
+    // RN-16's scenario: the module's own X-Umbra-Version (9) replaced, its body and every other header its own.
+    const raw = await exchange(process.url, "GET", "/raw");
+    expect(versionsOf(raw.rawHeaders)).toEqual([UMBRADB_VERSION]);
+    expect(hex(raw.body)).toBe(hex(RAW.body));
+    expect(await untouchedProblems(process.url, 2n)).toEqual([]);
+  }, 120_000);
+
+  it("negative control: a module API that leaves the version out of its own errors, or sends a module's beside it, fails 'every answer names its build'", async () => {
+    const { db } = await backend.database();
+    const api = chainApi();
+    const sealed = await startThroughSeal(db, [api.module], [entry("chain-api", 1)]);
+    const routes = await registerModuleApis(sealed);
+    const listeners: ModuleApiServer[] = [];
+    const listen = async (made: ModuleApi, response?: typeof ServerResponse) => {
+      const server = await listenModuleApi(made, "127.0.0.1:0", response === undefined ? {} : { response });
+      listeners.push(server);
+      return { url: `http://127.0.0.1:${server.port}`, ws: `ws://127.0.0.1:${server.port}` };
+    };
+    const options = { db, timeoutMs: 30_000 };
+    try {
+      const answersOnly = await listen(new VersionsAnswersOnly(routes, options), ServerResponse);
+      const appends = await listen(new ModuleApi(routes, options), AppendsVersion);
+      const real = await listen(new ModuleApi(routes, options));
+      const errors = (before: boolean) => [
+        ...(before ? ["GET /height (503): X-Umbra-Version []"] : []),
+        "GET /nothing (404): X-Umbra-Version []",
+        "POST /raw (405): X-Umbra-Version []",
+        "GET /%ff (400): X-Umbra-Version []",
+        "POST /plain with { (400): X-Umbra-Version []",
+        "GET /fails (500): X-Umbra-Version []",
+        "GET /timeout (504): X-Umbra-Version []",
+      ];
+      const twice = `GET /raw (203): X-Umbra-Version ${JSON.stringify(["9", UMBRADB_VERSION])}`;
+      expect(await versionProblems(answersOnly.url, answersOnly.ws, false)).toEqual(errors(true));
+      expect(await versionProblems(appends.url, appends.ws, false)).toEqual([twice]);
+      expect(await versionProblems(real.url, real.ws, false)).toEqual([]);
+      await runLoop({ db, ...sealed }, new InMemoryBlockSource({ head: 1n }), 1n);
+      expect(await versionProblems(answersOnly.url, answersOnly.ws, true)).toEqual(errors(false));
+      expect(await versionProblems(appends.url, appends.ws, true)).toEqual([twice]);
+      expect(await versionProblems(real.url, real.ws, true)).toEqual([]);
+      // The one A75 oracle that reads the version through fetch sees the module's beside the build's as one value.
+      expect(await untouchedProblems(appends.url, 1n)).toEqual([`GET /raw: X-Umbra-Version 9, ${UMBRADB_VERSION}`]);
+    } finally {
+      for (const server of listeners) await server.close();
+    }
   }, 120_000);
 
   it("notifies a subscription from the module's on-after-db-write with exactly its values; unsubscribes on unsubscribe and on close", async () => {
@@ -942,6 +1161,214 @@ describe("the module API server without a database", () => {
     expect(ms).toBeLessThan(CLOSE_TIMEOUT_MS + 2_000);
     client.socket.terminate();
   }, 30_000);
+
+  it("VersionedResponse: every answer written through it carries the build's version once, in each form of writeHead", async () => {
+    const answers: Record<string, (response: ServerResponse) => void> = {
+      // A header of the version's name, in any letter case, is replaced; two others differing in case both stay.
+      "/object": (response) =>
+        response.writeHead(200, { "x-umbra-version": "9", "X-UMBRA-VERSION": "8", "X-A": "1", "x-a": "2" }).end("o"),
+      "/array": (response) => response.writeHead(200, ["X-Umbra-Version", "9", "X-B", "1"]).end("a"),
+      "/message": (response) => response.writeHead(201, "Made", { "X-Umbra-version": "9", "X-C": "1" }).end(),
+      "/message-array": (response) => response.writeHead(202, "Taken", ["x-umbra-version", "9", "X-D", "1"]).end(),
+      "/none": (response) => response.writeHead(200).end(),
+      "/implicit": (response) => {
+        response.statusCode = 204;
+        response.end();
+      },
+      "/set": (response) => {
+        response.setHeader("X-Umbra-Version", "9");
+        response.setHeader("X-E", "1");
+        response.writeHead(200, { "X-F": "1" }).end();
+      },
+    };
+    const server = createHttpServer({ ServerResponse: VersionedResponse }, (request, response) =>
+      answers[request.url as string]?.(response),
+    );
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    try {
+      const seen: Record<string, unknown> = {};
+      for (const path of Object.keys(answers)) {
+        const { status, rawHeaders, body } = await exchange(url, "GET", path);
+        const own = rawHeaders.filter((_, index) => index % 2 === 0).filter((name) => /^x-/i.test(name));
+        seen[path] = { status, versions: versionsOf(rawHeaders), own, body: String(body) };
+      }
+      const named = (status: number, own: string[], body = "") => ({ status, versions: [UMBRADB_VERSION], own, body });
+      expect(seen).toEqual({
+        "/object": named(200, ["X-A", "x-a", VERSION_HEADER], "o"),
+        "/array": named(200, ["X-B", VERSION_HEADER], "a"),
+        "/message": named(201, ["X-C", VERSION_HEADER]),
+        "/message-array": named(202, ["X-D", VERSION_HEADER]),
+        "/none": named(200, [VERSION_HEADER]),
+        "/implicit": named(204, [VERSION_HEADER]),
+        "/set": named(200, [VERSION_HEADER, "X-E", "X-F"]),
+      });
+      // The status message given is kept.
+      const asked = "GET /message HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n";
+      const message = await rawExchange(Number(new URL(url).port), asked);
+      expect(message.split("\r\n")[0]).toBe("HTTP/1.1 201 Made");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  /** The `X-Umbra-Version` values of the listener's answers that are not a handler's, by what was asked. */
+  const ownAnswers = async (port: number, http: string): Promise<Record<string, string[]>> => {
+    const raw = async (text: string) => versionsInHead(await rawExchange(port, text));
+    const tooLarge = await exchange(http, "POST", "/q", JSON.stringify({ a: "x".repeat(32) }));
+    const notUtf8 = await exchange(http, "POST", "/q", Uint8Array.of(0x22, 0xff, 0x22));
+    const continued = await rawExchange(
+      port,
+      "POST /q HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\nContent-Length: 1\r\nConnection: close\r\n\r\n1",
+    );
+    const [interim, final] = continued.split("\r\n\r\n");
+    expect([tooLarge.status, notUtf8.status, interim, final?.split("\r\n")[0]]).toEqual([
+      413,
+      400,
+      "HTTP/1.1 100 Continue",
+      "HTTP/1.1 200 OK",
+    ]);
+    return {
+      "413 request-too-large": versionsOf(tooLarge.rawHeaders),
+      "400 a body not UTF-8": versionsOf(notUtf8.rawHeaders),
+      "400 a URL it cannot read": await raw("GET http://[ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"),
+      // Node.js's own answers, through the listener's response: a request without Host, an Expect it does not meet.
+      "400 no Host": await raw("GET /q HTTP/1.1\r\nConnection: close\r\n\r\n"),
+      "417 an unmet Expect": await raw("GET /q HTTP/1.1\r\nHost: x\r\nExpect: something\r\nConnection: close\r\n\r\n"),
+      // The final answer after a 100 Continue (an interim answer: no headers but its status line).
+      "200 after 100 Continue": versionsInHead(final ?? ""),
+      // Node.js's answers to bytes it cannot read as a request, which the listener writes.
+      "400 no request": await raw("GARBAGE\r\n\r\n"),
+      "431 headers too large": await raw(`GET /q HTTP/1.1\r\nHost: x\r\nX-Big: ${"a".repeat(20_000)}\r\n\r\n`),
+      "413 chunk extensions too large": await raw(
+        `POST /q HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n1;${"e".repeat(20_000)}\r\n`,
+      ),
+    };
+  };
+
+  it("sets X-Umbra-Version on the listener's own answers: its refusals, Node.js's own and its answers to what is no request", async () => {
+    const register = (api: ApiRegistry) => api.http("POST", "/q", async () => ({ status: 200, body: null }));
+    const { server, http } = await serve(register, { maxBodyBytes: 16 });
+    const answers = await ownAnswers(server.port, http);
+    expect(answers).toEqual(Object.fromEntries(Object.keys(answers).map((what) => [what, [UMBRADB_VERSION]])));
+    // Each status as Node.js gives it.
+    const statuses = await Promise.all(
+      [
+        "GET /q HTTP/1.1\r\nConnection: close\r\n\r\n",
+        "GET /q HTTP/1.1\r\nHost: x\r\nExpect: something\r\nConnection: close\r\n\r\n",
+        "GARBAGE\r\n\r\n",
+        `GET /q HTTP/1.1\r\nHost: x\r\nX-Big: ${"a".repeat(20_000)}\r\n\r\n`,
+      ].map(async (text) => (await rawExchange(server.port, text)).split("\r\n")[0]),
+    );
+    expect(statuses).toEqual([
+      "HTTP/1.1 400 Bad Request",
+      "HTTP/1.1 417 Expectation Failed",
+      "HTTP/1.1 400 Bad Request",
+      "HTTP/1.1 431 Request Header Fields Too Large",
+    ]);
+    // Negative control: the same listener with Node.js's own response leaves out every answer written through one.
+    const plain = await serve(register, { maxBodyBytes: 16, response: ServerResponse });
+    expect(await ownAnswers(plain.server.port, plain.http)).toEqual({
+      ...answers,
+      "413 request-too-large": [],
+      "400 a body not UTF-8": [],
+      "400 a URL it cannot read": [],
+      "400 no Host": [],
+      "417 an unmet Expect": [],
+      "200 after 100 Continue": [],
+    });
+  });
+
+  it("survives a client that resets its connection in a request's head, and answers the next", async () => {
+    const reasons: string[] = [];
+    const { server, http } = await serve((api) => api.http("GET", "/q", ok));
+    const listener = (error: Error) => reasons.push(error.message);
+    process.on("uncaughtException", listener);
+    try {
+      const socket = new Socket();
+      await new Promise<void>((resolve) => socket.connect(server.port, "127.0.0.1", resolve));
+      socket.write("GET /q HTTP/1.1\r\nHost: x\r\n");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      socket.resetAndDestroy();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const next = await exchange(http, "GET", "/q");
+      expect([next.status, versionsOf(next.rawHeaders), reasons]).toEqual([200, [UMBRADB_VERSION], []]);
+    } finally {
+      process.off("uncaughtException", listener);
+    }
+  });
+
+  it("unreadableAnswer: Node.js's answer to what it cannot read as a request, by its error's code, with the build's version", () => {
+    const answer = (status: string) =>
+      `HTTP/1.1 ${status}\r\nConnection: close\r\nX-Umbra-Version: ${UMBRADB_VERSION}\r\n\r\n`;
+    const codes = ["HPE_HEADER_OVERFLOW", "HPE_CHUNK_EXTENSIONS_OVERFLOW", "ERR_HTTP_REQUEST_TIMEOUT"];
+    // Any other code — the parser's other errors, a name an object has, none — is 400.
+    expect([...codes, "HPE_INVALID_METHOD", "constructor", undefined].map((code) => unreadableAnswer(code))).toEqual([
+      answer("431 Request Header Fields Too Large"),
+      answer("413 Payload Too Large"),
+      answer("408 Request Timeout"),
+      answer("400 Bad Request"),
+      answer("400 Bad Request"),
+      answer("400 Bad Request"),
+    ]);
+  });
+
+  it("sets X-Umbra-Version on the subscription's upgrade and on ws's refusals of an upgrade it cannot complete", async () => {
+    const { server, ws } = await serve((api) => api.subscription("s", () => () => undefined));
+    const socket = new WebSocket(ws);
+    const opened = once(socket, "open");
+    const [upgrade] = (await once(socket, "upgrade")) as [IncomingMessage];
+    expect([upgrade.statusCode, versionsOf(upgrade.rawHeaders)]).toEqual([101, [UMBRADB_VERSION]]);
+    await opened;
+    const closed = once(socket, "close");
+    socket.close();
+    await closed;
+    // RFC 6455 §1.3's sample Sec-WebSocket-Key: 16 bytes, base64.
+    const nonce = Buffer.from("the sample nonce").toString("base64");
+    const upgradeTo = (method: string, protocol: string, headers: string) =>
+      rawExchange(
+        server.port,
+        `${method} / HTTP/1.1\r\nHost: x\r\nConnection: Upgrade, HTTP2-Settings\r\nUpgrade: ${protocol}\r\n${headers}\r\n`,
+      );
+    const refusal = (status: string, message: string, versions = "") =>
+      `HTTP/1.1 ${status}\r\nConnection: close\r\nContent-Type: text/html\r\nContent-Length: ${message.length}\r\n` +
+      `${versions}X-Umbra-Version: ${UMBRADB_VERSION}\r\n\r\n${message}`;
+    expect(await upgradeTo("GET", "websocket", "Sec-WebSocket-Version: 13\r\n")).toBe(
+      refusal("400 Bad Request", "Missing or invalid Sec-WebSocket-Key header"),
+    );
+    // A version ws does not speak: it says which it does (RFC 6455 §4.4).
+    expect(await upgradeTo("GET", "websocket", `Sec-WebSocket-Key: ${nonce}\r\nSec-WebSocket-Version: 7\r\n`)).toBe(
+      refusal("400 Bad Request", "Missing or invalid Sec-WebSocket-Version header", "Sec-WebSocket-Version: 13, 8\r\n"),
+    );
+    // ws's first check is the method's, then the Upgrade header's: neither names the versions, as ws's own do not.
+    expect(await upgradeTo("POST", "websocket", "Content-Length: 0\r\n")).toBe(
+      refusal("405 Method Not Allowed", "Invalid HTTP method"),
+    );
+    // As curl --http2 asks for HTTP/2 on http:// (no WebSocket header at all).
+    expect(await upgradeTo("GET", "h2c", "HTTP2-Settings: AAMAAABkAAQAoAAAAAIAAAAA\r\n")).toBe(
+      refusal("400 Bad Request", "Invalid Upgrade header"),
+    );
+    // The refused connection is closed, as ws closes it, also for a client that keeps its own side open: what it
+    // writes afterwards finds no connection (a reset, seen at a later write) rather than one left half open.
+    const halfOpen = new Socket({ allowHalfOpen: true });
+    let answered = "";
+    halfOpen.on("data", (chunk) => (answered += String(chunk)));
+    halfOpen.on("error", () => undefined);
+    const ended = once(halfOpen, "end");
+    let open = true;
+    // Not `once(…, "close")`, which rejects at the write's error (EPIPE) that comes first.
+    halfOpen.on("close", () => (open = false));
+    halfOpen.connect(server.port, "127.0.0.1", () =>
+      halfOpen.write("GET / HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: h2c\r\n\r\n"),
+    );
+    await ended;
+    expect(answered.split("\r\n")[0]).toBe("HTTP/1.1 400 Bad Request");
+    for (let waited = 0; open && waited < 5_000; waited += 100) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      if (open) halfOpen.write("more");
+    }
+    expect(open ? "still open after 5 s" : "closed").toBe("closed");
+  });
 
   it("passes a handler's failure through startModuleApi to onError, with the module and the route", async () => {
     const errors: unknown[] = [];

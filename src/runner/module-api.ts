@@ -21,8 +21,10 @@
  * (`db.read(…, { timeoutMs })`, DB-15: on PostgreSQL only), and the handler runs inside it — so on PGlite a `db.read`
  * from a handler fails with `nested-call` rather than waiting (Q73). **The answer is the module's** (RN-16; owner
  * decisions Q104, Q105; task 5.2b): the module API adds no header and no `extensions` to it, tells no GraphQL response
- * apart, and calls the handler before block S commits too. A module that states the view, height and hash it read does
- * so itself with the envelope's helpers (`./envelope.ts`: `readChainDataView`, `chainDataHeaders`,
+ * apart, and calls the handler before block S commits too — only its HTTP listener sets `X-Umbra-Version`, the build's
+ * version, on every answer it sends (`./api-server.ts`; owner decision Q131, task 5.2c), not here, so another transport
+ * (the browser's, task 16.x) carries the answer as the handler gave it. A module that states the view, height and hash
+ * it read does so itself with the envelope's helpers (`./envelope.ts`: `readChainDataView`, `chainDataHeaders`,
  * `withViewExtensions`, `answerChainData`); before block S commits `readChainDataView` fails with
  * `no-committed-height`, answered 503 when the handler does not catch it. A POST's body is read as JSON by the
  * component's own reader (integers beyond ±(2^53 − 1) as `bigint`, Q78); a GET's body is ignored.
@@ -427,7 +429,8 @@ export class ModuleApi {
 
   /**
    * `route`'s handler called with `req` and `read`, its answer checked and returned as the handler wrote it: the module
-   * API adds nothing to it (RN-16, Q104, Q105). Protected for the negative controls, which add the envelope back.
+   * API adds nothing to it (RN-16, Q104, Q105; the listener's `X-Umbra-Version` is set where it sends, Q131). Protected
+   * for the negative controls, which add the envelope back or set the version here.
    */
   protected async handle(route: HttpRoute, req: Parameters<HttpHandler>[0], read: ReadHandle): Promise<ChainDataAnswer> {
     const answer: unknown = await route.handler(req, read);

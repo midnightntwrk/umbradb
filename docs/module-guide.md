@@ -348,8 +348,12 @@ RN-16 of the `core-arch` change).
   PGlite it fails with `nested-call`.
 - **Answer `{ status, headers?, body }`; the client gets it as you wrote it.** The status is an integer from 200 to
   599. The body is written as JSON — a `bigint` as decimal text, bytes as `0x` hex — unless you give a `Content-Type`
-  with a string or bytes, which are sent as they are. UmbraDB adds no header to your answer and changes no body, a
-  GraphQL response's included (owner decisions Q104 and Q105).
+  with a string or bytes, which are sent as they are. UmbraDB changes no body, a GraphQL response's included (owner
+  decisions Q104 and Q105), and adds one header: `X-Umbra-Version`, the build's version, on every HTTP answer on the
+  API listener — yours, its own errors and the subscriptions' upgrade (owner decision Q131).
+- **The `X-Umbra-` prefix holds the headers every module shares.** UmbraDB owns `X-Umbra-Version`: a header of that
+  name in your answer, in any letter case, is replaced, never sent beside it. The helpers below write `X-Umbra-View`,
+  `X-Umbra-Height` and `X-Umbra-Hash`. Name your own headers without the prefix.
 - **State the view, height and hash you read with the helpers** of `src/runner/envelope.ts`, if your clients want
   them: `readChainDataView(read)` gives `finalized`, your read's committed height and that block's hash;
   `chainDataHeaders(view)` writes them as `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`; `withViewExtensions(body,
