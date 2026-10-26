@@ -74,8 +74,9 @@ series in the startup order, for the parts active in a range the process may run
 revisions all ended below it serves no API. Its routes (`GET`/`POST`, `/` and segments, `:name` parameters, a literal
 winning over a parameter) and subscription names are refused with `duplicate-api-route` when two have one method and
 path (parameters' names aside) or one name, before anything listens (RN-15). Each request is one `db.read` at the
-latest committed height bounded by `apiReadTimeoutMs` (DB-15), the handler inside it and its answer in RN-16's
-envelope; a GraphQL response is told by its shape (an object of only `data`, `errors` and `extensions`). Bodies are
+latest committed height bounded by `apiReadTimeoutMs` (DB-15), the handler inside it and its answer as the handler
+wrote it: the core adds no header and no `extensions` to it and tells no GraphQL response apart (RN-16, Q104, Q105;
+task 5.2b), and the helpers below are the module's to use. Bodies are
 JSON (a `bigint` as decimal text, bytes as `0x` hex) unless the handler typed its text or bytes; errors are `{ error: {
 code, message } }`: 400 `invalid-request`, 404 `not-found`, 405 `method-not-allowed`, 413 `request-too-large`, 500
 `internal-error` (a fixed message; the error goes to the runner's log), 503 `no-committed-height`, 504
@@ -152,7 +153,11 @@ interface BlockSource {
   has processed everything up to `above` and waits. It holds no queue: `on-best-block` and `on-rollback` are the node
   source's (IN-6), and so is IN-4's finality check; IN-4's parent check is `core-block-commit`'s, for every source.
 - **The cursor (the blocks table)** is the last row of `core-block-commit`'s `core_block_commit.blocks`
-  (`src/backbone/core-block-commit/`, tasks 5.2 and 10.2; §10's columns, range-partitioned by height). The part writes
+  (`src/backbone/core-block-commit/`, tasks 5.2 and 10.2; §10's columns, range-partitioned by height: five
+  partitions of 1,000,000 heights created by migration `001` (`src/backbone/height-partitions.ts`) and a default that
+  takes every higher height. **To update in the future:** a later release adds partitions by migration before mainnet
+  passes height 5,000,000, about a year after genesis — the default is correct but unpartitioned (owner decision Q119,
+  `docs/issues/00023`). The part writes
   the block's row first in every block (CD-3) — from the block context and the `block` items `block-header` (spec
   version, the block's own time in milliseconds, converted to `block_time` exactly by PostgreSQL's integer interval
   input, never through a float, Q74) and `ledger-version` —, so the cursor is inside the block's transaction; then the
@@ -193,8 +198,8 @@ interface BlockSource {
   `X-Umbra-View`, `X-Umbra-Height` (decimal) and `X-Umbra-Hash` (`0x`-prefixed lowercase hex, as the process transport
   writes hashes, CORE-ARCH §4.14); `withViewExtensions` adds `view`, `height` (a decimal string) and `hash` to a GraphQL
   response's `extensions`, its `data` unchanged; `answerChainData` answers a request with the module's answer and the
-  headers, or, before block S commits, 503 with `{ error: { code: "no-committed-height", message } }`. Mounting it on
-  `listen.api` is task 5.2a's.
+  headers, or, before block S commits, 503 with `{ error: { code: "no-committed-height", message } }`. They are helpers
+  a module calls itself: since Q104 and Q105 the module API applies none of them to an answer (task 5.2b).
 - **The node client** (`src/node/`, task 10.1) retries per IN-10; every request has a timeout; subscriptions are
   re-established after a reconnect, and the runner re-reads the finalized head instead of trusting lost notifications.
   It sends IN-8's methods only, each naming its block by hash or height (never the node's best block), and reads every

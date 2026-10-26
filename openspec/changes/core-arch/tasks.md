@@ -1179,6 +1179,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `COMMIT` (A86), §11's registry (A87) with Q115's codes (10.4); the `slow-block` condition (5.5); the admin
       endpoints over `status()` (8.1–8.3); `umbradb run` staying up on a refusal (4.4); the required ids in the manifest
       (18.4).
+- [ ] 5.2b The owner's answers Q104 A and Q105: the module API never changes a module's answer — no envelope headers or
+      GraphQL `extensions` added, no GraphQL response told apart, a subscription's notification exactly the value the
+      module emitted; the envelope's headers and extensions stay as helpers a module calls itself; an uncaught
+      `no-committed-height` still answers 503.
+      **Acceptance:** A75 (as amended).
 - [ ] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
       commit; never a cancel or a retry.
       **Acceptance:** A142.

@@ -240,12 +240,13 @@ git as pinned release assets that CI downloads and verifies.
 - **A74** `[CI]` A process item published in its provider's `on-start-db` is visible to a requiring module from
   `on-start-api` on; publishing twice, publishing from `on-compute`, or publishing an undeclared item fails the
   callback; a required process item left unpublished refuses startup with `process-item-missing`. (MD-7)
-- **A75** `[CI]` Module HTTP handlers answer on `listen.api` with a read handle at the latest committed height; a
-  subscription registered by a module is notified from its `on-after-db-write`; two modules registering the same route
-  or subscription name refuse startup with `duplicate-api-route`; every chain-data HTTP response carries
-  `X-Umbra-View: finalized`, `X-Umbra-Height` and `X-Umbra-Hash` of the height it read, a GraphQL response carries the
-  same in `extensions` with its `data` unchanged, and a read before block S commits answers 503
-  `no-committed-height`. (RN-15, RN-16)
+- **A75** `[CI]` Module HTTP handlers answer on `listen.api` with a read handle at the latest committed height that
+  reports its view, height and hash; a subscription registered by a module is notified from its `on-after-db-write` with
+  the value the module emitted; two modules registering the same route or subscription name refuse startup with
+  `duplicate-api-route`; the core leaves a module's answer as the module wrote it, and the helpers write `X-Umbra-View:
+  finalized`, `X-Umbra-Height` and `X-Umbra-Hash`, or the same in a GraphQL response's `extensions` with its `data`
+  unchanged; a read before block S commits fails with `no-committed-height`, answered 503 when the handler does not
+  catch it. (RN-15, RN-16, Q104, Q105)
 - **A142** `[CI]` With `slowBlockMs` 1000, a test module whose `on-compute` awaits 3 s: the runner's published state
   (and `/status`, once `core-status` serves it) shows `slow-block` with the height, `on-compute` and the module within
   2 s; the height commits once, with no retry; the condition is gone after the commit; with `slowBlockMs` 5000 it never

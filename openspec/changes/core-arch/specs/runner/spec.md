@@ -212,17 +212,24 @@ the module's `on-after-db-write` through `emit`.
 - **WHEN** modules `a` and `b` both register `GET /api/v4/graphql`
 - **THEN** startup refuses with `duplicate-api-route`, the route, `a` and `b`
 
-### Requirement: RN-16 Chain-data responses name their view and height
+### Requirement: RN-16 Chain-data reads name their view and height
 
-THE system SHALL answer every module API request from finalized data only, and SHALL state in each chain-data response
-its view (`finalized`), height and hash — as the `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` headers on HTTP,
-and in the `extensions` object of GraphQL responses — so response bodies stay compatible with existing clients. IF no
-height has committed yet THEN THE system SHALL refuse chain-data reads with `no-committed-height` (HTTP 503).
+THE system SHALL answer every module API request from finalized data only: each request's read SHALL report its view
+(`finalized`), the committed height it read and that block's hash, and IF no height has committed yet THEN the read
+SHALL fail with `no-committed-height`, which a handler that does not catch it answers with HTTP 503. A module SHALL
+decide what its answers and its subscriptions' notifications carry: THE system SHALL NOT change a module's answer, and
+SHALL provide helpers a module may use to state the view, height and hash it read — the `X-Umbra-View`, `X-Umbra-Height`
+and `X-Umbra-Hash` headers on HTTP, or the `extensions` object of a GraphQL response — so its bodies stay compatible
+with existing clients (owner decisions Q104, Q105).
 
-#### Scenario: A GraphQL response
-- **WHEN** a module answers a GraphQL query at committed height 120
+#### Scenario: A GraphQL module states its height
+- **WHEN** a module answers a GraphQL query at committed height 120 through the extensions helper
 - **THEN** the response's `extensions` hold view `finalized`, height 120 and that block's hash, and the body's `data` is
   unchanged
+
+#### Scenario: The core leaves an answer as the module wrote it
+- **WHEN** a module answers `{ "data": … }` without the helpers
+- **THEN** the response's body and headers are the module's own
 
 ### Requirement: RN-17 A slow block is reported, never cut off
 
