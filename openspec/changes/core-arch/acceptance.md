@@ -15,8 +15,10 @@ Every criterion is numbered, individually checkable, and tagged with how it is v
 
 Database tests run against PostgreSQL 18 in Docker (owner decision Q82; Testcontainers, random free ports ≥ 10000, torn
 down afterwards) and against PGlite in Node.js. "Both backends" means the criterion runs once on each. Tapes (TT-1) are
-identified by their SHA-256; the large ones (stagenet, preview and mainnet ranges, the devnet fork) are stored outside
-git as pinned release assets that CI downloads and verifies.
+identified by their SHA-256. The recorded ones (task 0.3: mainnet, preview and preprod ranges, the undeployed devnet)
+are kept outside git, on the machine that recorded them, until the owner decides where they are stored (owner decision
+Q130); a test reads a recorded tape from the local directory named by `UMBRADB_TAPES`, checks its SHA-256, and is
+skipped with a named reason when the tape is absent. Synthetic tapes built by the tests themselves are always present.
 
 ## Definition of done
 

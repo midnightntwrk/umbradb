@@ -173,7 +173,7 @@ interface QueueRunner {                                      // given by the fin
   above that ancestor dropped with one `on-rollback` (lowest first) and the branch between fetched; its calls without
   retries, any error dropping the block (IN-10); at most `tipCap` blocks, while full none queued and the condition
   `finality-stall` (the process's `status().conditions`); a block queued only while the head is within
-  `prefetchWindow` of the cursor (decision record question Q129); a queued block at a height the finalized head
+  `prefetchWindow` of the cursor (owner decision Q129); a queued block at a height the finalized head
   names with another hash dropped with those above it. At finality a queued block with the finalized hash goes on with
   its items, unfetched (A81); one with another hash is dropped with those above (`on-rollback`) and the block fetched —
   the heights look into the queue in height order, so that is one `on-rollback`, from the lowest. Its `close` (the

@@ -52,16 +52,22 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the devnet tape of task 0.3, which runs after task 9.2. No v8 `decodeLogItem` patch: the v8 adapter returns
       null (owner decision Q54, task 12.1). Q53 (root counts as signed changes) and Q55 (`stateKey` in
       `LedgerPackage`): owner decisions A. Proposing the patches upstream is the owner's, later (Q56).
-- [ ] 0.3 Tapes: record, with the builder of task 9.2, stagenet 0–10,000, preview 0–10,000 and a preview range across
-      the runtime 1.0.300 upgrade, mainnet ranges around 1,774,492 and 1,788,980 (from backups), and a local devnet
-      that starts on a v8 runtime and enacts the v9 upgrade; read each network's genesis hash, runtime at genesis and
-      upgrade boundaries (U and F hashes and `MNSV`) for the built-in tables; publish the tapes as pinned release assets
-      with their SHA-256. Recorded once, when a task first needs real data (12.3's A99, 18.2), with a complete
-      per-height recording: every IN-8 call for every height of each range and both head subscriptions, so any client
-      that makes any subset of those calls replays against the same tape; checked for completeness and replayed before
-      publishing, and never recorded again (owner decision Q123).
+- [ ] 0.3 Tapes (owner decisions Q123, Q130): record, with the builder of task 9.2, mainnet ranges around 1,774,492 and
+      1,788,980 (`rpc.mainnet.midnight.network`), preview 0–10,000 and a preview range across the runtime 1.0.300
+      upgrade (`rpc.preview`), preprod 0–10,000 (`rpc.preprod`), and an undeployed devnet we build (`midnight-node` 2.x
+      in Docker; no public network runs ledger v9) that starts on a v8 runtime, enacts the v9 upgrade and carries our
+      own transactions — deploys, calls, transfers, a partial success, a failed extrinsic, system transactions — so that
+      every event and outcome kind the core stores appears; stagenet (a temporary network) where it helps, the owner
+      choosing between it and the undeployed devnet once both exist. Read each network's genesis hash, runtime at
+      genesis and upgrade boundaries (U and F hashes and `MNSV`) for the built-in tables. Recorded once, when a task
+      first needs real data (11.1's A91, 12.3's A99, 18.2), with a complete per-height recording: every IN-8 call for
+      every height of each range and both head subscriptions, so any client that makes any subset of those calls replays
+      against the same tape; checked for completeness and replayed, and never recorded again. Kept on this machine
+      (`~/todo/Umbra/tapes/`, each with its SHA-256) until the owner decides where they are stored; tests find them
+      through `UMBRADB_TAPES` and are skipped with a named reason when a tape is absent.
       **Acceptance:** each tape replays against the tape node and its SHA-256 matches; the boundary data is recorded
-      with its source; every IN-8 call of every height is on the tape. (Runs after task 9.2, when first needed.)
+      with its source; every IN-8 call of every height is on the tape; a test whose tape is absent is reported as
+      skipped with the tape's name. (Runs after task 9.2, when first needed.)
 - [x] 0.4 PostgreSQL 18 everywhere (owner decision Q82): every `postgres:17-alpine` pin (test setups, Testcontainers
       helpers, benchmarks, the pack smoke test, design documents that name the image) becomes one pinned
       `postgres:18-alpine`, through the supply-chain gate's image-pin agreement; the facts §14 records as checked on
@@ -1491,6 +1497,10 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (8.3), A66's `/config`, A29, A140 (8.4); the conditions `slow-block` (5.5), `finality-stall` (10.3),
       `waiting-for-lockstep` (14.3); the private process's lag (14.x); `umbradb run` passing `admin: true` (Q128; the
       task that wires `run` to `startProcess`); the browser's message channel (16.1).
+- [ ] 8.1a The owner's answer Q128 B: `startProcess` serves the admin endpoints unless its caller passes `admin: false`
+      (opt-out, as AE-1 says); `umbradb run` needs no flag; every existing test that starts a process opts out or
+      listens on a port of its own (port 0), so parallel tests never collide on `0.0.0.0:8081`.
+      **Acceptance:** A62, A64 with the default; a process started without `admin` answers on its admin listener.
 - [ ] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
       **Acceptance:** A63, A65; A140 for these endpoints.
 - [ ] 8.3 `core-status` (`src/backbone/core-status/`): `/status` and its JSON schema, times as RFC 3339 text (Q68).

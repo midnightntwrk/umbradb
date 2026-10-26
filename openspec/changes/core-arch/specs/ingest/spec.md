@@ -77,9 +77,15 @@ memory, and still commit each height in its own transaction in order.
 WHEN `chain_subscribeNewHeads` reports a block above the finalized head, THE system SHALL fire `on-best-block`, fetch
 and parse it, and append it IF its parent is the top of the queue; OTHERWISE it SHALL walk the new block's parents back
 to a queued block or the finalized head, drop every queued block above that common ancestor (`on-rollback`) and fetch
-the new branch. Best blocks at or below the cursor SHALL be ignored. THE queue SHALL hold at most `tipCap` blocks
-(operational, default 600); WHILE it is full, new best blocks SHALL NOT be queued and the status SHALL report the
-condition `finality-stall`.
+the new branch. Best blocks at or below the cursor SHALL be ignored, and WHILE the finalized head is more than
+`prefetchWindow` heights above the cursor (a catch-up) new best blocks SHALL be ignored (owner decision Q129). THE queue
+SHALL hold at most `tipCap` blocks (operational, default 600); WHILE it is full, new best blocks SHALL NOT be queued and
+the status SHALL report the condition `finality-stall`.
+
+#### Scenario: A catch-up ignores best blocks
+- **WHEN** the cursor is at 1,000 and the node's finalized head at 50,000 with `prefetchWindow` 64
+- **THEN** best blocks are neither fetched nor queued and no `finality-stall` is reported, and they are queued again
+  once the finalized head is within 64 heights of the cursor
 
 #### Scenario: A best-chain switch
 - **WHEN** queued blocks 101–103 on branch A are replaced by 101′–104′ on branch B
