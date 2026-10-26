@@ -1,0 +1,94 @@
+// The test packages of task 12.3 (`openspec/changes/core-arch` A92, A101, A106; `src/ledger/worker/`): a loader the
+// ledger worker imports in place of `src/ledger/load.ts` (`startLedgerWorker({ loader, loaderData })`), so that the
+// worker thread itself runs the instrumented adapter. It loads the real adapter and, by `loaderData`, counts the
+// package's native parses, returns a wrong state root for one height (A106's "test package returning a wrong root"),
+// spends a long synchronous step in one height's apply (A101's 60 s ledger step), fails, ends the thread, or traps as
+// WebAssembly does. Erasable TypeScript only: the worker runs it through Node.js's type stripping.
+
+import { loadLedgerPackage } from "../../../src/ledger/load.js";
+import type { LedgerName, LedgerPackage, LedgerPackageOptions, StateHandle } from "../../../src/ledger/types.js";
+
+/** A slow apply: a busy wait of `ms` at the start of the apply of `height` (decimal text). */
+export interface SlowStep {
+  readonly height: string;
+  readonly ms: number;
+}
+
+/** What a test asks of the loader (plain data, through the worker's `workerData`). */
+export interface TestLoaderData {
+  /** Records the bytes of every native `Transaction.deserialize` and `SystemTransaction.deserialize`. */
+  readonly count?: boolean;
+  /** The height, as decimal text, whose state after it gets a root with its last byte flipped. */
+  readonly wrongRootAt?: string;
+  /**
+   * A synchronous busy wait of `ms` at the start of the apply of `height` (decimal text), timed in `hold` (the last
+   * one's); several heights in a list.
+   */
+  readonly slowAt?: SlowStep | readonly SlowStep[];
+  /** The load of any adapter rejects. */
+  readonly failLoad?: boolean;
+  /** The thread ends (`process.exit` in the worker) at the start of the apply of this height. */
+  readonly exitAt?: string;
+  /** The apply of this height throws a `WebAssembly.RuntimeError`, as a trapped module does. */
+  readonly trapAt?: string;
+}
+
+const deserialized: Uint8Array[] = [];
+const hold = { start: "0", end: "0" };
+const wrapped = new WeakSet<object>();
+
+function countDeserializations(target: { deserialize(...args: unknown[]): unknown }): void {
+  if (wrapped.has(target)) return;
+  wrapped.add(target);
+  const original = target.deserialize.bind(target);
+  target.deserialize = (...args: unknown[]) => {
+    deserialized.push(Uint8Array.from(args.at(-1) as Uint8Array));
+    return original(...args);
+  };
+}
+
+/** The ledger worker's loader (see the module comment). */
+export async function loadLedger(
+  ledger: LedgerName,
+  options: LedgerPackageOptions,
+  given?: TestLoaderData | null,
+): Promise<LedgerPackage> {
+  const data = given ?? {};
+  if (data.failLoad === true) throw new Error(`the test loader refuses to load ${ledger}`);
+  const adapter = await loadLedgerPackage(ledger, options);
+  if (data.count === true) {
+    for (const raw of Object.values(adapter.rawPackages()) as { Transaction: never; SystemTransaction: never }[]) {
+      countDeserializations(raw.Transaction);
+      countDeserializations(raw.SystemTransaction);
+    }
+  }
+  const wrong = new WeakSet<StateHandle>();
+  const apply: LedgerPackage["apply"] = (state, input) => {
+    const height = `${input.height}`;
+    if (data.exitAt === height) process.exit(3);
+    if (data.trapAt === height) throw new WebAssembly.RuntimeError("unreachable");
+    const slow = ([] as SlowStep[]).concat(data.slowAt ?? []).find((step) => step.height === height);
+    if (slow !== undefined) {
+      hold.start = `${process.hrtime.bigint()}`;
+      const end = process.hrtime.bigint() + BigInt(slow.ms) * 1_000_000n;
+      while (process.hrtime.bigint() < end) {
+        // A step the main thread must not wait on (A101).
+      }
+      hold.end = `${process.hrtime.bigint()}`;
+    }
+    const applied = adapter.apply(state, input);
+    if (data.wrongRootAt === height) wrong.add(applied.state);
+    return applied;
+  };
+  const stateRoot: LedgerPackage["stateRoot"] = (state) => {
+    const root = adapter.stateRoot(state);
+    if (wrong.has(state)) root[root.length - 1] = (root[root.length - 1] as number) ^ 1;
+    return root;
+  };
+  return Object.freeze({ ...adapter, apply, stateRoot });
+}
+
+/** What the loader saw, for the test (`LedgerHost.probe()`). */
+export function probe(): { readonly deserialized: readonly Uint8Array[]; readonly hold: { readonly start: string; readonly end: string } } {
+  return { deserialized: [...deserialized], hold: { ...hold } };
+}

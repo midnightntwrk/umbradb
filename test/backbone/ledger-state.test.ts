@@ -1,0 +1,416 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
+import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
+import { CORE_LEDGER_STATE } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
+import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-results.js";
+import { openConfiguredDatabase } from "../../src/config/database.js";
+import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
+import type { ModuleDeclaration } from "../../src/modules/declaration.js";
+import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
+import {
+  callTransaction,
+  cellValue,
+  contractFixture,
+  FAILING_PROGRAM,
+  logProgram,
+  NETWORK_ID,
+  RAW,
+  GLOBAL_TTL_MS,
+  systemTransaction,
+  T0,
+  wrappedLog,
+  zswapOutputTransaction,
+} from "../ledger/adapter-fixtures.js";
+import { outsideIn8 } from "../node/in8.js";
+import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
+import { a92Problems, a93Problems } from "./chain-data-checks.js";
+import { hex } from "./fetch-fixtures.js";
+import { committed, halted, type Ingest, ingest, PATIENCE_MS } from "./ingest-harness.js";
+import {
+  a99Problems,
+  a106Problems,
+  a107Problems,
+  blockZeroProblems,
+  ledgerItemsSeen,
+  ledgerItemsWatcher,
+  nodeProblems,
+} from "./ledger-checks.js";
+import {
+  distributeReserve,
+  type LedgerScenario,
+  ledgerScenario,
+  type LedgerTx,
+  recordedGenesis,
+  RUNTIME_1_0,
+} from "./ledger-tapes.js";
+
+/**
+ * `core-ledger-state` through the real process (task 12.3; `openspec/changes/core-arch/acceptance.md` A82, A99, A106,
+ * A107; IN-7, LG-8, LG-10, LG-11, LG-15, LG-16), on PostgreSQL 18 and PGlite 0.5.10: `startProcess` with UmbraDB's
+ * backbone over the node source and the core modules `core-chain-events`, `core-block-parsed`, `core-tx-results` and
+ * `core-ledger-state` enabled from genesis, the ledger in its worker thread, against a tape node serving the synthetic
+ * tapes of `./ledger-tapes.ts` (real ledger transactions, and task 0.2's real genesis states with their nodes' roots).
+ *
+ * - A82 (IN-7): block 0 in both cases — a genesis state whose root is the node's at block 0 (its transactions run on an
+ *   empty state for their results only, and it becomes the state), and one whose root is not (they apply to it) —, its
+ *   transactions numbered in body order, the root after it the node's; on the real genesis states of mainnet, preview
+ *   and an undeployed devnet, task 0.2's recorded roots.
+ * - A99 (LG-8, LG-15): every height's root checked against the node's on a range from genesis — here synthetic; task
+ *   0.3's recorded ranges from genesis below, skipped by name while their tapes are absent (owner decision Q133 C).
+ * - A106 (LG-15): a package whose root is wrong at one height halts there with `root-mismatch`, nothing of it stored.
+ * - A107 (LG-16): the rows of `states`, `segment_results` and `events`; above S without a backup: `cannot-start-mid-chain`.
+ */
+
+/** The test packages' loader (`test/ledger/fixtures/ledger-test-loader.ts`), which the worker imports. */
+const LOADER = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url);
+
+const LEDGER_CORE: readonly ModuleDeclaration[] = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, CORE_LEDGER_STATE];
+
+/** Every call the tape node received is one of IN-8's, and none went unanswered (A83's check). */
+function in8Problems(run: Ingest): string[] {
+  const calls = run.node.calls as readonly { readonly method: unknown; readonly outcome?: unknown }[];
+  const outside = outsideIn8(calls.map((call) => call.method as string));
+  const unanswered = calls.filter((call) => call.outcome === "not-on-tape" || call.outcome === "invalid-request");
+  return [...outside.map((m) => `called ${m}`), ...unanswered.map((c) => `${String(c.method)}: ${String(c.outcome)}`)];
+}
+
+/** Runs `scenario` from genesis with the ledger's core modules (and `user`), to its head unless it is to halt. */
+async function run(
+  db: ProcessDatabase,
+  scenario: LedgerScenario,
+  options: { user?: readonly ModuleDeclaration[]; ledgerWorker?: () => LedgerHost; beforeClose?: () => Promise<void> } = {},
+) {
+  const process = await ingest(db, scenario.records, {
+    start: 0n,
+    core: LEDGER_CORE,
+    user: options.user ?? [],
+    ...(options.ledgerWorker === undefined ? {} : { ledgerWorker: options.ledgerWorker }),
+  });
+  let status;
+  try {
+    await committed(process, scenario.head);
+    status = process.handle.status();
+    await options.beforeClose?.();
+  } finally {
+    await process.close();
+  }
+  expect(in8Problems(process)).toEqual([]);
+  return { ...process, status };
+}
+
+/** The blocks of the range scenario: block 0's transactions in body order, then deploys, calls, partial successes, … */
+async function rangeBlocks(): Promise<LedgerTx[][]> {
+  const contract = await contractFixture(RAW.v9);
+  const logged = [cellValue(Uint8Array.of(9)), wrappedLog(1, 5, cellValue(Uint8Array.of(4, 5)))];
+  return [
+    [
+      { bytes: systemTransaction("v9"), kind: "system" },
+      { bytes: zswapOutputTransaction(RAW.v9), kind: "regular" },
+    ],
+    [
+      { bytes: contract.deploy, kind: "regular" },
+      { bytes: zswapOutputTransaction(RAW.v9), kind: "regular" },
+    ],
+    [
+      { bytes: callTransaction(RAW.v9, contract, logProgram(logged)), kind: "regular" },
+      { bytes: callTransaction(RAW.v9, contract, logProgram([cellValue(Uint8Array.of(3))]), FAILING_PROGRAM), kind: "regular", outcome: "partial" },
+      { bytes: distributeReserve("v9", 500_000_000_000_000n), kind: "system" },
+    ],
+    [],
+    [
+      // A transaction the ledger would apply, failed by the chain (task 12.1a's outcomes): skipped, as the node did.
+      { bytes: zswapOutputTransaction(RAW.v9), kind: "regular", outcome: "failure" },
+      // One the ledger refuses (its intent's TTL is beyond the block time + global_ttl): a failure, the state unchanged.
+      { bytes: (await contractFixture(RAW.v9, T0 + 2 * GLOBAL_TTL_MS)).deploy, kind: "regular" },
+      { bytes: zswapOutputTransaction(RAW.v9), kind: "regular" },
+    ],
+  ];
+}
+
+describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name", (backend: ProcessBackend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop(), 60_000);
+
+  it("A82: block 0 whose genesis state includes its transactions: their results from an empty state, the genesis state after it, in body order", async () => {
+    const devnet = recordedGenesis("genesis_state_undeployed.mn");
+    const scenario = await ledgerScenario({
+      ledger: "v9",
+      genesis: devnet.state,
+      includesBlockZero: true,
+      blocks: [
+        [
+          { bytes: systemTransaction("v9"), kind: "system" },
+          { bytes: zswapOutputTransaction(RAW.v9), kind: "regular" },
+          { bytes: (await contractFixture(RAW.v9)).deploy, kind: "regular" },
+        ],
+        [{ bytes: zswapOutputTransaction(RAW.v9), kind: "regular" }],
+      ],
+    });
+    // The node's root at block 0 is the one task 0.2 read from the undeployed devnet's node.
+    expect(hex(scenario.heights[0]?.root as Uint8Array)).toBe(hex(devnet.root));
+    const db = await backend.database();
+    const seen = ledgerItemsSeen();
+    await run(db, scenario, { user: [ledgerItemsWatcher(seen)] });
+    expect(await blockZeroProblems(db, scenario)).toEqual([]);
+    expect(await a107Problems(db, scenario)).toEqual([]);
+    expect(await nodeProblems(db)).toEqual([]);
+    expect(scenario.heights[0]?.output.results.map((r) => r.outcome)).toEqual(["success", "success", "success"]);
+    expect(seen.state.get(0n)).toMatchObject({ ledger: "v9", height: 0n, stateRoot: devnet.root, zswapFirstFree: 28n });
+    expect(seen.segments.get(0n)).toEqual(scenario.heights[0]?.output.results);
+  }, PATIENCE_MS * 2);
+
+  it("A82: the real genesis states of mainnet and preview (v8): the state after block 0 has the node's root", async () => {
+    for (const file of ["genesis_state_mainnet.mn", "genesis_state_preview.mn"]) {
+      const genesis = recordedGenesis(file);
+      const scenario = await ledgerScenario({
+        ledger: "v8",
+        runtime: RUNTIME_1_0,
+        genesis: genesis.state,
+        includesBlockZero: true,
+        blocks: [[{ bytes: systemTransaction("v8"), kind: "system" }], []],
+      });
+      expect(hex(scenario.heights[0]?.root as Uint8Array), file).toBe(hex(genesis.root));
+      const db = await backend.database();
+      await run(db, scenario);
+      expect(await blockZeroProblems(db, scenario), file).toEqual([]);
+      expect(await a107Problems(db, scenario), file).toEqual([]);
+    }
+  }, PATIENCE_MS * 3);
+
+  it("A82: block 0 whose genesis state does not include its transactions: they are applied to it", async () => {
+    const devnet = recordedGenesis("genesis_state_undeployed.mn");
+    const scenario = await ledgerScenario({
+      ledger: "v9",
+      genesis: devnet.state,
+      includesBlockZero: false,
+      blocks: [
+        [
+          { bytes: zswapOutputTransaction(RAW.v9), kind: "regular" },
+          { bytes: systemTransaction("v9"), kind: "system" },
+        ],
+        [],
+      ],
+    });
+    expect(hex(scenario.heights[0]?.root as Uint8Array)).not.toBe(hex(devnet.root));
+    const db = await backend.database();
+    await run(db, scenario);
+    expect(await blockZeroProblems(db, scenario)).toEqual([]);
+    expect(await a107Problems(db, scenario)).toEqual([]);
+    expect(await nodeProblems(db)).toEqual([]);
+  }, PATIENCE_MS * 2);
+
+  it("A99 and A107: a range from genesis, every root the node's; states, segment results and events as LG-16 says", async () => {
+    const scenario = await ledgerScenario({
+      ledger: "v9",
+      genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
+      includesBlockZero: false,
+      blocks: await rangeBlocks(),
+    });
+    const db = await backend.database();
+    const seen = ledgerItemsSeen();
+    // The worker counts its package's native parses: the parse of core-block-parsed and the apply share them (LG-7).
+    let worker: LedgerHost | undefined;
+    let deserialized: Uint8Array[] = [];
+    const process = await run(db, scenario, {
+      user: [ledgerItemsWatcher(seen)],
+      ledgerWorker: () => (worker = startLedgerWorker({ loader: LOADER, loaderData: { count: true } })),
+      beforeClose: async () => {
+        ({ deserialized } = (await worker?.probe()) as { deserialized: Uint8Array[] });
+      },
+    });
+    expect(await a99Problems(db, process.status, scenario)).toEqual([]);
+    expect(await a107Problems(db, scenario)).toEqual([]);
+    expect(await nodeProblems(db)).toEqual([]);
+    expect(await a92Problems(db, scenario as never, deserialized)).toEqual([]);
+    expect(await a93Problems(db, scenario as never)).toEqual([]);
+    // The block items (LG-16): the partial success's segments, the logs of applied segments numbered in the block.
+    expect(seen.segments.get(2n)?.[1]).toEqual({ outcome: "partial", segments: [{ segment: 0, success: true }, { segment: 1, success: false }] });
+    expect(seen.logs.get(2n)?.map((log) => [log.transaction, log.index, log.eventType])).toEqual(
+      scenario.heights[2]?.output.logs.map((log) => [log.transaction, log.index, log.eventType]),
+    );
+    expect(seen.logs.get(2n)?.length).toBeGreaterThan(0);
+    expect(seen.events.get(1n)?.map((e) => e.kind)).toEqual(scenario.heights[1]?.output.events.map((e) => e.kind));
+    expect(seen.events.get(1n)?.some((e) => e.kind === "contract-deploy")).toBe(true);
+    expect(seen.state.get(4n)).toMatchObject({ height: 4n, stateRoot: scenario.heights[4]?.root, stateKey: scenario.heights[4]?.stateKey });
+    expect(scenario.heights[4]?.output.results.map((r) => r.outcome)).toEqual(["failure", "failure", "success"]);
+    // Block 3 holds no transaction and still has its state, root and row (the post-block update changes it).
+    expect(seen.segments.get(3n)).toEqual([]);
+  }, PATIENCE_MS * 2);
+
+  it("A107: core-ledger-state enabled above S, with no backup restored, refuses with cannot-start-mid-chain", async () => {
+    const scenario = await ledgerScenario({
+      ledger: "v9",
+      genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
+      includesBlockZero: false,
+      blocks: [[], [], [], []],
+    });
+    const db = await backend.database();
+    const process = await ingest(db, scenario.records, {
+      start: 0n,
+      core: LEDGER_CORE,
+      startOf: (id) => (id === "core-ledger-state" ? 2 : 0),
+    });
+    try {
+      const refusal = await process.handle.started.catch((error: unknown) => error);
+      expect(refusal).toMatchObject({ code: "cannot-start-mid-chain", details: { module: "core-ledger-state", start: 2n } });
+      expect(process.handle.status()).toMatchObject({ state: "refused", reason: { code: "cannot-start-mid-chain" } });
+    } finally {
+      await process.close();
+    }
+  }, PATIENCE_MS);
+
+  it("LG-11: the state at the cursor loads from the database alone, in a fresh worker, through the node-store bridge", async () => {
+    const scenario = await ledgerScenario({
+      ledger: "v9",
+      genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
+      includesBlockZero: false,
+      blocks: (await rangeBlocks()).slice(0, 3),
+    });
+    const db = await backend.database();
+    await run(db, scenario);
+    const last = scenario.heights.at(-1)!;
+    const database = await openConfiguredDatabase(
+      { settings: { database: db.setting, developmentOptIn: true } } as never,
+      { committedHeight: async () => null },
+    );
+    const host = startLedgerWorker();
+    try {
+      const block = scenario.chain[Number(last.height)]!;
+      const loaded = await database.read((read) => host.load({ ledger: "v9", height: last.height, hash: block.hash, stateKey: last.stateKey }, read));
+      expect(hex(loaded.stateRoot)).toBe(hex(last.root));
+      expect(host.bridge().requests).toBeGreaterThan(0);
+    } finally {
+      await host.close();
+      await database.close();
+    }
+  }, PATIENCE_MS);
+});
+
+describe("A106: the root check (LG-15)", () => {
+  beforeAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.start())), 180_000);
+  afterAll(() => Promise.all(PROCESS_BACKENDS.map((backend) => backend.stop())), 60_000);
+
+  it("[[ledger.root-check-halts]] A106: a test package returning a wrong root for one block halts with root-mismatch and stores nothing of that block, on PostgreSQL and on PGlite", async () => {
+    const scenario = await ledgerScenario({
+      ledger: "v9",
+      genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
+      includesBlockZero: false,
+      blocks: (await rangeBlocks()).slice(0, 4),
+    });
+    for (const backend of PROCESS_BACKENDS) {
+      const db = await backend.database();
+      const process = await ingest(db, scenario.records, {
+        start: 0n,
+        core: LEDGER_CORE,
+        ledgerWorker: () =>
+          startLedgerWorker({ loader: LOADER, loaderData: { wrongRootAt: "2" } }),
+      });
+      let status;
+      try {
+        await halted(process);
+        status = process.handle.status();
+      } finally {
+        await process.close();
+      }
+      expect(await a106Problems(db, status, 2n), backend.name).toEqual([]);
+      expect(process.lines.some((line) => /processing halted \(root-mismatch\): .*height 2/.test(line)), backend.name).toBe(true);
+      expect(await a107Problems(db, scenario, 1n), backend.name).toEqual([]);
+    }
+  }, PATIENCE_MS * 3);
+});
+
+describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C; each skipped by name without its tape)", () => {
+  const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
+  /** Six hours of replay: 10,000 heights on a loaded machine. */
+  const REPLAY_MS = 6 * 3_600_000;
+
+  /**
+   * Replays `found` from genesis to `to` with the ledger's core modules on PGlite (its network's `core` settings, a
+   * custom network's own), and holds every stored root to the node's answer on the tape. The tape's
+   * `chain_getFinalizedHead` answers the recording day's head, far past the range (task 0.3's notes): the replay's head
+   * is the range's end, and the core stops there.
+   */
+  async function replayRange(
+    found: FoundTape,
+    to: bigint,
+    settings: Readonly<Record<string, unknown>>,
+    halt?: { readonly height: bigint; readonly code: string },
+  ): Promise<void> {
+    const { records } = found.read();
+    const hashAt = new Map<string, string>();
+    const roots = new Map<string, string>();
+    for (const record of records) {
+      if (!("method" in record) || !("result" in record)) continue;
+      if (record.method === "chain_getBlockHash") hashAt.set(String((record.params as unknown[])[0]), record.result as string);
+      if (record.method === "midnight_ledgerStateRoot") {
+        roots.set((record.params as string[])[0] as string, Buffer.from(record.result as number[]).toString("hex"));
+      }
+    }
+    const end = hashAt.get(`${to}`);
+    if (end === undefined) throw new Error(`the tape holds no block ${to}`);
+    const capped = records.map((record) =>
+      "method" in record && record.method === "chain_getFinalizedHead" && "result" in record ? { ...record, result: end } : record,
+    );
+    await backend.start();
+    try {
+      const db = await backend.database();
+      const process = await ingest(db, capped, { start: 0n, stop: to, core: LEDGER_CORE, settings });
+      let status;
+      try {
+        if (halt === undefined) await committed(process, to, REPLAY_MS);
+        else await halted(process);
+        status = process.handle.status();
+      } finally {
+        await process.close();
+      }
+      if (halt !== undefined) {
+        expect(status).toMatchObject({ state: "halted", cursor: halt.height - 1n, reason: { code: halt.code, height: halt.height } });
+        to = halt.height - 1n;
+      } else expect(status).toMatchObject({ cursor: to, reason: null });
+      const stored = await db.query("SELECT height::text AS h, encode(state_root, 'hex') AS root FROM core_ledger_state.states ORDER BY height");
+      expect(stored).toHaveLength(Number(to) + 1);
+      const differing = stored.filter((row) => roots.get(hashAt.get(row.h as string) as string) !== row.root);
+      expect(differing.map((row) => row.h)).toEqual([]);
+    } finally {
+      await backend.stop();
+    }
+  }
+
+  for (const name of ["preview-0-10000", "preprod-0-10000"]) {
+    tapeTest(
+      name,
+      `A99: every state root of ${name}, from genesis, is the node's`,
+      async (found) => replayRange(found, BigInt(found.tape.to), { network: found.tape.network }),
+      { timeoutMs: REPLAY_MS + 600_000 },
+    );
+  }
+
+  // Stagenet runs runtime 2.0, whose node (2.0.0) builds ledger v9 from `crate-ledger-9.1.0.0-rc.3`, not the vendored
+  // v9 (rc.5, the node 2.1.0-rc.4's): from block 1, whose one system transaction is a `CNightGeneratesDustUpdate` — DUST
+  // generation, whose semantics rc.3 → rc.5 changed (task 0.2) —, the roots differ (decision record question
+  // Q139). Until the owner answers, this records what happens: block 0's root is the node's, and the replay halts
+  // at block 1 with root-mismatch, nothing of it stored.
+  tapeTest(
+    "stagenet-0-10000",
+    "A99 (Q139): stagenet's runtime 2.0 ledger is not the vendored v9, so its replay halts at block 1 with root-mismatch",
+    async (found) => replayRange(found, BigInt(found.tape.to), { network: found.tape.network }, { height: 1n, code: "root-mismatch" }),
+    { timeoutMs: 600_000 },
+  );
+
+  // The undeployed devnet from genesis up to its upgrade's enactment block U = 102 (v8 throughout); F = 103 onwards
+  // needs the v8 → v9 conversion, task 12.4's (LG-9, A100).
+  tapeTest(
+    "devnet-v8-v9-0-235",
+    "A99: every state root of the undeployed devnet from genesis to its upgrade's U (102), v8, is the node's",
+    async (found) => {
+      const genesis = (found.tape.notes as { genesis: { hash: string } }).genesis.hash;
+      await replayRange(found, 102n, {
+        network: "custom",
+        genesisHash: genesis,
+        ledgerTable: { rows: [{ specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" }, { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" }] },
+      });
+    },
+    { timeoutMs: REPLAY_MS },
+  );
+  it.todo("A99: the undeployed devnet's roots from F (103) to 235, across its v8 → v9 upgrade (with task 12.4's conversion)");
+});

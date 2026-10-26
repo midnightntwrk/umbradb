@@ -2253,9 +2253,59 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       change is `package-identity.test.ts`'s, on the rebuilt packages. **Wrong variants:** 30 over the new adapter
       logic, first run 28 caught, 2 survivors (the saturation bound) closed by a test with `u64::MAX` written out;
       final run 30 of 30 caught. Coverage of `src/ledger/` 100 %. No question raised.
-- [ ] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
+- [x] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
       root check, outputs.
       **Acceptance:** A82, A99 (the ranges from genesis, Q133), A101, A106, A107.
+      **Done (2026-10-26):** **The ledger worker** (`src/ledger/worker/`): one per process, started by the runner when
+      the graph has `core-block-parsed` or `core-ledger-state` (`startLedgerWorker`; `ProcessInput.ledgerWorker` for a
+      test package) and closed with it; plain data both ways (`protocol.ts`), requests answered in order; its engine
+      (`engine.ts`, run in the main thread by the tests and by `inThreadLedger`) loads each version's adapter once,
+      keeps each block's parse under its hash for the block's apply (LG-7: `core-block-parsed` now parses there,
+      `workerParser`; released at `on-after-db-write` and `on-rollback`), holds the committed state and one pending
+      state, applies only on the state at h − 1, gives the same result again for the same block while pending, and
+      commits at `on-after-db-write`. A step is not bounded (RN-17) and is reported (`activity()`, timed from when it
+      began); a thread that ends,
+      throws or whose package traps fails every request with one `LedgerWorkerFailure` (a halt, `callback-error`). **The
+      node-store bridge** (`node-bridge.ts`): a growable `SharedArrayBuffer`, the worker blocked on `Atomics.wait` while
+      the main thread reads the node through the request's read handle — a request given none (a parse) through another
+      request's read, else the process's database or a read that comes meanwhile (on PGlite the database waits behind
+      `on-compute`'s read) — and sends its referenced nodes along (`src/ledger/node-refs.ts` reads a child list without
+      the package); the pending block's nodes the worker serves itself; a failed read answers no node and names itself
+      in the request's error. The store is installed in each package from the first block (its cache drops flushed
+      nodes' bytes and reads them again: without it preview aborted at block 3,772), and a transaction's hash is taken
+      over its bytes (`core-block-parsed` checks it against its chain event's). **`core-ledger-state`**
+      (`src/backbone/core-ledger-state/`, in the build's core list; never mid-chain, so above 0
+      `cannot-start-mid-chain`): at `on-compute` the worker applies the block with `tx-results` as outcomes (12.1a), the
+      parent's time from `core_block_commit.blocks` and LG-8's rule (`src/ledger/replay.ts`), while the node's root is
+      read through the block source (`ledgerStateRoot`, `genesisState`: `midnight_ledgerStateRoot`, `system_properties`,
+      IN-8); block 0 per IN-7 (the genesis state's root against the node's: its transactions on an empty state of the
+      genesis state's own network id for their results, or applied to it); **the root check** throws `root-mismatch`
+      (new `ErrorCode`, a halt) before the block's transaction; items `ledger-state`, `ledger-events`,
+      `segment-results`, `vm-logs`; at `on-db-write` the batch (nodes; root counts as signed changes, Q53) and the
+      `states`, `segment_results`, `events` rows (§10, with `contract-deploy`; the five tree values the packages do not
+      export null, Q138). Tests (seen failing first: `Cannot find module` in 9 of 10 files, `config-check.test.ts`'s
+      core list): `test/ledger/node-refs.test.ts`, `replay-rules.test.ts`, `worker-engine.test.ts`,
+      `worker-host.test.ts` (the worker and the bridge, over a database on both backends), `node-bridge.test.ts`;
+      `test/backbone/core-ledger-state.test.ts`, `ledger-source.test.ts`, `ledger-worker-process.test.ts`,
+      `ledger-state.test.ts` (A82, A99, A106, A107 through the process on PostgreSQL 18.6 and PGlite 0.5.10 over
+      synthetic tapes of real transactions and task 0.2's real genesis states, and A99 on task 0.3's recorded tapes:
+      preview and preprod 0–10,000 and the devnet to its U, 102, every root the node's, skipped by name without
+      `UMBRADB_TAPES`), `ledger-liveness.test.ts` (A101, a 60 s step); `chain-data.test.ts` counts A92's parses in the
+      worker; `chain-data.negative-control.test.ts`'s A93 control turns the hash check off (`chainHash`), which would
+      refuse its placement first, and a second control shows the check halting it. Committed negative controls
+      (`ledger-state.negative-control.test.ts`, both backends; `ledger-liveness.test.ts`): a root check comparing
+      nothing passes A106's wrong root; outcomes ignored halt a range with a chain-failed extrinsic; block 0 in the
+      wrong IN-7 case halts at 0; the step on the main thread loses `/health/live`. Wrong variants (a scratch copy,
+      outside the clone): 71, 65 caught; of the 6 survivors 5 gaps closed by tests seen failing on them (the empty
+      state's network id, block 0's parent time and LG-8's flag passed to the adapter, the worker closed with the
+      process and started once) and one redundant line removed; after the real tapes' fixes, on the final sources, 83,
+      81 caught (one more gap closed: the runner giving the worker its database), the 2 survivors equivalent on every
+      input the tests build (the root read after the flush, the hash serialized again: safeguards against the package's
+      cache dropping a node's bytes, which a long real run shows); then 5 of the step's timing and the chain-hash
+      check's option, 5 caught.
+      **Pending:** A99's devnet range from F (103), with the conversion (12.4); stagenet (runtime 2.0 runs ledger
+      9.1.0.0-rc.3: its roots differ from block 1, Q139, owner); restart, retention, contract keys (12.4); Q138
+      (owner).
 - [ ] 12.4 Storage of the ledger state, restart, retention, contract-key persistence, the v8→v9 conversion.
       **Acceptance:** A100, A102, A103, A104.
 - [ ] 12.5 The fixed-budget mark-and-sweep.

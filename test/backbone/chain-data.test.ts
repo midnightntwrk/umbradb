@@ -1,10 +1,10 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
 import { canonicalJson } from "../../src/backbone/core-chain-events/scale-value.js";
 import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-results.js";
+import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
-import { RAW } from "../ledger/adapter-fixtures.js";
 import { outsideIn8 } from "../node/in8.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { a91Problems, a92Problems, a93Problems, itemsSeen, itemsWatcher } from "./chain-data-checks.js";
@@ -35,9 +35,9 @@ import { committed, ingest, PATIENCE_MS } from "./ingest-harness.js";
  *   fields; at a synthetic upgrade, U's events — the old runtime's, whose `CodeUpdated` the new runtime's metadata
  *   reads otherwise — decoded with the metadata of U's parent's state, F's with the new.
  * - A92 (CD-5): a system transaction between two regular ones stored 0, 1, 2 in that order; block 0's transactions in
- *   body order; each parsed once — the vendored v9 package's `Transaction.deserialize` and
- *   `SystemTransaction.deserialize` counted while the process runs (it runs in this test's process, with the same
- *   module instance).
+ *   body order; each parsed once, in the ledger worker (task 12.3) — the vendored v9 package's `Transaction.deserialize`
+ *   and `SystemTransaction.deserialize` counted there while the process runs, by the test packages' loader
+ *   (`test/ledger/fixtures/ledger-test-loader.ts`), which the worker imports.
  * - A93 (CD-6): `TxApplied`, `TxPartialSuccess` and `ExtrinsicFailed` (and `SystemTransactionApplied`) give
  *   `success`, `partial`, `failure` (and `success`), matched to their extrinsics by phase; the `tx-results` item is the
  *   form `ApplyInput.outcomes` takes (task 12.3).
@@ -46,27 +46,8 @@ import { committed, ingest, PATIENCE_MS } from "./ingest-harness.js";
 
 const CORE = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS];
 
-/** Counts the v9 package's native deserializations, with the bytes each was given (the last argument). */
-function countParses(): { deserialized: Uint8Array[]; restore(): void } {
-  const deserialized: Uint8Array[] = [];
-  const spies: MockInstance[] = [];
-  for (const kind of ["Transaction", "SystemTransaction"] as const) {
-    const target = RAW.v9[kind] as unknown as { deserialize(...args: unknown[]): unknown };
-    const original = target.deserialize.bind(target);
-    spies.push(
-      vi.spyOn(target, "deserialize").mockImplementation((...args: unknown[]) => {
-        deserialized.push(args.at(-1) as Uint8Array);
-        return original(...args);
-      }),
-    );
-  }
-  return {
-    deserialized,
-    restore: () => {
-      for (const spy of spies) spy.mockRestore();
-    },
-  };
-}
+/** The test packages' loader, which the ledger worker imports: it counts the package's native parses (task 12.3). */
+const COUNTING = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url);
 
 /** Every call the tape node received is one of IN-8's, and none went unanswered (A83). */
 function in8Problems(calls: readonly { readonly method: unknown; readonly outcome?: unknown }[]): string[] {
@@ -78,21 +59,31 @@ function in8Problems(calls: readonly { readonly method: unknown; readonly outcom
 describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
-  let counter: ReturnType<typeof countParses> | undefined;
-  afterEach(() => counter?.restore());
 
   /** Runs `scenario` to its head with the core modules and the items watcher, and returns what it saw. */
+  /**
+   * Runs `scenario` to its head with the core modules and the items watcher, and returns what it saw — with the bytes
+   * of every native parse the ledger package made in the ledger worker, where `core-block-parsed` parses (task 12.3).
+   */
   async function run(scenario: Scenario, items: Parameters<typeof itemsWatcher>[1] = ["chain-events", "block-parsed", "tx-results"]) {
     const db = await backend.database();
     const seen = itemsSeen();
-    const process = await ingest(db, scenario.records, { start: scenario.start, core: CORE, user: [itemsWatcher(seen, items)] });
+    let worker: LedgerHost | undefined;
+    const process = await ingest(db, scenario.records, {
+      start: scenario.start,
+      core: CORE,
+      user: [itemsWatcher(seen, items)],
+      ledgerWorker: () => (worker = startLedgerWorker({ loader: COUNTING, loaderData: { count: true } })),
+    });
+    let deserialized: Uint8Array[] = [];
     try {
       await committed(process, scenario.head);
+      ({ deserialized } = (await worker?.probe()) as { deserialized: Uint8Array[] });
     } finally {
       await process.close();
     }
     expect(in8Problems(process.node.calls)).toEqual([]);
-    return { db, seen, process };
+    return { db, seen, process, deserialized };
   }
 
   it("A91: core-chain-events stores every event of a range, byte for byte, with its decoded fields", async () => {
@@ -142,10 +133,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
 
   it("A92: a system transaction between two regular ones is stored 0, 1, 2 in that order, each parsed once", async () => {
     const scenario = a92Scenario();
-    counter = countParses();
-    const { db, seen } = await run(scenario);
-    const deserialized = [...counter.deserialized];
-    counter.restore();
+    const { db, seen, deserialized } = await run(scenario);
     expect(await a92Problems(db, scenario, deserialized)).toEqual([]);
     expect(deserialized).toHaveLength(3);
     const parsed = seen.parsed.get(1n);
@@ -178,10 +166,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
       { method: "chain_getBlockHash", params: [2], result: block(2).hex },
     ];
     const scenario = { start: 1n, head: 2n, records, transactions: [] } as unknown as Scenario;
-    counter = countParses();
-    const { db, seen, process } = await run(scenario);
-    const deserialized = [...counter.deserialized];
-    counter.restore();
+    const { db, seen, process, deserialized } = await run(scenario);
     const expected = { transactions: [transactionSpec(2n, 0, "regular", r), transactionSpec(2n, 1, "system", s)] } as unknown as Scenario;
     expect(await a92Problems(db, expected, deserialized)).toEqual([]);
     expect(process.seen.queue).toEqual([`best 2 ${block(2).hex.slice(0, 10)}`]);
@@ -191,10 +176,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
 
   it("A92: block 0's transactions are stored in body order, each parsed once", async () => {
     const scenario = a92GenesisScenario();
-    counter = countParses();
-    const { db, seen } = await run(scenario);
-    const deserialized = [...counter.deserialized];
-    counter.restore();
+    const { db, seen, deserialized } = await run(scenario);
     expect(await a92Problems(db, scenario, deserialized)).toEqual([]);
     expect(seen.parsed.get(0n)?.transactions.map((t) => [t.index, t.kind, t.extrinsicIndex, t.eventIndex])).toEqual([
       [0, "system", 0, null],
@@ -210,10 +192,7 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
 
   it("A93: TxApplied, TxPartialSuccess and ExtrinsicFailed give success, partial and failure, matched by phase", async () => {
     const scenario = a93Scenario();
-    counter = countParses();
-    const { db, seen } = await run(scenario);
-    const deserialized = [...counter.deserialized];
-    counter.restore();
+    const { db, seen, deserialized } = await run(scenario);
     expect(await a93Problems(db, scenario)).toEqual([]);
     // A failed transaction is parsed too (block-parsed lists it; the ledger's apply skips it, task 12.1a).
     expect(await a92Problems(db, scenario, deserialized)).toEqual([]);

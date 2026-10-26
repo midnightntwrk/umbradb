@@ -95,6 +95,7 @@ export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
   "metadata-mismatch",
   "writer-lock-lost",
   "truncate-not-allowed",
+  "root-mismatch",
 ] as const);
 
 const NAMED: ReadonlySet<ErrorCode> = new Set([...REFUSAL_CODES, ...HALT_CODES]);

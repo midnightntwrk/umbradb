@@ -12,8 +12,12 @@
  * (`midnight:transaction[vN](S,P,B):`), so a proven chain transaction and a proof-erased test transaction parse alike;
  * the package checks the tag's version. A transaction's hash is SHA-256 over the package's own serialization of it,
  * the ledger's definition for both kinds (`midnight-ledger` `ledger/src/structure.rs` `Transaction::transaction_hash`,
- * `SystemTransaction::transaction_hash`); the package's `transactionHash()` exists only for proven, bound transactions
- * and agrees (`test/ledger/adapter-suite.ts`).
+ * `SystemTransaction::transaction_hash`), taken over the bytes the transaction was parsed from: the package's
+ * deserialization is canonical, so they are that serialization (held on every fixture, and on the 290 transactions of
+ * preview's blocks 0 to 10,000, task 12.3; `core-block-parsed` checks each against the hash its chain event carries).
+ * Serializing it again would read each of its nodes from the package's storage — a node it shares with a stored state
+ * from the node store, which a parse, at `on-parse` with no database read open, cannot reach. The package's
+ * `transactionHash()` exists only for proven, bound transactions and agrees (`test/ledger/adapter-suite.ts`).
  *
  * **Applying a block (LG-8), as the official indexer does** (`midnight-indexer`
  * `chain-indexer/src/domain/ledger_state.rs` `apply_transactions`, `failed_regular_transaction`;
@@ -96,6 +100,9 @@ export interface RawState {
   apply(transaction: object, context: object): [RawState, RawTransactionResult];
   applySystemTx(transaction: object, tblock: Date): [RawState, RawEvent[]];
   readonly parameters: RawParameters;
+  /** The zswap part of the state, a new object at each read (freed by the reader). */
+  readonly zswap: { readonly firstFree: bigint };
+  toString(compact?: boolean): string;
 }
 
 export interface RawIntent {
@@ -406,6 +413,16 @@ export function addCosts(a: SyntheticCost, b: SyntheticCost): SyntheticCost {
   };
 }
 
+/**
+ * The network id a state carries, from its `Debug` rendering (`LedgerState { network_id: "…", …`, `ledger/src/
+ * structure.rs`): the one field the packages' JavaScript API does not give. A rendering without it throws.
+ */
+export function networkIdOf(state: Pick<RawState, "toString">): string {
+  const rendered = /^LedgerState \{ network_id: ("(?:[^"\\]|\\.)*")/.exec(state.toString(true))?.[1];
+  if (rendered === undefined) throw new Error("a ledger state whose rendering names no network id");
+  return JSON.parse(rendered) as string;
+}
+
 const asRaw = (state: StateHandle): RawState => state as unknown as RawState;
 const asHandle = (state: RawState): StateHandle => state as unknown as StateHandle;
 
@@ -597,7 +614,7 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
       const native = nativeOf(bytes);
       return {
         index,
-        hash: sha256(native.transaction.serialize()),
+        hash: sha256(bytes),
         kind: native.kind,
         size: bytes.length,
         bytes,
@@ -605,8 +622,23 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
       };
     },
     nativeTransaction: (bytes) => nativeOf(bytes).transaction,
-    emptyState: () => asHandle(raw.LedgerState.blank(spec.networkId)),
+    emptyState: (networkId = spec.networkId) => asHandle(raw.LedgerState.blank(networkId)),
     genesisState: (bytes) => asHandle(raw.LedgerState.deserialize(bytes)),
+    networkIdOf: (state) => networkIdOf(asRaw(state)),
+    stateSummary(state) {
+      const zswap = asRaw(state).zswap;
+      const zswapFirstFree = zswap.firstFree;
+      free(zswap);
+      return {
+        zswapFirstFree,
+        zswapRoot: null,
+        dustCommitmentFirstFree: null,
+        dustCommitmentRoot: null,
+        dustGenerationFirstFree: null,
+        dustGenerationRoot: null,
+      };
+    },
+    dispose: (state) => free(state),
     load: (stateKey, store) => asHandle(raw.loadState(stateKey, store)),
     apply,
     stateRoot: (state) => raw.stateRoot(asRaw(state)),

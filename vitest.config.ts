@@ -145,6 +145,9 @@ export default defineConfig({
         // The admin worker thread's entry runs only as a thread of its own (`test/admin/`); what it runs, `serveAdmin`,
         // is covered on the main thread too (task 8.1).
         "src/admin/worker.ts",
+        // The ledger worker thread's entry runs only as a thread of its own (`test/ledger/worker-host.test.ts`, the
+        // process tests); what it runs, the engine and the bridge, is covered on the main thread too (task 12.3).
+        "src/ledger/worker/entry.ts",
         // Deferred full-chain-archival track — out of 1.0.0 (acceptance-criteria I6).
         "src/postgres/chain-archive-store.ts",
         "src/postgres/chain-archive-rollover.ts",

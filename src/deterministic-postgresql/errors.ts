@@ -173,6 +173,11 @@ export const ERROR_CODES = [
    * finalized hash it read — names another block (IN-4; task 10.3, `src/backbone/core-block-fetch/`): processing halts.
    */
   "finality-conflict",
+  /**
+   * The ledger state root after a block is not the node's `midnight_ledgerStateRoot` at that block (LG-15; task 12.3,
+   * `src/backbone/core-ledger-state/`): processing halts at that height, nothing of the block stored.
+   */
+  "root-mismatch",
 ] as const;
 
 /**

@@ -101,8 +101,9 @@ revisions (a module's from its entries with their effective stops; every backbon
 one's data fields with the process revision's other fields), `core-chain` bound to its context with what startup checked
 and opened (`bindCoreChain`: the node client and the revision's ledger table among them), `core-block-fetch` to the
 block source (`bindCoreBlockFetch`) and, when enabled, the core module `core-chain-events` too (`bindCoreChainEvents`,
-task 11.1),
-`startDatabase`, the seal, on a database without a cursor the bootstrap's wait while S is above
+task 11.1), when the graph has `core-block-parsed` or `core-ledger-state` the process's ledger worker started once and
+bound to them (`bindLedgerParser`, `bindCoreLedgerState` with the source's ledger calls; task 12.3, §5.3; closed with
+the node client), `startDatabase`, the seal, on a database without a cursor the bootstrap's wait while S is above
 the head (`waiting-for-node`, still `starting`, IN-2), `startModuleApi`, then the loop. A refusal closes what startup
 opened and rejects `started`. The loop fires
 `on-start-height` between `on-parse` and `on-compute` for the core's parts at S and the modules a segment of which
@@ -187,7 +188,9 @@ interface QueueRunner {                                      // given by the fin
   inherent, 0 for a block 0 without one), `block-body` (the extrinsics, each unsigned one's call named by the metadata),
   `runtime-metadata` (`RuntimeMetadata.forBlock`: the runtime in the parent's state, block 0's own; LG-4) and
   `ledger-version` (`selectLedgerVersion` over the `ledger-table` item, as text). The metadata is read as V14 — what
-  `state_getMetadata` answers — or V15 up to its pallets. Block 0 (IN-7) takes the same path; its ledger path is 12.3's.
+  `state_getMetadata` answers — or V15 up to its pallets. Block 0 (IN-7) takes the same path; its ledger path is
+  `core-ledger-state`'s (task 12.3). The node source also gives the node's ledger state root after a block and the
+  genesis state (`BlockLedgerSource`, task 12.3), with the client's retries.
   Queue-side callbacks get no database handle. The source also gives a block's raw chain events (`blockEvents`,
   `src/backbone/core-block-fetch/events.ts`, task 11.1): `System::Events` read with `state_getStorage` at the block's
   own hash, a best block's without retries, null where the state holds none (block 0); `core-chain-events` decodes them
@@ -201,10 +204,28 @@ interface QueueRunner {                                      // given by the fin
   each outcome event matched to its extrinsic by its phase (`TxApplied`, `TxPartialSuccess`, `ExtrinsicFailed` under
   `ApplyExtrinsic(i)` for the regular transaction of extrinsic `i`; `MidnightSystem::SystemTransactionApplied` for a
   system transaction, its bytes the event's), block 0's in body order, refusing a block whose events do not account for
-  each Midnight transaction exactly once (decision record question Q132), and has them parsed once
-  (`TransactionParser`: in the module's thread with the block's ledger adapter until task 12.3's ledger worker takes
-  the parse, Q49); `core-tx-results` (requires `chain-events`, `block-parsed`) reads each transaction's outcome from the
-  event that placed it, block 0's `success`, and puts `tx-results` in the form `ApplyInput.outcomes` takes (task 12.1a).
+  each Midnight transaction exactly once (decision record question Q132), and has them parsed once in the process's
+  ledger worker (`TransactionParser`; task 12.3: `workerParser`, the worker keeping the parse for the block's apply and
+  dropping it once the block committed, `on-after-db-write`, or was dropped, `on-rollback`; Q49); `core-tx-results`
+  (requires `chain-events`, `block-parsed`) reads each transaction's outcome from the event that placed it, block 0's
+  `success`, and puts `tx-results` in the form `ApplyInput.outcomes` takes (task 12.1a).
+- **`core-ledger-state`** (task 12.3; LG-8, LG-10, LG-11, LG-15, LG-16, IN-7; off unless configured, never mid-chain:
+  `startsMidChain: false`, so the graph refuses it above 0 with `cannot-start-mid-chain`) requires `block-header`,
+  `ledger-version`, `block-parsed` and `tx-results`. At `on-compute` its bound ledger worker (§5.3) applies the block on
+  the state at h − 1 with the parse it kept, the block's `tx-results` as outcomes, the block's time, its parent's (read
+  from `core_block_commit.blocks` at h − 1 through on-compute's read; a parent time of 0, block 0's, is the block's own,
+  as the official indexer takes it) and LG-8's first-regular rule for the `MNSV` runtime (`src/ledger/replay.ts`:
+  `spec_version` 22,000–22,999, 1,000,000–1,000,299, 2,000,000–2,000,999; never block 0), while it reads the node's root
+  after h through its bound block source (`ledgerStateRoot`, `src/backbone/core-block-fetch/ledger-source.ts`:
+  `midnight_ledgerStateRoot` at the block's hash, IN-8); block 0's genesis state is the source's `genesisState`
+  (`system_properties.genesis_state`), included or not as IN-7 says by comparing its root with the node's at block 0.
+  A root other than the node's throws `root-mismatch` (`UmbraError`: height, hash, both roots), a halt before the
+  block's transaction, so nothing of it is stored (LG-15). It puts `ledger-state` (the state's key, root, summary and
+  parameters, plain), `ledger-events`, `segment-results` and `vm-logs`; at `on-db-write` it writes the batch (nodes,
+  root counts as signed changes) and the block's `states`, `segment_results` and `events` rows (§10); at
+  `on-after-db-write` it tells the worker the block committed. The state before each block is released in its batch
+  (the retention window, LG-12, is task 12.4's), and a worker without the state at h − 1 refuses the block (a restart's
+  reload is task 12.4's), as does a block of another ledger than the state's (the conversion, LG-9, task 12.4).
 - **`InMemoryBlockSource`** (exported) keeps blocks in memory, for tests and module authors, with the same cursor,
   `core-block-commit`'s blocks table (`src/runner/in-memory-source.ts`, task 5.2): a finalized head that only rises
   (`finalize`), the blocks it was given or else a default chain whose hashes link (`inMemoryBlock`: SHA-256 of
@@ -582,11 +603,14 @@ interface LedgerPackage {                                  // one per ledger ver
   rawPackages(): Readonly<Record<string, unknown>>;        // the loaded WASM packages, unwrapped, by package name
   parseTransaction(bytes: Uint8Array, index: number): ParsedTransaction;  // parsed once per Uint8Array (LG-7)
   nativeTransaction(bytes: Uint8Array): unknown;           // the native object that parse made, for ledger tasks
-  emptyState(): StateHandle;                               // block 0 (IN-7), of the adapter's network id
+  emptyState(networkId?: string): StateHandle;             // block 0 (IN-7): the adapter's, or the given, network id
   genesisState(bytes: Uint8Array): StateHandle;            // from system_properties.genesis_state
+  networkIdOf(state: StateHandle): string;                 // a state's own network id (block 0's empty state, IN-7)
   load(stateKey: Uint8Array, store: NodeStore): StateHandle;
   apply(state: StateHandle, block: ApplyInput): AppliedBlock;  // LG-8; `state` itself unchanged
   stateRoot(state: StateHandle): Uint8Array;               // compared with midnight_ledgerStateRoot (LG-15)
+  stateSummary(state: StateHandle): StateSummary;          // the trees' first free indexes and roots (LG-16)
+  dispose(state: StateHandle): void;                       // frees a state the worker no longer holds
   stateKey(state: StateHandle): Uint8Array;                // its root node's key, what `load` takes (Q55)
   flush(): NodeBatch;                                      // nodes created, and root-count changes, since the last flush
   persist(key: Uint8Array): void;
@@ -614,6 +638,9 @@ interface LedgerEvent { transaction: number; kind: LedgerEventKind;   // every e
 interface LogItem { version: number; eventType: LogEventType; data: Uint8Array }   // CC-3
 interface VmLog extends LogItem { transaction: number; index: number; address: Uint8Array; entryPoint: Uint8Array;
   logicalSegment: number; physicalSegment: number }                   // numbered per block in emission order
+interface StateSummary { zswapFirstFree: bigint; zswapRoot: Uint8Array | null;       // null: not exported (Q138)
+  dustCommitmentFirstFree: bigint | null; dustCommitmentRoot: Uint8Array | null;
+  dustGenerationFirstFree: bigint | null; dustGenerationRoot: Uint8Array | null }
 interface NodeStore { get(key: Uint8Array): { data: Uint8Array; children: Uint8Array } | null }
 interface NodeBatch { inserts: { key: Uint8Array; data: Uint8Array; children: Uint8Array }[];
   rootCounts: { key: Uint8Array; delta: number }[] }       // signed change of each changed root count (Q53)
@@ -651,18 +678,27 @@ output, which is what crosses to the main thread; `parseTransaction` takes the t
 which the bytes do not carry) and keeps the native object under that very `Uint8Array`, so `apply` and
 `nativeTransaction` reuse it; an adapter is made for one network id (`loadLedgerPackage(ledger, { networkId })`, which
 imports the version's vendored Node.js entry when it is first asked for). A transaction's hash is SHA-256 over the
-package's serialization of it, the ledger's own definition for both kinds. `apply` follows the official indexer's
-replay (strictness without proof checks or balancing; a malformed transaction, one whose cost cannot be computed and
-one the ledger fails are a `failure` that leaves the state as it was; the post-block update given the block's
-fullness, zero when nothing applied). Task 12.1a (owner decision Q113 A) makes the replay the node's: the post-block
-update is the node's (`postBlockUpdateExact`, §5.2: the summed cost clamped to the block limits and normalized in the
-package, with no JavaScript number in between, so a block above its limits is clamped, not refused), each system
-transaction's cost joins the fullness (`systemTransactionCost`), the costs add up saturating as the ledger's do, and
-an extrinsic whose `outcomes` entry is `failure` is skipped as the official indexer skips it (not given to the ledger,
-no cost, not the first regular transaction of LG-8's rule). Without `outcomes` every transaction is replayed and the
-ledger decides; a chain block gives them (task 12.3), since the v9 node also fails an extrinsic whose cost would take
-the block over its limits. `LedgerEventKind` also has `contract-deploy`, which §10's kinds of
-`core_ledger_state.events` lack though LG-16 stores every event but logs (task 12.3 settles the table).
+package's serialization of it, the ledger's own definition for both kinds — taken over the bytes it was parsed from,
+which are that serialization (task 12.3: serializing it again would read its nodes, at a parse, where no database read
+is open; `core-block-parsed` checks each hash against the one its chain event carries). `apply` follows the official
+indexer's replay (strictness without proof checks or balancing; a malformed transaction, one whose cost cannot be
+computed and one the ledger fails are a `failure` that leaves the state as it was; the post-block update given the
+block's fullness, zero when nothing applied). Task 12.1a (owner decision Q113 A) makes the replay the node's: the
+post-block update is the node's (`postBlockUpdateExact`, §5.2: the summed cost clamped to the block limits and
+normalized in the package, with no JavaScript number in between, so a block above its limits is clamped, not refused),
+each system transaction's cost joins the fullness (`systemTransactionCost`), the costs add up saturating as the ledger's
+do, and an extrinsic whose `outcomes` entry is `failure` is skipped as the official indexer skips it (not given to the
+ledger, no cost, not the first regular transaction of LG-8's rule). Without `outcomes` every transaction is replayed and
+the ledger decides; a chain block gives them (task 12.3), since the v9 node also fails an extrinsic whose cost would
+take the block over its limits. `LedgerEventKind` also has `contract-deploy`, which §10's `core_ledger_state.events`
+stores too (task 12.3).
+
+As built (task 12.3): the adapter also gives a state's network id (`networkIdOf`, read from the state's own `Debug`
+rendering, which names it first: the node makes block 0's empty state with the genesis state's id) and makes an empty
+state of a given id (`emptyState(networkId)`), frees a state (`dispose`, wasm-bindgen's `free`), and summarizes a state
+for `core_ledger_state.states` (`stateSummary`): the zswap tree's first free index (`LedgerState.zswap.firstFree`); the
+zswap root and the DUST commitment and generation trees' first free indexes and roots are null, as the vendored packages
+export none of them (decision record question Q138).
 
 ### 5.2 Vendored builds (LG-5)
 
@@ -733,6 +769,38 @@ request to the main thread through a `SharedArrayBuffer` and blocks with `Atomic
 owns the database, writes the node bytes back (batched: a miss prefetches the node's referenced keys). The main thread
 never blocks on the worker; it awaits the worker's results asynchronously. Native parsed objects never leave the
 worker (Q49): the main thread receives `block-parsed` as `ParsedTransaction[]` and each ledger task's plain result.
+
+As built (task 12.3, `src/ledger/worker/`): one worker per process, started by the runner when the graph has
+`core-block-parsed` or `core-ledger-state` and closed with the process (`startLedgerWorker`; `ProcessInput.ledgerWorker`
+for a test package). Its engine (`engine.ts`, the same code the tests run in the main thread) loads each version's
+adapter once and keeps each block's parse under the block's hash — the very arrays parsed, so the adapter's native
+objects — until the block committed or was dropped, so `core-block-parsed`'s parse (`on-parse`) and
+`core-ledger-state`'s apply (`on-compute`) parse each transaction once (LG-7). It holds the state committed at the
+cursor and at most one pending state after it, applies a block only on the state at h − 1 (of the block's ledger, its
+parent the committed block), gives the same result back for the same block while pending (a height processed again after
+a lost transaction: its batch still to be written), and promotes the pending state when the block's `on-after-db-write`
+says it committed. Messages are plain data both ways (`protocol.ts`); every request is answered in order. The bridge
+(`node-bridge.ts`): a growable `SharedArrayBuffer` (a 16-byte header — state, length, status — and the data), the worker
+writing the key, the main thread answering from the read handle the request was given (on-compute's read at h − 1) or,
+for a request given none (a parse at `on-parse`: a deploy's address serializes its initial state, whose nodes a stored
+state may share), from another request's read in flight, else from a read of the process's database (`useDatabase`) — or
+from the read of a request that comes meanwhile: on PGlite `core-ledger-state`'s on-compute read holds the one queue
+while its apply waits behind that parse —; the pending block's own nodes, which the database holds only once it
+committed, the worker serves itself; a request no read reaches answers "no node" and fails naming why), the node's
+referenced nodes — their keys read from its child list without the package, `src/ledger/node-refs.ts` — sent along and
+served from the worker's side during the request, the memory grown to fit up to 256 MiB. The store is installed in each
+package from the first block on (the package installs one only in `loadState`, so the engine loads the state it just
+made, from memory, and drops that copy): a flushed node is stored to the package, whose cache may drop its bytes while
+the state still uses it, and reads them again from the database (without it the package aborted at preview's block
+3,772); a state's root and summary are read before the flush, as the database holds a block's nodes only once it
+committed. A failing read never throws into the package (which would abort): the store answers no node and the request's
+error names the read's. A step's time is not bounded (RN-17, Q71): `LedgerHost.activity()` names the step in progress —
+its kind, its block's height, how long it has run since it began (a request sent behind others waits for them in the
+worker). A worker that ends, throws outside a request, or whose package traps (a WebAssembly `RuntimeError`, after which
+the module's memory is in no known state: the thread is ended) fails the request in progress and every later one with
+one `LedgerWorkerFailure`: the module awaiting it fails, and processing halts with `callback-error` naming the module
+and the point (§11). Loading a stored state through the bridge (`load`) exists for task 12.4's restart and is tested
+from a database; nothing calls it at startup yet.
 
 ### 5.4 Storage, retention and sweep (LG-11 to LG-14)
 
@@ -1013,13 +1081,13 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-chain-events` | `core_chain_events.events` | (height, event_index) | phase (text: `initialization`, `apply-extrinsic`, `finalization`), extrinsic_index (int null; set exactly under `apply-extrinsic`, a `CHECK`), pallet, name (text), bytes (SCALE: the event record's own bytes — phase, event, topics — so the count and the rows give `System::Events` back), fields (jsonb, canonical: keys sorted, integers of 64 bits and wider as decimal text, bytes as `0x` hex) — migration `001`, range-partitioned by height (task 11.1) |
 | `core-block-parsed` | `core_block_parsed.transactions` | (height, tx_index) | tx_hash (32 bytes, the ledger's), kind (`regular`, `system`), size (int > 0) — range-partitioned by height (task 11.1) |
 | `core-tx-results` | `core_tx_results.results` | (height, tx_index) | outcome (`success`, `partial`, `failure`) — range-partitioned by height (task 11.1) |
-| `core-ledger-state` | `core_ledger_state.nodes` | node_key | data, children (ledger serialization) |
-| `core-ledger-state` | `core_ledger_state.root_counts` | node_key | count (int > 0) |
-| `core-ledger-state` | `core_ledger_state.states` | height | state_key, state_root, zswap_first_free, zswap_root, dust_commitment_first_free, dust_commitment_root, dust_generation_first_free, dust_generation_root |
+| `core-ledger-state` | `core_ledger_state.nodes` | node_key | data, children (ledger serialization) — an existing key is left as it is (a node is its key's content) (task 12.3) |
+| `core-ledger-state` | `core_ledger_state.root_counts` | node_key | count (int > 0) — each block adds its batch's signed changes, a count reaching 0 deleted (task 12.3) |
+| `core-ledger-state` | `core_ledger_state.states` | height | state_key, state_root, zswap_first_free, zswap_root (null), dust_commitment_first_free (null), dust_commitment_root (null), dust_generation_first_free (null), dust_generation_root (null) — the five null until a vendored package exports them (decision record question Q138); range-partitioned by height (task 12.3) |
 | `core-ledger-state` | `core_ledger_state.sweep` | id = 1 | cycle, phase (`idle`, `mark`, `sweep`), sweep_after (null) |
 | `core-ledger-state` | `core_ledger_state.grey`, `core_ledger_state.marks` | node_key | — |
-| `core-ledger-state` | `core_ledger_state.segment_results` | (height, tx_index, segment) | success (boolean) |
-| `core-ledger-state` | `core_ledger_state.events` | (height, tx_index, event_index) | kind (`zswap-input`, `zswap-output`, `dust-initial-utxo`, `dust-generation-dtime-update`, `dust-spend-processed`, `param-change`), logical_segment, physical_segment (int), bytes (ledger serialization), nullifier, commitment, tree_index, contract_address (each null) |
+| `core-ledger-state` | `core_ledger_state.segment_results` | (height, tx_index, segment) | success (boolean) — range-partitioned by height (task 12.3) |
+| `core-ledger-state` | `core_ledger_state.events` | (height, tx_index, event_index) | kind (`zswap-input`, `zswap-output`, `contract-deploy`, `dust-initial-utxo`, `dust-generation-dtime-update`, `dust-spend-processed`, `param-change`), logical_segment, physical_segment (int), bytes (ledger serialization), nullifier, commitment, tree_index, contract_address (each null) — event_index numbers each transaction's events from 0 in emission order; range-partitioned by height (task 12.3) |
 | `core-contract-states` | `core_contract_states.states` | (contract_address, height) | state_key, zswap_state_key |
 | `core-contract-logs-*` | `contract_logs.logs` | (height, tx_index, log_index) | contract_address, entry_point, logical_segment (int), log_version (bigint), event_type (text), data (ledger serialization) |
 | `core-key-registry` (private) | `core_key_registry.keys` | key_id | kind (text), key_bytes, arrived_height |

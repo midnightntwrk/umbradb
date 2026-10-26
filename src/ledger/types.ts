@@ -194,6 +194,21 @@ export interface ParsedTransaction {
   }[];
 }
 
+/**
+ * What `core_ledger_state.states` stores of a state besides its key and root (LG-16; task 12.3): the zswap commitment
+ * tree's first free index and root, and the DUST commitment and generation trees' first free indexes and roots. The
+ * vendored packages export the zswap first free index only (`LedgerState.zswap.firstFree`); the other five are null
+ * until a package exports them (decision record question Q138).
+ */
+export interface StateSummary {
+  zswapFirstFree: bigint;
+  zswapRoot: Uint8Array | null;
+  dustCommitmentFirstFree: bigint | null;
+  dustCommitmentRoot: Uint8Array | null;
+  dustGenerationFirstFree: bigint | null;
+  dustGenerationRoot: Uint8Array | null;
+}
+
 /** A module's ledger task (LG-17, task 12.6), run in the ledger worker once per block. */
 export interface LedgerTask {
   name: string;
@@ -224,16 +239,32 @@ export interface LedgerPackage {
   parseTransaction(bytes: Uint8Array, index: number): ParsedTransaction;
   /** The native parsed transaction for these bytes, parsed now if they were not before; for ledger tasks (LG-17). */
   nativeTransaction(bytes: Uint8Array): unknown;
-  /** A blank state of the adapter's network id: block 0's empty state (IN-7). */
-  emptyState(): StateHandle;
+  /**
+   * A blank state of `networkId`, the adapter's network id unless given: block 0's empty state (IN-7), whose network id
+   * is the genesis state's ({@link networkIdOf}, task 12.3).
+   */
+  emptyState(networkId?: string): StateHandle;
   /** The state `system_properties.genesis_state` carries (IN-7). */
   genesisState(bytes: Uint8Array): StateHandle;
   /** The state whose root node has key `stateKey`, read from `store` as needed (LG-11). */
   load(stateKey: Uint8Array, store: NodeStore): StateHandle;
   /** Applies a block with the replay rules of LG-8; `state` itself is unchanged. */
   apply(state: StateHandle, block: ApplyInput): AppliedBlock;
+  /**
+   * The network id a state carries (task 12.3): the node makes block 0's empty state with the genesis state's own
+   * (`midnight-node` `node/src/genesis/verification/verify_ledger_state_genesis.rs`, `state.network_id`). Read from the
+   * state's `Debug` rendering, which names it first — a cost that grows with the state, paid at block 0 only.
+   */
+  networkIdOf(state: StateHandle): string;
   /** Compared with `midnight_ledgerStateRoot` (LG-15). */
   stateRoot(state: StateHandle): Uint8Array;
+  /** What `core_ledger_state.states` stores of the state besides its key and root (LG-16, task 12.3). */
+  stateSummary(state: StateHandle): StateSummary;
+  /**
+   * Frees the state's WebAssembly memory now (wasm-bindgen's `free`): a state the worker no longer holds (task 12.3);
+   * the handle must not be used afterwards. Its nodes another state shares stay.
+   */
+  dispose(state: StateHandle): void;
   /** Its root node's 32-byte key, what {@link load} takes (owner decision Q55). */
   stateKey(state: StateHandle): Uint8Array;
   /** Nodes created, and root-count changes, since the last flush. */

@@ -28,7 +28,10 @@
  *    opened (`bindCoreChain`: the configuration, the declarations, the cursor, the database, S, the genesis hash, the
  *    node client, the revision's ledger table), `core-block-fetch` bound to the block source (`bindCoreBlockFetch`, when
  *    the source gives block items), and so is the core module `core-chain-events` when enabled (`bindCoreChainEvents`,
- *    when the source gives a block's events; task 11.1), the migrations and `on-start-db` (`startDatabase`, through each
+ *    when the source gives a block's events; task 11.1), and — when the graph has `core-block-parsed` or
+ *    `core-ledger-state` — the process's ledger worker started (`startLedgerWorker`, once per process) and bound to
+ *    them (`bindLedgerParser`; `bindCoreLedgerState`, with the source's ledger calls; task 12.3), the migrations and
+ *    `on-start-db` (`startDatabase`, through each
  *    context's publishing window — `core-chain`'s records the history and the identity and publishes its `process`
  *    items —; a failing
  *    `on-start-db` names its point and module, a `CallbackFailure` as a failing `on-start-api`'s), the seal
@@ -37,9 +40,9 @@
  *    IN-2: still `starting`, with the condition `waiting-for-node`), every bootstrap step having run;
  * 9. `on-start-api` and the module API on `listen.api` (`startModuleApi`);
  * 10. the finalized loop, with the core's stop and RN-12's upgrade boundary ({@link upgradeBoundary}).
- * A refusal closes what startup opened — the node client, the database, its writer lock released, then the block
- * source — and rejects {@link ProcessHandle.started} with it; the process stays up, `refused` with the refusal's
- * reason, until stopped (IN-12, AE-3). A retryable failure of steps 4 to 8 (`connection-lost`, `node-unreachable`) refuses nothing:
+ * A refusal closes what startup opened — the node client, the ledger worker, the database, its writer lock released,
+ * then the block source — and rejects {@link ProcessHandle.started} with it; the process stays up, `refused` with the
+ * refusal's reason, until stopped (IN-12, AE-3). A retryable failure of steps 4 to 8 (`connection-lost`, `node-unreachable`) refuses nothing:
  * steps 4 to 10 run again after IN-10's back-off (see **Retries**), with new process contexts and new bindings of
  * `core-chain` and `core-block-fetch` (the node client and the block source kept). The waits come before the module
  * API, so a retry never meets it open.
@@ -96,7 +99,10 @@
 import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
 import { bindCoreBlockFetch, CORE_BLOCK_FETCH_ID, isBlockItemSource } from "../backbone/core-block-fetch/core-block-fetch.js";
 import { isBlockEventSource } from "../backbone/core-block-fetch/events.js";
+import { bindLedgerParser, CORE_BLOCK_PARSED_ID } from "../backbone/core-block-parsed/core-block-parsed.js";
+import { isBlockLedgerSource } from "../backbone/core-block-fetch/ledger-source.js";
 import { bindCoreChainEvents, CORE_CHAIN_EVENTS_ID } from "../backbone/core-chain-events/core-chain-events.js";
+import { bindCoreLedgerState, CORE_LEDGER_STATE_ID } from "../backbone/core-ledger-state/core-ledger-state.js";
 import {
   bindCoreChain,
   type ChainCheck,
@@ -125,6 +131,7 @@ import type { Database } from "../db/api.js";
 import { type MigrationPart, startDatabase } from "../db/migrate.js";
 import { startWriter } from "../db/writer-lock.js";
 import type { LedgerTable } from "../ledger/version-table.js";
+import { type LedgerHost, startLedgerWorker } from "../ledger/worker/host.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
@@ -182,6 +189,12 @@ export interface ProcessInput {
    * on one address refuses startup with `listen-failed` before its database opens.
    */
   readonly admin?: boolean | AdminStarter;
+  /**
+   * The process's ledger worker (LG-10, task 12.3): started when the graph has `core-block-parsed` or
+   * `core-ledger-state`, with `startLedgerWorker` unless given (a test package's, a negative control's), and closed with
+   * the process.
+   */
+  readonly ledgerWorker?: () => LedgerHost;
 }
 
 /** What the process shares with the block source it makes (task 10.3): its one node connection. */
@@ -484,6 +497,8 @@ class Process implements ProcessHandle {
   readonly #admin: ProcessAdmin | undefined;
   /** The process's one node client (task 10.3), shared by `core-chain`'s `node-client` item and the block source. */
   #nodeClient: NodeClient | null = null;
+  /** The process's ledger worker (task 12.3), once its graph needs one; kept across a retried startup. */
+  #ledger: LedgerHost | undefined;
 
   constructor(input: ProcessInput) {
     this.#input = input;
@@ -545,6 +560,7 @@ class Process implements ProcessHandle {
       await this.#api?.close();
     } finally {
       await this.#closeNode();
+      await this.#ledger?.close();
       await this.#db?.close();
       await this.#source?.close?.();
       if (this.#admin !== undefined) await this.#admin.close();
@@ -622,6 +638,7 @@ class Process implements ProcessHandle {
       }
       // The module API opens in the last step, after which only a stop throws: the stop closes it.
       await this.#closeNode();
+      await this.#ledger?.close();
       await this.#db?.close();
       await this.#source?.close?.();
       throw error;
@@ -675,6 +692,18 @@ class Process implements ProcessHandle {
     }
     if (graph.modules.some((part) => part.id === CORE_CHAIN_EVENTS_ID) && isBlockEventSource(source)) {
       bindCoreChainEvents(contexts.of(CORE_CHAIN_EVENTS_ID), source);
+    }
+    // The ledger worker (task 12.3): core-block-parsed parses there, core-ledger-state applies there (LG-7, LG-10).
+    const parses = graph.modules.some((part) => part.id === CORE_BLOCK_PARSED_ID);
+    const applies = graph.modules.some((part) => part.id === CORE_LEDGER_STATE_ID);
+    if (parses || applies) {
+      this.#ledger ??= (input.ledgerWorker ?? startLedgerWorker)();
+      // A request given no read (a parse) reads stored nodes through the process's database.
+      this.#ledger.useDatabase({ read: (body) => db.read(body) });
+      if (parses) bindLedgerParser(contexts.of(CORE_BLOCK_PARSED_ID), this.#ledger);
+      if (applies && isBlockLedgerSource(source)) {
+        bindCoreLedgerState(contexts.of(CORE_LEDGER_STATE_ID), { ledger: this.#ledger, source });
+      }
     }
     await startDatabase(db, {
       plan,

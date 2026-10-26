@@ -7,6 +7,7 @@ import {
   eventKindOf,
   fieldBytes,
   ledgerEventOf,
+  networkIdOf,
   type RawEvent,
   type RawLedgerPackage,
   type RawState,
@@ -261,6 +262,9 @@ function fakePackage(
     constructor(readonly name: string) {}
     get parameters() {
       return { of: this.name, serialize: () => Uint8Array.of(7), free() {} };
+    }
+    get zswap() {
+      return { firstFree: 0n, free() {} };
     }
     apply(verified: object, context: object): [RawState, RawTransactionResult] {
       const { name, outcome } = verified as { name: string; outcome: RawTransactionResult };
@@ -519,5 +523,31 @@ describe("apply, on a package that records what it is handed (LG-8, LG-15)", () 
     const { output } = adapter.apply(adapter.emptyState(), skewed);
     expect(recorded.wellFormed.map((check) => check.time - T)).toEqual([0, 6_000, 0]);
     expect(output.results.map((r) => r.outcome)).toEqual(["success", "failure"]);
+  });
+});
+
+describe("networkIdOf and the state's summary (task 12.3; IN-7, LG-16)", () => {
+  it("reads a state's network id from its rendering, escapes included, and refuses a rendering without one", () => {
+    expect(networkIdOf({ toString: () => 'LedgerState { network_id: "mainnet", parameters: … }' })).toBe("mainnet");
+    expect(networkIdOf({ toString: () => 'LedgerState { network_id: "a\\"b\\\\c", parameters: … }' })).toBe('a"b\\c');
+    expect(() => networkIdOf({ toString: () => "LedgerState { parameters: … }" })).toThrow(/names no network id/);
+    expect(() => networkIdOf({ toString: () => 'ZswapState { network_id: "x" }' })).toThrow(/names no network id/);
+  });
+
+  it("gives the real states' network ids, an empty state of another network, the zswap first free index, and frees", async () => {
+    const adapter = await loadLedgerPackage("v9", { networkId: NETWORK_ID });
+    const preview = adapter.emptyState("preview");
+    expect(adapter.networkIdOf(preview)).toBe("preview");
+    expect(adapter.networkIdOf(adapter.emptyState())).toBe(NETWORK_ID);
+    expect(adapter.stateSummary(preview)).toEqual({
+      zswapFirstFree: 0n,
+      zswapRoot: null,
+      dustCommitmentFirstFree: null,
+      dustCommitmentRoot: null,
+      dustGenerationFirstFree: null,
+      dustGenerationRoot: null,
+    });
+    adapter.dispose(preview);
+    expect(() => adapter.stateRoot(preview)).toThrow();
   });
 });

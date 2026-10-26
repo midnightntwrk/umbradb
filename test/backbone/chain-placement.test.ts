@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 import {
   type BlockParsed,
   blockParsedOf,
   type BlockTransaction,
+  chainHashOf,
   writeTransactionRows,
 } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import { inThreadParser, PARSE_NETWORK_ID, type TransactionParser } from "../../src/backbone/core-block-parsed/parser.js";
@@ -311,6 +313,39 @@ describe("the parse (CD-5, LG-7)", () => {
     );
     const short: TransactionParser = { parse: async () => [] };
     await expect(blockParsedOf(context, { parser: short })).rejects.toThrow(/block 8: the parser gave 0 transactions for 1/);
+  });
+
+  it("refuses a transaction whose ledger hash is not the one its chain event carries (task 12.3)", async () => {
+    const regular = zswapOutputTransaction(RAW.v9);
+    const system = systemTransaction("v9");
+    const own = (bytes: Uint8Array) => Uint8Array.from(createHash("sha256").update(bytes).digest());
+    const contextOf = (applied: Uint8Array, systemHash: Uint8Array): BlockContext => {
+      const extrinsics = [timestampSet(1n), ledgerTransaction([...regular]), ledgerTransaction([...zswapOutputTransaction(RAW.v9)])];
+      const { body, events } = block(9n, extrinsics, [
+        ev.success(0),
+        ev.txApplied(1, applied),
+        ev.success(1),
+        ev.failed(2),
+        ev.systemApplied("finalization", systemHash, system),
+      ]);
+      return {
+        height: 9n,
+        items: new Map<string, unknown>([
+          ["block-body", body],
+          ["chain-events", events],
+          ["ledger-version", "v9"],
+          ["runtime-metadata", { specVersion: 2_000_000, metadata: METADATA }],
+        ]),
+      } as unknown as BlockContext;
+    };
+    // The chain's hashes: every one checked, the failed extrinsic's (no hash in its event) not.
+    const parsed = await blockParsedOf(contextOf(own(regular), own(system)));
+    expect(parsed.transactions.map((t) => t.kind)).toEqual(["regular", "regular", "system"]);
+    await expect(blockParsedOf(contextOf(fill(1), own(system)))).rejects.toThrow(
+      /block 9: transaction 0's hash is 0x[0-9a-f]{64} to the ledger v9, and its chain event 1 carries 0x(01){32} \(CD-5\)/,
+    );
+    await expect(blockParsedOf(contextOf(own(regular), fill(2)))).rejects.toThrow(/transaction 2's hash .* its chain event 4 carries 0x(02){32}/);
+    expect(chainHashOf(undefined)).toBeNull();
   });
 });
 

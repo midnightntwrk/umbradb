@@ -59,9 +59,15 @@
  * **A block's chain events** ({@link NodeBlockSource.blockEvents}, `./events.ts`; task 11.1): `System::Events` read with
  * `state_getStorage` at the block's own hash, for `core-chain-events` (CD-4), which decodes them; a queued best block's
  * without retries, as its other calls (IN-10).
+ *
+ * **The ledger's root and genesis state** ({@link NodeBlockSource.ledgerStateRoot}, {@link NodeBlockSource.genesisState},
+ * `./ledger-source.ts`; task 12.3): `midnight_ledgerStateRoot` at a finalized block's hash and
+ * `system_properties.genesis_state`, for `core-ledger-state` (LG-15, IN-7), with the client's retries — it asks only for
+ * finalized heights, at `on-compute`.
  */
 
 import { UmbraError } from "../../db/errors.js";
+import { type BlockLedgerSource, genesisStateOf } from "./ledger-source.js";
 import { RuntimeMetadata, type MetadataBlock, type RuntimeMetadataEntry } from "../../ledger/metadata.js";
 import { type LedgerTable, selectLedgerVersion } from "../../ledger/version-table.js";
 import type { NodeClient, NodeSubscription } from "../../node/client.js";
@@ -141,7 +147,7 @@ function refOf(header: NodeHeader, hash: Uint8Array): BlockRef {
 }
 
 /** The block source over the node (see the module comment). */
-export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEventSource {
+export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEventSource, BlockLedgerSource {
   /** The node client, the process's one connection. */
   protected readonly client: NodeClient;
   readonly #window: number;
@@ -354,6 +360,16 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   async blockEvents(block: BlockRef): Promise<Uint8Array | null> {
     const best = this.#fetched.get(hexOf(block.hash))?.best ?? false;
     return this.client.storage(systemEventsKey(), block.hash, best ? { retry: false } : undefined);
+  }
+
+  /** The node's ledger state root after `block` (LG-15): `midnight_ledgerStateRoot` at its hash, with the client's retries. */
+  async ledgerStateRoot(block: BlockRef): Promise<Uint8Array> {
+    return this.client.ledgerStateRoot(block.hash);
+  }
+
+  /** The genesis ledger state (IN-7): `system_properties.genesis_state`, with the client's retries. */
+  async genesisState(): Promise<Uint8Array> {
+    return genesisStateOf(await this.client.systemProperties());
   }
 
   // ── seams (a negative control's) ────────────────────────────────────────────────────────────────────────────────

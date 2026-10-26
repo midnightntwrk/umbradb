@@ -11,8 +11,8 @@
  * source and the block items, task 10.3), `core-block-commit` (the blocks table, tasks 5.2 and 10.2), `core-digest`
  * (task 7.1), and the admin parts `core-health`, `core-status` and `core-config` (tasks 8.2–8.4). Its core modules —
  * off unless a configuration enables them — are `core-chain-events`, `core-block-parsed` and `core-tx-results` (task
- * 11.1); the others come with tasks 12.x–13.x, each adding its declaration here, in `design.md` §6's fixed order and
- * the decision record's table of core modules.
+ * 11.1) and `core-ledger-state` (task 12.3); the others come with task 13.x, each adding its declaration here, in
+ * `design.md` §6's fixed order and the decision record's table of core modules.
  */
 
 import { CORE_BLOCK_COMMIT } from "../backbone/core-block-commit/core-block-commit.js";
@@ -23,6 +23,7 @@ import { CORE_CHAIN_EVENTS } from "../backbone/core-chain-events/core-chain-even
 import { CORE_CONFIG } from "../backbone/core-config/core-config.js";
 import { CORE_DIGEST } from "../backbone/core-digest/index.js";
 import { CORE_HEALTH } from "../backbone/core-health/core-health.js";
+import { CORE_LEDGER_STATE } from "../backbone/core-ledger-state/core-ledger-state.js";
 import { CORE_STATUS } from "../backbone/core-status/core-status.js";
 import { CORE_TX_RESULTS } from "../backbone/core-tx-results/core-tx-results.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
@@ -32,7 +33,7 @@ import { type DeclarationSet, validateDeclarations } from "../modules/validation
 export function buildDeclarations(): DeclarationSet<ModuleDeclaration> {
   return validateDeclarations({
     backbone: [CORE_CHAIN, CORE_BLOCK_FETCH, CORE_BLOCK_COMMIT, CORE_DIGEST, CORE_HEALTH, CORE_STATUS, CORE_CONFIG],
-    core: [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS],
+    core: [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS, CORE_LEDGER_STATE],
     user: [],
   });
 }

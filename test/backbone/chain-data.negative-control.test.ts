@@ -1,6 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, type MockInstance, vi } from "vitest";
 import { readRuntimeMetadata } from "../../src/backbone/core-block-fetch/metadata.js";
-import { CORE_BLOCK_PARSED, coreBlockParsedOnParse } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
+import {
+  type BlockParsedOptions,
+  CORE_BLOCK_PARSED,
+  coreBlockParsedOnParse,
+} from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import { inThreadParser, type TransactionParser } from "../../src/backbone/core-block-parsed/parser.js";
 import { type ChainTransaction, placeTransactions } from "../../src/backbone/core-block-parsed/placement.js";
 import { boundEventSource, CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
@@ -25,7 +29,10 @@ import { committed, halted, ingest, PATIENCE_MS } from "./ingest-harness.js";
  *   for the same) is caught by the counted parses; one placing the regular transactions before the system ones (the
  *   body's order) by the stored order.
  * - A93: outcomes matched to the block's Midnight transactions by their place among the events rather than by their
- *   phase: a failed remark's `ExtrinsicFailed` becomes B's, and B's `TxPartialSuccess` C's.
+ *   phase: a failed remark's `ExtrinsicFailed` becomes B's, and B's `TxPartialSuccess` C's. Since task 12.3,
+ *   `core-block-parsed` also checks each transaction's ledger hash against the one its placing event carries, which
+ *   refuses that placement at `on-parse` (C's hash is not B's): the control turns the check off to show that A93's own
+ *   oracle catches the wrong outcomes, and a second run with the check on shows the check halting the block.
  */
 
 /** Decodes with the block's own state's metadata (`state_getMetadata` at its hash) instead of `runtime-metadata`. */
@@ -42,8 +49,8 @@ const OWN_STATE_EVENTS: ModuleDeclaration = {
   },
 };
 
-/** `core-block-parsed` with its own placement or parser. */
-function blockParsedWith(options: { readonly place?: typeof placeTransactions; readonly parser?: TransactionParser }): ModuleDeclaration {
+/** `core-block-parsed` with its own placement, parser or chain-hash reading. */
+function blockParsedWith(options: BlockParsedOptions): ModuleDeclaration {
   return {
     ...CORE_BLOCK_PARSED,
     points: {
@@ -166,10 +173,23 @@ describe.each(PROCESS_BACKENDS)("chain data's negative controls on $name", (back
 
   it("A93's control: outcomes matched by event order instead of phase fail A93", async () => {
     const scenario = a93Scenario();
-    const { db, seen } = await run(scenario, [CORE_CHAIN_EVENTS, blockParsedWith({ place: eventOrder }), CORE_TX_RESULTS]);
+    const wrong = blockParsedWith({ place: eventOrder, chainHash: () => null });
+    const { db, seen } = await run(scenario, [CORE_CHAIN_EVENTS, wrong, CORE_TX_RESULTS]);
     expect(seen.results.get(1n)).toEqual(["success", "failure", "partial", "success"]);
     const problems = await a93Problems(db, scenario);
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatch(/"outcome":"failure","tx_index":"1n".*"outcome":"partial","tx_index":"2n".*, expected/);
+  }, PATIENCE_MS * 2);
+
+  it("A93's control with the chain-hash check on (task 12.3): the same placement halts block 1 at on-parse", async () => {
+    const scenario = a93Scenario();
+    const { process, status } = await run(scenario, [CORE_CHAIN_EVENTS, blockParsedWith({ place: eventOrder }), CORE_TX_RESULTS], "halt");
+    expect(status).toMatchObject({
+      state: "halted",
+      // Nothing committed: S is 1, the halted block.
+      cursor: null,
+      reason: { code: "callback-error", height: scenario.start, module: "core-block-parsed", point: "on-parse" },
+    });
+    expect(process.lines.some((line) => /transaction 2's hash is 0x[0-9a-f]{64} to the ledger v9, and its chain event \d+ carries/.test(line))).toBe(true);
   }, PATIENCE_MS * 2);
 });

@@ -500,3 +500,28 @@ items needs them enabled where it runs.
   height (a best block is dropped and fetched again at finality).
 - **Testing with `InMemoryBlockSource`**: its blocks have no extrinsics and no events, so the three items are empty;
   the node source over a tape node gives them their content.
+
+## The ledger state
+
+The core module `core-ledger-state` (LG-8 to LG-16 of the `core-arch` change) applies every block to the ledger
+state, from genesis, in the ledger worker — a thread of its own, so a long ledger step never holds your callbacks or
+the admin endpoints —, and halts processing (`root-mismatch`, nothing of the block stored) at any block whose state
+root is not the node's. It requires `core-block-parsed` and `core-tx-results`, which must be enabled with it, and it
+cannot start mid-chain: enable it at 0 on a database synced from genesis (or restored from a backup holding it); an
+entry starting above 0 is refused at startup with `cannot-start-mid-chain`. Its `block` items, from `on-compute` on
+(require them, and read them in your `on-compute` or `on-db-write`):
+
+- **`ledger-state`**: the state after the block, as plain data — its root node's key, its root (the node's), the ledger
+  parameters after the block, the zswap tree's first free index. The state itself stays in the worker; what a module
+  needs of it that this does not give is a ledger task's (task 12.6).
+- **`ledger-events`**: every ledger event of the block but contract logs — zswap inputs and outputs, contract deploys,
+  DUST events, parameter changes —, each with its transaction's index, its segments, its bytes and its nullifier,
+  commitment, tree index or contract address where it has one.
+- **`segment-results`**: per transaction, in `block-parsed`'s order, its outcome and each segment's success: here a
+  partial success says which fallible segment failed. A transaction the chain failed (`tx-results` `failure`) was not
+  applied: all its segments failed.
+- **`vm-logs`**: the contract logs of the block's applied segments, numbered in the block in emission order (none on
+  ledger v8). The `contract-logs` modules store them (task 13.1).
+
+Stored: `core_ledger_state.states` (per block), `segment_results`, `events`, and the state's nodes with their root
+counts (`nodes`, `root_counts`), never a whole serialized state.

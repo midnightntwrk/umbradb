@@ -1,6 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
+import type { AdminStarter } from "../../src/admin/server.js";
 import { type BodyExtrinsic, NodeBlockSource, nodeSourceOf } from "../../src/backbone/core-block-fetch/index.js";
+import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import type { BlockHeader, ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { NodeClient } from "../../src/node/client.js";
@@ -132,13 +134,21 @@ export interface IngestOptions {
   readonly start: bigint;
   /** More `core` settings (`prefetchWindow`, `tipCap`, …). */
   readonly settings?: Readonly<Record<string, unknown>>;
+  /** The core's stop (CF-4): the last height processed (a recorded tape's range end, task 12.3). */
+  readonly stop?: bigint;
   /** The node source's class (a negative control's), or a factory wrapping the process's client (an instrument). */
   readonly Source?: SourceClass;
   readonly client?: (client: NodeClient) => NodeClient;
   /** More user modules. */
   readonly user?: readonly ModuleDeclaration[];
-  /** Core modules of the build, each enabled from S (task 11.1's). */
+  /** Core modules of the build, each enabled from S (task 11.1's) unless {@link startOf} says otherwise. */
   readonly core?: readonly ModuleDeclaration[];
+  /** The start of each core module's entry (task 12.3's mid-chain refusal); S unless given. */
+  readonly startOf?: (id: string) => number;
+  /** The process's ledger worker (task 12.3: a test package's, a negative control's); `startLedgerWorker` unless given. */
+  readonly ledgerWorker?: () => LedgerHost;
+  /** The admin endpoints (task 8.1), as `startProcess` takes them; none unless given. */
+  readonly admin?: AdminStarter;
 }
 
 /** A process over a tape node. */
@@ -172,8 +182,12 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
   const genesisHash = genesisOf(records);
   const genesis = (network === undefined || network === "custom") && genesisHash !== undefined ? { genesisHash } : {};
   const entries = [
-    core(db.setting, Number(options.start), { extra: { node: node.url, ...genesis, ...options.settings } }),
-    ...[...(options.core ?? []), ...user].map((module) => entryOf(module, Number(options.start))),
+    core(db.setting, Number(options.start), {
+      extra: { node: node.url, ...genesis, ...options.settings },
+      ...(options.stop === undefined ? {} : { stop: Number(options.stop) }),
+    }),
+    ...(options.core ?? []).map((module) => entryOf(module, options.startOf?.(module.id) ?? Number(options.start))),
+    ...user.map((module) => entryOf(module, Number(options.start))),
   ];
   const lines: string[] = [];
   const Source = options.Source ?? NodeBlockSource;
@@ -187,6 +201,9 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
       return new Source({ client, prefetchWindow: settings.prefetchWindow, tipCap: settings.tipCap });
     },
     log: (line) => lines.push(line),
+    ...(options.ledgerWorker === undefined ? {} : { ledgerWorker: options.ledgerWorker }),
+    // Explicitly, so that no test of this harness serves the endpoints on their default address (task 8.1a, Q128 B).
+    admin: options.admin ?? false,
   });
   return {
     handle,
