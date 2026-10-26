@@ -473,6 +473,9 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A112** `[CI]` With a core and a private process running, the core's database connections reach only the public
   database. (PP-1)
 - **A113** `[CI]` A private database bound to another public database refuses with `private-binding-mismatch`. (PP-2)
+- **A156** `[CI]` On both backends, a private process configured for network A, starting for the first time against
+  the public database of network B, refuses with `private-binding-mismatch` (`details.reason` `network`, both genesis
+  hashes) before any migration; configured for B it binds. (PP-2, owner decision Q136)
 - **A114** `[FAULT]` Dropping the transport while the public cursor advances 50 heights: after reconnecting, the private
   process processes the 50 heights in order. (PP-3)
 - **A115** `[CI]` Every message type round-trips through the zod schemas of `design.md` §8 and fails on a missing or
@@ -506,6 +509,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   opt-in, and writes no file. (PP-12)
 - **A123** `[CI]` A private process restarting with a test key it already admitted at its start keeps its
   `arrived_height`; the same key with another start refuses with `test-key-conflict`. (CF-11)
+- **A155** `[CI]` On both backends, a private module that requires a public `table` item starts when the public core
+  provides it at every height the module runs; refuses with `item-no-provider` naming the item when no public module
+  provides it, and with `item-not-available` when one provides it only from a height above the module's start. (PP-13,
+  owner decision Q126)
 
 ## 15. Backups and browser
 

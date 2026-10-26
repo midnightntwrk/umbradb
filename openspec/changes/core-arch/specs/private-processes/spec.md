@@ -22,12 +22,27 @@ configuration (test keys included) and the heights its keys arrived at.
 ### Requirement: PP-2 A private database is bound to one public database
 
 WHEN a private database is first started, THE private backbone part `core-private-source` SHALL record the public
-database's genesis hash and S in `core_private_source.cursor`; on every start IF they differ, or the private S is below
-the public S, THEN startup SHALL refuse.
+database's genesis hash and S in `core_private_source.cursor`, which also holds the private cursor's height, hash and
+parent hash, written in each block's transaction (owner decision Q124). On every start, before any migration, IF the
+public database's core has never started (it has no chain identity; Q125), or its genesis hash is not the configured
+network's (the built-in table's for a known network, `genesisHash` for `custom`; Q136), THEN startup SHALL refuse; and
+IF the recorded genesis hash or S differ from the public database's, or the private S is below the public S, THEN
+startup SHALL refuse. Each of these refusals is `private-binding-mismatch`, its `details.reason` naming which:
+`public-not-started`, `network`, `genesis`, `start` or `private-start-below`.
 
 #### Scenario: Pointed at another public database
 - **WHEN** a private database bound to network A starts against a public database of network B
 - **THEN** startup refuses with `private-binding-mismatch`
+
+#### Scenario: Configured for another network
+- **WHEN** a private process configured for `mainnet` starts for the first time against the public database of a
+  preprod core
+- **THEN** startup refuses with `private-binding-mismatch` (`details.reason` `network`, both genesis hashes) before any
+  migration, and the private database records no binding
+
+#### Scenario: The public core never started
+- **WHEN** a private process starts against a public database whose core has never started
+- **THEN** startup refuses with `private-binding-mismatch` (`details.reason` `public-not-started`)
 
 ### Requirement: PP-3 Private processes take blocks from the public database
 
@@ -148,3 +163,17 @@ can still copy the database with PostgreSQL's own tools; this rule governs only 
 #### Scenario: A production private backup
 - **WHEN** `umbradb backup` runs against a private process without the development opt-in
 - **THEN** it refuses with `private-backup-refused` and writes no file
+
+### Requirement: PP-13 A private module may require public table items
+
+WHEN a private process resolves its requirement graph (MD-3, MD-4), THE private backbone SHALL count as provided, for
+each height range, the public `table` items that the public core's enabled modules provide there, read from the public
+database (owner decision Q126); IF a private module requires a public `table` item that no public module provides at a
+height the private module runs THEN startup SHALL refuse, as MD-4 refuses a core module's: `item-no-provider` when no
+public module provides it, `item-not-available` when one provides it only at other heights. A private module SHALL NOT
+require a public `block` or `process` item.
+
+#### Scenario: A wallet module on the public ledger events
+- **WHEN** a private module requires `ledger-events`, and the public core enables `core-ledger-state` from S
+- **THEN** the private process starts; against a public core that does not enable `core-ledger-state`, startup refuses
+  with `item-no-provider` naming `ledger-events`

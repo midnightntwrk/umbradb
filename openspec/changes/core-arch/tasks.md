@@ -61,13 +61,15 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       choosing between it and the undeployed devnet once both exist. Read each network's genesis hash, runtime at
       genesis and upgrade boundaries (U and F hashes and `MNSV`) for the built-in tables. Recorded once, when a task
       first needs real data (11.1's A91, 12.3's A99, 18.2), with a complete per-height recording: every IN-8 call for
-      every height of each range and both head subscriptions, so any client that makes any subset of those calls replays
-      against the same tape; checked for completeness and replayed, and never recorded again. Kept on this machine
-      (`~/todo/Umbra/tapes/`, each with its SHA-256) until the owner decides where they are stored; tests find them
-      through `UMBRADB_TAPES` and are skipped with a named reason when a tape is absent.
+      every height of each range — `state_getMetadata` once per runtime, at the range's first block and at each
+      upgrade's U, its answer being the same at every block of a runtime (owner decision Q135) — and both head
+      subscriptions, so any client that makes any subset of those calls replays against the same tape; checked for
+      completeness and replayed, and never recorded again. Kept on this machine (`~/todo/Umbra/tapes/`, each with its
+      SHA-256) until the owner decides where they are stored; tests find them through `UMBRADB_TAPES` and are skipped
+      with a named reason when a tape is absent.
       **Acceptance:** each tape replays against the tape node and its SHA-256 matches; the boundary data is recorded
-      with its source; every IN-8 call of every height is on the tape; a test whose tape is absent is reported as
-      skipped with the tape's name. (Runs after task 9.2, when first needed.)
+      with its source; every IN-8 call of every height is on the tape (`state_getMetadata` once per runtime, Q135); a
+      test whose tape is absent is reported as skipped with the tape's name. (Runs after task 9.2, when first needed.)
       **Done (2026-10-26):** seven tapes recorded through the builder and kept in `~/todo/Umbra/tapes/` (none in the
       repository), listed with name, network, range, SHA-256, size, records, endpoint, node version, day and why their
       bounds in `test/tape/real/manifest.json`: `preview-0-10000`, `preview-1073620-1075620` (the 1.0.300 upgrade, U
@@ -2045,6 +2047,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `genesisHash` the configuration refuses — closed by an assertion and caught on rerun. Issues
       `00026-core-revisions-name-different-networks` and `00027-v8-fatal-wasm-free-hangs-test-worker` recorded.
       **Pending:** the configured network's genesis on a private process (Q136, owner).
+- [ ] 10.2b The owner's answer Q136 B: a private process's configured network compared with its public database's
+      genesis. `PrivateBlockSource.checkChain` (task 14.1; it receives `configured` since 10.2a) compares the
+      configured network's genesis hash (`configuredGenesisOf`) with the public database's identity before PP-2's
+      binding and before any migration, and refuses a difference with `private-binding-mismatch` (`details.reason`
+      `network`, both hashes); `design.md` §5 and §11 name the reason; A113's committed control changes, since its
+      other-network case is now refused by this check first.
+      **Acceptance:** A156.
 
 ## 11. Chain data
 
@@ -2322,8 +2331,18 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** the process transport, `hello`/`hello-ack`/`committed`/`read` and the PGlite public database (14.2,
       which replaces `PublicWakes`' poll and `openPublicDatabase`'s refusal); lockstep and its check in the read of
       public data (14.3); test keys made pending, `on-key`, the admission cutoff and CF-11's checks, and A146 with the
-      keys admitted (14.4); the configured network's genesis check (10.2a, Q117, Q120) on a private process; the
-      private-backup refusal (15.1); the browser's transport (16.1); Q126's graph (a later task, by its answer).
+      keys admitted (14.4); the configured network's genesis check on a private process (10.2b, Q136 B); the
+      private-backup refusal (15.1); the browser's transport (16.1); public `table` items in the private graph (14.1a,
+      Q126 B).
+- [ ] 14.1a The owner's answer Q126 B: a private module's requirement on a public `table` item resolved against the
+      public database (PP-13). **Design first**, recorded in `design.md` §8 and §10 before any code: where the public
+      database says which `table` items each module provides at which heights, so that a private process needs neither
+      the public build nor its user modules — the reading in Q126's resolution, to be confirmed or replaced by a
+      question: a `provides` column (`text[]`) of `core_chain.config`, written by `core-chain` with each revision from
+      the module's declaration. Then the private graph (`resolveGraph`, MD-3, MD-4) counts those items as provided in
+      their ranges; the module guide's "Private modules" and `test/private/builds.ts`'s modules declare the public
+      tables they read.
+      **Acceptance:** A155.
 - [ ] 14.2 The process transport and its messages; opt-in mutual TLS.
       **Acceptance:** A115, A121.
 - [ ] 14.3 Lockstep and the behind-instance refusal.

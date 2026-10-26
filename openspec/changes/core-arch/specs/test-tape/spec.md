@@ -50,7 +50,9 @@ node, writing every call, subscription and notification in order; and SHALL prov
 drop, repeat or skip notifications of a subscription; insert a `disconnect` after a record; delay answers (setting
 `delayMs`); replace an
 answer by an error (e.g. state unavailable); and splice another tape's notifications for a range (for a best-chain
-switch recorded on a devnet).
+switch recorded on a devnet). IF a node's answer or notification is not written as the tape node will replay it
+THEN the builder SHALL refuse the recording (`cannot-record`, `not-replayable`), naming the frame, and write nothing of
+it (owner decision Q111).
 
 #### Scenario: Record and replay give the same session
 - **WHEN** a client session against a local devnet node is recorded, and the same client is then run against the tape
