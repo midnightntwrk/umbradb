@@ -29,8 +29,10 @@
  * error itself its cause). A use of a closed write handle (DB-3), or a put from a kept item sink, is a callback error
  * even when no callback rejects with it (a timer, a module that catches it): the loop keeps the first, names its module
  * and point, and fails the height in progress before its `COMMIT`, or stops once the height's last point ended, or before
- * the next height. The halt — the state `halted`, its code, the process staying up — and the retries of a lost
- * connection are task 5.4's (RN-8, IN-10).
+ * the next height. So is a `publish` the process contexts refuse (MD-7, `./process-context.ts`), which they report to
+ * the loop ({@link LoopInput.misuses}): named by its module and the point the loop was dispatching, none while it waits.
+ * The halt — the state `halted`, its code, the process staying up — and the retries of a lost connection are task 5.4's
+ * (RN-8, IN-10).
  */
 
 import { CURSOR_TABLE, readCursor } from "../backbone/core-block-commit/core-block-commit.js";
@@ -48,6 +50,7 @@ import type { ResolvedGraph, ResolvedRange } from "../modules/graph.js";
 import { BlockItems, revisionAt } from "./block-context.js";
 import type { BlockRef, BlockSource } from "./block-source.js";
 import { CallbackFailure, type PointArguments, runSchedule, scheduleAt } from "./dispatch.js";
+import type { MisuseReports } from "./process-context.js";
 
 /** What the loop runs over. */
 export interface LoopInput {
@@ -61,6 +64,11 @@ export interface LoopInput {
   readonly source: BlockSource;
   /** Each module's process context: one per module, the same object at every point (MD-7). */
   readonly contextOf: (id: string) => ProcessContext;
+  /**
+   * Where the process contexts report a refused `publish` (MD-7): a callback error of its module even when the module
+   * caught it, or when a timer made it (`ProcessContexts`, `./process-context.ts`).
+   */
+  readonly misuses?: MisuseReports;
   /** Stops the loop: before the next height, or while it waits for the head. */
   readonly signal?: AbortSignal;
 }
@@ -108,11 +116,14 @@ export class HeightFailure extends Error {
   }
 }
 
-/** A callback error no callback rejected with: a use of a closed write handle, or of a kept item sink. */
+/**
+ * A callback error no callback rejected with: a use of a closed write handle, of a kept item sink, or a refused
+ * `publish`; its point is the callback's, or for a refused `publish` the point being dispatched (none while waiting).
+ */
 interface Misuse {
   readonly error: Error;
   readonly module: string;
-  readonly point: PointName;
+  readonly point: PointName | undefined;
 }
 
 /** The callbacks of a point, called with what `invoke` gives each. */
@@ -131,6 +142,8 @@ export class FinalizedLoop {
   protected readonly input: LoopInput;
   readonly #signal: AbortSignal;
   #misuse: Misuse | undefined;
+  /** The point being dispatched, if any. */
+  #point: PointName | undefined;
 
   constructor(input: LoopInput) {
     this.input = input;
@@ -142,6 +155,16 @@ export class FinalizedLoop {
    * then resolves; rejects with a {@link HeightFailure} when processing fails.
    */
   async run(): Promise<void> {
+    const unwatch = this.input.misuses?.watch((error, module) => this.#misused({ error, module, point: this.#point }));
+    try {
+      await this.#run();
+    } finally {
+      unwatch?.();
+    }
+  }
+
+  /** {@link run}, while the process contexts' refusals are reported to the loop. */
+  async #run(): Promise<void> {
     const { db, graph, source } = this.input;
     let cursor = await db.read((read) => source.cursor(read));
     for (;;) {
@@ -272,7 +295,12 @@ export class FinalizedLoop {
   /** Runs `point` in `range`, each callback through `invoke`, after checking no misuse is pending. */
   async #dispatch<P extends PointName>(range: ResolvedRange, point: P, invoke: Invoke<P>): Promise<void> {
     this.#check();
-    await runSchedule(scheduleAt(range, point), { contextOf: this.input.contextOf, invoke });
+    this.#point = point;
+    try {
+      await runSchedule(scheduleAt(range, point), { contextOf: this.input.contextOf, invoke });
+    } finally {
+      this.#point = undefined;
+    }
   }
 
   /** The block context of `part`'s callback at the height of `run`, with `items`. */

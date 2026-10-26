@@ -78,6 +78,16 @@ export const ERROR_CODES = [
   "graph-cycle",
   "item-not-available",
   "cannot-start-mid-chain",
+  /**
+   * A `process` item a module of the process requires was not published when every `on-start-db` had run (MD-7,
+   * `src/runner/process-context.ts`): startup refuses, naming the item, the modules requiring it and its providers.
+   */
+  "process-item-missing",
+  /**
+   * Two modules — or one module twice — registered one method and path, or one subscription name, in `on-start-api`
+   * (RN-15, `src/runner/module-api.ts`): startup refuses before anything listens, naming the route and both modules.
+   */
+  "duplicate-api-route",
   // Startup refusals of migrations (DB-9, DB-10, decision record Q91; `src/db/migrate.ts`).
   "migration-checksum-changed",
   "migration-missing",

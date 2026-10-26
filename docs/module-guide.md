@@ -246,3 +246,42 @@ that height stay as the old version wrote them (owner decisions Q33 and Q43 of t
   synced with this version from the module's first revision. Any other database refuses it at startup with
   `requires-resync`, naming the module and the version, before any migration runs. A database built with it restarts
   normally.
+
+## Process items and APIs
+
+A `process` item is set once per process, by its provider, and read by the modules that require it (MD-7, RN-15 and
+RN-16 of the `core-arch` change).
+
+- **Publish a process item from your `on-start-db`, once.** `p.publish(item, value)` takes only an item your module
+  declares with the `process` lifetime; it throws for any other item, for a second publish of the item (by you or by
+  another provider of it: one value per item for the whole process), and when called anywhere but your own
+  `on-start-db` — a later point, a timer, another module's callback. Such a call fails your callback even if you catch
+  the error, so startup refuses, or processing stops at the block in progress.
+- **Read it from `on-start-api` on.** `p.items` holds the published items your module requires or provides; it is
+  empty during `on-start-db`, so no setup depends on the order of other modules' setups. If an item a running module
+  requires was not published once every `on-start-db` has run, startup refuses with `process-item-missing`, naming the
+  item, the modules requiring it and its providers.
+- **Register your API in `on-start-api`.** `api.http(method, path, handler)` takes `GET` or `POST` and a path of `/`
+  and segments, each a literal (letters, digits and `-._~!$&'()*+,;=@`) or a parameter `:name`; a literal segment wins
+  over a parameter. `api.subscription(name, handler)` takes a non-empty name. Register nothing later: the registry
+  closes when your callback ends. Two registrations of one method and path (parameters' names aside), or of one
+  subscription name, refuse startup with `duplicate-api-route`, naming both modules — also across a handover, so two
+  modules that serve the same route at different heights need distinct paths.
+- **A handler gets `{ params, body }` and a read handle.** `params` holds the query's parameters and the path's (the
+  path's win a name both have); a `POST`'s body is parsed JSON (integers beyond ±(2^53 − 1) as `bigint`). The read sees
+  the latest committed height (`read.height`) and is bounded by `apiReadTimeoutMs` on PostgreSQL (`query-timeout`,
+  answered 504): do slow work that is not the database's outside the handler. Do not call `db.read` from a handler: on
+  PGlite it fails with `nested-call`.
+- **Answer `{ status, headers?, body }`.** The status is an integer from 200 to 599. The body is written as JSON — a
+  `bigint` as decimal text, bytes as `0x` hex — unless you give a `Content-Type` with a string or bytes, which are sent
+  as they are. Every answer carries `X-Umbra-View: finalized`, `X-Umbra-Height` and `X-Umbra-Hash` of the height your
+  read saw; an object of only `data`, `errors` and `extensions` (a GraphQL response) also gets them in its
+  `extensions`. Before the first block commits every request is answered 503 `no-committed-height` without calling
+  you. A handler that throws is answered 500 `internal-error` with a fixed message: the client never sees your error.
+- **Notify subscribers from your `on-after-db-write`.** A subscription handler gets the subscriber's arguments and an
+  `emit`, and returns its unsubscribe; keep the `emit`s you were given and call them from `on-after-db-write`, which
+  reads the committed block. `emit` never waits: a subscriber that falls more than 1 MiB behind is disconnected and
+  unsubscribed, and after the unsubscribe `emit` does nothing. A value `emit` cannot write as JSON (a cyclic one)
+  throws at your `emit`. Clients speak JSON messages over WebSocket on the API listener: `subscribe` (`id`, `name`,
+  `args`), answered `subscribed`, then `next` with each value; `unsubscribe`, answered `complete`; `error` for what
+  cannot be done.

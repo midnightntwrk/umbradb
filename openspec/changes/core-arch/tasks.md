@@ -945,9 +945,52 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       switch (5.3); the `halted` state, retries and RN-11's re-delivery (5.4); the watchdog (5.5); the node source
       and IN-4's parent check (10.3); the cursor table's other columns and `duplicate-block-hash` (10.2);
       `core-digest` through the loop (7.1, 5.x); the exports (17.x).
-- [ ] 5.2a Process items (`ProcessContext.publish`) and module API registration (`ApiRegistry` mounted on `listen.api`,
+- [x] 5.2a Process items (`ProcessContext.publish`) and module API registration (`ApiRegistry` mounted on `listen.api`,
       WebSocket subscriptions, duplicate routes refused); each request's read bounded by `apiReadTimeoutMs` (DB-15).
       **Acceptance:** A74, A75; A141's request half through a registered handler.
+      **Done (2026-10-25):** `src/runner/process-context.ts`: `ProcessContexts`, one context per module, the same
+      object in its `on-start-db` (`startDbPart`: the migration runner's part, run in the module's publishing window)
+      and at every point; `publish` only from the module's own `on-start-db`, only an item it declares with the
+      `process` lifetime, once per item for the whole process (another provider's second publish too) — any other call
+      throws and fails the callback even when caught: `on-start-db` there, `on-start-api` in `registerModuleApis`, the
+      loop's points through `LoopInput.misuses`, which `FinalizedLoop.run` watches, naming the module and the point it
+      dispatched (none while it waits); `items` a read-only view of the published items the module requires or
+      provides, from `on-start-api` on (empty before); `seal()` once every `on-start-db` ran: a late refusal, then
+      `process-item-missing` for an item a module running in this process requires (not one whose revisions all ended
+      below the cursor's range), naming the item, the modules and the providers. `src/runner/module-api.ts`:
+      `ApiRoutes` (a registry per module, closed when its `on-start-api` ends; `GET`/`POST` routes of `/` and segments
+      with `:name` parameters, a literal winning; subscription names; `duplicate-api-route` naming the route and both
+      modules), `registerModuleApis` (`on-start-api` once, in series in the startup order, for the parts active in a
+      range the process may run: a part whose revisions all ended serves no API), `ModuleApi` (each request one
+      `db.read` with `{ timeoutMs: apiReadTimeoutMs }`, the handler inside it; RN-16's envelope on every module route,
+      a GraphQL response told by its shape; JSON bodies, `bigint`s as decimal text and bytes as `0x` hex, unless the
+      handler typed its text or bytes; errors `{ error: { code, message } }` — 400 `invalid-request`, 404, 405 with
+      `Allow`, 413, 500 `internal-error` with a fixed message (the error to `onError`), 503 `no-committed-height`, 504
+      `query-timeout`; `subscribe`). `src/runner/api-server.ts`: `listenModuleApi` (`node:http` on `listen.api`, `ws`
+      subscriptions on any path: `subscribe`/`subscribed`/`next`/`unsubscribe`/`complete`/`error`; a subscriber more
+      than 1 MiB behind disconnected, so `emit` never waits; closing ends every connection) and `startModuleApi`
+      (`on-start-api` and its checks, then the listener, so a refused startup listens nowhere; none without
+      `listen.api`). `ERROR_CODES` gains `process-item-missing` and `duplicate-api-route`; `design.md` §2 and the module
+      guide's "Process items and APIs" say what was built. Questions Q104 (a subscription notification and RN-16's
+      envelope; shipped A, the value only) and Q105 (how a GraphQL response is told; shipped A, by its shape), not
+      blocking 5.3. Tests, seen failing first (`tsc` exit 2, 40 lines: the three modules missing, the two codes unknown,
+      `LoopInput.misuses` unknown; the four suites failed to load): `test/runner/process-context.test.ts` (A74 through
+      the runner's startup and loop; the rules without a database), `module-api.test.ts`, `api-server.test.ts` (A75;
+      A36/A39 with `on-start-api`; the listener's own behaviour), `api-timeouts.test.ts` (A141's request half on
+      PostgreSQL 18.6, PGlite setting neither timeout), with `process-harness.ts`, on PostgreSQL 18.6 and PGlite 0.5.10;
+      committed negative controls: contexts allowing a second publish, or one outside `on-start-db`, fail A74; a
+      registry accepting a duplicate route fails A75's duplicate checks, responses without the envelope its envelope
+      checks; a handler's read ignoring `apiReadTimeoutMs` fails A141's request half. Wrong variants (a scratch runner
+      outside the clone): 166 of 174 caught on the first run; of the 8 survivors, 3 were gaps (an address that is not a
+      string, the 413's `Connection: close`, closing with a request in flight; closed by tests), 2 unused options (the
+      subscriber buffer limit and the start's listener options; removed) and 3 equivalent; on the final sources 170 of
+      173 caught, the 3 survivors equivalent (chunks of a refused body still buffered, the request's `error` listener
+      without which Node.js swallows the error, a stopped loop that keeps watching).
+      **Pending:** the startup assembled with the configuration — `listen.api` and `apiReadTimeoutMs` from the latest
+      `core` revision of the build's version (Q102), each module's revisions, the API closed at SIGTERM — (5.3); the
+      `refused` state for `process-item-missing`, `duplicate-api-route`, a failing `on-start-db` or `on-start-api` and a
+      listener that cannot listen, and the `halted` state for a refused publish (5.4); `core-chain` publishing the real
+      process items (10.2); the browser's `postMessage` transport (16.1); the exports (17.x).
 - [ ] 5.3 Revisions and settings; start and stop heights; the upgrade-boundary stop; SIGTERM; the `core` entry's
       operational fields from its latest revision of the build's version (Q102).
       **Acceptance:** A42, A45, A47, A48, A149.

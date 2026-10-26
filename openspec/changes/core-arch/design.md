@@ -63,6 +63,27 @@ in their fixed order after the stopping modules. Each callback is called as a me
 with its module's process context first (`src/runner/dispatch.ts`, task 5.1). The lockstep wait (PP-6) sits between
 `on-compute` and `BEGIN`.
 
+**Process items and module APIs** (task 5.2a: `src/runner/process-context.ts`, `module-api.ts`, `api-server.ts`). Each
+module has one process context, the same object in its `on-start-db` and at every point. `publish` takes only an item
+the module declares with the `process` lifetime, only from its own `on-start-db`, once per item for the whole process
+(a second provider's publish too); any other call throws and fails the callback even when caught — `on-start-db`'s,
+`on-start-api`'s, or the loop's point through the loop's misuse reports. `items` shows the published items the module
+requires or provides from `on-start-api` on, empty before; once every `on-start-db` ran, an item a running module
+requires that was not published refuses startup with `process-item-missing` (MD-7). `on-start-api` then runs once, in
+series in the startup order, for the parts active in a range the process may run (the cursor's on): a part whose
+revisions all ended below it serves no API. Its routes (`GET`/`POST`, `/` and segments, `:name` parameters, a literal
+winning over a parameter) and subscription names are refused with `duplicate-api-route` when two have one method and
+path (parameters' names aside) or one name, before anything listens (RN-15). Each request is one `db.read` at the
+latest committed height bounded by `apiReadTimeoutMs` (DB-15), the handler inside it and its answer in RN-16's
+envelope; a GraphQL response is told by its shape (an object of only `data`, `errors` and `extensions`). Bodies are
+JSON (a `bigint` as decimal text, bytes as `0x` hex) unless the handler typed its text or bytes; errors are `{ error: {
+code, message } }`: 400 `invalid-request`, 404 `not-found`, 405 `method-not-allowed`, 413 `request-too-large`, 500
+`internal-error` (a fixed message; the error goes to the runner's log), 503 `no-committed-height`, 504
+`query-timeout`. The listener is `node:http` on `listen.api` in the main thread, subscriptions on WebSocket at it on
+any path (`subscribe` → `subscribed`, `next`; `unsubscribe` → `complete`; `error`); a subscriber more than 1 MiB
+behind is disconnected, so a module's `emit` from `on-after-db-write` never waits. Without `listen.api` nothing
+listens, and `on-start-api` and its checks still run.
+
 ## 3. Block source and ingest
 
 ```ts
