@@ -15,6 +15,7 @@ import {
   type HistoryOptions,
   type HistoryRow,
   historyFindings,
+  omissionAllowed,
   recordedData,
   revisionAt,
   rowOf,
@@ -71,8 +72,9 @@ const BUILD_CORE_VERSION_TEXT =
  *   core version's canonical JSON), its data fields (canonical JSON) and `data_hash`, SHA-256 of their canonical
  *   encoding (DT-1);
  * - CF-5 (A30): revisions identified by `(id, start)`, a later one superseding an earlier one from its start (its
- *   effective stop is the next start − 1, or its own lower stop), and `missing-entry` for a recorded entry the
- *   configuration omits;
+ *   effective stop is the next start − 1, or its own lower stop), and `missing-entry` for a recorded entry starting at
+ *   or below the cursor that the configuration omits; one starting above it may be omitted or moved, its row deleted
+ *   (owner decision Q103, option B);
  * - CF-6 (A31): an entry starting at or below the cursor c refuses `changes-past` when it differs in a data field or
  *   its version (or is not recorded), except a module's stop above c in both values; operational fields are not
  *   recorded and may change; entries above c are recorded, or re-recorded;
@@ -83,7 +85,8 @@ const BUILD_CORE_VERSION_TEXT =
  * - and what startup passes on: the graph's input (`resolveGraph`) and DB-10's committed versions.
  *
  * The committed negative controls: each rule of `HISTORY_RULES` left out loses exactly its cases; CF-6's two
- * allowances replaced — a stop compared strictly, operational fields recorded — each refuses exactly its cases.
+ * allowances replaced — a stop compared strictly, operational fields recorded — and CF-5's omission above the cursor
+ * refused (the rule before Q103) each refuse exactly their cases.
  */
 
 /** `m` 1.0.0's revision from `start` with `config` (defaults for the rest), stopping at `stop` when given. */
@@ -267,28 +270,33 @@ describe("CF-5, A30: revisions by (id, start); a later one supersedes the earlie
   });
 });
 
-describe("A30: a configuration omitting a recorded entry refuses with missing-entry", () => {
-  it("refuses CF-5's scenario: the history holds (m, 1) and (m, 50), the file lists only (m, 1)", () => {
-    const db = new Simulation();
-    db.start({ entries: [CORE, m(1), m(50)], cursor: null });
-    const error = db.refusal({ entries: [CORE, m(1)], cursor: 20n });
-    expect(error.code).toBe("missing-entry");
-    expect(error.retryable).toBe(false);
-    expect(error.details.missing).toEqual([{ id: "m", start: 50 }]);
-    expect(error.details).toMatchObject({ file: FILE, cursor: 20n });
-    expect(found(error)).toEqual([["listed", "entries", null]]);
-    for (const words of ["m from 50", "does not list", "CF-5", FILE]) expect(error.message).toContain(words);
+describe("A30: a configuration omitting a recorded entry that starts at or below the cursor refuses with missing-entry", () => {
+  it("refuses CF-5's scenario: the history holds (m, 1) and (m, 50), the cursor is at or above 50, the file lists only (m, 1)", () => {
+    for (const cursor of [50n, 60n]) {
+      const db = new Simulation();
+      db.start({ entries: [CORE, m(1), m(50)], cursor: null });
+      const error = db.refusal({ entries: [CORE, m(1)], cursor });
+      expect(error.code).toBe("missing-entry");
+      expect(error.retryable).toBe(false);
+      expect(error.details.missing).toEqual([{ id: "m", start: 50 }]);
+      expect(error.details).toMatchObject({ file: FILE, cursor });
+      expect(found(error)).toEqual([["listed", "entries", null]]);
+      for (const words of ["m from 50", "does not list", `at or below the cursor ${cursor}`, "CF-5", "Q103", FILE]) {
+        expect(error.message).toContain(words);
+      }
+    }
   });
 
-  it("names every omitted entry at once: started, scheduled, a core revision, a module the build no longer has", () => {
+  it("names every omitted entry at or below the cursor at once: started, scheduled, a core revision, a module the build no longer has", () => {
     const db = new Simulation();
     db.start({
-      entries: [CORE, core(10, { retainStates: 1 }), m(1), n(5), versionEntry({ id: "m", start: 60, version: "1.1.0" })],
+      entries: [CORE, core(10, { retainStates: 1 }), m(1), n(5), versionEntry({ id: "m", start: 60, version: "1.1.0" }), n(70)],
       user: [M_1_0, N],
       cursor: null,
     });
-    const error = db.refusal({ entries: [CORE, m(1)], user: [M_1_0], cursor: 20n });
+    const error = db.refusal({ entries: [CORE, m(1)], user: [M_1_0], cursor: 60n });
     expect(error.code).toBe("missing-entry");
+    // (n, 70) starts above the cursor: it may be omitted (Q103), so it is not named.
     expect(error.details.missing).toEqual([
       { id: "core", start: 10 },
       { id: "m", start: 60 },
@@ -306,7 +314,8 @@ describe("A30: a configuration omitting a recorded entry refuses with missing-en
       { id: "m", start: 0n, stop: null, version: "0.9.0", data: { limit: 1 }, dataHash: dataHash({ limit: 1 }) },
       { id: "m", start: 50n, stop: 80n, version: "1.1.0", data: null, dataHash: null },
     ];
-    const error = refusal(() => checkHistory({ config: checked([CORE, m(10)], declarations), cursor: null, declarations, history }));
+    const error = refusal(() => checkHistory({ config: checked([CORE, m(10)], declarations), cursor: 60n, declarations, history }));
+    expect(error.code).toBe("missing-entry");
     const [other, scheduled] = (error.details.findings as HistoryFinding[]).map((f) => f.message);
     expect(other).toContain("versionEntry({ id, start, version, config }) with its recorded version and data");
     expect(scheduled).toContain('versionEntry({ id: "m", start: 50, version, stop: 80 })');
@@ -316,8 +325,10 @@ describe("A30: a configuration omitting a recorded entry refuses with missing-en
     const declarations = build();
     const config = { ...checked([CORE, m(1)], declarations), file: null };
     const history = [rowOf(config.entries[0]!), { ...rowOf(config.entries[1]!), start: 50n }];
-    const error = refusal(() => checkHistory({ config, cursor: C, declarations, history }));
-    expect(error.message.startsWith("the configuration omits entries the history records (CF-5): entries: ")).toBe(true);
+    const error = refusal(() => checkHistory({ config, cursor: 50n, declarations, history }));
+    expect(
+      error.message.startsWith("the configuration omits entries the history records at or below the cursor (CF-5): entries: "),
+    ).toBe(true);
     expect(error.details.file).toBeNull();
     const none = refusal(() => processCoreEntry({ ...checked([oldCore(0, "0.9.4")], build([])), file: null }));
     expect(none.message.startsWith("the configuration has no core revision")).toBe(true);
@@ -339,7 +350,7 @@ describe("A30: a configuration omitting a recorded entry refuses with missing-en
     const db = new Simulation();
     db.start({ entries: [CORE, m(1), m(50)], cursor: null });
     const declarations = build();
-    const input = { config: checked([CORE, m(1, { limit: 2 })], declarations), cursor: C, declarations, history: db.history };
+    const input = { config: checked([CORE, m(1, { limit: 2 })], declarations), cursor: 60n, declarations, history: db.history };
     expect(historyFindings(input).map((f) => [f.code, f.path])).toEqual([
       ["missing-entry", "entries"],
       ["changes-past", "entries[1].config.limit"],
@@ -350,8 +361,131 @@ describe("A30: a configuration omitting a recorded entry refuses with missing-en
     const db = new Simulation();
     db.start({ entries: [CORE, m(1), m(50)], cursor: null });
     // Also a changed past (limit) and an omitted entry: the omission is named first (CF-5 before CF-6).
-    expect(db.refusal({ entries: [CORE, m(1, { limit: 2 })], cursor: 20n }).code).toBe("missing-entry");
-    expect(db.start({ entries: [CORE, m(1), m(50)], cursor: 20n }).writes).toEqual([]);
+    expect(db.refusal({ entries: [CORE, m(1, { limit: 2 })], cursor: 60n }).code).toBe("missing-entry");
+    expect(db.start({ entries: [CORE, m(1), m(50)], cursor: 60n }).writes).toEqual([]);
+  });
+});
+
+/** A row's `(id, start)`, the start as a number. */
+const keyOf = (row: HistoryRow): [string, number] => [row.id, Number(row.start)];
+
+describe("A30, Q103 B: a recorded entry that starts above the cursor may be omitted or moved (CF-5)", () => {
+  it("accepts omitting one: its row is deleted, nothing else written, and the earlier revision runs on", () => {
+    const db = new Simulation();
+    db.start({ entries: [CORE, m(1), m(50)], cursor: null });
+    const recorded = rowAt(db.history, "m", 50);
+    const check = db.start({ entries: [CORE, m(1)], cursor: C });
+    expect(check.deletes).toEqual([recorded]);
+    expect(check.writes).toEqual([]);
+    expect(db.history.map(keyOf)).toEqual([
+      ["core", 0],
+      ["m", 1],
+    ]);
+    expect(check.graphEntries).toEqual([{ id: "m", start: 1n, stop: null }]);
+    // An omission above the cursor is no finding (`umbradb config check` reports none).
+    const declarations = build();
+    const before = new Simulation();
+    before.start({ entries: [CORE, m(1), m(50)], cursor: null });
+    expect(historyFindings({ config: checked([CORE, m(1)], declarations), cursor: C, declarations, history: before.history })).toEqual([]);
+    // Restarted unchanged: nothing to delete.
+    expect(db.start({ entries: [CORE, m(1)], cursor: C }).deletes).toEqual([]);
+  });
+
+  it("accepts CF-5's scenario 'A scheduled entry is moved': (m, 50) deleted and (m, 100) recorded, superseding from 100", () => {
+    const moves = [
+      ["a revision of the build's version", m(50, { limit: 2 }), m(100, { limit: 2 })],
+      [
+        "a scheduled versionEntry",
+        versionEntry({ id: "m", start: 50, version: "1.1.0" }),
+        versionEntry({ id: "m", start: 100, version: "1.1.0" }),
+      ],
+    ] as const;
+    for (const [label, from, to] of moves) {
+      const db = new Simulation();
+      db.start({ entries: [CORE, m(0), from], cursor: null });
+      const check = db.start({ entries: [CORE, m(0), to], cursor: C });
+      expect(check.deletes.map(keyOf), label).toEqual([["m", 50]]);
+      expect(check.writes.map(keyOf), label).toEqual([["m", 100]]);
+      expect(db.history.filter((row) => row.id === "m").map(keyOf), label).toEqual([
+        ["m", 0],
+        ["m", 100],
+      ]);
+      // The revision from 0 now ends at 99, the moved one's start − 1 (CF-5).
+      expect(revisionAt(check.entries, "m", 99n)?.start, label).toBe(0);
+      expect(revisionAt(check.entries, "m", 100n)?.start, label).toBe(100);
+    }
+  });
+
+  it("lets the old build run on when a scheduled upgrade slips (Q103's use case): moved to 100, or dropped", () => {
+    const scheduled = (start: number) => versionEntry({ id: "m", start, version: "1.1.0" });
+    for (const later of [[scheduled(100)], []]) {
+      const db = new Simulation();
+      db.start({ entries: [CORE, m(0), scheduled(50)], cursor: null });
+      // At cursor 49 the 1.0.0 build is refused: the revision covering 50 names 1.1.0 (RN-12, CF-8).
+      expect(db.refusal({ entries: [CORE, m(0), scheduled(50)], cursor: 49n }).code).toBe("upgrade-required");
+      const check = db.start({ entries: [CORE, m(0), ...later], cursor: 49n });
+      expect(check.deletes.map(keyOf)).toEqual([["m", 50]]);
+      expect(check.writes.map(keyOf)).toEqual(later.length === 0 ? [] : [["m", 100]]);
+    }
+  });
+
+  it("draws the line exactly: an entry starting at the cursor must be listed, one starting at cursor + 1 may be omitted", () => {
+    const db = new Simulation();
+    db.start({ entries: [CORE, m(0), m(20), m(21)], cursor: null });
+    const atCursor = db.refusal({ entries: [CORE, m(0), m(21)], cursor: C });
+    expect([atCursor.code, atCursor.details.missing]).toEqual(["missing-entry", [{ id: "m", start: 20 }]]);
+    // Both omitted: only the one at the cursor is named.
+    expect(db.refusal({ entries: [CORE, m(0)], cursor: C }).details.missing).toEqual([{ id: "m", start: 20 }]);
+    const above = db.start({ entries: [CORE, m(0), m(20)], cursor: C });
+    expect([above.deletes.map(keyOf), above.writes]).toEqual([[["m", 21]], []]);
+  });
+
+  it("refuses moving one from above the cursor to at or below it: the new start is a past without it (changes-past)", () => {
+    for (const start of [20, 15]) {
+      const db = new Simulation();
+      db.start({ entries: [CORE, m(0), m(50)], cursor: null });
+      const error = db.refusal({ entries: [CORE, m(0), m(start)], cursor: C });
+      expect([error.code, found(error)], `to ${start}`).toEqual(["changes-past", [["recorded", "entries[2]", null]]]);
+      expect(rowAt(db.history, "m", 50), `to ${start}`).toBeDefined();
+    }
+    // To cursor + 1 it is a move above the cursor.
+    const db = new Simulation();
+    db.start({ entries: [CORE, m(0), m(50)], cursor: null });
+    const check = db.start({ entries: [CORE, m(0), m(21)], cursor: C });
+    expect([check.deletes.map(keyOf), check.writes.map(keyOf)]).toEqual([[["m", 50]], [["m", 21]]]);
+  });
+
+  it("deletes every omitted row above the cursor at once — a core revision, a scheduled one, a module the build no longer has", () => {
+    const db = new Simulation();
+    db.start({
+      entries: [CORE, core(30, { retainStates: 1 }), m(0), versionEntry({ id: "m", start: 40, version: "1.1.0" }), n(25)],
+      user: [M_1_0, N],
+      cursor: null,
+    });
+    const check = db.start({ entries: [CORE, m(0)], user: [M_1_0], cursor: C });
+    expect(check.deletes.map(keyOf)).toEqual([
+      ["core", 30],
+      ["m", 40],
+      ["n", 25],
+    ]);
+    expect(check.writes).toEqual([]);
+    expect(db.history.map(keyOf)).toEqual([
+      ["core", 0],
+      ["m", 0],
+    ]);
+  });
+
+  it("lets a database that has committed nothing (cursor null) omit or move any recorded entry", () => {
+    const db = new Simulation();
+    db.start({ entries: [CORE, m(0), m(10)], cursor: null });
+    const check = db.start({ entries: [CORE, m(5)], cursor: null });
+    expect([check.deletes.map(keyOf), check.writes.map(keyOf)]).toEqual([
+      [
+        ["m", 0],
+        ["m", 10],
+      ],
+      [["m", 5]],
+    ]);
   });
 });
 
@@ -504,8 +638,15 @@ const CHANGES: readonly (Case & { readonly rule: string; readonly path: string; 
   },
 ];
 
-/** CF-6's acceptances: what may change at the cursor, and what is (re-)recorded then. */
-const ACCEPTED: readonly (Case & { readonly writes: readonly [string, number][]; readonly allowance?: "stop" | "operational" })[] = [
+/**
+ * CF-6's acceptances, and CF-5's omissions above the cursor (Q103 B): what may change at the cursor, what is
+ * (re-)recorded then and what is deleted.
+ */
+const ACCEPTED: readonly (Case & {
+  readonly writes: readonly [string, number][];
+  readonly deletes?: readonly [string, number][];
+  readonly allowance?: "stop" | "operational" | "omission";
+})[] = [
   {
     name: "a module's stop above the cursor raised",
     first: { entries: [CORE, m(10, {}, 30)], cursor: null },
@@ -592,15 +733,48 @@ const ACCEPTED: readonly (Case & { readonly writes: readonly [string, number][];
     then: { entries: [core(0, {}), m(0, { limit: 2, mode: "fast" })], cursor: C },
     writes: [],
   },
+  {
+    name: "a recorded revision above the cursor omitted (its row deleted, Q103)",
+    first: { entries: [CORE, m(0), m(50)], cursor: null },
+    then: { entries: [CORE, m(0)], cursor: C },
+    writes: [],
+    deletes: [["m", 50]],
+    allowance: "omission",
+  },
+  {
+    name: "a recorded revision above the cursor moved (CF-5's scenario 'A scheduled entry is moved')",
+    first: { entries: [CORE, m(0), versionEntry({ id: "m", start: 50, version: "1.1.0" })], cursor: null },
+    then: { entries: [CORE, m(0), versionEntry({ id: "m", start: 100, version: "1.1.0" })], cursor: C },
+    writes: [["m", 100]],
+    deletes: [["m", 50]],
+    allowance: "omission",
+  },
+  {
+    name: "a recorded revision moved to cursor + 1",
+    first: { entries: [CORE, m(0), m(50)], cursor: null },
+    then: { entries: [CORE, m(0), m(21)], cursor: C },
+    writes: [["m", 21]],
+    deletes: [["m", 50]],
+    allowance: "omission",
+  },
+  {
+    name: "a core revision above the cursor omitted",
+    first: { entries: [CORE, core(30, { retainStates: 1 })], cursor: null },
+    then: { entries: [CORE], cursor: C },
+    writes: [],
+    deletes: [["core", 30]],
+    allowance: "omission",
+  },
 ];
 
-/** The outcome of a case's second startup: its refusal's code and findings, or its writes. */
+/** The outcome of a case's second startup: its refusal's code and findings, or its writes and deletes. */
 function outcome(test: Case, options?: HistoryOptions) {
   const db = new Simulation();
   db.start({ ...test.first, ...(options === undefined ? {} : { options }) });
   try {
     const check = db.start({ ...test.then, ...(options === undefined ? {} : { options }) });
-    return { writes: check.writes.map((row) => [row.id, Number(row.start)]) };
+    const keys = (rows: readonly HistoryRow[]) => rows.map((row) => [row.id, Number(row.start)]);
+    return { writes: keys(check.writes), deletes: keys(check.deletes) };
   } catch (error) {
     if (!(error instanceof UmbraError)) throw error;
     return { code: error.code, findings: found(error) };
@@ -613,7 +787,7 @@ describe("A31: configuration changes only the future (CF-6)", () => {
   });
 
   it.each(ACCEPTED)("accepts $name, recording exactly what changed", (test) => {
-    expect(outcome(test)).toEqual({ writes: test.writes });
+    expect(outcome(test)).toEqual({ writes: test.writes, deletes: test.deletes ?? [] });
   });
 
   it("names the entry, the field and the cursor in the refusal, never a setting's value", () => {
@@ -1001,7 +1175,7 @@ function ruleCases(): { readonly rule: string; readonly test: Case }[] {
   const base = { entries: [CORE, m(1), m(50)], cursor: null };
   return [
     ...CHANGES.map((test) => ({ rule: test.rule, test })),
-    { rule: "listed", test: { name: "an omitted entry", first: base, then: { entries: [CORE, m(1)], cursor: C } } },
+    { rule: "listed", test: { name: "an omitted entry", first: base, then: { entries: [CORE, m(1)], cursor: 50n } } },
     {
       rule: "build-version",
       test: {
@@ -1062,6 +1236,35 @@ describe("negative controls (committed)", () => {
         expect(result, test.name).toEqual(outcome(test));
       }
     }
+  });
+
+  it("with every omission refused (CF-5 before Q103, the old rule), exactly the omission allowance's cases refuse", () => {
+    const options: HistoryOptions = { omissionAllowed: () => false };
+    for (const test of ACCEPTED) {
+      const result = outcome(test, options);
+      if (test.allowance === "omission") {
+        const missing = (test.deletes ?? []).map((): [string, string, null] => ["listed", "entries", null]);
+        expect(result, test.name).toEqual({ code: "missing-entry", findings: missing });
+      } else {
+        expect(result, test.name).toEqual(outcome(test));
+      }
+    }
+    for (const { test } of ruleCases()) expect(outcome(test, options), test.name).toEqual(outcome(test));
+  });
+
+  it("never deletes a row at or below the cursor, even with the listed rule left out (the past stays recorded)", () => {
+    const rules = HISTORY_RULES.filter((rule) => rule.name !== "listed");
+    const db = new Simulation();
+    db.start({ entries: [CORE, m(0), m(20), m(21)], cursor: null });
+    const check = db.start({ entries: [CORE, m(0)], cursor: C, options: { rules } });
+    expect(check.deletes.map(keyOf)).toEqual([["m", 21]]);
+    expect(rowAt(db.history, "m", 20)).toBeDefined();
+  });
+
+  it("treats an omitted row as allowed exactly when it starts above the cursor, or nothing has committed (omissionAllowed)", () => {
+    const row = (start: bigint): HistoryRow => ({ id: "m", start, stop: null, version: "1.0.0", data: null, dataHash: null });
+    expect([omissionAllowed(row(20n), C), omissionAllowed(row(21n), C), omissionAllowed(row(0n), null)]).toEqual([false, true, true]);
+    expect(omissionAllowed(row(19n), C)).toBe(false);
   });
 
   it("finds nothing for an unchanged restart with every rule (historyFindings)", () => {

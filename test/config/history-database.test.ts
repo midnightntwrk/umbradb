@@ -3,7 +3,7 @@ import { recordHistory } from "../../src/backbone/core-chain/index.js";
 import { buildCoreVersion } from "../../src/config/build.js";
 import { versionEntry } from "../../src/config/entries.js";
 import { canonicalJson, dataHash } from "../../src/config/history.js";
-import type { Database } from "../../src/db/api.js";
+import type { Database, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { schemaPlan } from "../../src/modules/adapters.js";
 import { BACKENDS } from "../db/backends.js";
@@ -23,7 +23,7 @@ import {
 import { historyInput, historyRows, migrationRows, rejection, startup, storedRows } from "./history-startup.js";
 
 /**
- * The configuration history in `core_chain.config` (task 4.3; CF-5 to CF-8, A28's history half, A30, A31, A33), on
+ * The configuration history in `core_chain.config` (tasks 4.3, 4.3a; CF-5 to CF-8, A28's history half, A30, A31, A33), on
  * both backends, through a startup standing in for the runner's (`./history-startup.ts`): the history read and checked
  * before any migration, then `startDatabase` with `core-chain` first — its migration `001` creates the table, its
  * `on-start-db` compares again and records, in one transaction. The pure rules are `./history.test.ts`'s; here the rows,
@@ -33,8 +33,10 @@ import { historyInput, historyRows, migrationRows, rejection, startup, storedRow
  * cursor read from the `blocks` table are tasks 5.x and 10.2's: here the cursor is given, as task 2.4's A72 test gave
  * the history.
  *
- * The committed negative control of A33: the version check run after the migrations instead of before — the refusal
- * still comes, but a `core_chain.migrations` row was added, which A33 forbids.
+ * The committed negative controls: A33's — the version check run after the migrations instead of before: the refusal
+ * still comes, but a `core_chain.migrations` row was added, which A33 forbids —, and A30's (Q103 B, task 4.3a) — the
+ * delete of an omitted row above the cursor committed outside the transaction that records: a failure between the
+ * delete and the insert then leaves a history no configuration was accepted with.
  */
 
 /** `m` 1.0.0's revision from `start`. */
@@ -46,6 +48,39 @@ const M_DEFAULTS = { limit: 10, mode: "full" } as const;
 
 /** The core version's canonical JSON, as `core_chain.config.version` holds it. */
 const CORE_VERSION_TEXT = canonicalJson(buildCoreVersion());
+
+/** The failure {@link failingSecondWrite} injects. */
+const FAILURE = "failure between the delete and the insert";
+
+/** A statement's verb: `DELETE`, `INSERT`, … */
+const verbOf = (sql: string): string => sql.trimStart().split(/\s/, 1)[0] as string;
+
+/**
+ * `tx` with its writes logged in `statements` by verb, failing the second write of the log — in recording a moved
+ * entry, the second of its delete and its insert, whichever comes first: a failure between the two.
+ */
+function failingSecondWrite(tx: Pick<Transaction, "query" | "execute">, statements: string[]): Pick<Transaction, "query" | "execute"> {
+  return {
+    query: (sql, params) => tx.query(sql, params),
+    execute: async (sql, params) => {
+      statements.push(verbOf(sql));
+      if (statements.length === 2) throw new Error(FAILURE);
+      return tx.execute(sql, params);
+    },
+  };
+}
+
+/** `tx` running only the deletes of a recording (its inserts dropped), each logged in `statements`. */
+function deletesOnly(tx: Pick<Transaction, "query" | "execute">, statements: string[]): Pick<Transaction, "query" | "execute"> {
+  return {
+    query: (sql, params) => tx.query(sql, params),
+    execute: async (sql, params) => {
+      if (verbOf(sql) !== "DELETE") return 0;
+      statements.push(verbOf(sql));
+      return tx.execute(sql, params);
+    },
+  };
+}
 
 describe.each(BACKENDS)("the configuration history in core_chain.config, on $name", (backend) => {
   beforeAll(() => backend.start(), 180_000);
@@ -252,14 +287,116 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
   });
 
   describe("A30: revisions by (id, start) (CF-5)", () => {
-    it("refuses a configuration omitting a recorded entry with missing-entry, changing nothing", async () => {
+    it("refuses a configuration omitting a recorded entry at or below the cursor with missing-entry, changing nothing", async () => {
       const db = await fresh();
       await startup(db, { entries: [CORE, m(1), m(50)], user: [M_1_0], cursor: null });
       const before = await storedRows(db);
-      const error = await rejection(startup(db, { entries: [CORE, m(1)], user: [M_1_0], cursor: 20n }));
+      const error = await rejection(startup(db, { entries: [CORE, m(1)], user: [M_1_0], cursor: 50n }));
       expect((error as UmbraError).code).toBe("missing-entry");
       expect((error as UmbraError).details.missing).toEqual([{ id: "m", start: 50 }]);
       expect(await storedRows(db)).toEqual(before);
+    });
+
+    it("draws Q103's line exactly: an entry starting at the cursor must stay, one at cursor + 1 is deleted when omitted", async () => {
+      const db = await fresh();
+      await startup(db, { entries: [CORE, m(0), m(20), m(21)], user: [M_1_0], cursor: null });
+      const before = await storedRows(db);
+      const error = await rejection(startup(db, { entries: [CORE, m(0), m(21)], user: [M_1_0], cursor: 20n }));
+      expect((error as UmbraError).code).toBe("missing-entry");
+      expect((error as UmbraError).details.missing).toEqual([{ id: "m", start: 20 }]);
+      expect(await storedRows(db)).toEqual(before);
+      const started = await startup(db, { entries: [CORE, m(0), m(20)], user: [M_1_0], cursor: 20n });
+      expect(started.recorded.deletes.map((row) => [row.id, row.start])).toEqual([["m", 21n]]);
+      expect(started.recorded.writes).toEqual([]);
+      // The rows kept are untouched — written by the same transactions as before —, and (m, 21) is gone.
+      expect(await storedRows(db)).toEqual(before.slice(0, 3));
+      expect(before[3]).toMatchObject({ entry_id: "m", start: 21n });
+    });
+
+    it("deletes only the omitted row: the rows of its id before and after it stay as they were", async () => {
+      const db = await fresh();
+      await startup(db, { entries: [CORE, m(0), m(30), m(60)], user: [M_1_0], cursor: null });
+      const before = await storedRows(db);
+      const started = await startup(db, { entries: [CORE, m(0), m(60)], user: [M_1_0], cursor: 20n });
+      expect(started.recorded.deletes.map((row) => [row.id, row.start])).toEqual([["m", 30n]]);
+      expect(await storedRows(db)).toEqual([before[0], before[1], before[3]]);
+    });
+
+    it("accepts CF-5's scenario 'A scheduled entry is moved': (m, 50) deleted and (m, 100) recorded by core-chain", async () => {
+      const db = await fresh();
+      const scheduled = (start: number) => versionEntry({ id: "m", start, version: "1.1.0" });
+      await startup(db, { entries: [CORE, core(30, { retainStates: 1 }), m(0), scheduled(50)], user: [M_1_0], cursor: null });
+      const before = await storedRows(db);
+      const started = await startup(db, { entries: [CORE, m(0), scheduled(100)], user: [M_1_0], cursor: 20n });
+      expect(started.recorded.deletes.map((row) => [row.id, row.start])).toEqual([
+        ["core", 30n],
+        ["m", 50n],
+      ]);
+      expect(started.recorded.writes.map((row) => [row.id, row.start])).toEqual([["m", 100n]]);
+      const after = await storedRows(db);
+      expect(after.map((row) => [row.entry_id, row.start, row.version, row.data])).toEqual([
+        ["core", 0n, CORE_VERSION_TEXT, before[0]?.data],
+        ["m", 0n, "1.0.0", before[2]?.data],
+        ["m", 100n, "1.1.0", null],
+      ]);
+      expect([after[0], after[1]]).toEqual([before[0], before[2]]);
+      // The 1.0.0 build runs on past 50: m's revision from 0 ends at 99, the moved one's start − 1.
+      expect(started.check.graphEntries).toEqual([
+        { id: "m", start: 0n, stop: 99n },
+        { id: "m", start: 100n, stop: null },
+      ]);
+    });
+
+    it("deletes and records in the caller's transaction: both rolled back with it", async () => {
+      const db = await fresh();
+      await startup(db, { entries: [CORE, m(0), m(50)], user: [M_1_0], cursor: null });
+      const before = await storedRows(db);
+      const input = historyInput([CORE, m(0), m(100)], 20n, [M_1_0]);
+      const sentinel = new Error("roll back");
+      const rolled = await rejection(
+        db.transaction(async (tx) => {
+          const check = await recordHistory(tx, input);
+          expect(check.deletes.map((row) => [row.id, row.start])).toEqual([["m", 50n]]);
+          // Within the transaction: (m, 50) deleted, (m, 100) recorded.
+          const rows = await tx.query("SELECT start FROM core_chain.config WHERE entry_id = 'm' ORDER BY start");
+          expect(rows).toEqual([{ start: 0n }, { start: 100n }]);
+          throw sentinel;
+        }),
+      );
+      expect(rolled).toBe(sentinel);
+      expect(await storedRows(db)).toEqual(before);
+    });
+
+    it("leaves the history as it was when recording fails between the delete and the insert", async () => {
+      const db = await fresh();
+      await startup(db, { entries: [CORE, m(0), m(50)], user: [M_1_0], cursor: null });
+      const before = await storedRows(db);
+      const input = historyInput([CORE, m(0), m(100)], 20n, [M_1_0]);
+      const statements: string[] = [];
+      const error = await rejection(db.transaction((tx) => recordHistory(failingSecondWrite(tx, statements), input)));
+      expect((error as Error).message).toBe(FAILURE);
+      expect([...statements].sort()).toEqual(["DELETE", "INSERT"]);
+      expect(await storedRows(db)).toEqual(before);
+    });
+
+    it("negative control (committed): a delete outside the recording transaction fails the atomicity test", async () => {
+      const db = await fresh();
+      await startup(db, { entries: [CORE, m(0), m(50)], user: [M_1_0], cursor: null });
+      const before = await storedRows(db);
+      const input = historyInput([CORE, m(0), m(100)], 20n, [M_1_0]);
+      const statements: string[] = [];
+      // The same statements and the same failure, but the delete committed by a transaction of its own first.
+      await db.transaction((tx) => recordHistory(deletesOnly(tx, statements), input));
+      const error = await rejection(db.transaction((tx) => recordHistory(failingSecondWrite(tx, statements), input)));
+      expect((error as Error).message).toBe(FAILURE);
+      expect(statements).toEqual(["DELETE", "INSERT"]);
+      const after = await storedRows(db);
+      expect(after).not.toEqual(before);
+      // (m, 50) is gone and (m, 100) was never recorded: a history no configuration was accepted with.
+      expect(after.map((row) => [row.entry_id, row.start])).toEqual([
+        ["core", 0n],
+        ["m", 0n],
+      ]);
     });
 
     it("lets a later revision supersede the earlier one from its start: a module that cannot start mid-chain continues", async () => {

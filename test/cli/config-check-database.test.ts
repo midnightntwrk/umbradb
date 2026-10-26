@@ -136,18 +136,20 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
 
   it("prints every finding of every history check at once: missing-entry, changes-past, upgrade-required", async () => {
     const before = await target.snapshot();
+    // core from 0 (at or below the cursor) and from 100 (above it, Q103: may be omitted) are both left out.
     const file = fileOf("everything.config.ts", [
-      core(0, { retainStates: 5 }, pglite),
+      core(5, { retainStates: 5 }, pglite),
       'versionEntry({ id: "core", start: 21, version: { umbradb: "0.9.6", ledgers: [] } })',
     ]);
     const report = await configCheck({ file, cwd: project.dir, database: target.url });
     const history = report.steps.find((step) => step.name === "history");
     expect(history?.findings.map((f) => `${f.code} ${f.path}`)).toEqual([
       "missing-entry listed entries",
-      "changes-past data entries[0].config.retainStates",
+      "changes-past recorded entries[0]",
       "upgrade-required build-version entries[1].version",
     ]);
-    expect(report.text).toContain("the history records core from 100");
+    expect(report.text).toContain("the history records core from 0");
+    expect(report.text).not.toContain("core from 100");
     expect(report.text).toMatch(/^failed: 3 findings$/m);
     expect(await target.snapshot()).toEqual(before);
   });

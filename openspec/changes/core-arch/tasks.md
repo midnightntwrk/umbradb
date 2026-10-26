@@ -970,9 +970,32 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       command (Q106); `core-chain`'s declaration and the core modules in the command's build (10.2, 11.x–13.x); the
       §12 surface and the pack smoke's rewrite with §12's imports (17.3); a file whose S is above the cursor refused
       with a code (the issue).
-- [ ] 4.3a The owner's answer Q103 B: a recorded entry that starts above the cursor may be omitted or moved; its history
+- [x] 4.3a The owner's answer Q103 B: a recorded entry that starts above the cursor may be omitted or moved; its history
       row is deleted in the transaction that records the configuration.
       **Acceptance:** A30 (as amended).
+      **Done (2026-10-26):** `src/config/history.ts`: `omissionAllowed(row, cursor)` — a recorded row the configuration
+      omits starts above the cursor, or nothing has committed (a null cursor) — is CF-5's allowance, replaceable through
+      `HistoryOptions.omissionAllowed` like CF-6's two; the `listed` rule refuses `missing-entry` only for an omitted
+      row starting at or below the cursor (its message and the refusal's say so and cite Q103); `HistoryCheck.deletes`
+      holds the omitted rows above the cursor, as read, never one at or below it even with the `listed` rule left out.
+      A move is an omission and a new entry: an entry is its `(id, start)` (CF-5), so moving `(m, 50)` to 100 deletes
+      `(m, 50)` and records `(m, 100)`; moved to cursor + 1 or above it is accepted, to the cursor or below refused
+      `changes-past` (`recorded`: the past was processed without it), nothing deleted. `recordHistory`
+      (`src/backbone/core-chain/history.ts`) deletes the check's deletes by key, then records its writes, in the one
+      transaction of `core-chain`'s `on-start-db` (the two never share a key). `design.md` §7 "History" says so. Tests,
+      seen failing first (`tsc` exit 2, 18 errors: `deletes`, `omissionAllowed` unknown; 38 pure and 10 database tests
+      failing, each above-cursor omission refused `missing-entry`): `test/config/history.test.ts` (A30's refusals at a
+      cursor at or above the omitted start; Q103 B — an omission, CF-5's moved scenario for a revision and a scheduled
+      one, Q103's slipped upgrade, the boundary at the cursor and cursor + 1, a move into the past, every kind of row at
+      once, a null cursor; four omission rows in CF-6's acceptance table), `history-database.test.ts` (both backends:
+      the boundary, only the omitted row deleted, the moved scenario, both writes rolled back with the caller's
+      transaction, a failure between the delete and the insert leaving the history as it was),
+      `test/cli/config-check-database.test.ts` (every history finding at once: an omitted row at or below the cursor,
+      none for one above it). Committed negative controls: omissions refused (the rule before Q103) refuse exactly the
+      omission cases; the delete committed outside the recording transaction fails the atomicity test. Wrong variants
+      (a scratch runner outside the clone): 22, 20 caught on the first run — a gap (a `DELETE` by id from the start on,
+      closed by a test) and an equivalent one (the deletes after the writes) — and 21 on the final sources, the
+      equivalent one left.
 - [ ] 4.4a The owner's answer Q106 B: the configuration file's exported `modules` are the build's user modules for
       `umbradb config check` and `umbradb run`, next to UmbraDB's own.
       **Acceptance:** A152.

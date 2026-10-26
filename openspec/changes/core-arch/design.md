@@ -838,11 +838,12 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   `settings(values, kinds)` shows a `secret` field, or one of unknown kind, as `[redacted]`. `/config`, `/status` and
   the logs use it (tasks 5.x, 8.x).
 - **Core stop.** Operational: not stored (`core_chain.config.stop` is null for `core`), changeable at any restart.
-- **History** (task 4.3). `core_chain.config` (§10) is created by `core-chain`'s migration `001`
+- **History** (tasks 4.3, 4.3a). `core_chain.config` (§10) is created by `core-chain`'s migration `001`
   (`src/backbone/core-chain/history.ts`, `CORE_CHAIN_MIGRATIONS`, as the login). `checkHistory`
   (`src/config/history.ts`) takes the validated configuration, the cursor (null on a new database), the build's
   declarations and the rows (`readHistory`, none before the table exists), and refuses, each with every finding of its
-  kind: `missing-entry` for a recorded `(id, start)` the configuration omits (CF-5); `changes-past` for an entry
+  kind: `missing-entry` for a recorded `(id, start)` starting at or below the cursor that the configuration omits (CF-5;
+  one starting above it — any on a new database — may be omitted or moved, Q103, task 4.3a); `changes-past` for an entry
   starting at or below the cursor that is not recorded, or differs in its version, a data field or — for a module — its
   stop, unless both stops are above the cursor (no stop counts as above it) (CF-6); `upgrade-required` (entry, needed,
   build) when the revision covering cursor + 1 (S on a new database) is not the build's version (CF-8); and
@@ -855,10 +856,11 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   the core's own stop bounds no revision. The runner calls `checkHistory` after reading the cursor and before
   `resolveGraph` (its `graphInputOf`: S, every module revision with its effective stop, the opt-in, the cursor) and
   `startDatabase` (its `committedVersions`, DB-10), so every refusal comes before any migration (A33); `core-chain`'s
-  `on-start-db` calls `recordHistory`, which checks again with the rows its transaction reads and records the check's
-  writes in that transaction — every entry above the cursor that differs from its row or has none, and a module's stop
-  changed above the cursor. `openConfiguredDatabase` (`src/config/database.ts`) opens what `database` names
-  (`pglite:memory`, `pglite:<directory>`, a PostgreSQL URL), PGlite refusing without the opt-in (CF-9, DB-12).
+  `on-start-db` calls `recordHistory`, which checks again with the rows its transaction reads and, in that transaction,
+  deletes the check's `deletes` — the omitted rows above the cursor — and records its writes — every entry above the
+  cursor that differs from its row or has none, and a module's stop changed above the cursor. `openConfiguredDatabase`
+  (`src/config/database.ts`) opens what `database` names (`pglite:memory`, `pglite:<directory>`, a PostgreSQL URL),
+  PGlite refusing without the opt-in (CF-9, DB-12).
 - **`umbradb config check`** (`src/cli/`, task 4.4; CF-10). Three checks, every finding of each reported with its path
   in one run: the TypeScript compiler (`typescript`, a runtime dependency, 5.9.3 installed) with `noEmit` and fixed
   options, those of a Node.js ES module loaded by type stripping (`NodeNext`, `erasableSyntaxOnly`,

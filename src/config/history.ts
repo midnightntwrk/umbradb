@@ -21,7 +21,10 @@
  * **The checks ({@link HISTORY_RULES}),** run by {@link checkHistory} on the validated configuration, the cursor (null
  * on a new database), the build's declarations and the recorded rows, each finding every violation of its kind; the
  * first code with findings refuses startup with all of them:
- * 1. `missing-entry` (CF-5): every recorded row is listed by the configuration, by `(id, start)`;
+ * 1. `missing-entry` (CF-5): every recorded row that starts at or below the cursor is listed by the configuration, by
+ *    `(id, start)`; one that starts above it (any, on a new database) has affected no stored data and may be omitted —
+ *    or moved, which omits its `(id, start)` and lists another — and is then deleted ({@link omissionAllowed},
+ *    {@link HistoryCheck.deletes}; owner decision Q103, option B);
  * 2. `changes-past` (CF-6): an entry starting at or below the cursor c is recorded, with its version and every data
  *    field as recorded, and — for a module — its stop, unless both the recorded and the new stop are above c (no stop
  *    counts as above every c: {@link stopChangeAllowed}); operational and secret fields are never recorded, so they may
@@ -36,9 +39,10 @@
  * Every check runs before any migration: the runner calls {@link checkHistory} after opening the database and reading
  * the cursor and the history, and before `resolveGraph` and `startDatabase` (CF-8: "before any `on-start-db`", A33: no
  * `core_chain.migrations` row added). `core-chain`'s `on-start-db` then runs it again on the rows its own transaction
- * reads and records its {@link HistoryCheck.writes} in that transaction (CF-6: "in the same transaction as the
- * comparison"): every entry above the cursor that differs from its row or has none, and a module's stop changed above
- * the cursor. Messages name paths, entries, fields, versions and heights — never a setting's value.
+ * reads, and in that transaction deletes its {@link HistoryCheck.deletes} and records its {@link HistoryCheck.writes}
+ * (CF-5: "in the transaction that records the configuration"; CF-6: "in the same transaction as the comparison"): the
+ * omitted rows above the cursor; every entry above the cursor that differs from its row or has none, and a module's
+ * stop changed above the cursor. Messages name paths, entries, fields, versions and heights — never a setting's value.
  */
 
 import { createHash } from "node:crypto";
@@ -126,6 +130,8 @@ export interface HistoryContext {
   recordedData(entry: CheckedEntry): PlainObject | null;
   /** CF-6's allowance for a module's stop ({@link stopChangeAllowed}). */
   stopChangeAllowed(recorded: bigint | null, configured: bigint | null, cursor: bigint): boolean;
+  /** CF-5's allowance for an omitted row ({@link omissionAllowed}). */
+  omissionAllowed(row: HistoryRow, cursor: bigint | null): boolean;
 }
 
 /** One check of the history: its findings, in entry order. */
@@ -136,8 +142,8 @@ export interface HistoryRule {
 }
 
 /**
- * What {@link checkHistory} may be given besides its input — the rules and CF-6's two allowances, each replaceable so
- * that the negative controls can show what each one decides.
+ * What {@link checkHistory} may be given besides its input — the rules, CF-6's two allowances and CF-5's, each
+ * replaceable so that the negative controls can show what each one decides.
  */
 export interface HistoryOptions {
   /** The rules to run; {@link HISTORY_RULES} unless given. */
@@ -146,6 +152,8 @@ export interface HistoryOptions {
   readonly recordedData?: (entry: CheckedEntry) => PlainObject | null;
   /** When a module's changed stop is accepted; {@link stopChangeAllowed} unless given. */
   readonly stopChangeAllowed?: (recorded: bigint | null, configured: bigint | null, cursor: bigint) => boolean;
+  /** When a recorded row the configuration omits is deleted instead of refused; {@link omissionAllowed} unless given. */
+  readonly omissionAllowed?: (row: HistoryRow, cursor: bigint | null) => boolean;
 }
 
 /** What startup goes on with once the history accepted the configuration. */
@@ -165,6 +173,11 @@ export interface HistoryCheck {
   readonly committedVersions: ReadonlyMap<string, readonly string[]>;
   /** The rows `core-chain` records, each inserted or replacing the row of its `(id, start)`. */
   readonly writes: readonly HistoryRow[];
+  /**
+   * The recorded rows `core-chain` deletes, in the transaction that records the writes: those the configuration omits
+   * that start above the cursor (CF-5, Q103 B), as read. None of them has a `(id, start)` among the writes.
+   */
+  readonly deletes: readonly HistoryRow[];
 }
 
 /** The canonical JSON of plain data (RFC 8785 for this subset): keys sorted by UTF-16 code units, no whitespace. */
@@ -303,6 +316,15 @@ export function stopChangeAllowed(recorded: bigint | null, configured: bigint | 
   return above(recorded) && above(configured);
 }
 
+/**
+ * CF-5's allowance for an omitted row (owner decision Q103, option B): a recorded row the configuration no longer lists
+ * is deleted, not refused, when it starts above the cursor — or nothing has committed (a null cursor) —, since no
+ * stored data was processed with it.
+ */
+export function omissionAllowed(row: HistoryRow, cursor: bigint | null): boolean {
+  return cursor === null || row.start > cursor;
+}
+
 /** How a finding names `entry`: its position, id and start. */
 const refOf = (entry: CheckedEntry): EntryRef =>
   Object.freeze({ index: entry.index, id: entry.id, start: entry.start });
@@ -349,7 +371,7 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
     code: "missing-entry",
     check: (context) =>
       context.history
-        .filter((row) => !context.listed(row))
+        .filter((row) => !context.listed(row) && !context.omissionAllowed(row, context.cursor))
         .map((row) => {
           const build = context.build(row.id);
           const hint =
@@ -371,7 +393,9 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
             null,
             `the history records ${row.id} from ${row.start} (version ${row.version}), which the configuration does ` +
               "not list: an entry is identified by its id and start, and the configuration lists every entry the " +
-              `history records (CF-5); ${hint}`,
+              `history records that starts at or below the cursor ${context.cursor}, since the heights up to the ` +
+              "cursor were processed with it (CF-5; one that starts above the cursor may be omitted or moved, " +
+              `decision record Q103); ${hint}`,
             { id: row.id, start: Number(row.start), version: row.version },
           );
         }),
@@ -587,6 +611,7 @@ function contextOf(input: HistoryInput, options: HistoryOptions): HistoryContext
     last: (entry) => last.get(entry as PlacedEntry) ?? null,
     recordedData: options.recordedData ?? recordedData,
     stopChangeAllowed: options.stopChangeAllowed ?? stopChangeAllowed,
+    omissionAllowed: options.omissionAllowed ?? omissionAllowed,
   };
 }
 
@@ -600,7 +625,7 @@ export function historyFindings(input: HistoryInput, options: HistoryOptions = {
 function refusal(code: HistoryCode, findings: readonly HistoryFinding[], context: HistoryContext): UmbraError {
   const where = context.file === null ? "the configuration" : `the configuration ${context.file}`;
   const what = {
-    "missing-entry": "omits entries the history records (CF-5)",
+    "missing-entry": "omits entries the history records at or below the cursor (CF-5)",
     "changes-past": "changes the past (CF-6)",
     "upgrade-required": "needs another build (CF-8)",
     "development-opt-in-required": "uses a development-only feature without the development opt-in (CF-9)",
@@ -647,6 +672,8 @@ export function checkHistory(input: HistoryInput, options: HistoryOptions = {}):
     }
     return recorded !== undefined && sameRow(recorded, row) ? [] : [row];
   });
+  // Every omitted row the listed rule did not refuse (CF-5, Q103 B).
+  const deletes = context.history.filter((row) => !context.listed(row) && context.omissionAllowed(row, context.cursor));
   const process = processCoreEntry(input.config);
   return Object.freeze({
     start: BigInt(input.config.start),
@@ -657,6 +684,7 @@ export function checkHistory(input: HistoryInput, options: HistoryOptions = {}):
     graphEntries: Object.freeze(graphEntries(context.entries)),
     committedVersions: committedVersions(input.history, BigInt(input.config.start), input.cursor),
     writes: Object.freeze(writes),
+    deletes: Object.freeze(deletes),
   });
 }
 

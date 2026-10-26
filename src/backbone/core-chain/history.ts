@@ -14,8 +14,9 @@
  *
  * **Order at startup** (CF-6, CF-8): the runner reads the rows ({@link readHistory}, none before the table exists) and
  * checks the configuration with them before any migration runs; then `startDatabase` runs `core-chain` first — this
- * migration on a new database, then its `on-start-db`, which compares again with the rows its own transaction reads and
- * records the check's writes in that same transaction ({@link recordHistory}).
+ * migration on a new database, then its `on-start-db`, which compares again with the rows its own transaction reads and,
+ * in that same transaction, deletes the omitted rows above the cursor (CF-5, Q103 B) and records the check's writes
+ * ({@link recordHistory}).
  */
 
 import {
@@ -56,6 +57,8 @@ const PRESENT_SQL = "SELECT to_regclass('core_chain.config') IS NOT NULL AS pres
 const ROWS_SQL = `SELECT entry_id, start, stop, version, data, data_hash FROM core_chain.config
   ORDER BY ${keyOrderTerm("entry_id", "text")}, ${keyOrderTerm("start", "bigint")}`;
 
+const DELETE_SQL = "DELETE FROM core_chain.config WHERE entry_id = $1 AND start = $2";
+
 const RECORD_SQL = `INSERT INTO core_chain.config (entry_id, start, stop, version, data, data_hash)
   VALUES ($1, $2, $3, $4, $5::jsonb, $6)
   ON CONFLICT (entry_id, start) DO UPDATE
@@ -84,7 +87,8 @@ export async function readHistory(read: Pick<ReadHandle, "query">): Promise<Hist
 /**
  * `core-chain`'s work in its `on-start-db` (CF-6): reads the rows in `tx` — its schema write handle, or any transaction
  * —, checks the configuration against them (`checkHistory`, refusing as it does, so the transaction rolls back with
- * nothing recorded), and records the check's writes in `tx`, each inserted or replacing the row of its `(id, start)`.
+ * nothing recorded), then in `tx` deletes the check's deletes — the omitted rows above the cursor (CF-5, Q103 B) — and
+ * records its writes, each inserted or replacing the row of its `(id, start)`: a failure anywhere rolls back both.
  * Resolves with the check. `options` are `checkHistory`'s (the negative controls').
  */
 export async function recordHistory(
@@ -93,6 +97,7 @@ export async function recordHistory(
   options: HistoryOptions = {},
 ): Promise<HistoryCheck> {
   const check = checkHistory({ ...input, history: await readHistory(tx) }, options);
+  for (const row of check.deletes) await tx.execute(DELETE_SQL, [row.id, row.start]);
   for (const row of check.writes) {
     const data = row.data === null ? null : canonicalJson(row.data);
     await tx.execute(RECORD_SQL, [row.id, row.start, row.stop, row.version, data, row.dataHash]);

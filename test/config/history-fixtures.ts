@@ -20,8 +20,9 @@ import { CORE_SETTINGS } from "./config-fixtures.js";
 /**
  * Modules, configurations and simulated startups for the tests of the configuration history (task 4.3; CF-5 to CF-9,
  * A28's history half, A30–A34): the history is `checkHistory` over the validated configuration, the cursor, the build's
- * declarations and the rows of `core_chain.config`; a startup records its `writes`, so a sequence of startups is
- * simulated here without a database by applying each one's writes to the rows the next one reads ({@link Simulation}).
+ * declarations and the rows of `core_chain.config`; a startup records its `writes` and deletes its `deletes` (task
+ * 4.3a), so a sequence of startups is simulated here without a database by applying each one's to the rows the next one
+ * reads ({@link Simulation}).
  * The database tests run the same sequence through `core_chain.config` (`./history-startup.ts`).
  */
 
@@ -116,9 +117,17 @@ export function checked(entries: readonly unknown[], declarations: DeclarationSe
   return validateConfig({ config: { file: FILE, data: plainData({ entries }) }, declarations, side: "public" });
 }
 
-/** The history once `writes` are recorded: each write inserted or replacing the row of its `(id, start)`. */
-export function recordedAfter(history: readonly HistoryRow[], writes: readonly HistoryRow[]): HistoryRow[] {
+/**
+ * The history once `deletes` are deleted and `writes` recorded: each deleted by its `(id, start)`, each write inserted
+ * or replacing the row of its `(id, start)`.
+ */
+export function recordedAfter(
+  history: readonly HistoryRow[],
+  writes: readonly HistoryRow[],
+  deletes: readonly HistoryRow[] = [],
+): HistoryRow[] {
   const rows = new Map(history.map((row) => [`${row.id}@${row.start}`, row]));
+  for (const row of deletes) rows.delete(`${row.id}@${row.start}`);
   for (const row of writes) rows.set(`${row.id}@${row.start}`, row);
   return [...rows.values()].sort((a, b) =>
     a.id === b.id ? (a.start < b.start ? -1 : a.start > b.start ? 1 : 0) : a.id < b.id ? -1 : 1,
@@ -135,7 +144,8 @@ export interface Start {
 
 /**
  * A database simulated by its history alone: each {@link Simulation.start} checks the configuration against the rows
- * recorded so far and, when it is accepted, records its writes, as `core-chain`'s `on-start-db` does.
+ * recorded so far and, when it is accepted, deletes its deletes and records its writes, as `core-chain`'s `on-start-db`
+ * does.
  */
 export class Simulation {
   history: HistoryRow[] = [];
@@ -145,7 +155,7 @@ export class Simulation {
     const declarations = build(start.user);
     const config = checked(start.entries, declarations);
     const check = checkHistory({ config, cursor: start.cursor, declarations, history: this.history }, start.options);
-    this.history = recordedAfter(this.history, check.writes);
+    this.history = recordedAfter(this.history, check.writes, check.deletes);
     return check;
   }
 
