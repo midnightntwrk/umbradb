@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import type { UmbraDBSql } from "../../src/postgres/client.js";
+import type { UmbraDBSql } from "../../../../src/postgres/client.js";
 import { referenceMergeEntries } from "../postgres/reference-merge.js";
 import { startTestDatabase, stopTestDatabase } from "../postgres/setup.js";
 import {

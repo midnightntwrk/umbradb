@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { ValidationError } from "../../src/interfaces/storage-errors.js";
-import { hasPostgresUnsafeText } from "../../src/interfaces/temporal-kv.js";
+import { ValidationError } from "../../../../src/interfaces/storage-errors.js";
+import { hasPostgresUnsafeText } from "../../../../src/interfaces/temporal-kv.js";
 import {
   THS_RESERVED_KEY_PREFIX,
   type EntryContent, type TransactionHistoryEntry,

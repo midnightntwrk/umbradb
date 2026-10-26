@@ -3,7 +3,7 @@ import * as umbra from "../../src/index.js";
 import {
   createClient, runMigrations, DEFAULT_SCHEMA,
   PgTemporalKV, PgCheckpointStore, PgWatermarks, PgTransactionLeaseLayer,
-  PgTransactionHistoryStorage, PgWalletStateEnvelopeStore,
+  PgWalletStateEnvelopeStore,
   saveAndAdvance, Rollback,
   StorageError, ValidationError, SerializationFailedError, ConnectionError,
   VersionConflictError, HistoryUnavailableError, TransactionKeyReuseError,
@@ -29,7 +29,7 @@ describe("frozen barrel: every frozen value name resolves from the built package
     expect(DEFAULT_SCHEMA).toBe("umbradb");
     for (const cls of [
       PgTemporalKV, PgCheckpointStore, PgWatermarks, PgTransactionLeaseLayer,
-      PgTransactionHistoryStorage, PgWalletStateEnvelopeStore,
+      PgWalletStateEnvelopeStore,
     ]) {
       expect(typeof cls).toBe("function");
       expect(typeof cls.prototype).toBe("object");
@@ -70,7 +70,10 @@ describe("frozen barrel: every frozen value name resolves from the built package
     expect((rb as unknown as { code?: unknown }).code).toBeUndefined();
   });
 
-  it("the runtime namespace exposes exactly the 36 frozen value names (type-only exports are erased)", () => {
-    expect(Object.keys(umbra).sort()).toHaveLength(36);
+  // 0.9.5 exported 36 value names; `PgTransactionHistoryStorage` left with TransactionHistory for
+  // `legacy/transaction-history/` (core-arch task 17.1, LS-3), so 35 remain until task 17.3 pins the new surface (LS-1).
+  it("the runtime namespace exposes exactly the 35 remaining 0.9.5 value names (type-only exports are erased)", () => {
+    expect(Object.keys(umbra).sort()).toHaveLength(35);
+    expect("PgTransactionHistoryStorage" in umbra).toBe(false);
   });
 });

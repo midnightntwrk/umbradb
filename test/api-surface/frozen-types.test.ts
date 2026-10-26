@@ -2,7 +2,7 @@ import { describe, expectTypeOf, it } from "vitest";
 import {
   createClient, runMigrations, saveAndAdvance, Rollback, DEFAULT_SCHEMA,
   PgTemporalKV, PgCheckpointStore, PgWatermarks, PgTransactionLeaseLayer,
-  PgTransactionHistoryStorage, PgWalletStateEnvelopeStore, StorageError,
+  PgWalletStateEnvelopeStore, StorageError,
   type UmbraDBSql, type UmbraDBConnectionOptions, type Migration, type RunMigrationsOptions,
   type Retryability,
   type SharedStorageErrorCode, type TemporalKVErrorCode, type CheckpointStoreErrorCode,
@@ -14,14 +14,13 @@ import {
   type SaveCheckpointOptions, type HistoryOptions, type CheckpointSequence, type ContentHash,
   type TransactionLeaseLayer, type TransactionHandle, type Lease, type TransactionOptions,
   type LeaseAcquireOptions, type TransactionRollbackCause,
-  type TransactionHistoryStorage, type TransactionHistoryReader, type TransactionHistoryWriter,
-  type TransactionHistoryEntry, type TransactionHistoryStatus, type EntryContent,
-  type EntryLifecycle, type EntryLifecycleStatus, type PendingLifecycle, type FinalizedLifecycle,
-  type RejectedLifecycle, type MergeEntriesFn,
   type WalletStateEnvelope, type SaveAndAdvanceDeps, type SaveAndAdvanceCursor,
 } from "../../src/index.js";
 
 /**
+ * TransactionHistory's class and its twelve types left the surface for `legacy/transaction-history/` (core-arch task
+ * 17.1, LS-3); `./excluded-not-exported.test.ts` holds that none of them is exported.
+ *
  * G1 / acceptance A5: a compiled type-assertion file (vitest expectTypeOf) proves each frozen
  * export resolves to a concrete type from the public barrel (src/index.ts; its declarations are emitted 1:1 to dist/index.d.ts by `npm run build`) with no
  * implicit-any fallback and no missing-declaration diagnostic. The assertions are checked by
@@ -38,7 +37,6 @@ describe("frozen surface: every export is a concrete, non-any type from the buil
     expectTypeOf(PgTransactionLeaseLayer).not.toBeAny();
     expectTypeOf(PgCheckpointStore).not.toBeAny();
     expectTypeOf(PgWatermarks).not.toBeAny();
-    expectTypeOf(PgTransactionHistoryStorage).not.toBeAny();
     expectTypeOf(PgWalletStateEnvelopeStore).not.toBeAny();
     expectTypeOf(Rollback).not.toBeAny();
     expectTypeOf(StorageError).not.toBeAny();
@@ -49,7 +47,6 @@ describe("frozen surface: every export is a concrete, non-any type from the buil
     expectTypeOf<InstanceType<typeof PgWatermarks>>().toMatchTypeOf<Watermarks>();
     expectTypeOf<InstanceType<typeof PgCheckpointStore>>().toMatchTypeOf<CheckpointStore>();
     expectTypeOf<InstanceType<typeof PgTransactionLeaseLayer>>().toMatchTypeOf<TransactionLeaseLayer>();
-    expectTypeOf<InstanceType<typeof PgTransactionHistoryStorage>>().toMatchTypeOf<TransactionHistoryStorage>();
   });
 
   it("Retryability is the frozen tri-state union", () => {
@@ -88,18 +85,6 @@ describe("frozen surface: every export is a concrete, non-any type from the buil
     expectTypeOf<TransactionOptions>().not.toBeAny();
     expectTypeOf<LeaseAcquireOptions>().not.toBeAny();
     expectTypeOf<TransactionRollbackCause>().not.toBeAny();
-    expectTypeOf<TransactionHistoryStorage>().not.toBeAny();
-    expectTypeOf<TransactionHistoryReader>().not.toBeAny();
-    expectTypeOf<TransactionHistoryWriter>().not.toBeAny();
-    expectTypeOf<TransactionHistoryEntry>().not.toBeAny();
-    expectTypeOf<TransactionHistoryStatus>().not.toBeAny();
-    expectTypeOf<EntryContent>().not.toBeAny();
-    expectTypeOf<EntryLifecycle>().not.toBeAny();
-    expectTypeOf<EntryLifecycleStatus>().not.toBeAny();
-    expectTypeOf<PendingLifecycle>().not.toBeAny();
-    expectTypeOf<FinalizedLifecycle>().not.toBeAny();
-    expectTypeOf<RejectedLifecycle>().not.toBeAny();
-    expectTypeOf<MergeEntriesFn>().not.toBeAny();
     expectTypeOf<WalletStateEnvelope>().not.toBeAny();
     expectTypeOf<SaveAndAdvanceDeps>().not.toBeAny();
     expectTypeOf<SaveAndAdvanceCursor>().not.toBeAny();

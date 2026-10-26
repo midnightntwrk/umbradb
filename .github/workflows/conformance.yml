@@ -16,13 +16,14 @@ concurrency:
 
 jobs:
   test:
-    # F5 (audit finding): the Pg-only conformance suite (`test/postgres/**`, `test/integration/
-    # pg-tx-history-adapter.test.ts`) uses testcontainers (`@testcontainers/postgresql`), which
+    # F5 (audit finding): the Pg-only conformance suite (`test/postgres/**`, `test/db/**` and the
+    # other database suites) uses testcontainers (`@testcontainers/postgresql`), which
     # starts its OWN disposable Postgres container via the Docker daemon already present on
     # ubuntu-latest runners -- no `services: postgres` block is needed or used. This is the
     # required merge gate; it never runs the env-gated live tier (`test:live`), which needs a real
     # preprod network, a funded seed, and a built midnight-wallet checkout none of which are
-    # available (or wanted) in CI (`design.md` §7.4).
+    # available (or wanted) in CI (`design.md` §7.4). TransactionHistory's tests, the live tier among
+    # them, are kept in `legacy/transaction-history/` outside this run (core-arch task 17.1, LS-3).
     #
     # Timeout posture (v1.0.0-recovery-testing Task 7.1): the crash (~26s), soak (~73s) and
     # differential (~10s) suites now RUN in this gate (Testcontainers, `UMBRADB_LIVE_PREPROD`
@@ -61,7 +62,6 @@ jobs:
         #
         # Suites that ALWAYS self-skip in CI (reported SKIPPED, never silently counted as passed;
         # none are `"required"` manifest ids, so they cannot make the reconciliation red):
-        #   - the two live/cold-boot integration tests (gated behind UMBRADB_LIVE_PREPROD);
         #   - test/integration/chain-archive-replay-decode.integration.test.ts (needs a built
         #     sibling midnight-wallet checkout + a captured indexer SQLite DB, absent in CI).
         # A green CI run therefore says NOTHING about those suites beyond clean collection.

@@ -1,5 +1,5 @@
 import type { ISql, JSONValue } from "postgres";
-import { SerializationFailedError, StorageError, ValidationError } from "../interfaces/storage-errors.js";
+import { SerializationFailedError, StorageError, ValidationError } from "../../../../src/interfaces/storage-errors.js";
 import {
   THS_RESERVED_KEY_PREFIX,
   TransactionHistoryEntrySchema,
@@ -9,12 +9,12 @@ import {
   type TransactionHistoryEntry,
   type TransactionHistoryStorage,
 } from "../interfaces/transaction-history-storage.js";
-import { hasPostgresUnsafeText } from "../interfaces/temporal-kv.js";
-import type { TransactionHandle } from "../interfaces/transaction-lease.js";
-import { withAbort } from "./abort.js";
-import type { UmbraDBSql } from "./client.js";
-import { translatePostgresError } from "./errors.js";
-import { resolveTransaction } from "./transaction-lease.js";
+import { hasPostgresUnsafeText } from "../../../../src/interfaces/temporal-kv.js";
+import type { TransactionHandle } from "../../../../src/interfaces/transaction-lease.js";
+import { withAbort } from "../../../../src/postgres/abort.js";
+import type { UmbraDBSql } from "../../../../src/postgres/client.js";
+import { translatePostgresError } from "../../../../src/postgres/errors.js";
+import { resolveTransaction } from "../../../../src/postgres/transaction-lease.js";
 
 /** Advisory-lock class `4` ("transaction-history merge lock"), distinct from the migration
  *  runner's class `1`, the writer-lease layer's class `2`

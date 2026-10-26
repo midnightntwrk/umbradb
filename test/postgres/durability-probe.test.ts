@@ -122,9 +122,10 @@ describe("G6 durability probe — live against Testcontainers Postgres", () => {
       const rows = await sql<{ count: string }[]>`
         select count(*)::text as count from ${sql(TEST_SCHEMA)}._migrations
       `;
-      // 7 = migrations 000..006 (perf-baseline added 005_kv_current_fillfactor +
-      // 006_ckpt_chunks_size_bytes to the tier-1 lineage; keep in sync with migrate.test.ts).
-      expect(Number(rows[0]!.count)).toBe(7);
+      // 6 = migrations 000..006 without 004_transaction_history (perf-baseline added 005_kv_current_fillfactor +
+      // 006_ckpt_chunks_size_bytes to the tier-1 lineage; 004 moved to legacy/transaction-history/ with
+      // TransactionHistory, core-arch task 17.1, LS-3; keep in sync with migrate.test.ts).
+      expect(Number(rows[0]!.count)).toBe(6);
     } finally {
       await sql.end({ timeout: 5 });
     }
@@ -151,7 +152,7 @@ describe("G6 durability probe — live against Testcontainers Postgres", () => {
       const rows = await sql<{ count: string }[]>`
         select count(*)::text as count from ${sql(TEST_SCHEMA)}._migrations
       `;
-      expect(Number(rows[0]!.count)).toBe(7);
+      expect(Number(rows[0]!.count)).toBe(6);
     } finally {
       await sql.end({ timeout: 5 });
     }
@@ -175,7 +176,7 @@ describe("G6 durability probe — live against Testcontainers Postgres", () => {
       const rows = await sql<{ count: string }[]>`
         select count(*)::text as count from ${sql(TEST_SCHEMA)}._migrations
       `;
-      expect(Number(rows[0]!.count)).toBe(7);
+      expect(Number(rows[0]!.count)).toBe(6);
     } finally {
       await sql.end({ timeout: 5 });
     }
@@ -195,7 +196,7 @@ describe("G6 durability probe — live against Testcontainers Postgres", () => {
       const rows = await sql<{ count: string }[]>`
         select count(*)::text as count from ${sql(TEST_SCHEMA)}._migrations
       `;
-      expect(Number(rows[0]!.count)).toBe(7);
+      expect(Number(rows[0]!.count)).toBe(6);
     } finally {
       await sql.end({ timeout: 5 });
     }

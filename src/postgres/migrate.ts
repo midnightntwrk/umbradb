@@ -7,7 +7,6 @@ import * as migration000 from "./migrations/000_schema.js";
 import * as migration001 from "./migrations/001_temporal_kv.js";
 import * as migration002 from "./migrations/002_checkpoint_store.js";
 import * as migration003 from "./migrations/003_watermarks.js";
-import * as migration004 from "./migrations/004_transaction_history.js";
 import * as migration005 from "./migrations/005_kv_current_fillfactor.js";
 import * as migration006 from "./migrations/006_ckpt_chunks_size_bytes.js";
 
@@ -71,7 +70,10 @@ async function withReservedTransaction<T>(reserved: ISql, fn: () => Promise<T>):
  *  selecting a different lineage (e.g. the Tier-1.5 chain-archive one) — this is still the
  *  default every existing caller gets when it omits that option, so this rename changes no
  *  runtime behavior for any current call site. */
-const tier1WalletMigrations: Migration[] = [migration000, migration001, migration002, migration003, migration004, migration005, migration006];
+// `004_transaction_history` left the lineage with TransactionHistory for `legacy/transaction-history/` (core-arch task
+// 17.1, LS-3): a schema this lineage creates no longer has `transaction_history`; one that already has it keeps the
+// table and its `_migrations` row, which nothing here reads (each migration is looked up by its own name).
+const tier1WalletMigrations: Migration[] = [migration000, migration001, migration002, migration003, migration005, migration006];
 
 export interface RunMigrationsOptions {
   schema: string;

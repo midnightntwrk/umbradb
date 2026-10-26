@@ -1,13 +1,13 @@
 import { TransactionHistoryStorage as Sdk } from "@midnightntwrk/wallet-sdk-abstractions";
 import { z } from "zod";
-import { SerializationFailedError, ValidationError } from "../../src/interfaces/storage-errors.js";
+import { SerializationFailedError, ValidationError } from "../../../../src/interfaces/storage-errors.js";
 import type {
   EntryContent,
   MergeEntriesFn,
   TransactionHistoryEntry as UmbraTransactionHistoryEntry,
   TransactionHistoryStatus as UmbraTransactionHistoryStatus,
 } from "../../src/interfaces/transaction-history-storage.js";
-import type { UmbraDBSql } from "../../src/postgres/client.js";
+import type { UmbraDBSql } from "../../../../src/postgres/client.js";
 import { PgTransactionHistoryStorage } from "../../src/postgres/transaction-history-storage.js";
 
 /**

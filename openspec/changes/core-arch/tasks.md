@@ -1545,8 +1545,69 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 17. Library surface and gates
 
-- [ ] 17.1 Move TransactionHistory and its tests to `legacy/transaction-history/`, excluded from build, package and run.
+- [x] 17.1 Move TransactionHistory and its tests to `legacy/transaction-history/`, excluded from build, package and run.
       **Acceptance:** A3.
+      **Done (2026-10-26):** TransactionHistory moved with `git mv` to `legacy/transaction-history/`, each file at its
+      repository path below the folder (design §1, §13; LS-3; Q27, F9): the source
+      (`src/interfaces/transaction-history-storage.ts`, `src/postgres/transaction-history-storage.ts`) with its table's
+      migration `src/postgres/migrations/004_transaction_history.ts`, which left 0.9.5's `tier1_wallet` lineage
+      (`src/postgres/migrate.ts`: a schema `runMigrations` creates no longer has `transaction_history`; one that has it
+      keeps it and its `_migrations` row, which the runner never reads); its tests and doubles
+      (`test/postgres/transaction-history-storage{,.property}.test.ts`, `in-memory-transaction-history-storage.ts`,
+      `reference-merge.ts`, `reference-merge-parity.test.ts`, `test/integration/pg-tx-history-adapter{,.test}.ts`), the
+      two live preprod tests (`preprod-db-sync`, `cold-boot-recovery`) and the wallet-SDK loaders only they use
+      (`test/integration/live-fixtures/`); and its benchmark workload (`bench/workloads/transaction-history.ts`,
+      `tx-history-merge.ts`), which `bench/harness.ts` and `bench/types.ts` no longer run or type (the committed
+      baseline keeps its two entries until 17.2). The moved files import each other as before; their 29 imports of files
+      that stayed point two levels further up. Added in the folder: `README.md`; `tsconfig.json`, its own program, which
+      `npm run typecheck` now runs after the repository's, so the kept code still compiles against the 0.9.5 modules it
+      imports (Q112); `vitest.config.ts`, its own run, by hand (`npm run test:live` uses it);
+      `test/postgres/setup.ts`, the repository's test database plus migration 004, at the path the moved tests already
+      import. Exclusions: `tsconfig.build.json` and `tsconfig.json` unchanged (neither includes `legacy/`; A3's test
+      checks their programs, imports followed); `package.json` `files` unchanged; `vitest.config.ts` excludes
+      `legacy/**` from the run and from coverage (Vitest matches coverage globs anywhere in a loaded file's path, so
+      `src/**/*.ts` would reach `legacy/…/src/`); Stryker's `mutate` and the mutation include name no TransactionHistory
+      file (unchanged); the conformance gate runs `vitest run` with that configuration; `npm run build` now empties
+      `dist/` first, so a moved source's old output is not packed (the smoke test's first run packed 12 such files left
+      by an earlier build). Exports, a breaking change: `src/index.ts` no longer exports `PgTransactionHistoryStorage`
+      or its 12 types (`TransactionHistoryStorage`, `…Reader`, `…Writer`, `…Entry`, `…Status`, `EntryContent`,
+      `EntryLifecycle`, `EntryLifecycleStatus`, `PendingLifecycle`, `FinalizedLifecycle`, `RejectedLifecycle`,
+      `MergeEntriesFn`); 35 of 0.9.5's 36 values remain until 17.3. The surface pins follow the new surface (LS-3), none
+      weakened: `barrel-resolves` counts 35 and checks the class is absent; `excluded-not-exported` adds the class's
+      absence and 12 `@ts-expect-error` type imports that `npm run typecheck` holds; `frozen-types` drops the removed
+      names. 0.9.5's `test/postgres/migrate.test.ts` and `durability-probe.test.ts` pin the lineage without 004 (exact
+      names; 6 rows, not 7). Tests: `test/library-surface/legacy.ts` (the inventory and the checks) and
+      `legacy-excluded.test.ts` (14: A3 on the real lists — `npm pack --dry-run --json`, the programs of
+      `tsconfig.build.json` and `tsconfig.json`, `vitest list --filesOnly --json`, the coverage and mutation
+      configurations, the folder's exact inventory — and the negative controls); the pack smoke's oracle 1b (the tarball
+      of a clean build holds nothing of `legacy/` or of TransactionHistory) and 4c (importing the class or its type from
+      the installed package fails to type-check). Seen failing first, before any move: `tsc` with 12 × TS2578 (an unused
+      `@ts-expect-error`); Vitest 15 of 72 tests in 5 files (`expected […] to have a length of 35 but got 36`;
+      `PgTransactionHistoryStorage must NOT be exported`; A3's inventory 38 problems, the build 3, the repository's
+      program 17, the run 6, the two controls that need legacy's configurations unable to load them; the two lineage
+      tests 7, `expected 7 to be 6` and the name lists); the smoke `FAIL -- the packed tarball holds files of legacy/ or
+      of TransactionHistory (A3, LS-3)` (12 `dist/` files); the coverage check, once it matched as Vitest does, with
+      `legacy/**` left out of `coverage.exclude` (3 files). The moved tests pass from their new place (legacy's
+      configuration, PostgreSQL 18.6: 6 files, 98 passed, 4 skipped — the two live tests and the parity file's two
+      real-SDK comparisons, as before). Committed controls, each failing A3: a tarball listing with a `legacy/` file or
+      a TransactionHistory build output (`-`, `_`, camel case, `tx`); a real `npm pack` of a package whose `files` names
+      `legacy`; a run list with a `legacy/` test or a moved test's old path; the list legacy's own Vitest configuration
+      runs; legacy's own TypeScript program; a program whose file imports a legacy file; coverage globs reaching
+      `legacy/`; a missing or stray legacy file, and a file left at its old path. Wrong variants (a scratch runner
+      outside the clone: `tsc`, then `test/library-surface/`): first run 54, 34 caught, 20 survived (the inventory never
+      compared with the folder 7, `underLegacy`'s edges 4, the name pattern's `_`, camel case and case 3, a legacy file
+      reported twice, coverage of the added files, the programs following imports, the package-file filter, the child
+      environment, the file-system oracle replaced), closed by gap tests each seen failing on its variant; the
+      child-environment stripping had no effect in a plain or a coverage run and was removed; on the final sources 63
+      variants, 63 caught (one of them, a planted type error, by the type check). No required id among the moved tests
+      (25 required and 1 deferred, in 10 files, none moved; the manifest unchanged). Question Q112 raised (not
+      blocking); issue `docs/issues/00017-vitest-config-not-type-checked.md` recorded (OPEN).
+      **Pending:** the 0.9.5 modules the kept code imports, and legacy's program and run when they go (17.2, Q112);
+      the TransactionHistory workload in `legacy/transaction-history/bench/` with the baseline's two entries and
+      `Performance/CEILINGS.md` SC-5 (17.2, §13); the §12 surface pin, keeping the LS-3 checks, and the pack smoke
+      rewritten with oracles 1b and 4c (17.3); the breaking-change notice naming the removed exports and that
+      `runMigrations` no longer creates `transaction_history`, and `README.md`'s TransactionHistory sections (17.4); the
+      refactor of the kept code (FEATURES F9).
 - [ ] 17.2 Remove the retired parts, the `chain_archive` store, `chain-archive-sync`, their tests, the Lean modules,
       benchmarks, manifest ids, coverage floors and mutation targets exactly as listed in `design.md` §13, and update
       the aggregators it lists; mark the retired laws in `Formal/STORAGE_ALGEBRA.md` and the roadmaps; set

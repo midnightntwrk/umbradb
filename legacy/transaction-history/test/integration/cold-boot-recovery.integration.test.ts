@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
-import { ENVELOPE_VERSION, type WalletStateEnvelope } from "../../src/interfaces/wallet-state-envelope.js";
-import type { UmbraDBSql } from "../../src/postgres/client.js";
-import { PgCheckpointStore } from "../../src/postgres/checkpoint-store.js";
+import { ENVELOPE_VERSION, type WalletStateEnvelope } from "../../../../src/interfaces/wallet-state-envelope.js";
+import type { UmbraDBSql } from "../../../../src/postgres/client.js";
+import { PgCheckpointStore } from "../../../../src/postgres/checkpoint-store.js";
 import { PgTransactionHistoryStorage } from "../../src/postgres/transaction-history-storage.js";
-import { PgTransactionLeaseLayer } from "../../src/postgres/transaction-lease.js";
-import { PgWalletStateEnvelopeStore } from "../../src/postgres/wallet-state-envelope.js";
+import { PgTransactionLeaseLayer } from "../../../../src/postgres/transaction-lease.js";
+import { PgWalletStateEnvelopeStore } from "../../../../src/postgres/wallet-state-envelope.js";
 import { referenceMergeEntries } from "../postgres/reference-merge.js";
 import { startTestDatabase, stopTestDatabase } from "../postgres/setup.js";
 import {

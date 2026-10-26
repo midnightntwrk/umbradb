@@ -122,7 +122,6 @@ export interface Baseline {
     watermarksHotRatio: HotRatio;
     /** Bloat-stability of `watermarks` under repeated same-key updates (task 2.2). */
     watermarksBloatStability: BloatStability;
-    transactionHistoryGinWriteP99Ms: number;
   };
   gcCurve: GcCurve;
 }

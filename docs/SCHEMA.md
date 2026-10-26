@@ -341,6 +341,11 @@ CREATE TABLE watermarks (
 
 ### `transaction_history`
 
+> **Moved out of the lineage** (core-arch task 17.1, LS-3): `004_transaction_history.ts` left `tier1WalletMigrations`
+> with TransactionHistory, which is kept in `legacy/transaction-history/` outside the build and the package. A schema
+> `runMigrations` creates no longer has this table; one that already has it keeps the table and its `_migrations` row.
+> The section below describes the table as 0.9.5 created it.
+
 **Purpose.** Per-wallet transaction history with lifecycle tracking (`pending` → `finalized` /
 `rejected`) and an identifier-subset "supersession" rule: finalizing/rejecting a transaction clears
 any other still-pending entries whose identifiers are a subset of the finalized one's.
@@ -791,7 +796,7 @@ export interface RunMigrationsOptions {
 ```
 
 - Every existing tier1_wallet caller that omits `migrations` is unaffected — `tier1WalletMigrations`
-  (the array `[migration000, migration001, migration002, migration003, migration004, migration005, migration006]`, formerly the
+  (the array `[migration000, migration001, migration002, migration003, migration005, migration006]`, formerly the
   module's unexported default) remains the implicit default.
 - A `chain_archive` caller passes `{ schema: "chain_archive", migrations: chainArchiveMigrations }`
   explicitly. `chainArchiveMigrations` (`migrations/chain_archive/index.ts`) is

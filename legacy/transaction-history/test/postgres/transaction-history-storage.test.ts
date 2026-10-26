@@ -1,15 +1,15 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { ConnectionError, SerializationFailedError, ValidationError } from "../../src/interfaces/storage-errors.js";
+import { ConnectionError, SerializationFailedError, ValidationError } from "../../../../src/interfaces/storage-errors.js";
 import {
   THS_RESERVED_KEY_PREFIX,
   type EntryContent, type MergeEntriesFn, type TransactionHistoryEntry,
 } from "../../src/interfaces/transaction-history-storage.js";
-import { TransactionHandleInvalidError, type TransactionHandle } from "../../src/interfaces/transaction-lease.js";
-import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
+import { TransactionHandleInvalidError, type TransactionHandle } from "../../../../src/interfaces/transaction-lease.js";
+import { createClient, type UmbraDBSql } from "../../../../src/postgres/client.js";
 import { PgTransactionHistoryStorage } from "../../src/postgres/transaction-history-storage.js";
-import { PgTransactionLeaseLayer } from "../../src/postgres/transaction-lease.js";
+import { PgTransactionLeaseLayer } from "../../../../src/postgres/transaction-lease.js";
 import { referenceMergeEntries } from "./reference-merge.js";
 import { registerSuiteLifecycle, TEST_SCHEMA } from "./setup.js";
 

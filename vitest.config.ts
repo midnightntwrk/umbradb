@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 /**
  * UmbraDB test + coverage configuration.
@@ -100,6 +100,9 @@ const CORE_ARCH = {
 
 export default defineConfig({
   test: {
+    // TransactionHistory's source and tests are kept in `legacy/transaction-history/`, outside the build, the package
+    // and this run (core-arch task 17.1, LS-3, A3); that folder has its own configuration for a run by hand.
+    exclude: [...configDefaults.exclude, "legacy/**"],
     // Teardown budget. `registerSuiteLifecycle`'s afterAll already sets 60s explicitly because
     // `container.stop()` can exceed the 10s default under heavy host load; suites with a plain
     // inline afterAll (e.g. chain-archive-rollover) inherit this global so coverage-instrumented,
@@ -123,6 +126,9 @@ export default defineConfig({
         "src/postgres/chain-archive-rollover.ts",
         "src/interfaces/chain-archive-store.ts",
         "src/postgres/migrations/chain_archive/**",
+        // TransactionHistory, kept outside the run (task 17.1, LS-3, A3). Vitest matches these globs anywhere in a
+        // file's path, so `src/**/*.ts` above would also take in `legacy/transaction-history/src/` if a test loaded it.
+        "legacy/**",
       ],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "./coverage",

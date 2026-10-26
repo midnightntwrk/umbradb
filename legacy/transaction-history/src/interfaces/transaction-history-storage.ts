@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { exceedsMaxDepth, hasPostgresUnsafeText, MAX_JSON_DEPTH } from "./temporal-kv.js";
-import type { TransactionHandle } from "./transaction-lease.js";
+import { exceedsMaxDepth, hasPostgresUnsafeText, MAX_JSON_DEPTH } from "../../../../src/interfaces/temporal-kv.js";
+import type { TransactionHandle } from "../../../../src/interfaces/transaction-lease.js";
 
 /**
  * Transaction History Storage — a Postgres-backed implementation of the Midnight wallet SDK's

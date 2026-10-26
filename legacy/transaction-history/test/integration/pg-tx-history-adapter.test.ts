@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { TransactionHistoryStorage as Sdk } from "@midnightntwrk/wallet-sdk-abstractions";
 import { afterEach, describe, expect, it } from "vitest";
-import { SerializationFailedError, ValidationError } from "../../src/interfaces/storage-errors.js";
+import { SerializationFailedError, ValidationError } from "../../../../src/interfaces/storage-errors.js";
 import { referenceMergeEntries } from "../postgres/reference-merge.js";
 import { registerSuiteLifecycle, TEST_SCHEMA } from "../postgres/setup.js";
 import {

@@ -7,7 +7,6 @@ import { runCheckpointWorkloads } from "./workloads/checkpoint-store.js";
 import { GC_DECLARED_ENVELOPE, runGcScale } from "./workloads/gc.js";
 import { runLeaseWorkloads } from "./workloads/lease.js";
 import { runTemporalKvWorkloads } from "./workloads/temporal-kv.js";
-import { runTxHistoryWorkloads } from "./workloads/transaction-history.js";
 import { runWatermarkWorkloads } from "./workloads/watermarks.js";
 
 /**
@@ -32,6 +31,9 @@ function parseNums(v: string | undefined): number[] | undefined {
   return nums.length > 0 ? nums : undefined;
 }
 
+// TransactionHistory's workload (`transactionHistory.pendingToFinalized`, `transactionHistoryGinWriteP99Ms`) moved with
+// the source to `legacy/transaction-history/bench/` (core-arch task 17.1, LS-3); the committed baseline still records
+// it until task 17.2 retires it with the baseline (`design.md` §13).
 async function main(): Promise<void> {
   const profile = process.env.BENCH_PROFILE ?? "full";
   const quick = profile === "quick";
@@ -59,8 +61,6 @@ async function main(): Promise<void> {
     const kv = await runTemporalKvWorkloads(statSql);
     console.log("[bench] Watermarks workloads ...");
     const wm = await runWatermarkWorkloads(statSql);
-    console.log("[bench] TransactionHistory workloads ...");
-    const th = await runTxHistoryWorkloads(env.sql);
     console.log("[bench] Lease/tx contention workloads ...");
     const lease = await runLeaseWorkloads(env.connectionUri, leaseContenders);
     console.log(`[bench] GC anti-join scale curve (points: ${gcPoints.join(", ")}) ...`);
@@ -70,7 +70,6 @@ async function main(): Promise<void> {
       ...ck.workloads,
       ...kv.workloads,
       ...wm.workloads,
-      ...th.workloads,
       ...lease,
     };
 
@@ -101,7 +100,6 @@ async function main(): Promise<void> {
         kvCurrentHotRatio: kv.hotRatio,
         watermarksHotRatio: wm.hotRatio,
         watermarksBloatStability: wm.bloatStability,
-        transactionHistoryGinWriteP99Ms: th.ginWriteP99Ms,
       },
       gcCurve: gc,
     };
@@ -132,7 +130,6 @@ function printSummary(b: Baseline): void {
   console.log(`  kv_current HOT ratio   : ${fmtRatio(b.measurements.kvCurrentHotRatio.hotRatio)} (hot ${b.measurements.kvCurrentHotRatio.n_tup_hot_upd}/${b.measurements.kvCurrentHotRatio.n_tup_upd} upd)`);
   console.log(`  watermarks HOT ratio   : ${fmtRatio(b.measurements.watermarksHotRatio.hotRatio)} (hot ${b.measurements.watermarksHotRatio.n_tup_hot_upd}/${b.measurements.watermarksHotRatio.n_tup_upd} upd)`);
   console.log(`  watermarks bloat       : ${b.measurements.watermarksBloatStability.relationSizeBytes} bytes, ${b.measurements.watermarksBloatStability.deadTuples} dead tup after ${b.measurements.watermarksBloatStability.updates} updates`);
-  console.log(`  tx-history GIN p99     : ${b.measurements.transactionHistoryGinWriteP99Ms.toFixed(3)} ms`);
   console.log("\n=== GC anti-join scale curve ===");
   for (const p of b.gcCurve.points) {
     console.log(`  ${String(p.liveChunks).padStart(9)} live chunks -> ${p.passMs.toFixed(1)} ms`);

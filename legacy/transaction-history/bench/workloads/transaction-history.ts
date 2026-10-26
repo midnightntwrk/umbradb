@@ -1,9 +1,9 @@
-import type { UmbraDBSql } from "../../src/postgres/client.js";
+import type { UmbraDBSql } from "../../../../src/postgres/client.js";
 import { PgTransactionHistoryStorage } from "../../src/postgres/transaction-history-storage.js";
-import { BENCH_SCHEMA } from "../environment.js";
-import { summarize, tinybenchSamples } from "../stats.js";
+import { BENCH_SCHEMA } from "../../../../bench/environment.js";
+import { summarize, tinybenchSamples } from "../../../../bench/stats.js";
 import { benchMerge } from "./tx-history-merge.js";
-import type { LatencyStats } from "../types.js";
+import type { LatencyStats } from "../../../../bench/types.js";
 
 export interface TxHistoryResults {
   workloads: Record<string, LatencyStats>;

@@ -8,6 +8,9 @@
  *
  *   Docker-independent (always run):
  *     1. `npm pack` UmbraDB and assert the tarball ships `dist/index.d.ts` (A6);
+ *     1b. assert the tarball holds no file under `legacy/` and no TransactionHistory file (core-arch task 17.1: A3,
+ *        LS-3) -- after `npm run build`, which starts from an empty `dist/`, so a source that left `src/` leaves no
+ *        output behind;
  *     2. install that tarball into a THROWAWAY scratch project (never a real consumer app -- the
  *        indexer-agnostic boundary, council/A ruling (b)) and confirm the declaration is present (A8);
  *     3. assert a deep import `umbradb/src/postgres/temporal-kv.js` FAILS with
@@ -16,6 +19,8 @@
  *        them, then compile it with `tsc --noEmit --strict` (noImplicitAny), resolving through the
  *        INSTALLED package's `exports.types`; assert zero errors and no implicit-any / missing-
  *        declaration diagnostic. This proves the shipped `.d.ts` actually types a consumer (A5).
+ *     4c. compile a second consumer importing TransactionHistory's class and type from "umbradb" and assert both
+ *        imports fail: the package no longer exports them (core-arch task 17.1, LS-3).
  *
  *     4b. run the INSTALLED `umbradb` command (package.json `bin`, task 4.4 of the core-arch change; LS-6, A6, CF-10):
  *        with no argument and with `sync` it prints the usage and exits 2; `run` exits 3 (not in this build yet);
@@ -93,6 +98,15 @@ async function dockerIndependentOracles() {
     fail(`dist/index.d.ts is NOT in the packed tarball. Shipped:\n${shippedPaths.join("\n")}`);
   }
   console.log(`pack-install smoke: packed ${entry.filename} (dist/index.d.ts present in tarball).`);
+
+  // ---- 1b. nothing of legacy/ and nothing of TransactionHistory in the tarball (core-arch A3, LS-3) ---------------
+  const kept = shippedPaths.filter(
+    (p) => p === "legacy" || p.startsWith("legacy/") || /transaction[-_]?history|tx[-_]?history/i.test(p),
+  );
+  if (kept.length > 0) {
+    fail(`the packed tarball holds files of legacy/ or of TransactionHistory (A3, LS-3):\n${kept.join("\n")}`);
+  }
+  console.log(`pack-install smoke: no file of legacy/ or of TransactionHistory among the tarball's ${shippedPaths.length} files (A3, LS-3).`);
 
   // ---- 2. install the tarball into the throwaway scratch project -------------------------------
   writeFileSync(
@@ -200,6 +214,30 @@ async function dockerIndependentOracles() {
     fail(`umbradb config check did not pass a valid file (A35, CF-10):\n${check.status}\n${check.stdout}\n${check.stderr}`);
   }
   console.log("pack-install smoke: the installed umbradb command prints its usage (exit 2), knows run (exit 3), and config check passes a valid file (exit 0) -- LS-6, A6, A35.");
+
+  // ---- 4c. TransactionHistory is not exported (core-arch task 17.1, LS-3): both imports fail ---------------------
+  writeFileSync(join(scratch, "tsconfig.legacy.json"), `${JSON.stringify({
+    compilerOptions: { module: "nodenext", moduleResolution: "nodenext", target: "es2022", lib: ["es2022"], strict: true, noEmit: true, skipLibCheck: true, types: [] },
+    files: ["legacy-import.ts"],
+  }, null, 2)}\n`);
+  writeFileSync(
+    join(scratch, "legacy-import.ts"),
+    [
+      'import { PgTransactionHistoryStorage } from "umbradb";',
+      'import type { TransactionHistoryStorage } from "umbradb";',
+      "export type { TransactionHistoryStorage };",
+      "void PgTransactionHistoryStorage;",
+      "",
+    ].join("\n"),
+  );
+  const legacyTsc = run(process.execPath, [tscBin, "--noEmit", "--project", "tsconfig.legacy.json"], { cwd: scratch });
+  const legacyOut = `${legacyTsc.stdout}\n${legacyTsc.stderr}`;
+  for (const name of ["PgTransactionHistoryStorage", "TransactionHistoryStorage"]) {
+    if (legacyTsc.status === 0 || !new RegExp(`no exported member (named )?'${name}'`).test(legacyOut)) {
+      fail(`importing ${name} from the installed umbradb did not fail as not exported (LS-3):\n${legacyOut}`);
+    }
+  }
+  console.log("pack-install smoke: importing PgTransactionHistoryStorage or TransactionHistoryStorage from umbradb fails to type-check (LS-3).");
 }
 
 /** Docker-DEPENDENT oracle (5): migrate + put/get round-trip against a Testcontainers Postgres. */
@@ -267,14 +305,14 @@ const CONSUMER_TS = `// BLOCK 8 (acceptance A5): a scratch TypeScript consumer o
 import {
   createClient, runMigrations, saveAndAdvance, Rollback, DEFAULT_SCHEMA,
   PgTemporalKV, PgCheckpointStore, PgWatermarks, PgTransactionLeaseLayer,
-  PgTransactionHistoryStorage, PgWalletStateEnvelopeStore,
+  PgWalletStateEnvelopeStore,
   StorageError, ValidationError, ConnectionError,
   MigrationLockTimeoutError, TransactionFaultError, LeaseTimeoutError,
 } from "umbradb";
 import type {
   UmbraDBSql, UmbraDBConnectionOptions, Migration, RunMigrationsOptions,
   SaveAndAdvanceDeps, SaveAndAdvanceCursor, Retryability,
-  TemporalKV, CheckpointStore, Watermarks, TransactionLeaseLayer, TransactionHistoryStorage,
+  TemporalKV, CheckpointStore, Watermarks, TransactionLeaseLayer,
   WalletStateEnvelope,
   SharedStorageErrorCode, TemporalKVErrorCode, CheckpointStoreErrorCode,
   TransactionLeaseErrorCode, WalletStateEnvelopeErrorCode,
@@ -310,14 +348,14 @@ void [
   _g_Retryability, _g_Shared, _g_TKV, _g_Ckpt, _g_Lease, _g_Env, _g_SAAD, _g_SAAC,
   schema, connRetryable, migRetryable,
   saveAndAdvance, Rollback, PgTemporalKV, PgCheckpointStore, PgWatermarks, PgTransactionLeaseLayer,
-  PgTransactionHistoryStorage, PgWalletStateEnvelopeStore, ValidationError, TransactionFaultError,
+  PgWalletStateEnvelopeStore, ValidationError, TransactionFaultError,
   LeaseTimeoutError, createClient, runMigrations,
 ];
 
 // Type-only references so the frozen type imports must resolve too.
 type _Types = [
   UmbraDBSql, UmbraDBConnectionOptions, Migration, RunMigrationsOptions,
-  TemporalKV, CheckpointStore, Watermarks, TransactionLeaseLayer, TransactionHistoryStorage,
+  TemporalKV, CheckpointStore, Watermarks, TransactionLeaseLayer,
   WalletStateEnvelope,
 ];
 export type { _Types };

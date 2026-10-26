@@ -10,9 +10,9 @@
  *
  * What it exposes: the connection factory (`createClient`) and forward-only migration runner
  * (`runMigrations`) that provision the default `umbradb` schema ({@link DEFAULT_SCHEMA}) with the
- * Tier-1 `tier1_wallet` migration lineage; the five storage primitives -- {@link PgTemporalKV},
- * {@link PgCheckpointStore}, {@link PgWatermarks}, {@link PgTransactionLeaseLayer},
- * {@link PgTransactionHistoryStorage} -- plus the {@link PgWalletStateEnvelopeStore} wrapper and the
+ * Tier-1 `tier1_wallet` migration lineage; the storage primitives -- {@link PgTemporalKV},
+ * {@link PgCheckpointStore}, {@link PgWatermarks}, {@link PgTransactionLeaseLayer} -- plus the
+ * {@link PgWalletStateEnvelopeStore} wrapper and the
  * {@link saveAndAdvance} co-transactional composition primitive; every `interfaces/` contract and
  * value type; the {@link Rollback} control primitive; and the full {@link StorageError} hierarchy
  * (minus the chain-archive classes) with its machine-readable {@link Retryability} field.
@@ -24,6 +24,10 @@
  * live-Preprod ingestion service lives entirely outside `src/`. Deep imports of any of these become
  * unresolvable for a consumer of the published package, which is the enforcement mechanism, not a
  * side effect.
+ *
+ * TransactionHistory (`PgTransactionHistoryStorage` and its contract and value types) is no longer exported: it is
+ * kept in `legacy/transaction-history/`, outside the build and the package, until the private wallet-data feature
+ * refactors it (core-arch task 17.1, LS-3).
  *
  * The `withTransaction`/`withLease` combinators are `async` METHODS of {@link PgTransactionLeaseLayer}
  * (and its {@link TransactionLeaseLayer} interface), reachable through that exported class -- there
@@ -40,12 +44,11 @@
 export { createClient, DEFAULT_SCHEMA } from "./postgres/client.js";
 export { runMigrations, MigrationLockTimeoutError } from "./postgres/migrate.js";
 
-// --- The five storage primitives + the wallet-state-envelope wrapper ---
+// --- The storage primitives + the wallet-state-envelope wrapper ---
 export { PgTemporalKV } from "./postgres/temporal-kv.js";
 export { PgCheckpointStore } from "./postgres/checkpoint-store.js";
 export { PgWatermarks } from "./postgres/watermarks.js";
 export { PgTransactionLeaseLayer } from "./postgres/transaction-lease.js";
-export { PgTransactionHistoryStorage } from "./postgres/transaction-history-storage.js";
 export { PgWalletStateEnvelopeStore } from "./postgres/wallet-state-envelope.js";
 
 // --- Co-transactional composition primitive (G5) ---
@@ -103,13 +106,6 @@ export type {
   TransactionLeaseLayer, TransactionHandle, Lease, TransactionOptions, LeaseAcquireOptions,
   TransactionRollbackCause, TransactionLeaseErrorCode,
 } from "./interfaces/transaction-lease.js";
-
-// --- Transaction-history contract + value types ---
-export type {
-  TransactionHistoryStorage, TransactionHistoryReader, TransactionHistoryWriter,
-  TransactionHistoryEntry, TransactionHistoryStatus, EntryContent, EntryLifecycle,
-  EntryLifecycleStatus, PendingLifecycle, FinalizedLifecycle, RejectedLifecycle, MergeEntriesFn,
-} from "./interfaces/transaction-history-storage.js";
 
 // --- Wallet-state-envelope value type ---
 export type { WalletStateEnvelope, WalletStateEnvelopeErrorCode } from "./interfaces/wallet-state-envelope.js";

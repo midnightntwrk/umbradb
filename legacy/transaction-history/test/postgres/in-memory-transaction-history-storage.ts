@@ -1,4 +1,4 @@
-import { ValidationError } from "../../src/interfaces/storage-errors.js";
+import { ValidationError } from "../../../../src/interfaces/storage-errors.js";
 import {
   TransactionHistoryEntrySchema,
   type MergeEntriesFn,
