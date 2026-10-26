@@ -1544,9 +1544,12 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `waiting-for-lockstep` (14.3); the private process's lag (14.x); `umbradb run` passing `admin: true` (Q128; the
       task that wires `run` to `startProcess`); the browser's message channel (16.1).
 - [ ] 8.1a The owner's answer Q128 B: `startProcess` serves the admin endpoints unless its caller passes `admin: false`
-      (opt-out, as AE-1 says); `umbradb run` needs no flag; every existing test that starts a process opts out or
-      listens on a port of its own (port 0), so parallel tests never collide on `0.0.0.0:8081`.
-      **Acceptance:** A62, A64 with the default; a process started without `admin` answers on its admin listener.
+      (opt-out, as AE-1 says); `umbradb run` needs no flag; an admin address that is taken refuses startup with
+      `listen-failed` before the database opens (the owner: "check if free; or it does not start"); every existing test
+      that starts a process opts out or listens on a port of its own (port 0), so parallel tests never collide on
+      `0.0.0.0:8081`.
+      **Acceptance:** A62, A64 with the default; a process started without `admin` answers on its admin listener; a
+      second process given the same admin address refuses with `listen-failed` and opens no database session.
 - [ ] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
       **Acceptance:** A63, A65; A140 for these endpoints.
 - [ ] 8.3 `core-status` (`src/backbone/core-status/`): `/status` and its JSON schema, times as RFC 3339 text (Q68).
