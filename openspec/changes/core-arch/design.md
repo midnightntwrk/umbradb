@@ -94,12 +94,14 @@ the process's one node client is made from it, and a block source given as a fun
 client, task 10.3's `nodeSourceOf` —, `listen.api`, the timeouts, the opt-in, the core's stop), the database opened
 and its writer started, the cursor, the history and the chain's identity read in one read and the history checked
 (`checkHistory`), `core-chain`'s startup checks against the node through the block source
-(`checkChain`, task 10.2: `genesis-mismatch`, a wait with `waiting-for-node` while the head is below the cursor,
-`cursor-hash-mismatch`; before any migration), the graph, the schema plan, the contexts with each part's revisions (a
-module's from its entries with their effective stops; every backbone part's the `core` entry's, each one's data fields
-with the process revision's other fields), `core-chain` bound to its context with what startup checked and opened
-(`bindCoreChain`: the node client and the revision's ledger table among them), `core-block-fetch` to the block source
-(`bindCoreBlockFetch`) and, when enabled, the core module `core-chain-events` too (`bindCoreChainEvents`, task 11.1),
+(`checkChain`, task 10.2: `genesis-mismatch` — against the configured network's genesis at every start, task 10.2a,
+then on a database with a cursor against the stored one —, a wait with `waiting-for-node` while the head is below the
+cursor, `cursor-hash-mismatch`; before any migration), the graph, the schema plan, the contexts with each part's
+revisions (a module's from its entries with their effective stops; every backbone part's the `core` entry's, each
+one's data fields with the process revision's other fields), `core-chain` bound to its context with what startup checked
+and opened (`bindCoreChain`: the node client and the revision's ledger table among them), `core-block-fetch` to the
+block source (`bindCoreBlockFetch`) and, when enabled, the core module `core-chain-events` too (`bindCoreChainEvents`,
+task 11.1),
 `startDatabase`, the seal, on a database without a cursor the bootstrap's wait while S is above
 the head (`waiting-for-node`, still `starting`, IN-2), `startModuleApi`, then the loop. A refusal closes what startup
 opened and rejects `started`. The loop fires
@@ -231,7 +233,16 @@ interface QueueRunner {                                      // given by the fin
   transaction, whichever it is.
 - **`core-chain`** (`src/backbone/core-chain/`, task 10.2) asks the block source — the node, through `core-block-fetch`
   (task 10.3), or the in-memory source — for what IN-2 and IN-3 ask of the node: the genesis hash (block 0's), the
-  finalized head (`finalizedHead`, `waitForHead`) and the finalized hash at the cursor (`block`). Its declaration is a
+  finalized head (`finalizedHead`, `waitForHead`) and the finalized hash at the cursor (`block`). Its checks, in order
+  (`checkChain`; task 10.2a, decision records Q117, Q120): a known network whose built-in table records no genesis hash
+  is refused before the node is asked (`genesis-mismatch`, `details { network, configured: null }`); the node's genesis
+  hash against the configured network's, at every start, on an empty database too (`configuredGenesisOf` of the
+  process's `core` revision: the built-in table's hash, read through `builtInNetwork`, or `genesisHash` for `custom`;
+  `details { network, configured, node }`); on a database with a cursor, against the stored one (`details { stored,
+  node }`); the wait while the head is below the cursor; the finalized hash at the cursor, last, since the node's hash
+  there is a finalized one only once its head reached the cursor. A `custom` network without `genesisHash` never reaches
+  them: the configuration refuses it (CF-4, `invalid-configuration`). A private process's check is its source's, which
+  compares nothing with its configured network (§8; decision record question Q136). Its declaration is a
   constant (`CORE_CHAIN`); the runner binds it to its process context with what startup checked and opened
   (`bindCoreChain`), and its `on-start-db` records the history and, before block S commits, the genesis hash and S, and
   publishes `config`, `node-client` (the process's one `NodeClient`, made from its `node` and shared with the block
@@ -702,7 +713,8 @@ As built (task 12.2, `src/ledger/version-table.ts`, `networks.ts`, `networks.jso
   the source — node, day, and the file in this repository holding the answers — or null until read), LG-3's `rows`,
   and its `boundaries` (U and F, each height, hash and `MNSV` version, read from the node, with the source); each
   boundary's F is a pin, and a boundary not read from a node is not listed. The file holds LG-3's rows for the four
-  known networks and the genesis hashes of mainnet and preview (read by task 0.2); task 0.3 adds the rest.
+  known networks and, since task 0.3, every one's genesis and boundaries read from its node (`core-chain` compares the
+  node's genesis hash with the configured network's, task 10.2a).
 - **The table in effect** (`ledgerTableOf(network, configured)`): a configured row maps the `spec_version`s it covers,
   the built-in rows the rest (cut around it); a configured pin replaces the built-in one at its height and adds one at
   any other; `custom` has no built-in table and must set rows. The `core` schemas check LG-1 and LG-2's rules on the

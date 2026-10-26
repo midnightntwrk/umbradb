@@ -6,6 +6,8 @@ import {
   bindCoreChain,
   checkChain,
   CONFIG_MIGRATION,
+  type ConfiguredGenesis,
+  configuredGenesisOf,
   CORE_CHAIN,
   CORE_CHAIN_ID,
   CORE_CHAIN_MIGRATIONS,
@@ -19,7 +21,8 @@ import {
   type NodeWait,
 } from "../../src/backbone/core-chain/index.js";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
-import { ledgerTableOf } from "../../src/ledger/networks.js";
+import networksFile from "../../src/ledger/networks.json" with { type: "json" };
+import { builtInNetwork, KNOWN_NETWORKS, ledgerTableOf, parseNetworksFile } from "../../src/ledger/networks.js";
 import type { LedgerTable } from "../../src/ledger/version-table.js";
 import { checkHistory, graphInputOf } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
@@ -60,6 +63,12 @@ const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex
 
 /** A block 0 another chain has. */
 const OTHER_GENESIS: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0xee), parentHash: new Uint8Array(32) };
+
+/** The configured network whose genesis is `genesis`'s hash: a `custom` network (task 10.2a; Q120). */
+const configuredAs = (genesis: BlockRef): ConfiguredGenesis => ({ network: "custom", hash: genesis.hash });
+
+/** The tests' configured network: `custom`, its genesis the in-memory chain's block 0. */
+const CONFIGURED = configuredAs(inMemoryBlock(0n));
 
 /** An error a promise rejects with (the test fails if it resolves). */
 async function rejectionOf(run: Promise<unknown>): Promise<unknown> {
@@ -136,13 +145,14 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
     const waits: (NodeWait | null)[] = [];
     // S above the head: the bootstrap's wait comes later (waitForNode), after the bootstrap's own steps.
     const source = new InMemoryBlockSource({ head: 2n });
-    const check = await checkChain({ source, identity: null, cursor: null, signal: signal(), onWaiting: (w) => waits.push(w) });
+    const check = await checkChain({ source, identity: null, cursor: null, configured: CONFIGURED, signal: signal(), onWaiting: (w) => waits.push(w) });
     expect(check.genesisHash).toEqual(inMemoryBlock(0n).hash);
     expect(waits).toEqual([]);
     const other = await checkChain({
       source: new InMemoryBlockSource({ head: 2n, blocks: [OTHER_GENESIS] }),
       identity: null,
       cursor: null,
+      configured: configuredAs(OTHER_GENESIS),
       signal: signal(),
     });
     expect(other.genesisHash).toEqual(OTHER_GENESIS.hash);
@@ -150,16 +160,25 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
 
   it("on a database with a cursor: accepts the node whose genesis and finalized hash at the cursor are the stored ones", async () => {
     const source = new InMemoryBlockSource({ head: 9n });
-    const check = await checkChain({ source, identity: identityOf(inMemoryBlock(0n)), cursor: inMemoryBlock(7n), signal: signal() });
+    const check = await checkChain({ source, identity: identityOf(inMemoryBlock(0n)), cursor: inMemoryBlock(7n), configured: CONFIGURED, signal: signal() });
     expect(check.genesisHash).toEqual(inMemoryBlock(0n).hash);
   });
 
-  it("refuses a node with another genesis hash with genesis-mismatch and both hashes, before any wait", async () => {
+  it("refuses a node whose genesis hash is not the stored one with genesis-mismatch and both hashes, before any wait", async () => {
     const waits: (NodeWait | null)[] = [];
-    // The head below the cursor and another hash at the cursor too: the genesis is checked first, at once.
+    // The head below the cursor and another hash at the cursor too: the genesis is checked first, at once. The
+    // configured network's genesis is the node's here, so the stored one is what differs (a database written for
+    // another chain).
     const source = new InMemoryBlockSource({ head: 3n, blocks: [OTHER_GENESIS] });
     const error = await rejectionOf(
-      checkChain({ source, identity: identityOf(inMemoryBlock(0n)), cursor: inMemoryBlock(7n), signal: signal(), onWaiting: (w) => waits.push(w) }),
+      checkChain({
+        source,
+        identity: identityOf(inMemoryBlock(0n)),
+        cursor: inMemoryBlock(7n),
+        configured: configuredAs(OTHER_GENESIS),
+        signal: signal(),
+        onWaiting: (w) => waits.push(w),
+      }),
     );
     expect(error).toBeInstanceOf(UmbraError);
     expect((error as UmbraError).code).toBe("genesis-mismatch");
@@ -174,7 +193,7 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
     const forked: BlockRef = { ...inMemoryBlock(7n), hash: new Uint8Array(32).fill(7) };
     const source = new InMemoryBlockSource({ head: 9n, blocks: [forked] });
     const error = await rejectionOf(
-      checkChain({ source, identity: identityOf(inMemoryBlock(0n)), cursor: inMemoryBlock(7n), signal: signal() }),
+      checkChain({ source, identity: identityOf(inMemoryBlock(0n)), cursor: inMemoryBlock(7n), configured: CONFIGURED, signal: signal() }),
     );
     expect((error as UmbraError).code).toBe("cursor-hash-mismatch");
     expect((error as UmbraError).details).toEqual({
@@ -192,6 +211,7 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
       source,
       identity: identityOf(inMemoryBlock(0n)),
       cursor: inMemoryBlock(7n),
+      configured: CONFIGURED,
       signal: signal(),
       onWaiting: (w) => waits.push(w),
     });
@@ -208,7 +228,7 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
   it("checks the hash at the cursor after the wait: a node that reached the cursor on another chain is refused", async () => {
     const forked: BlockRef = { ...inMemoryBlock(7n), hash: new Uint8Array(32).fill(1) };
     const source = new InMemoryBlockSource({ head: 4n, blocks: [forked] });
-    const checking = checkChain({ source, identity: identityOf(inMemoryBlock(0n)), cursor: inMemoryBlock(7n), signal: signal() });
+    const checking = checkChain({ source, identity: identityOf(inMemoryBlock(0n)), cursor: inMemoryBlock(7n), configured: CONFIGURED, signal: signal() });
     await source.waiting(6n);
     source.finalize(8n);
     expect(((await rejectionOf(checking)) as UmbraError).code).toBe("cursor-hash-mismatch");
@@ -222,6 +242,7 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
       source,
       identity: identityOf(inMemoryBlock(0n)),
       cursor: inMemoryBlock(7n),
+      configured: CONFIGURED,
       signal: controller.signal,
       onWaiting: (w) => waits.push(w),
     });
@@ -235,24 +256,122 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
   it("compares whole hashes: a genesis hash or a hash at the cursor that only begins like the stored one differs", async () => {
     const stored = identityOf(inMemoryBlock(0n));
     const shortGenesis: BlockRef = { ...inMemoryBlock(0n), hash: inMemoryBlock(0n).hash.slice(0, 31) };
-    const genesis = await rejectionOf(
-      checkChain({ source: new InMemoryBlockSource({ head: 9n, blocks: [shortGenesis] }), identity: stored, cursor: inMemoryBlock(7n), signal: signal() }),
-    );
-    expect((genesis as UmbraError).code).toBe("genesis-mismatch");
+    const source = () => new InMemoryBlockSource({ head: 9n, blocks: [shortGenesis] });
+    // The configured network's genesis, then the stored one, each compared whole.
+    for (const [configured, against] of [[CONFIGURED, "configured"], [configuredAs(shortGenesis), "stored"]] as const) {
+      const genesis = await rejectionOf(
+        checkChain({ source: source(), identity: stored, cursor: inMemoryBlock(7n), configured, signal: signal() }),
+      );
+      expect((genesis as UmbraError).code, against).toBe("genesis-mismatch");
+      expect(Object.keys((genesis as UmbraError).details), against).toContain(against);
+    }
     const shortAtCursor: BlockRef = { ...inMemoryBlock(7n), hash: inMemoryBlock(7n).hash.slice(0, 31) };
     const atCursor = await rejectionOf(
-      checkChain({ source: new InMemoryBlockSource({ head: 9n, blocks: [shortAtCursor] }), identity: stored, cursor: inMemoryBlock(7n), signal: signal() }),
+      checkChain({
+        source: new InMemoryBlockSource({ head: 9n, blocks: [shortAtCursor] }),
+        identity: stored,
+        cursor: inMemoryBlock(7n),
+        configured: CONFIGURED,
+        signal: signal(),
+      }),
     );
     expect((atCursor as UmbraError).code).toBe("cursor-hash-mismatch");
   });
 
   it("throws for a cursor without an identity row: a database whose core-chain recorded no identity", async () => {
     const error = await rejectionOf(
-      checkChain({ source: new InMemoryBlockSource({ head: 9n }), identity: null, cursor: inMemoryBlock(7n), signal: signal() }),
+      checkChain({ source: new InMemoryBlockSource({ head: 9n }), identity: null, cursor: inMemoryBlock(7n), configured: CONFIGURED, signal: signal() }),
     );
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(UmbraError);
     expect((error as Error).message).toMatch(/core_chain\.identity/);
+  });
+
+  it("compares the node's genesis hash with the configured network's at every start, on a new database too (Q120)", async () => {
+    for (const cursor of [null, inMemoryBlock(7n)]) {
+      const waits: (NodeWait | null)[] = [];
+      // The head below the cursor: the configured network's genesis is compared first, before any wait.
+      const source = new InMemoryBlockSource({ head: 3n, blocks: [OTHER_GENESIS] });
+      const identity = cursor === null ? null : identityOf(inMemoryBlock(0n));
+      const error = (await rejectionOf(
+        checkChain({ source, identity, cursor, configured: CONFIGURED, signal: signal(), onWaiting: (w) => waits.push(w) }),
+      )) as UmbraError;
+      expect(error).toBeInstanceOf(UmbraError);
+      expect(error.code).toBe("genesis-mismatch");
+      expect(error.retryable).toBe(false);
+      expect(error.details).toEqual({ network: "custom", configured: hex(inMemoryBlock(0n).hash), node: hex(OTHER_GENESIS.hash) });
+      expect(error.message).toContain(hex(inMemoryBlock(0n).hash));
+      expect(error.message).toContain(hex(OTHER_GENESIS.hash));
+      expect(error.message).toContain("custom");
+      expect(waits).toEqual([]);
+    }
+    // A known network's genesis, as its built-in table holds it: a mainnet configuration against a preprod node.
+    const preprod = builtInNetwork("preprod")?.genesis?.hash as string;
+    const preprodNode = new InMemoryBlockSource({ head: 3n, blocks: [{ ...OTHER_GENESIS, hash: Buffer.from(preprod.slice(2), "hex") }] });
+    const mainnet = configuredGenesisOf({ network: "mainnet" });
+    const known = (await rejectionOf(
+      checkChain({ source: preprodNode, identity: null, cursor: null, configured: mainnet, signal: signal() }),
+    )) as UmbraError;
+    expect(known.code).toBe("genesis-mismatch");
+    expect(known.details).toEqual({ network: "mainnet", configured: builtInNetwork("mainnet")?.genesis?.hash, node: preprod });
+    expect(known.message).toContain("mainnet");
+  });
+
+  it("checks the configured network's genesis first, then the stored one, then waits, then the hash at the cursor", async () => {
+    // Another genesis than both: the configured network's is named.
+    const both = (await rejectionOf(
+      checkChain({
+        source: new InMemoryBlockSource({ head: 3n, blocks: [OTHER_GENESIS] }),
+        identity: identityOf(inMemoryBlock(0n)),
+        cursor: inMemoryBlock(7n),
+        configured: CONFIGURED,
+        signal: signal(),
+      }),
+    )) as UmbraError;
+    expect(both.details).toEqual({ network: "custom", configured: hex(inMemoryBlock(0n).hash), node: hex(OTHER_GENESIS.hash) });
+    // The configured network's genesis, not the stored one: the stored one is named, before any wait.
+    const waits: (NodeWait | null)[] = [];
+    const stored = (await rejectionOf(
+      checkChain({
+        source: new InMemoryBlockSource({ head: 3n }),
+        identity: identityOf(OTHER_GENESIS),
+        cursor: inMemoryBlock(7n),
+        configured: CONFIGURED,
+        signal: signal(),
+        onWaiting: (w) => waits.push(w),
+      }),
+    )) as UmbraError;
+    expect(stored.details).toEqual({ stored: hex(OTHER_GENESIS.hash), node: hex(inMemoryBlock(0n).hash) });
+    expect(waits).toEqual([]);
+  });
+
+  it("refuses a known network whose built-in table records no genesis hash, before asking the node (Q117)", async () => {
+    let asked = 0;
+    const source = new InMemoryBlockSource({ head: 9n });
+    const counting = {
+      finalizedHead: () => source.finalizedHead(),
+      waitForHead: (above: bigint, s: AbortSignal) => source.waitForHead(above, s),
+      block: (height: bigint) => {
+        asked += 1;
+        return source.block(height);
+      },
+    };
+    for (const cursor of [null, inMemoryBlock(7n)]) {
+      const error = (await rejectionOf(
+        checkChain({
+          source: counting,
+          identity: cursor === null ? null : identityOf(inMemoryBlock(0n)),
+          cursor,
+          configured: { network: "stagenet", hash: null },
+          signal: signal(),
+        }),
+      )) as UmbraError;
+      expect(error).toBeInstanceOf(UmbraError);
+      expect(error.code).toBe("genesis-mismatch");
+      expect(error.details).toEqual({ network: "stagenet", configured: null });
+      expect(error.message).toMatch(/records no genesis hash for the network stagenet/);
+    }
+    expect(asked).toBe(0);
   });
 
   it("waitForNode waits for S on a new database: not at all when the head is at or above it", async () => {
@@ -267,6 +386,43 @@ describe("the startup checks (IN-3) and the wait for the node (IN-2, IN-3)", () 
     source.finalize(9n);
     await waiting;
     expect(waits).toEqual([{ height: 9n, head: 5n }, null]);
+  });
+});
+
+describe("the configured network's genesis hash (IN-3; decision records Q117, Q120; task 10.2a)", () => {
+  const bytes = (text: string): Uint8Array => new Uint8Array(Buffer.from(text.slice(2), "hex"));
+
+  it("is the core entry's genesisHash for a custom network", () => {
+    const given = `0x${"ab".repeat(32)}`;
+    const configured = configuredGenesisOf({ network: "custom", genesisHash: given });
+    expect(configured).toEqual({ network: "custom", hash: bytes(given) });
+    expect(Object.isFrozen(configured)).toBe(true);
+  });
+
+  it("is the built-in table's for each known network, read through task 12.2's table; every one has it in this build", () => {
+    for (const network of KNOWN_NETWORKS) {
+      const recorded = builtInNetwork(network)?.genesis?.hash;
+      // Task 0.3 recorded every known network's genesis from its node (src/ledger/networks.json), so Q117's refusal
+      // applies to none of them in this build.
+      expect(recorded, network).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(configuredGenesisOf({ network }), network).toEqual({ network, hash: bytes(recorded as string) });
+    }
+  });
+
+  it("is null for a known network whose built-in table records no genesis hash, or that has no built-in entry", () => {
+    // A networks file of 12.2's format whose stagenet entry records no genesis hash yet (as before task 0.3).
+    const file = structuredClone(networksFile) as { networks: { network: string; genesis: unknown }[] };
+    for (const entry of file.networks) if (entry.network === "stagenet") entry.genesis = null;
+    const networks = parseNetworksFile(file);
+    const lookup = (network: string) => networks.find((entry) => entry.network === network) ?? null;
+    expect(configuredGenesisOf({ network: "stagenet" }, lookup)).toEqual({ network: "stagenet", hash: null });
+    expect(configuredGenesisOf({ network: "mainnet" }, lookup).hash).toEqual(bytes(builtInNetwork("mainnet")?.genesis?.hash as string));
+    expect(configuredGenesisOf({ network: "preview" }, () => null)).toEqual({ network: "preview", hash: null });
+    // A known network's genesis is the build's only: never a genesisHash (which the configuration refuses there, CF-4).
+    expect(configuredGenesisOf({ network: "stagenet", genesisHash: `0x${"cd".repeat(32)}` }, lookup)).toEqual({ network: "stagenet", hash: null });
+    expect(configuredGenesisOf({ network: "mainnet", genesisHash: `0x${"cd".repeat(32)}` }).hash).toEqual(
+      bytes(builtInNetwork("mainnet")?.genesis?.hash as string),
+    );
   });
 });
 

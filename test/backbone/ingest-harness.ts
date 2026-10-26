@@ -151,13 +151,28 @@ export interface Ingest {
   close(): Promise<void>;
 }
 
+/**
+ * The genesis hash `records` answer — the result of `chain_getBlockHash [0]`, which `core-chain`'s startup check asks
+ * (IN-2, IN-3) — as `0x` hex; undefined when the tape has none.
+ */
+export function genesisOf(records: readonly TapeRecord[]): string | undefined {
+  const record = records.find(
+    (r) => "method" in r && r.method === "chain_getBlockHash" && Array.isArray(r.params) && r.params[0] === 0 && "result" in r,
+  );
+  return record === undefined ? undefined : ((record as { readonly result: unknown }).result as string);
+}
+
 /** Starts the process on `db` from S over a tape node serving `records` (see the module comment). */
 export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[], options: IngestOptions): Promise<Ingest> {
   const node = await TapeNode.start({ records });
   const seen = watched();
   const user = [watcher(seen), ...(options.user ?? [])];
+  // The tests' custom network has the tape's genesis (task 10.2a: the node's genesis must be the configured network's).
+  const network = options.settings?.network;
+  const genesisHash = genesisOf(records);
+  const genesis = (network === undefined || network === "custom") && genesisHash !== undefined ? { genesisHash } : {};
   const entries = [
-    core(db.setting, Number(options.start), { extra: { node: node.url, ...options.settings } }),
+    core(db.setting, Number(options.start), { extra: { node: node.url, ...genesis, ...options.settings } }),
     ...[...(options.core ?? []), ...user].map((module) => entryOf(module, Number(options.start))),
   ];
   const lines: string[] = [];

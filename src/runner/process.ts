@@ -19,8 +19,9 @@
  *    (`readIdentity`) read in one read, and the history checked against the configuration (`checkHistory`, CF-5,
  *    CF-6, CF-8: every refusal before any migration);
  * 6. `core-chain`'s startup checks against the node, through the block source (`checkChain`, IN-3, task 10.2): its
- *    genesis hash, and on a database with a cursor the stored genesis hash (`genesis-mismatch`), a wait while the
- *    node's finalized head is below the cursor (the condition `waiting-for-node`), and the node's hash at the cursor
+ *    genesis hash against the configured network's at every start (`configuredGenesisOf` of the `core` revision, task
+ *    10.2a), and on a database with a cursor the stored genesis hash (`genesis-mismatch`), a wait while the node's
+ *    finalized head is below the cursor (the condition `waiting-for-node`), and the node's hash at the cursor
  *    (`cursor-hash-mismatch`) — also before any migration;
  * 7. the graph resolved from the check (`resolveGraph`, `graphInputOf`), the schema plan, the process contexts with each
  *    part's revisions ({@link processRevisions}), `core-chain` bound to its context with what startup checked and
@@ -101,6 +102,7 @@ import {
   type ChainCheck,
   type ChainCheckInput,
   checkChain,
+  configuredGenesisOf,
   CORE_CHAIN_ID,
   type NodeWait,
   nodeOptionsOf,
@@ -647,6 +649,7 @@ class Process implements ProcessHandle {
       source,
       identity,
       cursor,
+      configured: configuredGenesisOf(settings),
       signal: this.#stop.signal,
       onWaiting: waiting,
     });

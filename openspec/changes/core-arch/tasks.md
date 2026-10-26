@@ -2010,10 +2010,41 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `umbradb run` passing `nodeSourceOf` (4.4); Q129 (owner).
 - [ ] 10.4 Error handling, retries and halts; recovery after an uncertain COMMIT; the refusal and halt registry.
       **Acceptance:** A84, A85, A86, A87.
-- [ ] 10.2a The owner's answers Q117 A and Q120 B: the node's genesis hash compared with the configured network's at
+- [x] 10.2a The owner's answers Q117 A and Q120 B: the node's genesis hash compared with the configured network's at
       every start (built in, or `genesisHash` for `custom`); a known network whose built-in table records no genesis
       hash is refused until task 0.3 records it.
       **Acceptance:** A78 (as amended).
+      **Done (2026-10-26):** `checkChain` (`src/backbone/core-chain/core-chain.ts`) takes the configured network's
+      genesis (`configuredGenesisOf` of the process's `core` revision: the built-in table's hash for a known network,
+      read through task 12.2's `builtInNetwork`, never a constant; `genesisHash` for `custom`) and checks, in order: a
+      known network whose built-in table records no genesis hash — refused before the node is asked (`genesis-mismatch`,
+      `details { network, configured: null }`; since task 0.3 every known network has one, so it applies to none in this
+      build); the node's genesis hash against the configured one at every start, on an empty database too (`details {
+      network, configured, node }`); on a database with a cursor, against the stored one (`details { stored, node }`);
+      the wait while the head is below the cursor; the hash at the cursor, last (the node's hash there is a finalized
+      one only once its head reached it). A `custom` network without `genesisHash` never reaches them: the configuration
+      refuses it (CF-4, `invalid-configuration`, before the database opens). A private process's check stays its
+      source's, which compares nothing with its configured network (question Q136, shipped A).
+      `src/runner/process.ts` passes `configured` (one line). The process tests' network is now `custom` with the
+      in-memory chain's genesis and LG-3's rows (`test/runner/process-build.ts`'s `coreSettings`, overridden by a test
+      naming another network), the ingest harness gives a tape's `chain_getBlockHash [0]` as `genesisHash`. `design.md`
+      §2, §3, §5.6. Tests, seen failing first (`tsc` 20 errors: `configured` not in `ChainCheckInput`,
+      `configuredGenesisOf` and `ConfiguredGenesis` missing; Vitest 7 unit tests and A78's cases failing, the empty
+      database's three accepted): `test/backbone/core-chain.test.ts` (the configured comparison on new and old
+      databases, its order, Q117's refusal before the node is asked, `configuredGenesisOf` over 12.2's table and a
+      networks file whose stagenet records none), `chain-process.test.ts` (A78 as amended on PostgreSQL 18.6 and PGlite
+      0.5.10: a node of another network on an empty database and at a start with a cursor, a mainnet configuration
+      against a preprod node, a known network without a recorded genesis — planted through `builtInNetwork` —, a
+      database whose stored genesis is not the node's, the cursor's hash, the wait; a `custom` network without
+      `genesisHash`; with task 0.3's preprod tape, the real node's genesis refusing a mainnet configuration and starting
+      a preprod one, skipped without `UMBRADB_TAPES`). Committed negative controls: a check that skips the configured
+      genesis on an empty database accepts A78's three empty-database cases, one that skips the stored genesis and one
+      that skips the cursor's hash each fail exactly their case. Wrong variants (a scratch copy outside the clone): 18
+      on the new logic (`configuredGenesisOf` 6, `checkChain` 10, the process 2), 17 caught (one by the run's limit
+      after the unit tests failed: a retryable code retried startup for ever), 1 gap — a known network taking a
+      `genesisHash` the configuration refuses — closed by an assertion and caught on rerun. Issues
+      `00026-core-revisions-name-different-networks` and `00027-v8-fatal-wasm-free-hangs-test-worker` recorded.
+      **Pending:** the configured network's genesis on a private process (Q136, owner).
 
 ## 11. Chain data
 

@@ -636,7 +636,7 @@ describe("processRevisions: each part's revisions for its process context (RN-7,
     expect(processRevisions(reordered, reordered.process)("core-chain")).toEqual(revisions("core-chain"));
     const [first, second, scheduled] = revisions("core-chain");
     expect([first?.start, first?.stop, second?.start, second?.stop, scheduled?.start, scheduled?.stop]).toEqual([1n, 49n, 50n, 89n, 90n, null]);
-    expect(first?.settings).toMatchObject({ database: "pglite:/b", node: N2, developmentOptIn: true, retainStates: 0, network: "preprod" });
+    expect(first?.settings).toMatchObject({ database: "pglite:/b", node: N2, developmentOptIn: true, retainStates: 0, network: "custom" });
     expect(second?.settings).toMatchObject({ database: "pglite:/b", node: N2, developmentOptIn: true, retainStates: 4 });
     expect(scheduled?.settings).toMatchObject({ database: "pglite:/b", node: N2 });
     expect(scheduled?.settings).not.toHaveProperty("retainStates");

@@ -14,7 +14,7 @@ import { core, entryOf } from "../runner/process-build.js";
 import { blockRef, branchOf, type ChainBlock, chainOf, content, finalized, headRead, newHead, opening, RUNTIME, subscriptions } from "./fetch-fixtures.js";
 import { a76Problems } from "./ingest-checks.js";
 import type { CrashEvent, CrashJob } from "./ingest-crash.worker.js";
-import { FENCE, fenceAt, ingest, PATIENCE_MS, until, watched, watcher } from "./ingest-harness.js";
+import { FENCE, fenceAt, genesisOf, ingest, PATIENCE_MS, until, watched, watcher } from "./ingest-harness.js";
 
 /**
  * A76 `[FAULT]` (task 10.3; IN-1): the database holds finalized blocks only. A real process — `ingest-crash.worker.ts`,
@@ -71,7 +71,8 @@ async function killedWhileQueued(db: ProcessDatabase, tipsTo?: string): Promise<
   let child: ChildProcess | undefined;
   try {
     const configFile = join(directory, "umbradb.config.ts");
-    const entries = [core(db.setting, 1, { extra: { node: node.url, tipCap: 20 } }), ...USER.map((module) => entryOf(module, 1))];
+    const genesisHash = genesisOf(firstTape()) as string;
+    const entries = [core(db.setting, 1, { extra: { node: node.url, genesisHash, tipCap: 20 } }), ...USER.map((module) => entryOf(module, 1))];
     writeFileSync(configFile, `export default ${JSON.stringify({ entries })};\n`);
     const job: CrashJob = { configFile, finalized: String(F), ...(tipsTo === undefined ? {} : { tipsTo }) };
     child = spawnChild(process.execPath, ["--import", "tsx", WORKER, JSON.stringify(job)], { cwd: REPOSITORY, stdio: ["ignore", "pipe", "pipe"] });

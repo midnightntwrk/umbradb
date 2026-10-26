@@ -11,9 +11,12 @@
  * **Startup**, as the runner (`src/runner/process.ts`) runs it:
  * 1. after the history's check and before any migration, {@link checkChain} asks the block source — the node, through
  *    `core-block-fetch` (task 10.3), or the in-memory source — for its genesis hash (block 0's, `chain_getBlockHash(0)`
- *    on the node) and, on a database with a cursor, compares it with the stored one (`genesis-mismatch`), waits while
- *    the node's finalized head is below the cursor (the condition `waiting-for-node`), and compares the node's
- *    finalized hash at the cursor's height with the cursor's (`cursor-hash-mismatch`) — IN-3;
+ *    on the node) and compares it with the configured network's ({@link configuredGenesisOf}: built in for the four
+ *    known networks, read through task 12.2's table, the `core` entry's `genesisHash` for `custom`; decision records
+ *    Q117, Q120, task 10.2a) at every start, refusing a known network whose built-in table records none; then, on a
+ *    database with a cursor, compares it with the stored one (`genesis-mismatch`), waits while the node's finalized head
+ *    is below the cursor (the condition `waiting-for-node`), and compares the node's finalized hash at the cursor's
+ *    height with the cursor's (`cursor-hash-mismatch`) — IN-3;
  * 2. the runner binds the part to its process context ({@link bindCoreChain}) with what it checked and opened, and runs
  *    the migrations; the part's `on-start-db` ({@link coreChainStartDb}) records the configuration history (CF-6), on a
  *    database without a cursor records the genesis hash and S — again at every start until block S commits, so an
@@ -39,6 +42,7 @@ import type { CheckedConfig } from "../../config/validate.js";
 import type { BlockWriteHandle, Database, ReadHandle, SchemaWriteHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { readOnlyDatabase } from "../../db/read-only.js";
+import { type BuiltInNetwork, builtInNetwork } from "../../ledger/networks.js";
 import type { LedgerTable } from "../../ledger/version-table.js";
 import { type BlockContext, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
 import type { DeclarationSet } from "../../modules/validation.js";
@@ -143,10 +147,48 @@ export async function waitForNode(
   }
 }
 
+/**
+ * The genesis hash the configuration names (IN-3; decision records Q117, Q120; task 10.2a): the configured network's,
+ * which the node's must be at every start.
+ */
+export interface ConfiguredGenesis {
+  /** The `core` entry's `network` (CF-4). */
+  readonly network: string;
+  /**
+   * Its genesis hash: the built-in table's for a known network (LG-3, task 12.2's `src/ledger/networks.json`), the
+   * entry's `genesisHash` for `custom`; null for a known network whose built-in table records none — refused (Q117).
+   */
+  readonly hash: Uint8Array | null;
+}
+
+/** `text`, `0x`-prefixed hex as the configuration and the built-in tables write hashes (both checked so), as bytes. */
+function bytesOf(text: string): Uint8Array {
+  const bytes = new Uint8Array((text.length - 2) / 2);
+  for (let index = 0; index < bytes.length; index++) bytes[index] = Number.parseInt(text.slice(2 + 2 * index, 4 + 2 * index), 16);
+  return bytes;
+}
+
+/**
+ * The configured network's genesis hash ({@link ConfiguredGenesis}) from a `core` revision's settings — the process's,
+ * whose `network` and `genesisHash` (data fields, CF-4) the validation has checked: `genesisHash` for `custom`, else the
+ * built-in table's, read through `lookup` (task 12.2's table, `builtInNetwork`; never a constant), null when the table
+ * has no entry for the network or records no genesis hash for it. Frozen.
+ */
+export function configuredGenesisOf(
+  settings: Readonly<Record<string, unknown>>,
+  lookup: (network: string) => BuiltInNetwork | null = builtInNetwork,
+): ConfiguredGenesis {
+  const network = settings.network as string;
+  const text = network === "custom" ? (settings.genesisHash as string) : (lookup(network)?.genesis?.hash ?? null);
+  return Object.freeze({ network, hash: text === null ? null : bytesOf(text) });
+}
+
 /** What {@link checkChain} takes. */
 export interface ChainCheckInput {
   /** The node, as the block source answers for it. */
   readonly source: ChainSource;
+  /** The configured network's genesis hash ({@link configuredGenesisOf}), compared with the node's at every start. */
+  readonly configured: ConfiguredGenesis;
   /** The stored identity (`readIdentity`), null on a new database. */
   readonly identity: ChainIdentity | null;
   /** The cursor (the blocks table's last row), null on a new database. */
@@ -163,15 +205,40 @@ export interface ChainCheck {
 }
 
 /**
- * IN-3's startup checks, before any migration (see the module comment): the node's genesis hash — its block 0's — and,
- * on a database with a cursor, the stored genesis hash compared with it (`genesis-mismatch`, both hashes), then a wait
- * while the node's finalized head is below the cursor ({@link waitForNode}), then the node's finalized hash at the
- * cursor's height compared with the cursor's (`cursor-hash-mismatch`, the height and both hashes). A database without
- * a cursor compares nothing: its bootstrap is repeated (IN-2). Throws a plain `Error` for a cursor without an identity.
+ * IN-3's startup checks, before any migration (see the module comment), in this order:
+ * 1. a known network whose built-in table records no genesis hash is refused before the node is asked: the build has
+ *    nothing to check the node against (Q117; `genesis-mismatch`, `details { network, configured: null }`);
+ * 2. the node's genesis hash — its block 0's — compared with the configured network's, at every start, on a database
+ *    without a cursor too (Q120; `genesis-mismatch`, `details { network, configured, node }`);
+ * 3. on a database with a cursor, the stored genesis hash compared with it (`genesis-mismatch`, `details { stored, node
+ *    }`: a database written for another chain);
+ * 4. a wait while the node's finalized head is below the cursor ({@link waitForNode});
+ * 5. the node's finalized hash at the cursor's height compared with the cursor's (`cursor-hash-mismatch`, the height
+ *    and both hashes) — last, as the node's hash there is a finalized one only once its head reached the cursor.
+ * A database without a cursor compares nothing more: its bootstrap is repeated (IN-2). Throws a plain `Error` for a
+ * cursor without an identity.
  */
 export async function checkChain(input: ChainCheckInput): Promise<ChainCheck> {
-  const { source, identity, cursor } = input;
+  const { source, identity, cursor, configured } = input;
+  if (configured.hash === null) {
+    throw new UmbraError(
+      "genesis-mismatch",
+      `this build records no genesis hash for the network ${configured.network}, so the node's genesis hash cannot be ` +
+        "checked against it: a known network starts only with a build whose built-in table records its genesis hash " +
+        "(IN-3, decision record Q117)",
+      { network: configured.network, configured: null },
+    );
+  }
   const genesisHash = (await source.block(0n)).hash;
+  if (!sameBytes(configured.hash, genesisHash)) {
+    throw new UmbraError(
+      "genesis-mismatch",
+      `the node's genesis hash is ${hex(genesisHash)}, but the configured network ${configured.network} has the genesis ` +
+        `hash ${hex(configured.hash)}: the configured node serves another network (IN-3); configure a node of ` +
+        `${configured.network}, or the network the node serves`,
+      { network: configured.network, configured: hex(configured.hash), node: hex(genesisHash) },
+    );
+  }
   if (cursor === null) return Object.freeze({ genesisHash });
   if (identity === null) {
     throw new Error(

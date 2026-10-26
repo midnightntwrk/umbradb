@@ -5,7 +5,9 @@ import { coreEntry } from "../../src/config/entries.js";
 import type { HistoryOptions } from "../../src/config/history.js";
 import type { BlockContext, ModuleDeclaration, PointName } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
-import type { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
+import { builtInLedgerTable } from "../../src/ledger/networks.js";
+import type { LedgerTable } from "../../src/ledger/version-table.js";
+import { type InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import {
   type ProcessHandle,
   type ProcessingEnd,
@@ -98,9 +100,25 @@ export function testBuild(user: readonly ModuleDeclaration[], options: TestBuild
   return { declarations: { backbone, core: options.core ?? [], user }, core };
 }
 
-/** The `core` entry's settings for a process on `database`: a public process on preprod, with the development opt-in. */
+/**
+ * The tests' network (task 10.2a; IN-3, decision records Q117, Q120): `custom`, its genesis hash the in-memory chain's
+ * block 0 ({@link inMemoryBlock}), so the configured genesis and the chain's agree, and its own ledger table LG-3's rows
+ * (the same for every network, as the built-in tables hold them), so a block's ledger is what it was on `preprod`.
+ */
+export const TEST_GENESIS = `0x${Buffer.from(inMemoryBlock(0n).hash).toString("hex")}`;
+const TEST_NETWORK = Object.freeze({
+  network: "custom",
+  genesisHash: TEST_GENESIS,
+  ledgerTable: { rows: (builtInLedgerTable("mainnet") as LedgerTable).rows.map((row) => ({ ...row })) },
+});
+
+/**
+ * The `core` entry's settings for a process on `database`: a public process on the tests' network ({@link TEST_GENESIS};
+ * `extra` naming another network replaces it), with the development opt-in.
+ */
 export function coreSettings(database: string, extra: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
-  return { network: "preprod", database, node: "ws://127.0.0.1:9/node", developmentOptIn: true, ...extra };
+  const network = extra.network === undefined || extra.network === "custom" ? TEST_NETWORK : {};
+  return { ...network, database, node: "ws://127.0.0.1:9/node", developmentOptIn: true, ...extra };
 }
 
 /** A `core` entry from `start`: `coreEntry` with {@link coreSettings}. */

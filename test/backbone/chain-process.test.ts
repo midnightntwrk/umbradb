@@ -17,7 +17,9 @@ import {
   writeHashRow,
 } from "../../src/backbone/core-block-commit/core-block-commit.js";
 import { CORE_CHAIN, checkChain, type ChainCheckInput } from "../../src/backbone/core-chain/index.js";
+import { coreEntry } from "../../src/config/entries.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { builtInNetwork } from "../../src/ledger/networks.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { NodeClient } from "../../src/node/index.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
@@ -28,8 +30,26 @@ import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../
 import { core, entryOf, settle, startProcess } from "../runner/process-build.js";
 import { workModule } from "../runner/sigterm-module.js";
 import { STAND_IN_SPEC_VERSION } from "./block-fetch-stand-in.js";
+import { tapeTest } from "../tape/real/real-tapes.js";
 import { type ChainBuildOptions, chainDeclarations } from "./chain-build.js";
 import type { Job, WorkerEvent } from "./chain-bootstrap.worker.js";
+import { genesisOf, ingest } from "./ingest-harness.js";
+
+/**
+ * The known networks whose built-in genesis a test hides (A78's Q117 case): task 0.3 recorded every network's, so a
+ * build without one is planted here, through task 12.2's table as `core-chain` reads it (`builtInNetwork`).
+ */
+const unrecorded = vi.hoisted(() => new Set<string>());
+vi.mock("../../src/ledger/networks.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../src/ledger/networks.js")>();
+  return {
+    ...real,
+    builtInNetwork: (network: string) => {
+      const entry = real.builtInNetwork(network);
+      return entry !== null && unrecorded.has(network) ? Object.freeze({ ...entry, genesis: null }) : entry;
+    },
+  };
+});
 
 /**
  * The chain's identity, bootstrap and startup checks, and the blocks table, through the real process (task 10.2):
@@ -41,9 +61,12 @@ import type { Job, WorkerEvent } from "./chain-bootstrap.worker.js";
  *   bootstrap done, and commits S once the head reaches it, the anchor recorded in S's transaction; a bootstrap killed
  *   before S commits — a real process killed with SIGKILL while it waits, or inside block S's transaction — is repeated
  *   by the next start without error.
- * - A78 (IN-3): a node with another genesis hash refuses startup with `genesis-mismatch`, one whose finalized hash at
- *   the cursor differs with `cursor-hash-mismatch`, both before any migration; one whose head is below the cursor makes
- *   the process wait with `waiting-for-node`.
+ * - A78 (IN-3, as amended by decision records Q117 and Q120; task 10.2a): a node whose genesis hash is not the
+ *   configured network's — on an empty database too — or not the stored one refuses startup with `genesis-mismatch`, a
+ *   known network whose built-in table records no genesis hash refuses (planted: every network has one since task 0.3),
+ *   one whose finalized hash at the cursor differs refuses with `cursor-hash-mismatch`, all before any migration; one
+ *   whose head is below the cursor makes the process wait with `waiting-for-node`. With task 0.3's preprod tape, the
+ *   real node's genesis against a mainnet and a preprod configuration (skipped without `UMBRADB_TAPES`).
  * - A88 (CD-1): after block S commits on an empty database, `core_chain.identity` holds the genesis hash, S and the
  *   anchor hash.
  * - A90 (CD-3): one `blocks` and one `hashes` row per height, the cursor the last `blocks` row; a block in another height
@@ -262,7 +285,8 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       const db = await backend.database();
       const genesis: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0x5a), parentHash: new Uint8Array(32) };
       const source = new InMemoryBlockSource({ head: start, blocks: [genesis] });
-      const handle = chainProcess(db, start, source);
+      // The tests' custom network with this chain's genesis (task 10.2a: the node's genesis is the configured one's).
+      const handle = chainProcess(db, start, source, { settings: { genesisHash: hex(genesis.hash) } });
       try {
         expect(await settle(handle, source, start)).toBe("waiting");
       } finally {
@@ -446,10 +470,30 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     return db;
   }
 
+  /** How a start A78 expects to refuse went: what `started` rejected with, the state, and whether it changed anything. */
+  interface A78Refusal {
+    /** `{ code, details }` of the refusal, or "accepted". */
+    readonly refused: unknown;
+    readonly status: unknown;
+    readonly unchanged: boolean;
+    /** How many times startup asked the node for a block. */
+    readonly asked: number;
+  }
+
   /** What A78 observed for each case: the refusal's code and details, or how the start waited. */
   interface A78Observation {
-    readonly genesis: { readonly refused: unknown; readonly status: unknown; readonly unchanged: boolean };
-    readonly cursorHash: { readonly refused: unknown; readonly status: unknown; readonly unchanged: boolean };
+    /** On an empty database, the tests' custom network, a node of another genesis (Q120). */
+    readonly emptyCustom: A78Refusal;
+    /** On an empty database, a mainnet configuration, a preprod node (IN-3's scenario, the built-in hashes). */
+    readonly emptyKnown: A78Refusal;
+    /** On an empty database, a known network whose built-in table records no genesis hash (planted: Q117). */
+    readonly notRecorded: A78Refusal;
+    /** On a database with a cursor, a node of another genesis than the configured network's. */
+    readonly configured: A78Refusal;
+    /** On a database with a cursor whose stored genesis is not the node's, the configured network's the node's. */
+    readonly stored: A78Refusal;
+    /** On a database with a cursor, another finalized hash at the cursor. */
+    readonly cursorHash: A78Refusal;
     readonly below: {
       readonly state: string;
       readonly condition: unknown;
@@ -459,9 +503,15 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     };
   }
 
-  /** The database's state a refused start must leave as it was: migrations, identity, history, blocks. */
-  const snapshot = async (db: ProcessDatabase) =>
-    JSON.stringify(
+  /** The database's state a refused start must leave as it was: its tables, migrations, identity, history, blocks. */
+  const snapshot = async (db: ProcessDatabase) => {
+    const [tables] = await outside(
+      db,
+      "SELECT string_agg(schemaname || '.' || tablename, ',' ORDER BY schemaname, tablename) AS t FROM pg_tables " +
+        "WHERE schemaname NOT IN ('pg_catalog', 'information_schema')",
+    );
+    if (tables?.t === null || tables?.t === undefined) return "no tables";
+    return JSON.stringify(
       await outside(
         db,
         "SELECT (SELECT string_agg(module || '/' || migration_id, ',' ORDER BY module, position) FROM core_chain.migrations) AS m, " +
@@ -469,17 +519,34 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
           "(SELECT count(*) FROM core_chain.config)::int AS c, (SELECT max(height)::text FROM core_block_commit.blocks) AS b",
       ),
     );
+  };
 
   const refusal = (error: unknown) =>
     error instanceof UmbraError ? { code: error.code, details: error.details } : { error: String(error) };
 
+  /** A block 0 of another chain than the tests' network's. */
+  const OTHER: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0xee), parentHash: new Uint8Array(32) };
+  /** The genesis hash a known network's built-in table records, as bytes (task 12.2's table, never a constant). */
+  const builtInGenesis = (network: string): Uint8Array =>
+    new Uint8Array(Buffer.from((builtInNetwork(network)?.genesis?.hash as string).slice(2), "hex"));
+
   async function a78Run(seam?: ProcessInput["checkChain"]): Promise<A78Observation> {
     const options = seam === undefined ? {} : { checkChain: seam };
-    const observe = async (blocks: BlockRef[]) => {
-      const db = await committedTo3();
+    /** A start of `db` over a source with `blocks`, expected to refuse; `settings` replace the tests' network. */
+    const observe = async (
+      db: ProcessDatabase,
+      blocks: BlockRef[],
+      settings?: Readonly<Record<string, unknown>>,
+    ): Promise<A78Refusal> => {
       const before = await snapshot(db);
       const source = new InMemoryBlockSource({ head: 5n, blocks });
-      const handle = chainProcess(db, 1n, source, { user: [growing(2)], ...options });
+      let asked = 0;
+      const block = source.block.bind(source);
+      source.block = (height: bigint) => {
+        asked += 1;
+        return block(height);
+      };
+      const handle = chainProcess(db, 1n, source, { user: [growing(2)], ...options, ...(settings === undefined ? {} : { settings }) });
       let refused: unknown = "accepted";
       let status: unknown = null;
       try {
@@ -494,10 +561,24 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       } finally {
         await handle.stop();
       }
-      return { refused, status, unchanged: (await snapshot(db)) === before };
+      return { refused, status, unchanged: (await snapshot(db)) === before, asked };
     };
-    const genesis = await observe([{ height: 0n, hash: new Uint8Array(32).fill(0xee), parentHash: new Uint8Array(32) }]);
-    const cursorHash = await observe([{ ...inMemoryBlock(3n), hash: new Uint8Array(32).fill(3) }]);
+    const emptyCustom = await observe(await backend.database(), [OTHER]);
+    const emptyKnown = await observe(await backend.database(), [{ ...OTHER, hash: builtInGenesis("preprod") }], { network: "mainnet" });
+    unrecorded.add("stagenet");
+    let notRecorded: A78Refusal;
+    try {
+      notRecorded = await observe(await backend.database(), [], { network: "stagenet" });
+    } finally {
+      unrecorded.delete("stagenet");
+    }
+    const configured = await observe(await committedTo3(), [OTHER]);
+    const tampered = await committedTo3();
+    // A database written for another chain (an older build's, or one restored from elsewhere): its stored genesis is not
+    // the node's, though the configured network's is.
+    await outside(tampered, `UPDATE core_chain.identity SET genesis_hash = '\\x${"dd".repeat(32)}'`);
+    const stored = await observe(tampered, []);
+    const cursorHash = await observe(await committedTo3(), [{ ...inMemoryBlock(3n), hash: new Uint8Array(32).fill(3) }]);
     const db = await committedTo3();
     const identitySql = "SELECT encode(genesis_hash, 'hex') || start_height || encode(anchor_hash, 'hex') || xmin AS row FROM core_chain.identity";
     const [identityBefore] = await outside(db, identitySql);
@@ -515,33 +596,66 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     }
     const [identityAfter] = await outside(db, identitySql);
     const below = { ...seenBelow, identityUnchanged: identityBefore?.row === identityAfter?.row };
-    return { genesis, cursorHash, below };
+    return { emptyCustom, emptyKnown, notRecorded, configured, stored, cursorHash, below };
   }
 
+  /** A78's oracle (as amended by Q117, Q120): the problems found, none when startup behaved as IN-3 says. */
   function a78Problems(observed: A78Observation): string[] {
     const problems: string[] = [];
-    const stored = hex(inMemoryBlock(0n).hash);
-    const expectGenesis = { code: "genesis-mismatch", details: { stored, node: hex(new Uint8Array(32).fill(0xee)) } };
-    if (JSON.stringify(observed.genesis.refused) !== JSON.stringify(expectGenesis)) {
-      problems.push(`a node with another genesis hash: ${JSON.stringify(observed.genesis.refused)}`);
+    const text = (value: unknown) => JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? `${v}` : v));
+    const refusedWith = (code: string) => text({ state: "refused", ready: false, reason: { code, height: null, module: null, point: null } });
+    const ours = hex(inMemoryBlock(0n).hash);
+    const cases: [string, A78Refusal, { code: string; details: Record<string, unknown> }][] = [
+      [
+        "a node of another network on an empty database",
+        observed.emptyCustom,
+        { code: "genesis-mismatch", details: { network: "custom", configured: ours, node: hex(OTHER.hash) } },
+      ],
+      [
+        "a mainnet configuration against a preprod node on an empty database",
+        observed.emptyKnown,
+        {
+          code: "genesis-mismatch",
+          details: { network: "mainnet", configured: hex(builtInGenesis("mainnet")), node: hex(builtInGenesis("preprod")) },
+        },
+      ],
+      [
+        "a known network whose built-in table records no genesis hash",
+        observed.notRecorded,
+        { code: "genesis-mismatch", details: { network: "stagenet", configured: null } },
+      ],
+      [
+        "a node of another network at a start with a cursor",
+        observed.configured,
+        { code: "genesis-mismatch", details: { network: "custom", configured: ours, node: hex(OTHER.hash) } },
+      ],
+      [
+        "a node whose genesis hash is not the stored one",
+        observed.stored,
+        { code: "genesis-mismatch", details: { stored: `0x${"dd".repeat(32)}`, node: ours } },
+      ],
+      [
+        "a node with another hash at the cursor",
+        observed.cursorHash,
+        {
+          code: "cursor-hash-mismatch",
+          details: { height: "3", stored: hex(inMemoryBlock(3n).hash), node: hex(new Uint8Array(32).fill(3)) },
+        },
+      ],
+    ];
+    for (const [what, seen, expected] of cases) {
+      if (text(seen.refused) !== text(expected)) {
+        problems.push(`${what}: ${text(seen.refused)}`);
+        continue;
+      }
+      if (!seen.unchanged) problems.push(`${what}: the refusal changed the database`);
+      if (text(seen.status) !== refusedWith(expected.code)) problems.push(`${what}: left ${text(seen.status)}`);
     }
-    if (!observed.genesis.unchanged) problems.push("the genesis refusal changed the database");
-    const refusedWith = (code: string) =>
-      JSON.stringify({ state: "refused", ready: false, reason: { code, height: null, module: null, point: null } });
-    const genesisStatus = JSON.stringify(observed.genesis.status, (_k, v) => (typeof v === "bigint" ? `${v}` : v));
-    if (genesisStatus !== refusedWith("genesis-mismatch")) problems.push(`a node with another genesis hash left ${genesisStatus}`);
-    const expectCursor = {
-      code: "cursor-hash-mismatch",
-      details: { height: "3", stored: hex(inMemoryBlock(3n).hash), node: hex(new Uint8Array(32).fill(3)) },
-    };
-    const seenCursor = JSON.stringify(observed.cursorHash.refused, (_k, v) => (typeof v === "bigint" ? `${v}` : v));
-    if (seenCursor !== JSON.stringify(expectCursor)) problems.push(`a node with another hash at the cursor: ${seenCursor}`);
-    if (!observed.cursorHash.unchanged) problems.push("the cursor-hash refusal changed the database");
-    const cursorStatus = JSON.stringify(observed.cursorHash.status, (_k, v) => (typeof v === "bigint" ? `${v}` : v));
-    if (cursorStatus !== refusedWith("cursor-hash-mismatch")) {
-      problems.push(`a node with another hash at the cursor left ${cursorStatus}`);
+    // Q117's refusal needs no node: the build has nothing to compare the node's genesis with.
+    if (observed.notRecorded.refused !== "accepted" && observed.notRecorded.asked !== 0) {
+      problems.push(`a known network whose built-in table records no genesis hash: the node was asked ${observed.notRecorded.asked} times`);
     }
-    const condition = JSON.stringify(observed.below.condition, (_k, v) => (typeof v === "bigint" ? `${v}` : v));
+    const condition = text(observed.below.condition);
     if (observed.below.state !== "starting" || condition !== '{"code":"waiting-for-node","height":"3","head":"1"}') {
       problems.push(`a node below the cursor: ${observed.below.state}, ${condition}`);
     }
@@ -550,14 +664,20 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     return problems;
   }
 
-  it("A78: another genesis refuses with genesis-mismatch, another hash at the cursor with cursor-hash-mismatch, a head below the cursor waits", async () => {
+  it("A78: a node of another network than the configured one, also on an empty database, or than the stored one refuses with genesis-mismatch, a known network without a recorded genesis refuses, another hash at the cursor refuses with cursor-hash-mismatch, a head below the cursor waits", async () => {
     expect(a78Problems(await a78Run())).toEqual([]);
   }, PATIENCE_MS * 4);
 
-  it("A78 negative controls: a startup check that skips the genesis or the cursor's hash comparison fails A78", async () => {
-    const skipGenesis = async (input: ChainCheckInput) => {
+  it("A78 negative controls: a startup check that skips the configured network's genesis on an empty database, the stored genesis or the cursor's hash fails A78 in exactly its own cases", async () => {
+    const skipConfiguredOnEmpty = async (input: ChainCheckInput) => {
+      if (input.cursor !== null) return checkChain(input);
       const node = (await input.source.block(0n)).hash;
-      return checkChain({ ...input, identity: input.identity === null ? null : { ...input.identity, genesisHash: node } });
+      return checkChain({ ...input, configured: { network: input.configured.network, hash: node } });
+    };
+    const skipStored = async (input: ChainCheckInput) => {
+      if (input.identity === null) return checkChain(input);
+      const node = (await input.source.block(0n)).hash;
+      return checkChain({ ...input, identity: { ...input.identity, genesisHash: node } });
     };
     const skipCursorHash = (input: ChainCheckInput) => {
       const { cursor, source } = input;
@@ -565,13 +685,90 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       const block = (height: bigint) => (height === cursor.height ? Promise.resolve(cursor) : source.block(height));
       return checkChain({ ...input, source: { finalizedHead: () => source.finalizedHead(), waitForHead: (a, s) => source.waitForHead(a, s), block } });
     };
-    const genesisSkipped = a78Problems(await a78Run(skipGenesis));
-    expect(genesisSkipped).toContain('a node with another genesis hash: "accepted"');
-    expect(genesisSkipped).not.toContain(expect.stringMatching(/cursor/));
-    const cursorSkipped = a78Problems(await a78Run(skipCursorHash));
-    expect(cursorSkipped).toContain('a node with another hash at the cursor: "accepted"');
-    expect(cursorSkipped).not.toContain(expect.stringMatching(/genesis/));
-  }, PATIENCE_MS * 8);
+    const prefixes = (problems: string[]) => problems.map((problem) => problem.slice(0, problem.indexOf(":")));
+    expect(prefixes(a78Problems(await a78Run(skipConfiguredOnEmpty)))).toEqual([
+      "a node of another network on an empty database",
+      "a mainnet configuration against a preprod node on an empty database",
+      "a known network whose built-in table records no genesis hash",
+    ]);
+    expect(a78Problems(await a78Run(skipStored))).toEqual(['a node whose genesis hash is not the stored one: "accepted"']);
+    expect(a78Problems(await a78Run(skipCursorHash))).toEqual(['a node with another hash at the cursor: "accepted"']);
+  }, PATIENCE_MS * 12);
+
+  it("a custom network without its genesisHash refuses at validation, before the database opens or the node is asked (CF-4)", async () => {
+    const db = await backend.database();
+    const source = new InMemoryBlockSource({ head: 5n });
+    let asked = 0;
+    const block = source.block.bind(source);
+    source.block = (height: bigint) => {
+      asked += 1;
+      return block(height);
+    };
+    const handle = startProcess({
+      declarations: chainDeclarations([]),
+      config: {
+        data: {
+          entries: [
+            coreEntry({
+              start: 1,
+              config: {
+                network: "custom",
+                ledgerTable: { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v9" }] },
+                database: db.setting,
+                node: "ws://127.0.0.1:9/node",
+                developmentOptIn: true,
+              } as never,
+            }),
+          ],
+        },
+      },
+      source,
+      log: () => undefined,
+    });
+    try {
+      const refused = await refusalOf(handle);
+      expect(refused).toBeInstanceOf(UmbraError);
+      expect((refused as UmbraError).code).toBe("invalid-configuration");
+      const { findings } = (refused as UmbraError).details as { readonly findings: readonly { readonly path: string }[] };
+      expect(findings.map((finding) => finding.path)).toEqual(["entries[0].config.genesisHash"]);
+      expect(handle.status()).toMatchObject({ state: "refused", reason: { code: "invalid-configuration" } });
+    } finally {
+      await handle.stop();
+    }
+    expect(asked).toBe(0);
+    expect(await snapshot(db)).toBe("no tables");
+  }, PATIENCE_MS);
+
+  tapeTest(
+    "preprod-0-10000",
+    "A78 against a real preprod node's genesis (task 0.3's tape): a mainnet configuration refuses with genesis-mismatch naming both, a preprod one starts",
+    async (found) => {
+      const { records } = found.read();
+      const answered = genesisOf(records) as string;
+      // The real node's genesis is what task 0.3 recorded as preprod's in the built-in table.
+      expect(answered).toBe(builtInNetwork("preprod")?.genesis?.hash);
+      const mainnet = await ingest(await backend.database(), records, { start: 1n, settings: { network: "mainnet" } });
+      try {
+        const refused = await refusalOf(mainnet.handle);
+        expect(refusal(refused)).toEqual({
+          code: "genesis-mismatch",
+          details: { network: "mainnet", configured: builtInNetwork("mainnet")?.genesis?.hash, node: answered },
+        });
+        expect(mainnet.handle.status()).toMatchObject({ state: "refused", reason: { code: "genesis-mismatch" } });
+      } finally {
+        await mainnet.close();
+      }
+      const preprod = await ingest(await backend.database(), records, { start: 1n, settings: { network: "preprod" } });
+      try {
+        await preprod.handle.started;
+        expect(preprod.handle.status().reason).toBeNull();
+        expect(["syncing", "following"]).toContain(preprod.handle.status().state);
+      } finally {
+        await preprod.close();
+      }
+    },
+    { timeoutMs: PATIENCE_MS * 2 },
+  );
 
   // ── A90 ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
