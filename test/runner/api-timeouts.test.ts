@@ -6,6 +6,7 @@ import { UmbraError } from "../../src/db/errors.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { startPgliteServer, type PgliteTestServer } from "../db/pglite-server.js";
 import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer } from "../db/postgres-server.js";
+import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { declaration } from "../modules/declarations.js";
 import { entry } from "../modules/graph-fixtures.js";
 import { InMemoryBlockSource, type Process, runLoop, startProcess } from "./process-harness.js";
@@ -64,7 +65,11 @@ function slowApi(seen: Seen): ModuleDeclaration {
           await failing(() => read.query("SELECT 1 AS one"));
           return { status: 200, body: "idled" };
         });
-        api.http("GET", "/timeouts", async (_req, read) => ({ status: 200, body: (await read.query(SHOW))[0] }));
+        api.http("GET", "/timeouts", async (_req, read) => ({
+          status: 200,
+          headers: chainDataHeaders(await readChainDataView(read)),
+          body: (await read.query(SHOW))[0],
+        }));
       },
     },
   });

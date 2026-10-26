@@ -5,6 +5,7 @@ import { type HistoryOptions, recordedData } from "../../src/config/history.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { defineModule, type ModuleDeclaration, type PointName } from "../../src/modules/declaration.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
+import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, type LoopInput } from "../../src/runner/loop.js";
 import { type ProcessingEnd, type ProcessStatus, startProcess } from "../../src/runner/process.js";
 import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
@@ -52,7 +53,12 @@ function moduleM(version: Version, log: string[]) {
         await w.execute(insert, [b.height, b.settings.k ?? -1]);
       },
       async "on-start-api"(_p, api) {
-        api.http("GET", "/height", async (_request, read) => ({ status: 200, body: { height: read.height } }));
+        // The module states its height itself, with the envelope's helpers (RN-16; task 5.2b).
+        api.http("GET", "/height", async (_request, read) => ({
+          status: 200,
+          headers: chainDataHeaders(await readChainDataView(read)),
+          body: { height: read.height },
+        }));
       },
     },
   });

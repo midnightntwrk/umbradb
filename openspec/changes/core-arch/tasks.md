@@ -1250,11 +1250,34 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `COMMIT` (A86), §11's registry (A87) with Q115's codes (10.4); the `slow-block` condition (5.5); the admin
       endpoints over `status()` (8.1–8.3); `umbradb run` staying up on a refusal (4.4); the required ids in the manifest
       (18.4).
-- [ ] 5.2b The owner's answers Q104 A and Q105: the module API never changes a module's answer — no envelope headers or
+- [x] 5.2b The owner's answers Q104 A and Q105: the module API never changes a module's answer — no envelope headers or
       GraphQL `extensions` added, no GraphQL response told apart, a subscription's notification exactly the value the
       module emitted; the envelope's headers and extensions stay as helpers a module calls itself; an uncaught
       `no-committed-height` still answers 503.
       **Acceptance:** A75 (as amended).
+      **Done (2026-10-26):** `src/runner/module-api.ts`: `ModuleApi.answer` runs the handler in its bounded read and
+      sends its answer as the handler wrote it — status, headers (its own `X-Umbra-*` among them) and body: no
+      envelope header, no `extensions`, no GraphQL response told apart (`isGraphQLResponse` and the `chainData` seam
+      removed; the protected `handle` checks the answer and returns it unchanged). The handler is called before block
+      S commits too; `readChainDataView`'s `no-committed-height`, uncaught, is answered 503 with the envelope's
+      message, not told to `onError`. Wire encoding unchanged: an object body written as JSON with its type, a typed
+      string or bytes as they are. A notification stays `{ type: "next", id, value }`, the value as emitted.
+      `src/runner/envelope.ts` (comments only): its helpers are the module's to call. `docs/module-guide.md` (the
+      answer as written, the helpers, the value of a notification), `src/runner/index.ts` and `errors.ts` (comments).
+      Tests, seen failing first (`tsc` exit 2, 4 errors: `handle` not in `ModuleApi`; 9 of 71 tests failing, the
+      envelope added, the handler not called before S, GraphQL `extensions` added): `test/runner/module-api.test.ts`
+      (the module's headers kept, its own `x-umbra-height` among them; the handler called before S, an uncaught
+      `no-committed-height` answered 503, one caught answered as written; every body — GraphQL's shape included —
+      unchanged; the helpers stating the view where a handler calls them), `test/runner/api-server.test.ts` (A75 on
+      both backends: `untouchedProblems` — a module's own status, headers and bytes, and a GraphQL-shaped body, byte
+      for byte, before S and after —, `helperProblems` over routes that call the helpers, the subscription values as
+      emitted); `halts`, `stop-heights`, `upgrade-boundary` and `api-timeouts` tests' handlers call
+      `chainDataHeaders(await readChainDataView(read))`. Committed negative controls: a module API that adds the
+      envelope's headers (`answerChainData` around the handler), and one that adds a GraphQL-shaped body's
+      `extensions`, each fail `untouchedProblems` while the real one passes. Wrong variants (a scratch runner outside
+      the clone): 12, all caught — the 503's mapping, message and reporting, the envelope's headers and extensions put
+      back, the handler skipped before S, the module's answer changed. Issue
+      `docs/issues/00024-api-413-closes-before-body-read.md` recorded (OPEN).
 - [ ] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
       commit; never a cancel or a retry.
       **Acceptance:** A142.

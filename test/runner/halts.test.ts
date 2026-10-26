@@ -8,6 +8,7 @@ import type { BlockRef, BlockSource } from "../../src/runner/block-source.js";
 import { CallbackFailure } from "../../src/runner/dispatch.js";
 import type { ProcessReason } from "../../src/runner/failures.js";
 import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
+import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, type HeightRun, type LoopEnd, type LoopInput } from "../../src/runner/loop.js";
 import { type ProcessingEnd, type ProcessStatus, startProcess } from "../../src/runner/process.js";
 import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
@@ -89,7 +90,12 @@ function a43Modules(log: string[]): ModuleDeclaration[] {
   const reader = loggingModule("reader", log, [], {
     points: {
       async "on-start-api"(_p, api) {
-        api.http("GET", "/height", async (_request, read) => ({ status: 200, body: { height: read.height } }));
+        // The module states its height itself, with the envelope's helpers (RN-16; task 5.2b).
+        api.http("GET", "/height", async (_request, read) => ({
+          status: 200,
+          headers: chainDataHeaders(await readChainDataView(read)),
+          body: { height: read.height },
+        }));
       },
     },
   });

@@ -1,15 +1,17 @@
 /**
- * The chain-data envelope of module API responses (`openspec/changes/core-arch/specs/runner/spec.md` RN-16; CORE-ARCH
- * §4.4, §4.20): every chain-data response states the view it answers from — `finalized`, the only view of this version
- * (IN-1) — and the height and hash of the committed height its read sees, so a client knows what it was told without
- * the body changing: over HTTP as the headers `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`
+ * The chain-data envelope's helpers (`openspec/changes/core-arch/specs/runner/spec.md` RN-16; CORE-ARCH §4.4, §4.20):
+ * a module that wants its answers to state the view they answer from — `finalized`, the only view of this version
+ * (IN-1) — and the height and hash of the committed height its read sees calls them itself, so a client knows what it
+ * was told without the body changing: over HTTP as the headers `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`
  * ({@link chainDataHeaders}, {@link answerChainData}), and in a GraphQL response's `extensions`, its `data` unchanged
- * ({@link withViewExtensions}). Before block S commits there is no committed height, and a chain-data read is refused
- * with `no-committed-height`, answered with HTTP 503.
+ * ({@link withViewExtensions}). The core applies none of them: a module's answer is the module's (owner decisions Q104,
+ * Q105; task 5.2b). Before block S commits there is no committed height, and the read's view
+ * ({@link readChainDataView}) fails with `no-committed-height`, which the module API answers with HTTP 503 when the
+ * handler does not catch it.
  *
  * Heights are written as decimal strings and hashes as `0x`-prefixed lowercase hex, as the process transport writes
  * them (CORE-ARCH §4.14). The hash is read in the request's own read, so it is the hash of the height that read reports.
- * The module API mounts handlers on `listen.api` and gives each request its read (RN-15, DB-15): task 5.2a.
+ * The module API mounts handlers on `listen.api` and gives each request its read (RN-15, DB-15): tasks 5.2a, 5.2b.
  */
 
 import type { ReadHandle } from "../db/api.js";

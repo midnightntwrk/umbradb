@@ -11,10 +11,10 @@ import {
   type ApiResponse,
   ApiRoutes,
   encodeJson,
-  isGraphQLResponse,
   ModuleApi,
   registerModuleApis,
 } from "../../src/runner/module-api.js";
+import { answerChainData, chainDataHeaders, readChainDataView, withViewExtensions } from "../../src/runner/envelope.js";
 import { ProcessContexts } from "../../src/runner/process-context.js";
 import { declaration } from "../modules/declarations.js";
 import { BACKBONE, CORE_BLOCK_FETCH, CORE_CHAIN, entry, graphInput } from "../modules/graph-fixtures.js";
@@ -22,9 +22,11 @@ import { BACKBONE, CORE_BLOCK_FETCH, CORE_CHAIN, entry, graphInput } from "../mo
 /**
  * The module API without a listener (task 5.2a; RN-15, RN-16, DB-15; CORE-ARCH §4.10's `ApiRegistry`): the routes and
  * subscription names modules register in `on-start-api` (`ApiRoutes`, `registerModuleApis`), refused when registered
- * twice (`duplicate-api-route`); each request answered through one read bounded by `apiReadTimeoutMs`, inside the
- * chain-data envelope (`ModuleApi.answer`); the wire format of bodies and errors; and subscriptions (`ModuleApi.subscribe`).
- * Over a database and on `listen.api` it is `api-server.test.ts`; A141's request half is `api-timeouts.test.ts`.
+ * twice (`duplicate-api-route`); each request answered through one read bounded by `apiReadTimeoutMs`, with the
+ * handler's answer as the handler wrote it — no envelope header or `extensions` added, no GraphQL response told apart
+ * (RN-16, owner decisions Q104, Q105; task 5.2b) — and the envelope's helpers as a handler calls them
+ * (`ModuleApi.answer`); the wire format of bodies and errors; and subscriptions (`ModuleApi.subscribe`). Over a
+ * database and on `listen.api` it is `api-server.test.ts`; A141's request half is `api-timeouts.test.ts`.
  */
 
 const HASH = Uint8Array.from({ length: 32 }, (_, i) => i);
@@ -218,8 +220,8 @@ describe("ApiRoutes: what modules register in on-start-api (RN-15)", () => {
   });
 });
 
-describe("ModuleApi.answer: one request, one bounded read, the envelope (RN-15, RN-16, DB-15)", () => {
-  it("answers a route with a read bounded by apiReadTimeoutMs, the handler's answer and the envelope's headers", async () => {
+describe("ModuleApi.answer: one request, one bounded read, the module's answer (RN-15, RN-16, DB-15)", () => {
+  it("answers a route with a read bounded by apiReadTimeoutMs and the handler's answer, adding no header", async () => {
     const { db, options, read } = fakeDb();
     const seen: unknown[] = [];
     const routes = routesOf((api) =>
@@ -235,7 +237,8 @@ describe("ModuleApi.answer: one request, one bounded read, the envelope (RN-15, 
     expect(seen).toEqual([{ params: { height: "12", limit: "5" }, body: undefined }, true]);
     expect(Object.isFrozen((seen[0] as { params: object }).params)).toBe(true);
     expect(response.status).toBe(200);
-    expect(response.headers).toEqual({ "X-Mine": "1", ...ENVELOPE, "Content-Type": JSON_TYPE });
+    // The handler's own headers, its own X-Umbra-Height among them, and the JSON body's type: nothing of the envelope.
+    expect(response.headers).toEqual({ "X-Mine": "1", "x-umbra-height": "0", "Content-Type": JSON_TYPE });
     expect(response.body).toBe('{"height":"7"}');
   });
 
@@ -378,22 +381,49 @@ describe("ModuleApi.answer: one request, one bounded read, the envelope (RN-15, 
     expect(Object.getPrototypeOf(params[0])).toBeNull();
   });
 
-  it("answers 503 no-committed-height before block S commits, calling no handler", async () => {
-    let called = false;
-    const routes = routesOf((api) =>
-      api.http("GET", "/x", async () => {
-        called = true;
-        return { status: 200, body: null };
-      }),
-    );
-    const response = await new ModuleApi(routes, fakeDb(null)).answer(request("GET", "/x"));
-    expect(response.status).toBe(503);
-    expect(response.headers).toEqual({ "Content-Type": JSON_TYPE });
-    expect(errorOf(response)).toEqual({
+  it("calls the handler before block S commits too; a no-committed-height it does not catch is answered 503", async () => {
+    const called: string[] = [];
+    const errors: unknown[] = [];
+    const routes = routesOf((api) => {
+      api.http("GET", "/plain", async (_req, read) => {
+        called.push("plain");
+        return { status: 200, body: { height: read.height } };
+      });
+      api.http("GET", "/view", async (_req, read) => {
+        called.push("view");
+        const view = await readChainDataView(read);
+        return { status: 200, headers: chainDataHeaders(view), body: null };
+      });
+      api.http("GET", "/caught", async (_req, read) => {
+        called.push("caught");
+        try {
+          await readChainDataView(read);
+          return { status: 200, body: { ready: true } };
+        } catch (error) {
+          if (!(error instanceof UmbraError && error.code === "no-committed-height")) throw error;
+          return { status: 202, headers: { "Retry-After": "5" }, body: { ready: false } };
+        }
+      });
+    });
+    const api = new ModuleApi(routes, { ...fakeDb(null), onError: (error) => errors.push(error) });
+    const plain = await api.answer(request("GET", "/plain"));
+    expect([plain.status, plain.headers, plain.body]).toEqual([200, { "Content-Type": JSON_TYPE }, '{"height":null}']);
+    const view = await api.answer(request("GET", "/view"));
+    expect(view.status).toBe(503);
+    expect(view.headers).toEqual({ "Content-Type": JSON_TYPE });
+    expect(errorOf(view)).toEqual({
       code: "no-committed-height",
       message: "no height has committed yet: chain data is answered once block S commits (RN-16)",
     });
-    expect(called).toBe(false);
+    const caught = await api.answer(request("GET", "/caught"));
+    expect([caught.status, caught.headers, caught.body]).toEqual([
+      202,
+      { "Retry-After": "5", "Content-Type": JSON_TYPE },
+      '{"ready":false}',
+    ]);
+    expect(called).toEqual(["plain", "view", "caught"]);
+    // An answer the API gives for a read before S is no failure of the module's: onError is not told.
+    expect(errors).toEqual([]);
   });
 
   it("answers 504 query-timeout when the read's timeout ended it, whatever the handler did", async () => {
@@ -478,7 +508,7 @@ describe("ModuleApi.answer: one request, one bounded read, the envelope (RN-15, 
     expect((await throwing.answer(request("GET", "/throws"))).status).toBe(500);
   });
 
-  it("carries the view in a GraphQL response's extensions, its data unchanged, and leaves other bodies alone", async () => {
+  it("leaves every body as the handler wrote it, GraphQL responses too: no extensions, no header added", async () => {
     const bodies: Record<string, unknown> = {
       "/data": { data: { a: [1, 2] } },
       "/errors": { errors: [{ message: "bad" }] },
@@ -492,17 +522,43 @@ describe("ModuleApi.answer: one request, one bounded read, the envelope (RN-15, 
       for (const [path, body] of Object.entries(bodies)) api.http("POST", path, async () => ({ status: 200, body }));
     });
     const api = new ModuleApi(routes, fakeDb());
-    const view = { view: "finalized", height: "7", hash: HEX };
-    const answered = async (path: string) => bodyOf(await api.answer(request("POST", path)));
-    expect(await answered("/data")).toEqual({ data: { a: [1, 2] }, extensions: view });
-    expect(await answered("/errors")).toEqual({ errors: [{ message: "bad" }], extensions: view });
-    expect(await answered("/both")).toEqual({ data: null, errors: [], extensions: { cost: 3, ...view } });
-    expect(await answered("/rest")).toEqual({ data: 1, other: 2 });
-    expect(await answered("/array")).toEqual([{ data: 1 }]);
-    expect(await answered("/bad-extensions")).toEqual({ data: 1, extensions: [1] });
-    expect(await answered("/no-data")).toEqual({ extensions: {} });
-    // Every one of them still carries the headers.
-    expect((await api.answer(request("POST", "/rest"))).headers).toMatchObject(ENVELOPE);
+    for (const [path, body] of Object.entries(bodies)) {
+      const response = await api.answer(request("POST", path));
+      expect(response.body, path).toBe(JSON.stringify(body));
+      expect(response.headers, path).toEqual({ "Content-Type": JSON_TYPE });
+    }
+  });
+
+  it("states the view only where the handler calls the envelope's helpers: headers, extensions, answerChainData", async () => {
+    const routes = routesOf((api) => {
+      api.http("GET", "/headers", async (_req, read) => ({
+        status: 200,
+        headers: { "X-Mine": "1", ...chainDataHeaders(await readChainDataView(read)) },
+        body: { ok: true },
+      }));
+      api.http("POST", "/graphql", async (_req, read) => ({
+        status: 200,
+        body: withViewExtensions({ data: { a: 1 }, extensions: { cost: 3 } }, await readChainDataView(read)),
+      }));
+      api.http("GET", "/answered", async (_req, read) =>
+        answerChainData(read, async (view) => ({ status: 201, headers: { "x-umbra-view": "mine" }, body: { at: view.height } })),
+      );
+    });
+    const api = new ModuleApi(routes, fakeDb());
+    const headers = await api.answer(request("GET", "/headers"));
+    expect(headers.headers).toEqual({ "X-Mine": "1", ...ENVELOPE, "Content-Type": JSON_TYPE });
+    const graphql = await api.answer(request("POST", "/graphql"));
+    expect(bodyOf(graphql)).toEqual({ data: { a: 1 }, extensions: { cost: 3, view: "finalized", height: "7", hash: HEX } });
+    expect(graphql.headers).toEqual({ "Content-Type": JSON_TYPE });
+    const answered = await api.answer(request("GET", "/answered"));
+    expect([answered.status, answered.headers, answered.body]).toEqual([
+      201,
+      { ...ENVELOPE, "Content-Type": JSON_TYPE },
+      '{"at":"7"}',
+    ]);
+    // Before block S: answerChainData answers 503 itself, without calling the module's answer.
+    const before = await new ModuleApi(routes, fakeDb(null)).answer(request("GET", "/answered"));
+    expect([before.status, errorOf(before).code]).toEqual([503, "no-committed-height"]);
   });
 
   it("writes bodies as JSON — bigints as decimal text, bytes as 0x hex — unless the handler typed its text or bytes", async () => {
@@ -528,15 +584,12 @@ describe("ModuleApi.answer: one request, one bounded read, the envelope (RN-15, 
     expect(bytes.headers["Content-Type"]).toBe("application/octet-stream");
     expect((await api.answer(request("GET", "/string"))).body).toBe('"a string"');
     const typed = await api.answer(request("GET", "/typed-json"));
-    expect([typed.body, typed.headers["Content-Type"]]).toEqual([
-      '{"data":1,"extensions":{"view":"finalized","height":"7","hash":"' + HEX + '"}}',
-      "application/graphql-response+json",
-    ]);
+    expect([typed.body, typed.headers["Content-Type"]]).toEqual(['{"data":1}', "application/graphql-response+json"]);
     const nothing = await api.answer(request("GET", "/nothing"));
     expect([nothing.body, nothing.headers["Content-Type"]]).toEqual(["", undefined]);
   });
 
-  it("encodes JSON values as the API writes them, and tells GraphQL responses by their shape", () => {
+  it("encodes JSON values as the API writes them", () => {
     expect(encodeJson({ a: 1n, b: [Uint8Array.of(16)], c: undefined, d: null })).toBe('{"a":"1","b":["0x10"],"d":null}');
     expect(encodeJson(-5n)).toBe('"-5"');
     expect(encodeJson(undefined)).toBeUndefined();
@@ -544,17 +597,6 @@ describe("ModuleApi.answer: one request, one bounded read, the envelope (RN-15, 
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
     expect(() => encodeJson(cyclic)).toThrow(TypeError);
-    expect(isGraphQLResponse({ data: {} })).toBe(true);
-    expect(isGraphQLResponse({ errors: [] })).toBe(true);
-    expect(isGraphQLResponse({ data: null, extensions: {} })).toBe(true);
-    expect(isGraphQLResponse(Object.assign(Object.create(null), { data: 1 }))).toBe(true);
-    for (const body of [null, 1, "data", [], { extensions: {} }, { data: 1, more: 2 }, { data: 1, extensions: null }, new Map()]) {
-      expect(isGraphQLResponse(body), JSON.stringify(body)).toBe(false);
-    }
-    class Shaped {
-      data = 1;
-    }
-    expect(isGraphQLResponse(new Shaped())).toBe(false);
   });
 });
 

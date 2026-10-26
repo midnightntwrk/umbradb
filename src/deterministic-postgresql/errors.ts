@@ -29,8 +29,9 @@ export const ERROR_CODES = [
    */
   "query-timeout",
   /**
-   * A chain-data read before block S commits, which has no committed height to answer from: a module API request is
-   * answered 503 (RN-16, `src/runner/envelope.ts`).
+   * A chain-data read before block S commits, which has no committed height to answer from: the read's view
+   * (`readChainDataView`) fails with it, which the module API answers 503 when the handler does not catch it (RN-16,
+   * `src/runner/envelope.ts`).
    */
   "no-committed-height",
   /**

@@ -19,12 +19,13 @@
  *
  * **A request** ({@link ModuleApi.answer}) gets one read of the latest committed height, bounded by `apiReadTimeoutMs`
  * (`db.read(…, { timeoutMs })`, DB-15: on PostgreSQL only), and the handler runs inside it — so on PGlite a `db.read`
- * from a handler fails with `nested-call` rather than waiting (Q73). Every module route is chain data (RN-16): the
- * answer carries `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` of the height the read sees, a GraphQL response —
- * a JSON object with only `data`, `errors` and `extensions`, and `data` or `errors` among them (the GraphQL
- * specification's response format) — the same in its `extensions`, its `data` unchanged; before block S commits, 503
- * `no-committed-height` without calling the handler (`./envelope.ts`). A POST's body is read as JSON by the component's
- * own reader (integers beyond ±(2^53 − 1) as `bigint`, Q78); a GET's body is ignored.
+ * from a handler fails with `nested-call` rather than waiting (Q73). **The answer is the module's** (RN-16; owner
+ * decisions Q104, Q105; task 5.2b): the module API adds no header and no `extensions` to it, tells no GraphQL response
+ * apart, and calls the handler before block S commits too. A module that states the view, height and hash it read does
+ * so itself with the envelope's helpers (`./envelope.ts`: `readChainDataView`, `chainDataHeaders`,
+ * `withViewExtensions`, `answerChainData`); before block S commits `readChainDataView` fails with
+ * `no-committed-height`, answered 503 when the handler does not catch it. A POST's body is read as JSON by the
+ * component's own reader (integers beyond ±(2^53 − 1) as `bigint`, Q78); a GET's body is ignored.
  *
  * **Bodies.** An answer's body is written as JSON — a `bigint` as decimal text and bytes as `0x`-prefixed lowercase hex,
  * as the envelope writes heights and hashes — with `Content-Type: application/json; charset=utf-8`, unless the handler
@@ -33,7 +34,8 @@
  * **Errors** are `{ "error": { "code", "message" } }` with the status of {@link API_ERROR_STATUS}: a path no route has
  * (404 `not-found`), a method it lacks (405 `method-not-allowed`, with `Allow`), a path or body that cannot be read (400
  * `invalid-request`), a body over the listener's limit (413 `request-too-large`), the read's timeout (504
- * `query-timeout`, its message the database API's), before block S (503 `no-committed-height`); anything else — a
+ * `query-timeout`, its message the database API's), a `no-committed-height` the handler did not catch (503
+ * `no-committed-height`, its message the envelope's); anything else — a
  * handler that throws or answers what is no answer, a database error — 500 `internal-error` with a fixed message,
  * so no exception text (which may hold a credential, AE-6) reaches a client; the error itself goes to `onError`.
  *
@@ -49,7 +51,7 @@ import { parseJsonLossless } from "../deterministic-postgresql/index.js";
 import type { ApiRegistry } from "../modules/declaration.js";
 import type { ResolvedGraph } from "../modules/graph.js";
 import { runSchedule, seriesOf } from "./dispatch.js";
-import { answerChainData, type ChainDataAnswer, type ChainDataView, withViewExtensions } from "./envelope.js";
+import type { ChainDataAnswer } from "./envelope.js";
 import type { ProcessContexts } from "./process-context.js";
 
 /** A route's method (CORE-ARCH §4.10). */
@@ -171,21 +173,6 @@ export function encodeJson(value: unknown): string | undefined {
     if (raw instanceof Uint8Array) return hex(raw);
     return replaced;
   });
-}
-
-/**
- * Whether `body` is a GraphQL response (the GraphQL specification's response format): a plain object whose keys are
- * only `data`, `errors` and `extensions`, with `data` or `errors`, and `extensions`, if present, an object.
- */
-export function isGraphQLResponse(body: unknown): body is { readonly extensions?: Record<string, unknown> } {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) return false;
-  const prototype: unknown = Object.getPrototypeOf(body);
-  if (prototype !== Object.prototype && prototype !== null) return false;
-  const keys = Object.keys(body);
-  if (!keys.every((key) => key === "data" || key === "errors" || key === "extensions")) return false;
-  if (!keys.includes("data") && !keys.includes("errors")) return false;
-  const { extensions } = body as { readonly extensions?: unknown };
-  return extensions === undefined || (typeof extensions === "object" && extensions !== null && !Array.isArray(extensions));
 }
 
 /** The answer to a request the module API refuses with `code` (see the module comment). */
@@ -375,13 +362,16 @@ export class ModuleApi {
     });
     const req = Object.freeze({ params: Object.freeze(params), body });
     try {
-      const answered = await this.#options.db.read(
-        (read) => this.chainData(route, read, (view) => this.#respond(route, req, read, view)),
-        { timeoutMs: this.#options.timeoutMs },
-      );
+      const answered = await this.#options.db.read((read) => this.handle(route, req, read), {
+        timeoutMs: this.#options.timeoutMs,
+      });
       return this.#encode(answered);
     } catch (error) {
       if (error instanceof UmbraError && error.code === "query-timeout") return apiErrorResponse("query-timeout", error.message);
+      // The view of a read before block S (`readChainDataView`), which the handler did not catch (RN-16).
+      if (error instanceof UmbraError && error.code === "no-committed-height") {
+        return apiErrorResponse("no-committed-height", error.message);
+      }
       this.#report(error, { module: route.module, route: `${route.method} ${route.path}` });
       return apiErrorResponse("internal-error", INTERNAL);
     }
@@ -435,22 +425,11 @@ export class ModuleApi {
     }
   }
 
-  /** Answers one chain-data request read through `read` (RN-16, `answerChainData`): the envelope around `answer`. */
-  protected chainData(
-    _route: HttpRoute,
-    read: ReadHandle,
-    answer: (view: ChainDataView) => Promise<ChainDataAnswer>,
-  ): Promise<ChainDataAnswer> {
-    return answerChainData(read, answer);
-  }
-
-  /** The handler's answer, checked, a GraphQL body with the view in its `extensions`. */
-  async #respond(
-    route: HttpRoute,
-    req: { readonly params: Record<string, string>; readonly body: unknown },
-    read: ReadHandle,
-    view: ChainDataView,
-  ): Promise<ChainDataAnswer> {
+  /**
+   * `route`'s handler called with `req` and `read`, its answer checked and returned as the handler wrote it: the module
+   * API adds nothing to it (RN-16, Q104, Q105). Protected for the negative controls, which add the envelope back.
+   */
+  protected async handle(route: HttpRoute, req: Parameters<HttpHandler>[0], read: ReadHandle): Promise<ChainDataAnswer> {
     const answer: unknown = await route.handler(req, read);
     const where = `the handler of ${route.method} ${route.path}`;
     if (typeof answer !== "object" || answer === null) {
@@ -471,11 +450,7 @@ export class ModuleApi {
         }
       }
     }
-    return {
-      status,
-      headers: { ...(headers as Record<string, string> | undefined) },
-      body: isGraphQLResponse(body) ? withViewExtensions(body, view) : body,
-    };
+    return { status, headers: { ...(headers as Record<string, string> | undefined) }, body };
   }
 
   /** `answered` as the transport sends it (see the module comment). */

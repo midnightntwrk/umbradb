@@ -12,9 +12,15 @@ import {
   parseAddress,
   startModuleApi,
 } from "../../src/runner/api-server.js";
-import type { ChainDataAnswer, ChainDataView } from "../../src/runner/envelope.js";
+import {
+  answerChainData,
+  type ChainDataAnswer,
+  chainDataHeaders,
+  readChainDataView,
+  withViewExtensions,
+} from "../../src/runner/envelope.js";
 import { inMemoryBlock } from "../../src/runner/in-memory-source.js";
-import { ApiRoutes, type HttpRoute, ModuleApi, registerModuleApis } from "../../src/runner/module-api.js";
+import { ApiRoutes, type HttpHandler, type HttpRoute, ModuleApi, registerModuleApis } from "../../src/runner/module-api.js";
 import { ProcessContexts } from "../../src/runner/process-context.js";
 import { declaration } from "../modules/declarations.js";
 import { entry } from "../modules/graph-fixtures.js";
@@ -30,13 +36,16 @@ import {
 } from "./process-harness.js";
 
 /**
- * The module API on `listen.api` (task 5.2a; RN-15, RN-16; A75): HTTP handlers registered in `on-start-api` answer on
- * the listener with a read handle at the latest committed height, inside the chain-data envelope (`X-Umbra-View`,
- * `X-Umbra-Height`, `X-Umbra-Hash`; a GraphQL response's `extensions`), 503 `no-committed-height` before block S
- * commits; subscriptions on WebSocket at the same listener, notified from the module's `on-after-db-write` through
- * `emit`; two modules registering one route or subscription name refuse startup with `duplicate-api-route` before
- * anything listens. Over a database on both backends, through the runner's startup and loop; the server's own
- * behaviour (the WebSocket protocol, limits, slow subscribers, closing) without one.
+ * The module API on `listen.api` (tasks 5.2a, 5.2b; RN-15, RN-16; A75): HTTP handlers registered in `on-start-api`
+ * answer on the listener with a read handle at the latest committed height, and the client gets each answer as the
+ * module wrote it — status, headers and body: the core adds no envelope header and no `extensions` and tells no GraphQL
+ * response apart (owner decisions Q104, Q105) —; a module that states the view, height and hash it read does so with
+ * the envelope's helpers (`X-Umbra-View`, `X-Umbra-Height`, `X-Umbra-Hash`; a GraphQL response's `extensions`), and the
+ * view's `no-committed-height` before block S commits, uncaught, is answered 503; subscriptions on WebSocket at the
+ * same listener, notified from the module's `on-after-db-write` through `emit` with exactly the values it emitted; two
+ * modules registering one route or subscription name refuse startup with `duplicate-api-route` before anything listens.
+ * Over a database on both backends, through the runner's startup and loop; the server's own behaviour (the WebSocket
+ * protocol, limits, slow subscribers, closing) without one.
  */
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex")}`;
@@ -114,7 +123,25 @@ async function listening(port: number): Promise<boolean> {
   });
 }
 
-/** The module `chain-api` of A75: its rows, three routes, a subscription notified from its `on-after-db-write`. */
+/** What `chain-api`'s `GET /raw` answers besides its read's height: its own status, headers and bytes. */
+const RAW = Object.freeze({
+  status: 203,
+  headers: Object.freeze({
+    "Content-Type": "application/x-chain-api",
+    "Cache-Control": "no-store",
+    "X-Umbra-Height": "the module's own",
+  }),
+  body: Uint8Array.of(0, 1, 2, 0x7f, 0x80, 0xfe, 0xff),
+});
+
+/** The headers HTTP itself writes (Node.js's server), beside a module's. */
+const TRANSPORT_HEADERS = new Set(["date", "connection", "keep-alive", "content-length", "transfer-encoding"]);
+
+/**
+ * The module `chain-api` of A75: its rows; routes that state their view with the envelope's helpers (`GET /height`,
+ * `GET /rows/:height`, `POST /graphql`) and routes that do not (`POST /plain`, a GraphQL response's shape, and `GET
+ * /raw`, its own status, headers and bytes); a subscription notified from its `on-after-db-write`.
+ */
 function chainApi() {
   const calls: string[] = [];
   const listeners = new Set<(value: unknown) => void>();
@@ -124,18 +151,34 @@ function chainApi() {
       async "on-start-api"(_p, api: ApiRegistry) {
         api.http("GET", "/height", async (_req, read) => {
           calls.push("height");
+          // Before block S this fails with no-committed-height, which the handler leaves to the module API (503).
+          const view = await readChainDataView(read);
           const [row] = await read.query("SELECT count(*)::bigint AS rows FROM chain_api.rows");
-          return { status: 200, body: { height: read.height, rows: row?.rows } };
+          return { status: 200, headers: chainDataHeaders(view), body: { height: read.height, rows: row?.rows } };
         });
-        api.http("GET", "/rows/:height", async (req, read) => {
-          const rows = await read.query("SELECT height FROM chain_api.rows WHERE height = $1", [BigInt(req.params.height ?? "")]);
-          return rows.length === 0
-            ? { status: 404, body: { missing: req.params.height, read: read.height } }
-            : { status: 200, body: { row: rows[0]?.height, read: read.height } };
-        });
+        api.http("GET", "/rows/:height", async (req, read) =>
+          answerChainData(read, async () => {
+            const rows = await read.query("SELECT height FROM chain_api.rows WHERE height = $1", [BigInt(req.params.height ?? "")]);
+            return rows.length === 0
+              ? { status: 404, body: { missing: req.params.height, read: read.height } }
+              : { status: 200, body: { row: rows[0]?.height, read: read.height } };
+          }),
+        );
         api.http("POST", "/graphql", async (req, read) => ({
           status: 200,
-          body: { data: { echo: (req.body as { query?: unknown }).query, read: String(read.height) } },
+          body: withViewExtensions(
+            { data: { echo: (req.body as { query?: unknown }).query, read: String(read.height) } },
+            await readChainDataView(read),
+          ),
+        }));
+        api.http("POST", "/plain", async (req, read) => {
+          calls.push("plain");
+          return { status: 200, body: { data: { echo: (req.body as { query?: unknown }).query, read: read.height } } };
+        });
+        api.http("GET", "/raw", async (_req, read) => ({
+          status: RAW.status,
+          headers: { ...RAW.headers, "X-Read": String(read.height) },
+          body: RAW.body,
         }));
         api.subscription("heights", (args, emit) => {
           listeners.add(emit);
@@ -180,20 +223,23 @@ const registering = (id: string, register: (api: ApiRegistry) => void): ModuleDe
 const ok = async () => ({ status: 200, body: null });
 
 /**
- * A75's envelope oracle over a process serving `chain-api` at committed height `height` with `hash`: the problems found
- * on `GET /height`, `GET /rows/1`, `GET /rows/999` (a handler's 404) and `POST /graphql` — none when every response
- * carries the view, height and hash of the read, the GraphQL one in its `extensions` too with its `data` unchanged.
+ * A75's helper oracle over a process serving `chain-api` at committed height `height` with `hash`: the problems found
+ * on the routes whose handlers call the envelope's helpers — `GET /height`, `GET /rows/1`, `GET /rows/999` (a
+ * handler's 404) and `POST /graphql` — none when each response carries the view, height and hash of the read: the
+ * headers on the first three, the GraphQL one's in its `extensions` (and no header), its `data` unchanged.
  */
-async function envelopeProblems(url: string, height: bigint, hash: Uint8Array): Promise<string[]> {
+async function helperProblems(url: string, height: bigint, hash: Uint8Array): Promise<string[]> {
   const problems: string[] = [];
   const expected = { view: "finalized", height: String(height), hash: hex(hash) };
-  const check = (what: string, response: Response, read: unknown) => {
+  /** `response`'s envelope headers: those of the read (`expected`), or none for a route whose module writes none. */
+  const check = (what: string, response: Response, read: unknown, headers: typeof expected | null = expected) => {
     const got = {
       view: response.headers.get("x-umbra-view"),
       height: response.headers.get("x-umbra-height"),
       hash: response.headers.get("x-umbra-hash"),
     };
-    if (JSON.stringify(got) !== JSON.stringify(expected)) problems.push(`${what}: headers ${JSON.stringify(got)}`);
+    const want = headers ?? { view: null, height: null, hash: null };
+    if (JSON.stringify(got) !== JSON.stringify(want)) problems.push(`${what}: headers ${JSON.stringify(got)}`);
     if (read !== String(height)) problems.push(`${what}: the handler read ${String(read)}`);
   };
   const first = await fetch(`${url}/height`);
@@ -205,13 +251,48 @@ async function envelopeProblems(url: string, height: bigint, hash: Uint8Array): 
   check("GET /rows/999", missing, ((await missing.json()) as { read?: unknown }).read);
   const graphql = await fetch(`${url}/graphql`, { method: "POST", body: JSON.stringify({ query: "{ x }" }) });
   const body = (await graphql.json()) as { data?: { echo?: unknown; read?: unknown }; extensions?: unknown };
-  check("POST /graphql", graphql, body.data?.read);
+  // The GraphQL module states its view in the body's extensions only (RN-16's scenario): no header.
+  check("POST /graphql", graphql, body.data?.read, null);
   if (JSON.stringify(body.data) !== JSON.stringify({ echo: "{ x }", read: String(height) })) {
     problems.push(`POST /graphql: data ${JSON.stringify(body.data)}`);
   }
   if (JSON.stringify(body.extensions) !== JSON.stringify(expected)) {
     problems.push(`POST /graphql: extensions ${JSON.stringify(body.extensions)}`);
   }
+  return problems;
+}
+
+/**
+ * A75's "the core leaves a module's answer as the module wrote it" (RN-16's scenario, Q104, Q105) over a process
+ * serving `chain-api` whose reads see `height` (null before block S): the problems found on the routes whose handlers
+ * call no helper — `GET /raw` (its own status, headers, an `X-Umbra-Height` of its own among them, and bytes) and `POST
+ * /plain` (a GraphQL response's shape, written as JSON) — none when the client gets each exactly as written: the
+ * status, the module's headers with their values and no others but HTTP's own (and, for a body the module gave as an
+ * object, the JSON type its encoding writes), and the body byte for byte.
+ */
+async function untouchedProblems(url: string, height: bigint | null): Promise<string[]> {
+  const problems: string[] = [];
+  const names = (response: Response) => [...response.headers.keys()].filter((name) => !TRANSPORT_HEADERS.has(name));
+  const raw = await fetch(`${url}/raw`);
+  const written = { ...RAW.headers, "X-Read": String(height) };
+  if (raw.status !== RAW.status) problems.push(`GET /raw: status ${raw.status}`);
+  for (const [name, value] of Object.entries(written)) {
+    if (raw.headers.get(name) !== value) problems.push(`GET /raw: ${name} ${String(raw.headers.get(name))}`);
+  }
+  const extra = names(raw).filter((name) => !Object.keys(written).some((own) => own.toLowerCase() === name));
+  if (extra.length > 0) problems.push(`GET /raw: headers added ${extra.join(", ")}`);
+  const bytes = new Uint8Array(await raw.arrayBuffer());
+  if (hex(bytes) !== hex(RAW.body)) problems.push(`GET /raw: body ${hex(bytes)}`);
+  const plain = await fetch(`${url}/plain`, { method: "POST", body: JSON.stringify({ query: "{ x }" }) });
+  if (plain.status !== 200) problems.push(`POST /plain: status ${plain.status}`);
+  const added = names(plain).filter((name) => name !== "content-type");
+  if (added.length > 0) problems.push(`POST /plain: headers added ${added.join(", ")}`);
+  if (plain.headers.get("content-type") !== "application/json; charset=utf-8") {
+    problems.push(`POST /plain: content-type ${String(plain.headers.get("content-type"))}`);
+  }
+  const text = await plain.text();
+  const expected = JSON.stringify({ data: { echo: "{ x }", read: height === null ? null : String(height) } });
+  if (text !== expected) problems.push(`POST /plain: body ${text}`);
   return problems;
 }
 
@@ -256,18 +337,32 @@ class AcceptsDuplicates extends ApiRoutes {
   }
 }
 
-/** A negative control: a module API whose responses lack the envelope (its headers, and a GraphQL body's extensions). */
-class NoEnvelope extends ModuleApi {
-  protected override async chainData(
+/** A negative control: task 5.2a's module API, which put the envelope's headers on every answer (`answerChainData`). */
+class AddsHeaders extends ModuleApi {
+  protected override handle(route: HttpRoute, req: Parameters<HttpHandler>[0], read: ReadHandle): Promise<ChainDataAnswer> {
+    return answerChainData(read, () => super.handle(route, req, read));
+  }
+}
+
+/** Task 5.2a's GraphQL rule (Q105's option A): an object whose keys are only `data`, `errors`, `extensions`. */
+const graphQLShaped = (body: unknown): body is object =>
+  typeof body === "object" &&
+  body !== null &&
+  !Array.isArray(body) &&
+  !(body instanceof Uint8Array) &&
+  Object.keys(body).every((key) => ["data", "errors", "extensions"].includes(key)) &&
+  ("data" in body || "errors" in body);
+
+/** A negative control: task 5.2a's module API, which put the view in the `extensions` of a GraphQL-shaped body. */
+class AddsExtensions extends ModuleApi {
+  protected override async handle(
     route: HttpRoute,
+    req: Parameters<HttpHandler>[0],
     read: ReadHandle,
-    answer: (view: ChainDataView) => Promise<ChainDataAnswer>,
   ): Promise<ChainDataAnswer> {
-    const answered = await super.chainData(route, read, answer);
-    const headers = Object.fromEntries(Object.entries(answered.headers ?? {}).filter(([name]) => !/^x-umbra-/i.test(name)));
-    const body = answered.body as { extensions?: unknown } | null;
-    if (body !== null && typeof body === "object" && "extensions" in body) delete body.extensions;
-    return { ...answered, headers };
+    const answered = await super.handle(route, req, read);
+    if (!graphQLShaped(answered.body)) return answered;
+    return { ...answered, body: withViewExtensions(answered.body, await readChainDataView(read)) };
   }
 }
 
@@ -286,11 +381,11 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     opened = [];
   });
 
-  it("answers with a read at the latest committed height, in the envelope; 503 no-committed-height before block S", async () => {
+  it("answers each request with a read at the latest committed height and the module's answer as it wrote it; 503 for an uncaught no-committed-height", async () => {
     const { db } = await backend.database();
     const api = chainApi();
     const process = await started(db, [api.module], [entry("chain-api", 1)]);
-    // Before block S commits: 503, and the handler is not called.
+    // Before block S commits: the handler is called; its view's no-committed-height, uncaught, is answered 503.
     const before = await fetch(`${process.url}/height`);
     expect(before.status).toBe(503);
     expect(before.headers.get("content-type")).toBe("application/json; charset=utf-8");
@@ -301,7 +396,10 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
         message: "no height has committed yet: chain data is answered once block S commits (RN-16)",
       },
     });
-    expect(api.calls).toEqual([]);
+    expect(api.calls).toEqual(["height"]);
+    // A handler that does not ask for the view answers as it wrote it, its read's height null.
+    expect(await untouchedProblems(process.url, null)).toEqual([]);
+    expect(api.calls).toEqual(["height", "plain"]);
 
     const source = new InMemoryBlockSource({ head: 3n });
     await runLoop(process, source, 3n);
@@ -311,20 +409,22 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     expect(response.headers.get("x-umbra-height")).toBe("3");
     expect(response.headers.get("x-umbra-hash")).toBe(hex(inMemoryBlock(3n).hash));
     expect(await response.json()).toEqual({ height: "3", rows: "3" });
-    expect(await envelopeProblems(process.url, 3n, inMemoryBlock(3n).hash)).toEqual([]);
+    expect(await helperProblems(process.url, 3n, inMemoryBlock(3n).hash)).toEqual([]);
+    expect(await untouchedProblems(process.url, 3n)).toEqual([]);
 
     // The head rises: each request reads the latest committed height.
     source.finalize(5n);
     await runLoop(process, source, 5n);
     expect(await (await fetch(`${process.url}/height`)).json()).toEqual({ height: "5", rows: "5" });
-    expect(await envelopeProblems(process.url, 5n, inMemoryBlock(5n).hash)).toEqual([]);
+    expect(await helperProblems(process.url, 5n, inMemoryBlock(5n).hash)).toEqual([]);
+    expect(await untouchedProblems(process.url, 5n)).toEqual([]);
     // Not a route: 404, without the envelope (no read).
     const missing = await fetch(`${process.url}/nothing`);
     expect([missing.status, missing.headers.get("x-umbra-height")]).toEqual([404, null]);
     expect(((await missing.json()) as { error: { code: string } }).error.code).toBe("not-found");
   }, 120_000);
 
-  it("notifies a subscription from the module's on-after-db-write; unsubscribes on unsubscribe and on close", async () => {
+  it("notifies a subscription from the module's on-after-db-write with exactly its values; unsubscribes on unsubscribe and on close", async () => {
     const { db } = await backend.database();
     const api = chainApi();
     const process = await started(db, [api.module], [entry("chain-api", 1)]);
@@ -341,6 +441,7 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
 
     const source = new InMemoryBlockSource({ head: 2n });
     await runLoop(process, source, 2n);
+    // Each value exactly as the module emitted it (toEqual: no member added, Q104 A), in the protocol's `next`.
     const notified = (height: number, id: string) => ({
       type: "next",
       id,
@@ -379,28 +480,35 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     expect(problems).toEqual(["http: started", "subscription: started"]);
   }, 120_000);
 
-  it("negative control: responses without the envelope fail A75's envelope checks", async () => {
+  it("negative control: a module API that adds the envelope's headers, or a GraphQL body's extensions, fails A75's 'as the module wrote it'", async () => {
     const { db } = await backend.database();
     const api = chainApi();
     const sealed = await startThroughSeal(db, [api.module], [entry("chain-api", 1)]);
     const routes = await registerModuleApis(sealed);
-    const server = await listenModuleApi(new NoEnvelope(routes, { db, timeoutMs: 30_000 }), "127.0.0.1:0");
-    try {
-      await runLoop({ db, ...sealed }, new InMemoryBlockSource({ head: 1n }), 1n);
-      const url = `http://127.0.0.1:${server.port}`;
-      const problems = await envelopeProblems(url, 1n, inMemoryBlock(1n).hash);
-      expect(problems.filter((p) => p.includes("headers"))).toHaveLength(4);
-      expect(problems).toContain('POST /graphql: extensions undefined');
-      // The real module API over the same routes and database passes.
-      const real = await listenModuleApi(new ModuleApi(routes, { db, timeoutMs: 30_000 }), "127.0.0.1:0");
+    await runLoop({ db, ...sealed }, new InMemoryBlockSource({ head: 1n }), 1n);
+    const problemsOf = async (made: ModuleApi) => {
+      const server = await listenModuleApi(made, "127.0.0.1:0");
       try {
-        expect(await envelopeProblems(`http://127.0.0.1:${real.port}`, 1n, inMemoryBlock(1n).hash)).toEqual([]);
+        const url = `http://127.0.0.1:${server.port}`;
+        return { untouched: await untouchedProblems(url, 1n), helpers: await helperProblems(url, 1n, inMemoryBlock(1n).hash) };
       } finally {
-        await real.close();
+        await server.close();
       }
-    } finally {
-      await server.close();
-    }
+    };
+    const headers = await problemsOf(new AddsHeaders(routes, { db, timeoutMs: 30_000 }));
+    expect(headers.untouched).toEqual([
+      "GET /raw: X-Umbra-Height 1",
+      "GET /raw: headers added x-umbra-hash, x-umbra-view",
+      "POST /plain: headers added x-umbra-hash, x-umbra-height, x-umbra-view",
+    ]);
+    const extensions = await problemsOf(new AddsExtensions(routes, { db, timeoutMs: 30_000 }));
+    expect(extensions.untouched).toHaveLength(1);
+    expect(extensions.untouched[0]).toMatch(/^POST \/plain: body \{"data":.*"extensions":\{"view":"finalized","height":"1","hash":"0x[0-9a-f]{64}"\}\}$/);
+    // The real module API over the same routes and database passes both oracles. Of the helpers' routes, the headers
+    // control changes only the GraphQL one, whose module writes no header; the extensions control changes none.
+    expect(await problemsOf(new ModuleApi(routes, { db, timeoutMs: 30_000 }))).toEqual({ untouched: [], helpers: [] });
+    expect(headers.helpers).toEqual([expect.stringMatching(/^POST \/graphql: headers \{"view":"finalized","height":"1",/)]);
+    expect(extensions.helpers).toEqual([]);
   }, 120_000);
 
   it("A36/A39 with on-start-api: on-start-db, then on-start-api with its registry, then the loop's points (RN-1, RN-4)", async () => {

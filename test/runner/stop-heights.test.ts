@@ -3,6 +3,7 @@ import type { ModuleDeclaration, PointName } from "../../src/modules/declaration
 import type { ResolvedRange } from "../../src/modules/graph.js";
 import { type EntryBoundary, isBackbonePart, type PointSchedule, seriesOf } from "../../src/runner/dispatch.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
+import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, HeightFailure, type LoopInput } from "../../src/runner/loop.js";
 import { type ProcessingEnd, type ProcessStatus, startProcess } from "../../src/runner/process.js";
 import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
@@ -30,7 +31,12 @@ function modules(log: string[]): ModuleDeclaration[] {
   const reader = loggingModule("reader", log, [], {
     points: {
       async "on-start-api"(_p, api) {
-        api.http("GET", "/height", async (_request, read) => ({ status: 200, body: { height: read.height } }));
+        // The module states its height itself, with the envelope's helpers (RN-16; task 5.2b).
+        api.http("GET", "/height", async (_request, read) => ({
+          status: 200,
+          headers: chainDataHeaders(await readChainDataView(read)),
+          body: { height: read.height },
+        }));
       },
     },
   });
