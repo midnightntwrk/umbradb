@@ -791,9 +791,71 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       effective stops and overlapping revisions, `missing-entry`, the version check and CF-9's development opt-in (task
       4.3); `umbradb config check` (task 4.4); `/config`, `/status` and the logs through the redaction (A29, tasks
       8.1–8.4 and 5.x); `ledgerTable`'s default, the built-in table (task 12.2).
-- [ ] 4.3 `core-chain`'s configuration history: revisions, future-only comparison, `data_hash`, the version check, the
+- [x] 4.3 `core-chain`'s configuration history: revisions, future-only comparison, `data_hash`, the version check, the
       development opt-in.
       **Acceptance:** A30, A31, A32, A33, A34.
+      **Done (2026-10-25):** `src/config/history.ts` (pure), `src/backbone/core-chain/history.ts` (the table),
+      `src/config/process.ts`, `src/config/database.ts` (design §7, §10). `core_chain.config` is created by
+      `core-chain`'s migration `001` (`CORE_CHAIN_MIGRATIONS`, as the login; design §10's owner): key `(entry_id,
+      start)`, `stop` null when absent and always for `core` (a `CHECK`), `version` text, `data` `jsonb` and `data_hash`
+      32 bytes, both null for a scheduled revision (CF-3: id, start, stop and version only) and otherwise both present
+      (a `CHECK`); module roles read it, none writes it. A revision's row (`rowOf`): its stop as written, its version (a
+      module's semver; the core version's canonical JSON, `canonicalJson`: RFC 8785 on plain data, keys by UTF-16 code
+      units), its data fields (the build's version's parsed `data` settings, defaults applied; an earlier
+      `versionEntry`'s `config` as written) and `dataHash`, SHA-256 of their canonical encoding (DT-1). Effective stops
+      (CF-5): the next revision's start − 1, or the revision's own stop when lower (a gap, then a new start MD-4
+      checks); an own stop at or above the next start is superseded; the core's stop bounds nothing. `checkHistory({
+      config, cursor, declarations, history })` places the entries (`entriesAtCursor`), takes the process's `core`
+      revision (`processCoreEntry`: the latest of the build's version, Q102 resolved A (owner); none →
+      `invalid-configuration`, `reason: no-build-core-revision`) and runs `HISTORY_RULES`, refusing with the first code
+      that has findings, every finding of it at once (`details.findings`, each with its path, entry, field, message and
+      `about`, never a setting's value): `missing-entry` (rule `listed`: a recorded `(id, start)` the file omits,
+      `details.missing`; CF-5), `changes-past` (`recorded`, `version`, `data`, `stop`: an entry at or below the cursor
+      not recorded, or differing in its version, a data field at any depth, or a module's stop unless both stops are
+      above the cursor — no stop counts as above it, `stopChangeAllowed`; CF-6), `upgrade-required` (`build-version`:
+      the revision covering cursor + 1, S on a new database, not of the build's version; `details { height, entries: [{
+      id, start, needed, build }] }`; CF-8), `development-opt-in-required` (`sweep-off`: a `core` revision with `sweep:
+      "off"` running above the cursor without the opt-in, `feature: "sweep-off"`; CF-9). It gives `graphEntries` (every
+      module revision with its effective stop; `graphInputOf` adds S, the opt-in and the cursor for `resolveGraph`),
+      `committedVersions` (DB-10, from the recorded rows over S..cursor) and the `writes`: every entry above the cursor
+      that differs from its row or has none, and a module's stop changed above the cursor. The runner calls it before
+      `resolveGraph` and `startDatabase`, so every refusal comes before any migration (A33); `core-chain`'s
+      `on-start-db` calls `recordHistory(w, input)`, which reads the rows in its own transaction, checks again and
+      records the writes there (CF-6: one transaction). `openConfiguredDatabase` (`databaseOptions`) opens what
+      `database` names — `pglite:memory`, `pglite:<directory>`, a PostgreSQL URL — with the revision's
+      `developmentOptIn` (PGlite refuses without it, task 2.5's `openPglite`, reused) or `fullPageWritesOffAllowed`.
+      `ERROR_CODES` gains `missing-entry`, `changes-past`, `upgrade-required` (design §11 had them). Q103 raised (not
+      blocking: CF-5 refuses omitting a recorded entry above the cursor too; shipped A, CF-5 as written). Tests, seen
+      failing first (`tsc` exit 2, 28 lines: `src/config/history.js`, `process.js`, `database.js` and
+      `src/backbone/core-chain/index.js` missing, and the implicit `any`s that follow; the four suites failed to load,
+      `Cannot find module`): `test/config/history.test.ts` (CF-7's row, canonical JSON and `data_hash` against CBOR
+      written by hand; CF-5's effective stops, `revisionAt` and a module that cannot start mid-chain continuing at its
+      later revision — the gap as the control; A30's `missing-entry`; A31's table of 15 refusals and 13 acceptances with
+      what each records; A28's renaming upgrade; A33's newer and older builds of a module and of UmbraDB, S on a new
+      database, the boundary restart, the core's operational stop; DB-10's committed versions; Q102 A; CF-9's sweep; the
+      caller's errors; the committed negative controls: each rule left out accepts exactly its cases, stops compared
+      strictly refuse exactly the stop allowance's cases, operational settings recorded refuse exactly the operational
+      ones), `history.property.test.ts` (A32, seed 20261025: `data_hash` independent of property order at every depth
+      and changed by any value; the controls: a hash in written order fails the first, a hash of the keys the second),
+      `development-opt-in.test.ts` (A34 through configuration files: PGlite with and without the opt-in, nothing
+      created; a development-only module through the graph; `sweep: off`; Q102 A's opt-in), `history-database.test.ts`
+      (PostgreSQL 18.6 and PGlite 0.5.10, through a startup standing in for the runner's, `history-startup.ts`: the
+      table's columns, checks, owner and privileges; the rows recorded in one transaction; A31's refusals changing
+      nothing, a stop raised above the cursor, a revision above it recorded, the recording rolled back with its
+      transaction and comparing what that transaction sees, operational changes leaving every row and its `xmin`, the
+      core's stop raised or removed at cursor 10; A30; A28's history half; A33 adding no `core_chain.migrations` row
+      and, as its committed negative control, the version check after the migrations adding `m/002`; `requires-resync`
+      from the history). 110 wrong variants (a scratch runner outside the clone): 98 caught on the first run; the 12
+      survivors were gaps — a revision superseded before S counted for DB-10, `(id, start)` keys run together, nested
+      data fields, a sweep-off revision ending at the cursor, a module's own `sweep` setting, the order of
+      `historyFindings`, `upgrade-required` before the opt-in, a cursor at S, an above-cursor revision changing only its
+      stop or its version (also in the table), the graph's cursor — closed by tests; on the final sources 110 of 110 are
+      caught, none equivalent.
+      **Pending:** "startup refuses" through the runner's refused state, "processing continues" past a raised core stop,
+      the cursor from the `blocks` table and the operational settings in use (tasks 5.x, 5.3, 10.2: `processCoreEntry`);
+      `core-chain`'s declaration calling `recordHistory` (10.2); `umbradb config check --database` (4.4); `/config`
+      showing a `versionEntry`'s settings once checked (8.4); the ledger versions in the core version (12.1–12.2);
+      private backups under the opt-in (15.x).
 - [ ] 4.4 `umbradb config check` and the `umbradb` command.
       **Acceptance:** A35, A6.
 

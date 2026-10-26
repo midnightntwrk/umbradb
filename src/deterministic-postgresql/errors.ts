@@ -37,11 +37,19 @@ export const ERROR_CODES = [
    * A setting refused before anything runs: a `database` URL that overrides a pinned session setting, or a database
    * login that cannot create or use the module roles and schemas (`reason: writer-privileges`, decision record Q90); or
    * a configuration file that cannot be loaded (`reason`: `file-not-found`, `load-failed`, `no-default-export`; CF-1),
-   * or whose entries the validation refuses (`reason: invalid-entries`, `details.findings`; CF-3, `src/config/`).
+   * or whose entries the validation refuses (`reason: invalid-entries`, `details.findings`; CF-3, `src/config/`), or
+   * that has no `core` revision of the build's version to run with (`reason: no-build-core-revision`; decision record
+   * Q102, `src/config/process.ts`).
    */
   "invalid-configuration",
   /** The configuration file's default export holds a value that is not plain data, at `details.path` (CF-1). */
   "not-plain-data",
+  // Startup refusals of the configuration history (CF-5, CF-6, CF-8; `src/config/history.ts`): a recorded entry the
+  // configuration omits, a change to an entry starting at or below the cursor, and a build whose version is not the
+  // one the revision covering cursor + 1 names.
+  "missing-entry",
+  "changes-past",
+  "upgrade-required",
   /** A `TRUNCATE` outside a migration, refused by this component's trigger (DB-14, `./block-transactions.ts`). */
   "truncate-not-allowed",
   // Startup refusals of module ids, item names and schema names (DB-8, MD-2, `src/db/roles.ts`).

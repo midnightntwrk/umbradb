@@ -542,10 +542,11 @@ opt-out's skip is the component's, written once (`src/deterministic-postgresql/o
 opted-out tables (`databaseRefusals(tables, relations, { optedOut })`, each relation with the table it belongs to), and
 so do the `TRUNCATE` guard and task 7.1's `CHECK`s, change capture and hash. Graph resolution (`src/modules/graph.ts`,
 task 3.2, `resolveGraph`) takes the validated declarations, S, every revision of every module entry with its effective
-stop (task 4.3), the development opt-in and the cursor (null on a new database; Q97). Backbone parts run with the core,
-from S with no stop (the core's `stop` is operational and ends processing for every part); a module is enabled when it
-has an entry. Heights are split at S, at every revision's start and after every revision's stop into closed ranges
-`[from, to]` (`to` null for no end), as entries are closed (RN-7): two providers are adjacent when one's last height + 1
+stop (task 4.3: the next revision's start − 1, or its own stop when lower), the development opt-in and the cursor
+(null on a new database; Q97). Backbone parts run with the core, from S with no stop (the core's `stop` is
+operational and ends processing for every part); a module is enabled when it has an entry. Heights are split at S, at
+every revision's start and after every revision's stop into closed ranges `[from, to]` (`to` null for no end), as
+entries are closed (RN-7): two providers are adjacent when one's last height + 1
 is the other's first, and overlap when they share a height (MD-6); revisions continue each other when one's stop + 1 is
 the next's start (CF-5), and after a gap the next one starts the module again. In each range it resolves the providers
 and refuses, in this order, each fault naming its range (merged over consecutive ranges with the same fault), module and
@@ -623,8 +624,27 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   `settings(values, kinds)` shows a `secret` field, or one of unknown kind, as `[redacted]`. `/config`, `/status` and
   the logs use it (tasks 5.x, 8.x).
 - **Core stop.** Operational: not stored (`core_chain.config.stop` is null for `core`), changeable at any restart.
-- **History.** `core_chain.config`, compared and extended by `core-chain`'s `on-start-db` (CF-6); the version check
-  (CF-8) runs before any `on-start-db`.
+- **History** (task 4.3). `core_chain.config` (§10) is created by `core-chain`'s migration `001`
+  (`src/backbone/core-chain/history.ts`, `CORE_CHAIN_MIGRATIONS`, as the login). `checkHistory`
+  (`src/config/history.ts`) takes the validated configuration, the cursor (null on a new database), the build's
+  declarations and the rows (`readHistory`, none before the table exists), and refuses, each with every finding of its
+  kind: `missing-entry` for a recorded `(id, start)` the configuration omits (CF-5); `changes-past` for an entry
+  starting at or below the cursor that is not recorded, or differs in its version, a data field or — for a module — its
+  stop, unless both stops are above the cursor (no stop counts as above it) (CF-6); `upgrade-required` (entry, needed,
+  build) when the revision covering cursor + 1 (S on a new database) is not the build's version (CF-8); and
+  `development-opt-in-required` (`feature: "sweep-off"`) for a `core` revision with `sweep: "off"` running above the
+  cursor without the opt-in (CF-9). A revision records its stop as written (null for `core`), its version (a module's
+  semver, the core version's canonical JSON: RFC 8785 on plain data), its data fields — the build's version's parsed
+  `data` settings, or an earlier `versionEntry`'s `config` as written — as `jsonb` and `data_hash`, SHA-256 of their
+  canonical encoding (DT-1); a scheduled revision records neither. Effective stops (CF-5): a revision ends at the next
+  one's start − 1, or at its own stop when that is lower (a gap; an own stop at or above the next start is superseded);
+  the core's own stop bounds no revision. The runner calls `checkHistory` after reading the cursor and before
+  `resolveGraph` (its `graphInputOf`: S, every module revision with its effective stop, the opt-in, the cursor) and
+  `startDatabase` (its `committedVersions`, DB-10), so every refusal comes before any migration (A33); `core-chain`'s
+  `on-start-db` calls `recordHistory`, which checks again with the rows its transaction reads and records the check's
+  writes in that transaction — every entry above the cursor that differs from its row or has none, and a module's stop
+  changed above the cursor. `openConfiguredDatabase` (`src/config/database.ts`) opens what `database` names
+  (`pglite:memory`, `pglite:<directory>`, a PostgreSQL URL), PGlite refusing without the opt-in (CF-9, DB-12).
 - **`umbradb config check`.** The TypeScript compiler API (`typescript` becomes a runtime dependency; 5.9.3 installed)
   with `noEmit`, then the loader, the plain-data check and schema validation; with `--database`, a read-only connection
   that reads `core_chain.config` and runs the history checks, with no migration and no write (CF-10).
@@ -695,7 +715,7 @@ per-block tables are append-only and partitioned by height range; no table store
 | Owner | Table | Primary key | Other columns |
 |---|---|---|---|
 | `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits) |
-| `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`), version (text), data (jsonb, canonical), data_hash |
+| `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`, a `CHECK`), version (text), data (jsonb, canonical; null for a scheduled revision, CF-3), data_hash (32 bytes; null with data, a `CHECK`) |
 | database API | `core_chain.migrations` | (module, migration_id) | checksum (SHA-256 of the UTF-8 SQL), position (int, from 1; unique per module) |
 | `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_time (`timestamptz`, converted exactly from the node's milliseconds, Q74) |
 | `core-block-commit` | `core_block_commit.hashes` (not partitioned) | hash | height — makes a repeated hash fail, which the height-partitioned `blocks` table cannot enforce |
