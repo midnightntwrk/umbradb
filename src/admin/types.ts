@@ -36,7 +36,7 @@ export interface SanitizedError {
 /** `status()` as the admin endpoints show it (see the module comment). */
 export interface StatusSnapshot {
   readonly state: ProcessState;
-  /** `/health/ready` (AE-4's order is `status()`'s). */
+  /** Whether it is ready: `status()`'s, by AE-4's order (`core-health`'s `readinessOf`, as `/health/ready` decides). */
   readonly ready: boolean;
   /** The process's conditions (AE-3), heights as decimal text. */
   readonly conditions: readonly PlainObject[];
@@ -63,6 +63,11 @@ export interface ConfigSnapshot {
 export interface AdminSnapshot {
   /** The liveness timeout of the process's `core` revision (`livenessTimeoutMs`, AE-2); CF-4's default before it. */
   readonly livenessTimeoutMs: number;
+  /**
+   * The readiness lag of the process's `core` revision (`readinessLag`, AE-4), null when none is set or before the
+   * revision is known; `/health/ready` decides from it with the state and the lag (`core-health`, task 8.2).
+   */
+  readonly readinessLag: number | null;
   readonly status: StatusSnapshot;
   readonly config: ConfigSnapshot;
 }

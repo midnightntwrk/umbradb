@@ -51,7 +51,7 @@
  * rolled it back), one after it left the height committed, and the process stays up, the module API answering at the
  * cursor and the database open until stopped; `stopping` from {@link ProcessHandle.stop} on. `refused` and `halted`
  * carry their reason ({@link ProcessReason}: §11's code, the height, the module and the point; `./failures.ts`). Ready
- * (`/health/ready`, AE-4) when `following` or `stopped`, or `syncing` unless a set `readinessLag` is exceeded; never
+ * (`/health/ready`, AE-4's order, `readinessOf`) when `stopped`, else unless a set `readinessLag` is exceeded; never
  * `starting`, `refused`, `halted` or `stopping`. While startup waits for the node (steps 6 and 8) the process is
  * `starting` with the condition `waiting-for-node`, beside a retry's condition when one is raised; the block source's
  * own conditions (`finality-stall` while the node source's queue is full, IN-6) are the process's too. The admin
@@ -107,6 +107,7 @@ import {
   readIdentity,
   waitForNode,
 } from "../backbone/core-chain/index.js";
+import { readinessOf } from "../backbone/core-health/readiness.js";
 import { buildCoreVersion, type CoreVersion } from "../config/build.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import { openConfiguredDatabase } from "../config/database.js";
@@ -309,10 +310,7 @@ export function statusOf(facts: StatusFacts): ProcessStatus {
   const lag = behind === null || behind > 0n ? behind : 0n;
   const following = lag !== null && lag <= BigInt(facts.followingThreshold);
   const state: ProcessState = phase === "running" ? (following ? "following" : "syncing") : phase;
-  const ready =
-    state === "following" ||
-    state === "stopped" ||
-    (state === "syncing" && (readinessLag === null || (lag !== null && lag <= BigInt(readinessLag))));
+  const ready = readinessOf({ state, lag, readinessLag });
   const conditions = Object.freeze([...facts.conditions]);
   return Object.freeze({ state, ready, conditions, cursor, head, lag, ended: facts.ended, reason: facts.reason });
 }

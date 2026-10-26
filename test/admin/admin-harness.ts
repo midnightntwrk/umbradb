@@ -7,6 +7,7 @@ import { serveAdmin, type FromAdmin } from "../../src/admin/serve.js";
 import { type AdminServer, type AdminStarter, startAdminServer } from "../../src/admin/server.js";
 import { answerAdmin, ADMIN_ROUTES } from "../../src/admin/routes.js";
 import type { AdminAnswer, AdminView } from "../../src/admin/types.js";
+import { CORE_HEALTH } from "../../src/backbone/core-health/index.js";
 import { coreEntry } from "../../src/config/entries.js";
 import type { ReadOnlyDatabase } from "../../src/db/api.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -73,6 +74,12 @@ export function dbKeeper(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaratio
     },
   };
 }
+
+/**
+ * The backbone parts of the admin endpoints that have a declaration, which the tests' build carries beside the test
+ * backbone (`testBuild`), as the command's build does (`src/cli/build-modules.ts`): `core-health` (task 8.2).
+ */
+export const ADMIN_BACKBONE = [CORE_HEALTH] as const;
 
 /** The four endpoints (AE-1). */
 export const ENDPOINTS = ["/health/live", "/health/ready", "/status", "/config"] as const;
@@ -238,7 +245,7 @@ export function startWithAdmin(options: AdminRunOptions): AdminRun {
   server.catch(() => undefined);
   const starter = options.starter ?? startAdminServer;
   const handle = startProcess({
-    declarations: build.declarations,
+    declarations: { ...build.declarations, backbone: [...build.declarations.backbone, ...ADMIN_BACKBONE] },
     config: { data: { entries } },
     source,
     log: (line) => lines.push(line),

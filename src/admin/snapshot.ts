@@ -36,6 +36,8 @@ const height = (value: bigint | null): string | null => (value === null ? null :
 export interface SnapshotFacts {
   /** The process's liveness timeout (`livenessTimeoutMs`). */
   readonly livenessTimeoutMs: number;
+  /** The process's readiness lag (`readinessLag`), null when none is set. */
+  readonly readinessLag: number | null;
   /** The configuration's redaction, for the reason's details; null shows none. */
   readonly redactor: Redactor | null;
   /** The configuration as it may be shown. */
@@ -48,6 +50,7 @@ export function snapshotOf(status: ProcessStatus, facts: SnapshotFacts): AdminSn
   const error = ended !== null && (ended.kind === "refused" || ended.kind === "failed") ? ended.error : undefined;
   return Object.freeze({
     livenessTimeoutMs: facts.livenessTimeoutMs,
+    readinessLag: facts.readinessLag,
     status: Object.freeze({
       state: status.state,
       ready: status.ready,

@@ -12,7 +12,7 @@
  */
 
 import { CORE_CONFIG } from "../backbone/core-config/core-config.js";
-import { CORE_HEALTH } from "../backbone/core-health/core-health.js";
+import { CORE_HEALTH_ENDPOINTS } from "../backbone/core-health/endpoints.js";
 import { CORE_STATUS } from "../backbone/core-status/core-status.js";
 import { BACKBONE_ORDER } from "../modules/graph.js";
 import type { AdminAnswer, AdminEndpoint, AdminPart, AdminView } from "./types.js";
@@ -21,7 +21,7 @@ import type { AdminAnswer, AdminEndpoint, AdminPart, AdminView } from "./types.j
 export type AdminRoutes = ReadonlyMap<string, AdminEndpoint>;
 
 /** The backbone parts that provide the admin endpoints, in `BACKBONE_ORDER`'s order. */
-export const ADMIN_PARTS: readonly AdminPart[] = Object.freeze([CORE_HEALTH, CORE_STATUS, CORE_CONFIG]);
+export const ADMIN_PARTS: readonly AdminPart[] = Object.freeze([CORE_HEALTH_ENDPOINTS, CORE_STATUS, CORE_CONFIG]);
 
 /** A frozen map: `set`, `delete` and `clear` throw. */
 function frozenMap<K, V>(entries: Iterable<readonly [K, V]>): ReadonlyMap<K, V> {

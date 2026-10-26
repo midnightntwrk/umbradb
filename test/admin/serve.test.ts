@@ -26,6 +26,7 @@ import { ask, ENDPOINTS, newHold, startProber, timingProblems } from "./admin-ha
 function snapshot(state: AdminSnapshot["status"]["state"] = "following", ready = true, liveness = 30_000): AdminSnapshot {
   return {
     livenessTimeoutMs: liveness,
+    readinessLag: null,
     status: { state, ready, conditions: [], cursor: "3", head: "3", lag: "0", reason: null },
     config: { core: null },
   };

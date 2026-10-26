@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ADMIN_PARTS, ADMIN_ROUTES, adminRoutes, answerAdmin, NOT_FOUND } from "../../src/admin/routes.js";
 import type { AdminSnapshot, AdminView } from "../../src/admin/types.js";
 import { CORE_CONFIG } from "../../src/backbone/core-config/index.js";
-import { CORE_HEALTH } from "../../src/backbone/core-health/index.js";
+import { CORE_HEALTH_ENDPOINTS } from "../../src/backbone/core-health/index.js";
 import { CORE_STATUS } from "../../src/backbone/core-status/index.js";
 import { BACKBONE_ORDER } from "../../src/modules/graph.js";
 import { OTHER_REQUESTS } from "./admin-harness.js";
@@ -21,6 +21,7 @@ import { OTHER_REQUESTS } from "./admin-harness.js";
 function snapshot(liveness = 30_000, ready = true): AdminSnapshot {
   return {
     livenessTimeoutMs: liveness,
+    readinessLag: null,
     status: { state: ready ? "following" : "halted", ready, conditions: [], cursor: "3", head: "3", lag: "0", reason: null },
     config: { core: { start: 1, settings: { network: "preprod", database: "[redacted]" } } },
   };
@@ -30,11 +31,11 @@ const view = (beatAgeMs: number, given: AdminSnapshot = snapshot()): AdminView =
 
 describe("the admin route table (AE-1, Q70)", () => {
   it("mounts exactly the backbone parts core-health, core-status and core-config, with the four paths", () => {
-    expect(ADMIN_PARTS).toEqual([CORE_HEALTH, CORE_STATUS, CORE_CONFIG]);
+    expect(ADMIN_PARTS).toEqual([CORE_HEALTH_ENDPOINTS, CORE_STATUS, CORE_CONFIG]);
     expect(ADMIN_PARTS.map((part) => part.id)).toEqual(["core-health", "core-status", "core-config"]);
     for (const part of ADMIN_PARTS) expect(BACKBONE_ORDER).toContain(part.id);
     expect([...ADMIN_ROUTES.keys()]).toEqual(["/health/live", "/health/ready", "/status", "/config"]);
-    expect(CORE_HEALTH.endpoints.map((endpoint) => endpoint.path)).toEqual(["/health/live", "/health/ready"]);
+    expect(CORE_HEALTH_ENDPOINTS.endpoints.map((endpoint) => endpoint.path)).toEqual(["/health/live", "/health/ready"]);
     expect(Object.isFrozen(ADMIN_ROUTES)).toBe(true);
     expect(Object.isFrozen(ADMIN_PARTS)).toBe(true);
     // The table cannot change: nothing mounts a path after it is built.
@@ -50,7 +51,7 @@ describe("the admin route table (AE-1, Q70)", () => {
     expect(() => adminRoutes([{ id: "m", endpoints: [{ path: "/m", answer }] }])).toThrow(
       new TypeError("admin endpoints come from backbone parts only (AE-1, Q70): m is not a backbone part"),
     );
-    expect(() => adminRoutes([CORE_HEALTH, { id: "core-chain", endpoints: [{ path: "/health/live", answer }] }])).toThrow(
+    expect(() => adminRoutes([CORE_HEALTH_ENDPOINTS, { id: "core-chain", endpoints: [{ path: "/health/live", answer }] }])).toThrow(
       new TypeError("the admin endpoint /health/live is given twice: by core-health and by core-chain"),
     );
     expect(() => adminRoutes([{ id: "core-chain", endpoints: [{ path: "health", answer }] }])).toThrow(
@@ -89,23 +90,23 @@ describe("the admin route table (AE-1, Q70)", () => {
 describe("the backbone parts' minimal endpoints (8.2–8.4 complete them)", () => {
   it("core-health /health/live: 200 while the last heartbeat tick is within the liveness timeout, 503 after (AE-2)", () => {
     const live = (age: number, timeout: number) => answerAdmin(ADMIN_ROUTES, "GET", "/health/live", view(age, snapshot(timeout)));
-    expect(live(0, 30_000)).toEqual({ status: 200, body: { live: true } });
-    expect(live(30_000, 30_000)).toEqual({ status: 200, body: { live: true } });
-    expect(live(30_000.5, 30_000)).toEqual({ status: 503, body: { live: false } });
-    expect(live(5_001, 5_000)).toEqual({ status: 503, body: { live: false } });
+    expect(live(0, 30_000)).toEqual({ status: 200, body: { live: true, heartbeatAgeMs: 0, livenessTimeoutMs: 30_000 } });
+    expect(live(30_000, 30_000)).toMatchObject({ status: 200, body: { live: true } });
+    expect(live(30_000.5, 30_000)).toMatchObject({ status: 503, body: { live: false } });
+    expect(live(5_001, 5_000)).toMatchObject({ status: 503, body: { live: false } });
     // Whatever the state: a halted process is live while its heartbeat ticks.
-    expect(answerAdmin(ADMIN_ROUTES, "GET", "/health/live", view(10, snapshot(30_000, false)))).toEqual({
+    expect(answerAdmin(ADMIN_ROUTES, "GET", "/health/live", view(10, snapshot(30_000, false)))).toMatchObject({
       status: 200,
       body: { live: true },
     });
   });
 
-  it("core-health /health/ready: 200 when the published status is ready, 503 when it is not (AE-4's order is status()'s)", () => {
-    expect(answerAdmin(ADMIN_ROUTES, "GET", "/health/ready", view(0, snapshot(30_000, true)))).toEqual({
+  it("core-health /health/ready: 200 when AE-4 finds the published state and lag ready, 503 when not (task 8.2)", () => {
+    expect(answerAdmin(ADMIN_ROUTES, "GET", "/health/ready", view(0, snapshot(30_000, true)))).toMatchObject({
       status: 200,
       body: { ready: true },
     });
-    expect(answerAdmin(ADMIN_ROUTES, "GET", "/health/ready", view(0, snapshot(30_000, false)))).toEqual({
+    expect(answerAdmin(ADMIN_ROUTES, "GET", "/health/ready", view(0, snapshot(30_000, false)))).toMatchObject({
       status: 503,
       body: { ready: false },
     });

@@ -237,7 +237,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
         conditions: [{ code: "finality-stall", tipCap: 5, height: 106n }],
       });
       // As the admin endpoints publish it (task 8.1's snapshot): the height as decimal text.
-      const published = snapshotOf(run.handle.status(), { livenessTimeoutMs: 1, redactor: null, config: { core: null } });
+      const published = snapshotOf(run.handle.status(), { livenessTimeoutMs: 1, readinessLag: null, redactor: null, config: { core: null } });
       expect(published.status.conditions).toEqual([{ code: "finality-stall", tipCap: 5, height: "106" }]);
       expect(run.seen.queue).toEqual(best.slice(0, 5).map((block) => `best ${block.height} ${block.hex.slice(0, 10)}`));
       expect(run.node.count("chain_getBlock", [a(106).hex])).toBe(0);

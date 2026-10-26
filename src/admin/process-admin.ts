@@ -8,11 +8,11 @@
  *   processing's end, the stop's start ({@link ProcessAdmin.follow}, {@link ProcessAdmin.publish}).
  * - **The listener** starts as soon as the configuration gives its address: {@link ProcessAdmin.serve}, once the
  *   process's `core` revision is known (Q102) and before the database opens, on its `listen.admin` (CF-4's default
- *   `0.0.0.0:8081`), its liveness timeout and its redaction; a listener that cannot listen refuses startup (Node.js's
- *   error, the runner's `listen-failed`, Q115). A startup refused before that ({@link ProcessAdmin.refused}) still
- *   answers — on the configuration's `listen.admin` as loaded when it is an address ({@link earlyAdminAddress}), else on
- *   CF-4's default (Q127, shipped A) —, its reason redacted by the configuration's secrets as the validation reads
- *   them; a listener that cannot listen then is logged.
+ *   `0.0.0.0:8081`), its liveness timeout, its readiness lag and its redaction; a listener that cannot listen refuses
+ *   startup (Node.js's error, the runner's `listen-failed`, Q115). A startup refused before that
+ *   ({@link ProcessAdmin.refused}) still answers — on the configuration's `listen.admin` as loaded when it is an
+ *   address ({@link earlyAdminAddress}), else on CF-4's default (Q127, shipped A) —, its reason redacted by the
+ *   configuration's secrets as the validation reads them; a listener that cannot listen then is logged.
  * - **At `stop()`**, after the database closed: {@link ProcessAdmin.close} ends the heartbeat and the listener's
  *   thread. Nothing of it is left to keep Node.js alive.
  */
@@ -83,6 +83,7 @@ export class ProcessAdmin {
   readonly #heartbeat: Heartbeat;
   #redactor: Redactor = earlyRedactor(undefined);
   #liveness = DEFAULT_LIVENESS_TIMEOUT_MS;
+  #readinessLag: number | null = null;
   #config: ConfigSnapshot = Object.freeze({ core: null });
   #loaded: ConfigInput | undefined;
   /** The listener: starting, listening, or failed (once tried, never again). */
@@ -108,13 +109,15 @@ export class ProcessAdmin {
 
   /**
    * The process's `core` revision is known (`core` of `checked`): starts the listener on its `listen.admin`, with its
-   * liveness timeout and the configuration's redaction; resolves once it listens, rejects when it cannot.
+   * liveness timeout, its readiness lag and the configuration's redaction; resolves once it listens, rejects when it
+   * cannot.
    */
   async serve(checked: CheckedConfig, core: CheckedEntry): Promise<void> {
     if (this.#closed || this.#listening !== undefined) return;
     const settings = core.settings as Readonly<Record<string, unknown>>;
     this.#redactor = configRedactor(checked);
     this.#liveness = settings.livenessTimeoutMs as number;
+    this.#readinessLag = (settings.readinessLag as number | undefined) ?? null;
     this.#config = Object.freeze({ core: Object.freeze({ start: core.start, settings: shownSettings(this.#redactor, core) }) });
     const { admin } = settings.listen as { readonly admin: string };
     await this.#listen(admin, true);
@@ -158,7 +161,12 @@ export class ProcessAdmin {
 
   /** The snapshot of `status()` now. */
   #snapshot(): AdminSnapshot {
-    return snapshotOf(this.#status(), { livenessTimeoutMs: this.#liveness, redactor: this.#redactor, config: this.#config });
+    return snapshotOf(this.#status(), {
+      livenessTimeoutMs: this.#liveness,
+      readinessLag: this.#readinessLag,
+      redactor: this.#redactor,
+      config: this.#config,
+    });
   }
 
   /** Publishes the snapshot of `status()` to the listener when it changed since the last one it was sent. */

@@ -57,9 +57,10 @@ describe("the snapshot of status() (AE-1, AE-3)", () => {
     const upgrade = { code: "upgrade-required" as const, height: 50n, entries: [{ id: "m", start: 50, needed: "1.1.0", build: "1.0.0" }] };
     const retry = { code: "node-retrying" as const, attempts: 2, height: null };
     const given = status({ conditions: [upgrade, retry], ended: { kind: "failed", error: new Error(PASSWORD) } });
-    const snapshot = snapshotOf(given, { livenessTimeoutMs: 5_000, redactor: null, config: { core: null } });
+    const snapshot = snapshotOf(given, { livenessTimeoutMs: 5_000, readinessLag: 12, redactor: null, config: { core: null } });
     expect(snapshot).toEqual({
       livenessTimeoutMs: 5_000,
+      readinessLag: 12,
       status: {
         state: "syncing",
         ready: true,
@@ -84,7 +85,7 @@ describe("the snapshot of status() (AE-1, AE-3)", () => {
 
   it("before the first height: cursor, head and lag null", () => {
     const given = statusOf({ ...{ phase: "starting", start: null, cursor: null, head: null }, followingThreshold: 3, readinessLag: null, conditions: [], ended: null, reason: null });
-    expect(snapshotOf(given, { livenessTimeoutMs: 1, redactor: null, config: { core: null } }).status).toEqual({
+    expect(snapshotOf(given, { livenessTimeoutMs: 1, readinessLag: null, redactor: null, config: { core: null } }).status).toEqual({
       state: "starting",
       ready: false,
       conditions: [],
@@ -103,7 +104,7 @@ describe("the snapshot of status() (AE-1, AE-3)", () => {
     });
     const reason = reasonOf(failure);
     const given = status({ phase: "halted", reason, ended: { kind: "failed", error: failure } });
-    const snapshot = snapshotOf(given, { livenessTimeoutMs: 1, redactor: null, config: { core: null } });
+    const snapshot = snapshotOf(given, { livenessTimeoutMs: 1, readinessLag: null, redactor: null, config: { core: null } });
     expect(snapshot.status.reason).toEqual({
       code: "callback-error",
       height: "5",

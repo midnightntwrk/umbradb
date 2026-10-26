@@ -431,7 +431,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     await admin.serve(config, config.entries[0] as never);
     expect(fake.started).toEqual([expect.objectContaining({ address: "127.0.0.1:0", beat: expect.any(SharedArrayBuffer) })]);
     expect(fake.published).toHaveLength(1);
-    expect(fake.published[0]).toMatchObject({ livenessTimeoutMs: 7_000, status: { state: "following", cursor: "1" } });
+    expect(fake.published[0]).toMatchObject({ livenessTimeoutMs: 7_000, readinessLag: null, status: { state: "following", cursor: "1" } });
     expect(fake.published[0]?.config.core?.settings).toMatchObject({ database: "[redacted]", node: "[redacted]" });
     expect(lines).toEqual(["admin endpoints listening on 127.0.0.1:10001"]);
     admin.publish();

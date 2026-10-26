@@ -1555,8 +1555,33 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `0.0.0.0:8081`.
       **Acceptance:** A62, A64 with the default; a process started without `admin` answers on its admin listener; a
       second process given the same admin address refuses with `listen-failed` and opens no database session.
-- [ ] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
+- [x] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
       **Acceptance:** A63, A65; A140 for these endpoints.
+      **Done (2026-10-26):** the part in its own folder: its declaration `CORE_HEALTH` (`core-health.ts`: a backbone
+      part with no points, no items and no migrations, in RN-3's place after `core-digest`, in the command's build
+      `src/cli/build-modules.ts`; like `core-block-fetch` it gets an empty schema and role, DB-8), its endpoints
+      `CORE_HEALTH_ENDPOINTS` (`endpoints.ts`, which the admin route table mounts) and `readinessOf` (`readiness.ts`).
+      `/health/live`: 200 while the last heartbeat tick is within `livenessTimeoutMs`, 503 after, in every state, body
+      `{ live, heartbeatAgeMs, livenessTimeoutMs }`. `/health/ready`: AE-4's order — not while `starting`, `refused`,
+      `halted` or `stopping`; always while `stopped`; otherwise within `readinessLag` if one is set (`following` too:
+      5.3's `statusOf` had `following` always ready, which A65's third case refuses) — decided from the published
+      state, lag and readiness lag (new in the snapshot), body `{ ready, state, lag, readinessLag }`; the runner's
+      `statusOf` takes `ready` from the same `readinessOf`, so `/status` and `/health/ready` agree. Conditions are no
+      rule of AE-4 and change nothing. Tests (`test/backbone/core-health/`, seen failing first: `tsc` exit 2, 14 lines,
+      the new exports and the snapshot's `readinessLag` missing; 8 tests failing on the old endpoints): A63 on
+      PostgreSQL 18.6 and PGlite 0.5.10 with a 5 s liveness timeout — an awaited 15 s operation, live 200 throughout; a
+      15 s synchronous loop, live 503 to every request from 5 s into it, every endpoint within 1 s (8.1's prober), 200
+      again from 1 s after it —; A65 — readiness lag 10 and lag 500, 503 until the lag is 10, then 200, every answer of
+      the 490-block catch-up checked against AE-4 (on PGlite: 152 s on PostgreSQL under load, 7 s on PGlite; the
+      decision does not depend on the backend), stopped with lag 100 200, following with threshold 20 and lag 15 503,
+      on both —; a halted and a stopping process within the readiness lag 503; a retry condition changing nothing; a
+      refused process answering both (A140); AE-4's cases (`readiness-cases.ts`), each built to fail a decision that
+      applies another rule first. Committed negative controls: the rules in three wrong orders and a rule AE-4 lacks
+      (conditions), each failing exactly its rule's cases; through the process, `/health/ready` with 5.3's order fails
+      A65's third case; an admin server on the main thread fails A63's "every endpoint within 1 s". Wrong variants (a
+      scratch copy of the tree): 33, all caught. Also changed: `src/runner/process.ts` (`statusOf`'s `ready`, one
+      import, one comment line), `src/admin/` (the snapshot's `readinessLag`), `test/admin/` (the bodies, the build's
+      `ADMIN_BACKBONE`), `test/cli/config-check.test.ts` (the build's backbone ids).
 - [ ] 8.3 `core-status` (`src/backbone/core-status/`): `/status` and its JSON schema, times as RFC 3339 text (Q68).
       **Acceptance:** A66 (`/status`), A67; A140 for this endpoint.
 - [ ] 8.4 `core-config` (`src/backbone/core-config/`): `/config` and its JSON schema.
