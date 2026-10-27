@@ -2893,10 +2893,27 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 15. Backups
 
-- [ ] 15.1 `umbradb backup` (command and at stop): `pg_dump` 18 on PostgreSQL in the read transaction's snapshot,
+- [x] 15.1 `umbradb backup` (command and at stop): `pg_dump` 18 on PostgreSQL in the read transaction's snapshot,
       `pglite-tools` on PGlite in one queued job, both looked up only when the command runs (`backup-tools-missing`),
       the manifest line; `private-backup-refused` (Q83, Q85).
       **Acceptance:** A124, A122.
+      **Done (2026-10-27):** `src/backup/`: `writeBackup` — a private process's backup refused without the development
+      opt-in (its side, or `core_private_source.cursor` in the database, PP-12), then the tool found (`tools.ts`:
+      `UMBRADB_PG_DUMP` or `PATH`, `pg_dump --version` of major 18; `@electric-sql/pglite-tools` imported only now),
+      then one snapshot: on PostgreSQL one database API read that reads the manifest's facts (`facts.ts`: cursor,
+      identity, every `core_chain.config` and `core_chain.migrations` row, the stored state root, the server version,
+      the contents hash with the opted-out tables by name only), exports its snapshot and runs `pg_dump
+      --snapshot=<id> --inserts --no-owner --no-privileges` (the password in `PGPASSWORD`); on PGlite one exclusive job
+      of the queue (`exclusiveJob`, `src/db/pglite.ts`: a read, then the engine for `pgDump`, then `RESET ALL` and
+      `RESET ROLE`); the manifest line (`manifest.ts`, format 1) then the dump, written under a temporary name and
+      renamed once complete. `umbradb backup --out <file> [--config <file>]` (`src/cli/backup.ts`, `configured.ts`);
+      `ProcessHandle.backup(out)` and `backupAtStop` at the core's stop (`src/runner/process.ts`: skipped while the
+      file is a backup of that height, a backup of another height replaced, a file that is no backup kept and the
+      failure logged). `@electric-sql/pglite-tools` 0.4.10 is an exact development dependency and an optional peer.
+      A124 and A122 pass on PostgreSQL 18.6 and PGlite 0.5.10 with the committed negative control
+      (`test/backup/backup.negative-control.test.ts`). The command cannot back up a PGlite directory a running
+      process holds (`writer-lock-held`; Q152, not blocking); the restore is task 15.2. Issue TBD-15.1 (the
+      runtime `npm audit`'s zod advisory, found while checking the new dependency) recorded.
 - [ ] 15.2 `umbradb restore`: the checks before loading, the file's SQL run in one transaction, owners and grants, the
       contents hash and state root checked before the commit; the operator guide's "restore only trusted backups".
       **Acceptance:** A125, A126, A127, A128.

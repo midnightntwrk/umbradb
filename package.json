@@ -59,7 +59,16 @@
     "ws": "8.22.0",
     "zod": "^4.0.0"
   },
+  "peerDependencies": {
+    "@electric-sql/pglite-tools": "0.4.10"
+  },
+  "peerDependenciesMeta": {
+    "@electric-sql/pglite-tools": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@electric-sql/pglite-tools": "0.4.10",
     "@midnightntwrk/wallet-sdk-abstractions": "3.0.0-canary.20260716150734-e744d99",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",

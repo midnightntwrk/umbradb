@@ -1280,8 +1280,21 @@ transaction on a read connection, reads the cursor and the chain identity, compu
 `pg_dump` is looked up on `PATH` (or `UMBRADB_PG_DUMP`) when the command runs; a missing tool or a major version other
 than 18 fails with `backup-tools-missing`. On PGlite the whole backup is one queued job that calls `pgDump` of
 `@electric-sql/pglite-tools` — an optional peer dependency the command imports only when it runs (an install hint
-without it), and that the browser build bundles; its `DEALLOCATE ALL` runs inside the job. Any committed height is a
-block boundary (RN-6), so every dump holds whole blocks. **Restore.** The command reads the manifest line, makes the
+without it), and that the browser build bundles; its `DEALLOCATE ALL` runs inside the job, and the job ends with `RESET
+ALL` and `RESET ROLE`, since that `pg_dump` sets its session's settings on PGlite's one session. Any committed height is
+a block boundary (RN-6), so every dump holds whole blocks. As built (task 15.1, `src/backup/`): the command is `umbradb
+backup --out <file> [--config <file>]` — the configuration file, `umbradb.config.ts` unless given as for `run`, names
+the database, the opt-in and the side, and its build the tables declared `deterministic: false` —; a process backs its
+own database up through `ProcessHandle.backup(out)` and `backupAtStop`, the same code; a PGlite directory opens in one
+process at a time (DB-11), so while a process holds it the command refuses with `writer-lock-held` and the process
+backs it up itself (task 15.1's Q152). The manifest's facts and the contents hash are read in the snapshot; a
+private database (its side, or `core_private_source.cursor` in it) is refused without the opt-in before anything is read
+(PP-12); the URL's password reaches `pg_dump` as `PGPASSWORD`, never on its command line; the file is written under a
+temporary name beside its path, flushed and renamed only once complete. A sequence is not transactional: `pg_dump`
+reads a sequence's position when it reads it, so on PostgreSQL beside commits the dump can hold an opted-out table's
+sequence ahead of its rows (never behind them). The backup at stop is skipped when the file at `backupAtStop` is a
+backup of that height, replaces a backup of another height, and refuses (`backup-format-unknown`, logged; the process
+stays `stopped`) a file there that is no backup. **Restore.** The command reads the manifest line, makes the
 checks of BK-3 that need no tables, then opens one transaction on the writer connection and runs the file's SQL itself
 (no `psql`; statements a tool writes for `psql` alone are handled as `psql` would), creates the module roles the server
 lacks and applies DB-6's and DB-7's owners and grants, recomputes the contents hash, checks the state root, and commits
@@ -1429,12 +1442,12 @@ the private database recorded: `recorded`, `public`), `private-start-below` (the
 `ProcessHandle`, `ProcessState`, `ErrorCode`, `ParsedTransaction`, `LedgerTask`.
 
 **Command:** `umbradb run [--config <file>]`, `umbradb config check <file> [--database <url>]`, `umbradb backup --out
-<file>`, `umbradb restore <file>` — `package.json`'s `bin` `umbradb` (`dist/cli/main.js`, task 4.4). No command, or
-any other, or a wrong argument, prints the usage and exits 2; a failed check exits 1; `run` (task 4.4a, §7) runs until
-SIGTERM or SIGINT and exits 1 when startup refused or processing halted, else 0, and exits 1 at once when the
-configuration itself is refused (Q137 B, task 8.1b); until tasks 15.1 and 15.2 build them,
-`backup` and `restore` exit 3, not available in this build. The configuration file's `modules` export is the
-command's user modules (CF-1, Q106 B).
+<file> [--config <file>]`, `umbradb restore <file>` — `package.json`'s `bin` `umbradb` (`dist/cli/main.js`, task 4.4).
+No command, or any other, or a wrong argument, prints the usage and exits 2; a failed check exits 1; `run` (task 4.4a,
+§7) runs until SIGTERM or SIGINT and exits 1 when startup refused or processing halted, else 0, and exits 1 at once
+when the configuration itself is refused (Q137 B, task 8.1b); `backup` exits 0 once its file is written and 1 when
+refused (task 15.1); until task 15.2 builds it, `restore` exits 3, not available in this build. The configuration
+file's `modules` export is the command's user modules (CF-1, Q106 B).
 
 ## 13. Quality gates: what moves and what is retired (LS-5; for the owner's approval, CORE-ARCH SC-010)
 
@@ -1481,6 +1494,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | `ws`: WebSocket server over `https` requiring client certificates | Probe on `ws` 8.22.0 (2026-09-26), 2026-10-22: with a certificate connected; without, `ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED` | Verified (probe) |
 | `esbuild` bundles a worker entry with a WASM asset | Probe on `esbuild` 0.28.2 (2026-08-08), 2026-10-22: 0 errors, the asset emitted | Verified (probe) |
 | Ajv validates JSON Schema draft 2020-12 and, in strict mode, refuses a schema with an unknown keyword (the admin endpoints' schemas, A66) | Probe on `ajv` 8.18.0 (2026-02-14; already in the tree as Stryker's, now an exact development dependency), 2026-10-26: `additionalProperties`, `required`, `pattern`, `$ref` to `$defs` and `oneOf` enforced, a misspelled keyword refused at compile time, `validateSchema` against the 2020-12 meta-schema; zod 4.4.3's `fromJSONSchema` accepted the misspelled keyword silently; `format` needs `ajv-formats`, so the schemas use patterns (`test/admin/json-schema.ts`) | Verified (probe and test) |
+| `@electric-sql/pglite-tools` 0.4.10's `pgDump` runs PostgreSQL 18.6's `pg_dump` (WASM) on a PGlite 0.5.10 engine, adds `--inserts`, removes `\restrict`/`\unrestrict`, runs `DEALLOCATE ALL` and restores `search_path` only — the other settings its `pg_dump` sets stay on the session | Package source `src/pg_dump.ts` (0.4.10, published 2026-10-14, peer `@electric-sql/pglite` 0.5.10 exactly, no dependencies); probes and `test/backup/backup.test.ts` (task 15.1), 2026-10-27: on a bare engine `extra_float_digits` 1 → 3 and `synchronize_seqscans` on → off after `pgDump`; a dump through the database API's exclusive job, `Dumped by pg_dump version 18.6`, the session's settings back to the start parameters after it | Verified (source, probe, test); an exact development dependency and optional peer (task 15.1) |
 | `midnight_ledgerStateRoot(at)` | `midnight-node/pallets/midnight/rpc/src/lib.rs:60-61` (node 2.1.0-rc.4) | Verified (reference) |
 | `midnight_ledgerStateRoot` answers a JSON array of byte values (a `Vec<u8>`, 33 bytes); head notifications (`chain_newHead`, `chain_finalizedHead`) carry the header without its hash; `system_properties.genesis_state` is hex without `0x` | `rpc.mainnet.midnight.network`, 2026-10-25: the answers recorded in `test/node/fixtures/mainnet-answers.json` (its `genesis_state` is `test/ledger/fixtures/genesis/genesis_state_mainnet.mn`) | Verified (run); the node client's readers (task 10.1) |
 | Substrate answers a call over the node's RPC rate limit with `-32999` "RPC rate limit exceeded", and a state the node discarded (pruned) with `4003` "Client error: UnknownBlock: State already discarded for 0x…" | `polkadot-sdk` stable2606 at `660acefe`: `substrate/client/rpc-servers/src/middleware/mod.rs:151`, `substrate/client/db/src/lib.rs:2833`, `substrate/client/rpc-api/src/state/error.rs:67` (the node builds the `shieldedtech` fork of stable2606 at `6b0ce48`, not read) | Verified (reference, upstream branch); no pruned node was available to observe it |

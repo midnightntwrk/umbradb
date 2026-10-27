@@ -7,7 +7,12 @@ import { describe, expect, it } from "vitest";
 // lockfile that `npm ci` installs from. `typescript` is a runtime dependency (for `umbradb config check`, design.md
 // §7) and `zod` stays on major version 4 (owner decision Q45).
 
-type Manifest = { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+type Manifest = {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+};
 type Lockfile = { packages: Record<string, { version: string; dev?: boolean }> };
 
 const readJson = <T>(name: string): T =>
@@ -38,6 +43,18 @@ describe("dependency pins", () => {
     expect(manifest.dependencies["ajv"]).toBeUndefined();
     expect(locked("ajv")).toMatchObject({ version: "8.18.0", dev: true });
   });
+
+  it(
+    "pins @electric-sql/pglite-tools 0.4.10 (PGlite 0.5.10's) as an optional peer and a development dependency only " +
+      "(task 15.1: the backup's pg_dump on PGlite, imported when a backup runs; owner decision Q85)",
+    () => {
+      expect(manifest.devDependencies["@electric-sql/pglite-tools"]).toBe("0.4.10");
+      expect(manifest.dependencies["@electric-sql/pglite-tools"]).toBeUndefined();
+      expect(manifest.peerDependencies?.["@electric-sql/pglite-tools"]).toBe("0.4.10");
+      expect(manifest.peerDependenciesMeta?.["@electric-sql/pglite-tools"]).toEqual({ optional: true });
+      expect(locked("@electric-sql/pglite-tools")).toMatchObject({ version: "0.4.10", dev: true });
+    },
+  );
 
   it("has typescript as a runtime dependency only", () => {
     expect(manifest.dependencies["typescript"]).toBeDefined();

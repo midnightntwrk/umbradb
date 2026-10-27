@@ -383,6 +383,22 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
     },
   ],
   // ── processing halts ─────────────────────────────────────────────────────────────────────────────────────────────
+  "backup:backup-tools-missing": [
+    {
+      file: "test/backup/backup.test.ts",
+      test:
+        "A124: without the tool (pg_dump 18, or pglite-tools), umbradb backup fails with backup-tools-missing, naming " +
+        "what to install, and writes no file",
+    },
+  ],
+  "backup:private-backup-refused": [
+    {
+      file: "test/backup/backup.test.ts",
+      test:
+        "A122: umbradb backup of a private database refuses with private-backup-refused without the development " +
+        "opt-in, and writes no file",
+    },
+  ],
   "halt:callback-error": [
     {
       file: `${RUNNER}/halts.test.ts`,
@@ -497,8 +513,6 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
  * (see the module comment).
  */
 export const PENDING: Readonly<Record<string, string>> = Object.freeze({
-  "backup:backup-tools-missing": "15.1",
-  "backup:private-backup-refused": "15.1",
   "backup:backup-format-unknown": "15.2",
   "backup:restore-target-not-empty": "15.2",
   "backup:backup-history-mismatch": "15.2",

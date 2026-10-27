@@ -196,6 +196,17 @@ export const ERROR_CODES = [
    * private cursor (`details.reason`). Not retryable.
    */
   "test-key-conflict",
+  // The backup's refusals (BK-1, PP-12; `src/backup/`, task 15.1): the command exits 1 and writes no file.
+  /**
+   * The tool a backup needs is missing or of another major version than 18: the PostgreSQL 18 client's `pg_dump` for a
+   * PostgreSQL database (on `PATH`, or `UMBRADB_PG_DUMP`), `@electric-sql/pglite-tools` for a PGlite one (owner decision
+   * Q85); the message says what to install.
+   */
+  "backup-tools-missing",
+  /** A backup of a private database without the development opt-in (PP-12). */
+  "private-backup-refused",
+  /** A file that is not a backup of the format this build reads: no manifest line, or a manifest of another format. */
+  "backup-format-unknown",
 ] as const;
 
 /**

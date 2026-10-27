@@ -159,6 +159,7 @@ import { openConfiguredDatabase } from "../config/database.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkHistory, graphInputOf, type HistoryCheck, versionText } from "../config/history.js";
 import { loadConfig, type LoadOptions } from "../config/load.js";
+import { resolve } from "node:path";
 import { type PlainObject, plainData } from "../config/plain-data.js";
 import { processCoreEntry } from "../config/process.js";
 import { configRedactor, type Redactor } from "../config/redact.js";
@@ -185,6 +186,10 @@ import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failure
 import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput, type SlowBlockEvent } from "./loop.js";
 import { ProcessContexts } from "./process-context.js";
 import { type CoreTransport, startCoreTransport, type TransportTls } from "../private/core-transport.js";
+import { type BackupInput, type BackupSeams, type BackupWritten, backupAtStop, writeBackup } from "../backup/backup.js";
+import { databaseTarget } from "../config/database.js";
+import { handleClosed, UmbraError } from "../db/errors.js";
+import type { TableName } from "../deterministic-postgresql/index.js";
 import { privateInstancesOf } from "../private/instances.js";
 import { Lockstep, type LockstepCondition } from "../private/lockstep.js";
 
@@ -380,6 +385,15 @@ export interface ProcessHandle {
    * decision Q137 B: see the module comment).
    */
   readonly closed: Promise<void>;
+  /**
+   * Writes a backup of the process's database at its committed height to the file `out` (BK-1; `../backup/`), while
+   * processing runs or after it ended: on PostgreSQL in one read's snapshot beside the commits, on PGlite as one job of
+   * the database's queue, so commits wait for it. Resolves with the backup once its file is complete; rejects with
+   * startup's refusal, with `handle-closed` once the process is stopping, and with the backup's refusals
+   * (`private-backup-refused`, `backup-tools-missing`, `no-committed-height`), writing no file. `seams` are the
+   * negative controls' only (`BackupSeams`: a dump outside the manifest's snapshot), not for programs.
+   */
+  backup(out: string, seams?: BackupSeams): Promise<BackupWritten>;
 }
 
 /** What {@link statusOf} computes the state from. */
@@ -582,6 +596,8 @@ class Process implements ProcessHandle {
   #loop: FinalizedLoop | undefined;
   /** A public process's bookkeeping of its `lockstepInstances` (PP-6; task 14.3), once startup read them. */
   #lockstep: Lockstep | undefined;
+  /** The schema plan's tables declared `deterministic: false` (Q76), for a backup's contents hash (BK-2). */
+  #optedOut: readonly TableName[] = [];
 
   constructor(input: ProcessInput) {
     this.#input = input;
@@ -638,6 +654,47 @@ class Process implements ProcessHandle {
   stop(): Promise<void> {
     this.#closing ??= this.#close();
     return this.#closing;
+  }
+
+  async backup(out: string, seams: BackupSeams = {}): Promise<BackupWritten> {
+    await this.started;
+    if (this.#closing !== undefined || this.#db === undefined) throw handleClosed("database");
+    return writeBackup(this.#backupInput(resolve(out)), seams);
+  }
+
+  /** What a backup of the process's database is given (BK-1): its backend, its opted-out tables, its side and opt-in. */
+  #backupInput(out: string): BackupInput {
+    const settings = (this.#core as CheckedEntry).settings as PlainObject;
+    const target = databaseTarget(String(settings.database));
+    return {
+      db: this.#db as Database,
+      target: target.backend === "postgres" ? { backend: "postgres", url: target.url } : { backend: "pglite" },
+      out,
+      optedOut: this.#optedOut,
+      side: this.#input.side ?? "public",
+      developmentOptIn: settings.developmentOptIn === true,
+    };
+  }
+
+  /**
+   * The backup at stop (CORE-ARCH §4.15, BK-1): after the core's `on-stop-height`, to the `core` revision's
+   * `backupAtStop` when set — relative to the working directory —, unless the file there is a backup of `height`
+   * already; logged, a failure too, which leaves the process `stopped`.
+   */
+  async #backupAtStop(height: bigint): Promise<void> {
+    const out = ((this.#core as CheckedEntry).settings as PlainObject).backupAtStop;
+    if (typeof out !== "string" || this.#db === undefined) return;
+    try {
+      const { written, manifest } = await backupAtStop(this.#backupInput(resolve(out)), height);
+      this.#log(
+        written
+          ? `backup at stop written to ${out}: height ${height}, contents hash ${manifest.contentsHash}`
+          : `backup at stop: ${out} holds a backup of height ${height} already, so none was written`,
+      );
+    } catch (error) {
+      const code = error instanceof UmbraError ? error.code : "error";
+      this.#log(`backup at stop failed (${code}): ${messageOf(error)}; no backup was written`);
+    }
   }
 
   /** {@link stop}'s work. */
@@ -798,6 +855,7 @@ class Process implements ProcessHandle {
     // A private process's source refuses a module it cannot run (PP-6: needsLockstep on an instance not lockstep).
     source.checkModules?.(graph.modules);
     const plan = schemaPlan(graph.modules);
+    this.#optedOut = plan.optedOut;
     const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, core) });
     const start = BigInt(checked.start);
     // Every build has core-chain, the first backbone part (`contexts.of` throws for a graph without it); a retried
@@ -1030,6 +1088,7 @@ class Process implements ProcessHandle {
     if (this.#phase === "running") this.#phase = "stopped";
     const why = [end.core ? "the core's stop" : null, upgrade === null ? null : `an upgrade boundary at ${upgrade.height}`];
     this.#log(`processing stopped at ${end.height}: ${why.filter((text) => text !== null).join(" and ")}`);
+    if (end.core) await this.#backupAtStop(end.height);
     return this.#ended(Object.freeze({ kind: "stopped", height: end.height, core: end.core, upgrade }));
   }
 

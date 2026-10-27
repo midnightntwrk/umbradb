@@ -149,7 +149,39 @@ async function openOn(engine: PGlite, committedHeight: CommittedHeight, afterClo
     if (database.isClosed) throw handleClosed("database");
     return { durabilityWarnings: [] };
   });
+  exclusiveJobs.set(database, (body) => database.exclusive(body));
   return database;
+}
+
+/**
+ * What one exclusive job of a PGlite database gives its body ({@link exclusiveJob}): reads of committed data, and the
+ * engine itself for a tool that speaks to it directly — `pg_dump` of `@electric-sql/pglite-tools` (BK-1, task 15.1).
+ */
+export interface ExclusiveJob {
+  /**
+   * Runs `body` with a read handle, as {@link Database.read} does — `REPEATABLE READ READ ONLY`, the session's
+   * settings and role reset, the committed height read first — inside the job, then rolls the read back. Reads run one
+   * at a time, never while the engine is in use.
+   */
+  read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T>;
+  /**
+   * The engine, with no transaction open: what a tool runs on it runs in the job, so nothing commits meanwhile. When
+   * the body ends, any transaction it left open is rolled back, and the session's settings and role are reset to the
+   * engine's start parameters (`RESET ALL`, `RESET ROLE`), so nothing a tool set reaches a later job.
+   */
+  readonly engine: PGlite;
+}
+
+const exclusiveJobs = new WeakMap<Database, <T>(body: (job: ExclusiveJob) => Promise<T>) => Promise<T>>();
+
+/**
+ * Runs `body` as one job of the PGlite database `db`'s queue (DB-4), so no transaction commits while it runs — a
+ * backup's manifest and dump see one committed height (BK-1) —; resolves with its result. Returns null for a database
+ * that is not a PGlite database the API opened.
+ */
+export function exclusiveJob<T>(db: Database, body: (job: ExclusiveJob) => Promise<T>): Promise<T> | null {
+  const run = exclusiveJobs.get(db);
+  return run === undefined ? null : run(body);
 }
 
 interface ServerErrorFields {
@@ -341,23 +373,88 @@ class PgliteDatabase implements Database {
   private runRead<T>(body: (read: ReadHandle) => Promise<T>, outer: Job | undefined): Promise<T> {
     const job: Job = { owner: this, running: true, outer };
     return currentJob.run(job, async () => {
-      let open = true;
       try {
-        await this.statement("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-        await this.statement("RESET ALL");
-        await this.statement("RESET ROLE");
-        const query = async (sql: string, params?: unknown[]): Promise<Row[]> => {
-          if (!open) throw handleClosed("read");
-          return (await this.statement(sql, params)).rows;
-        };
-        const height = await this.committedHeight({ query });
-        return await body({ height, query });
+        return await this.readInJob(body, () => {
+          job.running = false;
+        });
       } finally {
-        open = false;
         job.running = false;
-        await this.end();
       }
     });
+  }
+
+  /**
+   * A read inside the running job (DB-2): `REPEATABLE READ READ ONLY`, then `RESET ALL` and `RESET ROLE`, then the
+   * committed height, then `body`'s statements, then `ROLLBACK`; `ended` is called once `body` settled, before it.
+   */
+  private async readInJob<T>(body: (read: ReadHandle) => Promise<T>, ended: () => void = () => undefined): Promise<T> {
+    let open = true;
+    try {
+      await this.statement("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      await this.statement("RESET ALL");
+      await this.statement("RESET ROLE");
+      const query = async (sql: string, params?: unknown[]): Promise<Row[]> => {
+        if (!open) throw handleClosed("read");
+        return (await this.statement(sql, params)).rows;
+      };
+      const height = await this.committedHeight({ query });
+      return await body({ height, query });
+    } finally {
+      open = false;
+      ended();
+      await this.end();
+    }
+  }
+
+  /** One exclusive job ({@link exclusiveJob}): `body` with reads and the engine, then the session reset. */
+  exclusive<T>(body: (job: ExclusiveJob) => Promise<T>): Promise<T> {
+    const refused = this.refusal("transaction");
+    if (refused !== undefined) return Promise.reject(refused);
+    const outer = currentJob.getStore();
+    return this.queue.add(() => {
+      const job: Job = { owner: this, running: true, outer };
+      return currentJob.run(job, async () => {
+        let open = true;
+        const read = <R>(inner: (read: ReadHandle) => Promise<R>): Promise<R> =>
+          open ? this.readInJob(inner) : Promise.reject(handleClosed("read"));
+        const running = body({ read, engine: this.engine });
+        // A close waits for the body, as for a statement sent, before it closes the engine the body may be using.
+        const settled = running.then(
+          () => undefined,
+          () => undefined,
+        );
+        this.sent.add(settled);
+        void settled.then(() => this.sent.delete(settled));
+        try {
+          return await running;
+        } finally {
+          open = false;
+          job.running = false;
+          await this.resetSession();
+        }
+      });
+    });
+  }
+
+  /**
+   * After an exclusive job: a transaction its body left open rolled back, and every setting and the role back to the
+   * engine's start parameters, so nothing a tool set on the one session reaches a later job; nothing is sent after
+   * closing started or the engine failed, and a reset that fails counts as the engine failing.
+   */
+  private async resetSession(): Promise<void> {
+    if (this.closed || this.failure !== undefined) return;
+    try {
+      if (this.engine.isInTransaction()) await this.statement("ROLLBACK");
+      await this.statement("RESET ALL");
+      await this.statement("RESET ROLE");
+    } catch (error) {
+      this.failure ??= new UmbraError(
+        "database-error",
+        `the PGlite engine failed: resetting the session after an exclusive job failed: ${(error as Error).message}`,
+        { reason: "engine-failed" },
+        { cause: error },
+      );
+    }
   }
 
   private runTransaction<T>(body: (tx: Transaction) => Promise<T>, outer: Job | undefined): Promise<T> {

@@ -82,6 +82,7 @@ const CORE_ARCH = {
   "**/src/runner/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the `umbradb` command's directory (task 4.4).
   "**/src/cli/**": { lines: 90, branches: 85, perFile: true },
+  "**/src/backup/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the backbone parts' directory (tasks 7.1 and 5.2: `core-digest`,
   // `core-block-commit`'s cursor table).
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },

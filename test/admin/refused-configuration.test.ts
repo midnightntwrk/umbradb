@@ -369,6 +369,7 @@ function stoppedWith(handle: ProcessHandle, also: () => Promise<void>): ProcessH
     ended: handle.ended,
     closed,
     status: () => handle.status(),
+    backup: (out, seams) => handle.backup(out, seams),
     stop: () => {
       stopping ??= (async () => {
         await handle.stop();

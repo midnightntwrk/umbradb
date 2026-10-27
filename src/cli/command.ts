@@ -7,10 +7,11 @@
  * - `umbradb run [--config <file>]` starts the process of the configuration file, with the user modules it exports,
  *   until SIGTERM or SIGINT stops it (`./run.ts`, task 4.4a; Q106 B); it exits 1 when startup refused or processing
  *   halted, else 0.
- * - `umbradb backup --out <file>` and `umbradb restore <file>` are recognized (A6): this build does not provide them
- *   yet (tasks 15.1 and 15.2), so each says so on stderr and exits {@link EXIT}`.unavailable` (3), whatever its
- *   arguments, never the usage's status and never success; the task that builds one replaces its entry in
- *   {@link COMMANDS}, parsing its own arguments.
+ * - `umbradb backup --out <file> [--config <file>]` writes a backup of the configuration file's database (`./backup.ts`,
+ *   task 15.1; BK-1): exit 0 once written, 1 when refused (nothing written).
+ * - `umbradb restore <file>` is recognized (A6): this build does not provide it yet (task 15.2), so it says so on
+ *   stderr and exits {@link EXIT}`.unavailable` (3), whatever its arguments, never the usage's status and never
+ *   success; the task that builds it replaces its entry in {@link COMMANDS}, parsing its own arguments.
  * - Anything else — no argument, an unknown command (0.9.5's chain-archive sync is no command of this one), a wrong
  *   argument of `config check` or `run` — prints the usage on stderr, after one line saying what was wrong, and exits 2;
  *   `--help` or `-h` as the only argument prints it on stdout and exits 0.
@@ -25,6 +26,8 @@ import { parseArgs } from "node:util";
 import { UMBRADB_VERSION } from "../config/build.js";
 import { redactor } from "../config/redact.js";
 import { configCheck, databaseArgumentProblem, errorText } from "./config-check.js";
+import type { BackupSeams } from "../backup/backup.js";
+import { backupArguments, runBackup } from "./backup.js";
 import { type RunSeams, runFailed, runProcess } from "./run.js";
 
 /** The exit statuses. */
@@ -39,8 +42,8 @@ Commands:
   umbradb config check <file> [--database <url>]
       Type-check and validate a configuration file without starting a process; with --database, also check it
       against that database's configuration history, read-only.
-  umbradb backup --out <file>
-      Back up the database: a pg_dump file with its manifest.
+  umbradb backup --out <file> [--config <file>]
+      Back up the configuration's database (default umbradb.config.ts): a pg_dump file with its manifest.
   umbradb restore <file>
       Restore a backup into an empty database.
   umbradb --help
@@ -56,6 +59,8 @@ Exit status:
 /** Where a command writes, and the working directory it reads relative paths from. */
 export interface CommandIo {
   readonly cwd: string;
+  /** The environment a command reads (`PATH`, `UMBRADB_PG_DUMP`); this process's unless given. */
+  readonly env?: Readonly<Record<string, string | undefined>>;
   stdout(text: string): void;
   stderr(text: string): void;
 }
@@ -170,11 +175,32 @@ export function runProcessCommand(seams: RunSeams = {}): CommandHandler {
   };
 }
 
+/**
+ * `umbradb backup` (`./backup.ts`): exit {@link EXIT}`.ok` with the line it wrote on stdout, {@link EXIT}`.failed` with
+ * why on stderr; `seams` are a test's (a missing `pglite-tools`).
+ */
+export function backupCommand(seams: BackupSeams = {}): CommandHandler {
+  return async (args, io) => {
+    const parsed = backupArguments(args);
+    if (typeof parsed === "string") return usage(io, parsed);
+    const outcome = await runBackup(
+      { out: parsed.out, config: parsed.config, cwd: io.cwd, ...(io.env === undefined ? {} : { env: io.env }) },
+      seams,
+    );
+    if (outcome.written) {
+      io.stdout(`${outcome.line}\n`);
+      return EXIT.ok;
+    }
+    io.stderr(`${outcome.line}\n`);
+    return EXIT.failed;
+  };
+}
+
 /** The commands, by name (LS-6). */
 export const COMMANDS: Readonly<Record<string, CommandHandler>> = Object.freeze({
   run: runProcessCommand(),
   config: configCommand(),
-  backup: unavailable("backup"),
+  backup: backupCommand(),
   restore: unavailable("restore"),
 });
 
