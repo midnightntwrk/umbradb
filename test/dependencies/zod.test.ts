@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 // Task 0.1 of `openspec/changes/core-arch` (design.md §7 and §14): characterization tests of `zod` 4 (installed
-// 4.4.3, kept by owner decision Q45) for module settings schemas. A field's kind (`data`, `operational` or
-// `secret`, CF-4) is carried in its metadata and read back with `schema.shape[field].meta().kind`; defaults fill
-// absent fields; issues name the offending field's path; `z.toJSONSchema` keeps `kind`. They test zod itself, not
+// 4.6.7 since task 0.6, kept on major version 4 by owner decision Q45) for module settings schemas. A field's kind
+// (`data`, `operational` or `secret`, CF-4) is carried in its metadata and read back with
+// `schema.shape[field].meta().kind`; defaults fill absent fields; issues name the offending field's path;
+// `z.toJSONSchema` keeps `kind`. Task 0.6 (issue 00032) adds the fix of GHSA-mrhx-c7xc-m3w5 (zod below 4.6.6): a
+// collection longer than its `max` is refused with one issue, its elements not parsed. They test zod itself, not
 // UmbraDB code.
 
 const settings = z.object({
@@ -94,6 +96,34 @@ describe("zod 4 — issue paths", () => {
     expect(result.success).toBe(false);
     expect(result.error!.issues.map((issue) => ({ path: issue.path, code: issue.code }))).toEqual([
       { path: ["database"], code: "invalid_type" },
+    ]);
+  });
+});
+
+describe("zod 4 — oversized constrained collections (GHSA-mrhx-c7xc-m3w5, fixed in 4.6.6; task 0.6)", () => {
+  // zod 4.4.3 parsed every element of an array or set longer than its `max` and kept one issue per failing element
+  // (100,001 issues for the array below): memory grows with the input. From 4.6.6 a collection over its `max` is
+  // refused with its `too_big` issue alone, before any element is parsed.
+  it("refuses an array longer than its max with one too_big issue, its elements not parsed", () => {
+    const result = z.array(z.string()).max(3).safeParse(Array.from({ length: 100_000 }, () => 0));
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((issue) => ({ path: issue.path, code: issue.code }))).toEqual([
+      { path: [], code: "too_big" },
+    ]);
+  });
+
+  it("refuses a set larger than its max with one too_big issue, its elements not parsed", () => {
+    const result = z.set(z.string()).max(2).safeParse(new Set([1, 2, 3, 4, 5]));
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((issue) => issue.code)).toEqual(["too_big"]);
+  });
+
+  it("still reports every failing element of an array within its max", () => {
+    const result = z.array(z.string()).max(3).safeParse([0, "a", 1]);
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((issue) => ({ path: issue.path, code: issue.code }))).toEqual([
+      { path: [0], code: "invalid_type" },
+      { path: [2], code: "invalid_type" },
     ]);
   });
 });

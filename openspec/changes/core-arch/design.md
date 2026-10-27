@@ -1025,8 +1025,9 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   as CF-4's table, a public process's fields or a private one's. `defineModule` adds `entry` to the declaration as a
   non-enumerable property, typed by `z.input` of its `configSchema`. `versionEntry`'s `version` is a `CoreVersion` for
   `core`, and its `config` is typed as plain data only.
-- **Schemas.** zod 4 (installed 4.4.3; Q45): a module's `configSchema` is a `z.object` whose fields carry `kind` in
-  their metadata (`schema.shape[field].meta().kind`, verified on 4.4.3); the `core` entry's are `PUBLIC_CORE_SCHEMA` and
+- **Schemas.** zod 4 (`^4.6.7`, installed 4.6.7 since task 0.6, which fixes GHSA-mrhx-c7xc-m3w5 — issue 00032;
+  4.4.3 before; Q45): a module's `configSchema` is a `z.object` whose fields carry `kind` in their metadata
+  (`schema.shape[field].meta().kind`, verified on 4.4.3 and on 4.6.7); the `core` entry's are `PUBLIC_CORE_SCHEMA` and
   `PRIVATE_CORE_SCHEMA` (`src/config/core-settings.ts`, task 4.2): CF-4's table with its kinds and defaults, strict at
   every depth, `genesisHash` required with `custom` and refused otherwise, hashes 32 bytes of lowercase hex,
   `apiReadTimeoutMs` from 1 to 2,147,483,647, `ledgerTable` the table in effect (§5.6); the
@@ -1605,7 +1606,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | OPFS access handles are exclusive: a second opening of a database another tab holds fails `createSyncAccessHandle` | `test/browser/browser.negative-control.test.ts` (a page without the Web Lock), Chrome 156, 2026-10-27 | Verified (test); the Web Lock refuses first, with `writer-lock-held` |
 | esbuild 0.28.2 bundles a top-level `await` in a module cycle so that the cycle waits on itself (the vendored packages' snippets import their entry back) | The ledger worker's first parse never answered with the entry awaiting its `.wasm`; synchronous instantiation answers, task 16.1, 2026-10-27 | Verified (run) |
 | An operating-system lock from Node.js (`node:sqlite`, `BEGIN EXCLUSIVE`) | Probe in Node.js v24.9.0, 2026-10-22: second process refused while the holder ran and while it was stopped; taken at once after `SIGKILL`. Probe, 2026-10-24: with `busy_timeout` 0, 4 of 30 rounds of ten processes started at one instant ended with no holder; with 10–100 ms, exactly one holder in 50 of 50 rounds (Q92); A17's tests (`test/db/pglite-writer-processes.test.ts`) | Verified (probe, test); `node:sqlite` is marked experimental in Node.js 24 |
-| zod 4: per-field metadata read back (`shape[f].meta().kind`), defaults, issue paths, `z.toJSONSchema` keeping `kind` | Probe on `zod` 4.4.3, 2026-10-22 | Verified (probe) |
+| zod 4: per-field metadata read back (`shape[f].meta().kind`), defaults, issue paths, `z.toJSONSchema` keeping `kind` | Probe on `zod` 4.4.3, 2026-10-22; again on 4.6.7, 2026-10-27 (task 0.6) | Verified (probe) |
 | `ws`: WebSocket server over `https` requiring client certificates | Probe on `ws` 8.22.0 (2026-09-26), 2026-10-22: with a certificate connected; without, `ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED` | Verified (probe) |
 | `esbuild` bundles a worker entry with a WASM asset | Probe on `esbuild` 0.28.2 (2026-08-08), 2026-10-22: 0 errors, the asset emitted | Verified (probe) |
 | Ajv validates JSON Schema draft 2020-12 and, in strict mode, refuses a schema with an unknown keyword (the admin endpoints' schemas, A66) | Probe on `ajv` 8.18.0 (2026-02-14; already in the tree as Stryker's, now an exact development dependency), 2026-10-26: `additionalProperties`, `required`, `pattern`, `$ref` to `$defs` and `oneOf` enforced, a misspelled keyword refused at compile time, `validateSchema` against the 2020-12 meta-schema; zod 4.4.3's `fromJSONSchema` accepted the misspelled keyword silently; `format` needs `ajv-formats`, so the schemas use patterns (`test/admin/json-schema.ts`) | Verified (probe and test) |

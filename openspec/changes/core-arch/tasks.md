@@ -162,10 +162,21 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       111; no CPU burner needed), each exit 0, `Test Files 196 passed | 1 skipped (197)`, 3,890 tests passed, all 25
       required ids, 449–690 s, the last on the committed sources (after a fix to the new container test's cleanup);
       after each, no container of this worktree's labels and no test child process left.
-- [ ] 0.6 The owner's answer to issue 00032 (bump zod): zod at `^4.6.7` — `package.json`'s range, the lock file,
+- [x] 0.6 The owner's answer to issue 00032 (bump zod): zod at `^4.6.7` — `package.json`'s range, the lock file,
       `test/dependencies/zod.test.ts` (task 0.1's probes), `docs/supply-chain/inventory.md`'s zod row and the version
       `design.md` §7 names —; the runtime `npm audit --audit-level=high --omit=dev` passing; issue 00032 closed.
       **Acceptance:** the runtime `npm audit` passes; the zod probes pass.
+      **Done (2026-10-27):** `npm install zod@^4.6.7` under `.npmrc`'s `min-release-age=7` and `ignore-scripts=true`:
+      `package.json` `^4.6.7`, the lock file 4.6.7 (`latest`, published 2026-10-12; zod's entry the only change; still
+      no dependency and no install script). The runtime `npm audit --audit-level=high --omit=dev`: 0 vulnerabilities,
+      exit 0 (1 high before: GHSA-mrhx-c7xc-m3w5); the full audit 9 → 8, the dev graph's 8 as before. The zod probes:
+      task 0.1's 7 pass on 4.6.7; three new ones — an array or a set longer than its `max` refused with one `too_big`
+      issue, its elements not parsed, and an array within its `max` still reporting each failing element — pass, and
+      the first two fail on 4.4.3 (resolved to `npm pack zod@4.4.3` by a scratch Vitest configuration: 100,001 issues
+      and 6). The fix caps collections with a `max` only; elsewhere one issue per failing element stays, bounded by the
+      input (the transport's messages by `ws`'s `maxPayload`). Suites: `test/dependencies`, `test/config`,
+      `test/modules`, the transport's and messages' files of `test/private`, `test/backbone/core-config` (33 files,
+      950 tests). `design.md` §7 and §14 and the inventory's row name 4.6.7; issue 00032 closed.
 
 ## 1. Determinism primitives
 

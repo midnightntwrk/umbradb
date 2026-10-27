@@ -1,6 +1,8 @@
 # 00032 — The runtime `npm audit` fails on zod 4.4.3 (GHSA-mrhx-c7xc-m3w5)
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-27 by task 0.6 of `openspec/changes/core-arch` (the owner's answer: bump zod),
+  in the task's local commit: `zod` `^4.6.7`, locked at 4.6.7; the runtime `npm audit --audit-level=high --omit=dev`
+  finds 0 vulnerabilities. See "Resolution" below.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem
@@ -27,3 +29,17 @@ optional peer only) left the runtime audit as it was: it does — the finding is
 Lock zod at 4.6.7 or later within `^4` (`npm install zod@^4.6.7`), re-run `test/dependencies/zod.test.ts` (task 0.1's
 probe of the metadata and default behaviour 4.2 relies on) and the configuration and transport suites, and update
 `docs/supply-chain/inventory.md`'s zod row.
+
+## Resolution
+
+Task 0.6 of `openspec/changes/core-arch` (2026-10-27): `npm install zod@^4.6.7` under the repository's `.npmrc`
+(`min-release-age=7`, `ignore-scripts=true`) set `package.json`'s range to `^4.6.7` and locked 4.6.7 (`latest`,
+published 2026-10-12; integrity `sha512-g8W2D2kU…+3CGwg==`; still no dependencies and no install script). The lock file
+changed only zod's entry. `npm audit --audit-level=high --omit=dev`: 0 vulnerabilities (exit 0); the full audit went
+from 9 (5 moderate, 4 high: the zod advisory and the dev graph's 8) to the dev graph's 8.
+`test/dependencies/zod.test.ts` keeps task 0.1's probes (metadata, defaults, issue paths, `z.toJSONSchema`), which
+pass on 4.6.7, and adds the fix: an array or set longer than its `max` is refused with one `too_big` issue, its elements
+not parsed (on 4.4.3 the same 100,000-element array gave 100,001 issues). The fix caps collections that declare a
+`max`; a collection without one still yields an issue per failing element, bounded by the input's size — the process
+transport's messages by `ws`'s `maxPayload`. `docs/supply-chain/inventory.md`'s row and `design.md` §7 and §14 name
+4.6.7.

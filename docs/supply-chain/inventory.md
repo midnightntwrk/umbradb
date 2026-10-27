@@ -34,7 +34,7 @@ and `ws` are pinned exactly, at the versions their characterization tests in
 | `postgres` | `^3.4.9` → **3.4.9** | range → locked | registry.npmjs.org | `sha512-GD3qdB0x…KDLnaw==` | Unlicense | The Postgres client driver | GH advisories / `npm audit` on `postgres` |
 | `typescript` | `^5.9.0` → **5.9.3** | range → locked | registry.npmjs.org | `sha512-jl1vZzPD…5TgSw==` | Apache-2.0 | Compiler API for `umbradb config check`; also typechecking (`tsc --noEmit`), `.d.ts` | TS releases / advisories |
 | `ws` | **8.22.0** | exact (no caret) | registry.npmjs.org | `sha512-Ydggc987…U+1DOg==` | MIT | WebSocket server of the process transport, with opt-in mutual TLS | ws releases / advisories |
-| `zod` | `^4.0.0` → **4.4.3** | range → locked | registry.npmjs.org | `sha512-ytENFjIJ…HJyTQ==` | MIT | Runtime schema validation (settings schemas, messages, stored/loaded state) | advisories / `npm audit` on `zod` |
+| `zod` | `^4.6.7` → **4.6.7** | range → locked | registry.npmjs.org | `sha512-g8W2D2kU…+3CGwg==` | MIT | Runtime schema validation (settings schemas, messages, stored/loaded state) | advisories / `npm audit` on `zod` |
 
 ---
 
