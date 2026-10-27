@@ -17,6 +17,7 @@ import {
   nodeOptionsOf,
   readHistory,
   readIdentity,
+  tableItemsOf,
   waitForNode,
   type NodeWait,
 } from "../../src/backbone/core-chain/index.js";
@@ -24,6 +25,7 @@ import { UMBRADB_VERSION } from "../../src/config/build.js";
 import networksFile from "../../src/ledger/networks.json" with { type: "json" };
 import { builtInNetwork, KNOWN_NETWORKS, ledgerTableOf, parseNetworksFile } from "../../src/ledger/networks.js";
 import type { LedgerTable } from "../../src/ledger/version-table.js";
+import { buildDeclarations } from "../../src/cli/build-modules.js";
 import { checkHistory, graphInputOf } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
 import { type CheckedConfig, validateConfig } from "../../src/config/validate.js";
@@ -110,13 +112,15 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
     expect(Object.keys(CORE_CHAIN.points)).toEqual(["on-start-db", "on-db-write"]);
   });
 
-  it("has migrations 001 (the history's table, task 4.3's text unchanged) and 002 (the identity)", () => {
+  it("has migrations 001 (the history's table, its provides column task 14.1a's) and 002 (the identity)", () => {
     expect(CORE_CHAIN_MIGRATIONS).toEqual([CONFIG_MIGRATION, IDENTITY_MIGRATION]);
     expect(CORE_CHAIN.migrations).toEqual(CORE_CHAIN_MIGRATIONS.map(({ id, sql }) => ({ id, sql })));
     expect(CORE_CHAIN_MIGRATIONS.map(({ id }) => id)).toEqual(["001", "002"]);
     const sha = (sql: string) => createHash("sha256").update(sql, "utf8").digest("hex");
-    // 001 is the text task 4.3 committed (`ed1b51f`): a database that applied it keeps its checksum.
+    // 001 is task 4.3's text (`ed1b51f`) with task 14.1a's column `provides` (PP-13), changed in place since no
+    // database exists yet; from now on a database that applied it keeps its checksum.
     expect(sha(CONFIG_MIGRATION.sql)).toBe(CONFIG_MIGRATION_SHA256);
+    expect(CONFIG_MIGRATION.sql).toContain("  provides text[] NOT NULL,\n");
     expect(sha(IDENTITY_MIGRATION.sql)).toBe(IDENTITY_MIGRATION_SHA256);
     expect(Object.isFrozen(CORE_CHAIN_MIGRATIONS)).toBe(true);
   });
@@ -128,8 +132,8 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
   });
 });
 
-/** The pinned SHA-256 of task 4.3's migration 001 (`core_chain.config`). */
-const CONFIG_MIGRATION_SHA256 = "c62e03495d6eeba88f027ca63c2089f7cbc1d8cb3e41d376fd2628b72379a5e7";
+/** The pinned SHA-256 of migration 001 (`core_chain.config`: task 4.3's, with task 14.1a's `provides`). */
+const CONFIG_MIGRATION_SHA256 = "33861745ea470f413c9f6d042c2398e366d3b42be2e5dbf12e2c0147eff43a74";
 /** The pinned SHA-256 of migration 002 (`core_chain.identity`). */
 const IDENTITY_MIGRATION_SHA256 = "c5474e25be7bdd0bf5a68965a20471039819cbb222750a5099252d130e074fc1";
 
@@ -688,5 +692,37 @@ describe("core-chain outside a process", () => {
     const binding = bindCoreChain(context, { ...facts, db: { read: async () => undefined } as unknown as Database });
     expect(binding.nodeClient).toBeNull();
     expect(() => bindCoreChain(context, { ...facts, db: { read: async () => undefined } as unknown as Database })).toThrow(/once/);
+  });
+});
+
+describe("the table items a revision's row records (core_chain.config.provides; PP-13, task 14.1a)", () => {
+  it("records a module's table items from its declaration and the core's from the backbone, each once, by UTF-8 bytes", () => {
+    const build = buildDeclarations();
+    expect(tableItemsOf(build, "core")).toEqual(["blocks", "chain-identity", "digest-checkpoints", "digest-tables"]);
+    expect(tableItemsOf(build, "core-ledger-state")).toEqual(["ledger-events", "ledger-state", "segment-results"]);
+    // By UTF-8 bytes, not UTF-16 code units: U+FF5E (EF BD 9E) before U+1F600 (F0 9F 98 80, a surrogate pair D83D DE00).
+    const items = ["zz", "aa", "Zz", "é", "aa", "\u{1F600}", "\uFF5E"].map((name) => ({
+      name,
+      lifetimes: ["table" as const],
+      table: { schema: "m", tables: ["t"], kind: "append-only" as const },
+    }));
+    // A block or process item is no table item; a repeated name is recorded once.
+    const block = { name: "b", lifetimes: ["block" as const] };
+    const m = { ...CORE_CHAIN, id: "m", provides: [...items, block, { name: "p", lifetimes: ["process" as const] }] };
+    expect(tableItemsOf({ backbone: [], core: [], user: [m] }, "m")).toEqual(["Zz", "aa", "zz", "é", "\uFF5E", "\u{1F600}"]);
+  });
+
+  it("records a private process's core from its own backbone (core-private-source, core-key-registry, core-digest)", () => {
+    expect(tableItemsOf(buildDeclarations([], { side: "private" }), "core")).toEqual([
+      "admitted-keys",
+      "chain-identity",
+      "digest-checkpoints",
+      "digest-tables",
+      "private-cursor",
+    ]);
+  });
+
+  it("throws for an id the build has no declaration of: the configuration refuses such an entry first (CF-3)", () => {
+    expect(() => tableItemsOf(buildDeclarations(), "nobody")).toThrow(/tableItemsOf: the build has no module nobody/);
   });
 });

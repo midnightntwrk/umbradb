@@ -1135,6 +1135,40 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   What wakes the wait is `PublicWakes`: with `coreTransport`, the `committed` messages and every (re)connection, and
   nothing else; without one, a poll of the public cursor every second (`pollingWakes`). An independent instance lags as
   it needs: nothing makes the core wait for it (PP-5); the lockstep wait is task 14.3's.
+- **Public `table` items** (PP-13, owner decision Q126 B, task 14.1a). *Where the public database says them:* the
+  column `provides` of `core_chain.config` (§10), which `core-chain` writes in the row of each revision it records
+  (CF-7): for a module entry, the `table` items of the build's declaration of that module — for a scheduled revision,
+  whose version the build does not carry, the declaration it has, which is how the public graph judges that revision
+  too; the build carrying its version rewrites the row, its data then recorded, before the revision starts (RN-12) —;
+  for `core`, the `table` items of the build's backbone parts, which run with the core entry from S with no stop. At
+  every start `core-chain` gives each revision above the cursor this build's items again (a row whose items differ is
+  updated in the history's transaction); a revision at or below the cursor keeps the items it was recorded with, as it
+  keeps its version and data (CF-6). An item is a name, the same in both processes' graphs, so a private process needs
+  neither the public build nor its user modules. No database exists before task 14.1a: migration `001` of `core-chain`
+  gains the column in place (`NOT NULL`). *How a private process reads them:* `PrivateBlockSource.checkChain` reads,
+  in its read of the public database's identity, every row's `entry_id`, `start`, `stop` and `provides`
+  (`readPublicItems`, `public-database.ts`), and gives each item the heights of its row, from its start to its last
+  height by CF-5 — its own stop, or the next revision's start − 1 of the same entry, as `graphEntries` reckons it
+  (`publicItemRanges`, `src/config/history.ts`) —, the provider named by the entry (`core` for the backbone's); they
+  reach the graph as `ChainCheck.publicItems` and `GraphInput.publicItems`. *How the graph counts them*
+  (`src/modules/graph.ts`): in each height range, a public item active at the range's first height is provided there
+  for MD-3's coverage, and the ranges are split at the public items' starts and after their stops as at entries'; so
+  a private module requiring a public item no public module provides is refused with `item-no-provider`, and one
+  whose public providers cover only other heights with `item-not-available` (`details.publicProviders`). Only `table`
+  items are recorded, so a public `block` or `process` item never counts (PP-13). A public item named like an item of
+  the private backbone — `chain-identity`, `digest-tables`, `digest-checkpoints`: `core-chain` and `core-digest` run in
+  both processes, each over its own database — is the private backbone's and is not counted; a private module that
+  provides an item a public module provides at a common height is refused with `providers-overlap` (MD-6: one
+  provider an item a height; `details.publicModules`; decision record question Q146). A public provider takes no
+  part in the order (it runs in the core, whose committed heights the private process reads), in cycles or in MD-4 (the
+  public core judged its own starts, and its `startsMidChain` is not recorded). *Order:* PP-2's comparisons with the
+  recorded binding (`genesis`, `start`, `private-start-below`) run in `checkChain` too, after the configured network
+  and before the graph — the startup read of the private cursor reads the binding from the same row — and again in
+  `on-start-db`'s transaction, which records the binding: a private process against the wrong public database is
+  refused for that, never by the graph reading the wrong database's items. *Reading:* a private module reads a public
+  table through its `on-fetch` read of public data (Q100); requiring the item is what makes its startup check that the
+  public core writes the table at every height the module runs. The items are read at the private process's startup
+  only (question Q147).
 - **Mutual TLS** (PP-11, Q34, task 14.2). `tls` is PEM text: `certificate` and `key` the process's own, `trustedRoots`
   the CAs it trusts. On the core the transport is then an `https` server with `requestCert` and `rejectUnauthorized`
   against `trustedRoots`; a private process presents its certificate and checks the core's against its
@@ -1185,7 +1219,7 @@ per-block tables are append-only and partitioned by height range; no table store
 | Owner | Table | Primary key | Other columns |
 |---|---|---|---|
 | `core-chain` | `core_chain.identity` | id = 1 | genesis_hash, start_height, anchor_hash (null until block S commits; recorded in block S's transaction) — migration `002`; genesis hash and S recorded at every start until S commits (IN-2) |
-| `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`, a `CHECK`), version (text), data (jsonb, canonical; null for a scheduled revision, CF-3), data_hash (32 bytes; null with data, a `CHECK`) |
+| `core-chain` | `core_chain.config` | (entry_id, start) | stop (null; always null for `core`, a `CHECK`), version (text), data (jsonb, canonical; null for a scheduled revision, CF-3), data_hash (32 bytes; null with data, a `CHECK`), provides (`text[]`: the names of the `table` items the revision provides — a module's from its declaration, `core`'s the backbone parts' —, each once, in UTF-8 byte order; what a private process's graph counts, PP-13, task 14.1a) |
 | database API | `core_chain.migrations` | (module, migration_id) | checksum (SHA-256 of the UTF-8 SQL), position (int, from 1; unique per module) |
 | `core-block-commit` | `core_block_commit.blocks` | height | hash, parent_hash, spec_version (int), ledger_version (text), block_time (`timestamptz`, converted exactly from the node's milliseconds by PostgreSQL's integer interval input, never through a float, Q74) — range-partitioned by height as 0.9.5's `chain_archive` store was: 1,000,000 heights per partition, five from 0 and a default (`src/backbone/height-partitions.ts`, task 10.2) |
 | `core-block-commit` | `core_block_commit.hashes` (not partitioned) | hash | height — makes a repeated hash fail, which the height-partitioned `blocks` table cannot enforce |

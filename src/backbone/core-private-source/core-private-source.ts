@@ -28,9 +28,13 @@
  * `network` (owner decision Q136 B, task 10.2b; {@link networkRefusal}), and the public genesis hash handed to
  * `core-chain`, which records it with the private S in the private database's `core_chain.identity` on a new private
  * database and the anchor at block S, and publishes `config`, `db` and `ledger-table` (no node client: the private
- * `core` entry has no `node`). The comparisons with the recorded binding are PP-2's, here, after it: so a private
- * database of the configured network bound to another public database is refused by them (`genesis`, `start`). The
- * bootstrap's wait (IN-2) waits, with the condition `waiting-for-node`, for the public cursor to reach the private S.
+ * `core` entry has no `node`). PP-2's comparisons with the recorded binding follow it there, before the graph (task
+ * 14.1a) — the startup read of the private cursor reads the binding from the same row — and again in the part's
+ * `on-start-db`, which records it: so a private database of the configured network bound to another public database
+ * is refused by them (`genesis`, `start`), never by the graph reading the wrong public database's items. Last, the
+ * check gives the graph the public core's `table` items with their heights ({@link readPublicItems}, read with the
+ * identity; PP-13, owner decision Q126 B), which a private module may require. The bootstrap's wait (IN-2) waits, with
+ * the condition `waiting-for-node`, for the public cursor to reach the private S.
  *
  * **Block intake** (PP-3, PP-5) is the finalized loop's (`src/runner/loop.ts`) over this part's block source
  * ({@link PrivateBlockSource}): its cursor is the private cursor; its finalized head is the public cursor, read in a
@@ -60,6 +64,7 @@ import type { CheckedEntry } from "../../config/validate.js";
 import type { ReadHandle, SchemaWriteHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import type { ModuleDeclaration, Revision } from "../../modules/declaration.js";
+import type { PublicItem } from "../../modules/graph.js";
 import type { BlockRef, BlockSource } from "../../runner/block-source.js";
 import {
   openPublicSide,
@@ -69,6 +74,7 @@ import {
   readPublicBlock,
   readPublicCursor,
   readPublicIdentity,
+  readPublicItems,
 } from "./public-database.js";
 
 /** `core-private-source`'s migrations (DB-9): applied once, in order; never changed. */
@@ -88,7 +94,8 @@ export const CORE_PRIVATE_SOURCE_MIGRATIONS: readonly { readonly id: string; rea
 ]);
 
 const PRESENT_SQL = "SELECT to_regclass('core_private_source.cursor') IS NOT NULL AS present";
-const CURSOR_SQL = "SELECT height, hash, parent_hash FROM core_private_source.cursor WHERE id = 1";
+const CURSOR_SQL =
+  "SELECT height, hash, parent_hash, public_genesis_hash, public_start_height FROM core_private_source.cursor WHERE id = 1";
 const BINDING_SQL = "SELECT public_genesis_hash, public_start_height FROM core_private_source.cursor WHERE id = 1";
 const BIND_SQL =
   "INSERT INTO core_private_source.cursor (id, public_genesis_hash, public_start_height) VALUES (1, $1, $2)";
@@ -100,15 +107,31 @@ const MOVE_SQL = "UPDATE core_private_source.cursor SET height = $1, hash = $2, 
  * startup).
  */
 export async function readPrivateCursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
+  return (await readPrivateRow(read)).cursor;
+}
+
+/**
+ * The private cursor ({@link readPrivateCursor}) and the binding the same row records — the public database's genesis
+ * hash and S, null before the first start recorded them —, in one statement.
+ */
+async function readPrivateRow(
+  read: Pick<ReadHandle, "query">,
+): Promise<{ readonly cursor: BlockRef | null; readonly binding: PublicIdentity | null }> {
   const [table] = await read.query(PRESENT_SQL);
-  if (table?.present !== true) return null;
+  if (table?.present !== true) return { cursor: null, binding: null };
   const [row] = await read.query(CURSOR_SQL);
-  if (row === undefined || row.height === null) return null;
-  return Object.freeze({
+  if (row === undefined) return { cursor: null, binding: null };
+  const binding = Object.freeze({
+    genesisHash: row.public_genesis_hash as Uint8Array,
+    start: row.public_start_height as bigint,
+  });
+  if (row.height === null) return { cursor: null, binding };
+  const cursor = Object.freeze({
     height: row.height as bigint,
     hash: row.hash as Uint8Array,
     parentHash: row.parent_hash as Uint8Array,
   });
+  return { cursor, binding };
 }
 
 /** A private database's committed height (DB-2): the private cursor's height. */
@@ -222,6 +245,15 @@ export interface Closable {
 export interface PrivateChecks {
   /** The configured network's check; {@link networkRefusal} unless given. */
   readonly network?: typeof networkRefusal;
+  /** PP-2's comparisons with the recorded binding; {@link bindingRefusal} unless given. */
+  readonly binding?: typeof bindingRefusal;
+  /**
+   * The private S, for PP-2's `private-start-below`; unless given (a source a test makes by hand) the public S, so that
+   * only the recorded binding is compared — the part's `on-start-db` compares the private S again.
+   */
+  readonly start?: bigint;
+  /** The negative controls' view of the public items the graph is given (PP-13); all of them, as read, unless given. */
+  readonly publicItems?: (items: readonly PublicItem[]) => readonly PublicItem[];
 }
 
 /** The block source of a private process (see the module comment). */
@@ -229,15 +261,17 @@ export class PrivateBlockSource implements BlockSource {
   readonly #public: PublicDatabase;
   readonly #wakes: PublicWakes;
   readonly #transport: Closable | null;
-  readonly #network: typeof networkRefusal;
+  readonly #checks: PrivateChecks;
   /** The private cursor last known committed: startup's read, then each block committed; undefined before startup's. */
   #position: BlockRef | null | undefined;
+  /** The binding the private database recorded, as the last read of the cursor found it; null before any or without. */
+  #recorded: PublicIdentity | null = null;
 
   constructor(publicDatabase: PublicDatabase, wakes: PublicWakes, transport: Closable | null = null, checks: PrivateChecks = {}) {
     this.#public = publicDatabase;
     this.#wakes = wakes;
     this.#transport = transport;
-    this.#network = checks.network ?? networkRefusal;
+    this.#checks = checks;
   }
 
   /**
@@ -261,10 +295,12 @@ export class PrivateBlockSource implements BlockSource {
 
   /**
    * The private cursor, read through `read` ({@link readPrivateCursor}); the first read — startup's, of the committed
-   * cursor — is also the position until a block commits (the loop's later reads are inside a block's transaction).
+   * cursor — is also the position until a block commits (the loop's later reads are inside a block's transaction). The
+   * binding the same row records is kept for {@link checkChain}, which startup runs after this read.
    */
   async cursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
-    const cursor = await readPrivateCursor(read);
+    const { cursor, binding } = await readPrivateRow(read);
+    this.#recorded = binding;
     if (this.#position === undefined) this.#position = cursor;
     return cursor;
   }
@@ -316,19 +352,28 @@ export class PrivateBlockSource implements BlockSource {
   }
 
   /**
-   * The chain's check at the private process's startup, before any migration, in place of `core-chain`'s checks
-   * against a node (IN-3; PP-1: a private process never talks to the node), in this order (PP-2): the public database's
-   * chain identity read — a public database whose core has never started refused ({@link publicNotStarted}, Q125) —;
-   * its genesis hash compared with the configured network's, `input.configured` (Q136 B; {@link networkRefusal}); then
-   * given to `core-chain`, which records it with the private S on a new private database. The comparisons with the
-   * recorded binding are the part's, in its `on-start-db`.
+   * The chain's check at the private process's startup, before any migration and before the graph, in place of
+   * `core-chain`'s checks against a node (IN-3; PP-1: a private process never talks to the node), in this order (PP-2):
+   * the public database's chain identity read — a public database whose core has never started refused
+   * ({@link publicNotStarted}, Q125) —; its genesis hash compared with the configured network's, `input.configured`
+   * (Q136 B; {@link networkRefusal}); the binding the startup read of the private cursor found compared with it
+   * ({@link bindingRefusal}: `genesis`, `start`, `private-start-below`; task 14.1a — the part's `on-start-db` compares
+   * again in its transaction). Resolves with the genesis hash, which `core-chain` records with the private S on a new
+   * private database, and the public core's `table` items with their heights, read with the identity
+   * ({@link readPublicItems}; PP-13), which the runner gives the graph.
    */
   async checkChain(input: Pick<ChainCheckInput, "configured">): Promise<ChainCheck> {
-    const identity = await this.#public.read((read) => readPublicIdentity(read));
+    const { identity, items } = await this.#public.read(async (read) => {
+      const found = await readPublicIdentity(read);
+      return { identity: found, items: found === null ? [] : await readPublicItems(read) };
+    });
     if (identity === null) throw publicNotStarted();
-    const refusal = this.#network(input.configured, identity);
-    if (refusal !== null) throw refusal;
-    return Object.freeze({ genesisHash: identity.genesisHash });
+    const network = (this.#checks.network ?? networkRefusal)(input.configured, identity);
+    if (network !== null) throw network;
+    const binding = (this.#checks.binding ?? bindingRefusal)(this.#recorded, identity, this.#checks.start ?? identity.start);
+    if (binding !== null) throw binding;
+    const publicItems = Object.freeze([...(this.#checks.publicItems?.(items) ?? items)]);
+    return Object.freeze({ genesisHash: identity.genesisHash, publicItems });
   }
 
   /** A read of the private database's committed height (DB-2): the private cursor's ({@link privateCursorHeight}). */
@@ -360,6 +405,8 @@ export interface PrivateIntakeOptions {
   readonly binding?: typeof bindingRefusal;
   /** The negative controls' check of the configured network (Q136 B); {@link networkRefusal} unless given. */
   readonly network?: typeof networkRefusal;
+  /** The negative controls' view of the public items the graph is given (PP-13); all of them, as read, unless given. */
+  readonly publicItems?: (items: readonly PublicItem[]) => readonly PublicItem[];
 }
 
 /** One private process start's `core-private-source`: the part and the block source it is bound to. */
@@ -432,6 +479,9 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
       );
       made = new PrivateBlockSource(side.publicDatabase, side.wakes, side.transport, {
         ...(options.network === undefined ? {} : { network: options.network }),
+        ...(options.publicItems === undefined ? {} : { publicItems: options.publicItems }),
+        binding,
+        start,
       });
       return made;
     },

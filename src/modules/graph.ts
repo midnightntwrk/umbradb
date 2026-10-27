@@ -37,8 +37,20 @@
  * at `on-db-write` `core-digest` runs last. Startup — each part's migrations and `on-start-db` (DB-9) — runs every part
  * of the database in one order: the backbone, then Kahn over the union of every range's requirements (Q95).
  *
+ * **A private process's public items** (PP-13, owner decision Q126 B, task 14.1a; `design.md` §8): its input may carry
+ * the public core's `table` items with their heights ({@link PublicItem}, read from the public database's
+ * configuration history). In each range a public item active at the range's first height counts as provided for MD-3's
+ * coverage (`item-no-provider` when neither a part of this build nor a public module provides it at any height,
+ * `item-not-available` when they do only at other heights), and the ranges are split at the public items' starts and
+ * after their stops as at entries'. A public item named like an item of this build's backbone is the backbone's — the
+ * private backbone's `core-chain` and `core-digest` provide `chain-identity` and the digests over its own database — and
+ * is not counted; a module providing an item a public module provides at a common height is `providers-overlap`
+ * (MD-6). Public providers are not parts: they take no part in the order, the segments, `providerOf`, the cycles or
+ * MD-4 (the public core judged its own starts). Without public items (a public process) nothing of this applies.
+ *
  * Pure: no database, no runner. The caller's own errors — an entry for a module the build does not have, revisions of
- * one module that overlap, a backbone part this order has no place for — are thrown as `Error`s, not refused.
+ * one module that overlap, a backbone part this order has no place for, a public item that stops before it starts —
+ * are thrown as `Error`s, not refused.
  */
 
 import { type ErrorCode, UmbraError } from "../db/errors.js";
@@ -78,6 +90,18 @@ export interface EntryRange {
   readonly stop: bigint | null;
 }
 
+/**
+ * A `table` item of the public core at a private process (PP-13): its name, the public entry providing it — a public
+ * module's id, or `core` for the public backbone's —, and its heights, `start` to its last height `stop` (CF-5's
+ * effective stop; null for none), as the public database's configuration history records them (task 14.1a).
+ */
+export interface PublicItem {
+  readonly item: string;
+  readonly provider: string;
+  readonly start: bigint;
+  readonly stop: bigint | null;
+}
+
 /** What the resolution takes (see the module comment). */
 export interface GraphInput {
   /** The build's declarations, validated (`validateDeclarations`): the same objects, ids unique across the lists. */
@@ -93,6 +117,11 @@ export interface GraphInput {
    * null on a new database, which has committed nothing (Q97). The first commit is at S, so a cursor is at least S.
    */
   readonly cursor: bigint | null;
+  /**
+   * A private process's public `table` items (PP-13; see the module comment), counted as provided where they run; none
+   * for a public process (absent).
+   */
+  readonly publicItems?: readonly PublicItem[];
 }
 
 /** What runs in one range. */
@@ -108,6 +137,12 @@ export interface ResolvedRange {
    * `block` items, as RN-11's re-delivery has none; in every later range `providers-overlap` refuses such an item.
    */
   readonly providerOf: ReadonlyMap<string, string>;
+  /**
+   * A private process's public items in the range (PP-13, task 14.1a): the items a public module provides at the range's
+   * heights and no part does. A part requiring one waits for no part: the public core committed it before the private
+   * process reads its height. Absent on a public process.
+   */
+  readonly publicItems?: ReadonlySet<string>;
 }
 
 /** The resolved graph of one database. */
@@ -154,6 +189,8 @@ export interface RangeFacts {
   readonly active: readonly GraphPart[];
   /** Each item, and the active parts that provide it. */
   readonly providers: ReadonlyMap<string, readonly GraphPart[]>;
+  /** Each public item active at the range's first height, and its public providers there, by UTF-8 id (PP-13). */
+  readonly publicProviders: ReadonlyMap<string, readonly string[]>;
 }
 
 /** What the rules check. */
@@ -168,6 +205,10 @@ export interface GraphFacts {
   readonly built: readonly ModuleDeclaration[];
   /** The ranges from S on, every one: those ending below the cursor too, for Q95's union. */
   readonly ranges: readonly RangeFacts[];
+  /** Whether the input carried public items (a private process, PP-13). */
+  readonly hasPublic: boolean;
+  /** The public items counted (those named like a backbone item left out), at every height, below S too. */
+  readonly publicItems: readonly PublicItem[];
 }
 
 /** One refusal cause of MD-3 to MD-6, checked over the whole graph. */
@@ -310,12 +351,15 @@ function factsOf(input: GraphInput): GraphFacts {
       })),
   ];
 
+  const publicItems = publicItemsOf(input);
   const boundaries = new Set<bigint>([start]);
-  for (const entries of revisions.values()) {
-    for (const entry of entries) {
-      if (entry.start > start) boundaries.add(entry.start);
-      if (entry.stop !== null && entry.stop + 1n > start) boundaries.add(entry.stop + 1n);
-    }
+  const bounded: readonly { readonly start: bigint; readonly stop: bigint | null }[] = [
+    ...[...revisions.values()].flat(),
+    ...publicItems,
+  ];
+  for (const entry of bounded) {
+    if (entry.start > start) boundaries.add(entry.start);
+    if (entry.stop !== null && entry.stop + 1n > start) boundaries.add(entry.stop + 1n);
   }
   const heights = [...boundaries].sort(byHeight);
   const ranges = heights.map((from, index): RangeFacts => {
@@ -326,7 +370,13 @@ function factsOf(input: GraphInput): GraphFacts {
     for (const part of active) {
       for (const item of part.declaration.provides) providers.set(item.name, [...(providers.get(item.name) ?? []), part]);
     }
-    return { range, check: checkOf(range, cursor), active, providers };
+    const publicProviders = new Map<string, string[]>();
+    for (const found of publicItems) {
+      if (!contains(frozenRange(found.start, found.stop), from)) continue;
+      const known = publicProviders.get(found.item) ?? [];
+      if (!known.includes(found.provider)) publicProviders.set(found.item, sorted([...known, found.provider]));
+    }
+    return { range, check: checkOf(range, cursor), active, providers, publicProviders };
   });
 
   return {
@@ -336,8 +386,34 @@ function factsOf(input: GraphInput): GraphFacts {
     parts,
     built: [...declarations.backbone, ...declarations.core, ...declarations.user],
     ranges,
+    hasPublic: input.publicItems !== undefined,
+    publicItems,
   };
 }
+
+/**
+ * The public items `input` carries that count (PP-13): every one but those named like an item of the build's backbone,
+ * which is the backbone's own (see the module comment); throws for one that stops before it starts (the caller's).
+ */
+function publicItemsOf(input: GraphInput): readonly PublicItem[] {
+  const own = new Set(input.declarations.backbone.flatMap((part) => part.provides.map((item) => item.name)));
+  for (const found of input.publicItems ?? []) {
+    if (found.stop !== null && found.stop < found.start) {
+      throw new Error(
+        `resolveGraph: the public item ${found.item} of ${found.provider} stops at ${found.stop}, before its start ` +
+          `${found.start}; a public database's configuration history refuses such a revision (CF-3)`,
+      );
+    }
+  }
+  return (input.publicItems ?? []).filter((found) => !own.has(found.item));
+}
+
+/** The public modules that provide `item` at any height (PP-13), by UTF-8 id. */
+const publicProvidersOf = (facts: GraphFacts, item: string): string[] =>
+  sorted(new Set(facts.publicItems.filter((found) => found.item === item).map((found) => found.provider)));
+
+/** Public modules in words: `p of the public core`, `p and q of the public core`. */
+const ofPublic = (modules: readonly string[]): string => `${listed(modules)} of the public core`;
 
 // ── faults merged over consecutive ranges ───────────────────────────────────────────────────────────────────────────
 
@@ -406,30 +482,37 @@ const developmentOnly: GraphRule = {
 
 // ── MD-3, MD-6: providers ───────────────────────────────────────────────────────────────────────────────────────────
 
-/** MD-3, MD-6: two parts that provide one item at a common height. */
+/**
+ * MD-3, MD-6: two parts that provide one item at a common height — on a private process, a part and a public module
+ * too (PP-13).
+ */
 const providersOverlap: GraphRule = {
   code: "providers-overlap",
   check: (facts) => {
     const [first] = spans(
       facts,
       (range) =>
-        sorted(whole(range) ? range.providers.keys() : [])
+        sorted(whole(range) ? new Set([...range.providers.keys(), ...range.publicProviders.keys()]) : [])
           .map((item) => ({
             item,
-            modules: sorted((range.providers.get(item) as GraphPart[]).map((part) => part.declaration.id)),
+            modules: sorted((range.providers.get(item) ?? []).map((part) => part.declaration.id)),
+            publicModules: [...(range.publicProviders.get(item) ?? [])],
           }))
-          .filter(({ modules }) => modules.length > 1),
-      ({ item, modules }) => JSON.stringify([item, modules]),
+          .filter(({ modules, publicModules }) => modules.length + publicModules.length > 1),
+      ({ item, modules, publicModules }) => JSON.stringify([item, modules, publicModules]),
     );
     if (first === undefined) return undefined;
-    const { item, modules } = first.fault;
+    const { item, modules, publicModules } = first.fault;
+    const count = modules.length + publicModules.length;
+    const own = modules.length === 1 ? [`module ${modules[0]}`] : modules.length > 1 ? [`the modules ${listed(modules)}`] : [];
+    const lead = publicModules.length === 0 ? `the modules ${listed(modules)}` : [...own, ofPublic(publicModules)].join(" and ");
     return new UmbraError(
       "providers-overlap",
-      `the modules ${listed(modules)} ${modules.length === 2 ? "both" : "all"} provide the item ${item} at heights ` +
-        `${span(first.range)}: at each height ` +
+      `${lead} ${count === 2 ? "both" : "all"} provide the item ${item} at heights ${span(first.range)}: at each height ` +
         "an item has at most one active provider (MD-3, MD-6); end one's entry before the other's starts — for a " +
-        "handoff, stop one at h − 1 and start the other at h",
-      { item, modules, range: first.range },
+        "handoff, stop one at h − 1 and start the other at h" +
+        (publicModules.length === 0 ? "" : "; a private module's item may not take the name of a public one (PP-13)"),
+      { item, modules, ...(facts.hasPublic ? { publicModules } : {}), range: first.range },
     );
   },
 };
@@ -456,7 +539,8 @@ function missing(facts: GraphFacts, none: boolean): Spanned<Missing> | undefined
       byId(whole(range) ? range.active : []).flatMap(({ declaration }) =>
         declaration.requires
           .filter((item) => (range.providers.get(item) ?? []).length === 0)
-          .filter((item) => (enabledProviders(facts, item).length === 0) === none)
+          .filter((item) => (range.publicProviders.get(item) ?? []).length === 0)
+          .filter((item) => (enabledProviders(facts, item).length + publicProvidersOf(facts, item).length === 0) === none)
           .map((item) => ({ module: declaration.id, item })),
       ),
     ({ module, item }) => JSON.stringify([module, item]),
@@ -483,10 +567,15 @@ const itemNoProvider: GraphRule = {
           ? `module ${notEnabled[0]} of the build provides it but has no entry in the configuration; add an entry for it`
           : `modules ${listed(notEnabled)} of the build provide it but have no entry in the configuration; add an ` +
             "entry for one of them";
+    const publicCore = facts.hasPublic
+      ? ", nor does any module of the public core (PP-13: a private module may require the public core's table items, " +
+        "as its configuration history records them, and no block or process item of it)"
+      : "";
+    const publicFix = facts.hasPublic ? "; or enable a module that provides it in the public core" : "";
     return new UmbraError(
       "item-no-provider",
-      `module ${module} requires the item ${item} at heights ${span(found.range)}, and no enabled module provides it ` +
-        `(MD-3): ${fix}`,
+      `module ${module} requires the item ${item} at heights ${span(found.range)}, and no enabled module provides it` +
+        `${publicCore} (MD-3): ${fix}${publicFix}`,
       { module, item, range: found.range, notEnabled },
     );
   },
@@ -500,13 +589,18 @@ const itemNotAvailable: GraphRule = {
     if (found === undefined) return undefined;
     const { module, item } = found.fault;
     const providers = enabledProviders(facts, item);
+    const publicProviders = publicProvidersOf(facts, item);
+    const by = [
+      ...(providers.length === 0 ? [] : [listed(providers)]),
+      ...(publicProviders.length === 0 ? [] : [ofPublic(publicProviders)]),
+    ];
     return new UmbraError(
       "item-not-available",
       `module ${module} requires the item ${item} at heights ${span(found.range)}, where no module provides it ` +
-        `(provided by ${listed(providers)} at other heights): an item is available only from its provider's start to ` +
+        `(provided by ${by.join(" and ")} at other heights): an item is available only from its provider's start to ` +
         `its provider's stop, so a module's heights must lie within its providers' (MD-3); start ${module} later, ` +
         "stop it earlier, or give a provider an entry that covers those heights",
-      { module, item, range: found.range, providers },
+      { module, item, range: found.range, providers, ...(facts.hasPublic ? { publicProviders } : {}) },
     );
   },
 };
@@ -814,8 +908,8 @@ function ordered(
   return [...backbone, ...order.map((id) => byName.get(id) as ModuleDeclaration)];
 }
 
-/** One range's orders and providers. */
-function resolvedRange(range: RangeFacts, compare: (a: string, b: string) => number): ResolvedRange {
+/** One range's orders and providers, and — on a private process (`hasPublic`) — its public items. */
+function resolvedRange(range: RangeFacts, compare: (a: string, b: string) => number, hasPublic: boolean): ResolvedRange {
   // In a range that ends at the cursor a module may provide a backbone part's item (providers are not checked there,
   // Q97); the backbone's own requirements are the same in every range, and the last range is always checked whole.
   if (whole(range)) checkBackbone(range);
@@ -826,11 +920,13 @@ function resolvedRange(range: RangeFacts, compare: (a: string, b: string) => num
   for (const [item, providers] of range.providers) {
     if (providers.length === 1) providerOf.set(item, (providers[0] as GraphPart).declaration.id);
   }
+  const publicItems = new Set([...range.publicProviders.keys()].filter((item) => !range.providers.has(item)));
   return Object.freeze({
     range: range.range,
     order: Object.freeze(order),
     writeOrder: Object.freeze(writeOrder),
     providerOf,
+    ...(hasPublic ? { publicItems } : {}),
   });
 }
 
@@ -849,7 +945,7 @@ export function resolveWith(
     if (refusal !== undefined) throw refusal;
   }
   const ranges = Object.freeze(
-    facts.ranges.filter((range) => range.check !== "none").map((range) => resolvedRange(range, compare)),
+    facts.ranges.filter((range) => range.check !== "none").map((range) => resolvedRange(range, compare, facts.hasPublic)),
   );
   const modules = Object.freeze(ordered(facts.parts, unionEdges(facts), compare, "across the height ranges"));
   const segments = new Map(facts.parts.map((part) => [part.declaration.id, part.segments]));

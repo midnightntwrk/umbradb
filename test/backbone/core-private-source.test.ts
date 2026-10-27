@@ -16,6 +16,7 @@ import {
   readPrivateCursor,
   readPublicBlock,
   readPublicIdentity,
+  readPublicItems,
 } from "../../src/backbone/core-private-source/index.js";
 import { PRIVATE_CORE_DIGEST, privateBackbone } from "../../src/backbone/private.js";
 import type { CheckedEntry } from "../../src/config/validate.js";
@@ -53,6 +54,15 @@ const bytes = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
 
 const hexOf = (value: Uint8Array): string => `0x${Buffer.from(value).toString("hex")}`;
 
+/** {@link PUBLIC_CONFIG}'s items as the graph takes them: `pub` from 5 superseded at 8 (CF-5), its stop 9 no bound. */
+const PUBLIC_ITEMS = [
+  { item: "blocks", provider: "core", start: 3n, stop: null },
+  { item: "chain-identity", provider: "core", start: 3n, stop: null },
+  { item: "pub-rows", provider: "pub", start: 5n, stop: 7n },
+  { item: "pub-rows", provider: "pub", start: 8n, stop: null },
+  { item: "pub-sums", provider: "pub", start: 8n, stop: null },
+];
+
 /** What the runner gives a source's chain check of the configured network (`configuredGenesisOf`'s value). */
 const configuredAs = (network: string, hash: Uint8Array | null) => ({ configured: Object.freeze({ network, hash }) });
 
@@ -67,12 +77,28 @@ async function refusalOf(pending: Promise<unknown>): Promise<UmbraError> {
   throw new Error("expected a refusal, and it resolved");
 }
 
-/** Answers of a public database: its identity (S = 3) and blocks up to `head`, or nothing. */
-function publicAnswers(options: { readonly identity?: boolean; readonly head?: bigint | null }) {
-  const { identity = true, head = null } = options;
+/** The public configuration history's rows a private process reads (`core_chain.config`: heights and `provides`). */
+const PUBLIC_CONFIG = [
+  { entry_id: "core", start: 3n, stop: null, provides: ["blocks", "chain-identity"] },
+  { entry_id: "pub", start: 5n, stop: 9n, provides: ["pub-rows"] },
+  { entry_id: "pub", start: 8n, stop: null, provides: ["pub-rows", "pub-sums"] },
+];
+
+/** Answers of a public database: its identity (S = 3), its configuration history and blocks up to `head`, or nothing. */
+function publicAnswers(options: {
+  readonly identity?: boolean;
+  readonly head?: bigint | null;
+  readonly config?: readonly Record<string, unknown>[] | null;
+}) {
+  const { identity = true, head = null, config = PUBLIC_CONFIG } = options;
   return (sql: string, params: readonly unknown[]): Record<string, unknown>[] => {
     if (sql.includes("to_regclass('core_chain.identity')")) return [{ present: identity }];
     if (sql.includes("FROM core_chain.identity")) return [{ genesis_hash: bytes(0xa1), start_height: 3n }];
+    if (sql.includes("to_regclass('core_chain.config')")) return [{ present: config !== null }];
+    if (sql.includes("FROM core_chain.config")) {
+      if (config === null) throw new Error('relation "core_chain.config" does not exist');
+      return [...config];
+    }
     if (sql.includes("to_regclass('core_block_commit.blocks')")) return [{ present: head !== null }];
     if (sql.includes("ORDER BY height DESC")) {
       return head === null || head < 3n ? [] : [{ height: head, hash: bytes(Number(head)), parent_hash: bytes(0) }];
@@ -117,7 +143,10 @@ describe("the private block source (PP-3)", () => {
   it("checks the chain at startup by the public identity, in place of the node's checks (PP-1, PP-2)", async () => {
     const { db, state } = fakePublic(publicAnswers({ head: 9n }));
     const source = new PrivateBlockSource(db, pollingWakes());
-    expect(await source.checkChain(configuredAs("custom", bytes(0xa1)))).toEqual({ genesisHash: bytes(0xa1) });
+    expect(await source.checkChain(configuredAs("custom", bytes(0xa1)))).toEqual({
+      genesisHash: bytes(0xa1),
+      publicItems: PUBLIC_ITEMS,
+    });
     expect(state.reads).toBe(1);
     const empty = new PrivateBlockSource(fakePublic(publicAnswers({ identity: false })).db, pollingWakes());
     await expect(empty.checkChain(configuredAs("custom", bytes(0xa1)))).rejects.toMatchObject({
@@ -149,7 +178,7 @@ describe("the private block source (PP-3)", () => {
     await expect(source.checkChain(configuredAs("mainnet", bytes(0x3c)))).rejects.toMatchObject({
       details: { reason: "network", network: "mainnet", configured: hexOf(bytes(0x3c)), public: hexOf(bytes(0xa1)) },
     });
-    expect(await source.checkChain(configuredAs("preprod", bytes(0xa1)))).toEqual({ genesisHash: bytes(0xa1) });
+    expect(await source.checkChain(configuredAs("preprod", bytes(0xa1)))).toMatchObject({ genesisHash: bytes(0xa1) });
   });
 
   it("refuses a known network whose built-in table records no genesis hash: nothing to check the public one against", async () => {
@@ -176,11 +205,73 @@ describe("the private block source (PP-3)", () => {
     const core = { id: "core", start: 3, settings: {} } as unknown as CheckedEntry;
     const publicDb = () => fakePublic(publicAnswers({ head: 9n })).db;
     const skipping = privateIntake({ publicDatabase: publicDb, wakes: () => manualWakes().wakes, network: () => null });
-    expect(await skipping.source(core).checkChain(configuredAs("custom", bytes(0xb2)))).toEqual({ genesisHash: bytes(0xa1) });
+    expect(await skipping.source(core).checkChain(configuredAs("custom", bytes(0xb2)))).toMatchObject({
+      genesisHash: bytes(0xa1),
+    });
     const checking = privateIntake({ publicDatabase: publicDb, wakes: () => manualWakes().wakes });
     await expect(checking.source(core).checkChain(configuredAs("custom", bytes(0xb2)))).rejects.toMatchObject({
       details: { reason: "network" },
     });
+  });
+
+  it("gives the graph the public table items, with their heights by CF-5, read with the identity (PP-13, task 14.1a)", async () => {
+    const { db, state } = fakePublic(publicAnswers({ head: 9n }));
+    const check = await new PrivateBlockSource(db, pollingWakes()).checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(check.publicItems).toEqual(PUBLIC_ITEMS);
+    expect(Object.isFrozen(check.publicItems)).toBe(true);
+    expect(state.reads).toBe(1);
+    // A public database whose history holds no row yet: no item.
+    const bare = new PrivateBlockSource(fakePublic(publicAnswers({ config: [] })).db, pollingWakes());
+    expect((await bare.checkChain(configuredAs("custom", bytes(0xa1)))).publicItems).toEqual([]);
+    expect(await readPublicItems(fakeRead(publicAnswers({ config: null })))).toEqual([]);
+    expect(await readPublicItems(fakeRead(publicAnswers({})))).toEqual(PUBLIC_ITEMS);
+  });
+
+  it("compares the recorded binding before the graph, after the configured network: genesis, start, private S (PP-2)", async () => {
+    const core = (start: number) => ({ id: "core", start, settings: {} }) as unknown as CheckedEntry;
+    /** A source of an intake over the fake public database, its startup read of the private cursor having found `row`. */
+    const sourceWith = async (row: Record<string, unknown> | null, start = 3) => {
+      const publicDb = fakePublic(publicAnswers({})).db;
+      const source = privateIntake({ publicDatabase: () => publicDb, wakes: () => manualWakes().wakes }).source(core(start), {
+        start: BigInt(start),
+        log: () => undefined,
+      });
+      await source.cursor(fakeRead((sql) => (sql.includes("to_regclass") ? [{ present: true }] : row === null ? [] : [row])));
+      return source;
+    };
+    const bound = (genesis: number, start: bigint) => ({
+      height: 4n,
+      hash: bytes(4),
+      parent_hash: bytes(3),
+      public_genesis_hash: bytes(genesis),
+      public_start_height: start,
+    });
+    const reasonOf = async (source: PrivateBlockSource, hash = bytes(0xa1)) =>
+      (await refusalOf(source.checkChain(configuredAs("custom", hash)))).details.reason;
+    expect(await reasonOf(await sourceWith(bound(0xb2, 3n)))).toBe("genesis");
+    expect(await reasonOf(await sourceWith(bound(0xa1, 1n)))).toBe("start");
+    expect(await reasonOf(await sourceWith(null, 2))).toBe("private-start-below");
+    // Bound at an earlier start that committed no block yet (the row's cursor columns null): compared all the same.
+    expect(await reasonOf(await sourceWith({ ...bound(0xb2, 3n), height: null, hash: null, parent_hash: null }))).toBe("genesis");
+    // The configured network first: a database bound elsewhere, configured for another network, is refused for that.
+    expect(await reasonOf(await sourceWith(bound(0xb2, 1n)), bytes(0xc3))).toBe("network");
+    // Bound to this public database, or a first start at or above its S: it passes, with the public items.
+    expect((await (await sourceWith(bound(0xa1, 3n))).checkChain(configuredAs("custom", bytes(0xa1)))).publicItems).toEqual(
+      PUBLIC_ITEMS,
+    );
+    expect(await (await sourceWith(null, 5)).checkChain(configuredAs("custom", bytes(0xa1)))).toMatchObject({
+      genesisHash: bytes(0xa1),
+    });
+  });
+
+  it("takes the negative controls' binding check and view of the public items from its intake", async () => {
+    const core = { id: "core", start: 3, settings: {} } as unknown as CheckedEntry;
+    const publicDb = () => fakePublic(publicAnswers({})).db;
+    const none = privateIntake({ publicDatabase: publicDb, wakes: () => manualWakes().wakes, publicItems: () => [] });
+    expect((await none.source(core).checkChain(configuredAs("custom", bytes(0xa1)))).publicItems).toEqual([]);
+    const skipping = privateIntake({ publicDatabase: publicDb, wakes: () => manualWakes().wakes, binding: () => null });
+    const source = skipping.source({ ...core, start: 1 } as unknown as CheckedEntry, { start: 1n, log: () => undefined });
+    expect((await source.checkChain(configuredAs("custom", bytes(0xa1)))).publicItems).toEqual(PUBLIC_ITEMS);
   });
 
   it("its block at h is the public block at h, and one the public database lacks is an error", async () => {

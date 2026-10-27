@@ -6,6 +6,7 @@ import { canonicalJson, dataHash } from "../../src/config/history.js";
 import type { Database, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { schemaPlan } from "../../src/modules/adapters.js";
+import { CORE_BLOCK_COMMIT } from "../../src/backbone/core-block-commit/core-block-commit.js";
 import { BACKENDS } from "../db/backends.js";
 import {
   CORE,
@@ -45,6 +46,17 @@ function m(start: number, config: Record<string, unknown> = {}, stop?: number) {
 }
 
 const M_DEFAULTS = { limit: 10, mode: "full" } as const;
+
+/** `m`'s table item for a build whose `m` 1.0.0 names its table item otherwise (task 14.1a's test of `provides`). */
+const M_ALL = { name: "m-all", lifetimes: ["table" as const], table: { schema: "m", tables: ["rows"], kind: "append-only" as const } };
+
+/** Each row's `provides` (PP-13), as `<id>@<start> <items…>`, in key order. */
+async function providesRows(db: Database): Promise<string[]> {
+  const rows = await db.read((read) =>
+    read.query(`SELECT entry_id, start, provides FROM core_chain.config ORDER BY entry_id COLLATE "C", start`),
+  );
+  return rows.map((row) => [`${row.entry_id as string}@${String(row.start)}`, ...(row.provides as string[])].join(" "));
+}
 
 /** The core version's canonical JSON, as `core_chain.config.version` holds it. */
 const CORE_VERSION_TEXT = canonicalJson(buildCoreVersion());
@@ -110,6 +122,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
         { name: "version", type: "text", not_null: true },
         { name: "data", type: "jsonb", not_null: false },
         { name: "data_hash", type: "bytea", not_null: false },
+        { name: "provides", type: "text[]", not_null: true },
       ]);
       const constraints = await db.read((read) =>
         read.query(
@@ -178,6 +191,24 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       expect(text).not.toMatch(/t-4-3|tipCap|pollMs|token/);
       // One transaction wrote them all: core-chain's on-start-db.
       expect(new Set(stored.map((row) => row.xmin)).size).toBe(1);
+    });
+
+    it("records each revision's table items in provides: the backbone's under core, a module's, a scheduled one's this build's (PP-13)", async () => {
+      const db = await fresh();
+      const entries = [CORE, m(0), m(50, {}, 70), versionEntry({ id: "m", start: 90, version: "1.1.0" })];
+      await startup(db, { entries, user: [M_1_0], cursor: null, backbone: [CORE_BLOCK_COMMIT] });
+      expect(await providesRows(db)).toEqual(["core@0 blocks", "m@0 m-rows", "m@50 m-rows", "m@90 m-rows"]);
+      // One transaction wrote them all, with the rest of each row: core-chain's on-start-db.
+      expect(new Set((await storedRows(db)).map((row) => row.xmin)).size).toBe(1);
+      // A build whose m 1.0.0 declares another table item: the revisions above the cursor (40) take it, those at or
+      // below it keep theirs (CF-6) — the core's, from 0, too —; an unchanged restart then writes nothing.
+      const other = moduleM("1.0.0", { provides: [M_ALL] });
+      const restart = { entries, user: [other], cursor: 40n, backbone: [CORE_BLOCK_COMMIT] } as const;
+      await startup(db, restart);
+      expect(await providesRows(db)).toEqual(["core@0 blocks", "m@0 m-rows", "m@50 m-all", "m@90 m-all"]);
+      const before = await storedRows(db);
+      await startup(db, restart);
+      expect(await storedRows(db)).toEqual(before);
     });
 
     it("keeps a core row's stop null: the table refuses one with a stop (A31)", async () => {

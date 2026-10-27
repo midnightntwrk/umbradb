@@ -5,9 +5,11 @@
  * make of public data at a height (decision record Q100); and it is woken when the public cursor may have moved.
  *
  * **Every read of public tables is here**, in one place: {@link readPublicIdentity} (`core_chain.identity`'s genesis
- * hash and S, through `core-chain`'s own `readIdentity`, task 10.2), {@link readPublicBlock} (`core_block_commit.blocks`'
- * height, hash and parent hash, which its other columns, partitions and `hashes` table do not change), and the public
- * cursor, which is `core-block-commit`'s own `readCursor` — the blocks table's last row, as the core reads it.
+ * hash and S, through `core-chain`'s own `readIdentity`, task 10.2), {@link readPublicItems} (the public core's `table`
+ * items with their heights, from `core_chain.config`'s `provides`; PP-13, task 14.1a), {@link readPublicBlock}
+ * (`core_block_commit.blocks`' height, hash and parent hash, which its other columns, partitions and `hashes` table do
+ * not change), and the public cursor, which is `core-block-commit`'s own `readCursor` — the blocks table's last row, as
+ * the core reads it.
  *
  * **Where the public data comes from** ({@link PublicDatabase}): on PostgreSQL directly — `publicDatabase`, the URL of
  * a login that may only read, opened by {@link openPublicDatabase} with reads only (one `REPEATABLE READ READ ONLY`
@@ -23,6 +25,7 @@
 
 import { BLOCKS_TABLE, cursorHeight, readCursor } from "../core-block-commit/core-block-commit.js";
 import { readIdentity } from "../core-chain/core-chain.js";
+import { publicItemRanges } from "../../config/history.js";
 import type { PlainObject } from "../../config/plain-data.js";
 import type { CheckedEntry } from "../../config/validate.js";
 import type { ReadHandle } from "../../db/api.js";
@@ -31,6 +34,7 @@ import { openPostgres } from "../../db/postgres.js";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { TransportTls } from "../../private/core-transport.js";
 import { PrivateTransport, type TransportPosition } from "../../private/private-transport.js";
+import type { PublicItem } from "../../modules/graph.js";
 import type { BlockRef } from "../../runner/block-source.js";
 
 /** The public database as a private process reads it (see the module comment). */
@@ -62,6 +66,8 @@ export interface PublicIdentity {
 /** How often {@link pollingWakes} wakes a private process that has no transport to the core. */
 export const PUBLIC_POLL_MS = 1_000;
 
+const CONFIG_PRESENT_SQL = "SELECT to_regclass('core_chain.config') IS NOT NULL AS present";
+const ITEMS_SQL = "SELECT entry_id, start, stop, provides FROM core_chain.config";
 const BLOCKS_PRESENT_SQL = `SELECT to_regclass('${BLOCKS_TABLE}') IS NOT NULL AS present`;
 const BLOCK_SQL = `SELECT height, hash, parent_hash FROM ${BLOCKS_TABLE} WHERE height = $1`;
 
@@ -78,6 +84,24 @@ async function present(read: Pick<ReadHandle, "query">, sql: string): Promise<bo
 export async function readPublicIdentity(read: Pick<ReadHandle, "query">): Promise<PublicIdentity | null> {
   const identity = await readIdentity(read);
   return identity === null ? null : Object.freeze({ genesisHash: identity.genesisHash, start: identity.start });
+}
+
+/**
+ * The public core's `table` items with their heights (PP-13, task 14.1a; `design.md` §8): every row of its
+ * `core_chain.config` — the revisions of its entries, with the `table` items each provides (`provides`) — as
+ * `publicItemRanges` gives them, each from its revision's start to its last height by CF-5; none before the table exists.
+ */
+export async function readPublicItems(read: Pick<ReadHandle, "query">): Promise<PublicItem[]> {
+  if (!(await present(read, CONFIG_PRESENT_SQL))) return [];
+  const rows = await read.query(ITEMS_SQL);
+  return publicItemRanges(
+    rows.map((row) => ({
+      id: row.entry_id as string,
+      start: row.start as bigint,
+      stop: row.stop as bigint | null,
+      provides: row.provides as string[],
+    })),
+  );
 }
 
 /** The public block at `height` — its height, hash and parent hash —, or null when the public database has none. */

@@ -475,16 +475,26 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
   cursor when it runs, never below `read.height`, and its values come back as the core reads them (a `bigint` as a
   `bigint`, `bytea` as bytes, `jsonb` as its value). A parameter that is a string of `0x` and lowercase hex pairs is
   sent as bytes.
-- **Require private items.** Your requirements order you among the private process's parts: the core's process items
-  `config`, `db` and `ledger-table` (no node client: a private process never talks to the node),
-  `core-private-source`'s `private-cursor` and `core-key-registry`'s `admitted-keys`. A public table you read in
-  `on-fetch` is not a requirement here.
+- **Require private items, and the public tables you read.** Your requirements order you among the private
+  process's parts: the core's process items `config`, `db` and `ledger-table` (no node client: a private process never
+  talks to the node), `core-private-source`'s `private-cursor` and `core-key-registry`'s `admitted-keys`. You may also
+  require a public `table` item — `core-block-commit`'s `blocks`, `core-ledger-state`'s `ledger-events`, a public
+  module's own (PP-13) —, and you should require each one whose table you read in `on-fetch`: the private process reads
+  which `table` items the public core provides at which heights from the public database's configuration history, and
+  refuses to start, with `item-no-provider` or `item-not-available` naming the item, when the public core does not
+  provide it at every height you run. It gives you the table only — read it through `on-fetch`'s read of public data —
+  and never a public `block` or `process` item (`block-header`, `node-client`: require them and startup refuses). The
+  items of the private process's own backbone parts (`chain-identity`, the digests) are its own database's, and an item
+  of yours may not take the name of a public item the public core provides at the same heights (`providers-overlap`).
+  The check is made at the private process's startup, against the public configuration as it is then.
 - **The same determinism rules.** Your private tables are checked, digested and hashed as the core's are (Q75): the
   sections above all apply, `deterministic: false` included. Two private processes with the same configuration, bound
   to the same public database, hold the same private data at the same height.
-- **Your database is bound to one public database.** Its first start records the public database's genesis hash and
-  start height; a later start against another public database is refused (`private-binding-mismatch`), and so is one
-  whose start height is below the public one's.
+- **Your database is bound to one public database.** At every start the public database's genesis hash must be your
+  configured network's (`network`, and `genesisHash` for `custom`); its first start records the public database's
+  genesis hash and start height; a later start against another public database is refused (`private-binding-mismatch`,
+  its `details.reason` saying why: `network`, `genesis`, `start`), and so is one whose start height is below the public
+  one's (`private-start-below`) or against a public database whose core never started (`public-not-started`).
 
 ## Blocks from the node
 

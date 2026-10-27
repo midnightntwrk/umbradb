@@ -247,8 +247,10 @@ export const PRIVATE_ROWS_SQL = (schema: string): string =>
   `CREATE TABLE ${schema}.rows (height bigint PRIMARY KEY, public_hash bytea NOT NULL, salt bigint NOT NULL)`;
 
 /**
- * A private module `id` (PP-1, PP-3): its `on-fetch` reads the public block's hash at the block's height through its
- * read of public data and puts it as its `block` item; its `on-compute` notes the keys `admitted-keys` holds and the
+ * A private module `id` (PP-1, PP-3, PP-13): it requires `admitted-keys` and the public `table` item `blocks` (the public
+ * backbone's `core_block_commit.blocks`, which the public database's configuration history records under `core`; task
+ * 14.1a); its `on-fetch` reads the public block's hash at the block's height through its read of public data and puts
+ * it as its `block` item; its `on-compute` notes the keys `admitted-keys` holds and the
  * height of its read of the private database; its `on-db-write` stores the hash with its data setting `salt`; its
  * `on-after-db-write` notes the height of its read. Its calls go to `seen`. `rest` replaces parts of the declaration
  * (a test's migration).
@@ -259,7 +261,7 @@ export function privateModule(id: string, seen: PrivateSeen[], rest: Partial<Mod
     id,
     version: "1.0.0",
     side: "private",
-    requires: ["admitted-keys"],
+    requires: ["admitted-keys", "blocks"],
     provides: [
       { name: `${id}-public`, lifetimes: ["block"] },
       { name: `${id}-rows`, lifetimes: ["table"], table: { schema, tables: ["rows"], kind: "append-only" } },

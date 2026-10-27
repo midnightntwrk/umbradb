@@ -23,7 +23,8 @@
  *    10.2a), and on a database with a cursor the stored genesis hash (`genesis-mismatch`), a wait while the node's
  *    finalized head is below the cursor (the condition `waiting-for-node`), and the node's hash at the cursor
  *    (`cursor-hash-mismatch`) — also before any migration;
- * 7. the graph resolved from the check (`resolveGraph`, `graphInputOf`), the schema plan, the process contexts with each
+ * 7. the graph resolved from the check (`resolveGraph`, `graphInputOf`; on a private process with the public core's
+ *    `table` items its source's check read, PP-13, task 14.1a), the schema plan, the process contexts with each
  *    part's revisions ({@link processRevisions}), `core-chain` bound to its context with what startup checked and
  *    opened (`bindCoreChain`: the configuration, the declarations, the cursor, the database, S, the genesis hash, the
  *    node client, the revision's ledger table), `core-block-fetch` bound to the block source (`bindCoreBlockFetch`, when
@@ -711,7 +712,7 @@ class Process implements ProcessHandle {
     const check = checkHistory({ config: checked, cursor: this.#cursor, declarations, history });
     const waiting = (wait: NodeWait | null): void => this.#waiting(wait);
     // A private process's source checks its chain itself (PP-1: it never talks to the node).
-    const { genesisHash } = await (input.checkChain ?? source.checkChain?.bind(source) ?? checkChain)({
+    const { genesisHash, publicItems } = await (input.checkChain ?? source.checkChain?.bind(source) ?? checkChain)({
       source,
       identity,
       cursor,
@@ -720,7 +721,8 @@ class Process implements ProcessHandle {
       onWaiting: waiting,
     });
     this.#step();
-    const graph = resolveGraph(graphInputOf(check, declarations));
+    // A private process's graph counts the public core's table items its source read (PP-13, task 14.1a).
+    const graph = resolveGraph({ ...graphInputOf(check, declarations), ...(publicItems === undefined ? {} : { publicItems }) });
     const plan = schemaPlan(graph.modules);
     const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, core) });
     const start = BigInt(checked.start);

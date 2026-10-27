@@ -5,7 +5,8 @@
  * module may require — `config`, `node-client`, `db` (read-only, Q73) and `ledger-table`.
  *
  * **Its tables**, in its reserved schema `core_chain` (DB-8), created by its migrations as the writer's login and
- * readable by every module role (DB-6): `001` the history's `core_chain.config` ({@link CONFIG_MIGRATION}, unchanged),
+ * readable by every module role (DB-6): `001` the history's `core_chain.config` ({@link CONFIG_MIGRATION}; its
+ * `provides` task 14.1a's),
  * `002` `core_chain.identity` — one row: the genesis hash, S, and the anchor hash, null until block S commits (CD-1).
  *
  * **Startup**, as the runner (`src/runner/process.ts`) runs it:
@@ -45,6 +46,7 @@ import { readOnlyDatabase } from "../../db/read-only.js";
 import { type BuiltInNetwork, builtInNetwork } from "../../ledger/networks.js";
 import type { LedgerTable } from "../../ledger/version-table.js";
 import { type BlockContext, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
+import type { PublicItem } from "../../modules/graph.js";
 import type { DeclarationSet } from "../../modules/validation.js";
 import type { NodeClient, NodeClientOptions } from "../../node/client.js";
 import type { BlockRef, BlockSource } from "../../runner/block-source.js";
@@ -202,6 +204,12 @@ export interface ChainCheckInput {
 export interface ChainCheck {
   /** The node's genesis hash: the hash of its block 0. */
   readonly genesisHash: Uint8Array;
+  /**
+   * A private process's source only (`PrivateBlockSource.checkChain`, PP-13, task 14.1a): the public core's `table`
+   * items with their heights, read from its public database's configuration history, which the runner gives the graph
+   * (`GraphInput.publicItems`). Absent from `core-chain`'s own check: a public process has none.
+   */
+  readonly publicItems?: readonly PublicItem[];
 }
 
 /**

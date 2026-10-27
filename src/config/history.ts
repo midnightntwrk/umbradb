@@ -49,7 +49,7 @@ import { createHash } from "node:crypto";
 import { UmbraError } from "../db/errors.js";
 import { encodeCanonical } from "../determinism/cbor.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
-import type { EntryRange, GraphInput } from "../modules/graph.js";
+import { type EntryRange, type GraphInput, type PublicItem, utf8Order } from "../modules/graph.js";
 import type { DeclarationSet } from "../modules/validation.js";
 import { buildCoreVersion, type CoreVersion } from "./build.js";
 import { CORE_ENTRY_ID } from "./entries.js";
@@ -305,6 +305,33 @@ export function committedVersions(
     versions.set(row.id, list);
   }
   return versions;
+}
+
+/** A row of a public `core_chain.config` as a private process reads it: its entry, heights and `table` items (PP-13). */
+export interface ProvidesRow {
+  readonly id: string;
+  readonly start: bigint;
+  /** The stop as written; null when absent, and always for `core`. */
+  readonly stop: bigint | null;
+  /** The `table` items the revision provides (`core_chain.config.provides`, task 14.1a): the backbone's for `core`. */
+  readonly provides: readonly string[];
+}
+
+/**
+ * The public core's `table` items with their heights (PP-13, task 14.1a; `design.md` §8), from the rows of its
+ * `core_chain.config`: each item of a row, provided by the row's entry from its start to its last height by CF-5 — its
+ * own stop, or the start − 1 of the entry's next revision when that is lower, as {@link graphEntries} reckons it (the
+ * core's stop bounds nothing). In the order of the rows' keys (ids by their UTF-8 bytes, then starts), each row's items
+ * in its order. Refuses nothing: the graph judges the heights.
+ */
+export function publicItemRanges(rows: readonly ProvidesRow[]): PublicItem[] {
+  const last = lastHeights(rows, (row) => row);
+  return [...rows]
+    // Rows are keyed by (id, start), so two rows of one id never share a start.
+    .sort((a, b) => utf8Order(a.id, b.id) || (a.start < b.start ? -1 : 1))
+    .flatMap((row) =>
+      row.provides.map((item) => Object.freeze({ item, provider: row.id, start: row.start, stop: last.get(row) ?? null })),
+    );
 }
 
 /**

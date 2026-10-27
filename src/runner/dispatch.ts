@@ -140,6 +140,8 @@ function moduleWaves(range: ResolvedRange, point: PointName): ModuleDeclaration[
   for (const part of range.order) {
     const firsts = part.requires.map((item) => {
       const provider = range.providerOf.get(item);
+      // A private process's public item (PP-13): the public core committed it; nothing here to wait for.
+      if (provider === undefined && range.publicItems?.has(item) === true) return 0;
       if (provider === undefined) {
         throw new Error(
           `scheduleAt: ${part.id} requires the item ${item}, which no single part provides at heights ` +

@@ -2571,7 +2571,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       keys admitted (14.4); the configured network's genesis check on a private process (10.2b, Q136 B); the
       private-backup refusal (15.1); the browser's transport (16.1); public `table` items in the private graph (14.1a,
       Q126 B).
-- [ ] 14.1a The owner's answer Q126 B: a private module's requirement on a public `table` item resolved against the
+- [x] 14.1a The owner's answer Q126 B: a private module's requirement on a public `table` item resolved against the
       public database (PP-13). **Design first**, recorded in `design.md` §8 and §10 before any code: where the public
       database says which `table` items each module provides at which heights, so that a private process needs neither
       the public build nor its user modules — the reading in Q126's resolution, to be confirmed or replaced by a
@@ -2580,6 +2580,47 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       their ranges; the module guide's "Private modules" and `test/private/builds.ts`'s modules declare the public
       tables they read.
       **Acceptance:** A155.
+      **Done (2026-10-27):** design first (`design.md` §8's "Public `table` items", §10's row), the reading of Q126's
+      resolution confirmed: `core_chain.config` gains `provides text[] NOT NULL` (migration `001` changed in place: no
+      database exists), which `core-chain`'s `recordHistory` writes with each row (`tableItemsOf`: the names of the
+      build's declaration's `table` items for a module — for a scheduled revision the declaration the build has, as the
+      graph judges it —, of the build's backbone parts for `core`; each once, by UTF-8 bytes) and gives every other
+      revision above the cursor again where it differs (`IS DISTINCT FROM`, so an unchanged restart writes nothing); a
+      revision at or below the cursor keeps its items (CF-6). `PrivateBlockSource.checkChain` reads them with the public
+      identity (`readPublicItems`, `publicItemRanges` in `src/config/history.ts`: each item from its row's start to its
+      last height by CF-5) and returns them as `ChainCheck.publicItems`, which `src/runner/process.ts` gives
+      `resolveGraph` (`GraphInput.publicItems`; two lines). `src/modules/graph.ts`: a public item active at a range's
+      first height counts as provided (`item-no-provider` when nothing provides it at any height, `item-not-available`
+      with `details.publicProviders` otherwise), the ranges split at the public items' starts and after their stops; a
+      public item named like a backbone item of the build is the backbone's (`chain-identity`, the digests), and a
+      private module providing a public item's name at a common height is `providers-overlap` (`details.publicModules`;
+      question Q146, shipped A); public providers take no part in the order, segments, `providerOf`, cycles or
+      MD-4; each resolved range lists its public items, on which `src/runner/dispatch.ts`'s Kahn waves wait for no part
+      (one line). PP-2's comparisons with the recorded binding now run in `checkChain` too, after the configured network
+      and before the graph — the startup read of the private cursor reads the binding from its row — and again in
+      `on-start-db`, so a private process against the wrong public database is refused for that and never by the graph
+      reading that database's items. Only `table` items are recorded, so a public `block` or `process` item still finds
+      no provider. The public items are read at the private process's startup only (question Q147, shipped A). The
+      module guide's "Private modules" says what to require (and the binding's reasons); `test/private/builds.ts`'s `pm`
+      requires `blocks`. Tests, seen failing first (`tsc` 15 errors; Vitest 38 failing, every private process refused
+      `item-no-provider` for `blocks`): `test/modules/graph-public-items.test.ts` (PP-13's scenario, a backbone item,
+      heights, stops, a handoff and a gap, no `block` item, the private backbone's names, overlaps, the resolved graph,
+      the cursor, none given), `test/runner/dispatch.test.ts` (no wait on a public item), `test/config/history.test.ts`
+      (`publicItemRanges`), `test/backbone/core-chain.test.ts` (the migration's pin, `tableItemsOf` on the command's
+      builds), `test/config/history-database.test.ts` (the column; `provides` recorded and refreshed above the cursor on
+      both backends), `test/backbone/core-private-source.test.ts` (the items read with the identity, the binding
+      compared in `checkChain` and its order, the seams) and `test/private/public-items.test.ts` (A155 on PostgreSQL
+      18.6 and PGlite 0.5.10: `reader`, requiring `pub-rows` of the public module `pub` and `blocks`, starts and reads
+      both at every height when `pub` runs from S; `item-no-provider` naming `pub-rows` without `pub`;
+      `item-not-available` when `pub` starts at 2 (range 1–1) or stops at 2 (from 3 on); it starts from 2 when `pub`
+      does; a module requiring `block-header` is refused). Committed negative controls: a graph given no public items
+      refuses A155's provided case; one given every public item at every height starts its two `item-not-available`
+      cases. Wrong variants (a scratch copy outside the clone): 35 on the new logic (the graph 12, the dispatch 2, the
+      item ranges 3, the recording 8, the private source 9, the runner 1), 35 caught (34 by the unit suites, 1 by A155);
+      the 24 with an effect a process can show run again against A155's and A113's suites alone, 21 caught there, the 3
+      left — an item a part provides in a range ending at the cursor, a public revision superseded before its own stop,
+      a binding recorded before any commit — being cases no process test sets up, each caught by its unit test; none
+      equivalent.
 - [x] 14.2 The process transport and its messages; opt-in mutual TLS.
       **Acceptance:** A115, A121.
       **Done (2026-10-26):** `src/private/` (new; design §1's row): `messages.ts` — design §8's eight messages as zod

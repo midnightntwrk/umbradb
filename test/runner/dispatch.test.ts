@@ -439,6 +439,21 @@ describe("RN-3 parallel where the graph allows: the Kahn waves of the modules re
     expect(waveIds(scheduleAt(graph.rangeAt(21n) as ResolvedRange, "on-compute"))).toEqual([["p3"], ["c"]]);
     expect(recorder.events).toEqual([]);
   });
+
+  it("waits for no part on a private process's public item, which the public core committed (PP-13, task 14.1a)", () => {
+    const recorder = new Recorder();
+    const at = (d: ModuleDeclaration) => registering(d, recorder, ["on-fetch"]);
+    const user = [at(provider("p", ["x"])), at(consumer("c", ["x", "pub-rows"])), at(consumer("r", ["pub-rows"]))];
+    const publicItems = [{ item: "pub-rows", provider: "pub", start: 1n, stop: null }];
+    const graph = resolveGraph({ ...graphInput(user, [entry("p", 1), entry("c", 1), entry("r", 1)]), publicItems });
+    const range = graph.rangeAt(1n) as ResolvedRange;
+    expect([...(range.publicItems ?? [])]).toEqual(["pub-rows"]);
+    expect(waveIds(scheduleAt(range, "on-fetch"))).toEqual([["p", "r"], ["c"]]);
+    // Without its public items the range has no provider for the item: the dispatch refuses to schedule it.
+    const { publicItems: _items, ...bare } = range;
+    expect(() => scheduleAt(bare, "on-fetch")).toThrow(/c requires the item pub-rows, which no single part provides/);
+    expect(recorder.events).toEqual([]);
+  });
 });
 
 describe("a callback that fails: what the dispatch gives back for RN-8's halt (task 5.4)", () => {

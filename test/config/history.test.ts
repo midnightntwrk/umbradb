@@ -16,6 +16,7 @@ import {
   type HistoryRow,
   historyFindings,
   omissionAllowed,
+  publicItemRanges,
   recordedData,
   revisionAt,
   rowOf,
@@ -1273,5 +1274,53 @@ describe("negative controls (committed)", () => {
     const declarations = build();
     const input = { config: checked([CORE, m(0)], declarations), cursor: C, declarations, history: db.history };
     expect(historyFindings(input)).toEqual([]);
+  });
+});
+
+describe("PP-13: the public table items a private process reads from the history (publicItemRanges, task 14.1a)", () => {
+  /** A row as a private process reads it from the public `core_chain.config`: its heights and its `provides`. */
+  const row = (id: string, start: number, stop: number | null, provides: readonly string[]) => ({
+    id,
+    start: BigInt(start),
+    stop: stop === null ? null : BigInt(stop),
+    provides,
+  });
+  const range = (item: string, provider: string, start: number, stop: number | null) => ({
+    item,
+    provider,
+    start: BigInt(start),
+    stop: stop === null ? null : BigInt(stop),
+  });
+
+  it("gives each item of a row the row's heights, to its last height by CF-5: its own stop or the next revision's start − 1", () => {
+    const rows = [
+      row("m", 30, 90, ["m-rows"]),
+      row("m", 0, 50, ["m-rows", "m-sums"]),
+      row("core", 0, null, ["blocks", "chain-identity"]),
+      row("core", 100, null, ["blocks"]),
+      row("n", 5, 8, ["n-rows"]),
+      row("n", 20, null, []),
+    ];
+    expect(publicItemRanges(rows)).toEqual([
+      range("blocks", "core", 0, 99),
+      range("chain-identity", "core", 0, 99),
+      range("blocks", "core", 100, null),
+      // m from 0 stops at 50 by its own stop… but m from 30 supersedes it from 30 (CF-5).
+      range("m-rows", "m", 0, 29),
+      range("m-sums", "m", 0, 29),
+      range("m-rows", "m", 30, 90),
+      // n stops at 8: the gap up to 19 provides nothing; its revision from 20 provides no table item.
+      range("n-rows", "n", 5, 8),
+    ]);
+  });
+
+  it("gives the same items whatever order the rows come in, and none for none", () => {
+    const rows = [row("b", 0, null, ["x"]), row("a", 3, null, ["y", "z"]), row("a", 1, 2, ["y"])];
+    expect(publicItemRanges(rows)).toEqual(publicItemRanges([...rows].reverse()));
+    expect(publicItemRanges([])).toEqual([]);
+  });
+
+  it("refuses nothing itself: the graph judges the ranges (an own stop below the start is the history's CHECK's)", () => {
+    expect(publicItemRanges([row("a", 4, 4, ["y"])])).toEqual([range("y", "a", 4, 4)]);
   });
 });
