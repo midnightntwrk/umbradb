@@ -66,9 +66,13 @@ an array of `{ sql, params }` run as one consistent read; used when the public d
 (core → private: `id`, `height` — `null` before the first commit — and either, per statement, `columns` (name and
 PostgreSQL type of each column) with `rows`, or `error`, a code); `api` (either way: `id`,
 `module`, `method`, `params`) and `api-result` (`id`, and `result` or `error`). In rows and params, `bigint` and
-`numeric` values SHALL be decimal strings, `bytea` values `0x`-prefixed hex, and `jsonb` values JSON. IF a message
-fails its schema, or has an unknown `v` or `type`, THEN the connection SHALL close; IF an instance id is already
-connected THEN the second `hello` SHALL be refused with `duplicate-instance`.
+`numeric` values SHALL be decimal strings, `bytea` values `0x`-prefixed hex, and `jsonb` values JSON; a parameter
+string of `0x` and lowercase hex pairs SHALL be sent to the database as `bytea`, so it has a `bytea` column's own type
+and index, every other string as text (owner decision Q141). A private module's read handle through the core SHALL send
+one `read` per statement, each a consistent read at or above the handle's height, so two statements of one callback may
+see two heights (owner decision Q142). IF a message fails its schema, or has an unknown `v` or `type`, THEN the
+connection SHALL close; IF an instance id is already connected THEN the second `hello` SHALL be refused with
+`duplicate-instance`.
 
 #### Scenario: A read through the core
 - **WHEN** a private process sends `read` with id `7` and two statements while the public database is PGlite

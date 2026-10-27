@@ -2548,7 +2548,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** lockstep — `report`'s hash check, `lockstep-behind` in `hello-ack`, the core's wait (14.3); the
       core's `/status` of its instances (PP-9, 14.4); test keys (14.4); the browser's `postMessage` transport (16.1);
       Q140 to Q142 (owner).
-- [ ] 14.3 Lockstep and the behind-instance refusal.
+- [ ] 14.3 Lockstep and the behind-instance refusal. Through the core, a read of public data is one `read` per
+      statement (owner decision Q142): a lockstep instance reads the public cursor again after its block's data and
+      halts with `lockstep-behind` if it moved past h.
       **Acceptance:** A117, A118.
 - [ ] 14.4 Test keys through the key registry (the key API is not core and leaves this change, Q70) and privacy checks
       (the private-backup refusal is task 15.1's).
