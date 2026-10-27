@@ -47,9 +47,10 @@ import { sweepTables, sweepWatcher, type TableSnapshot } from "./sweep-tapes.js"
  * - A102 (LG-11): a process killed with SIGKILL at the upgrade's U and restarted loads the state at U from the database
  *   (the node's root), converts it at F and goes on with every root the node's; a stored node changed under its key
  *   fails the restart's read; `[STATIC]` the tables are design §10's node layout, and no stored value is a whole state.
- * - A103 (LG-12): `retainStates` 1,000 at cursor 5,000 — the state at 4,000 loads, 3,999 fails with
- *   `state-not-retained` —; a revision raising it fills the window from its start, one lowering it releases the
- *   states leaving the window in its first block.
+ * - A103 (LG-12): a revision raising `retainStates` fills the window from its start, one lowering it releases the
+ *   states leaving the window in its first block; `retainStates` 1,000 at cursor 5,000 — the state at 4,000 loads,
+ *   3,999 fails with `state-not-retained` — is `ledger-window.test.ts` (5,000 blocks once, on PGlite, and PostgreSQL
+ *   from its backup: task 12.5a, owner decision Q122).
  * - A104 (LG-13; tasks 12.4, 12.5): with `retainStates` 0 a contract's state and zswap-state keys persisted at 10 stay
  *   held after the contract changed at 20, every state holding them was released and two sweep cycles completed, and
  *   load from their keys alone (the run without persisting them is `ledger-sweep.negative-control.test.ts`'s).
@@ -191,32 +192,6 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     expect(process.lines.some((line) => /processing halted \(callback-error\).*ledger worker/.test(line))).toBe(true);
     expect((await db.query("SELECT count(*)::text AS n FROM core_ledger_state.states WHERE height > 5"))[0]?.n).toBe("0");
   }, PATIENCE_MS * 4);
-
-  it("A103: with retainStates 1,000 at cursor 5,000, the state at 4,000 loads and 3,999 fails with state-not-retained", async () => {
-    const scenario = await ledgerScenario({
-      ledger: "v9",
-      genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
-      includesBlockZero: false,
-      blocks: Array.from({ length: 5_002 }, () => []),
-      rootsOnly: true,
-    });
-    const db = await backend.database();
-    const seen = retentionSeen();
-    // At 5,001's on-compute the read is at the cursor 5,000.
-    const plan = new Map([[5_001n, [4_000n, 3_999n, 5_000n, 5_001n, 0n]]]);
-    // The sweep (LG-14, task 12.5) is off here: the window does not depend on it, and its full budget of 10,000 units a
-    // block over the nodes of 1,001 held states makes a 5,000-block run several times slower (A103 with the sweep on is
-    // the revisions test below).
-    const process = await runTo(db, scenario.records, scenario.head, { settings: { retainStates: 1_000, sweep: "off" }, user: [retentionWatcher(seen, plan)] });
-    expect(process.status).toMatchObject({ cursor: 5_001n, reason: null });
-    expect(seen.loads.get(5_001n)).toEqual([loaded(scenario, 4_000n), "3999 state-not-retained", loaded(scenario, 5_000n), "5001 state-not-retained", "0 state-not-retained"]);
-    // After 5,001: the states of 4,001 to 5,001 held, each once.
-    const counts = await db.query(
-      "SELECT min(s.height)::text AS lo, max(s.height)::text AS hi, count(*)::text AS n, max(r.count)::text AS c FROM core_ledger_state.states s JOIN core_ledger_state.root_counts r ON r.node_key = s.state_key",
-    );
-    expect(counts[0]).toEqual({ lo: "4001", hi: "5001", n: "1001", c: "1" });
-    expect((await db.query("SELECT count(*)::text AS n FROM core_ledger_state.root_counts"))[0]?.n).toBe("1001");
-  }, PATIENCE_MS * 12);
 
   it("A103: a revision raising retainStates fills the window from its start; one lowering it releases the leaving states in its first block", async () => {
     const scenario = await ledgerScenario({

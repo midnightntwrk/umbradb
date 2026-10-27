@@ -34,6 +34,23 @@ export interface TestLoaderData {
   readonly trapAt?: string;
   /** Records every `evict` (its keys, and whether the package refused) and `forgetTransactions` (how many). */
   readonly recordEvictions?: boolean;
+  /**
+   * Memory the threads share (task 12.5a): the loader of each thread that loads an adapter takes the next slot after
+   * the first (the first counts the threads) and adds 1 to it every 5 ms while the thread runs, so a test sees which
+   * threads still run.
+   */
+  readonly heartbeat?: SharedArrayBuffer;
+}
+
+let beating = false;
+
+/** Starts this thread's heartbeat in `memory` (see {@link TestLoaderData.heartbeat}), once. */
+function beat(memory: SharedArrayBuffer): void {
+  if (beating) return;
+  beating = true;
+  const view = new Int32Array(memory);
+  const slot = Atomics.add(view, 0, 1) + 1;
+  setInterval(() => Atomics.add(view, slot, 1), 5);
 }
 
 const deserialized: Uint8Array[] = [];
@@ -60,6 +77,7 @@ export async function loadLedger(
   given?: TestLoaderData | null,
 ): Promise<LedgerPackage> {
   const data = given ?? {};
+  if (data.heartbeat !== undefined) beat(data.heartbeat);
   if (data.failLoad === true) throw new Error(`the test loader refuses to load ${ledger}`);
   const adapter = await loadLedgerPackage(ledger, options);
   if (data.count === true) {

@@ -54,7 +54,9 @@
  * fixed-budget mark-and-sweep from `sweep`, `grey`, `marks`, `nodes` and `root_counts` as committed at h − 1 and the
  * block's batch, and has the worker evict the nodes it deletes (`LedgerHost.evict`) before the block commits;
  * `on-db-write` writes the step after the batch. With the `core` entry's `sweep` off at h no step runs, and the first
- * such block after one with it on clears the sweep's sets.
+ * such block after one with it on clears the sweep's sets. An eviction the package still refuses after the worker
+ * freed what it can ends the worker thread: a new one loads the state at h − 1 from the database and applies h again,
+ * and only a refusal then fails the block (owner decision Q144 B, task 12.5a: {@link computeBlock}).
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant over its rules; a negative control's build composes its own
  * with {@link coreLedgerState}, one rule replaced.
@@ -67,7 +69,7 @@ import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { firstRegularAtParentTime, parentTimestampMs } from "../../ledger/replay.js";
 import type { ChainOutcome, LedgerEvent, LedgerName, StateSummary, TransactionResult, VmLog } from "../../ledger/types.js";
-import type { AppliedState, ContractKeys } from "../../ledger/worker/engine.js";
+import { type AppliedState, type ContractKeys, isEvictionRefused } from "../../ledger/worker/engine.js";
 import type { LedgerHost } from "../../ledger/worker/host.js";
 import { type BlockContext, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
 import { BLOCKS_TABLE, blockHeaderOf, ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
@@ -318,6 +320,11 @@ export interface CoreLedgerStateOptions {
   readonly sweepBudget?: number;
   /** LG-14: which grey keys a marking round visits; the smallest in byte order. */
   readonly greyPicker?: GreyPicker;
+  /**
+   * LG-14 (owner decision Q144 B, task 12.5a): whether an eviction the package still refuses after the worker freed
+   * what it can ends the worker thread and applies the block again in a new one; true (false: task 12.5's halt).
+   */
+  readonly restartOnRefusedEviction?: boolean;
 }
 
 const hex = (bytes: Uint8Array): string => `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -637,6 +644,32 @@ export async function sweepOf(
   return step;
 }
 
+/**
+ * Block `b`'s `on-compute` work (see the module comment): the block applied, its root checked and its sweep step
+ * computed, the nodes the step deletes evicted. When the package still refuses that eviction after the worker freed
+ * what it can (`EvictionRefused`), the worker thread is ended and a new one started, which loads the state at h − 1
+ * from the database (the apply's load, task 12.4) and applies the block again, its sweep step computed and evicted
+ * again; a refusal then fails the block (LG-14, owner decision Q144 B, task 12.5a). The stored rows and roots do not
+ * depend on the restart: the new thread applies the same block to the same stored state, and a node it writes again is
+ * left as it is (`ON CONFLICT DO NOTHING`).
+ */
+export async function computeBlock(
+  p: ProcessContext,
+  b: BlockContext,
+  read: Pick<ReadHandle, "query">,
+  options: CoreLedgerStateOptions = {},
+): Promise<{ readonly applied: AppliedState; readonly sweep: SweepWrites | null }> {
+  const applied = await applyBlock(p, b, read, options);
+  try {
+    return { applied, sweep: await sweepOf(p, b, read, applied, options) };
+  } catch (error) {
+    if (!isEvictionRefused(error) || options.restartOnRefusedEviction === false) throw error;
+    await boundLedger(p).ledger.restart();
+    const again = await applyBlock(p, b, read, options);
+    return { applied: again, sweep: await sweepOf(p, b, read, again, options) };
+  }
+}
+
 /** The {@link RetainedStates} of core-ledger-state's context `p` (see the module comment). */
 export function retainedStates(p: ProcessContext, options: CoreLedgerStateOptions = {}): RetainedStates {
   const from = options.retainedFrom ?? retainedFrom;
@@ -711,9 +744,9 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): ModuleDec
         p.publish(LEDGER_STATE_ITEM, retainedStates(p, options));
       },
       async "on-compute"(p, b, read, out) {
-        const applied = await applyBlock(p, b, read, options);
-        PENDING.set(p, { applied, sweep: await sweepOf(p, b, read, applied, options) });
-        const items = itemsOf(applied);
+        const computed = await computeBlock(p, b, read, options);
+        PENDING.set(p, computed);
+        const items = itemsOf(computed.applied);
         out.put(LEDGER_STATE_ITEM, items.state);
         out.put(LEDGER_EVENTS_ITEM, items.events);
         out.put(SEGMENT_RESULTS_ITEM, items.segments);

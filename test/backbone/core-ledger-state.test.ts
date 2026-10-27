@@ -6,6 +6,7 @@ import {
   applyBlock,
   bindCoreLedgerState,
   boundLedger,
+  computeBlock,
   CORE_LEDGER_STATE,
   CORE_LEDGER_STATE_MIGRATIONS,
   itemsOf,
@@ -18,7 +19,7 @@ import {
   writeBlock,
 } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { UmbraError } from "../../src/db/errors.js";
-import type { AppliedState } from "../../src/ledger/worker/engine.js";
+import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { BlockContext, ProcessContext } from "../../src/modules/declaration.js";
 
@@ -499,5 +500,75 @@ describe("core-block-parsed in the ledger worker (CD-5, LG-7)", () => {
     expect(await parser.parse("v9", [], { height: 1n, hash: hash(2) })).toEqual([]);
     expect(await parser.parse("v9", [Uint8Array.of(1)], { height: 1n, hash: hash(2) })).toEqual([]);
     expect(asked.at(-1)).toEqual({ parse: ["v9", { height: 1n, hash: hash(2) }, [Uint8Array.of(1)]] });
+  });
+});
+
+describe("a refused eviction (task 12.5a; LG-14, owner decision Q144 B)", () => {
+  /** A read at h − 1 whose sweep is scanning: one unmarked stored node, 0x77…, which the block's step deletes. */
+  const sweeping = () => {
+    const base = reading([{ ms: 1n }]);
+    return {
+      ...base,
+      async query(sql: string, params: unknown[] = []) {
+        if (sql.includes("FROM core_ledger_state.sweep")) return [{ cycle: 1n, phase: "sweep", sweep_after: null }];
+        if (sql.includes("FROM core_ledger_state.nodes n")) return [{ node_key: hash(0x77), marked: false }];
+        return base.query(sql, params);
+      },
+    };
+  };
+  /** The fake worker of {@link bound}, its evictions answered by `answers` in turn, its restarts counted. */
+  function refusing(...answers: readonly (Error | null)[]) {
+    const first = applied(3n);
+    const again = applied(3n, { stateKey: hash(0x41) });
+    const { p, asked, host } = bound(first.stateRoot, first);
+    let applies = 0;
+    let restarts = 0;
+    const evictions: Uint8Array[][] = [];
+    Object.assign(host, {
+      async apply(input: unknown) {
+        asked.push({ apply: input });
+        applies += 1;
+        return applies === 1 ? first : again;
+      },
+      async evict(keys: readonly Uint8Array[]) {
+        evictions.push([...keys]);
+        const answer = answers[evictions.length - 1] ?? null;
+        if (answer !== null) throw answer;
+        return 1;
+      },
+      async restart() {
+        asked.push({ restart: true });
+        restarts += 1;
+      },
+    });
+    return { p, asked, first, again, evictions, restarts: () => restarts };
+  }
+  const refusal = () => new EvictionRefused("still held by a live object");
+
+  it("ends the worker thread and computes the block again in a new one — the state at h − 1 loaded, the block applied, its step evicted — when the package refuses after the worker freed what it can", async () => {
+    const { p, asked, again, evictions, restarts } = refusing(refusal(), null);
+    const computed = await computeBlock(p, block(3n), sweeping());
+    expect(restarts()).toBe(1);
+    expect(computed.applied).toBe(again);
+    expect(computed.sweep?.deleted).toEqual([hash(0x77)]);
+    expect(evictions).toEqual([[hash(0x77)], [hash(0x77)]]);
+    // load, apply, restart, then load and apply again (the new thread's state at h − 1 read from the database).
+    expect(asked.map((call) => Object.keys(call as object)[0])).toEqual(["load", "apply", "restart", "load", "apply"]);
+  });
+
+  it("fails the block with a refusal on the retry, after one restart; with any other error, or the restart turned off, at once", async () => {
+    const twice = refusing(refusal(), refusal());
+    await expect(computeBlock(twice.p, block(3n), sweeping())).rejects.toThrow(/still held by a live object/);
+    expect(twice.restarts()).toBe(1);
+    const other = refusing(new Error("the database went away"), null);
+    await expect(computeBlock(other.p, block(3n), sweeping())).rejects.toThrow(/the database went away/);
+    expect(other.restarts()).toBe(0);
+    const off = refusing(refusal(), null);
+    await expect(computeBlock(off.p, block(3n), sweeping(), { restartOnRefusedEviction: false })).rejects.toThrow(/still held/);
+    expect(off.restarts()).toBe(0);
+    // No eviction, no restart: a block whose step deletes nothing.
+    const none = refusing(refusal());
+    expect((await computeBlock(none.p, block(3n), reading([{ ms: 1n }]))).applied).toBe(none.first);
+    expect(none.restarts()).toBe(0);
   });
 });

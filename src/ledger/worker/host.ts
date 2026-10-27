@@ -92,8 +92,20 @@ export interface LedgerHost {
   load(input: LoadState, read?: NodeReader): Promise<LoadedState>;
   /** A retained state's root, the state loaded by its key aside through `read` (LG-12; task 12.4). */
   retained(input: LoadState, read?: NodeReader): Promise<{ readonly stateRoot: Uint8Array }>;
-  /** The nodes the sweep deletes, forgotten by the worker's packages (LG-14; task 12.5); rejects when one is in use. */
+  /**
+   * The nodes the sweep deletes, forgotten by the worker's packages (LG-14; task 12.5); rejects when one is in use —
+   * with an `EvictionRefused` (`./engine.ts`) once the worker freed what it can.
+   */
   evict(keys: readonly Uint8Array[]): Promise<number>;
+  /**
+   * Ends the worker thread and starts a new one (LG-14, owner decision Q144 B; task 12.5a): the new thread holds no
+   * state, so the next block's state at h − 1 is loaded from the database; the parses kept for blocks not released yet
+   * are sent to it again (a parse in flight is answered by it), and any other request in flight fails. Rejects for a
+   * worker that failed or is closed.
+   */
+  restart(): Promise<void>;
+  /** How many times {@link LedgerHost.restart} started a new thread. */
+  readonly restarts: number;
   /** A test package's loader's `probe()` (plain data), or null without one. */
   probe(): Promise<unknown>;
   /** The step in progress, or null. */
@@ -177,8 +189,37 @@ function heightOf(request: LedgerRequest): bigint | null {
   }
 }
 
+/** A parse request as sent. */
+type ParseRequest = Extract<LedgerRequest, { readonly type: "parse" }>;
+
+const hexOf = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+/**
+ * The parses a worker keeps, as the main thread sent them (task 12.5a): each parse until a release drops it, as the
+ * engine keeps and drops them (`./engine.ts`'s `parse` and `release`, by the block's hash), so that a restarted worker
+ * is sent them again.
+ */
+class SentParses {
+  readonly #byHash = new Map<string, ParseRequest>();
+
+  sent(request: LedgerRequest): void {
+    if (request.type === "parse") this.#byHash.set(hexOf(request.block.hash), request);
+    if (request.type !== "release") return;
+    const named = new Set((request.drop.hashes ?? []).map(hexOf));
+    for (const [key, parse] of [...this.#byHash]) {
+      if (named.has(key) || (request.drop.upTo !== undefined && parse.block.height <= request.drop.upTo)) this.#byHash.delete(key);
+    }
+  }
+
+  /** The parses kept now, in the order they were sent. */
+  kept(): readonly ParseRequest[] {
+    return [...this.#byHash.values()];
+  }
+}
+
 /** A request in flight. */
 interface Pending {
+  readonly request: LedgerRequest;
   readonly kind: LedgerRequestKind;
   readonly height: bigint | null;
   readonly sent: number;
@@ -187,24 +228,66 @@ interface Pending {
   reject(error: unknown): void;
 }
 
+/** A worker thread of a host: a thread, its bridge, and whether the host ended it to start another (`restart`). */
+interface Thread {
+  readonly worker: Worker;
+  readonly bridge: BridgeServer;
+  readonly exited: Promise<void>;
+  retired: boolean;
+}
+
 /** Starts a ledger worker (see the module comment). */
 export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost {
-  const memory = bridgeMemory(options.bridgeBytes);
-  const bridge = new BridgeServer(memory);
   const loader = options.loader === undefined ? null : new URL(options.loader).href;
-  const worker = new Worker(options.entry ?? ledgerWorkerEntry(), {
-    workerData: { memory, loader, loaderData: options.loaderData },
-  });
+  const entry = options.entry ?? ledgerWorkerEntry();
   const pending = new Map<number, Pending>();
+  const parses = new SentParses();
   let database: NodeDatabase | null = null;
   /** Node requests of requests given no read, waiting for a read (see the module comment). */
   const waiting = new Set<(read: NodeReader) => void>();
   let next = 1;
   /** When the worker last answered a request: the next one in order began then, if it was sent by then. */
   let answeredAt = performance.now();
+  let failure: LedgerWorkerFailure | null = null;
+  let closed = false;
+  let closing: Promise<void> | undefined;
+  let restarts = 0;
+  /** The bridge requests and nodes of the threads ended by a restart. */
+  const before = { requests: 0, nodes: 0 };
+
+  const fail = (error: LedgerWorkerFailure): void => {
+    if (failure !== null || closed) return;
+    failure = error;
+    for (const request of pending.values()) request.reject(error);
+    pending.clear();
+    void thread.worker.terminate();
+  };
+
+  /** A new worker thread, its messages and its end handled while it is the host's (see {@link LedgerHost.restart}). */
+  const spawn = (): Thread => {
+    const memory = bridgeMemory(options.bridgeBytes);
+    const worker = new Worker(entry, { workerData: { memory, loader, loaderData: options.loaderData } });
+    const started: Thread = {
+      worker,
+      bridge: new BridgeServer(memory),
+      exited: new Promise<void>((resolve) => worker.once("exit", () => resolve())),
+      retired: false,
+    };
+    worker.on("message", (message: FromLedgerWorker) => {
+      if (!started.retired) onMessage(message);
+    });
+    worker.on("error", (error: Error) => {
+      if (!started.retired) fail(new LedgerWorkerFailure(`the ledger worker failed: ${error.message}`, { cause: error }));
+    });
+    worker.on("exit", (code) => {
+      if (!started.retired) fail(new LedgerWorkerFailure(`the ledger worker exited with code ${code}`));
+    });
+    return started;
+  };
 
   /** Answers the worker's node request for request `id` (see the module comment). */
   const answerNode = (id: number): void => {
+    const { bridge } = thread;
     const own = pending.get(id)?.read ?? [...pending.values()].find((request) => request.read !== null)?.read ?? null;
     if (own !== null || database === null) {
       void bridge.answer(own);
@@ -221,19 +304,8 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     waiting.add(viaRequest);
     database.read((read) => once(read)).catch(() => once(null));
   };
-  let failure: LedgerWorkerFailure | null = null;
-  let closed = false;
-  let closing: Promise<void> | undefined;
-  const exited = new Promise<void>((resolve) => worker.once("exit", () => resolve()));
 
-  const fail = (error: LedgerWorkerFailure): void => {
-    if (failure !== null || closed) return;
-    failure = error;
-    for (const request of pending.values()) request.reject(error);
-    pending.clear();
-    void worker.terminate();
-  };
-  worker.on("message", (message: FromLedgerWorker) => {
+  const onMessage = (message: FromLedgerWorker): void => {
     if (message.type === "node") {
       answerNode(message.id);
       return;
@@ -249,24 +321,23 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
       pending.delete(message.id);
       request?.reject(errorOf(message.error));
     }
-  });
-  worker.on("error", (error: Error) => fail(new LedgerWorkerFailure(`the ledger worker failed: ${error.message}`, { cause: error })));
-  worker.on("exit", (code) => fail(new LedgerWorkerFailure(`the ledger worker exited with code ${code}`)));
+  };
+
+  let thread = spawn();
+
+  /** Posts `request` to the current thread under a new number, `entry` its pending record. */
+  const post = (request: LedgerRequest, record: Omit<Pending, "request" | "kind" | "height" | "sent">): void => {
+    const id = next++;
+    pending.set(id, { request, kind: request.type, height: heightOf(request), sent: performance.now(), ...record });
+    thread.worker.postMessage({ id, request } satisfies ToLedgerWorker);
+  };
 
   const send = <T>(request: LedgerRequest, read?: NodeReader): Promise<T> => {
     if (failure !== null) return Promise.reject(failure);
     if (closed) return Promise.reject(new Error("the ledger worker is closed"));
-    const id = next++;
+    parses.sent(request);
     return new Promise<T>((resolve, reject) => {
-      pending.set(id, {
-        kind: request.type,
-        height: heightOf(request),
-        sent: performance.now(),
-        read: read ?? null,
-        resolve: resolve as (value: unknown) => void,
-        reject,
-      });
-      worker.postMessage({ id, request } satisfies ToLedgerWorker);
+      post(request, { read: read ?? null, resolve: resolve as (value: unknown) => void, reject });
       if (read !== undefined) for (const waiter of [...waiting]) waiter(read);
     });
   };
@@ -285,13 +356,43 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     retained: (input, read) => send({ type: "retained", input }, read),
     evict: (keys) => send({ type: "evict", keys: [...keys] }),
     probe: () => send({ type: "probe" }),
+    async restart() {
+      if (failure !== null) throw failure;
+      if (closed) throw new Error("the ledger worker is closed");
+      const old = thread;
+      old.retired = true;
+      before.requests += old.bridge.stats.requests;
+      before.nodes += old.bridge.stats.nodes;
+      const inFlight = [...pending.values()];
+      pending.clear();
+      thread = spawn();
+      restarts += 1;
+      answeredAt = performance.now();
+      // The parses kept for blocks not released yet, sent again in their order, a parse still in flight answered by
+      // the new thread; any other request in flight fails (it ran on the thread that ended).
+      const parsing = new Map(inFlight.filter((request) => request.kind === "parse").map((request) => [hexOf((request.request as ParseRequest).block.hash), request]));
+      for (const request of parses.kept()) {
+        const key = hexOf(request.block.hash);
+        post(request, parsing.get(key) ?? { read: null, resolve: () => undefined, reject: () => undefined });
+        parsing.delete(key);
+      }
+      for (const request of parsing.values()) post(request.request, request);
+      for (const request of inFlight) {
+        if (request.kind !== "parse") request.reject(new Error(`the ledger worker was restarted while its ${request.kind} request ran (LG-14, Q144 B)`));
+      }
+      await old.worker.terminate();
+      await old.exited;
+    },
+    get restarts() {
+      return restarts;
+    },
     activity() {
       const [first] = pending.values();
       if (first === undefined) return null;
       const began = Math.max(first.sent, answeredAt);
       return Object.freeze({ kind: first.kind, height: first.height, sinceMs: performance.now() - began });
     },
-    bridge: () => bridge.stats,
+    bridge: () => ({ requests: before.requests + thread.bridge.stats.requests, nodes: before.nodes + thread.bridge.stats.nodes }),
     get failure() {
       return failure;
     },
@@ -301,8 +402,8 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
         closed = true;
         for (const request of pending.values()) request.reject(new Error("the ledger worker is closed"));
         pending.clear();
-        if (!wasFailed) await worker.terminate();
-        await exited;
+        if (!wasFailed) await thread.worker.terminate();
+        await thread.exited;
       })();
       return closing;
     },
@@ -325,13 +426,16 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
     }
     return engine;
   };
+  const parses = new SentParses();
   let chain: Promise<unknown> = Promise.resolve();
   let closed = false;
+  let restarts = 0;
   let current: { kind: LedgerRequestKind; height: bigint | null; sent: number } | null = null;
-  const run = <T>(kind: LedgerRequestKind, height: bigint | null, work: (engine: LedgerEngine) => Promise<T> | T): Promise<T> => {
+  const run = <T>(request: LedgerRequest, work: (engine: LedgerEngine) => Promise<T> | T): Promise<T> => {
     if (closed) return Promise.reject(new Error("the ledger worker is closed"));
+    parses.sent(request);
     const result = chain.then(async () => {
-      current = { kind, height, sent: performance.now() };
+      current = { kind: request.type, height: heightOf(request), sent: performance.now() };
       try {
         return await work(await engineOf());
       } finally {
@@ -341,18 +445,30 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
     chain = result.catch(() => undefined);
     return result;
   };
+  const parse = (request: ParseRequest) => run(request, (e) => e.parse(request.ledger, request.block, request.transactions));
   return {
     useDatabase: () => undefined,
-    parse: (ledger, block, transactions) => run("parse", block.height, (e) => e.parse(ledger, block, transactions)),
-    genesisRoot: (ledger, bytes) => run("genesis-root", 0n, (e) => e.genesisRoot(ledger, bytes)),
-    genesis: (input) => run("genesis", input.height, (e) => e.genesis(input)),
-    apply: (input) => run("apply", input.height, (e) => e.apply(input)),
-    commit: (block) => run("commit", block.height, (e) => e.commit(block)),
-    release: (drop) => run("release", null, (e) => e.release(drop)),
-    load: (input) => run("load", input.height, (e) => e.load(input)),
-    retained: (input) => run("retained", input.height, (e) => e.retained(input)),
-    evict: (keys) => run("evict", null, (e) => e.evict(keys)),
-    probe: () => run("probe", null, () => null),
+    parse: (ledger, block, transactions) => parse({ type: "parse", ledger, block, transactions: [...transactions] }),
+    genesisRoot: (ledger, bytes) => run({ type: "genesis-root", ledger, bytes }, (e) => e.genesisRoot(ledger, bytes)),
+    genesis: (input) => run({ type: "genesis", input }, (e) => e.genesis(input)),
+    apply: (input) => run({ type: "apply", input }, (e) => e.apply(input)),
+    commit: (block) => run({ type: "commit", block }, (e) => e.commit(block)),
+    release: (drop) => run({ type: "release", drop }, (e) => e.release(drop)),
+    load: (input) => run({ type: "load", input }, (e) => e.load(input)),
+    retained: (input) => run({ type: "retained", input }, (e) => e.retained(input)),
+    evict: (keys) => run({ type: "evict", keys: [...keys] }, (e) => e.evict(keys)),
+    probe: () => run({ type: "probe" }, () => null),
+    async restart() {
+      if (closed) throw new Error("the ledger worker is closed");
+      // A new engine (the old one, its states and parses, dropped), sent the kept parses again (see `startLedgerWorker`).
+      await chain;
+      engine = undefined;
+      restarts += 1;
+      for (const request of parses.kept()) parse(request).catch(() => undefined);
+    },
+    get restarts() {
+      return restarts;
+    },
     activity: () => (current === null ? null : Object.freeze({ kind: current.kind, height: current.height, sinceMs: performance.now() - current.sent })),
     bridge: () => ({ requests: 0, nodes: 0 }),
     failure: null,

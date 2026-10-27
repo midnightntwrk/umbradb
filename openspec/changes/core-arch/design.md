@@ -926,6 +926,18 @@ evicts again (those transactions are parsed again at their apply), and a refusal
 built it; under owner decision Q144 B the worker thread is ended instead and a new one started, which loads the state at
 h − 1 from the database and applies h again, a refusal on that retry failing the block (LG-14; task 12.5a).
 
+As built (task 12.5a): the engine names that second refusal (`EvictionRefused`, its name kept across the threads; a trap
+is never retried), and `core-ledger-state`'s `on-compute` (`computeBlock`) answers it with `LedgerHost.restart()` and
+the block's whole computation again — the load of the state at h − 1 (the new thread holds none, so it reads it through
+the bridge from on-compute's read), the apply, the root check, the sweep step and its eviction —; any error of that
+second pass fails the block as `callback-error`. `restart` ends the thread and starts one with the same options, keeps
+the host (the runner's bindings stay), sends the new thread every parse kept for a block not yet released, in their
+order (a parse in flight is answered there; any other request in flight fails), and counts the restarts (`restarts`); a
+worker that failed or was closed is not restarted. The rows written do not depend on the restart: the new thread applies
+the same block to the same stored state, and a node its fresh package writes again (one the old package knew stored) is
+left as it is (`ON CONFLICT DO NOTHING`), so the sweep's "stored" set — the committed nodes and the batch's inserts — is
+the same.
+
 ### 5.5 Ledger tasks (LG-17, Q49)
 
 The host program provides the ledger worker's entry: a small file that imports the same module packages as the main

@@ -58,7 +58,10 @@
  * loaded package, so a node needed again is flushed again. A package refuses to forget a node a live object holds; the
  * states the engine holds never hold a deleted node (the sweep marks them), so the engine frees a kept parse's native
  * objects when it drops the parse, and, should a later block's kept transaction still hold one, frees every kept
- * parse's native objects and tries again (those transactions are parsed again at their apply).
+ * parse's native objects and tries again (those transactions are parsed again at their apply). A refusal after that
+ * rejects with {@link EvictionRefused}: an object this thread cannot reach holds the node, and the main thread ends the
+ * thread, starts a new one, and applies the block again there on the state at h − 1 loaded from the database (owner
+ * decision Q144 B, task 12.5a; `./host.ts`'s `restart`).
  *
  * **The node store is installed from the first block on** (in the worker: the bridge's). A flushed node is a stored
  * node to the package, whose cache may then drop its bytes while the state still uses it; it reads them again, when it
@@ -96,6 +99,24 @@ export type LedgerLoader = (ledger: LedgerName, options: LedgerPackageOptions) =
 
 /** The network id the engine's adapters are made with: parsing and applying read none (see the module comment). */
 export const PARSE_NETWORK_ID = "undeployed";
+
+/** The name of {@link EvictionRefused}, which an error keeps when it crosses from the worker (`./host.ts`'s `errorOf`). */
+export const EVICTION_REFUSED = "EvictionRefused";
+
+/**
+ * A package still refusing to forget a swept node after the worker freed what it can (LG-14; see
+ * {@link LedgerEngine.evict}): the main thread ends the worker thread and applies the block again in a new one (owner
+ * decision Q144 B, task 12.5a).
+ */
+export class EvictionRefused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = EVICTION_REFUSED;
+  }
+}
+
+/** Whether `error` is an {@link EvictionRefused}, here or as it crossed from the worker (its name kept). */
+export const isEvictionRefused = (error: unknown): boolean => error instanceof Error && error.name === EVICTION_REFUSED;
 
 /** A block: its height and hash. */
 export interface BlockId {
@@ -541,7 +562,9 @@ export class LedgerEngine {
 
   /**
    * Drops the nodes the sweep deletes from every loaded package's caches (LG-14, task 12.5), so a later block that needs
-   * one again flushes it again; the package refuses (and this throws) when a live object still holds one.
+   * one again flushes it again. When the package refuses — a live object still holds one — the kept parses' native
+   * objects are freed and the eviction tried once more; a refusal then rejects with {@link EvictionRefused}, which the
+   * main thread answers by ending this thread and starting a new one (Q144 B, task 12.5a). A trap is never retried.
    */
   async evict(keys: readonly Uint8Array[]): Promise<number> {
     if (keys.length === 0) return 0;
@@ -551,12 +574,21 @@ export class LedgerEngine {
       if (adapter === undefined) continue;
       try {
         adapter.evict([...keys]);
-      } catch {
+      } catch (first) {
+        if (first instanceof WebAssembly.RuntimeError) throw first;
         // A live object holds one: the states the engine holds are marked, so it is a kept parse's (a later block's
-        // transaction carrying the same value). Its native objects are freed — the block's apply parses it again — and
-        // the eviction tried once more; a refusal then is a node of a live state, and fails the block.
+        // transaction carrying the same value) or, should one hold it, an object nothing here can reach. The kept
+        // parses' native objects are freed — the block's apply parses them again — and the eviction tried once more.
         for (const kept of this.#kept.values()) await this.#forget(kept);
-        adapter.evict([...keys]);
+        try {
+          adapter.evict([...keys]);
+        } catch (second) {
+          if (second instanceof WebAssembly.RuntimeError) throw second;
+          throw new EvictionRefused(
+            `the ${adapter.ledger} package refuses to forget ${keys.length} swept node(s) after the ledger worker freed ` +
+              `every kept parse's native objects: ${second instanceof Error ? second.message : String(second)} (LG-14)`,
+          );
+        }
       }
       packages += 1;
     }

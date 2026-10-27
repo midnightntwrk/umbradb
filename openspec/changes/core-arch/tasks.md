@@ -2721,12 +2721,36 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       it deleted nothing a retained state reaches.
       **Pending:** Q144 (a deleted node a live object still holds after the retry); K's cost on real states is
       A136's to measure.
-- [ ] 12.5a The owner's answer Q144 B: when the ledger package still refuses an eviction after the worker freed what it
+- [x] 12.5a The owner's answer Q144 B: when the ledger package still refuses an eviction after the worker freed what it
       can (12.5's second attempt), the worker thread is ended and a new one started, which loads the state at h − 1 from
       the database (task 12.4's load) and applies block h again; processing does not halt, and only a refusal on that
       retry fails the block with `callback-error` (LG-14 as amended); `design.md` §5.4; a test package that refuses one
       eviction, and the tests.
       **Acceptance:** A160.
+      **Done (2026-10-27):** the engine names a refusal after its freeing (`EvictionRefused`, its name kept across the
+      threads; a trap never retried); `LedgerHost.restart()` ends the thread and starts one with the same options,
+      keeping the host the runner bound, sending the new thread every parse kept for a block not yet released (a parse
+      in flight answered there, any other request in flight failed) and counting restarts (`inThreadLedger` alike: a
+      new engine); `core-ledger-state`'s `on-compute` (`computeBlock`) answers the refusal with a restart and the
+      block's whole computation again — the load of the state at h − 1 through the bridge, the apply, the root check,
+      the sweep step and its eviction —, any error of that pass failing the block (`restartOnRefusedEviction`, the
+      negative control's seam); design §5.4's "As built". Tests (seen failing first on the base tree: no restart, a halt
+      at h = 14): `test/backbone/ledger-eviction-restart.test.ts` (A160 on PostgreSQL 18.6 and PGlite 0.5.10 over task
+      12.5's DAG fixture with K = 50, h its first deleting block: the first thread's package refuses both tries, one
+      restart, the new thread loads the state at h − 1 from the node store, no halt, the sweep tables after every block
+      and every `states` row equal to an uninterrupted run's; refused again on the retry: `callback-error` in
+      `core-ledger-state`'s `on-compute`, one restart, nothing of h stored), `test/ledger/worker-restart.test.ts` (a
+      real thread: kept parses sent again, in-flight requests, the old thread ended, the bridge's counts kept, the main
+      thread's engine, the named refusal), `core-ledger-state.test.ts` (+2, `computeBlock`); the test package
+      (`sweep-test-loader.ts`) loads a state it did not make from the node store and refuses by thread. Committed
+      negative controls (`ledger-eviction-restart.negative-control.test.ts`, both backends): task 12.5's halt on the
+      first refusal halts at h; a retry without the state at h − 1 halts at h ("holds no state"). **A103's load
+      sensitivity** (owner decision Q122): its 5,000-block run on PostgreSQL — about 4 blocks a second there at load
+      averages near 40 against PGlite's 30, 1.3 in a loaded conformance run, past an hour — now runs once, on PGlite, to
+      4,990, where the process backs up; PGlite continues to 5,001 and PostgreSQL continues from that backup restored
+      with `umbradb restore`'s code (BK-2, BK-4), A103's loads and holdings checked on both
+      (`test/backbone/ledger-window.test.ts`, about 110 s in all); its revisions test and its control are unchanged.
+      **Pending:** nothing of 12.5a.
 - [ ] 12.6 Ledger tasks and the plain-data `block-parsed` (`runLedgerWorker`, the host's worker entry, the
       structured-clone check).
       **Acceptance:** A137.

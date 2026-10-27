@@ -1,6 +1,8 @@
 # 00039 — A103's PostgreSQL case times out inside the full conformance run under load
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed by task 12.5a (owner decision Q122): A103's 5,000-block run now happens once, on
+  PGlite, and PostgreSQL continues from its backup at 4,990 restored with `umbradb restore`'s code
+  (`test/backbone/ledger-window.ts`, `ledger-window.test.ts`); the case in `ledger-storage.test.ts` is gone.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem
