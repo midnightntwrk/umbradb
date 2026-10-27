@@ -488,3 +488,89 @@ async function grantAsOwner(tx: Transaction, plan: SchemaPlan, schema: PlannedSc
   }
   await tx.execute("RESET ROLE");
 }
+
+/** The relations of a schema whose owner a restore sets: tables, partitions, views, sequences no column owns. */
+const RESTORED_RELATIONS = `SELECT c.relname AS name, c.relkind AS kind FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+    AND NOT (c.relkind = 'S' AND EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_class'::regclass
+      AND d.objid = c.oid AND d.refclassid = 'pg_class'::regclass AND d.deptype IN ('a', 'i')))
+    AND pg_get_userbyid(c.relowner) <> $2
+  ORDER BY c.relname`;
+
+/** The routines of a schema, by signature, and its types that no relation defines (an enum, a domain, a range). */
+const RESTORED_ROUTINES = `SELECT p.oid::regprocedure::text AS routine FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1 AND pg_get_userbyid(p.proowner) <> $2
+  ORDER BY 1`;
+const RESTORED_TYPES = `SELECT t.oid::regtype::text AS type FROM pg_type t
+  JOIN pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 AND t.typtype IN ('e', 'd', 'r')
+    AND pg_get_userbyid(t.typowner) <> $2 ORDER BY 1`;
+
+/** The command that gives a relation of `kind` (`pg_class.relkind`) another owner. */
+const ALTER_BY_KIND: Readonly<Record<string, string>> = {
+  r: "TABLE",
+  p: "TABLE",
+  f: "FOREIGN TABLE",
+  v: "VIEW",
+  m: "MATERIALIZED VIEW",
+  S: "SEQUENCE",
+};
+
+/**
+ * After a restore ran a backup's SQL as the writer's login (BK-3, task 15.2; the dump written with `--no-owner`, so
+ * the login owns everything it created): the roles of the plan the server lacks created, as {@link prepareSchemas}
+ * would create them, and a login that is not a superuser let to use them; then each schema of the plan, and every
+ * table, partition, view, sequence no column owns (a column's follows its table), routine, enum, domain and range in
+ * it, given to the schema's role, as the module's migrations under its role made them on a database built by
+ * migrations. UmbraDB's own schemas (`core_chain`, `core_digest`, `core_digest_shadow`) stay the login's, as theirs do.
+ * Refuses, before changing anything, a login that cannot create a missing role or use one (`invalid-configuration`,
+ * `reason: writer-privileges`), as {@link prepareSchemas} does.
+ */
+export async function restoreOwnership(tx: Transaction, plan: SchemaPlan): Promise<void> {
+  const [facts] = await tx.query(LOGIN_FACTS);
+  const login = facts?.login as string;
+  const superuser = facts?.superuser === true;
+  const roleRows = await tx.query(ROLE_FACTS, [plan.schemas.map((schema) => schema.role)]);
+  const roles = new Map(roleRows.map((row) => [row.role as string, row]));
+  const missingRoles = [...new Set(plan.schemas.filter((schema) => !roles.has(schema.role)).map((schema) => schema.role))];
+  if (!superuser && missingRoles.length > 0 && facts?.createrole !== true) {
+    throw new UmbraError(
+      "invalid-configuration",
+      `the database login ${login} cannot create the roles ${missingRoles.join(", ")} the restored database's ` +
+        `schemas belong to: it lacks CREATEROLE (ALTER ROLE ${login} CREATEROLE), or an administrator creates them ` +
+        "(design.md §4)",
+      { reason: "writer-privileges", login, missing: missingRoles },
+    );
+  }
+  for (const role of missingRoles) await tx.execute(`CREATE ROLE ${quoteIdentifier(role)} NOLOGIN`);
+  if (!superuser) {
+    for (const role of new Set(plan.schemas.map((schema) => schema.role))) {
+      const row = roles.get(role);
+      if (row?.can_set === true && row.inherits === true) continue;
+      await tx.execute(`GRANT ${quoteIdentifier(role)} TO CURRENT_USER WITH INHERIT TRUE, SET TRUE`);
+    }
+  }
+  const owners = new Map(
+    (await tx.query(SCHEMA_OWNERS, [plan.schemas.map((schema) => schema.name)])).map((row) => [
+      row.schema as string,
+      row.owner as string,
+    ]),
+  );
+  for (const schema of plan.schemas) {
+    const owner = owners.get(schema.name);
+    if (owner === undefined) continue;
+    const name = quoteIdentifier(schema.name);
+    const role = quoteIdentifier(schema.role);
+    if (owner !== schema.role) await tx.execute(`ALTER SCHEMA ${name} OWNER TO ${role}`);
+    for (const row of await tx.query(RESTORED_RELATIONS, [schema.name, schema.role])) {
+      const what = ALTER_BY_KIND[row.kind as string] as string;
+      await tx.execute(`ALTER ${what} ${name}.${quoteIdentifier(row.name as string)} OWNER TO ${role}`);
+    }
+    for (const row of await tx.query(RESTORED_ROUTINES, [schema.name, schema.role])) {
+      await tx.execute(`ALTER ROUTINE ${row.routine as string} OWNER TO ${role}`);
+    }
+    for (const row of await tx.query(RESTORED_TYPES, [schema.name, schema.role])) {
+      await tx.execute(`ALTER TYPE ${row.type as string} OWNER TO ${role}`);
+    }
+  }
+}

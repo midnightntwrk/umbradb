@@ -205,8 +205,30 @@ export const ERROR_CODES = [
   "backup-tools-missing",
   /** A backup of a private database without the development opt-in (PP-12). */
   "private-backup-refused",
-  /** A file that is not a backup of the format this build reads: no manifest line, or a manifest of another format. */
+  /**
+   * A file that is not a backup of the format this build reads: no manifest line, a manifest of another format, or a
+   * dump a restore does not run (a `psql` meta-command other than `\restrict`/`\unrestrict`, a `COPY … FROM stdin`, a
+   * file ending inside a statement).
+   */
   "backup-format-unknown",
+  // The restore's refusals (BK-3; `src/backup/restore.ts`, task 15.2), in its order: before loading, then after.
+  /** The target database of a restore is not empty: nothing was changed. */
+  "restore-target-not-empty",
+  /** The configuration's S or history differs from the backup's up to its height (CF-5, CF-6 against the manifest). */
+  "backup-history-mismatch",
+  /**
+   * The build cannot continue the backup: the versions of the revisions covering its height + 1 (CF-8), a version that
+   * requires a resync (DB-10), or a recorded migration the build lacks or changed (DB-9).
+   */
+  "backup-build-mismatch",
+  /** The node's genesis hash is not the backup's chain's. */
+  "backup-genesis-mismatch",
+  /** The node has not finalized the backup's block: its head is below the backup's height, or another block is there. */
+  "backup-block-not-finalized",
+  /** The restored database's contents hash (DT-3) is not the manifest's: the restore rolled back. */
+  "contents-hash-mismatch",
+  /** The ledger state root the backup stores at its height is not the node's (LG-15): the restore rolled back. */
+  "backup-root-mismatch",
 ] as const;
 
 /**

@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { backupAtStop, firstLine, writeBackup } from "../../src/backup/backup.js";
 import { readBackupFacts } from "../../src/backup/facts.js";
+import { isEmptyDatabase } from "../../src/backup/restore.js";
+import { runRestore } from "../../src/cli/restore.js";
 import { BACKUP_FORMAT, type Manifest, MANIFEST_PREFIX, manifestLine, readManifestLine } from "../../src/backup/manifest.js";
 import { findPgDump, loadPgliteDump, pgDumpVersion } from "../../src/backup/tools.js";
 import { backupArguments, runBackup } from "../../src/cli/backup.js";
@@ -345,5 +347,42 @@ describe("pglite-tools' pg_dump of another major version", () => {
       await db.close();
     }
     expect(existsSync(out)).toBe(false);
+  });
+});
+
+describe("a restore's empty target and its refusals before reading the file (BK-3)", () => {
+  it("counts a database as empty only with no schema of its own, and nothing in public", async () => {
+    const db = await openPglite({ dataDir: "memory://", committedHeight: async () => null, developmentOptIn: true });
+    try {
+      const empty = () => db.read((read) => isEmptyDatabase(read));
+      expect(await empty()).toBe(true);
+      for (const [make, drop] of [
+        ["CREATE SCHEMA s", "DROP SCHEMA s"],
+        ["CREATE TABLE public.t (a int)", "DROP TABLE public.t"],
+        ["CREATE FUNCTION public.f() RETURNS int LANGUAGE sql AS 'SELECT 1'", "DROP FUNCTION public.f()"],
+        ["CREATE TYPE public.e AS ENUM ('a')", "DROP TYPE public.e"],
+      ] as const) {
+        await db.transaction((tx) => tx.execute(make));
+        expect(await empty(), make).toBe(false);
+        await db.transaction((tx) => tx.execute(drop));
+        expect(await empty(), drop).toBe(true);
+      }
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("refuses a private process's configuration before anything is opened", async () => {
+    const file = project.write(
+      "private-restore.config.ts",
+      [
+        `import { coreEntry, defineConfig } from ${JSON.stringify(project.builders)};`,
+        "export default defineConfig({ entries: [coreEntry({ start: 1, config: " +
+          `${JSON.stringify({ network: "custom", genesisHash: HASH, ledgerTable: { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v9" }] }, database: "postgres://u:p@127.0.0.1:1/x", instanceId: "i-1" })} })] });`,
+        "",
+      ].join("\n"),
+    );
+    const outcome = await runRestore({ file: join(dir, "none.backup"), config: file, cwd: project.dir });
+    expect(outcome).toMatchObject({ restored: false, error: { code: "invalid-configuration", details: { reason: "private-restore" } } });
   });
 });

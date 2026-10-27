@@ -125,7 +125,7 @@ const RECORD_SQL = `INSERT INTO core_chain.migrations (module, migration_id, che
   VALUES ($1, $2, decode($3, 'hex'), $4::integer)`;
 
 /** A row of `core_chain.migrations`, its checksum in hex. */
-interface AppliedRow {
+export interface AppliedRow {
   readonly module: string;
   readonly migration_id: string;
   readonly checksum: string;
@@ -309,20 +309,84 @@ async function apply(
 }
 
 /**
+ * The bootstrap's checks of the recorded migrations (DB-9, DB-10, Q91): for every part, `requires-resync`, then its
+ * rows as {@link checkApplied} checks them; then a name recorded that no part of the build has (`migration-missing`).
+ * Resolves with how many migrations each name has applied.
+ */
+function checkRecorded(
+  runners: readonly Runnable[],
+  byName: ReadonlyMap<string, Runnable>,
+  rows: readonly AppliedRow[],
+  committedVersions: ReadonlyMap<string, readonly string[]>,
+): Map<string, number> {
+  const recorded = new Map<string, AppliedRow[]>();
+  for (const row of rows) recorded.set(row.module, [...(recorded.get(row.module) ?? []), row]);
+  for (const runner of runners) {
+    checkResync(runner.part, committedVersions.get(runner.part.id) ?? []);
+    if (byName.get(runner.name) === runner) checkApplied(runner, recorded.get(runner.name) ?? []);
+  }
+  // Recorded under a name no part of the build has: a module (or shared item) the build dropped (DB-9).
+  for (const [name, list] of recorded) {
+    if (!byName.has(name)) throw missing(`the module or shared item ${name}`, name, list[0] as AppliedRow);
+  }
+  return new Map([...recorded].map(([name, list]) => [name, list.length]));
+}
+
+/** The parts as the runner runs them, and the first of each record name (a shared item's providers declare alike). */
+function runnersOf(parts: readonly MigrationPart[], plan: SchemaPlan): { runners: Runnable[]; byName: Map<string, Runnable> } {
+  const runners = parts.map((part) => runnable(part, plan));
+  const byName = new Map<string, Runnable>();
+  for (const runner of runners) if (!byName.has(runner.name)) byName.set(runner.name, runner);
+  return { runners, byName };
+}
+
+/**
+ * A restore's check of a backup's recorded migrations against the build (BK-3, task 15.2): the bootstrap's own checks
+ * ({@link startDatabase}) on `rows`, the backup's `core_chain.migrations` (each name's rows in position order), without
+ * a database — `requires-resync`, `migration-checksum-changed`, `migration-missing` as startup would refuse them.
+ */
+export function checkRecordedMigrations(
+  plan: SchemaPlan,
+  parts: readonly MigrationPart[],
+  rows: readonly AppliedRow[],
+  committedVersions: ReadonlyMap<string, readonly string[]>,
+): void {
+  const { runners, byName } = runnersOf(parts, plan);
+  checkRecorded(runners, byName, rows, committedVersions);
+}
+
+/**
+ * The grants of a restored database (BK-3, DB-6, DB-7; task 15.2), in the restore's transaction, once its objects
+ * belong to their schemas' roles (`restoreOwnership`): what startup's bootstrap grants, made again — `pg_dump
+ * --no-privileges` writes no grant — as each schema's owner (`prepareSchemas`: `USAGE`, `SELECT`, `EXECUTE` and their
+ * default privileges), after `EXECUTE` on every routine of a module schema is taken from `PUBLIC` (a routine its
+ * migration made after the owner's default privilege revoked it never had it), then `USAGE` and `SELECT` on
+ * `core_chain` and, once `core-digest`'s migrations made it, `core_digest`, for every role of the plan.
+ */
+export async function restoreGrants(tx: Transaction, plan: SchemaPlan): Promise<void> {
+  for (const schema of plan.schemas) {
+    await tx.execute(`SET LOCAL ROLE ${quoteIdentifier(schema.role)}`);
+    await tx.execute(`REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA ${quoteIdentifier(schema.name)} FROM PUBLIC`);
+    await tx.execute("RESET ROLE");
+  }
+  await prepareSchemas(tx, plan);
+  await grantReads(tx, plan, "core_chain");
+  if (await captureReady(tx)) await grantReads(tx, plan, "core_digest");
+}
+
+/**
  * Bootstraps the database, checks every part's applied migrations, then migrates and sets up each part in order (see
  * the module comment). Resolves with the migrations this startup applied; rejects with the first refusal or failure,
  * with the error of an `on-start-db` as it is, or with `connection-lost`.
  */
 export async function startDatabase(db: Database, input: StartupInput): Promise<readonly AppliedMigration[]> {
-  const runners = input.parts.map((part) => runnable(part, input.plan));
+  // The build's list for each record name: its first part's (a shared item's providers declare the same, DB-8).
+  const { runners, byName } = runnersOf(input.parts, input.plan);
   const ids = new Set<string>();
   for (const { part } of runners) {
     if (ids.has(part.id)) throw new Error(`startDatabase: the part ${part.id} is given twice`);
     ids.add(part.id);
   }
-  // The build's list for each record name: its first part's (a shared item's providers declare the same, DB-8).
-  const byName = new Map<string, Runnable>();
-  for (const runner of runners) if (!byName.has(runner.name)) byName.set(runner.name, runner);
 
   const applied = await db.transaction(async (tx) => {
     await prepareSchemas(tx, input.plan);
@@ -331,17 +395,7 @@ export async function startDatabase(db: Database, input: StartupInput): Promise<
     await createCheckFunctions(tx);
     await guardTables(tx, input.plan);
     const rows = (await tx.query(APPLIED_SQL)) as unknown as AppliedRow[];
-    const recorded = new Map<string, AppliedRow[]>();
-    for (const row of rows) recorded.set(row.module, [...(recorded.get(row.module) ?? []), row]);
-    for (const runner of runners) {
-      checkResync(runner.part, input.committedVersions.get(runner.part.id) ?? []);
-      if (byName.get(runner.name) === runner) checkApplied(runner, recorded.get(runner.name) ?? []);
-    }
-    // Recorded under a name no part of the build has: a module (or shared item) the build dropped (DB-9).
-    for (const [name, list] of recorded) {
-      if (!byName.has(name)) throw missing(`the module or shared item ${name}`, name, list[0] as AppliedRow);
-    }
-    return new Map([...recorded].map(([name, list]) => [name, list.length]));
+    return checkRecorded(runners, byName, rows, input.committedVersions);
   });
 
   const done: AppliedMigration[] = [];

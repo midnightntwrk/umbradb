@@ -58,8 +58,8 @@ describe("A6: the command's usage and its commands (LS-6)", () => {
     expect(await inChild(project, ["--help"])).toEqual({ code: EXIT.ok, stdout: USAGE, stderr: "" });
   });
 
-  // umbradb run starts the process (task 4.4a): ./run.test.ts runs it in a child process; umbradb backup (task 15.1):
-  // test/backup/.
+  // umbradb run starts the process (task 4.4a): ./run.test.ts runs it in a child process; umbradb backup and restore
+  // (tasks 15.1, 15.2): test/backup/.
   it("umbradb backup is recognized: without --out it prints the usage and exits 2", async () => {
     const result = await inChild(project, ["backup"]);
     expect(result).toEqual({
@@ -69,12 +69,13 @@ describe("A6: the command's usage and its commands (LS-6)", () => {
     });
   });
 
-  it.each([["restore"]])("umbradb %s is recognized: exit 3, not available in this build", async (name) => {
-    const result = await inChild(project, [name]);
-    expect(result.code).toBe(EXIT.unavailable);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toContain(`umbradb ${name}: not available in this build`);
-    expect(result.stderr).not.toContain(USAGE);
+  it("umbradb restore is recognized: without its file it prints the usage and exits 2", async () => {
+    const result = await inChild(project, ["restore"]);
+    expect(result).toEqual({
+      code: EXIT.usage,
+      stdout: "",
+      stderr: `umbradb: restore takes one backup file: umbradb restore <file> [--config <file>]\n\n${USAGE}`,
+    });
   });
 });
 

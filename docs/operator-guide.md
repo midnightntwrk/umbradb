@@ -53,3 +53,39 @@ Every table of the database, as plain SQL (`--inserts --no-owner --no-privileges
 declared `deterministic: false` with their rows and their sequences' positions. A sequence is not transactional:
 taken beside a running indexer on PostgreSQL, its position in the file can be ahead of its table's rows (never behind
 them), so values a restored indexer gives such a column may skip some numbers.
+
+### Restoring a backup
+
+```sh
+umbradb restore indexer-1774000.backup [--config umbradb.config.ts]
+```
+
+**Restore only backups from a source you trust — your own.** A restore runs the file's SQL with the database login's
+rights: a file that was changed, or written by someone else, can create functions, triggers or views, change any
+table, and on a server whose login is a superuser do more than that, before any check after loading can refuse it
+(BK-3, owner decision Q83). The manifest's checks and the contents hash catch a backup that is damaged or from another
+chain; they do not make a hostile file safe to run.
+
+The command restores into the configuration file's database, which must be empty — a new PostgreSQL database, or a
+PGlite directory with no database in it (the command creates it). The configuration must be the one the backup's
+indexer ran with: the same S and the same entries up to the backup's height (later changes, above it, are allowed),
+and a build that carries their versions and every migration the backup's database applied. The command reads the
+configuration's node to check the chain. It refuses, and leaves the target as it was, when:
+
+| Code | Why |
+|---|---|
+| `restore-target-not-empty` | the target holds a schema, or anything in `public` |
+| `backup-format-unknown` | the file is no backup of format 1, or its SQL holds what a restore does not run (a `psql` meta-command other than `\restrict`/`\unrestrict`, a `COPY … FROM stdin`, a cut-off end) |
+| `backup-history-mismatch` | the configuration's S or its history up to the backup's height differs from the backup's |
+| `backup-build-mismatch` | the build lacks the version of an entry at the backup's height + 1, or a migration the backup applied |
+| `backup-genesis-mismatch` | the node serves another chain |
+| `backup-block-not-finalized` | the node has not finalized the backup's block, or finalized another one at its height |
+| `contents-hash-mismatch` | the restored data is not what the backup's manifest says (checked before the commit) |
+| `backup-root-mismatch` | with `core-ledger-state`, the stored ledger state root at the backup's height is not the node's |
+
+The first six are checked before anything is loaded; the last two after loading, inside the restore's one transaction,
+which then rolls back. A restore interrupted halfway — a crash, a kill — leaves the target empty, and can be run again.
+The restored database gets UmbraDB's module roles (created on the server if missing: the login needs `CREATEROLE`, as
+for a first start) and the owners and grants a database built by migrations has. Start the indexer on it with the same
+configuration: it keeps the backup's S and resumes from the backup's height + 1. A private process's backup cannot be
+restored by this version of the command.

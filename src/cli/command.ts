@@ -9,9 +9,10 @@
  *   halted, else 0.
  * - `umbradb backup --out <file> [--config <file>]` writes a backup of the configuration file's database (`./backup.ts`,
  *   task 15.1; BK-1): exit 0 once written, 1 when refused (nothing written).
- * - `umbradb restore <file>` is recognized (A6): this build does not provide it yet (task 15.2), so it says so on
- *   stderr and exits {@link EXIT}`.unavailable` (3), whatever its arguments, never the usage's status and never
- *   success; the task that builds it replaces its entry in {@link COMMANDS}, parsing its own arguments.
+ * - `umbradb restore <file> [--config <file>]` restores a backup into the configuration file's database, which must be
+ *   empty (`./restore.ts`, task 15.2; BK-3): exit 0 once committed, 1 when refused (nothing committed).
+ * - {@link EXIT}`.unavailable` (3) is the status of a command a build does not provide; every command of design §12
+ *   is built now (tasks 4.4, 4.4a, 15.1, 15.2), so none exits with it.
  * - Anything else — no argument, an unknown command (0.9.5's chain-archive sync is no command of this one), a wrong
  *   argument of `config check` or `run` — prints the usage on stderr, after one line saying what was wrong, and exits 2;
  *   `--help` or `-h` as the only argument prints it on stdout and exits 0.
@@ -23,11 +24,11 @@
  */
 
 import { parseArgs } from "node:util";
-import { UMBRADB_VERSION } from "../config/build.js";
 import { redactor } from "../config/redact.js";
 import { configCheck, databaseArgumentProblem, errorText } from "./config-check.js";
 import type { BackupSeams } from "../backup/backup.js";
 import { backupArguments, runBackup } from "./backup.js";
+import { type RestoreCommandSeams, restoreArguments, runRestore } from "./restore.js";
 import { type RunSeams, runFailed, runProcess } from "./run.js";
 
 /** The exit statuses. */
@@ -44,8 +45,8 @@ Commands:
       against that database's configuration history, read-only.
   umbradb backup --out <file> [--config <file>]
       Back up the configuration's database (default umbradb.config.ts): a pg_dump file with its manifest.
-  umbradb restore <file>
-      Restore a backup into an empty database.
+  umbradb restore <file> [--config <file>]
+      Restore a backup into the configuration's database, which must be empty (default umbradb.config.ts).
   umbradb --help
       Print this usage.
 
@@ -75,15 +76,6 @@ const shown = redactor([]).text;
 function usage(io: CommandIo, problem: string): number {
   io.stderr(`umbradb: ${shown(problem)}\n\n${USAGE}`);
   return EXIT.usage;
-}
-
-/** A command this build does not provide yet (see the module comment). */
-function unavailable(name: string): CommandHandler {
-  return async (_args, io) => {
-    const build = `this build (UmbraDB ${UMBRADB_VERSION})`;
-    io.stderr(`umbradb ${name}: not available in ${build}; a later build provides it (LS-6)\n`);
-    return EXIT.unavailable;
-  };
 }
 
 /** `config check`'s arguments, or what is wrong with them. */
@@ -196,12 +188,33 @@ export function backupCommand(seams: BackupSeams = {}): CommandHandler {
   };
 }
 
+/**
+ * `umbradb restore` (`./restore.ts`): exit {@link EXIT}`.ok` with the line it wrote on stdout, {@link EXIT}`.failed` with
+ * why on stderr (the node client's retries go there too); `seams` are a test's (its chain, the restore's seams).
+ */
+export function restoreCommand(seams: RestoreCommandSeams = {}): CommandHandler {
+  return async (args, io) => {
+    const parsed = restoreArguments(args);
+    if (typeof parsed === "string") return usage(io, parsed);
+    const outcome = await runRestore(
+      { file: parsed.file, config: parsed.config, cwd: io.cwd, log: (line) => io.stderr(`${line}\n`) },
+      seams,
+    );
+    if (outcome.restored) {
+      io.stdout(`${outcome.line}\n`);
+      return EXIT.ok;
+    }
+    io.stderr(`${outcome.line}\n`);
+    return EXIT.failed;
+  };
+}
+
 /** The commands, by name (LS-6). */
 export const COMMANDS: Readonly<Record<string, CommandHandler>> = Object.freeze({
   run: runProcessCommand(),
   config: configCommand(),
   backup: backupCommand(),
-  restore: unavailable("restore"),
+  restore: restoreCommand(),
 });
 
 /** Runs the command `argv` (the arguments after `umbradb`) with `commands` and resolves with its exit status. */

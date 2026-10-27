@@ -91,9 +91,9 @@ const ROWS: readonly RowCoverage[] = [
     requirement: "MD-1, DT-3, DT-4, DT-6, BK-2",
     // Task 3.1: the declaration, and the skip written once (`opt-out.ts`), which the refusals and the TRUNCATE guard use;
     // task 7.1: the startup check, the CHECKs and change capture skip such tables, and the hash records them by name
-    // only (A147's core part).
-    tests: ["opt-out.test.ts"],
-    pending: { "backups carry its rows and its sequences' positions": "15.2" },
+    // only (A147's core part); task 15.2: a backup carries its rows and its sequence's position (A147's backup part).
+    tests: ["opt-out.test.ts", "opt-out-backup.test.ts"],
+    pending: {},
   },
 ];
 
@@ -209,8 +209,6 @@ describe("A138: the suite runs every rule of design.md §4's component table on 
     );
     expect(done).toEqual([]);
     // What A138 covers now, and what waits for which task (`tasks.md` 2.2a's done note says the same).
-    expect(Object.fromEntries(ROWS.flatMap((row) => Object.entries(row.pending)))).toEqual({
-      "backups carry its rows and its sequences' positions": "15.2",
-    });
+    expect(Object.fromEntries(ROWS.flatMap((row) => Object.entries(row.pending)))).toEqual({});
   });
 });

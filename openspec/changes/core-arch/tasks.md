@@ -2912,11 +2912,28 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       failure logged). `@electric-sql/pglite-tools` 0.4.10 is an exact development dependency and an optional peer.
       A124 and A122 pass on PostgreSQL 18.6 and PGlite 0.5.10 with the committed negative control
       (`test/backup/backup.negative-control.test.ts`). The command cannot back up a PGlite directory a running
-      process holds (`writer-lock-held`; Q152, not blocking); the restore is task 15.2. Issue TBD-15.1 (the
+      process holds (`writer-lock-held`; Q152, not blocking); the restore is task 15.2. Issue 00032 (the
       runtime `npm audit`'s zod advisory, found while checking the new dependency) recorded.
-- [ ] 15.2 `umbradb restore`: the checks before loading, the file's SQL run in one transaction, owners and grants, the
+- [x] 15.2 `umbradb restore`: the checks before loading, the file's SQL run in one transaction, owners and grants, the
       contents hash and state root checked before the commit; the operator guide's "restore only trusted backups".
       **Acceptance:** A125, A126, A127, A128.
+      **Done (2026-10-27):** `src/backup/restore.ts` (`restoreBackup`): before loading, in BK-3's order, the target
+      empty (`isEmptyDatabase`; a PGlite directory without a database not opened), the manifest and the whole dump read
+      without running it (`statements.ts`: statements split as PostgreSQL's lexer reads them, `\restrict` and
+      `\unrestrict` as `psql` takes them, anything else `psql` alone runs refused), S and `checkHistory` against the
+      manifest's rows, `checkRecordedMigrations` (`src/db/migrate.ts`, the bootstrap's own checks), block 0, the
+      finalized head and block at the height through the block source, the node's ledger root read; then one transaction
+      on the writer connection (one job on PGlite): each statement, `RESET ALL`, `restoreOwnership` (`src/db/roles.ts`:
+      module roles created where missing, owners given) and `restoreGrants` (`src/db/migrate.ts`), the contents hash and
+      the stored root checked before the commit. `umbradb restore <file> [--config <file>]` (`src/cli/restore.ts`, its
+      chain the configuration's node). The operator guide's restore section ("restore only backups from a source you
+      trust"). A125 (both directions, catalogs equal to a migrated database's up to an ACL's item order, a `CREATEROLE`
+      login that is not a superuser included), A126 (every code in BK-3's order, the target as it was after each), A127
+      (a restore killed while loading, in a process of its own) and A128 (`[[backup.restore-equals-uninterrupted]]`;
+      PostgreSQL → PGlite, PostgreSQL → PostgreSQL, PGlite → PostgreSQL, continued to h + 100) pass on PostgreSQL 18.6
+      and PGlite 0.5.10, with A147's backup part and the committed negative controls
+      (`test/backup/restore.negative-control.test.ts`). Waits: restoring a private process's backup (Q153, not
+      blocking); BK-5's page (16.x).
 
 ## 16. Browser
 

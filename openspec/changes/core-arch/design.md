@@ -1300,7 +1300,24 @@ checks of BK-3 that need no tables, then opens one transaction on the writer con
 lacks and applies DB-6's and DB-7's owners and grants, recomputes the contents hash, checks the state root, and commits
 only if all hold; on PGlite the same runs as one queued job. A crash mid-restore leaves nothing, since nothing commits
 before the end. A restore runs the file's SQL with the writer's rights, so the operator guide says to restore only
-trusted backups.
+trusted backups. As built (task 15.2, `src/backup/restore.ts`, `statements.ts`): `umbradb restore <file> [--config
+<file>]`, its chain the configuration's node (`core-block-fetch`'s node source on one node client); before loading, in
+BK-3's order — the target empty (no schema but PostgreSQL's own and `public`, nothing in `public`, no extension but
+`plpgsql`; a PGlite directory without a database is empty and not opened), the manifest of format 1 and the whole dump
+read once without running it (the statements split as PostgreSQL's lexer reads them; `\restrict`/`\unrestrict` taken as
+`psql` takes them, any other meta-command, a `COPY … FROM stdin` or a cut-off end refused as `backup-format-unknown`),
+the configuration's S and `checkHistory` against the manifest's rows at its height (`missing-entry` and `changes-past`
+are `backup-history-mismatch`; `upgrade-required` and `requires-resync` `backup-build-mismatch`), the recorded
+migrations against the build (`checkRecordedMigrations`, the bootstrap's own checks: `backup-build-mismatch`), block 0's
+hash, the finalized head and the block at the height; the node's ledger state root read before the transaction when
+`core-ledger-state` is in the history. Then, after the writer started: the target checked empty again, each statement
+run, `RESET ALL`, `restoreOwnership` (`src/db/roles.ts`: missing module roles created and, for a login that is not a
+superuser, granted to it, as `prepareSchemas` does; each module schema and its tables, partitions, views, sequences no
+column owns, routines, enums, domains and ranges given to the schema's role; UmbraDB's own schemas stay the login's)
+and `restoreGrants` (`src/db/migrate.ts`: `EXECUTE` taken from `PUBLIC` on module routines, then `prepareSchemas`'s
+grants as each owner and the bootstrap's `core_chain`/`core_digest` grants), the contents hash with the plan's opt-outs,
+the stored root. A restored database's catalogs equal a database built by migrations' up to the order of an ACL's items
+(A125). A private process's backup is not restored by the command yet (Q153).
 
 ### 9.2 Browser build (BR)
 
@@ -1446,8 +1463,9 @@ the private database recorded: `recorded`, `public`), `private-start-below` (the
 No command, or any other, or a wrong argument, prints the usage and exits 2; a failed check exits 1; `run` (task 4.4a,
 §7) runs until SIGTERM or SIGINT and exits 1 when startup refused or processing halted, else 0, and exits 1 at once
 when the configuration itself is refused (Q137 B, task 8.1b); `backup` exits 0 once its file is written and 1 when
-refused (task 15.1); until task 15.2 builds it, `restore` exits 3, not available in this build. The configuration
-file's `modules` export is the command's user modules (CF-1, Q106 B).
+refused (task 15.1), `restore` 0 once committed and 1 when refused, nothing committed (task 15.2); 3 is left for a
+command a build does not provide. The configuration file's `modules` export is the command's user modules (CF-1,
+Q106 B).
 
 ## 13. Quality gates: what moves and what is retired (LS-5; for the owner's approval, CORE-ARCH SC-010)
 

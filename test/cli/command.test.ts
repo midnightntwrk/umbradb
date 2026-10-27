@@ -19,8 +19,8 @@ import { type CommandResult, inProcess, REPOSITORY } from "./cli-fixtures.js";
  * A6 `[CI]` (LS-6), in this process through `runCommand` (`./umbradb.test.ts` runs the command itself, in a child
  * process): `umbradb sync` and `umbradb` with no argument print the usage and exit 2; `run`, `config check`, `backup`
  * and `restore` are recognized — `config check` runs (task 4.4), `run` starts the process (task 4.4a; its breadth is
- * `./run.test.ts`'s), `backup` reads its configuration file (task 15.1; its breadth is `test/backup/`); `restore`
- * (task 15.2) is not built yet and says so, with an exit status of its own, never the usage's and never success.
+ * `./run.test.ts`'s), `backup` and `restore` read their configuration file (tasks 15.1, 15.2; their breadth is
+ * `test/backup/`).
  * Also the command's argument errors: each prints the usage and exits 2, and a `--database` value is never echoed.
  */
 
@@ -89,7 +89,7 @@ describe("A6: an unknown subcommand or none prints the usage and exits 2 (LS-6)"
     expect(USAGE).toContain("umbradb run [--config <file>]");
     expect(USAGE).toContain("umbradb config check <file> [--database <url>]");
     expect(USAGE).toContain("umbradb backup --out <file> [--config <file>]");
-    expect(USAGE).toContain("umbradb restore <file>");
+    expect(USAGE).toContain("umbradb restore <file> [--config <file>]");
     for (const status of ["0 ", "1 ", "2 ", "3 "]) expect(USAGE).toContain(`  ${status}`);
     expect(Object.keys(COMMANDS).sort()).toEqual(["backup", "config", "restore", "run"]);
   });
@@ -158,16 +158,19 @@ describe("A6: run, config check, backup and restore are recognized (LS-6)", () =
     }
   });
 
-  it.each([
-    ["restore", ["restore", "backup.sql"]],
-  ])("umbradb %s is recognized and not available in this build yet: exit 3, no usage, never success", async (name, argv) => {
-    const result = await inProcess(argv, CWD);
-    expect(recognized(result)).toBe(true);
-    expect(result.code).toBe(EXIT.unavailable);
-    expect(result.stdout).toBe("");
-    expect(result.stderr).toBe(
-      `umbradb ${name}: not available in this build (UmbraDB ${UMBRADB_VERSION}); a later build provides it (LS-6)\n`,
-    );
+  it("umbradb restore is recognized: it reads its configuration file (here: there is none) and restores nothing", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "umbradb-restore-a6-"));
+    try {
+      const result = await inProcess(["restore", "backup.sql"], directory);
+      expect(recognized(result)).toBe(true);
+      expect(result.code).toBe(EXIT.failed);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("umbradb restore: invalid-configuration: ");
+      expect(result.stderr).toContain("file-not-found");
+      expect(printsUsage(await inProcess(["restore"], directory))).toBe(true);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("umbradb config check is recognized: it checks the file (here: there is none) instead of printing the usage", async () => {
@@ -256,7 +259,7 @@ describe("the bin entry's work (runMain)", () => {
     expect([help.exitCode, help.out, help.err]).toEqual([EXIT.ok, USAGE, ""]);
     const restore = stand(["restore"]);
     await runMain(restore);
-    expect(restore.exitCode).toBe(EXIT.unavailable);
+    expect(restore.exitCode).toBe(EXIT.usage);
     const run = stand(["run", "--confg", "umbradb.config.ts"]);
     await runMain(run);
     expect([run.exitCode, run.err]).toEqual([EXIT.usage, `umbradb: unknown option --confg of run\n\n${USAGE}`]);

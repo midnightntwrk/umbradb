@@ -399,6 +399,35 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
         "opt-in, and writes no file",
     },
   ],
+  ...Object.fromEntries(
+    [
+      "backup-format-unknown",
+      "restore-target-not-empty",
+      "backup-history-mismatch",
+      "backup-build-mismatch",
+      "backup-genesis-mismatch",
+      "backup-block-not-finalized",
+      "contents-hash-mismatch",
+    ].map((code) => [
+      `backup:${code}`,
+      [
+        {
+          file: "test/backup/restore.test.ts",
+          test:
+            "A126: each restore refusal of BK-3 is triggered and checked before or after loading, as BK-3 orders them; " +
+            "after every refusal the target is as it was",
+        },
+      ],
+    ]),
+  ),
+  "backup:backup-root-mismatch": [
+    {
+      file: "test/backup/restore-ledger.test.ts",
+      test:
+        "A126: with core-ledger-state in the history, a stored state root at the backup's height that is not the " +
+        "node's refuses with backup-root-mismatch after loading, the target empty; the node's own restores",
+    },
+  ],
   "halt:callback-error": [
     {
       file: `${RUNNER}/halts.test.ts`,
@@ -513,14 +542,6 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
  * (see the module comment).
  */
 export const PENDING: Readonly<Record<string, string>> = Object.freeze({
-  "backup:backup-format-unknown": "15.2",
-  "backup:restore-target-not-empty": "15.2",
-  "backup:backup-history-mismatch": "15.2",
-  "backup:backup-build-mismatch": "15.2",
-  "backup:backup-genesis-mismatch": "15.2",
-  "backup:backup-block-not-finalized": "15.2",
-  "backup:contents-hash-mismatch": "15.2",
-  "backup:backup-root-mismatch": "15.2",
   "halt:fast-log-unsupported": "13.1",
 });
 
