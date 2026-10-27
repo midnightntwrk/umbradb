@@ -1,7 +1,7 @@
 # Graph Report - UmbraDB
 
 ## Corpus Check
-- 969 files · ~1,430,230 words
+- 969 files · ~1,430,396 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 66 file(s) not represented in the graph (top: .patch 18, (none) 14, .lean 11)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Corpus fingerprint: `5d5d62a8034d1f1b` (969 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
+- Corpus fingerprint: `ee356f7229ecb2c2` (969 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
 - `npm run graph:check` recomputes it: exit 0 means the graph matches the tracked files.
 - `npm run graph:refresh` rebuilds the graph from scratch (no LLM, deterministic).
 

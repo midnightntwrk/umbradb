@@ -1873,10 +1873,20 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       check, the history, the genesis hash), `src/admin/` (`ConfigSnapshot`'s fields, `ProcessAdmin`'s reads: the
       identity read there), `test/admin/` and the 8.2–8.3 tests (the configuration's new fields),
       `test/cli/config-check.test.ts`.
-- [ ] 8.4a The owner's answer Q134 D: `/config` shows the runtime configuration (secrets redacted) and the build's
+- [x] 8.4a The owner's answer Q134 D: `/config` shows the runtime configuration (secrets redacted) and the build's
       version, and no build commit (AE-5 as amended) — `build.commit` removed from `configOf`
       (`src/admin/configuration.ts`), its type and `test/backbone/core-config/config.schema.json`, with the tests.
       **Acceptance:** A66 (`/config`).
+      **Done (2026-10-27):** `/config`'s `build` is `{ umbradb }` — `BUILD` in `src/admin/configuration.ts` (also
+      `UNVALIDATED_CONFIG`'s, the build only before the validation) and `ConfigSnapshot.build`'s type
+      (`src/admin/types.ts`) without `commit`, their comments citing Q134 D; the schema's `build` requires `umbradb`
+      only, with `additionalProperties: false`, so a body naming a commit — `null` or a hash — fails it (two committed
+      negative controls in `config-schema.test.ts`, replacing "a commit before a build records one");
+      `core-config.test.ts` expects the build without it. Tests first: on the old sources 7 of the folder's 21 failed
+      for the intended reason (`/build: must NOT have additional properties {"additionalProperty":"commit"}` for the
+      full body and for every `/config` read through the process on PostgreSQL 18.6 and PGlite 0.5.10; the build with
+      `commit: null` in the two expectations). A66 for `/config` passes on both backends; with `test/admin`,
+      `test/backbone/core-status` and `core-health`: 18 files, 198 tests passed (3 skipped, environment-gated).
 
 ## 9. Test tape
 

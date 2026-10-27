@@ -103,7 +103,7 @@ describe("/config: the published configuration", () => {
       chain: null,
       ledger: null,
       database: null,
-      build: { umbradb: UMBRADB_VERSION, commit: null },
+      build: { umbradb: UMBRADB_VERSION },
     });
   });
 });
@@ -132,7 +132,8 @@ describe("configOf: what /config shows (AE-5), every secret redacted (AE-6)", ()
     expect(shown.chain).toEqual({ network: "custom", genesisHash: ADMIN_GENESIS, start: "1", anchorHash: null });
     expect(shown.ledger).toEqual({ table: { rows: TEST_LEDGER_TABLE.rows, pins: [] }, packages: buildCoreVersion().ledgers });
     expect(shown.database).toEqual({ backend: "postgres", version: null, writerLock: false });
-    expect(shown.build).toEqual({ umbradb: UMBRADB_VERSION, commit: null });
+    // The build's version and no commit (AE-5 as amended by Q134 D): a running build does not know its commit.
+    expect(shown.build).toEqual({ umbradb: UMBRADB_VERSION });
     expect(JSON.stringify(shown)).not.toContain(PASSWORD);
     expect(configOf({ redactor: configRedactor(config), checked: config, core: config.entries[0] as never, opened: null }, true).database?.writerLock).toBe(true);
   });

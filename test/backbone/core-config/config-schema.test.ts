@@ -101,7 +101,8 @@ describe("A66: /config's JSON schema", () => {
       "a ledger row of another ledger": (b) => (b.ledger.table.rows = [{ specVersionMin: 0, specVersionMax: 1, ledger: "v7" }]),
       "a third backend": (b) => (b.database.backend = "sqlite"),
       "a writer lock as text": (b) => (b.database.writerLock = "held"),
-      "a commit before a build records one": (b) => (b.build.commit = "a75ed95"),
+      "a build commit (none since Q134 D)": (b) => (b.build.commit = "a75ed95"),
+      "a build commit of null": (b) => (b.build.commit = null),
     };
     for (const [name, change] of Object.entries(wrong)) {
       const changed = JSON.parse(JSON.stringify(valid)) as Record<string, any>;

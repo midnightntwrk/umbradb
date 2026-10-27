@@ -239,8 +239,8 @@ export interface ConfigSnapshot {
   readonly ledger: { readonly table: PlainData; readonly packages: PlainData } | null;
   /** The database: its backend, the server's version, and whether this process holds its writer lock (DB-11). */
   readonly database: { readonly backend: "postgres" | "pglite"; readonly version: string | null; readonly writerLock: boolean } | null;
-  /** The build: UmbraDB's version and the commit it was built from (no build records one yet). */
-  readonly build: { readonly umbradb: string; readonly commit: null };
+  /** The build: UmbraDB's version; no commit (AE-5, owner decision Q134 D). */
+  readonly build: { readonly umbradb: string };
 }
 
 /** What the runner publishes to the admin worker (see the module comment). */

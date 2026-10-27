@@ -113,17 +113,13 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "umbradb",
-        "commit"
+        "umbradb"
       ],
+      "description": "The build's version; no commit (AE-5 as amended by the owner's decision Q134 D).",
       "properties": {
         "umbradb": {
           "type": "string",
           "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
-        },
-        "commit": {
-          "type": "null",
-          "description": "The build's commit: no build records it yet (decision record question Q134)."
         }
       }
     }

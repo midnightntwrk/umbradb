@@ -17,7 +17,8 @@
  *   configuration's rows and pins (LG-3) — **with the build's package identities** (`buildCoreVersion().ledgers`);
  * - **the database**: its backend, the server's version, and whether the process holds its writer lock (the caller's:
  *   the process knows it from its writer's start and its failures);
- * - **the build**: UmbraDB's version, and its commit — null, as no build records it yet.
+ * - **the build**: UmbraDB's version — no commit: a running build does not know the commit it was built from (AE-5,
+ *   owner decision Q134 D).
  * Before the configuration is validated nothing of it is shown ({@link UNVALIDATED_CONFIG}): its secrets are not known.
  */
 
@@ -39,7 +40,7 @@ import type { ConfigSnapshot, DeclarationView, EntryView, RecordedView } from ".
 const hex = (bytes: Uint8Array): string => `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 
 /** The build, as `/config` shows it. */
-const BUILD = Object.freeze({ umbradb: UMBRADB_VERSION, commit: null });
+const BUILD = Object.freeze({ umbradb: UMBRADB_VERSION });
 
 /** `/config` before the configuration is validated: the build only. */
 export const UNVALIDATED_CONFIG: ConfigSnapshot = Object.freeze({
