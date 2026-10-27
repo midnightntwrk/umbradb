@@ -496,8 +496,8 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A115** `[CI]` Every message type round-trips through the zod schemas of `design.md` §8 and fails on a missing or
   mistyped field; a `read-result` carries its request's `id`, the height read (`null` on an empty public database) and,
   per statement, the column names and types with the rows, and a `bigint`, `numeric`, `bytea` and `jsonb` value each
-  decode back to the value the core read; an `api-result` carries its request's `id`; an unknown `v` or `type`, or a
-  message failing its schema, closes the connection; a second `hello` with a connected id is refused with
+  decode back to the value the core read; an unknown `v` or `type` (`api` among them, Q140), or a message failing its
+  schema, closes the connection; a second `hello` with a connected id is refused with
   `duplicate-instance`. (PP-4)
 - **A116** `[CI]` An independent instance stopped for 100 blocks never pauses the core and catches up from public data.
   (PP-5)
