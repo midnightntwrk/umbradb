@@ -2260,6 +2260,22 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       change is `package-identity.test.ts`'s, on the rebuilt packages. **Wrong variants:** 30 over the new adapter
       logic, first run 28 caught, 2 survivors (the saturation bound) closed by a test with `u64::MAX` written out;
       final run 30 of 30 caught. Coverage of `src/ledger/` 100 %. No question raised.
+- [ ] 12.1b The owner's answer Q138 A: patches for each vendored ledger package exporting LG-16's six tree values from
+      the ledger state as the official indexer reads them (the zswap tree's first free index and root, the DUST
+      commitment and generation trees' first free indexes and roots); the adapters' `stateSummary` fills them (none
+      `null`), `core_ledger_state.states` stores them at every height and its five columns become `NOT NULL` (no
+      database exists yet: migration `001` is edited); the packages rebuilt, `SHA256SUMS` and the core version
+      re-recorded; `design.md` §5.1, §5.2, §10 and `vendor/ledger/README.md` updated. After 12.2a, or with it, so the
+      rc.3 package carries the patch too.
+      **Acceptance:** A158.
+- [ ] 12.2a The owner's answer Q139 A: a third vendored ledger package, v9 at `crate-ledger-9.1.0.0-rc.3` (the ledger
+      node 2.0 builds, runtime 2.0), as a ledger version of its own — its name settled in `design.md` §5.2 (the
+      reading: `v9-rc3`) and carried through `ledgerSources`, `ledgerTable` and the core version — built by
+      `npm run vendor:ledger` from its pinned tag with task 12.1a's (and 12.1b's) patches where they apply, with its
+      adapter (the v9 one where the API is the same); LG-3's built-in rows map `spec_version` 2,000,000–2,000,999 to
+      it; a state stored by it loads in the rc.5 package (a 2.0 → 2.1 upgrade; a question if it does not); A99's
+      stagenet test changed from the halt at block 1 to "every root is the node's".
+      **Acceptance:** A99 (stagenet), A159.
 - [x] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
       root check, outputs.
       **Acceptance:** A82, A99 (the ranges from genesis, Q133), A101, A106, A107.

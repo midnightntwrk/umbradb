@@ -31,11 +31,12 @@ pinned height has another hash or another `MNSV` version THEN processing SHALL h
 ### Requirement: LG-3 Built-in tables per network
 
 THE system SHALL ship, as a versioned data file, one ledger version table per known network keyed by genesis hash —
-`spec_version` 22_000–22_999 and 1_000_000–1_999_999 → v8, 2_000_000–2_999_999 → v9 — with the mainnet pin at F =
-1,774,492 (hash `0x380266656e11208adbcaa5ab62a6beb9c09ef86de1cb886eac721099177a1a0b`), and with every other network's
-genesis hash, runtime at genesis and upgrade boundaries (hash and `MNSV` of U and F) read from that network's node
-before they become pins; a boundary not read that way SHALL NOT be a pin. THE `core` entry's `ledgerTable` MAY add or
-replace rows and pins; a network not in the file SHALL set its own table.
+`spec_version` 22_000–22_999 and 1_000_000–1_999_999 → v8; 2_000_000–2_000_999 → v9 as runtime 2.0 built it
+(`ledger-9.1.0.0-rc.3`, a package of its own, owner decision Q139); 2_001_000–2_999_999 → v9 (`ledger-9.1.0.0-rc.5`)
+— with the mainnet pin at F = 1,774,492 (hash `0x380266656e11208adbcaa5ab62a6beb9c09ef86de1cb886eac721099177a1a0b`),
+and with every other network's genesis hash, runtime at genesis and upgrade boundaries (hash and `MNSV` of U and F)
+read from that network's node before they become pins; a boundary not read that way SHALL NOT be a pin. THE `core`
+entry's `ledgerTable` MAY add or replace rows and pins; a network not in the file SHALL set its own table.
 
 #### Scenario: An undeployed network
 - **WHEN** a devnet's configuration sets "every `spec_version` → v8"
@@ -193,7 +194,8 @@ at that block and SHALL halt (`root-mismatch`) on any difference; proofs SHALL N
 WHERE `core-ledger-state` is enabled, it SHALL provide the `block` and `table` items `ledger-state` (mutable),
 `ledger-events`, `segment-results` and `vm-logs` (the `ContractLog` events of applied segments, numbered per block in
 emission order); store per block the state key, state root, zswap first-free index and root, and DUST commitment and
-generation first-free indexes and roots (`core_ledger_state.states`); store each segment's success
+generation first-free indexes and roots (`core_ledger_state.states`; each read from the ledger state as the official
+indexer reads it, through a vendored patch, none of them null — owner decision Q138); store each segment's success
 (`core_ledger_state.segment_results`) and each ledger event other than logs with its kind, segments, bytes and the
 extracted nullifier, commitment, tree index and contract address (`core_ledger_state.events`). It SHALL NOT start
 mid-chain: it needs history from genesis or a backup (BK-3).

@@ -128,6 +128,17 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   `FixedPoint(243035853171123343)`), adds each system transaction's cost and clamps to the block limits as the node
   does; an extrinsic the chain reports failed is skipped; the rebuilt packages' `SHA256SUMS` are recorded and A97's
   rebuild reproduces them. (LG-5, LG-8, LG-15, Q113)
+- **A158** `[CI]` For each vendored ledger package, the patched export gives a state's zswap first free index and root
+  and its DUST commitment and generation trees' first free indexes and roots exactly as the ledger's Rust state gives
+  them (`zswap.first_free`, `zswap.coin_coms.rehash().root()`, `dust.utxo.commitments_first_free`,
+  `dust.utxo.commitments.rehash().root()`, `dust.generation.generating_tree_first_free`,
+  `dust.generation.generating_tree.rehash().root()`), checked against values the vendored build's own Rust test writes
+  for fixed states; `core_ledger_state.states` holds all six, none null, at every height of A99's ranges; the rebuilt
+  packages' `SHA256SUMS` are recorded and A97's rebuild reproduces them. (LG-5, LG-16, owner decision Q138)
+- **A159** `[CI]` The vendored builds include v9 at `crate-ledger-9.1.0.0-rc.3` as a package of its own, reproducible by
+  the build script and identified in the core version; the built-in tables map `spec_version` 2,000,000–2,000,999 to it
+  and 2,001,000 on to rc.5; a state stored by the rc.3 package loads in the rc.5 package with the same root, so a
+  2.0 → 2.1 upgrade carries it. (LG-3, LG-5, owner decision Q139)
 - **A152** `[CI]` `umbradb config check` on a file that exports `modules = [stats]` and lists `stats.entry({ … })`
   checks the entry against `stats`'s schema, reporting a wrong setting with its path; `umbradb run` on it runs `stats`;
   a file listing a module that neither it exports nor UmbraDB ships is refused, naming the module. (CF-1, CF-10, LS-6,
@@ -424,9 +435,9 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   reloads by its `stateKey` (Q55); the v8 adapter's `decodeLogItem` returns null for every input and its `apply`
   returns no `logs` (Q54). (LG-6, LG-7, CC-2)
 - **A99** `[CI]` State roots match the node's on every range from genesis that task 0.3 recorded — preview 0–10,000,
-  preprod 0–10,000 and the undeployed devnet across its v8 → v9 upgrade (stagenet 0–10,000 if kept) —, each skipped by
-  name when its tape is absent; the preview range across the runtime 1.0.300 upgrade and the mainnet ranges are A154's.
-  (LG-8, Q133)
+  preprod 0–10,000, the undeployed devnet across its v8 → v9 upgrade and stagenet 0–10,000 (runtime 2.0, its rc.3
+  package, Q139) —, each skipped by name when its tape is absent; the preview range across the runtime 1.0.300 upgrade
+  and the mainnet ranges are A154's. (LG-8, Q133)
 - **A100** `[CI]` On a devnet that starts on a v8 runtime and enacts the v9 upgrade (tape), the state is converted
   before F is applied, the root at F matches the node's, and the same holds when F has no transactions. (LG-9)
 - **A101** `[CI]` During a 60 s ledger step in the worker, `/health/live` answers 200 and every endpoint answers within
@@ -450,7 +461,7 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A106** `[CI]` A test package returning a wrong root for one block halts with `root-mismatch` and stores nothing of
   that block. (LG-15)
 - **A107** `[CI]` `core_ledger_state.states`, `segment_results` and `events` hold the values of LG-16 for a tape range
-  (first-free indexes and roots match the node's runtime calls where the node exposes them); enabling
+  (first-free indexes and roots match the node's runtime calls where the node exposes them; none null, Q138); enabling
   `core-ledger-state` above S without a restored backup refuses with `cannot-start-mid-chain`. (LG-16)
 - **A137** `[CI]` A test module's ledger task decodes each contract call's arguments with the native parsed objects
   and `rawPackages()`, and its `on-compute` receives them as its `block` item; with that task and three modules reading
