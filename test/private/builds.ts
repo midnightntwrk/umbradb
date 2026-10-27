@@ -13,6 +13,7 @@ import type { AdminStarter } from "../../src/admin/server.js";
 import type { ReadHandle, ReadOnlyDatabase } from "../../src/db/api.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
+import type { BlockRef } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { FinalizedLoop, LoopInput } from "../../src/runner/loop.js";
 import type { ProcessHandle, ProcessInput } from "../../src/runner/process.js";
@@ -96,6 +97,8 @@ export interface PublicCoreOptions {
   readonly start?: number;
   /** The custom network's genesis hash, as `0x` hex; {@link genesisHex}(0xa1) unless given. */
   readonly genesisHash?: string;
+  /** Blocks of the in-memory chain in place of its own (another chain from a height; task 15.2a's restores). */
+  readonly blocks?: readonly BlockRef[];
   /** User modules of the core. */
   readonly modules?: readonly ModuleDeclaration[];
   /** Entries of those modules. */
@@ -179,7 +182,8 @@ export async function startPublicCore(options: PublicCoreOptions): Promise<Publi
 export function launchPublicCore(options: PublicCoreOptions): PublicCore {
   const genesis = options.genesisHash ?? genesisHex(0xa1);
   const start = options.start ?? 1;
-  const source = new InMemoryBlockSource({ head: options.head, blocks: [genesisBlock(genesis)] });
+  const blocks = [genesisBlock(genesis), ...(options.blocks ?? [])];
+  const source = new InMemoryBlockSource({ head: options.head, blocks });
   let kept: ReadOnlyDatabase | undefined;
   const reads = publicReads((db) => {
     kept = db;

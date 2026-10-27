@@ -408,6 +408,22 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
       ],
     ]),
   ),
+  "backup:private-binding-mismatch": [
+    {
+      file: "test/backup/restore-private.test.ts",
+      test:
+        "A164: a private process's backup restores into an empty private database with BK-3's checks made against its " +
+        "public database and continues from its height + 1; one taken against another public database is refused with " +
+        "private-binding-mismatch and the binding's details.reason, the target left empty",
+    },
+    {
+      file: "test/backup/restore-private.test.ts",
+      test:
+        "A164: the other checks against the public database refuse before anything is loaded — its core never started, " +
+        "another network, its S above the backup's, its head below the backup's height, another block there — the " +
+        "target left empty",
+    },
+  ],
   "backup:backup-root-mismatch": [
     {
       file: "test/backup/restore-ledger.test.ts",

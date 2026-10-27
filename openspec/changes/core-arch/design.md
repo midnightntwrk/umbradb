@@ -1386,8 +1386,20 @@ column owns, routines, enums, domains and ranges given to the schema's role; Umb
 and `restoreGrants` (`src/db/migrate.ts`: `EXECUTE` taken from `PUBLIC` on module routines, then `prepareSchemas`'s
 grants as each owner and the bootstrap's `core_chain`/`core_digest` grants), the contents hash with the plan's opt-outs,
 the stored root. A restored database's catalogs equal a database built by migrations' up to the order of an ACL's items
-(A125). A private process's backup is not restored by the command yet: owner decision Q153 B restores it against
-its public database (task 15.2a).
+(A125). As built (task 15.2a, owner decision Q153 B): a private process's backup is restored by the same command and
+the same `restoreBackup` with the private process's configuration (its `core` entry has no `node`), its chain the
+configured public database, read as the private process reads it (`openPublicSide`: a PostgreSQL `publicDatabase`
+directly, else through the core's transport at `coreTransport`, whose `hello` gives the empty target's position, S − 1
+with no hash). After the history check, one read of the public database gives its identity, its `table` items, its
+cursor and its block at the backup's height; PP-2's checks then run in a private start's order and with its functions
+— no identity `public-not-started`, a genesis hash not the configured network's `network`, the backup's S below the
+public S `private-start-below`, each `private-binding-mismatch` — before the graph, which counts those items (PP-13);
+then the build's checks; then the block, `backup-block-not-finalized` when the public cursor is below the height or
+its block there has another hash. After loading, after the contents hash, the binding the backup's own
+`core_private_source.cursor` row records is compared with the public database's identity (`genesis`, `start`): the
+manifest holds the public genesis hash (the private chain identity's) but not the public S, which only that row
+records. A private process's backup restored with a public configuration, or the reverse, is refused by the build's
+checks (the other side's backbone migrations).
 
 ### 9.2 Browser build (BR)
 
@@ -1519,7 +1531,8 @@ failing `on-start-db` or `on-start-api`, with point and module) and `listen-fail
 (Q115). **Backup and restore refuse** (the command exits non-zero; nothing is written or committed):
 `backup-tools-missing`, `private-backup-refused`, `backup-format-unknown`, `restore-target-not-empty`,
 `backup-history-mismatch`, `backup-build-mismatch`, `backup-genesis-mismatch`, `backup-block-not-finalized`,
-`contents-hash-mismatch`, `backup-root-mismatch`.
+`contents-hash-mismatch`, `backup-root-mismatch`, and for a private process's backup `private-binding-mismatch` (BK-3,
+owner decision Q153; task 15.2a).
 
 **Processing halts** (state `halted`, live, not ready, the database at the last committed height), with these codes:
 `callback-error` (with point and module), `database-error`, `parent-mismatch`, `finality-conflict`, `node-requirement`,
@@ -1540,11 +1553,11 @@ frame the tape node could not give back byte for byte; the variant transforms' `
 **A module's call fails** (an `UmbraError` the module may catch; uncaught, its callback fails with `callback-error`):
 `state-not-retained` (LG-12: a ledger state outside the retention window, task 12.4).
 
-**`private-binding-mismatch` names its cause** in `details.reason` (PP-2, §8), in the order a private start checks
-them: `public-not-started` (the public database's core never started, Q125), `network` (its genesis hash is not the
-configured network's, Q136 B: `network`, `configured`, `public`), `genesis` and `start` (it is not the public database
-the private database recorded: `recorded`, `public`), `private-start-below` (the private S is below the public S:
-`private`, `public`).
+**`private-binding-mismatch` names its cause** in `details.reason` (PP-2, §8) — at a private start, and at a restore of
+a private process's backup (§9.1) —, in the order a private start checks them: `public-not-started` (the public
+database's core never started, Q125), `network` (its genesis hash is not the configured network's, Q136 B: `network`,
+`configured`, `public`), `genesis` and `start` (it is not the public database the private database recorded:
+`recorded`, `public`), `private-start-below` (the private S is below the public S: `private`, `public`).
 
 ## 12. Exported surface and command (LS-1, LS-6)
 

@@ -1,6 +1,6 @@
 /**
  * Restoring a backup (`openspec/changes/core-arch/specs/backups/spec.md` BK-3, BK-4; `design.md` §9.1; owner decisions
- * Q83, Q85; task 15.2) into an empty database, checked before and after loading, in BK-3's order:
+ * Q83, Q85, Q153; tasks 15.2, 15.2a) into an empty database, checked before and after loading, in BK-3's order:
  *
  * **Before loading anything:**
  * 1. `restore-target-not-empty` — the target holds a schema other than PostgreSQL's own and `public`, or anything in
@@ -29,16 +29,47 @@
  * state root at the manifest's height compared with the chain's (`backup-root-mismatch`, the node's root read before
  * the transaction). Any failure rolls all of it back: the target is as it was (empty). Only then it commits.
  *
+ * **A private process's backup** (PP-12, owner decision Q153; task 15.2a), restored with a private process's
+ * configuration ({@link RestoreInput}'s `publicDatabase`): its chain is its configured public database — a private
+ * process never talks to the node (PP-1) —, so the checks against the node are made against it, as a private start
+ * makes them (PP-2, PP-13). After step 3, in one read of the public database ({@link PublicSide}): its chain identity —
+ * none refuses `private-binding-mismatch` (`public-not-started`) —, its genesis hash against the configured network's
+ * (`network`), and the backup's S (the configuration's, step 3) against the public S (`private-start-below`) — in the
+ * place of step 5 and before the graph, which counts the public core's `table` items read in the same read (PP-13), so
+ * that a wrong public database is refused by its binding, not by the graph's view of its items; then step 4; then step
+ * 6 against the public database's committed head and its block at the manifest's height (`backup-block-not-finalized`).
+ * After loading, after the contents hash: the binding the backup's own `core_private_source.cursor` row records — the
+ * public genesis hash and S it was bound to (PP-2) — compared with the public database's identity
+ * (`private-binding-mismatch`: `genesis`, `start`), so a backup taken against another public database rolls back. The
+ * reasons are PP-2's (`bindingRefusal`, `networkRefusal`, `publicNotStarted` of `core-private-source`, the startup's
+ * own), in the order a private start checks them.
+ *
  * A restore runs the file's SQL with the writer's rights: the operator guide (`docs/operator-guide.md`) says to restore
  * only backups from a trusted source. The restored database keeps the backup's S and cursor; its first startup checks
- * it like any other (IN-3, CF-5 to CF-8, DB-9) and resumes from the height + 1 (BK-4).
+ * it like any other (IN-3, CF-5 to CF-8, DB-9; a private one its binding, PP-2) and resumes from the height + 1 (BK-4).
  */
 
 import { createReadStream } from "node:fs";
 import { isBlockLedgerSource } from "../backbone/core-block-fetch/ledger-source.js";
+import { configuredGenesisOf } from "../backbone/core-chain/core-chain.js";
 import { CORE_LEDGER_STATE_ID } from "../backbone/core-ledger-state/core-ledger-state.js";
+import {
+  bindingRefusal,
+  networkRefusal,
+  publicNotStarted,
+  readPrivateBinding,
+} from "../backbone/core-private-source/core-private-source.js";
+import {
+  type PublicDatabase,
+  type PublicIdentity,
+  readPublicBlock,
+  readPublicCursor,
+  readPublicIdentity,
+  readPublicItems,
+} from "../backbone/core-private-source/public-database.js";
 import { checkHistory, graphInputOf, type HistoryRow } from "../config/history.js";
 import type { PlainObject } from "../config/plain-data.js";
+import { processCoreEntry } from "../config/process.js";
 import type { CheckedConfig } from "../config/validate.js";
 import type { Database, Transaction } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
@@ -48,9 +79,9 @@ import { startWriter } from "../db/writer-lock.js";
 import { contentsHash } from "../determinism/contents-hash.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
-import { resolveGraph } from "../modules/graph.js";
+import { type PublicItem, resolveGraph } from "../modules/graph.js";
 import type { DeclarationSet } from "../modules/validation.js";
-import type { BlockSource } from "../runner/block-source.js";
+import type { BlockRef, BlockSource } from "../runner/block-source.js";
 import { hex } from "./facts.js";
 import { type Manifest, readManifestLine } from "./manifest.js";
 import { checkStatements, statementsOf } from "./statements.js";
@@ -61,8 +92,8 @@ export type RestoreTarget =
   | { readonly backend: "postgres" }
   | { readonly backend: "pglite"; readonly exists: boolean };
 
-/** What {@link restoreBackup} restores, into what, and against which chain. */
-export interface RestoreInput {
+/** What every restore takes: the file, the target, and the configuration with its build. */
+interface RestoreBase {
   /** The backup file. */
   readonly file: string;
   readonly target: RestoreTarget;
@@ -71,16 +102,29 @@ export interface RestoreInput {
   /** The validated configuration and the build's declarations (the configuration file's, CF-1). */
   readonly config: CheckedConfig;
   readonly declarations: DeclarationSet<ModuleDeclaration>;
-  /** The chain the checks read: the node's block source (genesis, finalized blocks, the ledger state root). */
-  readonly source: BlockSource;
 }
+
+/**
+ * The chain a restore checks against: a public process's backup the node's (`source`, its block source: genesis,
+ * finalized blocks, the ledger state root), a private process's its configured public database (`publicDatabase`, as
+ * the private process reads it; PP-12, owner decision Q153).
+ */
+export type RestoreChain =
+  | { readonly source: BlockSource; readonly publicDatabase?: undefined }
+  | { readonly publicDatabase: PublicDatabase; readonly source?: undefined };
+
+/** What {@link restoreBackup} restores, into what, and against which chain. */
+export type RestoreInput = RestoreBase & RestoreChain;
 
 /** What the tests replace: the committed negative controls' and A127's. */
 export interface RestoreSeams {
   /** Called after each statement of the file ran, with how many ran (A127's kill point). */
   readonly statementRan?: (count: number) => Promise<void> | void;
-  /** A126/A127's negative controls only: skip the contents hash's check, or the state root's. */
-  readonly skip?: { readonly contentsHash?: boolean; readonly stateRoot?: boolean };
+  /**
+   * The committed negative controls only: skip the contents hash's check, the state root's, or the comparison of a
+   * private backup's recorded binding with its public database (A126, A164).
+   */
+  readonly skip?: { readonly contentsHash?: boolean; readonly stateRoot?: boolean; readonly binding?: boolean };
   /** A127's negative control only: each statement in a transaction of its own, so a kill leaves what ran. */
   readonly statementByStatement?: boolean;
 }
@@ -179,12 +223,76 @@ function historyRefusal(error: unknown, manifest: Manifest): unknown {
   return error;
 }
 
-/** What the checks before loading found: the plan of the backup's modules and the chain's root at its height. */
+/**
+ * What the checks before loading found: the plan of the backup's modules, the chain's root at its height and, for a
+ * private process's backup, its public database's identity.
+ */
 interface Checked {
   readonly manifest: Manifest;
   readonly plan: SchemaPlan;
   /** The chain's ledger state root at the backup's height, when `core-ledger-state` is in the history. */
   readonly nodeRoot: Uint8Array | null;
+  /** A private process's backup: the public database's identity, which the restored binding must be (PP-2). */
+  readonly publicIdentity: PublicIdentity | null;
+}
+
+/** What a private process's backup's checks read of its public database, in one read (see the module comment). */
+interface PublicSide {
+  readonly identity: PublicIdentity;
+  /** The public core's `table` items with their heights (PP-13). */
+  readonly items: readonly PublicItem[];
+  /** The public cursor: its core's last committed block, or null before its first. */
+  readonly head: BlockRef | null;
+  /** Its committed block at the backup's height, or null. */
+  readonly block: BlockRef | null;
+}
+
+/**
+ * The public database of a private process's backup, read once, and its binding as far as the manifest gives it (see
+ * the module comment): `private-binding-mismatch` with `public-not-started`, `network` or `private-start-below`.
+ */
+async function checkPublicSide(
+  publicDatabase: PublicDatabase,
+  config: CheckedConfig,
+  manifest: Manifest,
+): Promise<PublicSide> {
+  const height = BigInt(manifest.height);
+  const side = await publicDatabase.read(async (read): Promise<PublicSide | null> => {
+    const identity = await readPublicIdentity(read);
+    if (identity === null) return null;
+    const items = await readPublicItems(read);
+    return { identity, items, head: await readPublicCursor(read), block: await readPublicBlock(read, height) };
+  });
+  if (side === null) throw publicNotStarted();
+  const network = networkRefusal(configuredGenesisOf(processCoreEntry(config).settings as PlainObject), side.identity);
+  if (network !== null) throw network;
+  // The backup's binding itself is in its rows, compared once loaded: here only its S against the public S.
+  const below = bindingRefusal(null, side.identity, BigInt(manifest.start));
+  if (below !== null) throw below;
+  return side;
+}
+
+/** Step 6 against a private process's public database (see the module comment): `backup-block-not-finalized`. */
+function checkPublicBlock(side: PublicSide, manifest: Manifest): void {
+  const height = BigInt(manifest.height);
+  const head = side.head?.height ?? null;
+  if (head === null || head < height) {
+    throw new UmbraError(
+      "backup-block-not-finalized",
+      `the public database's committed head is ${head ?? "none"}, below the backup's height ${height}: its core has ` +
+        "not committed the backup's block there yet (BK-3, PP-12); restore once it has",
+      { height: manifest.height, head: head === null ? null : String(head) },
+    );
+  }
+  const found = side.block === null ? null : hex(side.block.hash);
+  if (found !== manifest.blockHash) {
+    throw new UmbraError(
+      "backup-block-not-finalized",
+      `the public database's committed block at ${height} has the hash ${found ?? "none"}, and the backup's ` +
+        `${manifest.blockHash}: its core committed another block there (BK-3, PP-12)`,
+      { height: manifest.height, public: found, backup: manifest.blockHash },
+    );
+  }
 }
 
 /** BK-3's checks 2 to 6 (see the module comment). */
@@ -201,6 +309,7 @@ async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
     );
   }
   let plan: SchemaPlan;
+  let side: PublicSide | null = null;
   try {
     const check = checkHistory({
       config: input.config,
@@ -208,7 +317,12 @@ async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
       declarations: input.declarations,
       history: historyRows(manifest),
     });
-    const graph = resolveGraph(graphInputOf(check, input.declarations));
+    // A private process's backup: its public database's binding before the graph, which counts its items (PP-13).
+    if (input.publicDatabase !== undefined) side = await checkPublicSide(input.publicDatabase, input.config, manifest);
+    const graph = resolveGraph({
+      ...graphInputOf(check, input.declarations),
+      ...(side === null ? {} : { publicItems: side.items }),
+    });
     plan = schemaPlan(graph.modules);
     checkRecordedMigrations(
       plan,
@@ -237,7 +351,12 @@ async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
     }
     throw historyRefusal(error, manifest);
   }
-  const genesis = (await input.source.block(0n)).hash;
+  if (side !== null) {
+    checkPublicBlock(side, manifest);
+    return { manifest, plan, nodeRoot: null, publicIdentity: side.identity };
+  }
+  const source = input.source as BlockSource;
+  const genesis = (await source.block(0n)).hash;
   if (hex(genesis) !== manifest.genesisHash) {
     throw new UmbraError(
       "backup-genesis-mismatch",
@@ -246,7 +365,7 @@ async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
       { node: hex(genesis), backup: manifest.genesisHash },
     );
   }
-  const head = await input.source.finalizedHead();
+  const head = await source.finalizedHead();
   if (head.height < height) {
     throw new UmbraError(
       "backup-block-not-finalized",
@@ -255,7 +374,7 @@ async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
       { height: manifest.height, head: String(head.height) },
     );
   }
-  const block = await input.source.block(height);
+  const block = await source.block(height);
   if (hex(block.hash) !== manifest.blockHash) {
     throw new UmbraError(
       "backup-block-not-finalized",
@@ -267,12 +386,12 @@ async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
   const ledger = manifest.history.some((row) => row.id === CORE_LEDGER_STATE_ID && BigInt(row.start) <= height);
   let nodeRoot: Uint8Array | null = null;
   if (ledger) {
-    if (!isBlockLedgerSource(input.source)) {
+    if (!isBlockLedgerSource(source)) {
       throw new Error("restoreBackup: core-ledger-state is in the backup's history, and the block source gives no root");
     }
-    nodeRoot = await input.source.ledgerStateRoot(block);
+    nodeRoot = await source.ledgerStateRoot(block);
   }
-  return { manifest, plan, nodeRoot };
+  return { manifest, plan, nodeRoot, publicIdentity: null };
 }
 
 const STORED_ROOT_SQL = `SELECT CASE WHEN to_regclass('core_ledger_state.states') IS NULL THEN NULL
@@ -301,6 +420,11 @@ async function load(tx: Transaction, input: RestoreInput, checked: Checked, seam
         { restored: hash, backup: manifest.contentsHash },
       );
     }
+  }
+  if (checked.publicIdentity !== null && seams.skip?.binding !== true) {
+    // The binding the backup's own row records (PP-2), now that the contents hash showed the rows are the backup's.
+    const refusal = bindingRefusal(await readPrivateBinding(tx), checked.publicIdentity, BigInt(manifest.start));
+    if (refusal !== null) throw refusal;
   }
   if (checked.nodeRoot !== null && seams.skip?.stateRoot !== true) {
     const [row] = await tx.query(STORED_ROOT_SQL, [manifest.height]);

@@ -3230,13 +3230,29 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       and PGlite 0.5.10, with A147's backup part and the committed negative controls
       (`test/backup/restore.negative-control.test.ts`). Waits: restoring a private process's backup (Q153, not
       blocking); BK-5's page (16.x).
-- [ ] 15.2a The owner's answer Q153 B: `umbradb restore` restores a private process's backup with BK-3's logic, its
+- [x] 15.2a The owner's answer Q153 B: `umbradb restore` restores a private process's backup with BK-3's logic, its
       checks against the node made against the configured public database — the binding (PP-2: the public genesis hash
       and S) refused with `private-binding-mismatch` and its `details.reason`, the manifest's block checked against the
       public database's committed block — and the process continues from its height + 1 (BK-3, BK-4, PP-12 as
       amended); `src/cli/restore.ts`'s refusal of a private configuration removed; `design.md` §9.1, and §11's backup
       refusals with the code registry; the tests.
       **Acceptance:** A164.
+      **Done (2026-10-27):** `restoreBackup` (`src/backup/restore.ts`) takes a chain: the node's block source, or a
+      private process's public database (`RestoreChain`); `umbradb restore` gives the latter for a configuration whose
+      `core` entry has no `node`, read as the private process reads it (`openPublicSide`: a PostgreSQL `publicDatabase`
+      directly, else the core's transport, its `hello` at S − 1 with no hash). After the history check, one read of
+      the public database (identity, `table` items, cursor, block at the height); PP-2's refusals in a private start's
+      order with its own functions — `public-not-started`, `network`, `private-start-below` — before the graph, which
+      counts those items (PP-13); the build's checks; `backup-block-not-finalized` against the public cursor and block;
+      after loading and the contents hash, the binding the backup's `core_private_source.cursor` row records against
+      the public identity (`genesis`, `start`; `readPrivateBinding`, new in `core-private-source`), rolled back on a
+      mismatch. `private-binding-mismatch` is in §11's backup refusals and the code registry; the operator guide's
+      restore section covers a private backup. A164 passes on PostgreSQL 18.6 (public database read directly) and
+      PGlite 0.5.10 (through the core's transport): restored, continued from 13 to 40 equal to an uninterrupted
+      instance; refused against another public database (`start`), and before loading for a public database never
+      started, of another network, of a higher S, with a lower head or another block at the height, the target left
+      empty each time; with the committed negative control (`test/backup/restore-private.negative-control.test.ts`:
+      without the binding's check the backup commits, and the private process then refuses to start on it).
 
 ## 16. Browser
 

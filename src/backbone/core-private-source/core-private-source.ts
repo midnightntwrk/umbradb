@@ -162,6 +162,15 @@ async function readPrivateRow(
   return { cursor, binding };
 }
 
+/**
+ * The binding a private database records (PP-2): its public database's genesis hash and S, read through `read`; null
+ * before its first start recorded them, and before the table exists. A restore of a private process's backup compares
+ * it with its public database's identity before the commit (BK-3, owner decision Q153; task 15.2a).
+ */
+export async function readPrivateBinding(read: Pick<ReadHandle, "query">): Promise<PublicIdentity | null> {
+  return (await readPrivateRow(read)).binding;
+}
+
 /** A private database's committed height (DB-2): the private cursor's height. */
 export const privateCursorHeight = async (read: Pick<ReadHandle, "query">): Promise<bigint | null> =>
   (await readPrivateCursor(read))?.height ?? null;

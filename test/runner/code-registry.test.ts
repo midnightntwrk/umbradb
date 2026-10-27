@@ -61,7 +61,8 @@ describe("A87: the refusal and halt registry (IN-12)", () => {
   it("reads §11's three lists whole: its states and points are no codes, and every UmbraError code it names is the runner's", () => {
     const codes = section11Codes(DESIGN);
     expect(codes.refusal.length).toBeGreaterThan(40);
-    expect(codes.backup).toHaveLength(10);
+    // Ten backup and restore codes, and `private-binding-mismatch` for a private process's backup (task 15.2a, Q153).
+    expect(codes.backup).toHaveLength(11);
     expect(codes.halt.length).toBeGreaterThan(14);
     for (const word of ["refused", "halted", "on-start-db", "on-start-api"]) {
       expect([...codes.refusal, ...codes.backup, ...codes.halt]).not.toContain(word);

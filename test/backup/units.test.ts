@@ -372,7 +372,7 @@ describe("a restore's empty target and its refusals before reading the file (BK-
     }
   });
 
-  it("refuses a private process's configuration before anything is opened", async () => {
+  it("takes a private process's chain from its public database: with no way to read it, refuses before anything is opened", async () => {
     const file = project.write(
       "private-restore.config.ts",
       [
@@ -383,7 +383,11 @@ describe("a restore's empty target and its refusals before reading the file (BK-
       ].join("\n"),
     );
     const outcome = await runRestore({ file: join(dir, "none.backup"), config: file, cwd: project.dir });
-    expect(outcome).toMatchObject({ restored: false, error: { code: "invalid-configuration", details: { reason: "private-restore" } } });
+    // Neither a PostgreSQL publicDatabase nor coreTransport (task 15.2a; Q153's interim refusal is gone).
+    expect(outcome).toMatchObject({
+      restored: false,
+      error: { code: "invalid-configuration", details: { reason: "public-database-transport" } },
+    });
   });
 });
 

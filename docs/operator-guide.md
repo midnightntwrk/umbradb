@@ -87,5 +87,14 @@ The first six are checked before anything is loaded; the last two after loading,
 which then rolls back. A restore interrupted halfway — a crash, a kill — leaves the target empty, and can be run again.
 The restored database gets UmbraDB's module roles (created on the server if missing: the login needs `CREATEROLE`, as
 for a first start) and the owners and grants a database built by migrations has. Start the indexer on it with the same
-configuration: it keeps the backup's S and resumes from the backup's height + 1. A private process's backup cannot be
-restored by this version of the command.
+configuration: it keeps the backup's S and resumes from the backup's height + 1.
+
+A private process's backup (written under the development opt-in) is restored the same way, with the private
+process's configuration: the command checks it against the configured public database instead of a node — read as the
+private process reads it, a PostgreSQL `publicDatabase` directly or else through the core's transport at
+`coreTransport`, so a PGlite public database needs its core running —: the public database's genesis hash and S must
+be the ones the backup's database is bound to, else `private-binding-mismatch` names which (`public-not-started`,
+`network` and `private-start-below` before loading; `genesis` and `start`, read from the backup's own binding, after
+loading, inside the restore's transaction), and the public database's committed block at the backup's height must be
+the backup's (`backup-block-not-finalized`). The restored private process continues from its public database at the
+backup's height + 1.
