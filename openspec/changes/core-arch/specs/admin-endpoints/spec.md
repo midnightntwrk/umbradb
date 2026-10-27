@@ -76,16 +76,17 @@ when no readiness lag is set or the lag is at or below it, and 503 when the lag 
 ### Requirement: AE-5 `/status` and `/config` contents
 
 `GET /status` SHALL answer 200 with JSON holding: state and conditions (with reason, height, module and point for
-`refused` and `halted`); cursor; lag; for the core, the node's finalized and best heads, connection state and retry
-count, the queue depth, the tip cap and whether finality stalls; per module: id, version, side, start, stop, stopped or
-not, and its tables' rows of `core_digest.tables` (each table's last-changed height and digest, DT-5); the ledger
-version, package and last root check; private instances (on the core: id, connection, lockstep, synced height; on a
-private process: its cursor, the public cursor, lag, lockstep); instance role, uptime and last commit time (wall-clock,
-reported only, as RFC 3339 text in UTC, `2025-05-21T14:30:00Z`, Q68). Fields with no value yet SHALL be `null`. `GET
-/config` SHALL answer 200 with JSON holding: the entries in effect and the configuration history; the operational
-fields; enabled modules with their declarations (without callbacks); the chain identity; the ledger version table in
-effect with package identities; the database backend and version and whether the writer lock is held; the build version
-— no build commit: a running build does not know the commit it was built from (owner decision Q134).
+`refused` and `halted`); cursor; lag; for the core, the node's finalized and best heads, connection state (`connecting`,
+`connected`, `retrying` or `closed`) and retry count, the queue depth, the tip cap and whether finality stalls; per
+module: id, version, side, start, stop, stopped or not, and its tables' rows of `core_digest.tables` (each table's
+last-changed height and digest, DT-5); the ledger version, package and last root check; private instances (on the core:
+id, connection, lockstep, synced height; on a private process: its cursor, the public cursor, lag, lockstep); instance
+role, uptime and last commit time (wall-clock, reported only, as RFC 3339 text in UTC, `2025-05-21T14:30:00Z`, Q68).
+Fields with no value yet SHALL be `null`. `GET /config` SHALL answer 200 with JSON holding: the entries in effect and
+the configuration history; the operational fields; enabled modules with their declarations (without callbacks); the
+chain identity; the ledger version table in effect with package identities; the database backend and version and whether
+the writer lock is held; the build version — no build commit: a running build does not know the commit it was built from
+(owner decision Q134).
 
 #### Scenario: Before the first block
 - **WHEN** `/status` is read on an empty database before block S commits

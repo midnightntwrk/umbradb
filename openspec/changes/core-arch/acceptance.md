@@ -202,6 +202,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   prints both with their paths and exits non-zero, opening no database, and says the history checks were not run; with
   `--database` it reports `changes-past` for a changed recorded entry, exits non-zero, and leaves the database unchanged
   (row counts and `core_chain.migrations` compared before and after). (CF-10)
+- **A166** `[CI]` Under the opt-in, `database: "pglite:<tmp>/a/b"` with `<tmp>/a` missing: `startProcess` and
+  `umbradb run` create `<tmp>/a/b` and commit block S; `umbradb restore` into `pglite:<tmp>/c/d` creates it and
+  restores; `umbradb config check --database pglite:<tmp>/e/f` and `umbradb backup` against `pglite:<tmp>/g/h` create
+  no directory. (CF-4, owner decision Q163)
 
 ## 5. Runner
 
@@ -269,6 +273,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   `slow-block` with h, `on-after-db-write` and the module within 2 s, and the condition is gone once that callback
   ends; likewise for a module whose `on-finalized` awaits 3 s; nothing is cancelled or retried. (RN-17, owner decision
   Q145)
+- **A167** `[CI]` With the node unreachable (a closed port) and startup retrying it, SIGTERM — and likewise
+  `ProcessHandle.stop()` — ends the process within 5 s: `stopping`, then `ended` of kind `signal`, the node client
+  closed, no connection attempt after the stop, no second signal; `umbradb run` exits 0. A committed negative control
+  (a startup whose wait for the node ignores the stop) fails it. (RN-13)
 
 ## 6. Determinism
 
@@ -352,6 +360,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   with its path and exit with a non-zero code, and make `startProcess` end `refused`, with no admin listener opened at
   any time; a refusal after the configuration is validated (a changed migration checksum) still answers the four
   endpoints. (AE-1, AE-3, owner decisions Q137, Q148)
+- **A168** `[CI]` On a core against a tape node: before the first connection `/status`'s `node.connection` is
+  `connecting`; once connected, `connected`, with `node.bestHead` the best head the node announced last and
+  `node.queueDepth` the best-block queue's length; with the node gone, `retrying`, `node.retries` counting; after the
+  stop, `closed`. On a private process the three are `null`. (AE-5)
 
 ## 9. Test tape
 

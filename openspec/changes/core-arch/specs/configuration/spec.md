@@ -90,7 +90,7 @@ module entry's `stop`; the `core` entry's `stop` SHALL be operational (it stops 
 | `ledgerSources` | data | per ledger version, `vendored` or `released`; default `vendored` |
 | `sweep` | data | `on` or `off`; default `on` (`off` only under the development opt-in) |
 | `retainStates` | data | integer ≥ 0; default 0 (LG-12) |
-| `database` | secret | a PostgreSQL URL, `pglite:<directory>` or `pglite:memory` |
+| `database` | secret | a PostgreSQL URL, `pglite:<directory>` (created if missing, Q163) or `pglite:memory` |
 | `node` | secret | the node's WebSocket URL (core process only) |
 | `listen` | operational | `{ api?, admin?, transport? }` addresses; admin default `0.0.0.0:8081` |
 | `tipCap`, `prefetchWindow` | operational | integers; 600, 64 |
@@ -116,10 +116,19 @@ version is the build's (by start), for its whole run; the operational and secret
 SHALL be validated (CF-3) but not used. The data fields of each `core` revision apply from its start, like any entry's
 (owner decision Q102).
 
+A process, and a restore into its target, SHALL create a `pglite:<directory>` that does not exist together with any
+missing parent directory; the read-only uses — `umbradb config check --database` and `umbradb backup` — SHALL create
+none (owner decision Q163).
+
 #### Scenario: Two `core` revisions with different databases
 - **WHEN** the file holds `core` revisions from 0 (`database: A`, `node: N1`) and from 9,000 (`database: B`, `node: N2`,
   `developmentOptIn: true`), both of the build's version, and the cursor is 5,000
 - **THEN** the process opens `B`, reads from `N2` and has the development opt-in from startup to exit
+
+#### Scenario: A PGlite directory whose parent is missing
+- **WHEN** `database` is `pglite:data/preview` under the opt-in and `data/` does not exist
+- **THEN** `umbradb run` creates `data/` and `data/preview` and starts, while `umbradb config check --database
+  pglite:data/preview` and `umbradb backup` against it create no directory
 
 #### Scenario: A secret never appears
 - **WHEN** `/config` is read and the logs are collected for a process whose `database` URL contains a password

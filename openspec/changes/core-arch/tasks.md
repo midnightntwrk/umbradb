@@ -676,6 +676,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       — `core-chain` publishing `readOnlyDatabase(db)` as the item (task 10.2) and the runner handing process items to
       modules (task 5.2a); the `on-db-write` case through the runner's own block loop, where a `nested-call` rejects the
       callback (`callback-error`, tasks 5.2 and 5.x).
+- [ ] 2.2c The owner's answer Q163 A: a process (`startProcess`, `umbradb run`) and a restore into its target create a
+      `pglite:<directory>` with any missing parent directory, before the writer lock is taken (`src/db/pglite-lock.ts`
+      puts the lock's file beside the directory and today refuses a missing parent); `umbradb config check
+      --database` and `umbradb backup` create none; `design.md` §7 and the operator guide.
+      **Acceptance:** A166.
 
 ## 3. Modules
 
@@ -1460,6 +1465,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       times the points after a commit, one that never times `on-finalized`, one that does not clear when the point
       ends). A142's tests are unchanged but for the seam's argument. No mutation pass here (deferred to the end, owner
       2026-10-27).
+- [ ] 5.3b A stop during startup with the node unreachable (found in the playground, 2026-10-27): SIGTERM, or
+      `ProcessHandle.stop()`, while startup waits on the node — `core-chain`'s `checkChain` reading block 0 through a
+      node client that keeps reconnecting — enters `stopping` but never ends; only a second signal does, through
+      Node.js's default handler. `#close()` awaits startup's end before it closes the node client
+      (`src/runner/process.ts`), and the wait is not tied to the stop. RN-13 as amended: every node call of startup
+      ends at the stop, and the process exits without a second signal.
+      **Acceptance:** A167.
 
 ## 6. Storage helpers
 
@@ -1913,6 +1925,12 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       full body and for every `/config` read through the process on PostgreSQL 18.6 and PGlite 0.5.10; the build with
       `commit: null` in the two expectations). A66 for `/config` passes on both backends; with `test/admin`,
       `test/backbone/core-status` and `core-health`: 18 files, 198 tests passed (3 skipped, environment-gated).
+- [ ] 8.3a `/status`'s node fields (AE-5 as amended): `node.bestHead`, `node.connection` and `node.queueDepth` are
+      always `null` — `src/admin/types.ts` types `connection` as `null`, and 8.3 left the three to 10.3, which reports
+      none. The node source and its client report the best head, the connection's state (`connecting`, `connected`,
+      `retrying`, `closed`) and the best-block queue's depth to the process's published state; the schema and
+      `docs/operator-guide.md` follow. On a private process, which has no node, they stay `null`.
+      **Acceptance:** A168; A66 with the three fields.
 
 ## 9. Test tape
 
@@ -3382,17 +3400,24 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the sweep's floor (Q158).
 - [ ] 17.3 `src/index.ts` with exactly the §12 surface; the surface pin; the `umbradb` command; the pack smoke rewritten
       (§12 imports, the retired-name failure, a tape sync on PostgreSQL in Docker, `umbradb config check`); the bench
-      smoke retargeted with a fresh baseline; `typedoc.json` entry points.
+      smoke retargeted with a fresh baseline; `typedoc.json` entry points. `package.json`'s `files` carries the
+      vendored ledger packages (`vendor/ledger/*/pkg`, `SHA256SUMS`, `upstream.json`): without them an installed
+      package halts at height 0 once `core-block-parsed` runs (`src/ledger/load.ts` imports them; found by the README
+      draft, 2026-10-27), so the pack smoke's configuration enables `core-block-parsed`.
       **Acceptance:** A1, A2, A6; `npm run test:smoke` passes.
 - [ ] 17.3a The module guide rewritten (owner, 2026-10-27; decisions Q160 A, Q161 A), after 17.3: `docs/module-guide.md`
       replaced by the reviewed outline and first draft (an overview, one complete example, then the detail sections; a
       "Deterministic PostgreSQL" section for the column types; migrations and upgrades late), every code block
-      importing from `umbradb`; the example in the repository at `examples/stats/` (the module, its configuration file,
-      the run and try scripts), type-checked with the code; the old guide's content each moved, shortened or cut as
-      the outline maps it.
-      **Acceptance:** `examples/stats/` type-checks against `src/index.ts`; `umbradb config check` passes on its
-      configuration file.
-- [ ] 17.4 Version `0.10.0` and the breaking-change notice in `CHANGELOG.md`.
+      importing from `umbradb`; the example in the repository at `examples/stats-module/` (module id `stats-module`,
+      renamed by the owner, 2026-10-27, so it is not read as metadata: the module, its configuration file, the run
+      and try scripts), type-checked with the code; the old guide's content each moved, shortened or cut as the
+      outline maps it. The main `README.md` replaced by the reviewed draft (owner, 2026-10-27), and `npm run web`,
+      which builds the browser page and serves it with the two headers it needs (COOP and COEP).
+      **Acceptance:** `examples/stats-module/` type-checks against `src/index.ts`; `umbradb config check` passes on its
+      configuration file; the README's two quick starts run as written.
+- [ ] 17.4 Version `0.10.0` and the breaking-change notice in `CHANGELOG.md`; every backbone part and core module
+      names the build's version (`UMBRADB_VERSION`), `core-digest` among them, which names `0.10.0` by hand
+      (`src/backbone/core-digest/core-digest.ts`).
       **Acceptance:** A4.
 - [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from

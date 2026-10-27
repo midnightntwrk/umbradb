@@ -182,11 +182,17 @@ reads at H − 1.
 ### Requirement: RN-13 SIGTERM stops cleanly
 
 WHEN the process receives SIGTERM THE runner SHALL enter `stopping`, start no new height, let a block whose
-transaction is open commit or roll back, and then exit.
+transaction is open commit or roll back, and then exit. During startup it SHALL stop before startup's next step and
+end any wait for the node at once, an unreachable node's retries included.
 
 #### Scenario: SIGTERM during a block transaction
 - **WHEN** SIGTERM arrives while `on-db-write` of h is running
 - **THEN** after exit the database holds h either completely or not at all, and a restart resumes from the cursor
+
+#### Scenario: SIGTERM during startup, the node unreachable
+- **WHEN** SIGTERM arrives while startup retries a node it cannot reach
+- **THEN** the process enters `stopping`, makes no further connection attempt, closes what startup opened and exits,
+  without a second signal
 
 ### Requirement: RN-14 The block source is the runner's only view of the chain
 
