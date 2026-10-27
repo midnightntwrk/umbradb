@@ -339,6 +339,11 @@ export interface PrivateOptions {
   readonly testKeys?: readonly { readonly kind: string; readonly bytes: string; readonly start: number }[];
   /** The custom network's genesis hash; {@link genesisHex}(0xa1) unless given. */
   readonly genesisHash?: string;
+  /**
+   * The `core` entry's network: `custom` (with {@link genesisHash} and the tests' ledger table) unless given; a known
+   * network has its genesis hash and ledger table built in (CF-4), so neither is given.
+   */
+  readonly network?: string;
   /** Where `pm` reports its calls. */
   readonly seen?: PrivateSeen[];
   /** The intake's negative-control options. */
@@ -351,12 +356,14 @@ export interface PrivateOptions {
 
 /** The private process's `core` entry. */
 export function privateCoreEntry(options: PrivateOptions) {
+  const network = options.network ?? "custom";
   return coreEntry({
     start: options.start ?? 1,
     config: {
-      network: "custom",
-      genesisHash: options.genesisHash ?? genesisHex(0xa1),
-      ledgerTable: TEST_LEDGER_TABLE,
+      network,
+      ...(network === "custom"
+        ? { genesisHash: options.genesisHash ?? genesisHex(0xa1), ledgerTable: TEST_LEDGER_TABLE }
+        : {}),
       database: options.database,
       instanceId: options.instanceId ?? "instance-1",
       developmentOptIn: true,

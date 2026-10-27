@@ -309,6 +309,11 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
       file: "test/private/binding.test.ts",
       test: "refuses with private-binding-mismatch against another public database, and starts against its own",
     },
+    {
+      file: "test/private/binding.test.ts",
+      test:
+        "A156 configured for another network refuses with private-binding-mismatch before any migration, and binds for its own",
+    },
   ],
   "refusal:package-hash-mismatch": [{ file: "test/ledger/package-identity.test.ts", test: "refuses a package file that is missing" }],
   "refusal:writer-lock-held": [

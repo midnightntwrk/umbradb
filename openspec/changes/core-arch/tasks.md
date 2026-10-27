@@ -2126,13 +2126,39 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `genesisHash` the configuration refuses — closed by an assertion and caught on rerun. Issues
       `00026-core-revisions-name-different-networks` and `00027-v8-fatal-wasm-free-hangs-test-worker` recorded.
       **Pending:** the configured network's genesis on a private process (Q136, owner).
-- [ ] 10.2b The owner's answer Q136 B: a private process's configured network compared with its public database's
+- [x] 10.2b The owner's answer Q136 B: a private process's configured network compared with its public database's
       genesis. `PrivateBlockSource.checkChain` (task 14.1; it receives `configured` since 10.2a) compares the
       configured network's genesis hash (`configuredGenesisOf`) with the public database's identity before PP-2's
       binding and before any migration, and refuses a difference with `private-binding-mismatch` (`details.reason`
       `network`, both hashes); `design.md` §5 and §11 name the reason; A113's committed control changes, since its
       other-network case is now refused by this check first.
       **Acceptance:** A156.
+      **Done (2026-10-27):** `PrivateBlockSource.checkChain(input)` (`src/backbone/core-private-source/`) checks, before
+      any migration, in order: the public database's identity (`public-not-started`, Q125), then its genesis hash
+      against `input.configured` (`networkRefusal`: the whole hash; `details { reason: "network", network, configured,
+      public }`, both as `0x` hex; a known network whose built-in table records none refused alike with `configured:
+      null`, as Q117 on the core). PP-2's comparisons with the recorded binding (`genesis`, `start`,
+      `private-start-below`) stay the part's `on-start-db`, after it. `hello-ack.genesis` (14.2) is not compared: with a
+      PGlite or no `publicDatabase` the identity read comes through that transport, and with a PostgreSQL one the
+      transport connects after startup's checks. The intake takes the negative controls' `network` check. The private
+      process's chain check is described in `design.md` §3 and §8 (§5 is the ledger's; the private chain check and the
+      binding are §8's), and §11 names `private-binding-mismatch`'s five reasons in a paragraph of their own (after the
+      code lists, so the registry of task 10.4 reads no reason as a code). Tests, seen failing first (`tsc` 15 errors:
+      `networkRefusal` missing, `checkChain` taking no input, no `network` seam; Vitest 9 failing):
+      `test/backbone/core-private-source.test.ts` (the comparison, by the whole hash, for `custom` and a known network,
+      the unrecorded case, `public-not-started` first, the seam) and `test/private/binding.test.ts` on PostgreSQL 18.6
+      and PGlite 0.5.10 — A156: configured for mainnet, and for a custom network whose hash differs from preprod's in
+      one byte, against the public database of a core whose genesis is preprod's, refused with both hashes, their
+      databases holding no table, schema or binding afterwards; configured for preprod it binds —, A113 asserting its
+      reasons (`network` for the other network's public database, `start`, `private-start-below`), and with the network
+      check skipped PP-2's binding alone refusing that database (`genesis`). Committed negative controls: a check that
+      skips the configured network binds A156's two other-network starts; A113's control is now a chain check that
+      compares nothing — no configured network and no binding (with the network check left in, a binding comparing
+      nothing no longer reaches the other-network case). Registry (A87): A156's test added under
+      `private-binding-mismatch`. Wrong variants (a scratch copy outside the clone): 13 on the new logic, 13 caught by
+      the unit suite; 7 of them run again against the process suite alone, 5 caught there, the 2 that compare one byte
+      of the hash surviving (the process tests' hashes differed in every byte), closed by A156's custom hash differing
+      from preprod's in one middle byte, then caught; none equivalent.
 
 ## 11. Chain data
 

@@ -276,11 +276,11 @@ interface QueueRunner {                                      // given by the fin
   node }`); the wait while the head is below the cursor; the finalized hash at the cursor, last, since the node's hash
   there is a finalized one only once its head reached the cursor. A `custom` network without `genesisHash` never reaches
   them: the configuration refuses it (CF-4, `invalid-configuration`). A private process's check is its source's, which
-  compares nothing with its configured network (§8; decision record question Q136). Its declaration is a
-  constant (`CORE_CHAIN`); the runner binds it to its process context with what startup checked and opened
-  (`bindCoreChain`), and its `on-start-db` records the history and, before block S commits, the genesis hash and S, and
-  publishes `config`, `node-client` (the process's one `NodeClient`, made from its `node` and shared with the block
-  source, closed by the process at stop; task 10.3), `db` (`readOnlyDatabase`) and `ledger-table` (the `core`
+  compares the public database's genesis hash with its configured network's (§8; owner decision Q136 B, task 10.2b).
+  Its declaration is a constant (`CORE_CHAIN`); the runner binds it to its process context with what startup checked
+  and opened (`bindCoreChain`), and its `on-start-db` records the history and, before block S commits, the genesis hash
+  and S, and publishes `config`, `node-client` (the process's one `NodeClient`, made from its `node` and shared with the
+  block source, closed by the process at stop; task 10.3), `db` (`readOnlyDatabase`) and `ledger-table` (the `core`
   revision's table in effect, `ledgerTable`); its `on-db-write` records the anchor hash in block S's transaction.
 - **The finalized loop** (`src/runner/loop.ts`, task 5.2) processes every height from cursor + 1 (S on a new database)
   to the source's finalized head, then waits (`waitForHead`) with no read or transaction open (RN-6, RN-14). Per new
@@ -1100,15 +1100,26 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   part and its block source, which share the public database: `ProcessInput.source` is the intake's `source(core)`,
   made from the process's `core` revision (Q102), which the part's `on-start-db` then reads. `core-chain`'s startup
   checks against a node (IN-3, `checkChain`) do not apply — a private process never talks to the node (PP-1) —: the
-  process runs its source's own check instead (`BlockSource.checkChain`, `PrivateBlockSource.checkChain`), which reads
-  the public database's identity, refuses `public-not-started` (Q125) before any migration, and gives `core-chain` the
-  public genesis hash, recorded with the private S in the private database's `core_chain.identity` (and the anchor at
-  block S); the bootstrap's wait (IN-2) waits, with `waiting-for-node`, for the public cursor to reach the private S.
+  process runs its source's own check instead (`BlockSource.checkChain`, `PrivateBlockSource.checkChain`), which, before
+  any migration, reads the public database's identity and refuses `public-not-started` (Q125), then compares its
+  genesis hash with the configured network's — `configuredGenesisOf` of the process's `core` revision: the built-in
+  table's for a known network, `genesisHash` for `custom` — and refuses a difference with `private-binding-mismatch`,
+  `details { reason: "network", network, configured, public }` (both hashes as `0x` hex; a known network whose built-in
+  table records none is refused alike with `configured: null`, as Q117 refuses it on the core; owner decision Q136 B,
+  task 10.2b), and gives `core-chain` the public genesis hash, recorded with the private S in the private database's
+  `core_chain.identity` (and the anchor at block S); the bootstrap's wait (IN-2) waits, with `waiting-for-node`, for
+  the public cursor to reach the private S. `hello-ack.genesis` (task 14.2) is not compared with it: with a PGlite or
+  no `publicDatabase` the identity the check reads comes through that same transport, from the same core; with a
+  PostgreSQL one the transport only wakes the process and connects after startup's checks, at its first wait, so
+  comparing it would need a connection before them or a new failure of a running process.
 - **Binding** (PP-2). `core-private-source`'s `on-start-db`, before any private module migrates, reads the public
   database's identity (`core_chain.identity`: `genesis_hash`, `start_height`, task 10.2's table); on the first start it
   records them in `core_private_source.cursor`; on every start a recorded genesis hash or S that differs, or a private S
   below the public S, refuses with `private-binding-mismatch` (`details.reason` `genesis`, `start`,
   `private-start-below`), and so does a public database whose core has never started (`public-not-started`, Q125).
+  These come after the source's check of the configured network, so a start against another network's public database
+  is refused for its network first (`network`); the recorded genesis still refuses a database of the configured network
+  bound to another public database.
 - **Taking blocks** (PP-3, PP-5). `core-private-source`'s block source (`PrivateBlockSource`) runs under the finalized
   loop unchanged: its `cursor` and `committedHeight` are the private cursor's; its finalized head is the public cursor
   (`core-block-commit`'s `readCursor` in a read of the public database; before the core's first commit the height
@@ -1271,6 +1282,12 @@ frame the tape node could not give back byte for byte; the variant transforms' `
 
 **A module's call fails** (an `UmbraError` the module may catch; uncaught, its callback fails with `callback-error`):
 `state-not-retained` (LG-12: a ledger state outside the retention window, task 12.4).
+
+**`private-binding-mismatch` names its cause** in `details.reason` (PP-2, §8), in the order a private start checks
+them: `public-not-started` (the public database's core never started, Q125), `network` (its genesis hash is not the
+configured network's, Q136 B: `network`, `configured`, `public`), `genesis` and `start` (it is not the public database
+the private database recorded: `recorded`, `public`), `private-start-below` (the private S is below the public S:
+`private`, `public`).
 
 ## 12. Exported surface and command (LS-1, LS-6)
 

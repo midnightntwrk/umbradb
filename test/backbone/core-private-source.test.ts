@@ -3,6 +3,7 @@ import { CORE_DIGEST } from "../../src/backbone/core-digest/index.js";
 import { CORE_KEY_REGISTRY } from "../../src/backbone/core-key-registry/index.js";
 import {
   bindingRefusal,
+  networkRefusal,
   openPublicDatabase,
   PrivateBlockSource,
   privateCursorHeight,
@@ -49,6 +50,22 @@ function fakePublic(answer: (sql: string, params: readonly unknown[]) => Record<
 }
 
 const bytes = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
+
+const hexOf = (value: Uint8Array): string => `0x${Buffer.from(value).toString("hex")}`;
+
+/** What the runner gives a source's chain check of the configured network (`configuredGenesisOf`'s value). */
+const configuredAs = (network: string, hash: Uint8Array | null) => ({ configured: Object.freeze({ network, hash }) });
+
+/** The `UmbraError` `pending` rejects with; fails the test when it resolves. */
+async function refusalOf(pending: Promise<unknown>): Promise<UmbraError> {
+  try {
+    await pending;
+  } catch (error) {
+    expect(error).toBeInstanceOf(UmbraError);
+    return error as UmbraError;
+  }
+  throw new Error("expected a refusal, and it resolved");
+}
 
 /** Answers of a public database: its identity (S = 3) and blocks up to `head`, or nothing. */
 function publicAnswers(options: { readonly identity?: boolean; readonly head?: bigint | null }) {
@@ -100,12 +117,69 @@ describe("the private block source (PP-3)", () => {
   it("checks the chain at startup by the public identity, in place of the node's checks (PP-1, PP-2)", async () => {
     const { db, state } = fakePublic(publicAnswers({ head: 9n }));
     const source = new PrivateBlockSource(db, pollingWakes());
-    expect(await source.checkChain()).toEqual({ genesisHash: bytes(0xa1) });
+    expect(await source.checkChain(configuredAs("custom", bytes(0xa1)))).toEqual({ genesisHash: bytes(0xa1) });
     expect(state.reads).toBe(1);
     const empty = new PrivateBlockSource(fakePublic(publicAnswers({ identity: false })).db, pollingWakes());
-    await expect(empty.checkChain()).rejects.toMatchObject({
+    await expect(empty.checkChain(configuredAs("custom", bytes(0xa1)))).rejects.toMatchObject({
       code: "private-binding-mismatch",
       details: { reason: "public-not-started" },
+    });
+  });
+
+  it("refuses a public database whose genesis hash is not the configured network's, by the whole hash (Q136)", async () => {
+    const source = new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes());
+    const other = await refusalOf(source.checkChain(configuredAs("custom", bytes(0xb2))));
+    expect(other).toMatchObject({
+      code: "private-binding-mismatch",
+      retryable: false,
+      details: { reason: "network", network: "custom", configured: hexOf(bytes(0xb2)), public: hexOf(bytes(0xa1)) },
+    });
+    expect(Object.keys(other.details)).toEqual(["reason", "network", "configured", "public"]);
+    expect(other.message).toContain(`configured for the network custom, whose genesis hash is ${hexOf(bytes(0xb2))}`);
+    expect(other.message).toContain(`the public database's genesis hash is ${hexOf(bytes(0xa1))}`);
+    // One byte of 32 differing, the last or the first, is another network.
+    for (const at of [31, 0]) {
+      const near = bytes(0xa1);
+      near[at] = 0xa0;
+      await expect(source.checkChain(configuredAs("custom", near))).rejects.toMatchObject({
+        details: { reason: "network", configured: hexOf(near) },
+      });
+    }
+    // A known network's hash (configuredGenesisOf's: the built-in table's) is compared alike.
+    await expect(source.checkChain(configuredAs("mainnet", bytes(0x3c)))).rejects.toMatchObject({
+      details: { reason: "network", network: "mainnet", configured: hexOf(bytes(0x3c)), public: hexOf(bytes(0xa1)) },
+    });
+    expect(await source.checkChain(configuredAs("preprod", bytes(0xa1)))).toEqual({ genesisHash: bytes(0xa1) });
+  });
+
+  it("refuses a known network whose built-in table records no genesis hash: nothing to check the public one against", async () => {
+    const source = new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes());
+    const refusal = await refusalOf(source.checkChain(configuredAs("stagenet", null)));
+    expect(refusal).toMatchObject({
+      code: "private-binding-mismatch",
+      details: { reason: "network", network: "stagenet", configured: null, public: hexOf(bytes(0xa1)) },
+    });
+    expect(refusal.message).toContain("this build records no genesis hash for the network stagenet");
+  });
+
+  it("refuses a public database whose core never started before comparing the configured network (PP-2's order)", async () => {
+    const empty = new PrivateBlockSource(fakePublic(publicAnswers({ identity: false })).db, pollingWakes());
+    await expect(empty.checkChain(configuredAs("custom", bytes(0xb2)))).rejects.toMatchObject({
+      details: { reason: "public-not-started" },
+    });
+  });
+
+  it("compares with networkRefusal, which the negative controls' intake replaces", async () => {
+    const identity = { genesisHash: bytes(0xa1), start: 3n };
+    expect(networkRefusal({ network: "custom", hash: bytes(0xa1) }, identity)).toBeNull();
+    expect(networkRefusal({ network: "custom", hash: bytes(0xb2) }, identity)?.details.reason).toBe("network");
+    const core = { id: "core", start: 3, settings: {} } as unknown as CheckedEntry;
+    const publicDb = () => fakePublic(publicAnswers({ head: 9n })).db;
+    const skipping = privateIntake({ publicDatabase: publicDb, wakes: () => manualWakes().wakes, network: () => null });
+    expect(await skipping.source(core).checkChain(configuredAs("custom", bytes(0xb2)))).toEqual({ genesisHash: bytes(0xa1) });
+    const checking = privateIntake({ publicDatabase: publicDb, wakes: () => manualWakes().wakes });
+    await expect(checking.source(core).checkChain(configuredAs("custom", bytes(0xb2)))).rejects.toMatchObject({
+      details: { reason: "network" },
     });
   });
 

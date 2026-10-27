@@ -21,11 +21,16 @@
  *
  * **`core-chain` on a private process** (task 10.2's part, unchanged): a private process never talks to the node
  * (PP-1), so its startup check of the chain is its source's ({@link PrivateBlockSource.checkChain}, in place of
- * `core-chain`'s IN-3 checks against a node): the public database's identity is read, its genesis hash handed to
+ * `core-chain`'s IN-3 checks against a node), before any migration: the public database's identity is read — a public
+ * database whose core never started refused ({@link publicNotStarted}) —, its genesis hash compared with the
+ * configured network's (`configuredGenesisOf` of the process's `core` revision: the built-in table's for a known
+ * network, `genesisHash` for `custom`), a difference refused with `private-binding-mismatch`, `details.reason`
+ * `network` (owner decision Q136 B, task 10.2b; {@link networkRefusal}), and the public genesis hash handed to
  * `core-chain`, which records it with the private S in the private database's `core_chain.identity` on a new private
  * database and the anchor at block S, and publishes `config`, `db` and `ledger-table` (no node client: the private
- * `core` entry has no `node`). Nothing of that compares: the comparisons are PP-2's, here. The bootstrap's wait (IN-2)
- * waits, with the condition `waiting-for-node`, for the public cursor to reach the private S.
+ * `core` entry has no `node`). The comparisons with the recorded binding are PP-2's, here, after it: so a private
+ * database of the configured network bound to another public database is refused by them (`genesis`, `start`). The
+ * bootstrap's wait (IN-2) waits, with the condition `waiting-for-node`, for the public cursor to reach the private S.
  *
  * **Block intake** (PP-3, PP-5) is the finalized loop's (`src/runner/loop.ts`) over this part's block source
  * ({@link PrivateBlockSource}): its cursor is the private cursor; its finalized head is the public cursor, read in a
@@ -50,7 +55,7 @@
 
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
-import type { ChainCheck } from "../core-chain/core-chain.js";
+import type { ChainCheck, ChainCheckInput, ConfiguredGenesis } from "../core-chain/core-chain.js";
 import type { CheckedEntry } from "../../config/validate.js";
 import type { ReadHandle, SchemaWriteHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
@@ -135,6 +140,35 @@ export function publicNotStarted(): UmbraError {
 }
 
 /**
+ * Q136 B's check (PP-2; task 10.2b): the refusal (`private-binding-mismatch`, `details.reason` `network`, not retried)
+ * of a public database whose identity `current` has another genesis hash than the configured network's — `configured`,
+ * `configuredGenesisOf` of the process's `core` revision —, compared whole; and of a known network whose built-in
+ * table records no genesis hash, against which nothing can be checked (as the core refuses it, decision record Q117).
+ * Null when the hashes are equal.
+ */
+export function networkRefusal(configured: ConfiguredGenesis, current: PublicIdentity): UmbraError | null {
+  const publicHash = hex(current.genesisHash);
+  if (configured.hash === null) {
+    return new UmbraError(
+      "private-binding-mismatch",
+      `this build records no genesis hash for the network ${configured.network}, so the public database's genesis ` +
+        `hash ${publicHash} cannot be checked against it: a private process of a known network starts only with a ` +
+        "build whose built-in table records its genesis hash (PP-2, decision records Q117, Q136)",
+      { reason: "network", network: configured.network, configured: null, public: publicHash },
+    );
+  }
+  if (sameBytes(configured.hash, current.genesisHash)) return null;
+  return new UmbraError(
+    "private-binding-mismatch",
+    `the private process is configured for the network ${configured.network}, whose genesis hash is ` +
+      `${hex(configured.hash)}, and the public database's genesis hash is ${publicHash}: its core indexes another ` +
+      `network (PP-2, decision record Q136); point publicDatabase or coreTransport at a public database of ` +
+      `${configured.network}, or configure the network its public database is of`,
+    { reason: "network", network: configured.network, configured: hex(configured.hash), public: publicHash },
+  );
+}
+
+/**
  * PP-2's binding check: the refusal (`private-binding-mismatch`, not retried) of a private database that recorded
  * `recorded` — null on its first start — against the public database whose identity is `current`, for a private
  * process whose S is `privateStart`; null when it may start.
@@ -184,18 +218,26 @@ export interface Closable {
   close(): Promise<void>;
 }
 
+/** The checks a {@link PrivateBlockSource} runs at startup, each replaceable by a negative control. */
+export interface PrivateChecks {
+  /** The configured network's check; {@link networkRefusal} unless given. */
+  readonly network?: typeof networkRefusal;
+}
+
 /** The block source of a private process (see the module comment). */
 export class PrivateBlockSource implements BlockSource {
   readonly #public: PublicDatabase;
   readonly #wakes: PublicWakes;
   readonly #transport: Closable | null;
+  readonly #network: typeof networkRefusal;
   /** The private cursor last known committed: startup's read, then each block committed; undefined before startup's. */
   #position: BlockRef | null | undefined;
 
-  constructor(publicDatabase: PublicDatabase, wakes: PublicWakes, transport: Closable | null = null) {
+  constructor(publicDatabase: PublicDatabase, wakes: PublicWakes, transport: Closable | null = null, checks: PrivateChecks = {}) {
     this.#public = publicDatabase;
     this.#wakes = wakes;
     this.#transport = transport;
+    this.#network = checks.network ?? networkRefusal;
   }
 
   /**
@@ -274,14 +316,18 @@ export class PrivateBlockSource implements BlockSource {
   }
 
   /**
-   * The chain's check at the private process's startup, in place of `core-chain`'s checks against a node (IN-3; PP-1: a
-   * private process never talks to the node): the public database's chain identity, its genesis hash given to
-   * `core-chain`, which records it with the private S on a new private database — or the refusal of a public database
-   * whose core has never started ({@link publicNotStarted}). PP-2's comparisons are the part's, in its `on-start-db`.
+   * The chain's check at the private process's startup, before any migration, in place of `core-chain`'s checks
+   * against a node (IN-3; PP-1: a private process never talks to the node), in this order (PP-2): the public database's
+   * chain identity read — a public database whose core has never started refused ({@link publicNotStarted}, Q125) —;
+   * its genesis hash compared with the configured network's, `input.configured` (Q136 B; {@link networkRefusal}); then
+   * given to `core-chain`, which records it with the private S on a new private database. The comparisons with the
+   * recorded binding are the part's, in its `on-start-db`.
    */
-  async checkChain(): Promise<ChainCheck> {
+  async checkChain(input: Pick<ChainCheckInput, "configured">): Promise<ChainCheck> {
     const identity = await this.#public.read((read) => readPublicIdentity(read));
     if (identity === null) throw publicNotStarted();
+    const refusal = this.#network(input.configured, identity);
+    if (refusal !== null) throw refusal;
     return Object.freeze({ genesisHash: identity.genesisHash });
   }
 
@@ -312,6 +358,8 @@ export interface PrivateIntakeOptions {
   readonly wakes?: (core: CheckedEntry) => PublicWakes;
   /** The negative controls' binding check; {@link bindingRefusal} unless given. */
   readonly binding?: typeof bindingRefusal;
+  /** The negative controls' check of the configured network (Q136 B); {@link networkRefusal} unless given. */
+  readonly network?: typeof networkRefusal;
 }
 
 /** One private process start's `core-private-source`: the part and the block source it is bound to. */
@@ -382,7 +430,9 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
           ...(options.wakes === undefined ? {} : { wakes: options.wakes(core) }),
         },
       );
-      made = new PrivateBlockSource(side.publicDatabase, side.wakes, side.transport);
+      made = new PrivateBlockSource(side.publicDatabase, side.wakes, side.transport, {
+        ...(options.network === undefined ? {} : { network: options.network }),
+      });
       return made;
     },
   });
