@@ -1465,13 +1465,35 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       times the points after a commit, one that never times `on-finalized`, one that does not clear when the point
       ends). A142's tests are unchanged but for the seam's argument. No mutation pass here (deferred to the end, owner
       2026-10-27).
-- [ ] 5.3b A stop during startup with the node unreachable (found in the playground, 2026-10-27): SIGTERM, or
+- [x] 5.3b A stop during startup with the node unreachable (found in the playground, 2026-10-27): SIGTERM, or
       `ProcessHandle.stop()`, while startup waits on the node — `core-chain`'s `checkChain` reading block 0 through a
       node client that keeps reconnecting — enters `stopping` but never ends; only a second signal does, through
       Node.js's default handler. `#close()` awaits startup's end before it closes the node client
       (`src/runner/process.ts`), and the wait is not tied to the stop. RN-13 as amended: every node call of startup
       ends at the stop, and the process exits without a second signal.
       **Acceptance:** A167.
+      **Done (2026-10-27):** the cause confirmed: at the stop startup's one pending call was `chain_getBlockHash(0)`
+      (`checkChain`'s block 0), retried without limit and given no signal, while `#close()` awaited `ended` before it
+      closed the node client; a private process whose core transport accepts and never answers hung the same way (its
+      transport's handshake). A stop during startup (`starting`) now closes the node client and the block source at
+      once, before awaiting startup's end (`#endStartupWaits` in `src/runner/process.ts`): every node call startup
+      awaits — `checkChain`'s blocks, the node source's subscriptions and head read, the wait for the head, a module's
+      call in `on-start-db` — ends with `handle-closed`, its retries and the client's reconnection included, and on a
+      private process the wait for its public side ends too; a step cut short fails, its transaction rolled back, and
+      startup ends with the stop (`ended` of kind `signal`); both are closed again with the rest, as before. A stop
+      while the loop runs is unchanged. `design.md` §2 says so. Tests first: on the old sources the four new tests
+      failed for the intended reason on both backends (no close within 5 s, no end, the client open, 7 connection
+      attempts after the stop; `umbradb run` not exited within 5 s). Tests (PostgreSQL 18.6, PGlite 0.5.10): A167
+      `test/runner/startup-stop.test.ts` (oracle `a167Problems` in `startup-stop-harness.ts`: a new database, the node
+      on a closed port, `backoffCeilingMs` 1 s; `ProcessHandle.stop()` and SIGTERM through `terminationSignal` once
+      startup shows `node-retrying` at 2 attempts: `stopping`, closed within 5 s, `ended` `signal`, the client closed,
+      no connection attempt over 2.5 s after, the database closed; `umbradb run`, the bundled command in a child, one
+      real SIGTERM: exit 0 by itself within 5 s, its admin listener closed; a private process whose core transport
+      never answers ends at its stop within 5 s); committed negative control
+      `startup-stop.negative-control.test.ts` (a startup whose wait for block 0 goes through a client of its own,
+      which the stop does not reach). Found on the way and recorded, not fixed: a stop while the loop waits on an
+      unreachable node outside a height's transaction does not end either (issue 00042). No mutation pass here
+      (deferred to the end, owner 2026-10-27).
 
 ## 6. Storage helpers
 

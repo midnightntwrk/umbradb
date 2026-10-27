@@ -118,8 +118,10 @@ then `syncing` or `following` by the lag (the head the loop last read minus the 
 `stopped`, `stopping`; ready when `following` or `stopped`, or `syncing` within a set `readinessLag` (`refused` and
 `halted` below); the block source's conditions (`finality-stall`) are the process's too. SIGTERM (`terminationSignal`)
 or `stop()`: `stopping`, the loop's signal aborted and the loop awaited — the height in progress, its transaction
-included, finishes —, then the module API, the node client, the database and the block source closed. Log lines go
-through the configuration's redaction.
+included, finishes —, then the module API, the node client, the database and the block source closed. During startup
+the node client and the block source are closed first, so every wait of startup for the chain ends at once — a node
+call and its retries, a private process's wait for its public side — and no connection is attempted after the stop
+(RN-13, task 5.3b). Log lines go through the configuration's redaction.
 
 **Failures** (task 5.4: `src/runner/failures.ts`, `process.ts`). A startup refusal leaves the process up in `refused`
 (IN-12, AE-3), its database closed and its writer lock released — except a refusal of the configuration itself, before

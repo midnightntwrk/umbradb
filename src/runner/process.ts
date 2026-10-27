@@ -95,7 +95,10 @@
  * {@link ProcessInput.signal}, or calling {@link ProcessHandle.stop}, enters `stopping`, aborts the loop's signal — the
  * loop finishes the height in progress, so a block whose transaction is open commits, and starts no other —, awaits
  * it, then closes the module API (WebSocket clients get 1001, every connection ends), the node client, the database and
- * the block source. During startup it stops before the next step, and ends a wait for the node at once.
+ * the block source. During startup it stops before the next step and ends every wait for the chain at once (RN-13 as
+ * amended; task 5.3b): it closes the node client and the block source first, so each node call startup awaits ends,
+ * an unreachable node's retries included, no connection is attempted after the stop, and on a private process a wait
+ * for its public side ends too.
  *
  * **A private process** (`side: "private"`, PP-1; task 14.1) starts the same way with the private `core` schema (CF-4):
  * its block source is `core-private-source`'s (`src/backbone/core-private-source/`), whose cursor and committed height
@@ -407,8 +410,10 @@ export interface ProcessHandle {
   readonly ended: Promise<ProcessingEnd>;
   /**
    * Stops the process (RN-13): `stopping`; the loop's signal aborted and the loop awaited; the module API, then the
-   * database, closed. Resolves once all of it is done; calling it again returns the same promise. After a refusal of
-   * the configuration ended the process, it returns {@link closed}, the state left `refused`.
+   * database, closed. During startup the node client and the block source are closed first, so every wait of startup
+   * for the chain ends at once (task 5.3b). Resolves once all of it is done; calling it again returns the same
+   * promise. After a refusal of the configuration ended the process, it returns {@link closed}, the state left
+   * `refused`.
    */
   stop(): Promise<void>;
   /**
@@ -730,13 +735,17 @@ class Process implements ProcessHandle {
 
   /** {@link stop}'s work. */
   async #close(): Promise<void> {
+    const starting = this.#phase === "starting";
     this.#phase = "stopping";
     this.#admin?.publish();
     this.#stop.abort();
+    // During startup its waits for the chain end now, not once startup has ended (RN-13; task 5.3b).
+    const waits = starting ? this.#endStartupWaits() : undefined;
     await this.ended;
     try {
       await this.#api?.close();
     } finally {
+      await waits;
       await this.#transport?.close();
       await this.#closeNode();
       await this.#ledger?.close();
@@ -745,6 +754,19 @@ class Process implements ProcessHandle {
       if (this.#admin !== undefined) await this.#admin.close();
       this.#resolveClosed();
     }
+  }
+
+  /**
+   * A stop during startup (RN-13 as amended; task 5.3b): ends every wait of startup for the chain at once, rather than
+   * once startup has ended — which it does not while a node call retries an unreachable node without limit (IN-10).
+   * The node client is closed, so each call startup awaits on it — `checkChain`'s blocks, the node source's
+   * subscriptions and head read, a module's call in `on-start-db` — ends with `handle-closed` and no connection is
+   * attempted after the stop; the block source is closed, which ends a wait for its head and, on a private process, a
+   * wait for its public side (its transport's connection, its reads). A step cut short fails, its transaction rolled
+   * back, and startup ends with the stop. Both are closed again with the rest; closing is idempotent. Never rejects.
+   */
+  async #endStartupWaits(): Promise<void> {
+    await Promise.allSettled([this.#closeNode(), this.#source?.close?.()]);
   }
 
   /** Closes the process's node client (every call and subscription ends with `handle-closed`). */
