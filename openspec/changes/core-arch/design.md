@@ -1540,7 +1540,12 @@ the private database recorded: `recorded`, `public`), `private-start-below` (the
 
 **Values:** `defineConfig`, `coreEntry`, `versionEntry`, `defineModule`, `startProcess`, `runLedgerWorker`,
 `InMemoryBlockSource`,
-`cursorTable`, `heightVersionedTable`, `encodeCanonical`, `encodeRow`, `contentsHash`, `POINTS`, `UmbraError`.
+`cursorTable`, `heightVersionedTable`, `encodeCanonical`, `encodeRow`, `contentsHash`, `POINTS`, `UmbraError`; and, for
+the module guide's example (owner decision Q161 A): the module API's envelope helpers `readChainDataView`,
+`chainDataHeaders`, `withViewExtensions` and `answerChainData` (`src/runner/envelope.ts`), `hexBytes`
+(`src/config/core-settings.ts`), `retainedStatesOf` (`src/backbone/core-ledger-state/`), and the core modules'
+declarations, so that a configuration file writes their entries (`<module>.entry({ … })`; their exported names are
+settled by task 17.3).
 
 **Types:** `ModuleDeclaration`, `ItemDeclaration`, `Lifetime`, `FieldKind`, `FieldSchema`, `Migration`, `Revision`,
 `PointName`, `PointCallbacks`, `ProcessContext`, `BlockContext`, `ItemSink`, `ReadHandle`, `BlockWriteHandle`,

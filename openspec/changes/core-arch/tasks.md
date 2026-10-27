@@ -3337,6 +3337,14 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (§12 imports, the retired-name failure, a tape sync on PostgreSQL in Docker, `umbradb config check`); the bench
       smoke retargeted with a fresh baseline; `typedoc.json` entry points.
       **Acceptance:** A1, A2, A6; `npm run test:smoke` passes.
+- [ ] 17.3a The module guide rewritten (owner, 2026-10-27; decisions Q160 A, Q161 A), after 17.3: `docs/module-guide.md`
+      replaced by the reviewed outline and first draft (an overview, one complete example, then the detail sections; a
+      "Deterministic PostgreSQL" section for the column types; migrations and upgrades late), every code block
+      importing from `umbradb`; the example in the repository at `examples/stats/` (the module, its configuration file,
+      the run and try scripts), type-checked with the code; the old guide's content each moved, shortened or cut as
+      the outline maps it.
+      **Acceptance:** `examples/stats/` type-checks against `src/index.ts`; `umbradb config check` passes on its
+      configuration file.
 - [ ] 17.4 Version `0.10.0` and the breaking-change notice in `CHANGELOG.md`.
       **Acceptance:** A4.
 - [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
