@@ -197,6 +197,12 @@ export const ERROR_CODES = [
   "needs-lockstep-not-listed",
   "lockstep-behind",
   "report-hash-mismatch",
+  /**
+   * A private process's halt when the core's configuration hash is no longer the one it recorded at startup (PP-14,
+   * owner decision Q147; task 14.1b): a `hello-ack`, `committed` or `read-result` carried another, or — without a
+   * transport — the public configuration history read again at a reconnection hashes to another. Not retryable.
+   */
+  "public-config-changed",
   // The backup's refusals (BK-1, PP-12; `src/backup/`, task 15.1): the command exits 1 and writes no file.
   /**
    * The tool a backup needs is missing or of another major version than 18: the PostgreSQL 18 client's `pg_dump` for a

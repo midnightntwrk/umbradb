@@ -2814,7 +2814,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       left — an item a part provides in a range ending at the cursor, a public revision superseded before its own stop,
       a binding recorded before any commit — being cases no process test sets up, each caught by its unit test; none
       equivalent.
-- [ ] 14.1b The owner's answer Q147 (the owner's design, none of the options): the core computes its configuration
+- [x] 14.1b The owner's answer Q147 (the owner's design, none of the options): the core computes its configuration
       hash once at startup, in memory, without secrets — its exact input settled in `design.md` §8 (for example the
       configuration history's per-revision `data_hash` values) — and sets `X-Umbra-Config-Hash` beside
       `X-Umbra-Version` on every `listen.api` answer (RN-16); `hello-ack`, `committed` and `read-result` carry it as
@@ -2823,6 +2823,62 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       public configuration history again at each reconnection to its public database (PP-14); the code in design §11's
       halts, `ErrorCode` and the code registry with its test (A87); the module guide; the tests.
       **Acceptance:** A162; A115 with the new field; A87.
+      **Done (2026-10-27):** the hash's input settled in `design.md` §8 ("The configuration hash"): SHA-256 of the
+      canonical encoding (DT-1) of `["umbradb-config-hash", 1, rows]`, each row of the process's own `core_chain.config`
+      as `core-chain` recorded it at startup — `[entry_id, start, stop, version, data_hash, provides]`, by `entry_id`'s
+      UTF-8 bytes and `start` —, so every data field of every revision (through `data_hash`), its heights, version and
+      `table` items count, and nothing operational or secret (never recorded, CF-4); the rows, so that a private process
+      computes the same hash from the public database (`configHashOf`, `src/config/history.ts`; `readConfigRows`,
+      `readConfigHash`, `src/backbone/core-chain/history.ts`). Each process reads its own once at startup, after
+      `on-start-db` recorded the configuration, and keeps it for the run (`src/runner/process.ts`: three lines and the
+      negative control's seam `ProcessInput.configHash`). `src/runner/api-server.ts`: `X-Umbra-Config-Hash`
+      (`CONFIG_HASH_HEADER`) beside `X-Umbra-Version` on every answer of a listener given the hash — the handlers', the
+      module API's errors, Node.js's own (`unreadableAnswer`), the upgrade and `ws`'s refusals —, a module's own header
+      of either name replaced (`coreHeadersResponse`; `VersionedResponse` is its form without a hash).
+      `src/private/messages.ts`: `configHash` (32 bytes) on `hello-ack`, `committed` and `read-result`;
+      `core-transport.ts` sends the process's on each. A private process (PP-14): its transport (`private-transport.ts`)
+      records the first `hello-ack`'s `configHash` and, on a later `hello-ack`, `committed` or `read-result` carrying
+      another, refuses itself for good with the new halt `public-config-changed` (`publicConfigChanged`, `details {
+      recorded, found, via }`): it closes the connection (1000), connects no more, fails every wait and read, and the
+      source (`core-private-source`) fails its next read of public data with that refusal even when it reads PostgreSQL
+      directly, so no other height is processed. Without `coreTransport`, startup's chain check reads the public rows
+      with the identity (`readPublicConfiguration`) and records their hash; the PostgreSQL public database counts its
+      read pool's lost sessions (`onReadSessionLost`, `src/db/postgres.ts`, `PublicDatabase.reconnections`), and the
+      source's first read after one reads the rows again, in that read and before its body, and halts alike (`via:
+      "public-database"`). The code is in `ERROR_CODES`, `HALT_CODES`, design §11's halts and the registry
+      (`test/runner/code-registry.ts`, A87). The module guide's "Answer…" and "The `X-Umbra-` prefix" bullets, and "A
+      changed public configuration halts you". Tests, seen failing first (`tsc` exit 2, 50 errors: `configHashOf`,
+      `ConfigHashRow`, `readConfigHash`, `readPublicConfiguration`, `publicConfigChanged`,
+      `PublicDatabase.reconnections`, `SourceTransport.refusal`, `PrivateChecks.configHash`, `ProcessInput.configHash`,
+      the messages' `configHash`; Vitest 7 files failed, 47 tests — no header, no halt: the private process went on to
+      16 on both backends and both paths, the schemas without the field, the registry's code not in §11):
+      `test/private/config-hash.test.ts` with `config-hash-checks.ts` (A162 on PostgreSQL 18.6 and PGlite 0.5.10: a core
+      restarted at 8 with the same configuration, at 11 with only secrets changed — the node URL's password, and on
+      PostgreSQL its own login's password in `database` —, at 11 with the data field `level` of the public module
+      `pub`'s revision from 30 changed, then on to 16: the private process with `coreTransport` reaches 8 and 11 and
+      halts with `public-config-changed` at 11; the core's and the private process's module API answers carry
+      `X-Umbra-Config-Hash`, the same through the first two restarts, another after the third, holding no secret as text
+      or hex; on PostgreSQL the same without a transport, every session of its public login ended after each restart),
+      and unit rows in `test/config/history.test.ts` (`configHashOf`), `history-database.test.ts` (`readConfigHash` and
+      `readPublicConfiguration` on both backends), `test/private/messages.test.ts` (A115 with the field),
+      `transport.test.ts` (the core's three messages carry one hash), `transport-faults.test.ts` (the core's side; the
+      private side refused for good by a `committed`, a `read-result` or a reconnection's `hello-ack` with another hash;
+      the same hash changes nothing), `test/backbone/core-private-source.test.ts` (the reread at a reconnection, the
+      transport's refusal at the next read) and `test/runner/api-server.test.ts` (every answer, `coreHeadersResponse`,
+      `unreadableAnswer`). Committed negative controls: a private process that ignores `configHash`
+      (`PrivateIntakeOptions.configHash: "ignore"`) reaches 16 — with a transport on both backends, without one on
+      PostgreSQL — and fails A162; a configuration hash over the core's secrets that shows them (the node URL's password
+      as hex) changes with only that password and holds it, failing A162 (`config-hash.negative-control.test.ts`); a
+      transport that ignores the hash keeps its connection; a source that ignores it reads on; task 5.2c's listener
+      without a hash fails the header oracle on every answer. Wrong variants (a scratch copy outside the clone, run
+      through Codex): run 1, 46 on the new logic — the hash 10, its reading 3, the listener's headers 5, the process 3,
+      the messages 2, the core's transport 2, the private transport 10, the source 7, the public database's count and
+      the PostgreSQL hook 3, the code lists 1 —, 46 caught (39 by the unit suites, 7 by A162), none equivalent; run 2,
+      the unchanged final sources against A162, its negative controls and the transport and history suites on a fresh
+      copy, nothing failing (a baseline: A162's catches are the variants'). Question Q159 (startup records the
+      first hello-ack's hash without comparing it with the public history it read) raised, not blocking, shipped A;
+      issue `docs/issues/00038-registry-conditional-tests.md` (the A87 registry cannot name an `it.runIf` test)
+      recorded (OPEN). Waits: Q159 (owner).
 - [x] 14.2 The process transport and its messages; opt-in mutual TLS.
       **Acceptance:** A115, A121.
       **Done (2026-10-26):** `src/private/` (new; design §1's row): `messages.ts` — design §8's eight messages as zod

@@ -90,6 +90,7 @@ describe("A121: with tls set, the core's transport requires mutual TLS (raw clie
       cursor: () => null,
       lockstepInstances: [],
       readTimeoutMs: 30_000,
+      configHash: `0x${"11".repeat(32)}`,
       log: () => undefined,
     });
     try {

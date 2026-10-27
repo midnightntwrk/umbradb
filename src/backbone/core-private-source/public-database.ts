@@ -25,7 +25,8 @@
 
 import { BLOCKS_TABLE, cursorHeight, readCursor } from "../core-block-commit/core-block-commit.js";
 import { readIdentity } from "../core-chain/core-chain.js";
-import { publicItemRanges } from "../../config/history.js";
+import { readConfigRows } from "../core-chain/history.js";
+import { configHashOf, publicItemRanges } from "../../config/history.js";
 import type { PlainObject } from "../../config/plain-data.js";
 import type { CheckedEntry } from "../../config/validate.js";
 import type { ReadHandle } from "../../db/api.js";
@@ -46,6 +47,12 @@ export interface PublicDatabase {
   read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T>;
   /** Closes what reading it opened. */
   close(): Promise<void>;
+  /**
+   * How many connections to it were lost so far (a PostgreSQL public database read directly: its read pool's lost
+   * sessions); each is followed by a reconnection, at which a private process without a transport reads the public
+   * configuration history again (PP-14). None for a database that does not count them.
+   */
+  reconnections?(): number;
 }
 
 /** What wakes a private process's wait for the public cursor (see the module comment). */
@@ -104,6 +111,30 @@ export async function readPublicItems(read: Pick<ReadHandle, "query">): Promise<
   );
 }
 
+/** The public configuration as a private process reads it at startup: its `table` items and its configuration hash. */
+export interface PublicConfiguration {
+  readonly items: PublicItem[];
+  /** `configHashOf` the rows of the public `core_chain.config` (RN-16, PP-14); null before the table exists. */
+  readonly configHash: string | null;
+}
+
+/**
+ * The public core's `table` items with their heights ({@link readPublicItems}' result) and its configuration hash — the
+ * core's own, by the same rows and function (`readConfigHash`, RN-16) — from one statement of `read` (PP-13, PP-14;
+ * tasks 14.1a, 14.1b).
+ */
+export async function readPublicConfiguration(read: Pick<ReadHandle, "query">): Promise<PublicConfiguration> {
+  const rows = await readConfigRows(read);
+  if (rows === null) return Object.freeze({ items: [], configHash: null });
+  return Object.freeze({ items: publicItemRanges(rows), configHash: configHashOf(rows) });
+}
+
+/** The public configuration hash of `read` (`configHashOf` its `core_chain.config`; null before the table exists). */
+export async function readPublicConfigHash(read: Pick<ReadHandle, "query">): Promise<string | null> {
+  const rows = await readConfigRows(read);
+  return rows === null ? null : configHashOf(rows);
+}
+
 /** The public block at `height` — its height, hash and parent hash —, or null when the public database has none. */
 export async function readPublicBlock(read: Pick<ReadHandle, "query">, height: bigint): Promise<BlockRef | null> {
   if (!(await present(read, BLOCKS_PRESENT_SQL))) return null;
@@ -124,7 +155,8 @@ const readsDirectly = (setting: unknown): setting is string => typeof setting ==
 
 /**
  * The public database of `core`, a private process's `core` revision (Q102): its `publicDatabase`, a PostgreSQL URL,
- * opened for reads only — no writer, no lock; no connection until the first read. Throws `invalid-configuration`
+ * opened for reads only — no writer, no lock; no connection until the first read —, counting the read sessions it lost
+ * ({@link PublicDatabase.reconnections}, PP-14). Throws `invalid-configuration`
  * (`details.reason` `public-database-transport`, not retried) without one, or for a PGlite one, which is read through
  * the core's transport instead ({@link openPublicSide}, PP-4).
  */
@@ -140,10 +172,18 @@ export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
       { reason: "public-database-transport" },
     );
   }
-  const db = openPostgres({ url: setting, committedHeight: cursorHeight });
+  let lost = 0;
+  const db = openPostgres({
+    url: setting,
+    committedHeight: cursorHeight,
+    onReadSessionLost: () => {
+      lost += 1;
+    },
+  });
   return Object.freeze({
     read: <T>(body: (read: ReadHandle) => Promise<T>): Promise<T> => db.read(body),
     close: () => db.close(),
+    reconnections: () => lost,
   });
 }
 
@@ -153,6 +193,8 @@ export interface PublicSideOptions {
   readonly position: () => TransportPosition;
   /** Where its transport's log lines go. */
   readonly log: (line: string) => void;
+  /** Whether its transport checks the core's `configHash` (PP-14); `check` unless given (the negative control's `ignore`). */
+  readonly configHash?: "check" | "ignore";
 }
 
 /** A private process's public side: its public database, what wakes it, and its transport, if any (closed with it). */
@@ -187,6 +229,7 @@ export function openPublicSide(
           position: options.position,
           backoffCeilingMs: settings.backoffCeilingMs as number,
           log: options.log,
+          ...(options.configHash === undefined ? {} : { configHash: options.configHash }),
         })
       : null;
   let publicDatabase = given.publicDatabase;

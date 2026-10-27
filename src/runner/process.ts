@@ -101,6 +101,11 @@
  * bootstrap's wait of step 8 waits for the public cursor to reach the private S, and the source is closed with the
  * database.
  *
+ * **The configuration hash** (RN-16, PP-14, owner decision Q147; task 14.1b): read once at startup, after step 7's
+ * `on-start-db` recorded the configuration (`readConfigHash`: the hash of the process's own `core_chain.config`), and
+ * kept in memory for the run: the module API sets it as `X-Umbra-Config-Hash` on every answer, and the core's transport
+ * sends it on its messages.
+ *
  * **The process transport** (PP-4; task 14.2, `../private/core-transport.ts`): a public process whose `core` revision
  * has `listen.transport` starts it once its database is open and its chain known (step 7, before the bootstrap's wait),
  * tells it each commit (`committed`), and closes it at its stop or at a refusal; a listener that cannot listen refuses
@@ -145,6 +150,7 @@ import {
   CORE_CHAIN_ID,
   type NodeWait,
   nodeOptionsOf,
+  readConfigHash,
   readHistory,
   readIdentity,
   waitForNode,
@@ -162,7 +168,7 @@ import { type PlainObject, plainData } from "../config/plain-data.js";
 import { processCoreEntry } from "../config/process.js";
 import { configRedactor, type Redactor } from "../config/redact.js";
 import { type CheckedConfig, type CheckedEntry, type ConfigInput, validateConfig } from "../config/validate.js";
-import type { Database } from "../db/api.js";
+import type { Database, ReadHandle } from "../db/api.js";
 import { type MigrationPart, startDatabase } from "../db/migrate.js";
 import { startWriter } from "../db/writer-lock.js";
 import type { LedgerTable } from "../ledger/version-table.js";
@@ -245,6 +251,11 @@ export interface ProcessInput {
    * the process.
    */
   readonly ledgerWorker?: () => LedgerHost;
+  /**
+   * The process's configuration hash (RN-16, PP-14; task 14.1b), read once at startup after `core-chain` recorded the
+   * configuration: `readConfigHash` of its own database unless given (a negative control's, over its secrets).
+   */
+  readonly configHash?: (read: ReadHandle, core: CheckedEntry) => Promise<string>;
 }
 
 /** What the process shares with the block source it makes (task 10.3): its one node connection, S and its log. */
@@ -894,6 +905,9 @@ class Process implements ProcessHandle {
     });
     this.#step();
     contexts.seal();
+    // The configuration hash (RN-16, PP-14, Q147; task 14.1b): once, now that core-chain recorded the configuration,
+    // kept in memory for the run — on X-Umbra-Config-Hash of every module API answer and the transport's messages.
+    const configHash = await db.read((read) => (input.configHash === undefined ? readConfigHash(read) : input.configHash(read, core)));
     // `/status` and `/config` show the database's parts from here on, and what startup read (AE-5, tasks 8.3, 8.4).
     this.#admin?.opened({
       declarations,
@@ -923,6 +937,7 @@ class Process implements ProcessHandle {
         lockstepInstances,
         ...(this.#lockstep === undefined ? {} : { lockstep: this.#lockstep }),
         readTimeoutMs: settings.apiReadTimeoutMs as number,
+        configHash,
         log: (line) => this.#log(line),
       });
       this.#step();
@@ -938,6 +953,7 @@ class Process implements ProcessHandle {
       db,
       ...(address === undefined ? {} : { address }),
       apiReadTimeoutMs: settings.apiReadTimeoutMs as number,
+      configHash,
       onError: (error, where) => this.#log(`module API: ${where.route} of ${where.module} failed: ${messageOf(error)}`),
     });
     this.#step();

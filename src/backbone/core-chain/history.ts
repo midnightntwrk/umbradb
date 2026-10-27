@@ -27,6 +27,8 @@
 import {
   canonicalJson,
   checkHistory,
+  type ConfigHashRow,
+  configHashOf,
   type HistoryCheck,
   type HistoryInput,
   type HistoryOptions,
@@ -69,6 +71,9 @@ const ROWS_SQL = `SELECT entry_id, start, stop, version, data, data_hash FROM co
   ORDER BY ${keyOrderTerm("entry_id", "text")}, ${keyOrderTerm("start", "bigint")}`;
 
 const DELETE_SQL = "DELETE FROM core_chain.config WHERE entry_id = $1 AND start = $2";
+
+/** The columns the configuration hash reads (RN-16, PP-14): every row's, its data by its hash only. */
+const CONFIG_HASH_SQL = "SELECT entry_id, start, stop, version, data_hash, provides FROM core_chain.config";
 
 const RECORD_SQL = `INSERT INTO core_chain.config (entry_id, start, stop, version, data, data_hash, provides)
   VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::text[])
@@ -119,6 +124,35 @@ export async function readHistory(read: Pick<ReadHandle, "query">): Promise<Hist
       dataHash: row.data_hash === null ? null : new Uint8Array(row.data_hash as Uint8Array),
     }),
   );
+}
+
+/**
+ * The rows of `core_chain.config` as the configuration hash reads them (RN-16, PP-14; task 14.1b, `design.md` §8), in
+ * no order (`configHashOf` orders them); null while the table does not exist. Takes any handle that reads.
+ */
+export async function readConfigRows(read: Pick<ReadHandle, "query">): Promise<ConfigHashRow[] | null> {
+  const [{ present }] = (await read.query(PRESENT_SQL)) as [{ present: boolean }];
+  if (!present) return null;
+  const rows = await read.query(CONFIG_HASH_SQL);
+  return rows.map((row) =>
+    Object.freeze({
+      id: row.entry_id as string,
+      start: row.start as bigint,
+      stop: row.stop as bigint | null,
+      version: row.version as string,
+      dataHash: row.data_hash === null ? null : new Uint8Array(row.data_hash as Uint8Array),
+      provides: Object.freeze([...(row.provides as string[])]),
+    }),
+  );
+}
+
+/**
+ * The configuration hash of the database `read` reads (RN-16, PP-14; owner decision Q147, task 14.1b): `configHashOf`
+ * its `core_chain.config` rows — none before the table exists. A process reads its own once, at startup, after
+ * `core-chain`'s `on-start-db` recorded its configuration, and keeps it in memory for the run (`src/runner/process.ts`).
+ */
+export async function readConfigHash(read: Pick<ReadHandle, "query">): Promise<string> {
+  return configHashOf((await readConfigRows(read)) ?? []);
 }
 
 /**

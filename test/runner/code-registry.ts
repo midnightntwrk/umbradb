@@ -533,6 +533,14 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
       test: "A117: a report hash mismatch halts that instance with report-hash-mismatch, and the core keeps waiting for it",
     },
   ],
+  "halt:public-config-changed": [
+    {
+      file: "test/private/config-hash.test.ts",
+      test:
+        "A162: with a transport, a core restarted with a data field changed halts the private process with public-config-changed " +
+        "before another height; the same configuration, or only secrets changed, changes nothing; X-Umbra-Config-Hash holds no secret",
+    },
+  ],
 });
 
 /**

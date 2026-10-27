@@ -15,7 +15,7 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { FinalizedLoop, LoopInput } from "../../src/runner/loop.js";
-import type { ProcessHandle } from "../../src/runner/process.js";
+import type { ProcessHandle, ProcessInput } from "../../src/runner/process.js";
 import { startProcess } from "../runner/process-build.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
 import { REACH_TIMEOUT_MS } from "./backends.js";
@@ -109,6 +109,8 @@ export interface PublicCoreOptions {
    * {@link extra} (`127.0.0.1:0` for a free port), or through a negative control's starter; none unless given.
    */
   readonly admin?: boolean | AdminStarter;
+  /** A negative control's configuration hash (RN-16; `ProcessInput.configHash`); the process's own unless given. */
+  readonly configHash?: ProcessInput["configHash"];
 }
 
 /** The public core's module that keeps the core's `db` item for the tests' direct reads (see the module comment). */
@@ -195,6 +197,7 @@ export function launchPublicCore(options: PublicCoreOptions): PublicCore {
     log: (line) => lines.push(line),
     ...(options.loop === undefined ? {} : { loop: options.loop }),
     ...(options.admin === undefined ? {} : { admin: options.admin }),
+    ...(options.configHash === undefined ? {} : { configHash: options.configHash }),
   });
   return {
     handle,

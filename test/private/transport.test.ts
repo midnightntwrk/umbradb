@@ -23,7 +23,12 @@ import { endedWithin, hello, rawClient, type RawClient } from "./raw-client.js";
  * the connection; a second `hello` with a connected id is refused with `duplicate-instance`. With the committed negative
  * controls: a decoder that drops a `bigint`'s precision or a `bytea`'s bytes, a core that accepts a second `hello` of a
  * connected id, and a transport that still answers `api` (task 14.2's) each fail their oracle.
+ * Every one of the core's `hello-ack`, `committed` and `read-result` carries its configuration hash, `configHash`, the
+ * same one (task 14.1b; PP-4, RN-16).
  */
+
+/** A configuration hash's form (PP-4: 32 bytes as `0x` and lowercase hex). */
+const CONFIG_HASH = /^0x[0-9a-f]{64}$/;
 
 /** The core's `listen.transport`: a free port of the loopback interface. */
 const TRANSPORT = { listen: { transport: "127.0.0.1:0" } };
@@ -165,6 +170,8 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
 
   let core: PublicCore;
   let address: string;
+  /** The core's configuration hash, as its first hello-ack gave it. */
+  let configHash: string | undefined;
   beforeAll(async () => {
     const db = await backend.database("public");
     // No instance listed: a core listing one waits for it before every height (task 14.3, PP-6).
@@ -175,7 +182,17 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
 
   it("hello is answered with hello-ack: the lockstep flag, the genesis, S and the public cursor", async () => {
     const { client, ack } = await greeted(address, "instance-a");
-    expect(ack).toEqual({ v: 1, type: "hello-ack", lockstep: false, genesis: genesisHex(0xa1), start: "1", cursor: "3", refused: null });
+    expect(ack).toEqual({
+      v: 1,
+      type: "hello-ack",
+      lockstep: false,
+      genesis: genesisHex(0xa1),
+      start: "1",
+      cursor: "3",
+      refused: null,
+      configHash: expect.stringMatching(CONFIG_HASH),
+    });
+    configHash = ack.configHash;
     // A listed instance's flag, from a transport over the same database that lists it (in step: at 2, the cursor 3).
     const listing = await startCoreTransport({
       address: "127.0.0.1:0",
@@ -185,13 +202,14 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
       cursor: () => 3n,
       lockstepInstances: ["listed"],
       readTimeoutMs: 30_000,
+      configHash: `0x${"11".repeat(32)}`,
       log: () => undefined,
     });
     try {
       const listedClient = rawClient(`ws://127.0.0.1:${listing.port}/`);
       await listedClient.opened;
       listedClient.send(hello("listed", "2"));
-      expect(await listedClient.next("hello-ack")).toMatchObject({ lockstep: true, refused: null });
+      expect(await listedClient.next("hello-ack")).toMatchObject({ lockstep: true, refused: null, configHash: `0x${"11".repeat(32)}` });
       listedClient.close();
     } finally {
       await listing.close();
@@ -200,11 +218,17 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
   }, TEST_TIMEOUT_MS);
 
   it("every public commit is announced with committed, its height and hash", async () => {
-    const { client } = await greeted(address, "instance-c");
+    const { client, ack } = await greeted(address, "instance-c");
     const from = core.handle.status().cursor as bigint;
     await core.advance(from + 3n);
     for (let height = from + 1n; height <= from + 3n; height++) {
-      expect(await client.next("committed")).toEqual({ v: 1, type: "committed", height: `${height}`, hash: hexOf(inMemoryBlock(height).hash) });
+      expect(await client.next("committed")).toEqual({
+        v: 1,
+        type: "committed",
+        height: `${height}`,
+        hash: hexOf(inMemoryBlock(height).hash),
+        configHash: ack.configHash,
+      });
     }
     client.close();
   }, TEST_TIMEOUT_MS);
@@ -226,6 +250,8 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
     const answer = await client.next("read-result");
     const cursor = core.handle.status().cursor as bigint;
     expect(answer.id).toBe("7");
+    expect(answer.configHash).toMatch(CONFIG_HASH);
+    expect(answer.configHash).toBe(configHash ?? answer.configHash);
     expect(BigInt(answer.height as string)).toBeGreaterThanOrEqual(3n);
     expect(BigInt(answer.height as string)).toBeLessThanOrEqual(cursor);
     expect(answer.results?.slice(0, 3).map((result) => result.columns)).toEqual([
@@ -318,7 +344,12 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
     ["a mistyped field", '{"v":1,"type":"report","height":42,"hash":null}', "invalid-message", true],
     ["a text that is no JSON", "hello?", "not-json", true],
     ["a message before hello", '{"v":1,"type":"read","id":"1","statements":[]}', "hello-first", false],
-    ["a message only the core sends", '{"v":1,"type":"committed","height":"1","hash":"0x' + "00".repeat(32) + '"}', "wrong-direction committed", true],
+    [
+      "a message only the core sends",
+      '{"v":1,"type":"committed","height":"1","hash":"0x' + "00".repeat(32) + '","configHash":"0x' + "11".repeat(32) + '"}',
+      "wrong-direction committed",
+      true,
+    ],
   ])("%s closes the connection (1008), and the core keeps serving others", async (name, text, reason, afterHello) => {
     const client = rawClient(`ws://${address}/`);
     await client.opened;
@@ -355,6 +386,7 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
       cursor: () => null,
       lockstepInstances: [],
       readTimeoutMs: 30_000,
+      configHash: `0x${"11".repeat(32)}`,
       log: () => undefined,
       duplicates: "accept",
     });
@@ -377,7 +409,9 @@ describe("A115 negative control (committed): a transport that still answers api 
       socket.on("message", (data) => {
         const message = JSON.parse(data.toString()) as { type: string; id?: string };
         if (message.type === "hello") {
-          socket.send(messageText({ v: 1, type: "hello-ack", lockstep: false, genesis: genesisHex(0xa1), start: "1", cursor: null, refused: null }));
+          socket.send(
+            messageText({ v: 1, type: "hello-ack", lockstep: false, genesis: genesisHex(0xa1), start: "1", cursor: null, refused: null, configHash: `0x${"11".repeat(32)}` }),
+          );
         } else if (message.type === "api") {
           socket.send(JSON.stringify({ v: 1, type: "api-result", id: message.id, error: "not-found" }));
         }
@@ -415,6 +449,7 @@ describe.each(PRIVATE_BACKENDS)("A115: a read of an empty public database on $na
         type: "read-result",
         id: "e",
         height: null,
+        configHash: ack.configHash,
         results: [{ columns: [{ name: "one", type: "bigint" }], rows: [["1"]] }],
       });
       client.close();

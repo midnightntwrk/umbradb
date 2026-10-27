@@ -28,6 +28,10 @@ import { endedWithin, hello, rawClient } from "./raw-client.js";
 
 const quiet = () => undefined;
 
+/** The stand-in cores' configuration hash (RN-16, PP-4; task 14.1b), and another, as a core restarted with a changed one. */
+const CONFIG = `0x${"c1".repeat(32)}`;
+const CHANGED = `0x${"c2".repeat(32)}`;
+
 /** Rows as the database API returns them: values by column name, with their columns kept (`mapRows`). */
 function rowsOf(columns: readonly ResultColumn[], values: readonly Record<string, unknown>[]): Record<string, unknown>[] {
   const rows = values.map((row) => ({ ...row }));
@@ -67,6 +71,7 @@ async function core(db: CoreTransportOptions["db"], rest: Partial<CoreTransportO
     cursor: () => 9n,
     lockstepInstances: [],
     readTimeoutMs: 30_000,
+    configHash: CONFIG,
     log: (line) => lines.push(line),
     ...rest,
   });
@@ -88,6 +93,25 @@ async function greeted(url: string, instance: string, options: Parameters<typeof
 }
 
 describe("the core's side: limits and faults", () => {
+  it("its hello-ack, committed and read-result carry the core's configuration hash, configHash (PP-4, RN-16, Q147)", async () => {
+    const { transport, url } = await core(blocksDb(9n));
+    opened.push(transport);
+    const client = rawClient(url);
+    await client.opened;
+    client.send(hello("hashed"));
+    expect(await client.next("hello-ack")).toMatchObject({ refused: null, configHash: CONFIG });
+    transport.committed({ height: 9n, hash: blockHash(9n), parentHash: blockHash(8n) });
+    expect(await client.next("committed")).toEqual({ v: 1, type: "committed", height: "9", hash: hexOf(blockHash(9n)), configHash: CONFIG });
+    client.send({ v: 1, type: "read", id: "r", statements: [] });
+    expect(await client.next("read-result")).toEqual({ v: 1, type: "read-result", id: "r", height: "9", configHash: CONFIG, results: [] });
+    // A refused hello's ack carries it too.
+    const second = rawClient(url);
+    await second.opened;
+    second.send(hello("hashed"));
+    expect(await second.next("hello-ack")).toMatchObject({ refused: "duplicate-instance", configHash: CONFIG });
+    client.close();
+  });
+
   it("more reads at once than the limit closes the connection (too-many-reads)", async () => {
     let release = (): void => undefined;
     const held = new Promise<void>((resolve) => {
@@ -119,7 +143,7 @@ describe("the core's side: limits and faults", () => {
     opened.push(transport);
     const client = await greeted(url, "large");
     client.send({ v: 1, type: "read", id: "big", statements: [{ sql: "SELECT t", params: [] }] });
-    expect(await client.next("read-result")).toEqual({ v: 1, type: "read-result", id: "big", height: "9", error: "result-too-large" });
+    expect(await client.next("read-result")).toEqual({ v: 1, type: "read-result", id: "big", height: "9", configHash: CONFIG, error: "result-too-large" });
     client.close();
   });
 
@@ -134,8 +158,8 @@ describe("the core's side: limits and faults", () => {
     const client = await greeted(url, "fails");
     client.send({ v: 1, type: "read", id: "a", statements: [{ sql: "boom", params: [] }] });
     client.send({ v: 1, type: "read", id: "b", statements: [{ sql: "slow", params: [] }] });
-    expect(await client.next("read-result")).toEqual({ v: 1, type: "read-result", id: "a", height: null, error: "database-error" });
-    expect(await client.next("read-result")).toEqual({ v: 1, type: "read-result", id: "b", height: null, error: "query-timeout" });
+    expect(await client.next("read-result")).toEqual({ v: 1, type: "read-result", id: "a", height: null, configHash: CONFIG, error: "database-error" });
+    expect(await client.next("read-result")).toEqual({ v: 1, type: "read-result", id: "b", height: null, configHash: CONFIG, error: "query-timeout" });
     client.close();
   });
 
@@ -448,7 +472,16 @@ async function standIn(
   };
 }
 
-const ACK: Message = { v: 1, type: "hello-ack", lockstep: false, genesis: `0x${"00".repeat(32)}`, start: "1", cursor: null, refused: null };
+const ACK: Message = {
+  v: 1,
+  type: "hello-ack",
+  lockstep: false,
+  genesis: `0x${"00".repeat(32)}`,
+  start: "1",
+  cursor: null,
+  refused: null,
+  configHash: CONFIG,
+};
 
 /** A private transport to `address`, its log kept, its back-off 50 ms. */
 function client(address: string, rest: Partial<PrivateTransportOptions> = {}) {
@@ -537,9 +570,9 @@ describe("a private process's side against a stand-in core", () => {
     const core = await standIn((socket, message) => {
       if (message.type === "hello") {
         socket.send(messageText(ACK));
-        socket.send(messageText({ v: 1, type: "read-result", id: "none", height: null, results: [] }));
+        socket.send(messageText({ v: 1, type: "read-result", id: "none", height: null, configHash: CONFIG, results: [] }));
       } else if (message.type === "read") {
-        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: "9", results: [] }));
+        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: "9", configHash: CONFIG, results: [] }));
       } else answers.push(message);
     });
     const { transport, lines } = client(core.address);
@@ -561,11 +594,11 @@ describe("a private process's side against a stand-in core", () => {
       if (message.type === "hello") socket.send(messageText(ACK));
       if (message.type !== "read") return;
       if (message.statements.length === 0 || mode === "empty") {
-        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: null, results: message.statements.map(() => ({ columns: [], rows: [] })) }));
+        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: null, configHash: CONFIG, results: message.statements.map(() => ({ columns: [], rows: [] })) }));
       } else if (mode === "error") {
-        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: "3", error: "query-timeout" }));
+        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: "3", configHash: CONFIG, error: "query-timeout" }));
       } else if (mode === "unknown") {
-        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: "3", error: "result-too-large" }));
+        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: "3", configHash: CONFIG, error: "result-too-large" }));
       } else socket.terminate();
     });
     const { transport } = client(core.address, { backoffCeilingMs: 60_000 });
@@ -711,6 +744,109 @@ describe("a private process's side against a stand-in core", () => {
       await core.close();
     }
     expect(transport.state).toBe("closed");
+  });
+
+  it.each([
+    ["a committed", "committed"],
+    ["a read-result", "read-result"],
+    ["the hello-ack of a connection made again (the core restarted)", "hello-ack"],
+  ] as const)(
+    "%s with another configHash than the first hello-ack's refuses it for good with public-config-changed (PP-14, Q147)",
+    async (_name, carrier) => {
+      const core = await standIn((socket, message, connection) => {
+        if (message.type === "hello") {
+          socket.send(messageText({ ...ACK, configHash: carrier === "hello-ack" && connection > 1 ? CHANGED : CONFIG } as Message));
+        }
+        if (message.type === "read") {
+          const changed = carrier === "read-result" && message.statements.length > 0;
+          socket.send(
+            messageText({ v: 1, type: "read-result", id: message.id, height: "4", configHash: changed ? CHANGED : CONFIG, results: message.statements.map(() => ({ columns: [], rows: [] })) }),
+          );
+        }
+      });
+      const { transport, lines } = client(core.address);
+      try {
+        const ack = await transport.connection();
+        expect(ack.configHash).toBe(CONFIG);
+        expect(transport.configHash).toBe(CONFIG);
+        const waiting = transport.next(new AbortController().signal);
+        waiting.catch(() => undefined);
+        if (carrier === "committed") {
+          for (const socket of core.sockets) {
+            socket.send(messageText({ v: 1, type: "committed", height: "5", hash: `0x${"05".repeat(32)}`, configHash: CHANGED }));
+          }
+        }
+        if (carrier === "read-result") {
+          await expect(transport.read((read) => read.query("SELECT 1"))).rejects.toMatchObject({ code: "public-config-changed" });
+        }
+        // The core restarted: the connection dropped, and the one made again is acknowledged with another hash.
+        if (carrier === "hello-ack") for (const socket of core.sockets) socket.terminate();
+        await until(() => transport.state === "refused", "refused for good");
+        await expect(waiting).rejects.toMatchObject({
+          code: "public-config-changed",
+          retryable: false,
+          details: { recorded: CONFIG, found: CHANGED },
+        });
+        expect(transport.refusal).toMatchObject({ code: "public-config-changed" });
+        await expect(transport.next(new AbortController().signal)).rejects.toMatchObject({ code: "public-config-changed" });
+        await expect(transport.read(async () => 1)).rejects.toMatchObject({ code: "public-config-changed" });
+        await expect(transport.connection()).rejects.toMatchObject({ code: "public-config-changed" });
+        // It connects no more, and the core sees its connection closed.
+        const made = core.connections();
+        await sleep(500);
+        expect(core.connections()).toBe(made);
+        await until(() => core.sockets.size === 0, "the connection closed");
+        expect(lines.join("\n")).toContain(
+          `transport: the core's configuration hash is now ${CHANGED}, not ${CONFIG} as when this instance started: public-config-changed (PP-14)`,
+        );
+      } finally {
+        await transport.close();
+        await core.close();
+      }
+    },
+  );
+
+  it("the same configHash on every message, a connection made again included, changes nothing", async () => {
+    const core = await standIn((socket, message) => {
+      if (message.type === "hello") socket.send(messageText(ACK));
+      if (message.type === "read") {
+        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: "4", configHash: CONFIG, results: [] }));
+      }
+    });
+    const { transport } = client(core.address);
+    try {
+      await transport.connection();
+      for (const socket of core.sockets) socket.terminate();
+      await until(() => core.connections() >= 2 && transport.state === "connected", "connected again");
+      const woken = transport.next(new AbortController().signal);
+      for (const socket of core.sockets) {
+        socket.send(messageText({ v: 1, type: "committed", height: "5", hash: `0x${"05".repeat(32)}`, configHash: CONFIG }));
+      }
+      await woken;
+      expect(await transport.read(async (read) => read.height)).toBe(4n);
+      expect(transport.state).toBe("connected");
+      expect(transport.refusal).toBeNull();
+    } finally {
+      await transport.close();
+      await core.close();
+    }
+  });
+
+  it("negative control: a transport that ignores configHash keeps going after the core's hash changed (fails PP-14)", async () => {
+    const core = await standIn((socket, message, connection) => {
+      if (message.type === "hello") socket.send(messageText({ ...ACK, configHash: connection === 1 ? CONFIG : CHANGED } as Message));
+    });
+    const { transport } = client(core.address, { configHash: "ignore" });
+    try {
+      await transport.connection();
+      for (const socket of core.sockets) socket.terminate();
+      await until(() => core.connections() >= 2 && transport.state === "connected", "connected again");
+      expect(transport.refusal).toBeNull();
+      expect(transport.state).toBe("connected");
+    } finally {
+      await transport.close();
+      await core.close();
+    }
   });
 
   it("an address that answers HTTP without a WebSocket is a lost connection, logged with its error", async () => {

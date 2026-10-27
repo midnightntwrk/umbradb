@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { recordHistory } from "../../src/backbone/core-chain/index.js";
+import { readConfigHash, readConfigRows, recordHistory } from "../../src/backbone/core-chain/index.js";
+import { readPublicConfiguration } from "../../src/backbone/core-private-source/index.js";
 import { buildCoreVersion } from "../../src/config/build.js";
 import { versionEntry } from "../../src/config/entries.js";
-import { canonicalJson, dataHash } from "../../src/config/history.js";
+import { canonicalJson, configHashOf, dataHash } from "../../src/config/history.js";
 import type { Database, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { schemaPlan } from "../../src/modules/adapters.js";
@@ -302,6 +303,35 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       });
       expect(started.recorded.writes).toEqual([]);
       expect(await storedRows(db)).toEqual(before);
+    });
+
+    it("gives the configuration hash of the recorded rows: the same after only operational or secret fields changed, another after a data field (RN-16, PP-14)", async () => {
+      const db = await recorded([core(0, { tipCap: 5 }), m(10, { pollMs: 5 }), m(30, { limit: 4 })]);
+      const first = await db.read((read) => readConfigHash(read));
+      expect(first).toMatch(/^0x[0-9a-f]{64}$/);
+      const rows = await db.read((read) => readConfigRows(read));
+      expect(first).toBe(configHashOf(rows ?? []));
+      expect(rows?.map((row) => `${row.id}@${row.start} ${row.version === CORE_VERSION_TEXT ? "core" : row.version}`).sort()).toEqual([
+        "core@0 core",
+        "m@10 1.0.0",
+        "m@30 1.0.0",
+      ]);
+      // A private process reads the same hash from the public database (PP-14: its check without a transport).
+      expect((await db.read((read) => readPublicConfiguration(read))).configHash).toBe(first);
+      await startup(db, {
+        entries: [core(0, { tipCap: 6, node: "wss://u:other-secret@node" }), m(10, { pollMs: 6, token: "secret-4-3" }), m(30, { limit: 4 })],
+        user: [M_1_0],
+        cursor: 20n,
+      });
+      expect(await db.read((read) => readConfigHash(read))).toBe(first);
+      // The revision above the cursor with a data field changed: the same rows, another data_hash.
+      await startup(db, { entries: [core(0, { tipCap: 6 }), m(10, { pollMs: 6 }), m(30, { limit: 5 })], user: [M_1_0], cursor: 20n });
+      expect(await db.read((read) => readConfigHash(read))).not.toBe(first);
+      // Before the table exists: the hash of no rows, and no public configuration.
+      const empty = await fresh();
+      expect(await empty.read((read) => readConfigRows(read))).toBeNull();
+      expect(await empty.read((read) => readConfigHash(read))).toBe(configHashOf([]));
+      expect(await empty.read((read) => readPublicConfiguration(read))).toEqual({ items: [], configHash: null });
     });
 
     it("accepts a restart after the core stopped at its stop 10 with stop 20, or without a stop, with no history change", async () => {

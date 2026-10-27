@@ -16,6 +16,8 @@ import { UmbraError } from "../../src/db/errors.js";
 import type { ApiRegistry, ModuleDeclaration } from "../../src/modules/declaration.js";
 import {
   CLOSE_TIMEOUT_MS,
+  CONFIG_HASH_HEADER,
+  coreHeadersResponse,
   listenModuleApi,
   type ModuleApiServer,
   parseAddress,
@@ -140,6 +142,16 @@ async function listening(port: number): Promise<boolean> {
 
 /** Whether `name` is `X-Umbra-Version`'s, in any letter case. */
 const isVersion = (name: string): boolean => name.toLowerCase() === "x-umbra-version";
+
+/** Whether `name` is `X-Umbra-Config-Hash`'s, in any letter case (RN-16, Q147; task 14.1b). */
+const isConfigHash = (name: string): boolean => name.toLowerCase() === "x-umbra-config-hash";
+
+/** The values of the `X-Umbra-Config-Hash` lines among raw headers, each line one value. */
+const configHashesOf = (rawHeaders: readonly string[]): string[] =>
+  rawHeaders.flatMap((name, index) => (index % 2 === 0 && isConfigHash(name) ? [String(rawHeaders[index + 1])] : []));
+
+/** A process's configuration hash, as the tests give a listener one. */
+const CONFIG_HASH = `0x${"5e".repeat(32)}`;
 
 /** The values of the `X-Umbra-Version` lines among raw headers (name, value, name, value, …), each line one value. */
 const versionsOf = (rawHeaders: readonly string[]): string[] =>
@@ -348,7 +360,7 @@ async function helperProblems(url: string, height: bigint, hash: Uint8Array): Pr
 async function untouchedProblems(url: string, height: bigint | null): Promise<string[]> {
   const problems: string[] = [];
   const names = (response: Response) =>
-    [...response.headers.keys()].filter((name) => !TRANSPORT_HEADERS.has(name) && !isVersion(name));
+    [...response.headers.keys()].filter((name) => !TRANSPORT_HEADERS.has(name) && !isVersion(name) && !isConfigHash(name));
   /** The core's header: the build's version, once (a second line would show as two values joined by a comma). */
   const version = (what: string, response: Response) => {
     const got = response.headers.get(VERSION_HEADER);
@@ -387,7 +399,7 @@ async function untouchedProblems(url: string, height: bigint | null): Promise<st
  * 503 before S, 504) and the subscription's upgrade (101) — none when each has the status asked for and exactly one
  * `X-Umbra-Version` line, the build's version. (A WebSocket message or close after the upgrade has no headers.)
  */
-async function versionProblems(url: string, ws: string, committed: boolean): Promise<string[]> {
+async function versionProblems(url: string, ws: string, committed: boolean, configHash?: string): Promise<string[]> {
   const query = JSON.stringify({ query: "{ x }" });
   const asked: readonly (readonly [what: string, method: string, path: string, status: number, body?: string])[] = [
     ...(committed
@@ -408,21 +420,27 @@ async function versionProblems(url: string, ws: string, committed: boolean): Pro
     ["GET /timeout", "GET", "/timeout", 504],
   ];
   const problems: string[] = [];
-  const check = (what: string, status: number, wanted: number, versions: readonly string[]) => {
+  const check = (what: string, status: number, wanted: number, rawHeaders: readonly string[]) => {
+    const versions = versionsOf(rawHeaders);
     if (status !== wanted) problems.push(`${what}: status ${status}`);
     if (versions.length !== 1 || versions[0] !== UMBRADB_VERSION) {
       problems.push(`${what} (${status}): X-Umbra-Version ${JSON.stringify(versions)}`);
     }
+    // RN-16's configuration hash (Q147, task 14.1b): once, the process's, on a listener given one.
+    const hashes = configHashesOf(rawHeaders);
+    if (configHash !== undefined && (hashes.length !== 1 || hashes[0] !== configHash)) {
+      problems.push(`${what} (${status}): X-Umbra-Config-Hash ${JSON.stringify(hashes)}`);
+    }
   };
   for (const [what, method, path, status, body] of asked) {
     const answer = await exchange(url, method, path, body);
-    check(what, answer.status, status, versionsOf(answer.rawHeaders));
+    check(what, answer.status, status, answer.rawHeaders);
   }
   const socket = new WebSocket(ws);
   // ws emits open right after upgrade, in the same turn: both are listened for at once.
   const opened = once(socket, "open");
   const [upgrade] = (await once(socket, "upgrade")) as [IncomingMessage];
-  check("the upgrade", upgrade.statusCode as number, 101, versionsOf(upgrade.rawHeaders));
+  check("the upgrade", upgrade.statusCode as number, 101, upgrade.rawHeaders);
   await opened;
   const closed = once(socket, "close");
   socket.close();
@@ -640,6 +658,31 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
       expect(await untouchedProblems(appends.url, 1n)).toEqual([`GET /raw: X-Umbra-Version 9, ${UMBRADB_VERSION}`]);
     } finally {
       for (const server of listeners) await server.close();
+    }
+  }, 120_000);
+
+  it("names the process's configuration on every answer: X-Umbra-Config-Hash once beside X-Umbra-Version (RN-16, Q147)", async () => {
+    const { db } = await backend.database();
+    const api = chainApi();
+    const sealed = await startThroughSeal(db, [api.module], [entry("chain-api", 1)]);
+    const routes = await registerModuleApis(sealed);
+    const options = { db, timeoutMs: 30_000 };
+    const hashed = await listenModuleApi(new ModuleApi(routes, options), "127.0.0.1:0", { configHash: CONFIG_HASH });
+    // Negative control: task 5.2c's listener, given no configuration hash, fails the oracle on every answer.
+    const unhashed = await listenModuleApi(new ModuleApi(routes, options), "127.0.0.1:0");
+    try {
+      const at = (server: ModuleApiServer) => ({ url: `http://127.0.0.1:${server.port}`, ws: `ws://127.0.0.1:${server.port}` });
+      expect(await versionProblems(at(hashed).url, at(hashed).ws, false, CONFIG_HASH)).toEqual([]);
+      const missing = await versionProblems(at(unhashed).url, at(unhashed).ws, false, CONFIG_HASH);
+      expect(missing).toHaveLength(10);
+      expect(missing.every((problem) => problem.endsWith("X-Umbra-Config-Hash []"))).toBe(true);
+      await runLoop({ db, ...sealed }, new InMemoryBlockSource({ head: 1n }), 1n);
+      expect(await versionProblems(at(hashed).url, at(hashed).ws, true, CONFIG_HASH)).toEqual([]);
+      // The handlers' answers are otherwise as the modules wrote them (A75's oracle, which skips the core's headers).
+      expect(await untouchedProblems(at(hashed).url, 1n)).toEqual([]);
+    } finally {
+      await hashed.close();
+      await unhashed.close();
     }
   }, 120_000);
 
@@ -1210,6 +1253,41 @@ describe("the module API server without a database", () => {
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+
+  it("coreHeadersResponse: every answer written through it carries the configuration hash once, a module's own replaced (RN-16)", async () => {
+    const answers: Record<string, (response: ServerResponse) => void> = {
+      "/object": (response) => response.writeHead(200, { "x-umbra-config-hash": "own", "X-UMBRA-CONFIG-HASH": "own", "X-A": "1" }).end("o"),
+      "/array": (response) => response.writeHead(200, ["X-Umbra-Config-Hash", "own", "X-B", "1"]).end("a"),
+      "/message": (response) => response.writeHead(201, "Made", { "X-Umbra-config-hash": "own" }).end(),
+      "/set": (response) => {
+        response.setHeader("X-Umbra-Config-Hash", "own");
+        response.writeHead(200).end();
+      },
+      "/implicit": (response) => {
+        response.statusCode = 204;
+        response.end();
+      },
+    };
+    const server = createHttpServer({ ServerResponse: coreHeadersResponse(CONFIG_HASH) }, (request, response) =>
+      answers[request.url as string]?.(response),
+    );
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    try {
+      for (const path of Object.keys(answers)) {
+        const { rawHeaders } = await exchange(url, "GET", path);
+        expect([path, configHashesOf(rawHeaders), versionsOf(rawHeaders)]).toEqual([path, [CONFIG_HASH], [UMBRADB_VERSION]]);
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+    expect(CONFIG_HASH_HEADER).toBe("X-Umbra-Config-Hash");
+    // Node.js's own answers too: with the hash given, after the version.
+    expect(unreadableAnswer("HPE_HEADER_OVERFLOW", CONFIG_HASH)).toBe(
+      `HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\nX-Umbra-Version: ${UMBRADB_VERSION}\r\n` +
+        `X-Umbra-Config-Hash: ${CONFIG_HASH}\r\n\r\n`,
+    );
   });
 
   /** The `X-Umbra-Version` values of the listener's answers that are not a handler's, by what was asked. */

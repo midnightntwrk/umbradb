@@ -69,6 +69,15 @@
  * ({@link lockstepBehind}). Each block the part's `on-after-db-write` sees committed is reported to the core (`report`,
  * sent only to a core that lists the instance), which waits for it before its next `BEGIN`; the core's refusal of a
  * report (`report-hash-mismatch`) fails the transport's waits and reads, which halts the instance.
+ *
+ * **A changed public configuration** (PP-14, owner decision Q147; task 14.1b). Startup's chain check reads the public
+ * configuration history with the identity ({@link readPublicConfiguration}: the items and the configuration hash, the
+ * core's own by the same rows and function). With `coreTransport` the transport is the check: it records the first
+ * `hello-ack`'s `configHash` and is refused for good, with `public-config-changed`, by a later message carrying
+ * another; the source then fails its next read of public data with that refusal, even one of a PostgreSQL public
+ * database read directly, so no other height is processed. Without `coreTransport`, the source's first read after the
+ * public database lost a connection ({@link PublicDatabase.reconnections}) reads the history again, in that read and
+ * before its body, and fails with `public-config-changed` ({@link publicConfigChanged}) when its hash is not startup's.
  */
 
 import { z } from "zod";
@@ -81,16 +90,20 @@ import { UmbraError } from "../../db/errors.js";
 import type { ModuleDeclaration, Revision } from "../../modules/declaration.js";
 import type { PublicItem } from "../../modules/graph.js";
 import type { BlockRef, BlockSource } from "../../runner/block-source.js";
+import { publicConfigChanged } from "../../private/private-transport.js";
 import {
   openPublicSide,
   type PublicDatabase,
   type PublicIdentity,
   type PublicWakes,
   readPublicBlock,
+  readPublicConfigHash,
+  readPublicConfiguration,
   readPublicCursor,
   readPublicIdentity,
-  readPublicItems,
 } from "./public-database.js";
+
+export { publicConfigChanged };
 
 /** `core-private-source`'s migrations (DB-9): applied once, in order; never changed. */
 export const CORE_PRIVATE_SOURCE_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
@@ -269,6 +282,11 @@ export interface SourceTransport {
   report(block: BlockRef): void;
   /** Whether the last `hello-ack` said the core lists the instance. */
   readonly lockstep: boolean;
+  /**
+   * Why the core's transport is refused for good (`public-config-changed`, `report-hash-mismatch`), or null; the source
+   * reads public data no more once it is (PP-14: no other height processed). None for a transport that has none.
+   */
+  readonly refusal?: UmbraError | null;
   close(): Promise<void>;
 }
 
@@ -334,6 +352,11 @@ export interface PrivateChecks {
    * unless given — false is the negative control's, which processes a cursor that moved meanwhile.
    */
   readonly reread?: boolean;
+  /**
+   * Whether the public configuration hash is checked (PP-14; task 14.1b); `check` unless given — `ignore` is the
+   * negative control's, which goes on after the public configuration changed.
+   */
+  readonly configHash?: "check" | "ignore";
 }
 
 /** The block source of a private process (see the module comment). */
@@ -350,6 +373,10 @@ export class PrivateBlockSource implements BlockSource {
   #position: BlockRef | null | undefined;
   /** The binding the private database recorded, as the last read of the cursor found it; null before any or without. */
   #recorded: PublicIdentity | null = null;
+  /** The public configuration hash startup's chain check read (PP-14); null before it, or before the table exists. */
+  #publicConfigHash: string | null = null;
+  /** How many reconnections of the public database the configuration was last checked after (PP-14). */
+  #reconnections = 0;
 
   constructor(publicDatabase: PublicDatabase, wakes: PublicWakes, transport: SourceTransport | null = null, checks: PrivateChecks = {}) {
     this.#public = publicDatabase;
@@ -394,6 +421,33 @@ export class PrivateBlockSource implements BlockSource {
     return this.#public;
   }
 
+  /** The public configuration hash startup's chain check read from the public database (PP-14); null before. */
+  get publicConfigHash(): string | null {
+    return this.#publicConfigHash;
+  }
+
+  /**
+   * One read of public data for the loop (PP-14; task 14.1b): none once the core's transport is refused for good — its
+   * refusal is the read's failure, so no other height is processed —; and, without a transport, the first read after
+   * the public database lost a connection reads the public configuration history again, in that read and before
+   * `body`, and fails with `public-config-changed` when its hash is not the one startup read.
+   */
+  #read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T> {
+    const refusal = this.#transport?.refusal ?? null;
+    if (refusal !== null) return Promise.reject(refusal);
+    return this.#public.read(async (read) => {
+      if (this.#transport === null && this.#checks.configHash !== "ignore" && this.#checked) {
+        const reconnections = this.#public.reconnections?.() ?? 0;
+        if (reconnections !== this.#reconnections) {
+          const found = await readPublicConfigHash(read);
+          if (found !== this.#publicConfigHash) throw publicConfigChanged(this.#publicConfigHash, found, "public-database");
+          this.#reconnections = reconnections;
+        }
+      }
+      return body(read);
+    });
+  }
+
   /**
    * The private cursor, read through `read` ({@link readPrivateCursor}); the first read — startup's, of the committed
    * cursor — is also the position until a block commits (the loop's later reads are inside a block's transaction). The
@@ -411,7 +465,7 @@ export class PrivateBlockSource implements BlockSource {
    * S, with 32 zero bytes for its hashes, which the loop never processes (a private S is at least the public S, PP-2).
    */
   finalizedHead(): Promise<BlockRef> {
-    return this.#public.read(async (read) => {
+    return this.#read(async (read) => {
       const cursor = await readPublicCursor(read);
       if (cursor !== null) return cursor;
       const identity = await readPublicIdentity(read);
@@ -450,7 +504,7 @@ export class PrivateBlockSource implements BlockSource {
    * where the public cursor is `height` (the read's height), else the instance halts with `lockstep-behind` (PP-6).
    */
   async block(height: bigint): Promise<BlockRef> {
-    const block = await this.#public.read(async (read) => {
+    const block = await this.#read(async (read) => {
       if (this.lockstep && read.height !== height) throw lockstepBehind(height, read.height);
       return readPublicBlock(read, height);
     });
@@ -470,9 +524,11 @@ export class PrivateBlockSource implements BlockSource {
    * ({@link readPublicItems}; PP-13), which the runner gives the graph.
    */
   async checkChain(input: Pick<ChainCheckInput, "configured">): Promise<ChainCheck> {
-    const { identity, items } = await this.#public.read(async (read) => {
+    const reconnections = this.#public.reconnections?.() ?? 0;
+    const { identity, items, configHash } = await this.#public.read(async (read) => {
       const found = await readPublicIdentity(read);
-      return { identity: found, items: found === null ? [] : await readPublicItems(read) };
+      const configuration = found === null ? { items: [], configHash: null } : await readPublicConfiguration(read);
+      return { identity: found, ...configuration };
     });
     if (identity === null) throw publicNotStarted();
     const network = (this.#checks.network ?? networkRefusal)(input.configured, identity);
@@ -487,6 +543,9 @@ export class PrivateBlockSource implements BlockSource {
       if (other !== null) throw other;
       this.#lockstepAtStart = ack.lockstep;
     }
+    // PP-14: the public configuration as startup checked it; without a transport, read again at each reconnection.
+    this.#publicConfigHash = configHash;
+    this.#reconnections = reconnections;
     this.#checked = true;
     const publicItems = Object.freeze([...(this.#checks.publicItems?.(items) ?? items)]);
     return Object.freeze({ genesisHash: identity.genesisHash, publicItems });
@@ -512,7 +571,7 @@ export class PrivateBlockSource implements BlockSource {
    * with `lockstep-behind` (PP-6).
    */
   readonly fetchRead = <T>(body: (read: ReadHandle) => Promise<T>, height: bigint): Promise<T> =>
-    this.#public.read(async (read) => {
+    this.#read(async (read) => {
       if (!this.lockstep) return body(read);
       if (read.height !== height) throw lockstepBehind(height, read.height);
       const result = await body(read);
@@ -558,6 +617,8 @@ export interface PrivateIntakeOptions {
   readonly publicItems?: (items: readonly PublicItem[]) => readonly PublicItem[];
   /** The negative control's lockstep instance that does not read the public cursor again (Q142); it does unless false. */
   readonly reread?: boolean;
+  /** The negative control's private process that ignores the public configuration hash (PP-14); checked unless `ignore`. */
+  readonly configHash?: "check" | "ignore";
 }
 
 /** One private process start's `core-private-source`: the part and the block source it is bound to. */
@@ -622,7 +683,11 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
       const start = shared?.start ?? BigInt(core.start);
       const side = openPublicSide(
         core,
-        { position: () => (made as PrivateBlockSource).position(start), log: shared?.log ?? (() => undefined) },
+        {
+          position: () => (made as PrivateBlockSource).position(start),
+          log: shared?.log ?? (() => undefined),
+          ...(options.configHash === undefined ? {} : { configHash: options.configHash }),
+        },
         {
           ...(options.publicDatabase === undefined ? {} : { publicDatabase: options.publicDatabase(core) }),
           ...(options.wakes === undefined ? {} : { wakes: options.wakes(core) }),
@@ -632,6 +697,7 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
         ...(options.network === undefined ? {} : { network: options.network }),
         ...(options.publicItems === undefined ? {} : { publicItems: options.publicItems }),
         ...(options.reread === undefined ? {} : { reread: options.reread }),
+        ...(options.configHash === undefined ? {} : { configHash: options.configHash }),
         binding,
         start,
       });

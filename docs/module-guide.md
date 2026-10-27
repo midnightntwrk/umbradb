@@ -383,11 +383,15 @@ RN-16 of the `core-arch` change).
 - **Answer `{ status, headers?, body }`; the client gets it as you wrote it.** The status is an integer from 200 to
   599. The body is written as JSON — a `bigint` as decimal text, bytes as `0x` hex — unless you give a `Content-Type`
   with a string or bytes, which are sent as they are. UmbraDB changes no body, a GraphQL response's included (owner
-  decisions Q104 and Q105), and adds one header: `X-Umbra-Version`, the build's version, on every HTTP answer on the
-  API listener — yours, its own errors and the subscriptions' upgrade (owner decision Q131).
-- **The `X-Umbra-` prefix holds the headers every module shares.** UmbraDB owns `X-Umbra-Version`: a header of that
-  name in your answer, in any letter case, is replaced, never sent beside it. The helpers below write `X-Umbra-View`,
-  `X-Umbra-Height` and `X-Umbra-Hash`. Name your own headers without the prefix.
+  decisions Q104 and Q105), and adds two headers on every HTTP answer on the API listener — yours, its own errors and
+  the subscriptions' upgrade: `X-Umbra-Version`, the build's version (owner decision Q131), and `X-Umbra-Config-Hash`,
+  the process's configuration hash (owner decision Q147): a hash of the configuration's data fields as the history
+  records them, computed once when the process starts, holding no secret. A client that sees it change knows the
+  process restarted with another configuration.
+- **The `X-Umbra-` prefix holds the headers every module shares.** UmbraDB owns `X-Umbra-Version` and
+  `X-Umbra-Config-Hash`: a header of either name in your answer, in any letter case, is replaced, never sent beside it.
+  The helpers below write `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`. Name your own headers without the
+  prefix.
 - **State the view, height and hash you read with the helpers** of `src/runner/envelope.ts`, if your clients want
   them: `readChainDataView(read)` gives `finalized`, your read's committed height and that block's hash;
   `chainDataHeaders(view)` writes them as `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`; `withViewExtensions(body,
@@ -504,6 +508,15 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
   process's own backbone parts (`chain-identity`, the digests) are its own database's, and an item of yours may not
   take the name of a public item the public core provides at the same heights (`providers-overlap`). The check is made
   at the private process's startup, against the public configuration as it is then.
+- **A changed public configuration halts you.** The private process remembers the public core's configuration hash
+  from its startup — the `configHash` of the core's first `hello-ack` through `coreTransport`, or, without a
+  transport, the hash of the public configuration history it read (PP-14). When the core restarts with another
+  configuration — a data field, a revision, the `table` items a module provides —, the process halts with
+  `public-config-changed` at the core's next message, before it processes another height, since the public tables you
+  read may no longer be what startup checked; without `coreTransport` it notices when it next connects to its public
+  database again. Restart it: startup checks the public side again (and refuses, naming the item, if what you require
+  is gone). A core restarted with the same configuration, or with only secrets or operational settings changed, keeps
+  its hash, and nothing happens.
 - **The same determinism rules.** Your private tables are checked, digested and hashed as the core's are (Q75): the
   sections above all apply, `deterministic: false` included. Two private processes with the same configuration, bound
   to the same public database, hold the same private data at the same height.

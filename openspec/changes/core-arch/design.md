@@ -75,9 +75,10 @@ revisions all ended below it serves no API. Its routes (`GET`/`POST`, `/` and se
 winning over a parameter) and subscription names are refused with `duplicate-api-route` when two have one method and
 path (parameters' names aside) or one name, before anything listens (RN-15). Each request is one `db.read` at the
 latest committed height bounded by `apiReadTimeoutMs` (DB-15), the handler inside it and its answer as the handler
-wrote it but for one header, `X-Umbra-Version` (the build's `UMBRADB_VERSION`, Q131; task 5.2c): the core adds no
-other header and no `extensions` and tells no GraphQL response apart (RN-16, Q104, Q105; task 5.2b), and the helpers
-below are the module's to use. Bodies are
+wrote it but for two headers, `X-Umbra-Version` (the build's `UMBRADB_VERSION`, Q131; task 5.2c) and
+`X-Umbra-Config-Hash` (the process's configuration hash, §8; Q147, task 14.1b): the core adds no other header and no
+`extensions` and tells no GraphQL response apart (RN-16, Q104, Q105; task 5.2b), and the helpers below are the module's
+to use. Bodies are
 JSON (a `bigint` as decimal text, bytes as `0x` hex) unless the handler typed its text or bytes; errors are `{ error: {
 code, message } }`: 400 `invalid-request`, 404 `not-found`, 405 `method-not-allowed`, 413 `request-too-large`, 500
 `internal-error` (a fixed message; the error goes to the runner's log), 503 `no-committed-height`, 504
@@ -1118,13 +1119,16 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   | Type | Fields (`H` = height, a decimal string; `X` = `0x`-prefixed lowercase hex) |
   |---|---|
   | `hello` | `v: 1`, `instance: string`, `version: string`, `height: H`, `hash: X` or `null` |
-  | `hello-ack` | `v: 1`, `lockstep: boolean`, `genesis: X`, `start: H`, `cursor: H` or `null`, `refused`: `null`, `"duplicate-instance"` or `"lockstep-behind"` |
-  | `committed`, `report` | `v: 1`, `height: H`, `hash: X` |
+  | `hello-ack` | `v: 1`, `lockstep: boolean`, `genesis: X`, `start: H`, `cursor: H` or `null`, `refused`: `null`, `"duplicate-instance"` or `"lockstep-behind"`, `configHash: X` |
+  | `committed` | `v: 1`, `height: H`, `hash: X`, `configHash: X` |
+  | `report` | `v: 1`, `height: H`, `hash: X` |
   | `read` | `v: 1`, `id: string`, `statements`: an array of `{ sql: string, params: Value[] }` |
-  | `read-result` | `v: 1`, `id: string`, `height: H` or `null` (before the first commit), and either `results`: one `{ columns: { name: string, type: string }[], rows: Value[][] }` per statement, or `error: string` (a code); `type` is the PostgreSQL type name that says how to read each `Value` back |
+  | `read-result` | `v: 1`, `id: string`, `height: H` or `null` (before the first commit), `configHash: X`, and either `results`: one `{ columns: { name: string, type: string }[], rows: Value[][] }` per statement, or `error: string` (a code); `type` is the PostgreSQL type name that says how to read each `Value` back |
 
   `Value` is `null`, a boolean, a string (text; `bigint` and `numeric` as decimal strings; `bytea` as `X`), or JSON (for
-  `jsonb`); the column types of the statement say how to read each string back.
+  `jsonb`); the column types of the statement say how to read each string back. `configHash` is the core's
+  configuration hash, 32 bytes (**The configuration hash** below; PP-4, PP-14, owner decision Q147, task 14.1b), on
+  each of the core's three messages and on none of a private process's.
 
   As built (tasks 14.2, 14.2a, `src/private/`): `messages.ts` holds the six schemas (zod strict objects: a field a type
   does not have fails it; hashes 32 bytes; ids 1–128 characters; a `read-result` with both or neither of its branches
@@ -1239,7 +1243,38 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   refused for that, never by the graph reading the wrong database's items. *Reading:* a private module reads a public
   table through its `on-fetch` read of public data (Q100); requiring the item is what makes its startup check that the
   public core writes the table at every height the module runs. The items are read at the private process's startup
-  only; a private process halts when the public configuration changes under it (PP-14, owner decision Q147, task 14.1b).
+  only; a private process halts when the public configuration changes under it (PP-14, owner decision Q147, task 14.1b;
+  next paragraph).
+- **The configuration hash** (RN-16, PP-4, PP-14; owner decision Q147, task 14.1b). *Its input:* the rows of the
+  process's own `core_chain.config` (§10) as `core-chain` recorded them at its startup — per revision its `entry_id`,
+  `start`, `stop`, `version`, `data_hash` and `provides`, ordered by `entry_id`'s UTF-8 bytes and then `start` —; the
+  hash is SHA-256 of the canonical encoding (DT-1) of `["umbradb-config-hash", 1, rows]`, each row `[entry_id, start,
+  stop, version, data_hash, provides]`, written as `X` (`configHashOf`, `src/config/history.ts`; `readConfigHash`,
+  `src/backbone/core-chain/history.ts`). So it covers every data field of every revision — through `data_hash`, the
+  SHA-256 of the revision's data fields (CF-7), null for a scheduled revision —, each revision's heights and version,
+  and the `table` items it provides (PP-13: what a private process's graph counts), and nothing operational or secret,
+  which the history never records (CF-4): a password in `database` or in the node's URL, `listen`, `tls`, the timeouts,
+  `lockstepInstances` neither show in it nor change it. The recorded rows rather than the validated configuration: a
+  revision at or below the cursor keeps the `provides` it was recorded with (CF-6), and a private process computes the
+  same hash from the public database. *Once, in memory:* each process reads its rows
+  once, after step 7's `on-start-db` recorded its configuration and before its transport and module API listen, and
+  keeps the hash for the run (`src/runner/process.ts`; a retried startup reads it again and finds the same); it changes
+  only when the process restarts with another configuration — or with another build whose declarations provide other
+  `table` items above the cursor. *Where it shows:* `X-Umbra-Config-Hash` on every HTTP answer on `listen.api`, beside
+  `X-Umbra-Version` and replacing a module's own header of either name (`src/runner/api-server.ts`; on both kinds of
+  process, each its own hash), and `configHash` of the core's `hello-ack`, `committed` and `read-result`. *A private
+  process's check* (PP-14): with `coreTransport`, its transport records the `configHash` of the first `hello-ack` it
+  receives (startup's chain check waits for one) and compares every later `hello-ack`, `committed` and `read-result`;
+  one that carries another refuses the transport for good with `public-config-changed` (`details { recorded, found,
+  via: "transport" }`): the private side closes the connection (1000) and connects no more, every wait and read
+  through it fails with that error, and the source's next read of public data fails with it too even when the public
+  database is read directly, so the process halts before it processes another height. Without `coreTransport` (a
+  PostgreSQL `publicDatabase` read directly; a PGlite one is read only through the core): startup's chain check reads
+  the public rows with the identity and computes the same hash; the public database counts the read sessions its pool
+  lost (`onReadSessionLost`, `src/db/postgres.ts`), and the source's first read after one — a reconnection — reads the
+  rows again, in that read and before its body, and halts alike (`via: "public-database"`) when the hash differs. A
+  restart runs the full checks again (PP-2, PP-13). The protocol's `v` stays 1: no transport of an earlier build
+  exists.
 - **Mutual TLS** (PP-11, Q34, task 14.2). `tls` is PEM text: `certificate` and `key` the process's own, `trustedRoots`
   the CAs it trusts. On the core the transport is then an `https` server with `requestCert` and `rejectUnauthorized`
   against `trustedRoots`; a private process presents its certificate and checks the core's against its
@@ -1480,7 +1515,8 @@ failing `on-start-db` or `on-start-api`, with point and module) and `listen-fail
 `callback-error` (with point and module), `database-error`, `parent-mismatch`, `finality-conflict`, `node-requirement`,
 `duplicate-block-hash`, `unknown-runtime`, `bad-version-digest`, `pin-mismatch`, `metadata-mismatch`, `root-mismatch`,
 `fast-log-unsupported`, `unexpected-cursor`, `writer-lock-lost`, `truncate-not-allowed` (a callback error); for a
-private instance, `lockstep-behind` and `report-hash-mismatch`.
+private instance, `lockstep-behind`, `report-hash-mismatch` and `public-config-changed` (PP-14, §8's configuration
+hash; task 14.1b).
 
 **The test tape's errors are not `UmbraError` codes** (tasks 9.1, 9.2): the tape is test tooling (`tools/tape/`, §1),
 and `ERROR_CODES` is the exported `ErrorCode` (§12). `bad-tape-record` is the tape tools' own `TapeError` (the line,

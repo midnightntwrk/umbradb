@@ -51,6 +51,13 @@ export interface TestDatabase {
    * on the database now (`pg_stat_activity`'s `xact_start`), the asking session not counted.
    */
   openTransactions?(login: string): Promise<number>;
+  /** PostgreSQL: runs `sql` as the server's login on the database (a login created, its password changed). */
+  exec?(sql: string): Promise<void>;
+  /**
+   * PostgreSQL: ends every session `login` has on the database (`pg_terminate_backend`, as a restart of the server
+   * would), and resolves with how many it ended.
+   */
+  terminate?(login: string): Promise<number>;
   /**
    * Runs `body` with a read of the database through the database API, its height `committedHeight`'s: on PGlite only
    * while no process holds it open (this process reuses its lock).
@@ -136,6 +143,16 @@ function postgresBackend(): PrivateBackend {
             [login],
           );
           return Number(row?.open);
+        },
+        async exec(sql) {
+          await database.admin.unsafe(sql);
+        },
+        async terminate(login) {
+          const rows = await database.admin.unsafe(
+            "SELECT pg_terminate_backend(pid) AS ended FROM pg_stat_activity WHERE datname = current_database() AND usename = $1",
+            [login],
+          );
+          return rows.filter((row) => row.ended === true).length;
         },
         async read(body, committedHeight = cursorHeight) {
           const db = openPostgres({ url: database.url, committedHeight: committedHeight ?? noHeight, readConnections: 1 });

@@ -16,7 +16,8 @@
  * connection holds — or this one already, a `hello` sent twice — is refused with `hello-ack.refused`
  * `duplicate-instance` and its connection closed, the first connection unchanged (PP-4); otherwise it is answered with
  * `hello-ack`: whether the instance is listed in `lockstepInstances`, the public genesis hash, S, and the public cursor
- * (null before the first commit).
+ * (null before the first commit). Each of the core's three messages carries its configuration hash, `configHash`
+ * (RN-16, PP-4, PP-14; task 14.1b: computed once at the process's startup, `../runner/process.ts`).
  *
  * **Lockstep** (PP-6, PP-7; task 14.3). A listed instance's `hello` below the public cursor − 1 — it was listed late, or
  * its database was replaced: the mutable public state of the heights it missed is gone — is answered `refused:
@@ -149,6 +150,8 @@ export interface CoreTransportOptions {
   readonly lockstep?: Lockstep;
   /** The bound of each read (`apiReadTimeoutMs`, DB-15). */
   readonly readTimeoutMs: number;
+  /** The process's configuration hash (RN-16, PP-4; task 14.1b), on its `hello-ack`, `committed` and `read-result`. */
+  readonly configHash: string;
   /** Where log lines go. */
   readonly log: (line: string) => void;
   /** The negative controls' `https` options from `tls`; {@link mutualTlsOptions} unless given. */
@@ -279,6 +282,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
       start: options.start.toString(),
       cursor: cursor === null ? null : cursor.toString(),
       refused,
+      configHash: options.configHash,
     });
   };
 
@@ -356,15 +360,16 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
         type: "read-result",
         id: request.id,
         height: height === null ? null : height.toString(),
+        configHash: options.configHash,
         results,
       };
       if (Buffer.byteLength(messageText(answer)) > limits.maxMessageBytes) {
-        send(session, { v: 1, type: "read-result", id: request.id, height: answer.height, error: "result-too-large" });
+        send(session, { v: 1, type: "read-result", id: request.id, height: answer.height, configHash: options.configHash, error: "result-too-large" });
       } else {
         send(session, answer);
       }
     } catch (error) {
-      send(session, { v: 1, type: "read-result", id: request.id, height: null, error: codeOf(error) });
+      send(session, { v: 1, type: "read-result", id: request.id, height: null, configHash: options.configHash, error: codeOf(error) });
     } finally {
       session.pending -= 1;
     }
@@ -464,7 +469,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     port: bound.port,
     committed(block: BlockRef) {
       for (const session of connected.values()) {
-        send(session, { v: 1, type: "committed", height: block.height.toString(), hash: hexOf(block.hash) });
+        send(session, { v: 1, type: "committed", height: block.height.toString(), hash: hexOf(block.hash), configHash: options.configHash });
       }
     },
     instances() {

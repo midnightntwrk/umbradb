@@ -17,6 +17,13 @@
  * restart can find while the core has not yet seen the old connection close) is logged and retried as a lost
  * connection.
  *
+ * **A changed public configuration** (PP-14, owner decision Q147; task 14.1b). The first `hello-ack` gives the core's
+ * configuration hash ({@link PrivateTransport.configHash}); every later `hello-ack`, `committed` and `read-result` must
+ * carry the same. One that carries another — the core restarted with another configuration — refuses the transport for
+ * good with `public-config-changed` ({@link publicConfigChanged}): the connection is closed, it connects no more, and
+ * every wait, read and {@link PrivateTransport.connection} fails with that `UmbraError` (not retryable), so the process
+ * halts before it processes another height.
+ *
  * **Lockstep** (PP-6; task 14.3). {@link PrivateTransport.lockstep} is the last `hello-ack`'s flag (kept while away).
  * While connected to a core that lists it and has not refused it, {@link PrivateTransport.report} sends each block the
  * private process committed as `report`. A close of the core for `report-hash-mismatch` (1008: its report's hash is not
@@ -89,6 +96,31 @@ export interface PrivateTransportOptions {
   readonly log: (line: string) => void;
   /** The tests' limits (the largest message, the ping's interval); `TRANSPORT_LIMITS` unless given. */
   readonly limits?: Partial<Pick<TransportLimits, "maxMessageBytes" | "pingIntervalMs">>;
+  /**
+   * Whether a `configHash` other than the first `hello-ack`'s refuses the transport (PP-14); `check` unless given —
+   * `ignore` is the negative control's, which goes on after the core's configuration changed.
+   */
+  readonly configHash?: "check" | "ignore";
+}
+
+/**
+ * PP-14's halt (`public-config-changed`, not retried; owner decision Q147, task 14.1b): the core's configuration hash is
+ * `found`, not `recorded`, the one it was when this private process started — learned from a message of the core
+ * (`transport`) or from the public configuration history read again at a reconnection to the public database
+ * (`public-database`). Its message names the two hashes, never a setting.
+ */
+export function publicConfigChanged(recorded: string | null, found: string | null, via: "transport" | "public-database"): UmbraError {
+  const how =
+    via === "transport"
+      ? `a message of the core at coreTransport carries the configuration hash ${found}`
+      : `the public configuration history, read again at a reconnection to the public database, hashes to ${found}`;
+  return new UmbraError(
+    "public-config-changed",
+    `${how}, and it was ${recorded} when this private process started (PP-14): the public core restarted with another ` +
+      "configuration, so the public table items this process checked at its startup (PP-13) may no longer be what it " +
+      "reads, and it halts before it processes another height; start it again, which checks the public side again",
+    { recorded, found, via },
+  );
 }
 
 /** Where the connection is: `refused` for good by the core (`report-hash-mismatch`), `closed` by the process. */
@@ -143,6 +175,8 @@ export class PrivateTransport {
   #ack: HelloAck | null = null;
   /** Why the core refused it for good, once it did. */
   #refusal: UmbraError | null = null;
+  /** The core's configuration hash its first `hello-ack` gave (PP-14); null before. */
+  #configHash: string | null = null;
   readonly #pending = new Map<string, Pending>();
   readonly #waiters = new Set<Waiter>();
   /** Reads made while connecting: settled when the attempt connects or fails. */
@@ -165,6 +199,16 @@ export class PrivateTransport {
   /** Whether the last `hello-ack` that connected it said the core lists it in `lockstepInstances` (PP-6). */
   get lockstep(): boolean {
     return this.#ack?.lockstep === true;
+  }
+
+  /** The core's configuration hash as its first `hello-ack` gave it (PP-14), which every later message must carry. */
+  get configHash(): string | null {
+    return this.#configHash;
+  }
+
+  /** Why it was refused for good (`report-hash-mismatch`, `public-config-changed`), or null. */
+  get refusal(): UmbraError | null {
+    return this.#refusal;
   }
 
   /**
@@ -369,6 +413,7 @@ export class PrivateTransport {
     const message: Message = parsed.message;
     switch (message.type) {
       case "hello-ack": {
+        if (this.#configChanged(message.configHash)) return null;
         if (message.refused === "duplicate-instance") return `the core refused instance ${this.#options.instance}: ${message.refused}`;
         this.#ack = message;
         this.#state = "connected";
@@ -381,9 +426,11 @@ export class PrivateTransport {
         return null;
       }
       case "committed":
+        if (this.#configChanged(message.configHash)) return null;
         this.#wake();
         return null;
       case "read-result": {
+        if (this.#configChanged(message.configHash)) return null;
         const pending = this.#pending.get(message.id);
         if (pending === undefined) return null;
         this.#pending.delete(message.id);
@@ -393,6 +440,32 @@ export class PrivateTransport {
       default:
         return `wrong-direction ${message.type}`;
     }
+  }
+
+  /**
+   * PP-14 (task 14.1b): records the first `configHash` the core sends (its first `hello-ack`'s), and refuses the
+   * transport for good when a later message carries another — unless told to ignore it. True when it refused.
+   */
+  #configChanged(found: string): boolean {
+    if (this.#configHash === null) {
+      this.#configHash = found;
+      return false;
+    }
+    if (found === this.#configHash || this.#options.configHash === "ignore") return false;
+    const recorded = this.#configHash;
+    this.#refusal = publicConfigChanged(recorded, found, "transport");
+    this.#state = "refused";
+    this.#options.log(
+      `transport: the core's configuration hash is now ${found}, not ${recorded} as when this instance started: ` +
+        "public-config-changed (PP-14)",
+    );
+    const socket = this.#socket;
+    this.#socket = undefined;
+    clearInterval(this.#pinger);
+    this.#fail(this.#refusal);
+    for (const waiter of [...this.#waiters]) waiter.fail(this.#refusal);
+    socket?.close(1000, "public-config-changed");
+    return true;
   }
 
   /** Wakes every waiter (PP-3). */

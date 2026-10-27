@@ -9,15 +9,20 @@
  * | Type | Direction | Fields (`H` a height as decimal text, `X` `0x`-prefixed lowercase hex) |
  * |---|---|---|
  * | `hello` | private → core | `instance`, `version`, `height: H` (its cursor; its S − 1 before its first commit), `hash: X` or null |
- * | `hello-ack` | core → private | `lockstep`, `genesis: X`, `start: H`, `cursor: H` or null, `refused`: null, `duplicate-instance` or `lockstep-behind` |
- * | `committed`, `report` | core → private, private → core | `height: H`, `hash: X` |
+ * | `hello-ack` | core → private | `lockstep`, `genesis: X`, `start: H`, `cursor: H` or null, `refused`: null, `duplicate-instance` or `lockstep-behind`, `configHash: X` |
+ * | `committed` | core → private | `height: H`, `hash: X`, `configHash: X` |
+ * | `report` | private → core | `height: H`, `hash: X` |
  * | `read` | private → core | `id`, `statements`: `[{ sql, params: Value[] }]`, run as one consistent read |
- * | `read-result` | core → private | `id`, `height: H` or null (before the first commit), and `results` — per statement `{ columns: [{ name, type }], rows: Value[][] }` — or `error`, a code |
+ * | `read-result` | core → private | `id`, `height: H` or null (before the first commit), `configHash: X`, and `results` — per statement `{ columns: [{ name, type }], rows: Value[][] }` — or `error`, a code |
+ *
+ * **`configHash`** (PP-4, PP-14, RN-16; owner decision Q147, task 14.1b): the core's configuration hash, 32 bytes, on
+ * each of its three messages — which a private process compares with the one its first `hello-ack` gave
+ * (`./private-transport.ts`).
  *
  * **Strict.** Every object is a strict object — a field it does not have fails its schema as a missing or mistyped one
  * does — and a message is `v: 1` with one of these `type`s; {@link parseMessage} tells the three failures apart
  * (`unknown-version`, `unknown-type`, `invalid-message`, besides `not-json`), and the transport closes the connection on
- * any of them (PP-4). Hashes (`hello`'s, `hello-ack`'s `genesis`, `committed`'s, `report`'s) are 32 bytes; ids are text
+ * any of them (PP-4). Hashes (`hello`'s, `hello-ack`'s `genesis`, `committed`'s, `report`'s, each `configHash`) are 32 bytes; ids are text
  * of 1 to 128 characters, unique per connection for its requests.
  *
  * **Values** ({@link encodeValue}, {@link decodeValue}). A value in a row or a parameter is `null`, a boolean, a string
@@ -99,10 +104,11 @@ export const HELLO_ACK = z.strictObject({
   start: height(),
   cursor: height().nullable(),
   refused: REFUSED.nullable(),
+  configHash: hash(),
 });
 
 /** `committed` (core → private): sent after each public commit. */
-export const COMMITTED = z.strictObject({ ...base("committed"), height: height(), hash: hash() });
+export const COMMITTED = z.strictObject({ ...base("committed"), height: height(), hash: hash(), configHash: hash() });
 
 /** `report` (lockstep private → core): sent after each private commit (task 14.3). */
 export const REPORT = z.strictObject({ ...base("report"), height: height(), hash: hash() });
@@ -125,6 +131,7 @@ export const READ_RESULT = z
     ...base("read-result"),
     id: id(),
     height: height().nullable(),
+    configHash: hash(),
     results: z.array(RESULT).optional(),
     error: z.string().min(1).optional(),
   })

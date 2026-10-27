@@ -63,6 +63,11 @@ export interface PostgresOptions {
   readonly connectTimeoutSeconds?: number;
   /** The core entry's `fullPageWritesOffAllowed` (CF-4): the durability probe's override; default false (DB-12). */
   readonly fullPageWritesOffAllowed?: boolean;
+  /**
+   * Called each time the read pool drops a session it lost (before a read takes another or opens a new one): a
+   * private process's reading of its public database again at a reconnection (PP-14; task 14.1b). None unless given.
+   */
+  readonly onReadSessionLost?: () => void;
 }
 
 /**
@@ -352,6 +357,7 @@ class ReadPool {
   constructor(
     private readonly size: number,
     private readonly open: () => Session,
+    private readonly lost: () => void = () => undefined,
   ) {}
 
   async acquire(): Promise<Session> {
@@ -391,6 +397,8 @@ class ReadPool {
 
   private drop(session: Session): void {
     this.all.delete(session);
+    // A session dropped while the pool is open was lost (an ended one is the pool's own close).
+    if (!this.closed) this.lost();
     void session.end();
   }
 }
@@ -522,7 +530,7 @@ export function openPostgres(options: PostgresOptions): Database {
   }
   const session = (role: Role) => () => new Session(options.url, role, options.connectTimeoutSeconds);
   const writer = new Writer(session("writer"), options.fullPageWritesOffAllowed ?? false);
-  const pool = new ReadPool(readConnections, session("reader"));
+  const pool = new ReadPool(readConnections, session("reader"), options.onReadSessionLost);
   let closed = false;
 
   const database: Database = {

@@ -23,6 +23,8 @@ import {
 
 const HASH = `0x${"ab".repeat(32)}`;
 const OTHER = `0x${"cd".repeat(32)}`;
+/** A core's configuration hash (RN-16, PP-4; task 14.1b). */
+const CONFIG = `0x${"ef".repeat(32)}`;
 
 /** One valid message of each type, every optional field given where the schema has one. */
 export const SAMPLES: Readonly<Record<MessageType, Message>> = {
@@ -35,8 +37,9 @@ export const SAMPLES: Readonly<Record<MessageType, Message>> = {
     start: "1",
     cursor: "42",
     refused: null,
+    configHash: CONFIG,
   },
-  committed: { v: 1, type: "committed", height: "42", hash: HASH },
+  committed: { v: 1, type: "committed", height: "42", hash: HASH, configHash: CONFIG },
   report: { v: 1, type: "report", height: "42", hash: HASH },
   read: {
     v: 1,
@@ -52,6 +55,7 @@ export const SAMPLES: Readonly<Record<MessageType, Message>> = {
     type: "read-result",
     id: "7",
     height: "42",
+    configHash: CONFIG,
     results: [
       { columns: [{ name: "height", type: "bigint" }], rows: [["42"]] },
       {
@@ -68,11 +72,11 @@ export const SAMPLES: Readonly<Record<MessageType, Message>> = {
 /** The other valid forms each type has: nulls where a field may be null, the other branch of a choice. */
 const VARIANTS: readonly Message[] = [
   { v: 1, type: "hello", instance: "i", version: "v", height: "0", hash: null },
-  { v: 1, type: "hello-ack", lockstep: true, genesis: HASH, start: "0", cursor: null, refused: "duplicate-instance" },
-  { v: 1, type: "hello-ack", lockstep: true, genesis: HASH, start: "0", cursor: null, refused: "lockstep-behind" },
+  { v: 1, type: "hello-ack", lockstep: true, genesis: HASH, start: "0", cursor: null, refused: "duplicate-instance", configHash: CONFIG },
+  { v: 1, type: "hello-ack", lockstep: true, genesis: HASH, start: "0", cursor: null, refused: "lockstep-behind", configHash: CONFIG },
   { v: 1, type: "read", id: "1", statements: [] },
-  { v: 1, type: "read-result", id: "1", height: null, results: [] },
-  { v: 1, type: "read-result", id: "1", height: "3", error: "query-timeout" },
+  { v: 1, type: "read-result", id: "1", height: null, configHash: CONFIG, results: [] },
+  { v: 1, type: "read-result", id: "1", height: "3", configHash: CONFIG, error: "query-timeout" },
   // A JSON value with an integer beyond ±(2^53 − 1), kept exactly on the wire: a parameter's and a row's.
   {
     v: 1,
@@ -85,6 +89,7 @@ const VARIANTS: readonly Message[] = [
     type: "read-result",
     id: "3",
     height: "9",
+    configHash: CONFIG,
     results: [{ columns: [{ name: "j", type: "jsonb" }], rows: [[{ big: 123456789012345678901234567890n }]] }],
   },
 ];
@@ -102,6 +107,11 @@ function mistyped(value: unknown): unknown {
 describe("A115: every message type round-trips through design §8's schemas", () => {
   it("the types are design §8's six (no api or api-result: owner decision Q140 C)", () => {
     expect(MESSAGE_TYPES).toEqual(["hello", "hello-ack", "committed", "report", "read", "read-result"]);
+  });
+
+  it("the core's three messages carry its configuration hash, configHash; a private process's three do not (PP-4, Q147)", () => {
+    const carrying = MESSAGE_TYPES.filter((type) => "configHash" in MESSAGE_SCHEMAS[type].shape);
+    expect(carrying).toEqual(["hello-ack", "committed", "read-result"]);
   });
 
   it.each([...MESSAGE_TYPES.map((type) => [type, SAMPLES[type]] as const), ...VARIANTS.map((m) => [`${m.type} (other form)`, m] as const)])(
@@ -147,7 +157,11 @@ describe("A115: a missing or mistyped field fails the schema", () => {
     ["a hash in upper case", { ...SAMPLES.committed, hash: HASH.toUpperCase().replace("0X", "0x") }],
     ["a refusal no hello-ack gives", { ...SAMPLES["hello-ack"], refused: "busy" }],
     ["a read-result with results and error", { ...SAMPLES["read-result"], error: "database-error" }],
-    ["a read-result with neither", { v: 1, type: "read-result", id: "1", height: null }],
+    ["a read-result with neither", { v: 1, type: "read-result", id: "1", height: null, configHash: CONFIG }],
+    ["a configHash of 31 bytes", { ...SAMPLES.committed, configHash: `0x${"ef".repeat(31)}` }],
+    ["a configHash that is null", { ...SAMPLES["hello-ack"], configHash: null }],
+    ["a configHash on a report (only the core's messages carry it)", { ...SAMPLES.report, configHash: CONFIG }],
+    ["a configHash on a hello", { ...SAMPLES.hello, configHash: CONFIG }],
     ["a row with a value too few", { ...SAMPLES["read-result"], results: [{ columns: [{ name: "a", type: "bigint" }], rows: [[]] }] }],
     ["an empty id", { ...SAMPLES.read, id: "" }],
     ["a statement without its SQL", { ...SAMPLES.read, statements: [{ params: [] }] }],
@@ -226,7 +240,7 @@ describe("the values' encoding (design §8), and reading them back", () => {
     expect(encoded).toEqual(carried);
     // Through the wire's JSON, and back.
     const wire = parseMessage(
-      messageText({ v: 1, type: "read-result", id: "1", height: "1", results: [{ columns: [{ name: "c", type }], rows: [[encoded]] }] }),
+      messageText({ v: 1, type: "read-result", id: "1", height: "1", configHash: CONFIG, results: [{ columns: [{ name: "c", type }], rows: [[encoded]] }] }),
     );
     if (!wire.ok || wire.message.type !== "read-result") throw new Error("not read back");
     const value = (wire.message.results ?? [])[0]?.rows[0]?.[0];

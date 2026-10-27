@@ -18,6 +18,11 @@
  * answer. A `100 Continue` is an interim answer, before the request's own; a WebSocket message or close after the
  * upgrade has no headers.
  *
+ * **And its configuration** (RN-16; owner decision Q147; task 14.1b): given the process's configuration hash, the
+ * listener sets {@link CONFIG_HASH_HEADER} to it on each of those answers alike, beside the version, replacing a header
+ * of that name in any letter case. The process computes the hash once at startup (`./process.ts`), so it changes only
+ * with a restart under another configuration; a private process compares the core's (PP-14).
+ *
  * **WebSocket subscriptions.** Each message is a JSON text of at most
  * {@link ModuleApiServerOptions.maxMessageBytes}: `{ "type": "subscribe", "id", "name", "args"? }` — `id` a string of 1
  * to 128 characters the client chooses, unique among its open subscriptions — answered `{ "type": "subscribed", "id" }`
@@ -75,10 +80,12 @@ export interface ModuleApiServerOptions {
   readonly maxBodyBytes?: number;
   readonly maxMessageBytes?: number;
   /**
-   * The class of each HTTP answer: {@link VersionedResponse}, which names the build, by default; another (Node.js's own
-   * `ServerResponse`) only for a negative control.
+   * The class of each HTTP answer: {@link coreHeadersResponse}'s, which names the build and the configuration, by
+   * default; another (Node.js's own `ServerResponse`) only for a negative control.
    */
   readonly response?: typeof ServerResponse;
+  /** The process's configuration hash (RN-16, Q147; task 14.1b), set as {@link CONFIG_HASH_HEADER}; none unless given. */
+  readonly configHash?: string;
 }
 
 /**
@@ -88,41 +95,61 @@ export interface ModuleApiServerOptions {
  */
 export const VERSION_HEADER = "X-Umbra-Version";
 
-/** Whether `name` is {@link VERSION_HEADER}'s, in any letter case (HTTP's header names are case-insensitive). */
-const isVersionHeader = (name: unknown): boolean =>
-  typeof name === "string" && name.toLowerCase() === "x-umbra-version";
+/**
+ * The header the core sets on every HTTP answer on `listen.api` beside {@link VERSION_HEADER}: the process's
+ * configuration hash (RN-16, PP-14, owner decision Q147; task 14.1b), computed once at startup.
+ */
+export const CONFIG_HASH_HEADER = "X-Umbra-Config-Hash";
+
+/** The core's headers, by their names in lower case (HTTP's header names are case-insensitive). */
+const CORE_HEADER_NAMES: ReadonlySet<string> = new Set(["x-umbra-version", "x-umbra-config-hash"]);
+
+/** Whether `name` is one of the core's headers, in any letter case. */
+const isCoreHeader = (name: unknown): boolean => typeof name === "string" && CORE_HEADER_NAMES.has(name.toLowerCase());
+
+/** The core's headers of a listener: the build's version, and the configuration hash when it has one. */
+const coreHeaders = (configHash: string | undefined): readonly (readonly [string, string])[] => [
+  [VERSION_HEADER, UMBRADB_VERSION],
+  ...(configHash === undefined ? [] : [[CONFIG_HASH_HEADER, configHash] as const]),
+];
 
 type HeadersArgument = OutgoingHttpHeaders | OutgoingHttpHeader[];
 
 /**
- * `headers` as `writeHead` takes them — an object, or a flat list of names and values — with {@link VERSION_HEADER}
- * set to the build's version: a header of that name in any letter case left out, the others kept as they are and in
- * their order.
+ * `headers` as `writeHead` takes them — an object, or a flat list of names and values — with the core's headers `core`
+ * set: a header of one of their names in any letter case left out, the others kept as they are and in their order.
  */
-function versioned(headers: HeadersArgument | undefined): HeadersArgument {
+function withCoreHeaders(headers: HeadersArgument | undefined, core: readonly (readonly [string, string])[]): HeadersArgument {
   if (Array.isArray(headers)) {
     const kept: OutgoingHttpHeader[] = [];
     for (let index = 0; index < headers.length; index += 2) {
-      if (!isVersionHeader(headers[index])) kept.push(...headers.slice(index, index + 2));
+      if (!isCoreHeader(headers[index])) kept.push(...headers.slice(index, index + 2));
     }
-    return [...kept, VERSION_HEADER, UMBRADB_VERSION];
+    return [...kept, ...core.flat()];
   }
-  const kept = Object.entries(headers ?? {}).filter(([name]) => !isVersionHeader(name));
-  return { ...Object.fromEntries(kept), [VERSION_HEADER]: UMBRADB_VERSION };
+  const kept = Object.entries(headers ?? {}).filter(([name]) => !isCoreHeader(name));
+  return { ...Object.fromEntries(kept), ...Object.fromEntries(core) };
 }
 
 /**
- * The listener's HTTP answers (see the module comment): every answer written through one — the module API's, and those
- * Node.js writes itself through a response (a request without `Host`, an `Expect` it does not meet) — carries
- * {@link VERSION_HEADER} with the build's version, whichever form of `writeHead` wrote it, an implicit one included.
+ * The class of the listener's HTTP answers (see the module comment): every answer written through one — the module
+ * API's, and those Node.js writes itself through a response (a request without `Host`, an `Expect` it does not meet) —
+ * carries {@link VERSION_HEADER} with the build's version and, given `configHash`, {@link CONFIG_HASH_HEADER} with it,
+ * whichever form of `writeHead` wrote it, an implicit one included.
  */
-export class VersionedResponse<Request extends IncomingMessage = IncomingMessage> extends ServerResponse<Request> {
-  override writeHead(statusCode: number, message?: string | HeadersArgument, headers?: HeadersArgument): this {
-    return typeof message === "string"
-      ? super.writeHead(statusCode, message, versioned(headers))
-      : super.writeHead(statusCode, versioned(message));
-  }
+export function coreHeadersResponse(configHash?: string): typeof ServerResponse {
+  const core = coreHeaders(configHash);
+  return class CoreHeadersResponse<Request extends IncomingMessage = IncomingMessage> extends ServerResponse<Request> {
+    override writeHead(statusCode: number, message?: string | HeadersArgument, headers?: HeadersArgument): this {
+      return typeof message === "string"
+        ? super.writeHead(statusCode, message, withCoreHeaders(headers, core))
+        : super.writeHead(statusCode, withCoreHeaders(message, core));
+    }
+  };
 }
+
+/** {@link coreHeadersResponse} without a configuration hash: the build's version alone (task 5.2c's). */
+export const VersionedResponse: typeof ServerResponse = coreHeadersResponse();
 
 /** The head of an HTTP/1.1 answer with `status` and `headers`, as a connection's bytes. */
 const answerHead = (status: number, headers: Readonly<Record<string, string>>): string =>
@@ -139,11 +166,12 @@ const UNREADABLE_STATUS: ReadonlyMap<string, number> = new Map([
 
 /**
  * Node.js's answer to bytes it cannot read as a request (its HTTP server's own, the error's `code` its parser's or a
- * timeout's), with the build's version: the listener writes it, then closes the connection.
+ * timeout's), with the build's version and, given one, the configuration hash: the listener writes it, then closes the
+ * connection.
  */
-export function unreadableAnswer(code: string | undefined): string {
+export function unreadableAnswer(code: string | undefined, configHash?: string): string {
   const status = UNREADABLE_STATUS.get(code ?? "") ?? 400;
-  return answerHead(status, { Connection: "close", [VERSION_HEADER]: UMBRADB_VERSION });
+  return answerHead(status, { Connection: "close", ...Object.fromEntries(coreHeaders(configHash)) });
 }
 
 /** `ws`'s message (8.22.0) when the request's WebSocket version is none it speaks; its refusal names those it does. */
@@ -154,7 +182,7 @@ const VERSION_REFUSED = "Missing or invalid Sec-WebSocket-Version header";
  * check), else 400; its headers, with the versions it speaks when the request's version is what it refused (RFC 6455
  * §4.4); its `message` — and the build's version, then closes the connection, as `ws` does.
  */
-function refuseUpgrade(socket: Duplex, request: IncomingMessage, message: string): void {
+function refuseUpgrade(socket: Duplex, request: IncomingMessage, message: string, configHash: string | undefined): void {
   socket.once("finish", () => socket.destroy());
   socket.end(
     answerHead(request.method === "GET" ? 400 : 405, {
@@ -162,7 +190,7 @@ function refuseUpgrade(socket: Duplex, request: IncomingMessage, message: string
       "Content-Type": "text/html",
       "Content-Length": String(Buffer.byteLength(message)),
       ...(message === VERSION_REFUSED ? { "Sec-WebSocket-Version": "13, 8" } : {}),
-      [VERSION_HEADER]: UMBRADB_VERSION,
+      ...Object.fromEntries(coreHeaders(configHash)),
     }) + message,
   );
 }
@@ -373,17 +401,18 @@ export async function listenModuleApi(
   const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const connections = new Set<Connection>();
   const sockets = new WebSocketServer({ noServer: true, maxPayload: options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES });
-  // The upgrade's 101 as ws writes it, and ws's refusals, with the build's version (see the module comment).
-  sockets.on("headers", (headers) => headers.push(`${VERSION_HEADER}: ${UMBRADB_VERSION}`));
-  sockets.on("wsClientError", (error, socket, request) => refuseUpgrade(socket, request, error.message));
-  const server = createServer({ ServerResponse: options.response ?? VersionedResponse }, (request, response) => {
+  // The upgrade's 101 as ws writes it, and ws's refusals, with the core's headers (see the module comment).
+  const { configHash } = options;
+  sockets.on("headers", (headers) => headers.push(...coreHeaders(configHash).map(([name, value]) => `${name}: ${value}`)));
+  sockets.on("wsClientError", (error, socket, request) => refuseUpgrade(socket, request, error.message, configHash));
+  const server = createServer({ ServerResponse: options.response ?? coreHeadersResponse(configHash) }, (request, response) => {
     void serve(api, request, response, maxBody);
   });
   // Node.js's answer to what it cannot read as a request, with the build's version. Node.js holds its own back while
   // an answer of the connection is half written; the listener writes each of its answers whole, so none is. On a
   // connection that can no longer be written (the client reset it) the write fails, and Node.js ignores the error.
   server.on("clientError", (error: NodeJS.ErrnoException, socket: Duplex) => {
-    socket.write(unreadableAnswer(error.code));
+    socket.write(unreadableAnswer(error.code, configHash));
     socket.destroy();
   });
   server.on("upgrade", (request, socket, head) => {
@@ -426,6 +455,8 @@ export interface ModuleApiStart extends ApiStartup {
   readonly onError?: ModuleApiOptions["onError"];
   /** The routes to register into (a negative control's); new ones by default. */
   readonly routes?: ApiRoutes;
+  /** The process's configuration hash (RN-16, Q147), on every answer of the listener; none unless given. */
+  readonly configHash?: string;
 }
 
 /** The module API started. */
@@ -449,7 +480,10 @@ export async function startModuleApi(input: ModuleApiStart): Promise<StartedModu
     timeoutMs: input.apiReadTimeoutMs,
     ...(input.onError === undefined ? {} : { onError: input.onError }),
   });
-  const server = input.address === undefined ? null : await listenModuleApi(api, input.address);
+  const server =
+    input.address === undefined
+      ? null
+      : await listenModuleApi(api, input.address, input.configHash === undefined ? {} : { configHash: input.configHash });
   return Object.freeze({
     routes,
     api,

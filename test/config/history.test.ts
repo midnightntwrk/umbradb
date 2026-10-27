@@ -7,6 +7,8 @@ import {
   canonicalJson,
   checkHistory,
   committedVersions,
+  type ConfigHashRow,
+  configHashOf,
   dataHash,
   graphEntries,
   graphInputOf,
@@ -25,6 +27,7 @@ import {
 } from "../../src/config/history.js";
 import { processCoreEntry } from "../../src/config/process.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { encodeCanonical } from "../../src/determinism/cbor.js";
 import { defineModule } from "../../src/modules/declaration.js";
 import { resolveGraph } from "../../src/modules/graph.js";
 import { declaration } from "../modules/declarations.js";
@@ -1322,5 +1325,64 @@ describe("PP-13: the public table items a private process reads from the history
 
   it("refuses nothing itself: the graph judges the ranges (an own stop below the start is the history's CHECK's)", () => {
     expect(publicItemRanges([row("a", 4, 4, ["y"])])).toEqual([range("y", "a", 4, 4)]);
+  });
+});
+
+describe("RN-16, PP-14: the configuration hash of the history's rows (configHashOf, task 14.1b, owner decision Q147)", () => {
+  const H = (byte: number) => new Uint8Array(32).fill(byte);
+  const ROWS: readonly ConfigHashRow[] = [
+    { id: "core", start: 1n, stop: null, version: '{"umbradb":"0.9.5"}', dataHash: H(1), provides: ["blocks", "chain-identity"] },
+    { id: "pub", start: 1n, stop: null, version: "1.0.0", dataHash: H(2), provides: ["pub-rows"] },
+    { id: "pub", start: 30n, stop: 40n, version: "1.1.0", dataHash: null, provides: [] },
+  ];
+
+  it("is SHA-256 of the canonical encoding of the tagged rows by id and start, as 0x and 64 lowercase hex digits", () => {
+    const hash = configHashOf(ROWS);
+    expect(hash).toMatch(/^0x[0-9a-f]{64}$/);
+    const encoded = encodeCanonical([
+      "umbradb-config-hash",
+      1,
+      ROWS.map((row) => [row.id, row.start, row.stop, row.version, row.dataHash, [...row.provides]]),
+    ]);
+    expect(hash).toBe(`0x${createHash("sha256").update(encoded).digest("hex")}`);
+  });
+
+  it("does not depend on the rows' order: ids by their UTF-8 bytes, then starts", () => {
+    expect(configHashOf([...ROWS].reverse())).toBe(configHashOf(ROWS));
+    expect(configHashOf([ROWS[2] as ConfigHashRow, ROWS[0] as ConfigHashRow, ROWS[1] as ConfigHashRow])).toBe(configHashOf(ROWS));
+    // "\uFF5E" (EF BD 9E) before "\u{1F600}" (F0 9F 98 80) by UTF-8 bytes, after it by UTF-16 code units (D83D …).
+    const a = { ...(ROWS[1] as ConfigHashRow), id: "\uFF5E" };
+    const b = { ...(ROWS[1] as ConfigHashRow), id: "\u{1F600}" };
+    const ordered = encodeCanonical(["umbradb-config-hash", 1, [a, b].map((row) => [row.id, row.start, row.stop, row.version, row.dataHash, [...row.provides]])]);
+    expect(configHashOf([b, a])).toBe(`0x${createHash("sha256").update(ordered).digest("hex")}`);
+  });
+
+  it("changes with every field of every row: id, start, stop, version, data_hash and provides", () => {
+    const base = configHashOf(ROWS);
+    const changed = (patch: Partial<ConfigHashRow>, index = 1) =>
+      configHashOf(ROWS.map((row, at) => (at === index ? { ...row, ...patch } : row)));
+    for (const patch of [
+      { id: "pub2" },
+      { start: 2n },
+      { stop: 9n },
+      { version: "1.0.1" },
+      { dataHash: H(3) },
+      { dataHash: null },
+      { provides: ["pub-rows", "pub-other"] },
+      { provides: [] },
+    ] as const) {
+      expect(changed(patch), JSON.stringify(patch, (_k, v) => (typeof v === "bigint" ? `${v}` : v))).not.toBe(base);
+    }
+    expect(changed({ stop: null }, 2)).not.toBe(base);
+    expect(configHashOf(ROWS.slice(0, 2))).not.toBe(base);
+    expect(configHashOf([])).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it("is equal for equal rows, the data's hash standing for the data (CF-7: a data field's change changes data_hash)", () => {
+    const copy = ROWS.map((row) => ({ ...row, dataHash: row.dataHash === null ? null : new Uint8Array(row.dataHash), provides: [...row.provides] }));
+    expect(configHashOf(copy)).toBe(configHashOf(ROWS));
+    const data = (level: number) => dataHash({ level });
+    expect(configHashOf([{ ...(ROWS[1] as ConfigHashRow), dataHash: data(0) }])).toBe(configHashOf([{ ...(ROWS[1] as ConfigHashRow), dataHash: data(0) }]));
+    expect(configHashOf([{ ...(ROWS[1] as ConfigHashRow), dataHash: data(1) }])).not.toBe(configHashOf([{ ...(ROWS[1] as ConfigHashRow), dataHash: data(0) }]));
   });
 });

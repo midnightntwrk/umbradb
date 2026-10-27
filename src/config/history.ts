@@ -334,6 +334,39 @@ export function publicItemRanges(rows: readonly ProvidesRow[]): PublicItem[] {
     );
 }
 
+/** A row of `core_chain.config` as the configuration hash reads it (RN-16, PP-14; `design.md` §8): no `data`, its hash. */
+export interface ConfigHashRow {
+  readonly id: string;
+  readonly start: bigint;
+  /** The stop as written; null when absent, and always for `core`. */
+  readonly stop: bigint | null;
+  readonly version: string;
+  /** SHA-256 of the data fields' canonical encoding; null for a scheduled revision. */
+  readonly dataHash: Uint8Array | null;
+  /** The `table` items the revision provides (PP-13). */
+  readonly provides: readonly string[];
+}
+
+/** What the configuration hash's encoding starts with: its name and the version of its input's layout. */
+const CONFIG_HASH_TAG = Object.freeze(["umbradb-config-hash", 1] as const);
+
+/**
+ * A process's configuration hash (RN-16, PP-14, owner decision Q147; task 14.1b; `design.md` §8): SHA-256 of the
+ * canonical encoding (DT-1) of `["umbradb-config-hash", 1, rows]`, each row of its `core_chain.config` as
+ * `[id, start, stop, version, data_hash, provides]`, the rows by id (UTF-8 bytes) and start — so in any order given —,
+ * written `0x` and 64 lowercase hex digits. Every data field of every revision counts (through `data_hash`, CF-7), its
+ * heights and version and the `table` items it provides; nothing operational or secret, which the history never
+ * records (CF-4).
+ */
+export function configHashOf(rows: readonly ConfigHashRow[]): string {
+  const ordered = [...rows].sort((a, b) => utf8Order(a.id, b.id) || (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+  const encoded = encodeCanonical([
+    ...CONFIG_HASH_TAG,
+    ordered.map((row) => [row.id, row.start, row.stop, row.version, row.dataHash, [...row.provides]]),
+  ]);
+  return `0x${createHash("sha256").update(encoded).digest("hex")}`;
+}
+
 /**
  * CF-6's allowance for a module's stop: a changed stop is accepted when both the recorded and the new one are above the
  * cursor — no stop counts as above every cursor — since then the change affects only heights not yet processed.

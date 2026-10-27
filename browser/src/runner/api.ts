@@ -38,6 +38,8 @@ export interface ModuleApiStart extends ApiStartup {
   readonly apiReadTimeoutMs: number;
   readonly onError?: ModuleApiOptions["onError"];
   readonly routes?: ApiRoutes;
+  /** The process's configuration hash: taken as Node.js's listener takes it, and set on no header (no HTTP here). */
+  readonly configHash?: string;
 }
 
 /** The module API started (as `src/runner/api-server.ts`'s). */

@@ -4,6 +4,7 @@ import { CORE_DIGEST } from "../../src/backbone/core-digest/index.js";
 import {
   bindingRefusal,
   lockstepBehind,
+  publicConfigChanged,
   needsLockstepRefusal,
   networkRefusal,
   openPublicDatabase,
@@ -18,10 +19,12 @@ import {
   publicNotStarted,
   readPrivateCursor,
   readPublicBlock,
+  readPublicConfiguration,
   readPublicIdentity,
   readPublicItems,
   type SourceTransport,
 } from "../../src/backbone/core-private-source/index.js";
+import { configHashOf } from "../../src/config/history.js";
 import { PRIVATE_CORE_DIGEST, privateBackbone } from "../../src/backbone/private.js";
 import type { CheckedEntry } from "../../src/config/validate.js";
 import type { ReadHandle, SchemaWriteHandle } from "../../src/db/api.js";
@@ -88,9 +91,9 @@ async function refusalOf(pending: Promise<unknown>): Promise<UmbraError> {
 
 /** The public configuration history's rows a private process reads (`core_chain.config`: heights and `provides`). */
 const PUBLIC_CONFIG = [
-  { entry_id: "core", start: 3n, stop: null, provides: ["blocks", "chain-identity"] },
-  { entry_id: "pub", start: 5n, stop: 9n, provides: ["pub-rows"] },
-  { entry_id: "pub", start: 8n, stop: null, provides: ["pub-rows", "pub-sums"] },
+  { entry_id: "core", start: 3n, stop: null, version: '{"umbradb":"0.9.5"}', data_hash: bytes(0x11), provides: ["blocks", "chain-identity"] },
+  { entry_id: "pub", start: 5n, stop: 9n, version: "1.0.0", data_hash: bytes(0x12), provides: ["pub-rows"] },
+  { entry_id: "pub", start: 8n, stop: null, version: "1.0.0", data_hash: bytes(0x13), provides: ["pub-rows", "pub-sums"] },
 ];
 
 /** Answers of a public database: its identity (S = 3), its configuration history and blocks up to `head`, or nothing. */
@@ -512,6 +515,18 @@ describe("the private backbone (PP-1, RN-3)", () => {
   });
 });
 
+/** The `hello-ack` of the cores these tests stand in for: network 0xa1, S = 3, cursor 9. */
+const ACK_OF_CORE: HelloAck = {
+  v: 1,
+  type: "hello-ack",
+  lockstep: false,
+  genesis: hexOf(bytes(0xa1)),
+  start: "3",
+  cursor: "9",
+  refused: null,
+  configHash: `0x${"0c".repeat(32)}`,
+};
+
 /** A transport stand-in for the source (`SourceTransport`): its connection's answer, the reports sent, its flag. */
 function fakeTransport(answer: Partial<HelloAck> | Error, later?: { lockstep: boolean }) {
   const reports: BlockRef[] = [];
@@ -519,7 +534,7 @@ function fakeTransport(answer: Partial<HelloAck> | Error, later?: { lockstep: bo
   const ack: HelloAck | Error =
     answer instanceof Error
       ? answer
-      : { v: 1, type: "hello-ack", lockstep: false, genesis: hexOf(bytes(0xa1)), start: "3", cursor: "9", refused: null, ...answer };
+      : { ...ACK_OF_CORE, ...answer };
   const transport: SourceTransport = {
     connection: async () => {
       state.asked += 1;
@@ -713,5 +728,124 @@ describe("lockstep on the private side (task 14.3; PP-6, PP-7, Q142)", () => {
     // The core's sources, and none: no public side to show.
     expect(publicLockstepOf(undefined)).toBeNull();
     expect(publicLockstepOf({ cursor: async () => null } as never)).toBeNull();
+  });
+});
+
+/** {@link PUBLIC_CONFIG}'s rows as the configuration hash takes them (RN-16, PP-14). */
+const configRows = (rows: readonly Record<string, unknown>[]) =>
+  rows.map((row) => ({
+    id: row.entry_id as string,
+    start: row.start as bigint,
+    stop: row.stop as bigint | null,
+    version: row.version as string,
+    dataHash: row.data_hash as Uint8Array | null,
+    provides: row.provides as string[],
+  }));
+
+describe("PP-14: a changed public configuration halts a private process (task 14.1b, owner decision Q147)", () => {
+  /** A public database of {@link publicAnswers} over `config` (changeable), whose lost sessions the test counts. */
+  function reconnecting() {
+    const state = { config: [...PUBLIC_CONFIG] as Record<string, unknown>[], lost: 0, configReads: 0, bodies: 0 };
+    const db: PublicDatabase = {
+      read: async (body) =>
+        body(
+          fakeRead((sql, params) => {
+            if (sql.includes("FROM core_chain.config")) state.configReads += 1;
+            return publicAnswers({ head: 9n, config: state.config })(sql, params);
+          }, 9n),
+        ),
+      close: async () => undefined,
+      reconnections: () => state.lost,
+    };
+    return { db, state };
+  }
+
+  it("reads the public configuration with the items: its hash is configHashOf the history's rows", async () => {
+    const { db } = fakePublic(publicAnswers({}));
+    const read = await db.read((handle) => readPublicConfiguration(handle));
+    expect(read.items).toEqual(await db.read((handle) => readPublicItems(handle)));
+    expect(read.configHash).toBe(configHashOf(configRows(PUBLIC_CONFIG)));
+    const none = await fakePublic(publicAnswers({ config: null })).db.read((handle) => readPublicConfiguration(handle));
+    expect(none).toEqual({ items: [], configHash: null });
+  });
+
+  it("without a transport: the first read after its public database lost a session reads the history again, in that read, before the body", async () => {
+    const { db, state } = reconnecting();
+    const source = new PrivateBlockSource(db, pollingWakes());
+    await source.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(source.publicConfigHash).toBe(configHashOf(configRows(PUBLIC_CONFIG)));
+    const atStart = state.configReads;
+    // No session lost: no reread.
+    await source.block(4n);
+    await source.finalizedHead();
+    expect(state.configReads).toBe(atStart);
+    // A session lost, the history unchanged: one reread, then none until the next loss.
+    state.lost += 1;
+    expect((await source.block(5n)).height).toBe(5n);
+    expect(state.configReads).toBe(atStart + 1);
+    await source.fetchRead(async () => undefined, 6n);
+    expect(state.configReads).toBe(atStart + 1);
+    // A session lost, a data field changed (pub's revision from 8 has another data_hash): the next read halts.
+    state.config = state.config.map((row) => (row.start === 8n ? { ...row, data_hash: bytes(0x99) } : row));
+    state.lost += 1;
+    let ran = false;
+    const halted = await refusalOf(
+      source.fetchRead(async () => {
+        ran = true;
+      }, 7n),
+    );
+    expect(ran).toBe(false);
+    expect(halted).toMatchObject({
+      code: "public-config-changed",
+      retryable: false,
+      details: { recorded: configHashOf(configRows(PUBLIC_CONFIG)), found: configHashOf(configRows(state.config)), via: "public-database" },
+    });
+    await expect(source.block(7n)).rejects.toMatchObject({ code: "public-config-changed" });
+    await expect(source.finalizedHead()).rejects.toMatchObject({ code: "public-config-changed" });
+  });
+
+  it("with a transport: its refusal fails the source's next read, so no other height is processed; the transport is the check", async () => {
+    const { db, state } = reconnecting();
+    const refusal = publicConfigChanged(`0x${"01".repeat(32)}`, `0x${"02".repeat(32)}`, "transport");
+    let refused: UmbraError | null = null;
+    const watched: SourceTransport = {
+      connection: async () => ({ ...ACK_OF_CORE }),
+      report: () => undefined,
+      lockstep: false,
+      get refusal() {
+        return refused;
+      },
+      close: async () => undefined,
+    };
+    const source = new PrivateBlockSource(db, pollingWakes(), watched);
+    await source.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect((await source.block(4n)).height).toBe(4n);
+    // With a transport, a lost session rereads nothing: the core's messages carry its hash.
+    state.lost += 1;
+    const reads = state.configReads;
+    await source.block(5n);
+    expect(state.configReads).toBe(reads);
+    refused = refusal;
+    await expect(source.block(6n)).rejects.toBe(refusal);
+    await expect(source.finalizedHead()).rejects.toBe(refusal);
+    await expect(source.fetchRead(async () => 1, 6n)).rejects.toBe(refusal);
+  });
+
+  it("names the hashes and how it learned of the change, never a setting's value", () => {
+    const error = publicConfigChanged(`0x${"01".repeat(32)}`, `0x${"02".repeat(32)}`, "public-database");
+    expect(error.code).toBe("public-config-changed");
+    expect(error.retryable).toBe(false);
+    expect(error.message).toContain(`0x${"01".repeat(32)}`);
+    expect(error.message).toContain(`0x${"02".repeat(32)}`);
+    expect(error.message).toContain("PP-14");
+  });
+
+  it("negative control: a source told to ignore configHash keeps reading after a changed public configuration (fails PP-14)", async () => {
+    const { db, state } = reconnecting();
+    const source = new PrivateBlockSource(db, pollingWakes(), null, { configHash: "ignore" });
+    await source.checkChain(configuredAs("custom", bytes(0xa1)));
+    state.config = state.config.map((row) => (row.start === 8n ? { ...row, data_hash: bytes(0x99) } : row));
+    state.lost += 1;
+    expect((await source.block(5n)).height).toBe(5n);
   });
 });

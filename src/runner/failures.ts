@@ -79,8 +79,8 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
 
 /**
  * `design.md` §11's processing halts that are `UmbraError` codes today; `callback-error` and `unexpected-cursor` are the
- * runner's own ({@link ReasonCode}), and the node's other halts come with their tasks. A private instance's two are
- * lockstep's (task 14.3).
+ * runner's own ({@link ReasonCode}), and the node's other halts come with their tasks. A private instance's three are
+ * lockstep's two (task 14.3) and a changed public configuration's (task 14.1b, PP-14).
  */
 export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
   "database-error",
@@ -98,6 +98,7 @@ export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
   "fast-log-unsupported",
   "lockstep-behind",
   "report-hash-mismatch",
+  "public-config-changed",
 ] as const);
 
 const NAMED: ReadonlySet<ErrorCode> = new Set([...REFUSAL_CODES, ...HALT_CODES]);
