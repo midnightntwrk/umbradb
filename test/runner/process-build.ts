@@ -102,14 +102,25 @@ export function testBuild(user: readonly ModuleDeclaration[], options: TestBuild
 
 /**
  * The tests' network (task 10.2a; IN-3, decision records Q117, Q120): `custom`, its genesis hash the in-memory chain's
- * block 0 ({@link inMemoryBlock}), so the configured genesis and the chain's agree, and its own ledger table LG-3's rows
- * (the same for every network, as the built-in tables hold them), so a block's ledger is what it was on `preprod`.
+ * block 0 ({@link inMemoryBlock}), so the configured genesis and the chain's agree, and its own ledger table:
+ * LG-3's rows for runtimes 0.22 and 1.0 (v8), as the built-in tables hold them, so such a block's ledger is what it
+ * was on `preprod`, and every runtime 2.x on v9 (rc.5), the release the tests' synthetic v9 transactions are built
+ * and checked with. The built-in tables map runtime 2.0 to `v9-rc3` since task 12.2a (owner decision Q139 A), whose
+ * package is tested on stagenet's own blocks (`test/ledger/ledger-v9-rc3.test.ts`, and the stagenet tape in
+ * `test/backbone/ledger-state.test.ts`).
  */
 export const TEST_GENESIS = `0x${Buffer.from(inMemoryBlock(0n).hash).toString("hex")}`;
 const TEST_NETWORK = Object.freeze({
   network: "custom",
   genesisHash: TEST_GENESIS,
-  ledgerTable: { rows: (builtInLedgerTable("mainnet") as LedgerTable).rows.map((row) => ({ ...row })) },
+  ledgerTable: {
+    rows: [
+      ...(builtInLedgerTable("mainnet") as LedgerTable).rows
+        .filter((row) => row.specVersionMax < 2_000_000)
+        .map((row) => ({ ...row })),
+      { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
+    ],
+  },
 });
 
 /**

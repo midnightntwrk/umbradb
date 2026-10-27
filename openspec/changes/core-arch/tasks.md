@@ -2455,7 +2455,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       re-recorded; `design.md` §5.1, §5.2, §10 and `vendor/ledger/README.md` updated. After 12.2a, or with it, so the
       rc.3 package carries the patch too.
       **Acceptance:** A158.
-- [ ] 12.2a The owner's answer Q139 A: a third vendored ledger package, v9 at `crate-ledger-9.1.0.0-rc.3` (the ledger
+- [x] 12.2a The owner's answer Q139 A: a third vendored ledger package, v9 at `crate-ledger-9.1.0.0-rc.3` (the ledger
       node 2.0 builds, runtime 2.0), as a ledger version of its own — its name settled in `design.md` §5.2 (the
       reading: `v9-rc3`) and carried through `ledgerSources`, `ledgerTable` and the core version — built by
       `npm run vendor:ledger` from its pinned tag with task 12.1a's (and 12.1b's) patches where they apply, with its
@@ -2463,6 +2463,39 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       it; a state stored by it loads in the rc.5 package (a 2.0 → 2.1 upgrade; a question if it does not); A99's
       stagenet test changed from the halt at block 1 to "every root is the node's".
       **Acceptance:** A99 (stagenet), A159.
+      **Done (2026-10-27):** **The package** `vendor/ledger/v9-rc3/` — the ledger version `v9-rc3` (design §5.2):
+      `midnight-ledger` `ledger-9.1.0.0-rc.3` (`4823b53`, the workspace tag; the per-crate tags `midnight-node`
+      2.0.0-rc.4 builds are isolate commits of it or hold the same crate sources; its crates.io storage crates differ
+      from the tree's in dependency versions, a refactoring and one panic guard: `vendor/ledger/README.md`),
+      `@umbradb/vendored-ledger-v9-rc3` 1.0.0-rc.3; patches `0001`–`0003` v9's (the first byte for byte, the third with
+      this tree's `midnight-storage-core 1.2.0` lock line), `0004` the wasm-bindgen 0.2.108 move (as v8's; also the
+      stale lock's member versions), `0005` v9's exact post-block update without the conversion, citing node 2.0.0-rc.4;
+      no conversion (that node has none). Recorded (77 s) and rebuilt (64 s) in Docker: the rebuild matches
+      `SHA256SUMS`; 10 MB, its `.wasm` 10.2 MB; identity `0x7e77e5a3…8c3c`. **The ledger version** `v9-rc3` in
+      `LedgerName`, `ledgerSources` (vendored unless given), `ledgerTable`'s rows, `networks.json` (every known network:
+      2,000,000–2,000,999 → `v9-rc3`, 2,001,000–2,999,999 → `v9`), the core version (v8, v9-rc3, v9 in release order),
+      the identity check (A97 over every file of the three packages) and the CI matrix. **Its adapter**
+      (`createV9Rc3Adapter`, `src/ledger/v9.ts`): the v9 one over the rc.3 package, without `convertFromV8`. **The 2.0 →
+      2.1 upgrade:** the engine loads a committed `v9-rc3` state at F in the rc.5 package by its key from the node store
+      and applies F to it; any other change but v8 → v9 is refused. **Tests:** `test/ledger/ledger-v9-rc3.test.ts` (A159
+      on stagenet's genesis state and blocks 1–3, `fixtures/stagenet/blocks.json` and
+      `fixtures/genesis/genesis_state_stagenet.mn` from task 0.3's tape: every root the node's; the state after block 3
+      loads in a fresh rc.5 instance with the same root and serialization; the tables; the core version),
+      `adapter-v9-rc3.test.ts` (the adapter suite), `worker-storage.test.ts` (the carry against the reference replay;
+      the refusals), the tape test `ledger-state.test.ts` (stagenet 0–10,000, every root the node's, the state at 10,000
+      loading in rc.5 from the database), and the identity, files, node-roots, networks and config tests extended. Seen
+      failing first: `this build carries no ledger v9-rc3 adapter`, the core version's two ledgers, the rows.
+      **Committed negative controls:** `ledger-v9-rc3.negative-control.test.ts` (the rc.5 package — the old table —
+      gives another root than stagenet's node from block 1; the v8 package, of another storage format, does not load
+      rc.3's state as rc.3 stored it) and the tape control in `ledger-state.test.ts` (the old table halts stagenet at
+      block 1 with `root-mismatch`). The tests' own `custom` network keeps runtime 2.x on rc.5
+      (`test/runner/process-build.ts`), the release their synthetic v9 transactions are built with. Tapes
+      (`UMBRADB_TAPES`, `ledger-state.test.ts`, PGlite): 20 of 20, 1,978 s — stagenet 0–10,000 every root the node's and
+      the state at 10,000 loading in rc.5 with it, its control halting at block 1, preview, preprod and the devnet as
+      before. **Wrong variants:** 19 (the engine's carry 7, the adapter 4, the loader, the releases 2, the tables 2, the
+      schemas 3); first run 18 caught, the survivor (F applied by the rc.3 package itself) closed by a carry test on
+      stagenet's block 1, whose rules differ; final run 19 of 19. Issue 00036 (the in-memory blocks' runtime 2.0
+      named `v9`). **Pending:** A97's CI rebuild of the third package runs when the branch is pushed (Phase 3).
 - [x] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
       root check, outputs.
       **Acceptance:** A82, A99 (the ranges from genesis, Q133), A101, A106, A107.

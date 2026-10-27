@@ -35,8 +35,14 @@
  * team's translation shipped with the vendored v9, reading the v8 state's nodes from the node store by its key (the
  * state at U is committed, so its nodes are in the database) — and then applies F to the converted state, as the node
  * and the official indexer do, also when F has no transaction; F's batch is the v9 package's (the converted state's new
- * nodes with F's, the v9 key persisted, the released keys — the v8 state's among them — released). Any other change of
- * ledger is refused.
+ * nodes with F's, the v9 key persisted, the released keys — the v8 state's among them — released).
+ *
+ * **The 2.0 → 2.1 upgrade (LG-3; task 12.2a, owner decision Q139 A, A159).** A block of ledger v9 (rc.5, runtime 2.1 on)
+ * on a committed `v9-rc3` state (v9 as runtime 2.0 built it) is F of that upgrade: the two packages share one storage
+ * format, so the engine loads the state at U in the rc.5 package by its key from the node store — as a restart loads a
+ * stored state (its nodes are in the database: U is committed) — and applies F to it; F's batch is the rc.5 package's,
+ * as at a conversion. Any other change of ledger is refused: no conversion to rc.3 exists (the node that builds it,
+ * `midnight-node` 2.0.0-rc.4, carries none), and none goes back.
  *
  * **What a block gives** ({@link AppliedState}): the state's key and root (LG-15: the main thread compares the root
  * with the node's), its summary (LG-16), the adapter's output (results, events, logs, parameters) and the batch the
@@ -426,10 +432,12 @@ export class LedgerEngine {
       throw new Error(`block ${input.height} cannot be applied: its parent is not block ${committed.height}, whose state the ledger worker holds`);
     }
     const converts = committed.ledger === "v8" && input.ledger === "v9";
-    if (committed.ledger !== input.ledger && !converts) {
+    const carries = committed.ledger === "v9-rc3" && input.ledger === "v9";
+    if (committed.ledger !== input.ledger && !converts && !carries) {
       throw new Error(
-        `block ${input.height} is a ${input.ledger} block on a ${committed.ledger} state: the ledger worker converts a ` +
-          "state from one ledger to another only from v8 to v9, at the first v9 block (LG-9: v8 → v9)",
+        `block ${input.height} is a ${input.ledger} block on a ${committed.ledger} state: the ledger worker changes a ` +
+          "state's ledger only at an upgrade's first block, from v8 to v9 (LG-9: v8 → v9) and from v9-rc3 to v9 " +
+          "(a 2.0 → 2.1 upgrade: v9-rc3 → v9)",
       );
     }
     const transactions = this.#transactions(input, input.ledger, input.transactions);
@@ -445,17 +453,25 @@ export class LedgerEngine {
       firstRegularAtParentTime: input.firstRegularAtParentTime,
     };
     const keys: Keys = { release: input.release ?? [committed.key], contracts: input.contracts ?? [] };
-    if (!converts) return this.#pend(committed.adapter, input, this.#applied(committed.adapter, input, committed.state, block, keys));
-    // LG-9: the v8 state at U converted first, then F applied to it (see the module comment).
+    if (!converts && !carries) {
+      return this.#pend(committed.adapter, input, this.#applied(committed.adapter, input, committed.state, block, keys));
+    }
     const adapter = await this.#adapter("v9");
-    const convert = adapter.convertFromV8;
-    if (convert === undefined) throw new Error("the ledger v9 adapter has no convertFromV8 (LG-9)");
-    const converted = convert(committed.key, this.#storeFor("convert the v8 state"));
+    let state: StateHandle;
+    if (carries) {
+      // A 2.0 → 2.1 upgrade: the rc.3 state at U loaded in the rc.5 package by its key, then F applied to it.
+      state = adapter.load(committed.key, this.#storeFor("carry the v9-rc3 state into v9"));
+    } else {
+      // LG-9: the v8 state at U converted first, then F applied to it (see the module comment).
+      const convert = adapter.convertFromV8;
+      if (convert === undefined) throw new Error("the ledger v9 adapter has no convertFromV8 (LG-9)");
+      state = convert(committed.key, this.#storeFor("convert the v8 state"));
+    }
     this.#installed.add(adapter);
     try {
-      return this.#pend(adapter, input, this.#applied(adapter, input, converted, block, keys));
+      return this.#pend(adapter, input, this.#applied(adapter, input, state, block, keys));
     } finally {
-      adapter.dispose(converted);
+      adapter.dispose(state);
     }
   }
 

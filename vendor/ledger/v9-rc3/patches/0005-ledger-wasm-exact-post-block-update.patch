@@ -1,0 +1,168 @@
+diff --git a/ledger-wasm/ledger-v9.template.d.ts b/ledger-wasm/ledger-v9.template.d.ts
+index 60b3436..0c018cb 100644
+--- a/ledger-wasm/ledger-v9.template.d.ts
++++ b/ledger-wasm/ledger-v9.template.d.ts
+@@ -2312,3 +2312,34 @@ export function decodeLogItem(value: Uint8Array): LogItem | null;
+ /** The tagged serialization of a state value, the input of `decodeLogItem`. */
+ export function serializeStateValue(value: StateValue): Uint8Array;
+ 
++// UmbraDB additions: the node's end-of-block update, with no JavaScript number in between.
++
++/**
++ * A block's fullness as the node computes it at the end of a block, each value a `FixedPoint`
++ * as the integer `value × 2^64` it holds: per dimension, the block's summed cost clamped to the
++ * block limit and divided by it (rounded up), and `overall`, the largest of the five.
++ */
++export interface ExactBlockFullness {
++  readTime: bigint;
++  computeTime: bigint;
++  blockUsage: bigint;
++  bytesWritten: bigint;
++  bytesChurned: bigint;
++  overall: bigint;
++}
++
++/**
++ * The fullness the node's post-block update takes for a block whose transactions cost
++ * `fullness` in all, against the block limits of `params`.
++ */
++export function blockFullness(params: LedgerParameters, fullness: SyntheticCost): ExactBlockFullness;
++
++/**
++ * The node's post-block update: `fullness`, the summed cost of the block's transactions, as
++ * `blockFullness` gives it against this state's block limits (clamped, never refused), then the
++ * ledger's post-block update at `tblock`.
++ */
++export function postBlockUpdateExact(state: LedgerState, tblock: Date, fullness: SyntheticCost): LedgerState;
++
++/** A system transaction's cost, which the node adds to the block's fullness. */
++export function systemTransactionCost(transaction: SystemTransaction, params: LedgerParameters): SyntheticCost;
+diff --git a/ledger-wasm/src/umbradb.rs b/ledger-wasm/src/umbradb.rs
+index 0578478..dab9f9e 100644
+--- a/ledger-wasm/src/umbradb.rs
++++ b/ledger-wasm/src/umbradb.rs
+@@ -21,11 +21,16 @@
+ //! persisted since the previous flush. Root counts are kept by the caller: `flushNodes` reports
+ //! each key's net root-count change since the previous flush.
+ 
++use crate::conversions::{from_value, js_date_to_seconds, to_value};
+ use crate::onchain_runtime::StateValue as WasmStateValue;
+ use crate::state::LedgerState;
++use crate::tx::SystemTransaction;
++use crate::zswap_wasm::LedgerParameters;
++use base_crypto::cost_model::{FixedPoint, NormalizedCost, SyntheticCost};
+ use base_crypto::hash::HashOutput;
++use base_crypto::time::Timestamp;
+ use coin_structure::contract::ContractAddress;
+-use js_sys::{Array, Function, Object, Reflect, Uint8Array};
++use js_sys::{Array, BigInt, Date, Function, Object, Reflect, Uint8Array};
+ use onchain_runtime::ops::LogEventType;
+ use onchain_runtime::state::StateValue;
+ use serialize::{Deserializable, Serializable, tagged_deserialize, tagged_serialize};
+@@ -415,3 +420,106 @@ pub fn serialize_state_value(value: &WasmStateValue) -> Result<Uint8Array, JsErr
+     tagged_serialize(&value, &mut bytes)?;
+     Ok(Uint8Array::from(&bytes[..]))
+ }
++
++// The node's end-of-block update (UmbraDB task 12.1a, owner decision Q113 A). The published
++// `LedgerParameters.normalizeFullness` and `LedgerState.postBlockUpdate` pass a block's fullness
++// through JavaScript numbers, whose 53 bits cannot hold a `FixedPoint`'s, and refuse a block
++// above its limits; the published `SystemTransaction` has no cost. These follow `midnight-node`
++// 2.0.0-rc.4, the node that builds this ledger (runtime 2.0), instead, so that the fee prices
++// after a block, and with them the state root, are the node's.
++
++/// A block's fullness as the node computes it at the end of a block: each dimension of `cost`,
++/// the summed cost of the block's transactions, clamped to the block limit and normalized to it
++/// (`midnight-node` `ledger/helpers/src/versions/common/mod.rs` `clamp_and_normalize`), and the
++/// largest dimension (`compute_overall_fullness`). Where the node's `expect` would panic (a zero
++/// limit), this returns an error.
++fn node_block_fullness(
++    cost: &SyntheticCost,
++    limits: &SyntheticCost,
++) -> Result<(NormalizedCost, FixedPoint), JsError> {
++    let clamped = SyntheticCost {
++        read_time: cost.read_time.min(limits.read_time),
++        compute_time: cost.compute_time.min(limits.compute_time),
++        block_usage: cost.block_usage.min(limits.block_usage),
++        bytes_written: cost.bytes_written.min(limits.bytes_written),
++        bytes_churned: cost.bytes_churned.min(limits.bytes_churned),
++    };
++    let normalized = clamped
++        .normalize(*limits)
++        .ok_or_else(|| JsError::new("a block limit of zero: the fullness cannot be normalized"))?;
++    let overall = FixedPoint::max(
++        FixedPoint::max(
++            FixedPoint::max(normalized.read_time, normalized.compute_time),
++            normalized.block_usage,
++        ),
++        FixedPoint::max(normalized.bytes_written, normalized.bytes_churned),
++    );
++    Ok((normalized, overall))
++}
++
++/// A `FixedPoint` as the integer `value × 2^64` it holds (its serialization is that `i128`,
++/// little-endian), as a JavaScript `bigint`.
++fn fixed_point_bits(value: FixedPoint) -> Result<BigInt, JsError> {
++    let mut bytes = Vec::with_capacity(16);
++    Serializable::serialize(&value, &mut bytes)?;
++    let bits: [u8; 16] = bytes
++        .as_slice()
++        .try_into()
++        .map_err(|_| JsError::new("a FixedPoint serializes to 16 bytes"))?;
++    Ok(BigInt::from(i128::from_le_bytes(bits)))
++}
++
++/// The fullness the node's post-block update takes for a block whose transactions cost
++/// `fullness` in all, against the block limits of `params`: `{ readTime, computeTime, blockUsage,
++/// bytesWritten, bytesChurned, overall }`, each a `FixedPoint` as the integer `value × 2^64` it
++/// holds.
++#[wasm_bindgen(js_name = "blockFullness")]
++pub fn block_fullness(params: &LedgerParameters, fullness: JsValue) -> Result<JsValue, JsError> {
++    report_panics();
++    let cost: SyntheticCost = from_value(fullness)?;
++    let (normalized, overall) = node_block_fullness(&cost, &params.limits.block_limits)?;
++    let result = Object::new();
++    for (field, value) in [
++        ("readTime", normalized.read_time),
++        ("computeTime", normalized.compute_time),
++        ("blockUsage", normalized.block_usage),
++        ("bytesWritten", normalized.bytes_written),
++        ("bytesChurned", normalized.bytes_churned),
++        ("overall", overall),
++    ] {
++        set_field(&result, field, &fixed_point_bits(value)?.into())?;
++    }
++    Ok(result.into())
++}
++
++/// The post-block update the node runs at the end of every block (`midnight-node`
++/// `ledger/src/versions/common/api/ledger.rs` `Ledger::post_block_update`, which
++/// `pallet-midnight`'s `on_finalize` calls): `fullness`, the summed cost of the block's
++/// transactions, as `blockFullness` gives it against this state's block limits (clamped, never
++/// refused), then the ledger's `post_block_update` at `tblock`, whose prevalidation a clamped
++/// fullness always passes.
++#[wasm_bindgen(js_name = "postBlockUpdateExact")]
++pub fn post_block_update_exact(
++    state: &LedgerState,
++    tblock: &Date,
++    fullness: JsValue,
++) -> Result<LedgerState, JsError> {
++    report_panics();
++    let cost: SyntheticCost = from_value(fullness)?;
++    let (normalized, overall) =
++        node_block_fullness(&cost, &state.0.parameters.limits.block_limits)?;
++    let tblock = Timestamp::from_secs(js_date_to_seconds(tblock));
++    Ok(LedgerState(state.0.post_block_update(tblock, normalized, overall)?))
++}
++
++/// A system transaction's cost, which the node adds to the block's fullness (`midnight-node`
++/// `ledger/src/versions/common/api/ledger.rs` `Ledger::apply_system_tx`:
++/// `tx.cost(&sp.state.parameters)`, with the parameters of the state before it applies).
++#[wasm_bindgen(js_name = "systemTransactionCost")]
++pub fn system_transaction_cost(
++    transaction: &SystemTransaction,
++    params: &LedgerParameters,
++) -> Result<JsValue, JsError> {
++    report_panics();
++    Ok(to_value(&transaction.0.cost(params))?)
++}

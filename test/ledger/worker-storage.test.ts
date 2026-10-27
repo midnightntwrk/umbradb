@@ -15,6 +15,7 @@ import {
 } from "./adapter-fixtures.js";
 import { runInFreshInstance } from "./fresh-instance.js";
 import { rebuildTagged } from "./stored-values.js";
+import { STAGENET } from "./v9-rc3-checks.js";
 
 // Task 12.4 of `openspec/changes/core-arch` (design.md §5.3, §5.4; specs/ledger LG-9, LG-11, LG-12, LG-13): what the
 // ledger worker's engine does with stored states — the keys a block persists and releases, the state at h − 1 loaded
@@ -40,7 +41,10 @@ class Nodes implements NodeStore {
     return node === undefined ? null : { data: node.data, children: node.children };
   }
   write(applied: AppliedState): void {
-    for (const node of applied.batch.inserts) if (!this.#nodes.has(hex(node.key))) this.#nodes.set(hex(node.key), node);
+    this.insert(applied.batch.inserts);
+  }
+  insert(inserts: readonly StoredNode[]): void {
+    for (const node of inserts) if (!this.#nodes.has(hex(node.key))) this.#nodes.set(hex(node.key), node);
   }
   all(): StoredNode[] {
     return [...this.#nodes.values()];
@@ -65,7 +69,7 @@ function input(height: bigint, transactions: number, rest: Partial<ApplyBlock> =
 }
 
 /** An engine with a store over `nodes`, past block 0 on `ledger` (a blank genesis), block 0 written and committed. */
-async function started(ledger: "v8" | "v9", nodes = new Nodes()) {
+async function started(ledger: "v8" | "v9" | "v9-rc3", nodes = new Nodes()) {
   const engine = new LedgerEngine({ load: loadLedgerPackage, store: nodes });
   const zero = await engine.genesis({
     ledger,
@@ -177,6 +181,72 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
   it("refuses a block of a ledger it cannot convert the state to, naming both", { timeout: LONG }, async () => {
     const { engine } = await started("v9");
     await expect(engine.apply(input(1n, 0, { ledger: "v8" }))).rejects.toThrow(/block 1 is a v8 block on a v9 state.*v8 → v9/);
+    // Task 12.2a: no way back from rc.5 to rc.3, and no conversion from v8 to rc.3 (the node that builds rc.3 has none).
+    await expect(engine.apply(input(1n, 0, { ledger: "v9-rc3" }))).rejects.toThrow(/block 1 is a v9-rc3 block on a v9 state.*v9-rc3 → v9/);
+    const { engine: v8 } = await started("v8");
+    await expect(v8.apply(input(1n, 0, { ledger: "v9-rc3" }))).rejects.toThrow(/block 1 is a v9-rc3 block on a v8 state/);
+    const { engine: rc3 } = await started("v9-rc3");
+    await expect(rc3.apply(input(1n, 0, { ledger: "v8" }))).rejects.toThrow(/block 1 is a v8 block on a v9-rc3 state/);
+  });
+
+  it("carries a v9-rc3 state into v9 at the first rc.5 block, loading it in rc.5 by its key from the store: a 2.0 → 2.1 upgrade (A159)", {
+    timeout: LONG,
+  }, async () => {
+    // One store for both runs: in this thread the packages remember what they flushed before, as a database would.
+    const shared = new Nodes();
+    for (const transactions of [[], [zswapOutputTransaction(RAW.v9)]]) {
+      const { engine, nodes } = await started("v9-rc3", shared);
+      const u = await step(engine, nodes, input(1n, 1, { ledger: "v9-rc3" }), [zswapOutputTransaction(RAW["v9-rc3"])]);
+      expect(u.ledger).toBe("v9-rc3");
+      const block = input(2n, transactions.length, { ledger: "v9" });
+      const f = await step(engine, nodes, block, transactions);
+      // The reference: the state at U rebuilt from the stored nodes without the packages and read by rc.5 — the same
+      // root —, then F applied to it.
+      const atU = RAW.v9.LedgerState.deserialize(rebuildTagged("ledger-state[v18]", u.stateKey, (k) => nodes.find(k)));
+      expect(hex(RAW.v9.stateRoot(atU))).toBe(hex(u.stateRoot));
+      const reference = referenceReplay(RAW.v9, atU, { ...block, transactions });
+      expect(hex(f.stateRoot)).toBe(hex(RAW.v9.stateRoot(reference.state)));
+      expect(f.ledger).toBe("v9");
+      expect(f.output.results.map((r) => r.outcome)).toEqual(transactions.map(() => "success"));
+      // The v9 state persisted and the rc.3 one released in F's batch.
+      expect(rows(f)).toEqual([`${hex(f.stateKey)} 1`, `${hex(u.stateKey)} -1`].sort());
+      // From the store alone the state at F loads in a fresh rc.5 instance, as a restart after F would load it.
+      const loaded = await runInFreshInstance({ packagePath: V9_PACKAGE, op: "load", key: f.stateKey, nodes: nodes.all() });
+      expect(hex(loaded.stateRoot as Uint8Array)).toBe(hex(f.stateRoot));
+    }
+  });
+
+  it("carries stagenet's rc.3 state into rc.5, whose rules differ on its next block: F is rc.5's (A159)", { timeout: LONG }, async () => {
+    // Stagenet's genesis state stored by the rc.3 package, as the database holds it after block 0.
+    const rc3 = await loadLedgerPackage("v9-rc3", { networkId: NETWORK_ID });
+    const genesis = rc3.genesisState(STAGENET.genesisState);
+    const key = rc3.stateKey(genesis);
+    rc3.persist(key);
+    const nodes = new Nodes();
+    nodes.insert(rc3.flush().inserts);
+    rc3.dispose(genesis);
+    const engine = new LedgerEngine({ load: loadLedgerPackage, store: nodes });
+    const one = STAGENET.blocks[0]!;
+    await engine.load({ ledger: "v9-rc3", height: 0n, hash: one.parentHash, stateKey: key });
+    // Block 1 taken as the first block of a 2.1 runtime: its DUST generation update, whose rules rc.3 → rc.5 changed.
+    await engine.parse("v9", { height: 1n, hash: one.hash }, one.transactions);
+    const f = await engine.apply({
+      ledger: "v9",
+      height: 1n,
+      hash: one.hash,
+      parentHash: one.parentHash,
+      timestampMs: one.timestampMs,
+      parentTimestampMs: one.parentTimestampMs,
+      firstRegularAtParentTime: one.firstRegularAtParentTime,
+      transactions: one.transactions.length,
+      outcomes: one.outcomes!,
+    });
+    // The reference: rc.5 applying block 1 to the same state; rc.3 would give the node's root, rc.5 gives another.
+    const rc5 = await loadLedgerPackage("v9", { networkId: NETWORK_ID });
+    const reference = rc5.apply(rc5.genesisState(STAGENET.genesisState), one);
+    expect(hex(f.stateRoot)).toBe(hex(rc5.stateRoot(reference.state)));
+    expect(hex(f.stateRoot)).not.toBe(STAGENET.nodeRoots.get(1n));
+    expect(f.ledger).toBe("v9");
   });
 
   it("persists the state and zswap-state keys of the contracts it is given, and never releases them (LG-13)", { timeout: LONG }, async () => {

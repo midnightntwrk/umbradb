@@ -1,0 +1,30 @@
+{
+  "name": "@umbradb/vendored-ledger-v9-rc3",
+  "version": "1.0.0-rc.3",
+  "private": true,
+  "type": "module",
+  "description": "Vendored midnight-ledger WASM build for UmbraDB (vendor/ledger, design.md §5.2)",
+  "upstream": {
+    "repository": "https://github.com/midnightntwrk/midnight-ledger",
+    "commit": "4823b5351b17cc49e30f19760dbd30a73cf95e22",
+    "versionName": "ledger-9.1.0.0-rc.3"
+  },
+  "imports": {
+    "#self": {
+      "browser": "./midnight_ledger_wasm_v9.js",
+      "node": "./midnight_ledger_wasm_v9_fs.js"
+    }
+  },
+  "types": "./ledger-v9.d.ts",
+  "exports": {
+    "types": "./ledger-v9.d.ts",
+    "browser": "./midnight_ledger_wasm_v9.js",
+    "node": "./midnight_ledger_wasm_v9_fs.js"
+  },
+  "sideEffects": [
+    "./midnight_ledger_wasm_v9.js",
+    "./midnight_ledger_wasm_v9_fs.js",
+    "./snippets/*"
+  ],
+  "license": "Apache-2.0"
+}

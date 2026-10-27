@@ -13,7 +13,7 @@
  *
  * Choices CF-4 leaves open (task 4.2): `genesisHash` is a data field, required with `network: "custom"` and refused
  * with the four known networks, whose genesis hashes are built in; hashes are 32 bytes; `ledgerSources` names each of
- * the three ledger versions, `vendored` unless given; `testKeys` is a secret field (key bytes are never shown, AE-6) and
+ * the ledger versions (four since task 12.2a's `v9-rc3`), `vendored` unless given; `testKeys` is a secret field (key bytes are never shown, AE-6) and
  * defaults to none; `listen.admin` defaults to `0.0.0.0:8081` also when `listen` is given without it; addresses are
  * `host:port` (a host name, an IPv4 address or a bracketed IPv6 address; the port from 0 to 65535); the integers are
  * the plain data's (0 to 2^53 − 1), and `apiReadTimeoutMs` is from 1 to {@link MAX_READ_TIMEOUT_MS}, the read
@@ -87,8 +87,8 @@ const database = () =>
 /** The node's WebSocket URL (CF-4, IN). */
 const NODE = /^wss?:\/\/\S+$/;
 
-/** A ledger major version (LG-1). */
-const LEDGER = z.enum(["v8", "v9", "v10"]);
+/** A ledger version (LG-1; `../config/build.ts`'s `LedgerName`, with `v9-rc3`, task 12.2a). */
+const LEDGER = z.enum(["v8", "v9-rc3", "v9", "v10"]);
 
 /** Where a ledger version's packages come from (LG-5). */
 const SOURCE = z.enum(["vendored", "released"]).default("vendored");
@@ -106,7 +106,7 @@ const BASE = {
     })
     .optional()
     .meta(DATA),
-  ledgerSources: z.strictObject({ v8: SOURCE, v9: SOURCE, v10: SOURCE }).prefault({}).meta(DATA),
+  ledgerSources: z.strictObject({ v8: SOURCE, "v9-rc3": SOURCE, v9: SOURCE, v10: SOURCE }).prefault({}).meta(DATA),
   sweep: z.enum(["on", "off"]).default("on").meta(DATA),
   retainStates: count().default(0).meta(DATA),
   database: database().meta(SECRET),

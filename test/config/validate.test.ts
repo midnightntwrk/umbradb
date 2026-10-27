@@ -947,7 +947,7 @@ describe("A28: absent fields take their declared defaults (CF-3, CF-4)", () => {
     expect(checked.entries[0]?.settings).toEqual({
       network: "preprod",
       ledgerTable: builtInLedgerTable("preprod"),
-      ledgerSources: { v8: "vendored", v9: "vendored", v10: "vendored" },
+      ledgerSources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" },
       sweep: "on",
       retainStates: 0,
       database: "pglite:memory",
@@ -971,7 +971,7 @@ describe("A28: absent fields take their declared defaults (CF-3, CF-4)", () => {
     expect(checked.entries[0]?.settings).toEqual({
       network: "preprod",
       ledgerTable: builtInLedgerTable("preprod"),
-      ledgerSources: { v8: "vendored", v9: "vendored", v10: "vendored" },
+      ledgerSources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" },
       sweep: "on",
       retainStates: 0,
       database: "pglite:memory",
@@ -1048,7 +1048,7 @@ describe("CF-3, CF-4: the validated configuration", () => {
       buildVersion: true,
       data: {
         network: "preprod",
-        ledgerSources: { v8: "vendored", v9: "vendored", v10: "vendored" },
+        ledgerSources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" },
         sweep: "on",
         retainStates: 0,
       },

@@ -25,7 +25,7 @@ export interface LedgerRelease {
   readonly packages: readonly [LedgerReleasePackage];
 }
 
-/** The release of each ledger version this build carries. */
+/** The release of each ledger version this build carries, in release order (the core version lists them so). */
 export const LEDGER_RELEASES = Object.freeze({
   v8: Object.freeze({
     versionName: "ledger-8.1.2",
@@ -34,6 +34,18 @@ export const LEDGER_RELEASES = Object.freeze({
         name: "@umbradb/vendored-ledger-v8",
         version: "8.1.2",
         sha256: "0x9c016702dcb1dd3645fd00c2eaf26923f8eed959d82a2d3037e50564438505f5",
+      }),
+    ] as const),
+  }),
+  // Ledger v9 as runtime 2.0 built it (`midnight-node` 2.0.0-rc.4: `crate-ledger-9.1.0.0-rc.3`), a package of its own
+  // (owner decision Q139 A, task 12.2a).
+  "v9-rc3": Object.freeze({
+    versionName: "ledger-9.1.0.0-rc.3",
+    packages: Object.freeze([
+      Object.freeze({
+        name: "@umbradb/vendored-ledger-v9-rc3",
+        version: "1.0.0-rc.3",
+        sha256: "0x7e77e5a376361ccca2285666ba5615a2edeb4757d2722cb1356091f290608c3c",
       }),
     ] as const),
   }),
@@ -47,4 +59,4 @@ export const LEDGER_RELEASES = Object.freeze({
       }),
     ] as const),
   }),
-}) satisfies Readonly<Record<"v8" | "v9", LedgerRelease>>;
+}) satisfies Readonly<Record<"v8" | "v9-rc3" | "v9", LedgerRelease>>;

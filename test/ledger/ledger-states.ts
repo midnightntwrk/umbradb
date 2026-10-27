@@ -13,6 +13,10 @@ export const V8_PACKAGE_PATH = fileURLToPath(
 export const V9_PACKAGE_PATH = fileURLToPath(
   new URL("../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js", import.meta.url),
 );
+/** Ledger v9 as runtime 2.0 built it (`crate-ledger-9.1.0.0-rc.3`, task 12.2a). */
+export const V9_RC3_PACKAGE_PATH = fileURLToPath(
+  new URL("../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js", import.meta.url),
+);
 
 export function contractAddress(seed: string): Uint8Array {
   return Uint8Array.from(createHash("sha256").update(`contract:${seed}`).digest());

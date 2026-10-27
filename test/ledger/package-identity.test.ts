@@ -14,7 +14,7 @@ import {
   verifyLedgerPackages,
 } from "../../src/ledger/identity.js";
 import { LEDGER_RELEASES } from "../../src/ledger/releases.js";
-import { copyVendoredLedger, expectEveryPackageFileChecked, VENDORED_ROOT } from "./version-checks.js";
+import { copyVendoredLedger, expectEveryPackageFileChecked, VENDORED_LEDGERS, VENDORED_ROOT } from "./version-checks.js";
 
 /**
  * A97 (`openspec/changes/core-arch/acceptance.md` §12; LG-5; task 12.2): each ledger package the build carries is
@@ -30,13 +30,15 @@ import { copyVendoredLedger, expectEveryPackageFileChecked, VENDORED_ROOT } from
 const sha256 = (bytes: Uint8Array): string => `0x${createHash("sha256").update(bytes).digest("hex")}`;
 
 describe("the core version's ledgers (CF-2, LG-5)", () => {
-  it("lists each ledger version the build carries: its release, and each package's name, version and SHA-256", () => {
+  it("lists each ledger version the build carries, in release order: its release, and each package's name, version and SHA-256", () => {
     const upstream = (ledger: string) =>
       JSON.parse(readFileSync(join(VENDORED_ROOT, ledger, "upstream.json"), "utf8")) as {
         versionName: string;
         package: { name: string; version: string };
       };
-    const ledgers = ["v8", "v9"].map((ledger) => ({
+    // Task 12.2a (A159): v9 as runtime 2.0 built it (rc.3) is a package of its own, between v8 and v9 (rc.5).
+    expect(VENDORED_LEDGERS).toEqual(["v8", "v9-rc3", "v9"]);
+    const ledgers = VENDORED_LEDGERS.map((ledger) => ({
       ledger,
       versionName: upstream(ledger).versionName,
       packages: [
@@ -52,7 +54,7 @@ describe("the core version's ledgers (CF-2, LG-5)", () => {
   });
 
   it("records each package's SHA-256 as a constant (the browser build reads no file), equal to its manifest's", () => {
-    for (const ledger of ["v8", "v9"] as const) {
+    for (const ledger of VENDORED_LEDGERS) {
       const manifest = readFileSync(join(VENDORED_ROOT, ledger, "SHA256SUMS"));
       expect(LEDGER_RELEASES[ledger].packages[0].sha256, `LEDGER_RELEASES.${ledger}: npm run vendor:ledger -- --record changed it`).toBe(
         sha256(manifest),
@@ -84,7 +86,9 @@ describe("A97: startup refuses a vendored package whose files are not the record
   it("passes the committed packages", () => {
     expect(VENDORED_LEDGER_ROOT).toBe(VENDORED_ROOT);
     expect(() => verifyLedgerPackages()).not.toThrow();
-    expect(() => verifyLedgerPackages({ root: copy.root, sources: { v8: "vendored", v9: "vendored", v10: "vendored" } })).not.toThrow();
+    expect(() =>
+      verifyLedgerPackages({ root: copy.root, sources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" } }),
+    ).not.toThrow();
   });
 
   it("refuses every package file, and each manifest, changed by one byte", { timeout: 120_000 }, () => {
@@ -223,7 +227,7 @@ describe("the manifest (`SHA256SUMS`: `<sha256>  pkg/<file>` per line, sorted)",
 
 describe("ledgerSources (LG-5; question Q116)", () => {
   it("refuses startup for a released package: this build carries vendored ones only", () => {
-    for (const ledger of ["v8", "v9"] as const) {
+    for (const ledger of VENDORED_LEDGERS) {
       let refusal: unknown;
       try {
         verifyLedgerPackages({ sources: { [ledger]: "released" } });

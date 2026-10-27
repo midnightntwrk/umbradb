@@ -87,7 +87,7 @@ export const M_BAR = defineModule({
 export const CORE_DATA = {
   network: "preprod",
   ledgerTable: plainData(builtInLedgerTable("preprod")) as PlainObject,
-  ledgerSources: { v8: "vendored", v9: "vendored", v10: "vendored" },
+  ledgerSources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" },
   sweep: "on",
   retainStates: 0,
 } as const;

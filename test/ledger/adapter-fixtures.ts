@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import * as v8 from "../../vendor/ledger/v8/pkg/midnight_ledger_wasm_fs.js";
 import * as v9 from "../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
+import * as v9rc3 from "../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";
 import type { ApplyInput } from "../../src/ledger/types.js";
 import { free } from "./node-format.js";
 
@@ -15,18 +16,23 @@ import { free } from "./node-format.js";
 // - A contract call is proof-erased (`(signature, (), pedersen)`), as `midnight-ledger`'s own integration tests apply
 //   calls without a prover (`integration-tests/src/test/utils/log-contract.ts`): proving a call would need its circuit.
 // - The system transaction is `DistributeReserve(1000000000000000)`: for v8 the bytes 0.9.5's replay decoder test
-//   decodes (`design/full-chain-storage-design.md` §3.2's captured devnet sample), for v9 the same payload under v9's
-//   tag.
+//   decodes (`design/full-chain-storage-design.md` §3.2's captured devnet sample), for v9 (both packages) the same
+//   payload under v9's tag.
 
-export type Ledger = "v8" | "v9";
+/** The vendored ledger packages: v8, v9 (rc.5) and v9 as runtime 2.0 built it (rc.3, task 12.2a). */
+export type Ledger = "v8" | "v9" | "v9-rc3";
 
 /**
- * The two packages share every constructor these fixtures use; the tests use both through v9's declarations (the
+ * The packages share every constructor these fixtures use; the tests use them all through v9's declarations (the
  * declared classes differ in members these fixtures do not touch).
  */
 export type RawPackage = typeof v9;
 
-export const RAW: Readonly<Record<Ledger, RawPackage>> = { v8: v8 as unknown as RawPackage, v9 };
+export const RAW: Readonly<Record<Ledger, RawPackage>> = {
+  v8: v8 as unknown as RawPackage,
+  v9,
+  "v9-rc3": v9rc3 as unknown as RawPackage,
+};
 
 /** The network id every fixture and adapter in these tests uses. */
 export const NETWORK_ID = "undeployed";

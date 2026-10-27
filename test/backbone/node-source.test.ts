@@ -1111,7 +1111,8 @@ describe("core-block-fetch's items from the node (CD-2, LG-1, LG-4)", () => {
     expect(items["block-body"].specVersion).toBe(2_000_000);
     expect(items["block-body"].extrinsics.map((e) => `${e.call?.pallet}.${e.call?.call}`)).toEqual(["Timestamp.set"]);
     expect(items["runtime-metadata"]).toEqual({ specVersion: 2_000_000, metadata: RUNTIME.metadata });
-    expect(items["ledger-version"]).toBe("v9");
+    // Preprod's built-in table: runtime 2.0's ledger is v9 as it built it, the rc.3 package (task 12.2a, Q139 A).
+    expect(items["ledger-version"]).toBe("v9-rc3");
     expect(Object.isFrozen(items)).toBe(true);
     // The runtime read at the parent's state; its metadata once for the runtime.
     expect(node.calls.map((call) => [call.method, call.params])).toEqual([

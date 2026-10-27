@@ -29,7 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
-        version: [v8, v9]
+        version: [v8, v9-rc3, v9]
     runs-on: ${{ matrix.runner }}
     # A cold build (image, then the ledger crate graph with LTO) takes minutes on a hosted runner.
     timeout-minutes: 120

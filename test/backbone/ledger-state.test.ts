@@ -358,6 +358,7 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
     to: bigint,
     settings: Readonly<Record<string, unknown>>,
     halt?: { readonly height: bigint; readonly code: string },
+    after?: (db: ProcessDatabase, hashAt: ReadonlyMap<string, string>) => Promise<void>,
   ): Promise<void> {
     const { records } = found.read();
     const hashAt = new Map<string, string>();
@@ -394,8 +395,37 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
       expect(stored).toHaveLength(Number(to) + 1);
       const differing = stored.filter((row) => roots.get(hashAt.get(row.h as string) as string) !== row.root);
       expect(differing.map((row) => row.h)).toEqual([]);
+      await after?.(db, hashAt);
     } finally {
       await backend.stop();
+    }
+  }
+
+  /**
+   * A159 on the stored range: the state stored at `height` (by the rc.3 package) loads in the rc.5 package — a fresh
+   * ledger worker reading it from the database through the node-store bridge, as F of a 2.0 → 2.1 upgrade does — with
+   * the stored root, the node's.
+   */
+  async function expectLoadsInRc5(db: ProcessDatabase, hashAt: ReadonlyMap<string, string>, height: bigint): Promise<void> {
+    const [row] = await db.query(
+      `SELECT encode(s.state_key, 'hex') AS key, encode(s.state_root, 'hex') AS root, b.ledger_version AS ledger
+         FROM core_ledger_state.states s JOIN core_block_commit.blocks b USING (height) WHERE s.height = ${height}`,
+    );
+    expect(row).toMatchObject({ ledger: "v9-rc3" });
+    const database = await openConfiguredDatabase(
+      { settings: { database: db.setting, developmentOptIn: true } } as never,
+      { committedHeight: async () => null },
+    );
+    const host = startLedgerWorker();
+    try {
+      const hash = Uint8Array.from(Buffer.from((hashAt.get(`${height}`) as string).slice(2), "hex"));
+      const stateKey = Uint8Array.from(Buffer.from(row!.key as string, "hex"));
+      const loaded = await database.read((read) => host.load({ ledger: "v9", height, hash, stateKey }, read));
+      expect(hex(loaded.stateRoot).slice(2)).toBe(row!.root);
+      expect(loaded.loaded).toBe(true);
+    } finally {
+      await host.close();
+      await database.close();
     }
   }
 
@@ -408,15 +438,32 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
     );
   }
 
-  // Stagenet runs runtime 2.0, whose node (2.0.0) builds ledger v9 from `crate-ledger-9.1.0.0-rc.3`, not the vendored
-  // v9 (rc.5, the node 2.1.0-rc.4's): from block 1, whose one system transaction is a `CNightGeneratesDustUpdate` — DUST
-  // generation, whose semantics rc.3 → rc.5 changed (task 0.2) —, the roots differ (decision record question
-  // Q139). Until the owner answers, this records what happens: block 0's root is the node's, and the replay halts
-  // at block 1 with root-mismatch, nothing of it stored.
+  // Stagenet runs runtime 2.0, whose node (2.0.0) builds ledger v9 from `crate-ledger-9.1.0.0-rc.3`: the built-in table
+  // maps runtime 2.0 to that ledger's own package, `v9-rc3` (owner decision Q139 A, task 12.2a), and every root is the
+  // node's; the state stored at the range's end loads in the rc.5 package with the node's root (A159: a 2.0 → 2.1
+  // upgrade carries it).
   tapeTest(
     "stagenet-0-10000",
-    "A99 (Q139): stagenet's runtime 2.0 ledger is not the vendored v9, so its replay halts at block 1 with root-mismatch",
-    async (found) => replayRange(found, BigInt(found.tape.to), { network: found.tape.network }, { height: 1n, code: "root-mismatch" }),
+    "A99 and A159: every state root of stagenet (runtime 2.0, its rc.3 package), from genesis, is the node's, and the state at its end loads in rc.5 with that root",
+    async (found) =>
+      replayRange(found, BigInt(found.tape.to), { network: found.tape.network }, undefined, (db, hashAt) =>
+        expectLoadsInRc5(db, hashAt, BigInt(found.tape.to)),
+      ),
+    { timeoutMs: REPLAY_MS + 600_000 },
+  );
+  // A99's committed control (task 12.2a): the old table — runtime 2.0 → rc.5, what tasks 12.2 and 12.3 shipped, set
+  // here as the configured row it was — halts at block 1, whose one system transaction is a `CNightGeneratesDustUpdate`
+  // (DUST generation, whose rules rc.3 → rc.5 changed: task 0.2), with root-mismatch, nothing of it stored.
+  tapeTest(
+    "stagenet-0-10000",
+    "A99's control: with the old table (runtime 2.0 → rc.5) stagenet's replay halts at block 1 with root-mismatch",
+    async (found) =>
+      replayRange(
+        found,
+        BigInt(found.tape.to),
+        { network: found.tape.network, ledgerTable: { rows: [{ specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" }] } },
+        { height: 1n, code: "root-mismatch" },
+      ),
     { timeoutMs: 600_000 },
   );
 

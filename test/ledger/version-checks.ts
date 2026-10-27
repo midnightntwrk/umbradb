@@ -237,10 +237,13 @@ export class CountingNode implements MetadataNode {
 /** The repository's vendored ledger builds. */
 export const VENDORED_ROOT = fileURLToPath(new URL("../../vendor/ledger/", import.meta.url));
 
+/** Every vendored ledger version, in the core version's order (task 12.2a adds v9 as runtime 2.0 built it). */
+export const VENDORED_LEDGERS = ["v8", "v9-rc3", "v9"] as const;
+
 /** A copy of the vendored builds (each version's `SHA256SUMS` and `pkg/`) in a new temporary directory. */
 export function copyVendoredLedger(): { readonly root: string; readonly remove: () => void } {
   const root = mkdtempSync(join(tmpdir(), "umbradb-12.2-ledger-"));
-  for (const ledger of ["v8", "v9"]) {
+  for (const ledger of VENDORED_LEDGERS) {
     cpSync(join(VENDORED_ROOT, ledger, "SHA256SUMS"), join(root, ledger, "SHA256SUMS"));
     cpSync(join(VENDORED_ROOT, ledger, "pkg"), join(root, ledger, "pkg"), { recursive: true });
   }
@@ -249,7 +252,7 @@ export function copyVendoredLedger(): { readonly root: string; readonly remove: 
 
 /** The files each version's `SHA256SUMS` lists, as `<version>/<path>`, and the manifests themselves. */
 export function packageFiles(root: string): string[] {
-  return ["v8", "v9"].flatMap((ledger) => [
+  return VENDORED_LEDGERS.flatMap((ledger) => [
     `${ledger}/SHA256SUMS`,
     ...readFileSync(join(root, ledger, "SHA256SUMS"), "utf8")
       .trimEnd()

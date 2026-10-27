@@ -192,11 +192,12 @@ commits).
 | Component | Version/Pin | Pinning | Source | Purpose | Update-watch |
 |---|---|---|---|---|---|
 | ledger v8 package (`vendor/ledger/v8/pkg/`) | `ledger-8.1.2` | exact commit `36d7442172136758e33009f75ff4aa56616cff40` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v8 for blocks built by v8 runtimes | midnight-ledger releases; the v8 ledger midnight-node pins |
+| ledger v9-rc3 package (`vendor/ledger/v9-rc3/pkg/`) | `ledger-9.1.0.0-rc.3` | exact commit `4823b5351b17cc49e30f19760dbd30a73cf95e22` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v9 as runtime 2.0 built it (`spec_version` 2,000,000–2,000,999; stagenet) | the v9 ledger midnight-node 2.0 pins (`crate-ledger-9.1.0.0-rc.3`) |
 | ledger v9 package (`vendor/ledger/v9/pkg/`) | `ledger-9.1.0.0-rc.5` | exact commit `67f9f97246339539af0091c4d8c6bc5ab236a191` + patches; output SHA-256 | github.com/midnightntwrk/midnight-ledger | Ledger v9, and the v8 → v9 state translation | midnight-ledger releases; the v9 ledger midnight-node pins |
 | `v8-to-v9-state-translation` (in the v9 package) | rev `da96e33d78ee9b7d3867b15c1037510d499cd909` | exact git rev in the patched `Cargo.lock` | github.com/midnightntwrk/midnight-ledger | The ledger team's v8 → v9 state translation (LG-9) | the revision midnight-node pins |
 | Build image base `rust:1.98.1-slim-bookworm` | 1.98.1 | index digest `sha256:ff521445a372125ed4f76e1453a1f8098f2d05332d1601d30db1c1f62757e730` | Docker Hub (official image) | Rust toolchain for the builds | Rust releases |
 | clang 14, llvm 14, git, jq, curl (in the image) | `1:14.0.6-12`, `1:2.39.5-0+deb12u3`, `1.6-2.1+deb12u2`, `7.88.1-10+deb12u15` | exact versions from snapshot.debian.org `20260918T000000Z` | Debian bookworm | C toolchain for `blst` on wasm32; source fetch; build scripting | Debian security updates |
-| `wasm-bindgen-cli` (in the image) | 0.2.108 | exact version, `cargo install --locked` | crates.io | JavaScript bindings (the version ledger-9.1.0.0-rc.5 pins; the v8 patches move ledger-8.1.2 from 0.2.104, whose output varies from run to run, to it) | wasm-bindgen releases |
+| `wasm-bindgen-cli` (in the image) | 0.2.108 | exact version, `cargo install --locked` | crates.io | JavaScript bindings (the version ledger-9.1.0.0-rc.5 pins; the v8 and v9-rc3 patches move ledger-8.1.2 and ledger-9.1.0.0-rc.3 from 0.2.104, whose output varies from run to run, to it) | wasm-bindgen releases |
 | binaryen `wasm-opt` (in the image) | `version_133` | release tarball SHA-256 (`x86_64` `2dc9c781…7489`, `aarch64` `89c07ea5…9bf8`) | github.com/WebAssembly/binaryen releases | Size optimization (`-Os`), as upstream's release recipe | binaryen releases |
 
 ## License summary

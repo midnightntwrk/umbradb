@@ -641,7 +641,7 @@ is where they are implemented and tested together:
 
 ```ts
 interface LedgerPackage {                                  // one per ledger version, used in the ledger worker
-  ledger: "v8" | "v9" | "v10";
+  ledger: "v8" | "v9-rc3" | "v9" | "v10";                 // v9-rc3: v9 as runtime 2.0 built it (§5.2, Q139)
   versionName: string;                                     // the ledger release the packages were built from
   rawPackages(): Readonly<Record<string, unknown>>;        // the loaded WASM packages, unwrapped, by package name
   parseTransaction(bytes: Uint8Array, index: number): ParsedTransaction;  // parsed once per Uint8Array (LG-7)
@@ -759,9 +759,11 @@ uses, each as the integer `value × 2^64`) and `systemTransactionCost(tx, params
 `vendor/ledger/README.md` lists each patch and what it adds; the owner
 proposes them upstream, as a few pull requests, once `midnight-ledger` is stable (Q56). v8 is `ledger-8.1.2`, the v8
 ledger `midnight-node` 2.1.0-rc.4 pins (`Cargo.toml:86`). v9 is `midnight-ledger` `ledger-9.1.0.0-rc.5` (the reference
-used for CORE-ARCH). The v8→v9 conversion is the crate `v8-to-v9-state-translation` at `midnight-ledger` rev
-`da96e33d78ee9b7d3867b15c1037510d499cd909`, the revision the node pins (`midnight-node/Cargo.toml:115`); it was written
-against v9 tag `crate-ledger-9.1.0.0-rc.3`, and the node's `[patch.crates-io]` (`Cargo.toml:459`) builds it against
+used for CORE-ARCH), runtime 2.1's; runtime 2.0's v9, `ledger-9.1.0.0-rc.3`, is the ledger version `v9-rc3`, a
+package of its own (owner decision Q139 A; below). The v8→v9 conversion is the crate `v8-to-v9-state-translation` at
+`midnight-ledger` rev `da96e33d78ee9b7d3867b15c1037510d499cd909`, the revision the node pins
+(`midnight-node/Cargo.toml:115`); it was written against v9 tag `crate-ledger-9.1.0.0-rc.3`, and the node's
+`[patch.crates-io]` (`Cargo.toml:459`) builds it against
 the rc.5 crates, so the vendored v9 package and the conversion are both built from rc.5, as the node builds them
 (task 0.2). It compiles for `wasm32-unknown-unknown` with `getrandom`'s `wasm_js` backend. CI rebuilds each vendored
 package and compares the SHA-256.
@@ -775,6 +777,21 @@ every file it lists — and refuses with `package-hash-mismatch` (the version, t
 `invalid-configuration` (`reason: ledger-source-unavailable`), since this build carries vendored packages only (question
 Q116). The CI job is task 0.2's `.github/workflows/vendored-ledger.yml`, its own workflow (Docker, up to two hours
 per version and runner), outside `npm test`: a rebuild that matches `SHA256SUMS` has the recorded identity.
+
+As built (task 12.2a, owner decision Q139 A; A159): runtime 2.0 (`spec_version` 2,000,000–2,000,999; stagenet) is
+`midnight-node` 2.0.0-rc.4's, which builds v9 from `crate-ledger-9.1.0.0-rc.3`, and rc.3 → rc.5 changed rules the state
+root depends on (DUST generation), so the build carries a third package, `vendor/ledger/v9-rc3/` (the workspace tag
+`ledger-9.1.0.0-rc.3`, `4823b53`, of which the node's per-crate tags are isolate commits or hold the same sources;
+`@umbradb/vendored-ledger-v9-rc3` 1.0.0-rc.3), as the ledger version **`v9-rc3`**: v9 as runtime 2.0 built it, `v9`
+staying the rc.5 release runtime 2.1 builds. The name carries through `LedgerName`, `ledgerSources` (`v9-rc3`, vendored
+unless given), `ledgerTable`'s rows, `networks.json` (LG-3's rows: 2,000,000–2,000,999 → `v9-rc3`, 2,001,000–2,999,999
+→ `v9`) and the core version, which lists v8, v9-rc3 and v9 in release order. Its patches are v9's that apply (the node
+store, the VM's log decoding, the exports, the exact post-block update — the last following `midnight-node` 2.0.0-rc.4)
+and the wasm-bindgen move v8's has; it has no conversion (that node carries none). Its adapter is the v9 one over the
+rc.3 package (`createV9Rc3Adapter`, `src/ledger/v9.ts`), without `convertFromV8`. The two releases share one storage
+format: a state the rc.3 package stored loads in the rc.5 package with the same root and serialization, so at F of a
+2.0 → 2.1 upgrade the ledger worker loads the state at U in rc.5 by its key and applies F to it (§5.4). The identity
+check and the CI rebuild treat it as any vendored version.
 
 ### 5.6 Version selection, the built-in tables and the metadata at upgrades (LG-1 to LG-4)
 
@@ -863,20 +880,22 @@ restarted process) loads it from its key through the node-store bridge, the pack
 the node's (LG-11). No restart step of its own: the first block after a restart loads the state at the cursor, once.
 **The conversion** (LG-9): a v9 block on a v8 state is F; the worker converts the state with the v9 package's
 `convertFromV8` (the v8 nodes read through the bridge by the v8 state's key) and applies F to the converted state, F's
-batch the v9 package's; any other change of ledger is refused. **The window** (LG-12, `retention.ts`): from the `core`
-entry's revisions in the `config` item, L(h) = max(L(h − 1), h − R(h)), the lowest height alive after block h; block h
-releases the states of L(h − 1) to L(h) − 1, their keys read from `states` and passed to the worker, which releases them
-in the block's batch beside the new state's persisted key. `ledger-state` is also a `process` item, published at
-`on-start-db`: `load(height, read)` loads the state after a height between L(c) and the read's cursor c in the worker
-and gives its key and root (`RetainedState`), and fails with `state-not-retained` (§11) outside. **Contract keys**
-(LG-13): while `core-contract-states` (task 13.1) is active at h, the worker persists the state and zswap-state keys
-(`contractStateKey`, `contractZswapStateKey`) of each contract the block's transactions call or deploy, in byte order,
-in the block's batch, never to be released; the `ledger-state` item carries them (`contracts`) for that module to store
-(owner decision Q143 A). As built (task 13.1): the contracts are also those the block's chain
-events name maintained (`Midnight::ContractMaintain`, whose `contract_address` is the ledger's tagged serialization of
-the address: a maintenance update changes the contract's state too), and at F every contract deployed below it (the
-`contract-deploy` rows of `core_ledger_state.events`, read at h − 1), so that CC-1's rows at F carry the converted
-keys; each once, on the state after the block.
+batch the v9 package's. **The 2.0 → 2.1 upgrade** (task 12.2a, A159): a v9 block on a `v9-rc3` state is F; the worker
+loads the state at U in the rc.5 package by its key through the bridge (one storage format, §5.2) and applies F to it,
+F's batch the rc.5 package's. Any other change of ledger is refused. **The window** (LG-12, `retention.ts`): from the
+`core` entry's revisions in the `config` item, L(h) = max(L(h − 1), h − R(h)), the lowest height alive after block h;
+block h releases the states of L(h − 1) to L(h) − 1, their keys read from `states` and passed to the worker, which
+releases them in the block's batch beside the new state's persisted key. `ledger-state` is also a `process` item,
+published at `on-start-db`: `load(height, read)` loads the state after a height between L(c) and the read's cursor c in
+the worker and gives its key and root (`RetainedState`), and fails with `state-not-retained` (§11) outside. **Contract
+keys** (LG-13): while `core-contract-states` (task 13.1) is active at h, the worker persists the state and zswap-state
+keys (`contractStateKey`, `contractZswapStateKey`) of each contract the block's transactions call or deploy, in byte
+order, in the block's batch, never to be released; the `ledger-state` item carries them (`contracts`) for that module to
+store (owner decision Q143 A). As built (task 13.1): the contracts are also those the block's chain events name
+maintained (`Midnight::ContractMaintain`, whose `contract_address` is the ledger's tagged serialization of the address:
+a maintenance update changes the contract's state too), and at F every contract deployed below it (the `contract-deploy`
+rows of `core_ledger_state.events`, read at h − 1), so that CC-1's rows at F carry the converted keys; each once, on the
+state after the block.
 
 As built (task 12.5, `src/backbone/core-ledger-state/sweep.ts`): the step is computed on the main thread in
 `on-compute`, after the root check, from the tables as committed at h − 1 (read through on-compute's read: `sweep`,

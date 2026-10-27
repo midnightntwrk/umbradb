@@ -1,5 +1,5 @@
 {
-  "description": "Genesis ledger states and the state root each node reports for block 0 (midnight_ledgerStateRoot). Each state file is the network's system_properties.genesis_state as the node returned it on 2026-10-23, byte-identical to midnight-node 2.1.0-rc.4 res/genesis/ (commit 1b2b31c714f8986a082b8690f15e805981c771dd, Apache-2.0).",
+  "description": "Genesis ledger states and the state root each node reports for block 0 (midnight_ledgerStateRoot). Each state file is the network's system_properties.genesis_state as the node returned it on 2026-10-23, byte-identical to midnight-node 2.1.0-rc.4 res/genesis/ (commit 1b2b31c714f8986a082b8690f15e805981c771dd, Apache-2.0). The stagenet state (task 12.2a) is the genesis_state of task 0.3's stagenet tape, with that node's root at block 0.",
   "recorded": "2026-10-23",
   "states": [
     {
@@ -31,6 +31,16 @@
       "nodeLedgerVersion": "1.0.0 (tag: crate-ledger-9.1.0.0-rc.5, rev: 6abe9b16f1a2a9965a3317729cd72fd1f7fbfc03)",
       "stateRoot": "0082f13a0b4d7037501e960d49c8e3bbef8fab7f179a4cd88db666c4bdf9262c78",
       "sha256": "203123b300a29319040208b420251738e1c1b5e01c644ea67d87da9b706df4d2"
+    },
+    {
+      "file": "genesis_state_stagenet.mn",
+      "ledger": "v9-rc3",
+      "network": "stagenet",
+      "node": "wss://rpc.stagenet.shielded.tools (node 2.0.0-d9729c13), as task 0.3's tape stagenet-0-10000 recorded it on 2026-10-26",
+      "block0": "0x2f76825abc239fecf6107c9df99016de57037b451ae57a4394b76c8cf53a9491",
+      "nodeLedgerVersion": "not read (runtime 2_000_000: midnight-node 2.0.0-rc.4 builds crate-ledger-9.1.0.0-rc.3, Cargo.toml:445)",
+      "stateRoot": "00f3bdb897a0604e0f3b5b65483fb155eb65f9f2dbc1b6861bf714f67f6fddf328",
+      "sha256": "35dabdabc470cad12648cddd6f8fdbb1176ba8a1c6c4c5431b69e3c6b1c68c50"
     }
   ]
 }

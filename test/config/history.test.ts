@@ -53,7 +53,7 @@ import { LEDGER_RELEASES } from "../../src/ledger/releases.js";
 /** The build's core version as canonical JSON, written out: keys sorted, no whitespace (RFC 8785). */
 const BUILD_CORE_VERSION_TEXT =
   '{"ledgers":[' +
-  (["v8", "v9"] as const)
+  (["v8", "v9-rc3", "v9"] as const)
     .map((ledger) => {
       const { versionName, packages } = LEDGER_RELEASES[ledger];
       const [{ name, sha256, version }] = packages;

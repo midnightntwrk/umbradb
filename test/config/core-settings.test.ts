@@ -36,7 +36,7 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   genesisHash: ["data", "absent"],
   // The network's built-in table (task 12.2); the required settings below name preprod.
   ledgerTable: ["data", { default: builtInLedgerTable("preprod") }],
-  ledgerSources: ["data", { default: { v8: "vendored", v9: "vendored", v10: "vendored" } }],
+  ledgerSources: ["data", { default: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" } }],
   sweep: ["data", { default: "on" }],
   retainStates: ["data", { default: 0 }],
   database: ["secret", "required"],

@@ -307,7 +307,8 @@ describe("CF-2: the build's core version", () => {
     expect(UMBRADB_VERSION).toBe(manifest.version);
     expect(buildCoreVersion()).toEqual({
       umbradb: manifest.version,
-      ledgers: (["v8", "v9"] as const).map((ledger) => ({
+      // In release order: v8, v9 as runtime 2.0 built it (rc.3, task 12.2a), v9 (rc.5).
+      ledgers: (["v8", "v9-rc3", "v9"] as const).map((ledger) => ({
         ledger,
         versionName: LEDGER_RELEASES[ledger].versionName,
         packages: LEDGER_RELEASES[ledger].packages.map(({ name, version, sha256 }) => ({ name, version, sha256 })),

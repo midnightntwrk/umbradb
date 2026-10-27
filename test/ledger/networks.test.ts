@@ -27,10 +27,15 @@ import { hashAnswer, headerAnswer } from "../../src/node/decode.js";
  * - **The format:** `networksFileProblems` refuses every way a file can break it, one rule per row below.
  */
 
+/**
+ * LG-3's rows: runtimes 0.22 and 1.0.x to v8; runtime 2.0 to v9 as it built it (`ledger-9.1.0.0-rc.3`, a package of
+ * its own: owner decision Q139 A, task 12.2a, A159); 2.1 on to v9 (`ledger-9.1.0.0-rc.5`).
+ */
 const LG3_ROWS = [
   { specVersionMin: 22_000, specVersionMax: 22_999, ledger: "v8" },
   { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
-  { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
+  { specVersionMin: 2_000_000, specVersionMax: 2_000_999, ledger: "v9-rc3" },
+  { specVersionMin: 2_001_000, specVersionMax: 2_999_999, ledger: "v9" },
 ];
 
 const repository = (path: string) => new URL(`../../${path}`, import.meta.url);

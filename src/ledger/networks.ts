@@ -109,7 +109,7 @@ const SOURCE = z.strictObject({
   record: z.string().min(1),
 });
 
-const ROW = z.strictObject({ specVersionMin: U32, specVersionMax: U32, ledger: z.enum(["v8", "v9", "v10"]) });
+const ROW = z.strictObject({ specVersionMin: U32, specVersionMax: U32, ledger: z.enum(["v8", "v9-rc3", "v9", "v10"]) });
 const BLOCK = z.strictObject({ height: HEIGHT, hash: HASH, specVersion: U32 });
 const BOUNDARY = z.strictObject({ u: BLOCK, f: BLOCK, source: SOURCE });
 const GENESIS = z.strictObject({ hash: HASH, specVersion: U32.nullable(), source: SOURCE }).nullable();

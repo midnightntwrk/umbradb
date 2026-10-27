@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import { build } from "esbuild";
 import type { ApplyInput, ApplyOutput, ParsedTransaction, StoredNode } from "../../src/ledger/types.js";
+import type { Ledger } from "./adapter-fixtures.js";
 
 // Task 12.1 (A98; LG-7, Q49): runs `fixtures/adapter-worker.ts` in a worker thread of its own. The entry is bundled
 // with esbuild (a plain worker cannot load the TypeScript sources), leaving the vendored ledger packages out of the
@@ -12,9 +13,9 @@ import type { ApplyInput, ApplyOutput, ParsedTransaction, StoredNode } from "../
 // the adapters needs (task 16.1 maps the same imports to the packages' browser entries).
 
 export type AdapterWorkerRequest =
-  | { op: "load"; ledger: "v8" | "v9"; networkId: string; key: Uint8Array; nodes: StoredNode[] }
+  | { op: "load"; ledger: Ledger; networkId: string; key: Uint8Array; nodes: StoredNode[] }
   | { op: "convert"; ledger: "v9"; networkId: string; key: Uint8Array; nodes: StoredNode[] }
-  | { op: "replay"; ledger: "v8" | "v9"; networkId: string; blocks: ApplyInput[] };
+  | { op: "replay"; ledger: Ledger; networkId: string; blocks: ApplyInput[] };
 
 export interface LoadedState {
   stateRoot: Uint8Array;
@@ -34,7 +35,7 @@ export interface AdapterWorkerAnswer<T> {
 }
 
 const ENTRY = fileURLToPath(new URL("./fixtures/adapter-worker.ts", import.meta.url));
-const VENDORED = /[/\\]vendor[/\\]ledger[/\\]v[0-9]+[/\\]pkg[/\\][^/\\]+\.js$/;
+const VENDORED = /[/\\]vendor[/\\]ledger[/\\]v[0-9]+(?:-rc[0-9]+)?[/\\]pkg[/\\][^/\\]+\.js$/;
 
 /** A bundle of the worker entry, built once per test file. */
 export class AdapterWorkerHost {
