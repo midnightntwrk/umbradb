@@ -27,13 +27,10 @@
  *   `./messages.ts` writes it; or `error`, a code (an `UmbraError`'s, `database-error` for anything else, never a
  *   message, which may hold a credential, AE-6). A result whose message would exceed {@link MAX_MESSAGE_BYTES} is
  *   answered `error: result-too-large`.
- * - `api-result` for each `api`, with its `id`: this change defines no call a private process makes on the core over
- *   the transport (PP-9 lets the public side call nothing on a private one), so every `api` is answered
- *   `error: not-found` (decision record question Q140). An `api-result` received is no answer to anything and is
- *   ignored.
  * - `report` (lockstep, task 14.3) is kept as the instance's last report; nothing else is done with it yet.
  *
- * **What closes a connection** (PP-4): a message that is not JSON, has an unknown `v` or `type`, or fails its schema; a
+ * **What closes a connection** (PP-4): a message that is not JSON, has an unknown `v` or `type` — an `api` or
+ * `api-result` among them: nothing calls a module across the transport (owner decision Q140 C) —, or fails its schema; a
  * binary frame; a message over {@link MAX_MESSAGE_BYTES} (`ws`'s `maxPayload`); a message only the core sends
  * (`hello-ack`, `committed`, `read-result`); more than {@link MAX_PENDING_READS} reads unanswered at once; a peer that
  * reads so slowly that more than {@link MAX_BUFFERED_BYTES} wait in its socket (PP-5: the core never waits for an
@@ -51,7 +48,6 @@ import { UmbraError } from "../db/errors.js";
 import { RESULT_TYPES, resultColumns, type ResultColumn } from "../deterministic-postgresql/index.js";
 import type { BlockRef } from "../runner/block-source.js";
 import {
-  type Api,
   decodeParameter,
   encodeValue,
   type Hello,
@@ -212,7 +208,7 @@ async function statementResult(read: ReadHandle, rows: Record<string, unknown>[]
   };
 }
 
-/** A failure as a `read-result`'s or `api-result`'s code: an `UmbraError`'s, `database-error` otherwise (AE-6). */
+/** A failure as a `read-result`'s code: an `UmbraError`'s, `database-error` otherwise (AE-6). */
 const codeOf = (error: unknown): string => (error instanceof UmbraError ? error.code : "database-error");
 
 /** Starts the core's transport (see the module comment): resolves once it listens; rejects with `listen`'s error. */
@@ -302,10 +298,6 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     }
   };
 
-  const onApi = (session: Session, request: Api): void => {
-    send(session, { v: 1, type: "api-result", id: request.id, error: "not-found" });
-  };
-
   const onMessage = (session: Session, data: RawData, binary: boolean): void => {
     if (binary) {
       drop(session, CLOSE_PROTOCOL, "binary-frame");
@@ -333,13 +325,8 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
         }
         void onRead(session, message);
         return;
-      case "api":
-        onApi(session, message);
-        return;
       case "report":
         session.reported = message;
-        return;
-      case "api-result":
         return;
       default:
         drop(session, CLOSE_PROTOCOL, `wrong-direction ${message.type}`);

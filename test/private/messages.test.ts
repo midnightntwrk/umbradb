@@ -13,11 +13,12 @@ import {
 } from "../../src/private/messages.js";
 
 /**
- * A115 `[CI]`, its schemas (task 14.2; PP-4, `design.md` §8): every message type round-trips through the zod schemas —
- * written as the transport writes it and read back equal — and fails on a missing or a mistyped field, each field of
- * each type; an unknown `v` or `type`, and a text that is not JSON, are told apart from a message failing its schema
- * (each closes the connection: `./transport.test.ts`). Also the values' encoding, by type, and its inverse, on values
- * as the database API gives them (the round trip through a real core's read is `./transport.test.ts`'s).
+ * A115 `[CI]`, its schemas (tasks 14.2, 14.2a; PP-4, `design.md` §8): every message type round-trips through the zod
+ * schemas — written as the transport writes it and read back equal — and fails on a missing or a mistyped field, each
+ * field of each type; an unknown `v` or `type` — `api` and `api-result` among them, which owner decision Q140 C removed
+ * from the protocol —, and a text that is not JSON, are told apart from a message failing its schema (each closes the
+ * connection: `./transport.test.ts`). Also the values' encoding, by type, and its inverse, on values as the database API
+ * gives them (the round trip through a real core's read is `./transport.test.ts`'s).
  */
 
 const HASH = `0x${"ab".repeat(32)}`;
@@ -62,8 +63,6 @@ export const SAMPLES: Readonly<Record<MessageType, Message>> = {
       },
     ],
   },
-  api: { v: 1, type: "api", id: "8", module: "stats", method: "totals", params: { from: "1" } },
-  "api-result": { v: 1, type: "api-result", id: "8", result: { total: "12" } },
 };
 
 /** The other valid forms each type has: nulls where a field may be null, the other branch of a choice. */
@@ -74,11 +73,20 @@ const VARIANTS: readonly Message[] = [
   { v: 1, type: "read", id: "1", statements: [] },
   { v: 1, type: "read-result", id: "1", height: null, results: [] },
   { v: 1, type: "read-result", id: "1", height: "3", error: "query-timeout" },
-  { v: 1, type: "api", id: "2", module: "m", method: "x", params: null },
-  { v: 1, type: "api-result", id: "2", result: null },
-  { v: 1, type: "api-result", id: "2", error: "not-found" },
-  // A JSON value with an integer beyond ±(2^53 − 1), kept exactly on the wire.
-  { v: 1, type: "api-result", id: "3", result: { big: 123456789012345678901234567890n, list: [-9007199254740993n] } },
+  // A JSON value with an integer beyond ±(2^53 − 1), kept exactly on the wire: a parameter's and a row's.
+  {
+    v: 1,
+    type: "read",
+    id: "3",
+    statements: [{ sql: "SELECT $1::jsonb AS j", params: [{ big: 123456789012345678901234567890n, list: [-9007199254740993n] }] }],
+  },
+  {
+    v: 1,
+    type: "read-result",
+    id: "3",
+    height: "9",
+    results: [{ columns: [{ name: "j", type: "jsonb" }], rows: [[{ big: 123456789012345678901234567890n }]] }],
+  },
 ];
 
 /** A value that is wrong for each kind of field (a mistyped field). */
@@ -92,8 +100,8 @@ function mistyped(value: unknown): unknown {
 }
 
 describe("A115: every message type round-trips through design §8's schemas", () => {
-  it("the types are design §8's eight", () => {
-    expect(MESSAGE_TYPES).toEqual(["hello", "hello-ack", "committed", "report", "read", "read-result", "api", "api-result"]);
+  it("the types are design §8's six (no api or api-result: owner decision Q140 C)", () => {
+    expect(MESSAGE_TYPES).toEqual(["hello", "hello-ack", "committed", "report", "read", "read-result"]);
   });
 
   it.each([...MESSAGE_TYPES.map((type) => [type, SAMPLES[type]] as const), ...VARIANTS.map((m) => [`${m.type} (other form)`, m] as const)])(
@@ -118,17 +126,13 @@ describe("A115: a missing or mistyped field fails the schema", () => {
   it.each(cases)("%s without %s", (type, field) => {
     const message: Record<string, unknown> = { ...SAMPLES[type] };
     delete message[field];
-    // An api-result without its result is one without either branch.
     expect(parseMessage(JSON.stringify(message))).toMatchObject({ ok: false, fault: "invalid-message" });
   });
 
   it.each(cases)("%s with %s mistyped", (type, field) => {
     const message: Record<string, unknown> = { ...SAMPLES[type] };
-    // A JSON field (`params`, `result`) takes any JSON value: its mistyped value is a number JSON cannot hold exactly.
-    const json = (type === "api" && field === "params") || (type === "api-result" && field === "result");
-    message[field] = json ? "__MISTYPED__" : mistyped(message[field]);
-    const text = JSON.stringify(message).replace('"__MISTYPED__"', "1e400");
-    expect(parseMessage(text)).toMatchObject({ ok: false, fault: "invalid-message" });
+    message[field] = mistyped(message[field]);
+    expect(parseMessage(JSON.stringify(message))).toMatchObject({ ok: false, fault: "invalid-message" });
   });
 
   it.each(MESSAGE_TYPES)("%s with a field its type does not have", (type) => {
@@ -145,8 +149,6 @@ describe("A115: a missing or mistyped field fails the schema", () => {
     ["a read-result with results and error", { ...SAMPLES["read-result"], error: "database-error" }],
     ["a read-result with neither", { v: 1, type: "read-result", id: "1", height: null }],
     ["a row with a value too few", { ...SAMPLES["read-result"], results: [{ columns: [{ name: "a", type: "bigint" }], rows: [[]] }] }],
-    ["an api-result with result and error", { ...SAMPLES["api-result"], error: "not-found" }],
-    ["an api-result with neither", { v: 1, type: "api-result", id: "1" }],
     ["an empty id", { ...SAMPLES.read, id: "" }],
     ["a statement without its SQL", { ...SAMPLES.read, statements: [{ params: [] }] }],
   ])("%s", (_name, message) => {
@@ -168,6 +170,10 @@ describe("A115: an unknown v or type, or a text that is no JSON object, is told 
     ['{"v":1}', "unknown-type"],
     ['{"v":1,"type":"toString"}', "unknown-type"],
     ['{"v":1,"type":"__proto__"}', "unknown-type"],
+    // Owner decision Q140 C: no call is made across the transport, so these are no message types.
+    ['{"v":1,"type":"api","id":"8","module":"stats","method":"totals","params":{"from":"1"}}', "unknown-type"],
+    ['{"v":1,"type":"api-result","id":"8","error":"not-found"}', "unknown-type"],
+    ['{"v":1,"type":"api-result","id":"8","result":{"total":"12"}}', "unknown-type"],
     ["not json", "not-json"],
     ['{"v":1,"type":"hello",', "not-json"],
     ["[1,2]", "invalid-message"],
@@ -188,7 +194,7 @@ describe("A115: an unknown v or type, or a text that is no JSON object, is told 
 
   it("a JSON value nested deeper than 256 levels is no value a message carries", () => {
     const deep = `${"[".repeat(300)}1${"]".repeat(300)}`;
-    const text = `{"v":1,"type":"api","id":"1","module":"m","method":"x","params":${deep}}`;
+    const text = `{"v":1,"type":"read","id":"1","statements":[{"sql":"SELECT 1","params":[${deep}]}]}`;
     expect(parseMessage(text)).toMatchObject({ ok: false, fault: "invalid-message" });
   });
 });

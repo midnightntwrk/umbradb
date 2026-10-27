@@ -1,9 +1,11 @@
+import { createServer } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { WebSocketServer } from "ws";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
 import type { ReadHandle } from "../../src/db/api.js";
 import { startCoreTransport } from "../../src/private/core-transport.js";
-import { decodeValue, hexOf, type JsonValue, type Message, type ReadResult } from "../../src/private/messages.js";
+import { decodeValue, hexOf, type JsonValue, type Message, messageText, type ReadResult } from "../../src/private/messages.js";
 import { PrivateTransport } from "../../src/private/private-transport.js";
 import { inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
@@ -11,15 +13,16 @@ import { genesisHex, launchPublicCore, type PublicCore, startPublicCore } from "
 import { endedWithin, hello, rawClient, type RawClient } from "./raw-client.js";
 
 /**
- * A115 `[CI]` through a running core (task 14.2; PP-4, `design.md` §8), on PostgreSQL 18.6 and PGlite 0.5.10: the core
- * process listens on its `listen.transport` (`127.0.0.1:0`) and a raw client (`./raw-client.ts`) speaks to it — `hello`
- * is answered with `hello-ack` (the genesis, S, the public cursor, the lockstep flag), every commit is announced with
- * `committed`, a `read-result` carries its request's `id`, the height read (`null` on an empty public database) and,
- * per statement, the columns' names and types with the rows, a `bigint`, `numeric`, `bytea` and `jsonb` value each
- * decoding back to the value the core read; an `api-result` carries its request's `id`; an unknown `v` or `type`, a
- * message failing its schema, and the other faults close the connection; a second `hello` with a connected id is
- * refused with `duplicate-instance`. With the committed negative controls: a decoder that drops a `bigint`'s precision
- * or a `bytea`'s bytes, and a core that accepts a second `hello` of a connected id, each fail their oracle.
+ * A115 `[CI]` through a running core (tasks 14.2, 14.2a; PP-4, `design.md` §8), on PostgreSQL 18.6 and PGlite 0.5.10:
+ * the core process listens on its `listen.transport` (`127.0.0.1:0`) and a raw client (`./raw-client.ts`) speaks to it
+ * — `hello` is answered with `hello-ack` (the genesis, S, the public cursor, the lockstep flag), every commit is
+ * announced with `committed`, a `read-result` carries its request's `id`, the height read (`null` on an empty public
+ * database) and, per statement, the columns' names and types with the rows, a `bigint`, `numeric`, `bytea` and `jsonb`
+ * value each decoding back to the value the core read; an unknown `v` or `type` — an `api` or `api-result` message among
+ * them (owner decision Q140 C: the protocol has neither) —, a message failing its schema, and the other faults close
+ * the connection; a second `hello` with a connected id is refused with `duplicate-instance`. With the committed negative
+ * controls: a decoder that drops a `bigint`'s precision or a `bytea`'s bytes, a core that accepts a second `hello` of a
+ * connected id, and a transport that still answers `api` (task 14.2's) each fail their oracle.
  */
 
 /** The core's `listen.transport`: a free port of the loopback interface. */
@@ -106,8 +109,8 @@ export async function duplicateProblems(address: string): Promise<string[]> {
   const end = await endedWithin(second.client, 10_000).catch(() => null);
   if (end === null) problems.push("the second connection stayed open");
   // The first is still served.
-  first.client.send({ v: 1, type: "api", id: "still", module: "m", method: "x", params: null });
-  const answer = await first.client.next("api-result", 10_000).catch(() => null);
+  first.client.send({ v: 1, type: "read", id: "still", statements: [] });
+  const answer = await first.client.next("read-result", 10_000).catch(() => null);
   if (answer?.id !== "still") problems.push("the first connection was no longer answered");
   first.client.close();
   await endedWithin(first.client, 10_000);
@@ -126,6 +129,33 @@ export async function duplicateProblems(address: string): Promise<string[]> {
   const repeated = await twice.client.next("hello-ack", 10_000).catch(() => null);
   if (repeated?.refused !== "duplicate-instance") problems.push(`a hello sent twice on one connection got ${repeated?.refused}`);
   twice.client.close();
+  return problems;
+}
+
+/** An `api` message as task 14.2's protocol had it (owner decision Q140 C removed the type). */
+const API_TEXT = '{"v":1,"type":"api","id":"a-1","module":"stats","method":"totals","params":{"from":"1"}}';
+
+/**
+ * A115's oracle for an `api` message (Q140 C: an unknown `type`) against the transport at `address`: every problem, none
+ * when a greeted connection that sends one is closed (1008, `unknown-type`) without an answer, and the core keeps
+ * serving others.
+ */
+export async function apiProblems(address: string): Promise<string[]> {
+  const problems: string[] = [];
+  const { client } = await greeted(address, "api-caller");
+  client.send(API_TEXT);
+  const end = await endedWithin(client, 10_000).catch(() => null);
+  if (end === null) problems.push("the connection stayed open after an api message");
+  else if (end.code !== 1008 || end.reason !== "unknown-type") problems.push(`it closed with ${end.code} ${end.reason}`);
+  // A text this build cannot parse (an `api-result`, say) is kept as it came: its type read from its JSON.
+  const typeOf = (message: Message | string): string =>
+    typeof message === "string" ? String((JSON.parse(message) as { type?: unknown }).type) : message.type;
+  const answered = client.received.map(typeOf).filter((type) => type !== "hello-ack");
+  if (answered.length > 0) problems.push(`the api message was answered: ${answered.join(", ")}`);
+  if (end === null) client.close();
+  const other = await greeted(address, "after-api");
+  if (other.ack.refused !== null) problems.push(`the next connection was refused: ${other.ack.refused}`);
+  other.client.close();
   return problems;
 }
 
@@ -257,34 +287,32 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
     }
   }, TEST_TIMEOUT_MS);
 
-  it("an api-result carries its request's id (no call is defined over the transport: not-found)", async () => {
-    const { client } = await greeted(address, "instance-api");
-    client.send({ v: 1, type: "api", id: "a-1", module: "stats", method: "totals", params: { from: "1" } });
-    client.send({ v: 1, type: "api", id: "a-2", module: "core", method: "x", params: null });
-    expect(await client.next("api-result")).toEqual({ v: 1, type: "api-result", id: "a-1", error: "not-found" });
-    expect(await client.next("api-result")).toEqual({ v: 1, type: "api-result", id: "a-2", error: "not-found" });
-    client.close();
+  it("an api message is an unknown type: it closes the connection unanswered (owner decision Q140 C)", async () => {
+    expect(await apiProblems(address)).toEqual([]);
   }, TEST_TIMEOUT_MS);
 
   it.each([
     ["an unknown v", '{"v":2,"type":"hello","instance":"x","version":"v","height":"0","hash":null}', "unknown-version", true],
     ["an unknown type", '{"v":1,"type":"goodbye"}', "unknown-type", true],
+    ["an api message (no such type: Q140)", API_TEXT, "unknown-type", true],
+    ["an api-result message (no such type: Q140)", '{"v":1,"type":"api-result","id":"a-1","error":"not-found"}', "unknown-type", true],
     ["a message failing its schema", '{"v":1,"type":"read","id":"1","statements":[{"sql":"SELECT 1"}]}', "invalid-message", true],
     ["a mistyped field", '{"v":1,"type":"report","height":42,"hash":null}', "invalid-message", true],
     ["a text that is no JSON", "hello?", "not-json", true],
-    ["a message before hello", '{"v":1,"type":"api","id":"1","module":"m","method":"x","params":null}', "hello-first", false],
+    ["a message before hello", '{"v":1,"type":"read","id":"1","statements":[]}', "hello-first", false],
     ["a message only the core sends", '{"v":1,"type":"committed","height":"1","hash":"0x' + "00".repeat(32) + '"}', "wrong-direction committed", true],
-  ])("%s closes the connection (1008), and the core keeps serving others", async (_name, text, reason, afterHello) => {
+  ])("%s closes the connection (1008), and the core keeps serving others", async (name, text, reason, afterHello) => {
     const client = rawClient(`ws://${address}/`);
     await client.opened;
+    // An id of its own per case: several cases close for one reason.
     if (afterHello) {
-      client.send(hello(`fault-${reason}`));
+      client.send(hello(`fault-${name}`));
       await client.next("hello-ack");
     }
     client.send(text);
     const end = await endedWithin(client);
     expect(end).toMatchObject({ opened: true, code: 1008, reason });
-    const other = await greeted(address, `after-${reason}`);
+    const other = await greeted(address, `after-${name}`);
     expect(other.ack.refused).toBeNull();
     other.client.close();
   }, TEST_TIMEOUT_MS);
@@ -320,6 +348,35 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
       await control.close();
     }
   }, TEST_TIMEOUT_MS);
+});
+
+describe("A115 negative control (committed): a transport that still answers api fails the oracle", () => {
+  it("task 14.2's answer to an api message (api-result not-found, the connection kept) is seen", async () => {
+    // A stand-in of task 14.2's core: hello answered, every api answered not-found with its id, the connection kept.
+    const server = createServer();
+    const wss = new WebSocketServer({ server });
+    wss.on("connection", (socket) => {
+      socket.on("message", (data) => {
+        const message = JSON.parse(data.toString()) as { type: string; id?: string };
+        if (message.type === "hello") {
+          socket.send(messageText({ v: 1, type: "hello-ack", lockstep: false, genesis: genesisHex(0xa1), start: "1", cursor: null, refused: null }));
+        } else if (message.type === "api") {
+          socket.send(JSON.stringify({ v: 1, type: "api-result", id: message.id, error: "not-found" }));
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    try {
+      const problems = await apiProblems(`127.0.0.1:${port}`);
+      expect(problems).toContain("the connection stayed open after an api message");
+      expect(problems).toContain("the api message was answered: api-result");
+    } finally {
+      for (const client of wss.clients) client.terminate();
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
 describe.each(PRIVATE_BACKENDS)("A115: a read of an empty public database on $name", (backend: PrivateBackend) => {

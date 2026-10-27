@@ -2755,11 +2755,29 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** lockstep — `report`'s hash check, `lockstep-behind` in `hello-ack`, the core's wait (14.3); the
       core's `/status` of its instances (PP-9, 14.4); test keys (14.4); the browser's `postMessage` transport (16.1);
       Q140 to Q142 (owner).
-- [ ] 14.2a The owner's answer Q140 C: the transport's `api` and `api-result` messages removed — from `design.md` §8's
+- [x] 14.2a The owner's answer Q140 C: the transport's `api` and `api-result` messages removed — from `design.md` §8's
       table and schemas, `src/private/messages.ts`, `core-transport.ts` and `private-transport.ts` (their `not-found`
       answers), the module guide and the tests; an `api` message is then an unknown `type`, which closes the connection
       as any other does (A115 as amended).
       **Acceptance:** A115.
+      **Done (2026-10-27):** `src/private/messages.ts` holds design §8's six schemas (`hello`, `hello-ack`,
+      `committed`, `report`, `read`, `read-result`) and no `API`, `API_RESULT`, `Api` or `ApiResult`, so `parseMessage`
+      reads an `api` or `api-result` text as `unknown-type`; the core's transport (`core-transport.ts`) closes the
+      connection (1008, `unknown-type`) without an answer, as for any unknown type, and a private process's
+      (`private-transport.ts`) closes on one from the core and connects again. Design §8: the table and the as-built
+      paragraph without the two types ("no other message", Q140 C). The module guide said nothing of `api`: nothing to
+      remove there. Tests, seen failing first (`tsc`: `SAMPLES` without the two types; Vitest 8 failing — the
+      messages suite not loading, the core answering `api` and keeping the connection, the private side keeping one
+      from the core): `test/private/messages.test.ts` (the six types; `api` and `api-result` texts `unknown-type`; the
+      JSON-integer and deep-nesting cases moved to `read` and `read-result`), `transport.test.ts` (A115's oracle
+      `apiProblems`: an `api` message closes the connection, 1008 `unknown-type`, unanswered, on PostgreSQL 18.6 and
+      PGlite 0.5.10; both texts among the faults that close; the duplicate oracle's "still served" through a `read`),
+      `transport-faults.test.ts` (both texts from the core close the private side's connection, which is made again; a
+      `read-result` of no read ignored). Committed negative control: task 14.2's answer (a stand-in core that answers
+      `api` with `api-result` `not-found` and keeps the connection) fails `apiProblems`. Wrong variants (a scratch copy
+      outside the clone): 11 (either type's schema put back, the unknown-type check and its reason, a wrong-direction
+      message ignored, on both sides), 11 caught; the three schema variants again against the transport suites alone,
+      3 caught; none equivalent.
 - [ ] 14.3 Lockstep and the behind-instance refusal. Through the core, a read of public data is one `read` per
       statement (owner decision Q142): a lockstep instance reads the public cursor again after its block's data and
       halts with `lockstep-behind` if it moved past h.

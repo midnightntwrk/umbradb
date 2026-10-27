@@ -1,8 +1,10 @@
 /**
  * The process transport's messages (`openspec/changes/core-arch/specs/private-processes/spec.md` PP-4; `design.md` §8;
- * CORE-ARCH §4.14; task 14.2): one JSON object per message, `{ "v": 1, "type", … }`, validated against these zod
- * schemas on both ends — the core's server (`./core-transport.ts`) and a private process's client
- * (`./private-transport.ts`).
+ * CORE-ARCH §4.14; tasks 14.2, 14.2a): one JSON object per message, `{ "v": 1, "type", … }`, validated against these
+ * zod schemas on both ends — the core's server (`./core-transport.ts`) and a private process's client
+ * (`./private-transport.ts`) — and no other message: a private process uses this connection and its reads of public
+ * data, and nothing calls a module across it (owner decision Q140 C), so an `api` or `api-result` message, which
+ * task 14.2 carried, is an unknown `type`.
  *
  * | Type | Direction | Fields (`H` a height as decimal text, `X` `0x`-prefixed lowercase hex) |
  * |---|---|---|
@@ -11,8 +13,6 @@
  * | `committed`, `report` | core → private, private → core | `height: H`, `hash: X` |
  * | `read` | private → core | `id`, `statements`: `[{ sql, params: Value[] }]`, run as one consistent read |
  * | `read-result` | core → private | `id`, `height: H` or null (before the first commit), and `results` — per statement `{ columns: [{ name, type }], rows: Value[][] }` — or `error`, a code |
- * | `api` | either way | `id`, `module`, `method`, `params` (JSON) |
- * | `api-result` | either way | `id`, and `result` (JSON) or `error`, a code |
  *
  * **Strict.** Every object is a strict object — a field it does not have fails its schema as a missing or mistyped one
  * does — and a message is `v: 1` with one of these `type`s; {@link parseMessage} tells the three failures apart
@@ -135,22 +135,6 @@ export const READ_RESULT = z
     message: "every row of a result has one value per column",
   });
 
-/** `api` (either way). */
-export const API = z.strictObject({
-  ...base("api"),
-  id: id(),
-  module: z.string().min(1),
-  method: z.string().min(1),
-  params: json(),
-});
-
-/** `api-result` (either way): answers the `api` of the same `id`. */
-export const API_RESULT = z
-  .strictObject({ ...base("api-result"), id: id(), result: json().optional(), error: z.string().min(1).optional() })
-  .refine((message) => ("result" in message) !== (message.error !== undefined), {
-    message: "an api-result has either result or error",
-  });
-
 /** The schemas, by message type. */
 export const MESSAGE_SCHEMAS = Object.freeze({
   hello: HELLO,
@@ -159,8 +143,6 @@ export const MESSAGE_SCHEMAS = Object.freeze({
   report: REPORT,
   read: READ,
   "read-result": READ_RESULT,
-  api: API,
-  "api-result": API_RESULT,
 } as const);
 
 /** A message type. */
@@ -175,11 +157,9 @@ export type Committed = z.infer<typeof COMMITTED>;
 export type Report = z.infer<typeof REPORT>;
 export type Read = z.infer<typeof READ>;
 export type ReadResult = z.infer<typeof READ_RESULT>;
-export type Api = z.infer<typeof API>;
-export type ApiResult = z.infer<typeof API_RESULT>;
 
 /** A message of the transport. */
-export type Message = Hello | HelloAck | Committed | Report | Read | ReadResult | Api | ApiResult;
+export type Message = Hello | HelloAck | Committed | Report | Read | ReadResult;
 
 /** A statement's result in a `read-result`. */
 export type StatementResult = z.infer<typeof RESULT>;

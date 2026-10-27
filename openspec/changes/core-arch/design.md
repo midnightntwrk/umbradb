@@ -1071,7 +1071,9 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
 - **Transport.** The core runs a WebSocket server (`ws`) on `listen.transport`; with `tls` set it is an `https` server
   requiring client certificates (`requestCert`, `rejectUnauthorized`; verified with `ws` 8.22.0: a client without a
   certificate is refused with `CERTIFICATE_REQUIRED`). In the browser, `postMessage` between workers; in tests, direct
-  calls. One JSON object per message, validated against these schemas (zod) on both ends:
+  calls. One JSON object per message, validated against these schemas (zod) on both ends, and no other message: a
+  private process uses this connection and its reads of public data, and nothing calls a module across it (owner
+  decision Q140 C, task 14.2a — task 14.2 carried an `api` and an `api-result`, which are now unknown types):
 
   | Type | Fields (`H` = height, a decimal string; `X` = `0x`-prefixed lowercase hex) |
   |---|---|
@@ -1080,15 +1082,13 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   | `committed`, `report` | `v: 1`, `height: H`, `hash: X` |
   | `read` | `v: 1`, `id: string`, `statements`: an array of `{ sql: string, params: Value[] }` |
   | `read-result` | `v: 1`, `id: string`, `height: H` or `null` (before the first commit), and either `results`: one `{ columns: { name: string, type: string }[], rows: Value[][] }` per statement, or `error: string` (a code); `type` is the PostgreSQL type name that says how to read each `Value` back |
-  | `api` | `v: 1`, `id: string`, `module: string`, `method: string`, `params` (JSON) |
-  | `api-result` | `v: 1`, `id: string`, and either `result` (JSON) or `error: string` (a code) |
 
   `Value` is `null`, a boolean, a string (text; `bigint` and `numeric` as decimal strings; `bytea` as `X`), or JSON (for
   `jsonb`); the column types of the statement say how to read each string back.
 
-  As built (task 14.2, `src/private/`): `messages.ts` holds the eight schemas (zod strict objects: a field a type does
-  not have fails it; hashes 32 bytes; ids 1–128 characters; a `read-result` or `api-result` with both or neither of
-  its branches fails; a row with another number of values than columns fails), `parseMessage` (tells `not-json`,
+  As built (tasks 14.2, 14.2a, `src/private/`): `messages.ts` holds the six schemas (zod strict objects: a field a type
+  does not have fails it; hashes 32 bytes; ids 1–128 characters; a `read-result` with both or neither of its branches
+  fails; a row with another number of values than columns fails), `parseMessage` (tells `not-json`,
   `unknown-version`, `unknown-type` and `invalid-message` apart) and the wire's JSON (written with `bigint`s exact,
   read with the component's lossless reader). Values per column type (`format_type`'s name, `bigint[]` for an array):
   `bigint` and `numeric` decimal text, `bytea` `X`, `json`/`jsonb` the JSON value (an integer beyond ±(2^53 − 1)
@@ -1103,18 +1103,19 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   stop. A connection speaks after its `hello`; a `hello` of an id another connection (or this one) holds is answered
   `refused: duplicate-instance` and closed; `committed` goes to every connection past its `hello` after each commit;
   each `read` runs in one `Database.read` bounded by `apiReadTimeoutMs`, its error a code only (`database-error` for
-  anything not an `UmbraError`), a result over 64 MiB answered `error: result-too-large`; every `api` is answered
-  `error: not-found` (no call is defined over the transport: Q140); a `report` is kept for task 14.3. A connection
-  closes (1008, the reason a fault's name) on a text that is no message, a binary frame, a message only the core sends,
-  a message before `hello`, more than 64 reads at once, more than 128 MiB waiting in its socket (a slow reader: PP-5,
-  the core never waits for it), a message over 64 MiB (`maxPayload`), or no pong within 15 s. `private-transport.ts`:
+  anything not an `UmbraError`), a result over 64 MiB answered `error: result-too-large`; a `report` is kept for task
+  14.3. A connection closes (1008, the reason a fault's name) on a text that is no message (an `api` message among
+  them: `unknown-type`), a binary frame, a message only the core sends, a message before `hello`, more than 64 reads
+  at once, more than 128 MiB waiting in its socket (a slow reader: PP-5, the core never waits for it), a message over
+  64 MiB (`maxPayload`), or no pong within 15 s. `private-transport.ts`:
   a private process with `coreTransport` connects at its first wait or read through it (after startup read the
   private cursor), `wss://` with its `tls`; its `hello` gives the private cursor or S − 1 before its first commit;
   a `hello-ack` that connects it wakes its wait (as does each `committed`); a lost or refused connection is retried
   after IN-10's back-off up to `backoffCeilingMs`, without end; meanwhile its wait waits, and a read fails with
   `connection-lost` (retried by the runner, `database-retrying`). A read through the core first sends a `read` with
   no statement (its height is the handle's `height`), then one `read` per `query`, each its own consistent read at
-  the public cursor then, at or above the handle's height. `api` from the core is answered `error: not-found` (PP-9).
+  the public cursor then, at or above the handle's height. A message from the core that is no message (an `api` among
+  them), fails its schema or only a private process sends closes the connection, which is made again.
 - **The private process** (task 14.1) is task 5.3's `startProcess` with `side: "private"`: the private `core` schema,
   its own database (`database`), and a backbone of `core-chain` (task 10.2's, unchanged: its configuration history, its
   identity, the process items `config`, `db` and `ledger-table`; no node client), then `src/backbone/private.ts`'s

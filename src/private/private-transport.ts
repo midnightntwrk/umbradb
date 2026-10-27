@@ -32,9 +32,9 @@
  * tables by height needs (PP-5); a lockstep instance's check of the cursor is task 14.3's. A `read-result` with
  * `error` fails the query with that code (`connection-lost` among them, retried).
  *
- * **What the core may ask** (PP-9): nothing but `hello` and `report`; an `api` message is answered `error: not-found`.
- * A message from the core that is not JSON, has an unknown `v` or `type`, fails its schema, or is one only a private
- * process sends closes the connection (PP-4).
+ * **What the core may ask** (PP-9): nothing but `hello` and `report`, which a private process sends unasked. A message
+ * from the core that is not JSON, has an unknown `v` or `type` (an `api` or `api-result` among them: owner decision
+ * Q140 C), fails its schema, or is one only a private process sends closes the connection (PP-4).
  */
 
 import { WebSocket } from "ws";
@@ -277,7 +277,7 @@ export class PrivateTransport {
       this.#alive = true;
     });
     socket.on("message", (data, binary) => {
-      const fault = this.#receive(socket, binary ? null : data.toString());
+      const fault = this.#receive(binary ? null : data.toString());
       if (fault !== null) {
         reason = fault;
         socket.close(CLOSE_PROTOCOL, fault);
@@ -296,7 +296,7 @@ export class PrivateTransport {
   }
 
   /** Handles one message from the core; returns why the connection must close, or null. */
-  #receive(socket: WebSocket, text: string | null): string | null {
+  #receive(text: string | null): string | null {
     if (text === null) return "binary-frame";
     const parsed = parseMessage(text);
     if (!parsed.ok) return parsed.fault;
@@ -322,11 +322,6 @@ export class PrivateTransport {
         pending.resolve(message);
         return null;
       }
-      case "api":
-        socket.send(messageText({ v: 1, type: "api-result", id: message.id, error: "not-found" }));
-        return null;
-      case "api-result":
-        return null;
       default:
         return `wrong-direction ${message.type}`;
     }

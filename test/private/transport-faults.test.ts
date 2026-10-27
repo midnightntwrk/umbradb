@@ -179,16 +179,16 @@ describe("the core's side: limits and faults", () => {
     again.close();
   });
 
-  it("keeps an instance's report (task 14.3's), shows connected instances, and ignores an api-result", async () => {
+  it("keeps an instance's report (task 14.3's), and shows connected instances", async () => {
     const { transport, url } = await core(fakeDb(async () => rowsOf([], [])), { lockstepInstances: ["reporter"] });
     opened.push(transport);
     const client = await greeted(url, "reporter");
     expect(transport.instances()).toEqual([{ instance: "reporter", lockstep: true, height: 0n, hash: null }]);
     const hash = `0x${"5a".repeat(32)}`;
     client.send({ v: 1, type: "report", height: "7", hash });
-    client.send({ v: 1, type: "api-result", id: "x", error: "not-found" });
-    client.send({ v: 1, type: "api", id: "probe", module: "m", method: "x", params: null });
-    await client.next("api-result");
+    // A read answered after it: the report was handled.
+    client.send({ v: 1, type: "read", id: "probe", statements: [] });
+    await client.next("read-result");
     expect(transport.instances()).toEqual([{ instance: "reporter", lockstep: true, height: 7n, hash }]);
     client.close();
     await endedWithin(client);
@@ -345,6 +345,16 @@ describe("a private process's side against a stand-in core", () => {
     ["a binary frame", (socket: WebSocket) => socket.send(Buffer.from([1]), { binary: true }), "binary-frame"],
     ["a text that is no JSON", (socket: WebSocket) => socket.send("nope"), "not-json"],
     ["a message only a private process sends", (socket: WebSocket) => socket.send(messageText(hello("x"))), "wrong-direction hello"],
+    [
+      "an api message (no such type: Q140)",
+      (socket: WebSocket) => socket.send('{"v":1,"type":"api","id":"q","module":"m","method":"x","params":null}'),
+      "unknown-type",
+    ],
+    [
+      "an api-result message (no such type: Q140)",
+      (socket: WebSocket) => socket.send('{"v":1,"type":"api-result","id":"z","result":null}'),
+      "unknown-type",
+    ],
   ])("%s from the core closes the connection, which is made again", async (_name, fault, reason) => {
     const core = await standIn((socket, message, connection) => {
       if (message.type !== "hello") return;
@@ -362,22 +372,23 @@ describe("a private process's side against a stand-in core", () => {
     }
   });
 
-  it("answers the core's api with not-found and its id; ignores an api-result and a read-result of no read", async () => {
+  it("ignores a read-result of no read, and answers nothing the core sends", async () => {
     const answers: Message[] = [];
     const core = await standIn((socket, message) => {
       if (message.type === "hello") {
         socket.send(messageText(ACK));
-        socket.send(messageText({ v: 1, type: "api-result", id: "z", result: null }));
         socket.send(messageText({ v: 1, type: "read-result", id: "none", height: null, results: [] }));
-        socket.send(messageText({ v: 1, type: "api", id: "q", module: "m", method: "x", params: null }));
+      } else if (message.type === "read") {
+        socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: "9", results: [] }));
       } else answers.push(message);
     });
-    const { transport } = client(core.address);
+    const { transport, lines } = client(core.address);
     try {
-      await transport.next(new AbortController().signal);
-      await until(() => answers.length > 0, "the api-result");
-      expect(answers).toEqual([{ v: 1, type: "api-result", id: "q", error: "not-found" }]);
+      // The read's answer comes after the read-result of no read, on the same connection: that one was ignored.
+      expect(await transport.read(async (read) => read.height)).toBe(9n);
+      expect(answers).toEqual([]);
       expect(transport.state).toBe("connected");
+      expect(lines.filter((line) => line.includes("connecting again"))).toEqual([]);
     } finally {
       await transport.close();
       await core.close();
