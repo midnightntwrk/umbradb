@@ -92,6 +92,8 @@ export interface LedgerHost {
   load(input: LoadState, read?: NodeReader): Promise<LoadedState>;
   /** A retained state's root, the state loaded by its key aside through `read` (LG-12; task 12.4). */
   retained(input: LoadState, read?: NodeReader): Promise<{ readonly stateRoot: Uint8Array }>;
+  /** The nodes the sweep deletes, forgotten by the worker's packages (LG-14; task 12.5); rejects when one is in use. */
+  evict(keys: readonly Uint8Array[]): Promise<number>;
   /** A test package's loader's `probe()` (plain data), or null without one. */
   probe(): Promise<unknown>;
   /** The step in progress, or null. */
@@ -281,6 +283,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     release: (drop) => send({ type: "release", drop }),
     load: (input, read) => send({ type: "load", input }, read),
     retained: (input, read) => send({ type: "retained", input }, read),
+    evict: (keys) => send({ type: "evict", keys: [...keys] }),
     probe: () => send({ type: "probe" }),
     activity() {
       const [first] = pending.values();
@@ -348,6 +351,7 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
     release: (drop) => run("release", null, (e) => e.release(drop)),
     load: (input) => run("load", input.height, (e) => e.load(input)),
     retained: (input) => run("retained", input.height, (e) => e.retained(input)),
+    evict: (keys) => run("evict", null, (e) => e.evict(keys)),
     probe: () => run("probe", null, () => null),
     activity: () => (current === null ? null : Object.freeze({ kind: current.kind, height: current.height, sinceMs: performance.now() - current.sent })),
     bridge: () => ({ requests: 0, nodes: 0 }),

@@ -572,6 +572,10 @@ required, `retainedStatesOf(p).load(height, read)` (from `core-ledger-state`'s m
 in the ledger worker and gives its key and root, inside the window at the read's cursor (`window(cursor)` gives it);
 outside it the call rejects with the `UmbraError` `state-not-retained`, which your callback may catch.
 
+**Reclaiming nodes** (LG-14). Nodes no held state and no persisted key reaches are deleted by an incremental
+mark-and-sweep of a fixed budget a block (10,000 node units), so every machine deletes the same nodes at the same block.
+The `core` entry's `sweep: off` (development only, with `developmentOptIn`) keeps every node.
+
 **Contracts' states** (LG-13). While `core-contract-states` is active, the `ledger-state` item's `contracts` carries,
 for each contract the block's transactions call or deploy, the keys of its state and of its zswap state after the
 block, persisted and never released: they load from the database whatever later blocks do.

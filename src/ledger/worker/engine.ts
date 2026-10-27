@@ -48,6 +48,12 @@
  * **A retained state** ({@link LedgerEngine.retained}; LG-12) is loaded by its key aside, its root read and the state
  * dropped: the states the engine holds are left as they are.
  *
+ * **Eviction** ({@link LedgerEngine.evict}; LG-14, task 12.5): the nodes the sweep deletes are forgotten by every
+ * loaded package, so a node needed again is flushed again. A package refuses to forget a node a live object holds; the
+ * states the engine holds never hold a deleted node (the sweep marks them), so the engine frees a kept parse's native
+ * objects when it drops the parse, and, should a later block's kept transaction still hold one, frees every kept
+ * parse's native objects and tries again (those transactions are parsed again at their apply).
+ *
  * **The node store is installed from the first block on** (in the worker: the bridge's). A flushed node is a stored
  * node to the package, whose cache may then drop its bytes while the state still uses it; it reads them again, when it
  * serializes something of the state, from the store — the database, which holds every flushed node from the block's
@@ -470,17 +476,27 @@ export class LedgerEngine {
     return true;
   }
 
-  /** Drops the kept parses at heights up to `upTo` and of the blocks `hashes` names; returns how many it dropped. */
-  release(drop: { readonly upTo?: bigint; readonly hashes?: readonly Uint8Array[] }): number {
+  /**
+   * Drops the kept parses at heights up to `upTo` and of the blocks `hashes` names, their native objects freed (task
+   * 12.5: see {@link LedgerEngine.evict}); returns how many it dropped.
+   */
+  async release(drop: { readonly upTo?: bigint; readonly hashes?: readonly Uint8Array[] }): Promise<number> {
     const named = new Set((drop.hashes ?? []).map(hexOf));
     let dropped = 0;
     for (const [key, kept] of [...this.#kept]) {
       if (named.has(key) || (drop.upTo !== undefined && kept.height <= drop.upTo)) {
         this.#kept.delete(key);
+        await this.#forget(kept);
         dropped += 1;
       }
     }
     return dropped;
+  }
+
+  /** Frees the native objects of a kept parse (its arrays and plain data stay where they are kept). */
+  async #forget(kept: Kept): Promise<void> {
+    const adapter = await this.#adapters.get(kept.ledger)?.catch(() => undefined);
+    adapter?.forgetTransactions(kept.transactions);
   }
 
   /**
@@ -505,6 +521,30 @@ export class LedgerEngine {
     const root = adapter.stateRoot(state);
     this.#committed = { ...idOf(input), ledger: input.ledger, adapter, state, key: input.stateKey, root };
     return { stateRoot: root, loaded: true };
+  }
+
+  /**
+   * Drops the nodes the sweep deletes from every loaded package's caches (LG-14, task 12.5), so a later block that needs
+   * one again flushes it again; the package refuses (and this throws) when a live object still holds one.
+   */
+  async evict(keys: readonly Uint8Array[]): Promise<number> {
+    if (keys.length === 0) return 0;
+    let packages = 0;
+    for (const loading of [...this.#adapters.values()]) {
+      const adapter = await loading.catch(() => undefined);
+      if (adapter === undefined) continue;
+      try {
+        adapter.evict([...keys]);
+      } catch {
+        // A live object holds one: the states the engine holds are marked, so it is a kept parse's (a later block's
+        // transaction carrying the same value). Its native objects are freed — the block's apply parses it again — and
+        // the eviction tried once more; a refusal then is a node of a live state, and fails the block.
+        for (const kept of this.#kept.values()) await this.#forget(kept);
+        adapter.evict([...keys]);
+      }
+      packages += 1;
+    }
+    return packages;
   }
 
   /** A retained state's root, the state loaded by its key aside and dropped (LG-12; see the module comment). */

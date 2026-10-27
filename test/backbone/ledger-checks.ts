@@ -164,15 +164,21 @@ export async function a99Problems(db: ProcessDatabase, status: ProcessStatus, sc
   return problems;
 }
 
-/** The node keys every stored state's key reaches through the stored nodes (a walk of `childRefKeys`). */
-async function reachableNodes(db: ProcessDatabase): Promise<{ reached: Set<string>; stored: Set<string>; missing: string[] }> {
+/**
+ * The node keys the keys `rootsSql` selects reach through the stored nodes (a walk of `childRefKeys`): every stored
+ * state's unless given.
+ */
+async function reachableNodes(
+  db: ProcessDatabase,
+  rootsSql = "SELECT encode(state_key, 'hex') AS k FROM core_ledger_state.states",
+): Promise<{ reached: Set<string>; stored: Set<string>; missing: string[] }> {
   const nodes = new Map(
     (await db.query("SELECT encode(node_key, 'hex') AS k, encode(children, 'hex') AS c FROM core_ledger_state.nodes")).map((row) => [
       row.k as string,
       Uint8Array.from(Buffer.from(row.c as string, "hex")),
     ]),
   );
-  const roots = (await db.query("SELECT encode(state_key, 'hex') AS k FROM core_ledger_state.states")).map((row) => row.k as string);
+  const roots = (await db.query(rootsSql)).map((row) => row.k as string);
   const reached = new Set<string>();
   const missing: string[] = [];
   const frontier = [...roots];
@@ -191,14 +197,17 @@ async function reachableNodes(db: ProcessDatabase): Promise<{ reached: Set<strin
 }
 
 /**
- * LG-11 as far as task 12.3 stores it: every node a stored state reaches is stored, no stored node is reached by none
- * (nothing but the states' nodes is written), and the root counts are the latest state's key at 1 (the state before it
- * released, `retainStates` 0).
+ * LG-11 and LG-14 as the ledger's tables hold them: every node the held keys (`root_counts`) reach is stored — the
+ * sweep (task 12.5) deletes only what no held key reaches, so the nodes of released states may be gone —, no stored node
+ * is reached by no stored state (nothing but the states' nodes is written: this holds between cycles, and with K at
+ * its default every cycle of these tests' small states completes within its block, so it holds after each of theirs),
+ * and the root counts are the latest state's key at 1 (the state before it released, `retainStates` 0).
  */
 export async function nodeProblems(db: ProcessDatabase): Promise<string[]> {
   const problems: string[] = [];
-  const { reached, stored, missing } = await reachableNodes(db);
-  for (const key of missing) problems.push(`node ${key} is reached by a stored state but not stored`);
+  const { missing } = await reachableNodes(db, "SELECT encode(node_key, 'hex') AS k FROM core_ledger_state.root_counts");
+  for (const key of missing) problems.push(`node ${key} is reached by a held key but not stored`);
+  const { reached, stored } = await reachableNodes(db);
   for (const key of stored) if (!reached.has(key)) problems.push(`node ${key} is stored but no stored state reaches it`);
   const counts = (await db.query("SELECT encode(node_key, 'hex') AS k, count FROM core_ledger_state.root_counts")).map((row) => text({ k: row.k, count: Number(row.count) }));
   const [latest] = await db.query("SELECT encode(state_key, 'hex') AS k FROM core_ledger_state.states ORDER BY height DESC LIMIT 1");

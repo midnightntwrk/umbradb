@@ -101,7 +101,8 @@ describe("A103's control (PGlite: 5,000 blocks once)", () => {
     const db = await backend.database();
     const seen = retentionSeen();
     const process = await runUntil(db, scenario.records, scenario.head, {
-      settings: { retainStates: 1_000 },
+      // As A103's own run: the sweep off (it does not change the window, and makes 5,000 blocks several times slower).
+      settings: { retainStates: 1_000, sweep: "off" },
       core: coreWith({ retainedFrom: (revisions, height) => retainedFrom(revisions, height) + 1n }),
       user: [retentionWatcher(seen, new Map([[5_001n, [4_000n, 4_001n]]]))],
     });

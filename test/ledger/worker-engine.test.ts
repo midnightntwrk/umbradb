@@ -322,12 +322,12 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     await engine.parse("v9", { height: 0n, hash: hash(0xff) }, [zswapOutputTransaction(RAW.v9)]);
     // By height, then by hash.
     expect(engine.holds().parsed).toEqual([hex(hash(0xff)), hex(at(1n).hash), hex(hash(0x00)), hex(at(2n).hash), hex(hash(0xbb))]);
-    expect(engine.release({ hashes: [hash(0x00), hash(0xff)] })).toBe(2);
+    expect(await engine.release({ hashes: [hash(0x00), hash(0xff)] })).toBe(2);
     expect(engine.holds().parsed).toHaveLength(3);
-    expect(engine.release({ hashes: [hash(0xbb)] })).toBe(1);
-    expect(engine.release({ upTo: 1n })).toBe(1);
+    expect(await engine.release({ hashes: [hash(0xbb)] })).toBe(1);
+    expect(await engine.release({ upTo: 1n })).toBe(1);
     expect(engine.holds().parsed).toEqual([hex(at(2n).hash)]);
-    expect(engine.release({ upTo: 5n, hashes: [hash(0x01)] })).toBe(1);
+    expect(await engine.release({ upTo: 5n, hashes: [hash(0x01)] })).toBe(1);
     expect(engine.holds().parsed).toEqual([]);
   });
 

@@ -268,6 +268,11 @@ function free(object: unknown): void {
   (object as { free(): void }).free();
 }
 
+/** Frees an object a getter gave, if it is a package object (a plain value has no `free`; task 12.5). */
+function freeGot(object: unknown): void {
+  (object as { free?: () => void } | null)?.free?.();
+}
+
 /**
  * The tag a ledger serialization starts with (`midnight:<tag>:`), or null. Refactored from 0.9.5's
  * `isSystemTransaction` / `isStandardTransaction`, which compared the same prefix.
@@ -303,10 +308,12 @@ function markersOf(tag: string): [Signature, Proof, Binding] | null {
 
 /** The fallible segments of a regular transaction, ascending: its intents' and fallible offers' segments but 0. */
 function fallibleSegments(transaction: RawTransaction): number[] {
-  const segments = new Set<number>([
-    ...(transaction.intents?.keys() ?? []),
-    ...(transaction.fallibleOffer?.keys() ?? []),
-  ]);
+  const intents = transaction.intents;
+  const offers = transaction.fallibleOffer;
+  const segments = new Set<number>([...(intents?.keys() ?? []), ...(offers?.keys() ?? [])]);
+  // The getters give new objects, which hold the transaction's values until freed (task 12.5: freed at once, so that
+  // no object the garbage collector has not reached yet keeps a node the sweep deletes, LG-14).
+  for (const value of [...(intents?.values() ?? []), ...(offers?.values() ?? [])]) freeGot(value);
   segments.delete(0);
   return [...segments].sort((a, b) => a - b);
 }
@@ -452,18 +459,26 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
 
   function segmentsOf(transaction: RawTransaction): ParsedTransaction["segments"] {
     const intents = [...(transaction.intents ?? new Map<number, RawIntent>())].sort(([a], [b]) => a - b);
-    return intents.map(([segment, intent]) => ({
-      segment,
-      calls: intent.actions
-        .filter((action) => action instanceof raw.ContractCall)
-        .map((action) => {
-          const call = action as { address: string; entryPoint: Uint8Array | string };
-          return { address: bytesOf(call.address), entryPoint: nameBytes(call.entryPoint) };
-        }),
-      deploys: intent.actions
-        .filter((action) => action instanceof raw.ContractDeploy)
-        .map((action) => ({ address: bytesOf((action as { address: string }).address) })),
-    }));
+    const segments = intents.map(([segment, intent]) => {
+      const actions = intent.actions;
+      const result = {
+        segment,
+        calls: actions
+          .filter((action) => action instanceof raw.ContractCall)
+          .map((action) => {
+            const call = action as { address: string; entryPoint: Uint8Array | string };
+            return { address: bytesOf(call.address), entryPoint: nameBytes(call.entryPoint) };
+          }),
+        deploys: actions
+          .filter((action) => action instanceof raw.ContractDeploy)
+          .map((action) => ({ address: bytesOf((action as { address: string }).address) })),
+      };
+      // New objects of the getters, freed at once (see `fallibleSegments`).
+      for (const action of actions) freeGot(action);
+      freeGot(intent);
+      return result;
+    });
+    return segments;
   }
 
   function apply(handle: StateHandle, input: ApplyInput): AppliedBlock {
@@ -622,6 +637,14 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
       };
     },
     nativeTransaction: (bytes) => nativeOf(bytes).transaction,
+    forgetTransactions(transactions) {
+      for (const bytes of transactions) {
+        const native = natives.get(bytes);
+        if (native === undefined) continue;
+        natives.delete(bytes);
+        free(native.transaction);
+      }
+    },
     emptyState: (networkId = spec.networkId) => asHandle(raw.LedgerState.blank(networkId)),
     genesisState: (bytes) => asHandle(raw.LedgerState.deserialize(bytes)),
     networkIdOf: (state) => networkIdOf(asRaw(state)),

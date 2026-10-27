@@ -135,6 +135,9 @@ function reading(
         if (rest.state === null) return [];
         return [{ state_key: hash(0x30), state_root: STORED_ROOT, hash: hash(Number(params[0]) + 1), ledger_version: "v9", ...rest.state }];
       }
+      // The sweep's tables (task 12.5): its row idle, every set empty.
+      if (sql.includes("FROM core_ledger_state.sweep")) return [{ cycle: 0n, phase: "idle", sweep_after: null }];
+      if (/FROM core_ledger_state\.(root_counts|grey|marks|nodes)/.test(sql)) return [];
       if (sql.includes("height >= $1")) {
         const [from, to] = params as [bigint, bigint];
         if (rest.keys !== undefined) return rest.keys(from, to);
@@ -367,7 +370,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
   it("declares its tables, cannot start mid-chain, and creates no table it does not declare", () => {
     expect(CORE_LEDGER_STATE.startsMidChain).toBe(false);
     const declared = CORE_LEDGER_STATE.provides.flatMap((item) => (item.table?.tables ?? []).map((t) => `${item.table?.schema}.${t}`)).sort();
-    const created = [...(CORE_LEDGER_STATE_MIGRATIONS[0]?.sql ?? "").matchAll(/CREATE TABLE (\S+) \(/g)].map((m) => m[1]).sort();
+    const created = [...CORE_LEDGER_STATE_MIGRATIONS.map((m) => m.sql).join("\n").matchAll(/CREATE TABLE (\S+) \(/g)].map((m) => m[1]).sort();
     expect(created).toEqual(declared);
   });
 });

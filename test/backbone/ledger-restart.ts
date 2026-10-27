@@ -106,6 +106,7 @@ export function recordingLoads(host: LedgerHost, seen: SeenLoad[]): LedgerHost {
       return result;
     },
     retained: (input, read) => host.retained(input, read),
+    evict: (keys) => host.evict(keys),
     probe: () => host.probe(),
     activity: () => host.activity(),
     bridge: () => host.bridge(),

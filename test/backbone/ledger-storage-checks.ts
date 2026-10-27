@@ -4,11 +4,12 @@ import { UMBRADB_VERSION } from "../../src/config/build.js";
 import { childRefKeys } from "../../src/ledger/node-refs.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { ProcessStatus } from "../../src/runner/process.js";
-import { rebuildTagged } from "../ledger/stored-values.js";
+import { callTransaction, cellValue, contractFixture, NETWORK_ID, RAW } from "../ledger/adapter-fixtures.js";
+import { nodesOfTagged, rebuildTagged } from "../ledger/stored-values.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
-import { hex } from "./fetch-fixtures.js";
+import { CHAIN_START_MS, hex } from "./fetch-fixtures.js";
 import type { SeenLoad } from "./ledger-restart.js";
-import type { LedgerScenario } from "./ledger-tapes.js";
+import { type LedgerScenario, ledgerScenario, type LedgerTx } from "./ledger-tapes.js";
 
 /**
  * The oracles of task 12.4's criteria (A100, A102, A103, A104), shared by `ledger-storage.test.ts` and its negative
@@ -248,7 +249,10 @@ export async function a104KeyProblems(db: ProcessDatabase, scenario: LedgerScena
       }
     }
   }
-  // Released: no state held alive holds the contract's state of `at` (a later state changed it).
+  // Released: the contract's state changed after `at`, and no state held alive holds its state of `at`.
+  if (plain(scenario.heights[Number(scenario.head)]?.contracts.get(hex(address))?.state as Uint8Array) === plain(expected.state)) {
+    problems.push(`the contract's state of ${at} is still its state at the head: nothing released it`);
+  }
   const contractKey = plain(bytesOf(row.state_key));
   for (const height of held) {
     const stateKey = plain(scenario.heights[Number(height)]?.stateKey as Uint8Array);
@@ -267,4 +271,57 @@ export async function heldNodeProblems(db: ProcessDatabase): Promise<string[]> {
   const missing = new Set<string>();
   for (const root of roots) for (const key of reach(nodes, root).missing) missing.add(key);
   return [...missing].map((key) => `node ${key} is reached by a held key but not stored`);
+}
+
+/**
+ * A call replacing a fixture contract's state with a cell of `size` bytes of `fill` (its guaranteed transcript), its
+ * intent's TTL a minute after the block time of height `at` in the synthetic chains (`CHAIN_START_MS` + 6 s a height).
+ */
+function setState(contract: { address: Uint8Array; deploy: Uint8Array }, fill: number, size: number, at: number): Uint8Array {
+  const program = [{ push: { storage: true, value: cellValue(new Uint8Array(size).fill(fill)) } }, { swap: { n: 0 } }, "pop"];
+  return callTransaction(RAW.v9, contract, program as never, undefined, Number(CHAIN_START_MS) + at * 6_000 + 60_000);
+}
+
+/**
+ * A104's scenario (LG-13; tasks 12.4, 12.5), `retainStates` 0: contract C deployed at 5, its state set at 10 to a cell
+ * of 1,500 bytes — over the ledger's 1,024-byte embedding limit, so the ledger state holds it as a node of its own —,
+ * set at 20 to another, then empty blocks to `last`.
+ */
+export async function a104Scenario(last = 40): Promise<{ readonly scenario: LedgerScenario; readonly contract: { address: Uint8Array } }> {
+  const contract = await contractFixture(RAW.v9);
+  const blocks: LedgerTx[][] = Array.from({ length: last + 1 }, () => []);
+  blocks[5] = [{ bytes: contract.deploy, kind: "regular" }];
+  blocks[10] = [{ bytes: setState(contract, 7, 1_500, 10), kind: "regular" }];
+  blocks[20] = [{ bytes: setState(contract, 8, 1_500, 20), kind: "regular" }];
+  const scenario = await ledgerScenario({
+    ledger: "v9",
+    genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
+    includesBlockZero: false,
+    blocks,
+    contracts: [contract.address],
+  });
+  // The scenario is A104's: each call applied, so C's state changed at 10 and again at 20.
+  for (const at of [5, 10, 20]) {
+    const types = scenario.heights[at]?.types;
+    if (types?.[0] !== "success") throw new Error(`a104Scenario: the transaction at ${at} is a ${types?.[0]}: a fixture problem`);
+  }
+  const of = (at: number): string => plain(scenario.heights[at]?.contracts.get(hex(contract.address))?.state as Uint8Array);
+  if (of(10) === of(9) || of(20) === of(10) || of(40) !== of(20)) throw new Error("a104Scenario: C's state does not change at 10 and 20 only");
+  return { scenario, contract };
+}
+
+/** The keys of every node of contract `address`'s state and zswap state after `at` in `scenario` (their serializations'). */
+export function contractNodeKeys(scenario: LedgerScenario, address: Uint8Array, at: bigint): Set<string> {
+  const values = scenario.heights[Number(at)]?.contracts.get(hex(address));
+  if (values === undefined) throw new Error(`the scenario's state at ${at} holds no such contract`);
+  return new Set([values.state, values.zswap].flatMap((value) => nodesOfTagged(value).nodes.map((node) => plain(node.key))));
+}
+
+/** The keys the held keys (`root_counts`) reach through the stored nodes. */
+export async function heldReach(db: ProcessDatabase): Promise<Set<string>> {
+  const nodes = await storedNodes(db);
+  const roots = (await db.query("SELECT encode(node_key, 'hex') AS k FROM core_ledger_state.root_counts")).map((r) => r.k as string);
+  const reached = new Set<string>();
+  for (const root of roots) for (const key of reach(nodes, root).reached) reached.add(key);
+  return reached;
 }

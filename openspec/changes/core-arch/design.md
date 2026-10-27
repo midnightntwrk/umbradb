@@ -616,6 +616,7 @@ interface LedgerPackage {                                  // one per ledger ver
   rawPackages(): Readonly<Record<string, unknown>>;        // the loaded WASM packages, unwrapped, by package name
   parseTransaction(bytes: Uint8Array, index: number): ParsedTransaction;  // parsed once per Uint8Array (LG-7)
   nativeTransaction(bytes: Uint8Array): unknown;           // the native object that parse made, for ledger tasks
+  forgetTransactions(transactions: Uint8Array[]): void;    // frees those parses' native objects now (task 12.5)
   emptyState(networkId?: string): StateHandle;             // block 0 (IN-7): the adapter's, or the given, network id
   genesisState(bytes: Uint8Array): StateHandle;            // from system_properties.genesis_state
   networkIdOf(state: StateHandle): string;                 // a state's own network id (block 0's empty state, IN-7)
@@ -842,6 +843,22 @@ and gives its key and root (`RetainedState`), and fails with `state-not-retained
 (`contractStateKey`, `contractZswapStateKey`) of each contract the block's transactions call or deploy, in byte order,
 in the block's batch, never to be released; the `ledger-state` item carries them (`contracts`) for that module to store
 (decision record question Q143 on the route).
+
+As built (task 12.5, `src/backbone/core-ledger-state/sweep.ts`): the step is computed on the main thread in
+`on-compute`, after the root check, from the tables as committed at h − 1 (read through on-compute's read: `sweep`,
+`grey` and `marks` by key, `root_counts`, `nodes`' child lists, read with `src/ledger/node-refs.ts`) with the block's
+batch held over them in memory, and written in `on-db-write` after the batch; only the eviction runs in the worker
+(`LedgerHost.evict`, awaited in `on-compute`, before the block commits: a node forgotten and still stored is merely
+written again, one deleted and not forgotten would never be). K = 10,000 (`SWEEP_BUDGET`). Step 1's roots are the
+counts as committed at h − 1, before the block's batch: the state after h − 1 is still alive in the worker while h is
+computed, and a package refuses to forget a node a live object holds, so that state must be marked in a cycle that
+starts at h. "Stored" is the committed nodes with the block's inserts; a scan that gives fewer nodes than the budget it
+had passed the last node. The first block with `sweep: off` after one with it on clears `grey`, `marks` and
+`sweep_after` and makes the phase `idle`; while off, nothing else is written. The worker frees a kept parse's native
+objects when it drops the parse (`forgetTransactions`), so that no object the garbage collector has not reached yet
+holds a deleted node; should a later block's kept transaction still hold one, it frees every kept parse's natives and
+evicts again (those transactions are parsed again at their apply), and a refusal then fails the block (decision record
+question Q144).
 
 ### 5.5 Ledger tasks (LG-17, Q49)
 

@@ -44,8 +44,13 @@
  * block's transactions call or deploy, never released (LG-13): the `ledger-state` item carries them, for that module to
  * store. The `ledger-state` item is also a `process` item ({@link RetainedStates}, published at `on-start-db`): a
  * module requiring it loads the state after a height inside the window at its read's cursor, in the worker, and gets it
- * as plain data; outside the window the load fails with `state-not-retained` (LG-12). Task 12.5 adds the sweep's
- * tables.
+ * as plain data; outside the window the load fails with `state-not-retained` (LG-12).
+ *
+ * **The sweep (task 12.5; LG-14, `./sweep.ts`).** After the root check, `on-compute` computes the block's step of the
+ * fixed-budget mark-and-sweep from `sweep`, `grey`, `marks`, `nodes` and `root_counts` as committed at h − 1 and the
+ * block's batch, and has the worker evict the nodes it deletes (`LedgerHost.evict`) before the block commits;
+ * `on-db-write` writes the step after the batch. With the `core` entry's `sweep` off at h no step runs, and the first
+ * such block after one with it on clears the sweep's sets.
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant over its rules; a negative control's build composes its own
  * with {@link coreLedgerState}, one rule replaced.
@@ -66,7 +71,19 @@ import type { BlockLedgerSource } from "../core-block-fetch/ledger-source.js";
 import { blockParsedItemOf } from "../core-block-parsed/core-block-parsed.js";
 import { txResultsItemOf } from "../core-tx-results/core-tx-results.js";
 import { heightPartitionsSql } from "../height-partitions.js";
-import { type CoreRevision, coreRevisionsOf, releasedBy, retainedFrom, retentionWindow } from "./retention.js";
+import { type CoreRevision, coreRevisionsOf, releasedBy, retainedFrom, retentionWindow, revisionAt } from "./retention.js";
+import {
+  GREY_TABLE,
+  type GreyPicker,
+  MARKS_TABLE,
+  SWEEP_BUDGET,
+  SWEEP_TABLE,
+  sqlSweepTables,
+  sweepReset,
+  sweepStep,
+  type SweepWrites,
+  writeSweep,
+} from "./sweep.js";
 
 /** The module's id. */
 export const CORE_LEDGER_STATE_ID = "core-ledger-state";
@@ -155,6 +172,26 @@ CREATE TABLE ${EVENTS_TABLE} (
   PRIMARY KEY (height, tx_index, event_index)
 ) PARTITION BY RANGE (height);
 ${heightPartitionsSql(EVENTS_TABLE)}`,
+  },
+  {
+    // LG-14's sweep (task 12.5, `./sweep.ts`): its row, its grey set and its marks.
+    id: "002",
+    sql: `CREATE TABLE ${SWEEP_TABLE} (
+  id smallint NOT NULL CHECK (id = 1),
+  cycle bigint NOT NULL CHECK (cycle >= 0),
+  phase text NOT NULL CHECK (phase IN ('idle', 'mark', 'sweep')),
+  sweep_after bytea CHECK (octet_length(sweep_after) = 32),
+  PRIMARY KEY (id)
+);
+INSERT INTO ${SWEEP_TABLE} (id, cycle, phase, sweep_after) VALUES (1, 0, 'idle', NULL);
+CREATE TABLE ${GREY_TABLE} (
+  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
+  PRIMARY KEY (node_key)
+);
+CREATE TABLE ${MARKS_TABLE} (
+  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
+  PRIMARY KEY (node_key)
+);`,
   },
 ]);
 
@@ -270,6 +307,10 @@ export interface CoreLedgerStateOptions {
   readonly retainedFrom?: (revisions: readonly CoreRevision[], height: bigint) => bigint;
   /** LG-13: whether the block's contracts' keys are persisted; while `core-contract-states` is active. */
   readonly persistsContracts?: (b: BlockContext) => boolean;
+  /** LG-14: the node units of each block's step; {@link SWEEP_BUDGET} (a test's smaller K). */
+  readonly sweepBudget?: number;
+  /** LG-14: which grey keys a marking round visits; the smallest in byte order. */
+  readonly greyPicker?: GreyPicker;
 }
 
 const hex = (bytes: Uint8Array): string => `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -290,8 +331,8 @@ export async function parentTimeOf(read: Pick<ReadHandle, "query">, b: BlockCont
   return parentTimestampMs(BigInt(row.ms as bigint | number | string), ownMs);
 }
 
-/** The pending writes of each process context: the block `on-compute` applied, for its `on-db-write`. */
-const PENDING = new WeakMap<ProcessContext, AppliedState>();
+/** The pending writes of each process context: the block `on-compute` applied and its sweep step, for its `on-db-write`. */
+const PENDING = new WeakMap<ProcessContext, { readonly applied: AppliedState; readonly sweep: SweepWrites | null }>();
 
 /** The `core` revisions of each process context, read once from its `config` item. */
 const REVISIONS = new WeakMap<ProcessContext, readonly CoreRevision[]>();
@@ -510,14 +551,37 @@ export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: 
   }
 }
 
-/** The block `on-compute` applied for `b`, taken for its `on-db-write`; throws when it is not `b`'s. */
-function pendingOf(p: ProcessContext, b: BlockContext): AppliedState {
-  const applied = PENDING.get(p);
-  if (applied === undefined || applied.height !== b.height || !sameBytes(applied.hash, b.hash)) {
+/** The block `on-compute` applied for `b`, with its sweep step, taken for its `on-db-write`; throws when it is not `b`'s. */
+function pendingOf(p: ProcessContext, b: BlockContext): { readonly applied: AppliedState; readonly sweep: SweepWrites | null } {
+  const pending = PENDING.get(p);
+  if (pending === undefined || pending.applied.height !== b.height || !sameBytes(pending.applied.hash, b.hash)) {
     throw new Error(`block ${b.height}: core-ledger-state's on-compute applied no such block for its on-db-write`);
   }
   PENDING.delete(p);
-  return applied;
+  return pending;
+}
+
+/**
+ * Block `b`'s sweep step (LG-14, `./sweep.ts`): none while the `core` entry's `sweep` is off at h, the reset at the
+ * first such block after one with it on; the nodes it deletes evicted from the worker before the block commits.
+ */
+export async function sweepOf(
+  p: ProcessContext,
+  b: BlockContext,
+  read: Pick<ReadHandle, "query">,
+  applied: AppliedState,
+  options: CoreLedgerStateOptions = {},
+): Promise<SweepWrites | null> {
+  const revisions = revisionsOf(p);
+  const on = (height: bigint): boolean => revisionAt(revisions, height)?.sweep !== "off";
+  const tables = sqlSweepTables(read);
+  if (!on(b.height)) return b.height > 0n && revisionAt(revisions, b.height - 1n) !== undefined && on(b.height - 1n) ? sweepReset(await tables.state()) : null;
+  const step = await sweepStep(tables, applied.batch, {
+    budget: options.sweepBudget ?? SWEEP_BUDGET,
+    ...(options.greyPicker === undefined ? {} : { picker: options.greyPicker }),
+  });
+  if (step.deleted.length > 0) await boundLedger(p).ledger.evict(step.deleted);
+  return step;
 }
 
 /** The {@link RetainedStates} of core-ledger-state's context `p` (see the module comment). */
@@ -572,7 +636,7 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): ModuleDec
       {
         name: LEDGER_STATE_ITEM,
         lifetimes: ["block", "table", "process"],
-        table: { schema: "core_ledger_state", tables: ["nodes", "root_counts", "states"], kind: "mutable" },
+        table: { schema: "core_ledger_state", tables: ["nodes", "root_counts", "states", "sweep", "grey", "marks"], kind: "mutable" },
       },
       {
         name: LEDGER_EVENTS_ITEM,
@@ -595,7 +659,7 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): ModuleDec
       },
       async "on-compute"(p, b, read, out) {
         const applied = await applyBlock(p, b, read, options);
-        PENDING.set(p, applied);
+        PENDING.set(p, { applied, sweep: await sweepOf(p, b, read, applied, options) });
         const items = itemsOf(applied);
         out.put(LEDGER_STATE_ITEM, items.state);
         out.put(LEDGER_EVENTS_ITEM, items.events);
@@ -603,7 +667,9 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): ModuleDec
         out.put(VM_LOGS_ITEM, items.logs);
       },
       async "on-db-write"(p, b, w) {
-        await writeBlock(w, pendingOf(p, b));
+        const { applied, sweep } = pendingOf(p, b);
+        await writeBlock(w, applied);
+        if (sweep !== null) await writeSweep(w, sweep);
       },
       async "on-after-db-write"(p, b) {
         // Not awaited: this callback runs inside a read, which on PGlite holds the one queue, and the commit may wait

@@ -38,6 +38,7 @@ function counted() {
       release: (...args) => host.release(...args),
       load: (...args) => host.load(...args),
       retained: (...args) => host.retained(...args),
+      evict: (...args) => host.evict(...args),
       probe: () => host.probe(),
       activity: () => host.activity(),
       bridge: () => host.bridge(),

@@ -12,7 +12,7 @@ import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
 import { spawnChild } from "../child-processes.js";
-import { callTransaction, cellValue, contractFixture, NETWORK_ID, RAW, zswapOutputTransaction } from "../ledger/adapter-fixtures.js";
+import { NETWORK_ID, RAW, zswapOutputTransaction } from "../ledger/adapter-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { core, entryOf } from "../runner/process-build.js";
 import { committed, genesisOf, halted, ingest, PATIENCE_MS, watched, watcher } from "./ingest-harness.js";
@@ -23,6 +23,8 @@ import {
   a100Problems,
   a102Problems,
   a104KeyProblems,
+  a104Scenario,
+  contractNodeKeys,
   contractStatesStandIn,
   heldNodeProblems,
   loaded,
@@ -31,6 +33,7 @@ import {
   wholeStateProblems,
 } from "./ledger-storage-checks.js";
 import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from "./ledger-tapes.js";
+import { sweepTables, sweepWatcher, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
  * `core-ledger-state`'s stored state through the real process (task 12.4; `openspec/changes/core-arch/acceptance.md`
@@ -47,9 +50,9 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from 
  * - A103 (LG-12): `retainStates` 1,000 at cursor 5,000 — the state at 4,000 loads, 3,999 fails with
  *   `state-not-retained` —; a revision raising it fills the window from its start, one lowering it releases the
  *   states leaving the window in its first block.
- * - A104 (LG-13), as far as task 12.4 goes (the sweep is task 12.5's): with `retainStates` 0 a contract's state and
- *   zswap-state keys persisted at 10 stay held after the contract changed at 20 and every state holding them was
- *   released, and load from their keys alone.
+ * - A104 (LG-13; tasks 12.4, 12.5): with `retainStates` 0 a contract's state and zswap-state keys persisted at 10 stay
+ *   held after the contract changed at 20, every state holding them was released and two sweep cycles completed, and
+ *   load from their keys alone (the run without persisting them is `ledger-sweep.negative-control.test.ts`'s).
  */
 
 const WORKER = fileURLToPath(new URL("./ledger-restart.worker.ts", import.meta.url));
@@ -201,7 +204,10 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     const seen = retentionSeen();
     // At 5,001's on-compute the read is at the cursor 5,000.
     const plan = new Map([[5_001n, [4_000n, 3_999n, 5_000n, 5_001n, 0n]]]);
-    const process = await runTo(db, scenario.records, scenario.head, { settings: { retainStates: 1_000 }, user: [retentionWatcher(seen, plan)] });
+    // The sweep (LG-14, task 12.5) is off here: the window does not depend on it, and its full budget of 10,000 units a
+    // block over the nodes of 1,001 held states makes a 5,000-block run several times slower (A103 with the sweep on is
+    // the revisions test below).
+    const process = await runTo(db, scenario.records, scenario.head, { settings: { retainStates: 1_000, sweep: "off" }, user: [retentionWatcher(seen, plan)] });
     expect(process.status).toMatchObject({ cursor: 5_001n, reason: null });
     expect(seen.loads.get(5_001n)).toEqual([loaded(scenario, 4_000n), "3999 state-not-retained", loaded(scenario, 5_000n), "5001 state-not-retained", "0 state-not-retained"]);
     // After 5,001: the states of 4,001 to 5,001 held, each once.
@@ -246,28 +252,36 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     expect(seen.held.get(19n)).toEqual(range(14, 19));
     expect(seen.held.get(20n)).toEqual(range(19, 20));
     expect(seen.held.get(29n)).toEqual(range(28, 29));
+    // The sweep ran meanwhile (on by default) and deleted nothing a retained state reaches.
+    expect((await sweepTables(db)).cycle).toBeGreaterThan(2n);
+    expect(await heldNodeProblems(db)).toEqual([]);
   }, PATIENCE_MS * 4);
 
-  it("A104 (keys; the sweep is task 12.5's): with retainStates 0, a contract's state and zswap-state keys stored at 10 stay held after it changed at 20, and load from their keys", async () => {
-    const contract = await contractFixture(RAW.v9);
-    const change = callTransaction(RAW.v9, contract, [{ push: { storage: true, value: cellValue(Uint8Array.of(42)) } }, { swap: { n: 0 } }, "pop"] as never);
-    const blocks: LedgerTx[][] = Array.from({ length: 31 }, () => []);
-    blocks[10] = [{ bytes: contract.deploy, kind: "regular" }];
-    blocks[20] = [{ bytes: change, kind: "regular" }];
-    const scenario = await ledgerScenario({
-      ledger: "v9",
-      genesis: RAW.v9.LedgerState.blank(NETWORK_ID).serialize(),
-      includesBlockZero: false,
-      blocks,
-      contracts: [contract.address],
-    });
+  it("A104: with retainStates 0, a contract's state and zswap-state keys stored at 10 still load from their keys after it changed at 20, its states were released and two sweep cycles completed", async () => {
+    const { scenario, contract } = await a104Scenario();
     const db = await backend.database();
-    const process = await runTo(db, scenario.records, scenario.head, { core: [...LEDGER_CORE, contractStatesStandIn()] });
-    expect(process.status).toMatchObject({ cursor: 30n, reason: null });
+    const sweeps = new Map<bigint, TableSnapshot>();
+    const process = await runTo(db, scenario.records, scenario.head, { core: [...LEDGER_CORE, contractStatesStandIn()], user: [sweepWatcher(sweeps)] });
+    expect(process.status).toMatchObject({ cursor: 40n, reason: null });
+    // The rows of 10 and 20; the keys of 10 held, loading from their keys alone, no held state holding the state of 10.
+    expect((await db.query("SELECT height::text AS h FROM core_contract_states.states ORDER BY height")).map((r) => r.h)).toEqual(["5", "10", "20"]);
     expect(await a104KeyProblems(db, scenario, contract.address, 10n)).toEqual([]);
-    expect(await a104KeyProblems(db, scenario, contract.address, 20n)).toEqual([]);
-    expect((await db.query("SELECT height::text AS h FROM core_contract_states.states ORDER BY height")).map((r) => r.h)).toEqual(["10", "20"]);
+    expect(await a104KeyProblems(db, scenario, contract.address, 5n)).toEqual([]);
+    // Two sweep cycles at least completed after the states holding C's state of 10 were released (block 20 released 19).
+    const at20 = sweeps.get(20n) as TableSnapshot;
+    const end = await sweepTables(db);
+    const completed = end.cycle - at20.cycle - (end.phase === "idle" ? 0n : 1n) + (at20.phase === "idle" ? 0n : 1n);
+    expect(completed).toBeGreaterThanOrEqual(2n);
+    // The sweep deleted nodes — every one stored at some cursor is no longer — and none a held key reaches.
+    const ever = new Set([...sweeps.values()].flatMap((tables) => tables.nodes));
+    expect(ever.size).toBeGreaterThan(end.nodes.length);
     expect(await heldNodeProblems(db)).toEqual([]);
+    // The nodes of C's state of 10 that the ledger state stored as rows of their own are stored still (the run without
+    // persisting the keys, where the sweep deletes them, is the negative control).
+    const stored = new Set(end.nodes);
+    const rows = [...contractNodeKeys(scenario, contract.address, 10n)].filter((key) => ever.has(key));
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.filter((key) => !stored.has(key))).toEqual([]);
   }, PATIENCE_MS * 4);
 });
 
@@ -281,7 +295,7 @@ describe("A102 [STATIC]: core-ledger-state's tables are the node layout of desig
       const cells = line.split("|").map((cell) => cell.trim());
       if (cells[1] !== "`core-ledger-state`") continue;
       const names = [...(cells[2] as string).matchAll(/`core_ledger_state\.([a-z_]+)`/g)].map((m) => m[1] as string);
-      const key = (cells[3] as string).replace(/[()]/g, "").split(",").map((c) => c.trim()).filter((c) => /^[a-z_]+$/.test(c));
+      const key = (cells[3] as string).replace(/[()]/g, "").replace(/ = 1$/, "").split(",").map((c) => c.trim()).filter((c) => /^[a-z_]+$/.test(c));
       const others = (cells[4] as string) === "—" ? [] : (cells[4] as string).split(" — ")[0]!.split(/,(?![^(]*\))/).map((c) => /^\s*([a-z_]+)/.exec(c)?.[1]).filter((c): c is string => c !== undefined);
       for (const name of names) tables.set(name, [...key, ...others]);
     }
@@ -303,9 +317,7 @@ describe("A102 [STATIC]: core-ledger-state's tables are the node layout of desig
   it("creates every table of design §10 with exactly its columns; a node is its key, data and children, and a state its key and root", () => {
     const design = designColumns();
     const migrations = migrationColumns();
-    expect([...migrations.keys()].filter((t) => !["sweep", "grey", "marks"].includes(t)).sort()).toEqual(
-      [...design.keys()].filter((t) => !["sweep", "grey", "marks"].includes(t)).sort(),
-    );
+    expect([...migrations.keys()].sort()).toEqual([...design.keys()].sort());
     for (const [table, columns] of migrations) expect(new Set(columns), table).toEqual(new Set(design.get(table)));
     expect(migrations.get("nodes")).toEqual(["node_key", "data", "children"]);
     expect(migrations.get("states")?.filter((c) => c.startsWith("state"))).toEqual(["state_key", "state_root"]);

@@ -240,6 +240,12 @@ export interface LedgerPackage {
   /** The native parsed transaction for these bytes, parsed now if they were not before; for ledger tasks (LG-17). */
   nativeTransaction(bytes: Uint8Array): unknown;
   /**
+   * Frees the native objects parsed from these very arrays now (task 12.5): what the ledger worker no longer needs, so
+   * that no object the garbage collector has not reached yet keeps a node the sweep deletes (LG-14); parsed again if
+   * asked for again.
+   */
+  forgetTransactions(transactions: readonly Uint8Array[]): void;
+  /**
    * A blank state of `networkId`, the adapter's network id unless given: block 0's empty state (IN-7), whose network id
    * is the genesis state's ({@link networkIdOf}, task 12.3).
    */

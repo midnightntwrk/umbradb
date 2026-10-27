@@ -2409,38 +2409,68 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       nothing read; a fresh worker, after a restart, loads it from its key through the node-store bridge); the root it
       gives must be the stored one. A node changed under its key aborts the package at that read (a trap): the worker
       fails and processing halts with `callback-error` naming `core-ledger-state` — no new code. **The conversion**
-      (LG-9): a v9 block on a v8 state is F; the engine converts the state with the v9 package's `convertFromV8` (the
-      v8 nodes read by the v8 state's key through the bridge) and applies F to it, also with no transaction, F's batch
-      the v9 package's; any other ledger change is refused. **The window** (LG-12,
+      (LG-9): a v9 block on a v8 state is F; the engine converts the state with the v9 package's `convertFromV8` (the v8
+      nodes read by the v8 state's key through the bridge) and applies F to it, also with no transaction, F's batch the
+      v9 package's; any other ledger change is refused. **The window** (LG-12,
       `src/backbone/core-ledger-state/retention.ts`): from the `core` revisions in the `config` item (now required),
-      L(h) = max(L(h − 1), h − R(h)); block h releases the states of L(h − 1) to L(h) − 1, their keys read from
-      `states` (`ApplyBlock.release`); `ledger-state` is also a `process` item, published at `on-start-db`
+      L(h) = max(L(h − 1), h − R(h)); block h releases the states of L(h − 1) to L(h) − 1, their keys read from `states`
+      (`ApplyBlock.release`); `ledger-state` is also a `process` item, published at `on-start-db`
       (`retainedStatesOf(p).load(height, read)`, `window(cursor)`), whose load gives a retained state's key and root,
       loaded aside in the worker (`LedgerHost.retained`), and fails with the new `state-not-retained` (`ERROR_CODES`;
       design §11, a module call's failure, not a halt) outside the window at the read's cursor. **Contract keys**
       (LG-13): while `core-contract-states` (13.1) is active, the worker persists the state and zswap-state keys of each
-      contract the block's transactions call or deploy (`ApplyBlock.contracts`), never released; the `ledger-state`
-      item carries them (`contracts`). Tests (seen failing first: `tsc` 28 errors in the new tests, `Cannot find
-      module …/retention.js`, the engine suite 6 of 6 failing): `test/ledger/worker-storage.test.ts` (6: releases, the
-      parent's load, the conversion against the v9 package's own conversion in a fresh instance, contract keys rebuilt
-      from the stored nodes without the packages — `test/ledger/stored-values.ts`, the arena's normal form —, retained
-      loads), `test/backbone/ledger-retention.test.ts` (6, fast-check seed 20261026 against the rule block by block),
+      contract the block's transactions call or deploy (`ApplyBlock.contracts`), never released; the `ledger-state` item
+      carries them (`contracts`). Tests (seen failing first: `tsc` 28 errors in the new tests, `Cannot find module
+      …/retention.js`, the engine suite 6 of 6 failing): `test/ledger/worker-storage.test.ts` (6: releases, the parent's
+      load, the conversion against the v9 package's own conversion in a fresh instance, contract keys rebuilt from the
+      stored nodes without the packages — `test/ledger/stored-values.ts`, the arena's normal form —, retained loads),
+      `test/backbone/ledger-retention.test.ts` (6, fast-check seed 20261026 against the rule block by block),
       `core-ledger-state.test.ts` (4 more), and `ledger-storage.test.ts` through the process on PostgreSQL 18.6 and
       PGlite 0.5.10: A100 (F with no transaction, F with one; the synthetic tapes' reference converts in a fresh v9
       instance), A102 (a SIGKILL at U, the restart loading the state at U once and converting at F; a tampered node
-      halting the restart; `[STATIC]` the migrations' tables and columns are design §10's, no source serializes a
-      state, and no stored value is one), A103 (`retainStates` 1,000 at cursor 5,000: 4,000 loads, 3,999 refuses;
-      a raise filling the window from its revision, a lowering releasing five states in its first block), A104's keys
-      (persisted at 10, held after the contract changed at 20 and every state holding them was released, and loading
-      from their keys alone); on task 0.3's devnet tape (`ledger-state.test.ts`, `tapeTest`): every root from genesis
-      to 235 across F 103, and a restart at 150 loading the state once. Committed negative controls
-      (`ledger-storage.negative-control.test.ts`): a restart that does not load the state halts at the next block; F
-      applied without the conversion halts with `root-mismatch`; a window one state short fails the load of 4,000.
+      halting the restart; `[STATIC]` the migrations' tables and columns are design §10's, no source serializes a state,
+      and no stored value is one), A103 (`retainStates` 1,000 at cursor 5,000: 4,000 loads, 3,999 refuses; a raise
+      filling the window from its revision, a lowering releasing five states in its first block), A104's keys (persisted
+      at 10, held, loading from their keys alone; task 12.5 found that the call meant to change the contract at 20 had
+      failed for an expired TTL, and replaced the test); on task 0.3's devnet tape (`ledger-state.test.ts`, `tapeTest`):
+      every root from genesis to 235 across F 103, and a restart at 150 loading the state once. Committed negative
+      controls (`ledger-storage.negative-control.test.ts`): a restart that does not load the state halts at the next
+      block; F applied without the conversion halts with `root-mismatch`; a window one state short fails the load of
+      4,000.
       **Pending:** A104's two sweep cycles and its control without persisted keys (12.5); question Q143 (how
       `core-contract-states` gets its keys persisted: design §4's `persist(key)` provider function, or the worker's
       batch, which ships).
-- [ ] 12.5 The fixed-budget mark-and-sweep.
-      **Acceptance:** A105 including its negative control.
+- [x] 12.5 The fixed-budget mark-and-sweep.
+      **Acceptance:** A105 including its negative control; A104's rest (from 12.4).
+      **Done (2026-10-26):** `src/backbone/core-ledger-state/sweep.ts`: LG-14's step — computed in `on-compute` after
+      the root check from `sweep`, `grey`, `marks`, `root_counts` and `nodes` as committed at h − 1 with the block's
+      batch held over them, written in `on-db-write` after the batch (migration `002`: the one-row `sweep`, its row
+      inserted `idle`, `grey`, `marks`); K = 10,000 (`SWEEP_BUDGET`; a test's smaller K through `coreLedgerState({
+      sweepBudget })`); grey keys in byte order (`GreyPicker`, a negative control's seam); step 1's roots the counts
+      before the block's batch (the state at h − 1 is alive in the worker while h is computed); the first block with
+      `sweep: off` after one with it on resets the sets. Deleted nodes are evicted in the worker (`LedgerHost.evict`)
+      before the block commits; the worker frees a dropped parse's native objects (`LedgerPackage.forgetTransactions`,
+      new; the adapter also frees the intents and actions it reads), and when a later block's kept transaction holds a
+      deleted node frees every kept parse's natives and evicts again (Q144). Tests (seen failing first: `Cannot find
+      module …/sweep.js`; the process tests on 12.4's module, which has no `sweep` table):
+      `test/backbone/sweep-model.ts` (the reference model, an independent in-memory LG-14), `ledger-sweep.test.ts` (the
+      step against the model on the fixture, on hand cases and on 400 random histories, fast-check seed 20261027; its
+      writes), `test/ledger/worker-sweep.test.ts` (in a real worker: eviction, a node needed again flushed again by the
+      real package, a kept transaction's refusal and the retry, a live state's refusal), `ledger-sweep-process.test.ts`
+      (A105 through the process with a test package serving the DAG fixture of `test/ledger/fixtures/sweep-fixture.ts`,
+      K = 50: the tables after every block the model's on PostgreSQL 18.6 and PGlite 0.5.10, equal across them,
+      `[[ledger.sweep-cross-backend-identical]]`; subtree 0's nodes deleted while its second version stood and inserted
+      again at its return; a revision turning the sweep off mid-cycle, which clears its sets, and one turning it on
+      again; `sweep: off` deleting nothing), `ledger-storage.test.ts`'s A104 (a contract state of 1,500
+      bytes at 10, changed at 20; its keys held and loading after the states holding it were released and two or more
+      sweep cycles completed). Committed negative controls (`ledger-sweep.negative-control.test.ts`, both backends):
+      grey keys in insertion order differ from the model after block 1; A104 without `core-contract-states` has the
+      sweep delete the nodes only those keys held. A103's two 5,000-block runs (12.4's) now set `sweep: off`: the window
+      does not depend on the sweep, and with it on — its full budget every block over 1,001 held states — they fell from
+      about 30 to 3–4.4 blocks a second (load averages 35–48); A103's revisions run keeps the sweep on and checks that
+      it deleted nothing a retained state reaches.
+      **Pending:** Q144 (a deleted node a live object still holds after the retry); K's cost on real states is
+      A136's to measure.
 - [ ] 12.6 Ledger tasks and the plain-data `block-parsed` (`runLedgerWorker`, the host's worker entry, the
       structured-clone check).
       **Acceptance:** A137.

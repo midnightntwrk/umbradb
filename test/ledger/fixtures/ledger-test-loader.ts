@@ -3,7 +3,8 @@
 // worker thread itself runs the instrumented adapter. It loads the real adapter and, by `loaderData`, counts the
 // package's native parses, returns a wrong state root for one height (A106's "test package returning a wrong root"),
 // spends a long synchronous step in one height's apply (A101's 60 s ledger step), fails, ends the thread, or traps as
-// WebAssembly does. Erasable TypeScript only: the worker runs it through Node.js's type stripping.
+// WebAssembly does; and (task 12.5) records each eviction the package is asked for and each parse whose native objects
+// it is told to free. Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
 import { loadLedgerPackage } from "../../../src/ledger/load.js";
 import type { LedgerName, LedgerPackage, LedgerPackageOptions, StateHandle } from "../../../src/ledger/types.js";
@@ -31,9 +32,14 @@ export interface TestLoaderData {
   readonly exitAt?: string;
   /** The apply of this height throws a `WebAssembly.RuntimeError`, as a trapped module does. */
   readonly trapAt?: string;
+  /** Records every `evict` (its keys, and whether the package refused) and `forgetTransactions` (how many). */
+  readonly recordEvictions?: boolean;
 }
 
 const deserialized: Uint8Array[] = [];
+const evictions: { readonly keys: readonly string[]; readonly refused: boolean }[] = [];
+const forgotten: number[] = [];
+const hexOf = (bytes: Uint8Array): string => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 const hold = { start: "0", end: "0" };
 const wrapped = new WeakSet<object>();
 
@@ -85,10 +91,29 @@ export async function loadLedger(
     if (wrong.has(state)) root[root.length - 1] = (root[root.length - 1] as number) ^ 1;
     return root;
   };
-  return Object.freeze({ ...adapter, apply, stateRoot });
+  if (data.recordEvictions !== true) return Object.freeze({ ...adapter, apply, stateRoot });
+  const evict: LedgerPackage["evict"] = (keys) => {
+    try {
+      adapter.evict(keys);
+      evictions.push({ keys: keys.map(hexOf), refused: false });
+    } catch (error) {
+      evictions.push({ keys: keys.map(hexOf), refused: true });
+      throw error;
+    }
+  };
+  const forgetTransactions: LedgerPackage["forgetTransactions"] = (transactions) => {
+    forgotten.push(transactions.length);
+    adapter.forgetTransactions(transactions);
+  };
+  return Object.freeze({ ...adapter, apply, stateRoot, evict, forgetTransactions });
 }
 
 /** What the loader saw, for the test (`LedgerHost.probe()`). */
-export function probe(): { readonly deserialized: readonly Uint8Array[]; readonly hold: { readonly start: string; readonly end: string } } {
-  return { deserialized: [...deserialized], hold: { ...hold } };
+export function probe(): {
+  readonly deserialized: readonly Uint8Array[];
+  readonly hold: { readonly start: string; readonly end: string };
+  readonly evictions: readonly { readonly keys: readonly string[]; readonly refused: boolean }[];
+  readonly forgotten: readonly number[];
+} {
+  return { deserialized: [...deserialized], hold: { ...hold }, evictions: [...evictions], forgotten: [...forgotten] };
 }
