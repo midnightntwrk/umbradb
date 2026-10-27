@@ -561,4 +561,17 @@ entry starting above 0 is refused at startup with `cannot-start-mid-chain`. Its 
   ledger v8). The `contract-logs` modules store them (task 13.1).
 
 Stored: `core_ledger_state.states` (per block), `segment_results`, `events`, and the state's nodes with their root
-counts (`nodes`, `root_counts`), never a whole serialized state.
+counts (`nodes`, `root_counts`), never a whole serialized state. A restarted process loads the state at its cursor
+from these tables alone; at the first block a v9 runtime builds after v8 blocks the state is converted to v9 before
+the block applies (LG-9).
+
+**Earlier states** (LG-12). The `core` entry's `retainStates` (default 0) keeps the states after the latest block and
+the `retainStates` blocks before it; a revision that raises it fills the window from its start, one that lowers it
+releases the states leaving the window in its first block. `ledger-state` is also a `process` item: with it
+required, `retainedStatesOf(p).load(height, read)` (from `core-ledger-state`'s module) loads the state after `height`
+in the ledger worker and gives its key and root, inside the window at the read's cursor (`window(cursor)` gives it);
+outside it the call rejects with the `UmbraError` `state-not-retained`, which your callback may catch.
+
+**Contracts' states** (LG-13). While `core-contract-states` is active, the `ledger-state` item's `contracts` carries,
+for each contract the block's transactions call or deploy, the keys of its state and of its zswap state after the
+block, persisted and never released: they load from the database whatever later blocks do.

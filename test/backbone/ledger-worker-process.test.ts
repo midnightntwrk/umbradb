@@ -37,6 +37,7 @@ function counted() {
       commit: (...args) => host.commit(...args),
       release: (...args) => host.release(...args),
       load: (...args) => host.load(...args),
+      retained: (...args) => host.retained(...args),
       probe: () => host.probe(),
       activity: () => host.activity(),
       bridge: () => host.bridge(),

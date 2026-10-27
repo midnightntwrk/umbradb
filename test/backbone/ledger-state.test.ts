@@ -6,6 +6,7 @@ import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-resu
 import { openConfiguredDatabase } from "../../src/config/database.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
+import type { TapeRecord } from "../../tools/tape/index.js";
 import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 import {
   callTransaction,
@@ -43,6 +44,7 @@ import {
   recordedGenesis,
   RUNTIME_1_0,
 } from "./ledger-tapes.js";
+import { cappedAt, hashAt, recordingLoads, restartAt, type SeenLoad } from "./ledger-restart.js";
 
 /**
  * `core-ledger-state` through the real process (task 12.3; `openspec/changes/core-arch/acceptance.md` A82, A99, A106,
@@ -324,6 +326,27 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
   /** Six hours of replay: 10,000 heights on a loaded machine. */
   const REPLAY_MS = 6 * 3_600_000;
 
+  /** The devnet's `core` settings: a custom network, its genesis from the manifest, its table v8 then v9 (task 0.3). */
+  const devnetSettings = (found: FoundTape): Readonly<Record<string, unknown>> => ({
+    network: "custom",
+    genesisHash: (found.tape.notes as { genesis: { hash: string } }).genesis.hash,
+    ledgerTable: { rows: [{ specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" }, { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" }] },
+  });
+
+  /** `records` with `chain_getFinalizedHead` answering block `to` (the recording day's head is past the range). */
+  const capTo = (records: readonly TapeRecord[], to: bigint): TapeRecord[] => cappedAt(records, to);
+
+  /** The tape's `midnight_ledgerStateRoot` answers, by block hash, as hex without `0x`. */
+  const rootsOf = (records: readonly TapeRecord[]): Map<string, string> => {
+    const roots = new Map<string, string>();
+    for (const record of records) {
+      if ("method" in record && record.method === "midnight_ledgerStateRoot" && "result" in record) {
+        roots.set((record.params as string[])[0] as string, Buffer.from(record.result as number[]).toString("hex"));
+      }
+    }
+    return roots;
+  };
+
   /**
    * Replays `found` from genesis to `to` with the ledger's core modules on PGlite (its network's `core` settings, a
    * custom network's own), and holds every stored root to the node's answer on the tape. The tape's
@@ -397,20 +420,61 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
     { timeoutMs: 600_000 },
   );
 
-  // The undeployed devnet from genesis up to its upgrade's enactment block U = 102 (v8 throughout); F = 103 onwards
-  // needs the v8 → v9 conversion, task 12.4's (LG-9, A100).
+  // The undeployed devnet from genesis up to its upgrade's enactment block U = 102 (v8 throughout).
   tapeTest(
     "devnet-v8-v9-0-235",
     "A99: every state root of the undeployed devnet from genesis to its upgrade's U (102), v8, is the node's",
+    async (found) => replayRange(found, 102n, devnetSettings(found)),
+    { timeoutMs: REPLAY_MS },
+  );
+  // From genesis to 235 across the upgrade: the v8 state at U (102) converted to v9 before F (103) is applied (task
+  // 12.4; LG-9, A100) — F holds the node's three DUST reapply system transactions and no transaction of ours.
+  tapeTest(
+    "devnet-v8-v9-0-235",
+    "A99 and A100: every state root of the undeployed devnet from genesis to 235, across its v8 → v9 upgrade (F 103 converted), is the node's",
+    async (found) => replayRange(found, 235n, devnetSettings(found)),
+    { timeoutMs: REPLAY_MS },
+  );
+
+  // A102 on the recorded devnet (task 12.4; LG-11): the process stopped at 150, after the conversion, and started again
+  // with the tape's records for the restart (`./ledger-restart.ts`: the header and the metadata at 150, Q135 A) loads
+  // the state at 150 from the database once, and every root to 235 is the node's.
+  tapeTest(
+    "devnet-v8-v9-0-235",
+    "A102: the undeployed devnet stopped at 150 and restarted loads the state at 150 from the database, and every root to 235 is the node's",
     async (found) => {
-      const genesis = (found.tape.notes as { genesis: { hash: string } }).genesis.hash;
-      await replayRange(found, 102n, {
-        network: "custom",
-        genesisHash: genesis,
-        ledgerTable: { rows: [{ specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" }, { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" }] },
-      });
+      const records = capTo(found.read().records, 235n);
+      await backend.start();
+      try {
+        const db = await backend.database();
+        const first = await ingest(db, cappedAt(records, 150n), { start: 0n, core: LEDGER_CORE, settings: devnetSettings(found) });
+        try {
+          await committed(first, 150n, REPLAY_MS);
+        } finally {
+          await first.close();
+        }
+        const loads: SeenLoad[] = [];
+        const second = await ingest(db, restartAt(records, 150n), {
+          start: 0n,
+          core: LEDGER_CORE,
+          settings: devnetSettings(found),
+          ledgerWorker: () => recordingLoads(startLedgerWorker(), loads),
+        });
+        try {
+          await committed(second, 235n, REPLAY_MS);
+        } finally {
+          await second.close();
+        }
+        expect(loads.filter((load) => load.loaded).map((load) => load.height)).toEqual([150n]);
+        expect(hex(loads[0]?.stateRoot as Uint8Array).slice(2)).toBe(rootsOf(records).get(hashAt(records, 150n)));
+        const stored = await db.query("SELECT height::text AS h, encode(state_root, 'hex') AS root FROM core_ledger_state.states ORDER BY height");
+        expect(stored).toHaveLength(236);
+        const roots = rootsOf(records);
+        expect(stored.filter((row) => roots.get(hashAt(records, BigInt(row.h as string))) !== row.root).map((row) => row.h)).toEqual([]);
+      } finally {
+        await backend.stop();
+      }
     },
     { timeoutMs: REPLAY_MS },
   );
-  it.todo("A99: the undeployed devnet's roots from F (103) to 235, across its v8 → v9 upgrade (with task 12.4's conversion)");
 });

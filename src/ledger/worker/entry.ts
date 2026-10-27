@@ -50,6 +50,8 @@ async function run(request: LedgerRequest): Promise<unknown> {
       return engine.release(request.drop);
     case "load":
       return engine.load(request.input);
+    case "retained":
+      return engine.retained(request.input);
     case "probe":
       return loaded.probe?.() ?? null;
   }

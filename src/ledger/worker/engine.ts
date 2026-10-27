@@ -17,17 +17,36 @@
  * **The states.** The engine holds the state committed at a height — its cursor's — and at most one pending state, the
  * one after the block applied last and not yet committed ({@link LedgerEngine.commit}, called once the block's
  * transaction committed). {@link LedgerEngine.apply} applies a block on the committed state at h − 1 only — of the
- * block's ledger, its parent hash the committed block's — and refuses anything else, naming what it holds: a state to
- * load from the database first (a restart) is task 12.4's (`load`, the bridge's, is its seam), and so is a block of
- * another ledger than the state's (the v8 → v9 conversion, LG-9). The same block applied again while pending — a height
- * whose transaction was lost and is processed again — gets the same result back, batch included: the database rolled
- * back, so the batch is still to be written, and the nodes it holds are already stored in the package's memory, so a
- * second apply would flush none of them. A pending state for another block is dropped.
+ * block's ledger, its parent hash the committed block's — and refuses anything else, naming what it holds. The same
+ * block applied again while pending — a height whose transaction was lost and is processed again — gets the same result
+ * back, batch included: the database rolled back, so the batch is still to be written, and the nodes it holds are
+ * already stored in the package's memory, so a second apply would flush none of them. A pending state for another block
+ * is dropped.
+ *
+ * **The state at h − 1 from the database (LG-11; task 12.4).** {@link LedgerEngine.load} makes the state the database
+ * stores for a block — its key, `core_ledger_state.states.state_key` — the committed one: at once when it holds it
+ * already (committed, or pending and committed since in the database, whose commit has not reached it), else read
+ * through the node store from its key, as after a restart, the pending block then dropped. `core-ledger-state` asks it
+ * for the state at h − 1 before every apply, so a restarted process — a fresh worker, which holds nothing — loads the
+ * state at the cursor once, and one that runs on reads nothing.
+ *
+ * **The v8 → v9 conversion (LG-9; task 12.4).** A block of ledger v9 on a committed v8 state is the first block F a v9
+ * runtime built after v8 blocks: the engine converts the state first — the v9 package's `convertFromV8`, the ledger
+ * team's translation shipped with the vendored v9, reading the v8 state's nodes from the node store by its key (the
+ * state at U is committed, so its nodes are in the database) — and then applies F to the converted state, as the node
+ * and the official indexer do, also when F has no transaction; F's batch is the v9 package's (the converted state's new
+ * nodes with F's, the v9 key persisted, the released keys — the v8 state's among them — released). Any other change of
+ * ledger is refused.
  *
  * **What a block gives** ({@link AppliedState}): the state's key and root (LG-15: the main thread compares the root
  * with the node's), its summary (LG-16), the adapter's output (results, events, logs, parameters) and the batch the
- * block writes (LG-11): the new state's key persisted, the previous one released — task 12.4 widens this to the
- * retention window (LG-12) —, flushed with the nodes they reach.
+ * block writes (LG-11): the new state's key persisted, the keys {@link ApplyBlock.release} names released (LG-12's
+ * window, which the main thread computes; the state before the block when none is given), and the state and
+ * zswap-state keys of each contract {@link ApplyBlock.contracts} names persisted and never released (LG-13), flushed
+ * with the nodes they reach; and each such contract's keys ({@link ContractKeys}).
+ *
+ * **A retained state** ({@link LedgerEngine.retained}; LG-12) is loaded by its key aside, its root read and the state
+ * dropped: the states the engine holds are left as they are.
  *
  * **The node store is installed from the first block on** (in the worker: the bridge's). A flushed node is a stored
  * node to the package, whose cache may then drop its bytes while the state still uses it; it reads them again, when it
@@ -83,6 +102,20 @@ export interface ApplyBlock extends BlockId {
   readonly transactions: number;
   /** The chain's outcome of each, `tx-results` (task 12.1a); absent: every transaction replayed. */
   readonly outcomes?: readonly ChainOutcome[];
+  /**
+   * The keys of the stored states the block releases (LG-12's window: the states leaving it, task 12.4), each released
+   * once in the block's batch; absent: the state before the block (`retainStates` 0).
+   */
+  readonly release?: readonly Uint8Array[];
+  /** The contracts whose state and zswap-state keys the block persists, never to be released (LG-13, task 12.4). */
+  readonly contracts?: readonly Uint8Array[];
+}
+
+/** A contract's keys after a block (LG-13): null for a contract the state does not hold. */
+export interface ContractKeys {
+  readonly address: Uint8Array;
+  readonly stateKey: Uint8Array | null;
+  readonly zswapStateKey: Uint8Array | null;
 }
 
 /** What block 0's apply takes (IN-7). */
@@ -98,7 +131,7 @@ export interface GenesisBlock extends BlockId {
   readonly includesBlockZero: boolean;
 }
 
-/** A state to load by its key (task 12.4's restart; the bridge's own test). */
+/** A stored state, by the block it is after and its key (LG-11, LG-12: the restart's load, a retained state's). */
 export interface LoadState extends BlockId {
   readonly ledger: LedgerName;
   readonly stateKey: Uint8Array;
@@ -112,6 +145,14 @@ export interface AppliedState extends BlockId {
   readonly summary: StateSummary;
   readonly output: ApplyOutput;
   readonly batch: NodeBatch;
+  /** The keys of each contract {@link ApplyBlock.contracts} named, in its order (LG-13); none for block 0. */
+  readonly contracts: readonly ContractKeys[];
+}
+
+/** What {@link LedgerEngine.load} gave: the state's root, and whether it was read from the node store. */
+export interface LoadedState {
+  readonly stateRoot: Uint8Array;
+  readonly loaded: boolean;
 }
 
 /** What the engine holds now (for the tests and the host's reports). */
@@ -135,6 +176,14 @@ interface Held extends BlockId {
   readonly adapter: LedgerPackage;
   readonly state: StateHandle;
   readonly key: Uint8Array;
+  readonly root: Uint8Array;
+}
+
+/** What a block's batch persists and releases besides the new state's key (see {@link ApplyBlock}). */
+interface Keys {
+  /** The keys released: the window's, or the state before the block. */
+  readonly release: readonly Uint8Array[];
+  readonly contracts: readonly Uint8Array[];
 }
 
 /** A state after a block, settled: persisted, flushed and described. */
@@ -156,6 +205,9 @@ const hexOf = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.to
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((byte, i) => byte === b[i]);
 const same = (a: BlockId, b: BlockId): boolean => a.height === b.height && sameBytes(a.hash, b.hash);
 const idOf = (block: BlockId): BlockId => Object.freeze({ height: block.height, hash: block.hash });
+
+/** Block 0's keys: nothing released, no contract. */
+const NO_KEYS: Keys = Object.freeze({ release: [], contracts: [] });
 
 /** The ledger worker's engine (see the module comment). */
 export class LedgerEngine {
@@ -221,25 +273,28 @@ export class LedgerEngine {
     return kept.transactions;
   }
 
-  /** The result of applying `input` to `state` (see the module comment): `before` is released, unless null. */
+  /** The result of applying `input` to `state` (see the module comment), its batch persisting and releasing `keys`. */
   #applied(
     adapter: LedgerPackage,
     block: BlockId & { readonly ledger: LedgerName },
     state: StateHandle,
     input: ApplyInput,
-    before: Uint8Array | null,
+    keys: Keys,
   ): Settled {
     const { state: after, output } = adapter.apply(state, input);
-    return this.#settled(adapter, block, after, output, before);
+    return this.#settled(adapter, block, after, output, keys);
   }
 
-  /** `state` after `block` persisted (and `before` released), flushed, and described as plain data. */
+  /**
+   * `state` after `block` persisted, `keys.release` released and `keys.contracts`' keys persisted, flushed, and
+   * described as plain data.
+   */
   #settled(
     adapter: LedgerPackage,
     block: BlockId & { readonly ledger: LedgerName },
     state: StateHandle,
     output: ApplyOutput,
-    before: Uint8Array | null,
+    keys: Keys,
   ): Settled {
     const key = adapter.stateKey(state);
     this.#installStore(adapter, key);
@@ -247,9 +302,26 @@ export class LedgerEngine {
     const stateRoot = adapter.stateRoot(state);
     const summary = adapter.stateSummary(state);
     adapter.persist(key);
-    if (before !== null) adapter.release(before);
+    const contracts = keys.contracts.map((address): ContractKeys => {
+      const stateKey = adapter.contractStateKey(state, address);
+      const zswapStateKey = adapter.contractZswapStateKey(state, address);
+      if (stateKey !== null) adapter.persist(stateKey);
+      if (zswapStateKey !== null) adapter.persist(zswapStateKey);
+      return { address, stateKey, zswapStateKey };
+    });
+    for (const released of keys.release) adapter.release(released);
     const batch = adapter.flush();
-    const result: AppliedState = { ledger: block.ledger, height: block.height, hash: block.hash, stateKey: key, stateRoot, summary, output, batch };
+    const result: AppliedState = {
+      ledger: block.ledger,
+      height: block.height,
+      hash: block.hash,
+      stateKey: key,
+      stateRoot,
+      summary,
+      output,
+      batch,
+      contracts,
+    };
     return { result, state, key };
   }
 
@@ -273,8 +345,22 @@ export class LedgerEngine {
 
   /** Records `settled` as the pending state after `block`. */
   #pend(adapter: LedgerPackage, block: BlockId & { readonly ledger: LedgerName }, settled: Settled): AppliedState {
-    this.#pending = { ...idOf(block), ledger: block.ledger, adapter, state: settled.state, key: settled.key, result: settled.result };
+    this.#pending = {
+      ...idOf(block),
+      ledger: block.ledger,
+      adapter,
+      state: settled.state,
+      key: settled.key,
+      root: settled.result.stateRoot,
+      result: settled.result,
+    };
     return settled.result;
+  }
+
+  /** The node store, which a load and a conversion read through; throws on the main thread, which has none. */
+  #storeFor(what: string): NodeStore {
+    if (this.#store === undefined) throw new Error(`the ledger engine has no node store to ${what} from (the main thread has none)`);
+    return this.#store;
   }
 
   /** Block 0 (IN-7; see the module comment). */
@@ -305,12 +391,12 @@ export class LedgerEngine {
         try {
           const { state: after, output } = adapter.apply(empty, block);
           adapter.dispose(after);
-          settled = this.#settled(adapter, input, genesis, output, null);
+          settled = this.#settled(adapter, input, genesis, output, NO_KEYS);
         } finally {
           adapter.dispose(empty);
         }
       } else {
-        settled = this.#applied(adapter, input, genesis, block, null);
+        settled = this.#applied(adapter, input, genesis, block, NO_KEYS);
         adapter.dispose(genesis);
       }
     } catch (error) {
@@ -325,7 +411,7 @@ export class LedgerEngine {
     if (this.#pending !== null && same(this.#pending, input)) return this.#pending.result;
     const committed = this.#committed;
     if (committed === null) {
-      throw new Error(`block ${input.height} cannot be applied: the ledger worker holds no state (loading a stored state is task 12.4's)`);
+      throw new Error(`block ${input.height} cannot be applied: the ledger worker holds no state (the stored state at h − 1 is loaded first, LG-11)`);
     }
     if (committed.height !== input.height - 1n) {
       throw new Error(`block ${input.height} cannot be applied: the ledger worker holds the state at ${committed.height}, not ${input.height - 1n}`);
@@ -333,30 +419,38 @@ export class LedgerEngine {
     if (!sameBytes(committed.hash, input.parentHash)) {
       throw new Error(`block ${input.height} cannot be applied: its parent is not block ${committed.height}, whose state the ledger worker holds`);
     }
-    if (committed.ledger !== input.ledger) {
+    const converts = committed.ledger === "v8" && input.ledger === "v9";
+    if (committed.ledger !== input.ledger && !converts) {
       throw new Error(
-        `block ${input.height} is a ${input.ledger} block on a ${committed.ledger} state: the conversion (LG-9) is task 12.4's`,
+        `block ${input.height} is a ${input.ledger} block on a ${committed.ledger} state: the ledger worker converts a ` +
+          "state from one ledger to another only from v8 to v9, at the first v9 block (LG-9: v8 → v9)",
       );
     }
     const transactions = this.#transactions(input, input.ledger, input.transactions);
     this.#dropPending();
-    const settled = this.#applied(
-      committed.adapter,
-      input,
-      committed.state,
-      {
-        transactions: [...transactions],
-        ...(input.outcomes === undefined ? {} : { outcomes: input.outcomes }),
-        height: input.height,
-        hash: input.hash,
-        parentHash: input.parentHash,
-        timestampMs: input.timestampMs,
-        parentTimestampMs: input.parentTimestampMs,
-        firstRegularAtParentTime: input.firstRegularAtParentTime,
-      },
-      committed.key,
-    );
-    return this.#pend(committed.adapter, input, settled);
+    const block: ApplyInput = {
+      transactions: [...transactions],
+      ...(input.outcomes === undefined ? {} : { outcomes: input.outcomes }),
+      height: input.height,
+      hash: input.hash,
+      parentHash: input.parentHash,
+      timestampMs: input.timestampMs,
+      parentTimestampMs: input.parentTimestampMs,
+      firstRegularAtParentTime: input.firstRegularAtParentTime,
+    };
+    const keys: Keys = { release: input.release ?? [committed.key], contracts: input.contracts ?? [] };
+    if (!converts) return this.#pend(committed.adapter, input, this.#applied(committed.adapter, input, committed.state, block, keys));
+    // LG-9: the v8 state at U converted first, then F applied to it (see the module comment).
+    const adapter = await this.#adapter("v9");
+    const convert = adapter.convertFromV8;
+    if (convert === undefined) throw new Error("the ledger v9 adapter has no convertFromV8 (LG-9)");
+    const converted = convert(committed.key, this.#storeFor("convert the v8 state"));
+    this.#installed.add(adapter);
+    try {
+      return this.#pend(adapter, input, this.#applied(adapter, input, converted, block, keys));
+    } finally {
+      adapter.dispose(converted);
+    }
   }
 
   /** `block` committed (its `on-after-db-write`): its pending state becomes the committed one. False when not pending. */
@@ -364,7 +458,14 @@ export class LedgerEngine {
     const pending = this.#pending;
     if (pending === null || !same(pending, block)) return false;
     if (this.#committed !== null) this.#committed.adapter.dispose(this.#committed.state);
-    this.#committed = { ...idOf(pending), ledger: pending.ledger, adapter: pending.adapter, state: pending.state, key: pending.key };
+    this.#committed = {
+      ...idOf(pending),
+      ledger: pending.ledger,
+      adapter: pending.adapter,
+      state: pending.state,
+      key: pending.key,
+      root: pending.root,
+    };
     this.#pending = null;
     return true;
   }
@@ -382,15 +483,41 @@ export class LedgerEngine {
     return dropped;
   }
 
-  /** The state with root node `stateKey`, read from the node store, as the committed state at `input` (task 12.4's seam). */
-  async load(input: LoadState): Promise<{ readonly stateRoot: Uint8Array }> {
-    if (this.#store === undefined) throw new Error("the ledger engine has no node store to load a state from (the main thread has none)");
+  /**
+   * The state the database stores for block `input`, by its key, as the committed state (LG-11; see the module
+   * comment): the one held already when it is that block's with that key, else read through the node store.
+   */
+  async load(input: LoadState): Promise<LoadedState> {
+    const holds = (held: Held | null): boolean =>
+      held !== null && same(held, input) && held.ledger === input.ledger && sameBytes(held.key, input.stateKey);
+    const { committed: before, pending } = { committed: this.#committed, pending: this.#pending };
+    if (before !== null && holds(before)) return { stateRoot: before.root, loaded: false };
+    if (pending !== null && holds(pending)) {
+      this.commit(input);
+      return { stateRoot: pending.root, loaded: false };
+    }
+    const store = this.#storeFor("load a state");
     const adapter = await this.#adapter(input.ledger);
-    const state = adapter.load(input.stateKey, this.#store);
+    const state = adapter.load(input.stateKey, store);
+    this.#installed.add(adapter);
     this.#dropPending();
     if (this.#committed !== null) this.#committed.adapter.dispose(this.#committed.state);
-    this.#committed = { ...idOf(input), ledger: input.ledger, adapter, state, key: input.stateKey };
-    return { stateRoot: adapter.stateRoot(state) };
+    const root = adapter.stateRoot(state);
+    this.#committed = { ...idOf(input), ledger: input.ledger, adapter, state, key: input.stateKey, root };
+    return { stateRoot: root, loaded: true };
+  }
+
+  /** A retained state's root, the state loaded by its key aside and dropped (LG-12; see the module comment). */
+  async retained(input: LoadState): Promise<{ readonly stateRoot: Uint8Array }> {
+    const store = this.#storeFor("load a retained state");
+    const adapter = await this.#adapter(input.ledger);
+    const state = adapter.load(input.stateKey, store);
+    this.#installed.add(adapter);
+    try {
+      return { stateRoot: adapter.stateRoot(state) };
+    } finally {
+      adapter.dispose(state);
+    }
   }
 
   /**

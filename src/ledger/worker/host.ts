@@ -39,7 +39,16 @@
 import { existsSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import type { LedgerName, ParsedTransaction } from "../types.js";
-import { type AppliedState, type ApplyBlock, type BlockId, type GenesisBlock, LedgerEngine, type LedgerLoader, type LoadState } from "./engine.js";
+import {
+  type AppliedState,
+  type ApplyBlock,
+  type BlockId,
+  type GenesisBlock,
+  LedgerEngine,
+  type LedgerLoader,
+  type LoadedState,
+  type LoadState,
+} from "./engine.js";
 import { BridgeServer, bridgeMemory, type NodeReader } from "./node-bridge.js";
 import type { FromLedgerWorker, LedgerRequest, LedgerRequestKind, SerializedError, ToLedgerWorker } from "./protocol.js";
 
@@ -76,8 +85,13 @@ export interface LedgerHost {
   commit(block: BlockId): Promise<boolean>;
   /** Drops kept parses: of heights up to `upTo`, and of the blocks `hashes` names. */
   release(drop: { readonly upTo?: bigint; readonly hashes?: readonly Uint8Array[] }): Promise<number>;
-  /** The state with root node `stateKey`, read through `read`, as the committed one (task 12.4's seam). */
-  load(input: LoadState, read?: NodeReader): Promise<{ readonly stateRoot: Uint8Array }>;
+  /**
+   * The state the database stores for a block, by its key, as the committed one — read through `read` unless the
+   * worker holds it already (LG-11; task 12.4: `core-ledger-state` asks for the state at h − 1 before each apply).
+   */
+  load(input: LoadState, read?: NodeReader): Promise<LoadedState>;
+  /** A retained state's root, the state loaded by its key aside through `read` (LG-12; task 12.4). */
+  retained(input: LoadState, read?: NodeReader): Promise<{ readonly stateRoot: Uint8Array }>;
   /** A test package's loader's `probe()` (plain data), or null without one. */
   probe(): Promise<unknown>;
   /** The step in progress, or null. */
@@ -152,6 +166,7 @@ function heightOf(request: LedgerRequest): bigint | null {
     case "genesis":
     case "apply":
     case "load":
+    case "retained":
       return request.input.height;
     case "genesis-root":
       return 0n;
@@ -265,6 +280,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     commit: (block) => send({ type: "commit", block }),
     release: (drop) => send({ type: "release", drop }),
     load: (input, read) => send({ type: "load", input }, read),
+    retained: (input, read) => send({ type: "retained", input }, read),
     probe: () => send({ type: "probe" }),
     activity() {
       const [first] = pending.values();
@@ -331,6 +347,7 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
     commit: (block) => run("commit", block.height, (e) => e.commit(block)),
     release: (drop) => run("release", null, (e) => e.release(drop)),
     load: (input) => run("load", input.height, (e) => e.load(input)),
+    retained: (input) => run("retained", input.height, (e) => e.retained(input)),
     probe: () => run("probe", null, () => null),
     activity: () => (current === null ? null : Object.freeze({ kind: current.kind, height: current.height, sinceMs: performance.now() - current.sent })),
     bridge: () => ({ requests: 0, nodes: 0 }),

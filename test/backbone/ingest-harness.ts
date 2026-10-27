@@ -136,6 +136,11 @@ export interface IngestOptions {
   readonly settings?: Readonly<Record<string, unknown>>;
   /** The core's stop (CF-4): the last height processed (a recorded tape's range end, task 12.3). */
   readonly stop?: bigint;
+  /**
+   * Later revisions of the `core` entry (CF-5; task 12.4's `retainStates` and `sweep` changes): each from its `start`
+   * with the first revision's settings and its own on top.
+   */
+  readonly revisions?: readonly { readonly start: bigint; readonly settings: Readonly<Record<string, unknown>> }[];
   /** The node source's class (a negative control's), or a factory wrapping the process's client (an instrument). */
   readonly Source?: SourceClass;
   readonly client?: (client: NodeClient) => NodeClient;
@@ -183,11 +188,13 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
   const network = options.settings?.network;
   const genesisHash = genesisOf(records);
   const genesis = (network === undefined || network === "custom") && genesisHash !== undefined ? { genesisHash } : {};
+  const extra = { node: node.url, ...genesis, ...options.settings };
   const entries = [
     core(db.setting, Number(options.start), {
-      extra: { node: node.url, ...genesis, ...options.settings },
+      extra,
       ...(options.stop === undefined ? {} : { stop: Number(options.stop) }),
     }),
+    ...(options.revisions ?? []).map((revision) => core(db.setting, Number(revision.start), { extra: { ...extra, ...revision.settings } })),
     ...(options.core ?? []).map((module) => entryOf(module, options.startOf?.(module.id) ?? Number(options.start))),
     ...user.map((module) => entryOf(module, Number(options.start))),
   ];

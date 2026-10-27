@@ -812,8 +812,8 @@ its kind, its block's height, how long it has run since it began (a request sent
 worker). A worker that ends, throws outside a request, or whose package traps (a WebAssembly `RuntimeError`, after which
 the module's memory is in no known state: the thread is ended) fails the request in progress and every later one with
 one `LedgerWorkerFailure`: the module awaiting it fails, and processing halts with `callback-error` naming the module
-and the point (§11). Loading a stored state through the bridge (`load`) exists for task 12.4's restart and is tested
-from a database; nothing calls it at startup yet.
+and the point (§11). Loading a stored state through the bridge (`load`) is how a restarted process gets the state at
+its cursor (task 12.4, §5.4).
 
 ### 5.4 Storage, retention and sweep (LG-11 to LG-14)
 
@@ -822,6 +822,26 @@ computation; `on-db-write` writes the flushed batch, the `states` row, the reten
 sweep follows `gc-v1` (`storage-core/src/gc.rs:93-250`) with a node budget; its grey and mark sets are tables, its
 rounds take keys in byte order, and deleted nodes are evicted from the worker's caches so later blocks insert them again
 (`layout-v2` writes every created node, `storage-core/src/backend.rs:771-790`).
+
+As built (task 12.4, `src/backbone/core-ledger-state/`, `src/ledger/worker/engine.ts`): **the state at h − 1.** Before
+each apply after block 0, `on-compute` reads the state stored after h − 1 (`states.state_key`, `state_root`) with that
+block's ledger (`core_block_commit.blocks.ledger_version`) and asks the worker to hold it (`LedgerHost.load`): a worker
+that holds it — committed, or pending and committed since in the database — keeps it and reads nothing; a fresh one (a
+restarted process) loads it from its key through the node-store bridge, the package checking every node against its key
+(a node that does not match aborts it: the worker fails, `callback-error`); the root it gives must be the stored root,
+the node's (LG-11). No restart step of its own: the first block after a restart loads the state at the cursor, once.
+**The conversion** (LG-9): a v9 block on a v8 state is F; the worker converts the state with the v9 package's
+`convertFromV8` (the v8 nodes read through the bridge by the v8 state's key) and applies F to the converted state, F's
+batch the v9 package's; any other change of ledger is refused. **The window** (LG-12, `retention.ts`): from the `core`
+entry's revisions in the `config` item, L(h) = max(L(h − 1), h − R(h)), the lowest height alive after block h; block h
+releases the states of L(h − 1) to L(h) − 1, their keys read from `states` and passed to the worker, which releases them
+in the block's batch beside the new state's persisted key. `ledger-state` is also a `process` item, published at
+`on-start-db`: `load(height, read)` loads the state after a height between L(c) and the read's cursor c in the worker
+and gives its key and root (`RetainedState`), and fails with `state-not-retained` (§11) outside. **Contract keys**
+(LG-13): while `core-contract-states` (task 13.1) is active at h, the worker persists the state and zswap-state keys
+(`contractStateKey`, `contractZswapStateKey`) of each contract the block's transactions call or deploy, in byte order,
+in the block's batch, never to be released; the `ledger-state` item carries them (`contracts`) for that module to store
+(decision record question Q143 on the route).
 
 ### 5.5 Ledger tasks (LG-17, Q49)
 
@@ -1231,6 +1251,9 @@ indexer calls something its tape lacks fails at once, naming the method, instead
 `cannot-record` (`RecordingError`: the session, the side the frame came from, a `reason`) voids a recording with a
 frame the tape node could not give back byte for byte; the variant transforms' `bad-transform` (`TransformError`, a
 `reason`) refuses what a tape lacks or cannot hold.
+
+**A module's call fails** (an `UmbraError` the module may catch; uncaught, its callback fails with `callback-error`):
+`state-not-retained` (LG-12: a ledger state outside the retention window, task 12.4).
 
 ## 12. Exported surface and command (LS-1, LS-6)
 

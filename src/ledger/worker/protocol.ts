@@ -16,6 +16,7 @@ export type LedgerRequest =
   | { readonly type: "commit"; readonly block: BlockId }
   | { readonly type: "release"; readonly drop: { readonly upTo?: bigint; readonly hashes?: readonly Uint8Array[] } }
   | { readonly type: "load"; readonly input: LoadState }
+  | { readonly type: "retained"; readonly input: LoadState }
   | { readonly type: "probe" };
 
 /** A request's kind. */

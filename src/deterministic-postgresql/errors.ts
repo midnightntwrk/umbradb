@@ -178,6 +178,11 @@ export const ERROR_CODES = [
    * `src/backbone/core-ledger-state/`): processing halts at that height, nothing of the block stored.
    */
   "root-mismatch",
+  /**
+   * A module asked `core-ledger-state` for the ledger state after a height outside LG-12's retention window at its
+   * read's cursor (task 12.4, `src/backbone/core-ledger-state/`): the call fails; uncaught, the module's callback fails.
+   */
+  "state-not-retained",
 ] as const;
 
 /**

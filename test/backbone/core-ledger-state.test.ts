@@ -10,6 +10,9 @@ import {
   itemsOf,
   NODES_PER_STATEMENT,
   parentTimeOf,
+  retainedStates,
+  retainedStatesOf,
+  revisionsOf,
   writeBlock,
 } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -23,7 +26,11 @@ import type { BlockContext, ProcessContext } from "../../src/modules/declaration
 // ones.
 
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
-const context = (): ProcessContext => ({ items: new Map(), revisions: [], publish() {} });
+/** A `config` item whose `core` revisions have the `retainStates` of each `[start, retainStates]` (task 12.4). */
+const config = (...revisions: readonly (readonly [number, number])[]) => ({
+  entries: revisions.map(([start, retainStates]) => ({ id: "core", start, settings: { retainStates } })),
+});
+const context = (core = config([0, 0])): ProcessContext => ({ items: new Map([["config", core]]), revisions: [], publish() {} });
 
 function block(height: bigint, items: Record<string, unknown> = {}): BlockContext {
   return {
@@ -58,15 +65,27 @@ function applied(height: bigint, rest: Partial<AppliedState> = {}): AppliedState
       dustGenerationRoot: null,
     },
     output: { results: [], events: [], logs: [], parameters: Uint8Array.of(1) },
+    contracts: [],
     batch: { inserts: [], rootCounts: [] },
     ...rest,
   };
 }
 
+/** The root the fake worker gives for the stored state at h − 1 ({@link reading}'s). */
+const STORED_ROOT = Uint8Array.of(0, ...hash(0x30));
+
 /** A fake ledger worker recording what it is asked, and a source answering `root`. */
-function bound(root: Uint8Array, result: AppliedState = applied(1n)) {
+function bound(root: Uint8Array, result: AppliedState = applied(1n), p: ProcessContext = context()) {
   const asked: unknown[] = [];
   const host = {
+    async load(input: unknown, read: unknown) {
+      asked.push({ load: input, read: read !== undefined });
+      return { stateRoot: STORED_ROOT, loaded: false };
+    },
+    async retained(input: unknown) {
+      asked.push({ retained: input });
+      return { stateRoot: STORED_ROOT };
+    },
     async apply(input: unknown, read: unknown) {
       asked.push({ apply: input, read: read !== undefined });
       return result;
@@ -92,12 +111,39 @@ function bound(root: Uint8Array, result: AppliedState = applied(1n)) {
     },
   } as unknown as LedgerHost;
   const source = { ledgerStateRoot: async () => root, genesisState: async () => Uint8Array.of(7) };
-  const p = context();
   bindCoreLedgerState(p, { ledger: host, source });
   return { p, asked, host };
 }
 
-const reading = (rows: Record<string, unknown>[]) => ({ query: async () => rows });
+/**
+ * A read answering each of `core-ledger-state`'s statements: the parent's time `rows`; the state stored after a block
+ * (key `0x30…`, {@link STORED_ROOT}, ledger v9) unless `state` says otherwise; and the keys of the states from `$1` to
+ * `$2` − 1, `0x30 + height` each, unless `keys` gives them. `queries` records each statement's parameters.
+ */
+function reading(
+  rows: Record<string, unknown>[],
+  rest: { state?: Record<string, unknown> | null; keys?: (from: bigint, to: bigint) => Record<string, unknown>[]; height?: bigint | null } = {},
+) {
+  const queries: unknown[][] = [];
+  return {
+    height: rest.height ?? null,
+    queries,
+    async query(sql: string, params: unknown[] = []) {
+      queries.push(params);
+      if (sql.includes("extract(epoch")) return rows;
+      if (sql.includes("JOIN core_block_commit.blocks")) {
+        if (rest.state === null) return [];
+        return [{ state_key: hash(0x30), state_root: STORED_ROOT, hash: hash(Number(params[0]) + 1), ledger_version: "v9", ...rest.state }];
+      }
+      if (sql.includes("height >= $1")) {
+        const [from, to] = params as [bigint, bigint];
+        if (rest.keys !== undefined) return rest.keys(from, to);
+        return Array.from({ length: Number(to - from) }, (_, i) => ({ height: from + BigInt(i), state_key: hash(0x30 + Number(from) + i) }));
+      }
+      throw new Error(`the fake read has no answer for ${sql}`);
+    },
+  };
+}
 
 describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
   it("is bound once per process context, and refuses to run unbound", async () => {
@@ -110,7 +156,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
   it("applies a block with LG-8's rule for its runtime and its parent's time read at h − 1", async () => {
     const { p, asked } = bound(applied(1n).stateRoot);
     await applyBlock(p, block(1n), reading([{ ms: 1_750_000_000_000n }]));
-    expect(asked[0]).toMatchObject({
+    expect(asked[1]).toMatchObject({
       apply: { height: 1n, timestampMs: 1_750_000_006_000n, parentTimestampMs: 1_750_000_000_000n, firstRegularAtParentTime: true, transactions: 0, outcomes: [] },
       read: true,
     });
@@ -121,14 +167,14 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
 
   it("refuses outcomes of another number than the block's transactions", async () => {
     const { p } = bound(applied(1n).stateRoot);
-    const parsed = { ledger: "v9", transactions: [{ index: 0 }] };
+    const parsed = { ledger: "v9", transactions: [{ index: 0, segments: [] }] };
     await expect(applyBlock(p, block(1n, { "block-parsed": parsed, "tx-results": [] }), reading([{ ms: 1n }]))).rejects.toThrow(
       /0 chain outcomes for 1 transactions/,
     );
     // A rule replacing the outcomes (a negative control's) is given none.
     const { p: q, asked } = bound(applied(1n).stateRoot);
     await applyBlock(q, block(1n, { "block-parsed": parsed, "tx-results": ["success"] }), reading([{ ms: 1n }]), { outcomes: () => undefined });
-    expect(asked[0]).not.toHaveProperty("apply.outcomes");
+    expect(asked[1]).not.toHaveProperty("apply.outcomes");
   });
 
   it("halts with root-mismatch, naming both roots, when the state's root is not the node's (LG-15)", async () => {
@@ -146,6 +192,7 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     const p = context();
     const { host } = bound(Uint8Array.of(1));
     bindCoreLedgerState(p, { ledger: host, source: { ledgerStateRoot: async () => Promise.reject(new Error("node down")), genesisState: async () => Uint8Array.of(7) } });
+    void STORED_ROOT;
     await expect(applyBlock(p, block(1n), reading([{ ms: 1n }]))).rejects.toThrow("node down");
     // At block 0 the outcomes a rule gives (none) are passed as they are.
     const { p: q, asked } = bound(applied(0n).stateRoot, applied(0n));
@@ -221,6 +268,100 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     expect(asked.at(-1)).toEqual({ commit: { height: 1n, hash: hash(2) } });
     // Unbound, the commit is no one's.
     await points["on-after-db-write"]?.(context(), block(1n), {} as never);
+  });
+
+  it("has the worker hold the state stored at h − 1 before the apply, and fails when its root is not the stored one (LG-11)", async () => {
+    const { p, asked } = bound(applied(3n).stateRoot, applied(3n));
+    const read = reading([{ ms: 1n }]);
+    await applyBlock(p, block(3n), read);
+    expect(asked[0]).toEqual({ load: { ledger: "v9", height: 2n, hash: hash(3), stateKey: hash(0x30) }, read: true });
+    expect(read.queries[0]).toEqual([2n]);
+    // A stored state whose root is not what the worker loads, and a height with no stored state, fail the block.
+    const { p: q } = bound(applied(3n).stateRoot, applied(3n));
+    await expect(applyBlock(q, block(3n), reading([{ ms: 1n }], { state: { state_root: Uint8Array.of(9) } }))).rejects.toThrow(
+      /loaded for block 2 has the root 0x0030.*stores 0x09 for it \(LG-11\)/,
+    );
+    await expect(applyBlock(q, block(3n), reading([{ ms: 1n }], { state: null }))).rejects.toThrow(/holds no state after block 2 \(LG-11\)/);
+    await expect(applyBlock(q, block(3n), reading([{ ms: 1n }], { state: { state_key: "no" } }))).rejects.toThrow(TypeError);
+    // A negative control's rule: no load asked.
+    const { p: r, asked: none } = bound(applied(3n).stateRoot, applied(3n));
+    await applyBlock(r, block(3n), reading([{ ms: 1n }]), { loadParent: false });
+    expect(none.some((call) => "load" in (call as object))).toBe(false);
+  });
+
+  it("gives the apply the block's ledger and the keys of the states leaving LG-12's window, refusing a missing one", async () => {
+    // retainStates 2 until 9, then 0 from 10: block 10 releases the states of 7 to 9 (L(9) = 7, L(10) = 10).
+    const p = context(config([0, 2], [10, 0]));
+    const { asked } = bound(applied(10n).stateRoot, applied(10n), p);
+    const read = reading([{ ms: 1n }]);
+    await applyBlock(p, block(10n, { "ledger-version": "v9" }), read, { ledgerOf: (b, parent) => (b.height === 10n ? parent : "v8") });
+    expect(read.queries.find((q) => q.length === 2)).toEqual([7n, 10n]);
+    expect(asked[1]).toMatchObject({ apply: { ledger: "v9", release: [hash(0x37), hash(0x38), hash(0x39)], contracts: [] } });
+    // With a constant window of 2, block 11 of the same history releases nothing new below 10 … and block 5 releases 2.
+    const { p: q, asked: told } = bound(applied(5n).stateRoot, applied(5n), context(config([0, 2])));
+    await applyBlock(q, block(5n), reading([{ ms: 1n }]));
+    expect(told[1]).toMatchObject({ apply: { release: [hash(0x32)] } });
+    // A window the table cannot fill (a states row missing) fails the block.
+    const { p: s } = bound(applied(10n).stateRoot, applied(10n), context(config([0, 2], [10, 0])));
+    await expect(applyBlock(s, block(10n), reading([{ ms: 1n }], { keys: () => [{ height: 7n, state_key: hash(1) }] }))).rejects.toThrow(
+      /releases the states of 7 to 9, and core_ledger_state.states holds 1 of them/,
+    );
+    // The parent's ledger reaches the rule: v8 at h − 1.
+    const { p: t, asked: v8 } = bound(applied(4n).stateRoot, applied(4n));
+    await applyBlock(t, block(4n), reading([{ ms: 1n }], { state: { ledger_version: "v8" } }), { ledgerOf: (_b, parent) => parent });
+    expect(v8[1]).toMatchObject({ apply: { ledger: "v8" } });
+  });
+
+  it("persists the keys of the contracts the block calls or deploys, each once in byte order, while core-contract-states is active (LG-13)", async () => {
+    const parsed = {
+      ledger: "v9",
+      transactions: [
+        { index: 0, segments: [{ segment: 0, calls: [{ address: hash(9), entryPoint: Uint8Array.of(1) }], deploys: [{ address: hash(2) }] }] },
+        { index: 1, segments: [{ segment: 1, calls: [{ address: hash(2), entryPoint: Uint8Array.of(1) }, { address: hash(5), entryPoint: Uint8Array.of(2) }], deploys: [] }] },
+      ],
+    };
+    const items = { "block-parsed": parsed, "tx-results": ["success", "success"] };
+    const { p, asked } = bound(applied(3n).stateRoot, applied(3n));
+    await applyBlock(p, { ...block(3n, items), active: (id) => id === "core-contract-states" }, reading([{ ms: 1n }]));
+    expect(asked[1]).toMatchObject({ apply: { contracts: [hash(2), hash(5), hash(9)] } });
+    const { p: q, asked: inactive } = bound(applied(3n).stateRoot, applied(3n));
+    await applyBlock(q, { ...block(3n, items), active: () => false }, reading([{ ms: 1n }]));
+    expect(inactive[1]).toMatchObject({ apply: { contracts: [] } });
+    // The item carries the keys the worker persisted.
+    const keys = [{ address: hash(2), stateKey: hash(3), zswapStateKey: hash(4) }];
+    expect(itemsOf(applied(3n, { contracts: keys })).state.contracts).toEqual(keys);
+  });
+
+  it("publishes its retained states at on-start-db: the window at a cursor, a load inside it, state-not-retained outside (LG-12)", async () => {
+    const p = context(config([0, 3]));
+    const { asked } = bound(applied(1n).stateRoot, applied(1n), p);
+    let published: [string, unknown] | undefined;
+    await CORE_LEDGER_STATE.points["on-start-db"]?.({ ...p, publish: (item, value) => (published = [item, value]) }, {} as never);
+    expect(published?.[0]).toBe("ledger-state");
+    const states = retainedStates(p);
+    expect(states.window(null)).toBeNull();
+    expect(states.window(10n)).toEqual({ from: 7n, to: 10n });
+    const at10 = reading([], { height: 10n });
+    await expect(states.load(7n, at10)).resolves.toEqual({ ledger: "v9", height: 7n, hash: hash(8), stateKey: hash(0x30), stateRoot: STORED_ROOT });
+    expect(asked.at(-1)).toEqual({ retained: { ledger: "v9", height: 7n, hash: hash(8), stateKey: hash(0x30) } });
+    for (const [height, read] of [
+      [6n, at10],
+      [11n, at10],
+      [0n, reading([], { height: null })],
+    ] as const) {
+      const error = await states.load(height, read).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(UmbraError);
+      expect(error).toMatchObject({ code: "state-not-retained", details: { height } });
+    }
+    await expect(states.load(6n, at10)).rejects.toThrow(/after block 6 is not retained at the cursor 10: the window holds the states of 7 to 10/);
+    await expect(states.load(0n, reading([], { height: null }))).rejects.toThrow(/no block is committed/);
+    // A stored state whose root the worker does not give back fails.
+    await expect(states.load(8n, reading([], { height: 10n, state: { state_root: Uint8Array.of(1) } }))).rejects.toThrow(/another root/);
+    // A module requiring ledger-state finds it as its process item.
+    const module: ProcessContext = { items: new Map([["ledger-state", states]]), revisions: [], publish() {} };
+    expect(retainedStatesOf(module)).toBe(states);
+    expect(() => retainedStatesOf(context())).toThrow(/does not require ledger-state/);
+    expect(() => revisionsOf({ items: new Map(), revisions: [], publish() {} })).toThrow(/without the config item/);
   });
 
   it("declares its tables, cannot start mid-chain, and creates no table it does not declare", () => {

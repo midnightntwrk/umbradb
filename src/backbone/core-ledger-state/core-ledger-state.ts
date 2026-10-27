@@ -31,10 +31,21 @@
  * `on-after-db-write`** it tells the worker the block committed, so the state after h becomes the one h + 1 applies on
  * — without waiting for the answer, as that callback holds a read (see the callback).
  *
- * **What task 12.4 adds** (LG-9, LG-11 to LG-13): the state's reload at a restart (today a worker with no state, or one
- * at another height, refuses the block, naming what it holds), the retention window (today the state before each block
- * is released in its batch, as with `retainStates` 0, whatever the setting), contract-state keys and the v8 → v9
- * conversion (today a block of another ledger than the state's is refused). Task 12.5 adds the sweep's tables.
+ * **The stored state (task 12.4; LG-9, LG-11 to LG-13).** Before each apply after block 0 it reads the state at h − 1
+ * from `states` (its key and root) with the block's ledger there (`core_block_commit.blocks`), and asks the worker to
+ * hold that state (`LedgerHost.load`): one it holds already is kept, else — a restarted process, a fresh worker — it is
+ * read from its key through the node-store bridge, each node checked against its key by the package (a node that does
+ * not match aborts it: the worker fails and processing halts with `callback-error`); the root the worker gives must be
+ * the stored one, the node's at h − 1 (LG-11). A block of ledger v9 on a v8 state is F: the worker converts the state
+ * first and applies F to it (LG-9, `../../ledger/worker/engine.ts`). The block's batch releases the states leaving
+ * LG-12's window — the `core` entry's `retainStates` at each height, read from the `config` item
+ * (`./retention.ts`): the heights L(h − 1) to L(h) − 1, their keys read from `states` — and, while
+ * `core-contract-states` (task 13.1) is active at h, persists the state and zswap-state keys of every contract the
+ * block's transactions call or deploy, never released (LG-13): the `ledger-state` item carries them, for that module to
+ * store. The `ledger-state` item is also a `process` item ({@link RetainedStates}, published at `on-start-db`): a
+ * module requiring it loads the state after a height inside the window at its read's cursor, in the worker, and gets it
+ * as plain data; outside the window the load fails with `state-not-retained` (LG-12). Task 12.5 adds the sweep's
+ * tables.
  *
  * The declaration ({@link CORE_LEDGER_STATE}) is a constant over its rules; a negative control's build composes its own
  * with {@link coreLedgerState}, one rule replaced.
@@ -42,11 +53,12 @@
 
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
+import type { CheckedConfig } from "../../config/validate.js";
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { firstRegularAtParentTime, parentTimestampMs } from "../../ledger/replay.js";
 import type { ChainOutcome, LedgerEvent, LedgerName, StateSummary, TransactionResult, VmLog } from "../../ledger/types.js";
-import type { AppliedState } from "../../ledger/worker/engine.js";
+import type { AppliedState, ContractKeys } from "../../ledger/worker/engine.js";
 import type { LedgerHost } from "../../ledger/worker/host.js";
 import { type BlockContext, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
 import { BLOCKS_TABLE, blockHeaderOf, ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
@@ -54,9 +66,13 @@ import type { BlockLedgerSource } from "../core-block-fetch/ledger-source.js";
 import { blockParsedItemOf } from "../core-block-parsed/core-block-parsed.js";
 import { txResultsItemOf } from "../core-tx-results/core-tx-results.js";
 import { heightPartitionsSql } from "../height-partitions.js";
+import { type CoreRevision, coreRevisionsOf, releasedBy, retainedFrom, retentionWindow } from "./retention.js";
 
 /** The module's id. */
 export const CORE_LEDGER_STATE_ID = "core-ledger-state";
+
+/** Task 13.1's module, whose contracts' keys `core-ledger-state` persists while it is active (LG-13). */
+export const CORE_CONTRACT_STATES_ID = "core-contract-states";
 
 /** The `block` and `table` items it provides (LG-16). */
 export const LEDGER_STATE_ITEM = "ledger-state";
@@ -143,6 +159,11 @@ ${heightPartitionsSql(EVENTS_TABLE)}`,
 ]);
 
 const PARENT_TIME_SQL = `SELECT (extract(epoch FROM block_time) * 1000)::bigint AS ms FROM ${BLOCKS_TABLE} WHERE height = $1`;
+/** The state stored after a block, with the block's hash and ledger (LG-11, LG-12). */
+const STATE_AT_SQL = `SELECT s.state_key, s.state_root, b.hash, b.ledger_version FROM ${STATES_TABLE} s
+  JOIN ${BLOCKS_TABLE} b ON b.height = s.height WHERE s.height = $1`;
+/** The keys of the states stored after the blocks `$1` to `$2` − 1, in height order (LG-12's releases). */
+const KEYS_SQL = `SELECT height, state_key FROM ${STATES_TABLE} WHERE height >= $1 AND height < $2 ORDER BY height`;
 const NODES_SQL = `INSERT INTO ${NODES_TABLE} (node_key, data, children)
   SELECT n.node_key, n.data, n.children FROM unnest($1::bytea[], $2::bytea[], $3::bytea[]) AS n (node_key, data, children)
   ON CONFLICT (node_key) DO NOTHING`;
@@ -177,6 +198,31 @@ export interface LedgerStateItem extends StateSummary {
   readonly stateRoot: Uint8Array;
   /** The ledger parameters after the block, in the ledger's tagged serialization. */
   readonly parameters: Uint8Array;
+  /**
+   * The keys persisted for each contract the block's transactions call or deploy, in byte order, while
+   * `core-contract-states` is active (LG-13; task 13.1 stores them); none otherwise.
+   */
+  readonly contracts: readonly ContractKeys[];
+}
+
+/** A retained state, loaded in the ledger worker (LG-12): plain data; the state itself stays in the worker. */
+export interface RetainedState {
+  readonly ledger: LedgerName;
+  readonly height: bigint;
+  readonly hash: Uint8Array;
+  readonly stateKey: Uint8Array;
+  readonly stateRoot: Uint8Array;
+}
+
+/** What a module requiring `ledger-state` gets as its `process` item (LG-12; see the module comment). */
+export interface RetainedStates {
+  /** The heights whose states are retained at cursor `cursor`, `from` to `to`; null before anything committed. */
+  window(cursor: bigint | null): { readonly from: bigint; readonly to: bigint } | null;
+  /**
+   * The state after block `height`, loaded in the ledger worker through `read`, inside the window at `read`'s cursor;
+   * rejects with `state-not-retained` outside it.
+   */
+  load(height: bigint, read: Pick<ReadHandle, "query" | "height">): Promise<RetainedState>;
 }
 
 /** What the runner binds `core-ledger-state` to: the process's ledger worker and its block source's ledger calls. */
@@ -216,6 +262,14 @@ export interface CoreLedgerStateOptions {
   readonly rootMatches?: (computed: Uint8Array, node: Uint8Array) => boolean;
   /** Task 12.1a: the chain outcomes the apply is given; the block's `tx-results`. */
   readonly outcomes?: (b: BlockContext) => readonly ChainOutcome[] | undefined;
+  /** LG-11: whether the worker is asked to hold the stored state at h − 1 before the apply; true. */
+  readonly loadParent?: boolean;
+  /** LG-9: the ledger the block is applied with, given the state's at h − 1; the block's own (`ledger-version`). */
+  readonly ledgerOf?: (b: BlockContext, parent: LedgerName) => LedgerName;
+  /** LG-12: L(h), the lowest height retained after block h; `./retention.ts`'s {@link retainedFrom}. */
+  readonly retainedFrom?: (revisions: readonly CoreRevision[], height: bigint) => bigint;
+  /** LG-13: whether the block's contracts' keys are persisted; while `core-contract-states` is active. */
+  readonly persistsContracts?: (b: BlockContext) => boolean;
 }
 
 const hex = (bytes: Uint8Array): string => `0x${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
@@ -238,6 +292,68 @@ export async function parentTimeOf(read: Pick<ReadHandle, "query">, b: BlockCont
 
 /** The pending writes of each process context: the block `on-compute` applied, for its `on-db-write`. */
 const PENDING = new WeakMap<ProcessContext, AppliedState>();
+
+/** The `core` revisions of each process context, read once from its `config` item. */
+const REVISIONS = new WeakMap<ProcessContext, readonly CoreRevision[]>();
+
+/** The `core` revisions of `p`'s configuration (the `config` item, `./retention.ts`). */
+export function revisionsOf(p: ProcessContext): readonly CoreRevision[] {
+  let revisions = REVISIONS.get(p);
+  if (revisions === undefined) {
+    const config = p.items.get("config") as Pick<CheckedConfig, "entries"> | undefined;
+    if (config === undefined) throw new Error("core-ledger-state ran without the config item (core-chain's), which it requires");
+    revisions = Object.freeze(coreRevisionsOf(config));
+    REVISIONS.set(p, revisions);
+  }
+  return revisions;
+}
+
+const bytesOf = (value: unknown, what: string): Uint8Array => {
+  if (!(value instanceof Uint8Array)) throw new TypeError(`${what} is not bytes`);
+  return value;
+};
+
+/** The state stored after block `height` (see {@link STATE_AT_SQL}); throws naming the height when none is. */
+async function stateAt(
+  read: Pick<ReadHandle, "query">,
+  height: bigint,
+): Promise<{ readonly stateKey: Uint8Array; readonly stateRoot: Uint8Array; readonly hash: Uint8Array; readonly ledger: LedgerName }> {
+  const [row] = await read.query(STATE_AT_SQL, [height]);
+  if (row === undefined) throw new Error(`${STATES_TABLE} holds no state after block ${height} (LG-11)`);
+  return {
+    stateKey: bytesOf(row.state_key, `${STATES_TABLE}.state_key`),
+    stateRoot: bytesOf(row.state_root, `${STATES_TABLE}.state_root`),
+    hash: bytesOf(row.hash, `${BLOCKS_TABLE}.hash`),
+    ledger: row.ledger_version as LedgerName,
+  };
+}
+
+/** The keys of the states block `b` releases (LG-12's window; see the module comment). */
+async function releasesOf(
+  p: ProcessContext,
+  b: BlockContext,
+  read: Pick<ReadHandle, "query">,
+  options: CoreLedgerStateOptions,
+): Promise<Uint8Array[]> {
+  const { from, to } = releasedBy(revisionsOf(p), b.height, options.retainedFrom ?? retainedFrom);
+  if (from >= to) return [];
+  const rows = await read.query(KEYS_SQL, [from, to]);
+  if (rows.length !== Number(to - from)) {
+    throw new Error(`block ${b.height} releases the states of ${from} to ${to - 1n}, and ${STATES_TABLE} holds ${rows.length} of them (LG-12)`);
+  }
+  return rows.map((row) => bytesOf(row.state_key, `${STATES_TABLE}.state_key`));
+}
+
+/** The contracts the block's transactions call or deploy, each once, in byte order (LG-13). */
+function contractsOf(transactions: readonly { readonly segments: readonly { readonly calls: readonly { readonly address: Uint8Array }[]; readonly deploys: readonly { readonly address: Uint8Array }[] }[] }[]): Uint8Array[] {
+  const byHex = new Map<string, Uint8Array>();
+  for (const transaction of transactions) {
+    for (const segment of transaction.segments) {
+      for (const { address } of [...segment.calls, ...segment.deploys]) byHex.set(hex(address), address);
+    }
+  }
+  return [...byHex.keys()].sort().map((key) => byHex.get(key) as Uint8Array);
+}
 
 /** `core-ledger-state`'s `on-compute` (see the module comment): returns what the block's `on-db-write` writes. */
 export async function applyBlock(
@@ -276,9 +392,21 @@ export async function applyBlock(
       read,
     );
   } else {
+    // LG-11: the worker holds the stored state at h − 1 — read from the database after a restart — with its root.
+    const parent = await stateAt(read, b.height - 1n);
+    if (options.loadParent !== false) {
+      const held = await host.load({ ledger: parent.ledger, height: b.height - 1n, hash: b.parentHash, stateKey: parent.stateKey }, read);
+      if (!sameBytes(held.stateRoot, parent.stateRoot)) {
+        throw new Error(
+          `the ledger state loaded for block ${b.height - 1n} has the root ${hex(held.stateRoot)}, and ${STATES_TABLE} ` +
+            `stores ${hex(parent.stateRoot)} for it (LG-11)`,
+        );
+      }
+    }
+    const persists = (options.persistsContracts ?? ((c: BlockContext) => c.active(CORE_CONTRACT_STATES_ID)))(b);
     applied = await host.apply(
       {
-        ledger,
+        ledger: (options.ledgerOf ?? (() => ledger))(b, parent.ledger),
         ...block,
         parentHash: b.parentHash,
         timestampMs: header.timestampMs,
@@ -286,6 +414,8 @@ export async function applyBlock(
         firstRegularAtParentTime: firstRegularAtParentTime(b.height, header.specVersion),
         transactions: transactions.length,
         ...(outcomes === undefined ? {} : { outcomes }),
+        release: await releasesOf(p, b, read, options),
+        contracts: persists ? contractsOf(transactions) : [],
       },
       read,
     );
@@ -316,6 +446,7 @@ export function itemsOf(applied: AppliedState): {
     stateKey: applied.stateKey,
     stateRoot: applied.stateRoot,
     parameters: applied.output.parameters,
+    contracts: Object.freeze([...applied.contracts]),
     ...applied.summary,
   });
   return Object.freeze({
@@ -389,21 +520,58 @@ function pendingOf(p: ProcessContext, b: BlockContext): AppliedState {
   return applied;
 }
 
+/** The {@link RetainedStates} of core-ledger-state's context `p` (see the module comment). */
+export function retainedStates(p: ProcessContext, options: CoreLedgerStateOptions = {}): RetainedStates {
+  const from = options.retainedFrom ?? retainedFrom;
+  const window = (cursor: bigint | null) => retentionWindow(revisionsOf(p), cursor, from);
+  return Object.freeze({
+    window,
+    async load(height: bigint, read: Pick<ReadHandle, "query" | "height">): Promise<RetainedState> {
+      const retained = window(read.height);
+      if (retained === null || height < retained.from || height > retained.to) {
+        throw new UmbraError(
+          "state-not-retained",
+          `the ledger state after block ${height} is not retained at the cursor ${read.height ?? "(none)"}: ` +
+            (retained === null ? "no block is committed" : `the window holds the states of ${retained.from} to ${retained.to}`) +
+            " (LG-12; retainStates)",
+          { height, cursor: read.height, from: retained?.from ?? null, to: retained?.to ?? null },
+        );
+      }
+      const stored = await stateAt(read, height);
+      const { stateRoot } = await boundLedger(p).ledger.retained(
+        { ledger: stored.ledger, height, hash: stored.hash, stateKey: stored.stateKey },
+        read,
+      );
+      if (!sameBytes(stateRoot, stored.stateRoot)) {
+        throw new Error(`the ledger state loaded for block ${height} has another root than ${STATES_TABLE} stores for it (LG-11)`);
+      }
+      return Object.freeze({ ledger: stored.ledger, height, hash: stored.hash, stateKey: stored.stateKey, stateRoot });
+    },
+  });
+}
+
+/** What a module requiring `ledger-state` loads retained states with: its `process` item (LG-12). */
+export function retainedStatesOf(p: ProcessContext): RetainedStates {
+  const item = p.items.get(LEDGER_STATE_ITEM) as RetainedStates | undefined;
+  if (item === undefined) throw new Error("retainedStatesOf: the module does not require ledger-state, whose process item it is");
+  return item;
+}
+
 /**
  * `core-ledger-state` with `options`' rules (see the module comment): a core module that requires `block-header`,
- * `ledger-version` (`core-block-fetch`'s), `block-parsed` and `tx-results`, provides its four items, and cannot start
- * mid-chain.
+ * `ledger-version` (`core-block-fetch`'s), `block-parsed`, `tx-results` and `config` (`core-chain`'s), provides its four
+ * items (`ledger-state` also as a `process` item), and cannot start mid-chain.
  */
 export function coreLedgerState(options: CoreLedgerStateOptions = {}): ModuleDeclaration {
   return defineModule({
     id: CORE_LEDGER_STATE_ID,
     version: UMBRADB_VERSION,
     side: "public",
-    requires: ["block-header", "ledger-version", "block-parsed", "tx-results"],
+    requires: ["block-header", "ledger-version", "block-parsed", "tx-results", "config"],
     provides: [
       {
         name: LEDGER_STATE_ITEM,
-        lifetimes: ["block", "table"],
+        lifetimes: ["block", "table", "process"],
         table: { schema: "core_ledger_state", tables: ["nodes", "root_counts", "states"], kind: "mutable" },
       },
       {
@@ -422,6 +590,9 @@ export function coreLedgerState(options: CoreLedgerStateOptions = {}): ModuleDec
     configSchema: z.object({}),
     migrations: CORE_LEDGER_STATE_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
     points: {
+      async "on-start-db"(p) {
+        p.publish(LEDGER_STATE_ITEM, retainedStates(p, options));
+      },
       async "on-compute"(p, b, read, out) {
         const applied = await applyBlock(p, b, read, options);
         PENDING.set(p, applied);

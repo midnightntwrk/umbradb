@@ -231,7 +231,10 @@ describe("the ledger worker (design §5.3; LG-7, LG-10)", () => {
     expect(host.failure).toBeNull();
     await host.parse("v9", at(1n), [zswapOutputTransaction(RAW.v9)]);
     expect((await host.apply(applyBlock(1n, 1))).output.results.map((r) => r.outcome)).toEqual(["success"]);
-    await expect(host.load({ ledger: "v9", ...at(0n), stateKey: zero.stateKey }, mapReader(new Map()))).rejects.toThrow(/main thread/);
+    // The state it holds is kept (task 12.4: nothing to read); any other one would have to be read, which it cannot.
+    expect(await host.load({ ledger: "v9", ...at(0n), stateKey: zero.stateKey }, mapReader(new Map()))).toEqual({ stateRoot: zero.stateRoot, loaded: false });
+    await expect(host.load({ ledger: "v9", ...at(0n), stateKey: new Uint8Array(32).fill(7) }, mapReader(new Map()))).rejects.toThrow(/main thread/);
+    await expect(host.retained({ ledger: "v9", ...at(0n), stateKey: zero.stateKey }, mapReader(new Map()))).rejects.toThrow(/main thread/);
     expect(await host.probe()).toBeNull();
     // While a step runs, it is reported; once closed, nothing runs.
     let seen: unknown = null;
