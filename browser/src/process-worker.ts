@@ -22,21 +22,44 @@
  *
  * A refusal of the configuration itself ends the process (Q137 B): the worker reports it (`refused`, with the
  * finding's details) and the process's log has every finding; nothing more answers but the worker's own calls.
+ *
+ * **Backup and restore (BK-5, BR-3; task 16.1's A131 half).** `backup` writes a backup of the process's database as
+ * `umbradb backup` does on PGlite — the manifest and `pg_dump` of `@electric-sql/pglite-tools` (bundled), in one
+ * exclusive job of the database's queue, so commits wait (`src/backup/pglite-backup.ts`) — and gives the page its text,
+ * which the page saves as a file. `restore` restores the file the user picked (a `Blob`) into the core's OPFS database
+ * before its process starts, as `umbradb restore` does (`src/backup/restore.ts`, every check of BK-3, in its order):
+ * the configuration is the bundled module's for the run with the backup's S (BK-4: a restored database keeps it), its
+ * chain the configured node (`nodeSourceOf` on a node client of its own, closed when the restore ends). The page then
+ * starts the process with that S, and it resumes from the backup's height + 1. A memory database ends with its worker,
+ * so it is not restored into; nor is a private instance's, whose checks need its public database's core running
+ * (owner decision Q153), which the page starts only after the restore.
  */
 
 import "./shims/prelude.js";
+import { pgDump } from "@electric-sql/pglite-tools/pg_dump";
 import configuration from "umbradb:configuration";
+import { readCursor } from "../../src/backbone/core-block-commit/core-block-commit.js";
 import { nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
+import { nodeOptionsOf } from "../../src/backbone/core-chain/core-chain.js";
 import { privateIntake } from "../../src/backbone/core-private-source/index.js";
-import { commandBuild } from "../../src/cli/build-modules.js";
+import { manifestLine, readManifestLine } from "../../src/backup/manifest.js";
+import { type PgliteDump, pgliteBackupText } from "../../src/backup/pglite-backup.js";
+import { type RestoreSeams, restoreBackup } from "../../src/backup/restore.js";
+import { blobText } from "../../src/backup/text.js";
+import { buildDeclarations, commandBuild } from "../../src/cli/build-modules.js";
+import { type PlainObject, plainData } from "../../src/config/plain-data.js";
+import { processCoreEntry } from "../../src/config/process.js";
+import { validateConfig } from "../../src/config/validate.js";
+import type { CommittedHeight, Database } from "../../src/db/api.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import { startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { NodeClient } from "../../src/node/client.js";
 import { type ProcessHandle, type ProcessInput, startProcess } from "../../src/runner/process.js";
 import { adminAnswer, messageAdmin } from "./admin.js";
 import { type BrowserConfiguration, type BrowserRun, withDevelopmentOptIn } from "./configuration.js";
+import { openConfiguredDatabase } from "./db/database.js";
 import { useNetwork } from "./net/network.js";
-import { crossedError, type FromProcessWorker, jsonSafe, type ToProcessWorker } from "./protocol.js";
+import { crossedError, type FromProcessWorker, jsonSafe, type StartRun, type ToProcessWorker } from "./protocol.js";
 import { openedProcess } from "./runner/process-registry.js";
 
 /** The worker's global scope, as this module uses it. */
@@ -51,7 +74,97 @@ const post = (message: FromProcessWorker): void => scope.postMessage(message);
 
 let handle: ProcessHandle | null = null;
 let starting: Promise<void> | null = null;
+/** The side of the process this worker started (`backup`'s PP-12 check); the core's until `start` says. */
+let side: "public" | "private" = "public";
+/** Whether a restore runs in this worker now (one at a time). */
+let restoring = false;
 const subscriptions = new Map<string, () => void>();
+
+/** The committed height of a core's database (DB-2): its cursor's; a restore's target is a core's (see above). */
+const coreCommittedHeight: CommittedHeight = async (read) => (await readCursor(read))?.height ?? null;
+
+/** The negative control of A131's restore (`browser/build.ts`): the contents hash's check skipped. */
+const RESTORE_SEAMS: RestoreSeams =
+  __UMBRADB_BROWSER_CONTROL__ === "restore-skips-contents-hash" ? { skip: { contentsHash: true } } : {};
+
+/** A backup of this worker's process's database (see the module comment): its manifest's facts and the file's text. */
+async function backUp(): Promise<unknown> {
+  const opened = openedProcess();
+  if (opened === null) throw new Error("the process has not completed its startup, or has stopped: nothing to back up");
+  // The database the process opened and handed its module API: a PGlite database of the API (exclusiveJob checks it).
+  const db = opened.db as Database;
+  const { manifest, text } = await pgliteBackupText(
+    { db, optedOut: opened.optedOut, side, developmentOptIn: true },
+    pgDump as unknown as PgliteDump,
+  );
+  return {
+    height: manifest.height,
+    start: manifest.start,
+    contentsHash: manifest.contentsHash,
+    text: manifestLine(manifest) + text,
+  };
+}
+
+/** Restores the backup `file` into the core's database before its process starts (see the module comment). */
+async function restoreInto(file: Blob, run: StartRun): Promise<unknown> {
+  if (starting !== null) {
+    throw new Error(
+      "a backup is restored into the core's database before its process starts (BK-3, BK-5): this worker's process " +
+        "has started already",
+    );
+  }
+  if (run.storage === "memory") {
+    throw new Error(
+      "a backup is restored into an OPFS database (the page's storage parameter), not into memory, which ends with " +
+        "the restore's worker",
+    );
+  }
+  if (restoring) throw new Error("a restore already runs in this worker");
+  restoring = true;
+  try {
+    const text = blobText(file);
+    // The backup's S (BK-4). A file without a readable manifest is refused by the restore itself, in BK-3's order.
+    const start = await text.firstLine().then(
+      (line) => Number(readManifestLine(line).start),
+      () => run.start ?? 0,
+    );
+    const { data, modules } = (configuration as BrowserConfiguration).core({ ...run, start });
+    const declarations = buildDeclarations(modules);
+    const config = validateConfig({ config: { data: plainData(withDevelopmentOptIn(data)) }, declarations, side: "public" });
+    const core = processCoreEntry(config);
+    const options = nodeOptionsOf(core.settings as PlainObject);
+    if (options === null) throw new Error("the core's configuration has no node to check the backup against");
+    const client = new NodeClient({
+      ...options,
+      onRetry: (retry) => post({ type: "log", line: `restore: node retries in ${retry.delayMs} ms (${retry.operation})` }),
+    });
+    const source = nodeSourceOf(core, { nodeClient: client });
+    try {
+      const restored = await restoreBackup(
+        {
+          file: text,
+          target: { backend: "pglite", exists: true },
+          open: () => openConfiguredDatabase(core, { committedHeight: coreCommittedHeight }),
+          config,
+          declarations,
+          source,
+        },
+        RESTORE_SEAMS,
+      );
+      const { manifest } = restored;
+      post({
+        type: "log",
+        line: `restored a backup of height ${manifest.height} (S ${manifest.start}, ${restored.statements} statements)`,
+      });
+      return { start, height: manifest.height, contentsHash: manifest.contentsHash, statements: restored.statements };
+    } finally {
+      await source.close();
+      await client.close();
+    }
+  } finally {
+    restoring = false;
+  }
+}
 
 /** The node's finalized head's height now (BR-2): its hash, then its header's number. */
 async function finalizedHeight(node: string): Promise<number> {
@@ -67,6 +180,7 @@ async function finalizedHeight(node: string): Promise<number> {
 /** Starts this worker's process (see the module comment). */
 async function startWorkerProcess(message: Extract<ToProcessWorker, { type: "start" }>): Promise<void> {
   useNetwork(message.network);
+  side = message.side;
   const chosen = configuration as BrowserConfiguration;
   const isCore = message.side === "public";
   const s = message.run.start ?? (isCore ? await finalizedHeight(message.run.node) : null);
@@ -142,6 +256,12 @@ async function answer(method: string, args: readonly unknown[]): Promise<unknown
       subscriptions.delete(id);
       return null;
     }
+    case "backup":
+      return backUp();
+    case "restore": {
+      const [file, run] = args as [Blob, StartRun];
+      return restoreInto(file, run);
+    }
     case "stop":
       await starting;
       await handle?.stop();
@@ -154,7 +274,7 @@ async function answer(method: string, args: readonly unknown[]): Promise<unknown
 scope.addEventListener("message", (event) => {
   const message = event.data;
   if (message.type === "start") {
-    if (starting !== null) return;
+    if (starting !== null || restoring) return;
     starting = startWorkerProcess(message).catch((error: unknown) => {
       post({ type: "log", line: `the worker could not start its process: ${error instanceof Error ? error.message : String(error)}` });
       post({ type: "refused", error: crossedError(error) });

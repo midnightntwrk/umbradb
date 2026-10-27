@@ -176,16 +176,31 @@ export class ChromeTab {
     await this.#cdp.send("Page.reload", { ignoreCache: true }, this.#session);
   }
 
-  /** Evaluates `expression` in the page, awaiting a promise, and gives its value (JSON data). */
-  async evaluate<T = unknown>(expression: string): Promise<T> {
+  /**
+   * Evaluates `expression` in the page, awaiting a promise, and gives its value (JSON data); with `userGesture`, as if
+   * the user had acted (a click that saves a file).
+   */
+  async evaluate<T = unknown>(expression: string, options: { readonly userGesture?: boolean } = {}): Promise<T> {
     const result = await this.#cdp.send<{
       result: { value?: unknown };
       exceptionDetails?: { text: string; exception?: { description?: string } };
-    }>("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, this.#session);
+    }>(
+      "Runtime.evaluate",
+      { expression, awaitPromise: true, returnByValue: true, userGesture: options.userGesture === true },
+      this.#session,
+    );
     if (result.exceptionDetails !== undefined) {
       throw new Error(`the page threw: ${result.exceptionDetails.exception?.description ?? result.exceptionDetails.text}`);
     }
     return result.result.value as T;
+  }
+
+  /** Picks `files` (paths on this machine) in the page's file input `selector`, as the user would (its `change` fires). */
+  async setInputFiles(selector: string, files: readonly string[]): Promise<void> {
+    const { root } = await this.#cdp.send<{ root: { nodeId: number } }>("DOM.getDocument", { depth: 0 }, this.#session);
+    const { nodeId } = await this.#cdp.send<{ nodeId: number }>("DOM.querySelector", { nodeId: root.nodeId, selector }, this.#session);
+    if (nodeId === 0) throw new Error(`the page has no ${selector}`);
+    await this.#cdp.send("DOM.setFileInputFiles", { files, nodeId }, this.#session);
   }
 
   /** Closes the tab. */
@@ -226,9 +241,21 @@ export class ChromeTab {
   }
 }
 
+/** A file a page saved (see {@link ChromeBrowser.saveDownloads}). */
+export interface Download {
+  readonly guid: string;
+  /** The name the page gave it. */
+  readonly suggested: string;
+  /** Where it is saved: the downloads directory and its `guid`. */
+  readonly path: string;
+  state: "inProgress" | "completed" | "canceled";
+}
+
 /** A Chrome process on a profile of its own (see the module comment). */
 export class ChromeBrowser {
   readonly profile: string;
+  /** The files its pages saved, once {@link saveDownloads} allowed it, in the order they began. */
+  readonly downloads: Download[] = [];
   readonly #cdp: Cdp;
   readonly #exited: Promise<void>;
   readonly #kill: () => void;
@@ -250,6 +277,29 @@ export class ChromeBrowser {
     await this.#cdp.send("Page.enable", {}, sessionId);
     await tab.navigate(url);
     return tab;
+  }
+
+  /**
+   * Lets its pages save files (a page's backup, BK-5) into `directory`, each named by its download's id, and records
+   * them in {@link downloads} (headless Chrome saves nothing unless told where).
+   */
+  async saveDownloads(directory: string): Promise<void> {
+    this.#cdp.listen((event) => {
+      if (event.sessionId !== undefined) return;
+      const params = event.params as { guid?: string; suggestedFilename?: string; state?: Download["state"] };
+      if (event.method === "Browser.downloadWillBegin" && params.guid !== undefined) {
+        this.downloads.push({
+          guid: params.guid,
+          suggested: params.suggestedFilename ?? "",
+          path: join(directory, params.guid),
+          state: "inProgress",
+        });
+      } else if (event.method === "Browser.downloadProgress" && params.state !== undefined) {
+        const download = this.downloads.find((candidate) => candidate.guid === params.guid);
+        if (download !== undefined) download.state = params.state;
+      }
+    });
+    await this.#cdp.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: directory, eventsEnabled: true });
   }
 
   /** Closes Chrome (SIGKILL after 10 s) and deletes its profile. */

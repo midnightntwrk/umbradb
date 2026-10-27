@@ -96,7 +96,7 @@ function importedFrom(target: string, bundled: readonly string[]): Map<string, s
 }
 
 describe("the browser build (task 16.1)", () => {
-  it("writes the page, the core, private and ledger workers, PGlite's files and the ledger packages' WebAssembly", () => {
+  it("writes the page, the core, private and ledger workers, PGlite's and pglite-tools' files and the ledger packages' WebAssembly", () => {
     for (const build of [defaultBuild, testBuild]) {
       for (const file of [
         "index.html",
@@ -107,6 +107,7 @@ describe("the browser build (task 16.1)", () => {
         "pglite.wasm",
         "pglite.data",
         "initdb.wasm",
+        "pg_dump.wasm",
         "ledger/v8/midnight_ledger_wasm_bg.wasm",
         "ledger/v9/midnight_ledger_wasm_v9_bg.wasm",
       ]) {
@@ -133,9 +134,16 @@ describe("the browser build (task 16.1)", () => {
       "src/private/private-transport.ts",
       "src/admin/process-admin.ts",
       "src/cli/build-modules.ts",
+      // The page's backup and restore (BK-5): the same backup text and restore as the commands', and pglite-tools.
+      "src/backup/pglite-backup.ts",
+      "src/backup/restore.ts",
+      "src/backup/text.ts",
+      "node_modules/@electric-sql/pglite-tools/dist/pg_dump.js",
     ]) {
       expect(testBuild.inputs, shared).toContain(shared);
     }
+    // `umbradb backup`'s file writer is the stub, never the module (it runs pg_dump and writes files).
+    expect(testBuild.inputs).not.toContain("src/backup/backup.ts");
     for (const [replaced, replacement] of Object.entries(SUBSTITUTES)) {
       expect(testBuild.inputs, replaced).not.toContain(replaced);
       expect(testBuild.inputs).toContain(replacement);

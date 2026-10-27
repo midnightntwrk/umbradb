@@ -3259,7 +3259,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 - [x] 16.1 The browser build (page, core, ledger and private workers, PGlite, Web Locks, backup and restore) and its
       headless-Chrome tests in CI.
       **Acceptance:** A129, A130, A131, A132.
-      **Done (2026-10-27), but for A131's backup and restore half:** `browser/` (design §9.2's "As built"):
+      **Done (2026-10-27):** `browser/` (design §9.2's "As built"):
       `browser/build.ts` (`npm run build:browser`, esbuild 0.28.2, writes `dist-browser/`, ignored) bundles the page and
       three worker entries — the core and private workers each run one process as `umbradb run` starts one
       (`commandBuild`, the bundled configuration module's data for the run with the development opt-in set on every
@@ -3289,8 +3289,26 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       has Node.js's hash); unit tests hold the SHA-256, `Buffer` and `node:path` replacements equal to Node.js's
       (fast-check, seed 20261027), and check the Web Lock, the worker shims, the page's message network and the build's
       inputs, replacements, stubs and built-in guard.
-      **Pending:** A131's backup and restore half (BK-5): `umbradb backup` and `umbradb restore` are tasks 15.1 and
-      15.2 (not in this branch's base); the page shows both disabled and `browser.test.ts` lists it as a `todo`.
+      **Done (A131's backup and restore half, BK-5, 2026-10-27):** the page's "Back up" asks the core worker for a
+      backup — the manifest and `pglite-tools`' `pg_dump` (bundled; `pg_dump.wasm` copied beside the bundles) in one
+      exclusive job of the database's queue, `umbradb backup`'s PGlite code moved to `src/backup/pglite-backup.ts`,
+      which imports nothing of Node.js — and saves its text as `umbradb-<storage>-<height>.backup`. With the `restore`
+      parameter the page does not start the core: the file the user picks in "Restore a backup" (BR-3) is restored
+      into the core's OPFS database by `restoreBackup` itself, every check of BK-3 in its order, over the file's text
+      (`src/backup/text.ts`: `blobText`, the line splitting `dumpLines` now shares), with the bundled configuration
+      for the backup's S and the configured node on a client of the restore's own; a refused restore leaves the
+      database empty and the page waiting for another file; a restored one sets the page's kept S and starts the core,
+      which resumes from the backup's height + 1. `node:fs`'s browser shim gains a failing `createReadStream`
+      (a restore by path, never called there). A131 passes in Chrome: a page synced from S 3 to 6 backed up through
+      its button (the file saved by Chrome); the backup refused `restore-target-not-empty` in the same profile and
+      `backup-history-mismatch` in a fresh one with other modules; in the fresh profile's page a file that is no
+      backup refused `backup-format-unknown`, the backup against another chain's genesis
+      `backup-genesis-mismatch`, against a node whose head is below it `backup-block-not-finalized`, a tampered copy
+      `contents-hash-mismatch`, then the backup restored (its contents hash the first page's at 6) and the core going
+      on from 7 to 9 with S 3 kept, every block once and the contents hash of an uninterrupted Node.js run; both
+      pages reaching only the build's files and the node. Committed negative control
+      (`browser.negative-control.test.ts`, build control `restore-skips-contents-hash`): without the contents hash
+      check the page commits the tampered backup and the oracle fails. Unit tests: `test/backup/text.test.ts`.
       Q156 resolved A (owner, 2026-10-27): CI's browser tests run the runner image's Google Chrome, as shipped.
 
 ## 17. Library surface and gates

@@ -1,21 +1,27 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { listenOnRandomPort } from "../../tools/tape/port.js";
 import { TapeNode } from "../../tools/tape/index.js";
-import { networkProblems, sameHashProblems, secondTabProblems } from "./browser-checks.js";
+import { networkProblems, restoreProblems, sameHashProblems, secondTabProblems } from "./browser-checks.js";
 import {
   BROWSER_TEST_TIMEOUT_MS,
+  backupThrough,
   contentsHashOf,
   eventWhen,
   type PageBench,
   pageBench,
   pageUrl,
+  restoreThrough,
   statusOf,
   statusWhen,
+  tamperedBackup,
 } from "./browser-harness.js";
 import { type ChromeBrowser, launchChrome } from "./chrome.js";
 import { nodeRun } from "./node-run.js";
-import { browserChain, headSession, KEPT_OPEN, resumeSession, syncSession } from "./tapes.js";
+import { browserChain, headSession, KEPT_OPEN, restoreSession, resumeSession, syncSession } from "./tapes.js";
 
 /**
  * The committed negative controls of the browser build's criteria (task 16.1): each builds a page that differs from
@@ -28,12 +34,15 @@ import { browserChain, headSession, KEPT_OPEN, resumeSession, syncSession } from
  * - A132's equality: a page whose JSON reader is `JSON.parse` (`plain-json-reader`) reads the `probe` module's `jsonb`
  *   integers beyond 2^53 rounded — which the canonical encoding then refuses, so its core halts at S —, and it never
  *   has Node.js's contents hash.
+ * - A131's restore (BK-5): a page whose restore skips BK-3's contents hash check (`restore-skips-contents-hash`)
+ *   commits a tampered backup into a fresh profile, and the check that it is refused `contents-hash-mismatch` fails.
  */
 
 const chain = browserChain();
 const browsers: ChromeBrowser[] = [];
 const nodes: TapeNode[] = [];
 const benches: PageBench[] = [];
+const directories: string[] = [];
 
 async function chrome(): Promise<ChromeBrowser> {
   const browser = await launchChrome();
@@ -50,18 +59,21 @@ async function tapeNode(records: Parameters<typeof TapeNode.start>[0]["records"]
 let noLock: PageBench;
 let foreign: PageBench;
 let plainJson: PageBench;
+let skipsHash: PageBench;
 
 beforeAll(async () => {
   noLock = await pageBench("ignore-web-lock");
   foreign = await pageBench("foreign-request");
   plainJson = await pageBench("plain-json-reader");
-  benches.push(noLock, foreign, plainJson);
+  skipsHash = await pageBench("restore-skips-contents-hash");
+  benches.push(noLock, foreign, plainJson, skipsHash);
 }, BROWSER_TEST_TIMEOUT_MS);
 
 afterAll(async () => {
   for (const browser of browsers.splice(0)) await browser.close();
   for (const node of nodes.splice(0)) await node.close();
   for (const bench of benches.splice(0)) await bench.close();
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
 }, BROWSER_TEST_TIMEOUT_MS);
 
 describe("the browser build's negative controls (task 16.1)", () => {
@@ -127,6 +139,37 @@ describe("the browser build's negative controls (task 16.1)", () => {
       const problems = sameHashProblems({ start: chosen.start, status, ...inChrome }, inNode);
       expect(problems).toContain(`Chrome's contents hash is ${inChrome.hash}, Node.js's ${inNode.hash}`);
       expect(problems.length).toBeGreaterThan(0);
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "A131's restore control: a page whose restore skips the contents hash check commits a tampered backup, and the " +
+      "check that BK-3 refuses it fails",
+    async () => {
+      const node = await tapeNode([
+        ...headSession(chain, 3n),
+        ...syncSession(chain, 3n, 6n),
+        ...KEPT_OPEN,
+        ...restoreSession(chain, 6n, 6n),
+        ...resumeSession(chain, 6n),
+      ]);
+      const directory = mkdtempSync(join(tmpdir(), "umbradb-a131-control-"));
+      directories.push(directory);
+      const url = (more: Readonly<Record<string, string>>): string =>
+        pageUrl(skipsHash.server.origin, { genesis: chain.genesis, node: node.url, storage: "control", ...more });
+      const first = await chrome();
+      await first.saveDownloads(directory);
+      const tab = await first.open(url({}));
+      await statusWhen(tab, "core", (s) => s.cursor === "6" && s.state === "following", "following at 6");
+      const { path } = await backupThrough(first, tab);
+      const tampered = join(directory, "tampered.backup");
+      writeFileSync(tampered, tamperedBackup(readFileSync(path, "utf8")));
+      const fresh = await (await chrome()).open(url({ restore: "1" }));
+      const record = await restoreThrough(fresh, tampered);
+      const problems = restoreProblems([{ what: "the tampered backup", expected: "contents-hash-mismatch", record }]);
+      expect(record.restored).toBe(true);
+      expect(problems).toEqual(["the tampered backup: restored, where BK-3 says contents-hash-mismatch"]);
     },
     BROWSER_TEST_TIMEOUT_MS,
   );

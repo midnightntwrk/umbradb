@@ -9,17 +9,17 @@
  *   `backup-tools-missing`, saying what to install.
  * - **PGlite:** `pg_dump` of `@electric-sql/pglite-tools`, an optional peer dependency imported only now; without it,
  *   `backup-tools-missing` with the command that installs the version made for this build's PGlite. Its `pg_dump`'s
- *   version is checked on the dump it writes (`./backup.ts`).
+ *   version is checked on the dump it writes (`./pglite-backup.ts`).
  */
 
 import { execFile } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { delimiter, join } from "node:path";
-import type { PGlite } from "@electric-sql/pglite";
 import { UmbraError } from "../db/errors.js";
+import { PG_DUMP_MAJOR, type PgliteDump, pgDumpVersion } from "./pglite-backup.js";
 
-/** The PostgreSQL major version both backends run (Q82), and so the one `pg_dump` must have. */
-export const PG_DUMP_MAJOR = 18;
+// The version rules and the PGlite tool's type live with the PGlite backup, which the browser build bundles.
+export { PG_DUMP_MAJOR, type PgliteDump, pgDumpVersion };
 
 /** The environment variable naming the `pg_dump` to run, in place of the one on `PATH`. */
 export const PG_DUMP_VARIABLE = "UMBRADB_PG_DUMP";
@@ -72,13 +72,6 @@ function locatePgDump(env: Environment): { readonly path: string; readonly from:
   return null;
 }
 
-/** The version `pg_dump --version` printed (`pg_dump (PostgreSQL) 18.6 …`), or null when it printed none. */
-export function pgDumpVersion(printed: string): { readonly major: number; readonly version: string } | null {
-  const match = /\(PostgreSQL\)\s+(\d+)(?:\.(\d+))?/.exec(printed);
-  if (match === null) return null;
-  return { major: Number(match[1]), version: match[2] === undefined ? (match[1] as string) : `${match[1]}.${match[2]}` };
-}
-
 /** The `pg_dump` a backup of a PostgreSQL database runs: its path and its version. */
 export interface PgDumpTool {
   readonly path: string;
@@ -116,9 +109,6 @@ export async function findPgDump(env: Environment): Promise<PgDumpTool> {
   }
   return Object.freeze({ path: located.path, version: version.version });
 }
-
-/** `pg_dump` of `@electric-sql/pglite-tools`, as its module exports it. */
-export type PgliteDump = (options: { readonly pg: PGlite; readonly args?: string[] }) => Promise<Blob>;
 
 /**
  * Imports `pg_dump` of `@electric-sql/pglite-tools` (`module`, {@link PGLITE_TOOLS_MODULE} unless given); rejects with

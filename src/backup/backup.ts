@@ -15,7 +15,8 @@
  * - **PGlite:** one exclusive job of the database's queue (`exclusiveJob`, DB-4), so commits wait: the facts in a read
  *   inside the job, then `pg_dump` of `@electric-sql/pglite-tools` on the engine (it adds `--inserts`; its `DEALLOCATE
  *   ALL` and everything its `pg_dump` set on the one session end with the job); the dump's own header must name a
- *   `pg_dump` of major version 18, else `backup-tools-missing`.
+ *   `pg_dump` of major version 18, else `backup-tools-missing` — `./pglite-backup.ts`, which the browser page's backup
+ *   runs too (BK-5).
  * Any committed height is a block boundary (RN-6), so the dump holds whole blocks. **The file** is written next to its
  * path under a temporary name, flushed to disk and renamed over the path only once complete, so a failed or interrupted
  * backup leaves no file at the path and never half a file; the temporary file is removed on failure.
@@ -26,71 +27,41 @@ import { randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
 import { open, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { PGlite } from "@electric-sql/pglite";
-import { UMBRADB_VERSION } from "../config/build.js";
-import type { ProcessSide } from "../config/core-settings.js";
-import type { Database } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
-import { exclusiveJob } from "../db/pglite.js";
-import type { TableName } from "../deterministic-postgresql/index.js";
-import { type BackupFacts, isPrivateDatabase, readBackupFacts } from "./facts.js";
-import { BACKUP_FORMAT, type Manifest, manifestLine, type ManifestTool, readManifestLine } from "./manifest.js";
+import { type Manifest, manifestLine, type ManifestTool, readManifestLine } from "./manifest.js";
 import {
-  type Environment,
-  findPgDump,
-  loadPgliteDump,
-  PG_DUMP_MAJOR,
-  type PgDumpTool,
+  type DumpInput,
+  factsOf,
+  manifestOf,
   type PgliteDump,
-  pgDumpVersion,
-} from "./tools.js";
+  pgliteBackupText,
+  privateRefused,
+  type SnapshotSeams,
+} from "./pglite-backup.js";
+import { type Environment, findPgDump, loadPgliteDump, type PgDumpTool } from "./tools.js";
 
 /** The database a backup reads, by backend: a PostgreSQL URL (for `pg_dump`), or PGlite (its engine, in the job). */
 export type BackupTarget = { readonly backend: "postgres"; readonly url: string } | { readonly backend: "pglite" };
 
-/** What {@link writeBackup} backs up, and where. */
-export interface BackupInput {
-  /** The database, opened through the database API on the backend {@link target} names. */
-  readonly db: Database;
+/** What {@link writeBackup} backs up, and where (the database, its opt-outs, side and opt-in: `DumpInput`). */
+export interface BackupInput extends DumpInput {
   readonly target: BackupTarget;
   /** The file to write: replaced only once the new backup is complete. */
   readonly out: string;
-  /** The tables declared `deterministic: false` (MD-1, Q76): the contents hash records them by name only. */
-  readonly optedOut: readonly TableName[];
-  /** The process's side: a private process's backup needs the development opt-in (PP-12). */
-  readonly side?: ProcessSide;
-  /** The development opt-in of the process's `core` revision (CF-4, Q102). */
-  readonly developmentOptIn: boolean;
   /** `PATH` and `UMBRADB_PG_DUMP`; this process's environment unless given. */
   readonly env?: Environment;
 }
 
-/** What the tests replace. */
-export interface BackupSeams {
+/** What the tests replace (the dump outside the manifest's snapshot: `SnapshotSeams`). */
+export interface BackupSeams extends SnapshotSeams {
   /** The `pglite-tools` module to import (a missing one: A124's `backup-tools-missing` on PGlite). */
   readonly pgliteTools?: string;
-  /**
-   * A124's negative control only: the dump taken outside the manifest's snapshot — the facts read and their read ended,
-   * then `between` awaited (while blocks commit), then the dump in a snapshot of its own.
-   */
-  readonly outsideSnapshot?: { between(): Promise<void> };
 }
 
 /** A backup written: its file and its manifest. */
 export interface BackupWritten {
   readonly file: string;
   readonly manifest: Manifest;
-}
-
-/** `private-backup-refused` (PP-12). */
-function privateRefused(): UmbraError {
-  return new UmbraError(
-    "private-backup-refused",
-    "UmbraDB does not back up a private process's database unless the development opt-in is set (PP-12): a private " +
-      "database holds what its modules computed from their private inputs; no file was written. PostgreSQL's own " +
-      "tools can still copy it, outside this rule",
-    { feature: "private-backup" },
-  );
 }
 
 /** A temporary file next to `out`, created now (never an existing file's name). */
@@ -169,20 +140,6 @@ async function runPgDump(
   }
 }
 
-/** The manifest of `facts`, written by `tool`. */
-function manifestOf(facts: BackupFacts, tool: ManifestTool): Manifest {
-  return Object.freeze({ format: BACKUP_FORMAT, ...facts.manifest, umbradb: UMBRADB_VERSION, tool });
-}
-
-/** The facts of the database `read` sees, a private database refused without the opt-in (PP-12). */
-async function factsOf(
-  read: Parameters<typeof readBackupFacts>[0],
-  input: BackupInput,
-): Promise<BackupFacts> {
-  if (!input.developmentOptIn && (await isPrivateDatabase(read))) throw privateRefused();
-  return readBackupFacts(read, { optedOut: input.optedOut });
-}
-
 /** A PostgreSQL backup into `stream` (see the module comment); resolves with its manifest. */
 async function postgresBackup(
   input: BackupInput & { readonly target: { readonly url: string } },
@@ -210,35 +167,6 @@ async function postgresBackup(
   });
 }
 
-/** The dump's own header line naming its `pg_dump`'s version, and that version. */
-function dumpedBy(dump: string): string | null {
-  const match = /^-- Dumped by pg_dump version (\S+)/m.exec(dump.slice(0, 4_096));
-  return match === null ? null : (match[1] as string);
-}
-
-/** A PGlite backup (see the module comment): its manifest and the dump's text. */
-async function pgliteBackup(
-  input: BackupInput,
-  dump: PgliteDump,
-  seams: BackupSeams,
-): Promise<{ readonly facts: BackupFacts; readonly text: string }> {
-  const run = (engine: PGlite) => dump({ pg: engine, args: ["--no-owner", "--no-privileges"] });
-  let result: { readonly facts: BackupFacts; readonly text: string } | null;
-  if (seams.outsideSnapshot !== undefined) {
-    const facts = await input.db.read((read) => factsOf(read, input));
-    await seams.outsideSnapshot.between();
-    const job = exclusiveJob(input.db, async ({ engine }) => (await run(engine)).text());
-    result = job === null ? null : { facts, text: await job };
-  } else {
-    result = await exclusiveJob(input.db, async ({ read, engine }) => {
-      const facts = await read((handle) => factsOf(handle, input));
-      return { facts, text: await (await run(engine)).text() };
-    });
-  }
-  if (result === null) throw new Error("writeBackup: a PGlite target's database is not one the PGlite backend opened");
-  return result;
-}
-
 /**
  * Writes a backup of `input.db` to `input.out` (see the module comment) and resolves with it; rejects with
  * `private-backup-refused`, `backup-tools-missing`, `no-committed-height`, or the database's and the tool's failures,
@@ -257,20 +185,10 @@ export async function writeBackup(input: BackupInput, seams: BackupSeams = {}): 
       if (input.target.backend === "postgres") {
         manifest = await postgresBackup({ ...input, target: input.target }, pgDump as PgDumpTool, stream, env, seams);
       } else {
-        const { facts, text } = await pgliteBackup(input, pgliteDump as PgliteDump, seams);
-        const version = dumpedBy(text);
-        const major = version === null ? null : pgDumpVersion(`(PostgreSQL) ${version}`)?.major;
-        if (major !== PG_DUMP_MAJOR) {
-          throw new UmbraError(
-            "backup-tools-missing",
-            `pg_dump of @electric-sql/pglite-tools is of PostgreSQL ${version ?? "an unknown version"}, not ` +
-              `${PG_DUMP_MAJOR}: install the version made for this build's PGlite (BK-1); no file was written`,
-            { tool: "pglite-tools", needed: String(PG_DUMP_MAJOR), version },
-          );
-        }
-        manifest = manifestOf(facts, { name: "pglite-tools", version: version as string });
+        const backup = await pgliteBackupText(input, pgliteDump as PgliteDump, seams);
+        manifest = backup.manifest;
         await writeText(stream, manifestLine(manifest));
-        await writeText(stream, text);
+        await writeText(stream, backup.text);
       }
     } finally {
       await endStream(stream);

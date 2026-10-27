@@ -1439,9 +1439,18 @@ ticks in the same worker, so a worker whose loop is blocked answers no call at a
 `/health/live` 503 (AE-2). For a new database the core worker reads the node's finalized head and runs from it as S
 (BR-2); the page keeps S per OPFS database in `localStorage`, so a reload and a second tab run the same configuration.
 Every `core` entry runs under the development opt-in (BR-1). The page must be cross-origin isolated (COOP `same-origin`,
-COEP `require-corp`): the node-store bridge's `SharedArrayBuffer` needs it. Backup and restore in the page (BK-5) wait
-for `umbradb backup` and `umbradb restore` (tasks 15.1, 15.2): the page shows them disabled. The tests (`test/browser/`)
-drive the machine's Chrome headless over the DevTools protocol, with no test dependency.
+COEP `require-corp`): the node-store bridge's `SharedArrayBuffer` needs it. Backup and restore in the page (BK-5; task
+16.1's A131 half): "Back up" asks the core worker for a backup — `pglite-tools`' `pg_dump` (bundled, its `pg_dump.wasm`
+beside the bundles) and the manifest in one exclusive job of the database's queue, the same code as `umbradb backup` on
+PGlite (`src/backup/pglite-backup.ts`) — and saves the text as a file. A backup is restored into a new OPFS database:
+with the `restore` parameter the page does not start the core; the file the user picks (BR-3) is restored by the core
+worker with `restoreBackup` itself, every check of BK-3 in its order, over the file's text (`src/backup/text.ts`'s
+`blobText`: the `Blob`'s stream, in place of `node:fs`), the configuration the bundled module's for the run with the
+backup's S, and the chain the configured node on a client of the restore's own. A refused restore leaves the database
+empty and the page waiting for another file; once one is restored the page keeps the backup's S for the database and
+starts the core, which resumes from the backup's height + 1. A memory database is not restored into (it ends with its
+worker), nor a private instance's (its checks need its public core running, Q153). The tests (`test/browser/`) drive
+the machine's Chrome headless over the DevTools protocol, with no test dependency.
 
 ## 10. Tables
 

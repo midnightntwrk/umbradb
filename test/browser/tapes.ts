@@ -1,7 +1,16 @@
 import type { TapeRecord } from "../../tools/tape/index.js";
 import { E, type EventSpec, ledgerTransactions } from "../backbone/chain-data-tapes.js";
 import { eventsValue, finalizedWithEvents, RUNTIME_2_0 } from "../backbone/events-fixtures.js";
-import { type ChainBlock, chainOf, finalizedHead, headRead, ledgerTransaction, opening } from "../backbone/fetch-fixtures.js";
+import {
+  blockRef,
+  type ChainBlock,
+  chainBlock,
+  chainOf,
+  finalizedHead,
+  headRead,
+  ledgerTransaction,
+  opening,
+} from "../backbone/fetch-fixtures.js";
 
 /**
  * The synthetic tapes of the browser build's tests (task 16.1; A129–A132), in the node's answer shapes
@@ -16,7 +25,11 @@ import { type ChainBlock, chainOf, finalizedHead, headRead, ledgerTransaction, o
  * - {@link syncSession}: the process on a new database from S, the head S at first, then each height to `to` finalized
  *   in turn (a finalized-head notification once the height before was fetched), so the process commits S to `to`;
  * - {@link resumeSession}: the process again on a database whose cursor is `cursor` (an OPFS database after a reload):
- *   the node's head is the cursor, so it resumes there and waits.
+ *   the node's head is the cursor, so it resumes there and waits; {@link continueSession}: the same, then each height
+ *   to `to` finalized in turn;
+ * - {@link restoreSession}: a restore's checks against the node (BK-3, BK-5) — block 0, the finalized head (the
+ *   source's subscriptions first), the block at the backup's height when the head is not below it —;
+ *   {@link otherGenesisSession}: a node whose block 0 is another chain's.
  *
  * A session the page keeps open while a later one waits for the next connection (a reload's) ends with {@link
  * KEPT_OPEN}: a call record nothing asks, then the `disconnect` that separates the sessions — which, coming after a
@@ -105,3 +118,27 @@ export function resumeSession(chain: BrowserChain, cursor: bigint): TapeRecord[]
     { method: "chain_getBlockHash", params: [Number(cursor)], result: at(chain, cursor).hex },
   ];
 }
+
+/** The process again on a database whose cursor is `cursor`, then each height to `to` (see the module comment). */
+export function continueSession(chain: BrowserChain, cursor: bigint, to: bigint): TapeRecord[] {
+  const records = resumeSession(chain, cursor);
+  // A new run of the process asks the runtime's metadata again, at the first height it fetches.
+  for (let h = cursor + 1n; h <= to; h++) records.push(finalizedHead(at(chain, h)), ...height(chain, h, h === cursor + 1n));
+  return records;
+}
+
+/**
+ * A restore's reads of the node whose finalized head is `head`, for a backup at `backupHeight` (see the module comment);
+ * the connection kept open ({@link KEPT_OPEN}) until the restore closes it, so its node client never connects again.
+ */
+export function restoreSession(chain: BrowserChain, head: bigint, backupHeight: bigint): TapeRecord[] {
+  const records = [...opening(at(chain, 0n), at(chain, head))];
+  if (backupHeight <= head) records.push(...blockRef(at(chain, backupHeight)));
+  return [...records, ...KEPT_OPEN];
+}
+
+/** A restore's first read of a node whose block 0 is another chain's: `backup-genesis-mismatch`. */
+export function otherGenesisSession(): TapeRecord[] {
+  return [...blockRef(chainBlock(0n, null, { branch: "another chain" })), ...KEPT_OPEN];
+}
+

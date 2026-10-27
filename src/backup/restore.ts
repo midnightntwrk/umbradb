@@ -44,6 +44,9 @@
  * reasons are PP-2's (`bindingRefusal`, `networkRefusal`, `publicNotStarted` of `core-private-source`, the startup's
  * own), in the order a private start checks them.
  *
+ * **The file** is read by its path, or as the text given (`./text.ts`): the browser page restores the file the user
+ * picked, a `Blob`, with this same function (BK-5, task 16.1's A131 half; `browser/src/process-worker.ts`).
+ *
  * A restore runs the file's SQL with the writer's rights: the operator guide (`docs/operator-guide.md`) says to restore
  * only backups from a trusted source. The restored database keeps the backup's S and cursor; its first startup checks
  * it like any other (IN-3, CF-5 to CF-8, DB-9; a private one its binding, PP-2) and resumes from the height + 1 (BK-4).
@@ -86,6 +89,7 @@ import { hex } from "./facts.js";
 import { type Manifest, readManifestLine } from "./manifest.js";
 import { checkStatements, statementsOf } from "./statements.js";
 import { firstLine } from "./backup.js";
+import { type BackupText, linesAfterFirst } from "./text.js";
 
 /** Where the target is: a PGlite directory with no database in it yet is empty and opened only to load. */
 export type RestoreTarget =
@@ -94,8 +98,11 @@ export type RestoreTarget =
 
 /** What every restore takes: the file, the target, and the configuration with its build. */
 interface RestoreBase {
-  /** The backup file. */
-  readonly file: string;
+  /**
+   * The backup file: its path, or its text (the browser page's file, BK-5: `blobText` of `./text.ts`), read once for
+   * its manifest and twice for its statements (checked whole before anything loads, then run).
+   */
+  readonly file: string | BackupText;
   readonly target: RestoreTarget;
   /** Opens the target database (called at most once; a PGlite directory's is created by it). */
   readonly open: () => Promise<Database>;
@@ -178,26 +185,20 @@ function historyRows(manifest: Manifest): HistoryRow[] {
 }
 
 /**
- * The lines of `file` from its second on (the dump), as a stream: the text between line feeds, a last line without one
- * included. Split here rather than by `node:readline`, whose async iterator fails with `ERR_USE_AFTER_CLOSE` when the
- * file has been read to its end while the restore, slower than the read, still takes the lines buffered (task 13.1 met
- * it restoring on PostgreSQL), and which also ends a line at a lone carriage return, which a dumped string may hold.
+ * The lines of `file` from its second on (the dump), as a stream ({@link linesAfterFirst}: the text between line
+ * feeds, a last line without one included). Split there rather than by `node:readline`, whose async iterator fails with
+ * `ERR_USE_AFTER_CLOSE` when the file has been read to its end while the restore, slower than the read, still takes the
+ * lines buffered (task 13.1 met it restoring on PostgreSQL), and which also ends a line at a lone carriage return, which
+ * a dumped string may hold.
  */
-export async function* dumpLines(file: string): AsyncGenerator<string> {
-  let rest = "";
-  let first = true;
-  for await (const chunk of createReadStream(file, { encoding: "utf8" })) {
-    rest += chunk as string;
-    let from = 0;
-    for (let at = rest.indexOf("\n"); at >= 0; at = rest.indexOf("\n", from)) {
-      const line = rest.slice(from, at);
-      from = at + 1;
-      if (first) first = false;
-      else yield line;
-    }
-    rest = rest.slice(from);
-  }
-  if (rest.length > 0 && !first) yield rest;
+export function dumpLines(file: string): AsyncGenerator<string> {
+  return linesAfterFirst(createReadStream(file, { encoding: "utf8" }) as AsyncIterable<string>);
+}
+
+/** The text a restore reads: a file's, by its path, or the one given (the browser page's `Blob`, `./text.ts`). */
+function textOf(file: string | BackupText): BackupText {
+  if (typeof file !== "string") return file;
+  return { firstLine: () => firstLine(file), lines: () => dumpLines(file) };
 }
 
 /** A refusal of the history check, as a restore names it (see the module comment). */
@@ -297,8 +298,9 @@ function checkPublicBlock(side: PublicSide, manifest: Manifest): void {
 
 /** BK-3's checks 2 to 6 (see the module comment). */
 async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
-  const manifest = readManifestLine(await firstLine(input.file));
-  await checkStatements(dumpLines(input.file));
+  const text = textOf(input.file);
+  const manifest = readManifestLine(await text.firstLine());
+  await checkStatements(text.lines());
   const height = BigInt(manifest.height);
   if (manifest.start !== String(input.config.start)) {
     throw new UmbraError(
@@ -401,7 +403,7 @@ const STORED_ROOT_SQL = `SELECT CASE WHEN to_regclass('core_ledger_state.states'
 async function load(tx: Transaction, input: RestoreInput, checked: Checked, seams: RestoreSeams): Promise<number> {
   if (!(await isEmptyDatabase(tx))) throw notEmpty();
   let count = 0;
-  for await (const statement of statementsOf(dumpLines(input.file))) {
+  for await (const statement of statementsOf(textOf(input.file).lines())) {
     await tx.execute(statement.sql);
     count += 1;
     await seams.statementRan?.(count);
@@ -459,7 +461,7 @@ export async function restoreBackup(input: RestoreInput, seams: RestoreSeams = {
     let statements: number;
     if (seams.statementByStatement === true) {
       statements = 0;
-      for await (const statement of statementsOf(dumpLines(input.file))) {
+      for await (const statement of statementsOf(textOf(input.file).lines())) {
         await opened.transaction((tx) => tx.execute(statement.sql));
         statements += 1;
         await seams.statementRan?.(statements);

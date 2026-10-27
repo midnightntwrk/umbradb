@@ -2,8 +2,8 @@
  * The browser build (`openspec/changes/core-arch/specs/browser/spec.md` BR-1 to BR-4; `design.md` §9.2; task 16.1):
  * `npm run build:browser` writes `dist-browser/` — not part of the npm package — with esbuild 0.28.2 (task 0.1): the
  * page (`index.html`, `page.js`), the core and private workers (`core-worker.js`, `private-worker.js`, one process
- * each), the ledger worker (`ledger-worker.js`), PGlite's WebAssembly and data files, and the vendored ledger packages'
- * WebAssembly (`ledger/<version>/`). `node browser/build.ts [--configuration <module>] [--out <dir>]`; a test builds
+ * each), the ledger worker (`ledger-worker.js`), PGlite's WebAssembly and data files, `pglite-tools`' `pg_dump`
+ * WebAssembly (the page's backup, BK-5), and the vendored ledger packages' WebAssembly (`ledger/<version>/`). `node browser/build.ts [--configuration <module>] [--out <dir>]`; a test builds
  * its own page with its own configuration through {@link buildBrowser}.
  *
  * **The same code as Node.js.** The workers bundle UmbraDB's sources unchanged — the runner, the modules, the database
@@ -26,8 +26,9 @@
  *   synchronously (`./src/ledger/instantiate.ts`).
  * - PGlite's own Node.js paths (guarded at run time by PGlite) are left as they are, never reached; its Node.js file
  *   system (`fs/nodefs.js`), imported statically there, is a stub that refuses.
- * - Modules the browser does not carry ({@link UNAVAILABLE}: `umbradb backup`'s, task 15.1) are bundled as stubs whose
- *   exports fail when used.
+ * - Modules the browser does not carry ({@link UNAVAILABLE}: `umbradb backup`'s file writer, task 15.1) are bundled as
+ *   stubs whose exports fail when used. The page's backup and restore (BK-5) run the same code without it: the PGlite
+ *   backup's text (`src/backup/pglite-backup.ts`) and `restoreBackup` over the picked file's text (`src/backup/text.ts`).
  *
  * **The configuration** is a module the page bundles (`umbradb:configuration`): `./src/config.ts` unless given — the
  * host program's choice of modules, as a configuration file is for `umbradb run` (CF-1, MD-1).
@@ -35,7 +36,8 @@
  * **Negative controls** (task 16.1's tests): `control` builds a page that differs in one way — `ignore-web-lock` takes
  * no Web Lock (`./src/db/web-lock.ts`), `plain-json-reader` reads `json` and `jsonb` with `JSON.parse` instead of the
  * lossless reader (`src/deterministic-postgresql/mapping.ts`'s `parseJsonLossless`), `foreign-request` makes the page
- * request one URL beside the node (`./src/page.ts`).
+ * request one URL beside the node (`./src/page.ts`), `restore-skips-contents-hash` makes the page's restore skip BK-3's
+ * contents hash check (`./src/process-worker.ts`).
  */
 
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -52,7 +54,7 @@ const BROWSER = join(REPOSITORY, "browser");
 const SRC = join(REPOSITORY, "src");
 
 /** A build that differs from the real one in one way, for a negative control (see the module comment). */
-export type BrowserControl = "" | "ignore-web-lock" | "plain-json-reader" | "foreign-request";
+export type BrowserControl = "" | "ignore-web-lock" | "plain-json-reader" | "foreign-request" | "restore-skips-contents-hash";
 
 /** What {@link buildBrowser} takes. */
 export interface BrowserBuildOptions {
@@ -92,8 +94,9 @@ export const SUBSTITUTES: Readonly<Record<string, string>> = Object.freeze({
 /**
  * UmbraDB's modules the browser does not carry, by their path in the repository: each is bundled as a module of the
  * same value exports, every one of which fails when used ({@link unavailableModule}). `src/backup/backup.ts` (task
- * 15.1, `umbradb backup`) runs `pg_dump` and writes files: the page's own backup and restore (BK-5) wait for it. A path
- * no file of the build imports is never reached.
+ * 15.1, `umbradb backup`) runs `pg_dump` and writes files; the page's own backup and restore (BK-5) use the parts that
+ * do neither (see the module comment), so `restoreBackup`'s import of its `firstLine` is never called there. A path no
+ * file of the build imports is never reached.
  */
 export const UNAVAILABLE: readonly string[] = Object.freeze(["src/backup/backup.ts"]);
 
@@ -110,6 +113,9 @@ const BUILTINS: Readonly<Record<string, string>> = Object.freeze({
 
 /** PGlite's files the page needs beside its bundles (PGlite fetches them relative to the bundle). */
 const PGLITE_ASSETS = ["pglite.wasm", "pglite.data", "initdb.wasm"];
+
+/** `pglite-tools`' `pg_dump` WebAssembly, which its bundled code fetches beside the bundle too (BK-5's backup). */
+const PGLITE_TOOLS_ASSETS = ["pg_dump.wasm"];
 
 /** The vendored ledger versions whose WebAssembly the ledger worker fetches. */
 const LEDGERS = ["v8", "v9-rc3", "v9"];
@@ -308,8 +314,11 @@ export async function buildBrowser(options: BrowserBuildOptions): Promise<Browse
     .catch(fail);
   const html = readFileSync(join(BROWSER, "index.html"), "utf8");
   writeFileSync(join(outdir, "index.html"), html);
-  const pglite = dirname(createRequire(import.meta.url).resolve("@electric-sql/pglite"));
+  const require = createRequire(import.meta.url);
+  const pglite = dirname(require.resolve("@electric-sql/pglite"));
   for (const asset of PGLITE_ASSETS) copyFileSync(join(pglite, asset), join(outdir, asset));
+  const tools = dirname(require.resolve("@electric-sql/pglite-tools/pg_dump"));
+  for (const asset of PGLITE_TOOLS_ASSETS) copyFileSync(join(tools, asset), join(outdir, asset));
   for (const version of LEDGERS) {
     const pkg = join(REPOSITORY, "vendor/ledger", version, "pkg");
     mkdirSync(join(outdir, "ledger", version), { recursive: true });

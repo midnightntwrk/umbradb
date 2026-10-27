@@ -1,8 +1,13 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TapeNode } from "../../tools/tape/index.js";
 import {
+  continuedProblems,
   midChainProblems,
   networkProblems,
+  restoreProblems,
   resumeProblems,
   sameHashProblems,
   secondTabProblems,
@@ -11,6 +16,7 @@ import {
 } from "./browser-checks.js";
 import {
   BROWSER_TEST_TIMEOUT_MS,
+  backupThrough,
   call,
   contentsHashOf,
   eventWhen,
@@ -18,12 +24,23 @@ import {
   pageBench,
   pageUrl,
   readOf,
+  restoreThrough,
   statusOf,
   statusWhen,
+  tamperedBackup,
 } from "./browser-harness.js";
 import { type ChromeBrowser, chromeVersion, launchChrome } from "./chrome.js";
 import { nodeRun } from "./node-run.js";
-import { browserChain, headSession, KEPT_OPEN, resumeSession, syncSession } from "./tapes.js";
+import {
+  browserChain,
+  continueSession,
+  headSession,
+  KEPT_OPEN,
+  otherGenesisSession,
+  restoreSession,
+  resumeSession,
+  syncSession,
+} from "./tapes.js";
 
 /**
  * The browser build in headless Chrome (task 16.1; `openspec/changes/core-arch/specs/browser/spec.md` BR-1 to BR-4,
@@ -31,8 +48,9 @@ import { browserChain, headSession, KEPT_OPEN, resumeSession, syncSession } from
  * (`./fixtures/configuration.ts`) is served for the file; each test starts Chrome on a profile of its own
  * (`./chrome.ts`: the machine's Chrome over the DevTools protocol, no test dependency) and a tape node serving the
  * browser tapes (`./tapes.ts`); everything is read through the page's own calls (`window.umbradb`: the admin endpoints'
- * `/status`, the contents hash, reads of the workers' databases). A machine without Chrome fails these tests, naming
- * `UMBRADB_CHROME`; none is skipped. The committed negative controls are `./browser.negative-control.test.ts`.
+ * `/status`, the contents hash, reads of the workers' databases; the page's backup and restore as the user makes them).
+ * A machine without Chrome fails these tests, naming `UMBRADB_CHROME`; none is skipped. The committed negative controls
+ * are `./browser.negative-control.test.ts`.
  */
 
 const chain = browserChain();
@@ -41,6 +59,7 @@ const params = (more: Readonly<Record<string, string>>): Record<string, string> 
 let bench: PageBench;
 const browsers: ChromeBrowser[] = [];
 const nodes: TapeNode[] = [];
+const directories: string[] = [];
 
 /** Chrome on a new profile, closed after the file. */
 async function chrome(): Promise<ChromeBrowser> {
@@ -65,6 +84,7 @@ beforeAll(async () => {
 afterAll(async () => {
   for (const browser of browsers.splice(0)) await browser.close();
   for (const node of nodes.splice(0)) await node.close();
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   await bench?.close();
 }, BROWSER_TEST_TIMEOUT_MS);
 
@@ -218,9 +238,89 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it.todo(
-    "A131 [CI] backing up the page's database and restoring the file in a fresh profile runs every BK-3 check and continues " +
-      "from its height + 1 (BK-5): waits for umbradb backup and restore (tasks 15.1, 15.2)",
+  it(
+    "A131 [CI] backing up the page's database and restoring the file in a fresh profile runs every BK-3 check and " +
+      "continues from its height + 1 (BK-5); the page reaches its files and the node only",
+    async () => {
+      // The tape's sessions, one per connection, in order: the first profile's head question and sync from S 3 to 6;
+      // then the fresh profile's restores that reach the node — another chain's genesis, a head below the backup, the
+      // tampered file and the backup —; then the restored core going on to 9. The restores refused before the node is
+      // asked make no connection.
+      const node = await tapeNode([
+        ...headSession(chain, 3n),
+        ...syncSession(chain, 3n, 6n),
+        ...KEPT_OPEN,
+        ...otherGenesisSession(),
+        ...restoreSession(chain, 5n, 6n),
+        ...restoreSession(chain, 6n, 6n),
+        ...restoreSession(chain, 6n, 6n),
+        ...continueSession(chain, 6n, 9n),
+      ]);
+      const directory = mkdtempSync(join(tmpdir(), "umbradb-a131-"));
+      directories.push(directory);
+      const url = (more: Readonly<Record<string, string>>): string =>
+        pageUrl(bench.server.origin, params({ node: node.url, storage: "a131", ...more }));
+      const reachable = { origin: bench.server.origin, node: node.url, files: bench.build.files };
+
+      // The first profile: the page syncs its OPFS database from S 3 to 6, and the user backs it up.
+      const first = await chrome();
+      await first.saveDownloads(directory);
+      const tab = await first.open(url({}));
+      await statusWhen(tab, "core", (s) => s.cursor === "6" && s.state === "following", "following at 6");
+      const hashThen = await contentsHashOf(tab, "core");
+      const { saved, path } = await backupThrough(first, tab);
+      const text = readFileSync(path, "utf8");
+      const tampered = join(directory, "tampered.backup");
+      writeFileSync(tampered, tamperedBackup(text));
+      const notABackup = join(directory, "not-a.backup");
+      writeFileSync(notABackup, "SELECT 1;\n");
+      expect(networkProblems(tab.requests, reachable)).toEqual([]);
+
+      // The same profile, its database not empty: refused first (the first tab closed, so its Web Lock is free).
+      await tab.close();
+      const notEmpty = await restoreThrough(await first.open(url({ restore: "1" })), path);
+
+      // A fresh profile: a page configured with other modules, then the page with the backup's configuration.
+      const second = await chrome();
+      const otherModules = await second.open(url({ restore: "1", modules: "core-chain-events" }));
+      const history = await restoreThrough(otherModules, path);
+      await otherModules.close();
+      const fresh = await second.open(url({ restore: "1" }));
+      const format = await restoreThrough(fresh, notABackup);
+      const genesis = await restoreThrough(fresh, path);
+      const head = await restoreThrough(fresh, path);
+      const hash = await restoreThrough(fresh, tampered);
+      // After five refusals the target is still empty, or this restore would be refused restore-target-not-empty.
+      const restored = await restoreThrough(fresh, path);
+      expect(
+        restoreProblems([
+          { what: "the backup into the first profile's database", expected: "restore-target-not-empty", record: notEmpty },
+          { what: "the backup with other modules configured", expected: "backup-history-mismatch", record: history },
+          { what: "a file that is no backup", expected: "backup-format-unknown", record: format },
+          { what: "the backup against another chain", expected: "backup-genesis-mismatch", record: genesis },
+          { what: "the backup above the node's head", expected: "backup-block-not-finalized", record: head },
+          { what: "the tampered backup", expected: "contents-hash-mismatch", record: hash },
+          { what: "the backup", expected: "restored", record: restored },
+        ]),
+      ).toEqual([]);
+
+      // The restored core goes on from 7 to 9, as one that never stopped.
+      const status = await statusWhen(fresh, "core", (s) => s.cursor === "9" && s.state === "following", "following at 9");
+      const blocks = await readOf(fresh, "core", "SELECT height FROM core_block_commit.blocks ORDER BY height");
+      const continued = await contentsHashOf(fresh, "core");
+      const uninterrupted = await nodeRun([...headSession(chain, 3n), ...syncSession(chain, 3n, 9n)], params({}), 9n);
+      expect(
+        continuedProblems({ saved, hashThen }, restored, {
+          keptStart: await fresh.evaluate("localStorage.getItem('umbradb-start:a131')"),
+          chosen: (await eventWhen(fresh, "core", "chosen")).start,
+          status,
+          blocks: blocks.rows.map((row) => String(row.height)),
+          ...continued,
+        }, uninterrupted),
+      ).toEqual([]);
+      expect(networkProblems(fresh.requests, reachable)).toEqual([]);
+    },
+    BROWSER_TEST_TIMEOUT_MS,
   );
 
   it(

@@ -4,14 +4,15 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { type BrowserBuild, type BrowserControl, buildBrowser } from "../../browser/build.js";
-import type { ChromeTab } from "./chrome.js";
+import type { ChromeBrowser, ChromeTab } from "./chrome.js";
 import { type PageServer, servePage } from "./page-server.js";
 
 /**
  * What the browser build's tests share (task 16.1; A129–A132): a build of the page with the tests' configuration
  * (`./fixtures/configuration.ts`) served on its own port ({@link pageBench}), the page's address, and the page's own
  * calls made through Chrome (`window.umbradb`, `browser/src/page.ts`): the admin endpoints' `/status` (BR-3), the
- * contents hash, a read, and what each worker told the page. Every wait is for a condition, read again until it holds
+ * contents hash, a read, what each worker told the page, and the page's backup and restore as the user makes them
+ * (BK-5: the "Back up" button's saved file, a file picked in "Restore a backup"). Every wait is for a condition, read again until it holds
  * or the patience runs out (a loaded machine), never a single sample.
  */
 
@@ -163,4 +164,84 @@ export async function readOf(
   const answer = await call<{ height: string | null; rows: Record<string, unknown>[] }>(tab, who, "read", sql, params);
   if (answer === null) throw new Error(`the page has no process ${who}`);
   return answer;
+}
+
+/** What the page records of a backup it saved (`browser/src/page.ts`'s `SavedBackup`). */
+export interface PageBackup {
+  readonly file: string;
+  readonly height: string;
+  readonly start: string;
+  readonly contentsHash: string;
+  readonly bytes: number;
+}
+
+/** What the page records of a restore (`browser/src/page.ts`'s `RestoreRecord`). */
+export interface PageRestore {
+  readonly file: string;
+  readonly restored: boolean;
+  readonly code?: string | null;
+  readonly message?: string;
+  readonly details?: unknown;
+  readonly start?: number;
+  readonly height?: string;
+  readonly contentsHash?: string;
+  readonly statements?: number;
+}
+
+/** Waits until `expression` (evaluated in the page) is true; fails naming `what` with the tab's report. */
+async function pageWhen(tab: ChromeTab, expression: string, what: string, patience: number = PATIENCE_MS): Promise<void> {
+  const deadline = Date.now() + patience;
+  while ((await tab.evaluate<boolean>(`Boolean(${expression})`).catch(() => false)) !== true) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}\n${await tabReport(tab)}`);
+    await sleep(200);
+  }
+}
+
+/**
+ * Backs the page's database up as the user does — a click on "Back up" once the core has started — and waits for the
+ * file it saves (`browser` saving its downloads, `ChromeBrowser.saveDownloads`): what the page recorded, and the
+ * file's path.
+ */
+export async function backupThrough(
+  browser: ChromeBrowser,
+  tab: ChromeTab,
+  patience: number = PATIENCE_MS,
+): Promise<{ readonly saved: PageBackup; readonly path: string }> {
+  await pageWhen(tab, "document.getElementById('backup')?.disabled === false", "the Back up button to be enabled", patience);
+  const before = browser.downloads.length;
+  const saved = (await tab.evaluate<number>("window.umbradb.backups.length")) as number;
+  await tab.evaluate("document.getElementById('backup').click()", { userGesture: true });
+  await pageWhen(tab, `window.umbradb.backups.length > ${saved}`, "the page's backup", patience);
+  const deadline = Date.now() + patience;
+  for (;;) {
+    const download = browser.downloads[before];
+    if (download?.state === "completed") {
+      const record = await tab.evaluate<PageBackup>(`window.umbradb.backups[${saved}]`);
+      if (download.suggested !== record.file) throw new Error(`the page saved ${download.suggested}, and recorded ${record.file}`);
+      return { saved: record, path: download.path };
+    }
+    if (download?.state === "canceled" || Date.now() > deadline) {
+      throw new Error(`the backup's file was not saved (${download?.state ?? "no download began"})\n${await tabReport(tab)}`);
+    }
+    await sleep(100);
+  }
+}
+
+/** Picks `path` in the page's "Restore a backup" once it takes a file, and gives what the page recorded of the restore. */
+export async function restoreThrough(tab: ChromeTab, path: string, patience: number = PATIENCE_MS): Promise<PageRestore> {
+  await pageWhen(tab, "document.getElementById('restore-file')?.disabled === false", "the restore input to take a file", patience);
+  const before = await tab.evaluate<number>("window.umbradb.restores.length");
+  await tab.setInputFiles("#restore-file", [path]);
+  await pageWhen(tab, `window.umbradb.restores.length > ${before}`, `the restore of ${path}`, patience);
+  return tab.evaluate<PageRestore>(`window.umbradb.restores[${before}]`);
+}
+
+/**
+ * A backup's text with one value changed in a row the contents hash covers (DT-3): `probe.rows`' row of height 5 moved
+ * to 50 — what BK-3's `contents-hash-mismatch` must refuse.
+ */
+export function tamperedBackup(text: string): string {
+  const row = /^INSERT INTO probe\.rows VALUES \(5, /m;
+  if (!row.test(text)) throw new Error("the backup has no probe.rows row of height 5 to change");
+  return text.replace(row, "INSERT INTO probe.rows VALUES (50, ");
 }

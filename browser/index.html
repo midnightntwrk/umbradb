@@ -71,8 +71,9 @@
       <tbody id="processes"></tbody>
     </table>
     <p>
-      <button type="button" disabled title="Waits for umbradb backup (task 15.1)">Back up</button>
-      <button type="button" disabled title="Waits for umbradb restore (task 15.2)">Restore a backup</button>
+      <button type="button" id="backup" disabled>Back up</button>
+      <label>Restore a backup <input type="file" id="restore-file" accept=".backup,.sql" disabled /></label>
+      <span id="backup-note" class="note"></span>
     </p>
     <ol id="log"></ol>
     <script type="module" src="./page.js"></script>
