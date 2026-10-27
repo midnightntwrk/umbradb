@@ -107,6 +107,13 @@
  * startup (`listen-failed`). A private process's side of it is its block source's (`openPublicSide`), which the
  * process gives S and its log ({@link SourceShared}).
  *
+ * **Lockstep** (PP-6, PP-7; task 14.3, `../private/lockstep.ts`): a public process whose `core` revision lists
+ * `lockstepInstances` keeps one bookkeeping of them for its run, which its transport tells of their `hello`s, reports
+ * and closes, and which the loop awaits before each block's `BEGIN` (`LoopInput.lockstep`): while it waits the process
+ * raises `waiting-for-lockstep`; with no `listen.transport` no listed instance can connect, and the core waits for them
+ * (Q24). On a private process the source checks the resolved graph's modules after step 7's graph and before any
+ * migration (`BlockSource.checkModules`: `needs-lockstep-not-listed`).
+ *
  * **Logs** go through the configuration's redaction (`configRedactor`, CF-4, AE-6) once it is validated; a refusal of
  * the configuration itself, through the redaction of its secrets as the validation reads them (`earlyRedactor`: the
  * configuration as loaded, else the URL patterns only), finding by finding (`startup refused: <code> (<n> findings);
@@ -175,6 +182,7 @@ import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failure
 import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput, type SlowBlockEvent } from "./loop.js";
 import { ProcessContexts } from "./process-context.js";
 import { type CoreTransport, startCoreTransport, type TransportTls } from "../private/core-transport.js";
+import { Lockstep, type LockstepCondition } from "../private/lockstep.js";
 
 /**
  * The configuration a process runs with: a file to load (CF-1), or its data — a browser's bundle, a test's —, which
@@ -298,15 +306,16 @@ export interface SlowBlockCondition {
 }
 
 /**
- * The process's conditions (AE-3); the block source's own (`finality-stall`, IN-6) among them; `waiting-for-lockstep`
- * is task 14.3's.
+ * The process's conditions (AE-3); the block source's own (`finality-stall`, IN-6) among them, `slow-block` (task 5.5)
+ * and `waiting-for-lockstep` (PP-6, task 14.3).
  */
 export type ProcessCondition =
   | UpgradeCondition
   | RetryCondition
   | WaitingCondition
   | SourceCondition
-  | SlowBlockCondition;
+  | SlowBlockCondition
+  | LockstepCondition;
 
 /** How processing ended. */
 export type ProcessingEnd =
@@ -567,6 +576,8 @@ class Process implements ProcessHandle {
   #transport: CoreTransport | undefined;
   /** The loop startup made (its slow height, RN-17). */
   #loop: FinalizedLoop | undefined;
+  /** A public process's bookkeeping of its `lockstepInstances` (PP-6; task 14.3), once startup read them. */
+  #lockstep: Lockstep | undefined;
 
   constructor(input: ProcessInput) {
     this.#input = input;
@@ -596,6 +607,7 @@ class Process implements ProcessHandle {
 
   status(): ProcessStatus {
     const settings = this.#core?.settings;
+    const lockstep = this.#lockstep?.condition() ?? null;
     return statusOf({
       phase: this.#phase,
       start: this.#start,
@@ -607,6 +619,7 @@ class Process implements ProcessHandle {
         ...this.#conditions,
         ...(this.#source?.conditions?.() ?? []),
         ...this.#slowBlock(),
+        ...(lockstep === null ? [] : [lockstep]),
         ...(this.#retrying === null ? [] : [this.#retrying]),
         ...(this.#nodeAttempts === null || this.#retrying?.code === "node-retrying"
           ? []
@@ -766,6 +779,8 @@ class Process implements ProcessHandle {
     this.#step();
     // A private process's graph counts the public core's table items its source read (PP-13, task 14.1a).
     const graph = resolveGraph({ ...graphInputOf(check, declarations), ...(publicItems === undefined ? {} : { publicItems }) });
+    // A private process's source refuses a module it cannot run (PP-6: needsLockstep on an instance not lockstep).
+    source.checkModules?.(graph.modules);
     const plan = schemaPlan(graph.modules);
     const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, core) });
     const start = BigInt(checked.start);
@@ -820,6 +835,11 @@ class Process implements ProcessHandle {
     // The process transport (PP-4, task 14.2): a public process given listen.transport listens for private ones from
     // here on — before the bootstrap's wait, so that they connect before S commits —, once.
     const { transport: transportAddress } = settings.listen as { readonly transport?: string };
+    const lockstepInstances = (settings.lockstepInstances as unknown as readonly string[] | undefined) ?? [];
+    // Lockstep (PP-6, task 14.3): one bookkeeping for the run, which the transport tells and the loop waits on.
+    if (this.#lockstep === undefined && lockstepInstances.length > 0) {
+      this.#lockstep = new Lockstep({ listed: lockstepInstances, log: (line) => this.#log(line) });
+    }
     if (this.#transport === undefined && (input.side ?? "public") === "public" && transportAddress !== undefined) {
       this.#transport = await startCoreTransport({
         address: transportAddress,
@@ -828,7 +848,8 @@ class Process implements ProcessHandle {
         genesis: genesisHash,
         start,
         cursor: () => this.#cursor,
-        lockstepInstances: settings.lockstepInstances as unknown as readonly string[],
+        lockstepInstances,
+        ...(this.#lockstep === undefined ? {} : { lockstep: this.#lockstep }),
         readTimeoutMs: settings.apiReadTimeoutMs as number,
         log: (line) => this.#log(line),
       });
@@ -861,6 +882,7 @@ class Process implements ProcessHandle {
       coreStop: core.stop === null ? null : BigInt(core.stop),
       boundary: this.#upgrade?.height ?? null,
       slowBlockMs: settings.slowBlockMs as number,
+      ...(this.#lockstep === undefined ? {} : { lockstep: this.#lockstep }),
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
         head: (head) => {

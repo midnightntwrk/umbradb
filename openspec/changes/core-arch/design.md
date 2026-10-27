@@ -1103,13 +1103,15 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   stop. A connection speaks after its `hello`; a `hello` of an id another connection (or this one) holds is answered
   `refused: duplicate-instance` and closed; `committed` goes to every connection past its `hello` after each commit;
   each `read` runs in one `Database.read` bounded by `apiReadTimeoutMs`, its error a code only (`database-error` for
-  anything not an `UmbraError`), a result over 64 MiB answered `error: result-too-large`; a `report` is kept for task
-  14.3. A connection closes (1008, the reason a fault's name) on a text that is no message (an `api` message among
-  them: `unknown-type`), a binary frame, a message only the core sends, a message before `hello`, more than 64 reads
-  at once, more than 128 MiB waiting in its socket (a slow reader: PP-5, the core never waits for it), a message over
-  64 MiB (`maxPayload`), or no pong within 15 s. `private-transport.ts`:
-  a private process with `coreTransport` connects at its first wait or read through it (after startup read the
-  private cursor), `wss://` with its `tls`; its `hello` gives the private cursor or S − 1 before its first commit;
+  anything not an `UmbraError`), a result over 64 MiB answered `error: result-too-large`; a `report` is checked and
+  counted (**Lockstep** below, task 14.3). A connection closes (1008, the reason a fault's name) on a text that is no
+  message (an `api` message among them: `unknown-type`), a binary frame, a message only the core sends, a message
+  before `hello`, more than 64 reads (or report checks) at once, more than 128 MiB waiting in its socket (a slow reader:
+  PP-5, the core never waits for it), a message over 64 MiB (`maxPayload`), a report whose hash is not the public
+  block's (`report-hash-mismatch`), or no pong within 15 s. `private-transport.ts`: a private process with
+  `coreTransport` connects at startup's chain check, which waits for its `hello-ack` (task 14.3: that says whether it is
+  lockstep; after startup read the private cursor), `wss://` with its `tls`; its `hello` gives the private cursor or
+  S − 1 before its first commit;
   a `hello-ack` that connects it wakes its wait (as does each `committed`); a lost or refused connection is retried
   after IN-10's back-off up to `backoffCeilingMs`, without end; meanwhile its wait waits, and a read fails with
   `connection-lost` (retried by the runner, `database-retrying`). A read through the core first sends a `read` with
@@ -1135,10 +1137,11 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   table records none is refused alike with `configured: null`, as Q117 refuses it on the core; owner decision Q136 B,
   task 10.2b), and gives `core-chain` the public genesis hash, recorded with the private S in the private database's
   `core_chain.identity` (and the anchor at block S); the bootstrap's wait (IN-2) waits, with `waiting-for-node`, for
-  the public cursor to reach the private S. `hello-ack.genesis` (task 14.2) is not compared with it: with a PGlite or
-  no `publicDatabase` the identity the check reads comes through that same transport, from the same core; with a
-  PostgreSQL one the transport only wakes the process and connects after startup's checks, at its first wait, so
-  comparing it would need a connection before them or a new failure of a running process.
+  the public cursor to reach the private S. With `coreTransport` the check then waits for the transport's `hello-ack`
+  (task 14.3) and compares its `genesis` with the configured network's too, refused alike (`network`, the message
+  naming the core at `coreTransport`): with a PostgreSQL `publicDatabase` read directly, the core the instance reports
+  to is checked nowhere else (task 10.2b's note); with a PGlite or no `publicDatabase` the identity came through that
+  same core. The ack's S is not compared with the public database's (decision record question Q149).
 - **Binding** (PP-2). `core-private-source`'s `on-start-db`, before any private module migrates, reads the public
   database's identity (`core_chain.identity`: `genesis_hash`, `start_height`, task 10.2's table); on the first start it
   records them in `core_private_source.cursor`; on every start a recorded genesis hash or S that differs, or a private S
@@ -1200,9 +1203,38 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   the CAs it trusts. On the core the transport is then an `https` server with `requestCert` and `rejectUnauthorized`
   against `trustedRoots`; a private process presents its certificate and checks the core's against its
   `trustedRoots`. Without `tls` the transport is plain WebSocket, unauthenticated.
-- **Lockstep.** The core keeps, per listed instance, its last reported height and connection; the runner awaits the
-  condition of PP-6 before `BEGIN` with no transaction open; a lockstep instance's consistent read checks
-  `public cursor == h`.
+- **Lockstep** (PP-6, PP-7, owner decisions Q5, Q24, Q142; task 14.3). *The core's bookkeeping*
+  (`src/private/lockstep.ts`, `Lockstep`): a public process whose `core` revision lists `lockstepInstances` keeps one
+  for its run; per listed instance, whether a connection past its `hello` holds its id, its committed height last
+  learned — the `hello`'s (also below the one known: its database replaced), then each counted `report`'s, which only
+  raises it — and whether the core refused it (`lockstep-behind`, `report-hash-mismatch`). A listed instance holds
+  height h while it is not connected (one not seen since the core started included: the core cannot know its height,
+  and waits, Q24), refused, or below h − 1. *The wait* (`src/runner/loop.ts`, `LoopInput.lockstep`): for each height
+  h, after h's `on-compute` and before its block transaction, every read of h ended — no transaction is open, and on
+  PGlite the one queue is free, so the instances' reads through the core are served —, the loop awaits the
+  bookkeeping until no listed instance holds h; meanwhile the process raises `waiting-for-lockstep` (`height`, and
+  each instance holding it with `connected`, `height`, `refused`; `/status` shows it) and logs the instances that hold
+  it because they are down or refused, not one that is processing h − 1. A stop ends the wait, h not committed (its
+  transaction never began, RN-13). With no `listen.transport` no listed instance can connect, and the core waits. *The
+  transport*: a listed instance's `hello` below the public cursor − 1 is answered `refused: lockstep-behind` (PP-7),
+  its connection kept — it holds its id and is answered, the core keeps waiting for it and names it, and the instance
+  halts by its own check —; a `report` counts once its hash is the public block's at its height (one `Database.read`
+  of `core_block_commit.blocks`, bounded as a read); another hash, or no public block there, closes the connection
+  (1008, `report-hash-mismatch`), the instance refused until its next `hello`; a report the core cannot check closes
+  it 1011 (`report-unchecked`), and the instance connects again. A core restarted while an instance is at the public
+  cursor learns its height from its `hello`, so nothing deadlocks. *The private side*
+  (`src/backbone/core-private-source/`, `src/private/private-transport.ts`): the instance is lockstep when its
+  startup's `hello-ack` said so — kept for the run, so a module needing it never runs unchecked — or a later one does;
+  after the graph is resolved and before any migration, a module declaring `needsLockstep` refuses to start on an
+  instance that is not lockstep or has no `coreTransport` (`needs-lockstep-not-listed`, `details { modules, transport
+  }`; `BlockSource.checkModules`). A lockstep instance takes height h only while the public cursor is h: its block at
+  h is read where the read's height is h, and each `on-fetch` read of public data (`BlockSource.fetchRead`, now given
+  the height) begins at h and, after the callback, reads the public cursor again — through the core each statement is
+  its own read (Q142) —; a cursor past h either time halts it with `lockstep-behind` (`details { height, cursor
+  }`). Each block `core-private-source`'s `on-after-db-write` sees committed is sent as `report` while connected to a
+  core that lists the instance and has not refused it; the core's close for `report-hash-mismatch` refuses the
+  transport for good (no reconnection), and its waits and reads fail with that `UmbraError`, which halts the
+  instance.
 - **Keys.** Configured test keys are the only key source in this change; a key API is not core and is left to a later
   module that feeds the registry (Q70). Pending keys live in memory until their block's `on-compute` takes them (PP-8).
   Task 14.1 builds `core-key-registry`'s table and its `admitted-keys` item, put at every `on-compute`; making test keys

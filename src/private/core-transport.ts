@@ -16,7 +16,19 @@
  * connection holds — or this one already, a `hello` sent twice — is refused with `hello-ack.refused`
  * `duplicate-instance` and its connection closed, the first connection unchanged (PP-4); otherwise it is answered with
  * `hello-ack`: whether the instance is listed in `lockstepInstances`, the public genesis hash, S, and the public cursor
- * (null before the first commit). `lockstep-behind` (PP-7) is task 14.3's.
+ * (null before the first commit).
+ *
+ * **Lockstep** (PP-6, PP-7; task 14.3). A listed instance's `hello` below the public cursor − 1 — it was listed late, or
+ * its database was replaced: the mutable public state of the heights it missed is gone — is answered `refused:
+ * lockstep-behind`, and its connection kept: it holds its id, is answered, and halts by its own check at its first
+ * height (the public cursor is past it), while the core keeps waiting for it (Q24) and names it. The core's
+ * bookkeeping (`./lockstep.ts`, the process's, which the finalized loop waits on before `BEGIN`) is told of each listed
+ * instance's `hello`, of each `report` that counts, and of the close of the connection holding its id. A `report` counts
+ * once its hash is the public block's at its height, read in one `Database.read` (bounded as a read, counted with the
+ * connection's reads); one whose hash differs, or at a height with no public block, closes the connection (1008,
+ * `report-hash-mismatch`), which tells the instance to halt (PP-6), and the core holds the instance refused until its
+ * next `hello`; one the core cannot check (its read failed) closes it 1011 (`report-unchecked`), and the instance
+ * connects again, its `hello` giving its height. A refused instance's report counts for nothing.
  *
  * **What the core sends and answers.**
  * - `committed` after each public commit, to every connection past its `hello` (PP-3: it only wakes a private process,
@@ -27,7 +39,7 @@
  *   `./messages.ts` writes it; or `error`, a code (an `UmbraError`'s, `database-error` for anything else, never a
  *   message, which may hold a credential, AE-6). A result whose message would exceed {@link MAX_MESSAGE_BYTES} is
  *   answered `error: result-too-large`.
- * - `report` (lockstep, task 14.3) is kept as the instance's last report; nothing else is done with it yet.
+ * - `report` (lockstep): checked and counted (see **Lockstep**); its height and hash are the instance's last known.
  *
  * **What closes a connection** (PP-4): a message that is not JSON, has an unknown `v` or `type` — an `api` or
  * `api-result` among them: nothing calls a module across the transport (owner decision Q140 C) —, or fails its schema; a
@@ -45,8 +57,10 @@ import type { AddressInfo } from "node:net";
 import { type RawData, type WebSocket, WebSocketServer } from "ws";
 import type { Database, ReadHandle } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
+import { BLOCKS_TABLE } from "../backbone/core-block-commit/core-block-commit.js";
 import { RESULT_TYPES, resultColumns, type ResultColumn } from "../deterministic-postgresql/index.js";
 import type { BlockRef } from "../runner/block-source.js";
+import { Lockstep } from "./lockstep.js";
 import {
   decodeParameter,
   encodeValue,
@@ -75,6 +89,12 @@ export const PING_INTERVAL_MS = 15_000;
 
 /** The WebSocket close code of a protocol fault (RFC 6455's policy violation). */
 export const CLOSE_PROTOCOL = 1008;
+
+/** The WebSocket close code of a report the core could not check (RFC 6455's internal error): connect again. */
+export const CLOSE_UNCHECKED = 1011;
+
+/** The close reason that tells a lockstep instance its report's hash is not the public block's, and to halt (PP-6). */
+export const REPORT_HASH_MISMATCH = "report-hash-mismatch";
 
 /** The transport's limits (see the module comment); the tests give smaller ones. */
 export interface TransportLimits {
@@ -124,6 +144,8 @@ export interface CoreTransportOptions {
   readonly cursor: () => bigint | null;
   /** `lockstepInstances`. */
   readonly lockstepInstances: readonly string[];
+  /** The process's lockstep bookkeeping, which the transport tells (`./lockstep.ts`); one of its own unless given. */
+  readonly lockstep?: Lockstep;
   /** The bound of each read (`apiReadTimeoutMs`, DB-15). */
   readonly readTimeoutMs: number;
   /** Where log lines go. */
@@ -132,6 +154,8 @@ export interface CoreTransportOptions {
   readonly serverTls?: (tls: TransportTls) => ServerOptions;
   /** The negative controls' handling of a second `hello` of a connected id; refused unless `"accept"`. */
   readonly duplicates?: "refuse" | "accept";
+  /** The negative controls' check of a `report`'s hash; compared with the public block's unless `"accept"`. */
+  readonly reports?: "check" | "accept";
   /** The tests' limits; {@link TRANSPORT_LIMITS} unless given. */
   readonly limits?: Partial<TransportLimits>;
 }
@@ -172,9 +196,13 @@ interface Session {
   readonly socket: WebSocket;
   hello: Hello | null;
   reported: Report | null;
+  /** Why the core does not count this connection's instance (PP-6, PP-7), or null. */
+  refused: "lockstep-behind" | "report-hash-mismatch" | null;
   pending: number;
   alive: boolean;
 }
+
+const HASH_SQL = `SELECT hash FROM ${BLOCKS_TABLE} WHERE height = $1`;
 
 const typeNames: ReadonlyMap<number, string> = new Map(
   RESULT_TYPES.flatMap((type) => [
@@ -222,7 +250,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
   const wss = new WebSocketServer({ noServer: true, maxPayload: limits.maxMessageBytes, perMessageDeflate: false });
   const sessions = new Set<Session>();
   const connected = new Map<string, Session>();
-  const lockstep = new Set(options.lockstepInstances);
+  const lockstep = options.lockstep ?? new Lockstep({ listed: options.lockstepInstances, log: options.log });
 
   const drop = (session: Session, code: number, reason: string): void => {
     options.log(`transport: closed the connection${session.hello === null ? "" : ` of ${session.hello.instance}`}: ${reason}`);
@@ -240,12 +268,12 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     session.socket.send(messageText(message));
   };
 
-  const ack = (session: Session, instance: string, refused: "duplicate-instance" | null): void => {
+  const ack = (session: Session, instance: string, refused: "duplicate-instance" | "lockstep-behind" | null): void => {
     const cursor = options.cursor();
     send(session, {
       v: 1,
       type: "hello-ack",
-      lockstep: lockstep.has(instance),
+      lockstep: lockstep.isListed(instance),
       genesis: hexOf(options.genesis),
       start: options.start.toString(),
       cursor: cursor === null ? null : cursor.toString(),
@@ -264,8 +292,51 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     if (session.hello !== null && connected.get(session.hello.instance) === session) connected.delete(session.hello.instance);
     session.hello = hello;
     connected.set(hello.instance, session);
-    ack(session, hello.instance, null);
-    options.log(`transport: instance ${hello.instance} connected at ${hello.height}`);
+    // PP-7: a listed instance below the public cursor − 1 cannot process the heights it missed.
+    const cursor = options.cursor();
+    const listed = lockstep.isListed(hello.instance);
+    const behind = listed && cursor !== null && BigInt(hello.height) < cursor - 1n;
+    session.refused = behind ? "lockstep-behind" : null;
+    if (listed) lockstep.hello(hello.instance, BigInt(hello.height), behind ? "lockstep-behind" : null);
+    ack(session, hello.instance, behind ? "lockstep-behind" : null);
+    const refusal = behind ? `; refused lockstep-behind: below the public cursor ${cursor} − 1 (PP-7)` : "";
+    options.log(`transport: instance ${hello.instance} connected at ${hello.height}${refusal}`);
+  };
+
+  /** Checks a `report` against the public block at its height, and counts it (see the module comment). */
+  const onReport = async (session: Session, report: Report): Promise<void> => {
+    const { instance } = session.hello as Hello;
+    if (session.refused !== null) return;
+    const height = BigInt(report.height);
+    if (options.reports !== "accept") {
+      session.pending += 1;
+      let stored: Uint8Array | null;
+      try {
+        stored = await options.db.read(
+          async (read) => ((await read.query(HASH_SQL, [height]))[0]?.hash as Uint8Array | undefined) ?? null,
+          { timeoutMs: options.readTimeoutMs },
+        );
+      } catch (error) {
+        options.log(`transport: the report of ${instance} at ${height} could not be checked (${codeOf(error)}); closing its connection`);
+        drop(session, CLOSE_UNCHECKED, "report-unchecked");
+        return;
+      } finally {
+        session.pending -= 1;
+      }
+      const found = stored === null ? null : hexOf(stored);
+      if (found !== report.hash) {
+        const there = found === null ? "the public database has no block there" : `the public block there has hash ${found}`;
+        options.log(`transport: instance ${instance} reported height ${height} with hash ${report.hash}, and ${there}: ${REPORT_HASH_MISMATCH} (PP-6)`);
+        session.refused = REPORT_HASH_MISMATCH;
+        lockstep.mismatched(instance);
+        drop(session, CLOSE_PROTOCOL, REPORT_HASH_MISMATCH);
+        return;
+      }
+    }
+    // Counted while its connection still holds the instance's id.
+    if (connected.get(instance) !== session) return;
+    session.reported = report;
+    lockstep.reported(instance, height);
   };
 
   const onRead = async (session: Session, request: Read): Promise<void> => {
@@ -326,7 +397,11 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
         void onRead(session, message);
         return;
       case "report":
-        session.reported = message;
+        if (session.pending >= limits.maxPendingReads) {
+          drop(session, CLOSE_PROTOCOL, "too-many-reads");
+          return;
+        }
+        void onReport(session, message);
         return;
       default:
         drop(session, CLOSE_PROTOCOL, `wrong-direction ${message.type}`);
@@ -334,7 +409,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
   };
 
   wss.on("connection", (socket: WebSocket) => {
-    const session: Session = { socket, hello: null, reported: null, pending: 0, alive: true };
+    const session: Session = { socket, hello: null, reported: null, refused: null, pending: 0, alive: true };
     sessions.add(session);
     socket.on("message", (data, binary) => onMessage(session, data, binary));
     socket.on("pong", () => {
@@ -345,6 +420,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
       sessions.delete(session);
       if (session.hello !== null && connected.get(session.hello.instance) === session) {
         connected.delete(session.hello.instance);
+        lockstep.disconnected(session.hello.instance);
         options.log(`transport: instance ${session.hello.instance} disconnected`);
       }
     });
@@ -395,7 +471,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
         const last = session.reported ?? session.hello;
         return Object.freeze({
           instance: (session.hello as Hello).instance,
-          lockstep: lockstep.has((session.hello as Hello).instance),
+          lockstep: lockstep.isListed((session.hello as Hello).instance),
           height: BigInt((last as Hello | Report).height),
           hash: (last as Hello | Report).hash,
         });

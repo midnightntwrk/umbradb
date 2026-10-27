@@ -354,6 +354,8 @@ export interface PrivateOptions {
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
   /** Starts the process in this function's context (A112's attribution). */
   readonly within?: <T>(start: () => T) => T;
+  /** More settings of the `core` entry (`backoffCeilingMs`). */
+  readonly extra?: Readonly<Record<string, unknown>>;
 }
 
 /** The private process's `core` entry. */
@@ -373,6 +375,7 @@ export function privateCoreEntry(options: PrivateOptions) {
       ...(options.testKeys === undefined ? {} : { testKeys: options.testKeys }),
       ...(options.coreTransport === undefined ? {} : { coreTransport: options.coreTransport }),
       ...(options.tls === undefined ? {} : { tls: options.tls }),
+      ...options.extra,
     } as never,
   });
 }

@@ -167,7 +167,8 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
   let address: string;
   beforeAll(async () => {
     const db = await backend.database("public");
-    core = await startPublicCore({ database: db.setting, head: 3n, extra: { ...TRANSPORT, lockstepInstances: ["listed"] } });
+    // No instance listed: a core listing one waits for it before every height (task 14.3, PP-6).
+    core = await startPublicCore({ database: db.setting, head: 3n, extra: TRANSPORT });
     address = core.transport();
   }, START_TIMEOUT_MS);
   afterAll(() => core?.stop(), START_TIMEOUT_MS);
@@ -175,10 +176,27 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
   it("hello is answered with hello-ack: the lockstep flag, the genesis, S and the public cursor", async () => {
     const { client, ack } = await greeted(address, "instance-a");
     expect(ack).toEqual({ v: 1, type: "hello-ack", lockstep: false, genesis: genesisHex(0xa1), start: "1", cursor: "3", refused: null });
-    const listed = await greeted(address, "listed");
-    expect(listed.ack.lockstep).toBe(true);
+    // A listed instance's flag, from a transport over the same database that lists it (in step: at 2, the cursor 3).
+    const listing = await startCoreTransport({
+      address: "127.0.0.1:0",
+      db: core.db(),
+      genesis: new Uint8Array(32).fill(0xa1),
+      start: 1n,
+      cursor: () => 3n,
+      lockstepInstances: ["listed"],
+      readTimeoutMs: 30_000,
+      log: () => undefined,
+    });
+    try {
+      const listedClient = rawClient(`ws://127.0.0.1:${listing.port}/`);
+      await listedClient.opened;
+      listedClient.send(hello("listed", "2"));
+      expect(await listedClient.next("hello-ack")).toMatchObject({ lockstep: true, refused: null });
+      listedClient.close();
+    } finally {
+      await listing.close();
+    }
     client.close();
-    listed.client.close();
   }, TEST_TIMEOUT_MS);
 
   it("every public commit is announced with committed, its height and hash", async () => {

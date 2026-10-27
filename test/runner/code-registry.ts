@@ -318,6 +318,18 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
         "A156 configured for another network refuses with private-binding-mismatch before any migration, and binds for its own",
     },
   ],
+  "refusal:needs-lockstep-not-listed": [
+    {
+      file: "test/private/lockstep-refusals.test.ts",
+      test:
+        "A117: a needsLockstep module refuses to run when hello-ack says lockstep: false (needs-lockstep-not-listed), or with no " +
+        "coreTransport, before any migration; on a listed instance it runs",
+    },
+    {
+      file: "test/backbone/core-private-source.test.ts",
+      test: "refuses a module declaring needsLockstep unless the hello-ack said lockstep, or with no transport (needs-lockstep-not-listed)",
+    },
+  ],
   "refusal:package-hash-mismatch": [{ file: "test/ledger/package-identity.test.ts", test: "refuses a package file that is missing" }],
   "refusal:writer-lock-held": [
     {
@@ -450,6 +462,22 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   "halt:truncate-not-allowed": [
     { file: `${RUNNER}/halts.test.ts`, test: "a TRUNCATE in on-db-write halts with truncate-not-allowed, the module and the point (DB-14)" },
   ],
+  "halt:lockstep-behind": [
+    {
+      file: "test/private/lockstep-refusals.test.ts",
+      test: "A118: an instance listed after the public cursor passed it is refused with lockstep-behind, halts, and the core waits and names it",
+    },
+    {
+      file: "test/private/lockstep-reads.test.ts",
+      test: "Q142: a lockstep instance reads the public cursor again after its block's data and halts with lockstep-behind when it moved past h",
+    },
+  ],
+  "halt:report-hash-mismatch": [
+    {
+      file: "test/private/lockstep-refusals.test.ts",
+      test: "A117: a report hash mismatch halts that instance with report-hash-mismatch, and the core keeps waiting for it",
+    },
+  ],
 });
 
 /**
@@ -457,7 +485,6 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
  * (see the module comment).
  */
 export const PENDING: Readonly<Record<string, string>> = Object.freeze({
-  "refusal:needs-lockstep-not-listed": "14.3",
   "refusal:test-key-conflict": "14.4",
   "backup:backup-tools-missing": "15.1",
   "backup:private-backup-refused": "15.1",
@@ -470,8 +497,6 @@ export const PENDING: Readonly<Record<string, string>> = Object.freeze({
   "backup:contents-hash-mismatch": "15.2",
   "backup:backup-root-mismatch": "15.2",
   "halt:fast-log-unsupported": "13.1",
-  "halt:lockstep-behind": "14.3",
-  "halt:report-hash-mismatch": "14.3",
 });
 
 /** The tasks of `tasks.md` (its text) by id, and whether each is checked done. */

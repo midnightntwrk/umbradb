@@ -21,6 +21,7 @@
 
 import type { ChainCheck, ChainCheckInput } from "../backbone/core-chain/core-chain.js";
 import type { CommittedHeight, ReadHandle } from "../db/api.js";
+import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { BlockItems } from "./block-context.js";
 
 /** A block as the runner sees it: its height, hash and parent hash (`design.md` §3). */
@@ -45,10 +46,11 @@ export interface BlockSource {
   block(height: bigint): Promise<BlockRef>;
   /**
    * A private process's source only (`core-private-source`, PP-3; decision record Q100): runs `body` with a read of the
-   * public data its blocks come from, one per `on-fetch` callback, at the public database's committed height. The
-   * core's sources have none: their `on-fetch` gets no handle (RN-4).
+   * public data its blocks come from, one per `on-fetch` callback of the block at `height`, at the public database's
+   * committed height — on a lockstep instance exactly `height`, checked again after `body` (PP-6, Q142). The core's
+   * sources have none: their `on-fetch` gets no handle (RN-4).
    */
-  readonly fetchRead?: <T>(body: (read: ReadHandle) => Promise<T>) => Promise<T>;
+  readonly fetchRead?: <T>(body: (read: ReadHandle) => Promise<T>, height: bigint) => Promise<T>;
   /**
    * A private process's source only: how a read of the process's database learns its committed height (DB-2) — the
    * private cursor's height. Absent for the core's sources, whose cursor is the cursor table's (`cursorHeight`).
@@ -60,6 +62,12 @@ export interface BlockSource {
    * Given what `checkChain` is given; resolves with the chain's genesis hash, which `core-chain` records.
    */
   checkChain?(input: ChainCheckInput): Promise<ChainCheck>;
+  /**
+   * A source that cannot run some modules refuses them at startup, given the resolved graph's modules after the chain
+   * check and before any migration: a private process's that is not lockstep refuses a module declaring
+   * `needsLockstep` (PP-6, `needs-lockstep-not-listed`; task 14.3).
+   */
+  checkModules?(modules: readonly ModuleDeclaration[]): void;
   /**
    * Optional (a source that fetches ahead): the loop gives the source its {@link QueueRunner} as each of its runs
    * starts; the source may run the queue-side points through it until the returned function is called, which the loop

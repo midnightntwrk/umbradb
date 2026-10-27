@@ -47,6 +47,11 @@ export interface TestDatabase {
    */
   connected?(login: string): Promise<number>;
   /**
+   * PostgreSQL: how many of the database API's sessions (`application_name` `umbradb`) of `login` have a transaction open
+   * on the database now (`pg_stat_activity`'s `xact_start`), the asking session not counted.
+   */
+  openTransactions?(login: string): Promise<number>;
+  /**
    * Runs `body` with a read of the database through the database API, its height `committedHeight`'s: on PGlite only
    * while no process holds it open (this process reuses its lock).
    */
@@ -123,6 +128,14 @@ function postgresBackend(): PrivateBackend {
             await new Promise((resolve) => setTimeout(resolve, 25));
           }
           return count;
+        },
+        async openTransactions(login) {
+          const [row] = await database.admin.unsafe(
+            "SELECT count(*)::int AS open FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() " +
+              "AND backend_type = 'client backend' AND application_name = 'umbradb' AND usename = $1 AND xact_start IS NOT NULL",
+            [login],
+          );
+          return Number(row?.open);
         },
         async read(body, committedHeight = cursorHeight) {
           const db = openPostgres({ url: database.url, committedHeight: committedHeight ?? noHeight, readConnections: 1 });

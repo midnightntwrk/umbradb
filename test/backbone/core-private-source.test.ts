@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { CORE_DIGEST } from "../../src/backbone/core-digest/index.js";
 import { CORE_KEY_REGISTRY } from "../../src/backbone/core-key-registry/index.js";
 import {
   bindingRefusal,
+  lockstepBehind,
+  needsLockstepRefusal,
   networkRefusal,
   openPublicDatabase,
   PrivateBlockSource,
@@ -17,12 +20,15 @@ import {
   readPublicBlock,
   readPublicIdentity,
   readPublicItems,
+  type SourceTransport,
 } from "../../src/backbone/core-private-source/index.js";
 import { PRIVATE_CORE_DIGEST, privateBackbone } from "../../src/backbone/private.js";
 import type { CheckedEntry } from "../../src/config/validate.js";
 import type { ReadHandle, SchemaWriteHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
-import type { ProcessContext } from "../../src/modules/declaration.js";
+import type { ModuleDeclaration, ProcessContext } from "../../src/modules/declaration.js";
+import type { HelloAck } from "../../src/private/messages.js";
+import type { BlockRef } from "../../src/runner/block-source.js";
 
 /**
  * `core-private-source`'s parts that need no database (task 14.1; PP-2, PP-3): the private block source over a public
@@ -35,13 +41,16 @@ function fakeRead(answer: (sql: string, params: readonly unknown[]) => Record<st
   return { height, query: async (sql, params = []) => answer(sql, params) };
 }
 
-/** A public database over {@link fakeRead}s of `answer`, counting its reads and whether it was closed. */
-function fakePublic(answer: (sql: string, params: readonly unknown[]) => Record<string, unknown>[]) {
+/**
+ * A public database over {@link fakeRead}s of `answer`, counting its reads and whether it was closed; each read's height
+ * is `height()`'s when it begins (7 unless given).
+ */
+function fakePublic(answer: (sql: string, params: readonly unknown[]) => Record<string, unknown>[], height: () => bigint | null = () => 7n) {
   const state = { reads: 0, closed: false };
   const db: PublicDatabase = {
     read: async (body) => {
       state.reads += 1;
-      return body(fakeRead(answer, 7n));
+      return body(fakeRead(answer, height()));
     },
     close: async () => {
       state.closed = true;
@@ -286,7 +295,8 @@ describe("the private block source (PP-3)", () => {
     const { db, state } = fakePublic(publicAnswers({ head: 9n }));
     const source = new PrivateBlockSource(db, pollingWakes());
     expect(source.publicDatabase).toBe(db);
-    expect(await source.fetchRead(async (read) => read.height)).toBe(7n);
+    // An independent source reads at the public cursor, whatever the height (PP-5).
+    expect(await source.fetchRead(async (read) => read.height, 3n)).toBe(7n);
     await source.close();
     expect(state).toEqual({ reads: 1, closed: true });
   });
@@ -501,5 +511,189 @@ describe("the private backbone (PP-1, RN-3)", () => {
     expect(intake.part.provides.map((item) => item.name)).toEqual(["private-cursor"]);
     expect(CORE_KEY_REGISTRY).toMatchObject({ side: "private", requires: [] });
     expect(CORE_KEY_REGISTRY.provides.map((item) => [item.name, item.lifetimes])).toEqual([["admitted-keys", ["block", "table"]]]);
+  });
+});
+
+/** A transport stand-in for the source (`SourceTransport`): its connection's answer, the reports sent, its flag. */
+function fakeTransport(answer: Partial<HelloAck> | Error, later?: { lockstep: boolean }) {
+  const reports: BlockRef[] = [];
+  const state = { asked: 0, closed: false };
+  const ack: HelloAck | Error =
+    answer instanceof Error
+      ? answer
+      : { v: 1, type: "hello-ack", lockstep: false, genesis: hexOf(bytes(0xa1)), start: "3", cursor: "9", refused: null, ...answer };
+  const transport: SourceTransport = {
+    connection: async () => {
+      state.asked += 1;
+      if (ack instanceof Error) throw ack;
+      return ack;
+    },
+    report: (block) => {
+      reports.push(block);
+    },
+    // Its last ack's flag once it connected: the first ack's, or `later`'s.
+    get lockstep() {
+      return state.asked > 0 && (later?.lockstep ?? (!(ack instanceof Error) && ack.lockstep));
+    },
+    close: async () => {
+      state.closed = true;
+    },
+  };
+  return { transport, reports, state };
+}
+
+/** A private module of `id`, needing lockstep or not. */
+const moduleOf = (id: string, needsLockstep?: boolean): ModuleDeclaration =>
+  ({
+    id,
+    version: "1.0.0",
+    side: "private",
+    requires: [],
+    provides: [],
+    startsMidChain: true,
+    configSchema: z.object({}),
+    migrations: [],
+    points: {},
+    ...(needsLockstep === undefined ? {} : { needsLockstep }),
+  }) as ModuleDeclaration;
+
+describe("lockstep on the private side (task 14.3; PP-6, PP-7, Q142)", () => {
+  it("its startup check takes the hello-ack, compares its genesis with the configured network's, and keeps its flag", async () => {
+    const lockstep = fakeTransport({ lockstep: true });
+    const source = new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), lockstep.transport);
+    expect(source.lockstep).toBe(false);
+    expect(await source.checkChain(configuredAs("custom", bytes(0xa1)))).toMatchObject({ genesisHash: bytes(0xa1) });
+    expect([lockstep.state.asked, source.lockstep]).toEqual([1, true]);
+    // The core at coreTransport of another network than the configured one, its public database the configured one's.
+    const elsewhere = fakeTransport({ genesis: hexOf(bytes(0xb2)) });
+    const refusal = await refusalOf(
+      new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), elsewhere.transport).checkChain(
+        configuredAs("custom", bytes(0xa1)),
+      ),
+    );
+    expect(refusal).toMatchObject({
+      code: "private-binding-mismatch",
+      details: { reason: "network", network: "custom", configured: hexOf(bytes(0xa1)), public: hexOf(bytes(0xb2)) },
+    });
+    expect(refusal.message).toContain(`the core at coreTransport has genesis hash ${hexOf(bytes(0xb2))}`);
+    // The public database's own checks come first: a database of another network is refused for that.
+    const both = fakeTransport({ genesis: hexOf(bytes(0xb2)) });
+    const first = await refusalOf(
+      new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), both.transport).checkChain(
+        configuredAs("custom", bytes(0xc3)),
+      ),
+    );
+    expect(first.message).toContain(`the public database's genesis hash is ${hexOf(bytes(0xa1))}`);
+    expect(both.state.asked).toBe(0);
+    // A core that cannot be reached fails the check with its failure: the runner retries it (IN-10).
+    const away = fakeTransport(new UmbraError("connection-lost", "away", {}));
+    await expect(
+      new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), away.transport).checkChain(
+        configuredAs("custom", bytes(0xa1)),
+      ),
+    ).rejects.toMatchObject({ code: "connection-lost", retryable: true });
+  });
+
+  it("refuses a module declaring needsLockstep unless the hello-ack said lockstep, or with no transport (needs-lockstep-not-listed)", async () => {
+    const modules = [moduleOf("plain"), moduleOf("needs-a", true), moduleOf("off", false), moduleOf("needs-b", true)];
+    const unlisted = new PrivateBlockSource(fakePublic(publicAnswers({})).db, pollingWakes(), fakeTransport({ lockstep: false }).transport);
+    await unlisted.checkChain(configuredAs("custom", bytes(0xa1)));
+    let refusal: unknown;
+    try {
+      unlisted.checkModules(modules);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toMatchObject({
+      code: "needs-lockstep-not-listed",
+      retryable: false,
+      details: { modules: ["needs-a", "needs-b"], transport: true },
+    });
+    expect((refusal as UmbraError).message).toContain("needs-a and needs-b declare needsLockstep");
+    const none = new PrivateBlockSource(fakePublic(publicAnswers({})).db, pollingWakes());
+    await none.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(() => none.checkModules(modules)).toThrow(/no coreTransport/);
+    expect(needsLockstepRefusal(modules, false, false)?.details).toEqual({ modules: ["needs-a", "needs-b"], transport: false });
+    // Listed: they run; a graph without such a module runs anywhere.
+    const listed = new PrivateBlockSource(fakePublic(publicAnswers({})).db, pollingWakes(), fakeTransport({ lockstep: true }).transport);
+    await listed.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(() => listed.checkModules(modules)).not.toThrow();
+    expect(() => none.checkModules([moduleOf("plain"), moduleOf("off", false)])).not.toThrow();
+    expect(needsLockstepRefusal([moduleOf("needs-a", true)], true, true)).toBeNull();
+  });
+
+  it("a lockstep source takes height h only while the public cursor is h, and halts with lockstep-behind past it (PP-6)", async () => {
+    let cursor: bigint | null = 5n;
+    const { db } = fakePublic(publicAnswers({ head: 9n }), () => cursor);
+    const source = new PrivateBlockSource(db, pollingWakes(), fakeTransport({ lockstep: true }).transport);
+    await source.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(await source.block(5n)).toEqual({ height: 5n, hash: bytes(5), parentHash: bytes(1) });
+    cursor = 6n;
+    const behind = await refusalOf(source.block(5n));
+    expect(behind).toMatchObject({ code: "lockstep-behind", retryable: false, details: { height: "5", cursor: "6" } });
+    expect(behind.message).toContain("the public cursor is 6, past height 5");
+    expect(lockstepBehind(5n, null).details).toEqual({ height: "5", cursor: null });
+    // An independent source takes it whatever the cursor (PP-5).
+    const independent = new PrivateBlockSource(db, pollingWakes(), fakeTransport({ lockstep: false }).transport);
+    await independent.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(await independent.block(5n)).toMatchObject({ height: 5n });
+  });
+
+  it("a lockstep source's on-fetch read is at h, and the public cursor is read again after its data (Q142)", async () => {
+    let cursor = 5n;
+    let head = 5n;
+    const { db } = fakePublic((sql, params) => publicAnswers({ head })(sql, params), () => cursor);
+    const make = async (reread?: boolean) => {
+      const source = new PrivateBlockSource(db, pollingWakes(), fakeTransport({ lockstep: true }).transport, {
+        ...(reread === undefined ? {} : { reread }),
+      });
+      await source.checkChain(configuredAs("custom", bytes(0xa1)));
+      return source;
+    };
+    const source = await make();
+    expect(await source.fetchRead(async (read) => read.height, 5n)).toBe(5n);
+    // The read begins past h: halted before the callback runs.
+    cursor = 6n;
+    let ran = false;
+    await expect(
+      source.fetchRead(async () => {
+        ran = true;
+      }, 5n),
+    ).rejects.toMatchObject({ code: "lockstep-behind", details: { height: "5", cursor: "6" } });
+    expect(ran).toBe(false);
+    // The cursor moves while the callback reads (through the core each statement is its own read): halted after it.
+    cursor = 5n;
+    await expect(
+      source.fetchRead(async () => {
+        head = 6n;
+        return "data read across two heights";
+      }, 5n),
+    ).rejects.toMatchObject({ code: "lockstep-behind", details: { height: "5", cursor: "6" } });
+    // The negative controls' source, which does not read the cursor again, lets that callback's data through.
+    head = 5n;
+    const skipping = await make(false);
+    expect(
+      await skipping.fetchRead(async () => {
+        head = 6n;
+        return "data read across two heights";
+      }, 5n),
+    ).toBe("data read across two heights");
+  });
+
+  it("stays lockstep once it started so, and becomes so when a later hello-ack lists it; reports each committed block", async () => {
+    const dropped = fakeTransport({ lockstep: true }, { lockstep: false });
+    const source = new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), dropped.transport);
+    await source.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(source.lockstep).toBe(true);
+    const listedLater = fakeTransport({ lockstep: false }, { lockstep: true });
+    const later = new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), listedLater.transport);
+    await later.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(later.lockstep).toBe(true);
+    const block = { height: 4n, hash: bytes(4), parentHash: bytes(3) };
+    source.committed(block);
+    expect(dropped.reports).toEqual([block]);
+    expect(source.position(3n)).toEqual({ height: 4n, hash: bytes(4) });
+    await source.close();
+    expect(dropped.state.closed).toBe(true);
   });
 });

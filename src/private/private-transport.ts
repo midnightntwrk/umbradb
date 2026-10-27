@@ -1,18 +1,27 @@
 /**
  * A private process's side of the process transport (`openspec/changes/core-arch/specs/private-processes/spec.md` PP-3,
- * PP-4, PP-5, PP-11; `design.md` §8; CORE-ARCH §4.14; task 14.2): its connection to the core's `coreTransport` address,
- * which wakes its wait for the public cursor ({@link PrivateTransport.next}, the `PublicWakes` of
- * `src/backbone/core-private-source/`) and, when its public database is PGlite or not given, reads it through the core
+ * PP-4, PP-5, PP-6, PP-7, PP-11; `design.md` §8; CORE-ARCH §4.14; tasks 14.2, 14.3): its connection to the core's
+ * `coreTransport` address, which wakes its wait for the public cursor ({@link PrivateTransport.next}, the `PublicWakes`
+ * of `src/backbone/core-private-source/`), tells the core where it is ({@link PrivateTransport.connection}'s `hello`,
+ * then {@link PrivateTransport.report}) and, when its public database is PGlite or not given, reads it through the core
  * ({@link PrivateTransport.publicDatabase}). One per private process start; its block source closes it.
  *
- * **Connecting.** The first wait or read connects (by then startup has read the private cursor), to
- * `ws://<coreTransport>`, or `wss://` with the `core` entry's `tls` — its certificate and key presented to the core,
- * the core's certificate checked against `trustedRoots` (PP-11). On open it sends `hello`: its instance id, the build's
- * version, and its position — the private cursor, or S − 1 with no hash before its first commit. A `hello-ack` with
- * `refused: null` connects it: every waiter is woken (PP-3: after every reconnect the private process reads the public
- * cursor and processes up to it). A `hello-ack` refusing it (`duplicate-instance`: another connection holds its id, as a
+ * **Connecting.** Startup's chain check connects ({@link PrivateTransport.connection}: by then startup has read the
+ * private cursor), to `ws://<coreTransport>`, or `wss://` with the `core` entry's `tls` — its certificate and key
+ * presented to the core, the core's certificate checked against `trustedRoots` (PP-11). On open it sends `hello`: its
+ * instance id, the build's version, and its position — the private cursor, or S − 1 with no hash before its first
+ * commit. A `hello-ack` with `refused: null` connects it: every waiter is woken (PP-3: after every reconnect the private
+ * process reads the public cursor and processes up to it). One with `refused: lockstep-behind` (PP-7) connects it too, as
+ * the core keeps the connection: the instance is lockstep and halts by its own check at its first height, the public
+ * cursor being past it. A `hello-ack` refusing it with `duplicate-instance` (another connection holds its id, as a
  * restart can find while the core has not yet seen the old connection close) is logged and retried as a lost
  * connection.
+ *
+ * **Lockstep** (PP-6; task 14.3). {@link PrivateTransport.lockstep} is the last `hello-ack`'s flag (kept while away).
+ * While connected to a core that lists it and has not refused it, {@link PrivateTransport.report} sends each block the
+ * private process committed as `report`. A close of the core for `report-hash-mismatch` (1008: its report's hash is not
+ * the public block's) refuses it for good: the transport is `refused`, connects no more, and every wait, read and
+ * {@link PrivateTransport.connection} fails with that `UmbraError` (not retryable), so the process halts.
  *
  * **While the core is away** (PP-5: the core never waits for an independent instance, and the instance does not need
  * the core to stay up). A lost connection — closed, refused, a protocol fault, no pong within `PING_INTERVAL_MS` — is
@@ -41,7 +50,7 @@ import { WebSocket } from "ws";
 import type { ReadHandle } from "../db/api.js";
 import { ERROR_CODES, type ErrorCode, UmbraError } from "../db/errors.js";
 import { backoffDelay } from "../node/backoff.js";
-import { CLOSE_PROTOCOL, TRANSPORT_LIMITS, type TransportLimits, type TransportTls } from "./core-transport.js";
+import { CLOSE_PROTOCOL, REPORT_HASH_MISMATCH, TRANSPORT_LIMITS, type TransportLimits, type TransportTls } from "./core-transport.js";
 import {
   decodeValue,
   encodeParameter,
@@ -81,13 +90,19 @@ export interface PrivateTransportOptions {
   readonly limits?: Partial<Pick<TransportLimits, "maxMessageBytes" | "pingIntervalMs">>;
 }
 
-/** Where the connection is. */
-export type TransportState = "idle" | "connecting" | "connected" | "waiting" | "closed";
+/** Where the connection is: `refused` for good by the core (`report-hash-mismatch`), `closed` by the process. */
+export type TransportState = "idle" | "connecting" | "connected" | "waiting" | "refused" | "closed";
 
 /** A request waiting for its answer. */
 interface Pending {
   resolve(message: ReadResult): void;
   reject(error: unknown): void;
+}
+
+/** A wait for the next wake-up. */
+interface Waiter {
+  wake(): void;
+  fail(error: unknown): void;
 }
 
 /** The failure of a read the connection could not carry: retryable (IN-10). */
@@ -125,8 +140,10 @@ export class PrivateTransport {
   #alive = true;
   #next = 0;
   #ack: HelloAck | null = null;
+  /** Why the core refused it for good, once it did. */
+  #refusal: UmbraError | null = null;
   readonly #pending = new Map<string, Pending>();
-  readonly #waiters = new Set<() => void>();
+  readonly #waiters = new Set<Waiter>();
   /** Reads made while connecting: settled when the attempt connects or fails. */
   readonly #connecting = new Set<{ resolve(): void; reject(error: unknown): void }>();
 
@@ -144,6 +161,31 @@ export class PrivateTransport {
     return this.#ack;
   }
 
+  /** Whether the last `hello-ack` that connected it said the core lists it in `lockstepInstances` (PP-6). */
+  get lockstep(): boolean {
+    return this.#ack?.lockstep === true;
+  }
+
+  /**
+   * The `hello-ack` that connects it: at once while connected; once connected when idle or connecting. Fails with
+   * `connection-lost` (retryable) while it waits to connect again or after `close`, and with the core's refusal once
+   * it refused it for good.
+   */
+  async connection(): Promise<HelloAck> {
+    await this.#connected();
+    return this.#ack as HelloAck;
+  }
+
+  /**
+   * Tells the core that `block` committed (`report`, PP-6) — only while connected to a core that lists it and has not
+   * refused it; a block committed meanwhile is the position of the next `hello`.
+   */
+  report(block: { readonly height: bigint; readonly hash: Uint8Array }): void {
+    const socket = this.#socket;
+    if (this.#state !== "connected" || socket === undefined || this.#ack?.lockstep !== true || this.#ack.refused !== null) return;
+    socket.send(messageText({ v: 1, type: "report", height: block.height.toString(), hash: hexOf(block.hash) }));
+  }
+
   /**
    * Resolves at the next wake-up after the call — a `committed` message, or a connection (the first included) —, or
    * rejects with `signal`'s reason once it aborts (PP-3; `PublicWakes.next`).
@@ -155,16 +197,27 @@ export class PrivateTransport {
         reject(signal.reason);
         return;
       }
-      const wake = (): void => {
-        this.#waiters.delete(wake);
-        signal.removeEventListener("abort", abort);
-        resolve();
+      if (this.#refusal !== null) {
+        reject(this.#refusal);
+        return;
+      }
+      const waiter: Waiter = {
+        wake: () => {
+          this.#waiters.delete(waiter);
+          signal.removeEventListener("abort", abort);
+          resolve();
+        },
+        fail: (error) => {
+          this.#waiters.delete(waiter);
+          signal.removeEventListener("abort", abort);
+          reject(error);
+        },
       };
       const abort = (): void => {
-        this.#waiters.delete(wake);
+        this.#waiters.delete(waiter);
         reject(signal.reason);
       };
-      this.#waiters.add(wake);
+      this.#waiters.add(waiter);
       signal.addEventListener("abort", abort, { once: true });
     });
   }
@@ -217,16 +270,22 @@ export class PrivateTransport {
     if (this.#state === "idle") this.#connect();
   }
 
-  /** Sends `statements` as one `read` once connected, and resolves with its `read-result` (or fails). */
-  async #request(statements: { sql: string; params: JsonValue[] }[]): Promise<ReadResult> {
+  /** Resolves once connected (see {@link connection}); throws why it is not. */
+  async #connected(): Promise<void> {
     this.#start();
     if (this.#state === "connecting") {
       await new Promise<void>((resolve, reject) => this.#connecting.add({ resolve, reject }));
     }
-    const socket = this.#socket;
-    if (this.#state !== "connected" || socket === undefined) {
+    if (this.#refusal !== null) throw this.#refusal;
+    if (this.#state !== "connected" || this.#socket === undefined) {
       throw lost(this.#state === "closed" ? "the process is stopping" : "the core is not connected; connecting again");
     }
+  }
+
+  /** Sends `statements` as one `read` once connected, and resolves with its `read-result` (or fails). */
+  async #request(statements: { sql: string; params: JsonValue[] }[]): Promise<ReadResult> {
+    await this.#connected();
+    const socket = this.#socket as WebSocket;
     this.#next += 1;
     const id = String(this.#next);
     const answer = await new Promise<ReadResult>((resolve, reject) => {
@@ -290,6 +349,10 @@ export class PrivateTransport {
       if (this.#socket !== socket) return;
       clearInterval(this.#pinger);
       this.#socket = undefined;
+      if (code === CLOSE_PROTOCOL && why.toString() === REPORT_HASH_MISMATCH) {
+        this.#refuse();
+        return;
+      }
       const text = why.length > 0 ? `${reason} (${code} ${why.toString()})` : reason;
       this.#lost(text);
     });
@@ -302,16 +365,18 @@ export class PrivateTransport {
     if (!parsed.ok) return parsed.fault;
     const message: Message = parsed.message;
     switch (message.type) {
-      case "hello-ack":
-        if (message.refused !== null) return `the core refused instance ${this.#options.instance}: ${message.refused}`;
+      case "hello-ack": {
+        if (message.refused === "duplicate-instance") return `the core refused instance ${this.#options.instance}: ${message.refused}`;
         this.#ack = message;
         this.#state = "connected";
         this.#attempts = 0;
-        this.#options.log(`transport: connected to the core at ${this.#options.address}`);
+        const behind = message.refused === null ? "" : "; refused lockstep-behind: this instance is behind the public cursor (PP-7)";
+        this.#options.log(`transport: connected to the core at ${this.#options.address}${behind}`);
         for (const waiting of this.#connecting) waiting.resolve();
         this.#connecting.clear();
         this.#wake();
         return null;
+      }
       case "committed":
         this.#wake();
         return null;
@@ -329,7 +394,23 @@ export class PrivateTransport {
 
   /** Wakes every waiter (PP-3). */
   #wake(): void {
-    for (const wake of [...this.#waiters]) wake();
+    for (const waiter of [...this.#waiters]) waiter.wake();
+  }
+
+  /** The core refused it for good (`report-hash-mismatch`, PP-6): everything that waits on it fails with that. */
+  #refuse(): void {
+    const instance = this.#options.instance;
+    this.#refusal = new UmbraError(
+      "report-hash-mismatch",
+      `the core refused instance ${instance}: a block it reported committed has another hash than the public block at ` +
+        "that height (PP-6), so its private data was computed from public data the core does not have; this instance " +
+        "halts — find why its public database is not the core's, then give it a new private database",
+      { instance },
+    );
+    this.#state = "refused";
+    this.#options.log(`transport: the core refused instance ${instance} for good: ${REPORT_HASH_MISMATCH} (its report's hash is not the public block's, PP-6)`);
+    this.#fail(this.#refusal);
+    for (const waiter of [...this.#waiters]) waiter.fail(this.#refusal);
   }
 
   /** Fails every pending read and every read waiting for the connection with `error`. */

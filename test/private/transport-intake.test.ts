@@ -135,10 +135,11 @@ describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name (PP-
       await proxy.close();
       await core.stop();
     }
-    // Each hello gave the private cursor: S − 1 before the first commit (on PGlite it connects at startup, to read), or
-    // the heights it processed reading PostgreSQL directly before its first wait; then the height it had reached.
+    // Each hello gave the private cursor: S − 1 before the first commit — a private process with coreTransport connects
+    // at startup's chain check, which waits for its hello-ack to learn whether it is lockstep (task 14.3) —; then the
+    // height it had reached.
     const connects = core.lines.filter((line) => line.startsWith("transport: instance instance-1 connected at "));
-    expect(connects[0]).toBe(`transport: instance instance-1 connected at ${backend.kind === "pglite" ? 0 : FROM}`);
+    expect(connects[0]).toBe("transport: instance instance-1 connected at 0");
     expect(connects.at(-1)).toBe(`transport: instance instance-1 connected at ${FROM + 1}`);
     // The core's stop closed its transport: nothing listens there.
     expect((await endedWithin(rawClient(`ws://${address}/`))).opened).toBe(false);

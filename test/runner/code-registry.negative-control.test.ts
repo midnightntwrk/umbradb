@@ -74,8 +74,9 @@ describe("A87 negative controls: the registry's check", () => {
     // Registered codes made pending, so the control does not change as pending codes get their tests.
     const { "halt:unexpected-cursor": _unexpected, "halt:finality-conflict": _conflict, ...registry } = REGISTRY;
     const pending = { ...PENDING, "halt:unexpected-cursor": "14.3", "halt:finality-conflict": "10.3" };
-    // The tasks as a fixed table, so the control does not change as tasks are checked: the pending ones open, 10.3 done.
-    const tasks = new Map([...Object.values(PENDING).map((task) => [task, false] as const), ["10.3", true] as const]);
+    // The tasks as a fixed table, so the control does not change as tasks are checked: the pending ones and the
+    // control's own 14.3 open, 10.3 done.
+    const tasks = new Map([...Object.values(PENDING).map((task) => [task, false] as const), ["14.3", false] as const, ["10.3", true] as const]);
     const baseline = [...Object.keys(PENDING), "halt:finality-conflict"];
     expect(registryProblems(input({ registry, pending, baseline, tasks }))).toEqual([
       "halt:unexpected-cursor: pending, but not among the codes pending at task 10.4: a new code of §11 comes with its test",
@@ -86,7 +87,7 @@ describe("A87 negative controls: the registry's check", () => {
   it("fails on a code registered and pending both, and on a pending code whose task tasks.md does not have", () => {
     const { "halt:finality-conflict": _conflict, ...registry } = REGISTRY;
     const pending = { ...PENDING, "halt:unexpected-cursor": "14.3", "halt:finality-conflict": "99.9" };
-    const tasks = new Map(Object.values(PENDING).map((task) => [task, false] as const));
+    const tasks = new Map([...Object.values(PENDING).map((task) => [task, false] as const), ["14.3", false] as const]);
     expect(registryProblems(input({ registry, pending, baseline: Object.keys(pending), tasks }))).toEqual([
       "halt:unexpected-cursor: registered with its test and pending both",
       "halt:finality-conflict: pending for task 99.9, which tasks.md does not have",

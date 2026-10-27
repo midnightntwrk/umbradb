@@ -2778,10 +2778,64 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       outside the clone): 11 (either type's schema put back, the unknown-type check and its reason, a wrong-direction
       message ignored, on both sides), 11 caught; the three schema variants again against the transport suites alone,
       3 caught; none equivalent.
-- [ ] 14.3 Lockstep and the behind-instance refusal. Through the core, a read of public data is one `read` per
+- [x] 14.3 Lockstep and the behind-instance refusal. Through the core, a read of public data is one `read` per
       statement (owner decision Q142): a lockstep instance reads the public cursor again after its block's data and
       halts with `lockstep-behind` if it moved past h.
       **Acceptance:** A117, A118.
+      **Done (2026-10-27):** `src/private/lockstep.ts` (new): the core's bookkeeping of its `lockstepInstances` — per
+      listed instance whether a connection past its `hello` holds its id, its committed height last learned (the
+      `hello`'s, then each counted `report`'s) and whether the core refused it (`lockstep-behind`,
+      `report-hash-mismatch`) — and the wait: a listed instance holds height h while not connected (one not seen since
+      the core started included, Q24), refused or below h − 1; `wait(h)` resolves once none does, false on a stop;
+      meanwhile the condition `waiting-for-lockstep` (`height`, each holding instance with `connected`, `height`,
+      `refused`; `/status`'s JSON schema has it), and a log line for the instances down or refused. The finalized loop
+      (`src/runner/loop.ts`, `LoopInput.lockstep`, the seam `lockstepWait`) awaits it after h's `on-compute` and before
+      h's block transaction, every read ended — no transaction open, PGlite's one queue free —, and ends with its
+      signal, h not committed, when a stop ends the wait. The process (`src/runner/process.ts`) keeps one bookkeeping
+      per run when its `core` revision lists instances (also without `listen.transport`: then the core waits for them),
+      gives it to its transport and its loop, and shows the condition. The core's transport (`core-transport.ts`): a
+      listed instance's `hello` below the public cursor − 1 is answered `refused: lockstep-behind` (PP-7), its
+      connection kept and the core holding for it; a `report` counts once its hash is the public block's (a bounded read
+      of `core_block_commit.blocks`), another hash or no block there closes the connection 1008 `report-hash-mismatch`,
+      one the core cannot check 1011 `report-unchecked`; the bookkeeping is told of hellos, counted reports and closes.
+      A private process (`private-transport.ts`, `core-private-source`): it connects at startup's chain check and waits
+      for its `hello-ack`, whose `genesis` is compared with the configured network's (`private-binding-mismatch`,
+      `network`; task 10.2b's note (a)); a lockstep-behind ack connects it; it is lockstep when startup's ack said so
+      (kept for the run) or a later one does; after the graph and before any migration a module declaring
+      `needsLockstep` refuses to start on an instance that is not lockstep or has no `coreTransport` (new
+      `BlockSource.checkModules`; `needs-lockstep-not-listed`, `details { modules, transport }`); a lockstep instance
+      takes h only where the public cursor is h — its block read at h, each `on-fetch` read (`BlockSource.fetchRead`,
+      now given the height) beginning at h and reading the cursor again after the callback (Q142) — else halts with
+      `lockstep-behind` (`details { height, cursor }`); each committed block is sent as `report` to a core that lists
+      it; the core's close for `report-hash-mismatch` refuses its transport for good, which halts it with that code. The
+      three codes are in `ERROR_CODES`, `REFUSAL_CODES`/`HALT_CODES` and the registry (`test/runner/code-registry.ts`).
+      Design §8 (the transport bullet, the private process's check, **Lockstep**), the module guide's "Private modules".
+      Question Q149 raised (the transport's core of another S than the public database's; not blocking, shipped A).
+      Tests, seen failing first (`tsc` 72 errors: `src/private/lockstep.ts`, `LockstepWait`, `checkModules`,
+      `connection`, `report`, `lockstep` missing; Vitest: the new unit suites not loading, the source's 5 new tests
+      failing, the process tests timing out with no wait): `test/private/lockstep-table.test.ts` (the bookkeeping, the
+      wait, its log, the condition in `/status`'s schema), `test/runner/lockstep-wait.test.ts` (the loop on PostgreSQL
+      18.6 and PGlite 0.5.10: the wait after `on-compute` and before `BEGIN`, no transaction open — `pg_stat_activity`,
+      PGlite's engine — and a read served; a stop or a false wait ends it, nothing committed),
+      `test/private/transport-faults.test.ts` (lockstep-behind kept and held, the report oracle `reportProblems`,
+      `report-unchecked`, the private side's `connection()`, `report()` and refusal for good),
+      `test/backbone/core-private-source.test.ts` (the ack's genesis and flag, `checkModules`, the block and fetch
+      checks, the reread, the sticky flag, the report), and on both backends `test/private/lockstep-wait.test.ts` (A117
+      `[[private.lockstep-waits-no-transaction]]`: the wait at S for an instance never seen, then for it stopped, no
+      transaction open and the queue free, `waiting-for-lockstep` naming it, the resume, every on-fetch read at its
+      height, a core restart with the instance at its cursor not deadlocking; a core without `listen.transport`),
+      `lockstep-refusals.test.ts` (A118; a report hash mismatch through a relay; `needsLockstep`),
+      `lockstep-reads.test.ts` (Q142). Committed negative controls: a core that opens its block transaction before it
+      waits (both the loop's and A117's oracles: `pg_stat_activity` on PostgreSQL, the held queue on PGlite), one that
+      skips an instance not seen since its start, a report check that compares nothing (`reports: "accept"`), an
+      instance that does not read the cursor again (`reread: false`); a status body without the condition's instances
+      fails the schema. Wrong variants (a scratch copy outside the clone): 71 on the new logic (the bookkeeping 17, the
+      core's transport 18, the private transport 10, the private source 15, the loop 5, the process 5, the code lists
+      3), 69 caught, one malformed (its edit did not parse) and one survivor — a refused instance's report moving the
+      transport's own view of it, which the bookkeeping already ignored —, a gap closed by a test; both again, caught.
+      **Pending:** the core's `/status` of its instances (PP-9's `privateInstances`) and a private process's
+      `public.lockstep` (14.4, from the bookkeeping's `instances()` and the source's `lockstep`); the browser's
+      `postMessage` transport carrying `report` and the lockstep-behind ack (16.1); question Q149 (owner).
 - [ ] 14.4 Test keys through the key registry (the key API is not core and leaves this change, Q70) and privacy checks
       (the private-backup refusal is task 15.1's).
       **Acceptance:** A119, A120, A123.

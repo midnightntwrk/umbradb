@@ -32,8 +32,8 @@ import { CallbackFailure } from "./dispatch.js";
 import { HeightFailure, UnexpectedCursor } from "./loop.js";
 
 /**
- * `design.md` §11's startup refusals that are `UmbraError` codes today (the others — `needs-lockstep-not-listed`,
- * `test-key-conflict` — come with the tasks that raise them, which add them here; task 10.4's registry checks §11).
+ * `design.md` §11's startup refusals that are `UmbraError` codes today (the other — `test-key-conflict` — comes with the
+ * task that raises it, which adds it here; task 10.4's registry checks §11).
  */
 export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "genesis-mismatch",
@@ -77,11 +77,13 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "durability-full-page-writes-off",
   "package-hash-mismatch",
   "private-binding-mismatch",
+  "needs-lockstep-not-listed",
 ] as const);
 
 /**
  * `design.md` §11's processing halts that are `UmbraError` codes today; `callback-error` and `unexpected-cursor` are the
- * runner's own ({@link ReasonCode}), and the node's other halts and the private instances' come with their tasks.
+ * runner's own ({@link ReasonCode}), and the node's other halts come with their tasks. A private instance's two are
+ * lockstep's (task 14.3).
  */
 export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
   "database-error",
@@ -96,6 +98,8 @@ export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
   "writer-lock-lost",
   "truncate-not-allowed",
   "root-mismatch",
+  "lockstep-behind",
+  "report-hash-mismatch",
 ] as const);
 
 const NAMED: ReadonlySet<ErrorCode> = new Set([...REFUSAL_CODES, ...HALT_CODES]);

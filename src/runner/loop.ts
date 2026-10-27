@@ -20,8 +20,14 @@
  * S, then the modules one of whose segments of the graph (`ResolvedGraph.segments`) starts at h — revisions continuing
  * each other are one segment (CF-5), so a revision boundary starts nothing (A42) —, each callback with a read at h − 1;
  * after `on-after-db-write`, `on-stop-height` for the entries stopping at h (RN-10): the modules one of whose segments
- * ends at h, in reverse order, then the core's parts when h is the core's stop, each with a read at h. The lockstep wait
- * (before `BEGIN`) is task 14.x's.
+ * ends at h, in reverse order, then the core's parts when h is the core's stop, each with a read at h.
+ *
+ * **The lockstep wait** (PP-6, task 14.3): given {@link LoopInput.lockstep} — the core's bookkeeping of the private
+ * instances its `core` entry lists in `lockstepInstances` (`src/private/lockstep.ts`) — the loop awaits it for each
+ * height h after h's `on-compute` and before h's block transaction, every read of h ended: nothing is open while it
+ * waits, so a private instance's reads through the core (on PGlite, its one queue) are served meanwhile. It resolves
+ * true once every listed instance has committed h − 1, and the loop goes on to `BEGIN`; false when the loop's signal
+ * stopped it first (RN-13: h's transaction never began), and the loop ends with its signal, h not committed.
  *
  * **At a restart** (RN-11), with the cursor c, the loop first runs `on-after-db-write` for c and `on-stop-height` for
  * the entries stopping at c — the core's when c is at or above its stop — in the order of the range holding c, with the
@@ -154,6 +160,14 @@ export interface LoopInput {
    * comment). Absent or null: none is.
    */
   readonly slowBlockMs?: number | null;
+  /** The lockstep wait before each block's transaction (PP-6; see the module comment); none unless given. */
+  readonly lockstep?: LockstepWait;
+}
+
+/** The lockstep wait (PP-6, `src/private/lockstep.ts`'s `Lockstep`): before `BEGIN` of `height`. */
+export interface LockstepWait {
+  /** Resolves true once the loop may open `height`'s block transaction, false when `signal` aborted first. */
+  wait(height: bigint, signal: AbortSignal): Promise<boolean>;
 }
 
 /** What the loop tells as it runs (the process's state, `./process.ts`): none may throw. */
@@ -472,7 +486,10 @@ export class FinalizedLoop {
       }
       for (let height = next; height <= head.height; height++) {
         if (this.#signal.aborted) return SIGNALLED;
-        cursor = await this.#process(height, cursor);
+        const done = await this.#process(height, cursor);
+        // Stopped at the lockstep wait: the height's transaction never began.
+        if (done === null) return SIGNALLED;
+        cursor = done;
         if (height === last) return this.#stopped(height);
       }
     }
@@ -523,6 +540,16 @@ export class FinalizedLoop {
     } catch (error) {
       if (!this.#signal.aborted) throw error;
     }
+  }
+
+  /**
+   * The lockstep wait for `run`'s height, before its block transaction (see the module comment): true to go on to
+   * `BEGIN`, false when the loop's signal stopped it; true at once without {@link LoopInput.lockstep}. A negative
+   * control's seam.
+   */
+  protected lockstepWait(run: HeightRun): Promise<boolean> {
+    const { lockstep } = this.input;
+    return lockstep === undefined ? Promise.resolve(true) : lockstep.wait(run.height, this.#signal);
   }
 
   /** The `block` items of `height`. */
@@ -593,7 +620,7 @@ export class FinalizedLoop {
     if (point === "on-fetch" && open !== undefined) {
       await this.#dispatch(run.range, "on-fetch", (part, call) => {
         const context = this.#context(run, part, run.items.visible());
-        return open((read) => run.items.collect(part, "on-fetch", (sink) => call(context, sink, read)));
+        return open((read) => run.items.collect(part, "on-fetch", (sink) => call(context, sink, read)), run.height);
       });
       return;
     }
@@ -691,9 +718,9 @@ export class FinalizedLoop {
 
   /**
    * Processes `height` above the cursor `previous` — a held height again from where it resumes —; resolves with the new
-   * cursor.
+   * cursor, or null when the loop's signal stopped it at the lockstep wait, before its transaction.
    */
-  async #process(height: bigint, previous: BlockRef | null): Promise<BlockRef> {
+  async #process(height: bigint, previous: BlockRef | null): Promise<BlockRef | null> {
     let committed = false;
     const resume = this.#resume?.run.height === height ? this.#resume : undefined;
     this.#resume = undefined;
@@ -702,6 +729,7 @@ export class FinalizedLoop {
     try {
       run = resume === undefined ? await this.#begin(height, previous) : this.#again(resume);
       await this.prepare(run);
+      if (!(await this.lockstepWait(run))) return null;
       // The block transaction is on-db-write's (RN-17): its BEGIN, its callbacks, the cursor check, the COMMIT.
       this.#enter("on-db-write");
       await this.commit(run);

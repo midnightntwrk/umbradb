@@ -7,19 +7,23 @@ import type { ReadHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { type ResultColumn, RESULT_COLUMNS } from "../../src/deterministic-postgresql/index.js";
 import { type CoreTransport, type CoreTransportOptions, splitAddress, startCoreTransport } from "../../src/private/core-transport.js";
-import { type Message, messageText, parseMessage } from "../../src/private/messages.js";
+import { Lockstep } from "../../src/private/lockstep.js";
+import { hexOf, type Message, messageText, parseMessage } from "../../src/private/messages.js";
 import { PrivateTransport, type PrivateTransportOptions } from "../../src/private/private-transport.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
 import { launchPublicCore } from "./builds.js";
 import { endedWithin, hello, rawClient } from "./raw-client.js";
 
 /**
- * The process transport's faults and limits (task 14.2; PP-4, PP-5, IN-10): what closes a connection on the core's side
- * — too many reads at once, a reader too slow, a peer that does not answer pings, a frame that is no WebSocket frame —,
- * a result too large, a report kept, a listener that cannot listen; and on a private process's side, against a stand-in
- * core, every reply of the core it closes on, retries after (a refused `hello`, a lost connection, no pong, an HTTP
- * answer), the reads while it is connecting, connected, waiting and closed, and what it answers to the core's own
- * messages. The limits are the tests' smaller ones (`limits`), the code the process runs.
+ * The process transport's faults and limits (tasks 14.2, 14.3; PP-4, PP-5, PP-6, PP-7, IN-10): what closes a connection
+ * on the core's side — too many reads at once, a reader too slow, a peer that does not answer pings, a frame that is no
+ * WebSocket frame, a `report` whose hash is not the public block's —, a result too large, a report checked and counted,
+ * a listed instance behind the public cursor refused `lockstep-behind`, a listener that cannot listen; and on a private
+ * process's side, against a stand-in core, every reply of the core it closes on, retries after (a refused `hello`, a
+ * lost connection, no pong, an HTTP answer), the reads while it is connecting, connected, waiting and closed, its
+ * `connection()` and `report()`, and the core's `report-hash-mismatch`, which refuses it for good. The limits are the
+ * tests' smaller ones (`limits`), the code the process runs. Committed negative control: a core whose report check
+ * compares nothing fails the report oracle.
  */
 
 const quiet = () => undefined;
@@ -32,10 +36,24 @@ function rowsOf(columns: readonly ResultColumn[], values: readonly Record<string
 }
 
 /** A public database whose reads the test answers: `answer` gives each statement's rows (or throws, or hangs). */
-function fakeDb(answer: (sql: string) => Promise<Record<string, unknown>[]>): CoreTransportOptions["db"] {
+function fakeDb(answer: (sql: string, params: readonly unknown[]) => Promise<Record<string, unknown>[]>): CoreTransportOptions["db"] {
   return {
-    read: async <T>(body: (read: ReadHandle) => Promise<T>) => body({ height: 9n, query: (sql: string) => answer(sql) }),
+    read: async <T>(body: (read: ReadHandle) => Promise<T>) =>
+      body({ height: 9n, query: (sql: string, params: unknown[] = []) => answer(sql, params) }),
   } as CoreTransportOptions["db"];
+}
+
+/** The hash of the public block at `height` in {@link blocksDb}: 32 bytes of the height. */
+const blockHash = (height: bigint): Uint8Array => new Uint8Array(32).fill(Number(height));
+
+/** A public database holding blocks 1 to `top` ({@link blockHash}); every read fails when `failing()` says so. */
+function blocksDb(top: bigint, failing: () => boolean = () => false): CoreTransportOptions["db"] {
+  return fakeDb(async (sql, params) => {
+    if (failing()) throw new UmbraError("connection-lost", "the public database is away", {});
+    if (!sql.includes("core_block_commit.blocks")) return rowsOf([], []);
+    const height = params[0] as bigint;
+    return rowsOf([{ name: "hash", type: 17 }], height >= 1n && height <= top ? [{ hash: blockHash(height) }] : []);
+  });
 }
 
 /** A core transport over `db`, its log kept. */
@@ -60,11 +78,11 @@ afterEach(async () => {
   for (const transport of opened.splice(0)) await transport.close();
 });
 
-/** A greeted raw client of `url` as `instance`. */
-async function greeted(url: string, instance: string, options: Parameters<typeof rawClient>[1] = {}) {
+/** A greeted raw client of `url` as `instance`, its `hello` at `height`. */
+async function greeted(url: string, instance: string, options: Parameters<typeof rawClient>[1] = {}, height = "0") {
   const client = rawClient(url, options);
   await client.opened;
-  client.send(hello(instance));
+  client.send(hello(instance, height));
   await client.next("hello-ack");
   return client;
 }
@@ -179,17 +197,16 @@ describe("the core's side: limits and faults", () => {
     again.close();
   });
 
-  it("keeps an instance's report (task 14.3's), and shows connected instances", async () => {
-    const { transport, url } = await core(fakeDb(async () => rowsOf([], [])), { lockstepInstances: ["reporter"] });
+  it("keeps an instance's report once its hash is the public block's, and shows connected instances", async () => {
+    const { transport, url } = await core(blocksDb(9n), { lockstepInstances: ["reporter"] });
     opened.push(transport);
-    const client = await greeted(url, "reporter");
-    expect(transport.instances()).toEqual([{ instance: "reporter", lockstep: true, height: 0n, hash: null }]);
-    const hash = `0x${"5a".repeat(32)}`;
-    client.send({ v: 1, type: "report", height: "7", hash });
-    // A read answered after it: the report was handled.
-    client.send({ v: 1, type: "read", id: "probe", statements: [] });
-    await client.next("read-result");
-    expect(transport.instances()).toEqual([{ instance: "reporter", lockstep: true, height: 7n, hash }]);
+    // In step with the public cursor (9): at 8, the height before it.
+    const client = await greeted(url, "reporter", {}, "8");
+    expect(transport.instances()).toEqual([{ instance: "reporter", lockstep: true, height: 8n, hash: null }]);
+    const hash = hexOf(blockHash(9n));
+    client.send({ v: 1, type: "report", height: "9", hash });
+    await until(() => transport.instances()[0]?.height === 9n, "the report counted");
+    expect(transport.instances()).toEqual([{ instance: "reporter", lockstep: true, height: 9n, hash }]);
     client.close();
     await endedWithin(client);
   });
@@ -229,6 +246,149 @@ describe("the core's side: limits and faults", () => {
   it("splits an address, a bracketed IPv6 host without its brackets", () => {
     expect(splitAddress("[::1]:9000")).toEqual({ host: "::1", port: 9000 });
     expect(splitAddress("0.0.0.0:0")).toEqual({ host: "0.0.0.0", port: 0 });
+  });
+});
+
+/**
+ * The oracle of PP-6's report check against the transport at `url` whose bookkeeping is `lockstep` (listing `good`, `bad`
+ * and `ahead`, each saying `hello` at 8; the public cursor 9, blocks 1–9): every problem, none when a report with the
+ * public block's hash counts, and one with another hash, or at a height with no public block, closes its connection
+ * (1008, `report-hash-mismatch`) and leaves the instance held, refused, at its earlier height.
+ */
+export async function reportProblems(url: string, lockstep: Lockstep): Promise<string[]> {
+  const problems: string[] = [];
+  const entry = (instance: string) => lockstep.instances().find((one) => one.instance === instance);
+  const good = await greeted(url, "good", {}, "8");
+  good.send({ v: 1, type: "report", height: "9", hash: hexOf(blockHash(9n)) });
+  await until(() => entry("good")?.height === 9n, "the good report counted").catch(() =>
+    problems.push(`a report with the public block's hash did not count: good at ${entry("good")?.height}`),
+  );
+  const cases: [string, string, Uint8Array][] = [
+    ["bad", "9", new Uint8Array(32).fill(0xee)],
+    ["ahead", "10", blockHash(10n)],
+  ];
+  for (const [instance, height, hash] of cases) {
+    const client = await greeted(url, instance, {}, "8");
+    client.send({ v: 1, type: "report", height, hash: hexOf(hash) });
+    const end = await endedWithin(client, 5_000).catch(() => null);
+    if (end === null) {
+      problems.push(`${instance}'s report at ${height} with another hash than the public block's left its connection open`);
+      client.close();
+    } else if (end.code !== 1008 || end.reason !== "report-hash-mismatch") {
+      problems.push(`${instance}'s connection closed with ${end.code} ${end.reason}, not 1008 report-hash-mismatch`);
+    }
+    await until(() => entry(instance)?.connected === false || end === null, `${instance}'s close seen`).catch(() => undefined);
+    const seen = entry(instance);
+    if (seen?.refused !== "report-hash-mismatch" || seen.height !== 8n) {
+      problems.push(`the core counted ${instance}'s report with another hash: ${JSON.stringify(seen, (_k, v) => (typeof v === "bigint" ? `${v}` : v))}`);
+    }
+  }
+  good.close();
+  return problems;
+}
+
+describe("the core's side: lockstep (task 14.3; PP-6, PP-7)", () => {
+  it("a listed instance whose hello is below the public cursor − 1 is refused lockstep-behind, kept connected and held (PP-7)", async () => {
+    const lockstep = new Lockstep({ listed: ["late", "ontime"] });
+    const { transport, url, lines } = await core(blocksDb(9n), { lockstepInstances: ["late", "ontime"], lockstep });
+    opened.push(transport);
+    const ackOf = async (instance: string, height: string) => {
+      const client = rawClient(url);
+      await client.opened;
+      client.send(hello(instance, height));
+      return { client, ack: await client.next("hello-ack") };
+    };
+    const late = await ackOf("late", "7");
+    expect(late.ack).toMatchObject({ lockstep: true, cursor: "9", refused: "lockstep-behind" });
+    // Its connection stays, answered, holding its id; its report counts for nothing.
+    late.client.send({ v: 1, type: "report", height: "9", hash: hexOf(blockHash(9n)) });
+    late.client.send({ v: 1, type: "read", id: "r", statements: [] });
+    expect(await late.client.next("read-result")).toMatchObject({ id: "r" });
+    expect((await ackOf("late", "9")).ack.refused).toBe("duplicate-instance");
+    const ontime = await ackOf("ontime", "8");
+    expect(ontime.ack).toMatchObject({ lockstep: true, refused: null });
+    const free = await ackOf("free", "0");
+    expect(free.ack).toMatchObject({ lockstep: false, refused: null });
+    await sleep(50);
+    expect(lockstep.instances()).toEqual([
+      { instance: "late", connected: true, height: 7n, refused: "lockstep-behind" },
+      { instance: "ontime", connected: true, height: 8n, refused: null },
+    ]);
+    // The transport's own view (PP-9) keeps the refused instance at its hello too.
+    expect(transport.instances().find((one) => one.instance === "late")).toEqual({ instance: "late", lockstep: true, height: 7n, hash: null });
+    expect(lines).toContain("transport: instance late connected at 7; refused lockstep-behind: below the public cursor 9 − 1 (PP-7)");
+    for (const client of [late.client, ontime.client, free.client]) client.close();
+    await until(() => lockstep.instances().every((one) => !one.connected), "the closes seen");
+    expect(lockstep.instances()[0]).toEqual({ instance: "late", connected: false, height: 7n, refused: "lockstep-behind" });
+  });
+
+  it("before the first public commit no hello is behind; without its own bookkeeping the transport makes one", async () => {
+    const { transport, url } = await core(blocksDb(0n), { lockstepInstances: ["early"], cursor: () => null });
+    opened.push(transport);
+    const client = rawClient(url);
+    await client.opened;
+    client.send(hello("early", "0"));
+    expect(await client.next("hello-ack")).toMatchObject({ lockstep: true, cursor: null, refused: null });
+    client.close();
+  });
+
+  it("a report with the public block's hash counts; another hash, or no public block there, closes report-hash-mismatch (PP-6)", async () => {
+    const lockstep = new Lockstep({ listed: ["good", "bad", "ahead"] });
+    const { transport, url, lines } = await core(blocksDb(9n), { lockstepInstances: lockstep.listed, lockstep });
+    opened.push(transport);
+    expect(await reportProblems(url, lockstep)).toEqual([]);
+    expect(lines).toContain(
+      `transport: instance bad reported height 9 with hash ${hexOf(new Uint8Array(32).fill(0xee))}, and the public block ` +
+        `there has hash ${hexOf(blockHash(9n))}: report-hash-mismatch (PP-6)`,
+    );
+    expect(lines).toContain(
+      `transport: instance ahead reported height 10 with hash ${hexOf(blockHash(10n))}, and the public database has no ` +
+        "block there: report-hash-mismatch (PP-6)",
+    );
+  });
+
+  it("negative control (committed): a core whose report check compares nothing fails the oracle", async () => {
+    const lockstep = new Lockstep({ listed: ["good", "bad", "ahead"] });
+    const { transport, url } = await core(blocksDb(9n), { lockstepInstances: lockstep.listed, lockstep, reports: "accept" });
+    opened.push(transport);
+    const problems = await reportProblems(url, lockstep);
+    expect(problems).toContain("bad's report at 9 with another hash than the public block's left its connection open");
+    expect(problems).toContain("ahead's report at 10 with another hash than the public block's left its connection open");
+  });
+
+  it("a report the core cannot check closes the connection (1011, report-unchecked), the instance's height unchanged", async () => {
+    let failing = false;
+    const lockstep = new Lockstep({ listed: ["unchecked"] });
+    const { transport, url, lines } = await core(
+      blocksDb(9n, () => failing),
+      { lockstepInstances: ["unchecked"], lockstep },
+    );
+    opened.push(transport);
+    const client = await greeted(url, "unchecked", {}, "8");
+    failing = true;
+    client.send({ v: 1, type: "report", height: "9", hash: hexOf(blockHash(9n)) });
+    expect(await endedWithin(client)).toMatchObject({ code: 1011, reason: "report-unchecked" });
+    expect(lockstep.instances()[0]).toMatchObject({ height: 8n, refused: null });
+    expect(lines.join("\n")).toContain("transport: the report of unchecked at 9 could not be checked (connection-lost)");
+  });
+
+  it("more report checks at once than the limit closes the connection (too-many-reads)", async () => {
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { transport, url } = await core(
+      fakeDb(async () => {
+        await held;
+        return rowsOf([], []);
+      }),
+      { lockstepInstances: ["flood"], limits: { maxPendingReads: 2 } },
+    );
+    opened.push(transport);
+    const client = await greeted(url, "flood", {}, "8");
+    for (const height of ["1", "2", "3"]) client.send({ v: 1, type: "report", height, hash: hexOf(blockHash(1n)) });
+    expect(await endedWithin(client)).toMatchObject({ code: 1008, reason: "too-many-reads" });
+    release();
   });
 });
 
@@ -466,6 +626,91 @@ describe("a private process's side against a stand-in core", () => {
       await transport.close();
       await core.close();
     }
+  });
+
+  it("connection() gives the hello-ack once connected, a lockstep-behind one included; it fails while waiting to connect", async () => {
+    const core = await standIn((socket, message, connection) => {
+      if (message.type !== "hello") return;
+      socket.send(messageText({ ...ACK, lockstep: true, refused: connection === 1 ? "lockstep-behind" : null } as Message));
+    });
+    const { transport, lines } = client(core.address, { backoffCeilingMs: 60_000 });
+    try {
+      expect(transport.lockstep).toBe(false);
+      expect(await transport.connection()).toMatchObject({ lockstep: true, refused: "lockstep-behind" });
+      // Refused lockstep-behind, it stays connected (PP-7: the core keeps waiting for it, and it halts by its own check).
+      expect([transport.state, transport.lockstep, core.connections()]).toEqual(["connected", true, 1]);
+      expect(lines).toContain(`transport: connected to the core at ${core.address}; refused lockstep-behind: this instance is behind the public cursor (PP-7)`);
+      // The same ack while connected.
+      expect(await transport.connection()).toBe(transport.ack);
+      for (const socket of core.sockets) socket.terminate();
+      await until(() => transport.state === "waiting", "the loss seen");
+      await expect(transport.connection()).rejects.toMatchObject({ code: "connection-lost", retryable: true });
+      // The flag of the last ack is kept while away.
+      expect(transport.lockstep).toBe(true);
+    } finally {
+      await transport.close();
+      await core.close();
+    }
+    await expect(transport.connection()).rejects.toMatchObject({ code: "connection-lost", message: expect.stringContaining("stopping") });
+  });
+
+  it("report() sends a committed block as report only to a core that lists it, while connected and not refused", async () => {
+    const reports: Message[] = [];
+    const listing = (lockstep: boolean, refused: "lockstep-behind" | null) =>
+      standIn((socket, message) => {
+        if (message.type === "hello") socket.send(messageText({ ...ACK, lockstep, refused } as Message));
+        if (message.type === "report") reports.push(message);
+      });
+    const block = { height: 5n, hash: new Uint8Array(32).fill(5), parentHash: new Uint8Array(32) };
+    for (const [lockstep, refused, sent] of [
+      [false, null, 0],
+      [true, "lockstep-behind", 0],
+      [true, null, 1],
+    ] as const) {
+      const core = await listing(lockstep, refused);
+      const { transport } = client(core.address);
+      reports.splice(0);
+      try {
+        transport.report(block);
+        await transport.connection();
+        transport.report(block);
+        // A report sent arrives; none sent, a while without one.
+        if (sent === 1) await until(() => reports.length === 1, "the report");
+        else await sleep(200);
+        expect(reports).toEqual(sent === 0 ? [] : [{ v: 1, type: "report", height: "5", hash: `0x${"05".repeat(32)}` }]);
+      } finally {
+        await transport.close();
+        await core.close();
+      }
+    }
+  });
+
+  it("a close for report-hash-mismatch refuses it for good: no new connection, every wait, read and connection fails with it", async () => {
+    const core = await standIn((socket, message) => {
+      if (message.type === "hello") socket.send(messageText({ ...ACK, lockstep: true }));
+      if (message.type === "report") socket.close(1008, "report-hash-mismatch");
+    });
+    const { transport, lines } = client(core.address);
+    try {
+      await transport.connection();
+      const waiting = transport.next(new AbortController().signal);
+      transport.report({ height: 1n, hash: new Uint8Array(32).fill(1) });
+      await expect(waiting).rejects.toMatchObject({ code: "report-hash-mismatch", retryable: false });
+      expect(transport.state).toBe("refused");
+      await expect(transport.next(new AbortController().signal)).rejects.toMatchObject({ code: "report-hash-mismatch" });
+      await expect(transport.read(async () => 1)).rejects.toMatchObject({ code: "report-hash-mismatch" });
+      await expect(transport.connection()).rejects.toMatchObject({ code: "report-hash-mismatch" });
+      // Ten back-off ceilings later, still the one connection it had.
+      await sleep(500);
+      expect(core.connections()).toBe(1);
+      expect(lines).toContain(
+        "transport: the core refused instance p-1 for good: report-hash-mismatch (its report's hash is not the public block's, PP-6)",
+      );
+    } finally {
+      await transport.close();
+      await core.close();
+    }
+    expect(transport.state).toBe("closed");
   });
 
   it("an address that answers HTTP without a WebSocket is a lost connection, logged with its error", async () => {

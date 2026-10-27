@@ -53,12 +53,27 @@
  *
  * **Its position on the transport** (task 14.2): every `hello` of the transport gives the private cursor — the one
  * startup read (the source's first {@link PrivateBlockSource.cursor}), then each block the part's `on-after-db-write`
- * sees committed — or, before the first commit, S − 1 with no hash (PP-4). The transport connects at the source's first
- * wait or read through it, which come after startup read the cursor.
+ * sees committed — or, before the first commit, S − 1 with no hash (PP-4). The transport connects at startup's chain
+ * check, after startup read the cursor (task 14.3: the instance learns there whether it is lockstep).
+ *
+ * **Lockstep** (PP-6, PP-7, owner decision Q142; task 14.3). With `coreTransport`, startup's chain check waits for the
+ * transport's `hello-ack` — after the public database's own checks — and refuses a core of another network than the
+ * configured one (`private-binding-mismatch`, `network`: with a PostgreSQL `publicDatabase` read directly, the core at
+ * `coreTransport` is checked nowhere else; owner decision Q136, task 10.2b's note); the ack says whether the core lists
+ * the instance in `lockstepInstances`. After the graph is resolved, a module declaring `needsLockstep` refuses to run on
+ * an instance that is not lockstep, or has no `coreTransport` at all ({@link needsLockstepRefusal},
+ * `needs-lockstep-not-listed`, before any migration). An instance lockstep at startup, or listed by a later `hello-ack`,
+ * takes height h only while the public cursor is h: its block at h is read where the public cursor is h, and each
+ * `on-fetch` read of public data begins at h and — through the core each statement being its own read (Q142) — reads
+ * the public cursor again after the callback's data; a cursor past h halts the instance with `lockstep-behind`
+ * ({@link lockstepBehind}). Each block the part's `on-after-db-write` sees committed is reported to the core (`report`,
+ * sent only to a core that lists the instance), which waits for it before its next `BEGIN`; the core's refusal of a
+ * report (`report-hash-mismatch`) fails the transport's waits and reads, which halts the instance.
  */
 
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
+import type { HelloAck } from "../../private/messages.js";
 import type { ChainCheck, ChainCheckInput, ConfiguredGenesis } from "../core-chain/core-chain.js";
 import type { CheckedEntry } from "../../config/validate.js";
 import type { ReadHandle, SchemaWriteHandle } from "../../db/api.js";
@@ -169,7 +184,11 @@ export function publicNotStarted(): UmbraError {
  * table records no genesis hash, against which nothing can be checked (as the core refuses it, decision record Q117).
  * Null when the hashes are equal.
  */
-export function networkRefusal(configured: ConfiguredGenesis, current: PublicIdentity): UmbraError | null {
+export function networkRefusal(
+  configured: ConfiguredGenesis,
+  current: PublicIdentity,
+  of: "public-database" | "transport" = "public-database",
+): UmbraError | null {
   const publicHash = hex(current.genesisHash);
   if (configured.hash === null) {
     return new UmbraError(
@@ -181,12 +200,15 @@ export function networkRefusal(configured: ConfiguredGenesis, current: PublicIde
     );
   }
   if (sameBytes(configured.hash, current.genesisHash)) return null;
+  const found =
+    of === "transport"
+      ? `the core at coreTransport has genesis hash ${publicHash}: it indexes another network than its public database's`
+      : `the public database's genesis hash is ${publicHash}: its core indexes another network`;
   return new UmbraError(
     "private-binding-mismatch",
     `the private process is configured for the network ${configured.network}, whose genesis hash is ` +
-      `${hex(configured.hash)}, and the public database's genesis hash is ${publicHash}: its core indexes another ` +
-      `network (PP-2, decision record Q136); point publicDatabase or coreTransport at a public database of ` +
-      `${configured.network}, or configure the network its public database is of`,
+      `${hex(configured.hash)}, and ${found} (PP-2, decision record Q136); point publicDatabase or coreTransport at a ` +
+      `public database of ${configured.network} and its core, or configure the network its public database is of`,
     { reason: "network", network: configured.network, configured: hex(configured.hash), public: publicHash },
   );
 }
@@ -236,9 +258,62 @@ async function recordedBinding(w: SchemaWriteHandle): Promise<PublicIdentity | n
   return { genesisHash: row.public_genesis_hash as Uint8Array, start: row.public_start_height as bigint };
 }
 
-/** What a {@link PrivateBlockSource} closes with its public database: its transport to the core. */
-export interface Closable {
+/**
+ * A {@link PrivateBlockSource}'s transport to the core (`src/private/private-transport.ts`'s `PrivateTransport`): its
+ * `hello-ack`, its reports and its lockstep flag; closed with the public database.
+ */
+export interface SourceTransport {
+  /** The `hello-ack` that connects it (startup's chain check waits for it). */
+  connection(): Promise<HelloAck>;
+  /** Tells the core that `block` committed, when it is lockstep (PP-6). */
+  report(block: BlockRef): void;
+  /** Whether the last `hello-ack` said the core lists the instance. */
+  readonly lockstep: boolean;
   close(): Promise<void>;
+}
+
+/** A byte string from `0x` hex. */
+const bytesOfHex = (text: string): Uint8Array => new Uint8Array(Buffer.from(text.slice(2), "hex"));
+
+/** `names` in a sentence: `a`, `a and b`, `a, b and c`. */
+const listed = (names: readonly string[]): string =>
+  names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1) as string}`;
+
+/**
+ * PP-6's refusal (`needs-lockstep-not-listed`, not retried) of the `modules` that declare `needsLockstep`, on an instance
+ * that is not lockstep: the core's `hello-ack` said `lockstep: false` (`transport`), or it has no `coreTransport`, so no
+ * core can hold it in lockstep. Null when none declares it, or the instance is lockstep.
+ */
+export function needsLockstepRefusal(modules: readonly ModuleDeclaration[], lockstep: boolean, transport: boolean): UmbraError | null {
+  const needing = modules.filter((declaration) => declaration.needsLockstep === true).map((declaration) => declaration.id);
+  if (needing.length === 0 || lockstep) return null;
+  const which = needing.length === 1 ? `the module ${listed(needing)} declares` : `the modules ${listed(needing)} declare`;
+  const why = transport
+    ? "the core at coreTransport answered lockstep: false — list this instance's instanceId in the core's " +
+      "lockstepInstances, or run the module on an instance it lists"
+    : "this private process has no coreTransport, so no core can hold it in lockstep — give it the core's " +
+      "listen.transport as coreTransport and list its instanceId in the core's lockstepInstances";
+  return new UmbraError(
+    "needs-lockstep-not-listed",
+    `${which} needsLockstep: it reads mutable public tables, which only a lockstep instance reads at the height it ` +
+      `processes (PP-6); ${why}`,
+    { modules: needing, transport },
+  );
+}
+
+/**
+ * PP-6's halt (`lockstep-behind`, not retried) of a lockstep instance processing `height` while the public cursor is
+ * `cursor`, past it: the mutable public state at `height` is gone (the core listed the instance late, or does not wait
+ * for it).
+ */
+export function lockstepBehind(height: bigint, cursor: bigint | null): UmbraError {
+  return new UmbraError(
+    "lockstep-behind",
+    `the public cursor is ${cursor}, past height ${height}: a lockstep instance processes a height only while the public ` +
+      "cursor is that height (PP-6), and the mutable public state of the heights it missed is gone (PP-7); give it a new " +
+      "private database whose start is above the public cursor, or remove it from the core's lockstepInstances",
+    { height: height.toString(), cursor: cursor === null ? null : cursor.toString() },
+  );
 }
 
 /** The checks a {@link PrivateBlockSource} runs at startup, each replaceable by a negative control. */
@@ -254,20 +329,27 @@ export interface PrivateChecks {
   readonly start?: bigint;
   /** The negative controls' view of the public items the graph is given (PP-13); all of them, as read, unless given. */
   readonly publicItems?: (items: readonly PublicItem[]) => readonly PublicItem[];
+  /**
+   * Whether a lockstep instance reads the public cursor again after each `on-fetch` callback's data (Q142); true
+   * unless given — false is the negative control's, which processes a cursor that moved meanwhile.
+   */
+  readonly reread?: boolean;
 }
 
 /** The block source of a private process (see the module comment). */
 export class PrivateBlockSource implements BlockSource {
   readonly #public: PublicDatabase;
   readonly #wakes: PublicWakes;
-  readonly #transport: Closable | null;
+  readonly #transport: SourceTransport | null;
   readonly #checks: PrivateChecks;
+  /** Whether the `hello-ack` of startup's chain check said the core lists the instance (PP-6). */
+  #lockstepAtStart = false;
   /** The private cursor last known committed: startup's read, then each block committed; undefined before startup's. */
   #position: BlockRef | null | undefined;
   /** The binding the private database recorded, as the last read of the cursor found it; null before any or without. */
   #recorded: PublicIdentity | null = null;
 
-  constructor(publicDatabase: PublicDatabase, wakes: PublicWakes, transport: Closable | null = null, checks: PrivateChecks = {}) {
+  constructor(publicDatabase: PublicDatabase, wakes: PublicWakes, transport: SourceTransport | null = null, checks: PrivateChecks = {}) {
     this.#public = publicDatabase;
     this.#wakes = wakes;
     this.#transport = transport;
@@ -283,9 +365,18 @@ export class PrivateBlockSource implements BlockSource {
     return known === null ? { height: start - 1n, hash: null } : { height: known.height, hash: known.hash };
   }
 
-  /** A block committed (the part's `on-after-db-write`): the position from now on. */
+  /** A block committed (the part's `on-after-db-write`): the position from now on, reported to the core (PP-6). */
   committed(block: BlockRef): void {
     this.#position = block;
+    this.#transport?.report(block);
+  }
+
+  /**
+   * Whether the instance is lockstep (PP-6): its startup's `hello-ack` said so — kept for the whole run, so a module
+   * needing it never runs unchecked —, or the last one did.
+   */
+  get lockstep(): boolean {
+    return this.#lockstepAtStart || this.#transport?.lockstep === true;
   }
 
   /** The public database the source reads. */
@@ -344,9 +435,15 @@ export class PrivateBlockSource implements BlockSource {
     }
   }
 
-  /** The public block at `height`; throws when the public database has none there. */
+  /**
+   * The public block at `height`; throws when the public database has none there. On a lockstep instance it is read
+   * where the public cursor is `height` (the read's height), else the instance halts with `lockstep-behind` (PP-6).
+   */
   async block(height: bigint): Promise<BlockRef> {
-    const block = await this.#public.read((read) => readPublicBlock(read, height));
+    const block = await this.#public.read(async (read) => {
+      if (this.lockstep && read.height !== height) throw lockstepBehind(height, read.height);
+      return readPublicBlock(read, height);
+    });
     if (block === null) throw new Error(`the public database has no block at height ${height}`);
     return block;
   }
@@ -372,15 +469,48 @@ export class PrivateBlockSource implements BlockSource {
     if (network !== null) throw network;
     const binding = (this.#checks.binding ?? bindingRefusal)(this.#recorded, identity, this.#checks.start ?? identity.start);
     if (binding !== null) throw binding;
+    if (this.#transport !== null) {
+      // The core the instance reports to (PP-6, task 14.3): of the configured network, and whether it lists it.
+      const ack = await this.#transport.connection();
+      const core = { genesisHash: bytesOfHex(ack.genesis), start: BigInt(ack.start) };
+      const other = (this.#checks.network ?? networkRefusal)(input.configured, core, "transport");
+      if (other !== null) throw other;
+      this.#lockstepAtStart = ack.lockstep;
+    }
     const publicItems = Object.freeze([...(this.#checks.publicItems?.(items) ?? items)]);
     return Object.freeze({ genesisHash: identity.genesisHash, publicItems });
+  }
+
+  /**
+   * The graph's modules at startup, after the chain check and before any migration (`BlockSource.checkModules`): a
+   * module declaring `needsLockstep` refuses to run on an instance that is not lockstep (PP-6,
+   * {@link needsLockstepRefusal}).
+   */
+  checkModules(modules: readonly ModuleDeclaration[]): void {
+    const refusal = needsLockstepRefusal(modules, this.#lockstepAtStart, this.#transport !== null);
+    if (refusal !== null) throw refusal;
   }
 
   /** A read of the private database's committed height (DB-2): the private cursor's ({@link privateCursorHeight}). */
   readonly committedHeight = privateCursorHeight;
 
-  /** One `on-fetch` callback's read of public data (PP-3, Q100): a read of the public database at its cursor. */
-  readonly fetchRead = <T>(body: (read: ReadHandle) => Promise<T>): Promise<T> => this.#public.read(body);
+  /**
+   * One `on-fetch` callback's read of public data for `height` (PP-3, Q100): a read of the public database at its
+   * cursor. On a lockstep instance the read begins at `height`, and after the callback the public cursor is read again
+   * (Q142: through the core each statement is its own read) — a cursor past `height` either time halts the instance
+   * with `lockstep-behind` (PP-6).
+   */
+  readonly fetchRead = <T>(body: (read: ReadHandle) => Promise<T>, height: bigint): Promise<T> =>
+    this.#public.read(async (read) => {
+      if (!this.lockstep) return body(read);
+      if (read.height !== height) throw lockstepBehind(height, read.height);
+      const result = await body(read);
+      if (this.#checks.reread !== false) {
+        const cursor = (await readPublicCursor(read))?.height ?? null;
+        if (cursor !== height) throw lockstepBehind(height, cursor);
+      }
+      return result;
+    });
 
   /** Closes the public database, then the transport to the core. */
   async close(): Promise<void> {
@@ -407,6 +537,8 @@ export interface PrivateIntakeOptions {
   readonly network?: typeof networkRefusal;
   /** The negative controls' view of the public items the graph is given (PP-13); all of them, as read, unless given. */
   readonly publicItems?: (items: readonly PublicItem[]) => readonly PublicItem[];
+  /** The negative control's lockstep instance that does not read the public cursor again (Q142); it does unless false. */
+  readonly reread?: boolean;
 }
 
 /** One private process start's `core-private-source`: the part and the block source it is bound to. */
@@ -480,6 +612,7 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
       made = new PrivateBlockSource(side.publicDatabase, side.wakes, side.transport, {
         ...(options.network === undefined ? {} : { network: options.network }),
         ...(options.publicItems === undefined ? {} : { publicItems: options.publicItems }),
+        ...(options.reread === undefined ? {} : { reread: options.reread }),
         binding,
         start,
       });

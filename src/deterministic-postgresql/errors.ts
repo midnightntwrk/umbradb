@@ -183,6 +183,13 @@ export const ERROR_CODES = [
    * read's cursor (task 12.4, `src/backbone/core-ledger-state/`): the call fails; uncaught, the module's callback fails.
    */
   "state-not-retained",
+  // Lockstep (PP-6, PP-7; task 14.3, `src/backbone/core-private-source/`, `src/private/`): a private process's startup
+  // refusal of a module declaring `needsLockstep` on an instance the core does not list; and a private instance's two
+  // halts — the public cursor past the height it processes (the core listed it late, or does not wait for it), and the
+  // core's refusal of a report whose hash is not the public block's.
+  "needs-lockstep-not-listed",
+  "lockstep-behind",
+  "report-hash-mismatch",
 ] as const;
 
 /**
