@@ -277,6 +277,11 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   `ProcessHandle.stop()` — ends the process within 5 s: `stopping`, then `ended` of kind `signal`, the node client
   closed, no connection attempt after the stop, no second signal; `umbradb run` exits 0. A committed negative control
   (a startup whose wait for the node ignores the stop) fails it. (RN-13)
+- **A169** `[CI]` A tape node answers up to height h and then refuses connections; SIGTERM — and likewise
+  `ProcessHandle.stop()` — while the running loop waits for h + 1's block, and, with `core-ledger-state`, while its
+  `on-compute` at h + 1 awaits the state root, ends the process within 5 s: `ended` of kind `signal`, no connection
+  attempt after the stop, nothing of h + 1 stored; a restart against a node that answers again processes h + 1. A
+  committed negative control (a loop whose node calls ignore the stop) fails it. (RN-13, issue 00042)
 
 ## 6. Determinism
 

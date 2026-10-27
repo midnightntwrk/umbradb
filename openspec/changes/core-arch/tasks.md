@@ -1494,6 +1494,14 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       which the stop does not reach). Found on the way and recorded, not fixed: a stop while the loop waits on an
       unreachable node outside a height's transaction does not end either (issue 00042). No mutation pass here
       (deferred to the end, owner 2026-10-27).
+- [ ] 5.3c A stop while the running loop waits on an unreachable node (issue 00042, found by task 5.3b from the code):
+      `#close()` closes the node client only after the loop ended, and the loop's node calls outside a transaction —
+      the next height's block through the node source's prefetch, `core-ledger-state`'s state root in `on-compute` —
+      are retried without limit and not tied to the stop. Reproduce it first (a test that fails on the current
+      sources); if it does not reproduce, close the issue with the evidence. Otherwise end those waits at the stop
+      (the loop's signal through the block source and the client, or closing the client when no transaction is
+      open), a height in progress storing nothing and processed again after a restart (RN-13 as amended).
+      **Acceptance:** A169; A48 and A167 unchanged.
 
 ## 6. Storage helpers
 

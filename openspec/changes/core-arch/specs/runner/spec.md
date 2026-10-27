@@ -194,6 +194,12 @@ end any wait for the node at once, an unreachable node's retries included.
 - **THEN** the process enters `stopping`, makes no further connection attempt, closes what startup opened and exits,
   without a second signal
 
+#### Scenario: SIGTERM while the loop waits on an unreachable node
+- **WHEN** SIGTERM arrives while the loop, with no transaction open, waits for a node call that the client retries
+  (the next height's block, or a state root an `on-compute` awaits)
+- **THEN** that wait ends, the height it belonged to stores nothing, the process exits without a second signal, and a
+  restart processes that height again
+
 ### Requirement: RN-14 The block source is the runner's only view of the chain
 
 THE runner SHALL learn the cursor, the finalized head and each finalized block's height, hash and parent hash only
