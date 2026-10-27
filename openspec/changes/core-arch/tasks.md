@@ -2447,7 +2447,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       change is `package-identity.test.ts`'s, on the rebuilt packages. **Wrong variants:** 30 over the new adapter
       logic, first run 28 caught, 2 survivors (the saturation bound) closed by a test with `u64::MAX` written out;
       final run 30 of 30 caught. Coverage of `src/ledger/` 100 %. No question raised.
-- [ ] 12.1b The owner's answer Q138 A: patches for each vendored ledger package exporting LG-16's six tree values from
+- [x] 12.1b The owner's answer Q138 A: patches for each vendored ledger package exporting LG-16's six tree values from
       the ledger state as the official indexer reads them (the zswap tree's first free index and root, the DUST
       commitment and generation trees' first free indexes and roots); the adapters' `stateSummary` fills them (none
       `null`), `core_ledger_state.states` stores them at every height and its five columns become `NOT NULL` (no
@@ -2455,6 +2455,43 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       re-recorded; `design.md` §5.1, §5.2, §10 and `vendor/ledger/README.md` updated. After 12.2a, or with it, so the
       rc.3 package carries the patch too.
       **Acceptance:** A158.
+      **Done (2026-10-27, lane 2):** **The patches** `vendor/ledger/v8/patches/0005-ledger-wasm-state-trees.patch`,
+      `v9-rc3/patches/0006-…` and `v9/patches/0007-…` (the same added lines in each, held equal by a test) export
+      `stateTrees(state)`: `{ zswapFirstFree, zswapRoot, dustCommitmentFirstFree, dustCommitmentRoot,
+      dustGenerationFirstFree, dustGenerationRoot }` — one export, plain data (Q49): each index a `bigint`, each root
+      its tree's root after `rehash()` in the ledger's untagged serialization, read as the official indexer reads them
+      (`indexer-common/src/domain/ledger/ledger_state.rs`); a tree without a root is an error. Ledger 8 has DUST state
+      too, so the six exist in every version; an empty tree (mainnet's genesis has three) has first free index 0 and
+      root `00`. Checked first with `cargo check --target wasm32-unknown-unknown` (no warning). **Rebuilt** in Docker:
+      `npm run vendor:ledger -- --record` (5 min 52 s), then `npm run vendor:ledger` twice (5 min 51 s, 6 min 26 s): all
+      three match `SHA256SUMS`; identities v8 `0x0eee0a22…1173`, v9-rc3 `0xce415cc5…012e`, v9 `0xc770c79d…45eb`
+      (`src/ledger/releases.ts`; the core version changes with them). **The adapters' `stateSummary`** gives the six
+      from `stateTrees` (the `zswap` getter path gone); `StateSummary`'s fields are no longer nullable; migration `001`
+      makes the five columns `NOT NULL` (first frees with their `CHECK`s). **The Rust oracle**
+      `test/ledger/fixtures/state-trees/oracle/` (`main.rs`, `run.sh`), built in the vendored build image against
+      unpatched `midnight-ledger` at each pinned commit, writes the six values of fixed states (`expected.json`): the
+      genesis states of `fixtures/genesis/`, stagenet after blocks 3 and 4,950 (`stagenet-3.state`,
+      `stagenet-4950.state`; v9-rc3 and v9) and preview after block 687 (`preview-687.state`; v8), the last three each
+      with its node's root from task 0.3's tapes; 4,950 and 687 are states whose DUST trees' first free indexes differ,
+      one per version. Run three times (the last with `stagenet-4950.state` added): each state's values the same in
+      every run that had it. **Tests:** `test/ledger/state-trees.test.ts` (A158 per package: the export and the adapter
+      equal to the oracle on every fixed state, none null, plain data, also for a state loaded from its stored nodes in
+      a fresh worker), `state-trees-checks.ts`; `worker-engine.test.ts`, `adapter-core.test.ts`,
+      `core-ledger-state.test.ts` (the six written; the columns `NOT NULL`; the row written on PGlite with each value
+      read back from its own column and a null refused in each of the five), `ledger-checks.ts`/`ledger-tapes.ts`
+      (A107's rows: the six of the reference state), the tape ranges of `ledger-state.test.ts` (none null at any
+      height), `vendored-ledger-files.test.ts`. Seen failing first: `raw.stateTrees is not a function`, the nulls.
+      **Committed negative control** (`state-trees.negative-control.test.ts`): a summary whose DUST commitment root is
+      the zswap tree's (or whose generation root is the commitment tree's) fails A158's check on every package. **Wrong
+      variants:** 20 on the final sources (each field read from another tree, 11; an index off by one; a null; each of
+      the five `NOT NULL`s dropped; the row's DUST roots swapped in its parameters; two first-free columns swapped in
+      its `INSERT`), 20 caught; the column swap only by the PGlite check (written for it before the pass). **Gates:**
+      `npm run typecheck` exit 0; `test/ledger` and `test/backbone` (run by Codex): 69 files, 933 tests passed, 11
+      skipped, 816 s; the tape file `ledger-state.test.ts` with `UMBRADB_TAPES`: 20 of 20, 2,979 s;
+      `npm run test:conformance` (run by Codex): run 1 exit 1 under load 57–63, its one failure task 12.4's
+      `ledger-storage.test.ts` (A103 at 5,000 on PostgreSQL timing out at cursor 1,462), run 2 exit 0 (272 files passed,
+      1 skipped; 4,900 tests passed; all 25 required ids; 835 s; coverage 99.26 % / 98.62 % / 99.01 % / 99.62 %).
+      **Pending:** A97's CI rebuild of the three packages runs when the branch is pushed (Phase 3).
 - [x] 12.2a The owner's answer Q139 A: a third vendored ledger package, v9 at `crate-ledger-9.1.0.0-rc.3` (the ledger
       node 2.0 builds, runtime 2.0), as a ledger version of its own — its name settled in `design.md` §5.2 (the
       reading: `v9-rc3`) and carried through `ledgerSources`, `ledgerTable` and the core version — built by

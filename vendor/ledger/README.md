@@ -62,7 +62,8 @@ Its patches are v9's where they apply:
   `midnight-node` 2.0.0-rc.4 (`ledger/helpers/src/versions/common/mod.rs` `clamp_and_normalize`,
   `compute_overall_fullness`; `ledger/src/versions/common/api/ledger.rs` `Ledger::post_block_update`,
   `apply_system_tx`): the update is the ledger's `post_block_update`, whose prevalidation a clamped fullness always
-  passes, as that node calls it.
+  passes, as that node calls it;
+- `0006-ledger-wasm-state-trees.patch` — LG-16's tree values, as v8's `0005-…` and v9's `0007-…` (below).
 
 v9's `0004-…` (the translation's timers) and `0005-…` (the conversion) do not apply: `midnight-node` 2.0.0-rc.4 carries
 no v8 → v9 translation, and the rc.3 package has no `convertFromV8`. The build takes about a minute and a half on this
@@ -133,6 +134,19 @@ JavaScript numbers, which cannot hold a `FixedPoint` (a deploy's block usage of 
 `test/ledger/fixtures/post-block-update/` holds the node's values for a table of block costs, computed in Rust at the
 pinned commits (`oracle/`), which `test/ledger/post-block-update.test.ts` checks the packages and the adapters against.
 
+LG-16's tree values (`v8/patches/0005-…`, `v9/patches/0007-…`, `v9-rc3/patches/0006-…`; owner decision Q138 A, task
+12.1b). The published packages give a state's zswap first free index only; the official indexer stores, per block, the
+zswap commitment tree's first free index and root and the DUST commitment and generation trees' first free indexes and
+roots. Every package exports `stateTrees(state)`: `{ zswapFirstFree, zswapRoot, dustCommitmentFirstFree,
+dustCommitmentRoot, dustGenerationFirstFree, dustGenerationRoot }`, read from the ledger's Rust state as that indexer
+reads them (`midnight-indexer` `indexer-common/src/domain/ledger/ledger_state.rs`: `zswap.first_free`,
+`zswap.coin_coms.rehash().root()`, `dust.utxo.commitments_first_free`, `dust.utxo.commitments.rehash().root()`,
+`dust.generation.generating_tree_first_free`, `dust.generation.generating_tree.rehash().root()`), each index a `bigint`
+and each root its untagged serialization. Ledger 8 has DUST state too, so the six exist in every version; an empty tree
+(mainnet's genesis state has three) has first free index 0 and root `00`, the zero digest as a SCALE compact integer.
+`test/ledger/fixtures/state-trees/` holds the six values of fixed states, computed in Rust at the pinned commits
+(`oracle/`), which `test/ledger/state-trees.test.ts` checks the packages and the adapters against.
+
 The v8 package has no `decodeLogItem`: v8 contract logs are not MIP-0002 events, and the v8 adapter returns null for
 them (owner decision Q54). The owner proposes these patches upstream, as a few pull requests, once `midnight-ledger`
 is stable (owner decision Q56); each is dropped once upstream releases it (LG-5).
@@ -143,4 +157,6 @@ Change `commit`, `tag` and `versionName` in `upstream.json`, rebase the patches 
 `Cargo.lock` hunks with `cargo`), run `npm run vendor:ledger -- --record <version>`, then `npm test`
 (`test/ledger/`), and commit `upstream.json`, `patches/`, `pkg/` and `SHA256SUMS` together. A rewritten `SHA256SUMS`
 (new patches too) changes the package's identity: set its `sha256` in `src/ledger/releases.ts` to the new manifest's
-SHA-256, which `test/ledger/package-identity.test.ts` prints; the core version changes with it.
+SHA-256, which `test/ledger/package-identity.test.ts` prints; the core version changes with it. The two Rust oracles
+of `test/ledger/fixtures/` (`post-block-update/oracle/`, `state-trees/oracle/`) are run again at the new commit and
+their `expected.json` re-assembled.

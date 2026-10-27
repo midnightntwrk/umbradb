@@ -41,7 +41,7 @@ try {
   switch (request.op) {
     case "load": {
       const state = adapter.load(request.key, storeOf(request.nodes));
-      result = { stateRoot: adapter.stateRoot(state), stateKey: adapter.stateKey(state) };
+      result = { stateRoot: adapter.stateRoot(state), stateKey: adapter.stateKey(state), summary: adapter.stateSummary(state) };
       break;
     }
     case "convert": {

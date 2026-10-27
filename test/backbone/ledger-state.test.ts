@@ -395,6 +395,13 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
       expect(stored).toHaveLength(Number(to) + 1);
       const differing = stored.filter((row) => roots.get(hashAt.get(row.h as string) as string) !== row.root);
       expect(differing.map((row) => row.h)).toEqual([]);
+      // A158 (task 12.1b): LG-16's six tree values at every stored height, none null.
+      const [trees] = await db.query(
+        `SELECT count(*)::int AS n FROM core_ledger_state.states WHERE zswap_first_free IS NULL OR zswap_root IS NULL
+           OR dust_commitment_first_free IS NULL OR dust_commitment_root IS NULL OR dust_generation_first_free IS NULL
+           OR dust_generation_root IS NULL`,
+      );
+      expect(trees).toEqual({ n: 0 });
       await after?.(db, hashAt);
     } finally {
       await backend.stop();

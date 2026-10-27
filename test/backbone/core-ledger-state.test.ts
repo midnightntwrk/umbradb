@@ -1,3 +1,4 @@
+import { PGlite } from "@electric-sql/pglite";
 import { describe, expect, it } from "vitest";
 import { bindLedgerParser, boundLedgerParser, CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import { workerParser } from "../../src/backbone/core-block-parsed/parser.js";
@@ -60,11 +61,11 @@ function applied(height: bigint, rest: Partial<AppliedState> = {}): AppliedState
     stateRoot: Uint8Array.of(0, ...hash(0x40)),
     summary: {
       zswapFirstFree: 3n,
-      zswapRoot: null,
-      dustCommitmentFirstFree: null,
-      dustCommitmentRoot: null,
-      dustGenerationFirstFree: null,
-      dustGenerationRoot: null,
+      zswapRoot: Uint8Array.of(0x73, 1),
+      dustCommitmentFirstFree: 4n,
+      dustCommitmentRoot: Uint8Array.of(0x73, 2),
+      dustGenerationFirstFree: 5n,
+      dustGenerationRoot: Uint8Array.of(0x73, 3),
     },
     output: { results: [], events: [], logs: [], parameters: Uint8Array.of(1) },
     contracts: [],
@@ -252,7 +253,17 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     expect((statements[0]?.params[0] as unknown[]).length).toBe(NODES_PER_STATEMENT);
     expect((statements[1]?.params[0] as unknown[]).length).toBe(1);
     expect(statements[2]?.params).toEqual([[hash(1), hash(3)], [1, -1]]);
-    expect(statements[3]?.params).toEqual([5n, hash(0x40), applied(5n).stateRoot, 3n, null, null, null, null, null]);
+    expect(statements[3]?.params).toEqual([
+      5n,
+      hash(0x40),
+      applied(5n).stateRoot,
+      3n,
+      Uint8Array.of(0x73, 1),
+      4n,
+      Uint8Array.of(0x73, 2),
+      5n,
+      Uint8Array.of(0x73, 3),
+    ]);
     expect(statements[4]?.params).toEqual([5n, [0n, 0n], [0, 1], [true, false]]);
     expect(statements[5]?.params.slice(0, 4)).toEqual([5n, [0n, 0n, 2n], [0n, 1n, 0n], ["zswap-output", "param-change", "contract-deploy"]]);
 
@@ -418,6 +429,54 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     const declared = CORE_LEDGER_STATE.provides.flatMap((item) => (item.table?.tables ?? []).map((t) => `${item.table?.schema}.${t}`)).sort();
     const created = [...CORE_LEDGER_STATE_MIGRATIONS.map((m) => m.sql).join("\n").matchAll(/CREATE TABLE (\S+) \(/g)].map((m) => m[1]).sort();
     expect(created).toEqual(declared);
+  });
+
+  it("stores LG-16's six tree values in states columns that are all NOT NULL (A158; task 12.1b, owner decision Q138 A)", () => {
+    const states = /CREATE TABLE core_ledger_state\.states \(([\s\S]*?)\n\)/.exec(CORE_LEDGER_STATE_MIGRATIONS[0]!.sql)?.[1] ?? "";
+    const columns = new Map(states.split("\n").map((line) => [/^\s*([a-z_]+) /.exec(line)?.[1], line] as const));
+    for (const column of [
+      "zswap_first_free",
+      "zswap_root",
+      "dust_commitment_first_free",
+      "dust_commitment_root",
+      "dust_generation_first_free",
+      "dust_generation_root",
+    ]) {
+      expect(columns.get(column), column).toMatch(/ NOT NULL/);
+    }
+  });
+
+  it("writes each of the six to its own column on a database, which refuses a null in any of them (A158; task 12.1b)", async () => {
+    const statements: { sql: string; params: unknown[] }[] = [];
+    await writeBlock({ execute: async (sql: string, params: unknown[] = []) => (statements.push({ sql, params }), 1) }, applied(5n));
+    const [states] = statements;
+    expect(states?.sql).toMatch(/^INSERT INTO core_ledger_state\.states /);
+    const db = await PGlite.create();
+    try {
+      await db.exec(`CREATE SCHEMA core_ledger_state;\n${CORE_LEDGER_STATE_MIGRATIONS[0]!.sql}`);
+      await db.query(states!.sql, states!.params);
+      const { rows } = await db.query(`SELECT zswap_first_free::text AS zswap_first_free, encode(zswap_root, 'hex') AS zswap_root,
+        dust_commitment_first_free::text AS dust_commitment_first_free, encode(dust_commitment_root, 'hex') AS dust_commitment_root,
+        dust_generation_first_free::text AS dust_generation_first_free, encode(dust_generation_root, 'hex') AS dust_generation_root
+        FROM core_ledger_state.states WHERE height = 5`);
+      // `applied`'s summary: first free indexes 3, 4, 5 and roots 0x7301, 0x7302, 0x7303, each another.
+      expect(rows).toEqual([
+        {
+          zswap_first_free: "3",
+          zswap_root: "7301",
+          dust_commitment_first_free: "4",
+          dust_commitment_root: "7302",
+          dust_generation_first_free: "5",
+          dust_generation_root: "7303",
+        },
+      ]);
+      for (let at = 4; at <= 8; at++) {
+        const params = states!.params.map((value, i) => (i === at ? null : i === 0 ? 6n : value));
+        await expect(db.query(states!.sql, params), `parameter $${at + 1}`).rejects.toThrow(/not-null constraint/);
+      }
+    } finally {
+      await db.close();
+    }
   });
 });
 

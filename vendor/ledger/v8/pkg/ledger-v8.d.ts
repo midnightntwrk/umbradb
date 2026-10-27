@@ -3337,3 +3337,22 @@ export function postBlockUpdateExact(state: LedgerState, tblock: Date, fullness:
 
 /** A system transaction's cost, which the node adds to the block's fullness. */
 export function systemTransactionCost(transaction: SystemTransaction, params: LedgerParameters): SyntheticCost;
+
+// UmbraDB additions: LG-16's tree values, as the official indexer reads them.
+
+/**
+ * A state's zswap commitment tree's first free index and root, and its DUST commitment and
+ * generation trees' first free indexes and roots; each root its tree's root after `rehash()`, in
+ * the ledger's untagged serialization (as the official indexer stores it).
+ */
+export interface StateTrees {
+  zswapFirstFree: bigint;
+  zswapRoot: Uint8Array;
+  dustCommitmentFirstFree: bigint;
+  dustCommitmentRoot: Uint8Array;
+  dustGenerationFirstFree: bigint;
+  dustGenerationRoot: Uint8Array;
+}
+
+/** LG-16's tree values of `state`. */
+export function stateTrees(state: LedgerState): StateTrees;

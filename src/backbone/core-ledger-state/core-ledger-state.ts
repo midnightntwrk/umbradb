@@ -25,8 +25,9 @@
  * **At `on-db-write`** it writes, in the block's transaction: the batch the worker flushed — the nodes created since the
  * previous block that the new state reaches (`core_ledger_state.nodes`, an existing key left as it is: a node is its
  * key's content) and each changed root count as a signed change added to the stored one, a count reaching 0 deleted
- * (Q53, `core_ledger_state.root_counts`) —, the block's `states` row (LG-16: key, root, the zswap tree's first free index
- * and the five tree values the packages do not export, null — decision record question Q138), its
+ * (Q53, `core_ledger_state.root_counts`) —, the block's `states` row (LG-16: key, root, and the zswap tree's first free
+ * index and root and the DUST commitment and generation trees' first free indexes and roots, none null, as the
+ * official indexer reads them: the packages' `stateTrees`, owner decision Q138 A, task 12.1b), its
  * `segment_results` and its ledger `events` (each transaction's numbered from 0 in emission order). **At
  * `on-after-db-write`** it tells the worker the block committed, so the state after h becomes the one h + 1 applies on
  * — without waiting for the answer, as that callback holds a read (see the callback).
@@ -145,11 +146,11 @@ CREATE TABLE ${STATES_TABLE} (
   state_key bytea NOT NULL CHECK (octet_length(state_key) = 32),
   state_root bytea NOT NULL,
   zswap_first_free bigint NOT NULL CHECK (zswap_first_free >= 0),
-  zswap_root bytea,
-  dust_commitment_first_free bigint CHECK (dust_commitment_first_free >= 0),
-  dust_commitment_root bytea,
-  dust_generation_first_free bigint CHECK (dust_generation_first_free >= 0),
-  dust_generation_root bytea,
+  zswap_root bytea NOT NULL,
+  dust_commitment_first_free bigint NOT NULL CHECK (dust_commitment_first_free >= 0),
+  dust_commitment_root bytea NOT NULL,
+  dust_generation_first_free bigint NOT NULL CHECK (dust_generation_first_free >= 0),
+  dust_generation_root bytea NOT NULL,
   PRIMARY KEY (height)
 ) PARTITION BY RANGE (height);
 ${heightPartitionsSql(STATES_TABLE)}

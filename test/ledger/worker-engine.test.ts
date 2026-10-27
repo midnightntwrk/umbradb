@@ -136,13 +136,8 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     expect(hex(applied.stateRoot)).toBe(hex(RAW.v9.stateRoot(reference.state)));
     expect(hex(applied.stateKey)).toBe(hex(RAW.v9.stateKey(reference.state)));
     expect(applied.summary.zswapFirstFree).toBe(reference.state.zswap.firstFree);
-    expect(applied.summary).toMatchObject({
-      zswapRoot: null,
-      dustCommitmentFirstFree: null,
-      dustCommitmentRoot: null,
-      dustGenerationFirstFree: null,
-      dustGenerationRoot: null,
-    });
+    // LG-16's six tree values of the reference state, by the package's `stateTrees` (task 12.1b).
+    expect(applied.summary).toEqual(RAW.v9.stateTrees(reference.state));
     expect(applied.output.results.map((r) => r.outcome)).toEqual(["success", "success", "success", "partial", "success"]);
     // The call's log and the partial success's guaranteed segment's.
     expect(applied.output.logs.map((log) => [log.transaction, log.index])).toEqual([

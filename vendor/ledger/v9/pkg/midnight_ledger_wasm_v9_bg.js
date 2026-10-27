@@ -9389,6 +9389,24 @@ export function stateRoot(state) {
 }
 
 /**
+ * The state's zswap commitment tree's first free index and root, and its DUST commitment and
+ * generation trees' first free indexes and roots: `{ zswapFirstFree, zswapRoot,
+ * dustCommitmentFirstFree, dustCommitmentRoot, dustGenerationFirstFree, dustGenerationRoot }`,
+ * each index a `bigint`, each root its tree's root after `rehash()` in the ledger's untagged
+ * serialization.
+ * @param {LedgerState} state
+ * @returns {any}
+ */
+export function stateTrees(state) {
+    _assertClass(state, LedgerState);
+    const ret = wasm.stateTrees(state.__wbg_ptr);
+    if (ret[2]) {
+        throw takeFromExternrefTable0(ret[1]);
+    }
+    return takeFromExternrefTable0(ret[0]);
+}
+
+/**
  * @param {any} utxo
  * @param {Date} now
  * @param {bigint} subtract_fee

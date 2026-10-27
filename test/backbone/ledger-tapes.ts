@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { loadLedgerPackage } from "../../src/ledger/load.js";
-import type { ApplyInput, ApplyOutput, ChainOutcome, StateHandle } from "../../src/ledger/types.js";
+import type { ApplyInput, ApplyOutput, ChainOutcome, StateHandle, StateSummary } from "../../src/ledger/types.js";
 import type * as V9Package from "../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
 import { RAW, referenceReplay } from "../ledger/adapter-fixtures.js";
@@ -67,7 +67,10 @@ export interface LedgerHeight {
   /** The node's `midnight_ledgerStateRoot` after the block (the tape's answer). */
   readonly root: Uint8Array;
   readonly stateKey: Uint8Array;
+  /** The zswap tree's first free index, from the package's published getter. */
   readonly zswapFirstFree: bigint;
+  /** LG-16's six tree values of the reference state, by the patched export `stateTrees` (task 12.1b). */
+  readonly trees: StateSummary;
   /** The test's adapter's output for the block (block 0: on the state IN-7's case gives). */
   readonly output: ApplyOutput;
   /** The reference replay's result type of each transaction (`success`, `partialSuccess`, `system`, `malformed`, …). */
@@ -244,6 +247,7 @@ export async function ledgerScenario(options: LedgerScenarioOptions): Promise<Le
       root,
       stateKey: raw.stateKey(reference),
       zswapFirstFree: reference.zswap.firstFree,
+      trees: raw.stateTrees(reference),
       output,
       types: replay.types,
       events: replay.events,

@@ -263,9 +263,6 @@ function fakePackage(
     get parameters() {
       return { of: this.name, serialize: () => Uint8Array.of(7), free() {} };
     }
-    get zswap() {
-      return { firstFree: 0n, free() {} };
-    }
     apply(verified: object, context: object): [RawState, RawTransactionResult] {
       const { name, outcome } = verified as { name: string; outcome: RawTransactionResult };
       const { state, block } = context as { state: State; block: unknown };
@@ -534,19 +531,16 @@ describe("networkIdOf and the state's summary (task 12.3; IN-7, LG-16)", () => {
     expect(() => networkIdOf({ toString: () => 'ZswapState { network_id: "x" }' })).toThrow(/names no network id/);
   });
 
-  it("gives the real states' network ids, an empty state of another network, the zswap first free index, and frees", async () => {
+  it("gives the real states' network ids, an empty state of another network, LG-16's tree values, and frees", async () => {
     const adapter = await loadLedgerPackage("v9", { networkId: NETWORK_ID });
     const preview = adapter.emptyState("preview");
     expect(adapter.networkIdOf(preview)).toBe("preview");
     expect(adapter.networkIdOf(adapter.emptyState())).toBe(NETWORK_ID);
-    expect(adapter.stateSummary(preview)).toEqual({
-      zswapFirstFree: 0n,
-      zswapRoot: null,
-      dustCommitmentFirstFree: null,
-      dustCommitmentRoot: null,
-      dustGenerationFirstFree: null,
-      dustGenerationRoot: null,
-    });
+    // The package's `stateTrees` passed on (task 12.1b); its values are the ledger's own (`state-trees.test.ts`).
+    const summary = adapter.stateSummary(preview);
+    expect(summary).toEqual(RAW.v9.stateTrees(preview as never));
+    expect([summary.zswapFirstFree, summary.dustCommitmentFirstFree, summary.dustGenerationFirstFree]).toEqual([0n, 0n, 0n]);
+    expect([summary.zswapRoot, summary.dustCommitmentRoot, summary.dustGenerationRoot].every((root) => root instanceof Uint8Array)).toBe(true);
     adapter.dispose(preview);
     expect(() => adapter.stateRoot(preview)).toThrow();
   });

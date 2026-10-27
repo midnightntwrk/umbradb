@@ -108,6 +108,7 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
       "0003-ledger-wasm-node-store-exports.patch",
       "0004-wasm-bindgen-0.2.108.patch",
       "0005-ledger-wasm-exact-post-block-update.patch",
+      "0006-ledger-wasm-state-trees.patch",
     ]);
     // The storage patch is v9's, byte for byte: storage-core is the same source at both tags.
     const patch = (version: string, name: string): string => readFileSync(join(ledgerDir, version, "patches", name), "utf8");
@@ -120,6 +121,19 @@ describe("vendored ledger builds: the recorded sources and pins", () => {
     expect(dockerfile).toMatch(/binaryen-version_133/);
     expect(dockerfile.match(/[0-9a-f]{64}/g)!.length).toBeGreaterThanOrEqual(3);
     expect(dockerfile).toContain("wasm-bindgen-cli --version 0.2.108");
+  });
+
+  it("gives every version the same export of LG-16's tree values, last (task 12.1b, A158)", () => {
+    const added = (version: string): string[] => {
+      const name = patchesOf(version).at(-1) as string;
+      expect(name, version).toMatch(/-ledger-wasm-state-trees\.patch$/);
+      return readFileSync(join(ledgerDir, version, "patches", name), "utf8")
+        .split("\n")
+        .filter((line) => line.startsWith("+") && !line.startsWith("+++"));
+    };
+    expect(added("v8")).toEqual(added("v9"));
+    expect(added("v9-rc3")).toEqual(added("v9"));
+    expect(added("v9").join("\n")).toContain('#[wasm_bindgen(js_name = "stateTrees")]');
   });
 
   for (const version of VERSIONS) {

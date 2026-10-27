@@ -60,11 +60,11 @@ function expectedStates(scenario: LedgerScenario, through: bigint): string[] {
         state_key: plainHex(h.stateKey),
         state_root: plainHex(h.root),
         zswap_first_free: `${h.zswapFirstFree}`,
-        zswap_root: null,
-        dust_commitment_first_free: null,
-        dust_commitment_root: null,
-        dust_generation_first_free: null,
-        dust_generation_root: null,
+        zswap_root: plainHex(h.trees.zswapRoot),
+        dust_commitment_first_free: `${h.trees.dustCommitmentFirstFree}`,
+        dust_commitment_root: plainHex(h.trees.dustCommitmentRoot),
+        dust_generation_first_free: `${h.trees.dustGenerationFirstFree}`,
+        dust_generation_root: plainHex(h.trees.dustGenerationRoot),
       }),
     );
 }
@@ -122,8 +122,9 @@ function rowProblems(table: string, actual: string[], expected: string[]): strin
 
 /**
  * A107 (LG-16): `core_ledger_state.states`, `segment_results` and `events` hold, for every height of `scenario` up to
- * `through`, the state's key, its root — the node's — and zswap first free index (the five tree values the packages
- * do not export null, decision record question Q138), each segment's success and each ledger event but logs with
+ * `through`, the state's key, its root — the node's — and LG-16's six tree values, none null (the zswap first free
+ * index the package's published getter's, the six the reference state's by the patched `stateTrees`, task 12.1b, owner
+ * decision Q138 A), each segment's success and each ledger event but logs with
  * its kind, segments, bytes and extracted fields, as the test's adapter gave them; and the reference replay agrees on
  * every transaction's outcome.
  */

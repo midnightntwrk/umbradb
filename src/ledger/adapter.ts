@@ -66,6 +66,7 @@ import type {
   NodeStore,
   ParsedTransaction,
   StateHandle,
+  StateSummary,
   TransactionResult,
   VmLog,
 } from "./types.js";
@@ -100,8 +101,6 @@ export interface RawState {
   apply(transaction: object, context: object): [RawState, RawTransactionResult];
   applySystemTx(transaction: object, tblock: Date): [RawState, RawEvent[]];
   readonly parameters: RawParameters;
-  /** The zswap part of the state, a new object at each read (freed by the reader). */
-  readonly zswap: { readonly firstFree: bigint };
   toString(compact?: boolean): string;
 }
 
@@ -160,6 +159,8 @@ export interface RawLedgerPackage {
   postBlockUpdateExact(state: RawState, tblock: Date, fullness: SyntheticCost): RawState;
   /** A system transaction's cost, which the node adds to the block's fullness (task 12.1a). */
   systemTransactionCost(transaction: RawSystemTransaction, params: RawParameters): SyntheticCost;
+  /** LG-16's six tree values of a state, as the official indexer reads them (task 12.1b). */
+  stateTrees(state: RawState): StateSummary;
 }
 
 /** A contract log event's logged item as the package gives it (`loggedItem`), ledger v9. */
@@ -649,16 +650,14 @@ export function createLedgerAdapter(spec: AdapterSpec): LedgerPackage {
     genesisState: (bytes) => asHandle(raw.LedgerState.deserialize(bytes)),
     networkIdOf: (state) => networkIdOf(asRaw(state)),
     stateSummary(state) {
-      const zswap = asRaw(state).zswap;
-      const zswapFirstFree = zswap.firstFree;
-      free(zswap);
+      const trees = raw.stateTrees(asRaw(state));
       return {
-        zswapFirstFree,
-        zswapRoot: null,
-        dustCommitmentFirstFree: null,
-        dustCommitmentRoot: null,
-        dustGenerationFirstFree: null,
-        dustGenerationRoot: null,
+        zswapFirstFree: trees.zswapFirstFree,
+        zswapRoot: trees.zswapRoot,
+        dustCommitmentFirstFree: trees.dustCommitmentFirstFree,
+        dustCommitmentRoot: trees.dustCommitmentRoot,
+        dustGenerationFirstFree: trees.dustGenerationFirstFree,
+        dustGenerationRoot: trees.dustGenerationRoot,
       };
     },
     dispose: (state) => free(state),

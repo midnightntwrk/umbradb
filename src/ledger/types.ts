@@ -195,18 +195,19 @@ export interface ParsedTransaction {
 }
 
 /**
- * What `core_ledger_state.states` stores of a state besides its key and root (LG-16; task 12.3): the zswap commitment
- * tree's first free index and root, and the DUST commitment and generation trees' first free indexes and roots. The
- * vendored packages export the zswap first free index only (`LedgerState.zswap.firstFree`); the other five are null
- * until a package exports them (decision record question Q138).
+ * What `core_ledger_state.states` stores of a state besides its key and root (LG-16; tasks 12.3, 12.1b): the zswap
+ * commitment tree's first free index and root, and the DUST commitment and generation trees' first free indexes and
+ * roots, as the official indexer reads them from the ledger's Rust state — each root its tree's root after `rehash()`,
+ * in the ledger's untagged serialization (the vendored packages' patched `stateTrees`, owner decision Q138 A). None is
+ * null.
  */
 export interface StateSummary {
   zswapFirstFree: bigint;
-  zswapRoot: Uint8Array | null;
-  dustCommitmentFirstFree: bigint | null;
-  dustCommitmentRoot: Uint8Array | null;
-  dustGenerationFirstFree: bigint | null;
-  dustGenerationRoot: Uint8Array | null;
+  zswapRoot: Uint8Array;
+  dustCommitmentFirstFree: bigint;
+  dustCommitmentRoot: Uint8Array;
+  dustGenerationFirstFree: bigint;
+  dustGenerationRoot: Uint8Array;
 }
 
 /** A module's ledger task (LG-17, task 12.6), run in the ledger worker once per block. */

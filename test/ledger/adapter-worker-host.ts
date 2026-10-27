@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
 import { build } from "esbuild";
-import type { ApplyInput, ApplyOutput, ParsedTransaction, StoredNode } from "../../src/ledger/types.js";
+import type { ApplyInput, ApplyOutput, ParsedTransaction, StateSummary, StoredNode } from "../../src/ledger/types.js";
 import type { Ledger } from "./adapter-fixtures.js";
 
 // Task 12.1 (A98; LG-7, Q49): runs `fixtures/adapter-worker.ts` in a worker thread of its own. The entry is bundled
@@ -20,6 +20,8 @@ export type AdapterWorkerRequest =
 export interface LoadedState {
   stateRoot: Uint8Array;
   stateKey: Uint8Array;
+  /** The adapter's `stateSummary` of the loaded state (a load only; task 12.1b). */
+  summary?: StateSummary;
 }
 
 export interface Replayed {

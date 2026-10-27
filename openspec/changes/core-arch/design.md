@@ -682,9 +682,9 @@ interface LedgerEvent { transaction: number; kind: LedgerEventKind;   // every e
 interface LogItem { version: number; eventType: LogEventType; data: Uint8Array }   // CC-3
 interface VmLog extends LogItem { transaction: number; index: number; address: Uint8Array; entryPoint: Uint8Array;
   logicalSegment: number; physicalSegment: number }                   // numbered per block in emission order
-interface StateSummary { zswapFirstFree: bigint; zswapRoot: Uint8Array | null;       // null: not exported (Q138)
-  dustCommitmentFirstFree: bigint | null; dustCommitmentRoot: Uint8Array | null;
-  dustGenerationFirstFree: bigint | null; dustGenerationRoot: Uint8Array | null }
+interface StateSummary { zswapFirstFree: bigint; zswapRoot: Uint8Array;   // LG-16's tree values (Q138 A)
+  dustCommitmentFirstFree: bigint; dustCommitmentRoot: Uint8Array;
+  dustGenerationFirstFree: bigint; dustGenerationRoot: Uint8Array }
 interface NodeStore { get(key: Uint8Array): { data: Uint8Array; children: Uint8Array } | null }
 interface NodeBatch { inserts: { key: Uint8Array; data: Uint8Array; children: Uint8Array }[];
   rootCounts: { key: Uint8Array; delta: number }[] }       // signed change of each changed root count (Q53)
@@ -740,9 +740,11 @@ stores too (task 12.3).
 As built (task 12.3): the adapter also gives a state's network id (`networkIdOf`, read from the state's own `Debug`
 rendering, which names it first: the node makes block 0's empty state with the genesis state's id) and makes an empty
 state of a given id (`emptyState(networkId)`), frees a state (`dispose`, wasm-bindgen's `free`), and summarizes a state
-for `core_ledger_state.states` (`stateSummary`): the zswap tree's first free index (`LedgerState.zswap.firstFree`); the
-zswap root and the DUST commitment and generation trees' first free indexes and roots are null, as the vendored packages
-export none of them (decision record question Q138).
+for `core_ledger_state.states` (`stateSummary`). Task 12.1b (owner decision Q138 A) makes the summary LG-16's six tree
+values, none null, from the packages' patched `stateTrees` (§5.2): the zswap commitment tree's first free index and
+root and the DUST commitment and generation trees' first free indexes and roots, read from the ledger's Rust state as
+the official indexer reads them, each root its tree's root after `rehash()` in the ledger's untagged serialization, as
+that indexer stores it. Task 12.3 stored the zswap first free index alone and the five others null.
 
 ### 5.2 Vendored builds (LG-5)
 
@@ -755,7 +757,13 @@ v9's `decodeLogItem`, the conversion) are the patches; the v9 package also expor
 native state value into `decodeLogItem`'s input. Both packages also export the node's end-of-block update (task
 12.1a, Q113): `postBlockUpdateExact(state, tblock, fullness)`, `blockFullness(params, fullness)` (the `FixedPoint`s it
 uses, each as the integer `value × 2^64`) and `systemTransactionCost(tx, params)`, following `midnight-node`
-2.1.0-rc.4's `clamp_and_normalize`, `compute_overall_fullness`, `apply_post_block_update` and `apply_system_tx`.
+2.1.0-rc.4's `clamp_and_normalize`, `compute_overall_fullness`, `apply_post_block_update` and `apply_system_tx`. Every
+package exports LG-16's tree values (task 12.1b, Q138 A): `stateTrees(state)` gives `{ zswapFirstFree, zswapRoot,
+dustCommitmentFirstFree, dustCommitmentRoot, dustGenerationFirstFree, dustGenerationRoot }` — `zswap.first_free`,
+`zswap.coin_coms.rehash().root()`, `dust.utxo.commitments_first_free`, `dust.utxo.commitments.rehash().root()`,
+`dust.generation.generating_tree_first_free`, `dust.generation.generating_tree.rehash().root()`, as the official indexer
+reads them (`indexer-common/src/domain/ledger/ledger_state.rs`) — as plain data: each index a `bigint`, each root its
+untagged serialization; a tree without a root is an error.
 `vendor/ledger/README.md` lists each patch and what it adds; the owner
 proposes them upstream, as a few pull requests, once `midnight-ledger` is stable (Q56). v8 is `ledger-8.1.2`, the v8
 ledger `midnight-node` 2.1.0-rc.4 pins (`Cargo.toml:86`). v9 is `midnight-ledger` `ledger-9.1.0.0-rc.5` (the reference
@@ -1423,7 +1431,7 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-tx-results` | `core_tx_results.results` | (height, tx_index) | outcome (`success`, `partial`, `failure`) — range-partitioned by height (task 11.1) |
 | `core-ledger-state` | `core_ledger_state.nodes` | node_key | data, children (ledger serialization) — an existing key is left as it is (a node is its key's content) (task 12.3) |
 | `core-ledger-state` | `core_ledger_state.root_counts` | node_key | count (int > 0) — each block adds its batch's signed changes, a count reaching 0 deleted (task 12.3) |
-| `core-ledger-state` | `core_ledger_state.states` | height | state_key, state_root, zswap_first_free, zswap_root (null), dust_commitment_first_free (null), dust_commitment_root (null), dust_generation_first_free (null), dust_generation_root (null) — the five null until a vendored package exports them (decision record question Q138); range-partitioned by height (task 12.3) |
+| `core-ledger-state` | `core_ledger_state.states` | height | state_key, state_root, zswap_first_free, zswap_root, dust_commitment_first_free, dust_commitment_root, dust_generation_first_free, dust_generation_root — none null, LG-16's tree values as the official indexer reads them (the packages' `stateTrees`, owner decision Q138 A, task 12.1b); range-partitioned by height (task 12.3) |
 | `core-ledger-state` | `core_ledger_state.sweep` | id = 1 | cycle, phase (`idle`, `mark`, `sweep`), sweep_after (null) |
 | `core-ledger-state` | `core_ledger_state.grey`, `core_ledger_state.marks` | node_key | — |
 | `core-ledger-state` | `core_ledger_state.segment_results` | (height, tx_index, segment) | success (boolean) — range-partitioned by height (task 12.3) |
