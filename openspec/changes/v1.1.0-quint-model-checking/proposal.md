@@ -1,6 +1,9 @@
 # Proposal — v1.1.0: Quint model checking (`quint-model-checking`)
 
-> **Status:** Proposed. Change id `v1.1.0-quint-model-checking`, capability `model-checking`.
+> **Status:** Archived (2026-10-27, `openspec/changes/core-arch` task 17.2, `design.md` §13): its laws (C2a, C2b, L1,
+> T1 cross-writer) are retired with the 0.9.5 parts they describe — CheckpointStore's GC, the transaction/lease layer
+> and TemporalKV — so there is nothing left for it to model-check. Kept as history; never implemented. Change id
+> `v1.1.0-quint-model-checking`, capability `model-checking`.
 > **Supersedes, for three specific laws,** the Lean-based approach in
 > `openspec/changes/v1.1.0-formal-completion` (GF1 C2a, GF3 L1). That change is not withdrawn — its
 > C1-hygiene rider, its refinement-obligation register, and its anti-vacuity criteria all still

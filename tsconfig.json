@@ -14,7 +14,6 @@
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
-    "chain-archive-sync/**/*.ts",
     "bench/**/*.ts",
     "tools/**/*.ts",
     "browser/**/*.ts"

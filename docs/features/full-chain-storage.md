@@ -7,8 +7,9 @@
 > `sync-service.ts` (`ChainArchiveSyncService`), `sync-cli.ts`, the `archive:sync` script, and the tests that drove it
 > (`test/integration/chain-archive-sync`, `chain-archive-sync-retry` and `chain-archive-preprod-cloud-crossval`).
 > `node-rpc-client.ts` is refactored into the node client of `src/node/` (JSON-RPC over WebSocket), with its tests in
-> `test/node/`. `bootstrap.ts`, `tx-replay-decoder.ts` and the `chain_archive` store stay until tasks 12.1 and 17.2;
-> the rest of this page describes 0.9.5 as it was.
+> `test/node/`. Task 17.2 (2026-10-27, `design.md` §13) removed the rest — `bootstrap.ts`, `tx-replay-decoder.ts` (its
+> v8 decoding is the ledger adapter's, task 12.1), the `chain_archive` store with its rollover and partitions (the
+> core block tables, task 10.2), and their tests; the rest of this page describes 0.9.5 as it was.
 
 The design rationale lives in `design/full-chain-storage-design.md` (present on the implementation branch, v4, revised through three rounds of design-council audit). The acceptance gate lives on a separate branch, `spec/full-chain-storage-acceptance-criteria`, at `openspec/changes/full-chain-storage-acceptance-criteria/specs/full-chain-archive-verification/spec.md`. This document summarizes both but focuses on the implementation as it actually exists on the implementation branch today.
 

@@ -1,5 +1,10 @@
 # Scalability ceilings (v1.0.0)
 
+> **History (2026-10-27, `openspec/changes/core-arch` task 17.2, `design.md` §13).** The ceilings below are UmbraDB
+> 0.9.5's: the parts they measure (TemporalKV, CheckpointStore and its GC, the lease, TransactionHistory) are retired,
+> and so are the benchmark workloads, the harness and smoke guard and the baseline file linked below. The page is kept
+> as the record of 0.9.5; task 17.3 retargets the bench smoke to the core with a fresh baseline.
+
 These are the known scalability limits UmbraDB ships with at 1.0.0. Each is a **1.0.0 contract** —
 stated here so operators discover it in docs, not in production
 (`openspec/changes/v1.0.0-perf-baseline/design.md` §6; report `03` §"Scalability ceilings";

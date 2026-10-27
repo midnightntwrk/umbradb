@@ -39,18 +39,22 @@ export const MOVED_TESTS: readonly string[] = [
   "test/integration/live-fixtures/preprod-fixtures.ts",
 ];
 
-/** Its benchmark workload, which imports the source (`design.md` §13 retires it with the baseline: task 17.2). */
-export const MOVED_BENCHMARKS: readonly string[] = [
+/**
+ * Its benchmark workload, moved by task 17.1 to `legacy/transaction-history/bench/workloads/` and retired with the
+ * baseline by task 17.2 (`design.md` §13's Benchmarks row): no longer in the folder, so not in {@link MOVED}.
+ */
+export const RETIRED_BENCHMARKS: readonly string[] = [
   "bench/workloads/transaction-history.ts",
   "bench/workloads/tx-history-merge.ts",
 ];
 
-export const MOVED: readonly string[] = [...MOVED_SOURCE, ...MOVED_TESTS, ...MOVED_BENCHMARKS];
+export const MOVED: readonly string[] = [...MOVED_SOURCE, ...MOVED_TESTS];
 
 /**
- * What the move added: a note on what the folder is, its own TypeScript program (`npm run typecheck` runs it apart from
- * the repository's), its own Vitest configuration (never the conformance run's), and the test setup that adds
- * migration 004 to the database the moved tests start.
+ * What the move added: a note on what the folder is, its own TypeScript program and Vitest configuration, and the test
+ * setup that adds migration 004 to the database the moved tests start. Since task 17.2 (owner decision Q112 B) nothing
+ * runs the program or the configuration — `npm run typecheck` checks the repository's program only and `test:live` is
+ * gone — and the README names the last commit where the folder compiled and its tests passed; the files are kept.
  */
 export const ADDED: readonly string[] = ["README.md", "tsconfig.json", "vitest.config.ts", "test/postgres/setup.ts"]
   .map((path) => legacyPath(path));

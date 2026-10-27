@@ -1,11 +1,5 @@
 {
-  "entryPoints": [
-    "src/interfaces/storage-errors.ts",
-    "src/interfaces/transaction-lease.ts",
-    "src/interfaces/temporal-kv.ts",
-    "src/interfaces/checkpoint-store.ts",
-    "src/interfaces/watermarks.ts"
-  ],
+  "entryPoints": [],
   "out": "docs/api/storage",
   "excludePrivate": true,
   "excludeInternal": true,

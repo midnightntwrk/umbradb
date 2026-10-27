@@ -3191,7 +3191,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       rewritten with oracles 1b and 4c (17.3); the breaking-change notice naming the removed exports and that
       `runMigrations` no longer creates `transaction_history`, and `README.md`'s TransactionHistory sections (17.4); the
       refactor of the kept code (FEATURES F9).
-- [ ] 17.2 Remove the retired parts, the `chain_archive` store, `chain-archive-sync`, their tests, the Lean modules,
+- [x] 17.2 Remove the retired parts, the `chain_archive` store, `chain-archive-sync`, their tests, the Lean modules,
       benchmarks, manifest ids, coverage floors and mutation targets exactly as listed in `design.md` §13, and update
       the aggregators it lists; mark the retired laws in `Formal/STORAGE_ALGEBRA.md` and the roadmaps; set
       `openspec/changes/v1.1.0-quint-model-checking`'s status to Archived with the reason; remove the `archive:sync`
@@ -3200,6 +3200,53 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       tests passed (owner decision Q112).
       **Acceptance:** A5; `lake build --wfail` and the trust audit pass; `npm run test:mutation:ci` passes at break 65
       on the new targets.
+      **Done (2026-10-27):** §13 applied; 101 files removed (21,739 lines). Removed: 0.9.5's `src/postgres/` and
+      `src/interfaces/` whole — TemporalKV, CheckpointStore, Watermarks, the transaction/lease layer,
+      `saveAndAdvance`, WalletStateEnvelope, the `chain_archive` store with its rollover and partitions, the
+      `tier1_wallet` lineage and the plumbing `src/db/` refactored (client, migration runner, durability probe, errors,
+      abort helper) — and `chain-archive-sync/` (`bootstrap.ts`, `tx-replay-decoder.ts`); their tests: 32 of
+      `test/postgres/` (all but `no-sdk-import-guard.test.ts`, kept, and `setup.ts`), the five 0.9.5 crash tests, the
+      soak and load-under-prune runs, the chain-archive replay test, and the 0.9.5 API pins of `test/api-surface/`
+      (`barrel-resolves`, `frozen-types`, `error-catalog-drift`, `retryability-table`, `withtx-methods`,
+      `chain-archive-routing`; `excluded-not-exported` and `package-json-strict` kept); the benchmarks' five workloads,
+      the baseline, `bench/harness.ts` and `bench/smoke.ts` (only they ran them), and legacy's TransactionHistory
+      workload; the Lean `UmbraDBFormal/TemporalKV/**`, `Checkpoint/**`, `Checkpoint.lean` and their tests, and
+      `APISmoke`'s `checkpoint_union_comm/assoc/idem`. Aggregators: `UmbraDBFormal.lean` imports `APISmoke` and
+      `Watermarks`, `Trust.lean` the two test modules and Watermarks'; `src/index.ts` is empty until 17.3 exports §12;
+      the manifest holds ids 1–4 (`EXPECTED_REQUIRED_COUNT` 4, `EXPECTED_DEFERRED_COUNT` 0; `loadManifest` takes the
+      pins as an argument so the deferred checks keep their tests); `vitest.config.ts` without the five 0.9.5 floors,
+      the three old paths of the moved ones and the chain-archive exclusions; `stryker.conf.json` mutates §13's nine
+      targets with their tests in `vitest.mutation.config.ts`; `tsconfig.json` without `chain-archive-sync/`;
+      `typedoc.json` with no entry point until 17.3; `bench/environment.ts` and `bench/types.ts` without 0.9.5's client
+      and baseline types; A148's record exemption emptied and issue 00010 closed. Kept for ids 1–4 until 18.1:
+      `test/postgres/setup.ts` (the fault primitives on a plain `postgres` connection, nothing migrated) and a crash
+      worker that holds a transaction open before its `COMMIT`. `Formal/STORAGE_ALGEBRA.md` and the two formalization
+      roadmaps mark T1–T4, C1, C2a, C2b, L1 and P1–P8, P10, P11 retired (header notes, kept as history), re-bind W1 and
+      P9 to the cursor table and restate T5 for heights; `ROADMAP.md`'s P1–P10 line and `Performance/CEILINGS.md` say
+      so. `v1.1.0-quint-model-checking` is Archived with §13's reason. Q112 B: `npm run typecheck` is `tsc --noEmit`,
+      `test:live` is gone, legacy's `tsconfig.json` and `vitest.config.ts` are kept unused, and its README names
+      `e31fcf85f2f0228d7c21c6e3f320a4f430f3ea94` as the last commit where it compiled (exit 0) and its tests passed
+      (6 files, 98 passed, 4 skipped; checked by this task). `archive:sync` was already gone (10.1). §13's three
+      mutation targets the build placed elsewhere are named as built (`src/runner/dispatch.ts`,
+      `src/backbone/core-ledger-state/sweep.ts`, `src/backbone/core-block-fetch/node-source.ts`; Q157, shipped A);
+      the sweep's 95/90 floor waits (branches 89.33 %; Q158, shipped A pending). A5:
+      `test/library-surface/retirement.ts` (§13's lists, checked against §13's words) and `retirement.test.ts` (9
+      checks on the real tree — the manifest, `mutate` and break, the floors, `Formal/Lean`'s files, imports and
+      lemmas, the retired files, the scripts, the barrel's names with types, the Quint status — and 9 negative
+      controls); seen failing first, before any removal: 11 of 18 (each check on its retired item, the floor control
+      and §13's words). Lean: `lake build --wfail` and the trust audit pass (Lean 4.32.0 through elan 4.2.4; a planted
+      axiom fails the audit), `leanchecker` passes. Mutation (`npm run test:mutation:ci`, about 58 min at load averages
+      25–45): aggregate 85.33 % over 3,163 valid mutants at break 65 — graph 87.81 %, dispatch 95.80 %, history
+      86.10 %, cbor 98.18 %, digest 96.05 %, height-versioned 74.07 %, cursor-table 78.38 %, sweep 60.62 % (79 mutants
+      reached by no test of its one file), node-source 77.80 %. Conformance (`env -u UMBRADB_TAPES npm run
+      test:conformance`, through Codex, twice, load averages 25–40): 257 of 258 files passed, 4,832 tests passed and 35
+      skipped, all 4 required ids passed, every coverage floor held; the one failure both times is task 12.4's A103 on
+      PostgreSQL in `test/backbone/ledger-storage.test.ts` (5,001 blocks in 960 s: the cursor at 4,163, then 947, when
+      the wait ended; its PGlite twin passed), which passes alone (17 of 17, 716 s).
+      **Waits:** the §12 barrel and pins, the pack smoke rewritten (its oracles 4 and 5 import 0.9.5's surface and
+      fail until then), the bench smoke and its baseline (`npm run bench` and `bench:smoke` name files this task
+      removed) and `typedoc.json`'s entry points (17.3); the crash worker driving the runner (18.1); the §17 ids (18.4);
+      the sweep's floor (Q158).
 - [ ] 17.3 `src/index.ts` with exactly the §12 surface; the surface pin; the `umbradb` command; the pack smoke rewritten
       (§12 imports, the retired-name failure, a tape sync on PostgreSQL in Docker, `umbradb config check`); the bench
       smoke retargeted with a fresh baseline; `typedoc.json` entry points.

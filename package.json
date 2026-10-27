@@ -35,7 +35,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit && tsc --noEmit -p legacy/transaction-history/tsconfig.json",
+    "typecheck": "tsc --noEmit",
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "build:browser": "node browser/build.ts",
     "docs:storage": "typedoc",
@@ -45,7 +45,6 @@
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run",
     "test:mutation:ci": "node scripts/mutation-per-adapter.mjs",
-    "test:live": "UMBRADB_LIVE_PREPROD=1 vitest run --config legacy/transaction-history/vitest.config.ts test/integration/preprod-db-sync.integration.test.ts test/integration/cold-boot-recovery.integration.test.ts",
     "test:smoke": "npm run build && node test/smoke/pack-install.mjs",
     "bench": "tsx bench/harness.ts",
     "bench:smoke": "tsx bench/smoke.ts",

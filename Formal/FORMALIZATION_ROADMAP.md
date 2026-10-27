@@ -1,5 +1,13 @@
 # UmbraDB storage-algebra — formalization gap map & roadmap
 
+> **Retired in part (2026-10-27, `openspec/changes/core-arch` task 17.2, `design.md` §13).** The laws this roadmap
+> plans or records for TemporalKV, CheckpointStore and the transaction/lease layer — **T1–T4, C1, C2a, C2b and L1**,
+> with the property tests **P1–P8, P10 and P11** — are retired with those 0.9.5 parts; their Lean modules
+> (`UmbraDBFormal/TemporalKV/**`, `UmbraDBFormal/Checkpoint/**`, the `APISmoke` lemmas
+> `checkpoint_union_comm/assoc/idem`) are removed, and the work below on them will not be done. Kept: **W1** (the cursor table's law, SH-1; P9 retargeted
+> as A59, `UmbraDBFormal/Watermarks/**`) and **T5's half-open rule restated for heights** (the height-versioned table,
+> SH-2; A60, `APISmoke.adjacent_Ico_disjoint`) — `Formal/STORAGE_ALGEBRA.md`'s header. This page is kept as history.
+
 Analysis by two Opus 5 agents: spec = `Formal/STORAGE_ALGEBRA.md`; Lean = `formal/storage-algebra-lean-m3c-checkpoint-c2a` (`UmbraDBFormal/`, mathlib v4.32.0, **83+ theorems, 0 sorry / 0 axiom / 0 admit**, enforced by the `Trust` gate = source scanner + `#audit_umbradb_trust` env audit restricting axioms to `{propext, Quot.sound, Classical.choice}`).
 
 **Headline:** everything mechanized is *fully proved* — but the mechanization is **abstract-kernel only**, single-key where it matters, and three laws (**C2a, C2b, L1**) plus the entire **abstract→PostgreSQL refinement** are absent. "0-sorry" means *fully proved but narrow*, not *broad*. The `Trust` gate cannot detect a missing law.

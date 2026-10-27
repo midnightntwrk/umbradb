@@ -9,55 +9,15 @@ import { configDefaults, defineConfig } from "vitest/config";
  * CLOSED (`docs/v1-implementation-guideline.md` §1.0, §2.3, §3.6). `src/` behaviour is untouched;
  * coverage only READS `src`.
  *
- * ── Coverage floors (measure-first ratchet, at §2.3's BINDING 90/85) ─────────────────────────
- * §2.3 makes the durability-critical per-file floors **binding, not recommended**: "the initial
- * floors MUST be set at exactly these values or higher — 90% lines / 85% branches per-file on
- * critical globs; 80% lines / 70% branches repo-wide — and MUST NOT be lowered thereafter." So
- * every durability-critical `src/postgres/**` file below has a per-file floor of **>= 90 lines /
- * >= 85 branches**. §2.3 gates LINES and BRANCHES only, so only those two metrics are thresholded.
- * Measured (lines% / branch%) over the deterministic Testcontainers set (`test/postgres` +
- * `test/integration/crash` + `test/integration/soak`), 2026-07-24:
+ * ── Coverage floors ──────────────────────────────────────────────────────────────────────────────────────────────
+ * Lines and branches, per file. The repo-wide per-file floor (85 lines / 78 branches) applies to every included file no
+ * glob below matches; vitest-4 semantics: a file matched by a glob threshold is checked ONLY against that glob (the
+ * global thresholds are NOT inherited), glob keys must be real patterns, and each glob sets `perFile: true` itself.
  *
- *   checkpoint-store.ts   96.58 / 96.07     save-and-advance.ts  100   / 100
- *   watermarks.ts        100    / 100       durability-probe.ts  100   / 95.83
- *   errors.ts             97.43 / 94.73     temporal-kv.ts        94.25 / 85.91
- *   migrate.ts            93.33 / 85.71     transaction-lease.ts  96.02 / 91.96
- *   repo-wide total       93.47 / 86.05 (lines / branches)
- *
- * All eight durability modules now clear §2.3's 90/85 target: `transaction-lease.ts` reached it via
- * the targeted `tryAcquireLease` reserve/timeout/abort/success branch tests added in this change
- * (its previous 89.20 / 81.25 was the one module still under it). Each per-file floor is pinned at
- * or a few points below the measured value, but NEVER below 90/85 — a floor that is green today and
- * ratchets up, never a target (§3.6). The repo-wide per-file floor (85 lines / 78 branches) is
- * STRONGER than §2.3's 80/70 repo-wide aggregate.
- *
- * vitest-4 semantics honoured: a file matched by a glob threshold is checked ONLY against that
- * glob (the global thresholds are NOT inherited), and glob keys must be real patterns — hence the
- * `**​/postgres/<file>.ts` form (a bare relative path does not match the provider's file paths) and
- * the explicit `perFile: true` on each glob (globs do not inherit the top-level `perFile`).
- *
- * The deferred full-chain-archival track (`chain-archive-*`, `migrations/chain_archive/**`;
- * acceptance-criteria I6 — out of 1.0.0 and untouched here) is excluded from the 1.0.0 coverage
- * gate; it is not durable-checkpoint-cursor code and its own suite still runs in the gate.
+ * 0.9.5's durability floors (`checkpoint-store`, `save-and-advance`, `watermarks`, `temporal-kv`, `transaction-lease`)
+ * and its chain-archive exclusions were retired with those parts by core-arch task 17.2 (`openspec/changes/core-arch/
+ * design.md` §13); `durability-probe`, `migrate` and `errors` keep their floors at the paths they moved to, below.
  */
-
-// Per-file durability floors (lines / branches) — BINDING §2.3 minimum is 90 / 85; each is pinned
-// at or a few points below the measured value but NEVER under 90 / 85. `**​/postgres/<file>.ts`
-// matches exactly the postgres adapter (not its `interfaces/` namesake).
-const DURABILITY = {
-  "**/postgres/checkpoint-store.ts": { lines: 94, branches: 93, perFile: true },
-  "**/postgres/save-and-advance.ts": { lines: 97, branches: 95, perFile: true },
-  "**/postgres/watermarks.ts": { lines: 97, branches: 95, perFile: true },
-  "**/postgres/durability-probe.ts": { lines: 97, branches: 92, perFile: true },
-  "**/postgres/errors.ts": { lines: 95, branches: 91, perFile: true },
-  // temporal-kv / migrate clear the 90/85 target on lines; their branch floors sit at the binding
-  // 85 minimum (measured 85.91 / 85.71 — deterministic over the Testcontainers set).
-  "**/postgres/temporal-kv.ts": { lines: 91, branches: 85, perFile: true },
-  "**/postgres/migrate.ts": { lines: 90, branches: 85, perFile: true },
-  // transaction-lease reached §2.3's 90/85 target via the tryAcquireLease branch tests added in this
-  // change (measured 96.02 / 91.96, up from 89.20 / 81.25). Floor set at the binding 90/85.
-  "**/postgres/transaction-lease.ts": { lines: 90, branches: 85, perFile: true },
-} as const;
 
 // CORE-ARCH floors (`openspec/changes/core-arch/design.md` §13, "Coverage floors" row), added with the directory each
 // covers. The canonical encoding, the contents hash and digests decide whether two databases agree, so they are held
@@ -68,11 +28,9 @@ const CORE_ARCH = {
   // §13 keeps at the moved path.
   "**/src/db/**": { lines: 90, branches: 85, perFile: true },
   "**/src/db/errors.ts": { lines: 95, branches: 91, perFile: true },
-  // §13's `migrate` floor at its moved path (task 2.4); 0.9.5's `**/postgres/migrate.ts` entry above goes with that file
-  // (task 17.2).
+  // §13's `migrate` floor at its moved path (task 2.4).
   "**/src/db/migrate.ts": { lines: 90, branches: 85, perFile: true },
-  // §13's `durability-probe` floor at its moved path (task 2.5); 0.9.5's `**/postgres/durability-probe.ts` entry above
-  // goes with that file (task 17.2).
+  // §13's `durability-probe` floor at its moved path (task 2.5).
   "**/src/db/durability-probe.ts": { lines: 97, branches: 92, perFile: true },
   // §13's default for `src/**`, added with the modules' directory (task 3.1).
   "**/src/modules/**": { lines: 90, branches: 85, perFile: true },
@@ -92,8 +50,9 @@ const CORE_ARCH = {
   "**/src/admin/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the process transport's directory (task 14.2).
   "**/src/private/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the ledger adapters' directory (task 12.1); `src/ledger/sweep*` gets §13's
-  // 95/90 with the sweep (task 12.5).
+  // §13's default for `src/**`, added with the ledger adapters' directory (task 12.1). The sweep (§13's 95/90, as built
+  // `src/backbone/core-ledger-state/sweep.ts`, task 12.5) stays under `src/backbone`'s 90/85 for now: its branches
+  // measure 89.33 % (decision record Q-17.2-2, task 17.2).
   "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
   // The test tape (task 9.1): not in the package, but the tests of ingest, faults and differentials stand on it, so it
   // is measured and held to §13's default like `src/**`.
@@ -113,7 +72,7 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, "legacy/**"],
     // Teardown budget. `registerSuiteLifecycle`'s afterAll already sets 60s explicitly because
     // `container.stop()` can exceed the 10s default under heavy host load; suites with a plain
-    // inline afterAll (e.g. chain-archive-rollover) inherit this global so coverage-instrumented,
+    // inline afterAll inherit this global so coverage-instrumented,
     // fully-parallel runs don't flake on teardown. Inline explicit timeouts still win.
     hookTimeout: 60_000,
     // Each test's budget (core-arch task 0.5, owner decision Q122, acceptance A153), for the same reason: Vitest's
@@ -151,11 +110,6 @@ export default defineConfig({
         // The ledger worker thread's entry runs only as a thread of its own (`test/ledger/worker-host.test.ts`, the
         // process tests); what it runs, the engine and the bridge, is covered on the main thread too (task 12.3).
         "src/ledger/worker/entry.ts",
-        // Deferred full-chain-archival track — out of 1.0.0 (acceptance-criteria I6).
-        "src/postgres/chain-archive-store.ts",
-        "src/postgres/chain-archive-rollover.ts",
-        "src/interfaces/chain-archive-store.ts",
-        "src/postgres/migrations/chain_archive/**",
         // TransactionHistory, kept outside the run (task 17.1, LS-3, A3). Vitest matches these globs anywhere in a
         // file's path, so `src/**/*.ts` above would also take in `legacy/transaction-history/src/` if a test loaded it.
         "legacy/**",
@@ -167,13 +121,11 @@ export default defineConfig({
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "./coverage",
       thresholds: {
-        // Repo-wide floor, checked PER FILE (§2.3 `perFile: true`) — stronger than §2.3's 80/70
-        // repo-wide aggregate. Applies to every included file NOT matched by a durability glob.
+        // Repo-wide floor, checked PER FILE (`perFile: true`). Applies to every included file no glob of CORE_ARCH
+        // matches.
         perFile: true,
         lines: 85,
         branches: 78,
-        // Stricter per-file floors on the durability-critical modules (BINDING 90/85, §2.3).
-        ...DURABILITY,
         ...CORE_ARCH,
       },
     },

@@ -31,11 +31,10 @@ const SCRIPT = new Set([".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"]);
 const HASH_COMMENTED = new Set([".yml", ".yaml", ".sh", ".nix", ".toml"]);
 
 /**
- * Files that name a PostgreSQL image without pinning one: the committed benchmark baseline records the image it was
- * measured on (PostgreSQL 17.10, before Q82), as a record of that run; it and its workloads are retired by task 17
- * (`design.md` §13).
+ * Files that may name a PostgreSQL image without pinning one, as a record of a run. None since task 17.2 retired the
+ * 0.9.5 benchmark baseline (measured on PostgreSQL 17.10, before Q82) with its workloads (`design.md` §13).
  */
-const RECORDS = new Set(["bench/baseline.1.0.0-perf-baseline.1.json"]);
+const RECORDS = new Set<string>();
 
 interface RepositoryFile {
   readonly path: string;
@@ -191,11 +190,16 @@ describe("A148 — one PostgreSQL image, postgres:18-alpine pinned by digest (Q8
         ["docs/c.md", `Run \`docker run ${older}\`.`],
         ["test/d.ts", `const args = ["postgres", "-c", "fsync=off"]; const url = "postgres://postgres:postgres@db:5432/x";`],
         ["test/e.ts", `const url = "postgresql://u:p@postgres:5432/postgres";`],
-        ["bench/baseline.1.0.0-perf-baseline.1.json", `{"postgresImage": "${older}"}`],
       ];
       for (const [path, text] of harmless) {
         expect(pinViolations([{ path, text }], POSTGRES_IMAGE), path).toEqual([]);
       }
+      // No file is exempt as a record since task 17.2 retired the 0.9.5 benchmark baseline: one naming an older image
+      // is caught like any other configuration file.
+      const baseline = "bench/baseline.1.0.0-perf-baseline.1.json";
+      expect(pinViolations([{ path: baseline, text: `{"postgresImage": "${older}"}` }], POSTGRES_IMAGE)).toEqual([
+        `${baseline}: names ${older}`,
+      ]);
       // The same reference on a code line after those comments is caught.
       expect(pinViolations([{ path: "test/c.ts", text: `// ${older}\nconst image = "${older}";` }], POSTGRES_IMAGE)).toEqual([
         `test/c.ts: names ${older}`,

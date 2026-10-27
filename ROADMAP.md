@@ -181,7 +181,9 @@ execute-and-pass — so a re-introduced `describe.skipIf` turns CI red by name, 
   Postgres (via Testcontainers, `design/design.md` §8), not mocked. All ten
   are live: P1/P10 `save-and-advance.property.test.ts`; P2–P5
   `temporal-kv.property.test.ts`; P6–P8 `checkpoint-store.property.test.ts`;
-  P9 `watermarks.property.test.ts`.
+  P9 `watermarks.property.test.ts`. *(Core-arch task 17.2, `design.md` §13:
+  P1–P8, P10 and P11 retired with their 0.9.5 parts; P9 re-bound to the
+  cursor table, `test/helpers/cursor-table.property.test.ts`, A59.)*
 - [x] **Full sync test** — `soak.full-sync.invariants-hold`
   (`test/integration/soak/full-sync-soak.integration.test.ts`): a sustained
   concurrent mix (KV puts + checkpoint/watermark cadence + periodic prune +

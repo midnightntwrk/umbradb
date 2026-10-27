@@ -1,34 +1,37 @@
 import type { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import postgres from "postgres";
 import { afterAll, beforeAll } from "vitest";
 import { POSTGRES_IMAGE } from "../postgres-image.js";
-import { createClient, type UmbraDBSql } from "../../src/postgres/client.js";
-import { runMigrations } from "../../src/postgres/migrate.js";
 import { spawnChild } from "../child-processes.js";
 import { startContainer } from "../containers.js";
 
 /**
- * One shared, session-scoped Postgres container for the whole test run
- * (`openspec/changes/sprint-1-setup-and-temporal-kv/design.md` §5) — container startup cost is
- * real and shouldn't be paid per-test. Each test file is responsible for cleaning up its own
- * data (`TRUNCATE` between tests), not relying on a fresh container per test.
+ * The crash harness's fault primitives, for the kept required ids 1–4 (`crash-harness.smoke.*`,
+ * `test/integration/crash/crash-harness.smoke.test.ts`; `openspec/changes/core-arch/design.md` §13): one shared
+ * PostgreSQL container per test file, a crash worker spawned as a real process and SIGKILLed, `pg_terminate_backend` of
+ * a chosen backend, and the suite watchdog that bounds every operation.
  *
- * Uses `createClient` (not a raw `postgres()` call) specifically so the `types.bigint` mapping
- * is actually configured on this connection — that mapping is runtime behavior of the
- * connection object itself, not something a TypeScript type assertion at the call site can
- * substitute for. A test setup using a differently-configured connection would silently return
- * `version` as a string at runtime while the adapter's own types still claimed `bigint`.
+ * Core-arch task 17.2 retired the 0.9.5 parts this file used to set up (its client, migration runner and the crash
+ * worker's checkpoint, watermark, key-value and lease operations) with the required ids 5–25 that drove them: the
+ * connections here are plain `postgres` ones, no schema is migrated, and the worker only holds a transaction open
+ * (`crash-worker.ts`). Task 18.1 retargets the worker to drive the runner, keeping ids 1–4.
  */
-let container: StartedPostgreSqlContainer;
-let adminSql: UmbraDBSql;
 
-export const TEST_SCHEMA = "umbradb_test";
+export type Sql = postgres.Sql;
 
-export async function startTestDatabase(): Promise<UmbraDBSql> {
+let container: StartedPostgreSqlContainer | undefined;
+let adminSql: Sql | undefined;
+
+/** A connection to the shared container: `max` connections (1 makes the backend pid of its queries deterministic). */
+export function connect(connectionUri: string, max = 5): Sql {
+  return postgres(connectionUri, { max, connect_timeout: 10, onnotice: () => {} });
+}
+
+export async function startTestDatabase(): Promise<Sql> {
   container = await startContainer(new PostgreSqlContainer(POSTGRES_IMAGE));
-  adminSql = createClient({ connectionString: container.getConnectionUri(), schema: TEST_SCHEMA, maxConnections: 5 });
-  await runMigrations(adminSql, { schema: TEST_SCHEMA });
+  adminSql = connect(container.getConnectionUri());
   return adminSql;
 }
 
@@ -37,102 +40,48 @@ export async function stopTestDatabase(): Promise<void> {
   await container?.stop();
 }
 
-export function registerSuiteLifecycle(): { sql: () => UmbraDBSql; connectionUri: () => string } {
-  let sql: UmbraDBSql;
+/**
+ * Starts the shared container before the file's tests and stops it after them. `sql()` is the shared admin pool;
+ * `connectionUri()` lets a test open its own small pool on the same database, or hand it to a worker.
+ */
+export function registerSuiteLifecycle(): { sql: () => Sql; connectionUri: () => string } {
+  let sql: Sql;
   beforeAll(async () => {
     sql = await startTestDatabase();
   }, 120_000);
   afterAll(async () => {
     await stopTestDatabase();
-  }, 60_000); // teardown can exceed the 10s default under heavy host load (container.stop)
-  // Exposed so a test that needs its OWN dedicated, small (e.g. maxConnections: 1) pool against
-  // the SAME database -- rather than the shared suite pool, whose physical connection a given
-  // query lands on is not deterministic -- doesn't have to spin up a second container.
-  return { sql: () => sql, connectionUri: () => container.getConnectionUri() };
+  }, 60_000); // container.stop() can exceed the 10 s default under heavy host load
+  return {
+    sql: () => sql,
+    connectionUri: () => {
+      if (container === undefined) throw new Error("registerSuiteLifecycle(): the shared container has not started");
+      return container.getConnectionUri();
+    },
+  };
 }
 
-// ===========================================================================================
-// v1.0.0-recovery-testing — Task 0 crash-harness fault primitives (`design.md` §1)
-//
-// Three deterministic fault primitives, layered on the SAME shared session-scoped container the
-// suite already runs (`registerSuiteLifecycle().connectionUri()` — its documented "own dedicated
-// pool against the same database" hook), so NO second container is spun up:
-//   1. child-process spawn + SIGKILL of the `crash-worker.ts` writer entrypoint;
-//   2. `pg_terminate_backend(pid)` of a target backend, captured from a second connection;
-//   3. Testcontainers `container.restart()` / `container.stop()` of the shared container.
-// Plus the suite-level watchdog backstop (`design.md` §1, Task 0.3): `SUITE_WATCHDOG_MS` +
-// `withSuiteWatchdog`, an independent bound so a half-dead Postgres fails the pending op with a
-// typed error instead of hanging, even if G7's server-side timeouts are absent/misconfigured.
-// ===========================================================================================
-
-// ---- Primitive 3: shared-container lifecycle control (Testcontainers) ---------------------
-
-/** The shared session-scoped container, for advanced control (e.g. an in-container `kill -9`
- *  of the postmaster on the T5 `synchronous_commit = off` leg). Throws if the suite lifecycle
- *  has not started it yet. */
-export function getTestContainer(): StartedPostgreSqlContainer {
-  if (container === undefined) {
-    throw new Error("getTestContainer(): no shared container — call registerSuiteLifecycle()/startTestDatabase() first");
-  }
-  return container;
-}
-
-/** Testcontainers restart of the shared container (a CLEAN, WAL-flushing bounce — the T2
- *  "kill Postgres mid-op" primitive). Wrapped by the suite watchdog so a wedged restart fails
- *  typed rather than hanging the suite. */
-export async function restartTestContainer(opts?: { timeoutMs?: number }): Promise<void> {
-  await withSuiteWatchdog(getTestContainer().restart(), { label: "container.restart", timeoutMs: opts?.timeoutMs });
-}
-
-/** Testcontainers stop of the shared container. */
-export async function stopTestContainer(opts?: { timeoutMs?: number }): Promise<void> {
-  await withSuiteWatchdog(
-    getTestContainer().stop().then(() => undefined),
-    { label: "container.stop", timeoutMs: opts?.timeoutMs },
-  );
-}
-
-// ---- Primitive 2: backend-pid capture + pg_terminate_backend ------------------------------
+// ---- Backend pid and pg_terminate_backend ---------------------------------------------------------------------------
 
 /**
- * Captures the backend pid serving `sql`. Only deterministic on a **dedicated single-connection
- * pool** (`createClient({ ..., maxConnections: 1 })` or a `reserve()`d connection) — on a
- * multi-connection pool the query can land on any physical backend, so the returned pid would not
- * reliably identify a subsequent statement's connection. The crash worker captures its own backend
- * pid this way at the fault point (`design.md` §1).
+ * The backend pid serving `sql`. Deterministic only on a single-connection pool (`connect(uri, 1)`): on a larger pool
+ * the query may land on any backend.
  */
-export async function backendPid(sql: UmbraDBSql): Promise<number> {
-  // Bounded by construction (`withSuiteWatchdog`), so every crash-suite caller — Tasks 1-6
-  // included — inherits the JS-level termination backstop without having to remember to wrap it.
-  const rows = await withSuiteWatchdog(
-    sql<{ pid: number }[]>`SELECT pg_backend_pid()::int AS pid`,
-    { label: "backendPid" },
-  );
+export async function backendPid(sql: Sql): Promise<number> {
+  const rows = await withSuiteWatchdog(sql<{ pid: number }[]>`SELECT pg_backend_pid()::int AS pid`, {
+    label: "backendPid",
+  });
   return rows[0]!.pid;
 }
 
 /**
- * Terminates a target backend `pid` from a SECOND connection (`admin`, which must not itself be
- * that backend), returning `pg_terminate_backend`'s boolean. This is the "kill Postgres mid-op"
- * primitive that drops a specific in-flight connection without stopping the whole postmaster
- * (`design.md` §1, T2). Postgres sends the target backend a SIGTERM and closes its socket; a
- * dedicated pool observing the drop then reconnects on its next statement.
- *
- * DETERMINISTIC DEATH, NOT MERELY SIGNAL DELIVERY (change-level audit BLOCK 3). The ONE-arg /
- * zero-timeout `pg_terminate_backend(pid)` returns true as soon as the SIGTERM has been DELIVERED,
- * not once the backend has actually died — so a caller that released a worker's `COMMIT`
- * immediately after this returned could race the still-live backend, and that COMMIT could
- * occasionally succeed (a flaky required gate). This function makes termination DETERMINISTIC:
- *   1. it calls the PG14+ TWO-arg `pg_terminate_backend(pid, timeout_ms)` with a POSITIVE timeout —
- *      Postgres then WAITS for the backend to actually terminate and returns true ONLY once it is
- *      gone (the pinned PostgreSQL 18 image, `../postgres-image.ts`, supports it); and
- *   2. it additionally POLLS `pg_stat_activity` until the backend row has DISAPPEARED, a POSITIVE
- *      proof of death, bounded by {@link waitForBackendGone} so it never hangs.
- * So when this resolves the target backend is PROVABLY dead, and a caller may release work that
- * must observe the dead backend (T2's post-kill COMMIT) without a wall-clock race.
+ * Terminates backend `pid` from a second connection `admin` and returns `pg_terminate_backend`'s answer once the
+ * backend is gone: the two-argument form waits up to `terminateTimeoutMs` for the backend to end, and
+ * {@link waitForBackendGone} then polls `pg_stat_activity` until no row has that pid, so a caller never races a backend
+ * still finishing its work.
  */
 export async function pgTerminateBackend(
-  admin: UmbraDBSql,
+  admin: Sql,
   pid: number,
   opts: { terminateTimeoutMs?: number; confirmDeathTimeoutMs?: number } = {},
 ): Promise<boolean> {
@@ -141,21 +90,12 @@ export async function pgTerminateBackend(
     admin<{ terminated: boolean }[]>`SELECT pg_terminate_backend(${pid}, ${terminateTimeoutMs}) AS terminated`,
     { label: "pgTerminateBackend" },
   );
-  const terminated = rows[0]!.terminated;
-  // Positive proof of death: the two-arg form already waited, but poll to death regardless so the
-  // guarantee holds even against a driver/version that treated the timeout arg leniently.
   await waitForBackendGone(admin, pid, opts.confirmDeathTimeoutMs ?? 10_000);
-  return terminated;
+  return rows[0]!.terminated;
 }
 
-/**
- * Polls `pg_stat_activity` (from a second connection `admin`) until no backend with `pid` remains —
- * the target is PROVABLY gone — or the `timeoutMs` bound elapses (then throws a typed
- * {@link SuiteWatchdogTimeoutError}, never hangs). Used by {@link pgTerminateBackend} to close the
- * "signal delivered but the backend is still finishing its in-flight COMMIT" race before a caller
- * releases a post-kill operation (T2, change-level audit BLOCK 3).
- */
-export async function waitForBackendGone(admin: UmbraDBSql, pid: number, timeoutMs = 10_000): Promise<void> {
+/** Polls `pg_stat_activity` until no backend has `pid`, or throws {@link SuiteWatchdogTimeoutError} after `timeoutMs`. */
+export async function waitForBackendGone(admin: Sql, pid: number, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const rows = await withSuiteWatchdog(
@@ -163,262 +103,105 @@ export async function waitForBackendGone(admin: UmbraDBSql, pid: number, timeout
       { label: "waitForBackendGone-probe", timeoutMs: 10_000 },
     );
     if (rows[0]!.n === 0) return;
-    if (Date.now() >= deadline) {
-      throw new SuiteWatchdogTimeoutError(`pg backend ${pid} did not terminate`, timeoutMs);
-    }
+    if (Date.now() >= deadline) throw new SuiteWatchdogTimeoutError(`pg backend ${pid} did not terminate`, timeoutMs);
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 }
 
-// ---- Primitive 1: crash-worker spawn + SIGKILL --------------------------------------------
+// ---- The crash worker: spawn and SIGKILL ----------------------------------------------------------------------------
 
-/** The four named program points the crash worker pauses at (`design.md` §1). Each pauses BETWEEN
- *  two real storage operations — never on a wall-clock timer — so the SIGKILL that follows lands
- *  at a reproducible point. See `crash-worker.ts` for the precise before/after boundary of each. */
-export type CrashHook =
-  | "before-commit"
-  | "in-critical-section"
-  | "after-data-commit-before-cursor"
-  | "after-cursor-before-data";
+/** The one point the worker pauses at: inside an open transaction, before its `COMMIT`. */
+export type CrashHook = "before-commit";
 
-/** The readiness payload the worker prints once it has paused at its named point. */
+/** What the worker prints once it has paused. */
 export interface CrashWorkerReady {
-  /** The hook the worker paused at, or `null` when it ran an ordinary uninterrupted `save`. */
-  hook: CrashHook | null;
-  /** The worker OS process id. */
+  hook: CrashHook;
+  /** The worker's operating-system process id. */
   pid: number;
-  /** The backend pid of the connection holding the paused work (present for `before-commit`) —
-   *  the target for a `pg_terminate_backend`/Postgres-kill of the worker's own session (T2). */
-  backendPid?: number;
-  /** The committed checkpoint sequence (present for `after-data-commit-before-cursor` and the
-   *  `t5-full-flow` control). */
-  savedSequence?: number;
-  /** The advisory-lock key held (present for `in-critical-section`). */
-  lockKey?: string;
-  /** `hashtext(lockKey)` — the `objid` of the class-2 advisory lock in `pg_locks` (T3). */
-  lockKeyHash?: number;
-  /** The non-pause control mode the worker ran (present for `t5-full-flow`). */
-  mode?: string;
-  /** The watermark cursor coordinates (present for the T5 hooks and the `t5-full-flow` control). */
-  cursorKind?: string;
-  cursorKey?: string;
-  [k: string]: unknown;
+  /** The backend pid of the connection holding the open transaction. */
+  backendPid: number;
 }
 
 export interface SpawnCrashWorkerOptions {
-  /** Connection URI of the shared container (`registerSuiteLifecycle().connectionUri()`). */
+  /** The shared container's connection URI (`registerSuiteLifecycle().connectionUri()`). */
   connectionUri: string;
-  /** Schema the worker operates in — reuse {@link TEST_SCHEMA}; the worker runs NO migrations. */
-  schema: string;
-  /** The named fault hook, or omit for an ordinary uninterrupted `save`. */
-  hook?: CrashHook;
-  /** A control/driver mode independent of {@link hook}:
-   *   - `t5-full-flow` — no-pause, no-kill: runs the safe two-transaction data->cursor sequence to
-   *     completion (the T5 negative control) so a killed run's cursor/data absence is provably
-   *     caused by the crash, not a missing op.
-   *   - `co-tx-crash` — drives `saveAndAdvance` (the co-transactional SINGLE-tx save+cursor
-   *     combinator) through a test-only pausing observer that stops BETWEEN the checkpoint-data
-   *     write and the cursor write inside the ONE uncommitted tx, signals readiness, then blocks
-   *     for the parent's SIGKILL (change-level audit BLOCK 1 — G5 atomicity crash test).
-   *   - `co-tx-full-flow` — no-pause, no-kill negative control for `co-tx-crash`: runs the SAME
-   *     `saveAndAdvance` to completion so BOTH the checkpoint and the cursor land.
-   *   - `save-tx-commit-control` — no-pause, no-kill SAME-PATH negative control for the T1
-   *     `before-commit` kill (change-level re-audit BLOCK 1): opens a caller `withTransaction` and
-   *     runs `save(..., { tx })` on it, then COMMITs -- the EXACT co-transactional `{tx}` path the
-   *     killed leg uses, differing from it ONLY by the absence of the SIGKILL, so a present control
-   *     seq vs the crash leg's absent seq isolates the kill as the cause for the `{tx}` path itself. */
-  mode?: "t5-full-flow" | "co-tx-crash" | "co-tx-full-flow" | "save-tx-commit-control";
-  walletId?: string;
-  networkId?: string;
-  /** Watermark cursor (kind, key, value) for the T5 hooks; `cursorValue` is JSON. */
-  cursorKind?: string;
-  cursorKey?: string;
-  cursorValue?: unknown;
-  /** Advisory-lock key for `in-critical-section`. */
-  leaseKey?: string;
-  /** Checkpoint payload size in bytes (default 256). */
-  payloadBytes?: number;
-  /** BLOCK 1: the EXACT checkpoint payload bytes (hex) to save, overriding random generation. Set on
-   *  BOTH the killed leg and its no-kill control so they save byte-identical content (only the SIGKILL
-   *  differs), isolating the kill as the cause of the killed leg's absence. */
-  payloadHex?: string;
-  /** T5 KEYSTONE deterministic-data mode (`design.md` §2.3). When `salt` is set, the T5 hooks
-   *  (`after-data-commit-before-cursor` / `after-cursor-before-data`) write the batch's REAL,
-   *  deterministic content — a KV `put(kvKey = kvValue)` in (`kvNamespace`, `kvScope`) AND a
-   *  checkpoint `save(payload(salt, index))` — byte-identical to the fault-free reference batch,
-   *  instead of a random opaque payload with no KV. This makes the crash batch a genuine
-   *  same-sequence step whose durable content can be compared against the reference. Omit for the
-   *  legacy random-payload behaviour the crash-harness smoke suite uses. */
-  salt?: string;
-  index?: number;
-  kvNamespace?: string;
-  kvScope?: string;
-  kvKey?: string;
-  kvValue?: unknown;
-  /** Extra environment overrides (e.g. a per-session `synchronous_commit`). */
-  extraEnv?: Record<string, string>;
+  hook: CrashHook;
 }
 
-/** Sentinel prefixes the worker writes on stdout so the parent can find its lines amid tsx /
- *  driver noise. Kept in sync with `crash-worker.ts`. */
+/** The sentinels the worker writes on stdout, so the parent finds its lines among other output. */
 export const CRASH_WORKER_READY_SENTINEL = "@@CRASH_WORKER_READY@@";
 export const CRASH_WORKER_ERROR_SENTINEL = "@@CRASH_WORKER_ERROR@@";
-/** The POST-readiness RESULT sentinel a T2 worker prints after its post-kill in-flight `save`
- *  (`design.md` §2.2). Kept in sync with `crash-worker.ts`. */
-export const CRASH_WORKER_RESULT_SENTINEL = "@@CRASH_WORKER_RESULT@@";
-
-/** The post-readiness RESULT payload a T2 worker prints after it has issued its post-kill in-flight
- *  `save` (`design.md` §2.2, Task 2.1). `isConnectionError`/`errorCode` are the worker's
- *  AUTHORITATIVE typed classification of the caught error (an `Error` cannot cross the `spawn`
- *  boundary as a live instance), so the parent asserts a typed `ConnectionError` on the stable
- *  discriminant, never a message substring. */
-export interface CrashWorkerResult {
-  /** True once the worker re-issued the save against the killed backend. */
-  reissued?: boolean;
-  /** Whether that in-flight save threw — it MUST (the backend is dead); `false` fails the parent. */
-  threw?: boolean;
-  /** `err.constructor.name` — expected `"ConnectionError"`. */
-  errorName?: string;
-  /** The `StorageError` `.code` discriminant — expected `"CONNECTION_ERROR"`. */
-  errorCode?: unknown;
-  /** `err instanceof ConnectionError`, evaluated in-worker against the imported class. */
-  isConnectionError?: boolean;
-  isStorageError?: boolean;
-  message?: string;
-  [k: string]: unknown;
-}
 
 export interface CrashWorkerHandle {
   readonly child: ChildProcess;
   readonly pid: number | undefined;
-  /** Resolves with the readiness payload once the worker has paused at its named point (or run
-   *  an ordinary save). Rejects if the worker errors, exits before signalling, or `timeoutMs`
-   *  elapses. */
+  /** Resolves once the worker has paused; rejects if it errors, exits first, or `timeoutMs` passes (and kills it). */
   waitForReady(timeoutMs?: number): Promise<CrashWorkerReady>;
-  /** Resolves once the child process has exited. */
+  /** Resolves once the process has exited. */
   waitForExit(): Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
-  /** Deterministic hard kill (SIGKILL) — the "kill the app mid-op" primitive (T1/T3/T5). */
+  /** SIGKILL: the "kill the process mid-operation" primitive. */
   sigkill(): void;
-  /** Writes `${line}\n` to the worker's stdin — the DETERMINISTIC parent->worker "proceed"
-   *  handshake (T2, `design.md` §2.2): the parent sends this AFTER killing the worker's backend so
-   *  the worker's subsequent in-flight save runs strictly post-kill. No-op if the child has exited. */
-  sendLine(line: string): void;
-  /** Resolves with the T2 RESULT payload once the worker has emitted it (after its post-kill
-   *  in-flight save). Rejects if the worker exits before signalling a result or `timeoutMs` elapses. */
-  waitForResult(timeoutMs?: number): Promise<CrashWorkerResult>;
-  /** Everything the worker has written to stdout / stderr so far (for diagnostics). */
   stdout(): string;
   stderr(): string;
 }
 
 const WORKER_ENTRYPOINT = fileURLToPath(new URL("../integration/crash/crash-worker.ts", import.meta.url));
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
-
 const DEFAULT_READY_TIMEOUT_MS = 30_000;
 
 /**
- * Spawns `crash-worker.ts` as a real, separate OS process via `node --import tsx` (tsx is already
- * a devDependency; no new pin), connected to the SHARED container. Because `--import tsx` runs
- * in-process (no wrapping shell), `child.pid` IS the worker's node process, so `sigkill()` is a
- * literal cross-process `SIGKILL` of the writer mid-operation — the deterministic fault the crash
- * tests need. The worker owns its own transaction/lease orchestration and pauses at a named
- * program point (`UMBRADB_CRASH_HOOK`); it touches NO `src/` code.
+ * Spawns `crash-worker.ts` as its own process (`node --import tsx`, no shell, so `child.pid` is the worker and
+ * `sigkill()` kills it), connected to the shared container, through {@link spawnChild} so a test process that dies
+ * never leaves it running. Its environment is the parent's without any `UMBRADB_CRASH_*` variable, plus the options.
  */
 export function spawnCrashWorker(opts: SpawnCrashWorkerOptions): CrashWorkerHandle {
-  // Build the child env EXPLICITLY. Start from the parent env (node/tsx need PATH etc.), then SCRUB
-  // the entire crash-worker control family so an AMBIENT variable never leaks into the child. This
-  // matters most for UMBRADB_CRASH_HOOK: if the parent process happens to have it set, a "no-hook"
-  // worker would inherit it, PAUSE at a named point, and hang the required no-hook smoke test. Only
-  // the variables set from `opts` below take effect — no-hook ⇒ guaranteed uninterrupted save.
   const env: Record<string, string | undefined> = { ...(process.env as Record<string, string | undefined>) };
   for (const key of Object.keys(env)) {
-    if (key.startsWith("UMBRADB_CRASH_") || key === "UMBRADB_TEST_CONNECTION_URI" || key === "UMBRADB_TEST_SCHEMA") {
-      delete env[key];
-    }
+    if (key.startsWith("UMBRADB_CRASH_") || key === "UMBRADB_TEST_CONNECTION_URI") delete env[key];
   }
   env.UMBRADB_TEST_CONNECTION_URI = opts.connectionUri;
-  env.UMBRADB_TEST_SCHEMA = opts.schema;
-  if (opts.hook !== undefined) env.UMBRADB_CRASH_HOOK = opts.hook;
-  if (opts.mode !== undefined) env.UMBRADB_CRASH_MODE = opts.mode;
-  if (opts.walletId !== undefined) env.UMBRADB_CRASH_WALLET = opts.walletId;
-  if (opts.networkId !== undefined) env.UMBRADB_CRASH_NETWORK = opts.networkId;
-  if (opts.cursorKind !== undefined) env.UMBRADB_CRASH_CURSOR_KIND = opts.cursorKind;
-  if (opts.cursorKey !== undefined) env.UMBRADB_CRASH_CURSOR_KEY = opts.cursorKey;
-  if (opts.cursorValue !== undefined) env.UMBRADB_CRASH_CURSOR_VALUE = JSON.stringify(opts.cursorValue);
-  if (opts.leaseKey !== undefined) env.UMBRADB_CRASH_LEASE_KEY = opts.leaseKey;
-  if (opts.payloadBytes !== undefined) env.UMBRADB_CRASH_PAYLOAD_BYTES = String(opts.payloadBytes);
-  if (opts.payloadHex !== undefined) env.UMBRADB_CRASH_PAYLOAD_HEX = opts.payloadHex;
-  if (opts.salt !== undefined) env.UMBRADB_CRASH_SALT = opts.salt;
-  if (opts.index !== undefined) env.UMBRADB_CRASH_INDEX = String(opts.index);
-  if (opts.kvNamespace !== undefined) env.UMBRADB_CRASH_KV_NS = opts.kvNamespace;
-  if (opts.kvScope !== undefined) env.UMBRADB_CRASH_KV_SCOPE = opts.kvScope;
-  if (opts.kvKey !== undefined) env.UMBRADB_CRASH_KV_KEY = opts.kvKey;
-  if (opts.kvValue !== undefined) env.UMBRADB_CRASH_KV_VALUE = JSON.stringify(opts.kvValue);
-  if (opts.extraEnv !== undefined) Object.assign(env, opts.extraEnv);
+  env.UMBRADB_CRASH_HOOK = opts.hook;
 
   const child = spawnChild(process.execPath, ["--import", "tsx", WORKER_ENTRYPOINT], {
     cwd: REPO_ROOT,
     env,
-    // stdin is a PIPE (was "ignore") so the parent can send the T2 "proceed" line (`sendLine`).
-    // Existing workers never read stdin, so this is transparent to them; an open, unread stdin pipe
-    // does not keep the child's event loop alive.
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "pipe"],
   });
 
   let stdoutBuf = "";
   let stderrBuf = "";
+  let scanPos = 0;
   let ready: CrashWorkerReady | undefined;
   let readyErr: Error | undefined;
-  let result: CrashWorkerResult | undefined;
-  let resultErr: Error | undefined;
-  /** Index into `stdoutBuf` up to which COMPLETE (newline-terminated) lines have been scanned for a
-   *  readiness/error/result record. The remainder past it is a possibly-partial final line, held
-   *  until its own newline arrives. ONE cursor for both signals: the scanner keeps advancing PAST
-   *  readiness so the later RESULT line (T2) is still found. */
-  let scanPos = 0;
-  const readyWaiters: Array<() => void> = [];
-  const resultWaiters: Array<() => void> = [];
   let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+  const readyWaiters: Array<() => void> = [];
   const exitWaiters: Array<() => void> = [];
+  const settleReady = (): void => {
+    while (readyWaiters.length) readyWaiters.shift()!();
+  };
 
-  const settleReady = (): void => { while (readyWaiters.length) readyWaiters.shift()!(); };
-  const settleResult = (): void => { while (resultWaiters.length) resultWaiters.shift()!(); };
-
-  /** Line-buffered readiness parser. The worker emits its readiness/error record as a SINGLE
-   *  `\n`-terminated line; a Node stream can split a chunk mid-line, so we `JSON.parse` ONLY
-   *  complete newline-terminated lines (never a partial record, which would raise a permanent
-   *  readiness error while the worker stays paused). Non-sentinel lines (tsx/driver log noise) are
-   *  ignored rather than treated as errors. `stdoutBuf` keeps the full stream for diagnostics. */
+  /** Reads complete lines only: a chunk may end in the middle of the readiness line. */
   const scanStdout = (): void => {
     let nl: number;
     while ((nl = stdoutBuf.indexOf("\n", scanPos)) >= 0) {
-      const line = stdoutBuf.slice(scanPos, nl); // one COMPLETE line, no trailing "\n"
+      const line = stdoutBuf.slice(scanPos, nl);
       scanPos = nl + 1;
-      if (ready === undefined && readyErr === undefined) {
-        const r = line.indexOf(CRASH_WORKER_READY_SENTINEL);
-        if (r >= 0) {
-          try { ready = JSON.parse(line.slice(r + CRASH_WORKER_READY_SENTINEL.length)) as CrashWorkerReady; }
-          catch (err) { readyErr = new Error(`crash worker readiness line was not valid JSON: ${String(err)}`); }
-          settleReady();
-          continue;
+      if (ready !== undefined || readyErr !== undefined) continue;
+      const r = line.indexOf(CRASH_WORKER_READY_SENTINEL);
+      if (r >= 0) {
+        try {
+          ready = JSON.parse(line.slice(r + CRASH_WORKER_READY_SENTINEL.length)) as CrashWorkerReady;
+        } catch (err) {
+          readyErr = new Error(`crash worker readiness line was not valid JSON: ${String(err)}`);
         }
-        const e = line.indexOf(CRASH_WORKER_ERROR_SENTINEL);
-        if (e >= 0) {
-          readyErr = new Error(`crash worker reported an error before readiness: ${line.slice(e + CRASH_WORKER_ERROR_SENTINEL.length).trim()}`);
-          settleReady();
-          continue;
-        }
+        settleReady();
+        continue;
       }
-      if (result === undefined && resultErr === undefined) {
-        const x = line.indexOf(CRASH_WORKER_RESULT_SENTINEL);
-        if (x >= 0) {
-          try { result = JSON.parse(line.slice(x + CRASH_WORKER_RESULT_SENTINEL.length)) as CrashWorkerResult; }
-          catch (err) { resultErr = new Error(`crash worker result line was not valid JSON: ${String(err)}`); }
-          settleResult();
-          continue;
-        }
+      const e = line.indexOf(CRASH_WORKER_ERROR_SENTINEL);
+      if (e >= 0) {
+        readyErr = new Error(`crash worker reported an error: ${line.slice(e + CRASH_WORKER_ERROR_SENTINEL.length).trim()}`);
+        settleReady();
       }
-      // else: a non-sentinel line — ignore and continue scanning subsequent complete lines.
     }
   };
 
@@ -428,22 +211,17 @@ export function spawnCrashWorker(opts: SpawnCrashWorkerOptions): CrashWorkerHand
     scanStdout();
   });
   child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => { stderrBuf += chunk; });
-
+  child.stderr?.on("data", (chunk: string) => {
+    stderrBuf += chunk;
+  });
   child.on("exit", (code, signal) => {
     exited = { code, signal };
-    scanStdout(); // flush any complete lines buffered right up to exit (the RESULT line, T2)
+    scanStdout();
     if (ready === undefined && readyErr === undefined) {
       readyErr = new Error(
         `crash worker exited (code=${String(code)}, signal=${String(signal)}) before signalling readiness.\nstderr:\n${stderrBuf}`,
       );
       settleReady();
-    }
-    if (result === undefined && resultErr === undefined) {
-      resultErr = new Error(
-        `crash worker exited (code=${String(code)}, signal=${String(signal)}) before signalling a result.\nstderr:\n${stderrBuf}`,
-      );
-      settleResult();
     }
     while (exitWaiters.length) exitWaiters.shift()!();
   });
@@ -456,7 +234,9 @@ export function spawnCrashWorker(opts: SpawnCrashWorkerOptions): CrashWorkerHand
 
   return {
     child,
-    get pid() { return child.pid; },
+    get pid() {
+      return child.pid;
+    },
     stdout: () => stdoutBuf,
     stderr: () => stderrBuf,
     waitForReady(timeoutMs = DEFAULT_READY_TIMEOUT_MS): Promise<CrashWorkerReady> {
@@ -465,74 +245,51 @@ export function spawnCrashWorker(opts: SpawnCrashWorkerOptions): CrashWorkerHand
           if (ready !== undefined) resolve(ready);
           else reject(readyErr ?? new Error("crash worker readiness settled without a result"));
         };
-        if (ready !== undefined || readyErr !== undefined) { done(); return; }
-        let timer: ReturnType<typeof setTimeout>;
-        const waiter = (): void => { clearTimeout(timer); done(); };
-        timer = setTimeout(() => {
-          // On a readiness timeout, REMOVE our waiter (so a late readiness line cannot re-settle
-          // this promise) AND terminate the child (so a wedged worker is not left running past its
-          // test — belt-and-suspenders vs. the worker's own orphan guard).
-          const idx = readyWaiters.indexOf(waiter);
-          if (idx >= 0) readyWaiters.splice(idx, 1);
-          try { child.kill("SIGKILL"); } catch { /* already gone */ }
+        if (ready !== undefined || readyErr !== undefined) {
+          done();
+          return;
+        }
+        const waiter = (): void => {
+          clearTimeout(timer);
+          done();
+        };
+        const timer = setTimeout(() => {
+          const index = readyWaiters.indexOf(waiter);
+          if (index >= 0) readyWaiters.splice(index, 1);
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            /* already gone */
+          }
           reject(new SuiteWatchdogTimeoutError("crash-worker readiness", timeoutMs));
         }, timeoutMs);
         readyWaiters.push(waiter);
       });
     },
-    waitForResult(timeoutMs = DEFAULT_READY_TIMEOUT_MS): Promise<CrashWorkerResult> {
-      return new Promise<CrashWorkerResult>((resolve, reject) => {
-        const done = (): void => {
-          if (result !== undefined) resolve(result);
-          else reject(resultErr ?? new Error("crash worker result settled without a value"));
-        };
-        if (result !== undefined || resultErr !== undefined) { done(); return; }
-        let timer: ReturnType<typeof setTimeout>;
-        const waiter = (): void => { clearTimeout(timer); done(); };
-        timer = setTimeout(() => {
-          const idx = resultWaiters.indexOf(waiter);
-          if (idx >= 0) resultWaiters.splice(idx, 1);
-          try { child.kill("SIGKILL"); } catch { /* already gone */ }
-          reject(new SuiteWatchdogTimeoutError("crash-worker result", timeoutMs));
-        }, timeoutMs);
-        resultWaiters.push(waiter);
-      });
-    },
     waitForExit(): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
       return new Promise((resolve) => {
-        if (exited !== undefined) { resolve(exited); return; }
+        if (exited !== undefined) {
+          resolve(exited);
+          return;
+        }
         exitWaiters.push(() => resolve(exited!));
       });
     },
-    sigkill(): void { child.kill("SIGKILL"); },
-    sendLine(line: string): void {
-      try { child.stdin?.write(`${line}\n`); } catch { /* child already gone */ }
+    sigkill(): void {
+      child.kill("SIGKILL");
     },
   };
 }
 
-/** Generic SIGKILL of any child process (the child-process kill primitive, exposed for callers
- *  that spawn their own helper processes). */
-export function sigkillChild(child: ChildProcess): void {
-  child.kill("SIGKILL");
-}
-
-// ---- Task 0.3: suite-level watchdog backstop (`design.md` §1) ------------------------------
+// ---- The suite watchdog ---------------------------------------------------------------------------------------------
 
 /**
- * Independent, JS-level termination bound wrapping every crash/soak operation. G7's server-side
- * `statement_timeout`/`lock_timeout`/`idle_in_transaction_session_timeout` are the primary bound;
- * this backstop is a SPEC-level guarantee that the suites terminate within a bounded wall-clock
- * even if G7's timeouts are absent or misconfigured (a wedged required gate would itself ship the
- * durability guarantee unverified). It is deliberately larger than the slowest legitimate
- * primitive (a `container.restart()` under host load) and far smaller than "hangs forever".
- * Per-call `timeoutMs` overrides it (e.g. a fault-injection unit uses a small bound to prove the
- * mechanism fires fast).
+ * The bound on every operation of the crash harness, independent of the server's own timeouts, so a half-dead
+ * PostgreSQL fails an operation with a typed error instead of hanging the suite. A call's `timeoutMs` overrides it.
  */
 export const SUITE_WATCHDOG_MS = 60_000;
 
-/** Typed timeout raised by {@link withSuiteWatchdog} — a wedged op fails with THIS, never a hang
- *  and never a raw driver error. */
+/** What {@link withSuiteWatchdog} rejects with when its bound passes. */
 export class SuiteWatchdogTimeoutError extends Error {
   readonly label: string;
   readonly timeoutMs: number;
@@ -547,10 +304,9 @@ export class SuiteWatchdogTimeoutError extends Error {
 type Cancellable = { cancel?: () => unknown };
 
 /**
- * Races `work` against a `timeoutMs` timer (default {@link SUITE_WATCHDOG_MS}). If the timer wins,
- * best-effort cancels the underlying work (a `postgres.js` query exposes `.cancel()`), invokes
- * `onTimeout`, and rejects with a typed {@link SuiteWatchdogTimeoutError}. If `work` settles first,
- * the timer is cleared and its result/rejection is passed through unchanged.
+ * Races `work` against `timeoutMs` (default {@link SUITE_WATCHDOG_MS}). If the bound passes first it cancels the work
+ * when it can (a `postgres` query has `.cancel()`), calls `onTimeout`, and rejects with
+ * {@link SuiteWatchdogTimeoutError}; otherwise it passes the work's result or rejection through.
  */
 export async function withSuiteWatchdog<T>(
   work: (PromiseLike<T> & Cancellable) | (() => PromiseLike<T> & Cancellable) | (() => PromiseLike<T>),
@@ -562,10 +318,17 @@ export async function withSuiteWatchdog<T>(
   let timer: ReturnType<typeof setTimeout> | undefined;
   const watchdog = new Promise<never>((_resolve, reject) => {
     timer = setTimeout(() => {
-      try { promise.cancel?.(); } catch { /* best effort */ }
-      // Absorb the late rejection the cancel triggers so it never surfaces as unhandled.
-      void Promise.resolve(promise).then(undefined, () => {});
-      try { opts.onTimeout?.(); } catch { /* best effort */ }
+      try {
+        promise.cancel?.();
+      } catch {
+        /* best effort */
+      }
+      void Promise.resolve(promise).then(undefined, () => {}); // the cancelled work's late rejection
+      try {
+        opts.onTimeout?.();
+      } catch {
+        /* best effort */
+      }
       reject(new SuiteWatchdogTimeoutError(label, timeoutMs));
     }, timeoutMs);
   });

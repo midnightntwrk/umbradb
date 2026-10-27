@@ -1,5 +1,13 @@
 # Roadmap — `v1.1.0-formal-completion`: storage-algebra Lean mechanization vs 1.0.0 (v2, audit-reframed)
 
+> **Retired in part (2026-10-27, `openspec/changes/core-arch` task 17.2, `design.md` §13).** The laws this roadmap
+> plans or records for TemporalKV, CheckpointStore and the transaction/lease layer — **T1–T4, C1, C2a, C2b and L1**,
+> with the property tests **P1–P8, P10 and P11** — are retired with those 0.9.5 parts; their Lean modules
+> (`UmbraDBFormal/TemporalKV/**`, `UmbraDBFormal/Checkpoint/**`, the `APISmoke` lemmas
+> `checkpoint_union_comm/assoc/idem`) are removed, and the work below on them will not be done. Kept: **W1** (the cursor table's law, SH-1; P9 retargeted
+> as A59, `UmbraDBFormal/Watermarks/**`) and **T5's half-open rule restated for heights** (the height-versioned table,
+> SH-2; A60, `APISmoke.adjacent_Ico_disjoint`) — `Formal/STORAGE_ALGEBRA.md`'s header. This page is kept as history.
+
 *v1 authored by an Opus 5 write-council (3 facets); v2 reframed after a 3-lane audit council (2 Opus 5 + GPT-5.6 Sol capstone). The audit corrected v1's central error — v1 wrongly asserted the guideline **requires** widening the frozen Lean cut-line; it does not. Governed by `docs/v1-implementation-guideline.md`; this is **voluntary hardening under §0.2**, not a mandate.*
 
 > **Front-page honesty statement.** Under the guideline's default path (G20/E3/§3.4), the 1.0.0 checklist item *"Formal spec's tractable properties proved in Lean, not just stated"* is **closable today** by keeping the frozen record `{T3,T5,W1,C1}` proved and recording **C2a, L1, and the rest as an explicit written deferral** — no new proofs required, no overclaim. Everything below is the **optional** extra: mechanizing the two absent MECHANISM-SPECIFIED laws (**C2a GC-safety, L1 lease-mutex**) so they can move from *deferred* to *proved* — which, if wanted tag-blocking, requires **explicit recorded amendments** (see §1). `0 sorry` certifies depth (what is stated is proved), never breadth: the `Trust` gate cannot detect a missing or too-weak law.

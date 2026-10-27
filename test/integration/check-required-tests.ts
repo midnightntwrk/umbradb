@@ -96,14 +96,16 @@ export function statusesFromReport(report: JsonReport): Map<string, string[]> {
 /** The pinned count of `required` tests (change-level audit BLOCK 9(b)). Structurally PINS the
  *  manifest so silently deleting (or adding) a required entry fails the gate: {@link loadManifest}
  *  rejects a manifest whose `required` length drifts from this constant. Bump it deliberately when
- *  a required test is genuinely added/removed. */
-export const EXPECTED_REQUIRED_COUNT = 25;
+ *  a required test is genuinely added/removed. Core-arch task 17.2 set it to 4 (ids 1-4, `crash-harness.smoke.*`;
+ *  `openspec/changes/core-arch/design.md` §13 retired ids 5-25); task 18.4 sets it to 27 (acceptance.md §17). */
+export const EXPECTED_REQUIRED_COUNT = 4;
 
 /** The pinned count of `deferred` (WHERE-gated optional-feature) tests (BLOCK 6). Structurally PINS
  *  the deferred exemption set so deleting the sole deferred entry (a green "0 deferred" gate) fails the
  *  gate: {@link loadManifest} rejects a manifest whose `deferred` length drifts from this constant.
- *  Bump it deliberately when a deferred scenario is genuinely added/removed. */
-export const EXPECTED_DEFERRED_COUNT = 1;
+ *  Bump it deliberately when a deferred scenario is genuinely added/removed. Core-arch task 17.2 set it to 0: design.md
+ *  §13 retired the one deferred id with the 0.9.5 save it was deferred for. */
+export const EXPECTED_DEFERRED_COUNT = 0;
 
 /** Normalises a file path (backslashes -> forward slashes) for cross-platform comparison. */
 function normPath(p: string): string { return p.replace(/\\/g, "/"); }
@@ -236,7 +238,15 @@ export function reconcile(report: JsonReport, manifest: RequiredTestsManifest): 
  * entry has a string `id` and a bound `file`; and `required.length` equals the pinned
  * {@link EXPECTED_REQUIRED_COUNT}. `deferred` may be empty/absent.
  */
-export function loadManifest(path: string): RequiredTestsManifest {
+export function loadManifest(
+  path: string,
+  // The pins: the gate always uses the constants. The mechanism's own tests pass others, so the deferred checks stay
+  // tested while the real pin is 0 (core-arch task 17.2).
+  pins: { readonly required: number; readonly deferred: number } = {
+    required: EXPECTED_REQUIRED_COUNT,
+    deferred: EXPECTED_DEFERRED_COUNT,
+  },
+): RequiredTestsManifest {
   let raw: unknown;
   try {
     raw = JSON.parse(readFileSync(path, "utf8"));
@@ -261,9 +271,9 @@ export function loadManifest(path: string): RequiredTestsManifest {
       );
     }
   }
-  if (required.length !== EXPECTED_REQUIRED_COUNT) {
+  if (required.length !== pins.required) {
     throw new Error(
-      `check-required-tests: manifest "required" length ${required.length} != pinned ${EXPECTED_REQUIRED_COUNT} — a required entry was added or deleted without updating the pinned count (BLOCK 9(b) structural pin). If this change is intentional, update EXPECTED_REQUIRED_COUNT.`,
+      `check-required-tests: manifest "required" length ${required.length} != pinned ${pins.required} — a required entry was added or deleted without updating the pinned count (BLOCK 9(b) structural pin). If this change is intentional, update EXPECTED_REQUIRED_COUNT.`,
     );
   }
   const deferredRaw = (raw as { deferred?: unknown }).deferred;
@@ -272,9 +282,9 @@ export function loadManifest(path: string): RequiredTestsManifest {
   // so deleting the sole deferred entry (a green "0 deferred" gate) or moving its skipped token to an
   // unrelated file cannot pass. `deferred` must have exactly EXPECTED_DEFERRED_COUNT entries, each with
   // a string `id` and a string `file`.
-  if (deferred.length !== EXPECTED_DEFERRED_COUNT) {
+  if (deferred.length !== pins.deferred) {
     throw new Error(
-      `check-required-tests: manifest "deferred" length ${deferred.length} != pinned ${EXPECTED_DEFERRED_COUNT} — a deferred entry was added or deleted without updating the pinned count (BLOCK 6 structural pin). If this change is intentional, update EXPECTED_DEFERRED_COUNT.`,
+      `check-required-tests: manifest "deferred" length ${deferred.length} != pinned ${pins.deferred} — a deferred entry was added or deleted without updating the pinned count (BLOCK 6 structural pin). If this change is intentional, update EXPECTED_DEFERRED_COUNT.`,
     );
   }
   for (const entry of deferred) {

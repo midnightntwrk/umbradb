@@ -6,7 +6,7 @@
  * (`durability-fsync-off`, `durability-full-page-writes-off`, `durability-pooler`) instead of 0.9.5's two error classes;
  * the override is CF-4's `fullPageWritesOffAllowed`; and the probe runs on the writer's session when the writer starts —
  * right after the writer lock (`./writer-lock.ts`, `./postgres.ts`), before the first write — instead of inside 0.9.5's
- * `runMigrations`. 0.9.5's file stays for 0.9.5's `runMigrations` until task 17.2 removes both.
+ * `runMigrations`. Task 17.2 removed 0.9.5's file with its `runMigrations`.
  *
  * WHERE the backend is PGlite, which runs without fsync, the process starts only under the development opt-in
  * ({@link pgliteNeedsDevelopmentOptIn}, checked by `openPglite` before anything is opened or created).

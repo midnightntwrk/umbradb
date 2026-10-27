@@ -1,5 +1,19 @@
 # Algebraic Specification of the midnight-pg-store Storage Layer
 
+> **Retired in part (2026-10-27, `openspec/changes/core-arch` task 17.2, `design.md` §13).** UmbraDB 0.9.5's
+> TemporalKV, CheckpointStore, transaction/lease layer, `saveAndAdvance` and WalletStateEnvelope are retired, and with
+> them **Laws T1–T4, C1, C2a, C2b and L1** and the **property tests P1–P8, P10 and P11** (P11 is
+> `save-and-advance.property.test.ts`'s, not listed in §5). Their sections below are kept as the record of 0.9.5, not
+> as laws of the current code; their Lean modules (`UmbraDBFormal/TemporalKV/**`, `UmbraDBFormal/Checkpoint/**`, the
+> `APISmoke` lemmas `checkpoint_union_comm/assoc/idem`) and their tests are removed, and the Quint change that was to
+> model-check C2a, C2b, L1 and cross-writer T1 (`openspec/changes/v1.1.0-quint-model-checking`) is archived. Kept:
+> - **W1**, re-bound to the cursor table (`src/helpers/cursor-table.ts`, SH-1; §3 below), with **P9** retargeted
+>   (`test/helpers/cursor-table.property.test.ts`, A59) and its Lean model and laws (`UmbraDBFormal/Watermarks/**`,
+>   `APISmoke.watermark_overwrite`);
+> - **T5's half-open rule**, restated for block heights (the height-versioned table, `src/helpers/height-versioned.ts`,
+>   SH-2; §1's T5 below), checked by A60 (`test/helpers/height-versioned.property.test.ts`), with
+>   `APISmoke.adjacent_Ico_disjoint`.
+
 Grounded in a structural analysis of Midnight's real ledger-v8 primitives
 (`ZswapLocalState`, `MerkleTreeCollapsedUpdate`) and an audit of this
 project's own interfaces against them (2026-07-20). One structure, four
@@ -230,6 +244,17 @@ parts.** For a fixed `k`, the set of `[valid_from, valid_to)` intervals in
    the trigger could violate it and no constraint would catch that). Do not
    conflate this with (1)'s database-level guarantee.
 
+**T5 restated for heights (core-arch, SH-2; task 17.2).** The height-versioned table keeps T5's half-open rule with
+block heights where TemporalKV had wall-clock times: a version of key `k` covers `[from, to)` heights, the current
+version has `to` null, writing `k` at height `h` closes the current version at `h` and opens one from `h`, deleting
+it at `h` closes it without a new one, and a write of the value `k` already has adds no version. For one key the
+versions (1) never overlap and (2) meet at their boundary — `to` of one is `from` of the next — unless the key was
+deleted between them. Both hold by the helper's trigger, the sole writer of the history table (a module may not
+`DELETE` or re-key rows, `0A000`), and one change per key per block (SH-3); A60's property test compares every
+height with a reference model and checks (1) and (2). `APISmoke.adjacent_Ico_disjoint` is the half-open interval
+fact behind (1). The `tstzrange` column, the gist `EXCLUDE` constraint and the millisecond truncation of 0.9.5 are
+gone with TemporalKV.
+
 ---
 
 ## 2. CheckpointStore — idempotent join-semilattice with a reachability closure
@@ -295,6 +320,15 @@ deliberately *not* a law here, the cursor-vs-data **ordering** safety that
 this last-write-wins `set` does not itself provide is specified as a
 composition contract — see `docs/checkpoint-store-contract.md`, which cites
 this law.
+
+**W1 re-bound to the cursor table (core-arch, SH-1; task 17.2).** W1 is now the law of the cursor table
+(`src/helpers/cursor-table.ts`): one row per key, `key text` → `value jsonb`, written only through the module's
+block write handle — `write(w, key, v)` in `on-db-write`, `read(handle, key)` through any handle. Per key,
+`write(write(x, v), v) = write(x, v)` and `read` returns the last write; 0.9.5's `kind` is gone (one key; a module
+wanting kinds uses several tables or composite keys), so the law holds per key exactly as above held per
+`(kind, key)`. The value is canonical JSON (the database API's column rules), which discharges the
+JSON-losslessness rider above. P9 is retargeted as A59 (`test/helpers/cursor-table.property.test.ts`, on PostgreSQL
+and PGlite through the real block write handles); the Lean model and laws (`UmbraDBFormal/Watermarks/**`) are kept.
 
 ---
 
@@ -386,7 +420,8 @@ surface).
   — this is the practical, public-API version of "no reachable chunk is
   ever reclaimed."
 - **P9 (W1):** `get` after N random `set`s to one key returns the last
-  value; `set·set` of equal value is indistinguishable from one.
+  value; `set·set` of equal value is indistinguishable from one. *(Kept, re-bound to the cursor table by core-arch
+  task 17.2: A59, `test/helpers/cursor-table.property.test.ts`. P1–P8 and P10 are retired with their parts.)*
 - **P10 (L1):** under concurrent `withLease` calls on one key from
   multiple connections (ideally multiple processes, not just multiple
   in-process callers, since the guarantee is connection-scoped), an

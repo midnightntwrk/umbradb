@@ -21,6 +21,9 @@ import {
  * imported ones included), the conformance run's from `vitest list` with the repository's configuration (what
  * `npm run test:conformance` runs), and the coverage and mutation configurations as they are written.
  *
+ * Legacy's own TypeScript program and Vitest configuration are kept but no longer run (task 17.2, owner decision
+ * Q112 B); the controls below still read them, as lists of what a build or a run of the folder would include.
+ *
  * The tarball check here is about `legacy/`; whether a TransactionHistory file is in a tarball built from the tree is
  * the build program's check here (a clean build emits nothing of a source it does not read) and the pack smoke test's
  * on the real tarball (`test/smoke/pack-install.mjs`, after a clean build): this run builds nothing, and a `dist/`
@@ -112,7 +115,7 @@ describe("A3: TransactionHistory is kept outside the build, the package and the 
     const found = filesBelow(LEGACY_ROOT);
     expect(inventoryProblems(found)).toEqual([]); // and nothing else, so the inventory is exact
     expect(found).toHaveLength(MOVED.length + ADDED.length);
-    // The inventory is the source and its tests (and the benchmark that imports the source), not an empty list.
+    // The inventory is the source and its tests (task 17.2 retired the benchmark workload), not an empty list.
     expect(MOVED_SOURCE.length).toBeGreaterThan(0);
     expect(MOVED_TESTS.filter((file) => file.endsWith(".test.ts")).length).toBeGreaterThan(0);
   });

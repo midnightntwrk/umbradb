@@ -1,20 +1,22 @@
 import { execFileSync } from "node:child_process";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { createClient, type UmbraDBSql } from "../src/postgres/client.js";
-import { runMigrations } from "../src/postgres/migrate.js";
+import postgres from "postgres";
 import { POSTGRES_IMAGE } from "../test/postgres-image.js";
 
-/** The bench schema — isolated from the test suite's `umbradb_test` so a bench run never collides
- *  with a test container reusing the same daemon. */
-export const BENCH_SCHEMA = "umbradb_bench";
+/**
+ * The benchmarks' PostgreSQL: a pinned container with fixed server settings. Core-arch task 17.2 retired the 0.9.5
+ * workloads that ran here (TemporalKV, Watermarks, CheckpointStore and its GC curve, the lease, TransactionHistory), with
+ * their baseline, harness and smoke guard (`openspec/changes/core-arch/design.md` §13); task 17.3 retargets the bench
+ * smoke to the core (`runner.commitEmptyBlock` per backend) with a fresh baseline. What is left is the container and
+ * `./stats.ts`, which those runs reuse.
+ */
 
 /**
  * Pinned Postgres image (`design.md` §4), pinned by DIGEST: the repository's one PostgreSQL image,
  * `test/postgres-image.ts` (PostgreSQL 18; owner decision Q82, `openspec/changes/core-arch` A148).
  * The Testcontainers container STARTS from this digest, so the pin is enforced at run time rather
- * than merely recorded after the fact. The resolved local image id is still captured into the
- * baseline's `environment.postgresImageId` as corroboration. The committed baseline was measured on
- * the 17-alpine digest it records, before Q82; see `Performance/CEILINGS.md` for the pinning note.
+ * than merely recorded after the fact. The resolved local image id is captured too (`BenchEnv.imageId`), for a
+ * baseline to record.
  */
 export { POSTGRES_IMAGE };
 
@@ -26,7 +28,7 @@ export const PG_SETTINGS = {
 } as const;
 
 export interface BenchEnv {
-  sql: UmbraDBSql;
+  sql: postgres.Sql;
   connectionUri: string;
   container: StartedPostgreSqlContainer;
   serverVersion: string;
@@ -35,11 +37,8 @@ export interface BenchEnv {
 }
 
 /**
- * Start a Testcontainers PostgreSQL 18 with the pinned image + settings, connect via UmbraDB's own
- * {@link createClient} (so `types.bigint`/`search_path` are configured exactly as production), and
- * run every migration (000..006, including IS-1 `005` fillfactor + IS-2 `006` size_bytes). The
- * bench drives UmbraDB's OWN adapters against this real Postgres — never a consumer/indexer app
- * (indexer-agnostic boundary, `design.md` §7; roadmap G11).
+ * Start a Testcontainers PostgreSQL 18 with the pinned image and settings, and connect to it. Nothing is migrated: a
+ * benchmark opens its database through the database API (`src/db/`) as the core does.
  */
 export async function startBenchEnv(maxConnections = 24): Promise<BenchEnv> {
   const container = await new PostgreSqlContainer(POSTGRES_IMAGE)
@@ -55,8 +54,7 @@ export async function startBenchEnv(maxConnections = 24): Promise<BenchEnv> {
     .start();
 
   const connectionUri = container.getConnectionUri();
-  const sql = createClient({ connectionString: connectionUri, schema: BENCH_SCHEMA, maxConnections });
-  await runMigrations(sql, { schema: BENCH_SCHEMA });
+  const sql = postgres(connectionUri, { max: maxConnections, onnotice: () => {} });
 
   const versionRows = await sql<{ version: string }[]>`SELECT version()`;
   const serverVersion = versionRows[0]?.version ?? "unknown";
