@@ -2879,6 +2879,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       first hello-ack's hash without comparing it with the public history it read) raised, not blocking, shipped A;
       issue `docs/issues/00038-registry-conditional-tests.md` (the A87 registry cannot name an `it.runIf` test)
       recorded (OPEN). Waits: Q159 (owner).
+- [ ] 14.1c The owner's answer Q159: a private process keeps the public configuration hash it accepted in its private
+      database; at every start it compares it with the core's first `hello-ack`'s and with the hash of the public
+      history it read, and on a difference stops with `public-config-changed`, naming the new hash and
+      `--update-hash=<hash>`; `umbradb run --update-hash=<hash>` (and `startProcess`'s `updateHash`) accepts it after
+      the full checks; a first start records the hash it finds (PP-14 as amended); `design.md` §8, the module guide and
+      the operator guide; the tests.
+      **Acceptance:** A165; A162 unchanged.
 - [x] 14.2 The process transport and its messages; opt-in mutual TLS.
       **Acceptance:** A115, A121.
       **Done (2026-10-26):** `src/private/` (new; design §1's row): `messages.ts` — design §8's eight messages as zod
@@ -3332,6 +3339,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Acceptance:** A1, A2, A6; `npm run test:smoke` passes.
 - [ ] 17.4 Version `0.10.0` and the breaking-change notice in `CHANGELOG.md`.
       **Acceptance:** A4.
+- [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
+      before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
+      2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage
+      floors §13 sets that are still pending — the sweep's 95/90 (`src/backbone/core-ledger-state/sweep.ts`, owner
+      decision Q158 A: tests for its eight unreached branches, or the unreachable ones removed, then the floor; A5's
+      `PENDING_FLOORS` emptied); `npm run test:mutation:ci` at break 65.
+      **Acceptance:** A5 (no pending floor); every deferred mutation pass run, its survivors explained.
 
 ## 18. Whole-system faults, differentials and measurements
 

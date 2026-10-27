@@ -167,13 +167,18 @@ require a public `block` or `process` item.
 
 ### Requirement: PP-14 A changed public configuration halts a private process
 
-WHEN a private process starts, THE system SHALL run its full checks of the public side (PP-2, PP-13) and record the
-core's configuration hash (RN-16) from its first `hello-ack`. THE private process SHALL compare the `configHash` of
+WHEN a private process starts, THE system SHALL run its full checks of the public side (PP-2, PP-13) and compare the
+core's configuration hash (RN-16) — its first `hello-ack`'s, and the hash of the public configuration history it read —
+with the hash it accepted when it last ran, kept in its private database; IF they differ THEN startup SHALL stop with
+`public-config-changed`, naming the new hash and how to accept it, and the private process SHALL accept a new hash only
+when its operator starts it with that hash (`umbradb run --update-hash=<hash>`; `startProcess`'s `updateHash`), after
+which it runs its full checks and records it; a first start records the hash it finds (owner decision Q159). THE
+private process SHALL compare the `configHash` of
 every `hello-ack`, `committed` and `read-result` it receives with the recorded hash, and IF they differ THEN it SHALL
 halt with `public-config-changed` before it processes another height. WHERE a private process has no transport
 connection to the core, it SHALL instead read the public configuration history again at each reconnection to its
 public database, and halt alike IF its hash differs from the one it read at startup. A restart SHALL run the full
-checks again (owner decision Q147).
+checks again (owner decision Q147), and stops as above until the operator accepts the new hash.
 
 #### Scenario: The core restarts with another configuration
 - **WHEN** a private process runs against a core that restarts with a data field of its configuration changed

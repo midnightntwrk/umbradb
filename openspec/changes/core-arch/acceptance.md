@@ -539,6 +539,12 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   `X-Umbra-Config-Hash`, which holds no secret (with a password in `database`, the header neither holds it nor changes
   with it); a private process without a transport, reading the public configuration history again at a reconnection to
   its public database, halts alike. (PP-14, RN-16, PP-4, owner decision Q147)
+- **A165** `[CI]` On both backends, with and without a transport: a private process's first start records the public
+  configuration hash it finds; after the core restarts with a changed configuration, the private process's start stops
+  with `public-config-changed`, its message naming the new hash and `--update-hash`; started with `--update-hash` set to
+  that hash it runs its full checks, records it and continues; set to another value it stops; a core changing its
+  configuration between the private process's read of the public history and its first `hello-ack` stops it too.
+  (PP-14, owner decision Q159)
 
 ## 15. Backups and browser
 
