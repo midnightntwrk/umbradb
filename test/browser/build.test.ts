@@ -206,6 +206,7 @@ describe("the browser build (task 16.1)", () => {
   it("rewrites each vendored ledger package's Node.js entry to read its WebAssembly beside the worker, checked against SHA256SUMS", () => {
     for (const [version, lib] of [
       ["v8", "midnight_ledger_wasm"],
+      ["v9-rc3", "midnight_ledger_wasm_v9"],
       ["v9", "midnight_ledger_wasm_v9"],
     ] as const) {
       const pkg = join(REPOSITORY, "vendor/ledger", version);

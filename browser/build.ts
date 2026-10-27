@@ -112,7 +112,7 @@ const BUILTINS: Readonly<Record<string, string>> = Object.freeze({
 const PGLITE_ASSETS = ["pglite.wasm", "pglite.data", "initdb.wasm"];
 
 /** The vendored ledger versions whose WebAssembly the ledger worker fetches. */
-const LEDGERS = ["v8", "v9"];
+const LEDGERS = ["v8", "v9-rc3", "v9"];
 
 const NODE_BUILTIN = /^(node:|(assert|async_hooks|buffer|child_process|crypto|events|fs|fs\/promises|http|https|module|net|os|path|perf_hooks|stream|stream\/promises|tls|url|util|worker_threads|zlib)$)/;
 
@@ -205,7 +205,7 @@ function browserPlugin(options: {
     setup(build) {
       build.onResolve({ filter: /^umbradb:configuration$/ }, () => ({ path: options.configuration }));
       build.onResolve({ filter: /^#self$/ }, (args) => {
-        const pkg = /^(.*\/vendor\/ledger\/v\d+\/pkg)(\/|$)/.exec(args.importer)?.[1];
+        const pkg = /^(.*\/vendor\/ledger\/v\d+(?:-[a-z0-9]+)?\/pkg)(\/|$)/.exec(args.importer)?.[1];
         if (pkg === undefined) return { errors: [{ text: `#self imported outside a vendored ledger package: ${args.importer}` }] };
         const entry = readdirSync(pkg).find((file) => file.endsWith("_fs.js"));
         return { path: join(pkg, entry as string) };
@@ -236,8 +236,8 @@ function browserPlugin(options: {
         contents: unavailableModule(readFileSync(args.path, "utf8"), repositoryPath(args.path)),
         loader: "js",
       }));
-      build.onLoad({ filter: /\/vendor\/ledger\/v\d+\/pkg\/[^/]+_fs\.js$/ }, (args) => {
-        const version = /\/vendor\/ledger\/(v\d+)\//.exec(args.path)?.[1] as string;
+      build.onLoad({ filter: /\/vendor\/ledger\/v\d+(?:-[a-z0-9]+)?\/pkg\/[^/]+_fs\.js$/ }, (args) => {
+        const version = /\/vendor\/ledger\/(v\d+(?:-[a-z0-9]+)?)\//.exec(args.path)?.[1] as string;
         const sums = readFileSync(join(REPOSITORY, "vendor/ledger", version, "SHA256SUMS"), "utf8");
         return { contents: browserLedgerEntry(readFileSync(args.path, "utf8"), version, sums), loader: "js", resolveDir: dirname(args.path) };
       });
