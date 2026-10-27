@@ -1022,6 +1022,36 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
 
   `Value` is `null`, a boolean, a string (text; `bigint` and `numeric` as decimal strings; `bytea` as `X`), or JSON (for
   `jsonb`); the column types of the statement say how to read each string back.
+
+  As built (task 14.2, `src/private/`): `messages.ts` holds the eight schemas (zod strict objects: a field a type does
+  not have fails it; hashes 32 bytes; ids 1–128 characters; a `read-result` or `api-result` with both or neither of
+  its branches fails; a row with another number of values than columns fails), `parseMessage` (tells `not-json`,
+  `unknown-version`, `unknown-type` and `invalid-message` apart) and the wire's JSON (written with `bigint`s exact,
+  read with the component's lossless reader). Values per column type (`format_type`'s name, `bigint[]` for an array):
+  `bigint` and `numeric` decimal text, `bytea` `X`, `json`/`jsonb` the JSON value (an integer beyond ±(2^53 − 1)
+  inside it exact), `smallint`/`integer`/`oid` and finite floats numbers, a float's `NaN` or infinity its text, dates
+  and times their RFC 3339 or ISO text, the rest text, arrays as JSON arrays; read back to the value the database API
+  gives. The database API keeps a result's columns on the rows it returns (`resultColumns`, a non-enumerable property
+  `mapRows` sets), which is where the core finds each column's type; a type the mapping does not name is read with
+  `format_type` in the same read. Parameters carry no types: the core reads a string of `0x` and lowercase hex pairs
+  as bytes, every other string as text (Q141). `core-transport.ts`: the public process starts it once its database
+  is open and its chain known, before the bootstrap's wait, when `listen.transport` is set (`transport listening on
+  <host>:<port>`, `(mutual TLS)` with `tls`; a taken address refuses startup, `listen-failed`), and closes it at its
+  stop. A connection speaks after its `hello`; a `hello` of an id another connection (or this one) holds is answered
+  `refused: duplicate-instance` and closed; `committed` goes to every connection past its `hello` after each commit;
+  each `read` runs in one `Database.read` bounded by `apiReadTimeoutMs`, its error a code only (`database-error` for
+  anything not an `UmbraError`), a result over 64 MiB answered `error: result-too-large`; every `api` is answered
+  `error: not-found` (no call is defined over the transport: Q140); a `report` is kept for task 14.3. A connection
+  closes (1008, the reason a fault's name) on a text that is no message, a binary frame, a message only the core sends,
+  a message before `hello`, more than 64 reads at once, more than 128 MiB waiting in its socket (a slow reader: PP-5,
+  the core never waits for it), a message over 64 MiB (`maxPayload`), or no pong within 15 s. `private-transport.ts`:
+  a private process with `coreTransport` connects at its first wait or read through it (after startup read the
+  private cursor), `wss://` with its `tls`; its `hello` gives the private cursor or S − 1 before its first commit;
+  a `hello-ack` that connects it wakes its wait (as does each `committed`); a lost or refused connection is retried
+  after IN-10's back-off up to `backoffCeilingMs`, without end; meanwhile its wait waits, and a read fails with
+  `connection-lost` (retried by the runner, `database-retrying`). A read through the core first sends a `read` with
+  no statement (its height is the handle's `height`), then one `read` per `query`, each its own consistent read at
+  the public cursor then, at or above the handle's height. `api` from the core is answered `error: not-found` (PP-9).
 - **The private process** (task 14.1) is task 5.3's `startProcess` with `side: "private"`: the private `core` schema,
   its own database (`database`), and a backbone of `core-chain` (task 10.2's, unchanged: its configuration history, its
   identity, the process items `config`, `db` and `ledger-table`; no node client), then `src/backbone/private.ts`'s
@@ -1051,11 +1081,16 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   read of the public database at its cursor, at least h (Q100). Every read of public tables is in
   `src/backbone/core-private-source/public-database.ts`. The part's `on-db-write` moves the private cursor first in each
   block. The public database is read directly on PostgreSQL (`publicDatabase`, a login that may only read: reads only,
-  no writer, no lock); through `read` messages when it is PGlite, which only the core opens — task 14.2's transport,
-  so this task refuses a PGlite or missing `publicDatabase` (`invalid-configuration`, `public-database-transport`).
-  What wakes the wait is `PublicWakes`: task 14.2's `committed` messages and every (re)connection; until then a poll of
-  the public cursor every second (`pollingWakes`). An independent instance lags as it needs: nothing makes the core
-  wait for it (PP-5); the lockstep wait is task 14.3's.
+  no writer, no lock); through `read` messages when it is PGlite, which only the core opens, or not given — task
+  14.2's transport, at the `core` entry's `coreTransport` (`openPublicSide`); a private process with neither a
+  PostgreSQL `publicDatabase` nor a `coreTransport` is refused (`invalid-configuration`, `public-database-transport`).
+  What wakes the wait is `PublicWakes`: with `coreTransport`, the `committed` messages and every (re)connection, and
+  nothing else; without one, a poll of the public cursor every second (`pollingWakes`). An independent instance lags as
+  it needs: nothing makes the core wait for it (PP-5); the lockstep wait is task 14.3's.
+- **Mutual TLS** (PP-11, Q34, task 14.2). `tls` is PEM text: `certificate` and `key` the process's own, `trustedRoots`
+  the CAs it trusts. On the core the transport is then an `https` server with `requestCert` and `rejectUnauthorized`
+  against `trustedRoots`; a private process presents its certificate and checks the core's against its
+  `trustedRoots`. Without `tls` the transport is plain WebSocket, unauthenticated.
 - **Lockstep.** The core keeps, per listed instance, its last reported height and connection; the runner awaits the
   condition of PP-6 before `BEGIN` with no transaction open; a lockstep instance's consistent read checks
   `public cursor == h`.

@@ -118,7 +118,8 @@ function processOf(
     return {
       config,
       declarations: commandBuild(user, { side: "private", intake }),
-      source: (core) => intake.source(core),
+      // The runner's S and log: a private process's transport `hello`s with S − 1 before its first commit (task 14.2).
+      source: (core, shared) => intake.source(core, shared),
       side: "private",
     };
   }

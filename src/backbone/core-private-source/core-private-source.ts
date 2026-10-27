@@ -31,8 +31,8 @@
  * ({@link PrivateBlockSource}): its cursor is the private cursor; its finalized head is the public cursor, read in a
  * consistent read of the public database; its block at h is the public block at h; it waits for the public cursor to
  * pass a height by reading it each time it is woken — by the core's `committed` messages and every (re)connection of
- * the transport (task 14.2), or a poll until then (`./public-database.ts`) —, so it never depends on receiving every
- * message. So, at a start and after every wake-up, the loop processes every height from the private cursor + 1 up to
+ * its transport (task 14.2), or, without a transport, a poll (`./public-database.ts`) —, so it never depends on receiving
+ * every message. So, at a start and after every wake-up, the loop processes every height from the private cursor + 1 up to
  * the public cursor, in order, `on-finalized` once per new public head, and each height's `on-fetch` with a read of
  * public data ({@link PrivateBlockSource.fetchRead}). Each block's transaction moves the private cursor in this part's
  * `on-db-write`, the first among the parts that write (RN-3's fixed order), so the loop's check before the `COMMIT`
@@ -41,6 +41,11 @@
  * **Its making**: one {@link privateIntake} per private process start gives the part and the block source the process
  * runs with (`ProcessInput.source`), which share its public database — the part's binding reads it at startup, after
  * the runner made the source from the process's `core` revision (Q102) and before the loop runs.
+ *
+ * **Its position on the transport** (task 14.2): every `hello` of the transport gives the private cursor — the one
+ * startup read (the source's first {@link PrivateBlockSource.cursor}), then each block the part's `on-after-db-write`
+ * sees committed — or, before the first commit, S − 1 with no hash (PP-4). The transport connects at the source's first
+ * wait or read through it, which come after startup read the cursor.
  */
 
 import { z } from "zod";
@@ -52,11 +57,10 @@ import { UmbraError } from "../../db/errors.js";
 import type { ModuleDeclaration, Revision } from "../../modules/declaration.js";
 import type { BlockRef, BlockSource } from "../../runner/block-source.js";
 import {
-  openPublicDatabase,
+  openPublicSide,
   type PublicDatabase,
   type PublicIdentity,
   type PublicWakes,
-  pollingWakes,
   readPublicBlock,
   readPublicCursor,
   readPublicIdentity,
@@ -175,14 +179,37 @@ async function recordedBinding(w: SchemaWriteHandle): Promise<PublicIdentity | n
   return { genesisHash: row.public_genesis_hash as Uint8Array, start: row.public_start_height as bigint };
 }
 
+/** What a {@link PrivateBlockSource} closes with its public database: its transport to the core. */
+export interface Closable {
+  close(): Promise<void>;
+}
+
 /** The block source of a private process (see the module comment). */
 export class PrivateBlockSource implements BlockSource {
   readonly #public: PublicDatabase;
   readonly #wakes: PublicWakes;
+  readonly #transport: Closable | null;
+  /** The private cursor last known committed: startup's read, then each block committed; undefined before startup's. */
+  #position: BlockRef | null | undefined;
 
-  constructor(publicDatabase: PublicDatabase, wakes: PublicWakes) {
+  constructor(publicDatabase: PublicDatabase, wakes: PublicWakes, transport: Closable | null = null) {
     this.#public = publicDatabase;
     this.#wakes = wakes;
+    this.#transport = transport;
+  }
+
+  /**
+   * The private process's position for its transport's `hello` (PP-4): the private cursor last known committed, or
+   * `start` − 1 with no hash before its first commit.
+   */
+  position(start: bigint): { readonly height: bigint; readonly hash: Uint8Array | null } {
+    const known = this.#position ?? null;
+    return known === null ? { height: start - 1n, hash: null } : { height: known.height, hash: known.hash };
+  }
+
+  /** A block committed (the part's `on-after-db-write`): the position from now on. */
+  committed(block: BlockRef): void {
+    this.#position = block;
   }
 
   /** The public database the source reads. */
@@ -190,9 +217,14 @@ export class PrivateBlockSource implements BlockSource {
     return this.#public;
   }
 
-  /** The private cursor, read through `read` ({@link readPrivateCursor}). */
-  cursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
-    return readPrivateCursor(read);
+  /**
+   * The private cursor, read through `read` ({@link readPrivateCursor}); the first read — startup's, of the committed
+   * cursor — is also the position until a block commits (the loop's later reads are inside a block's transaction).
+   */
+  async cursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
+    const cursor = await readPrivateCursor(read);
+    if (this.#position === undefined) this.#position = cursor;
+    return cursor;
   }
 
   /**
@@ -259,20 +291,24 @@ export class PrivateBlockSource implements BlockSource {
   /** One `on-fetch` callback's read of public data (PP-3, Q100): a read of the public database at its cursor. */
   readonly fetchRead = <T>(body: (read: ReadHandle) => Promise<T>): Promise<T> => this.#public.read(body);
 
-  /** Closes the public database. */
-  close(): Promise<void> {
-    return this.#public.close();
+  /** Closes the public database, then the transport to the core. */
+  async close(): Promise<void> {
+    try {
+      await this.#public.close();
+    } finally {
+      await this.#transport?.close();
+    }
   }
 }
 
 /** Options of {@link privateIntake}. */
 export interface PrivateIntakeOptions {
   /**
-   * The public database, from the process's `core` revision: {@link openPublicDatabase} unless given (the tests' direct
-   * reads of a PGlite core's database; task 14.2's transport).
+   * The public database, from the process's `core` revision: `openPublicSide`'s unless given — a PostgreSQL
+   * `publicDatabase` read directly, else the core's transport (the tests' direct reads of a PGlite core's database).
    */
   readonly publicDatabase?: (core: CheckedEntry) => PublicDatabase;
-  /** What wakes the wait for the public cursor: {@link pollingWakes} unless given (task 14.2's transport). */
+  /** What wakes the wait for the public cursor: `openPublicSide`'s unless given — the transport's, else a poll. */
   readonly wakes?: (core: CheckedEntry) => PublicWakes;
   /** The negative controls' binding check; {@link bindingRefusal} unless given. */
   readonly binding?: typeof bindingRefusal;
@@ -283,10 +319,11 @@ export interface PrivateIntake {
   /** The backbone part `core-private-source` (see the module comment). */
   readonly part: ModuleDeclaration;
   /**
-   * The process's block source, made from its `core` revision (`ProcessInput.source`): once, before the part's
+   * The process's block source, made from its `core` revision and what the process shares with it — S and its log
+   * (`ProcessInput.source`; without them S is the revision's start and nothing is logged): once, before the part's
    * `on-start-db`, which reads its public database.
    */
-  source(core: CheckedEntry): PrivateBlockSource;
+  source(core: CheckedEntry, shared?: { readonly start: bigint; readonly log: (line: string) => void }): PrivateBlockSource;
 }
 
 /** A private process start's `core-private-source` (see the module comment). */
@@ -328,13 +365,24 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
       async "on-db-write"(_p, b, w) {
         await w.execute(MOVE_SQL, [b.height, b.hash, b.parentHash]);
       },
+      async "on-after-db-write"(_p, b) {
+        made?.committed({ height: b.height, hash: b.hash, parentHash: b.parentHash });
+      },
     },
   };
   return Object.freeze({
     part,
-    source(core: CheckedEntry): PrivateBlockSource {
-      const publicDatabase = (options.publicDatabase ?? openPublicDatabase)(core);
-      made = new PrivateBlockSource(publicDatabase, (options.wakes ?? (() => pollingWakes()))(core));
+    source(core: CheckedEntry, shared?: { readonly start: bigint; readonly log: (line: string) => void }): PrivateBlockSource {
+      const start = shared?.start ?? BigInt(core.start);
+      const side = openPublicSide(
+        core,
+        { position: () => (made as PrivateBlockSource).position(start), log: shared?.log ?? (() => undefined) },
+        {
+          ...(options.publicDatabase === undefined ? {} : { publicDatabase: options.publicDatabase(core) }),
+          ...(options.wakes === undefined ? {} : { wakes: options.wakes(core) }),
+        },
+      );
+      made = new PrivateBlockSource(side.publicDatabase, side.wakes, side.transport);
       return made;
     },
   });

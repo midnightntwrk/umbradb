@@ -1066,7 +1066,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** `configCheck` and the `modules` export in §12's surface (17.3); `core-chain`'s and the core modules'
       declarations as they come (10.x–13.x, `build-modules.ts`); the ledger worker's entry importing the file's modules
       (MD-1, §5.5; 12.3); a private process's history check with `--database` (its cursor is
-      `core_private_source.cursor`, not `core_block_commit.blocks`).
+      `core_private_source.cursor`, not `core_block_commit.blocks`: issue
+      `docs/issues/00029-private-config-check-cursor.md`, recorded with task 14.2).
 
 ## 5. Runner
 
@@ -2487,8 +2488,66 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       their ranges; the module guide's "Private modules" and `test/private/builds.ts`'s modules declare the public
       tables they read.
       **Acceptance:** A155.
-- [ ] 14.2 The process transport and its messages; opt-in mutual TLS.
+- [x] 14.2 The process transport and its messages; opt-in mutual TLS.
       **Acceptance:** A115, A121.
+      **Done (2026-10-26):** `src/private/` (new; design §1's row): `messages.ts` — design §8's eight messages as zod
+      strict schemas (32-byte hashes, ids of 1–128 characters, a `read-result` or `api-result` with exactly one of its
+      branches, rows of one value per column), `parseMessage` telling `not-json`, `unknown-version`, `unknown-type` and
+      `invalid-message` apart, the wire's JSON exact for every integer (written with `bigint`s as numbers, read with the
+      component's lossless reader), and the values by column type (`bigint` and `numeric` decimal text, `bytea` `0x`
+      hex, `json`/`jsonb` their value, arrays element by element) read back to the value the database API gives;
+      `core-transport.ts` — the core's WebSocket server on `listen.transport` (`https` with `requestCert` and
+      `rejectUnauthorized` against `trustedRoots` when `tls` is set, PP-11), a connection speaking after its `hello`, a
+      `hello` of a connected id (or a second on one connection) answered `refused: duplicate-instance` and closed,
+      `hello-ack` with the lockstep flag, the genesis, S and the public cursor, `committed` after each public commit,
+      each `read` in one `Database.read` bounded by `apiReadTimeoutMs` with each column's type name (the database API
+      now keeps a result's columns on its rows, `resultColumns`; other types named by `format_type` in the same read)
+      and an error as a code only, every `api` answered `error: not-found` (Q140), a `report` kept for 14.3, and a
+      connection closed (1008) on a fault, a binary frame, a message only the core sends, a message before `hello`, more
+      than 64 reads at once, a slow reader (128 MiB waiting), a message over 64 MiB, no pong within 15 s;
+      `private-transport.ts` — a private process's connection to `coreTransport` (made at its first wait or read through
+      it), its `hello` with the private cursor or S − 1, woken by every `hello-ack` that connects it and every
+      `committed` (PP-3), reconnecting after IN-10's back-off up to `backoffCeilingMs` without end, its reads failing
+      `connection-lost` (retried by the runner) while the core is away, and a read of public data through the core
+      (`read` messages: the handle's height first, then one per `query`; Q142). `core-private-source`
+      (`public-database.ts`'s `openPublicSide`): with `coreTransport` the wake-ups are the transport's and nothing else,
+      replacing 14.1's poll, which stays only for a private process without one; a PGlite or missing `publicDatabase` is
+      read through the transport, and one with neither is refused (`public-database-transport`); the source tracks its
+      position for `hello` (startup's cursor, then each block `on-after-db-write` sees committed) and closes the
+      transport with the public database. The runner: a public process with `listen.transport` starts the transport once
+      its database is open and its chain known, before the bootstrap's wait (a taken address refuses, `listen-failed`),
+      sends `committed` from the loop's observer and closes it at its stop or a refusal; `SourceShared` gains S and the
+      log; `umbradb run` passes them to a private intake. Design §8 (as built, mutual TLS, taking blocks), the module
+      guide's "Private modules", `vitest.config.ts` (`**/src/private/**` 90/85). Questions Q140 (what an `api`
+      calls; shipped A, not-found), Q141 (a `read`'s parameters' types; shipped A, `0x` hex is bytes) and Q142
+      (a read through the core is not one snapshot across statements; shipped A) raised, none blocking; issue
+      `docs/issues/00029-private-config-check-cursor.md` recorded (OPEN). Tests, seen failing first (`tsc` exit 2, 22
+      errors: `src/private/` missing, `resultColumns`, the intake's two-argument `source`; the four new suites failed to
+      load, the core's transport did not listen, 14.1's refusal message, `resultColumns is not a function`):
+      `test/private/messages.test.ts` (A115's schemas: every type round-trips, each field missing, mistyped or extra
+      fails, `v`, `type` and non-JSON told apart, the values' encoding and its inverse), `transport.test.ts` (A115
+      through a running core on PostgreSQL 18.6 and PGlite 0.5.10: `hello-ack`, `committed`, a `read-result`'s id,
+      height and columns, a `bigint`, `numeric`, `bytea` and `jsonb` read back as the core read them — through a raw
+      client and through the private process's own client —, a height `null` on an empty public database, an
+      `api-result`'s id, every fault closing the connection, `duplicate-instance`), `tls.test.ts` (A121 with
+      certificates the test makes with `openssl`, never committed: no certificate, a stranger's and plain WebSocket
+      refused, a trusted one answered; a private process with a trusted certificate processes heights, one without is
+      never connected), `transport-intake.test.ts` (A114 with the real transport: a proxy drops it while the core
+      commits 50 heights, the private process stays put — no poll —, reconnects and processes them in order, on both
+      backends; on PGlite its public reads through the core), `transport-faults.test.ts` (the limits and faults on both
+      sides against stand-ins), rows in `test/deterministic-postgresql/mapping.test.ts` and
+      `test/backbone/core-private-source.test.ts`; `test/private/builds.ts` gains `extra` settings, the core's log and
+      transport address, `coreTransport`, `tls` and a private process's log. Committed negative controls: a decoder that
+      drops a `bigint`'s precision or a `bytea`'s bytes fails A115's value oracle; a core that does not require a client
+      certificate under `tls` fails A121's; a core that accepts a second `hello` of a connected id fails the duplicate
+      oracle. Wrong variants (a scratch runner outside the clone): 90, 81 caught on the first run; the 9 survivors were
+      gaps — an extra field on `hello`, a second `hello` of another id on one connection, the reads' bound, the back-off
+      not started again after a connection, parameters sent without their encoding, the transport preferred to a direct
+      PostgreSQL read, `hello`'s position, the transport left open by a stopped private process and by a stopped core —
+      closed by tests; on the final sources 90 of 90 caught, none equivalent.
+      **Pending:** lockstep — `report`'s hash check, `lockstep-behind` in `hello-ack`, the core's wait (14.3); the
+      core's `/status` of its instances (PP-9, 14.4); test keys (14.4); the browser's `postMessage` transport (16.1);
+      Q140 to Q142 (owner).
 - [ ] 14.3 Lockstep and the behind-instance refusal.
       **Acceptance:** A117, A118.
 - [ ] 14.4 Test keys through the key registry (the key API is not core and leaves this change, Q70) and privacy checks

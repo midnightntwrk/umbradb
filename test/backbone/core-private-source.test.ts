@@ -224,7 +224,7 @@ describe("the public database and the wake-ups a private process starts with", (
   const core = (settings: Record<string, unknown>): CheckedEntry =>
     ({ id: "core", start: 0, settings }) as unknown as CheckedEntry;
 
-  it("refuses no publicDatabase and a PGlite one, which the core's transport serves (task 14.2)", () => {
+  it("refuses no publicDatabase and a PGlite one, which the core's transport reads instead (task 14.2)", () => {
     for (const settings of [{}, { publicDatabase: "pglite:/tmp/public" }]) {
       let error: unknown;
       try {
@@ -235,7 +235,7 @@ describe("the public database and the wake-ups a private process starts with", (
       expect(error).toBeInstanceOf(UmbraError);
       expect((error as UmbraError).code).toBe("invalid-configuration");
       expect((error as UmbraError).details).toEqual({ reason: "public-database-transport" });
-      expect((error as UmbraError).message).toContain("task 14.2");
+      expect((error as UmbraError).message).toContain("through the core's transport, at the core entry's coreTransport");
     }
   });
 

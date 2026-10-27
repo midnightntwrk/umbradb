@@ -89,6 +89,8 @@ const CORE_ARCH = {
   "**/src/node/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the admin endpoints' directory (task 8.1).
   "**/src/admin/**": { lines: 90, branches: 85, perFile: true },
+  // §13's default for `src/**`, added with the process transport's directory (task 14.2).
+  "**/src/private/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the ledger adapters' directory (task 12.1); `src/ledger/sweep*` gets §13's
   // 95/90 with the sweep (task 12.5).
   "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },

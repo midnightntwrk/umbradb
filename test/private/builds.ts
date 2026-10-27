@@ -36,8 +36,9 @@ import { REACH_TIMEOUT_MS } from "./backends.js";
  * `src/backbone/private.ts` — `core-private-source` from a {@link privateIntake}, `core-key-registry`, `core-digest` —
  * and its private modules. Its public data comes from the public database: on PostgreSQL through `publicDatabase`, the
  * URL of a login that may only read (the production path, `openPublicDatabase`); on PGlite, whose public database the
- * core alone opens, through direct reads of the core's `db` item — the "direct calls in tests" of PP-4, standing in
- * for task 14.2's `read` messages.
+ * core alone opens, through direct reads of the core's `db` item — the "direct calls in tests" of PP-4 —, or, given
+ * `coreTransport`, through the core's process transport (task 14.2: `read` messages, and its wake-ups in place of the
+ * tests' poll), which a core started with `listen.transport` serves.
  *
  * Imports nothing of Vitest.
  */
@@ -76,6 +77,12 @@ export interface PublicCore {
   /** Raises the head to `head` and waits until the core waits above it. */
   advance(head: bigint): Promise<void>;
   stop(): Promise<void>;
+  /** The lines the core logged. */
+  readonly lines: readonly string[];
+  /** The address its process transport listens on (`transport listening on <address>`); throws before it listens. */
+  transport(): string;
+  /** {@link transport} once it listens, within `ms`. */
+  transportWithin(ms: number): Promise<string>;
 }
 
 /** Options of {@link startPublicCore}. */
@@ -94,6 +101,8 @@ export interface PublicCoreOptions {
   readonly entries?: readonly Readonly<Record<string, unknown>>[];
   /** A negative control's loop. */
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
+  /** More settings of the `core` entry (`listen.transport`, `tls`, `lockstepInstances`). */
+  readonly extra?: Readonly<Record<string, unknown>>;
 }
 
 /** The public core's module that keeps the core's `db` item for the tests' direct reads (see the module comment). */
@@ -116,7 +125,12 @@ function publicReads(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaration {
 }
 
 /** The public core's `core` entry. */
-export function publicCoreEntry(database: string, start = 1, genesisHash = genesisHex(0xa1)) {
+export function publicCoreEntry(
+  database: string,
+  start = 1,
+  genesisHash = genesisHex(0xa1),
+  extra: Readonly<Record<string, unknown>> = {},
+) {
   return coreEntry({
     start,
     config: {
@@ -126,12 +140,35 @@ export function publicCoreEntry(database: string, start = 1, genesisHash = genes
       database,
       node: "ws://127.0.0.1:9/node",
       developmentOptIn: true,
-    },
+      ...extra,
+    } as never,
   });
 }
 
+/** The address in a core's `transport listening on <address>` line, or null. */
+const transportIn = (lines: readonly string[]): string | null => {
+  for (const line of lines) {
+    const match = /^transport listening on (\S+)/.exec(line);
+    if (match !== null) return match[1] as string;
+  }
+  return null;
+};
+
 /** Starts a public core and waits until it has processed its head. */
 export async function startPublicCore(options: PublicCoreOptions): Promise<PublicCore> {
+  const core = launchPublicCore(options);
+  try {
+    await core.handle.started;
+    await core.advance(options.head);
+  } catch (error) {
+    await core.handle.stop();
+    throw error;
+  }
+  return core;
+}
+
+/** Starts a public core and returns it at once, startup running (a core that waits for the node at S, say). */
+export function launchPublicCore(options: PublicCoreOptions): PublicCore {
   const genesis = options.genesisHash ?? genesisHex(0xa1);
   const start = options.start ?? 1;
   const source = new InMemoryBlockSource({ head: options.head, blocks: [genesisBlock(genesis)] });
@@ -140,18 +177,19 @@ export async function startPublicCore(options: PublicCoreOptions): Promise<Publi
     kept = db;
   });
   const entries = [
-    publicCoreEntry(options.database, start, genesis),
+    publicCoreEntry(options.database, start, genesis, options.extra),
     { id: reads.id, start, version: reads.version, config: {} },
     ...(options.entries ?? []),
   ];
+  const lines: string[] = [];
   const handle = startProcess({
     declarations: chainDeclarations([reads, ...(options.modules ?? [])]),
     config: { data: { entries } },
     source,
-    log: quiet,
+    log: (line) => lines.push(line),
     ...(options.loop === undefined ? {} : { loop: options.loop }),
   });
-  const core: PublicCore = {
+  return {
     handle,
     source,
     db: () => {
@@ -163,15 +201,24 @@ export async function startPublicCore(options: PublicCoreOptions): Promise<Publi
       await Promise.race([source.waiting(head), handle.ended.then((end) => Promise.reject(end))]);
     },
     stop: () => handle.stop(),
+    lines,
+    transport() {
+      const address = transportIn(lines);
+      if (address === null) throw new Error(`the public core's transport does not listen: ${lines.join(" | ")}`);
+      return address;
+    },
+    async transportWithin(ms) {
+      const deadline = Date.now() + ms;
+      for (;;) {
+        const address = transportIn(lines);
+        if (address !== null) return address;
+        if (handle.status().ended !== null || Date.now() > deadline) {
+          throw new Error(`the public core's transport did not listen: ${lines.join(" | ")}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
   };
-  try {
-    await handle.started;
-    await core.advance(options.head);
-  } catch (error) {
-    await handle.stop();
-    throw error;
-  }
-  return core;
 }
 
 /** Public data read directly through the core's `db` item: PP-4's direct calls in tests (14.2's `read` messages). */
@@ -270,8 +317,14 @@ export interface PrivateOptions {
   readonly publicDatabase?: string;
   /** Public data read some other way than `publicDatabase` (PGlite's direct reads). */
   readonly direct?: () => ReadOnlyDatabase;
-  /** What wakes the private source; a 50 ms poll unless given. */
+  /** What wakes the private source; with `coreTransport` the transport's, else a 50 ms poll, unless given. */
   readonly wakes?: PublicWakes;
+  /** The core's transport address (`coreTransport`): the private process's wake-ups, and on PGlite its public reads. */
+  readonly coreTransport?: string;
+  /** The `tls` setting (PP-11). */
+  readonly tls?: { readonly certificate: string; readonly key: string; readonly trustedRoots: readonly string[] };
+  /** Where the process's log lines go; nowhere unless given. */
+  readonly lines?: string[];
   /** S; 1 unless given. */
   readonly start?: number;
   /** The instance id; `instance-1` unless given. */
@@ -309,7 +362,9 @@ export function privateCoreEntry(options: PrivateOptions) {
       developmentOptIn: true,
       ...(options.publicDatabase === undefined ? {} : { publicDatabase: options.publicDatabase }),
       ...(options.testKeys === undefined ? {} : { testKeys: options.testKeys }),
-    },
+      ...(options.coreTransport === undefined ? {} : { coreTransport: options.coreTransport }),
+      ...(options.tls === undefined ? {} : { tls: options.tls }),
+    } as never,
   });
 }
 
@@ -334,10 +389,11 @@ function poll(): PublicWakes {
 /** Starts a private process (see the module comment) and returns it at once, startup running. */
 export function launchPrivate(options: PrivateOptions): PrivateProcess {
   const direct = options.direct;
+  const wakes = options.wakes ?? (options.coreTransport === undefined ? poll() : undefined);
   const intake = privateIntake({
     ...options.intake,
     ...(direct === undefined ? {} : { publicDatabase: () => directPublic(direct) }),
-    wakes: () => options.wakes ?? poll(),
+    ...(wakes === undefined ? {} : { wakes: () => wakes }),
   });
   const modules = options.modules ?? [privateModule("pm", options.seen ?? [])];
   const entries = options.entries ?? [
@@ -352,9 +408,9 @@ export function launchPrivate(options: PrivateOptions): PrivateProcess {
     startProcess({
       declarations,
       config: { data: { entries: [privateCoreEntry(options), ...entries] } },
-      source: (core) => intake.source(core),
+      source: (core, shared) => intake.source(core, shared),
       side: "private",
-      log: quiet,
+      log: options.lines === undefined ? quiet : (line) => options.lines?.push(line),
       ...(options.loop === undefined ? {} : { loop: options.loop }),
     });
   const handle = options.within === undefined ? start() : options.within(start);

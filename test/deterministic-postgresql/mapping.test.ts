@@ -2,6 +2,8 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   mapRows,
+  RESULT_COLUMNS,
+  resultColumns,
   mapValue,
   parameterText,
   parseArrayText,
@@ -404,6 +406,22 @@ describe("rows (DB-2)", () => {
       { a: "x", b: new Uint8Array([1]) },
       { a: null, b: null },
     ]);
+  });
+
+  it("keeps the result's columns on the rows, unseen by any other reader (task 14.2's read-result names their types)", () => {
+    const columns = [
+      { name: "a", type: 20 },
+      { name: "b", type: 17 },
+    ];
+    const rows = mapRows(columns, [["1", "\\x01"]]);
+    expect(resultColumns(rows)).toEqual(columns);
+    expect(Object.isFrozen(resultColumns(rows))).toBe(true);
+    // Not enumerable: the rows compare, copy and serialize as before.
+    expect(Object.keys(rows)).toEqual(["0"]);
+    expect(JSON.stringify(rows.map((row) => Object.keys(row)))).toBe('[["a","b"]]');
+    expect((rows as unknown as Record<symbol, unknown>)[RESULT_COLUMNS]).toBe(resultColumns(rows));
+    expect(resultColumns(mapRows(columns, []))).toEqual(columns);
+    expect(resultColumns([{ a: 1 }])).toBeUndefined();
   });
 });
 

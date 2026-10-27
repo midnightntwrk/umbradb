@@ -12,12 +12,13 @@
  * **Where the public data comes from** ({@link PublicDatabase}): on PostgreSQL directly — `publicDatabase`, the URL of
  * a login that may only read, opened by {@link openPublicDatabase} with reads only (one `REPEATABLE READ READ ONLY`
  * transaction each, its height the public cursor's, DB-2); when the public database is PGlite, which only the core can
- * open (DB-4), through the core's transport (`read` messages, PP-4) — task 14.2's, as is any `publicDatabase` absent,
- * which this task refuses.
+ * open (DB-4), or when none is given, through the core's transport (`read` messages, PP-4; task 14.2,
+ * `src/private/private-transport.ts`), at the `core` entry's `coreTransport`; a private process with neither is refused.
  *
- * **What wakes the private process** ({@link PublicWakes}): the core's `committed` messages and every (re)connection of
- * its transport (PP-3: they only wake it; it reads the public cursor itself) — task 14.2's. Until then a private
- * process reads the public cursor every {@link PUBLIC_POLL_MS} ({@link pollingWakes}).
+ * **What wakes the private process** ({@link PublicWakes}): with `coreTransport`, the core's `committed` messages and
+ * every (re)connection of its transport (PP-3: they only wake it; it reads the public cursor itself), and nothing else;
+ * a private process without one (its public database PostgreSQL, read directly) reads the public cursor every
+ * {@link PUBLIC_POLL_MS} instead ({@link pollingWakes}). {@link openPublicSide} makes both from the `core` revision.
  */
 
 import { BLOCKS_TABLE, cursorHeight, readCursor } from "../core-block-commit/core-block-commit.js";
@@ -27,6 +28,9 @@ import type { CheckedEntry } from "../../config/validate.js";
 import type { ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { openPostgres } from "../../db/postgres.js";
+import { UMBRADB_VERSION } from "../../config/build.js";
+import type { TransportTls } from "../../private/core-transport.js";
+import { PrivateTransport, type TransportPosition } from "../../private/private-transport.js";
 import type { BlockRef } from "../../runner/block-source.js";
 
 /** The public database as a private process reads it (see the module comment). */
@@ -55,7 +59,7 @@ export interface PublicIdentity {
   readonly start: bigint;
 }
 
-/** How often {@link pollingWakes} wakes a private process until task 14.2's transport does. */
+/** How often {@link pollingWakes} wakes a private process that has no transport to the core. */
 export const PUBLIC_POLL_MS = 1_000;
 
 const BLOCKS_PRESENT_SQL = `SELECT to_regclass('${BLOCKS_TABLE}') IS NOT NULL AS present`;
@@ -91,21 +95,24 @@ export async function readPublicBlock(read: Pick<ReadHandle, "query">, height: b
 /** The public cursor: the last block the core committed (`core-block-commit`'s cursor table), or null before any. */
 export const readPublicCursor: (read: Pick<ReadHandle, "query">) => Promise<BlockRef | null> = readCursor;
 
+/** Whether `setting` is a `publicDatabase` read directly: a PostgreSQL URL (not PGlite, which only the core opens). */
+const readsDirectly = (setting: unknown): setting is string => typeof setting === "string" && !setting.startsWith("pglite:");
+
 /**
  * The public database of `core`, a private process's `core` revision (Q102): its `publicDatabase`, a PostgreSQL URL,
  * opened for reads only — no writer, no lock; no connection until the first read. Throws `invalid-configuration`
- * (`details.reason` `public-database-transport`, not retried) without one, or for a PGlite one, which the core's
- * transport serves (PP-4, task 14.2).
+ * (`details.reason` `public-database-transport`, not retried) without one, or for a PGlite one, which is read through
+ * the core's transport instead ({@link openPublicSide}, PP-4).
  */
 export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
   const setting = (core.settings as PlainObject).publicDatabase;
-  if (typeof setting !== "string" || setting.startsWith("pglite:")) {
+  if (!readsDirectly(setting)) {
     const found = setting === undefined ? "the private process's core entry has no publicDatabase" : "it is PGlite";
     throw new UmbraError(
       "invalid-configuration",
-      `${found}: a private process reads a PostgreSQL public database directly, through publicDatabase (a login ` +
+      `${found}: openPublicDatabase reads a PostgreSQL public database directly, through publicDatabase (a login ` +
         "that may only read); a PGlite public database, which only the core opens, or one not given, is read " +
-        "through the core's transport (PP-4), which this build does not have yet (task 14.2)",
+        "through the core's transport, at the core entry's coreTransport (PP-4)",
       { reason: "public-database-transport" },
     );
   }
@@ -114,6 +121,65 @@ export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
     read: <T>(body: (read: ReadHandle) => Promise<T>): Promise<T> => db.read(body),
     close: () => db.close(),
   });
+}
+
+/** What {@link openPublicSide} needs besides the `core` revision: the private process's position, S and its log. */
+export interface PublicSideOptions {
+  /** Its position now, for each `hello` of its transport. */
+  readonly position: () => TransportPosition;
+  /** Where its transport's log lines go. */
+  readonly log: (line: string) => void;
+}
+
+/** A private process's public side: its public database, what wakes it, and its transport, if any (closed with it). */
+export interface PublicSide {
+  readonly publicDatabase: PublicDatabase;
+  readonly wakes: PublicWakes;
+  /** The transport to the core, made from `coreTransport`; null without it. */
+  readonly transport: PrivateTransport | null;
+}
+
+/**
+ * The public side of a private process from its `core` revision (see the module comment): a transport to the core when
+ * it has `coreTransport` (with its `tls`, `instanceId` and `backoffCeilingMs`); its public database read directly when
+ * `publicDatabase` is a PostgreSQL URL, else through that transport; its wake-ups the transport's, else a poll. Throws
+ * `invalid-configuration` (`public-database-transport`) for a revision with neither a PostgreSQL `publicDatabase` nor a
+ * `coreTransport`: it has no way to read public data. `given` replaces either part (the tests' direct reads and links).
+ */
+export function openPublicSide(
+  core: CheckedEntry,
+  options: PublicSideOptions,
+  given: { readonly publicDatabase?: PublicDatabase; readonly wakes?: PublicWakes } = {},
+): PublicSide {
+  const settings = core.settings as PlainObject;
+  const address = settings.coreTransport;
+  const transport =
+    typeof address === "string"
+      ? new PrivateTransport({
+          address,
+          tls: settings.tls as unknown as TransportTls | undefined,
+          instance: settings.instanceId as string,
+          version: UMBRADB_VERSION,
+          position: options.position,
+          backoffCeilingMs: settings.backoffCeilingMs as number,
+          log: options.log,
+        })
+      : null;
+  let publicDatabase = given.publicDatabase;
+  if (publicDatabase === undefined && readsDirectly(settings.publicDatabase)) publicDatabase = openPublicDatabase(core);
+  if (publicDatabase === undefined && transport !== null) publicDatabase = transport.publicDatabase();
+  if (publicDatabase === undefined) {
+    const which = settings.publicDatabase === undefined ? "no publicDatabase" : "a PGlite publicDatabase";
+    throw new UmbraError(
+      "invalid-configuration",
+      `the private process's core entry has ${which} and no coreTransport: a private process reads a PostgreSQL ` +
+        "public database directly (publicDatabase, a login that may only read), or any public database through the " +
+        "core's transport (coreTransport, the core's listen.transport), which also wakes it at every public commit " +
+        "(PP-3, PP-4); give it one of them",
+      { reason: "public-database-transport" },
+    );
+  }
+  return Object.freeze({ publicDatabase, wakes: given.wakes ?? transport ?? pollingWakes(), transport });
 }
 
 /** Wakes a private process every `intervalMs` (see the module comment). */

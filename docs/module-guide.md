@@ -470,7 +470,11 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
   when your process lags. Read public tables by height (`WHERE height = $1`, or `<=`), and only append-only ones: the
   rows of a height never change once committed, so you read the same whenever you run (PP-5). A mutable public table
   would show you a later height than the one you process; that needs lockstep (task 14.3). The core's `on-fetch`
-  gets no such argument.
+  gets no such argument. When the public database is PGlite, or the private process has no `publicDatabase`, the read
+  goes through the core's process transport (`coreTransport`): each `query` of it is then its own read at the public
+  cursor when it runs, never below `read.height`, and its values come back as the core reads them (a `bigint` as a
+  `bigint`, `bytea` as bytes, `jsonb` as its value). A parameter that is a string of `0x` and lowercase hex pairs is
+  sent as bytes.
 - **Require private items.** Your requirements order you among the private process's parts: the core's process items
   `config`, `db` and `ledger-table` (no node client: a private process never talks to the node),
   `core-private-source`'s `private-cursor` and `core-key-registry`'s `admitted-keys`. A public table you read in

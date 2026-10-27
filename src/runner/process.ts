@@ -91,6 +91,12 @@
  * bootstrap's wait of step 8 waits for the public cursor to reach the private S, and the source is closed with the
  * database.
  *
+ * **The process transport** (PP-4; task 14.2, `../private/core-transport.ts`): a public process whose `core` revision
+ * has `listen.transport` starts it once its database is open and its chain known (step 7, before the bootstrap's wait),
+ * tells it each commit (`committed`), and closes it at its stop or at a refusal; a listener that cannot listen refuses
+ * startup (`listen-failed`). A private process's side of it is its block source's (`openPublicSide`), which the
+ * process gives S and its log ({@link SourceShared}).
+ *
  * **Logs** go through the configuration's redaction (`configRedactor`, CF-4, AE-6) once it is validated; before that,
  * a refusal is logged by its code only, since nothing yet knows which strings are secret. A refusal, a halt and each
  * retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
@@ -153,6 +159,7 @@ import { CallbackFailure, isBackbonePart } from "./dispatch.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failures.js";
 import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput } from "./loop.js";
 import { ProcessContexts } from "./process-context.js";
+import { type CoreTransport, startCoreTransport, type TransportTls } from "../private/core-transport.js";
 
 /**
  * The configuration a process runs with: a file to load (CF-1), or its data — a browser's bundle, a test's —, which
@@ -210,10 +217,14 @@ export interface ProcessInput {
   readonly ledgerWorker?: () => LedgerHost;
 }
 
-/** What the process shares with the block source it makes (task 10.3): its one node connection. */
+/** What the process shares with the block source it makes (task 10.3): its one node connection, S and its log. */
 export interface SourceShared {
   /** The node client made from the process's `core` revision (`nodeOptionsOf`), or null for a revision with no node. */
   readonly nodeClient: NodeClient | null;
+  /** S, the database's start (a private process's `hello` before its first commit gives S − 1; task 14.2). */
+  readonly start: bigint;
+  /** The process's log, redacted (a private source's transport logs its connections; task 14.2). */
+  readonly log: (line: string) => void;
 }
 
 /** The process's state (CORE-ARCH §4.18, AE-3): exactly one at a time. */
@@ -516,6 +527,8 @@ class Process implements ProcessHandle {
   #nodeClient: NodeClient | null = null;
   /** The process's ledger worker (task 12.3), once its graph needs one; kept across a retried startup. */
   #ledger: LedgerHost | undefined;
+  /** A public process's process transport on `listen.transport` (PP-4; task 14.2, `../private/core-transport.ts`). */
+  #transport: CoreTransport | undefined;
 
   constructor(input: ProcessInput) {
     this.#input = input;
@@ -579,6 +592,7 @@ class Process implements ProcessHandle {
     try {
       await this.#api?.close();
     } finally {
+      await this.#transport?.close();
       await this.#closeNode();
       await this.#ledger?.close();
       await this.#db?.close();
@@ -643,8 +657,12 @@ class Process implements ProcessHandle {
                 if (!retrying) this.#nodeAttempts = null;
               },
             });
-      const source =
-        typeof input.source === "function" ? input.source(core, { nodeClient: this.#nodeClient }) : input.source;
+      const shared: SourceShared = {
+        nodeClient: this.#nodeClient,
+        start: BigInt(checked.start),
+        log: (line) => this.#log(line),
+      };
+      const source = typeof input.source === "function" ? input.source(core, shared) : input.source;
       this.#source = source;
       // A read's height is the cursor's (DB-2): the core's cursor table, or a private process's own (its source's).
       const db = await openConfiguredDatabase(core, { committedHeight: source.committedHeight ?? cursorHeight });
@@ -667,6 +685,7 @@ class Process implements ProcessHandle {
         if (this.#admin !== undefined) await this.#admin.refused();
       }
       // The module API opens in the last step, after which only a stop throws: the stop closes it.
+      await this.#transport?.close();
       await this.#closeNode();
       await this.#ledger?.close();
       await this.#db?.close();
@@ -753,6 +772,23 @@ class Process implements ProcessHandle {
       history,
       genesisHash,
     });
+    // The process transport (PP-4, task 14.2): a public process given listen.transport listens for private ones from
+    // here on — before the bootstrap's wait, so that they connect before S commits —, once.
+    const { transport: transportAddress } = settings.listen as { readonly transport?: string };
+    if (this.#transport === undefined && (input.side ?? "public") === "public" && transportAddress !== undefined) {
+      this.#transport = await startCoreTransport({
+        address: transportAddress,
+        tls: settings.tls as TransportTls | undefined,
+        db,
+        genesis: genesisHash,
+        start,
+        cursor: () => this.#cursor,
+        lockstepInstances: settings.lockstepInstances as unknown as readonly string[],
+        readTimeoutMs: settings.apiReadTimeoutMs as number,
+        log: (line) => this.#log(line),
+      });
+      this.#step();
+    }
     // The bootstrap's wait (IN-2): every bootstrap step has run, and nothing is processed until block S commits; before
     // the module API, so that a retried startup (a node unreachable meanwhile) never finds it listening.
     if (cursor === null) await waitForNode(source, start, this.#stop.signal, waiting);
@@ -789,6 +825,7 @@ class Process implements ProcessHandle {
           this.#cursor = block.height;
           this.#recovered();
           this.#admin?.committed();
+          this.#transport?.committed(block);
         },
       },
     });

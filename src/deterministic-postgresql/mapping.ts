@@ -333,15 +333,31 @@ export function mapValue(typeOid: number, text: string | null): unknown {
   return parse === undefined ? text : parse(text);
 }
 
+/**
+ * The key under which {@link mapRows} keeps a result's columns on the rows it returns: a non-enumerable property of the
+ * array, so the rows are what they were for every reader, and a reader that needs the columns' types — the process
+ * transport's `read-result`, which names each column's type (task 14.2, `src/private/core-transport.ts`) — reads them
+ * with {@link resultColumns}.
+ */
+export const RESULT_COLUMNS: unique symbol = Symbol("umbradb.resultColumns");
+
 /** Maps result rows given as text values in column order, as {@link mapValue} maps each value. */
 export function mapRows(columns: readonly ResultColumn[], rows: readonly (readonly (string | null)[])[]): Row[] {
-  return rows.map((values) => {
+  const mapped = rows.map((values) => {
     const row: Row = {};
     columns.forEach((column, index) => {
       row[column.name] = mapValue(column.type, values[index] ?? null);
     });
     return row;
   });
+  const kept = Object.freeze(columns.map((column) => Object.freeze({ name: column.name, type: column.type })));
+  Object.defineProperty(mapped, RESULT_COLUMNS, { value: kept, enumerable: false });
+  return mapped;
+}
+
+/** The columns of the result `rows` came from, in order, as {@link mapRows} kept them; undefined for other arrays. */
+export function resultColumns(rows: readonly Row[]): readonly ResultColumn[] | undefined {
+  return (rows as unknown as { readonly [RESULT_COLUMNS]?: readonly ResultColumn[] })[RESULT_COLUMNS];
 }
 
 /**
