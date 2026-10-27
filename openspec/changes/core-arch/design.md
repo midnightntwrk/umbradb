@@ -149,6 +149,27 @@ logs each of its retries. A condition clears once startup completes, a height co
 process (the client's when it stops retrying); a stop ends the wait. §11's registry is `test/runner/code-registry.ts`
 (A87).
 
+**A slow block** (task 5.5: `src/runner/loop.ts`, `process.ts`; RN-17, Q71). Nothing cuts a height off, times it out or
+retries it for its time; it is reported. Each run of a height has a window, from its first callback after `on-finalized`
+to its `COMMIT`: from its `on-fetch`; for a height the source prepares ahead (the node source), from when the loop asks
+for it if its `on-fetch` or `on-parse` runs in the queue then, else from the first that starts there — so the queue's
+work for it beside the heights before it, and the node's fetch before its first callback, are not its time —; for a
+held height's retry, from where it resumes, so neither the earlier attempt nor the back-off counts. Once a window has
+been open longer than the process revision's `slowBlockMs` (a timer of the main thread), the process shows the
+condition `slow-block` with the height, the point it is in — the last of its points that began; from the block
+transaction's request on, `on-db-write`: its `BEGIN`, its callbacks, the cursor check, the `COMMIT` — and the first
+module whose callback runs there, in the point's order (a callback's read waiting in PGlite's queue counts as its
+module's), or null while none runs; it logs `slow block: height <h> is still processing after slowBlockMs (<ms> ms),
+in <point>[ of <module>]` and publishes the snapshot at once. The condition clears when the height commits or its run
+fails (a halt; a retry, whose run is a window of its own), logged (`… committed after <ms> ms`, `… stopped without
+committing after <ms> ms`) and published again; it changes no readiness (AE-4). `on-finalized`, RN-11's re-delivery and
+the points after the `COMMIT` (`on-after-db-write`, `on-stop-height`) are in no window (RN-17's text; decision record
+question Q145). A callback that blocks the main thread stops the timer and every publication: `/status` answers from
+the snapshot published before it, without a condition raised meanwhile, and `/health/live` (AE-2) is the signal of the
+block; once the thread is free the condition may show until the commit. The ledger worker's step
+(`LedgerHost.activity()`) is not named in the condition: the module whose callback awaits it (`core-ledger-state`,
+`core-block-parsed`) is.
+
 ## 3. Block source and ingest
 
 ```ts

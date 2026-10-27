@@ -353,6 +353,8 @@ export interface ProbeRecord {
   readonly sent: string;
   /** How long its answer took, from the request. */
   readonly ms: number;
+  /** The answer's body as text, when the prober was asked for bodies (task 5.5). */
+  readonly body?: string;
 }
 
 /** A running prober (`prober.mjs`). */
@@ -361,10 +363,18 @@ export interface Prober {
   stop(): Promise<ProbeRecord[]>;
 }
 
-/** Starts the prober on `origin`'s `paths`, every `intervalMs`; resolves once it runs. */
-export async function startProber(origin: string, paths: readonly string[], intervalMs = 150): Promise<Prober> {
+/**
+ * Starts the prober on `origin`'s `paths`, every `intervalMs` — keeping each answer's body with `bodies` (task 5.5) —;
+ * resolves once it runs.
+ */
+export async function startProber(
+  origin: string,
+  paths: readonly string[],
+  intervalMs = 150,
+  options: { readonly bodies?: boolean } = {},
+): Promise<Prober> {
   const worker = new Worker(new URL("./prober.mjs", import.meta.url), {
-    workerData: { origin, paths, intervalMs, timeoutMs: 30_000 },
+    workerData: { origin, paths, intervalMs, timeoutMs: 30_000, bodies: options.bodies === true },
   });
   const messages: { type: string; records?: ProbeRecord[] }[] = [];
   const next = (type: string) =>

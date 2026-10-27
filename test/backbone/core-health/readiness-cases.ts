@@ -72,6 +72,9 @@ export const READINESS_CASES: readonly ReadinessCase[] = [
   { state: "following", lag: 2n, readinessLag: 10, conditions: ["node-retrying"], ready: true, rule: 3 },
   { state: "syncing", lag: 8n, readinessLag: 10, conditions: ["database-retrying", "finality-stall"], ready: true, rule: 3 },
   { state: "syncing", lag: 12n, readinessLag: 10, conditions: ["node-retrying"], ready: false, rule: 3 },
+  // A slow block (RN-17, task 5.5) changes no readiness either.
+  { state: "following", lag: 1n, readinessLag: null, conditions: ["slow-block"], ready: true, rule: 3 },
+  { state: "syncing", lag: 12n, readinessLag: 10, conditions: ["slow-block"], ready: false, rule: 3 },
 ];
 
 /** One case in words, for a problem's message. */

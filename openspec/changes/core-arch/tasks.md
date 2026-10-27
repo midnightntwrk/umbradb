@@ -1378,9 +1378,40 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       scratch runner outside the clone): 34, 33 caught on the first run, the survivor (a refused upgrade's socket not
       destroyed) closed by the half-open test; 34 of 34 caught on the final sources. Issue
       `docs/issues/00025-non-websocket-upgrade-refused.md` recorded (OPEN).
-- [ ] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
+- [x] 5.5 The slow-block watchdog (Q71): the condition `slow-block` with height, point and module, cleared at the
       commit; never a cancel or a retry.
       **Acceptance:** A142.
+      **Done (2026-10-26):** the finalized loop (`src/runner/loop.ts`) keeps a window for each run of a height, from
+      its first callback after `on-finalized` to its `COMMIT`: from its `on-fetch`; for a height the source prepares
+      ahead (the node source's queue), from when the loop asks for it if its `on-fetch` or `on-parse` runs there then,
+      else from the first that starts (the queue's earlier work and the node's fetch are not its time); for a held
+      height's retry (10.4), from where it resumes (no back-off is in a window). While it is open the loop knows the
+      point the height is in — the last that began; `on-db-write` from the block transaction's request on (`BEGIN`, the
+      cursor check, `COMMIT`) — and the modules whose callbacks run (a callback's read waiting in PGlite's queue is its
+      module's). A main-thread timer of the process revision's `slowBlockMs` (`LoopInput.slowBlockMs`) makes the height
+      slow: `FinalizedLoop.slowBlock()` gives its height, point, first running module in the point's order (null for
+      none) and time, and `LoopObserver.slow` is told when it became slow and when its window closed (committed, or its
+      run failed: a halt, or a retry whose run is a window of its own). The process (`src/runner/process.ts`) lists
+      `{ code: "slow-block", height, point, module }` in `status().conditions` (`SlowBlockCondition`), logs `slow block:
+      height <h> is still processing after slowBlockMs (<ms> ms), in <point>[ of <module>]` and `… committed after <ms>
+      ms` or `… stopped without committing after <ms> ms`, and publishes the snapshot at once each time; `/status`
+      shows it through `core-status` with no admin change; it changes no readiness. Nothing cancels, times out or
+      retries a height. `on-finalized`, RN-11's re-delivery and the points after the `COMMIT` are in no window
+      (Q145). A callback that blocks the main thread stops the timer and every publication: `/status` keeps the
+      snapshot from before it (no `slow-block`), `/health/live` is the signal; afterwards the condition may show until
+      the commit (seen on PostgreSQL, not on PGlite). The ledger worker's step is named by its module
+      (`core-ledger-state`, `core-block-parsed`), not in the condition. Tests (both backends): A142
+      `test/runner/slow-block.test.ts` (oracles in `slow-block-harness.ts`), the settled cases
+      `slow-block-cases.test.ts` (a point in waves, the block transaction with no callback running, a height that
+      commits in time, a halt, a held height's retry, a height prepared in the queue — asked while its `on-parse` runs,
+      already running, prepared earlier —, the node's fetch, a callback blocking the main thread), committed negative
+      controls `slow-block.negative-control.test.ts` (a watchdog that never clears, one that retries the slow height,
+      one that cancels it, two with a fixed threshold); `/status`'s schema gained the condition
+      (`test/backbone/core-status/status.schema.json`), AE-4's cases a slow block. Wrong variants (a scratch runner
+      outside the clone): 26, 24 caught (one once a test of a committed height's timer was added), 2 survivors
+      explained (the queue's entry for a height never removed: a leak only; no publication at once: the heartbeat
+      publishes within A142's 2 s). **Waits:** Q145 (the points after the `COMMIT`, `on-finalized` and RN-11's
+      re-delivery are in no window).
 
 ## 6. Storage helpers
 

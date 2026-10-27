@@ -75,6 +75,19 @@
  * takes each height from it prepared (`BlockSource.prepared`) — `on-fetch` and `on-parse` already run, their items in
  * the height's — and goes on to `on-start-height` and `on-compute` with them. The queue's callbacks run outside the
  * loop's points, each with its block context as the loop builds it.
+ *
+ * **A slow height** (RN-17, Q71; task 5.5) is reported, never cut off: nothing here cancels, times out or retries a
+ * height for its time. Each run of a height has a window, from its first callback after `on-finalized` to its `COMMIT`
+ * — from its `on-fetch`; for a height the source prepares ahead, from when the loop asks for it if its `on-fetch` or
+ * `on-parse` runs in the queue by then, else from when one starts there (the queue's earlier work for it, beside the
+ * heights before it, is not its time, nor is the fetch from the node before its first callback); for a held height
+ * processed again, from where it resumes (a back-off is never in a window) — and while it is open the loop knows the
+ * point the height is in (the last of its points that began; from the block transaction's request on, `on-db-write`:
+ * its `BEGIN`, its callbacks, the cursor check, the `COMMIT`) and the modules whose callbacks run. Once a window has
+ * been open longer than {@link LoopInput.slowBlockMs} (a timer of the main thread, so not while a callback blocks it),
+ * {@link FinalizedLoop.slowBlock} gives the height, its point and the first module running in the point's order, and
+ * the observer is told ({@link LoopObserver.slow}); the window closes when the height commits, or when its run fails
+ * — a halt, or a retry, whose run opens a window of its own —, and the observer is told again.
  */
 
 import { BLOCKS_TABLE } from "../backbone/core-block-commit/core-block-commit.js";
@@ -136,14 +149,77 @@ export interface LoopInput {
   readonly boundary?: bigint | null;
   /** Told of the finalized heads the loop reads and the heights it commits (the process's state). */
   readonly observer?: LoopObserver;
+  /**
+   * RN-17's threshold (CF-4's `slowBlockMs`): a height whose window has been open longer is slow (see the module
+   * comment). Absent or null: none is.
+   */
+  readonly slowBlockMs?: number | null;
 }
 
-/** What the loop tells as it runs (the process's state, `./process.ts`): neither may throw. */
+/** What the loop tells as it runs (the process's state, `./process.ts`): none may throw. */
 export interface LoopObserver {
   /** The source's finalized head, each time the loop reads it. */
   head?(head: BlockRef): void;
   /** A height that committed: its block, the new cursor. */
   committed?(block: BlockRef): void;
+  /** A height became slow, or the window of a slow height closed (RN-17; see the module comment). */
+  slow?(event: SlowBlockEvent): void;
+}
+
+/** What a height in progress does (RN-17): the point it is in, the first module running there, and since when. */
+export interface HeightActivity {
+  readonly height: bigint;
+  readonly point: PointName;
+  /** The first module whose callback runs, in the point's order; null while none runs. */
+  readonly module: string | null;
+  /** How long its window has been open, in milliseconds. */
+  readonly sinceMs: number;
+}
+
+/** What {@link LoopObserver.slow} is told. */
+export type SlowBlockEvent =
+  /** The height's window has been open longer than `slowBlockMs`: what it does now. */
+  | { readonly kind: "raised"; readonly activity: HeightActivity }
+  /** The slow height's window closed: it committed, or its run failed; `ms` its time. */
+  | { readonly kind: "ended"; readonly height: bigint; readonly committed: boolean; readonly ms: number };
+
+/**
+ * Where a height's processing is (RN-17): the last of its points that began, and the modules whose callbacks run, in
+ * the order they started — at a point in waves, the point's order.
+ */
+class Activity {
+  point: PointName;
+  readonly #running: string[] = [];
+
+  constructor(point: PointName) {
+    this.point = point;
+  }
+
+  /** The first module running, or null. */
+  get module(): string | null {
+    return this.#running[0] ?? null;
+  }
+
+  /** Runs `body`, module `module`'s callback, as running. */
+  async during(module: string, body: () => Promise<void>): Promise<void> {
+    this.#running.push(module);
+    try {
+      await body();
+    } finally {
+      this.#running.splice(this.#running.indexOf(module), 1);
+    }
+  }
+}
+
+/** The height the loop is on (RN-17's window; see the module comment). */
+interface Watch {
+  readonly height: bigint;
+  /** When its window opened (`performance.now()`); null while none of its callbacks has started. */
+  began: number | null;
+  activity: Activity | undefined;
+  timer: ReturnType<typeof setTimeout> | undefined;
+  /** Whether it was found slow (the observer told). */
+  raised: boolean;
 }
 
 /** How the loop ended (RN-10, RN-12, RN-13). */
@@ -263,6 +339,11 @@ type Invoke<P extends PointName> = (
   call: (...args: PointArguments<P>) => Promise<void>,
 ) => Promise<void>;
 
+/** `invoke`, each callback recorded as running in `activity` when there is one (RN-17). */
+function tracked<P extends PointName>(activity: Activity | undefined, invoke: Invoke<P>): Invoke<P> {
+  return activity === undefined ? invoke : (part, call) => activity.during(part.id, () => invoke(part, call));
+}
+
 /** Whether two byte strings are equal. */
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((byte, index) => byte === b[index]);
@@ -306,10 +387,29 @@ export class FinalizedLoop {
   #held: HeldHeight | undefined;
   /** The held height this run processes again, once it reaches it. */
   #resume: HeldHeight | undefined;
+  /** The height the loop is on (RN-17), from the start of its processing to its commit or its failure. */
+  #watch: Watch | undefined;
+  /** What the source's queue runs for each height it prepares (`on-fetch`, `on-parse`), while it does. */
+  readonly #preparing = new Map<bigint, Activity>();
 
   constructor(input: LoopInput) {
     this.input = input;
     this.#signal = input.signal ?? new AbortController().signal;
+  }
+
+  /**
+   * The height in progress once its window has been open longer than `slowBlockMs` (RN-17; see the module comment):
+   * the point it is in and the first module running there now, and its time; null otherwise — no height in progress,
+   * none slow yet, or no `slowBlockMs`.
+   */
+  slowBlock(): HeightActivity | null {
+    const watch = this.#watch;
+    return watch === undefined || !watch.raised ? null : this.#activityOf(watch);
+  }
+
+  /** RN-17's threshold: the input's `slowBlockMs`, null for none (a negative control's seam). */
+  protected slowBlockMs(): number | null {
+    return this.input.slowBlockMs ?? null;
   }
 
   /**
@@ -598,16 +698,21 @@ export class FinalizedLoop {
     const resume = this.#resume?.run.height === height ? this.#resume : undefined;
     this.#resume = undefined;
     let run: HeightRun | undefined;
+    const watch = this.#watchHeight(height);
     try {
       run = resume === undefined ? await this.#begin(height, previous) : this.#again(resume);
       await this.prepare(run);
+      // The block transaction is on-db-write's (RN-17): its BEGIN, its callbacks, the cursor check, the COMMIT.
+      this.#enter("on-db-write");
       await this.commit(run);
       committed = true;
       this.input.observer?.committed?.(run.block);
+      this.#unwatch(watch, true);
       await this.after(run);
       this.#check();
       return run.block;
     } catch (error) {
+      if (!committed) this.#unwatch(watch, false);
       const failure = this.#failure(height, error, committed);
       if (!committed && run !== undefined) this.#hold(run, failure);
       throw failure;
@@ -627,6 +732,72 @@ export class FinalizedLoop {
   #again(held: HeldHeight): HeightRun {
     held.run.items.restore(held.items);
     return { ...held.run, from: held.from };
+  }
+
+  /**
+   * The loop is on `height` (RN-17; see the module comment): its window opens at once when the source's queue runs its
+   * `on-fetch` or `on-parse` now, else with the first callback of it that starts.
+   */
+  #watchHeight(height: bigint): Watch {
+    const watch: Watch = { height, began: null, activity: undefined, timer: undefined, raised: false };
+    this.#watch = watch;
+    const queued = this.#preparing.get(height);
+    if (queued !== undefined) this.#open(watch, queued);
+    return watch;
+  }
+
+  /** Opens `watch`'s window, recorded in `activity`, and starts the timer of `slowBlockMs` when there is one. */
+  #open(watch: Watch, activity: Activity): void {
+    watch.began = performance.now();
+    watch.activity = activity;
+    const ms = this.slowBlockMs();
+    if (ms !== null) watch.timer = setTimeout(() => this.#raise(watch), ms);
+  }
+
+  /** `watch`'s window has been open longer than `slowBlockMs`: the height is slow, and the observer is told. */
+  #raise(watch: Watch): void {
+    watch.raised = true;
+    this.input.observer?.slow?.({ kind: "raised", activity: this.#activityOf(watch) });
+  }
+
+  /**
+   * `point` of the height in progress began, if a height is in progress: its window opens if it was not yet; returns
+   * what records its callbacks.
+   */
+  #enter(point: PointName): Activity | undefined {
+    const watch = this.#watch;
+    if (watch === undefined) return undefined;
+    if (watch.activity === undefined) this.#open(watch, new Activity(point));
+    else watch.activity.point = point;
+    return watch.activity;
+  }
+
+  /** Closes `watch`'s window — its height committed, or its run failed —; the observer is told when it was slow. */
+  #unwatch(watch: Watch, committed: boolean): void {
+    this.#watch = undefined;
+    clearTimeout(watch.timer);
+    if (!watch.raised) return;
+    const ms = performance.now() - (watch.began as number);
+    this.input.observer?.slow?.({ kind: "ended", height: watch.height, committed, ms });
+  }
+
+  /** What the height of an open window `watch` does now. */
+  #activityOf(watch: Watch): HeightActivity {
+    const activity = watch.activity as Activity;
+    const sinceMs = performance.now() - (watch.began as number);
+    return Object.freeze({ height: watch.height, point: activity.point, module: activity.module, sinceMs });
+  }
+
+  /**
+   * What the source's queue runs for `height` from now on (`QueueRunner.prepare`); when the loop is on that height and
+   * no callback of it has started, its window opens with it.
+   */
+  #preparingAt(height: bigint): Activity {
+    const activity = new Activity("on-fetch");
+    this.#preparing.set(height, activity);
+    const watch = this.#watch;
+    if (watch?.height === height && watch.activity === undefined) this.#open(watch, activity);
+    return activity;
   }
 
   /** Records that `run` reached `point`; at the first, its items (what holding it needs). */
@@ -705,13 +876,14 @@ export class FinalizedLoop {
    */
   #queueRunner(): QueueRunner {
     const { contextOf, db } = this.input;
-    const queuePoint = async (run: HeightRun, point: "on-fetch" | "on-parse"): Promise<void> => {
+    const queuePoint = async (run: HeightRun, point: "on-fetch" | "on-parse", activity: Activity): Promise<void> => {
+      activity.point = point;
       await runSchedule(scheduleAt(run.range, point), {
         contextOf,
-        invoke: (part, call) => {
+        invoke: tracked<"on-fetch" | "on-parse">(activity, (part, call) => {
           const context = this.#context(run, part, run.items.visible());
           return run.items.collect(part, point, (sink) => call(context, sink));
-        },
+        }),
       });
     };
     const header = (block: BlockRef): BlockRef =>
@@ -725,8 +897,15 @@ export class FinalizedLoop {
           items: this.itemsAt(block.height),
           previous: null,
         };
-        await queuePoint(run, "on-fetch");
-        await queuePoint(run, "on-parse");
+        const activity = this.#preparingAt(block.height);
+        try {
+          await queuePoint(run, "on-fetch", activity);
+          await queuePoint(run, "on-parse", activity);
+        } finally {
+          // A second prepare of the height still running (a best block and the finalized one) loses its entry: the
+          // loop then waits for it with its window not yet open, which counts less, never more.
+          this.#preparing.delete(block.height);
+        }
         return run.items;
       },
       bestBlock: async (block: BlockRef) => {
@@ -758,12 +937,16 @@ export class FinalizedLoop {
     await this.#schedule(scheduleAt(range, point), invoke);
   }
 
-  /** Runs `schedule`, each callback through `invoke`, after checking no misuse is pending. */
+  /**
+   * Runs `schedule`, each callback through `invoke`, after checking no misuse is pending; for the height in progress,
+   * recording the point and its running callbacks (RN-17).
+   */
   async #schedule<P extends PointName>(schedule: PointSchedule<P>, invoke: Invoke<P>): Promise<void> {
     this.#check();
     this.#point = schedule.point;
+    const activity = this.#enter(schedule.point);
     try {
-      await runSchedule(schedule, { contextOf: this.input.contextOf, invoke });
+      await runSchedule(schedule, { contextOf: this.input.contextOf, invoke: tracked(activity, invoke) });
     } finally {
       this.#point = undefined;
     }

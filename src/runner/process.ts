@@ -59,8 +59,12 @@
  * (`/health/ready`, AE-4's order, `readinessOf`) when `stopped`, else unless a set `readinessLag` is exceeded; never
  * `starting`, `refused`, `halted` or `stopping`. While startup waits for the node (steps 6 and 8) the process is
  * `starting` with the condition `waiting-for-node`, beside a retry's condition when one is raised; the block source's
- * own conditions (`finality-stall` while the node source's queue is full, IN-6) are the process's too. The admin
- * endpoints that show all this are tasks 8.1–8.3.
+ * own conditions (`finality-stall` while the node source's queue is full, IN-6) are the process's too. `slow-block`
+ * (RN-17, Q71; task 5.5) shows while the loop's height in progress has run longer than the process revision's
+ * `slowBlockMs` — its height, the point it is in, the first module running there or null (the window and its limits
+ * are `./loop.ts`'s) —, logged when raised and when that height commits or its run fails, and published at once each
+ * time; nothing cuts the height off or retries it for its time. The admin endpoints that show all this are tasks
+ * 8.1–8.3.
  *
  * **Retries** (IN-10, CORE-ARCH §4.6): a lost database connection (`connection-lost`) or an unreachable node
  * (`node-unreachable`) — the two retryable codes, wherever startup's later steps or the loop meet them — never halts or
@@ -147,7 +151,7 @@ import { startWriter } from "../db/writer-lock.js";
 import type { LedgerTable } from "../ledger/version-table.js";
 import { type LedgerHost, startLedgerWorker } from "../ledger/worker/host.js";
 import { schemaPlan } from "../modules/adapters.js";
-import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
+import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
 import { ProcessAdmin } from "../admin/process-admin.js";
 import type { AdminStarter } from "../admin/server.js";
@@ -158,7 +162,7 @@ import { type StartedModuleApi, startModuleApi } from "./api-server.js";
 import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failures.js";
-import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput } from "./loop.js";
+import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput, type SlowBlockEvent } from "./loop.js";
 import { ProcessContexts } from "./process-context.js";
 import { type CoreTransport, startCoreTransport, type TransportTls } from "../private/core-transport.js";
 
@@ -272,10 +276,27 @@ export interface WaitingCondition extends NodeWait {
 }
 
 /**
- * The process's conditions (AE-3); the block source's own (`finality-stall`, IN-6) among them; `slow-block` is task
- * 5.5's, the others' their tasks'.
+ * The condition `slow-block` (RN-17, AE-3, Q71; task 5.5): the height in progress has run longer than `slowBlockMs`
+ * (`./loop.ts`'s window); `point` is the point it is in, `module` the first module whose callback runs there, null
+ * while none runs. Cleared when the height commits or its run fails; nothing cuts the height off.
  */
-export type ProcessCondition = UpgradeCondition | RetryCondition | WaitingCondition | SourceCondition;
+export interface SlowBlockCondition {
+  readonly code: "slow-block";
+  readonly height: bigint;
+  readonly point: PointName;
+  readonly module: string | null;
+}
+
+/**
+ * The process's conditions (AE-3); the block source's own (`finality-stall`, IN-6) among them; `waiting-for-lockstep`
+ * is task 14.3's.
+ */
+export type ProcessCondition =
+  | UpgradeCondition
+  | RetryCondition
+  | WaitingCondition
+  | SourceCondition
+  | SlowBlockCondition;
 
 /** How processing ended. */
 export type ProcessingEnd =
@@ -530,6 +551,8 @@ class Process implements ProcessHandle {
   #ledger: LedgerHost | undefined;
   /** A public process's process transport on `listen.transport` (PP-4; task 14.2, `../private/core-transport.ts`). */
   #transport: CoreTransport | undefined;
+  /** The loop startup made (its slow height, RN-17). */
+  #loop: FinalizedLoop | undefined;
 
   constructor(input: ProcessInput) {
     this.#input = input;
@@ -569,6 +592,7 @@ class Process implements ProcessHandle {
       conditions: [
         ...this.#conditions,
         ...(this.#source?.conditions?.() ?? []),
+        ...this.#slowBlock(),
         ...(this.#retrying === null ? [] : [this.#retrying]),
         ...(this.#nodeAttempts === null || this.#retrying?.code === "node-retrying"
           ? []
@@ -817,7 +841,9 @@ class Process implements ProcessHandle {
       signal: this.#stop.signal,
       coreStop: core.stop === null ? null : BigInt(core.stop),
       boundary: this.#upgrade?.height ?? null,
+      slowBlockMs: settings.slowBlockMs as number,
       observer: {
+        slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
         head: (head) => {
           this.#head = head.height;
           // Nothing to process (the loop waits): whatever was retried works again.
@@ -831,6 +857,7 @@ class Process implements ProcessHandle {
         },
       },
     });
+    this.#loop = loop;
     const { server } = this.#api;
     const api = server === null ? null : Object.freeze({ host: server.host, port: server.port });
     // Not stopping (the step above): from here on a stop finds the loop running.
@@ -866,6 +893,29 @@ class Process implements ProcessHandle {
   #nodeRetrying(attempts: number): RetryCondition {
     const height = this.#phase === "running" ? (this.#cursor === null ? this.#start : this.#cursor + 1n) : null;
     return Object.freeze({ code: "node-retrying", attempts, height });
+  }
+
+  /** `slow-block` while the loop's height in progress is slow (RN-17), else none. */
+  #slowBlock(): SlowBlockCondition[] {
+    const slow = this.#loop?.slowBlock() ?? null;
+    if (slow === null) return [];
+    return [Object.freeze({ code: "slow-block", height: slow.height, point: slow.point, module: slow.module })];
+  }
+
+  /**
+   * A height became slow, or a slow height's window closed (RN-17, the loop's observer): logged, and published at once
+   * (the heartbeat's next tick may be a second away).
+   */
+  #slowBlockEvent(event: SlowBlockEvent, slowBlockMs: number): void {
+    if (event.kind === "raised") {
+      const { height, point, module } = event.activity;
+      const where = module === null ? point : `${point} of ${module}`;
+      this.#log(`slow block: height ${height} is still processing after slowBlockMs (${slowBlockMs} ms), in ${where}`);
+    } else {
+      const how = event.committed ? "committed" : "stopped without committing";
+      this.#log(`slow block: height ${event.height} ${how} after ${Math.round(event.ms)} ms`);
+    }
+    this.#admin?.publish();
   }
 
   /** What was retried works again: no condition, and the next retry's back-off starts from 1 s. */

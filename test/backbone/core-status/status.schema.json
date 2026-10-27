@@ -375,6 +375,38 @@
               "$ref": "#/$defs/height"
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "height",
+            "point",
+            "module"
+          ],
+          "properties": {
+            "code": {
+              "const": "slow-block"
+            },
+            "height": {
+              "$ref": "#/$defs/height"
+            },
+            "point": {
+              "$ref": "#/$defs/point"
+            },
+            "module": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
         }
       ]
     },

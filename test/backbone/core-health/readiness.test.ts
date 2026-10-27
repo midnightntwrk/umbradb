@@ -157,6 +157,7 @@ describe("readinessOf: AE-4's order", () => {
       "rule 2: stopped, lag 100, readiness lag 10, conditions upgrade-required decided 503, not 200",
       "rule 3: following, lag 2, readiness lag 10, conditions node-retrying decided 503, not 200",
       "rule 3: syncing, lag 8, readiness lag 10, conditions database-retrying finality-stall decided 503, not 200",
+      "rule 3: following, lag 1, readiness lag none, conditions slow-block decided 503, not 200",
     ]);
   });
 });

@@ -75,6 +75,12 @@ describe("A66: /status's JSON schema", () => {
     expect(body()).toMatchObject({ lastCommitAt: "2026-10-26T12:00:00.25Z", uptimeMs: 1_500 });
   });
 
+  it("holds slow-block (task 5.5, RN-17): the height, the point, the module or null while none runs", () => {
+    const slow = { code: "slow-block", height: "4", point: "on-compute", module: "m" };
+    expect(STATUS_SCHEMA.problems({ ...body(), conditions: [slow] })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...body(), conditions: [{ ...slow, point: "on-db-write", module: null }] })).toEqual([]);
+  });
+
   it("names the points of MD-1 and every field the endpoint answers, each one required", () => {
     const schema = schemaFile(new URL("./status.schema.json", import.meta.url)) as {
       required: string[];
@@ -104,6 +110,11 @@ describe("A66: /status's JSON schema", () => {
       "a part without its tables": (b) => delete b.modules[0].tables,
       "a condition no task raises": (b) => (b.conditions = [{ code: "slow-node", height: "4" }]),
       "a retry condition without its attempts": (b) => (b.conditions = [{ code: "node-retrying", height: "4" }]),
+      "a slow block without its point": (b) => (b.conditions = [{ code: "slow-block", height: "4", module: "m" }]),
+      "a slow block without its module": (b) => (b.conditions = [{ code: "slow-block", height: "4", point: "on-compute" }]),
+      "a slow block in a point that is none": (b) => (b.conditions = [{ code: "slow-block", height: "4", point: "commit", module: null }]),
+      "a slow block of an empty module": (b) => (b.conditions = [{ code: "slow-block", height: "4", point: "on-compute", module: "" }]),
+      "a slow block with its time": (b) => (b.conditions = [{ code: "slow-block", height: "4", point: "on-compute", module: "m", ms: 1 }]),
       "an unknown detail": (b) => (b.reason.details = { message: "the raw message" }),
       "a point that is none": (b) => (b.reason.point = "on-commit"),
       "a node field the runner has no value for, given one": (b) => (b.node.connection = "connected"),

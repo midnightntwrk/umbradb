@@ -8,7 +8,8 @@
  * startup from the declarations, the configuration and a block source, the loop's start and stop heights, RN-11's
  * re-delivery and the upgrade boundary, its state and SIGTERM (`./process.ts`). Failures (task 5.4): the `refused` and
  * `halted` states with their reasons, and the retries of a lost connection or an unreachable node (`./process.ts`,
- * `./failures.ts`). The slow-block watchdog is task 5.5.
+ * `./failures.ts`). The slow-block watchdog (task 5.5): the loop's window of each height and `slow-block`
+ * (`./loop.ts`, `./process.ts`).
  */
 
 export * from "./api-server.js";
