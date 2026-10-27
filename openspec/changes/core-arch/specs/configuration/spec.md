@@ -97,6 +97,7 @@ module entry's `stop`; the `core` entry's `stop` SHALL be operational (it stops 
 | `backoffCeilingMs` | operational | integer; 30000 |
 | `lockstepInstances` | operational | instance ids; default none |
 | `backupAtStop` | operational | a file path; default absent (BK-1) |
+| `backupOnSignal` | operational | a file path; default absent (SIGUSR2 writes a backup there, BK-1, Q152) |
 | `tls` | secret | certificates and trusted roots for opt-in mutual TLS (PP-11); default absent |
 | `livenessTimeoutMs` | operational | integer; 30000 |
 | `apiReadTimeoutMs` | operational | integer; 30000 (DB-15) |
@@ -107,8 +108,8 @@ module entry's `stop`; the `core` entry's `stop` SHALL be operational (it stops 
 | `developmentOptIn` | operational | boolean; false |
 
 A private process's `core` entry has, instead of `node` and `lockstepInstances`: `instanceId` (operational, string),
-`publicDatabase` (secret), `coreTransport` (operational, address) and `testKeys` (CF-11). A private process has no key
-API listener: keys enter through configured test keys (PP-8, Q70).
+`publicDatabase` (secret) and `coreTransport` (operational, address). The core handles no keys: keys, and private items
+in general, are a module's (owner decision Q154).
 
 A process SHALL take every operational and secret field of the `core` entry from the latest `core` revision whose
 version is the build's (by start), for its whole run; the operational and secret fields of the other `core` revisions
@@ -212,15 +213,4 @@ each finding with its path.
 - **WHEN** `umbradb config check --database <url>` runs on a file that changes a recorded entry's data field
 - **THEN** it reports `changes-past` and exits non-zero, and the database is unchanged
 
-### Requirement: CF-11 Test keys in a private configuration
-
-WHERE a private process's `core` entry lists `testKeys` (`{ kind, bytes, start }`), THE system SHALL admit each through
-the key registry (PP-8) at its `start`; a test key whose kind no configured module declared, or whose bytes fail that
-module's `validateKey`, SHALL refuse startup (`invalid-configuration`); a test key not yet admitted SHALL have a start
-above the private cursor; one already admitted with the same start SHALL be accepted unchanged at every restart; one
-admitted with another start SHALL refuse startup (`test-key-conflict`); removing a test key from the list SHALL NOT
-remove the admitted key.
-
-#### Scenario: Restarting with the same test key
-- **WHEN** a private process restarts with a test key it admitted at its start
-- **THEN** startup accepts it and its `arrived_height` is unchanged
+<!-- CF-11 withdrawn by owner decision Q154 (keys are a module's, not the core's) -->

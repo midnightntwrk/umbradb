@@ -265,6 +265,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   (and `/status`, once `core-status` serves it) shows `slow-block` with the height, `on-compute` and the module within
   2 s; the height commits once, with no retry; the condition is gone after the commit; with `slowBlockMs` 5000 it never
   appears. (RN-17, AE-3, Q71)
+- **A161** `[CI]` With `slowBlockMs` 1000, a test module whose `on-after-db-write` at h awaits 3 s: `/status` shows
+  `slow-block` with h, `on-after-db-write` and the module within 2 s, and the condition is gone once that callback
+  ends; likewise for a module whose `on-finalized` awaits 3 s; nothing is cancelled or retried. (RN-17, owner decision
+  Q145)
 
 ## 6. Determinism
 
@@ -343,10 +347,11 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   parts `core-health`, `core-status` and `core-config`, each in its own folder under `src/backbone/` with its tests
   beside it, and A62–A67 pass through them; the admin server mounts only backbone parts' endpoints; a refused process
   answers all four (a refused configuration excepted: it ends the process, A157). (AE-1, Q70)
-- **A157** `[CI]` A configuration file that cannot be loaded, one that is not plain data and one that fails its schemas
-  each make `umbradb run` log every finding with its path and exit with a non-zero code, and make `startProcess` end
-  `refused`, with no admin listener opened at any time; a refusal after the configuration is validated (a changed
-  migration checksum) still answers the four endpoints. (AE-1, AE-3, owner decision Q137)
+- **A157** `[CI]` A configuration file that cannot be loaded, one that is not plain data and one that fails its schemas,
+  and a build whose module declarations fail MD-2 (an invalid declaration), each make `umbradb run` log every finding
+  with its path and exit with a non-zero code, and make `startProcess` end `refused`, with no admin listener opened at
+  any time; a refusal after the configuration is validated (a changed migration checksum) still answers the four
+  endpoints. (AE-1, AE-3, owner decisions Q137, Q148)
 
 ## 9. Test tape
 
@@ -437,7 +442,7 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A99** `[CI]` State roots match the node's on every range from genesis that task 0.3 recorded — preview 0–10,000,
   preprod 0–10,000, the undeployed devnet across its v8 → v9 upgrade and stagenet 0–10,000 (runtime 2.0, its rc.3
   package, Q139) —, each skipped by name when its tape is absent; the preview range across the runtime 1.0.300 upgrade
-  and the mainnet ranges are A154's. (LG-8, Q133)
+  and the mainnet ranges are not checked (A154 withdrawn: owner decision Q155). (LG-8, Q133)
 - **A100** `[CI]` On a devnet that starts on a v8 runtime and enacts the v9 upgrade (tape), the state is converted
   before F is applied, the root at F matches the node's, and the same holds when F has no transactions. (LG-9)
 - **A101** `[CI]` During a 60 s ledger step in the worker, `/health/live` answers 200 and every endpoint answers within
@@ -458,6 +463,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   and on PGlite; a node deleted by the sweep and needed again is reinserted; with `sweep: off` nothing is deleted;
   **negative control:** a sweep that takes grey keys in insertion order instead of byte order differs from the model
   on this fixture. (LG-14)
+- **A160** `[FAULT]` A test package that refuses one eviction at block h, after the worker freed what it can, makes
+  the worker thread end and a new one start, which loads the state at h − 1 from the database and applies h again: the
+  process does not halt, and its stored rows and state roots equal an uninterrupted run's; a package that refuses again
+  on that retry fails the block with `callback-error`; on both backends. (LG-14, owner decision Q144)
 - **A106** `[CI]` A test package returning a wrong root for one block halts with `root-mismatch` and stores nothing of
   that block. (LG-15)
 - **A107** `[CI]` `core_ledger_state.states`, `segment_results` and `events` hold the values of LG-16 for a tape range
@@ -507,27 +516,29 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   to run when `hello-ack` says `lockstep: false`. (PP-6)
 - **A118** `[CI]` An instance listed after the public cursor passed it is refused with `lockstep-behind`, and the core
   waits and names it. (PP-7)
-- **A119** `[CI]` A test key of an undeclared kind, or with bytes its module's `validateKey` rejects, refuses startup
-  with `invalid-configuration`; a test key with start h fires `on-key` once before h's `on-compute` and is stored with
-  `arrived_height` h when h commits; after a crash before that commit it is not stored, and after the restart it is
-  admitted at h. (PP-8, CF-11)
-- **A120** `[CI]` With a registered test key and 100 processed blocks, its bytes appear in no public table, log line,
-  status field or API response; the core's `/status` shows only each instance's id, connection, lockstep flag and
-  synced height. (PP-9, PP-10)
+- **A119** **Withdrawn** (owner decision Q154: keys are a module's, not the core's).
+- **A120** `[CI]` The core's `/status` shows only each instance's id, connection, lockstep flag and synced height.
+  (PP-9; its key half — a test key's bytes in no public table, log line, status field or API response, PP-10 — is
+  withdrawn by owner decision Q154: keys are a module's, not the core's)
 - **A146** `[CI]` A private module table with a `serial` column, a `now()` default or a `double precision` column
   refuses the private process's startup with the same code and message as in the core; two private instances with the
-  same configuration (test keys included), bound to the same public database, have equal contents hashes at the same
-  height. (DT-3, DT-6, PP-1, Q75)
+  same configuration, bound to the same public database, have equal contents hashes at the same height. (DT-3, DT-6,
+  PP-1, Q75)
 - **A121** `[CI]` With `tls` set, a private process without a certificate is refused by the core and one with a
   trusted certificate is accepted. (PP-11)
 - **A122** `[CI]` `umbradb backup` of a private database refuses with `private-backup-refused` without the development
   opt-in, and writes no file. (PP-12)
-- **A123** `[CI]` A private process restarting with a test key it already admitted at its start keeps its
-  `arrived_height`; the same key with another start refuses with `test-key-conflict`. (CF-11)
+- **A123** **Withdrawn** (owner decision Q154: keys are a module's, not the core's).
 - **A155** `[CI]` On both backends, a private module that requires a public `table` item starts when the public core
   provides it at every height the module runs; refuses with `item-no-provider` naming the item when no public module
   provides it, and with `item-not-available` when one provides it only from a height above the module's start. (PP-13,
   owner decision Q126)
+- **A162** `[CI]` On both backends, a private process running against a core that restarts with a data field of its
+  configuration changed halts with `public-config-changed` at its next message from the core, before it processes
+  another height; a core restarted with the same configuration changes nothing; every module API answer carries
+  `X-Umbra-Config-Hash`, which holds no secret (with a password in `database`, the header neither holds it nor changes
+  with it); a private process without a transport, reading the public configuration history again at a reconnection to
+  its public database, halts alike. (PP-14, RN-16, PP-4, owner decision Q147)
 
 ## 15. Backups and browser
 
@@ -535,6 +546,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   restored, its contents hash equals the manifest's and the source's at that height; with `backupAtStop` set, the core's
   stop writes one backup for that height; without the tool (`pg_dump` 18, or `pglite-tools`), `umbradb backup` fails
   with `backup-tools-missing`, naming what to install, and writes no file. (BK-1, BK-2)
+- **A163** `[CI]` On PGlite with a running process: paused and resumed between heights, it loses and repeats no height
+  (its committed heights and contents hash equal an unpaused run's); with `backupOnSignal` set, SIGUSR2 writes a backup
+  at its next pause, the process goes on, and the file restores like any other, every check of BK-3 passing. (BK-1,
+  owner decision Q152)
 - **A125** `[DIFF]` A backup written on PostgreSQL 18 restores on PGlite and one written on PGlite restores on
   PostgreSQL 18, each with every check of BK-3 passing; a restored database's schemas, tables, sequences and functions
   have the owners and grants of a database built by migrations (compared in the catalogs). (BK-2, BK-3)
@@ -546,6 +561,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   then succeeds. (BK-3)
 - **A128** `[DIFF]` A backup written on PostgreSQL 18 at h, restored on PGlite and on PostgreSQL 18, and continued to
   h + 100, gives the same contents hash and the same per-table digests as an instance that never stopped. (BK-4)
+- **A164** `[CI]` On both backends, a private process's backup, written under the development opt-in, restores into
+  an empty private database with BK-3's checks made against its public database, and the process continues from its
+  height + 1; one taken against another public database is refused with `private-binding-mismatch` and the binding's
+  `details.reason`, the target left empty. (BK-3, BK-4, PP-2, PP-12, owner decision Q153)
 - **A129** `[CI]` In Chrome (headless, in CI), the page runs the core, ledger and a private instance in workers on
   PGlite with the development opt-in, in memory and with OPFS; with OPFS, a reload resumes from the cursor with the same
   contents hash, and a second tab on the same database refuses with `writer-lock-held`. (BR-1)
@@ -560,10 +579,7 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 
 - **A133** `[CI]` Stagenet blocks 0–10,000 and preview blocks 0–10,000, from genesis, with every core module except
   `-fast`, sync with every state root matching the node's. (IN-4, LG-15)
-- **A154** `[MANUAL]` A full sync from genesis against the public archive nodes, with every core module except `-fast`,
-  matches every state root the node reports: preview past height 1,075,000 (across the runtime 1.0.300 upgrade at
-  1,074,620) and mainnet past 1,789,000 (blocks 1,774,492 and 1,788,980 included); the run's node versions, rate and
-  duration are recorded in the pull request. (LG-8, LG-15, Q133)
+- **A154** **Withdrawn** (owner decision Q155: the full syncs are skipped).
 - **A134** `[FAULT]` The crash sweep of A50 repeated on the stagenet 0–10,000 tape with every core module except
   `-fast`: every mandatory point (inside `on-compute`; inside `on-db-write` after the first and the last callback; just
   before and just after COMMIT; during a sweep step) and 100 seeded random points leave no partial block, no skipped
@@ -585,7 +601,8 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 ## 17. Required test ids added to the manifest
 
 Each id is a `[[id]]` token in its test title (`test/integration/required-tests.manifest.json`); the pinned count
-becomes 4 (kept harness ids) + 23.
+becomes 4 (kept harness ids) + 22. The id `private.no-key-bytes-public` (A120's key half) is withdrawn by owner
+decision Q154.
 
 | Id | Criterion |
 |---|---|
@@ -609,6 +626,5 @@ becomes 4 (kept harness ids) + 23.
 | `ledger.root-check-halts` | A106 |
 | `contract-logs.fast-equals-full` | A110 |
 | `private.lockstep-waits-no-transaction` | A117 |
-| `private.no-key-bytes-public` | A120 |
 | `backup.restore-equals-uninterrupted` | A128 |
 | `core.full-crash-sweep` | A134 |

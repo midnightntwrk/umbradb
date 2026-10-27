@@ -162,6 +162,10 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       111; no CPU burner needed), each exit 0, `Test Files 196 passed | 1 skipped (197)`, 3,890 tests passed, all 25
       required ids, 449–690 s, the last on the committed sources (after a fix to the new container test's cleanup);
       after each, no container of this worktree's labels and no test child process left.
+- [ ] 0.6 The owner's answer to issue 00032 (bump zod): zod at `^4.6.7` — `package.json`'s range, the lock file,
+      `test/dependencies/zod.test.ts` (task 0.1's probes), `docs/supply-chain/inventory.md`'s zod row and the version
+      `design.md` §7 names —; the runtime `npm audit --audit-level=high --omit=dev` passing; issue 00032 closed.
+      **Acceptance:** the runtime `npm audit` passes; the zod probes pass.
 
 ## 1. Determinism primitives
 
@@ -1412,6 +1416,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       explained (the queue's entry for a height never removed: a leak only; no publication at once: the heartbeat
       publishes within A142's 2 s). **Waits:** Q145 (the points after the `COMMIT`, `on-finalized` and RN-11's
       re-delivery are in no window).
+- [ ] 5.5a The owner's answer Q145 B: `slow-block` also over the callbacks the loop awaits outside a height's
+      processing (RN-17 as amended) — `on-after-db-write` and `on-stop-height` after each `COMMIT` (one window, from the
+      commit to the end of `on-stop-height`), each `on-finalized`, and RN-11's re-delivery at a run's start —, each a
+      window of its own timed against `slowBlockMs`, raising the same condition with the height (committed or not), the
+      point and the module, and clearing it when its window ends; nothing cancelled or retried; `design.md` §2's "A slow
+      block", the `/status` schema if it changes, and the tests.
+      **Acceptance:** A161; A142 unchanged.
 
 ## 6. Storage helpers
 
@@ -1851,6 +1862,10 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       check, the history, the genesis hash), `src/admin/` (`ConfigSnapshot`'s fields, `ProcessAdmin`'s reads: the
       identity read there), `test/admin/` and the 8.2–8.3 tests (the configuration's new fields),
       `test/cli/config-check.test.ts`.
+- [ ] 8.4a The owner's answer Q134 D: `/config` shows the runtime configuration (secrets redacted) and the build's
+      version, and no build commit (AE-5 as amended) — `build.commit` removed from `configOf`
+      (`src/admin/configuration.ts`), its type and `test/backbone/core-config/config.schema.json`, with the tests.
+      **Acceptance:** A66 (`/config`).
 
 ## 9. Test tape
 
@@ -2571,6 +2586,12 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       it deleted nothing a retained state reaches.
       **Pending:** Q144 (a deleted node a live object still holds after the retry); K's cost on real states is
       A136's to measure.
+- [ ] 12.5a The owner's answer Q144 B: when the ledger package still refuses an eviction after the worker freed what it
+      can (12.5's second attempt), the worker thread is ended and a new one started, which loads the state at h − 1 from
+      the database (task 12.4's load) and applies block h again; processing does not halt, and only a refusal on that
+      retry fails the block with `callback-error` (LG-14 as amended); `design.md` §5.4; a test package that refuses one
+      eviction, and the tests.
+      **Acceptance:** A160.
 - [ ] 12.6 Ledger tasks and the plain-data `block-parsed` (`runLedgerWorker`, the host's worker entry, the
       structured-clone check).
       **Acceptance:** A137.
@@ -2723,6 +2744,15 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       left — an item a part provides in a range ending at the cursor, a public revision superseded before its own stop,
       a binding recorded before any commit — being cases no process test sets up, each caught by its unit test; none
       equivalent.
+- [ ] 14.1b The owner's answer Q147 (the owner's design, none of the options): the core computes its configuration
+      hash once at startup, in memory, without secrets — its exact input settled in `design.md` §8 (for example the
+      configuration history's per-revision `data_hash` values) — and sets `X-Umbra-Config-Hash` beside
+      `X-Umbra-Version` on every `listen.api` answer (RN-16); `hello-ack`, `committed` and `read-result` carry it as
+      `configHash` (PP-4, design §8's schemas); a private process records it after its full startup checks and halts
+      with the new code `public-config-changed` when a message carries another, and without a transport reads the
+      public configuration history again at each reconnection to its public database (PP-14); the code in design §11's
+      halts, `ErrorCode` and the code registry with its test (A87); the module guide; the tests.
+      **Acceptance:** A162; A115 with the new field; A87.
 - [x] 14.2 The process transport and its messages; opt-in mutual TLS.
       **Acceptance:** A115, A121.
       **Done (2026-10-26):** `src/private/` (new; design §1's row): `messages.ts` — design §8's eight messages as zod
@@ -2918,6 +2948,17 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       00031-key-bytes-in-module-error-messages recorded.
       **Pending:** questions Q150 and Q151 (owner); the private-backup refusal (15.1); the browser's transport
       (16.1).
+- [ ] 14.4a The owner's answer Q154 A2: keys, and private items in general, are a module's, not the core's (FEATURES
+      records `user-secrets` as a feature module, specified later). Removed from the code: `core-key-registry`
+      (`src/backbone/core-key-registry/`, its table `core_key_registry.keys`, the item `admitted-keys`, its place in the
+      private backbone), the point `on-key` (`POINTS`, `PointCallbacks`, `LoopInput.keys`), the private `core` entry's
+      `testKeys` and the configuration rule `test-keys`, a declaration's `keyKinds` and `validateKey` (the types, the
+      validation, `/config`'s declarations and their schema), and the code `test-key-conflict`; `design.md` §1's and
+      §2's tables (the part and the `on-key` row), §10's `core_key_registry` row and §11's `test-key-conflict`, with the
+      code registry; the module guide; the tests of A119, A123 and A120's key half, with their negative controls
+      (A120's `/status` half kept); issue 00031 (a key's bytes in a module's error message) closed or rewritten for what
+      is left of it.
+      **Acceptance:** A120 (its PP-9 half), A146, A87; A119 and A123 withdrawn.
 
 ## 15. Backups
 
@@ -2942,6 +2983,12 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (`test/backup/backup.negative-control.test.ts`). The command cannot back up a PGlite directory a running
       process holds (`writer-lock-held`; Q152, not blocking); the restore is task 15.2. Issue 00032 (the
       runtime `npm audit`'s zod advisory, found while checking the new dependency) recorded.
+- [ ] 15.1a The owner's answer Q152 B: the finalized loop pauses and continues between heights (no transaction open,
+      the height's reads finished) — `ProcessHandle.pause()` and `resume()` —, and a running process given
+      `backupOnSignal` (CF-4) writes, on SIGUSR2, a backup to that path at its next pause, as the backup at stop writes
+      one, then continues: the way to back up a running PGlite process from a shell (BK-1 as amended); the `core`
+      schema's new field, `design.md` §9.1, the operator guide and the tests.
+      **Acceptance:** A163.
 - [x] 15.2 `umbradb restore`: the checks before loading, the file's SQL run in one transaction, owners and grants, the
       contents hash and state root checked before the commit; the operator guide's "restore only trusted backups".
       **Acceptance:** A125, A126, A127, A128.
@@ -2962,6 +3009,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       and PGlite 0.5.10, with A147's backup part and the committed negative controls
       (`test/backup/restore.negative-control.test.ts`). Waits: restoring a private process's backup (Q153, not
       blocking); BK-5's page (16.x).
+- [ ] 15.2a The owner's answer Q153 B: `umbradb restore` restores a private process's backup with BK-3's logic, its
+      checks against the node made against the configured public database — the binding (PP-2: the public genesis hash
+      and S) refused with `private-binding-mismatch` and its `details.reason`, the manifest's block checked against the
+      public database's committed block — and the process continues from its height + 1 (BK-3, BK-4, PP-12 as
+      amended); `src/cli/restore.ts`'s refusal of a private configuration removed; `design.md` §9.1, and §11's backup
+      refusals with the code registry; the tests.
+      **Acceptance:** A164.
 
 ## 16. Browser
 
@@ -3055,17 +3109,27 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 - [ ] 18.1 The crash worker retargeted to the runner (harness ids 1–4 kept); the crash sweep with test modules and its
       negative control; the restart-20 and cross-backend differential.
       **Acceptance:** A50, A51; required ids 1–4 pass.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
 - [ ] 18.2 The full-core runs: stagenet and preview 0–10,000 from genesis; the full-core crash sweep and its negative
-      control; the three-backend comparison; the full syncs of preview and mainnet from genesis compared with the node's
-      roots (Q133).
-      **Acceptance:** A133, A134, A135, A154.
+      control; the three-backend comparison.
+      **Acceptance:** A133, A134, A135.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
 - [ ] 18.3 The ingest benchmark against the official indexer (`bench/ingest-vs-official/`), recorded in the PR.
       **Acceptance:** A136.
-- [ ] 18.4 Add the 23 ids of `acceptance.md` §17 to the manifest and set the pinned count to 27.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
+- [ ] 18.4 Add the 22 ids of `acceptance.md` §17 to the manifest and set the pinned count to 26 (A120's key-half id
+      withdrawn, owner decision Q154).
       **Acceptance:** `npm run test:conformance` passes with every required id reported passed in its file.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
 - [ ] 18.5 The tape-apply baseline (Q72): the measurement of A143 in CI, its committed reference
       (`bench/baselines/tape-apply.json`), and the check of `slowBlockMs`'s default against it.
       **Acceptance:** A143; its figures recorded in the pull request.
+      Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
+      Q155).
 
 ## 19. Close-out
 

@@ -218,12 +218,15 @@ THE system SHALL answer every module API request from finalized data only: each 
 (`finalized`), the committed height it read and that block's hash, and IF no height has committed yet THEN the read
 SHALL fail with `no-committed-height`, which a handler that does not catch it answers with HTTP 503. A module SHALL
 decide what its answers and its subscriptions' notifications carry: THE system SHALL NOT change a module's answer,
-except that it SHALL set the header `X-Umbra-Version` to the build's version on every HTTP answer on `listen.api`, the
-subscription upgrade response included (owner decision Q131). The `X-Umbra-` prefix SHALL hold the headers shared by
-every module: the core owns `X-Umbra-Version`, replacing a module's own header of that name, and SHALL provide helpers a
-module may use to state the view, height and hash it read — the `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`
-headers on HTTP, or the `extensions` object of a GraphQL response — so its bodies stay compatible with existing clients
-(owner decisions Q104, Q105).
+except that on every HTTP answer on `listen.api`, the subscription upgrade response included, it SHALL set the header
+`X-Umbra-Version` to the build's version (owner decision Q131) and the header `X-Umbra-Config-Hash` to the process's
+**configuration hash**: a hash of its configuration without secrets (its data fields; `design.md` §8 gives the exact
+input), computed once at startup and kept in memory, so it changes only when the process restarts with another
+configuration (PP-14, owner decision Q147). The `X-Umbra-` prefix SHALL hold the headers shared by every module: the
+core owns `X-Umbra-Version` and `X-Umbra-Config-Hash`, replacing a module's own header of either name, and SHALL provide
+helpers a module may use to state the view, height and hash it read — the `X-Umbra-View`, `X-Umbra-Height` and
+`X-Umbra-Hash` headers on HTTP, or the `extensions` object of a GraphQL response — so its bodies stay compatible with
+existing clients (owner decisions Q104, Q105).
 
 #### Scenario: A GraphQL module states its height
 - **WHEN** a module answers a GraphQL query at committed height 120 through the extensions helper
@@ -232,20 +235,34 @@ headers on HTTP, or the `extensions` object of a GraphQL response — so its bod
 
 #### Scenario: The core leaves an answer as the module wrote it
 - **WHEN** a module answers `{ "data": … }` without the helpers
-- **THEN** the response's body and headers are the module's own, with `X-Umbra-Version` added
+- **THEN** the response's body and headers are the module's own, with `X-Umbra-Version` and `X-Umbra-Config-Hash`
+  added
 
 #### Scenario: Every answer names its build
 - **WHEN** a build of version 0.10.0 answers any request on `listen.api`, a module's own `X-Umbra-Version: 9` included
 - **THEN** the response carries `X-Umbra-Version: 0.10.0` once and its body is the module's
 
+#### Scenario: The configuration hash holds no secret
+- **WHEN** two processes run with configurations that differ only in the password of their `database` URL
+- **THEN** their answers carry the same `X-Umbra-Config-Hash`, and no header holds the password
+
 ### Requirement: RN-17 A slow block is reported, never cut off
 
 WHEN a height's processing — from its first callback after `on-finalized` to its commit — has run longer than
 `slowBlockMs` (CF-4), THE runner SHALL raise the condition `slow-block` (AE-3) with the height, the point it is in and,
-while a callback runs, the module; it SHALL clear the condition when that height commits or processing halts; and it
-SHALL NOT cancel or retry a height for being slow (Q71).
+while a callback runs, the module; it SHALL clear the condition when that height commits or processing halts. THE
+runner SHALL time alike, each as a window of its own, the callbacks it awaits outside that window — `on-after-db-write`
+and `on-stop-height` after each commit (one window, from the commit to the end of `on-stop-height`), each
+`on-finalized`, and RN-11's re-delivery at a restart —: each SHALL raise the same `slow-block` condition, naming the
+height (which may have committed), the point and the module, and clear it when its window ends (owner decision Q145).
+THE runner SHALL NOT cancel or retry a height or a callback for being slow (Q71).
 
 #### Scenario: A slow callback
 - **WHEN** a test module's `on-compute` awaits 3 s with `slowBlockMs` 1000
 - **THEN** `/status` shows `slow-block` with the height, `on-compute` and the module after about 1 s, the height
   commits, and the condition is gone after the commit
+
+#### Scenario: A slow callback after the commit
+- **WHEN** a test module's `on-after-db-write` at h awaits 3 s with `slowBlockMs` 1000
+- **THEN** `/status` shows `slow-block` with h, `on-after-db-write` and the module after about 1 s, and the condition
+  is gone once that callback ends

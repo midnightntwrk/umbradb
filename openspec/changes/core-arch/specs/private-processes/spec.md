@@ -13,7 +13,8 @@ THE system SHALL run one core process, the only one that talks to the node, owni
 more private processes, each owning its own private database. A private process MAY read public data; the public side
 SHALL NOT read private data and MAY call only the private calls of PP-9. A private database SHALL follow the same
 determinism rules as the public one (DT-3, DT-6; owner decision Q75): it is a function of its public database, its
-configuration (test keys included) and the heights its keys arrived at.
+configuration and the private inputs its modules take, which are each module's own — the core handles no keys (owner
+decision Q154).
 
 #### Scenario: The core never reads a private database
 - **WHEN** a core process and a private process run with a test private module
@@ -60,12 +61,14 @@ THE core SHALL listen for private processes on its `listen.transport` address ov
 browser workers, direct calls in tests), exchanging JSON messages `{ "v": 1, "type", … }` with heights as decimal
 strings and hashes as `0x`-prefixed lowercase hex, exactly as the schemas of `design.md` §8 define them:
 `hello` (private → core: `instance`, `version`, `height`, `hash` or null); `hello-ack` (core → private: `lockstep`,
-`genesis`, `start`, `cursor`, `refused` — null, `duplicate-instance` or `lockstep-behind`); `committed` (core → private:
-`height`, `hash`); `report` (lockstep private → core: `height`, `hash`); `read` (private → core: `id`, `statements` —
-an array of `{ sql, params }` run as one consistent read; used when the public database is PGlite) and `read-result`
-(core → private: `id`, `height` — `null` before the first commit — and either, per statement, `columns` (name and
-PostgreSQL type of each column) with `rows`, or `error`, a code) — and no other message (owner decision Q140: a
-private process uses this connection and its reads of public data, and nothing calls a module across it). In rows and
+`genesis`, `start`, `cursor`, `refused` — null, `duplicate-instance` or `lockstep-behind` —, `configHash`); `committed`
+(core → private: `height`, `hash`, `configHash`); `report` (lockstep private → core: `height`, `hash`); `read` (private
+→ core: `id`, `statements` — an array of `{ sql, params }` run as one consistent read; used when the public database is
+PGlite) and `read-result` (core → private: `id`, `height` — `null` before the first commit —, `configHash`, and either,
+per statement, `columns` (name and PostgreSQL type of each column) with `rows`, or `error`, a code) — and no other
+message (owner decision Q140: a private process uses this connection and its reads of public data, and nothing calls a
+module across it). `configHash` SHALL be the core's configuration hash (RN-16), which a private process checks on
+every message that carries it (PP-14, owner decision Q147). In rows and
 params, `bigint` and `numeric` values SHALL be decimal strings, `bytea` values `0x`-prefixed hex, and `jsonb` values
 JSON; a parameter string of `0x` and lowercase hex pairs SHALL be sent to the database as `bytea`, so it has a `bytea`
 column's own type and index, every other string as text (owner decision Q141). A private module's read handle through
@@ -114,22 +117,7 @@ run, because the mutable public state of the heights it missed is gone.
 - **WHEN** an instance at height 100 is added to the lockstep list while the public cursor is 500
 - **THEN** its `hello` is refused with `lockstep-behind`, and the core waits and names it
 
-### Requirement: PP-8 Keys enter through the key registry
-
-THE backbone part `core-key-registry` SHALL admit keys whose `kind` a configured private module declared (`keyKinds`)
-and whose `bytes` pass that module's `validateKey`; `key_id` = SHA-256(UTF-8 kind ‖ bytes); an id already admitted SHALL
-be left unchanged. In this change keys enter only as configured test keys (CF-11): an endpoint that accepts keys over
-the network (a key API) is not core and is not part of this change, and a later, non-core module can offer one by
-feeding the registry (Q70). A test key whose `start` is h SHALL become pending, firing `on-key`, before block h's
-`on-compute` begins. WHEN a block's `on-compute` begins, the registry SHALL take every pending key, give it that block's
-height as `arrived_height`, publish the set as the `block` item `admitted-keys`, and write them in that block's
-`on-db-write`. IF the block does not commit and is processed again THEN its keys SHALL be taken again; IF processing
-halts or the process stops or crashes first THEN pending keys SHALL be dropped, and become pending again when their
-block is next processed.
-
-#### Scenario: A test key admitted at its start
-- **WHEN** a private process's configuration lists a test key with start h, and block h commits
-- **THEN** `on-key` fired once before h's `on-compute`, and the key is stored with `arrived_height` h
+<!-- PP-8 withdrawn by owner decision Q154 (keys are a module's, not the core's) -->
 
 ### Requirement: PP-9 What the public side may call
 
@@ -140,14 +128,7 @@ THE public side SHALL call nothing on a private process except its `GET /status`
 - **WHEN** `/status` of the core is read
 - **THEN** it shows each instance's id, connection, lockstep flag and synced height, and nothing else from it
 
-### Requirement: PP-10 Keys never reach the public side
-
-THE system SHALL never log or report key bytes, and SHALL keep keys and everything private modules compute from them in
-the private process; keeping module output private is each module developer's responsibility (Q16).
-
-#### Scenario: Searching for a key
-- **WHEN** a test key is registered and blocks are processed
-- **THEN** its bytes appear in no public table, log line, status field or API response
+<!-- PP-10 withdrawn by owner decision Q154 (keys are a module's, not the core's) -->
 
 ### Requirement: PP-11 Opt-in mutual TLS
 
@@ -162,7 +143,9 @@ channel, or a browser. TEE attestation is out of scope.
 ### Requirement: PP-12 Private databases are not backed up by UmbraDB
 
 THE system SHALL refuse `umbradb backup` of a private database unless the development opt-in is set (BK-1). An operator
-can still copy the database with PostgreSQL's own tools; this rule governs only what UmbraDB writes.
+can still copy the database with PostgreSQL's own tools; this rule governs only what UmbraDB writes. A private backup
+written under the opt-in SHALL be restored as any backup is (BK-3, BK-4), checked against its public database instead
+of the node (owner decision Q153).
 
 #### Scenario: A production private backup
 - **WHEN** `umbradb backup` runs against a private process without the development opt-in
@@ -181,3 +164,18 @@ require a public `block` or `process` item.
 - **WHEN** a private module requires `ledger-events`, and the public core enables `core-ledger-state` from S
 - **THEN** the private process starts; against a public core that does not enable `core-ledger-state`, startup refuses
   with `item-no-provider` naming `ledger-events`
+
+### Requirement: PP-14 A changed public configuration halts a private process
+
+WHEN a private process starts, THE system SHALL run its full checks of the public side (PP-2, PP-13) and record the
+core's configuration hash (RN-16) from its first `hello-ack`. THE private process SHALL compare the `configHash` of
+every `hello-ack`, `committed` and `read-result` it receives with the recorded hash, and IF they differ THEN it SHALL
+halt with `public-config-changed` before it processes another height. WHERE a private process has no transport
+connection to the core, it SHALL instead read the public configuration history again at each reconnection to its
+public database, and halt alike IF its hash differs from the one it read at startup. A restart SHALL run the full
+checks again (owner decision Q147).
+
+#### Scenario: The core restarts with another configuration
+- **WHEN** a private process runs against a core that restarts with a data field of its configuration changed
+- **THEN** the private process halts with `public-config-changed` at its next message from the core, before it
+  processes another height; against a core restarted with the same configuration, nothing changes

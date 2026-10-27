@@ -61,8 +61,8 @@ split; this change is one feature by the owner's decision, recorded here as the 
 8. **Contract data:** `core-contract-states` (state and zswap-state keys), `core-contract-logs-full`, and the
    development-only `core-contract-logs-fast`.
 9. **Private processes:** binding, block intake from the public database, the process transport, independent and
-   lockstep instances, the key registry with configured test keys (a key API is not core and is left to a later
-   module, Q70), opt-in mutual TLS on the process transport.
+   lockstep instances, opt-in mutual TLS on the process transport. No key handling: keys, and private items in general,
+   are a module's (owner decision Q154; FEATURES' `user-secrets`).
 10. **Determinism tooling, backups and storage helpers:** the canonical encoding, contents hash, per-table digests
     for every module table (Q84, Q86), backup and restore with `pg_dump` (Q83, Q85), the cursor and height-versioned
     tables; the `deterministic_postgresql` component that
@@ -77,7 +77,8 @@ split; this change is one feature by the owner's decision, recorded here as the 
   private wallet data, Passport, explorer); each gets its own spec later.
 - **No tip in the database, no tip queries, no rollbacks of stored data** (Q1, Q18).
 - **No raw block archive** (Q8): the node must serve every block and its state.
-- **No backfill mechanism for private keys** (Q35) and **no TEE attestation** (Q34).
+- **No key handling in the core** (owner decision Q154; a later feature module), so **no backfill mechanism for
+  private keys** (Q35), and **no TEE attestation** (Q34).
 - **No migration of 0.9.5 databases**: the indexer always starts a new database (CORE-ARCH §3.4).
 - **No security boundary against modules**: modules are trusted code (Q46).
 - **No data source other than the Midnight node**, Celestia included (Q39).

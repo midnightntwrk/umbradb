@@ -169,7 +169,10 @@ remaining budget are visited — each removed from the grey set, marked, one uni
 marked or grey added to the grey set; a grey key with no stored node is marked and adds nothing; (4) only when the grey
 set is empty, stored nodes after the sweep position are scanned in key order, one unit each, unmarked ones deleted, and
 the position moved; (5) when the scan passes the last node, the marks and position are cleared and the phase becomes
-`idle`. Nodes the sweep deletes SHALL be evicted from the worker's caches. WHERE the `core` entry sets `sweep: off`
+`idle`. Nodes the sweep deletes SHALL be evicted from the worker's caches; IF the ledger package still refuses an
+eviction after the worker freed every object it can, THEN THE system SHALL end the worker thread and start a new one,
+which loads the state at h − 1 from the database and applies block h again, without halting — only a refusal on that
+retry SHALL fail the block, with `callback-error` (owner decision Q144). WHERE the `core` entry sets `sweep: off`
 (development only), no node SHALL be deleted.
 
 #### Scenario: Same deletions on two machines

@@ -49,7 +49,7 @@ keeping range partitioning by height and the parent-hash and genesis checks.
 | `on-db-write` | Inside the block transaction | Block write handle | In series, fixed order |
 | `on-after-db-write` | After the commit; no `block` items (RN-5) | Read handle at h | In series |
 | `on-stop-height` | After the commit of an entry's stop height; no `block` items | Read handle at h | In series: stopping modules in reverse graph order, then the core |
-| `on-key` | Private: a key became pending (PP-8) | Read handle at the cursor | In series |
+| `on-key` | Private: a key became pending (until task 14.4a, Q154) | Read handle at the cursor | In series |
 
 Parallel callbacks run in the "waves" of Kahn's algorithm restricted to the modules registered at that point: a module
 goes one wave after the latest registered module on a requirement path from it, through modules that do not register
@@ -61,7 +61,8 @@ series and nothing of the next wave runs; the wave's other callbacks are awaited
 failure in the point's order is reported with the point and the module (RN-8). At `on-stop-height` the core's parts run
 in their fixed order after the stopping modules. Each callback is called as a method of its declaration's `points`,
 with its module's process context first (`src/runner/dispatch.ts`, task 5.1). The lockstep wait (PP-6) sits between
-`on-compute` and `BEGIN`. On a private process `on-key` (PP-8; task 14.4) fires for each key that becomes pending at h
+`on-compute` and `BEGIN`. Until task 14.4a removes it (owner decision Q154: keys are a module's, not the core's), on a
+private process `on-key` (task 14.4) fires for each key that becomes pending at h
 after h's `on-start-height` and before its `on-compute` (`LoopInput.keys`, its `core-key-registry`'s), one key after
 the other, its callbacks in series in the range's order, each with its own read at the cursor (h − 1); a height
 retried from `on-compute` fires none again, one retried from `on-start-height` fires them again.
@@ -170,8 +171,9 @@ module's), or null while none runs; it logs `slow block: height <h> is still pro
 in <point>[ of <module>]` and publishes the snapshot at once. The condition clears when the height commits or its run
 fails (a halt; a retry, whose run is a window of its own), logged (`… committed after <ms> ms`, `… stopped without
 committing after <ms> ms`) and published again; it changes no readiness (AE-4). `on-finalized`, RN-11's re-delivery and
-the points after the `COMMIT` (`on-after-db-write`, `on-stop-height`) are in no window (RN-17's text; decision record
-question Q145). A callback that blocks the main thread stops the timer and every publication: `/status` answers from
+the points after the `COMMIT` (`on-after-db-write`, `on-stop-height`) are in no window as task 5.5 built it; owner
+decision Q145 B times each in a window of its own, raising the same condition (RN-17 as amended; task 5.5a). A
+callback that blocks the main thread stops the timer and every publication: `/status` answers from
 the snapshot published before it, without a condition raised meanwhile, and `/health/live` (AE-2) is the signal of the
 block; once the thread is free the condition may show until the commit. The ledger worker's step
 (`LedgerHost.activity()`) is not named in the condition: the module whose callback awaits it (`core-ledger-state`,
@@ -388,8 +390,8 @@ interface QueueRunner {                                      // given by the fin
 - **Provider functions.** `SECURITY DEFINER`, owned by the provider role, with `SET search_path = pg_catalog, <provider
   schema>, pg_temp` (`pg_temp` last, so no temporary table shadows a provider table); default privileges revoke
   `EXECUTE` from `PUBLIC`; `EXECUTE` on the routines of the schema a provider writes is granted, now and by default
-  privilege, to the roles of modules that require one of its items (DB-7). `core-ledger-state` offers `persist(key)`
-  this way (LG-13).
+  privilege, to the roles of modules that require one of its items (DB-7). No part offers one for LG-13:
+  `core-ledger-state` persists contract keys in the block's own batch (§5.4, owner decision Q143 A).
 - **`TRUNCATE`.** Every module table not declared `deterministic: false` gets a `BEFORE TRUNCATE … FOR EACH STATEMENT`
   trigger raising `truncate-not-allowed` (DB-14) — every partition too, since a statement trigger is not copied to
   partitions, and a partition of an opted-out table is opted out with it. The trigger function,
@@ -870,7 +872,7 @@ and gives its key and root (`RetainedState`), and fails with `state-not-retained
 (LG-13): while `core-contract-states` (task 13.1) is active at h, the worker persists the state and zswap-state keys
 (`contractStateKey`, `contractZswapStateKey`) of each contract the block's transactions call or deploy, in byte order,
 in the block's batch, never to be released; the `ledger-state` item carries them (`contracts`) for that module to store
-(decision record question Q143 on the route). As built (task 13.1): the contracts are also those the block's chain
+(owner decision Q143 A). As built (task 13.1): the contracts are also those the block's chain
 events name maintained (`Midnight::ContractMaintain`, whose `contract_address` is the ledger's tagged serialization of
 the address: a maintenance update changes the contract's state too), and at F every contract deployed below it (the
 `contract-deploy` rows of `core_ledger_state.events`, read at h − 1), so that CC-1's rows at F carry the converted
@@ -889,8 +891,9 @@ had passed the last node. The first block with `sweep: off` after one with it on
 `sweep_after` and makes the phase `idle`; while off, nothing else is written. The worker frees a kept parse's native
 objects when it drops the parse (`forgetTransactions`), so that no object the garbage collector has not reached yet
 holds a deleted node; should a later block's kept transaction still hold one, it frees every kept parse's natives and
-evicts again (those transactions are parsed again at their apply), and a refusal then fails the block (decision record
-question Q144).
+evicts again (those transactions are parsed again at their apply), and a refusal then fails the block as task 12.5
+built it; under owner decision Q144 B the worker thread is ended instead and a new one started, which loads the state at
+h − 1 from the database and applies h again, a refusal on that retry failing the block (LG-14; task 12.5a).
 
 ### 5.5 Ledger tasks (LG-17, Q49)
 
@@ -930,7 +933,8 @@ refuses a callback under a name that is not a point in a declaration built first
 (`src/modules/validation.ts`, task 3.1), so a module written in JavaScript or built at run time is held to the same
 declaration: the set has three lists — UmbraDB's backbone parts, its core modules, the host's user modules — and every
 shape the type forbids is refused with `invalid-declaration`, naming the field — a public module's `keyKinds`,
-`validateKey` or `needsLockstep`, a private module's own fields (PP-6, PP-8; task 14.1), included —; then MD-2's
+`validateKey` or `needsLockstep`, a private module's own fields (PP-6; task 14.1; the two key fields leave with task
+14.4a, owner decision Q154), included —; then MD-2's
 causes, one rule and one code each (`bad-id` through the schema plan's own check, `reserved-prefix` for user modules
 only — also for the id `core`, the `core` entry's (task 4.1) —, `duplicate-id`,
 `no-requirement` except for backbone parts, `item-no-lifetime`, `table-item-no-kind`, `field-no-kind` read as
@@ -959,7 +963,8 @@ above the cursor (on a new database, every range from S), a range that ends at t
 re-delivers there), the starts above the cursor and the development-only modules active at the cursor or later (Q97);
 the union's cycle check covers every range, past ones included, since startup orders every part by it (Q99).
 Each range's order is the backbone parts present in a fixed order — `core-chain`, `core-block-fetch`,
-`core-block-commit`, `core-private-source`, `core-key-registry`, `core-digest`, the admin parts — then Kahn's algorithm
+`core-block-commit`, `core-private-source`, `core-key-registry` (until task 14.4a, Q154), `core-digest`, the admin
+parts — then Kahn's algorithm
 over the active modules, the ready one with the smallest id by UTF-8 bytes first; at `on-db-write` `core-digest` moves
 last (RN-3). Startup (DB-9) runs every part of the database — the backbone and every enabled module, its revisions ended
 or not — in one order: the backbone, then Kahn over the union of the ranges' requirements, so `core_digest` exists
@@ -1002,7 +1007,8 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   their metadata (`schema.shape[field].meta().kind`, verified on 4.4.3); the `core` entry's are `PUBLIC_CORE_SCHEMA` and
   `PRIVATE_CORE_SCHEMA` (`src/config/core-settings.ts`, task 4.2): CF-4's table with its kinds and defaults, strict at
   every depth, `genesisHash` required with `custom` and refused otherwise, hashes 32 bytes of lowercase hex,
-  `apiReadTimeoutMs` from 1 to 2,147,483,647, `testKeys` secret, `ledgerTable` the table in effect (§5.6); the
+  `apiReadTimeoutMs` from 1 to 2,147,483,647, `testKeys` secret (until task 14.4a, Q154), `ledgerTable` the table in
+  effect (§5.6); the
   builders' `CoreSettings` is held equal to their input types by a type test. Only revisions whose version is this
   build's are validated against this build's schema; a `versionEntry` revision is compared with its recorded row, or —
   when it is a later version not yet recorded — recorded as written and validated by the build that carries its
@@ -1017,8 +1023,9 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   hashes, an object `config`, required for a revision of the build's version; `(id, start)` once; a `core` entry; no
   lone UTF-16 surrogate (the history could not hash it); and, for each revision of the build's version, no setting its
   schema lacks (a key check against `schema.shape`, since `z.object` strips unknown keys), the schema's own `safeParse`
-  (its messages redacted), and settings that stay plain data; on a private process, each test key of a `core`
-  revision of the build's version (`test-keys`, CF-11, PP-8; task 14.4) of a kind some module the configuration
+  (its messages redacted), and settings that stay plain data; on a private process, until task 14.4a removes the rule
+  (owner decision Q154), each test key of a `core` revision of the build's version (`test-keys`; task 14.4) of a kind
+  some module the configuration
   enables declares in `keyKinds`, its bytes taken by the `validateKey` of every such module (anything but `true`, or a
   throw, refuses; a finding names `testKeys[i].kind` or `.bytes`, never the key or a thrown message), no key listed
   twice. It returns every revision with its parsed settings (defaults applied), kinds and data fields, and S.
@@ -1139,7 +1146,8 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
 - **The private process** (task 14.1) is task 5.3's `startProcess` with `side: "private"`: the private `core` schema,
   its own database (`database`), and a backbone of `core-chain` (task 10.2's, unchanged: its configuration history, its
   identity, the process items `config`, `db` and `ledger-table`; no node client), then `src/backbone/private.ts`'s
-  `core-private-source`, `core-key-registry` and `core-digest` (the core's part, requiring `core-private-source`'s
+  `core-private-source`, `core-key-registry` (until task 14.4a, owner decision Q154) and `core-digest` (the core's
+  part, requiring `core-private-source`'s
   `private-cursor` where the core's requires `blocks`), in RN-3's fixed order; no `core-block-fetch` or
   `core-block-commit`. Its modules are `side: "private"` (an entry of another side's module refuses, `entry-side`), and
   their tables are checked by DT-6, digested and hashed as the core's (Q75); the states, reasons and retries of 5.4,
@@ -1159,7 +1167,8 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   (task 14.3) and compares its `genesis` with the configured network's too, refused alike (`network`, the message
   naming the core at `coreTransport`): with a PostgreSQL `publicDatabase` read directly, the core the instance reports
   to is checked nowhere else (task 10.2b's note); with a PGlite or no `publicDatabase` the identity came through that
-  same core. The ack's S is not compared with the public database's (decision record question Q149).
+  same core. The ack's S is not compared with the public database's (owner decision Q149 A: the operator brings a
+  correct selection of the database and the core).
 - **Binding** (PP-2). `core-private-source`'s `on-start-db`, before any private module migrates, reads the public
   database's identity (`core_chain.identity`: `genesis_hash`, `start_height`, task 10.2's table); on the first start it
   records them in `core_private_source.cursor`; on every start a recorded genesis hash or S that differs, or a private S
@@ -1207,7 +1216,7 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   the private backbone — `chain-identity`, `digest-tables`, `digest-checkpoints`: `core-chain` and `core-digest` run in
   both processes, each over its own database — is the private backbone's and is not counted; a private module that
   provides an item a public module provides at a common height is refused with `providers-overlap` (MD-6: one
-  provider an item a height; `details.publicModules`; decision record question Q146). A public provider takes no
+  provider an item a height; `details.publicModules`; owner decision Q146 A). A public provider takes no
   part in the order (it runs in the core, whose committed heights the private process reads), in cycles or in MD-4 (the
   public core judged its own starts, and its `startsMidChain` is not recorded). *Order:* PP-2's comparisons with the
   recorded binding (`genesis`, `start`, `private-start-below`) run in `checkChain` too, after the configured network
@@ -1216,7 +1225,7 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   refused for that, never by the graph reading the wrong database's items. *Reading:* a private module reads a public
   table through its `on-fetch` read of public data (Q100); requiring the item is what makes its startup check that the
   public core writes the table at every height the module runs. The items are read at the private process's startup
-  only (question Q147).
+  only; a private process halts when the public configuration changes under it (PP-14, owner decision Q147, task 14.1b).
 - **Mutual TLS** (PP-11, Q34, task 14.2). `tls` is PEM text: `certificate` and `key` the process's own, `trustedRoots`
   the CAs it trusts. On the core the transport is then an `https` server with `requestCert` and `rejectUnauthorized`
   against `trustedRoots`; a private process presents its certificate and checks the core's against its
@@ -1253,8 +1262,9 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   core that lists the instance and has not refused it; the core's close for `report-hash-mismatch` refuses the
   transport for good (no reconnection), and its waits and reads fail with that `UmbraError`, which halts the
   instance.
-- **Keys.** Configured test keys are the only key source in this change; a key API is not core and is left to a later
-  module that feeds the registry (Q70). Pending keys live in memory until their block's `on-compute` takes them (PP-8).
+- **Keys.** None in the core: keys, and private items in general, are a module's (owner decision Q154 A2; FEATURES
+  records `user-secrets` as a feature module, specified later). Task 14.4a removes what task 14.4 built, described here
+  until then.
   As built (task 14.4, `src/backbone/core-key-registry/`): the private `core` entry's `testKeys` (a secret field, so
   every revision of the backbone part has the process revision's list, Q102) are checked by the configuration's rule
   `test-keys` (§7: kind declared, `validateKey`, no key twice: `invalid-configuration`, before the database opens);
@@ -1272,7 +1282,7 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   `privateInstances` lists every instance its `core` revision lists in `lockstepInstances` (from the lockstep
   bookkeeping: connected or not, its height as the core learned it from `hello` and checked `report`s, null when not
   seen since the core started) and every other connected one (from the transport, as not lockstep, at its `hello`'s
-  height: an independent instance sends no `report`, decision record Q151), each with exactly `id`, `connected`,
+  height: an independent instance sends no `report`, owner decision Q151 A), each with exactly `id`, `connected`,
   `lockstep` and `height`; null on a private process and before startup opened the database. On a private process,
   `public.lockstep` is whether it is lockstep (its startup's `hello-ack`, kept for the run, or a later one; false
   without `coreTransport`), null until startup's chain check knows. The core's view is published with the heartbeat,
@@ -1298,7 +1308,8 @@ backup --out <file> [--config <file>]` — the configuration file, `umbradb.conf
 the database, the opt-in and the side, and its build the tables declared `deterministic: false` —; a process backs its
 own database up through `ProcessHandle.backup(out)` and `backupAtStop`, the same code; a PGlite directory opens in one
 process at a time (DB-11), so while a process holds it the command refuses with `writer-lock-held` and the process
-backs it up itself (task 15.1's Q152). The manifest's facts and the contents hash are read in the snapshot; a
+backs it up itself — on SIGUSR2 at a pause of its loop under owner decision Q152 B (task 15.1a). The manifest's facts
+and the contents hash are read in the snapshot; a
 private database (its side, or `core_private_source.cursor` in it) is refused without the opt-in before anything is read
 (PP-12); the URL's password reaches `pg_dump` as `PGPASSWORD`, never on its command line; the file is written under a
 temporary name beside its path, flushed and renamed only once complete. A sequence is not transactional: `pg_dump`
@@ -1328,7 +1339,8 @@ column owns, routines, enums, domains and ranges given to the schema's role; Umb
 and `restoreGrants` (`src/db/migrate.ts`: `EXECUTE` taken from `PUBLIC` on module routines, then `prepareSchemas`'s
 grants as each owner and the bootstrap's `core_chain`/`core_digest` grants), the contents hash with the plan's opt-outs,
 the stored root. A restored database's catalogs equal a database built by migrations' up to the order of an ACL's items
-(A125). A private process's backup is not restored by the command yet (Q153).
+(A125). A private process's backup is not restored by the command yet: owner decision Q153 B restores it against
+its public database (task 15.2a).
 
 ### 9.2 Browser build (BR)
 
@@ -1447,10 +1459,10 @@ frame the tape node could not give back byte for byte; the variant transforms' `
 **A module's call fails** (an `UmbraError` the module may catch; uncaught, its callback fails with `callback-error`):
 `state-not-retained` (LG-12: a ledger state outside the retention window, task 12.4).
 
-**`test-key-conflict` names its cause** in `details.reason` (CF-11, §8; task 14.4): `start-changed` (the key was
+**`test-key-conflict` names its cause** in `details.reason` (§8; task 14.4): `start-changed` (the key was
 admitted with another start: `index`, `admitted`, `start`) or `start-passed` (a key not admitted whose start is at or
-below the private cursor, S − 1 before the first block: `index`, `cursor`, `start`); the decision record's question
-Q150 asks whether the second is this code.
+below the private cursor, S − 1 before the first block: `index`, `cursor`, `start`). The code leaves with the keys
+(owner decision Q154, task 14.4a; Q150 withdrawn).
 
 **`private-binding-mismatch` names its cause** in `details.reason` (PP-2, §8), in the order a private start checks
 them: `public-not-started` (the public database's core never started, Q125), `network` (its genesis hash is not the

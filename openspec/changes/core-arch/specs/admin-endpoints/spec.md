@@ -42,9 +42,9 @@ THE process SHALL be in exactly one state — `starting` (startup and migrations
 following threshold), `following` (lag at or below it; default 3), `stopped`, `halted`, `stopping` (after SIGTERM) —
 with zero or more conditions — `waiting-for-node`, `waiting-for-lockstep`, `finality-stall`, `node-retrying`,
 `database-retrying`, `upgrade-required`, `slow-block` (RN-17). A refused or halted process SHALL stay up and live,
-except that IF the configuration cannot be loaded, is not plain data (CF-1) or fails its schemas (CF-2, CF-3) THEN the
-process SHALL log every finding with its path and exit with a non-zero code, having served no admin endpoint (owner
-decision Q137).
+except that IF the build's module declarations fail their validation (MD-2), or the configuration cannot be loaded, is
+not plain data (CF-1) or fails its schemas (CF-2, CF-3), THEN the process SHALL log every finding with its path and exit
+with a non-zero code, having served no admin endpoint (owner decisions Q137, Q148).
 **Lag** is, for the core, the node's finalized head minus the cursor and, for a private process, the public cursor minus
 its own.
 
@@ -57,6 +57,11 @@ its own.
 - **WHEN** startup refuses because a setting fails its schema (`livenessTimeoutMs: "30s"`)
 - **THEN** every finding is logged with its path, the process exits with a non-zero code, and no admin listener was
   opened
+
+#### Scenario: A fault of the build's declarations ends the process
+- **WHEN** startup refuses because the configuration file exports `modules = [stats, stats]` (`duplicate-id`, MD-2)
+- **THEN** the finding is logged with the module and its position, the process exits with a non-zero code, and no
+  admin listener was opened
 
 ### Requirement: AE-4 Readiness
 
@@ -80,7 +85,7 @@ reported only, as RFC 3339 text in UTC, `2025-05-21T14:30:00Z`, Q68). Fields wit
 /config` SHALL answer 200 with JSON holding: the entries in effect and the configuration history; the operational
 fields; enabled modules with their declarations (without callbacks); the chain identity; the ledger version table in
 effect with package identities; the database backend and version and whether the writer lock is held; the build version
-and commit.
+— no build commit: a running build does not know the commit it was built from (owner decision Q134).
 
 #### Scenario: Before the first block
 - **WHEN** `/status` is read on an empty database before block S commits

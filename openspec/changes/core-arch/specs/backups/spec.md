@@ -16,11 +16,19 @@ dependency of UmbraDB: the command SHALL look for it when it runs and, IF it is 
 fail with `backup-tools-missing` and say what to install (owner decision Q85). The dump and the manifest SHALL see the
 same committed height: on PostgreSQL the command reads the cursor and computes the contents hash in one `REPEATABLE READ
 READ ONLY` transaction whose snapshot `pg_dump` uses (`--snapshot`); on PGlite all of it runs as one queued job, so
-commits wait.
+commits wait. THE finalized loop SHALL pause and continue on request (`ProcessHandle.pause()`, `resume()`) only between
+heights — no transaction open and the height's reads finished —, so a paused process loses and repeats no height; WHERE
+`backupOnSignal` (CF-4) is set, a running process SHALL, on SIGUSR2, write a backup to that path at its next pause, as
+the backup at stop writes one, and continue (owner decision Q152): the way to back up from a shell a running PGlite
+process, whose directory the command cannot open while the process holds it (DB-11).
 
 #### Scenario: Backup while syncing
 - **WHEN** a backup is written while blocks keep committing
 - **THEN** every table in it reflects the height in its manifest, and its contents hash equals the manifest's
+
+#### Scenario: A backup of a running PGlite process
+- **WHEN** a process on PGlite with `backupOnSignal` set receives SIGUSR2 while blocks commit
+- **THEN** it writes a backup at its next pause and goes on from the next height, and the file restores like any other
 
 #### Scenario: No `pg_dump` on the machine
 - **WHEN** `umbradb backup` runs against PostgreSQL on a machine without the PostgreSQL 18 client
@@ -52,7 +60,11 @@ recorded migration with the same ids and checksums (`backup-build-mismatch`); th
 give every schema, table, sequence and function the owner and grants DB-6 and DB-7 require (creating the module roles if
 the server lacks them), recompute the contents hash and compare it with the manifest's (`contents-hash-mismatch`), and,
 WHERE `core-ledger-state` is in the history, compare the stored state root at the manifest's height with the node's
-(`backup-root-mismatch`); any failure SHALL roll the whole restore back, leaving the target empty. Because a restore
+(`backup-root-mismatch`); any failure SHALL roll the whole restore back, leaving the target empty. WHERE the backup is
+a private process's (PP-12), THE checks against the node SHALL be made against the configured public database instead:
+the binding the backup records (PP-2: the public genesis hash and S) SHALL be the public database's, else the restore
+refuses with `private-binding-mismatch` and the binding's `details.reason`, and the manifest's block SHALL be the
+public database's committed block at that height (`backup-block-not-finalized`) (owner decision Q153). Because a restore
 runs the file's SQL with the writer's rights, THE operator documentation SHALL say to restore only backups from a
 trusted source.
 
@@ -65,7 +77,8 @@ trusted source.
 
 WHEN a backup taken at h is restored and the process continues to h + 100, THE database SHALL keep the backup's S and
 resume from h + 1, and SHALL hold the same contents hash and the same per-table digests as an instance that synced to
-h + 100 without stopping, on either backend.
+h + 100 without stopping, on either backend. A private process's restored backup SHALL continue alike, from its public
+database (owner decision Q153).
 
 #### Scenario: Restore on the other backend
 - **WHEN** a backup written on PostgreSQL 18 at h is restored on PGlite, one written on PGlite is restored on PostgreSQL
