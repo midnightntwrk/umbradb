@@ -1,5 +1,4 @@
 import type { ChildProcess } from "node:child_process";
-import { UNVALIDATED_CONFIG } from "../../src/admin/configuration.js";
 import { once } from "node:events";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
@@ -13,11 +12,7 @@ import { ProcessAdmin } from "../../src/admin/process-admin.js";
 import type { AdminServer, AdminStartOptions } from "../../src/admin/server.js";
 import { startAdminServer } from "../../src/admin/server.js";
 import type { AdminSnapshot } from "../../src/admin/types.js";
-import { buildCoreVersion } from "../../src/config/build.js";
-import { DEFAULT_ADMIN_ADDRESS } from "../../src/config/core-settings.js";
 import { validateConfig } from "../../src/config/validate.js";
-import { UmbraError } from "../../src/db/errors.js";
-import { reasonOf } from "../../src/runner/failures.js";
 import { coreEntry } from "../../src/config/entries.js";
 import { type ProcessStatus, startProcess, statusOf } from "../../src/runner/process.js";
 import { spawnChild } from "../child-processes.js";
@@ -30,9 +25,7 @@ import {
   adminCoreSettings,
   adminSource,
   ask,
-  observe,
   startWithAdmin,
-  stateProblems,
   statusWhen,
   within,
 } from "./admin-harness.js";
@@ -42,14 +35,13 @@ import {
  * serves them on the configuration's `listen.admin` from the moment its `core` revision is known — before the database
  * opens, so every later refusal answers there — until `stop()` has closed the database, then ends its worker thread and
  * its heartbeat, so nothing of it keeps Node.js alive; a listener that cannot listen refuses startup (`listen-failed`,
- * before the database opens); a startup refused before its configuration was validated answers on the configuration's
- * `listen.admin` when it is an address, else on CF-4's default (Q127, shipped A). `ProcessAdmin` itself: what it
- * publishes and when, its log lines, and closing at every step.
+ * before the database opens); a startup refused by its configuration itself opens no admin listener and ends the
+ * process (owner decision Q137 B, task 8.1b: `./refused-configuration.test.ts`, A157; here, a real process that ends
+ * by itself). `ProcessAdmin` itself: what it publishes and when, its log lines, and closing at every step.
  */
 
 const WORKER = fileURLToPath(new URL("./exit.worker.ts", import.meta.url));
 const REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));
-const PASSWORD = "pw-8-1-EARLY";
 
 /** A port held by another listener, and its release. */
 async function heldPort(): Promise<{ readonly port: number; release(): Promise<void> }> {
@@ -243,63 +235,7 @@ describe("the process publishes at once when startup ends, processing ends and t
   }, 60_000);
 });
 
-describe("a startup refused before its configuration was validated (Q127, shipped A)", () => {
-  it("answers on the configuration's listen.admin: refused, its findings, live 200, ready 503, no secret", async () => {
-    const database = `postgres://indexer:${PASSWORD}@127.0.0.1:9/umbra`;
-    const run = startWithAdmin({ database, extra: { livenessTimeoutMs: "thirty seconds" } });
-    expect(await run.requested).toBe("127.0.0.1:0");
-    await expect(run.handle.started).rejects.toMatchObject({ code: "invalid-configuration" });
-    const origin = await run.origin();
-    await statusWhen(origin, (body) => body.state === "refused");
-    const seen = await observe(origin);
-    expect(stateProblems(seen, { state: "refused", ready: false, reason: { code: "invalid-configuration", module: null } })).toEqual([]);
-    expect((seen.status.json as { reason: unknown }).reason).toMatchObject({
-      details: {
-        reason: "invalid-entries",
-        findings: [{ path: "entries[0].config.livenessTimeoutMs", message: expect.stringContaining("livenessTimeoutMs") }],
-      },
-    });
-    expect(seen.config.json).toEqual(JSON.parse(JSON.stringify(UNVALIDATED_CONFIG)));
-    for (const answer of Object.values(seen)) expect(answer.text).not.toContain(PASSWORD);
-    expect(run.lines[0]).toMatch(/^startup refused: invalid-configuration$/);
-    expect(run.lines[1]).toMatch(/^admin endpoints listening on 127\.0\.0\.1:\d+$/);
-    await run.handle.stop();
-    expect(await ask(origin, "/status")).toMatchObject({ status: null, error: "ECONNREFUSED" });
-  }, 60_000);
-
-  it("asks for CF-4's default 0.0.0.0:8081 when the configuration names no usable listen.admin, or could not be loaded", async () => {
-    // The starter is told the address; it listens on a free port here instead of 8081 (a shared machine).
-    const asked: string[] = [];
-    const starter = (options: AdminStartOptions) => {
-      asked.push(options.address);
-      return startAdminServer({ ...options, address: "127.0.0.1:0" });
-    };
-    for (const [what, config] of [
-      ["an invalid address", { data: { entries: [{ ...adminCore("pglite:memory", 1, { extra: { listen: { admin: "8081" } } }) }] } }],
-      ["no listen setting", { data: { entries: [{ ...adminCore("pglite:memory", 1, { extra: { retainStates: "many" } }) }] } }],
-      ["no file", { file: join(tmpdir(), "umbradb-8-1-no-such-config.ts") }],
-    ] as const) {
-      const build = testBuild([]);
-      let server: AdminServer | undefined;
-      const handle = startProcess({
-        declarations: build.declarations,
-        config: config as never,
-        source: adminSource(1n),
-          log: () => undefined,
-        admin: async (options) => {
-          server = await starter(options);
-          return server;
-        },
-      });
-      await handle.ended;
-      expect(asked.at(-1), what).toBe(DEFAULT_ADMIN_ADDRESS);
-      const origin = `http://127.0.0.1:${(server as AdminServer).port}`;
-      const status = await statusWhen(origin, (body) => body.state === "refused");
-      expect(status.reason, what).toMatchObject({ code: "invalid-configuration" });
-      await handle.stop();
-    }
-  }, 60_000);
-
+describe("a stop before the configuration was read", () => {
   it("a stop before the configuration was read starts no admin listener", async () => {
     const controller = new AbortController();
     controller.abort();
@@ -349,28 +285,41 @@ async function lineOf(child: Child, key: string, patienceMs = 120_000): Promise<
 }
 
 describe("the worker thread ends with the process (no orphan, nothing left keeping Node.js alive)", () => {
-  for (const mode of ["run", "refuse"] as const) {
-    it(`a real process (${mode}): up and live until SIGTERM, then it closes and exits by itself, its admin port released`, async () => {
-      const directory = mkdtempSync(join(tmpdir(), "umbradb-admin-exit-"));
-      const child = startChild(`pglite:${join(directory, "db")}`, mode);
-      try {
-        const { port } = (await lineOf(child, "port")) as { port: number };
-        const origin = `http://127.0.0.1:${port}`;
-        const state = mode === "run" ? "following" : "refused";
-        await statusWhen(origin, (body) => body.state === state, 60_000);
-        expect((await ask(origin, "/health/live")).status).toBe(200);
-        // Up: the heartbeat keeps Node.js alive while the loop waits, or while the process stays refused.
-        expect(await within(child.exited, 1_500)).toBe(false);
-        child.child.kill("SIGTERM");
-        expect(await Promise.race([child.exited, sleep(60_000).then(() => "still running")])).toBe(0);
-        expect(await lineOf(child, "closed")).toEqual({ closed: "stopping" });
-        expect(await ask(origin, "/health/live")).toMatchObject({ status: null, error: "ECONNREFUSED" });
-      } finally {
-        if (child.child.exitCode === null) child.child.kill("SIGKILL");
-        rmSync(directory, { recursive: true, force: true });
-      }
-    }, 180_000);
-  }
+  it("a real process (run): up and live until SIGTERM, then it closes and exits by itself, its admin port released", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "umbradb-admin-exit-"));
+    const child = startChild(`pglite:${join(directory, "db")}`, "run");
+    try {
+      const { port } = (await lineOf(child, "port")) as { port: number };
+      const origin = `http://127.0.0.1:${port}`;
+      await statusWhen(origin, (body) => body.state === "following", 60_000);
+      expect((await ask(origin, "/health/live")).status).toBe(200);
+      // Up: the heartbeat keeps Node.js alive while the loop waits.
+      expect(await within(child.exited, 1_500)).toBe(false);
+      child.child.kill("SIGTERM");
+      expect(await Promise.race([child.exited, sleep(60_000).then(() => "still running")])).toBe(0);
+      expect(await lineOf(child, "closed")).toEqual({ closed: "stopping" });
+      expect(await ask(origin, "/health/live")).toMatchObject({ status: null, error: "ECONNREFUSED" });
+    } finally {
+      if (child.child.exitCode === null) child.child.kill("SIGKILL");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it("a real process whose configuration is refused (refuse) ends by itself, unsignalled: no admin listener, nothing left keeping Node.js alive (Q137 B)", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "umbradb-admin-exit-"));
+    const child = startChild(`pglite:${join(directory, "db")}`, "refuse");
+    try {
+      // No signal is sent: the refusal ends the process, and nothing of the admin endpoints keeps Node.js alive.
+      expect(await Promise.race([child.exited, sleep(60_000).then(() => "still running")])).toBe(0);
+      expect(await lineOf(child, "ended")).toEqual({ ended: "refused" });
+      expect(await lineOf(child, "closed")).toEqual({ closed: "refused" });
+      expect(child.lines.some((line) => "port" in (JSON.parse(line) as object))).toBe(false);
+      expect(existsSync(join(directory, "db"))).toBe(false);
+    } finally {
+      if (child.child.exitCode === null) child.child.kill("SIGKILL");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 180_000);
 
   it("a real process whose admin listener cannot listen: refused, up until SIGTERM, then it exits by itself (its thread ended)", async () => {
     const held = await heldPort();
@@ -455,7 +404,6 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     expect(fake.published.at(-1)?.status).toMatchObject({ cursor: "3" });
     // Closed: it starts nothing more.
     await admin.serve(config, config.entries[0] as never);
-    await admin.refused();
     expect(fake.started).toHaveLength(1);
   });
 
@@ -482,29 +430,6 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     fail(new Error("refused"));
     await sleep(0);
     expect(fake.published.at(-1)?.status).toMatchObject({ cursor: "8" });
-    await admin.close();
-  });
-
-  it("refused() listens once on the early address and logs a listener that cannot listen; serve() after it is a no-op", async () => {
-    const lines: string[] = [];
-    const tried: string[] = [];
-    const admin = new ProcessAdmin({
-      status: () => running({ phase: "refused" }),
-      log: (line) => lines.push(line),
-      start: async (options) => {
-        tried.push(options.address);
-        throw Object.assign(new Error(`admin listener: listen EACCES on ${options.address}`), { code: "EACCES", syscall: "listen" });
-      },
-    });
-    admin.loaded({ config: { data: { entries: [] } }, declarations: { backbone: [], core: [], user: [] }, side: "public" });
-    await admin.refused();
-    await admin.refused();
-    const config = checked();
-    await admin.serve(config, config.entries[0] as never);
-    expect(tried).toEqual([DEFAULT_ADMIN_ADDRESS]);
-    expect(lines).toEqual([
-      `admin endpoints cannot listen on ${DEFAULT_ADMIN_ADDRESS}: admin listener: listen EACCES on ${DEFAULT_ADMIN_ADDRESS}`,
-    ]);
     await admin.close();
   });
 
@@ -573,13 +498,12 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     await admin.close();
   });
 
-  it("an admin closed before it listened starts no listener: neither serve() nor refused()", async () => {
+  it("an admin closed before it listened starts no listener: serve() is a no-op", async () => {
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => running(), log: () => undefined, start: fake.start });
     await admin.close();
     const config = checked();
     await admin.serve(config, config.entries[0] as never);
-    await admin.refused();
     expect(fake.started).toEqual([]);
   });
 
@@ -607,33 +531,6 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     const admin = new ProcessAdmin({ status: () => running(), log: () => undefined, start: fake.start });
     await admin.serve(config, config.entries[0] as never);
     expect(fake.published[0]?.config.core?.settings).toMatchObject({ database: "[redacted]", backupAtStop: "/backups/[redacted]" });
-    expect(JSON.stringify(fake.published)).not.toContain(password);
-    await admin.close();
-  });
-
-  it("refused() shows the reason's details through the redaction of the configuration as loaded", async () => {
-    const password = "pw-8-1-LOADED";
-    const error = new UmbraError("invalid-configuration", `holds ${password}`, {
-      reason: "invalid-entries",
-      findings: [{ path: "entries[0].config.x", message: `a message holding ${password}` }],
-    });
-    const status = running({ phase: "refused", reason: reasonOf(error), ended: { kind: "refused", error } });
-    const fake = recording();
-    const admin = new ProcessAdmin({ status: () => status, log: () => undefined, start: fake.start });
-    admin.loaded({
-      config: {
-        data: {
-          entries: [{ id: "core", start: 1, version: buildCoreVersion() as never, config: { database: `postgres://u:${password}@h:9/x` } }],
-        },
-      },
-      declarations: { backbone: [], core: [], user: [] },
-      side: "public",
-    });
-    await admin.refused();
-    expect(fake.published[0]?.status.reason?.details).toEqual({
-      reason: "invalid-entries",
-      findings: [{ path: "entries[0].config.x", message: "a message holding [redacted]" }],
-    });
     expect(JSON.stringify(fake.published)).not.toContain(password);
     await admin.close();
   });

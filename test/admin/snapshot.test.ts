@@ -14,7 +14,6 @@ import { CallbackFailure } from "../../src/runner/dispatch.js";
 import { reasonOf } from "../../src/runner/failures.js";
 import { HeightFailure } from "../../src/runner/loop.js";
 import { statusOf, type ProcessStatus, type StatusFacts } from "../../src/runner/process.js";
-import { earlyAdminAddress } from "../../src/admin/process-admin.js";
 
 /**
  * The snapshot the runner publishes to the admin worker (task 8.1; AE-1, AE-3, AE-5, AE-6), and the helpers the
@@ -22,7 +21,8 @@ import { earlyAdminAddress } from "../../src/admin/process-admin.js";
  * (d)) —, the reason as a sanitized error — its text built from the code and the reason's fields only, its details only
  * the allowlisted fields of the failure's own `UmbraError`, each text through the configuration's redaction (AE-6) —,
  * never `ended` (which holds the raw error); the settings as they may be shown (`/config`, 4.2's note (d)); the
- * redaction and the admin address of a startup refused before its configuration was validated (Q127).
+ * redaction of a configuration not yet validated (what a process logs a refusal of its configuration through, task
+ * 8.1b; Q127's admin address before the validation is gone with it, owner decision Q137 B).
  */
 
 const PASSWORD = "pw-8-1-SECRET";
@@ -257,42 +257,5 @@ describe("the settings as they may be shown (4.2's note (d)), and the early reda
     expect(early.text(`password ${PASSWORD} and ${encodeURIComponent(PASSWORD)}`)).toBe(`password ${REDACTED} and ${REDACTED}`);
     expect(earlyRedactor(undefined).text(`see ${DATABASE}`)).toBe(`see postgres://${REDACTED}@db.example:5432/umbra`);
     expect(earlyRedactor(undefined).text(PASSWORD)).toBe(PASSWORD);
-  });
-
-  it("earlyAdminAddress: listen.admin of the latest core entry of the build's version when it is an address, else CF-4's default", () => {
-    const version = buildCoreVersion();
-    const entry = (start: number, admin: unknown, of: unknown = version) => ({
-      id: "core",
-      start,
-      version: of,
-      config: admin === undefined ? {} : { listen: { admin } },
-    });
-    expect(earlyAdminAddress({ entries: [entry(0, "127.0.0.1:10001"), entry(5, "127.0.0.1:10002")] })).toBe("127.0.0.1:10002");
-    expect(earlyAdminAddress({ entries: [entry(5, "127.0.0.1:10002"), entry(0, "127.0.0.1:10001")] })).toBe("127.0.0.1:10002");
-    expect(earlyAdminAddress({ entries: [entry(0, "[::1]:10003")] })).toBe("[::1]:10003");
-    // Another version's revision (a versionEntry) gives none (Q102).
-    expect(earlyAdminAddress({ entries: [entry(0, "127.0.0.1:10001"), entry(9, "127.0.0.1:10009", { ...version, umbradb: "9.9.9" })] })).toBe(
-      "127.0.0.1:10001",
-    );
-    for (const data of [
-      undefined,
-      null,
-      "x",
-      { entries: "x" },
-      { entries: [] },
-      { entries: [entry(0, undefined)] },
-      { entries: [entry(0, "not an address")] },
-      { entries: [entry(0, "127.0.0.1:70000")] },
-      { entries: [entry(0, 8081)] },
-      { entries: [{ ...entry(0, "127.0.0.1:10001"), start: "0" }] },
-      { entries: [{ ...entry(0, "127.0.0.1:10001"), id: "m" }] },
-      { entries: [{ ...entry(0, "127.0.0.1:10001"), config: { listen: "127.0.0.1:10001" } }] },
-      { entries: [{ ...entry(0, "127.0.0.1:10001"), config: null }] },
-      { entries: [null, 3] },
-      // The latest revision decides, as for a valid configuration: its listen without admin is the default.
-      { entries: [entry(0, "127.0.0.1:10001"), entry(5, undefined)] },
-    ]) {
-      expect(earlyAdminAddress(data), JSON.stringify(data)).toBe(DEFAULT_ADMIN_ADDRESS);
-    }
   });
 });

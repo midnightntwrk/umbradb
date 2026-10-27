@@ -22,7 +22,7 @@ this change relies on is restated in `specs/`. Owner decisions cited as Qn are i
 | `vendor/ledger/` | Vendored ledger builds: per version the pinned upstream source reference, the patches, the build script and the built WASM with its SHA-256 (§5.2) |
 | `src/private/` | The process transport (core server, private client), lockstep bookkeeping (no key API: not core, Q70) |
 | `src/backup/` | `umbradb backup` and `umbradb restore` around `pg_dump` and `pglite-tools` (§9.1) |
-| `src/admin/` | The admin HTTP server (`node:http`) in its own worker thread, reading a state snapshot the runner publishes through a `SharedArrayBuffer` and messages — the heartbeat's last tick in one 64-bit slot of shared memory (`src/runner/heartbeat.ts`, one atomic store and load), `status()` encoded for JSON on the main thread (heights as decimal text, the reason a sanitized error, the settings redacted), one whole snapshot per message —, and running the endpoints of `core-health`, `core-status` and `core-config` on it; 404 for anything else; the redaction and sanitized-error helpers they share; the runner's side, which `startProcess` runs unless told `admin: false` (Q128 B; task 8.1a): the heartbeat and the publication from startup on, the listener on `listen.admin` once the process's `core` revision is chosen, before the database opens, until `stop()` (AE-1, AE-2, AE-6, Q70; task 8.1) |
+| `src/admin/` | The admin HTTP server (`node:http`) in its own worker thread, reading a state snapshot the runner publishes through a `SharedArrayBuffer` and messages — the heartbeat's last tick in one 64-bit slot of shared memory (`src/runner/heartbeat.ts`, one atomic store and load), `status()` encoded for JSON on the main thread (heights as decimal text, the reason a sanitized error, the settings redacted), one whole snapshot per message —, and running the endpoints of `core-health`, `core-status` and `core-config` on it; 404 for anything else; the redaction and sanitized-error helpers they share; the runner's side, which `startProcess` runs unless told `admin: false` (Q128 B; task 8.1a): the heartbeat and the publication from startup on, the listener on `listen.admin` once the process's `core` revision is chosen, before the database opens, until `stop()`, and never before: a refusal of the configuration itself ends the process with no listener (AE-1, AE-2, AE-6, Q70, Q137 B; tasks 8.1, 8.1b) |
 | `src/cli/` | The `umbradb` command |
 | `browser/` | The browser build: page, workers and its build script (§9.2) |
 | `tools/tape/` | Tape reader and writer, tape node, recording builder, variant transforms (unexported, for tests) |
@@ -121,7 +121,11 @@ included, finishes —, then the module API, the node client, the database and t
 through the configuration's redaction.
 
 **Failures** (task 5.4: `src/runner/failures.ts`, `process.ts`). A startup refusal leaves the process up in `refused`
-(IN-12, AE-3), its database closed and its writer lock released; a failure of the loop leaves it up in `halted` (RN-8)
+(IN-12, AE-3), its database closed and its writer lock released — except a refusal of the configuration itself, before
+the process's `core` revision is known (the build's declarations, the configuration's loading, plain data and
+validation, the choice of its revision), which ends the process: every finding logged with its path
+(`src/runner/configuration-refusal.ts`), no admin listener opened, `refused` with `closed` resolved, nothing left to
+stop (owner decision Q137 B, task 8.1b) —; a failure of the loop leaves it up in `halted` (RN-8)
 — before the `COMMIT` the loop rolled the height back, after it the height stays committed —, the module API answering
 at the cursor and the database open until `stop()`. Both are not ready and carry a reason: a code of §11, the height,
 the module and the point, never a message (AE-5, AE-6). The code is the failure's own where §11 lists it (an
@@ -1056,10 +1060,11 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   source (`nodeSourceOf`); private: one `privateIntake()` and its backbone —, the admin endpoints by default (Q128 B)
   and the log on stderr; a file that cannot be loaded is given to startup as the file, which refuses it as itself. The
   first SIGTERM or SIGINT stops the process (RN-13; a second one gets Node.js's default); the command exits once it
-  closed — 1 when it ended `refused` or `failed`, else 0. A refused or halted process stays up until then (IN-12). For a
-  refusal before the validation, which the process logs by its code only, the command adds `config check`'s findings
-  of the first step that refused (the loader, the declarations with the file's modules, the validation), one
-  `umbradb run: <path>: <message> [<code>]` line each, redacted the same way.
+  closed — 1 when it ended `refused` or `failed`, else 0. A refusal of the configuration itself (the loader, the
+  declarations with the file's modules, the validation) ends the process, which logs every finding as `config check`
+  names it (`startup refused: <path>: <message> [<code>]`, `src/config/findings.ts`), redacted, and serves no admin
+  endpoint: the command exits 1 at once (Q137 B, task 8.1b), adding no line of its own. Any other refused or halted
+  process stays up until a signal (IN-12).
 
 ## 8. Private processes (PP)
 
@@ -1304,7 +1309,9 @@ module table.
 Each code below has a test that triggers it and checks it, named in `test/runner/code-registry.ts`, or the task that
 adds it there (A87; task 10.4): a code added here comes with its test.
 
-**Startup refuses** (state `refused`, live, not ready), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,
+**Startup refuses** (state `refused`, live, not ready — but a refusal of the configuration itself, before its core
+revision is known, logs every finding and ends the process, serving no admin endpoint: owner decision Q137 B, task
+8.1b), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,
 `changes-past`, `missing-entry`, `not-plain-data`, `invalid-configuration`, `upgrade-required`, `requires-resync`,
 `migration-checksum-changed`, `migration-missing`, `migration-failed`, `non-deterministic-column`,
 `non-deterministic-table`, `no-primary-key`, `unsupported-key-type`, `unsupported-column-type` (DT-6, Q58, Q61),
@@ -1358,7 +1365,8 @@ the private database recorded: `recorded`, `public`), `private-start-below` (the
 **Command:** `umbradb run [--config <file>]`, `umbradb config check <file> [--database <url>]`, `umbradb backup --out
 <file>`, `umbradb restore <file>` — `package.json`'s `bin` `umbradb` (`dist/cli/main.js`, task 4.4). No command, or
 any other, or a wrong argument, prints the usage and exits 2; a failed check exits 1; `run` (task 4.4a, §7) runs until
-SIGTERM or SIGINT and exits 1 when startup refused or processing halted, else 0; until tasks 15.1 and 15.2 build them,
+SIGTERM or SIGINT and exits 1 when startup refused or processing halted, else 0, and exits 1 at once when the
+configuration itself is refused (Q137 B, task 8.1b); until tasks 15.1 and 15.2 build them,
 `backup` and `restore` exit 3, not available in this build. The configuration file's `modules` export is the
 command's user modules (CF-1, Q106 B).
 

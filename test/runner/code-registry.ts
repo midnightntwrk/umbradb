@@ -273,7 +273,10 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
     ]),
   ),
   "refusal:invalid-declaration": [
-    { file: `${RUNNER}/refusals.test.ts`, test: "an invalid declaration: refused with its code, up until stopped, logged by its code only" },
+    {
+      file: `${RUNNER}/refusals.test.ts`,
+      test: "an invalid declaration: refused with its code, logged with its finding, and the process ends by itself (Q137 B)",
+    },
   ],
   ...Object.fromEntries(
     ["item-no-provider", "providers-overlap", "graph-cycle", "item-not-available", "cannot-start-mid-chain"].map((code) => [

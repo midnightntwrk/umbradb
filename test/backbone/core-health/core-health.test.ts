@@ -149,9 +149,10 @@ describe("A140 for /health/live and /health/ready: core-health's, from its own f
   });
 
   it("a refused process answers both: live 200 while it ticks, ready 503 with the state refused", async () => {
-    // Refused by the validation (a liveness timeout that is no number): no database is opened.
-    const run = startWithAdmin({ database: "postgres://indexer:unused@127.0.0.1:9/umbradb", extra: { livenessTimeoutMs: "5 s" } });
-    await expect(run.handle.started).rejects.toMatchObject({ code: "invalid-configuration" });
+    // Refused once the configuration is validated — PGlite without the development opt-in (CF-9) —, so no database is
+    // opened; a refusal of the configuration itself would end the process instead, serving nothing (task 8.1b).
+    const run = startWithAdmin({ database: "pglite:memory", extra: { developmentOptIn: false } });
+    await expect(run.handle.started).rejects.toMatchObject({ code: "development-opt-in-required" });
     const origin = await run.origin();
     await statusWhen(origin, (body) => body.state === "refused");
     expect(await ask(origin, "/health/live")).toMatchObject({ status: 200, json: { live: true } });

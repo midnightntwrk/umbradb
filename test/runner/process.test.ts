@@ -649,7 +649,7 @@ describe("processRevisions: each part's revisions for its process context (RN-7,
 });
 
 describe("startProcess without a database", () => {
-  it("refuses an invalid declaration first, logging nothing, and its block source is never made", async () => {
+  it("refuses an invalid declaration first, its block source never made, logged with its finding; the process ends (Q137 B)", async () => {
     let made = false;
     const lines: string[] = [];
     const handle = startProcess({
@@ -664,8 +664,15 @@ describe("startProcess without a database", () => {
     await expect(handle.started).rejects.toMatchObject({ code: "invalid-declaration" });
     expect(await handle.ended).toMatchObject({ kind: "refused" });
     expect(made).toBe(false);
-    expect(lines).toEqual(["startup refused: invalid-declaration"]);
+    expect(lines).toEqual([
+      "startup refused: invalid-declaration (1 finding); the process ends",
+      expect.stringMatching(/^startup refused: the user module Bad: .* \[invalid-declaration\]$/),
+    ]);
+    // It ended by itself: nothing to stop.
+    await handle.closed;
+    expect(handle.status().state).toBe("refused");
     await handle.stop();
+    expect(handle.status().state).toBe("refused");
   });
 
   it("logs to standard error by default, and loads umbradb.config.ts from the working directory by default (CF-1)", async () => {
@@ -685,7 +692,10 @@ describe("startProcess without a database", () => {
     } finally {
       process.stderr.write = write;
     }
-    expect(written).toEqual(["startup refused: invalid-configuration\n"]);
+    expect(written).toEqual([
+      "startup refused: invalid-configuration (1 finding); the process ends\n",
+      expect.stringMatching(/^startup refused: .*umbradb\.config\.ts: no configuration file at .* \[invalid-configuration file-not-found\]\n$/),
+    ]);
   });
 
   it("logs a refusal after the configuration was validated with its code and message; a value thrown that is no Error as text", async () => {

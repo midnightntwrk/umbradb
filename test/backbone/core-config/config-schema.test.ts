@@ -136,9 +136,17 @@ describe.each(PROCESS_BACKENDS)("A66: /config through the process validates on $
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("A66: refused before the validation, refused after it, and running with everything the process knows", async () => {
-    const early = startWithAdmin({ database: (await backend.database()).setting, extra: { tipCap: "many" } });
-    expect(await valid(early, (b) => b.state === "refused")).toMatchObject({ core: null, entries: null, database: null });
+  it("A66: refused before the database opens, refused after it, and running with everything the process knows", async () => {
+    // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in,
+    // CF-9); a refusal of the configuration itself ends the process and serves no /config (task 8.1b, Q137 B).
+    const early = startWithAdmin({ database: "pglite:memory", extra: { developmentOptIn: false } });
+    expect(await valid(early, (b) => b.state === "refused")).toMatchObject({
+      core: { settings: { database: "[redacted]" } },
+      history: null,
+      modules: null,
+      // Known from the `core` revision; not opened: no server version, no writer lock.
+      database: { backend: "pglite", version: null, writerLock: false },
+    });
     await early.handle.stop();
 
     const db = await backend.database();

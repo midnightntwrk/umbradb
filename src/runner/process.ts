@@ -43,7 +43,12 @@
  * 10. the finalized loop, with the core's stop and RN-12's upgrade boundary ({@link upgradeBoundary}).
  * A refusal closes what startup opened — the node client, the ledger worker, the database, its writer lock released,
  * then the block source — and rejects {@link ProcessHandle.started} with it; the process stays up, `refused` with the
- * refusal's reason, until stopped (IN-12, AE-3). A retryable failure of steps 4 to 8 (`connection-lost`, `node-unreachable`) refuses nothing:
+ * refusal's reason, until stopped (IN-12, AE-3). **A refusal of the configuration itself** — of steps 1 to 3, before
+ * the process's `core` revision is known: the declarations, the configuration's loading, plain data and validation, the
+ * choice of its revision — ends the process instead (owner decision Q137 B, task 8.1b): it logs every finding with its
+ * path (`./configuration-refusal.ts`), opens no admin listener (no validated `listen.admin` exists), and is `refused`
+ * with `closed` resolved, nothing left to stop; `umbradb run` then exits 1. Every later refusal stays up as above.
+ * A retryable failure of steps 4 to 8 (`connection-lost`, `node-unreachable`) refuses nothing:
  * steps 4 to 10 run again after IN-10's back-off (see **Retries**), with new process contexts and new bindings of
  * `core-chain` and `core-block-fetch` (the node client and the block source kept). The waits come before the module
  * API, so a retry never meets it open.
@@ -102,16 +107,19 @@
  * startup (`listen-failed`). A private process's side of it is its block source's (`openPublicSide`), which the
  * process gives S and its log ({@link SourceShared}).
  *
- * **Logs** go through the configuration's redaction (`configRedactor`, CF-4, AE-6) once it is validated; before that,
- * a refusal is logged by its code only, since nothing yet knows which strings are secret. A refusal, a halt and each
- * retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
+ * **Logs** go through the configuration's redaction (`configRedactor`, CF-4, AE-6) once it is validated; a refusal of
+ * the configuration itself, through the redaction of its secrets as the validation reads them (`earlyRedactor`: the
+ * configuration as loaded, else the URL patterns only), finding by finding (`startup refused: <code> (<n> findings);
+ * the process ends`, then `startup refused: <path>: <message> [<code>]` each). A later refusal, a halt and each retry
+ * are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
  * `processing retries in <ms> ms (<condition>, attempt <n>): …`, `startup retries …`).
  *
  * **The admin endpoints** (AE-1, AE-2; task 8.1, `../admin/`), unless {@link ProcessInput.admin} is `false` (owner
  * decision Q128 B, task 8.1a): the heartbeat ticks from `startProcess` on and publishes `status()` to the admin worker;
  * the admin listener starts on `listen.admin` once the process's `core` revision is known, before the database opens
- * (a listener that cannot listen — an address another listener holds — refuses startup, `listen-failed`), or at a
- * refusal before that; it closes after the database at {@link ProcessHandle.stop}.
+ * (a listener that cannot listen — an address another listener holds — refuses startup, `listen-failed`), and never
+ * before (a refusal before that ends the process, above); it closes after the database at {@link ProcessHandle.stop},
+ * and the heartbeat ends when a refusal of the configuration ends the process.
  */
 
 import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
@@ -144,7 +152,7 @@ import { loadConfig, type LoadOptions } from "../config/load.js";
 import { type PlainObject, plainData } from "../config/plain-data.js";
 import { processCoreEntry } from "../config/process.js";
 import { configRedactor, type Redactor } from "../config/redact.js";
-import { type CheckedConfig, type CheckedEntry, validateConfig } from "../config/validate.js";
+import { type CheckedConfig, type CheckedEntry, type ConfigInput, validateConfig } from "../config/validate.js";
 import type { Database } from "../db/api.js";
 import { type MigrationPart, startDatabase } from "../db/migrate.js";
 import { startWriter } from "../db/writer-lock.js";
@@ -154,12 +162,14 @@ import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
 import { ProcessAdmin } from "../admin/process-admin.js";
+import { earlyRedactor } from "../admin/redaction.js";
 import type { AdminStarter } from "../admin/server.js";
 import { NodeClient, type NodeClientOptions, type NodeRetry } from "../node/client.js";
 import { resolveGraph } from "../modules/graph.js";
 import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
 import { type StartedModuleApi, startModuleApi } from "./api-server.js";
 import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
+import { configurationRefusalLines } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failures.js";
 import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput, type SlowBlockEvent } from "./loop.js";
@@ -348,10 +358,14 @@ export interface ProcessHandle {
   readonly ended: Promise<ProcessingEnd>;
   /**
    * Stops the process (RN-13): `stopping`; the loop's signal aborted and the loop awaited; the module API, then the
-   * database, closed. Resolves once all of it is done; calling it again returns the same promise.
+   * database, closed. Resolves once all of it is done; calling it again returns the same promise. After a refusal of
+   * the configuration ended the process, it returns {@link closed}, the state left `refused`.
    */
   stop(): Promise<void>;
-  /** Resolves once {@link stop} completed. */
+  /**
+   * Resolves once {@link stop} completed, or once a refusal of the configuration itself ended the process (owner
+   * decision Q137 B: see the module comment).
+   */
   readonly closed: Promise<void>;
 }
 
@@ -653,15 +667,17 @@ class Process implements ProcessHandle {
     // Begins on the next microtask, so that a signal aborted before `startProcess` returned stops it before anything.
     await Promise.resolve();
     const input = this.#input;
+    // The configuration as loaded, once it is: what a refusal of its validation is redacted with.
+    let loadedInput: ConfigInput | undefined;
     try {
       this.#step();
       const declarations = validateDeclarations(input.declarations);
       const given = input.config ?? {};
       const loaded =
         "data" in given ? { file: given.file, data: plainData(given.data, given.file) } : await loadConfig(given);
-      this.#admin?.loaded({ config: loaded, declarations, side: input.side ?? "public" });
+      loadedInput = { config: loaded, declarations, side: input.side ?? "public" };
       this.#step();
-      const checked = validateConfig({ config: loaded, declarations, side: input.side ?? "public" });
+      const checked = validateConfig(loadedInput);
       this.#redactor = configRedactor(checked);
       this.#start = BigInt(checked.start);
       const core = (input.processCore ?? processCoreEntry)(checked);
@@ -705,9 +721,12 @@ class Process implements ProcessHandle {
       }
     } catch (error) {
       if (!this.#stop.signal.aborted) {
-        const { code } = reasonOf(error);
-        this.#log(`startup refused: ${code}${this.#redactor === undefined ? "" : `: ${messageOf(error)}`}`);
-        if (this.#admin !== undefined) await this.#admin.refused();
+        if (this.#core === undefined) {
+          // A refusal of the configuration itself (Q137 B): every finding logged; `#run` then ends the process.
+          for (const line of configurationRefusalLines(error, earlyRedactor(loadedInput).text)) this.#log(line);
+        } else {
+          this.#log(`startup refused: ${reasonOf(error).code}: ${messageOf(error)}`);
+        }
       }
       // The module API opens in the last step, after which only a stop throws: the stop closes it.
       await this.#transport?.close();
@@ -941,7 +960,10 @@ class Process implements ProcessHandle {
     } catch (error) {
       if (this.#stop.signal.aborted) return this.#ended({ kind: "signal" });
       this.#fail("refused", error);
-      return this.#ended({ kind: "refused", error });
+      const end = this.#ended({ kind: "refused", error });
+      // Refused before its `core` revision was known: by the configuration itself, which ends the process (Q137 B).
+      if (this.#core === undefined) this.#closing ??= this.#endItself();
+      return end;
     }
     let end: LoopEnd;
     for (;;) {
@@ -973,6 +995,15 @@ class Process implements ProcessHandle {
   #ended(end: ProcessingEnd): ProcessingEnd {
     this.#end = end;
     return end;
+  }
+
+  /**
+   * Ends the process after a refusal of its configuration (Q137 B), which opened nothing but the heartbeat: the
+   * heartbeat stopped, `closed` resolved; the state stays `refused`, and {@link stop} returns this.
+   */
+  async #endItself(): Promise<void> {
+    await this.#admin?.close();
+    this.#resolveClosed();
   }
 }
 

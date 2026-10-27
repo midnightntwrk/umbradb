@@ -40,6 +40,7 @@ import { resolve } from "node:path";
 import { PUBLIC_CORE_SCHEMA, type ProcessSide } from "../config/core-settings.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { historyFindings, type HistoryRow } from "../config/history.js";
+import { type ConfigFinding, findingText, refusalFindings } from "../config/findings.js";
 import { type LoadedConfig, loadConfig, MODULES_EXPORT } from "../config/load.js";
 import type { PlainData } from "../config/plain-data.js";
 import { processCoreEntry } from "../config/process.js";
@@ -91,13 +92,14 @@ export type StepName = "type check" | "configuration" | "history";
 /** How a check ended. */
 export type StepStatus = "passed" | "failed" | "not run";
 
-/** One finding: its code (`TS2322`, `invalid-configuration settings-schema`, `changes-past data`), where, and what. */
-export interface CheckFinding {
-  readonly code: string;
-  /** `file:line:column` for the compiler's, a configuration's path (`entries[0].config.pollMs`), or `--database`. */
-  readonly path: string;
-  readonly message: string;
-}
+/**
+ * One finding: its code (`TS2322`, `invalid-configuration settings-schema`, `changes-past data`), where — `file:line:
+ * column` for the compiler's, a configuration's path (`entries[0].config.pollMs`), or `--database` — and what
+ * (`src/config/findings.ts`, which a process's log of a refusal of its configuration shares, task 8.1b).
+ */
+export type CheckFinding = ConfigFinding;
+
+export { refusalFindings };
 
 /** What one check reported. */
 export interface StepReport {
@@ -253,21 +255,6 @@ export function declarationFinding(error: unknown, user: readonly unknown[]): Ch
   return { code: error.code, path: declarationPath(error, user), message: error.message };
 }
 
-/** The findings of a refusal of the loader, the validation or the process's `core` revision. */
-export function refusalFindings(error: unknown, file: string): CheckFinding[] {
-  if (!(error instanceof UmbraError)) throw error;
-  const details = error.details as {
-    readonly findings?: readonly Finding[];
-    readonly reason?: string;
-    readonly path?: string;
-  };
-  if (details.findings !== undefined) return details.findings.map((found) => ruleFinding(error.code, found));
-  if (error.code === "not-plain-data") {
-    return [{ code: error.code, path: String(details.path), message: error.message }];
-  }
-  return [{ code: `${error.code} ${String(details.reason)}`, path: file, message: error.message }];
-}
-
 /** The type check (see the module comment). */
 const TYPE_CHECK: CheckStep = {
   name: "type check",
@@ -385,11 +372,9 @@ export const CHECK_STEPS: readonly CheckStep[] = Object.freeze([TYPE_CHECK, CONF
 /** `n finding(s)`. */
 const findingsText = (count: number) => `${count} finding${count === 1 ? "" : "s"}`;
 
-/** One finding's line: its message, which starts with its path (or is given one), and its code. */
+/** One finding's line of the report: its text (`findingText`: its message, starting with its path, and its code). */
 export function findingLine(found: CheckFinding): string {
-  const where = found.path === "" ? "(the default export)" : found.path;
-  const text = found.path !== "" && found.message.startsWith(found.path) ? found.message : `${where}: ${found.message}`;
-  return `  ${text} [${found.code}]`;
+  return `  ${findingText(found)}`;
 }
 
 /** The report as the command prints it. */

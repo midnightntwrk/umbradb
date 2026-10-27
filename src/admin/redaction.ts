@@ -7,9 +7,9 @@
  * - {@link shownSettings}: a revision's settings as `/config` may show them (4.2's note (d)) — a revision of the
  *   build's version by its schema's kinds; a `versionEntry`'s (whose kinds only its recorded row knows) every field
  *   redacted until the history has found it equal to its recorded row, then as data.
- * - {@link earlyRedactor}: before the configuration is validated (a startup refused by the validation, or before it),
- *   the redaction of its secrets as the validation reads them (`configSecrets`, task 4.4), or, with no configuration
- *   loaded, of URL credentials only.
+ * - {@link earlyRedactor}: before the configuration is validated, the redaction of its secrets as the validation reads
+ *   them (`configSecrets`, task 4.4), or, with no configuration loaded, of URL credentials only — what a process logs a
+ *   refusal of its configuration through (task 8.1b; such a process serves no admin endpoint, owner decision Q137 B).
  */
 
 import type { PlainObject } from "../config/plain-data.js";

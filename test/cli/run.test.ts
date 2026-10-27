@@ -3,8 +3,6 @@ import { existsSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EXIT, runProcessCommand, USAGE } from "../../src/cli/command.js";
-import { refusalLines } from "../../src/cli/run.js";
-import { loadConfig } from "../../src/config/load.js";
 import { startProcess as startWithoutAdmin } from "../runner/process-build.js";
 import type { ProcessHandle } from "../../src/runner/process.js";
 import { ask, statusWhen } from "../admin/admin-harness.js";
@@ -29,9 +27,11 @@ import {
  * process (the bundled `src/cli/main.ts`: Node.js's own type stripping, a real SIGTERM, the exit code). The process is
  * what the command builds: UmbraDB's backbone, the node source (`nodeSourceOf`) on the `core` entry's `node` — a tape
  * node serving a synthetic chain (`./run-fixtures.ts`) —, and the admin endpoints, served by default (Q128 B), here on
- * `127.0.0.1:0`. Also: a file listing a module that neither it exports nor UmbraDB ships is refused naming the module,
- * stays up refused until signalled and exits 1; SIGINT stops it as SIGTERM does; `run`'s arguments; and the committed
- * negative control, a run that ignores the file's modules.
+ * `127.0.0.1:0`. Also: a file listing a module that neither it exports nor UmbraDB ships is refused naming the module —
+ * a refusal of the configuration itself, which the process logs, finding by finding, and which ends it: the command
+ * exits 1 with no signal (owner decision Q137 B, task 8.1b; A157 is `test/admin/refused-configuration.test.ts`) —; a
+ * halted process stays up until signalled and exits 1; SIGINT stops it as SIGTERM does; `run`'s arguments; and the
+ * committed negative control, a run that ignores the file's modules.
  */
 
 /** How long a process may take to reach the head, and to exit after its signal, on a loaded machine. */
@@ -63,6 +63,19 @@ async function statsRows(db: ProcessDatabase): Promise<string[]> {
 
 /** Every height from S = 1 to the head, as `stats` writes them with its label `label`. */
 const everyHeight = (label: string) => Array.from({ length: Number(HEAD) }, (_, i) => `${i + 1} ${label}`);
+
+/**
+ * The command's result once it ended by itself — no signal sent —, or null when it had not within `PATIENCE_MS` (it is
+ * then stopped with SIGTERM, so that the test ends).
+ */
+async function endedByItself(running: ReturnType<typeof runHere>) {
+  const result = await Promise.race([running.result, sleep(PATIENCE_MS, null)]);
+  if (result === null) {
+    running.signals.emit("SIGTERM");
+    await running.result;
+  }
+  return result;
+}
 
 /** Waits until `check` holds or `patienceMs` passed (then fails with `what`). */
 async function until(check: () => boolean, what: () => string, patienceMs = PATIENCE_MS): Promise<void> {
@@ -157,30 +170,20 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
   beforeAll(() => backend.start());
   afterAll(() => backend.stop());
 
-  it("a file listing stats that it does not export is refused naming stats, stays up refused until SIGTERM, exits 1", async () => {
+  it("a file listing stats that it does not export is refused naming stats: the process logs it and ends, exit 1 unsignalled", async () => {
     const db = await backend.database();
     const file = write({ core: runCoreSettings(db.setting, "ws://127.0.0.1:9/node"), modules: null });
     const run = runInChild(project, ["--config", file]);
     try {
-      const port = await run.adminPort(PATIENCE_MS);
-      const status = await statusWhen(
-        `http://127.0.0.1:${port}`,
-        (body) => {
-          if (body.state === "syncing" || body.state === "following") throw new Error(`the process runs: ${body.state}`);
-          return body.state === "refused";
-        },
-        PATIENCE_MS,
-      );
-      expect(status.reason).toMatchObject({ code: "invalid-configuration" });
-      // The process logs the refusal by its code (before the validation nothing tells the file's secrets apart); the
-      // command adds the finding, naming the module.
-      expect(run.stderr()).toMatch(/^startup refused: invalid-configuration$/m);
-      expect(run.stderr()).toMatch(
-        /^umbradb run: entries\[1\]\.id \(stats from 1\): this build has no module stats: .* \[invalid-configuration entry-id\]$/m,
-      );
-      expect((await ask(`http://127.0.0.1:${port}`, "/health/live")).status).toBe(200);
-      run.child.kill("SIGTERM");
+      // A refusal of the configuration itself ends the process (Q137 B): no signal is sent, no admin listener opened.
       expect(await exitWithin(run, PATIENCE_MS)).toBe(EXIT.failed);
+      expect(run.stderr()).toMatch(/^startup refused: invalid-configuration \(1 finding\); the process ends$/m);
+      expect(run.stderr()).toMatch(
+        /^startup refused: entries\[1\]\.id \(stats from 1\): this build has no module stats: .* \[invalid-configuration entry-id\]$/m,
+      );
+      expect(adminPortIn(run.stderr())).toBeNull();
+      // The process logged the finding; the command adds none of its own.
+      expect(run.stderr()).not.toContain("umbradb run:");
     } finally {
       run.child.kill("SIGKILL");
     }
@@ -207,19 +210,18 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     }
   }, PATIENCE_MS * 2);
 
-  it("a file that cannot be loaded is refused by startup as itself, and the command names why (exit 1)", async () => {
-    // Refused before it is loaded, the process's admin listener would take CF-4's default 0.0.0.0:8081: this one
-    // serves none (the tests' startProcess).
+  it("a file that cannot be loaded is refused by startup as itself, which logs why and ends: exit 1 unsignalled", async () => {
+    // The tests' startProcess, which serves no admin endpoints (none opens here anyway: the refusal ends the process
+    // before any listener, task 8.1b, which A157's test checks with the runner's own).
     const run = runHere(["--config", "no-such.config.ts"], { start: startWithoutAdmin });
-    await untilRefused(run);
+    const result = await endedByItself(run);
+    expect(result?.code).toBe(EXIT.failed);
     expect((await run.status()).reason?.code).toBe("invalid-configuration");
-    run.signals.emit("SIGTERM");
-    const result = await run.result;
-    expect(result.code).toBe(EXIT.failed);
-    expect(result.stderr).toMatch(/^startup refused: invalid-configuration$/m);
-    expect(result.stderr).toMatch(
-      /^umbradb run: .*no-such\.config\.ts: no configuration file at .*no-such\.config\.ts.* \[invalid-configuration file-not-found\]$/m,
+    expect(result?.stderr).toMatch(/^startup refused: invalid-configuration \(1 finding\); the process ends$/m);
+    expect(result?.stderr).toMatch(
+      /^startup refused: .*no-such\.config\.ts: no configuration file at .*no-such\.config\.ts.* \[invalid-configuration file-not-found\]$/m,
     );
+    expect(result?.stderr).not.toContain("umbradb run:");
   }, PATIENCE_MS * 2);
 
   it("without --config it runs umbradb.config.ts of the working directory (here: none, refused as such)", async () => {
@@ -233,9 +235,12 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
       },
     });
     const result = inProcess(["run"], `${project.dir}/types`, { run });
-    await until(() => handle?.status().state === "refused", () => `refused: ${handle?.status().state}`);
-    signals.emit("SIGTERM");
-    const ended = await result;
+    // Refused as a file that cannot be loaded, the process ends by itself (Q137 B): no signal is sent.
+    const ended = await Promise.race([result, sleep(PATIENCE_MS, null)]);
+    if (ended === null) signals.emit("SIGTERM");
+    expect(ended).not.toBeNull();
+    expect(handle?.status().state).toBe("refused");
+    if (ended === null) return;
     expect(ended.code).toBe(EXIT.failed);
     expect(ended.stderr).toMatch(/umbradb\.config\.ts: no configuration file at .*types\/umbradb\.config\.ts/);
   }, PATIENCE_MS * 2);
@@ -329,69 +334,14 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
       const db = await backend.database();
       const file = write({ core: runCoreSettings(db.setting, tape.url) });
       const ignoring = runHere(["--config", file], { userModules: () => [] });
-      await untilRefused(ignoring);
+      const result = await endedByItself(ignoring);
       expect((await ignoring.status()).reason?.code).toBe("invalid-configuration");
-      ignoring.signals.emit("SIGTERM");
-      const result = await ignoring.result;
-      expect(result.code).toBe(EXIT.failed);
-      expect(result.stderr).toMatch(/^startup refused: invalid-configuration$/m);
-      expect(result.stderr).toMatch(/^umbradb run: entries\[1\]\.id \(stats from 1\): this build has no module stats: /m);
+      expect(result?.code).toBe(EXIT.failed);
+      expect(result?.stderr).toMatch(/^startup refused: entries\[1\]\.id \(stats from 1\): this build has no module stats: /m);
     } finally {
       await tape.close();
     }
   }, PATIENCE_MS * 2);
-});
-
-describe("why startup refused, before the validation: the command's own lines (refusalLines)", () => {
-  const PASSWORD = "pw-4-4a-REFUSED";
-  const database = `postgres://indexer:${PASSWORD}@127.0.0.1:9/indexer`;
-
-  it("a fault of the build's declarations with the file's modules names the module's place (MD-2)", async () => {
-    const loaded = await loadConfig({ cwd: project.dir, file: write({ core: runCoreSettings(database, "ws://127.0.0.1:9/n"), modules: "[stats, stats]" }) });
-    const lines = refusalLines({ loaded, loadError: undefined, user: loaded.modules, side: "public" });
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/^umbradb run: modules\[1\]: the user module stats \(position 2\) has the id of .* \[duplicate-id\]$/);
-  });
-
-  it("every finding of the validation, the file's secrets hidden (CF-4, AE-6)", async () => {
-    const loaded = await loadConfig({
-      cwd: project.dir,
-      file: write({
-        core: runCoreSettings(database, "ws://127.0.0.1:9/n", { apiReadTimeoutMs: 0 }),
-        statsConfig: '{ label: "s", pollMs: 0 }',
-      }),
-    });
-    const lines = refusalLines({ loaded, loadError: undefined, user: loaded.modules, side: "public" });
-    expect(lines).toEqual([
-      expect.stringMatching(/^umbradb run: entries\[0\]\.config\.apiReadTimeoutMs \(core from 1\): .* \[invalid-configuration settings-schema\]$/),
-      expect.stringMatching(/^umbradb run: entries\[1\]\.config\.pollMs \(stats from 1\): .* \[invalid-configuration settings-schema\]$/),
-    ]);
-    expect(lines.join("\n")).not.toContain(PASSWORD);
-  });
-
-  it("a loader's refusal quoting the file's own error shows no URL's credentials (AE-6)", async () => {
-    files += 1;
-    const name = `run-${files}-throws.config.ts`;
-    project.write(name, `throw new Error("cannot reach postgres://indexer:${PASSWORD}@db/x");\nexport default {};\n`);
-    const error = await loadConfig({ cwd: project.dir, file: name }).catch((caught: unknown) => caught);
-    const lines = refusalLines({ loaded: null, loadError: error, user: [], side: "public" });
-    expect(lines).toEqual([expect.stringMatching(/^umbradb run: .* \[invalid-configuration load-failed\]$/)]);
-    expect(lines.join("\n")).toContain("cannot reach postgres://");
-    expect(lines.join("\n")).not.toContain(PASSWORD);
-  });
-
-  it("the loader's refusal, at the file", async () => {
-    const error = await loadConfig({ cwd: project.dir, file: "no-such.config.ts" }).catch((caught: unknown) => caught);
-    const lines = refusalLines({ loaded: null, loadError: error, user: [], side: "public" });
-    expect(lines).toEqual([expect.stringMatching(/^umbradb run: .*no-such\.config\.ts: no configuration file at .* \[invalid-configuration file-not-found\]$/)]);
-  });
-
-  it("none for a refusal of a later step, which the process logs itself with its message", async () => {
-    const loaded = await loadConfig({ cwd: project.dir, file: write({ core: runCoreSettings(database, "ws://127.0.0.1:9/n") }) });
-    expect(refusalLines({ loaded, loadError: undefined, user: loaded.modules, side: "public" })).toEqual([]);
-    // A thrown value that is no refusal of the loader gives no line either.
-    expect(refusalLines({ loaded: null, loadError: new Error("not a refusal"), user: [], side: "public" })).toEqual([]);
-  });
 });
 
 const run = (running: ReturnType<typeof runHere>) => running.handle();

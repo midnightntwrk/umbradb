@@ -14,7 +14,9 @@ import { core, entryOf, loggingModule, settle, startProcess, testBuild } from ".
  * (the refusal's code, and the module and point where there is one), its database closed and its writer lock released;
  * AE-3's scenario (a migration checksum that changed) on both backends, and the three startup failures §11 names no
  * code for (decision record Q115, shipped A): a failing `on-start-db` or `on-start-api` callback (`callback-error`,
- * with the point and the module) and a module API listener that cannot listen (`listen-failed`).
+ * with the point and the module) and a module API listener that cannot listen (`listen-failed`). A refusal before the
+ * configuration is validated — of the configuration itself, or of the build's declarations before it — ends the process
+ * instead (owner decision Q137 B, task 8.1b; A157 is `test/admin/refused-configuration.test.ts`).
  */
 
 /** Starts a build of `user` on `db` with `listen`, and waits for its startup to end; the handle and its log. */
@@ -151,7 +153,7 @@ describe.each(PROCESS_BACKENDS)("refused startups (IN-12, AE-3) on $name", (back
 });
 
 describe("refused startups without a database", () => {
-  it("an invalid declaration: refused with its code, up until stopped, logged by its code only", async () => {
+  it("an invalid declaration: refused with its code, logged with its finding, and the process ends by itself (Q137 B)", async () => {
     const lines: string[] = [];
     const handle = startProcess({
       declarations: { backbone: [], core: [], user: [{ id: "Bad" }] },
@@ -171,10 +173,15 @@ describe("refused startups without a database", () => {
       // The refusal's details name the module (its id as declared): an allowlisted field (AE-6).
       reason: { code: "invalid-declaration", height: null, module: "Bad", point: null },
     });
-    expect(await staysUp(handle)).toBe(true);
-    expect(lines).toEqual(["startup refused: invalid-declaration"]);
+    // Refused before the configuration was validated, as a refusal of the configuration itself: no admin address is
+    // known, so the process ends (task 8.1b) — `closed` resolves with no stop, the state stays refused.
+    expect(await Promise.race([handle.closed.then(() => "closed"), sleep(30_000, "still up")])).toBe("closed");
+    expect(lines).toEqual([
+      "startup refused: invalid-declaration (1 finding); the process ends",
+      expect.stringMatching(/^startup refused: the user module Bad: .* \[invalid-declaration\]$/),
+    ]);
     await handle.stop();
-    expect(handle.status().state).toBe("stopping");
+    expect(handle.status().state).toBe("refused");
   });
 
   it("a value thrown that is no Error refuses with database-error, logged as text", async () => {

@@ -25,7 +25,7 @@ import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { BACKBONE_ORDER, resolveGraph } from "../../../src/modules/graph.js";
 import { type DeclarationSet, validateDeclarations } from "../../../src/modules/validation.js";
 import { statusOf, type StatusFacts } from "../../../src/runner/process.js";
-import { ADMIN_GENESIS, adminCoreSettings, adminSnapshot, ask, startWithAdmin, statusWhen } from "../../admin/admin-harness.js";
+import { ADMIN_GENESIS, adminCoreSettings, adminSnapshot, ask, startWithAdmin, statusWhen, within } from "../../admin/admin-harness.js";
 import { LOOP_BACKBONE } from "../../runner/loop-harness.js";
 import { entryOf, loggingModule } from "../../runner/process-build.js";
 import { TEST_LEDGER_TABLE } from "../../private/builds.js";
@@ -349,14 +349,14 @@ describe("A140 for /config: core-config's, from its own folder, its tests beside
     expect(Object.isFrozen(CORE_CONFIG_ENDPOINTS) && Object.isFrozen(CORE_CONFIG_ENDPOINTS.endpoints)).toBe(true);
   });
 
-  it("a refused process answers /config with the build only; one past the validation with its configuration redacted", async () => {
+  it("a configuration refused by its validation serves no /config (the process ends); one past the validation answers with its configuration redacted", async () => {
+    // A refusal of the configuration itself ends the process before any admin listener opens (task 8.1b, Q137 B):
+    // nothing is asked of the admin starter, and the process closes by itself.
     const early = startWithAdmin({ database: `postgres://indexer:${PASSWORD}@127.0.0.1:9/umbradb`, extra: { tipCap: "many" } });
     await expect(early.handle.started).rejects.toMatchObject({ code: "invalid-configuration" });
-    await statusWhen(await early.origin(), (body) => body.state === "refused");
-    const before = await ask(await early.origin(), "/config");
-    expect(before).toMatchObject({ status: 200, json: { core: null, entries: null, build: { umbradb: UMBRADB_VERSION, commit: null } } });
-    expect(before.text).not.toContain(PASSWORD);
-    await early.handle.stop();
+    await early.handle.closed;
+    expect(await within(early.requested, 100)).toBe(false);
+    expect(early.lines.join("\n")).not.toContain(PASSWORD);
 
     // Past the validation, still starting: the database cannot be reached (port 9), its connection retried.
     const late = startWithAdmin({ database: `postgres://indexer:${PASSWORD}@127.0.0.1:9/umbradb`, extra: { backoffCeilingMs: 100 } });

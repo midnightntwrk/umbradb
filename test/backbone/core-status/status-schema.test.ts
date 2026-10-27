@@ -291,7 +291,7 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
     await closing;
   }, 180_000);
 
-  it("A66: halted with its reason; refused before and after the validation, with their details", async () => {
+  it("A66: halted with its reason; refused before the database opens and after it, with their details", async () => {
     const failing = loggingModule("f", [], ["on-db-write"], {
       points: {
         ...loggingModule("f", [], ["on-db-write"]).points,
@@ -312,10 +312,12 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
     });
     await halted.handle.stop();
 
-    const invalid = startWithAdmin({ database: (await backend.database()).setting, extra: { tipCap: "many" } });
-    const early = await valid(invalid, (b) => b.state === "refused");
-    expect(early.reason).toMatchObject({ code: "invalid-configuration", details: { findings: [expect.objectContaining({ path: "entries[0].config.tipCap" })] } });
-    await invalid.handle.stop();
+    // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in,
+    // CF-9); a refusal of the configuration itself ends the process and serves no /status (task 8.1b, Q137 B).
+    const unopened = startWithAdmin({ database: "pglite:memory", extra: { developmentOptIn: false } });
+    const early = await valid(unopened, (b) => b.state === "refused");
+    expect(early.reason).toMatchObject({ code: "development-opt-in-required", height: null, module: null, point: null });
+    await unopened.handle.stop();
 
     const db = await backend.database();
     const first = startWithAdmin({ database: db.setting, user: [loggingModule("m", [], ["on-db-write"])] });

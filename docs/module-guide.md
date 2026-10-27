@@ -323,8 +323,14 @@ export default defineConfig({
 
 - **List each module once.** The modules are the build's user modules, in the order given; startup refuses a module
   listed twice (`duplicate-id`), an id of UmbraDB's own (`core`, `core-…`: `reserved-prefix`) and an element that is no
-  declaration (`invalid-declaration`), naming its place (`modules[1]`). A `modules` export that is not a list is
-  refused as the file's (`modules-not-a-list`).
+  declaration (`invalid-declaration`): `umbradb config check` names its place (`modules[1]`), and `umbradb run` logs the
+  refusal, naming the module and its position, and exits 1. A `modules` export that is not a list is refused as the
+  file's (`modules-not-a-list`).
+- **A refused configuration stops the command.** When the file cannot be loaded, is not plain data or fails its
+  schemas — or lists modules startup refuses —, `umbradb run` logs every finding with its path, serves no admin
+  endpoint and exits 1 (owner decision Q137 of the `core-arch` change); run `umbradb config check` first to see the
+  same findings. A refusal found later (the database, the node, a migration) leaves the process up and refused, its
+  admin endpoints saying why, until it is stopped.
 - **An entry needs its module in `modules`.** An entry whose id is neither UmbraDB's nor in the list is refused, naming
   the module; a module in the list without an entry is in the build but does not run.
 - **A program that calls `startProcess` itself** gives its own declarations; the file's `modules` are then not used.

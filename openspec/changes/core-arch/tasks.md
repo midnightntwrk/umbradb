@@ -1702,13 +1702,56 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       opens and reads its database before listening (an admin starter) fails "opens no database session" (one session
       on PostgreSQL, the directory on PGlite). Wrong variants (a scratch runner outside the clone): 25, 24
       caught; the survivor equivalent (the 8.1 spread `{ start: undefined }`, which `ProcessAdmin` takes for none).
-- [ ] 8.1b The owner's answer Q137 B: a refused configuration ends the process. A configuration that cannot be loaded,
+- [x] 8.1b The owner's answer Q137 B: a refused configuration ends the process. A configuration that cannot be loaded,
       is not plain data or fails its schemas logs every finding (its path and message) and ends the process before any
       admin listener opens — `umbradb run` exits with a non-zero code, `startProcess` ends `refused` —; task 8.1's
       listener before validation (`ProcessAdmin.loaded`, `refused` before the `core` revision is known,
       `earlyAdminAddress`, Q127) and its tests go. Every refusal after the configuration is validated keeps AE-3's
       stay-up behaviour.
       **Acceptance:** A157.
+      **Done (2026-10-27):** `src/runner/process.ts`: a refusal before the process's `core` revision is known — the
+      configuration's loading and plain data (CF-1), its validation (CF-2, CF-3), the choice of its `core` revision
+      (Q102's `no-build-core-revision`, on the line) and, before them, the build's declarations (MD-2; Q148) — ends
+      the process: it logs every finding with its path (`src/runner/configuration-refusal.ts`: `startup refused: <code>
+      (<n> findings); the process ends`, then one `startup refused: <path>: <message> [<code>]` per finding, named as
+      `umbradb config check` names them — `src/config/findings.ts`, which `config check` now shares —, redacted with the
+      configuration's secrets as the validation reads them, else the URL patterns), opens no admin listener, and ends
+      `refused` (the reason the refusal's code) with `closed` resolved by itself and the heartbeat stopped; `stop()`
+      then returns `closed`, the state left `refused`. `umbradb run` exits 1 at once and adds no line of its own (4.4a's
+      `refusalLines` removed: no finding is printed twice). Every later refusal stays up as AE-3 says, by step, not by
+      code — an `invalid-configuration` raised once the configuration is validated (the database's, the node client's, a
+      private source's) included, and `development-opt-in-required`, the history checks (CF-5, CF-6), `listen-failed`.
+      Task 8.1's listener before validation removed from `src/admin/process-admin.ts` (`loaded`, `refused`,
+      `earlyAdminAddress`, Q127) with its tests. `design.md` §1, §2, §7, §11, §12; the module guide. Question Q148
+      (a fault of the build's declarations ends the process too; shipped A), not blocking. Tests, seen failing first
+      (`tsc` 4 errors: the new module missing; 21 tests failing — the processes stayed up, asked for an admin listener
+      on the configuration's `listen.admin` or CF-4's default, and logged the code only —, and the new unit suite
+      failing to load): new `test/admin/refused-configuration.test.ts` (A157, 19 tests: on PostgreSQL 18.6 and PGlite
+      0.5.10, a file that does not exist, a file whose evaluation throws, a function in a setting and two settings
+      failing their schemas each end `startProcess` `refused` by itself, every finding logged once with its path and no
+      secret, no admin listener asked for and the test's own port — the configuration's `listen.admin` and the address
+      any starter is given — probed from the start and never answering, the database never opened; the same with the
+      real admin worker; on the line, a configuration with no `core` revision of the build's version; a changed
+      migration checksum, after the validation, answering the four endpoints and staying up; `umbradb run` on the four
+      files in this process exiting 1 unsignalled with the process's lines only, a file refused after the validation
+      keeping it up and answering until SIGTERM, and the schema failure through the bundled command in a child process
+      exiting 1 by itself with nothing on its `listen.admin`), `test/runner/configuration-refusal.test.ts` (9: the lines
+      of every kind of refusal, the redaction given), `test/config/findings.test.ts` (3: the shared findings); changed:
+      `test/admin/lifecycle.test.ts` (a real process whose configuration is refused exits by itself, unsignalled; the
+      Q127 tests and `refused()`'s removed), `snapshot.test.ts` (`earlyAdminAddress`'s cases removed),
+      `test/runner/process.test.ts`, `refusals.test.ts` (an invalid declaration ends the process; its registered title
+      in `test/runner/code-registry.ts`), `test/cli/run.test.ts` (refused files exit 1 unsignalled with the process's
+      lines; `refusalLines`' cases moved to the unit suite), and 8.2–8.4's refused processes
+      (`test/backbone/core-health/core-health.test.ts`, `core-status/core-status.test.ts`, `status-schema.test.ts`,
+      `core-config/core-config.test.ts`, `config-schema.test.ts`) now refused once validated, before their database
+      opens (PGlite without the development opt-in). Committed negative controls: a process that opens its admin
+      listener at a refusal of its configuration (Q127's rule) fails "no admin listener opened"; one that ends on every
+      refusal fails the stay-up half, in the process and through the command; one that logs only the code fails "every
+      finding with its path", in the process and through the command. Wrong variants (a scratch runner outside the
+      clone): 23 — which refusals end the process and how, what it logs, the lines, the shared findings, `config
+      check`'s line, the admin listener's refusal, the command's wait —, 22 caught; the survivor equivalent (the log's
+      redaction by the configuration as loaded replaced by the URL patterns alone: the validation already redacts its
+      findings with the same secrets, and nothing else is logged once the configuration is loaded).
 - [x] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
       **Acceptance:** A63, A65; A140 for these endpoints.
       **Done (2026-10-26):** the part in its own folder: its declaration `CORE_HEALTH` (`core-health.ts`: a backbone

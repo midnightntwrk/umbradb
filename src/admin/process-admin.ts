@@ -9,30 +9,26 @@
  * - **The listener** starts as soon as the configuration gives its address: {@link ProcessAdmin.serve}, once the
  *   process's `core` revision is known (Q102) and before the database opens, on its `listen.admin` (CF-4's default
  *   `0.0.0.0:8081`), its liveness timeout, its readiness lag and its redaction; a listener that cannot listen refuses
- *   startup (Node.js's error, the runner's `listen-failed`, Q115). A startup refused before that
- *   ({@link ProcessAdmin.refused}) still answers — on the configuration's `listen.admin` as loaded when it is an
- *   address ({@link earlyAdminAddress}), else on CF-4's default (Q127, shipped A) —, its reason redacted by the
- *   configuration's secrets as the validation reads them; a listener that cannot listen then is logged.
+ *   startup (Node.js's error, the runner's `listen-failed`, Q115). Never before: a startup refused before that — by
+ *   the configuration itself, which gives no validated address — ends the process with no listener, the refusal in its
+ *   log only (owner decision Q137 B, task 8.1b; Q127's address before the validation went with it).
  * - **What `/status` shows besides `status()`** (AE-5): the process's side and `instanceId`, its revision's `tipCap`,
  *   the wall-clock time of the last commit ({@link ProcessAdmin.committed}, which the loop's commit observer calls),
  *   and, once startup has resolved the graph and migrated the database ({@link ProcessAdmin.opened}), every part of the
  *   database with its revisions and its tables' rows of `core_digest.tables` (DT-5), which it reads from the process's
  *   database on the main thread — at most one read at a time, at a publication after a commit — so the worker still
  *   reads none.
- * - **At `stop()`**, after the database closed: {@link ProcessAdmin.close} ends the heartbeat and the listener's
- *   thread. Nothing of it is left to keep Node.js alive.
+ * - **At `stop()`**, after the database closed, or when a refusal of the configuration ended the process:
+ *   {@link ProcessAdmin.close} ends the heartbeat and the listener's thread. Nothing of it is left to keep Node.js
+ *   alive.
  */
 
-import { buildCoreVersion } from "../config/build.js";
-import { CORE_ENTRY_ID } from "../config/entries.js";
-import { DEFAULT_ADMIN_ADDRESS, type ProcessSide } from "../config/core-settings.js";
-import { type PlainData, samePlainData } from "../config/plain-data.js";
+import type { ProcessSide } from "../config/core-settings.js";
 import { configRedactor, type Redactor } from "../config/redact.js";
-import type { CheckedConfig, CheckedEntry, ConfigInput } from "../config/validate.js";
+import type { CheckedConfig, CheckedEntry } from "../config/validate.js";
 import type { Database, ReadHandle } from "../db/api.js";
 import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
-import { parseAddress } from "../runner/api-server.js";
 import { Heartbeat } from "../runner/heartbeat.js";
 import type { ProcessStatus } from "../runner/process.js";
 import { readIdentity } from "../backbone/core-chain/core-chain.js";
@@ -49,40 +45,6 @@ import {
   tableKey,
 } from "./snapshot.js";
 import type { AdminSnapshot, ConfigSnapshot } from "./types.js";
-
-/** Whether `value` is an object (not null, not a list). */
-const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/** Whether `value` is an address `host:port` (CF-4), as the listener parses it. */
-function isAddress(value: unknown): value is string {
-  try {
-    parseAddress(value as string);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Where a startup refused before its configuration was validated listens (Q127, shipped A): the `listen.admin` of
- * the loaded configuration's latest `core` entry of the build's version (Q102's revision, read without the validation),
- * when it is an address; otherwise — no such entry, an entry whose `listen` names no admin address (CF-4's default
- * applies), an address that is not one, no configuration loaded — CF-4's default, `0.0.0.0:8081`.
- */
-export function earlyAdminAddress(data: unknown): string {
-  const entries = isObject(data) && Array.isArray(data.entries) ? (data.entries as readonly unknown[]) : [];
-  const version = buildCoreVersion() as unknown as PlainData;
-  let latest: Readonly<Record<string, unknown>> | undefined;
-  for (const entry of entries) {
-    if (!isObject(entry) || entry.id !== CORE_ENTRY_ID || !Number.isSafeInteger(entry.start)) continue;
-    if (!samePlainData(entry.version as PlainData, version)) continue;
-    if (latest === undefined || (entry.start as number) > (latest.start as number)) latest = entry;
-  }
-  const listen = isObject(latest?.config) ? latest.config.listen : undefined;
-  const admin = isObject(listen) ? listen.admin : undefined;
-  return isAddress(admin) ? admin : DEFAULT_ADMIN_ADDRESS;
-}
 
 /** What a {@link ProcessAdmin} takes. */
 export interface ProcessAdminOptions {
@@ -195,7 +157,6 @@ export class ProcessAdmin {
   #configFacts: Omit<ConfigFacts, "opened"> | undefined;
   #opened: OpenedConfig | null = null;
   #config: ConfigSnapshot = UNVALIDATED_CONFIG;
-  #loaded: ConfigInput | undefined;
   /** The listener: starting, listening, or failed (once tried, never again). */
   #listening: Promise<AdminServer | undefined> | undefined;
   #server: AdminServer | undefined;
@@ -210,12 +171,6 @@ export class ProcessAdmin {
     this.#start = options.start ?? startAdminServer;
     this.#side = options.side ?? "public";
     this.#heartbeat = new Heartbeat(() => this.publish());
-  }
-
-  /** The configuration as loaded, not yet validated: for a startup refused before it is ({@link refused}). */
-  loaded(input: ConfigInput): void {
-    this.#loaded = input;
-    this.#redactor = earlyRedactor(input);
   }
 
   /**
@@ -234,16 +189,7 @@ export class ProcessAdmin {
     this.#configFacts = { redactor: this.#redactor, checked, core };
     this.#config = configOf({ ...this.#configFacts, opened: null }, false);
     const { admin } = settings.listen as { readonly admin: string };
-    await this.#listen(admin, true);
-  }
-
-  /**
-   * Startup refused before {@link serve}: starts the listener on {@link earlyAdminAddress} of the configuration as
-   * loaded; a listener that cannot listen is logged. Nothing when the listener was tried already.
-   */
-  async refused(): Promise<void> {
-    if (this.#closed || this.#listening !== undefined) return;
-    await this.#listen(earlyAdminAddress(this.#loaded?.config.data), false);
+    await this.#listen(admin);
   }
 
   /**
@@ -332,29 +278,22 @@ export class ProcessAdmin {
     });
   }
 
-  /** Starts the listener at `address`; its failure rejects when `rethrow`, else is logged. */
-  async #listen(address: string, rethrow: boolean): Promise<void> {
+  /** Starts the listener at `address`; its failure rejects. */
+  async #listen(address: string): Promise<void> {
     const first = this.#snapshot();
     const listening = this.#start({
       address,
       beat: this.#heartbeat.buffer,
       snapshot: first,
       onFailure: (error) => this.#log(`admin endpoints failed: ${error.message}`),
-    }).then(
-      (server) => {
-        this.#server = server;
-        this.#published = JSON.stringify(first);
-        this.#log(`admin endpoints listening on ${server.host}:${server.port}`);
-        // What changed while it started.
-        this.publish();
-        return server;
-      },
-      (error: unknown) => {
-        if (rethrow) throw error;
-        this.#log(`admin endpoints cannot listen on ${address}: ${(error as Error).message}`);
-        return undefined;
-      },
-    );
+    }).then((server) => {
+      this.#server = server;
+      this.#published = JSON.stringify(first);
+      this.#log(`admin endpoints listening on ${server.host}:${server.port}`);
+      // What changed while it started.
+      this.publish();
+      return server;
+    });
     this.#listening = listening.catch(() => undefined);
     await listening;
   }
