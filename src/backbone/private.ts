@@ -1,20 +1,19 @@
 /**
  * The private backbone (`openspec/changes/core-arch/specs/private-processes/spec.md` PP-1; `specs/runner/spec.md`
- * RN-3; `design.md` §6, §8; CORE-ARCH §4.11; decision records Q75, Q84, Q95): the backbone parts a private process runs
- * besides `core-chain` (task 10.2; on a private process its configuration history and its process items `config`, `db`
- * and `ledger-table` — no node client, as a private process never talks to the node):
+ * RN-3; `design.md` §6, §8; CORE-ARCH §4.11; decision records Q75, Q84, Q95, Q154): the backbone parts a private
+ * process runs besides `core-chain` (task 10.2; on a private process its configuration history and its process items
+ * `config`, `db` and `ledger-table` — no node client, as a private process never talks to the node):
  * - `core-private-source` (`./core-private-source/`), its heights from the public database and its binding to it;
- * - `core-key-registry` (`./core-key-registry/`), the keys it admitted (its configured test keys, task 14.4);
  * - `core-digest` (`./core-digest/`), the digests of its module tables: one set of determinism rules for every
  *   database (Q75), digests on every module table (Q84). The same part as the core's, with its requirement on the
  *   cursor table a private database has — `core-private-source`'s `private-cursor`, as the core's requires
- *   `core-block-commit`'s `blocks` —, so that it runs after both private parts, as RN-3's fixed order has it.
+ *   `core-block-commit`'s `blocks` —, so that it runs after it, as RN-3's fixed order has it.
  * Not `core-block-fetch` nor `core-block-commit`: a private process takes no block from the node and keeps no
- * `core_block_commit.blocks`; its cursor is `core_private_source.cursor`.
+ * `core_block_commit.blocks`; its cursor is `core_private_source.cursor`. Nothing of the backbone takes a private
+ * module's private inputs, keys among them: those are each module's own (owner decision Q154 A2; task 14.4a).
  */
 
 import { CORE_DIGEST } from "./core-digest/index.js";
-import { CORE_KEY_REGISTRY } from "./core-key-registry/index.js";
 import type { PrivateIntake } from "./core-private-source/index.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 
@@ -26,10 +25,9 @@ export const PRIVATE_CORE_DIGEST: ModuleDeclaration = Object.freeze({
 });
 
 /**
- * The private backbone of one private process start, after its `core-chain`: `intake`'s `core-private-source`,
- * `core-key-registry` — `registry`, a negative control's (`coreKeyRegistry`), when given — and `core-digest`, in RN-3's
- * fixed order.
+ * The private backbone of one private process start, after its `core-chain`: `intake`'s `core-private-source` and
+ * `core-digest`, in RN-3's fixed order.
  */
-export function privateBackbone(intake: PrivateIntake, registry: ModuleDeclaration = CORE_KEY_REGISTRY): ModuleDeclaration[] {
-  return [intake.part, registry, PRIVATE_CORE_DIGEST];
+export function privateBackbone(intake: PrivateIntake): ModuleDeclaration[] {
+  return [intake.part, PRIVATE_CORE_DIGEST];
 }

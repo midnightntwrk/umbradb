@@ -225,7 +225,6 @@ describe("configOf: what /config shows (AE-5), every secret redacted (AE-6)", ()
       developmentOnly: false,
       requiresResync: false,
       needsLockstep: false,
-      keyKinds: null,
       settings: { mode: "data", feed: "data", apiKey: "secret" },
       migrations: [{ id: "001", checksum: createHash("sha256").update("CREATE TABLE m.rows (height bigint PRIMARY KEY)").digest("hex") }],
       points: ["on-db-write"],
@@ -235,9 +234,8 @@ describe("configOf: what /config shows (AE-5), every secret redacted (AE-6)", ()
       provides: expect.arrayContaining([{ name: "db", lifetimes: ["process"], table: null }]),
       points: Object.keys(CORE_CHAIN.points),
     });
-    const keyed = { ...m, side: "private" as const, keyKinds: ["viewing", "spending"], validateKey: () => true };
-    expect(declarationView(keyed, "user")).toMatchObject({ side: "private", keyKinds: ["viewing", "spending"] });
-    expect(JSON.stringify(declarationView(keyed, "user"))).not.toContain("validateKey");
+    const lockstep = { ...m, side: "private" as const, needsLockstep: true };
+    expect(declarationView(lockstep, "user")).toMatchObject({ side: "private", needsLockstep: true });
     const opted = { ...m, provides: [{ name: "m-rows", lifetimes: ["table" as const], table: { schema: "m", tables: ["rows"], kind: "mutable" as const, deterministic: false as const } }], developmentOnly: true, requiresResync: true };
     expect(declarationView(opted, "core")).toMatchObject({
       origin: "core",

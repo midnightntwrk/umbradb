@@ -21,7 +21,6 @@ import {
 /** The codes pending when task 10.4 made the registry: a later code of §11 comes with its test, never pending. */
 const PENDING_AT_10_4 = Object.freeze([
   "refusal:needs-lockstep-not-listed",
-  "refusal:test-key-conflict",
   "backup:backup-tools-missing",
   "backup:private-backup-refused",
   "backup:backup-format-unknown",

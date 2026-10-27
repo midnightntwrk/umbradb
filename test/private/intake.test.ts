@@ -56,9 +56,8 @@ function rowProblems(rows: readonly [number, string][], head: number): string[] 
 }
 
 /**
- * Problems with the reads and items the private module saw: `on-fetch`'s read of public data at its block's height or
- * above, `on-compute`'s of the private database at h − 1 with an empty `admitted-keys` (no key source until task
- * 14.4), `on-after-db-write`'s at h.
+ * Problems with the reads the private module saw: `on-fetch`'s read of public data at its block's height or above,
+ * `on-compute`'s of the private database at h − 1, `on-after-db-write`'s at h.
  */
 function readProblems(seen: readonly PrivateSeen[]): string[] {
   const problems: string[] = [];
@@ -67,8 +66,8 @@ function readProblems(seen: readonly PrivateSeen[]): string[] {
     if (call.point === "on-fetch" && (at === null || (at as bigint) < call.height)) {
       problems.push(`on-fetch at ${call.height} read public data at ${at}`);
     }
-    if (call.point === "on-compute" && (at !== (call.height === 1n ? null : call.height - 1n) || call.admitted !== 0)) {
-      problems.push(`on-compute at ${call.height} read the private database at ${at}, admitted-keys ${call.admitted}`);
+    if (call.point === "on-compute" && at !== (call.height === 1n ? null : call.height - 1n)) {
+      problems.push(`on-compute at ${call.height} read the private database at ${at}`);
     }
     if (call.point === "on-after-db-write" && at !== call.height) {
       problems.push(`on-after-db-write at ${call.height} read the private database at ${at}`);

@@ -408,7 +408,6 @@
         "developmentOnly",
         "requiresResync",
         "needsLockstep",
-        "keyKinds",
         "settings",
         "migrations",
         "points"
@@ -459,20 +458,6 @@
         },
         "needsLockstep": {
           "type": "boolean"
-        },
-        "keyKinds": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
-          ]
         },
         "settings": {
           "type": "object",
@@ -526,8 +511,7 @@
         "on-compute",
         "on-db-write",
         "on-after-db-write",
-        "on-stop-height",
-        "on-key"
+        "on-stop-height"
       ]
     },
     "chain": {

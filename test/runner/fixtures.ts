@@ -5,7 +5,6 @@ import type {
   BlockHeader,
   ItemSink,
   ModuleDeclaration,
-  PendingKey,
   PointName,
   ProcessContext,
 } from "../../src/modules/declaration.js";
@@ -103,7 +102,6 @@ export const READ: ReadHandle = Object.freeze({ height: 0n, query: async () => [
 export const WRITE: BlockWriteHandle = Object.freeze({ height: 0n, query: async () => [], execute: async () => 0 });
 const HEADER: BlockHeader = Object.freeze({ height: 2n, hash: HASH, parentHash: HASH });
 const API: ApiRegistry = Object.freeze({ http: () => undefined, subscription: () => undefined });
-const KEY: PendingKey = Object.freeze({ keyId: HASH, kind: "test", bytes: new Uint8Array(1) });
 
 /** Stand-in arguments of every point, after the process context (`PointCallbacks`, CORE-ARCH §4.10). */
 export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Object.freeze({
@@ -119,7 +117,6 @@ export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Objec
   "on-db-write": [BLOCK, WRITE],
   "on-after-db-write": [BLOCK, READ],
   "on-stop-height": [{ entryId: "m", height: 1n }, READ],
-  "on-key": [KEY, READ],
 });
 
 /** One process context per module, made on first use and the same object afterwards (MD-7). */

@@ -34,7 +34,7 @@ import { REACH_TIMEOUT_MS } from "./backends.js";
  * **A private process** is the same process with `side: "private"`: the real `core-chain` — its history, its
  * identity (the public genesis hash, the private S, the anchor at S) and the process items `config`, `db` and
  * `ledger-table`; no node client, as its `core` entry has no `node` —, then the private backbone of
- * `src/backbone/private.ts` — `core-private-source` from a {@link privateIntake}, `core-key-registry`, `core-digest` —
+ * `src/backbone/private.ts` — `core-private-source` from a {@link privateIntake}, `core-digest` —
  * and its private modules. Its public data comes from the public database: on PostgreSQL through `publicDatabase`, the
  * URL of a login that may only read (the production path, `openPublicDatabase`); on PGlite, whose public database the
  * core alone opens, through direct reads of the core's `db` item — the "direct calls in tests" of PP-4 —, or, given
@@ -245,8 +245,6 @@ export interface PrivateSeen {
    * the private database.
    */
   readonly readHeight?: bigint | null;
-  /** `on-compute`: the number of keys `admitted-keys` held, or null when the block had no such item. */
-  readonly admitted?: number | null;
 }
 
 /** The SQL of a private test module's table: each height with the public block's hash it read and its setting `salt`. */
@@ -254,13 +252,12 @@ export const PRIVATE_ROWS_SQL = (schema: string): string =>
   `CREATE TABLE ${schema}.rows (height bigint PRIMARY KEY, public_hash bytea NOT NULL, salt bigint NOT NULL)`;
 
 /**
- * A private module `id` (PP-1, PP-3, PP-13): it requires `admitted-keys` and the public `table` item `blocks` (the public
- * backbone's `core_block_commit.blocks`, which the public database's configuration history records under `core`; task
- * 14.1a); its `on-fetch` reads the public block's hash at the block's height through its read of public data and puts
- * it as its `block` item; its `on-compute` notes the keys `admitted-keys` holds and the
- * height of its read of the private database; its `on-db-write` stores the hash with its data setting `salt`; its
- * `on-after-db-write` notes the height of its read. Its calls go to `seen`. `rest` replaces parts of the declaration
- * (a test's migration).
+ * A private module `id` (PP-1, PP-3, PP-13): it requires the public `table` item `blocks` (the public backbone's
+ * `core_block_commit.blocks`, which the public database's configuration history records under `core`; task 14.1a); its
+ * `on-fetch` reads the public block's hash at the block's height through its read of public data and puts it as its
+ * `block` item; its `on-compute` notes the height of its read of the private database; its `on-db-write` stores the
+ * hash with its data setting `salt`; its `on-after-db-write` notes the height of its read. Its calls go to `seen`.
+ * `rest` replaces parts of the declaration (a test's migration).
  */
 export function privateModule(id: string, seen: PrivateSeen[], rest: Partial<ModuleDeclaration> = {}): ModuleDeclaration {
   const schema = id.replaceAll("-", "_");
@@ -268,7 +265,7 @@ export function privateModule(id: string, seen: PrivateSeen[], rest: Partial<Mod
     id,
     version: "1.0.0",
     side: "private",
-    requires: ["admitted-keys", "blocks"],
+    requires: ["blocks"],
     provides: [
       { name: `${id}-public`, lifetimes: ["block"] },
       { name: `${id}-rows`, lifetimes: ["table"], table: { schema, tables: ["rows"], kind: "append-only" } },
@@ -285,13 +282,7 @@ export function privateModule(id: string, seen: PrivateSeen[], rest: Partial<Mod
         out.put(`${id}-public`, row.hash);
       },
       async "on-compute"(_p, b, read) {
-        const keys = b.items.get("admitted-keys");
-        seen.push({
-          point: "on-compute",
-          height: b.height,
-          readHeight: read.height,
-          admitted: Array.isArray(keys) ? keys.length : null,
-        });
+        seen.push({ point: "on-compute", height: b.height, readHeight: read.height });
       },
       async "on-db-write"(_p, b, w) {
         seen.push({ point: "on-db-write", height: b.height });
@@ -344,8 +335,6 @@ export interface PrivateOptions {
   readonly entries?: readonly Readonly<Record<string, unknown>>[];
   /** `pm`'s `salt`; 0 unless given. */
   readonly salt?: number;
-  /** The `core` entry's test keys (CF-11). */
-  readonly testKeys?: readonly { readonly kind: string; readonly bytes: string; readonly start: number }[];
   /** The custom network's genesis hash; {@link genesisHex}(0xa1) unless given. */
   readonly genesisHash?: string;
   /**
@@ -365,8 +354,6 @@ export interface PrivateOptions {
   readonly extra?: Readonly<Record<string, unknown>>;
   /** The admin endpoints, as {@link PublicCoreOptions.admin}: none unless given. */
   readonly admin?: boolean | AdminStarter;
-  /** The private backbone's `core-key-registry`: a negative control's (`coreKeyRegistry`), the real one unless given. */
-  readonly registry?: ModuleDeclaration;
 }
 
 /** The private process's `core` entry. */
@@ -383,7 +370,6 @@ export function privateCoreEntry(options: PrivateOptions) {
       instanceId: options.instanceId ?? "instance-1",
       developmentOptIn: true,
       ...(options.publicDatabase === undefined ? {} : { publicDatabase: options.publicDatabase }),
-      ...(options.testKeys === undefined ? {} : { testKeys: options.testKeys }),
       ...(options.coreTransport === undefined ? {} : { coreTransport: options.coreTransport }),
       ...(options.tls === undefined ? {} : { tls: options.tls }),
       ...options.extra,
@@ -423,7 +409,7 @@ export function launchPrivate(options: PrivateOptions): PrivateProcess {
     { id: "pm", start: options.start ?? 1, version: "1.0.0", config: { salt: options.salt ?? 0 } },
   ];
   const declarations: DeclarationSet = {
-    backbone: [CORE_CHAIN, ...privateBackbone(intake, options.registry)],
+    backbone: [CORE_CHAIN, ...privateBackbone(intake)],
     core: [],
     user: modules,
   };

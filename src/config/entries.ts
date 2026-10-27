@@ -56,9 +56,6 @@ export type TlsSettings = {
   readonly trustedRoots: readonly string[];
 };
 
-/** A test key of a private process (CF-11): admitted through the key registry at `start`; `bytes` as `0x` hex. */
-export type TestKey = { readonly kind: string; readonly bytes: string; readonly start: number };
-
 /**
  * The `core` entry's fields every process has (CF-4). Each field's kind, default and validation are the schemas'
  * (`./core-settings.ts`), whose input types `test/config/core-settings.test.ts` holds equal to these.
@@ -99,16 +96,14 @@ export type PublicCoreSettings = CoreSettingsBase & {
   readonly instanceId?: never;
   readonly publicDatabase?: never;
   readonly coreTransport?: never;
-  readonly testKeys?: never;
 };
 
-/** A private process's `core` entry (CF-4): instead of `node` and `lockstepInstances`, its own four fields. */
+/** A private process's `core` entry (CF-4): instead of `node` and `lockstepInstances`, its own three fields. */
 export type PrivateCoreSettings = CoreSettingsBase & {
   readonly instanceId: string;
   readonly publicDatabase?: string;
   /** The core's transport address. */
   readonly coreTransport?: string;
-  readonly testKeys?: readonly TestKey[];
   readonly node?: never;
   readonly lockstepInstances?: never;
 };

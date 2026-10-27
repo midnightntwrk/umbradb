@@ -18,8 +18,8 @@ import {
  *
  * - A private module table with a `serial` column, a `now()` default or a `double precision` column refuses the private
  *   process's startup with the same code and message as the same table in a module of the core.
- * - Two private instances with the same configuration — test keys included —, bound to the same public database, have
- *   equal contents hashes at the same height; a third whose module's data setting differs has another.
+ * - Two private instances with the same configuration, bound to the same public database, have equal contents hashes
+ *   at the same height; a third whose module's data setting differs has another.
  */
 
 /** The three tables of A146, by what makes them non-deterministic. */
@@ -59,7 +59,7 @@ function privateM(sql: string): ModuleDeclaration {
   return {
     ...publicM(sql),
     side: "private",
-    requires: ["admitted-keys"],
+    requires: ["private-cursor"],
   };
 }
 
@@ -137,20 +137,12 @@ export function a146RefusalProblems(found: readonly TableRefusals[]): string[] {
   return problems;
 }
 
-/** The test keys both instances are configured with (CF-11): obviously fake bytes, admitted at 5 (task 14.4). */
-export const TEST_KEYS = [{ kind: "viewing", bytes: "0x0102030405", start: 5 }];
-
-/** `pm` declaring the test keys' kind (PP-8, CF-11: a configured module declares it, and its `validateKey` takes them). */
-const KEYED = { keyKinds: ["viewing"], validateKey: (_kind: string, bytes: Uint8Array) => bytes.length > 0 };
-
 const HEAD = 20n;
 
-/** What the hash half saw: the cursor, the contents hash and the admitted keys of each instance's private database. */
+/** What the hash half saw: the cursor and the contents hash of each instance's private database. */
 export interface InstanceHashes {
   readonly cursors: readonly (bigint | null)[];
   readonly hashes: readonly string[];
-  /** Each instance's `core_key_registry.keys`: `<kind> <bytes> <arrived_height>` per row. */
-  readonly keys: readonly (readonly string[])[];
 }
 
 /** Runs a public core to {@link HEAD} and three private instances to it, then hashes their databases. */
@@ -160,18 +152,11 @@ export async function a146Hashes(backend: PrivateBackend): Promise<InstanceHashe
   try {
     const cursors: (bigint | null)[] = [];
     const hashes: string[] = [];
-    const keys: string[][] = [];
     // Instances 1 and 2 differ only in their instance ids and databases (operational and secret fields); 3 in `salt`.
     for (const [instanceId, salt] of [["instance-1", 0], ["instance-2", 0], ["instance-3", 7]] as const) {
       const privateDb = await backend.database("private");
       const running = await startPrivate(
-        against(backend, publicDb, core, {
-          database: privateDb.setting,
-          instanceId,
-          salt,
-          testKeys: TEST_KEYS,
-          modules: [privateModule("pm", [], KEYED)],
-        }),
+        against(backend, publicDb, core, { database: privateDb.setting, instanceId, salt }),
       );
       try {
         await running.reach(HEAD);
@@ -181,13 +166,8 @@ export async function a146Hashes(backend: PrivateBackend): Promise<InstanceHashe
       }
       const hash = await privateDb.read((read) => contentsHash(read), privateCursorHeight);
       hashes.push(Buffer.from(hash).toString("hex"));
-      const rows = await privateDb.read(
-        (read) => read.query("SELECT kind, key_bytes, arrived_height FROM core_key_registry.keys ORDER BY key_id"),
-        privateCursorHeight,
-      );
-      keys.push(rows.map((row) => `${String(row.kind)} 0x${Buffer.from(row.key_bytes as Uint8Array).toString("hex")} ${String(row.arrived_height)}`));
     }
-    return { cursors, hashes, keys };
+    return { cursors, hashes };
   } finally {
     await core.stop();
   }
@@ -202,10 +182,6 @@ export function a146HashProblems(observed: InstanceHashes): string[] {
   const [one, two, three] = observed.hashes;
   if (one !== two) problems.push(`two instances with the same configuration hash ${one} and ${two}`);
   if (three === one) problems.push("an instance whose module's data differs hashes the same");
-  // The test keys admitted (task 14.4): each instance holds the key with arrived_height 5, its start.
-  for (const [index, rows] of observed.keys.entries()) {
-    if (rows.join(" | ") !== "viewing 0x0102030405 5") problems.push(`instance ${index + 1} holds the keys ${rows.join(" | ") || "none"}`);
-  }
   return problems;
 }
 
@@ -221,7 +197,7 @@ export function optedOutModule(flag: { readonly deterministic?: false } = { dete
     id: "po",
     version: "1.0.0",
     side: "private",
-    requires: ["admitted-keys", "config"],
+    requires: ["private-cursor", "config"],
     provides: [
       { name: "po-rows", lifetimes: ["table"], table: { schema: "po", tables: ["rows"], kind: "append-only" } },
       { name: "po-log", lifetimes: ["table"], table: { schema: "po", tables: ["log"], kind: "append-only", ...flag } },

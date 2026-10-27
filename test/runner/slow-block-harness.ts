@@ -60,7 +60,7 @@ export type HoldMode = "await" | "block";
 /** What {@link holding} holds. */
 export interface HoldSpec {
   /** The point held; `on-compute` unless given. */
-  readonly point?: Exclude<PointName, "on-start-db" | "on-start-api" | "on-best-block" | "on-rollback" | "on-finalized" | "on-key">;
+  readonly point?: Exclude<PointName, "on-start-db" | "on-start-api" | "on-best-block" | "on-rollback" | "on-finalized">;
   /** The height held; {@link SLOW_HEIGHT} unless given. */
   readonly height?: bigint;
   /** How long; {@link HOLD_MS} unless given. */

@@ -11,7 +11,6 @@ import {
   defineModule,
   type ItemSink,
   type ModuleDeclaration,
-  type PendingKey,
   type PointCallbacks,
   type PointName,
   POINTS,
@@ -71,9 +70,9 @@ type WithUnknownPoint = Omit<ModuleDeclaration, "points"> & {
 type WithKnownPoints = Omit<ModuleDeclaration, "points"> & { points: { "on-fetch": () => Promise<void> } };
 
 describe("A20: the points (MD-1, design.md §2)", () => {
-  it("names the thirteen points of design.md §2, in its order", () => {
+  it("names the twelve points of design.md §2, in its order", () => {
     expect(POINTS).toEqual(designPoints());
-    expect(POINTS).toHaveLength(13);
+    expect(POINTS).toHaveLength(12);
     expect(Object.isFrozen(POINTS)).toBe(true);
     expectTypeOf<PointName>().toEqualTypeOf<(typeof POINTS)[number]>();
     expectTypeOf<keyof PointCallbacks>().toEqualTypeOf<PointName>();
@@ -108,14 +107,13 @@ describe("A20: the points (MD-1, design.md §2)", () => {
       }),
     );
     // The read handles RN-4 and design.md §2 give these points (decision record Q100, option A): `on-finalized` at
-    // the cursor, `on-start-height` at h − 1, `on-stop-height` at h, `on-key` at the cursor.
+    // the cursor, `on-start-height` at h − 1, `on-stop-height` at h.
     type Rest<P extends PointName> = PointCallbacks[P] extends (p: ProcessContext, ...rest: infer R) => Promise<void>
       ? R
       : never;
     expectTypeOf<Rest<"on-finalized">>().toEqualTypeOf<[head: { height: bigint; hash: Uint8Array }, read: ReadHandle]>();
     expectTypeOf<Rest<"on-start-height">>().toEqualTypeOf<[e: { entryId: string; height: bigint }, read: ReadHandle]>();
     expectTypeOf<Rest<"on-stop-height">>().toEqualTypeOf<[e: { entryId: string; height: bigint }, read: ReadHandle]>();
-    expectTypeOf<Rest<"on-key">>().toEqualTypeOf<[key: PendingKey, read: ReadHandle]>();
     expectTypeOf(typed).toMatchTypeOf<ModuleDeclaration>();
   });
 });

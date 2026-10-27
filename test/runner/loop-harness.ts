@@ -211,7 +211,7 @@ export interface SeenCall {
 /** The height a callback's arguments name: the block's, the head's, the entry's; none for the others. */
 function heightOf(point: PointName, args: readonly unknown[]): bigint | undefined {
   const first = args[0] as { height?: unknown } | undefined;
-  if (point === "on-start-db" || point === "on-start-api" || point === "on-rollback" || point === "on-key") return undefined;
+  if (point === "on-start-db" || point === "on-start-api" || point === "on-rollback") return undefined;
   return first?.height as bigint | undefined;
 }
 
@@ -252,7 +252,6 @@ const POINT_NAMES: readonly PointName[] = [
   "on-db-write",
   "on-after-db-write",
   "on-stop-height",
-  "on-key",
 ];
 
 /** A `Database` that counts the transactions asked of it and passes everything else through. */

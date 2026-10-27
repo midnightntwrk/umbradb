@@ -469,8 +469,8 @@ A private module runs in a private process, next to its own private database, an
 database the core writes (PP-1 to PP-5 of the `core-arch` change).
 
 - **Declare `side: "private"`.** A private process runs private modules only, the core public ones: an entry for a
-  module of the other side refuses the configuration. `keyKinds`, `validateKey` and `needsLockstep` are a private
-  module's own: a public module that declares one is refused.
+  module of the other side refuses the configuration. `needsLockstep` is a private module's own: a public module that
+  declares it is refused.
 - **Your `on-fetch` reads public data.** In a private process `on-fetch(p, b, out, read)` gets a fourth argument, a
   read of the public database at its committed height — the public cursor, at least `b.height`, and maybe above it
   when your process lags. Read public tables by height (`WHERE height = $1`, or `<=`), and only append-only ones: the
@@ -494,16 +494,16 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
   above the public cursor.
 - **Require private items, and the public tables you read.** Your requirements order you among the private
   process's parts: the core's process items `config`, `db` and `ledger-table` (no node client: a private process never
-  talks to the node), `core-private-source`'s `private-cursor` and `core-key-registry`'s `admitted-keys`. You may also
-  require a public `table` item — `core-block-commit`'s `blocks`, `core-ledger-state`'s `ledger-events`, a public
-  module's own (PP-13) —, and you should require each one whose table you read in `on-fetch`: the private process reads
-  which `table` items the public core provides at which heights from the public database's configuration history, and
-  refuses to start, with `item-no-provider` or `item-not-available` naming the item, when the public core does not
-  provide it at every height you run. It gives you the table only — read it through `on-fetch`'s read of public data —
-  and never a public `block` or `process` item (`block-header`, `node-client`: require them and startup refuses). The
-  items of the private process's own backbone parts (`chain-identity`, the digests) are its own database's, and an item
-  of yours may not take the name of a public item the public core provides at the same heights (`providers-overlap`).
-  The check is made at the private process's startup, against the public configuration as it is then.
+  talks to the node) and `core-private-source`'s `private-cursor`. You may also require a public `table` item —
+  `core-block-commit`'s `blocks`, `core-ledger-state`'s `ledger-events`, a public module's own (PP-13) —, and you
+  should require each one whose table you read in `on-fetch`: the private process reads which `table` items the public
+  core provides at which heights from the public database's configuration history, and refuses to start, with
+  `item-no-provider` or `item-not-available` naming the item, when the public core does not provide it at every height
+  you run. It gives you the table only — read it through `on-fetch`'s read of public data — and never a public `block`
+  or `process` item (`block-header`, `node-client`: require them and startup refuses). The items of the private
+  process's own backbone parts (`chain-identity`, the digests) are its own database's, and an item of yours may not
+  take the name of a public item the public core provides at the same heights (`providers-overlap`). The check is made
+  at the private process's startup, against the public configuration as it is then.
 - **The same determinism rules.** Your private tables are checked, digested and hashed as the core's are (Q75): the
   sections above all apply, `deterministic: false` included. Two private processes with the same configuration, bound
   to the same public database, hold the same private data at the same height.
@@ -512,26 +512,16 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
   genesis hash and start height; a later start against another public database is refused (`private-binding-mismatch`,
   its `details.reason` saying why: `network`, `genesis`, `start`), and so is one whose start height is below the public
   one's (`private-start-below`) or against a public database whose core never started (`public-not-started`).
-- **Keys reach you through the key registry** (PP-8, CF-11). Declare the kinds of key you read (`keyKinds`) and a
-  `validateKey(kind, bytes)` that returns `true` for bytes of a form you can use; in this version keys enter only as
-  the private `core` entry's `testKeys` (`{ kind, bytes, start }`, a secret setting — no endpoint takes keys, Q70). A
-  test key whose kind no module of the configuration declares, or whose bytes the `validateKey` of a module declaring
-  its kind refuses (or throws on), refuses the configuration (`invalid-configuration`, naming `testKeys[i]`), as
-  does a key listed twice. A key with start h becomes pending as h is processed: `on-key(p, key, read)` fires once
-  for it in every module that has the callback, whatever kinds it declares, after h's `on-start-height` and before
-  h's `on-compute`, with `key.keyId` (SHA-256 of the UTF-8 kind and the bytes),
-  `key.kind`, `key.bytes` and a read of your database at h − 1; then h's `admitted-keys` (require it) holds it with
-  `arrivedHeight` h — every other height's holds none — and `core_key_registry.keys` keeps it once h commits. Sync
-  the key's history yourself if you need it (the core offers no backfill). A crash before h commits drops the key, and
-  the restart admits it at h again, `on-key` firing again; a restart with the key admitted keeps its height, and
-  `on-key` does not fire for it. Changing an admitted key's start refuses startup (`test-key-conflict`), as does a new
-  key whose start is at or below your private cursor; removing a key from `testKeys` leaves it admitted.
-- **Keys stay in your process.** UmbraDB never logs, shows or sends a key's bytes: `testKeys` reads `[redacted]` in
-  `/config` and its values are redacted in log lines, `/status` and the transport carry none, and the core's `/status`
-  shows of each instance only its id, connection, lockstep flag and synced height (PP-9, PP-10). What your module
-  computes from a key is yours to keep private (Q16): never put key bytes in an error message, which the process logs
-  when it halts (written as configured, `0x` and lowercase hex, they are redacted; in any other form they are not), in
-  an API answer, or in a read of public data through the core (its statements and parameters cross the transport).
+- **Your private inputs are your module's.** UmbraDB takes no keys or other private values for you: the core only
+  launches the private process, which reads public data and runs your modules (owner decision Q154). Take what your
+  module needs as you choose — your own `secret` settings, which `/config` shows as `[redacted]` and whose values the
+  process's log lines redact as written (`0x` and lowercase hex, say), or your own API on the private process's
+  `listen.api` — and keep it in your own private tables. The core's `/status` shows of each private instance only its
+  id, whether it is connected, whether it is lockstep and its synced height (PP-9), and nothing calls your module
+  across the process transport (PP-4). What your module computes from its private inputs is yours to keep private
+  (Q16): never put them in an error message, which the process logs when it halts (a secret setting's value in any
+  other form than the one written is not redacted), in an API answer, or in a read of public data through the core
+  (its statements and parameters cross the transport).
 
 ## Blocks from the node
 

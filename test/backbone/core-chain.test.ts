@@ -716,9 +716,8 @@ describe("the table items a revision's row records (core_chain.config.provides; 
     expect(tableItemsOf({ backbone: [], core: [], user: [m] }, "m")).toEqual(["Zz", "aa", "zz", "é", "\uFF5E", "\u{1F600}"]);
   });
 
-  it("records a private process's core from its own backbone (core-private-source, core-key-registry, core-digest)", () => {
+  it("records a private process's core from its own backbone (core-private-source, core-digest)", () => {
     expect(tableItemsOf(buildDeclarations([], { side: "private" }), "core")).toEqual([
-      "admitted-keys",
       "chain-identity",
       "digest-checkpoints",
       "digest-tables",

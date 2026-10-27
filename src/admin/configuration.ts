@@ -110,7 +110,6 @@ export function declarationView(declaration: ModuleDeclaration, origin: Declarat
     developmentOnly: declaration.developmentOnly === true,
     requiresResync: declaration.requiresResync === true,
     needsLockstep: declaration.needsLockstep === true,
-    keyKinds: declaration.keyKinds === undefined ? null : Object.freeze([...declaration.keyKinds]),
     settings: fieldKinds(declaration.configSchema),
     migrations: Object.freeze(declaration.migrations.map(({ id, sql }) => Object.freeze({ id, checksum: migrationChecksum(sql) }))),
     points: Object.freeze(POINTS.filter((point) => typeof declaration.points[point] === "function")),

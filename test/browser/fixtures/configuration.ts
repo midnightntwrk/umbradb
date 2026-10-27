@@ -101,7 +101,7 @@ export const SHADOW: ModuleDeclaration = {
   id: "shadow",
   version: "1.0.0",
   side: "private",
-  requires: ["admitted-keys", "blocks"],
+  requires: ["blocks"],
   provides: [
     { name: "shadow-public", lifetimes: ["block"] },
     { name: "shadow-rows", lifetimes: ["table"], table: { schema: "shadow", tables: ["rows"], kind: "append-only" } },

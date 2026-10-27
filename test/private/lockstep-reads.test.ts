@@ -62,7 +62,7 @@ function pausing(pause: Pause): ModuleDeclaration {
     id: "pm",
     version: "1.0.0",
     side: "private",
-    requires: ["admitted-keys", "blocks"],
+    requires: ["blocks"],
     provides: [
       { name: "pm-public", lifetimes: ["block"] },
       { name: "pm-rows", lifetimes: ["table"], table: { schema: "pm", tables: ["rows"], kind: "append-only" } },

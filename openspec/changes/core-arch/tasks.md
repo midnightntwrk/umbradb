@@ -3018,7 +3018,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       00031-key-bytes-in-module-error-messages recorded.
       **Pending:** questions Q150 and Q151 (owner); the private-backup refusal (15.1); the browser's transport
       (16.1).
-- [ ] 14.4a The owner's answer Q154 A2: keys, and private items in general, are a module's, not the core's (FEATURES
+- [x] 14.4a The owner's answer Q154 A2: keys, and private items in general, are a module's, not the core's (FEATURES
       records `user-secrets` as a feature module, specified later). Removed from the code: `core-key-registry`
       (`src/backbone/core-key-registry/`, its table `core_key_registry.keys`, the item `admitted-keys`, its place in the
       private backbone), the point `on-key` (`POINTS`, `PointCallbacks`, `LoopInput.keys`), the private `core` entry's
@@ -3029,6 +3029,29 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (A120's `/status` half kept); issue 00031 (a key's bytes in a module's error message) closed or rewritten for what
       is left of it.
       **Acceptance:** A120 (its PP-9 half), A146, A87; A119 and A123 withdrawn.
+      **Done (2026-10-27):** removed — `src/backbone/core-key-registry/` (the part, its table and migration,
+      `admitted-keys`, `keyIdOf`, `testKeyConflict`, `pendingKeysOf`), the registry in `privateBackbone` (now
+      `core-private-source` and `core-digest`) and in `BACKBONE_ORDER`; `on-key` from `POINTS` (twelve points),
+      `PointCallbacks` and `PendingKey`; `LoopInput.keys`, `PendingKeys` and `keyPoint` (`src/runner/loop.ts`, task
+      14.4's lines reversed) and their wiring in `src/runner/process.ts` (an import, a comment, three lines); the
+      private `core` entry's `testKeys` (schema, `CoreSettings`, `TestKey`) and the rule `test-keys`; `keyKinds` and
+      `validateKey` (the type, the validation — `needsLockstep` is now a public module's one refused field —,
+      `/config`'s declarations and `config.schema.json`); `test-key-conflict` (`ERROR_CODES`, `REFUSAL_CODES`, the
+      registry and its 10.4 baseline). `design.md` §1, §2, §6, §7, §8, §10 and §11 say nothing of them but that keys
+      are a module's; the module guide's "Private modules" says a module takes its private inputs itself (its `secret`
+      settings, its own API) and keeps them in its tables; `src/backup/backup.ts`'s refusal message no longer speaks of
+      admitted keys. Issue 00031 rewritten for what is left (a module's `secret` byte setting in another form in a
+      halt's log line). Tests: the files of A119, A123 and the loop's `on-key` deleted with their negative controls;
+      A120 keeps its PP-9 half (`test/private/privacy.test.ts`: a core, a lockstep and an independent instance, 20
+      heights, the core's `/status` with exactly `id`, `connected`, `lockstep`, `height`; a listed instance never
+      seen), its required id `private.no-key-bytes-public` dropped from the title (the manifest never listed it: task
+      18.4's), with a new committed negative control (a core whose `/status` shows a fifth field of an instance fails
+      the oracle); A146 without keys; every other test that named a removed part changed to what is left (private
+      modules require `blocks` or `private-cursor`). New static test, seen failing first (leftovers in 53 files):
+      `test/private/key-handling-removed.test.ts` — no removed file or folder exists, and no name of the removed parts
+      is left in `src/`, `browser/`, `test/`, the module guide or this change's design (`key-handling-checks.ts`), with
+      its committed negative control (`on-key` put back in `POINTS`, the part's folder, a removed test file,
+      `testKeys`, `keyKinds`, `validateKey`, the code and the prose "key registry" each found).
 
 ## 15. Backups
 

@@ -231,14 +231,14 @@ describe("CF-4: which strings are secret", () => {
       secretStrings(
         {
           tls: { certificate: "C", key: "K", trustedRoots: ["R1", "R2"] },
-          testKeys: [{ kind: "viewing-key", bytes: "0x01", start: 5 }],
+          tokens: [{ name: "feed", token: "0x01", from: 5 }],
           feedUrl: "https://u:pw@feed",
           plain: "https://feed",
           count: 3,
         },
-        { tls: "secret", testKeys: "secret", feedUrl: "operational", plain: "data", count: "data" },
+        { tls: "secret", tokens: "secret", feedUrl: "operational", plain: "data", count: "data" },
       ),
-    ).toEqual(["C", "K", "R1", "R2", "viewing-key", "0x01", "pw"]);
+    ).toEqual(["C", "K", "R1", "R2", "feed", "0x01", "pw"]);
   });
 
   it("a field without a known kind counts as secret (fail closed); empty strings are no secret", () => {

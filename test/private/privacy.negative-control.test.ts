@@ -2,24 +2,22 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AdminSnapshot } from "../../src/admin/types.js";
 import { type AdminStarter, startAdminServer } from "../../src/admin/server.js";
 import { PRIVATE_BACKENDS, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
-import { privacyProblems, privacyRun } from "./privacy-checks.js";
+import { instancesProblems, instancesRun } from "./privacy-checks.js";
 
 /**
- * A120's committed negative controls (task 14.4; PP-10), on PostgreSQL 18.6 and PGlite 0.5.10, each through A120's own
- * run and oracle over 10 blocks, `keeper` independent:
- * - **a process that logs a key's bytes**: `keeper`'s module fails its `on-key` with an error whose message holds the
- *   key's bytes as hex without `0x` — the form the configuration does not hold, so the log's redaction leaves it —, and
- *   the process logs its halt with that message: the scan finds them in a log line of `keeper`;
- * - **a status that shows them**: `keeper`'s admin endpoints are served from snapshots whose `/config` carries the
- *   configuration's test keys as written (an unredacted secret field): the scan finds them in `keeper`'s `/config`.
+ * A120's committed negative control (task 14.4a, PP-9), on PostgreSQL 18.6 and PGlite 0.5.10, through A120's own run
+ * and oracle over 5 blocks, `keeper` independent: the core's admin endpoints are served from snapshots that show of each
+ * private instance one field more than the four PP-9 allows — the hash of its last `hello` or report, which the core's
+ * transport knows —, and the oracle finds it in the core's `/status`.
  */
 
-/** An admin starter whose snapshots show `testKeys` of the process's `core` revision as `keys` (unredacted). */
-function showingKeys(keys: () => unknown): AdminStarter {
+/** An admin starter whose snapshots add `hash` to each private instance the core's `/status` shows. */
+function showingMore(): AdminStarter {
   const shown = (snapshot: AdminSnapshot): AdminSnapshot => {
-    const core = snapshot.config.core;
-    if (core === null) return snapshot;
-    return { ...snapshot, config: { ...snapshot.config, core: { ...core, settings: { ...core.settings, testKeys: keys() as never } } } };
+    const instances = snapshot.status.privateInstances;
+    if (instances === null) return snapshot;
+    const more = instances.map((instance) => ({ ...instance, hash: `0x${"00".repeat(32)}` }));
+    return { ...snapshot, status: { ...snapshot.status, privateInstances: more } };
   };
   return async (options) => {
     const server = await startAdminServer({ ...options, snapshot: shown(options.snapshot) });
@@ -33,37 +31,17 @@ function showingKeys(keys: () => unknown): AdminStarter {
   };
 }
 
-describe.each(PRIVATE_BACKENDS)("A120's negative controls on $name", (backend) => {
+describe.each(PRIVATE_BACKENDS)("A120's negative control on $name", (backend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it(
-    "a private process that logs a key's bytes fails A120's scan",
+    "a core whose /status shows more of an instance than its id, connection, lockstep flag and height fails A120's oracle",
     async () => {
-      const run = await privacyRun(backend, {
-        head: 10n,
-        lockstep: false,
-        keeperPoints: {
-          async "on-key"(_p, key) {
-            throw new Error(`cannot take the key ${Buffer.from(key.bytes).toString("hex")}`);
-          },
-        },
-      });
-      const problems = privacyProblems(run);
-      expect(problems).toContain("a log line of keeper holds the key's bytes as hex");
-      expect(run.cursors.keeper).toBe(2n);
-    },
-    TEST_TIMEOUT_MS,
-  );
-
-  it(
-    "a /config that shows the test keys fails A120's scan",
-    async () => {
-      let keys: unknown = null;
-      const run = await privacyRun(backend, { head: 10n, lockstep: false, keeperAdmin: showingKeys(() => keys), onKey: (key) => (keys = [key]) });
-      const problems = privacyProblems(run);
-      expect(problems).toContain("the answer of keeper /config holds the key's bytes as hex");
-      expect(problems.filter((problem) => !problem.startsWith("the answer of keeper /config"))).toEqual([]);
+      const run = await instancesRun(backend, { head: 5n, lockstep: false, coreAdmin: showingMore() });
+      const problems = instancesProblems(run);
+      expect(problems.filter((problem) => problem.includes("other fields than id, connected, lockstep, height"))).toHaveLength(2);
+      expect(problems.filter((problem) => !problem.includes("other fields than"))).toEqual([]);
     },
     TEST_TIMEOUT_MS,
   );

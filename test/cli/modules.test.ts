@@ -170,7 +170,6 @@ describe("how the file's modules join the build (Q106 B)", () => {
     expect(build.backbone.map((part) => (part as { id: string }).id)).toEqual([
       "core-chain",
       "core-private-source",
-      "core-key-registry",
       "core-digest",
       "core-health",
       "core-status",

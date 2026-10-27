@@ -2,7 +2,7 @@
  * The `core` entry's settings schemas (`openspec/changes/core-arch/specs/configuration/spec.md` CF-3, CF-4; `design.md`
  * §7; CORE-ARCH §4.12): CF-4's table as two zod 4 object schemas — {@link PUBLIC_CORE_SCHEMA} for the public (core)
  * process, whose entry has the node's URL and the lockstep list, and {@link PRIVATE_CORE_SCHEMA} for a private process,
- * whose entry has instead its instance id, the public database, the core's transport and its test keys (CF-11). Each
+ * whose entry has instead its instance id, the public database and the core's transport. Each
  * field carries its kind (`data`, `operational` or `secret`) on its outermost schema, read as
  * `schema.shape[field].meta().kind` like a module's settings (design §7), and its default, applied to an absent field.
  * The validation (`./validate.ts`) parses a `core` revision of this build with the schema of the process's side.
@@ -13,11 +13,11 @@
  *
  * Choices CF-4 leaves open (task 4.2): `genesisHash` is a data field, required with `network: "custom"` and refused
  * with the four known networks, whose genesis hashes are built in; hashes are 32 bytes; `ledgerSources` names each of
- * the ledger versions (four since task 12.2a's `v9-rc3`), `vendored` unless given; `testKeys` is a secret field (key bytes are never shown, AE-6) and
- * defaults to none; `listen.admin` defaults to `0.0.0.0:8081` also when `listen` is given without it; addresses are
- * `host:port` (a host name, an IPv4 address or a bracketed IPv6 address; the port from 0 to 65535); the integers are
- * the plain data's (0 to 2^53 − 1), and `apiReadTimeoutMs` is from 1 to {@link MAX_READ_TIMEOUT_MS}, the read
- * option's bounds (DB-15). Every nested object is strict: a field it does not have is refused, not dropped.
+ * the ledger versions (four since task 12.2a's `v9-rc3`), `vendored` unless given; `listen.admin` defaults to
+ * `0.0.0.0:8081` also when `listen` is given without it; addresses are `host:port` (a host name, an IPv4 address or a
+ * bracketed IPv6 address; the port from 0 to 65535); the integers are the plain data's (0 to 2^53 − 1), and
+ * `apiReadTimeoutMs` is from 1 to {@link MAX_READ_TIMEOUT_MS}, the read option's bounds (DB-15). Every nested object is
+ * strict: a field it does not have is refused, not dropped.
  *
  * **`ledgerTable`** (LG-1 to LG-3, task 12.2): its default is the network's built-in table (`../ledger/networks.json`),
  * and a configured table adds to or replaces parts of it (`../ledger/version-table.ts`). Both schemas check LG-1 and
@@ -181,17 +181,13 @@ export const PUBLIC_CORE_SCHEMA = z
   .superRefine(ledgerTableRule)
   .overwrite(withLedgerTable);
 
-/** A test key of a private process (CF-11): its kind, its bytes as a byte value, and the height it is admitted at. */
-const TEST_KEY = z.strictObject({ kind: text(), bytes: hexBytes(), start: count() });
-
-/** A private process's `core` entry (CF-4): instead of the node and the lockstep list, its own four fields. */
+/** A private process's `core` entry (CF-4): instead of the node and the lockstep list, its own three fields. */
 export const PRIVATE_CORE_SCHEMA = z
   .strictObject({
     ...BASE,
     instanceId: text().meta(OPERATIONAL),
     publicDatabase: database().optional().meta(SECRET),
     coreTransport: address().optional().meta(OPERATIONAL),
-    testKeys: z.array(TEST_KEY).default([]).meta(SECRET),
   })
   .superRefine(genesisHashRule)
   .superRefine(ledgerTableRule)

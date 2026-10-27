@@ -22,19 +22,14 @@ const tableItem = (name: string, schema: string, lifetimes: ("block" | "table")[
   table: { schema, tables: ["t"], kind: "append-only" as const },
 });
 
-/** The private backbone's shape (`src/backbone/private.ts`): core-chain, core-private-source, core-key-registry, core-digest. */
+/** The private backbone's shape (`src/backbone/private.ts`): core-chain, core-private-source, core-digest. */
 const PRIVATE_SOURCE = declaration("core-private-source", {
   requires: [],
   provides: [tableItem("private-cursor", "core_private_source")],
   migrations: [],
 });
-const KEY_REGISTRY = declaration("core-key-registry", {
-  requires: [],
-  provides: [tableItem("admitted-keys", "core_key_registry", ["block", "table"])],
-  migrations: [],
-});
 const PRIVATE_DIGEST: ModuleDeclaration = { ...CORE_DIGEST, requires: ["private-cursor"] };
-const PRIVATE_BACKBONE: readonly ModuleDeclaration[] = [CORE_CHAIN, PRIVATE_SOURCE, KEY_REGISTRY, PRIVATE_DIGEST];
+const PRIVATE_BACKBONE: readonly ModuleDeclaration[] = [CORE_CHAIN, PRIVATE_SOURCE, PRIVATE_DIGEST];
 
 /** A public item: `name`, provided by the public entry `provider` from `start` to `stop`. */
 function item(name: string, provider: string, start: number, stop: number | null = null): PublicItem {
@@ -146,7 +141,7 @@ describe("PP-13: a private module may require the public core's table items", ()
   it("refuses a private module providing an item a public module provides at a common height (MD-6, Q146)", () => {
     const mine = declaration("mine", {
       side: "private",
-      requires: ["admitted-keys"],
+      requires: ["private-cursor"],
       provides: [tableItem("ledger-events", "mine")],
     });
     const refused = refusalOf(privateInput([mine, wallet()], [entry("mine", 1), entry("wallet", 1)], ledger(5)));
@@ -166,7 +161,7 @@ describe("PP-13: a private module may require the public core's table items", ()
 
   it("names every provider of an overlap: several private modules with a public one, or two public ones", () => {
     const own = (id: string) =>
-      declaration(id, { side: "private", requires: ["admitted-keys"], provides: [tableItem("ledger-events", id)] });
+      declaration(id, { side: "private", requires: ["private-cursor"], provides: [tableItem("ledger-events", id)] });
     const three = refusalOf(privateInput([own("a"), own("b")], [entry("a", 1), entry("b", 1)], ledger(1)));
     expect(three.message).toContain("the modules a and b and core-ledger-state of the public core all provide the item");
     expect(three.details).toMatchObject({ modules: ["a", "b"], publicModules: ["core-ledger-state"] });
@@ -181,7 +176,6 @@ describe("PP-13: a private module may require the public core's table items", ()
     expect(graph.modules.map((part) => part.id)).toEqual([
       "core-chain",
       "core-private-source",
-      "core-key-registry",
       "core-digest",
       "wallet",
     ]);
@@ -201,7 +195,7 @@ describe("PP-13: a private module may require the public core's table items", ()
     ]);
     // In the range that ends at the cursor (providers unchecked there, Q97) an item a part provides is the part's,
     // never a public item, though the public core provides it too.
-    const mine = declaration("mine", { side: "private", requires: ["admitted-keys"], provides: [tableItem("ledger-events", "mine")] });
+    const mine = declaration("mine", { side: "private", requires: ["private-cursor"], provides: [tableItem("ledger-events", "mine")] });
     const atCursor = resolveGraph(privateInput([mine, wallet()], [entry("mine", 1, 4), entry("wallet", 1)], ledger(1), { cursor: 4n }));
     expect(atCursor.rangeAt(4n)?.providerOf.get("ledger-events")).toBe("mine");
     expect(atCursor.rangeAt(4n)?.publicItems?.has("ledger-events")).toBe(false);

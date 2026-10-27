@@ -19,7 +19,7 @@
  * them — `core-chain-events`, `core-block-parsed` and `core-tx-results` (task 11.1), `core-ledger-state` (task 12.3),
  * and `core-contract-states`, `core-contract-logs-full` and the development-only `core-contract-logs-fast` (task 13.1),
  * in the decision record's table of core modules' order. A private process's (PP-1, task 14.1): `core-chain`, then the private backbone of one private start
- * (`src/backbone/private.ts`: `core-private-source` from its intake, `core-key-registry`, `core-digest`), then the admin
+ * (`src/backbone/private.ts`: `core-private-source` from its intake, `core-digest`), then the admin
  * parts; no core module (they are public).
  */
 

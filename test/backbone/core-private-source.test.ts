@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { CORE_DIGEST } from "../../src/backbone/core-digest/index.js";
-import { CORE_KEY_REGISTRY } from "../../src/backbone/core-key-registry/index.js";
 import {
   bindingRefusal,
   lockstepBehind,
@@ -502,16 +501,14 @@ describe("the public database and the wake-ups a private process starts with", (
 });
 
 describe("the private backbone (PP-1, RN-3)", () => {
-  it("is core-private-source, core-key-registry and core-digest requiring the private cursor", () => {
+  it("is core-private-source and core-digest requiring the private cursor: nothing of it takes keys (Q154)", () => {
     const intake = privateIntake();
-    expect(privateBackbone(intake).map((part) => part.id)).toEqual(["core-private-source", "core-key-registry", "core-digest"]);
+    expect(privateBackbone(intake).map((part) => part.id)).toEqual(["core-private-source", "core-digest"]);
     expect(privateBackbone(intake)[0]).toBe(intake.part);
     expect(PRIVATE_CORE_DIGEST).toMatchObject({ side: "private", requires: ["private-cursor"] });
     expect(PRIVATE_CORE_DIGEST.migrations).toEqual(CORE_DIGEST.migrations);
     expect(PRIVATE_CORE_DIGEST.points).toBe(CORE_DIGEST.points);
     expect(intake.part.provides.map((item) => item.name)).toEqual(["private-cursor"]);
-    expect(CORE_KEY_REGISTRY).toMatchObject({ side: "private", requires: [] });
-    expect(CORE_KEY_REGISTRY.provides.map((item) => [item.name, item.lifetimes])).toEqual([["admitted-keys", ["block", "table"]]]);
   });
 });
 

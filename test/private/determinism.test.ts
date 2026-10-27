@@ -36,8 +36,8 @@ describe.each(PRIVATE_BACKENDS)("A146 one set of determinism rules on a private 
   );
 
   it(
-    "two private instances with the same configuration, test keys included, bound to the same public database, have " +
-      "equal contents hashes at the same height",
+    "two private instances with the same configuration, bound to the same public database, have equal contents " +
+      "hashes at the same height",
     async () => {
       expect(a146HashProblems(await a146Hashes(backend))).toEqual([]);
     },

@@ -276,11 +276,11 @@ describe("RN-3 in series: the registered parts in the range's order, each awaite
     const recorder = new Recorder();
     const a = registering(declaration("a"), recorder, ["on-start-api"]);
     const b = declaration("b");
-    const c = registering(declaration("c"), recorder, ["on-start-api", "on-key"]);
+    const c = registering(declaration("c"), recorder, ["on-start-api", "on-best-block"]);
     const schedule = seriesOf("on-start-api", [c, b, a]);
     expect(schedule.point).toBe("on-start-api");
     expect(waveIds(schedule)).toEqual([["c"], ["a"]]);
-    expect(waveIds(seriesOf("on-key", [c, b, a]))).toEqual([["c"]]);
+    expect(waveIds(seriesOf("on-best-block", [c, b, a]))).toEqual([["c"]]);
     expect(Object.isFrozen(schedule)).toBe(true);
     expect(Object.isFrozen(schedule.waves)).toBe(true);
     expect(schedule.waves.every((wave) => Object.isFrozen(wave))).toBe(true);
@@ -515,15 +515,15 @@ describe("a callback that fails: what the dispatch gives back for RN-8's halt (t
   });
 
   it("keeps a value that is not an Error as the cause, and shows it in the message", async () => {
-    const m = declaration("m", { points: { "on-key": () => Promise.reject("just a string") } });
-    const failure = (await rejection(runSchedule(seriesOf("on-key", [m]), runOf("on-key")))) as CallbackFailure;
+    const m = declaration("m", { points: { "on-rollback": () => Promise.reject("just a string") } });
+    const failure = (await rejection(runSchedule(seriesOf("on-rollback", [m]), runOf("on-rollback")))) as CallbackFailure;
     expect(failure.cause).toBe("just a string");
-    expect(failure.message).toBe("the on-key callback of m failed: just a string");
-    const none = declaration("n", { points: { "on-key": () => Promise.reject(undefined) } });
-    const empty = (await rejection(runSchedule(seriesOf("on-key", [none]), runOf("on-key")))) as CallbackFailure;
+    expect(failure.message).toBe("the on-rollback callback of m failed: just a string");
+    const none = declaration("n", { points: { "on-rollback": () => Promise.reject(undefined) } });
+    const empty = (await rejection(runSchedule(seriesOf("on-rollback", [none]), runOf("on-rollback")))) as CallbackFailure;
     expect(empty.cause).toBeUndefined();
     expect("cause" in empty).toBe(true);
-    expect(empty.message).toBe("the on-key callback of n failed: undefined");
+    expect(empty.message).toBe("the on-rollback callback of n failed: undefined");
   });
 
   it("in a wave: awaits the wave's other callbacks, starts nothing of the next wave, then throws the failure", async () => {

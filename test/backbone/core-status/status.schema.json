@@ -183,8 +183,7 @@
         "on-compute",
         "on-db-write",
         "on-after-db-write",
-        "on-stop-height",
-        "on-key"
+        "on-stop-height"
       ]
     },
     "token": {

@@ -7,8 +7,8 @@ import { type Message, messageText, parseMessage, type Report } from "../../src/
  * Go-betweens of a private process and the core's transport for task 14.3's tests (PP-6): a TCP proxy whose target can
  * change ({@link RetargetProxy}: a restarted core listens on another free port, and the private process's
  * `coreTransport` stays the proxy's), and a WebSocket relay that can rewrite the reports a private process sends
- * ({@link ReportRelay}: a `report` whose hash is not the public block's, without changing the private process) and
- * keeps every message it relays (task 14.4's privacy checks). Imports nothing of Vitest.
+ * ({@link ReportRelay}: a `report` whose hash is not the public block's, without changing the private process). Imports
+ * nothing of Vitest.
  */
 
 /** `host:port` split. */
@@ -81,8 +81,6 @@ export class ReportRelay {
   readonly #wss: WebSocketServer;
   /** The reports the private processes sent, before any rewriting. */
   readonly reports: Report[] = [];
-  /** Every message relayed, both ways, as sent (task 14.4's privacy checks read them all). */
-  readonly texts: string[] = [];
 
   private constructor(http: HttpServer, target: string, rewrite: (report: Report) => Report) {
     this.#http = http;
@@ -100,12 +98,10 @@ export class ReportRelay {
           this.reports.push(parsed.message);
           text = messageText(rewrite(parsed.message) as Message);
         }
-        this.texts.push(text);
         if (outer.readyState === WebSocket.OPEN) outer.send(text);
         else waiting.push(text);
       });
       outer.on("message", (data: RawData) => {
-        this.texts.push(data.toString());
         if (inner.readyState === WebSocket.OPEN) inner.send(data.toString());
       });
       const pass = (to: WebSocket, code: number, reason: Buffer): void => {

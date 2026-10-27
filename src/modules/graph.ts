@@ -67,7 +67,6 @@ export const BACKBONE_ORDER: readonly string[] = Object.freeze([
   "core-block-fetch",
   "core-block-commit",
   "core-private-source",
-  "core-key-registry",
   "core-digest",
   "core-health",
   "core-status",

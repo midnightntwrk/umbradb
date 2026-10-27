@@ -1097,7 +1097,6 @@ describe("RN-3: backbone first, then Kahn's algorithm by UTF-8 id, core-digest l
       "core-block-fetch",
       "core-block-commit",
       "core-private-source",
-      "core-key-registry",
       "core-digest",
       "core-health",
       "core-status",

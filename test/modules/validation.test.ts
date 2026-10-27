@@ -455,43 +455,14 @@ const SHAPES: readonly ShapeCase[] = [
     field: "provides[1].table.tables[0]",
     says: ["stats.rows", "stats-rows and stats-times", "one item"],
   },
-  { name: "keyKinds not a list", build: () => loose("stats", (d) => void (d.keyKinds = "viewing")), field: "keyKinds" },
-  {
-    name: "a key kind that is not a string",
-    build: () => loose("stats", (d) => Object.assign(d, { keyKinds: [7], validateKey: () => true })),
-    field: "keyKinds[0]",
-  },
-  {
-    name: "keyKinds without validateKey",
-    build: () => loose("stats", (d) => void (d.keyKinds = ["viewing"])),
-    field: "validateKey",
-    says: ["required when keyKinds is set"],
-  },
-  {
-    name: "validateKey that is not a function",
-    build: () => loose("stats", (d) => Object.assign(d, { keyKinds: ["viewing"], validateKey: true })),
-    field: "validateKey",
-  },
   { name: "no startsMidChain", build: () => loose("stats", (d) => void delete d.startsMidChain), field: "startsMidChain" },
   { name: "needsLockstep not a boolean", build: () => loose("stats", (d) => void (d.needsLockstep = "yes")), field: "needsLockstep" },
-  // A private module's own fields on a public module (PP-6, PP-8; task 14.1).
-  {
-    name: "keyKinds on a public module",
-    build: () => loose("stats", (d) => Object.assign(d, { keyKinds: ["viewing"], validateKey: () => true })),
-    field: "keyKinds",
-    says: ["is a public module and declares keyKinds", 'declare the module side: "private"'],
-  },
-  {
-    name: "validateKey on a public module",
-    build: () => loose("stats", (d) => Object.assign(d, { validateKey: () => true })),
-    field: "validateKey",
-    says: ["is a public module and declares validateKey"],
-  },
+  // A private module's own field on a public module (PP-6; task 14.1).
   {
     name: "needsLockstep on a public module",
     build: () => loose("stats", (d) => Object.assign(d, { needsLockstep: false })),
     field: "needsLockstep",
-    says: ["is a public module and declares needsLockstep", "only a private module declares"],
+    says: ["is a public module and declares needsLockstep", "only a private module declares", 'declare the module side: "private"'],
   },
   { name: "developmentOnly not a boolean", build: () => loose("stats", (d) => void (d.developmentOnly = 1)), field: "developmentOnly" },
   {
@@ -577,8 +548,6 @@ describe("MD-1: a declaration of a shape its type forbids is refused (invalid-de
 
   it("accepts every optional property absent, or set to undefined, and every one present", () => {
     const optional = {
-      keyKinds: ["viewing"],
-      validateKey: () => true,
       needsLockstep: true,
       developmentOnly: false,
       requiresResync: true,

@@ -8,7 +8,7 @@
  * everything `ModuleDeclaration`'s type forbids — a missing or misspelled property, a value of the wrong type, a version
  * that is not semver, `deterministic: true` — with `invalid-declaration`, naming the field; so a module built without
  * types is held to the same declaration (A20). It also refuses so a public module that declares a private module's own
- * fields — `keyKinds`, `validateKey`, `needsLockstep` (PP-6, PP-8; task 14.1) —, which no public process could honour.
+ * field `needsLockstep` (PP-6; task 14.1), which no public process could honour.
  *
  * **MD-2's causes**, each a rule of {@link DECLARATION_RULES} with its own code, checked in that order over every
  * declaration once their shapes are valid: an id or item name DB-8's pattern does not allow (`bad-id`, the same check
@@ -78,8 +78,6 @@ const DECLARATION_PROPERTIES = [
   "side",
   "requires",
   "provides",
-  "keyKinds",
-  "validateKey",
   "startsMidChain",
   "needsLockstep",
   "developmentOnly",
@@ -305,33 +303,16 @@ function checkShape(value: unknown, origin: DeclarationOrigin, index: number): M
     names.set(name, position);
   });
 
-  const keyKinds = shape.strings(value.keyKinds, "keyKinds", false);
-  const validateKey = value.validateKey;
-  if (validateKey !== undefined && typeof validateKey !== "function") {
-    shape.wrong("validateKey", validateKey, "a function, (kind, bytes) => boolean");
-  }
-  if (keyKinds !== undefined && validateKey === undefined) {
-    shape.wrong(
-      "validateKey",
-      validateKey,
-      "a function, (kind, bytes) => boolean",
-      "it is required when keyKinds is set: the key registry admits a key of those kinds only if validateKey " +
-        "accepts its bytes (PP-8)",
-    );
-  }
   shape.boolean(value, "startsMidChain", true);
   shape.boolean(value, "needsLockstep", false);
-  if (value.side === "public") {
-    // A private module's own fields (PP-6, PP-8): a public module has no keys and no lockstep.
-    const own = (["keyKinds", "validateKey", "needsLockstep"] as const).find((field) => value[field] !== undefined);
-    if (own !== undefined) {
-      shape.refuse(
-        own,
-        "nothing, on a public module",
-        `${shape.who} is a public module and declares ${own}, which only a private module declares (MD-1): keys and ` +
-          `lockstep are a private process's (PP-6, PP-8); declare the module side: "private", or remove ${own}`,
-      );
-    }
+  if (value.side === "public" && value.needsLockstep !== undefined) {
+    // A private module's own field (PP-6): a public module has no lockstep.
+    shape.refuse(
+      "needsLockstep",
+      "nothing, on a public module",
+      `${shape.who} is a public module and declares needsLockstep, which only a private module declares (MD-1): ` +
+        `lockstep is a private process's (PP-6); declare the module side: "private", or remove needsLockstep`,
+    );
   }
   shape.boolean(value, "developmentOnly", false);
   if (!isZodObject(value.configSchema)) {

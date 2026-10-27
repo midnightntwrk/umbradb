@@ -34,7 +34,6 @@ export const POINTS = Object.freeze([
   "on-db-write",
   "on-after-db-write",
   "on-stop-height",
-  "on-key",
 ] as const);
 
 /** A point's name. */
@@ -101,10 +100,6 @@ export interface ModuleDeclaration {
   /** Item names, at least one (backbone parts may require none). */
   requires: string[];
   provides: ItemDeclaration[];
-  /** Private modules: key kinds the key registry admits (PP-8). */
-  keyKinds?: string[];
-  /** Required when `keyKinds` is set. */
-  validateKey?(kind: string, bytes: Uint8Array): boolean;
   /** CORE-ARCH §4.10, "Mid-chain start"; MD-4. */
   startsMidChain: boolean;
   /** Private modules that read mutable public tables (PP-6). */
@@ -163,13 +158,6 @@ export interface ItemSink {
   put(item: string, value: unknown): void;
 }
 
-/** A key that became pending in a private process (PP-8): its id, SHA-256(UTF-8 kind ‖ bytes), its kind and bytes. */
-export interface PendingKey {
-  keyId: Uint8Array;
-  kind: string;
-  bytes: Uint8Array;
-}
-
 /** What `on-start-api` registers the module's API on (CORE-ARCH §4.10, RN-15, RN-16). */
 export interface ApiRegistry {
   http(
@@ -186,10 +174,10 @@ export interface ApiRegistry {
 
 /**
  * The callbacks a module may register, by point (CORE-ARCH §4.10; `design.md` §2 gives each its handle). The read
- * handles of `on-finalized` (at the cursor), `on-start-height` (at h − 1), `on-stop-height` (at h) and `on-key` (at
- * the cursor) are RN-4's and design §2's (decision record Q100, option A); so is a private process's `on-fetch` read
- * of public data (PP-3, task 14.1): a read of the public database at its committed height — the public cursor, at
- * least h, so a module reads the public tables it needs by height (PP-5) —, and none in the core (RN-4).
+ * handles of `on-finalized` (at the cursor), `on-start-height` (at h − 1) and `on-stop-height` (at h) are RN-4's and
+ * design §2's (decision record Q100, option A); so is a private process's `on-fetch` read of public data (PP-3, task
+ * 14.1): a read of the public database at its committed height — the public cursor, at least h, so a module reads the
+ * public tables it needs by height (PP-5) —, and none in the core (RN-4).
  */
 export interface PointCallbacks {
   "on-start-db"(p: ProcessContext, w: SchemaWriteHandle): Promise<void>;
@@ -204,7 +192,6 @@ export interface PointCallbacks {
   "on-db-write"(p: ProcessContext, b: BlockContext, w: BlockWriteHandle): Promise<void>;
   "on-after-db-write"(p: ProcessContext, b: BlockContext, read: ReadHandle): Promise<void>;
   "on-stop-height"(p: ProcessContext, e: { entryId: string; height: bigint }, read: ReadHandle): Promise<void>;
-  "on-key"(p: ProcessContext, key: PendingKey, read: ReadHandle): Promise<void>;
 }
 
 /**

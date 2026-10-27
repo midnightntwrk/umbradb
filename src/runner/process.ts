@@ -99,8 +99,7 @@
  * are the private cursor's and whose blocks are the public database's; step 6 is that source's own check (it reads the
  * public database's chain identity, whose genesis hash `core-chain` records; PP-2's binding is the part's), the
  * bootstrap's wait of step 8 waits for the public cursor to reach the private S, and the source is closed with the
- * database. Its loop fires `on-key` for the test keys that become pending at each height, which its `core-key-registry`
- * gives (PP-8, CF-11; task 14.4: `LoopInput.keys`).
+ * database.
  *
  * **The process transport** (PP-4; task 14.2, `../private/core-transport.ts`): a public process whose `core` revision
  * has `listen.transport` starts it once its database is open and its chain known (step 7, before the bootstrap's wait),
@@ -151,7 +150,6 @@ import {
   waitForNode,
 } from "../backbone/core-chain/index.js";
 import { readinessOf } from "../backbone/core-health/readiness.js";
-import { CORE_KEY_REGISTRY_ID, pendingKeysOf } from "../backbone/core-key-registry/index.js";
 import { publicLockstepOf } from "../backbone/core-private-source/index.js";
 import { buildCoreVersion, type CoreVersion } from "../config/build.js";
 import type { ProcessSide } from "../config/core-settings.js";
@@ -957,10 +955,6 @@ class Process implements ProcessHandle {
       boundary: this.#upgrade?.height ?? null,
       slowBlockMs: settings.slowBlockMs as number,
       ...(this.#lockstep === undefined ? {} : { lockstep: this.#lockstep }),
-      // A private process's test keys (PP-8, task 14.4): those its core-key-registry makes pending at each height.
-      ...(graph.modules.some((part) => part.id === CORE_KEY_REGISTRY_ID)
-        ? { keys: pendingKeysOf(contexts.of(CORE_KEY_REGISTRY_ID)) }
-        : {}),
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
         head: (head) => {

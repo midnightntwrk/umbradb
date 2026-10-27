@@ -19,8 +19,6 @@
  * Between `on-parse` and `on-compute`, `on-start-height` for the entries starting at h (RN-9): the core's parts when h is
  * S, then the modules one of whose segments of the graph (`ResolvedGraph.segments`) starts at h — revisions continuing
  * each other are one segment (CF-5), so a revision boundary starts nothing (A42) —, each callback with a read at h − 1;
- * then, on a private process ({@link LoopInput.keys}, PP-8; task 14.4), `on-key` for each key that becomes pending at h,
- * one key after the other, its callbacks in series in the range's order, each with its own read at the cursor (h − 1);
  * after `on-after-db-write`, `on-stop-height` for the entries stopping at h (RN-10): the modules one of whose segments
  * ends at h, in reverse order, then the core's parts when h is the core's stop, each with a read at h.
  *
@@ -73,10 +71,9 @@
  *    earlier `on-compute` published are dropped), or from `on-start-height` when the failure came before `on-compute`
  *    began; anything else halts with `unexpected-cursor` at h ({@link UnexpectedCursor}).
  * Nothing is fetched or parsed again, and the cursor's `on-after-db-write`, which ran before h began, is not
- * re-delivered; `on-key` fires again only for a height that resumes at `on-start-height` (its keys are still pending
- * when it resumes at `on-compute`, which takes them again); a retryable failure on the way to h (the head's read, its
- * `on-finalized`) keeps h held for the run after. A failure before `on-parse` ended holds nothing: the next run starts
- * from the cursor, which it re-delivers (RN-11), and fetches h again.
+ * re-delivered; a retryable failure on the way to h (the head's read, its `on-finalized`) keeps h held for the run
+ * after. A failure before `on-parse` ended holds nothing: the next run starts from the cursor, which it re-delivers
+ * (RN-11), and fetches h again.
  *
  * **A source that fetches ahead** (`core-block-fetch`'s node source, task 10.3; IN-4 to IN-6) is given, for each run,
  * the runner's dispatch interface for its queue ({@link QueueRunner}: `on-fetch` and `on-parse` of a block it fetched
@@ -107,7 +104,6 @@ import { openBlockWrites } from "../db/write-handles.js";
 import type {
   BlockContext,
   ModuleDeclaration,
-  PendingKey,
   PointName,
   ProcessContext,
 } from "../modules/declaration.js";
@@ -166,14 +162,6 @@ export interface LoopInput {
   readonly slowBlockMs?: number | null;
   /** The lockstep wait before each block's transaction (PP-6; see the module comment); none unless given. */
   readonly lockstep?: LockstepWait;
-  /** The keys that become pending at each height, for `on-key` (PP-8; see the module comment); none unless given. */
-  readonly keys?: PendingKeys;
-}
-
-/** The keys that become pending before a height's `on-compute` (PP-8; a private process's `core-key-registry`). */
-export interface PendingKeys {
-  /** The keys that become pending at `height`, in the order `on-key` fires for them; none when no key does. */
-  at(height: bigint): readonly PendingKey[];
 }
 
 /** The lockstep wait (PP-6, `src/private/lockstep.ts`'s `Lockstep`): before `BEGIN` of `height`. */
@@ -570,9 +558,8 @@ export class FinalizedLoop {
   }
 
   /**
-   * The points before the block transaction: `on-fetch`, `on-parse`, `on-start-height` ({@link startHeight}), `on-key`
-   * ({@link keyPoint}), then `on-compute` with a read at h − 1; a held height from the point it resumes at
-   * ({@link HeightRun.from}).
+   * The points before the block transaction: `on-fetch`, `on-parse`, `on-start-height` ({@link startHeight}), then
+   * `on-compute` with a read at h − 1; a held height from the point it resumes at ({@link HeightRun.from}).
    */
   protected async prepare(run: HeightRun): Promise<void> {
     if (run.prepared !== true && run.from === undefined) {
@@ -580,10 +567,7 @@ export class FinalizedLoop {
       await this.blockPoint(run, "on-parse");
     }
     this.#reached(run, "on-start-height");
-    if (run.from !== "on-compute") {
-      await this.startHeight(run);
-      await this.keyPoint(run);
-    }
+    if (run.from !== "on-compute") await this.startHeight(run);
     this.#reached(run, "on-compute");
     await this.compute(run, (body) => this.input.db.read(body));
   }
@@ -595,17 +579,6 @@ export class FinalizedLoop {
   protected async startHeight(run: HeightRun): Promise<void> {
     const schedule = startHeightSchedule(run.range, this.startingAt(run));
     await this.#schedule(schedule, (part, call) => this.#entry(run, part, call));
-  }
-
-  /**
-   * `on-key` (PP-8): for each key that becomes pending at the height ({@link LoopInput.keys}), in order, the callbacks in
-   * series in the range's order, each with the key and its own read at the cursor; nothing without `keys`. A negative
-   * control's seam.
-   */
-  protected async keyPoint(run: HeightRun): Promise<void> {
-    for (const key of this.input.keys?.at(run.height) ?? []) {
-      await this.#dispatch(run.range, "on-key", (_part, call) => this.input.db.read((read) => call(key, read)));
-    }
   }
 
   /**

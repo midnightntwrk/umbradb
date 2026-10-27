@@ -9,7 +9,6 @@ import {
   coreEntry,
   defineConfig,
   type Entry,
-  type TestKey,
   type UmbraConfig,
   versionEntry,
 } from "../../src/config/entries.js";
@@ -205,7 +204,6 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
     expectTypeOf<Accepts<typeof coreEntry, Public & { instanceId: string }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Public & { publicDatabase: string }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Public & { coreTransport: string }>>().toEqualTypeOf<false>();
-    expectTypeOf<Accepts<typeof coreEntry, Public & { testKeys: TestKey[] }>>().toEqualTypeOf<false>();
     type Private = Minimal & { instanceId: string };
     expectTypeOf<Accepts<typeof coreEntry, Private & { node: string }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Private & { lockstepInstances: string[] }>>().toEqualTypeOf<false>();
@@ -254,7 +252,6 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
         instanceId: "wallet-1",
         publicDatabase: "postgres://reader@db/umbradb",
         coreTransport: "core.internal:8082",
-        testKeys: [{ kind: "viewing-key", bytes: "0x01", start: 100 }],
         developmentOptIn: true,
       },
     });

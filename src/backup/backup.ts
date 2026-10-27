@@ -87,8 +87,8 @@ function privateRefused(): UmbraError {
   return new UmbraError(
     "private-backup-refused",
     "UmbraDB does not back up a private process's database unless the development opt-in is set (PP-12): a private " +
-      "database holds what the process admitted for its keys; no file was written. PostgreSQL's own tools can still " +
-      "copy it, outside this rule",
+      "database holds what its modules computed from their private inputs; no file was written. PostgreSQL's own " +
+      "tools can still copy it, outside this rule",
     { feature: "private-backup" },
   );
 }

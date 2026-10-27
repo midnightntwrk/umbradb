@@ -61,13 +61,12 @@ const PUBLIC: Readonly<Record<string, readonly [string, Absent]>> = {
   lockstepInstances: ["operational", { default: [] }],
 };
 
-/** A private process's own fields; `testKeys`' kind is task 4.2's choice (CF-4 names no kind for it). */
+/** A private process's own fields. */
 const PRIVATE: Readonly<Record<string, readonly [string, Absent]>> = {
   ...BASE,
   instanceId: ["operational", "required"],
   publicDatabase: ["secret", "absent"],
   coreTransport: ["operational", "absent"],
-  testKeys: ["secret", { default: [] }],
 };
 
 const REQUIRED_PUBLIC = { network: "preprod", database: "pglite:memory", node: "ws://127.0.0.1:9944" };
@@ -152,7 +151,6 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
         database: "pglite:/var/lib/umbradb/wallet",
         publicDatabase: "postgres://reader@db/umbradb",
         coreTransport: "core.internal:8082",
-        testKeys: [{ kind: "viewing-key", bytes: "0x", start: 0 }],
       }).error,
     ).toBeUndefined();
   });
@@ -220,7 +218,7 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
     expect(PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, extra: 1 }).success).toBe(false);
     expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, extra: 1 }).success).toBe(false);
     expect(PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, tls: { certificate: "c", key: "k", trustedRoots: [], x: 1 } }).success).toBe(false);
-    expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, testKeys: [{ kind: "k", bytes: "0x", start: 0, x: 1 }] }).success).toBe(false);
+    expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, tls: { certificate: "c", key: "k", trustedRoots: [], x: 1 } }).success).toBe(false);
   });
 });
 
@@ -265,7 +263,7 @@ type DeepReadonly<T> = T extends readonly (infer E)[]
     : T;
 
 /** The fields one side's type declares `never`, to refuse the other side's (task 4.1). */
-type PrivateOnly = "instanceId" | "publicDatabase" | "coreTransport" | "testKeys";
+type PrivateOnly = "instanceId" | "publicDatabase" | "coreTransport";
 type PublicOnly = "node" | "lockstepInstances";
 
 describe("CF-2, CF-4: the builders' types and the schemas say the same", () => {

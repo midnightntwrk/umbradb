@@ -201,7 +201,6 @@ export interface DeclarationView {
   readonly developmentOnly: boolean;
   readonly requiresResync: boolean;
   readonly needsLockstep: boolean;
-  readonly keyKinds: readonly string[] | null;
   /** Each setting with its kind (CF-4). */
   readonly settings: Readonly<Record<string, string>>;
   /** Each migration by its id and checksum (SHA-256 of its SQL, lowercase hex, DB-9). */
