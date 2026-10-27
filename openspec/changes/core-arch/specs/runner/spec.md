@@ -260,7 +260,8 @@ while a callback runs, the module; it SHALL clear the condition when that height
 runner SHALL time alike, each as a window of its own, the callbacks it awaits outside that window — `on-after-db-write`
 and `on-stop-height` after each commit (one window, from the commit to the end of `on-stop-height`), each
 `on-finalized`, and RN-11's re-delivery at a restart —: each SHALL raise the same `slow-block` condition, naming the
-height (which may have committed), the point and the module, and clear it when its window ends (owner decision Q145).
+height (which may have committed; for an `on-finalized`, the head it announces, owner decision Q162), the point and
+the module, and clear it when its window ends (owner decision Q145).
 THE runner SHALL NOT cancel or retry a height or a callback for being slow (Q71).
 
 #### Scenario: A slow callback
