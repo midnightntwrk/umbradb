@@ -1350,6 +1350,40 @@ development dependency, pinned in task 0.1); PGlite runs in the core and private
 answered by the same backbone parts; the page offers backup and restore of its database (BK-5). `npm run build:browser`
 writes `dist-browser/`, which is not part of the npm package.
 
+**As built (task 16.1).** `browser/build.ts` (`npm run build:browser`) bundles the page (`index.html`, `src/page.ts`),
+the core and private workers (`src/core-worker.ts`, `src/private-worker.ts`: one process each in a dedicated module
+worker, `src/process-worker.ts`, started as `umbradb run` starts one — the command's build, the bundled configuration's
+data, the node's block source or the private intake) and the ledger worker (`src/ledger-worker.ts`:
+`src/ledger/worker/entry.ts` unchanged). The configuration is a module the page bundles (`src/config.ts` by default;
+`src/configuration.ts` its shape): it makes each process's data from the run — the node, the storage, S, the page's
+parameters — and names its user modules and private instances. The workers bundle UmbraDB's sources unchanged and
+replace only what a browser lacks, each in one place: Node.js's built-in modules for the files of `src/` (`node:crypto`
+by a synchronous, incremental SHA-256; `node:async_hooks` by nothing, so PGlite's nested-call guard of Q73 is off in the
+browser and such a call waits instead of being refused; `node:worker_threads` by Web Workers, the first message carrying
+`workerData` and later ones held until the entry listens; `node:fs`; `node:http`, `node:https` and `ws` by the page's
+message network; `node:path`, POSIX from `/`), `Buffer` (given to the files of `src/` that name it) and
+`process.hrtime.bigint` (`performance.now()`); whole modules — the database's opening (PGlite in memory or OPFS, never
+PostgreSQL), the PGlite writer lock (a Web Lock `umbradb-database:<name>` asked with `ifAvailable` and held for the
+worker's life, so a second tab refuses with `writer-lock-held` before it opens anything), the configuration loader (no
+file), the node client's socket (the browser's `WebSocket`: no handshake status, so a refused handshake reads as
+`connect-failed`) and the module API's listener (calls on the worker's channel); and `umbradb backup`'s module (task
+15.1), bundled as a stub whose exports fail when used. A built-in module no replacement covers fails the build by name.
+The vendored ledger packages' Node.js entries are rewritten to read their `.wasm` beside the ledger worker with a
+synchronous request, check it against the package's `SHA256SUMS` (`package-hash-mismatch`) and instantiate it
+synchronously, as `readFileSync` does: a top-level `await` there, in the cycle the packages' snippets make (`#self`),
+waits on itself once bundled. The process transport of `src/private/` runs unchanged over the page's message network — a
+`MessageChannel` per connection, which the page hands to the listening and the connecting worker — with its six
+messages, lockstep and close codes; `tls` is refused there (no TLS on the page's channels); its timers are `unref`'d
+only where they can be (`src/private/timers.ts`). The admin endpoints are the process's own `ProcessAdmin` with a
+starter whose listener is the worker's channel (`answerAdmin` over the backbone parts' routes, BR-3); the heartbeat
+ticks in the same worker, so a worker whose loop is blocked answers no call at all, where Node.js's admin thread answers
+`/health/live` 503 (AE-2). For a new database the core worker reads the node's finalized head and runs from it as S
+(BR-2); the page keeps S per OPFS database in `localStorage`, so a reload and a second tab run the same configuration.
+Every `core` entry runs under the development opt-in (BR-1). The page must be cross-origin isolated (COOP `same-origin`,
+COEP `require-corp`): the node-store bridge's `SharedArrayBuffer` needs it. Backup and restore in the page (BK-5) wait
+for `umbradb backup` and `umbradb restore` (tasks 15.1, 15.2): the page shows them disabled. The tests (`test/browser/`)
+drive the machine's Chrome headless over the DevTools protocol, with no test dependency.
+
 ## 10. Tables
 
 Every column is `NOT NULL` unless marked null; a one-row table has the key `id smallint` with `CHECK (id = 1)`;
@@ -1530,6 +1564,9 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | The PostgreSQL image of the tests, benchmarks and pack smoke test (A148): `postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873` is the official image's multi-platform index, PostgreSQL 18.6 on Alpine 3.24.2 | `docker-library/repo-info` `repos/postgres/remote/18-alpine.md` at `23406aef` (the tag's index from 2026-09-21 to 2026-10-22); pulled by digest 2026-10-24: `postgres --version` 18.6, `/etc/alpine-release` 3.24.2 | Verified (pulled); pinned in `test/postgres-image.ts`, checked by the supply-chain gate's image-pin agreement and `test/dependencies/postgres-image.test.ts` |
 | PGlite does not stop two processes opening one data directory | Probe: two Node.js processes opened and wrote one directory | Verified (probe); hence the operating-system lock of §4 |
 | PGlite with OPFS storage in a browser worker; Web Locks exclusion | Probe in a Chromium-based browser, 2026-10-22: PGlite 0.5.10 in a module worker with `opfs-ahp://` wrote a row, closed, reopened and read it back; a second `navigator.locks.request(…, { ifAvailable: true })` on a held lock got `null` | Verified (probe) |
+| The browser build in Chrome: PGlite 0.5.10 in dedicated module workers in memory and with OPFS, a nested worker, a growable `SharedArrayBuffer` waited on with `Atomics.wait` across workers under COOP/COEP, Web Locks with `ifAvailable`, a synchronous request in a worker; the same contents hash as Node.js on PGlite | `test/browser/browser.test.ts` on Chrome 156.0.8078.48 headless (macOS), 2026-10-27 (task 16.1) | Verified (test) |
+| OPFS access handles are exclusive: a second opening of a database another tab holds fails `createSyncAccessHandle` | `test/browser/browser.negative-control.test.ts` (a page without the Web Lock), Chrome 156, 2026-10-27 | Verified (test); the Web Lock refuses first, with `writer-lock-held` |
+| esbuild 0.28.2 bundles a top-level `await` in a module cycle so that the cycle waits on itself (the vendored packages' snippets import their entry back) | The ledger worker's first parse never answered with the entry awaiting its `.wasm`; synchronous instantiation answers, task 16.1, 2026-10-27 | Verified (run) |
 | An operating-system lock from Node.js (`node:sqlite`, `BEGIN EXCLUSIVE`) | Probe in Node.js v24.9.0, 2026-10-22: second process refused while the holder ran and while it was stopped; taken at once after `SIGKILL`. Probe, 2026-10-24: with `busy_timeout` 0, 4 of 30 rounds of ten processes started at one instant ended with no holder; with 10–100 ms, exactly one holder in 50 of 50 rounds (Q92); A17's tests (`test/db/pglite-writer-processes.test.ts`) | Verified (probe, test); `node:sqlite` is marked experimental in Node.js 24 |
 | zod 4: per-field metadata read back (`shape[f].meta().kind`), defaults, issue paths, `z.toJSONSchema` keeping `kind` | Probe on `zod` 4.4.3, 2026-10-22 | Verified (probe) |
 | `ws`: WebSocket server over `https` requiring client certificates | Probe on `ws` 8.22.0 (2026-09-26), 2026-10-22: with a certificate connected; without, `ERR_SSL_TLSV13_ALERT_CERTIFICATE_REQUIRED` | Verified (probe) |

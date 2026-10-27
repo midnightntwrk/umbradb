@@ -49,6 +49,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Chrome for the browser build's tests
+        # core-arch task 16.1 (A129–A132): `test/browser/` drives the runner image's Google Chrome headless over the
+        # DevTools protocol (`test/browser/chrome.ts`; no test dependency). Its version is printed for the record.
+        run: |
+          google-chrome --version
+          echo "UMBRADB_CHROME=$(command -v google-chrome)" >> "$GITHUB_ENV"
+
       - name: Run conformance gate (tests + coverage + required-test skip-enforcement)
         # `npm run test:conformance` is now `scripts/conformance-gate.mjs` (Task 7.1): it runs
         # `vitest run --coverage` with `UMBRADB_LIVE_PREPROD` UNSET (so the crash/soak/differential

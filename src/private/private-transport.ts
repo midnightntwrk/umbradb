@@ -63,6 +63,7 @@ import {
   type ReadResult,
   type StatementResult,
 } from "./messages.js";
+import { unrefTimer } from "./timers.js";
 
 /** A private process's position, as its `hello` gives it: its cursor, or S − 1 with no hash before its first commit. */
 export interface TransportPosition {
@@ -257,10 +258,12 @@ export class PrivateTransport {
       await new Promise<void>((resolve) => {
         socket.once("close", () => resolve());
         socket.close(1001, "the private process is stopping");
-        setTimeout(() => {
-          socket.terminate();
-          resolve();
-        }, 1_000).unref();
+        unrefTimer(
+          setTimeout(() => {
+            socket.terminate();
+            resolve();
+          }, 1_000),
+        );
       });
     }
   }
@@ -330,7 +333,7 @@ export class PrivateTransport {
         this.#alive = false;
         socket.ping();
       }, limits.pingIntervalMs);
-      this.#pinger.unref();
+      unrefTimer(this.#pinger);
     });
     socket.on("pong", () => {
       this.#alive = true;
@@ -431,6 +434,6 @@ export class PrivateTransport {
     this.#options.log(`transport: ${why}; connecting again in ${delay} ms (attempt ${this.#attempts})`);
     // `close` clears the timer, so it fires only while waiting.
     this.#timer = setTimeout(() => this.#connect(), delay);
-    this.#timer.unref();
+    unrefTimer(this.#timer);
   }
 }

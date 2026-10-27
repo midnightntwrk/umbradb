@@ -74,6 +74,7 @@ import {
   type Report,
   type StatementResult,
 } from "./messages.js";
+import { unrefTimer } from "./timers.js";
 
 /** The largest message either side sends or takes, in bytes (`ws`'s `maxPayload`; a `read-result` above it is refused). */
 export const MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
@@ -256,7 +257,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     options.log(`transport: closed the connection${session.hello === null ? "" : ` of ${session.hello.instance}`}: ${reason}`);
     session.socket.close(code, reason);
     // A peer that never completes the close handshake is ended after it.
-    setTimeout(() => session.socket.terminate(), 5_000).unref();
+    unrefTimer(setTimeout(() => session.socket.terminate(), 5_000));
   };
 
   const send = (session: Session, message: Message): void => {
@@ -441,7 +442,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
       session.socket.ping();
     }
   }, limits.pingIntervalMs);
-  pings.unref();
+  unrefTimer(pings);
 
   await new Promise<void>((resolve, reject) => {
     const failed = (error: Error): void => {
@@ -484,10 +485,12 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
         await new Promise<void>((resolve) => {
           server.close(() => resolve());
           // Sockets that do not finish their close handshake.
-          setTimeout(() => {
-            for (const session of sessions) session.socket.terminate();
-            server.closeAllConnections();
-          }, 1_000).unref();
+          unrefTimer(
+            setTimeout(() => {
+              for (const session of sessions) session.socket.terminate();
+              server.closeAllConnections();
+            }, 1_000),
+          );
         });
         await new Promise<void>((resolve) => wss.close(() => resolve()));
       })();

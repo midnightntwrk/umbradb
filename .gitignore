@@ -35,6 +35,8 @@ stryker.log
 
 # Build output (declaration + JS emitted by `npm run build`; never committed)
 dist/
+# The browser build's output (`npm run build:browser`, core-arch task 16.1; not part of the npm package)
+dist-browser/
 
 # v1.0.0-infosec-signoff (G19): locally generated Preview test wallet -- never commit a key
 nix/midnight-env/test-wallets/preview-test-wallet.json

@@ -16,6 +16,7 @@
     "test/**/*.ts",
     "chain-archive-sync/**/*.ts",
     "bench/**/*.ts",
-    "tools/**/*.ts"
+    "tools/**/*.ts",
+    "browser/**/*.ts"
   ]
 }

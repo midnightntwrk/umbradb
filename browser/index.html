@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UmbraDB in the browser</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --ink: #1d1f23;
+        --paper: #fbfbfa;
+        --rule: #d9dbe0;
+        --muted: #5c6370;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #e6e7ea;
+          --paper: #16181c;
+          --rule: #33363d;
+          --muted: #9aa0ab;
+        }
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 14px/1.45 system-ui, sans-serif;
+        color: var(--ink);
+        background: var(--paper);
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0 0 4px;
+      }
+      p.note {
+        color: var(--muted);
+        margin: 0 0 16px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        max-width: 720px;
+        margin-bottom: 16px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--rule);
+        font-variant-numeric: tabular-nums;
+      }
+      ol#log {
+        font: 12px/1.4 ui-monospace, monospace;
+        max-height: 40vh;
+        overflow: auto;
+        padding-left: 24px;
+        border: 1px solid var(--rule);
+      }
+      button[disabled] {
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>UmbraDB in the browser</h1>
+    <p class="note">A development setup: PGlite in workers, <span id="where"></span>, S <span id="start">choosing…</span>.</p>
+    <table>
+      <thead>
+        <tr><th>Process</th><th>State</th><th>Cursor</th><th>Head</th><th>Lag</th></tr>
+      </thead>
+      <tbody id="processes"></tbody>
+    </table>
+    <p>
+      <button type="button" disabled title="Waits for umbradb backup (task 15.1)">Back up</button>
+      <button type="button" disabled title="Waits for umbradb restore (task 15.2)">Restore a backup</button>
+    </p>
+    <ol id="log"></ol>
+    <script type="module" src="./page.js"></script>
+  </body>
+</html>

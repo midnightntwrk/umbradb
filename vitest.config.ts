@@ -159,6 +159,10 @@ export default defineConfig({
         // TransactionHistory, kept outside the run (task 17.1, LS-3, A3). Vitest matches these globs anywhere in a
         // file's path, so `src/**/*.ts` above would also take in `legacy/transaction-history/src/` if a test loaded it.
         "legacy/**",
+        // The browser build (task 16.1, `browser/`): its code runs in Chrome's workers, which Node.js's coverage does
+        // not see; `test/browser/` holds it (headless Chrome; its replacements of Node.js against Node.js's own). The
+        // match anywhere would otherwise take `browser/src/` in, held to `src/**`'s floors by its Node.js tests alone.
+        "browser/**",
       ],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "./coverage",

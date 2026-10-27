@@ -3019,9 +3019,42 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 16. Browser
 
-- [ ] 16.1 The browser build (page, core, ledger and private workers, PGlite, Web Locks, backup and restore) and its
+- [x] 16.1 The browser build (page, core, ledger and private workers, PGlite, Web Locks, backup and restore) and its
       headless-Chrome tests in CI.
       **Acceptance:** A129, A130, A131, A132.
+      **Done (2026-10-27), but for A131's backup and restore half:** `browser/` (design §9.2's "As built"):
+      `browser/build.ts` (`npm run build:browser`, esbuild 0.28.2, writes `dist-browser/`, ignored) bundles the page and
+      three worker entries — the core and private workers each run one process as `umbradb run` starts one
+      (`commandBuild`, the bundled configuration module's data for the run with the development opt-in set on every
+      `core` entry, `nodeSourceOf` or the private intake), the ledger worker runs `src/ledger/worker/entry.ts`
+      unchanged. The workers bundle UmbraDB's sources unchanged and replace only Node.js's built-in modules for the
+      files of `src/` (SHA-256 for `node:crypto`; no asynchronous context for `node:async_hooks`, so PGlite's
+      nested-call guard is off in the browser; Web Workers for `node:worker_threads`; the page's message network for
+      `node:http`, `node:https` and `ws`; POSIX paths for `node:path`), `Buffer`, `process.hrtime.bigint`, six whole
+      modules (the database's opening: PGlite in memory or OPFS; the writer lock: a Web Lock per database; the
+      configuration loader; the node client's socket; the module API's listener: the worker's channel; PostgreSQL,
+      refused) and, as a stub whose exports fail when used, `umbradb backup`'s module (task 15.1, so the build holds
+      once 15.1 is integrated: checked with 15.1's committed sources overlaid in a scratch copy, the whole browser suite
+      passing); the vendored ledger packages' entries read their `.wasm` synchronously, checked against `SHA256SUMS`.
+      The process transport of `src/private/` runs unchanged over `MessageChannel`s the page hands out; its only change
+      is `src/private/timers.ts` (`unrefTimer`, since a browser's timer is a number). The admin endpoints are calls on
+      the worker's channel (`ProcessInput.admin` given a starter, BR-3); for a new database the core worker takes the
+      node's finalized head as S and the page keeps it per OPFS database (BR-2). Tests (`test/browser/`, the machine's
+      Chrome over the DevTools protocol, no new dependency; CI uses the runner's Google Chrome): A129 in memory (the
+      core, the ledger worker parsing heights 4 and 6, a lockstep private instance; the development opt-in the build
+      sets; the admin endpoints and the module API on the channels) and with OPFS (one Web Lock per database; a second
+      tab refused `writer-lock-held`, the first untouched; a reload resumes from the cursor with the same contents hash,
+      the core and the private instance), A130 (S the head at creation, recorded; `core-ledger-state` refused
+      `cannot-start-mid-chain`, named), A131's network half (only the page's files and the node), A132 (Chrome and
+      Node.js on PGlite, the same tape and configuration, a table declared `deterministic: false` among it: equal
+      contents hashes), with their committed negative controls (no Web Lock: the second tab is refused `database-error`
+      by OPFS, not `writer-lock-held`; a foreign request; `JSON.parse` as the JSON reader: the core halts at S and never
+      has Node.js's hash); unit tests hold the SHA-256, `Buffer` and `node:path` replacements equal to Node.js's
+      (fast-check, seed 20261027), and check the Web Lock, the worker shims, the page's message network and the build's
+      inputs, replacements, stubs and built-in guard.
+      **Pending:** A131's backup and restore half (BK-5): `umbradb backup` and `umbradb restore` are tasks 15.1 and
+      15.2 (not in this branch's base); the page shows both disabled and `browser.test.ts` lists it as a `todo`.
+      Q156 resolved A (owner, 2026-10-27): CI's browser tests run the runner image's Google Chrome, as shipped.
 
 ## 17. Library surface and gates
 
