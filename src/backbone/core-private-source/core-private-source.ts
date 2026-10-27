@@ -344,6 +344,8 @@ export class PrivateBlockSource implements BlockSource {
   readonly #checks: PrivateChecks;
   /** Whether the `hello-ack` of startup's chain check said the core lists the instance (PP-6). */
   #lockstepAtStart = false;
+  /** Whether a startup chain check completed: from then on the source knows whether it is lockstep (task 14.4). */
+  #checked = false;
   /** The private cursor last known committed: startup's read, then each block committed; undefined before startup's. */
   #position: BlockRef | null | undefined;
   /** The binding the private database recorded, as the last read of the cursor found it; null before any or without. */
@@ -377,6 +379,14 @@ export class PrivateBlockSource implements BlockSource {
    */
   get lockstep(): boolean {
     return this.#lockstepAtStart || this.#transport?.lockstep === true;
+  }
+
+  /**
+   * Whether the instance is lockstep as `/status` shows it (`public.lockstep`, AE-5; task 14.4): {@link lockstep} once a
+   * startup chain check completed — without a transport, false —, null before.
+   */
+  get lockstepShown(): boolean | null {
+    return this.#checked ? this.lockstep : null;
   }
 
   /** The public database the source reads. */
@@ -477,6 +487,7 @@ export class PrivateBlockSource implements BlockSource {
       if (other !== null) throw other;
       this.#lockstepAtStart = ack.lockstep;
     }
+    this.#checked = true;
     const publicItems = Object.freeze([...(this.#checks.publicItems?.(items) ?? items)]);
     return Object.freeze({ genesisHash: identity.genesisHash, publicItems });
   }
@@ -520,6 +531,14 @@ export class PrivateBlockSource implements BlockSource {
       await this.#transport?.close();
     }
   }
+}
+
+/**
+ * A process's `public.lockstep` for `/status` (AE-5; task 14.4): its source's {@link PrivateBlockSource.lockstepShown}
+ * on a private process; null for any other source (the core's), or none yet.
+ */
+export function publicLockstepOf(source: BlockSource | undefined): boolean | null {
+  return source instanceof PrivateBlockSource ? source.lockstepShown : null;
 }
 
 /** Options of {@link privateIntake}. */

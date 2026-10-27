@@ -190,6 +190,12 @@ export const ERROR_CODES = [
   "needs-lockstep-not-listed",
   "lockstep-behind",
   "report-hash-mismatch",
+  /**
+   * A private process's startup refusal of a configured test key (CF-11; task 14.4, `src/backbone/core-key-registry/`):
+   * one its private database admitted with another start, or one not yet admitted whose start is at or below the
+   * private cursor (`details.reason`). Not retryable.
+   */
+  "test-key-conflict",
 ] as const;
 
 /**

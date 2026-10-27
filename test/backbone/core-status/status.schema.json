@@ -123,8 +123,18 @@
       "description": "The ledger version, package and last root check: null until the ledger tasks (12.x) report them."
     },
     "privateInstances": {
-      "type": "null",
-      "description": "On the core, its private instances: null until the private-process tasks (14.x) report them."
+      "description": "On the core, its private instances (PP-9, AE-5; task 14.4): each listed or connected one with its id, connection, lockstep flag and synced height only; null on a private process, and on the core until startup opened its database.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/privateInstance"
+          }
+        }
+      ]
     },
     "public": {
       "oneOf": [
@@ -672,8 +682,40 @@
           "$ref": "#/$defs/heightOrNull"
         },
         "lockstep": {
-          "type": "null",
-          "description": "Whether the private process runs in lockstep: null until task 14.3 reports it."
+          "description": "Whether the private process runs in lockstep (PP-6; task 14.4): its core's hello-ack said so; null until startup's chain check knows.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        }
+      }
+    },
+    "privateInstance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "connected",
+        "lockstep",
+        "height"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "connected": {
+          "type": "boolean"
+        },
+        "lockstep": {
+          "type": "boolean"
+        },
+        "height": {
+          "$ref": "#/$defs/heightOrNull"
         }
       }
     }

@@ -61,7 +61,10 @@ series and nothing of the next wave runs; the wave's other callbacks are awaited
 failure in the point's order is reported with the point and the module (RN-8). At `on-stop-height` the core's parts run
 in their fixed order after the stopping modules. Each callback is called as a method of its declaration's `points`,
 with its module's process context first (`src/runner/dispatch.ts`, task 5.1). The lockstep wait (PP-6) sits between
-`on-compute` and `BEGIN`.
+`on-compute` and `BEGIN`. On a private process `on-key` (PP-8; task 14.4) fires for each key that becomes pending at h
+after h's `on-start-height` and before its `on-compute` (`LoopInput.keys`, its `core-key-registry`'s), one key after
+the other, its callbacks in series in the range's order, each with its own read at the cursor (h − 1); a height
+retried from `on-compute` fires none again, one retried from `on-start-height` fires them again.
 
 **Process items and module APIs** (task 5.2a: `src/runner/process-context.ts`, `module-api.ts`, `api-server.ts`). Each
 module has one process context, the same object in its `on-start-db` and at every point. `publish` takes only an item
@@ -1003,10 +1006,14 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   hashes, an object `config`, required for a revision of the build's version; `(id, start)` once; a `core` entry; no
   lone UTF-16 surrogate (the history could not hash it); and, for each revision of the build's version, no setting its
   schema lacks (a key check against `schema.shape`, since `z.object` strips unknown keys), the schema's own `safeParse`
-  (its messages redacted), and settings that stay plain data. It returns every revision with its parsed settings
-  (defaults applied), kinds and data fields, and S. `entriesAtCursor(checked, cursor)`, once the database is open,
-  refuses a `versionEntry` above the cursor that carries a `config` and one at or below it without one, and places each
-  revision (`started`, `scheduled`) for the history's comparison (CF-6).
+  (its messages redacted), and settings that stay plain data; on a private process, each test key of a `core`
+  revision of the build's version (`test-keys`, CF-11, PP-8; task 14.4) of a kind some module the configuration
+  enables declares in `keyKinds`, its bytes taken by the `validateKey` of every such module (anything but `true`, or a
+  throw, refuses; a finding names `testKeys[i].kind` or `.bytes`, never the key or a thrown message), no key listed
+  twice. It returns every revision with its parsed settings (defaults applied), kinds and data fields, and S.
+  `entriesAtCursor(checked, cursor)`, once the database is open, refuses a `versionEntry` above the cursor that carries
+  a `config` and one at or below it without one, and places each revision (`started`, `scheduled`) for the history's
+  comparison (CF-6).
 - **Redaction** (`src/config/redact.ts`, task 4.2; CF-4, AE-6). `configRedactor(checked)` knows the configuration's
   secret strings — each string of a `secret` field, the password of every URL with credentials in the other fields —
   and hides each, as written, decoded and in each encoding a text may hold (URI-component with upper- or lower-case hex,
@@ -1237,8 +1244,29 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   instance.
 - **Keys.** Configured test keys are the only key source in this change; a key API is not core and is left to a later
   module that feeds the registry (Q70). Pending keys live in memory until their block's `on-compute` takes them (PP-8).
-  Task 14.1 builds `core-key-registry`'s table and its `admitted-keys` item, put at every `on-compute`; making test keys
-  pending, `on-key`, the cutoff and their writing are task 14.4's, so until then the set is empty.
+  As built (task 14.4, `src/backbone/core-key-registry/`): the private `core` entry's `testKeys` (a secret field, so
+  every revision of the backbone part has the process revision's list, Q102) are checked by the configuration's rule
+  `test-keys` (§7: kind declared, `validateKey`, no key twice: `invalid-configuration`, before the database opens);
+  `core-key-registry`'s `on-start-db` — before any private module migrates — reads each key's row of
+  `core_key_registry.keys` (`key_id` = SHA-256(UTF-8 kind ‖ bytes)) and refuses `test-key-conflict` for a key admitted
+  with another start (`details.reason` `start-changed`) or one not admitted whose start is at or below the private
+  cursor, S − 1 before the first block (`start-passed`); it keeps the keys not admitted for the run, by start. A key
+  whose start is h becomes pending as h is processed: the loop fires `on-key` before h's `on-compute` (§2); the part's
+  `on-compute` puts them as `admitted-keys` with `arrived_height` h (none at other heights) and its `on-db-write` writes
+  them, an id already admitted left unchanged (`ON CONFLICT DO NOTHING`). A height that does not commit and is processed
+  again takes them again; a halt, stop or crash drops the run, and the next startup finds them not admitted and makes
+  them pending again at h. A restart with an admitted key keeps its height and fires no `on-key`; a key removed from
+  the list stays admitted.
+- **Private instances in `/status`** (PP-9, AE-5; task 14.4, `src/private/instances.ts`): on the core,
+  `privateInstances` lists every instance its `core` revision lists in `lockstepInstances` (from the lockstep
+  bookkeeping: connected or not, its height as the core learned it from `hello` and checked `report`s, null when not
+  seen since the core started) and every other connected one (from the transport, as not lockstep, at its `hello`'s
+  height: an independent instance sends no `report`, decision record Q151), each with exactly `id`, `connected`,
+  `lockstep` and `height`; null on a private process and before startup opened the database. On a private process,
+  `public.lockstep` is whether it is lockstep (its startup's `hello-ack`, kept for the run, or a later one; false
+  without `coreTransport`), null until startup's chain check knows. The core's view is published with the heartbeat,
+  so it lags a change by up to a second. No key byte reaches either: `testKeys` is redacted in `/config` and in logs,
+  and neither `/status` nor the transport carries a key.
 
 ## 9. Backups and browser
 
@@ -1377,6 +1405,11 @@ frame the tape node could not give back byte for byte; the variant transforms' `
 
 **A module's call fails** (an `UmbraError` the module may catch; uncaught, its callback fails with `callback-error`):
 `state-not-retained` (LG-12: a ledger state outside the retention window, task 12.4).
+
+**`test-key-conflict` names its cause** in `details.reason` (CF-11, §8; task 14.4): `start-changed` (the key was
+admitted with another start: `index`, `admitted`, `start`) or `start-passed` (a key not admitted whose start is at or
+below the private cursor, S − 1 before the first block: `index`, `cursor`, `start`); the decision record's question
+Q150 asks whether the second is this code.
 
 **`private-binding-mismatch` names its cause** in `details.reason` (PP-2, §8), in the order a private start checks
 them: `public-not-started` (the public database's core never started, Q125), `network` (its genesis hash is not the

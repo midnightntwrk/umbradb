@@ -15,6 +15,7 @@ import {
   type PublicDatabase,
   type PublicWakes,
   pollingWakes,
+  publicLockstepOf,
   publicNotStarted,
   readPrivateCursor,
   readPublicBlock,
@@ -695,5 +696,25 @@ describe("lockstep on the private side (task 14.3; PP-6, PP-7, Q142)", () => {
     expect(source.position(3n)).toEqual({ height: 4n, hash: bytes(4) });
     await source.close();
     expect(dropped.state.closed).toBe(true);
+  });
+
+  it("shows its lockstep flag once startup's chain check knows it, null before (/status's public.lockstep, task 14.4)", async () => {
+    const listed = fakeTransport({ lockstep: true });
+    const source = new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), listed.transport);
+    expect(publicLockstepOf(source)).toBeNull();
+    await source.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(publicLockstepOf(source)).toBe(true);
+    // Without a transport no core lists it: not lockstep, once checked.
+    const alone = new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes());
+    expect(publicLockstepOf(alone)).toBeNull();
+    await alone.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(publicLockstepOf(alone)).toBe(false);
+    // A refused check leaves it unknown.
+    const refused = new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), fakeTransport({ lockstep: true }).transport);
+    await expect(refused.checkChain(configuredAs("custom", bytes(0xc3)))).rejects.toBeInstanceOf(UmbraError);
+    expect(publicLockstepOf(refused)).toBeNull();
+    // The core's sources, and none: no public side to show.
+    expect(publicLockstepOf(undefined)).toBeNull();
+    expect(publicLockstepOf({ cursor: async () => null } as never)).toBeNull();
   });
 });

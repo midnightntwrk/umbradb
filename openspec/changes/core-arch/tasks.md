@@ -2836,9 +2836,60 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Pending:** the core's `/status` of its instances (PP-9's `privateInstances`) and a private process's
       `public.lockstep` (14.4, from the bookkeeping's `instances()` and the source's `lockstep`); the browser's
       `postMessage` transport carrying `report` and the lockstep-behind ack (16.1); question Q149 (owner).
-- [ ] 14.4 Test keys through the key registry (the key API is not core and leaves this change, Q70) and privacy checks
+- [x] 14.4 Test keys through the key registry (the key API is not core and leaves this change, Q70) and privacy checks
       (the private-backup refusal is task 15.1's).
       **Acceptance:** A119, A120, A123.
+      **Done (2026-10-27):** test keys reach `core-key-registry` (`src/backbone/core-key-registry/`) as the private
+      `core` entry's `testKeys`, a secret field, so every revision of the backbone part has the process revision's list
+      (Q102). CF-11's checks of the configuration alone are the validation's new rule `test-keys`
+      (`src/config/validate.ts`, `testKeysRule`): each key of a kind some module the configuration enables declares in
+      `keyKinds`, its bytes taken by the `validateKey` of every such module (only `true` takes them; a throw refuses),
+      no key listed twice — `invalid-configuration`, a finding at `testKeys[i].kind` or `.bytes` that never holds the
+      key, before the database opens (a refusal of the configuration itself, which ends the process, Q137 B; `umbradb
+      config check` reports it too). The registry's `on-start-db` — before any private module migrates — reads each
+      key's row (`key_id` = SHA-256(UTF-8 kind ‖ bytes)) and refuses `test-key-conflict` (new `ErrorCode`, in
+      `REFUSAL_CODES` and the registry `test/runner/code-registry.ts`) for a key admitted with another start
+      (`details.reason` `start-changed`) or one not admitted whose start is at or below the private cursor, S − 1
+      before the first block (`start-passed`; question Q150), naming the key by its place in `testKeys`; it keeps
+      the keys not admitted for the run, by start. The finalized loop (`LoopInput.keys`, the seam `keyPoint`) fires
+      `on-key` for each key that becomes pending at h after h's `on-start-height` and before its `on-compute`, one key
+      after the other, each callback in series in the range's order with its own read at the cursor; a retry resuming
+      at `on-compute` fires none again. The registry's `on-compute` puts them as `admitted-keys` with `arrived_height`
+      h, none at other heights, and its `on-db-write` writes them, an id already admitted left unchanged; a halt, stop
+      or crash drops the run, and the restart makes them pending again at h. `/status` (`src/admin/`, `src/private/
+      instances.ts`): on the core `privateInstances` — every listed instance from the lockstep bookkeeping (connected or
+      not, its learned height, null when never seen) and every other connected one from the transport (its `hello`'s
+      height: an independent instance sends no `report`, question Q151), each with exactly `id`, `connected`,
+      `lockstep`, `height` —, null before startup opened the database and on a private process; on a private process
+      `public.lockstep`, its source's flag once startup's chain check knows it (`PrivateBlockSource.lockstepShown`).
+      The `/status` JSON schema has both. Design §2, §7, §8, §11 and the module guide's "Private modules". Tests, seen
+      failing first (`tsc` exit 2, 28 errors: the registry's new exports, `LoopInput.keys`, `PendingKeys`, `keyPoint`,
+      `testKeysRule`, `publicLockstepOf`, `src/private/instances.js`, the admin's `privateSide` missing; Vitest: 4 files
+      failed, 22 tests), on PostgreSQL 18.6 and PGlite 0.5.10: `test/private/keys.test.ts` (A119: an undeclared kind and
+      bytes `validateKey` rejects refused before the private database opens; a key with start 4 fires `on-key` once,
+      between 4's `on-fetch` and its `on-compute`, read at 3, and is stored at 4; a private process killed with SIGKILL
+      inside 4's block transaction (`key-crash.worker.ts`) stores nothing and its restart admits the key at 4 — A123: a
+      restart keeps `arrived_height`, fires no `on-key`; another start refuses `test-key-conflict`, as does a new key at
+      the cursor; a removed key stays), `test/private/privacy.test.ts` (A120 `[[private.no-key-bytes-public]]`: a core
+      and two instances, one lockstep with a key of 32 random bytes, 100 blocks; every public table's rows, every log
+      line of the three, every `/status`, `/config` and health answer, the module APIs' answers and every transport
+      message searched for the key's bytes and id in nine forms, the private database holding them as the positive
+      control; the core's `/status` with the four fields only; a listed instance never seen), `test/runner/
+      key-point.test.ts` (the loop's `on-key`), and unit suites (`test/backbone/core-key-registry.test.ts`,
+      `test/private/instances.test.ts`, A28's rows and A119's checks in `test/config/validate.test.ts`, the source's
+      flag, the snapshot and `ProcessAdmin`, the `/status` schema); A146 now asserts the key admitted at 5 in both
+      instances. Committed negative controls: a `test-keys` rule that skips `validateKey` accepts A119's bad bytes; a
+      registry admitting a known key again at a new height (`coreKeyRegistry({ admission: "again" })`) fails A123; a
+      private process logging the key's bytes (a module's error) and a `/config` showing them fail A120's scan; a loop
+      firing `on-key` after `on-compute` fails its oracle. Wrong variants (a scratch copy outside the clone): run 1, 59
+      on the new logic (the registry 23, the loop 7, the validation rule 10, `/status` 13, the process 5, the code
+      lists 1), 56 caught, 2 equivalent (`test-keys` run on a public process too, whose `core` schema has no `testKeys`;
+      an unlisted instance's flag taken from the transport, which gives it `false`) and 1 survivor, a gap — every
+      `on-key` callback of a key sharing one read — closed by a test (one callback's failed statement leaves the next
+      one's read whole), caught in run 2. Issues 00030-concurrent-role-provisioning and
+      00031-key-bytes-in-module-error-messages recorded.
+      **Pending:** questions Q150 and Q151 (owner); the private-backup refusal (15.1); the browser's transport
+      (16.1).
 
 ## 15. Backups
 

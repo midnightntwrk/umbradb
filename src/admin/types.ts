@@ -93,8 +93,23 @@ export interface ModuleStatus {
 export interface PublicStatus {
   /** The public cursor: the public database's last committed height, as the private source last read it. */
   readonly cursor: string | null;
-  /** Whether the private process runs in lockstep; null until task 14.3 reports it. */
-  readonly lockstep: null;
+  /**
+   * Whether the private process runs in lockstep (PP-6): its core's `hello-ack` listed it (task 14.3's flag, kept for
+   * the run once startup's said so); false without a transport; null until startup's chain check knows (task 14.4).
+   */
+  readonly lockstep: boolean | null;
+}
+
+/**
+ * One private instance as the core shows it (AE-5, PP-9; task 14.4): its id, whether it is connected, whether the core
+ * lists it in `lockstepInstances`, and its committed height as the core last learned it (its `hello`'s, then a lockstep
+ * instance's checked reports'; decimal text, null when not seen since the core started) — and nothing else of it.
+ */
+export interface PrivateInstanceStatus {
+  readonly id: string;
+  readonly connected: boolean;
+  readonly lockstep: boolean;
+  readonly height: string | null;
 }
 
 /** `status()` as the admin endpoints show it (see the module comment): `/status` without its uptime. */
@@ -120,8 +135,11 @@ export interface StatusSnapshot {
   readonly modules: readonly ModuleStatus[] | null;
   /** The ledger version in effect, its package and its last root check: null until the ledger tasks (12.x) give it. */
   readonly ledger: null;
-  /** On the core, its private instances; null until the private-process tasks (14.x) report them. */
-  readonly privateInstances: null;
+  /**
+   * On the core, its private instances (PP-9): every listed instance, connected or not, and every other connected one;
+   * null on a private process, and on the core until startup opened its database (task 14.4).
+   */
+  readonly privateInstances: readonly PrivateInstanceStatus[] | null;
   /** On a private process, the public side; null on the core. */
   readonly public: PublicStatus | null;
 }

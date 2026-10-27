@@ -18,6 +18,7 @@ import {
   entriesAtCursor,
   type Finding,
   fieldKinds,
+  testKeysRule,
   validateConfig,
 } from "../../src/config/validate.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -132,6 +133,26 @@ const earlierCore = (sha256: string): CoreVersion => ({
 
 const core0 = at(0, "core", 0);
 const stats1 = at(1, "stats", 0);
+
+/**
+ * A private module declaring the key kind `viewing` (PP-8, CF-11), whose `validateKey` takes 4 bytes or more and throws,
+ * its message holding the bytes, on a first byte 0xff.
+ */
+const WALLET = defineModule({
+  ...declaration("wallet", {
+    side: "private",
+    keyKinds: ["viewing"],
+    validateKey: (_kind: string, bytes: Uint8Array) => {
+      if (bytes[0] === 0xff) throw new Error(`cannot use ${Buffer.from(bytes).toString("hex")}`);
+      return bytes.length >= 4;
+    },
+  }),
+});
+
+/** A private process's configuration with `testKeys` and `wallet`'s revision from 0. */
+const withWallet = (testKeys: readonly Record<string, unknown>[]) => ({
+  entries: [...withPrivateCore({ ...PRIVATE_SETTINGS, testKeys }).entries, WALLET.entry({ start: 0, config: { pollMs: 1000 } })],
+});
 
 const A28: readonly Row[] = [
   // ── the top level ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -669,6 +690,70 @@ const A28: readonly Row[] = [
       },
     ],
   },
+  {
+    name: "a test key of a kind no configured module declares (CF-11, A119)",
+    rule: "test-keys",
+    side: "private",
+    user: [WALLET],
+    config: () => withWallet([{ kind: "spending", bytes: "0x0a0b0c0d", start: 5 }]),
+    findings: [
+      {
+        path: "entries[0].config.testKeys[0].kind",
+        entry: core0,
+        field: "testKeys",
+        says: ["the test key's kind is declared by no module this configuration enables", "wallet: viewing", "CF-11"],
+      },
+    ],
+  },
+  {
+    name: "a test key whose bytes its module's validateKey rejects (CF-11, A119)",
+    rule: "test-keys",
+    side: "private",
+    user: [WALLET],
+    config: () => withWallet([{ kind: "viewing", bytes: "0x0a0b", start: 5 }]),
+    findings: [
+      {
+        path: "entries[0].config.testKeys[0].bytes",
+        entry: core0,
+        field: "testKeys",
+        says: ["the test key's bytes are refused by the validateKey of wallet", "CF-11"],
+      },
+    ],
+  },
+  {
+    name: "a test key whose module's validateKey throws, its message not repeated (CF-11, A119)",
+    rule: "test-keys",
+    side: "private",
+    user: [WALLET],
+    config: () => withWallet([{ kind: "viewing", bytes: "0xff0b0c0d", start: 5 }]),
+    findings: [
+      {
+        path: "entries[0].config.testKeys[0].bytes",
+        entry: core0,
+        field: "testKeys",
+        says: ["the test key's bytes are refused by the validateKey of wallet, which threw", "CF-11"],
+      },
+    ],
+  },
+  {
+    name: "the same test key twice (CF-11, PP-8)",
+    rule: "test-keys",
+    side: "private",
+    user: [WALLET],
+    config: () =>
+      withWallet([
+        { kind: "viewing", bytes: "0x0a0b0c0d", start: 5 },
+        { kind: "viewing", bytes: "0x0a0b0c0d", start: 7 },
+      ]),
+    findings: [
+      {
+        path: "entries[0].config.testKeys[1]",
+        entry: core0,
+        field: "testKeys",
+        says: ["the same kind and bytes as testKeys[0]", "admitted once"],
+      },
+    ],
+  },
 ];
 
 /** The validation's input for a row. */
@@ -1036,13 +1121,19 @@ describe("CF-3, CF-4: the validated configuration", () => {
   it("takes the core entry of a private process with every private field", () => {
     const checked = validateConfig(
       input(
-        withPrivateCore({
-          ...PRIVATE_SETTINGS,
-          publicDatabase: "postgres://reader@db/umbradb",
-          coreTransport: "core.internal:8082",
-          testKeys: [{ kind: "viewing-key", bytes: "0x01ab", start: 100 }],
-        }),
+        {
+          entries: [
+            ...withPrivateCore({
+              ...PRIVATE_SETTINGS,
+              publicDatabase: "postgres://reader@db/umbradb",
+              coreTransport: "core.internal:8082",
+              testKeys: [{ kind: "viewing", bytes: "0x01ab02cd", start: 100 }],
+            }).entries,
+            WALLET.entry({ start: 0, config: { pollMs: 1000 } }),
+          ],
+        },
         "private",
+        [WALLET],
       ),
     );
     expect(checked.side).toBe("private");
@@ -1352,5 +1443,100 @@ describe("A28 through the loader: a configuration file refused by the validation
       { path: "entries[1].stop", entry: at(1, "stats", 10) },
     ]);
     expect(error.message).toContain(file);
+  });
+});
+
+describe("A119 (CF-11): a test key's kind and bytes are checked against the configured modules' declarations", () => {
+  /** A119's oracle on the validation's findings for {@link withWallet}'s keys: none when every bad key is found. */
+  function a119Problems(findings: readonly Finding[]): string[] {
+    const problems: string[] = [];
+    const paths = new Set(findings.map((finding) => finding.path));
+    if (!paths.has("entries[0].config.testKeys[0].kind")) problems.push("a test key of a kind no module declares was accepted");
+    if (!paths.has("entries[0].config.testKeys[1].bytes")) problems.push("a test key whose bytes validateKey rejects was accepted");
+    if (!paths.has("entries[0].config.testKeys[2].bytes")) problems.push("a test key whose validateKey throws was accepted");
+    if (paths.has("entries[0].config.testKeys[3].kind") || paths.has("entries[0].config.testKeys[3].bytes")) {
+      problems.push("a good test key was refused");
+    }
+    return problems;
+  }
+
+  const KEYS = [
+    { kind: "spending", bytes: "0x0a0b0c0d", start: 5 },
+    { kind: "viewing", bytes: "0x0a0b", start: 5 },
+    { kind: "viewing", bytes: "0xff0b0c0d", start: 5 },
+    { kind: "viewing", bytes: "0x0a0b0c0d", start: 5 },
+  ];
+  const keysInput = () => input(withWallet(KEYS), "private", [WALLET]);
+
+  it("finds a kind no configured module declares and bytes validateKey rejects or throws on, never a good key", () => {
+    const findings = configFindings(keysInput());
+    expect(a119Problems(findings)).toEqual([]);
+    expect(findings.every((finding) => finding.rule === "test-keys")).toBe(true);
+    // No message repeats a key's bytes, nor the thrown message that held them.
+    for (const finding of findings) {
+      for (const key of KEYS) expect(finding.message).not.toContain(key.bytes.slice(2));
+    }
+  });
+
+  it("checks every module that declares the kind, a module not enabled by the configuration counting for none", () => {
+    const other = defineModule({ ...declaration("other", { side: "private", keyKinds: ["viewing"], validateKey: () => false }) });
+    // `other` declares the kind and refuses every key, but no entry enables it: wallet alone decides.
+    expect(configFindings(input(withWallet([{ kind: "viewing", bytes: "0x0a0b0c0d", start: 5 }]), "private", [WALLET, other]))).toEqual([]);
+    const both = {
+      entries: [...withWallet([{ kind: "viewing", bytes: "0x0a0b0c0d", start: 5 }]).entries, other.entry({ start: 0, config: { pollMs: 1 } })],
+    };
+    const [finding] = configFindings(input(both, "private", [WALLET, other]));
+    expect(finding?.message).toContain("refused by the validateKey of other");
+  });
+
+  it("takes a key only when validateKey returns true; the same bytes under two kinds are two keys", () => {
+    const loose = defineModule({
+      ...declaration("loose", { side: "private", keyKinds: ["viewing", "spending"], validateKey: (() => 1) as never }),
+    });
+    const config = (testKeys: readonly Record<string, unknown>[]) => ({
+      entries: [...withPrivateCore({ ...PRIVATE_SETTINGS, testKeys }).entries, loose.entry({ start: 0, config: { pollMs: 1 } })],
+    });
+    const [truthy] = configFindings(input(config([{ kind: "viewing", bytes: "0x0a0b", start: 5 }]), "private", [loose]));
+    expect(truthy?.path).toBe("entries[0].config.testKeys[0].bytes");
+    const twoKinds = [
+      { kind: "viewing", bytes: "0x0a0b0c0d", start: 5 },
+      { kind: "spending", bytes: "0x0a0b0c0d", start: 5 },
+    ];
+    const both = defineModule({ ...declaration("both", { side: "private", keyKinds: ["viewing", "spending"], validateKey: () => true }) });
+    const entries = { entries: [...withPrivateCore({ ...PRIVATE_SETTINGS, testKeys: twoKinds }).entries, both.entry({ start: 0, config: { pollMs: 1 } })] };
+    expect(configFindings(input(entries, "private", [both]))).toEqual([]);
+  });
+
+  it("gives validateKey the key's kind and a copy of its bytes", () => {
+    const calls: { kind: string; bytes: Uint8Array }[] = [];
+    const recording = defineModule({
+      ...declaration("recording", {
+        side: "private",
+        keyKinds: ["viewing"],
+        validateKey: (kind: string, bytes: Uint8Array) => {
+          calls.push({ kind, bytes });
+          bytes.fill(0);
+          return true;
+        },
+      }),
+    });
+    const config = {
+      entries: [
+        ...withPrivateCore({ ...PRIVATE_SETTINGS, testKeys: [{ kind: "viewing", bytes: "0x0a0b", start: 5 }] }).entries,
+        recording.entry({ start: 0, config: { pollMs: 1 } }),
+      ],
+    };
+    expect(configFindings(input(config, "private", [recording]))).toEqual([]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.kind).toBe("viewing");
+    const checked = validateConfig(input(config, "private", [recording]));
+    expect((checked.entries[0]?.settings as { testKeys: { bytes: string }[] }).testKeys[0]?.bytes).toBe("0x0a0b");
+  });
+
+  it("negative control: a test-keys rule that skips validateKey accepts the bytes it rejects, and fails the oracle", () => {
+    const rules = CONFIG_RULES.map((rule) => (rule.name === "test-keys" ? testKeysRule({ validateKey: false }) : rule));
+    const problems = a119Problems(configFindings(keysInput(), rules));
+    expect(problems).toContain("a test key whose bytes validateKey rejects was accepted");
+    expect(problems).toContain("a test key whose validateKey throws was accepted");
   });
 });

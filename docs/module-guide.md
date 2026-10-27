@@ -512,6 +512,26 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
   genesis hash and start height; a later start against another public database is refused (`private-binding-mismatch`,
   its `details.reason` saying why: `network`, `genesis`, `start`), and so is one whose start height is below the public
   one's (`private-start-below`) or against a public database whose core never started (`public-not-started`).
+- **Keys reach you through the key registry** (PP-8, CF-11). Declare the kinds of key you read (`keyKinds`) and a
+  `validateKey(kind, bytes)` that returns `true` for bytes of a form you can use; in this version keys enter only as
+  the private `core` entry's `testKeys` (`{ kind, bytes, start }`, a secret setting — no endpoint takes keys, Q70). A
+  test key whose kind no module of the configuration declares, or whose bytes the `validateKey` of a module declaring
+  its kind refuses (or throws on), refuses the configuration (`invalid-configuration`, naming `testKeys[i]`), as
+  does a key listed twice. A key with start h becomes pending as h is processed: `on-key(p, key, read)` fires once
+  for it in every module that has the callback, whatever kinds it declares, after h's `on-start-height` and before
+  h's `on-compute`, with `key.keyId` (SHA-256 of the UTF-8 kind and the bytes),
+  `key.kind`, `key.bytes` and a read of your database at h − 1; then h's `admitted-keys` (require it) holds it with
+  `arrivedHeight` h — every other height's holds none — and `core_key_registry.keys` keeps it once h commits. Sync
+  the key's history yourself if you need it (the core offers no backfill). A crash before h commits drops the key, and
+  the restart admits it at h again, `on-key` firing again; a restart with the key admitted keeps its height, and
+  `on-key` does not fire for it. Changing an admitted key's start refuses startup (`test-key-conflict`), as does a new
+  key whose start is at or below your private cursor; removing a key from `testKeys` leaves it admitted.
+- **Keys stay in your process.** UmbraDB never logs, shows or sends a key's bytes: `testKeys` reads `[redacted]` in
+  `/config` and its values are redacted in log lines, `/status` and the transport carry none, and the core's `/status`
+  shows of each instance only its id, connection, lockstep flag and synced height (PP-9, PP-10). What your module
+  computes from a key is yours to keep private (Q16): never put key bytes in an error message, which the process logs
+  when it halts (written as configured, `0x` and lowercase hex, they are redacted; in any other form they are not), in
+  an API answer, or in a read of public data through the core (its statements and parameters cross the transport).
 
 ## Blocks from the node
 

@@ -99,7 +99,8 @@
  * are the private cursor's and whose blocks are the public database's; step 6 is that source's own check (it reads the
  * public database's chain identity, whose genesis hash `core-chain` records; PP-2's binding is the part's), the
  * bootstrap's wait of step 8 waits for the public cursor to reach the private S, and the source is closed with the
- * database.
+ * database. Its loop fires `on-key` for the test keys that become pending at each height, which its `core-key-registry`
+ * gives (PP-8, CF-11; task 14.4: `LoopInput.keys`).
  *
  * **The process transport** (PP-4; task 14.2, `../private/core-transport.ts`): a public process whose `core` revision
  * has `listen.transport` starts it once its database is open and its chain known (step 7, before the bootstrap's wait),
@@ -150,6 +151,8 @@ import {
   waitForNode,
 } from "../backbone/core-chain/index.js";
 import { readinessOf } from "../backbone/core-health/readiness.js";
+import { CORE_KEY_REGISTRY_ID, pendingKeysOf } from "../backbone/core-key-registry/index.js";
+import { publicLockstepOf } from "../backbone/core-private-source/index.js";
 import { buildCoreVersion, type CoreVersion } from "../config/build.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import { openConfiguredDatabase } from "../config/database.js";
@@ -168,7 +171,7 @@ import { type LedgerHost, startLedgerWorker } from "../ledger/worker/host.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
-import { ProcessAdmin } from "../admin/process-admin.js";
+import { type PrivateSideFacts, ProcessAdmin } from "../admin/process-admin.js";
 import { earlyRedactor } from "../admin/redaction.js";
 import type { AdminStarter } from "../admin/server.js";
 import { NodeClient, type NodeClientOptions, type NodeRetry } from "../node/client.js";
@@ -182,6 +185,7 @@ import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failure
 import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput, type SlowBlockEvent } from "./loop.js";
 import { ProcessContexts } from "./process-context.js";
 import { type CoreTransport, startCoreTransport, type TransportTls } from "../private/core-transport.js";
+import { privateInstancesOf } from "../private/instances.js";
 import { Lockstep, type LockstepCondition } from "../private/lockstep.js";
 
 /**
@@ -589,6 +593,7 @@ class Process implements ProcessHandle {
             status: () => this.status(),
             log: (line) => this.#log(line),
             side: input.side ?? "public",
+            privateSide: () => this.#privateSide(),
             ...(typeof admin === "function" ? { start: admin } : {}),
           });
     this.closed = new Promise((resolve) => {
@@ -657,6 +662,17 @@ class Process implements ProcessHandle {
   /** Closes the process's node client (every call and subscription ends with `handle-closed`). */
   async #closeNode(): Promise<void> {
     await this.#nodeClient?.close();
+  }
+
+  /**
+   * What `/status` shows of the private side (PP-9, AE-5; task 14.4): on the core, its private instances from its
+   * lockstep bookkeeping and its transport; on a private process, whether its source is lockstep.
+   */
+  #privateSide(): PrivateSideFacts {
+    return Object.freeze({
+      instances: privateInstancesOf(this.#lockstep?.instances() ?? [], this.#transport?.instances() ?? []),
+      lockstep: publicLockstepOf(this.#source),
+    });
   }
 
   /** A log line, through the configuration's redaction once it is known. */
@@ -883,6 +899,10 @@ class Process implements ProcessHandle {
       boundary: this.#upgrade?.height ?? null,
       slowBlockMs: settings.slowBlockMs as number,
       ...(this.#lockstep === undefined ? {} : { lockstep: this.#lockstep }),
+      // A private process's test keys (PP-8, task 14.4): those its core-key-registry makes pending at each height.
+      ...(graph.modules.some((part) => part.id === CORE_KEY_REGISTRY_ID)
+        ? { keys: pendingKeysOf(contexts.of(CORE_KEY_REGISTRY_ID)) }
+        : {}),
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
         head: (head) => {

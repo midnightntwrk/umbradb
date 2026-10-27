@@ -9,6 +9,7 @@ import {
 } from "../../src/backbone/core-private-source/index.js";
 import { privateBackbone } from "../../src/backbone/private.js";
 import { coreEntry } from "../../src/config/entries.js";
+import type { AdminStarter } from "../../src/admin/server.js";
 import type { ReadHandle, ReadOnlyDatabase } from "../../src/db/api.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
@@ -103,6 +104,11 @@ export interface PublicCoreOptions {
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
   /** More settings of the `core` entry (`listen.transport`, `tls`, `lockstepInstances`). */
   readonly extra?: Readonly<Record<string, unknown>>;
+  /**
+   * The admin endpoints (task 14.4's `/status` of the private instances): served when given, on the `listen.admin` of
+   * {@link extra} (`127.0.0.1:0` for a free port), or through a negative control's starter; none unless given.
+   */
+  readonly admin?: boolean | AdminStarter;
 }
 
 /** The public core's module that keeps the core's `db` item for the tests' direct reads (see the module comment). */
@@ -188,6 +194,7 @@ export function launchPublicCore(options: PublicCoreOptions): PublicCore {
     source,
     log: (line) => lines.push(line),
     ...(options.loop === undefined ? {} : { loop: options.loop }),
+    ...(options.admin === undefined ? {} : { admin: options.admin }),
   });
   return {
     handle,
@@ -356,6 +363,10 @@ export interface PrivateOptions {
   readonly within?: <T>(start: () => T) => T;
   /** More settings of the `core` entry (`backoffCeilingMs`). */
   readonly extra?: Readonly<Record<string, unknown>>;
+  /** The admin endpoints, as {@link PublicCoreOptions.admin}: none unless given. */
+  readonly admin?: boolean | AdminStarter;
+  /** The private backbone's `core-key-registry`: a negative control's (`coreKeyRegistry`), the real one unless given. */
+  readonly registry?: ModuleDeclaration;
 }
 
 /** The private process's `core` entry. */
@@ -412,7 +423,7 @@ export function launchPrivate(options: PrivateOptions): PrivateProcess {
     { id: "pm", start: options.start ?? 1, version: "1.0.0", config: { salt: options.salt ?? 0 } },
   ];
   const declarations: DeclarationSet = {
-    backbone: [CORE_CHAIN, ...privateBackbone(intake)],
+    backbone: [CORE_CHAIN, ...privateBackbone(intake, options.registry)],
     core: [],
     user: modules,
   };
@@ -424,6 +435,7 @@ export function launchPrivate(options: PrivateOptions): PrivateProcess {
       side: "private",
       log: options.lines === undefined ? quiet : (line) => options.lines?.push(line),
       ...(options.loop === undefined ? {} : { loop: options.loop }),
+      ...(options.admin === undefined ? {} : { admin: options.admin }),
     });
   const handle = options.within === undefined ? start() : options.within(start);
   return {
@@ -478,6 +490,15 @@ export async function refusalOf(options: PrivateOptions): Promise<PrivateRefusal
   }
   await running.stop();
   throw new Error("expected the private process's startup to refuse, and it started");
+}
+
+/** The origin (`http://host:port`) of the admin endpoints a process logged it listens on, or null before it does. */
+export function adminOrigin(lines: readonly string[]): string | null {
+  for (const line of lines) {
+    const match = /^admin endpoints listening on (\S+)$/.exec(line);
+    if (match !== null) return `http://${match[1] as string}`;
+  }
+  return null;
 }
 
 /** The default 32 zero bytes, a hash nothing has. */

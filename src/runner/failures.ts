@@ -31,10 +31,7 @@ import type { PointName } from "../modules/declaration.js";
 import { CallbackFailure } from "./dispatch.js";
 import { HeightFailure, UnexpectedCursor } from "./loop.js";
 
-/**
- * `design.md` §11's startup refusals that are `UmbraError` codes today (the other — `test-key-conflict` — comes with the
- * task that raises it, which adds it here; task 10.4's registry checks §11).
- */
+/** `design.md` §11's startup refusals that are `UmbraError` codes (task 10.4's registry checks §11). */
 export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "genesis-mismatch",
   "cursor-hash-mismatch",
@@ -78,6 +75,7 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "package-hash-mismatch",
   "private-binding-mismatch",
   "needs-lockstep-not-listed",
+  "test-key-conflict",
 ] as const);
 
 /**

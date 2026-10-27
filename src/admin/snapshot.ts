@@ -5,10 +5,12 @@
  * `/status` (AE-5) for JSON, on the main thread: heights as decimal text (JSON has no `bigint`, 3.2's note (d)), the
  * conditions as the runner raised them, the reason as a sanitized error (`./errors.ts`), never `ended`, which holds the
  * raw error; the wall-clock time of the last commit as RFC 3339 UTC text ({@link utcText}, Q68); the node as the core
- * sees it; every part of the database with its tables' digest rows (DT-5). A field nothing reports a value for yet is
- * null (AE-5). The configuration's part is already redacted (`./redaction.ts`). The result is plain, frozen,
- * structured-clone data: it crosses to the worker as one message, and the worker answers each request from one
- * snapshot. The uptime is not in it: `/status` computes it at each request from {@link AdminSnapshot.startedNs}.
+ * sees it; every part of the database with its tables' digest rows (DT-5); on the core its private instances, each
+ * with its id, connection, lockstep flag and synced height only (PP-9), and on a private process whether it runs in
+ * lockstep (task 14.4). A field nothing reports a value for yet is null (AE-5). The configuration's part is already
+ * redacted (`./redaction.ts`). The result is plain, frozen, structured-clone data: it crosses to the worker as one
+ * message, and the worker answers each request from one snapshot. The uptime is not in it: `/status` computes it at
+ * each request from {@link AdminSnapshot.startedNs}.
  */
 
 import type { PlainData, PlainObject } from "../config/plain-data.js";
@@ -16,7 +18,7 @@ import { type ProcessSide, PUBLIC_CORE_SCHEMA } from "../config/core-settings.js
 import type { Redactor } from "../config/redact.js";
 import type { ProcessStatus } from "../runner/process.js";
 import { sanitizedError } from "./errors.js";
-import type { AdminSnapshot, ConfigSnapshot, ModuleStatus, NodeStatus, StatusSnapshot } from "./types.js";
+import type { AdminSnapshot, ConfigSnapshot, ModuleStatus, NodeStatus, PrivateInstanceStatus, StatusSnapshot } from "./types.js";
 
 /** CF-4's default liveness timeout (30 s), read from the `core` schema: the snapshot's before the configuration's. */
 export const DEFAULT_LIVENESS_TIMEOUT_MS: number = PUBLIC_CORE_SCHEMA.shape.livenessTimeoutMs.parse(undefined);
@@ -79,6 +81,14 @@ export interface DigestRow extends PartTable {
 /** The key of a table in a digest map. */
 export const tableKey = ({ schema, table }: PartTable): string => JSON.stringify([schema, table]);
 
+/** One private instance as the core knows it (`src/private/instances.ts`): the four fields `/status` shows (PP-9). */
+export interface PrivateInstanceFacts {
+  readonly id: string;
+  readonly connected: boolean;
+  readonly lockstep: boolean;
+  readonly height: bigint | null;
+}
+
 /** What a snapshot holds besides `status()`. */
 export interface SnapshotFacts {
   /** The process's liveness timeout (`livenessTimeoutMs`). */
@@ -103,6 +113,24 @@ export interface SnapshotFacts {
   readonly modules: readonly ModuleFacts[] | null;
   /** `core_digest.tables` as last read, by {@link tableKey}. */
   readonly digests: ReadonlyMap<string, DigestRow>;
+  /** On the core, its private instances now (PP-9; task 14.4); none unless given. */
+  readonly privateInstances?: readonly PrivateInstanceFacts[];
+  /** On a private process, whether it runs in lockstep, null while unknown (task 14.4); null unless given. */
+  readonly publicLockstep?: boolean | null;
+}
+
+/** The private instances as `/status` shows them: the four fields of each, its height as text, nothing else (PP-9). */
+function instancesOf(instances: readonly PrivateInstanceFacts[]): readonly PrivateInstanceStatus[] {
+  return Object.freeze(
+    instances.map((instance) =>
+      Object.freeze({
+        id: instance.id,
+        connected: instance.connected,
+        lockstep: instance.lockstep,
+        height: height(instance.height),
+      }),
+    ),
+  );
 }
 
 /** The node as the core sees it (see {@link NodeStatus}). */
@@ -166,8 +194,9 @@ export function snapshotOf(status: ProcessStatus, facts: SnapshotFacts): AdminSn
     node: core ? nodeOf(status, facts.tipCap) : null,
     modules: facts.modules === null ? null : Object.freeze(modulesOf(facts.modules, facts.digests, status.cursor)),
     ledger: null,
-    privateInstances: null,
-    public: core ? null : Object.freeze({ cursor: height(status.head), lockstep: null }),
+    // The core's instances once startup opened the database (its parts known); a private process has none.
+    privateInstances: !core || facts.modules === null ? null : instancesOf(facts.privateInstances ?? []),
+    public: core ? null : Object.freeze({ cursor: height(status.head), lockstep: facts.publicLockstep ?? null }),
   };
   return Object.freeze({
     livenessTimeoutMs: facts.livenessTimeoutMs,

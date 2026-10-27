@@ -330,6 +330,18 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
       test: "refuses a module declaring needsLockstep unless the hello-ack said lockstep, or with no transport (needs-lockstep-not-listed)",
     },
   ],
+  "refusal:test-key-conflict": [
+    {
+      file: "test/private/keys.test.ts",
+      test:
+        "A123: a restart with a test key admitted at its start keeps its arrived_height; the same key with another start " +
+        "refuses with test-key-conflict",
+    },
+    {
+      file: "test/backbone/core-key-registry.test.ts",
+      test: "refuses a key admitted with another start (start-changed), naming it by its place and both heights, never its bytes",
+    },
+  ],
   "refusal:package-hash-mismatch": [{ file: "test/ledger/package-identity.test.ts", test: "refuses a package file that is missing" }],
   "refusal:writer-lock-held": [
     {
@@ -485,7 +497,6 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
  * (see the module comment).
  */
 export const PENDING: Readonly<Record<string, string>> = Object.freeze({
-  "refusal:test-key-conflict": "14.4",
   "backup:backup-tools-missing": "15.1",
   "backup:private-backup-refused": "15.1",
   "backup:backup-format-unknown": "15.2",

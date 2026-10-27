@@ -4,7 +4,7 @@
  * besides `core-chain` (task 10.2; on a private process its configuration history and its process items `config`, `db`
  * and `ledger-table` — no node client, as a private process never talks to the node):
  * - `core-private-source` (`./core-private-source/`), its heights from the public database and its binding to it;
- * - `core-key-registry` (`./core-key-registry/`), the keys it admitted;
+ * - `core-key-registry` (`./core-key-registry/`), the keys it admitted (its configured test keys, task 14.4);
  * - `core-digest` (`./core-digest/`), the digests of its module tables: one set of determinism rules for every
  *   database (Q75), digests on every module table (Q84). The same part as the core's, with its requirement on the
  *   cursor table a private database has — `core-private-source`'s `private-cursor`, as the core's requires
@@ -27,8 +27,9 @@ export const PRIVATE_CORE_DIGEST: ModuleDeclaration = Object.freeze({
 
 /**
  * The private backbone of one private process start, after its `core-chain`: `intake`'s `core-private-source`,
- * `core-key-registry` and `core-digest`, in RN-3's fixed order.
+ * `core-key-registry` — `registry`, a negative control's (`coreKeyRegistry`), when given — and `core-digest`, in RN-3's
+ * fixed order.
  */
-export function privateBackbone(intake: PrivateIntake): ModuleDeclaration[] {
-  return [intake.part, CORE_KEY_REGISTRY, PRIVATE_CORE_DIGEST];
+export function privateBackbone(intake: PrivateIntake, registry: ModuleDeclaration = CORE_KEY_REGISTRY): ModuleDeclaration[] {
+  return [intake.part, registry, PRIVATE_CORE_DIGEST];
 }

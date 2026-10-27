@@ -75,6 +75,17 @@ describe("A66: /status's JSON schema", () => {
     expect(body()).toMatchObject({ lastCommitAt: "2026-10-26T12:00:00.25Z", uptimeMs: 1_500 });
   });
 
+  it("holds the private instances and the lockstep flag (task 14.4; PP-9, AE-5)", () => {
+    const instances = [
+      { id: "keeper", connected: true, lockstep: true, height: "100" },
+      { id: "other", connected: false, lockstep: false, height: null },
+    ];
+    expect(STATUS_SCHEMA.problems({ ...body(), privateInstances: instances })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...body(), privateInstances: [] })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...body(), public: { cursor: "3", lockstep: true } })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...body(), public: { cursor: null, lockstep: null } })).toEqual([]);
+  });
+
   it("holds slow-block (task 5.5, RN-17): the height, the point, the module or null while none runs", () => {
     const slow = { code: "slow-block", height: "4", point: "on-compute", module: "m" };
     expect(STATUS_SCHEMA.problems({ ...body(), conditions: [slow] })).toEqual([]);
@@ -119,6 +130,12 @@ describe("A66: /status's JSON schema", () => {
       "a point that is none": (b) => (b.reason.point = "on-commit"),
       "a node field the runner has no value for, given one": (b) => (b.node.connection = "connected"),
       "a ledger before its task": (b) => (b.ledger = { version: "v8" }),
+      "private instances that are no list": (b) => (b.privateInstances = { id: "i" }),
+      "a private instance with its hash": (b) =>
+        (b.privateInstances = [{ id: "i", connected: true, lockstep: false, height: "3", hash: `0x${"ab".repeat(32)}` }]),
+      "a private instance without its height": (b) => (b.privateInstances = [{ id: "i", connected: true, lockstep: false }]),
+      "a private instance with an empty id": (b) => (b.privateInstances = [{ id: "", connected: true, lockstep: false, height: null }]),
+      "a lockstep flag as text": (b) => (b.public = { cursor: "3", lockstep: "yes" }),
       "a negative uptime": (b) => (b.uptimeMs = -1),
     };
     for (const [name, change] of Object.entries(wrong)) {
@@ -212,7 +229,8 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
       (b) => b.cursor === "4" && (b as any).modules?.find((part: { id: string }) => part.id === "m")?.tables[0]?.height === "4",
     );
     const after = Date.now();
-    expect(shown).toMatchObject({ state: "following", instance: { role: "core", id: null }, public: null, ledger: null, privateInstances: null });
+    // A core with no transport and no lockstep list: no private instance (task 14.4).
+    expect(shown).toMatchObject({ state: "following", instance: { role: "core", id: null }, public: null, ledger: null, privateInstances: [] });
     expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: null, retries: 0, queueDepth: null, tipCap: 600, finalityStall: false });
     const committed = Date.parse(shown.lastCommitAt);
     expect(committed).toBeGreaterThanOrEqual(before);

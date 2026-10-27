@@ -38,8 +38,16 @@
  * schema is CF-4's for the process's side (`./core-settings.ts`); a module's is its declaration's `configSchema`, whose
  * every field carries a kind (MD-2, `field-no-kind`).
  *
+ * **A private process's test keys** (CF-11, PP-8; task 14.4: rule `test-keys`, {@link testKeysRule}): each test key
+ * of a `core` revision of the build's version must be of a kind some module the configuration enables (an entry of it,
+ * any revision) declares in `keyKinds`, and its bytes must pass the `validateKey` of every such module — one that
+ * returns anything but `true`, or throws, refuses them —; and no key may be listed twice (the same kind and bytes: a
+ * key is admitted once). What needs the private database — a key admitted with another start, or one whose start has
+ * passed — is `core-key-registry`'s (`test-key-conflict`).
+ *
  * No message holds a setting's value: findings name paths, fields and types, and every message built from a schema's
- * issue or error is redacted with the secrets of the configuration (`./redact.ts`).
+ * issue or error is redacted with the secrets of the configuration (`./redact.ts`); a test key's findings name its
+ * place in `testKeys`, never its kind or bytes, nor a message `validateKey` threw.
  */
 
 import { UmbraError } from "../db/errors.js";
@@ -414,7 +422,7 @@ function otherSideOnly(side: ProcessSide): readonly string[] {
 const schemaOf = (view: EntryView): string =>
   view.core ? "the core entry's settings schema" : `the settings schema of ${view.ref.id} ${String(view.object?.version)}`;
 
-/** The configuration's checks, in the order their findings are reported within one entry (CF-3, CF-5, CF-7). */
+/** The configuration's checks, in the order their findings are reported within one entry (CF-3, CF-5, CF-7, CF-11). */
 export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
   {
     name: "top-level",
@@ -792,7 +800,117 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
         });
       }),
   },
+  // CF-11: a private process's test keys against the configured modules' declarations (task 14.4).
+  testKeysRule(),
 ]);
+
+/** Options of {@link testKeysRule}: the negative control's. */
+export interface TestKeysRuleOptions {
+  /** Whether a key's bytes are given to `validateKey`; true unless given — false is A119's negative control. */
+  readonly validateKey?: boolean;
+}
+
+/** Bytes from a test key's `0x` hex (the schema holds it to lowercase hex pairs). */
+const keyBytes = (text: string): Uint8Array =>
+  Uint8Array.from(text.slice(2).match(/../g) ?? [], (pair) => Number.parseInt(pair, 16));
+
+/** Whether `module`'s `validateKey` takes `bytes` of `kind`: it returns `true`; anything else, or a throw, refuses. */
+function validKey(module: ModuleDeclaration, kind: string, bytes: Uint8Array): "valid" | "refused" | "threw" {
+  try {
+    return module.validateKey?.(kind, bytes) === true ? "valid" : "refused";
+  } catch {
+    return "threw";
+  }
+}
+
+/**
+ * CF-11's rule `test-keys` (see the module comment): every problem of each test key of a private process's `core`
+ * revisions of the build's version, at `entries[i].config.testKeys[j]` (its `kind`, its `bytes`, or the key itself
+ * when it is listed again).
+ */
+export function testKeysRule(options: TestKeysRuleOptions = {}): ConfigRule {
+  const checkBytes = options.validateKey !== false;
+  return Object.freeze({
+    name: "test-keys",
+    check: (context: ConfigContext): readonly Finding[] => {
+      if (context.side !== "private") return [];
+      // The modules this configuration enables: those with an entry, in the build's declarations.
+      const enabled = [...new Set(objects(context).map((view) => view.object.id))]
+        .filter((id): id is string => typeof id === "string" && id !== CORE_ENTRY_ID)
+        .flatMap((id) => {
+          const module = context.modules.get(id);
+          return module === undefined ? [] : [module];
+        });
+      const declaring = enabled.filter((module) => (module.keyKinds ?? []).length > 0);
+      const kinds =
+        declaring.length === 0
+          ? "none of them declares keyKinds"
+          : `they declare ${declaring.map((module) => `${module.id}: ${(module.keyKinds as string[]).join(", ")}`).join("; ")}`;
+      return validated(context)
+        .filter(({ view }) => view.core)
+        .flatMap(({ view, schema, config }) => {
+          let result: ReturnType<SettingsSchema["safeParse"]>;
+          try {
+            result = schema.safeParse(declared(schema, config));
+          } catch {
+            return [];
+          }
+          if (!result.success) return [];
+          const keys = (result.data.testKeys as readonly { readonly kind: string; readonly bytes: string }[] | undefined) ?? [];
+          const base = `${view.path}.config.testKeys`;
+          const seen = new Map<string, number>();
+          return keys.flatMap((key, index) => {
+            const at = `${base}[${index}]`;
+            const same = seen.get(`${key.kind}\u0000${key.bytes}`);
+            if (same !== undefined) {
+              return [
+                finding(
+                  "test-keys",
+                  at,
+                  view,
+                  "testKeys",
+                  `the test key has the same kind and bytes as testKeys[${same}]: a key is admitted once (PP-8, CF-11); ` +
+                    "remove one of them",
+                ),
+              ];
+            }
+            seen.set(`${key.kind}\u0000${key.bytes}`, index);
+            const owners = enabled.filter((module) => module.keyKinds?.includes(key.kind) === true);
+            if (owners.length === 0) {
+              return [
+                finding(
+                  "test-keys",
+                  `${at}.kind`,
+                  view,
+                  "testKeys",
+                  `the test key's kind is declared by no module this configuration enables (${kinds}): a test key is ` +
+                    "admitted only for a kind a configured private module declares in keyKinds (CF-11, PP-8); correct " +
+                    "its kind, or enable the module that reads keys of that kind",
+                ),
+              ];
+            }
+            if (!checkBytes) return [];
+            return owners.flatMap((module) => {
+              const verdict = validKey(module, key.kind, keyBytes(key.bytes));
+              if (verdict === "valid") return [];
+              const how = verdict === "threw" ? ", which threw" : "";
+              return [
+                finding(
+                  "test-keys",
+                  `${at}.bytes`,
+                  view,
+                  "testKeys",
+                  `the test key's bytes are refused by the validateKey of ${module.id}${how}: a key is admitted only ` +
+                    "when every module declaring its kind takes its bytes (CF-11, PP-8); give bytes of the form that " +
+                    "module reads",
+                ),
+              ];
+            });
+          });
+        });
+    },
+  });
+}
 
 /** The refusal of `findings` in the configuration loaded from `file`. */
 function refusal(file: string | null, findings: readonly Finding[]): UmbraError {

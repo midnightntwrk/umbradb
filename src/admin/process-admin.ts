@@ -13,6 +13,8 @@
  *   the configuration itself, which gives no validated address — ends the process with no listener, the refusal in its
  *   log only (owner decision Q137 B, task 8.1b; Q127's address before the validation went with it).
  * - **What `/status` shows besides `status()`** (AE-5): the process's side and `instanceId`, its revision's `tipCap`,
+ *   its private side as the process gives it at each snapshot ({@link ProcessAdminOptions.privateSide}: the core's
+ *   private instances, a private process's lockstep flag; task 14.4),
  *   the wall-clock time of the last commit ({@link ProcessAdmin.committed}, which the loop's commit observer calls),
  *   and, once startup has resolved the graph and migrated the database ({@link ProcessAdmin.opened}), every part of the
  *   database with its revisions and its tables' rows of `core_digest.tables` (DT-5), which it reads from the process's
@@ -41,6 +43,7 @@ import {
   DEFAULT_TIP_CAP,
   type DigestRow,
   type ModuleFacts,
+  type PrivateInstanceFacts,
   snapshotOf,
   tableKey,
 } from "./snapshot.js";
@@ -56,6 +59,19 @@ export interface ProcessAdminOptions {
   readonly start?: AdminStarter;
   /** The process's side (CF-4), the instance role `/status` shows: public (the core) unless given. */
   readonly side?: ProcessSide;
+  /**
+   * The process's private side now (PP-9, AE-5; task 14.4), asked at each snapshot: on the core its private instances,
+   * on a private process whether it runs in lockstep; none unless given.
+   */
+  readonly privateSide?: () => PrivateSideFacts;
+}
+
+/** What `/status` shows of the private side (see {@link ProcessAdminOptions.privateSide}). */
+export interface PrivateSideFacts {
+  /** On the core: its private instances (`src/private/instances.ts`). */
+  readonly instances: readonly PrivateInstanceFacts[];
+  /** On a private process: whether it runs in lockstep, null while startup does not know. */
+  readonly lockstep: boolean | null;
 }
 
 /** What startup has resolved once the database is migrated ({@link ProcessAdmin.opened}). */
@@ -137,6 +153,7 @@ export class ProcessAdmin {
   readonly #start: AdminStarter;
   readonly #heartbeat: Heartbeat;
   readonly #side: ProcessSide;
+  readonly #privateSide: (() => PrivateSideFacts) | undefined;
   readonly #startedNs = process.hrtime.bigint();
   #redactor: Redactor = earlyRedactor(undefined);
   #liveness = DEFAULT_LIVENESS_TIMEOUT_MS;
@@ -170,6 +187,7 @@ export class ProcessAdmin {
     this.#log = options.log;
     this.#start = options.start ?? startAdminServer;
     this.#side = options.side ?? "public";
+    this.#privateSide = options.privateSide;
     this.#heartbeat = new Heartbeat(() => this.publish());
   }
 
@@ -307,7 +325,9 @@ export class ProcessAdmin {
       database === null || database.writerLock === writerLock
         ? this.#config
         : Object.freeze({ ...this.#config, database: Object.freeze({ ...database, writerLock }) });
+    const privateSide = this.#privateSide?.();
     return snapshotOf(status, {
+      ...(privateSide === undefined ? {} : { privateInstances: privateSide.instances, publicLockstep: privateSide.lockstep }),
       livenessTimeoutMs: this.#liveness,
       readinessLag: this.#readinessLag,
       redactor: this.#redactor,

@@ -132,6 +132,29 @@ describe("what /status shows besides status() (AE-5)", () => {
     expect(shown.status).toMatchObject({ instance: { role: "private", id: "wallet-a" }, node: null, public: { cursor: "12", lockstep: null } });
   });
 
+  it("on the core, its private instances once startup opened the database: id, connection, lockstep, synced height (PP-9)", () => {
+    const instances = [
+      { id: "keeper", connected: true, lockstep: true, height: 100n },
+      { id: "other", connected: false, lockstep: false, height: null },
+    ];
+    const opened = { ...FACTS, modules: [], privateInstances: instances };
+    expect(snapshotOf(status(), opened).status.privateInstances).toEqual([
+      { id: "keeper", connected: true, lockstep: true, height: "100" },
+      { id: "other", connected: false, lockstep: false, height: null },
+    ]);
+    expect(Object.isFrozen(snapshotOf(status(), opened).status.privateInstances?.[0])).toBe(true);
+    // Before startup opened the database: null; with nothing to show once it did: none.
+    expect(snapshotOf(status(), { ...FACTS, privateInstances: instances }).status.privateInstances).toBeNull();
+    expect(snapshotOf(status(), { ...FACTS, modules: [] }).status.privateInstances).toEqual([]);
+    // Only the four fields, whatever the facts carry (an instance's hash, say).
+    const extra = { ...FACTS, modules: [], privateInstances: [{ ...instances[0], hash: "0x00" } as never] };
+    expect(Object.keys(snapshotOf(status(), extra).status.privateInstances?.[0] ?? {}).sort()).toEqual(["connected", "height", "id", "lockstep"]);
+    // A private process shows none, and its lockstep flag as known.
+    const privately = { ...FACTS, side: "private" as const, instanceId: "w", modules: [], privateInstances: instances, publicLockstep: true };
+    expect(snapshotOf(status(), privately).status).toMatchObject({ privateInstances: null, public: { cursor: "9", lockstep: true } });
+    expect(snapshotOf(status(), { ...privately, publicLockstep: false }).status.public).toEqual({ cursor: "9", lockstep: false });
+  });
+
   it("the last commit's wall-clock time as RFC 3339 UTC text, the fraction only when it has one (Q68)", () => {
     expect(utcText(Date.UTC(2025, 4, 21, 14, 30, 0, 0))).toBe("2025-05-21T14:30:00Z");
     expect(utcText(Date.UTC(2025, 4, 21, 14, 30, 0, 120))).toBe("2025-05-21T14:30:00.12Z");
@@ -349,6 +372,30 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     expect(queries).not.toContain(DIGESTS_SQL);
     expect(fake.published.at(-1)?.status).toMatchObject({ instance: { role: "private", id: "wallet-a" }, node: null, public: { cursor: "9", lockstep: null } });
     await admin.close();
+  });
+
+  it("asks the process for its private side at each snapshot: the core's instances, a private process's lockstep flag", async () => {
+    const side = { instances: [{ id: "i", connected: true, lockstep: false, height: 4n }], lockstep: null as boolean | null };
+    const fake = recording();
+    const admin = new ProcessAdmin({ status: () => status(), log: () => undefined, start: fake.start, privateSide: () => side });
+    const config = checked();
+    await admin.serve(config, config.entries[0] as never);
+    expect(fake.published.at(-1)?.status.privateInstances).toBeNull();
+    const db = { read: async () => [] };
+    admin.opened({ declarations: validateDeclarations({ backbone: [CORE_CHAIN], core: [], user: [] }), modules: [CORE_CHAIN], revisionsOf: () => [], db: db as never, ...OPENED });
+    await sleep(10);
+    expect(fake.published.at(-1)?.status.privateInstances).toEqual([{ id: "i", connected: true, lockstep: false, height: "4" }]);
+    side.instances = [{ id: "i", connected: true, lockstep: false, height: 5n }];
+    admin.publish();
+    expect(fake.published.at(-1)?.status.privateInstances).toEqual([{ id: "i", connected: true, lockstep: false, height: "5" }]);
+    await admin.close();
+
+    const privately = recording();
+    const other = new ProcessAdmin({ status: () => status(), log: () => undefined, start: privately.start, side: "private", privateSide: () => ({ instances: [], lockstep: true }) });
+    const privateConfig = checked("private");
+    await other.serve(privateConfig, privateConfig.entries[0] as never);
+    expect(privately.published.at(-1)?.status).toMatchObject({ privateInstances: null, public: { lockstep: true } });
+    await other.close();
   });
 });
 
