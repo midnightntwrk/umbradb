@@ -48,8 +48,26 @@
  * the next height. So is a `publish` the process contexts refuse (MD-7, `./process-context.ts`), which they report to
  * the loop ({@link LoopInput.misuses}): named by its module and the point the loop was dispatching, none while it waits.
  * The halt — the state `halted` with its reason, the process staying up — and the retries of a lost connection or an
- * unreachable node, which run the loop again from the cursor, are the process's (`./process.ts`, `./failures.ts`; RN-8,
- * IN-10).
+ * unreachable node, which run the loop again, are the process's (`./process.ts`, `./failures.ts`; RN-8, IN-10).
+ *
+ * **A height held for a retry** (IN-10, IN-11; task 10.4). When a retryable failure (`UmbraError.retryable`:
+ * `connection-lost`, `node-unreachable`, directly or as a callback's) stops h after its `on-parse` and before it
+ * committed, the loop keeps h ({@link HeldHeight}: its block, its range, the cursor before it, its `block` items as
+ * `on-fetch` and `on-parse` left them, the point it resumes at, and whether the failure came from the `COMMIT`), and
+ * its next run — the process runs the same loop again after IN-10's back-off — starts with it instead of the cursor's
+ * re-delivery:
+ * 1. it reads the cursor inside a transaction, on the writer: after a lost connection that is a new session, which
+ *    takes the writer lock again before anything else (DB-11, `writer-lock-lost` when another process took it), so
+ *    nothing can move the cursor after it is read; a failure of that read keeps h held for the run after;
+ * 2. {@link FinalizedLoop.commitOutcome} reads it (IN-11): h with the block's hash after a failed `COMMIT` — h
+ *    committed: the loop tells its observer, runs h's `on-after-db-write` and `on-stop-height`, and goes on from h + 1;
+ *    the cursor before h — h did not commit: h is processed again from `on-compute` with its kept items (those its
+ *    earlier `on-compute` published are dropped), or from `on-start-height` when the failure came before `on-compute`
+ *    began; anything else halts with `unexpected-cursor` at h ({@link UnexpectedCursor}).
+ * Nothing is fetched or parsed again, and the cursor's `on-after-db-write`, which ran before h began, is not
+ * re-delivered; a retryable failure on the way to h (the head's read, its `on-finalized`) keeps h held for the run
+ * after. A failure before `on-parse` ended holds nothing: the next run starts from the cursor, which it re-delivers
+ * (RN-11), and fetches h again.
  *
  * **A source that fetches ahead** (`core-block-fetch`'s node source, task 10.3; IN-4 to IN-6) is given, for each run,
  * the runner's dispatch interface for its queue ({@link QueueRunner}: `on-fetch` and `on-parse` of a block it fetched
@@ -61,7 +79,7 @@
 
 import { BLOCKS_TABLE } from "../backbone/core-block-commit/core-block-commit.js";
 import type { Database, ReadHandle, Transaction } from "../db/api.js";
-import type { UmbraError } from "../db/errors.js";
+import { UmbraError } from "../db/errors.js";
 import type { SchemaPlan } from "../db/roles.js";
 import { openBlockWrites } from "../db/write-handles.js";
 import type {
@@ -154,14 +172,47 @@ export interface HeightRun {
   readonly previous: BlockRef | null;
   /** True when the source prepared the height (`BlockSource.prepared`): its `on-fetch` and `on-parse` ran already. */
   readonly prepared?: boolean;
+  /**
+   * Set for a held height processed again ({@link HeldHeight}): the point it resumes at — its `on-fetch` and `on-parse`
+   * ran in an earlier run of the loop, and with `on-compute` its `on-start-height` too.
+   */
+  readonly from?: ResumePoint;
 }
+
+/** Where a held height resumes: `on-start-height` when its failure came before `on-compute` began, else there. */
+export type ResumePoint = "on-start-height" | "on-compute";
+
+/**
+ * A height a retryable failure stopped before it committed, after its `on-parse` (IN-10, IN-11; see the module
+ * comment): what the loop's next run processes it again with.
+ */
+export interface HeldHeight {
+  /** The height's run: its block, its range, the cursor before it, its items. */
+  readonly run: HeightRun;
+  /** Its `block` items as `on-fetch` and `on-parse` left them: the items it is processed again with. */
+  readonly items: ReadonlyMap<string, unknown>;
+  /** The point it resumes at. */
+  readonly from: ResumePoint;
+  /**
+   * True when the failure came after the block transaction's body ended — from its `COMMIT`, which the server may have
+   * committed or not (IN-11) —; false when the transaction failed before, and certainly did not commit.
+   */
+  readonly uncertain: boolean;
+}
+
+/**
+ * What the cursor read after a held height's failure says (IN-11, {@link FinalizedLoop.commitOutcome}): the height
+ * `committed`, `not-committed` (the cursor is the one before it), or `unexpected` (anything else: `unexpected-cursor`).
+ */
+export type CommitOutcome = "committed" | "not-committed" | "unexpected";
 
 /** Opens a read for one callback, and runs `body` inside it. */
 export type ReadOpener = <T>(body: (read: ReadHandle) => Promise<T>) => Promise<T>;
 
 /**
  * The loop's check before the `COMMIT` that the block transaction left the cursor at the height with the block's hash
- * failed: the halt `unexpected-cursor` (`design.md` §11).
+ * failed, or the cursor read after a held height's failure was neither the height nor the one before it (IN-11): the
+ * halt `unexpected-cursor` (`design.md` §11).
  */
 export class UnexpectedCursor extends Error {
   constructor(message: string) {
@@ -217,6 +268,29 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((byte, index) => byte === b[index]);
 }
 
+/** Whether `ref` is the block `block`: its height and hash. */
+function isBlock(ref: BlockRef | null, block: BlockRef | null): boolean {
+  if (ref === null || block === null) return ref === block;
+  return ref.height === block.height && sameBytes(ref.hash, block.hash);
+}
+
+/** A cursor as text, for a message. */
+const cursorText = (cursor: BlockRef | null): string => (cursor === null ? "none" : `height ${cursor.height}`);
+
+/** Whether the process retries `failure` (IN-10): a retryable `UmbraError`, itself or a callback's. */
+function isRetryable(failure: HeightFailure): boolean {
+  const cause = failure.cause instanceof CallbackFailure ? failure.cause.cause : failure.cause;
+  return cause instanceof UmbraError && cause.retryable;
+}
+
+/** How far a height's run got before `on-compute`: what holding it needs (see {@link HeldHeight}). */
+interface Progress {
+  /** Its items when it reached `on-start-height`: as `on-fetch` and `on-parse` left them. */
+  readonly items: ReadonlyMap<string, unknown>;
+  /** The last point it reached of the two a held height resumes at. */
+  from: ResumePoint;
+}
+
 /** The finalized loop over a block source (see the module comment). */
 export class FinalizedLoop {
   protected readonly input: LoopInput;
@@ -224,6 +298,14 @@ export class FinalizedLoop {
   #misuse: Misuse | undefined;
   /** The point being dispatched, if any. */
   #point: PointName | undefined;
+  /** How far each height's run got, by run. */
+  readonly #progress = new WeakMap<HeightRun, Progress>();
+  /** The runs whose block transaction's body ended: a failure after that is the `COMMIT`'s (IN-11). */
+  readonly #bodiesEnded = new WeakSet<HeightRun>();
+  /** The height the last run held for the next (see the module comment). */
+  #held: HeldHeight | undefined;
+  /** The held height this run processes again, once it reaches it. */
+  #resume: HeldHeight | undefined;
 
   constructor(input: LoopInput) {
     this.input = input;
@@ -231,9 +313,10 @@ export class FinalizedLoop {
   }
 
   /**
-   * Re-delivers at the cursor (RN-11), then processes every finalized height above it, waiting for the head to rise, up
-   * to its last height ({@link lastHeight}) — then resolves with how it ended, or with `signal` when its signal stopped
-   * it; rejects with a {@link HeightFailure} when processing fails.
+   * Re-delivers at the cursor (RN-11) — or, after a run that held a height, settles it first (see the module
+   * comment) —, then processes every finalized height above it, waiting for the head to rise, up to its last height
+   * ({@link lastHeight}) — then resolves with how it ended, or with `signal` when its signal stopped it; rejects with a
+   * {@link HeightFailure} when processing fails.
    */
   async run(): Promise<LoopEnd> {
     const unwatch = this.input.misuses?.watch((error, module) => this.#misused({ error, module, point: this.#point }));
@@ -257,8 +340,16 @@ export class FinalizedLoop {
   /** The loop's work in {@link run} (see the module comment). */
   async #follow(): Promise<LoopEnd> {
     const { db, graph, source, observer } = this.input;
-    let cursor = await db.read((read) => source.cursor(read));
-    if (cursor !== null) await this.redeliver(cursor);
+    const held = this.#held;
+    this.#held = undefined;
+    this.#resume = undefined;
+    let cursor: BlockRef | null;
+    if (held === undefined) {
+      cursor = await db.read((read) => source.cursor(read));
+      if (cursor !== null) await this.redeliver(cursor);
+    } else {
+      cursor = await this.#settle(held);
+    }
     const last = this.lastHeight();
     if (cursor !== null && last !== null && cursor.height >= last) return this.#stopped(cursor.height);
     for (;;) {
@@ -274,7 +365,10 @@ export class FinalizedLoop {
         }
         await this.#finalized(head, next);
       } catch (error) {
-        throw this.#failure(next, error, false);
+        const failure = this.#failure(next, error, false);
+        // A held height not reached yet stays held for the next run, its items kept (IN-10).
+        if (this.#resume !== undefined && isRetryable(failure)) this.#held = this.#resume;
+        throw failure;
       }
       for (let height = next; height <= head.height; height++) {
         if (this.#signal.aborted) return SIGNALLED;
@@ -338,14 +432,16 @@ export class FinalizedLoop {
 
   /**
    * The points before the block transaction: `on-fetch`, `on-parse`, `on-start-height` ({@link startHeight}), then
-   * `on-compute` with a read at h − 1.
+   * `on-compute` with a read at h − 1; a held height from the point it resumes at ({@link HeightRun.from}).
    */
   protected async prepare(run: HeightRun): Promise<void> {
-    if (run.prepared !== true) {
+    if (run.prepared !== true && run.from === undefined) {
       await this.blockPoint(run, "on-fetch");
       await this.blockPoint(run, "on-parse");
     }
-    await this.startHeight(run);
+    this.#reached(run, "on-start-height");
+    if (run.from !== "on-compute") await this.startHeight(run);
+    this.#reached(run, "on-compute");
     await this.compute(run, (body) => this.input.db.read(body));
   }
 
@@ -415,9 +511,15 @@ export class FinalizedLoop {
     });
   }
 
-  /** The block transaction: one `BEGIN … COMMIT` holding the height's {@link write}. */
+  /**
+   * The block transaction: one `BEGIN … COMMIT` holding the height's {@link write}; once its body ended, a failure is
+   * the `COMMIT`'s, which may have committed (IN-11).
+   */
   protected async commit(run: HeightRun): Promise<void> {
-    await this.input.db.transaction((tx) => this.write(tx, run));
+    await this.input.db.transaction(async (tx) => {
+      await this.write(tx, run);
+      this.#bodiesEnded.add(run);
+    });
   }
 
   /**
@@ -471,25 +573,121 @@ export class FinalizedLoop {
     return new Map();
   }
 
-  /** Processes `height` above the cursor `previous`; resolves with the new cursor. */
+  /** The height kept for the next run when a retryable failure stopped `held`'s (see the module comment): a seam. */
+  protected held(held: HeldHeight): HeldHeight | undefined {
+    return held;
+  }
+
+  /**
+   * What `cursor`, read after `held`'s failure, says (IN-11): after a failed `COMMIT` (`uncertain`), the height with
+   * the block's hash committed; the cursor before the height — none before S — did not; anything else is unexpected, as
+   * is the height itself after a transaction that failed before its `COMMIT`.
+   */
+  protected commitOutcome(held: HeldHeight, cursor: BlockRef | null): CommitOutcome {
+    const { block, previous } = held.run;
+    if (held.uncertain && isBlock(cursor, block)) return "committed";
+    return isBlock(cursor, previous) ? "not-committed" : "unexpected";
+  }
+
+  /**
+   * Processes `height` above the cursor `previous` — a held height again from where it resumes —; resolves with the new
+   * cursor.
+   */
   async #process(height: bigint, previous: BlockRef | null): Promise<BlockRef> {
     let committed = false;
+    const resume = this.#resume?.run.height === height ? this.#resume : undefined;
+    this.#resume = undefined;
+    let run: HeightRun | undefined;
     try {
-      const { source } = this.input;
-      const prepared = source.prepared === undefined ? undefined : await source.prepared(height);
-      const block = prepared?.block ?? (await source.block(height));
-      const items = prepared?.items ?? this.itemsAt(height);
-      const run: HeightRun = { height, block, range: this.#rangeAt(height), items, previous, prepared: prepared !== undefined };
+      run = resume === undefined ? await this.#begin(height, previous) : this.#again(resume);
       await this.prepare(run);
       await this.commit(run);
       committed = true;
-      this.input.observer?.committed?.(block);
+      this.input.observer?.committed?.(run.block);
       await this.after(run);
       this.#check();
-      return block;
+      return run.block;
     } catch (error) {
-      throw this.#failure(height, error, committed);
+      const failure = this.#failure(height, error, committed);
+      if (!committed && run !== undefined) this.#hold(run, failure);
+      throw failure;
     }
+  }
+
+  /** A new run of `height` above `previous`: its block from the source, prepared by it when it prepares heights. */
+  async #begin(height: bigint, previous: BlockRef | null): Promise<HeightRun> {
+    const { source } = this.input;
+    const prepared = source.prepared === undefined ? undefined : await source.prepared(height);
+    const block = prepared?.block ?? (await source.block(height));
+    const items = prepared?.items ?? this.itemsAt(height);
+    return { height, block, range: this.#rangeAt(height), items, previous, prepared: prepared !== undefined };
+  }
+
+  /** `held`'s run again: its items as `on-parse` left them, from the point it resumes at. */
+  #again(held: HeldHeight): HeightRun {
+    held.run.items.restore(held.items);
+    return { ...held.run, from: held.from };
+  }
+
+  /** Records that `run` reached `point`; at the first, its items (what holding it needs). */
+  #reached(run: HeightRun, point: ResumePoint): void {
+    const progress = this.#progress.get(run);
+    if (progress === undefined) this.#progress.set(run, { items: run.items.visible(), from: point });
+    else progress.from = point;
+  }
+
+  /** Keeps `run` for the next run of the loop when `failure` is retried and came after its `on-parse`. */
+  #hold(run: HeightRun, failure: HeightFailure): void {
+    const progress = this.#progress.get(run);
+    if (progress === undefined || !isRetryable(failure)) return;
+    const { items, from } = progress;
+    this.#held = this.held(Object.freeze({ run, items, from, uncertain: this.#bodiesEnded.has(run) }));
+  }
+
+  /**
+   * The start of a run after one that held `held` (see the module comment): the cursor read on the writer, then
+   * {@link commitOutcome}; resolves with the cursor to go on from, or rejects with the height's failure.
+   */
+  async #settle(held: HeldHeight): Promise<BlockRef | null> {
+    const { db, source, observer } = this.input;
+    const { run } = held;
+    let cursor: BlockRef | null;
+    try {
+      cursor = await db.transaction((tx) => source.cursor(tx));
+    } catch (error) {
+      this.#held = held;
+      throw this.#failure(run.height, error, false);
+    }
+    const outcome = this.commitOutcome(held, cursor);
+    if (outcome === "not-committed") {
+      // The height again, above the cursor before it (which the cursor read is).
+      this.#resume = held;
+      return run.previous;
+    }
+    if (outcome === "unexpected") {
+      const lost = held.uncertain
+        ? `the COMMIT of height ${run.height} was lost`
+        : `the block transaction of height ${run.height} was lost before its COMMIT`;
+      const expected = held.uncertain
+        ? `neither height ${run.height} with the block's hash (committed) nor ${cursorText(run.previous)} (not committed)`
+        : `not ${cursorText(run.previous)}, where it was`;
+      throw this.#failure(
+        run.height,
+        new UnexpectedCursor(
+          `after ${lost} the cursor is at ${cursorText(cursor)}, ${expected}: another writer changed the database ` +
+            "while the connection was lost (IN-10, IN-11)",
+        ),
+        false,
+      );
+    }
+    observer?.committed?.(run.block);
+    try {
+      await this.after(run);
+      this.#check();
+    } catch (error) {
+      throw this.#failure(run.height, error, true);
+    }
+    return run.block;
   }
 
   /** `on-finalized` for `head`, before its heights from `next` on: each callback with a read at the cursor. */

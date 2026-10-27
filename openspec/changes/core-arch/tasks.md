@@ -2017,8 +2017,35 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       client, the registry (10.4); `chain-events`, the ledger transactions and signed extrinsics' calls (11.1); block
       0's ledger path (12.3); real tapes for every criterion (0.3, 18.2); `/status` serving `finality-stall` (8.3);
       `umbradb run` passing `nodeSourceOf` (4.4); Q129 (owner).
-- [ ] 10.4 Error handling, retries and halts; recovery after an uncertain COMMIT; the refusal and halt registry.
+- [x] 10.4 Error handling, retries and halts; recovery after an uncertain COMMIT; the refusal and halt registry.
       **Acceptance:** A84, A85, A86, A87.
+      **Done (2026-10-26):** the finalized loop (`src/runner/loop.ts`) holds a height a retryable failure
+      (`connection-lost`, `node-unreachable`, directly or as a callback's) stopped after its `on-parse` and before it
+      committed (`HeldHeight`: the block, the cursor before it, its `block` items as `on-fetch` and `on-parse` left
+      them — `BlockItems.restore` drops the failed `on-compute`'s —, the point it resumes at, and whether the failure
+      came from the `COMMIT`); the process's retry runs the same loop, which first reads the cursor inside a transaction
+      on the writer — a new session after a lost connection, which takes the writer lock again first (DB-11) — and then
+      (`commitOutcome`, IN-11): h with the block's hash after a failed `COMMIT` — `on-after-db-write` and
+      `on-stop-height` for h, then h + 1; the cursor before h — h again from `on-compute` (from `on-start-height` when
+      the failure came before `on-compute` began), nothing fetched or parsed again, the cursor's `on-after-db-write` not
+      re-delivered (a retryable failure on the way to h keeps it held); anything else — `unexpected-cursor` at h. A
+      failure before `on-parse` ended holds nothing (the loop runs from the cursor, re-delivered, as before). The node
+      client's own retries (it retries without limit, so a finalized call never fails with `node-unreachable`) are the
+      process's `node-retrying` (the most attempts it counted, the height processed or waited for, none during
+      startup; the process's own when both) and a log line each (`src/runner/process.ts`; `ProcessInput.nodeClient`,
+      the tests' clock). IN-9's halt was built by 10.1, 5.4 and 10.3; A84 is now tested through the process. A87:
+      `test/runner/code-registry.ts` names, for each refusal and halt code of design §11, the tests that trigger it
+      and check it, or the task that adds it — a shrink-only list of 15 pending codes (14.3, 14.4, 15.1, 15.2, 13.1's
+      `fast-log-unsupported`; 12.3's `root-mismatch` registered at integration). Tests:
+      `test/runner/held-height.test.ts` (both backends, a database whose `COMMIT` fails after its body),
+      `recovery.test.ts` (PostgreSQL: `pg_terminate_backend` during `on-db-write`, and during the `COMMIT` through a
+      proxy holding it or its answer, `commit-proxy.ts`; tagged `[[ingest.uncertain-commit-recovery]]`, not yet in the
+      manifest, 18.4), `retries.test.ts` (the process on both backends), `test/backbone/ingest-faults.test.ts` (A84 and
+      A85's node clauses against tapes, the two-minute outage on a node-client clock 100 times faster),
+      `code-registry.test.ts`; committed negative controls (a client asking again after "state unavailable", a process
+      whose client reports nothing, a loop dropping the held height, two reading a lost `COMMIT` the wrong way, a
+      registry missing a code). **Waits:** A85's "the ledger state is reloaded at the cursor, and h's root matches
+      the node's" (12.3, 12.4); issue 00028-parent-check-passes-a-gap (a block above a missing height commits).
 - [x] 10.2a The owner's answers Q117 A and Q120 B: the node's genesis hash compared with the configured network's at
       every start (built in, or `genesisHash` for `custom`); a known network whose built-in table records no genesis
       hash is refused until task 0.3 records it.

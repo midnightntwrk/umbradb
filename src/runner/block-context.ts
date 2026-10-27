@@ -40,6 +40,15 @@ export class BlockItems {
   }
 
   /**
+   * Makes the items published exactly `kept` — what {@link visible} gave earlier —, dropping those published since: a
+   * height processed again from `on-compute` keeps the items of `on-fetch` and `on-parse` only (IN-10, `./loop.ts`).
+   */
+  restore(kept: ReadonlyMap<string, unknown>): void {
+    this.published.clear();
+    for (const [item, value] of kept) this.published.set(item, value);
+  }
+
+  /**
    * Runs `body` — `part`'s callback at `point` — with a sink of its own; when `body` resolves, publishes its puts, or
    * rejects with its first refused put, if any; when `body` rejects, publishes nothing and rejects with its error.
    */

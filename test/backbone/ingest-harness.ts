@@ -5,7 +5,7 @@ import { type BodyExtrinsic, NodeBlockSource, nodeSourceOf } from "../../src/bac
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import type { BlockHeader, ModuleDeclaration } from "../../src/modules/declaration.js";
-import type { NodeClient } from "../../src/node/client.js";
+import type { NodeClient, NodeClientOptions } from "../../src/node/client.js";
 import type { ProcessHandle, SourceShared } from "../../src/runner/process.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
@@ -139,6 +139,8 @@ export interface IngestOptions {
   /** The node source's class (a negative control's), or a factory wrapping the process's client (an instrument). */
   readonly Source?: SourceClass;
   readonly client?: (client: NodeClient) => NodeClient;
+  /** Makes the process's node client (`ProcessInput.nodeClient`: a clock of the test's own); the process's own unless given. */
+  readonly nodeClient?: (options: NodeClientOptions) => NodeClient;
   /** More user modules. */
   readonly user?: readonly ModuleDeclaration[];
   /** Core modules of the build, each enabled from S (task 11.1's) unless {@link startOf} says otherwise. */
@@ -204,6 +206,7 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
     ...(options.ledgerWorker === undefined ? {} : { ledgerWorker: options.ledgerWorker }),
     // Explicitly, so that no test of this harness serves the endpoints on their default address (task 8.1a, Q128 B).
     admin: options.admin ?? false,
+    ...(options.nodeClient === undefined ? {} : { nodeClient: options.nodeClient }),
   });
   return {
     handle,

@@ -131,10 +131,23 @@ point and module —, `unexpected-cursor` for the loop's cursor check before the
 API listener that cannot listen (decision record Q115), and `database-error` for anything else. The two retryable
 codes never halt or refuse (IN-10): `connection-lost` raises `database-retrying`, `node-unreachable` `node-retrying`
 (with the attempts and the height); after IN-10's back-off (1 s doubling up to `backoffCeilingMs`) startup runs again
-from its database steps, or the loop runs again from the cursor, which it re-delivers, so a height whose transaction
-was lost is processed again and one whose `COMMIT` landed continues with its `on-after-db-write`. The condition clears
-once startup completes, a height commits or the loop has nothing to process; a stop ends the wait. Task 10.4 refines
-the retry (IN-10's items kept, IN-11's cursor check) and keeps §11's registry.
+from its database steps, or the same loop runs again. **A height held for the retry** (task 10.4, `loop.ts`): a
+retryable failure after h's `on-parse` and before h committed keeps h — its block, the cursor before it, its `block`
+items as `on-fetch` and `on-parse` left them —, and the next run first reads the cursor inside a transaction on the
+writer, whose new session takes the writer lock again before anything else (DB-11), so nothing can move the cursor
+after it is read; then, IN-11: after a lost `COMMIT`, the cursor at h with the block's hash means h committed — its
+`on-after-db-write` and `on-stop-height` run and the loop goes on from h + 1 —; the cursor before h means h did not, and
+h is processed again from `on-compute` with the kept items (the failed `on-compute`'s dropped; from `on-start-height`
+when the failure came before `on-compute` began), nothing fetched or parsed again and the cursor's `on-after-db-write`
+not re-delivered (a retryable failure on the way to h keeps it held); any other cursor halts with `unexpected-cursor`
+at h. A failure before `on-parse` ended holds
+nothing: the loop runs again from the cursor, which it re-delivers. PGlite runs in the process and has no connection to
+lose, so only a node failure can hold a height there. The node client retries its own calls and connection without
+limit (§3), so a finalized call never fails with `node-unreachable`: while it retries, the process shows
+`node-retrying` — the most attempts it counted, the height the loop processes or waits for, null during startup — and
+logs each of its retries. A condition clears once startup completes, a height commits or the loop has nothing to
+process (the client's when it stops retrying); a stop ends the wait. §11's registry is `test/runner/code-registry.ts`
+(A87).
 
 ## 3. Block source and ingest
 
@@ -1132,6 +1145,9 @@ constraint (which needed `btree_gist`); both tables get Q57's `CHECK`, change ca
 module table.
 
 ## 11. Refusals and halts (IN-12)
+
+Each code below has a test that triggers it and checks it, named in `test/runner/code-registry.ts`, or the task that
+adds it there (A87; task 10.4): a code added here comes with its test.
 
 **Startup refuses** (state `refused`, live, not ready), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,
 `changes-past`, `missing-entry`, `not-plain-data`, `invalid-configuration`, `upgrade-required`, `requires-resync`,

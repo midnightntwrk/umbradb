@@ -416,9 +416,14 @@ of the `core-arch` change).
 - **A failing `on-start-db` or `on-start-api` refuses startup.** The process enters `refused`, with `callback-error`,
   your module and the point, and its database is closed, so a fixed build can start at once.
 - **A lost connection is retried, not a failure.** When the database connection is lost, or the node cannot be
-  reached, the process waits and runs again from the cursor (the condition `database-retrying` or `node-retrying`): a
-  height whose transaction was lost runs again from `on-fetch`, and `on-after-db-write` of the cursor fires again.
-  Catching such an error and throwing your own turns it into a failure that halts.
+  reached, the process waits and runs again (the condition `database-retrying` or `node-retrying`). A height the loss
+  stopped after its `on-parse` runs again from `on-compute` (from `on-start-height` if `on-compute` had not begun),
+  with the `block` items `on-fetch` and `on-parse` published, and without those of the `on-compute` that ran before:
+  `on-compute` and `on-db-write` may run twice for a height, `on-fetch` and `on-parse` do not. A `COMMIT` whose answer
+  was lost is settled by the cursor: if the height committed, its `on-after-db-write` fires and processing goes on; if
+  not, it runs again from `on-compute`. A loss before `on-parse` ended runs the height again from `on-fetch`, after
+  `on-after-db-write` of the cursor fires again. Catching such an error and throwing your own turns it into a failure
+  that halts.
 - **After a crash, some points run again.** `on-db-write` runs exactly once per committed height: a block that did not
   commit left nothing. `on-start-height` fires again if your start height had not committed, and `on-after-db-write`
   and `on-stop-height` fire again for the cursor; `on-fetch`, `on-parse` and `on-compute` may run again for a height.

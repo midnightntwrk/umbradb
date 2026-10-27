@@ -65,11 +65,18 @@
  * (`node-unreachable`) — the two retryable codes, wherever startup's later steps or the loop meet them — never halts or
  * refuses: the process raises the condition `database-retrying` or `node-retrying` with the attempts and the height,
  * waits IN-10's back-off (`backoffDelay`: 1 s doubling up to the process revision's `backoffCeilingMs`), and runs
- * again — startup from its database steps, or the loop, which reads the cursor again and re-delivers it (RN-11), so a
- * height whose transaction was lost (the writer re-takes its lock, DB-11) is processed again from `on-fetch`, and one
- * whose `COMMIT` landed continues with its `on-after-db-write`. The condition clears, and the back-off starts again
- * from 1 s, once startup completes, a height commits or the loop finds nothing to process. A stop ends the wait at once.
- * Task 10.4 refines it (IN-10's items kept from before `on-compute`, IN-11's cursor check after an uncertain `COMMIT`).
+ * again — startup from its database steps, or the same loop: a height the failure stopped after its `on-parse` is
+ * processed again from `on-compute`, its earlier items kept, once the loop has read the cursor on the writer (whose new
+ * session re-takes the lock, DB-11) and found the height not committed — or, after a lost `COMMIT` that landed, goes on
+ * with its `on-after-db-write`; a cursor that is neither halts with `unexpected-cursor` (IN-11, task 10.4,
+ * `./loop.ts`) —; any other failure runs the loop from the cursor, which it re-delivers (RN-11). The condition clears,
+ * and the back-off starts again from 1 s, once startup completes, a height commits or the loop finds nothing to
+ * process. A stop ends the wait at once. The node client retries its own calls and its connection without limit with
+ * the same back-off (`../node/client.ts`), so a finalized call never fails with `node-unreachable`: while it retries,
+ * the process shows `node-retrying` too — with the most attempts the client counted for one call or the connection
+ * since it began retrying, and the height the loop processes or waits for (null during startup) — and logs each of its
+ * retries (`node retries in <ms> ms (node-retrying, <call or connect>, attempt <n>): …`); the condition clears when the
+ * client stops retrying.
  *
  * **SIGTERM** (RN-13): {@link terminationSignal} gives the signal SIGTERM aborts; aborting
  * {@link ProcessInput.signal}, or calling {@link ProcessHandle.stop}, enters `stopping`, aborts the loop's signal — the
@@ -137,7 +144,7 @@ import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
 import { ProcessAdmin } from "../admin/process-admin.js";
 import type { AdminStarter } from "../admin/server.js";
-import { NodeClient } from "../node/client.js";
+import { NodeClient, type NodeClientOptions, type NodeRetry } from "../node/client.js";
 import { resolveGraph } from "../modules/graph.js";
 import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
 import { type StartedModuleApi, startModuleApi } from "./api-server.js";
@@ -181,6 +188,12 @@ export interface ProcessInput {
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
   /** The negative controls' choice of the process's `core` revision; `processCoreEntry` (Q102) unless given. */
   readonly processCore?: (config: CheckedConfig) => CheckedEntry;
+  /**
+   * The tests' node client: makes the process's one client from the options the process gives it (the `core`
+   * revision's, with the process's `onRetry` and `onRetryingChange`) — on a clock of the test's own; `new
+   * NodeClient(options)` unless given.
+   */
+  readonly nodeClient?: (options: NodeClientOptions) => NodeClient;
   /**
    * The admin endpoints (AE-1, AE-2; `../admin/`), served unless `false` (decision record Q128 B: opt-out): absent or
    * `true` serves them on `listen.admin` from the admin worker, with the heartbeat, from startup until
@@ -228,7 +241,9 @@ export interface UpgradeCondition extends UpgradeBoundary {
 /**
  * A condition of the process (IN-10, AE-3): a failure is being retried — `database-retrying` for a lost database
  * connection, `node-retrying` for an unreachable node —, after `attempts` failures since startup completed or the last
- * commit, at `height` (null at startup, or at the loop's cursor read).
+ * commit, at `height` (null at startup, or at the loop's cursor read); or the node client retries
+ * (`node-retrying`), its most attempts for one call or the connection since it began, at the height the loop processes
+ * or waits for (null at startup).
  */
 export interface RetryCondition {
   readonly code: RetryCode;
@@ -491,6 +506,8 @@ class Process implements ProcessHandle {
   /** The failure being retried (IN-10), and the failures since startup completed or a height committed. */
   #retrying: RetryCondition | null = null;
   #attempts = 0;
+  /** While the node client retries (IN-10): the most attempts it reported since it began; null while it does not. */
+  #nodeAttempts: number | null = null;
   #db: Database | undefined;
   #source: BlockSource | undefined;
   #api: StartedModuleApi | undefined;
@@ -539,6 +556,9 @@ class Process implements ProcessHandle {
         ...this.#conditions,
         ...(this.#source?.conditions?.() ?? []),
         ...(this.#retrying === null ? [] : [this.#retrying]),
+        ...(this.#nodeAttempts === null || this.#retrying?.code === "node-retrying"
+          ? []
+          : [this.#nodeRetrying(this.#nodeAttempts)]),
       ],
       ended: this.#end,
       reason: this.#reason,
@@ -612,7 +632,17 @@ class Process implements ProcessHandle {
         this.#step();
       }
       const nodeOptions = nodeOptionsOf(core.settings as PlainObject);
-      this.#nodeClient = nodeOptions === null ? null : new NodeClient(nodeOptions);
+      const makeClient = input.nodeClient ?? ((options: NodeClientOptions) => new NodeClient(options));
+      this.#nodeClient =
+        nodeOptions === null
+          ? null
+          : makeClient({
+              ...nodeOptions,
+              onRetry: (retry) => this.#nodeRetry(retry),
+              onRetryingChange: (retrying) => {
+                if (!retrying) this.#nodeAttempts = null;
+              },
+            });
       const source =
         typeof input.source === "function" ? input.source(core, { nodeClient: this.#nodeClient }) : input.source;
       this.#source = source;
@@ -781,6 +811,22 @@ class Process implements ProcessHandle {
     this.#log(`${where} retries in ${delay} ms (${code}, attempt ${this.#attempts}): ${messageOf(error)}`);
     await pause(delay, this.#stop.signal);
     return !this.#stop.signal.aborted;
+  }
+
+  /** One retry the node client scheduled (IN-10): its attempts counted for `node-retrying`, and a log line. */
+  #nodeRetry(retry: NodeRetry): void {
+    this.#nodeAttempts = Math.max(retry.attempt, this.#nodeAttempts ?? 0);
+    const what = `node-retrying, ${retry.operation}, attempt ${retry.attempt}`;
+    this.#log(`node retries in ${retry.delayMs} ms (${what}): ${messageOf(retry.error)}`);
+  }
+
+  /**
+   * `node-retrying` while the node client retries: `attempts`, at the height the loop processes or waits for now — the
+   * cursor + 1, S before the first block — or null outside processing (startup).
+   */
+  #nodeRetrying(attempts: number): RetryCondition {
+    const height = this.#phase === "running" ? (this.#cursor === null ? this.#start : this.#cursor + 1n) : null;
+    return Object.freeze({ code: "node-retrying", attempts, height });
   }
 
   /** What was retried works again: no condition, and the next retry's back-off starts from 1 s. */

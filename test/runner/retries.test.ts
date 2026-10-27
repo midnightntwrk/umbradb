@@ -2,6 +2,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { BlockItemSource } from "../../src/backbone/core-block-fetch/index.js";
 import { UmbraError } from "../../src/db/errors.js";
+import { backoffDelay } from "../../src/node/backoff.js";
+import { NodeClient, type NodeClientOptions, type NodeRetry } from "../../src/node/client.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { BlockRef, BlockSource } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
@@ -15,9 +17,10 @@ import { core, entryOf, loggingModule, settle, startProcess, testBuild } from ".
  * (`node-unreachable`), the two retryable codes, wherever they come from — a callback's statement, the block
  * transaction, the loop's cursor read, startup's steps after the database opened. The process raises the condition
  * `database-retrying` or `node-retrying` (with the attempts and the height), waits IN-10's back-off (1 s doubling up to
- * the process revision's `backoffCeilingMs`) and runs again from the cursor — the loop re-reads it and re-delivers it
- * (RN-11), so a height whose transaction was lost is processed again from `on-fetch` (task 10.4 keeps its items from
- * before `on-compute`, IN-10) —; the condition clears once a height commits or the loop finds nothing to process.
+ * the process revision's `backoffCeilingMs`) and runs again — a height whose transaction was lost after its
+ * `on-compute` began is processed again from `on-compute`, its items from before it kept (task 10.4, IN-10;
+ * `recovery.test.ts`), any other failure runs the loop again from the cursor, which it re-delivers (RN-11) —; the
+ * condition clears once a height commits or the loop finds nothing to process.
  * A stop ends the wait at once. A writer that finds its lock taken when it reconnects halts for good
  * (`writer-lock-lost`, DB-11). The terminated connections are PostgreSQL's; PGlite has none to lose.
  */
@@ -157,6 +160,125 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     expect(await cursorIn(db)).toBe(5);
   }, 180_000);
 
+  it("a node unreachable in on-compute of h is retried with node-retrying; h is processed again from on-compute, not fetched or parsed again (task 10.4)", async () => {
+    const db = await backend.database();
+    const log: string[] = [];
+    const seen: ProcessStatus[] = [];
+    let handle!: ProcessHandle;
+    const base = loggingModule("w", log, ["on-fetch", "on-parse", "on-db-write", "on-after-db-write"]);
+    const w = loggingModule("w", log, [], {
+      points: {
+        ...base.points,
+        async "on-compute"(_p, b) {
+          log.push(`w on-compute@${b.height}`);
+          if (b.height !== 3n) return;
+          if (log.filter((line) => line === "w on-compute@3").length === 1) {
+            throw new UmbraError("node-unreachable", "the node did not answer in on-compute");
+          }
+          seen.push(handle.status());
+        },
+      },
+    });
+    const source = new InMemoryBlockSource({ head: HEAD });
+    const started = start(db, [w], source);
+    handle = started.handle;
+    try {
+      expect(await settle(handle, source, HEAD)).toBe("waiting");
+      expect(handle.status()).toMatchObject({ state: "following", conditions: [], cursor: HEAD, reason: null });
+    } finally {
+      await handle.stop();
+    }
+    expect(seen.map((status) => status.conditions)).toEqual([[{ code: "node-retrying", attempts: 1, height: 3n }]]);
+    expect(started.lines).toHaveLength(1);
+    expect(started.lines[0]).toMatch(retryLine("processing", "node-retrying", 1));
+    const at = (height: number) => ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"].map((p) => `w ${p}@${height}`);
+    // 3 again from on-compute: not fetched or parsed again, and the cursor's on-after-db-write (2) not re-delivered.
+    expect(log).toEqual([...at(1), ...at(2), "w on-fetch@3", "w on-parse@3", "w on-compute@3", ...at(3).slice(2), ...at(4), ...at(5)]);
+    expect(await cursorIn(db)).toBe(5);
+  }, 180_000);
+
+  it("the node client's own retries show node-retrying — its most attempts, at the height processed or waited for, none during startup — are logged, clear when it stops, and give way to the process's own node-retrying (task 10.4)", async () => {
+    const db = await backend.database();
+    // The process's real client, never connected (the in-memory source asks the node nothing); the test plays its
+    // retry reports through the options the process gave it.
+    let options!: NodeClientOptions;
+    const nodeClient = (given: NodeClientOptions): NodeClient => {
+      options = given;
+      return new NodeClient(given);
+    };
+    const retry = (operation: NodeRetry["operation"], attempt: number): void =>
+      options.onRetry?.({
+        operation,
+        attempt,
+        delayMs: backoffDelay(attempt, 30_000),
+        error: new UmbraError("node-unreachable", `the node did not answer (${operation})`),
+      });
+    let handle!: ProcessHandle;
+    const seen: Record<string, ProcessStatus["conditions"]> = {};
+    let reads = 0;
+    let sixes = 0;
+    const source = new InMemoryBlockSource({ head: HEAD });
+    const flaky = flakySource(source, (method, height) => {
+      if (method === "cursor" && ++reads === 1) {
+        // Startup's cursor read: the client retries the connection, then a call, then the connection again.
+        retry("connect", 1);
+        seen.starting = handle.status().conditions;
+        retry("chain_getBlockHash", 1);
+        retry("connect", 2);
+        seen.most = handle.status().conditions;
+        options.onRetryingChange?.(false);
+        seen.cleared = handle.status().conditions;
+      }
+      if (method === "block" && height === 6n && ++sixes <= 2) {
+        if (sixes === 1) {
+          retry("connect", 4);
+          return new UmbraError("node-unreachable", "the node did not answer for block 6");
+        }
+        seen.both = handle.status().conditions;
+      }
+      return undefined;
+    });
+    const lines: string[] = [];
+    handle = startProcess({
+      declarations: testBuild([]).declarations,
+      config: { data: { entries: [core(db.setting, 1, { extra: { backoffCeilingMs: CEILING } })] } },
+      source: flaky,
+      log: (line) => lines.push(line),
+      nodeClient,
+    });
+    try {
+      expect(await settle(handle, source, HEAD)).toBe("waiting");
+      retry("connect", 1);
+      // Waiting for a head above 5: the height the loop waits for is 6.
+      seen.waiting = handle.status().conditions;
+      expect(handle.status().state).toBe("following");
+      source.finalize(6n);
+      expect(await settle(handle, source, 6n)).toBe("waiting");
+      options.onRetryingChange?.(false);
+      seen.end = handle.status().conditions;
+    } finally {
+      await handle.stop();
+    }
+    expect(seen).toEqual({
+      starting: [{ code: "node-retrying", attempts: 1, height: null }],
+      most: [{ code: "node-retrying", attempts: 2, height: null }],
+      cleared: [],
+      waiting: [{ code: "node-retrying", attempts: 1, height: 6n }],
+      // The process retries block 6 itself (attempt 1) while the client reports attempt 4: one node-retrying, the
+      // process's.
+      both: [{ code: "node-retrying", attempts: 1, height: 6n }],
+      end: [],
+    });
+    expect(lines.filter((line) => line.startsWith("node retries"))).toEqual([
+      "node retries in 1000 ms (node-retrying, connect, attempt 1): the node did not answer (connect)",
+      "node retries in 1000 ms (node-retrying, chain_getBlockHash, attempt 1): the node did not answer (chain_getBlockHash)",
+      "node retries in 2000 ms (node-retrying, connect, attempt 2): the node did not answer (connect)",
+      "node retries in 1000 ms (node-retrying, connect, attempt 1): the node did not answer (connect)",
+      "node retries in 8000 ms (node-retrying, connect, attempt 4): the node did not answer (connect)",
+    ]);
+    expect(await cursorIn(db)).toBe(6);
+  }, 180_000);
+
   it("a retried failure clears once the loop finds nothing to process", async () => {
     const db = await backend.database();
     const source = new InMemoryBlockSource({ head: HEAD });
@@ -270,6 +392,8 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
 
   if (backend.kind === "postgres") {
     it("the writer's connection terminated during on-db-write of h: retried with database-retrying, h committed once, complete", async () => {
+      // Since task 10.4 (IN-10) the retry processes h again from on-compute: the cursor's on-after-db-write, which ran
+      // before h began, is not delivered again.
       const db = await backend.database();
       const log: string[] = [];
       const reached = signal();
@@ -309,7 +433,6 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
         "w on-db-write@2",
         "w on-after-db-write@2",
         "w on-db-write@3",
-        "w on-after-db-write@2",
         "w on-db-write@3",
         "w on-after-db-write@3",
         "w on-db-write@4",
