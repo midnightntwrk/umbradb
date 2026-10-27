@@ -331,7 +331,11 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A140** `[CI]` `GET /health/live`, `GET /health/ready`, `GET /status` and `GET /config` are provided by the backbone
   parts `core-health`, `core-status` and `core-config`, each in its own folder under `src/backbone/` with its tests
   beside it, and A62–A67 pass through them; the admin server mounts only backbone parts' endpoints; a refused process
-  answers all four. (AE-1, Q70)
+  answers all four (a refused configuration excepted: it ends the process, A157). (AE-1, Q70)
+- **A157** `[CI]` A configuration file that cannot be loaded, one that is not plain data and one that fails its schemas
+  each make `umbradb run` log every finding with its path and exit with a non-zero code, and make `startProcess` end
+  `refused`, with no admin listener opened at any time; a refusal after the configuration is validated (a changed
+  migration checksum) still answers the four endpoints. (AE-1, AE-3, owner decision Q137)
 
 ## 9. Test tape
 

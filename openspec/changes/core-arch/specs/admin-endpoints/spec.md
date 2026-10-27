@@ -7,12 +7,14 @@ EARS forms and terms as in `specs/runner/spec.md`. **Lag** is the block source's
 ### Requirement: AE-1 Four read-only endpoints on the admin listener
 
 THE process SHALL serve `GET /health/live`, `GET /health/ready`, `GET /status` and `GET /config` on its admin listener
-(default `0.0.0.0:8081`, separate from the module API listener), from process start to exit, from a worker thread of
-its own that answers from a state snapshot the runner publishes to it (shared memory), without database reads, so a
-busy main thread or a held database never delays an answer. Any other method or path SHALL answer 404. Each endpoint
-SHALL be provided by a backbone part, as a function of that snapshot which the admin worker runs: `core-health`
-(`GET /health/live`, `GET /health/ready`), `core-status` (`GET /status`) and `core-config` (`GET /config`); only
-backbone parts SHALL provide admin endpoints — a module's endpoints are on the module API listener (RN-15) (Q70).
+(default `0.0.0.0:8081`, separate from the module API listener), from the moment its configuration is validated to
+exit — a configuration refused at startup ends the process before the listener opens (AE-3, owner decision Q137) —,
+from a worker thread of its own that answers from a state snapshot the runner publishes to it (shared memory), without
+database reads, so a busy main thread or a held database never delays an answer. Any other method or path SHALL
+answer 404. Each endpoint SHALL be provided by a backbone part, as a function of that snapshot which the admin worker
+runs: `core-health` (`GET /health/live`, `GET /health/ready`), `core-status` (`GET /status`) and `core-config`
+(`GET /config`); only backbone parts SHALL provide admin endpoints — a module's endpoints are on the module API
+listener (RN-15) (Q70).
 
 #### Scenario: Endpoints answer while the database is busy
 - **WHEN** a PGlite block transaction holds the database queue for 5 s
@@ -39,7 +41,10 @@ definition — long computation belongs in a worker thread (as the ledger's does
 THE process SHALL be in exactly one state — `starting` (startup and migrations), `refused`, `syncing` (lag above the
 following threshold), `following` (lag at or below it; default 3), `stopped`, `halted`, `stopping` (after SIGTERM) —
 with zero or more conditions — `waiting-for-node`, `waiting-for-lockstep`, `finality-stall`, `node-retrying`,
-`database-retrying`, `upgrade-required`, `slow-block` (RN-17). A refused or halted process SHALL stay up and live.
+`database-retrying`, `upgrade-required`, `slow-block` (RN-17). A refused or halted process SHALL stay up and live,
+except that IF the configuration cannot be loaded, is not plain data (CF-1) or fails its schemas (CF-2, CF-3) THEN the
+process SHALL log every finding with its path and exit with a non-zero code, having served no admin endpoint (owner
+decision Q137).
 **Lag** is, for the core, the node's finalized head minus the cursor and, for a private process, the public cursor minus
 its own.
 
@@ -47,6 +52,11 @@ its own.
 - **WHEN** startup refuses because a migration checksum changed
 - **THEN** the process keeps running, `/health/live` answers 200, `/health/ready` answers 503, and `/status` reports
   `refused` with the reason
+
+#### Scenario: A refused configuration ends the process
+- **WHEN** startup refuses because a setting fails its schema (`livenessTimeoutMs: "30s"`)
+- **THEN** every finding is logged with its path, the process exits with a non-zero code, and no admin listener was
+  opened
 
 ### Requirement: AE-4 Readiness
 

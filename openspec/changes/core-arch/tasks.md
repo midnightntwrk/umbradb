@@ -1626,6 +1626,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       opens and reads its database before listening (an admin starter) fails "opens no database session" (one session
       on PostgreSQL, the directory on PGlite). Wrong variants (a scratch runner outside the clone): 25, 24
       caught; the survivor equivalent (the 8.1 spread `{ start: undefined }`, which `ProcessAdmin` takes for none).
+- [ ] 8.1b The owner's answer Q137 B: a refused configuration ends the process. A configuration that cannot be loaded,
+      is not plain data or fails its schemas logs every finding (its path and message) and ends the process before any
+      admin listener opens — `umbradb run` exits with a non-zero code, `startProcess` ends `refused` —; task 8.1's
+      listener before validation (`ProcessAdmin.loaded`, `refused` before the `core` revision is known,
+      `earlyAdminAddress`, Q127) and its tests go. Every refusal after the configuration is validated keeps AE-3's
+      stay-up behaviour.
+      **Acceptance:** A157.
 - [x] 8.2 `core-health` (`src/backbone/core-health/`): `/health/live` and `/health/ready` with readiness precedence.
       **Acceptance:** A63, A65; A140 for these endpoints.
       **Done (2026-10-26):** the part in its own folder: its declaration `CORE_HEALTH` (`core-health.ts`: a backbone
