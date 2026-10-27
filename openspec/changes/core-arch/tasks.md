@@ -2577,9 +2577,37 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 13. Contract data
 
-- [ ] 13.1 `core-contract-states`; `core-contract-logs-full`; `core-contract-logs-fast`; the shared `contract-logs`
+- [x] 13.1 `core-contract-states`; `core-contract-logs-full`; `core-contract-logs-fast`; the shared `contract-logs`
       item.
       **Acceptance:** A108, A109, A110, A111.
+      **Done (2026-10-27):** **`core-contract-states`** (`src/backbone/core-contract-states/`; requires `ledger-state`,
+      cannot start mid-chain) stores, per contract a block touched, one row of `core_contract_states.states` with the
+      keys `core-ledger-state` persisted for it (Q143's route: the `ledger-state` item's `contracts`), a contract the
+      state does not hold left out. `core-ledger-state` now also persists the keys of the contracts the block's chain
+      events name maintained (`Midnight::ContractMaintain`, its tagged address) and, at F, of every contract deployed
+      below it (its `contract-deploy` events, read at h − 1), so F's rows carry the converted keys. **The shared item**
+      (`src/backbone/contract-logs/`): one declaration and one migration for both providers, `contract_logs.logs` under
+      `umbradb_i_contract_logs`. **`-full`** (requires `vm-logs`) stores the ledger's logs. **`-fast`** (requires
+      `chain-events` and `block-parsed`; development only; may start mid-chain) reads each call's transcripts in the
+      ledger's emission order (every intent's guaranteed transcripts by segment, then the fallible ones) and stores a
+      successful transaction's literal logs (a `push` right before the `log`, no `branch` or `jmp` before them that can
+      skip either; `decodeLogItem`'s decoding), nothing of a chain-failed transaction, none on v8 (Q54); on any other
+      log, and on any log of a partial success, it halts with the new code `fast-log-unsupported` (height,
+      transaction, segment, call, op, reason). It reads in the calling thread (`inThreadLogReader`) until task 12.6's
+      ledger tasks, through a function shaped as one. The restore's dump reader splits lines itself: `node:readline`'s
+      iterator failed A111's restore on PostgreSQL (`ERR_USE_AFTER_CLOSE`). Tests (seen failing first: `tsc` 33 errors,
+      5 of 6 files failing): `contract-modules.test.ts` (the literal rule; the emission order against the v9 package's
+      own apply of a transaction of two intents; rows and halts per outcome; the reader; both tables against design
+      §10), `core-ledger-state.test.ts` (+1), `contract-data.test.ts` on PostgreSQL 18.6 and PGlite 0.5.10 (A108: two
+      calls of one contract in one block give one row with the state after both, each key loading from the stored
+      nodes, and at F every contract has its row; A109; A110's halts; `[[contract-logs.fast-equals-full]]`, a range of
+      literal, malformed and oversized logs identical with `-full` and `-fast` on both backends; the devnet tape: each
+      deploy, call and maintenance has its row, F every contract's, `-fast` stores what `-full` stores),
+      `contract-logs-handoff.test.ts` (A111 on both: `-full` to 3, a backup at 3, its restore, `-fast` from 4, every
+      log once); committed controls in `contract-data.negative-control.test.ts`. The code registry's last pending code
+      has its tests (`PENDING` empty).
+      **Pending:** `-fast` as a ledger task in the worker (12.6); a recorded tape with a MIP-0002 log (the devnet's
+      contracts log none); issue 00033-restore-future-module.
 
 ## 14. Private processes
 

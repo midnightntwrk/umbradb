@@ -41,8 +41,11 @@
  * LG-12's window — the `core` entry's `retainStates` at each height, read from the `config` item
  * (`./retention.ts`): the heights L(h − 1) to L(h) − 1, their keys read from `states` — and, while
  * `core-contract-states` (task 13.1) is active at h, persists the state and zswap-state keys of every contract the
- * block's transactions call or deploy, never released (LG-13): the `ledger-state` item carries them, for that module to
- * store. The `ledger-state` item is also a `process` item ({@link RetainedStates}, published at `on-start-db`): a
+ * block touched, never released (LG-13): those its transactions call or deploy (`block-parsed`), those its chain events
+ * name maintained (`Midnight::ContractMaintain`, task 13.1: a maintenance update changes the contract's state too), and
+ * at F, the first v9 block on a v8 state, every contract deployed before it (its `contract-deploy` events, read at
+ * h − 1; CC-1: every contract gets a row with its converted keys at F); the `ledger-state` item carries them, for that
+ * module to store. The `ledger-state` item is also a `process` item ({@link RetainedStates}, published at `on-start-db`): a
  * module requiring it loads the state after a height inside the window at its read's cursor, in the worker, and gets it
  * as plain data; outside the window the load fails with `state-not-retained` (LG-12).
  *
@@ -69,6 +72,7 @@ import { type BlockContext, defineModule, type ModuleDeclaration, type ProcessCo
 import { BLOCKS_TABLE, blockHeaderOf, ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
 import type { BlockLedgerSource } from "../core-block-fetch/ledger-source.js";
 import { blockParsedItemOf } from "../core-block-parsed/core-block-parsed.js";
+import { chainEventsItemOf } from "../core-chain-events/core-chain-events.js";
 import { txResultsItemOf } from "../core-tx-results/core-tx-results.js";
 import { heightPartitionsSql } from "../height-partitions.js";
 import { type CoreRevision, coreRevisionsOf, releasedBy, retainedFrom, retentionWindow, revisionAt } from "./retention.js";
@@ -199,6 +203,8 @@ const PARENT_TIME_SQL = `SELECT (extract(epoch FROM block_time) * 1000)::bigint 
 /** The state stored after a block, with the block's hash and ledger (LG-11, LG-12). */
 const STATE_AT_SQL = `SELECT s.state_key, s.state_root, b.hash, b.ledger_version FROM ${STATES_TABLE} s
   JOIN ${BLOCKS_TABLE} b ON b.height = s.height WHERE s.height = $1`;
+/** The contracts deployed below height `$1`: every contract a state there holds (CC-1's rows at F, task 13.1). */
+const DEPLOYED_SQL = `SELECT DISTINCT contract_address FROM ${EVENTS_TABLE} WHERE kind = 'contract-deploy' AND height < $1`;
 /** The keys of the states stored after the blocks `$1` to `$2` − 1, in height order (LG-12's releases). */
 const KEYS_SQL = `SELECT height, state_key FROM ${STATES_TABLE} WHERE height >= $1 AND height < $2 ORDER BY height`;
 const NODES_SQL = `INSERT INTO ${NODES_TABLE} (node_key, data, children)
@@ -385,15 +391,58 @@ async function releasesOf(
   return rows.map((row) => bytesOf(row.state_key, `${STATES_TABLE}.state_key`));
 }
 
-/** The contracts the block's transactions call or deploy, each once, in byte order (LG-13). */
-function contractsOf(transactions: readonly { readonly segments: readonly { readonly calls: readonly { readonly address: Uint8Array }[]; readonly deploys: readonly { readonly address: Uint8Array }[] }[] }[]): Uint8Array[] {
+/**
+ * The contracts the block's transactions call or deploy, and the `others` (maintained, and at F every contract), each
+ * once, in byte order (LG-13).
+ */
+function contractsOf(
+  transactions: readonly { readonly segments: readonly { readonly calls: readonly { readonly address: Uint8Array }[]; readonly deploys: readonly { readonly address: Uint8Array }[] }[] }[],
+  ...others: readonly (readonly Uint8Array[])[]
+): Uint8Array[] {
   const byHex = new Map<string, Uint8Array>();
   for (const transaction of transactions) {
     for (const segment of transaction.segments) {
       for (const { address } of [...segment.calls, ...segment.deploys]) byHex.set(hex(address), address);
     }
   }
+  for (const address of others.flat()) byHex.set(hex(address), address);
   return [...byHex.keys()].sort().map((key) => byHex.get(key) as Uint8Array);
+}
+
+/** The chain event of a maintenance update of a contract (`pallet-midnight`'s `ContractMaintain`, CD-4). */
+export const CONTRACT_MAINTAIN = Object.freeze({ pallet: "Midnight", name: "ContractMaintain" } as const);
+
+/** The prefix of a contract address's tagged serialization (`coin-structure` `ContractAddress`, `contract-address[v2]`). */
+const ADDRESS_TAG = /^midnight:contract-address\[v[0-9]+\]:$/;
+
+/**
+ * A contract address as `pallet-midnight`'s contract events carry it — the ledger's tagged serialization of the
+ * address (`midnight-node` `ledger/src/ledger_9/mod.rs`, `tagged_serialize(&address)`) — as its 32 bytes; throws for
+ * anything else.
+ */
+export function taggedAddress(bytes: Uint8Array): Uint8Array {
+  const at = bytes.length - 32;
+  if (at <= 0 || !ADDRESS_TAG.test(Buffer.from(bytes.subarray(0, at)).toString("latin1"))) {
+    throw new Error(`a contract event's address is not the ledger's tagged serialization of one: ${hex(bytes)} (CD-4)`);
+  }
+  return bytes.slice(at);
+}
+
+/** The contracts block `b`'s chain events name maintained (see the module comment), as their 32-byte addresses. */
+function maintainedOf(b: BlockContext): Uint8Array[] {
+  return chainEventsItemOf(b, CORE_LEDGER_STATE_ID)
+    .filter((event) => event.pallet === CONTRACT_MAINTAIN.pallet && event.name === CONTRACT_MAINTAIN.name)
+    .map((event) => {
+      const address = (event.fields as { readonly contract_address?: unknown } | null)?.contract_address;
+      if (!(address instanceof Uint8Array)) throw new TypeError(`block ${b.height}: a ContractMaintain event without its contract_address bytes`);
+      return taggedAddress(address);
+    });
+}
+
+/** The contracts deployed below `height` (see {@link DEPLOYED_SQL}), read at h − 1. */
+async function deployedBelow(read: Pick<ReadHandle, "query">, height: bigint): Promise<Uint8Array[]> {
+  const rows = await read.query(DEPLOYED_SQL, [height]);
+  return rows.map((row) => bytesOf(row.contract_address, `${EVENTS_TABLE}.contract_address`));
 }
 
 /** `core-ledger-state`'s `on-compute` (see the module comment): returns what the block's `on-db-write` writes. */
@@ -445,9 +494,12 @@ export async function applyBlock(
       }
     }
     const persists = (options.persistsContracts ?? ((c: BlockContext) => c.active(CORE_CONTRACT_STATES_ID)))(b);
+    const applyWith = (options.ledgerOf ?? (() => ledger))(b, parent.ledger);
+    // LG-9's F: the worker converts the v8 state first, so every contract it holds has new keys (CC-1).
+    const others = persists ? [maintainedOf(b), parent.ledger === "v8" && applyWith === "v9" ? await deployedBelow(read, b.height) : []] : [];
     applied = await host.apply(
       {
-        ledger: (options.ledgerOf ?? (() => ledger))(b, parent.ledger),
+        ledger: applyWith,
         ...block,
         parentHash: b.parentHash,
         timestampMs: header.timestampMs,
@@ -456,7 +508,7 @@ export async function applyBlock(
         transactions: transactions.length,
         ...(outcomes === undefined ? {} : { outcomes }),
         release: await releasesOf(p, b, read, options),
-        contracts: persists ? contractsOf(transactions) : [],
+        contracts: persists ? contractsOf(transactions, ...others) : [],
       },
       read,
     );

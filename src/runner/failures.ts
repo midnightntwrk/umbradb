@@ -96,6 +96,7 @@ export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
   "writer-lock-lost",
   "truncate-not-allowed",
   "root-mismatch",
+  "fast-log-unsupported",
   "lockstep-behind",
   "report-hash-mismatch",
 ] as const);

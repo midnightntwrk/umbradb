@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { type RetainedState, retainedStatesOf } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
-import { UMBRADB_VERSION } from "../../src/config/build.js";
 import { childRefKeys } from "../../src/ledger/node-refs.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { ProcessStatus } from "../../src/runner/process.js";
@@ -15,8 +14,8 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx } from "./ledger-tap
  * The oracles of task 12.4's criteria (A100, A102, A103, A104), shared by `ledger-storage.test.ts` and its negative
  * controls: each reads the database after a process ran a scenario (`./ledger-tapes.ts`) and lists what differs from
  * what the scenario's chain and its reference replay hold — empty when the criterion holds. Imports nothing of Vitest.
- * The test modules here are what a module of a later task does with `core-ledger-state`'s items: a stand-in for task
- * 13.1's `core-contract-states` (LG-13), and a module loading retained states (LG-12).
+ * The test module here is what a module of a later task does with `core-ledger-state`'s items: a module loading
+ * retained states (LG-12). Task 13.1's `core-contract-states` replaced this file's stand-in for it (LG-13).
  */
 
 const text = (value: unknown): string => JSON.stringify(value, (_key, v: unknown) => (typeof v === "bigint" ? `${v}n` : v));
@@ -154,44 +153,6 @@ export function retentionWatcher(seen: RetentionSeen, plan: ReadonlyMap<bigint, 
 
 /** What a load of the state at `height` gives in `scenario`: its root. */
 export const loaded = (scenario: LedgerScenario, height: bigint): string => `${height} ${plain(scenario.heights[Number(height)]?.root as Uint8Array)}`;
-
-/** The id of task 13.1's module, which `core-ledger-state` persists contracts' keys for (LG-13). */
-export const CONTRACT_STATES_ID = "core-contract-states";
-
-/**
- * A stand-in for task 13.1's `core-contract-states` (CC-1, LG-13): a core module requiring `ledger-state` that stores,
- * at each block, the keys `core-ledger-state` persisted for the contracts the block touched (the `ledger-state` item's
- * `contracts`), one row per contract and height.
- */
-export function contractStatesStandIn(): ModuleDeclaration {
-  return {
-    id: CONTRACT_STATES_ID,
-    version: UMBRADB_VERSION,
-    side: "public",
-    requires: ["ledger-state"],
-    provides: [
-      { name: "contract-states", lifetimes: ["table"], table: { schema: "core_contract_states", tables: ["states"], kind: "append-only" } },
-    ],
-    startsMidChain: false,
-    configSchema: z.object({}),
-    migrations: [
-      {
-        id: "001",
-        sql: `CREATE TABLE core_contract_states.states (contract_address bytea NOT NULL, height bigint NOT NULL,
-  state_key bytea NOT NULL, zswap_state_key bytea NOT NULL, PRIMARY KEY (contract_address, height))`,
-      },
-    ],
-    points: {
-      async "on-db-write"(_p, b, w) {
-        const item = b.items.get("ledger-state") as { readonly contracts: readonly { address: Uint8Array; stateKey: Uint8Array | null; zswapStateKey: Uint8Array | null }[] };
-        for (const contract of item.contracts) {
-          if (contract.stateKey === null || contract.zswapStateKey === null) continue;
-          await w.execute("INSERT INTO core_contract_states.states VALUES ($1, $2, $3, $4)", [contract.address, b.height, contract.stateKey, contract.zswapStateKey]);
-        }
-      },
-    },
-  };
-}
 
 /** The stored nodes, by `0x`-less hex key. */
 async function storedNodes(db: ProcessDatabase): Promise<Map<string, { data: Uint8Array; children: Uint8Array }>> {

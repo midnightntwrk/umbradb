@@ -13,6 +13,7 @@ import {
   retainedStates,
   retainedStatesOf,
   revisionsOf,
+  taggedAddress,
   writeBlock,
 } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -42,6 +43,7 @@ function block(height: bigint, items: Record<string, unknown> = {}): BlockContex
       "ledger-version": "v9",
       "block-parsed": { ledger: "v9", transactions: [] },
       "tx-results": Object.freeze([]),
+      "chain-events": Object.freeze([]),
       ...items,
     })),
     settings: {},
@@ -122,7 +124,12 @@ function bound(root: Uint8Array, result: AppliedState = applied(1n), p: ProcessC
  */
 function reading(
   rows: Record<string, unknown>[],
-  rest: { state?: Record<string, unknown> | null; keys?: (from: bigint, to: bigint) => Record<string, unknown>[]; height?: bigint | null } = {},
+  rest: {
+    state?: Record<string, unknown> | null;
+    keys?: (from: bigint, to: bigint) => Record<string, unknown>[];
+    height?: bigint | null;
+    deployed?: readonly Uint8Array[];
+  } = {},
 ) {
   const queries: unknown[][] = [];
   return {
@@ -138,6 +145,8 @@ function reading(
       // The sweep's tables (task 12.5): its row idle, every set empty.
       if (sql.includes("FROM core_ledger_state.sweep")) return [{ cycle: 0n, phase: "idle", sweep_after: null }];
       if (/FROM core_ledger_state\.(root_counts|grey|marks|nodes)/.test(sql)) return [];
+      // Task 13.1: the contracts deployed below a block (CC-1's rows at F).
+      if (sql.includes("kind = 'contract-deploy'")) return (rest.deployed ?? []).map((address) => ({ contract_address: address }));
       if (sql.includes("height >= $1")) {
         const [from, to] = params as [bigint, bigint];
         if (rest.keys !== undefined) return rest.keys(from, to);
@@ -333,6 +342,43 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     // The item carries the keys the worker persisted.
     const keys = [{ address: hash(2), stateKey: hash(3), zswapStateKey: hash(4) }];
     expect(itemsOf(applied(3n, { contracts: keys })).state.contracts).toEqual(keys);
+  });
+
+  it("persists the keys of the contracts the block's chain events name maintained, and at F of every contract deployed below it (task 13.1; CC-1, LG-13)", async () => {
+    const tagged = (address: Uint8Array) => Uint8Array.from([...Buffer.from("midnight:contract-address[v2]:", "latin1"), ...address]);
+    const maintain = (address: Uint8Array) => ({ pallet: "Midnight", name: "ContractMaintain", fields: { tx_hash: hash(0x77), contract_address: tagged(address) } });
+    const parsed = { ledger: "v9", transactions: [{ index: 0, segments: [{ segment: 1, calls: [{ address: hash(9), entryPoint: Uint8Array.of(1) }], deploys: [] }] }] };
+    const events = [maintain(hash(4)), { pallet: "Midnight", name: "ContractCall", fields: { tx_hash: hash(0x77), contract_address: tagged(hash(6)) } }, maintain(hash(9))];
+    const items = { "block-parsed": parsed, "tx-results": ["success"], "chain-events": events };
+    const { p, asked } = bound(applied(3n).stateRoot, applied(3n));
+    const read = reading([{ ms: 1n }], { deployed: [hash(1)] });
+    await applyBlock(p, { ...block(3n, items), active: (id) => id === "core-contract-states" }, read);
+    // Maintained 4 and 9 (9 called too, once); the call event's 6 is block-parsed's to name; no F, so no deploy read.
+    expect(asked[1]).toMatchObject({ apply: { contracts: [hash(4), hash(9)] } });
+    expect(read.queries).not.toContainEqual([3n]);
+    // At F (a v9 block on the v8 state at h − 1) every contract deployed below it, read at h − 1.
+    const { p: q, asked: atF } = bound(applied(4n).stateRoot, applied(4n));
+    const fRead = reading([{ ms: 1n }], { state: { ledger_version: "v8" }, deployed: [hash(1), hash(9), hash(0)] });
+    await applyBlock(q, { ...block(4n, items), active: (id) => id === "core-contract-states" }, fRead);
+    expect(atF[1]).toMatchObject({ apply: { ledger: "v9", contracts: [hash(0), hash(1), hash(4), hash(9)] } });
+    expect(fRead.queries).toContainEqual([4n]);
+    // Not at a block of the same ledger (v8 on v8), nor while core-contract-states is inactive.
+    const { p: r, asked: v8 } = bound(applied(4n).stateRoot, applied(4n));
+    await applyBlock(r, { ...block(4n, { ...items, "ledger-version": "v8" }), active: (id) => id === "core-contract-states" }, reading([{ ms: 1n }], { state: { ledger_version: "v8" }, deployed: [hash(1)] }));
+    expect(v8[1]).toMatchObject({ apply: { contracts: [hash(4), hash(9)] } });
+    const { p: t, asked: off } = bound(applied(4n).stateRoot, applied(4n));
+    await applyBlock(t, { ...block(4n, items), active: () => false }, reading([{ ms: 1n }], { state: { ledger_version: "v8" }, deployed: [hash(1)] }));
+    expect(off[1]).toMatchObject({ apply: { contracts: [] } });
+    // An address that is not the ledger's tagged serialization of one fails the block.
+    const bare = { ...items, "chain-events": [{ pallet: "Midnight", name: "ContractMaintain", fields: { contract_address: hash(4) } }] };
+    const { p: u } = bound(applied(3n).stateRoot, applied(3n));
+    await expect(applyBlock(u, { ...block(3n, bare), active: () => true }, reading([{ ms: 1n }]))).rejects.toThrow(/not the ledger's tagged serialization/);
+    const none = { ...items, "chain-events": [{ pallet: "Midnight", name: "ContractMaintain", fields: { tx_hash: hash(1) } }] };
+    const { p: v } = bound(applied(3n).stateRoot, applied(3n));
+    await expect(applyBlock(v, { ...block(3n, none), active: () => true }, reading([{ ms: 1n }]))).rejects.toThrow(/without its contract_address/);
+    expect(taggedAddress(tagged(hash(5)))).toEqual(hash(5));
+    expect(() => taggedAddress(Uint8Array.from([...Buffer.from("midnight:contract-address[v2]:", "latin1"), 1, 2]))).toThrow(/tagged serialization/);
+    expect(() => taggedAddress(Uint8Array.from([...Buffer.from("midnight:coin-public-key[v1]:", "latin1"), ...hash(5)]))).toThrow(/tagged serialization/);
   });
 
   it("publishes its retained states at on-start-db: the window at a cursor, a load inside it, state-not-retained outside (LG-12)", async () => {

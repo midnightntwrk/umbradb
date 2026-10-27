@@ -870,7 +870,11 @@ and gives its key and root (`RetainedState`), and fails with `state-not-retained
 (LG-13): while `core-contract-states` (task 13.1) is active at h, the worker persists the state and zswap-state keys
 (`contractStateKey`, `contractZswapStateKey`) of each contract the block's transactions call or deploy, in byte order,
 in the block's batch, never to be released; the `ledger-state` item carries them (`contracts`) for that module to store
-(decision record question Q143 on the route).
+(decision record question Q143 on the route). As built (task 13.1): the contracts are also those the block's chain
+events name maintained (`Midnight::ContractMaintain`, whose `contract_address` is the ledger's tagged serialization of
+the address: a maintenance update changes the contract's state too), and at F every contract deployed below it (the
+`contract-deploy` rows of `core_ledger_state.events`, read at h − 1), so that CC-1's rows at F carry the converted
+keys; each once, on the state after the block.
 
 As built (task 12.5, `src/backbone/core-ledger-state/sweep.ts`): the step is computed on the main thread in
 `on-compute`, after the root check, from the tables as committed at h − 1 (read through on-compute's read: `sweep`,
@@ -898,6 +902,13 @@ native parsed objects, `rawPackages()` and, for a task that declares `needsState
 structured-cloneable plain data (a `structuredClone` round trip that preserves it), and posts `block-parsed` and the
 task results to the main thread, where they become `block` items before `on-compute`. `core-ledger-state`'s apply, the
 conversion and the sweep step then run in the worker as part of `on-compute`. Ledger tasks keep no state between blocks.
+
+As built (task 13.1, before task 12.6): `core-contract-logs-fast` reads the transcripts with a function shaped as a
+ledger task without `needsState` — the native transaction and `rawPackages()` in, each `log` operation's site out as
+plain data (`src/backbone/core-contract-logs-fast/transcripts.ts`) —, run for now by a reader in the calling thread
+(`reader.ts`'s `inThreadLogReader`: the block's ledger adapter loaded there once, each transaction that calls a contract
+deserialized a second time and freed once read; none on ledger v8, Q54), as `core-block-parsed` parsed in its own
+thread before task 12.3. Task 12.6 runs the same function as a ledger task in the worker, on the block's one parse.
 
 ## 6. Modules
 
@@ -1352,8 +1363,8 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-ledger-state` | `core_ledger_state.grey`, `core_ledger_state.marks` | node_key | — |
 | `core-ledger-state` | `core_ledger_state.segment_results` | (height, tx_index, segment) | success (boolean) — range-partitioned by height (task 12.3) |
 | `core-ledger-state` | `core_ledger_state.events` | (height, tx_index, event_index) | kind (`zswap-input`, `zswap-output`, `contract-deploy`, `dust-initial-utxo`, `dust-generation-dtime-update`, `dust-spend-processed`, `param-change`), logical_segment, physical_segment (int), bytes (ledger serialization), nullifier, commitment, tree_index, contract_address (each null) — event_index numbers each transaction's events from 0 in emission order; range-partitioned by height (task 12.3) |
-| `core-contract-states` | `core_contract_states.states` | (contract_address, height) | state_key, zswap_state_key |
-| `core-contract-logs-*` | `contract_logs.logs` | (height, tx_index, log_index) | contract_address, entry_point, logical_segment (int), log_version (bigint), event_type (text), data (ledger serialization) |
+| `core-contract-states` | `core_contract_states.states` | (contract_address, height) | state_key, zswap_state_key — each 32 bytes, persisted (LG-13); range-partitioned by height (task 13.1) |
+| `core-contract-logs-*` | `contract_logs.logs` | (height, tx_index, log_index) | contract_address, entry_point, logical_segment (int), log_version (bigint), event_type (text), data (ledger serialization) — log_index numbers the block's logs from 0 in emission order; event_type one of the eleven MIP-0002 types; the shared item's one migration `001`, recorded under `contract-logs`; range-partitioned by height (task 13.1) |
 | `core-key-registry` (private) | `core_key_registry.keys` | key_id | kind (text), key_bytes, arrived_height |
 | `core-private-source` (private) | `core_private_source.cursor` | id = 1 | height (null), hash (null), parent_hash (null; Q124), public_genesis_hash, public_start_height |
 

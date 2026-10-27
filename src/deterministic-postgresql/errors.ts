@@ -183,6 +183,13 @@ export const ERROR_CODES = [
    * read's cursor (task 12.4, `src/backbone/core-ledger-state/`): the call fails; uncaught, the module's callback fails.
    */
   "state-not-retained",
+  /**
+   * `core-contract-logs-fast` cannot read a block's MIP-0002 log exactly from the transcripts — a value not a literal
+   * (read from the contract's state, or computed), one behind a `branch`, or any log of a partially successful
+   * transaction (CC-3, Q21; task 13.1, `src/backbone/core-contract-logs-fast/`): processing halts at that height,
+   * nothing of the block stored.
+   */
+  "fast-log-unsupported",
   // Lockstep (PP-6, PP-7; task 14.3, `src/backbone/core-private-source/`, `src/private/`): a private process's startup
   // refusal of a module declaring `needsLockstep` on an instance the core does not list; and a private instance's two
   // halts — the public cursor past the height it processes (the core listed it late, or does not wait for it), and the

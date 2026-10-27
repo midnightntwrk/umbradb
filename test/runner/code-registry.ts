@@ -519,6 +519,16 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   "halt:truncate-not-allowed": [
     { file: `${RUNNER}/halts.test.ts`, test: "a TRUNCATE in on-db-write halts with truncate-not-allowed, the module and the point (DB-14)" },
   ],
+  "halt:fast-log-unsupported": [
+    {
+      file: "test/backbone/contract-data.test.ts",
+      test: "A110: a log of a value read from the contract's state makes -fast halt with fast-log-unsupported at its height, naming the transaction; -full stores it",
+    },
+    {
+      file: "test/backbone/contract-data.test.ts",
+      test: "A110: any log of a partially successful transaction makes -fast halt with fast-log-unsupported (CC-3)",
+    },
+  ],
   "halt:lockstep-behind": [
     {
       file: "test/private/lockstep-refusals.test.ts",
@@ -541,9 +551,7 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
  * The codes whose tasks have not run yet, by `<list>:<code>`, each with the task of `tasks.md` that adds it and its test
  * (see the module comment).
  */
-export const PENDING: Readonly<Record<string, string>> = Object.freeze({
-  "halt:fast-log-unsupported": "13.1",
-});
+export const PENDING: Readonly<Record<string, string>> = Object.freeze({});
 
 /** The tasks of `tasks.md` (its text) by id, and whether each is checked done. */
 export function tasksDone(text: string): ReadonlyMap<string, boolean> {

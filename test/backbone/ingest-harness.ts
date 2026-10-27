@@ -152,6 +152,8 @@ export interface IngestOptions {
   readonly core?: readonly ModuleDeclaration[];
   /** The start of each core module's entry (task 12.3's mid-chain refusal); S unless given. */
   readonly startOf?: (id: string) => number;
+  /** The stop of each core module's entry (task 13.1's handoff of `contract-logs`, CC-4); none unless given. */
+  readonly stopOf?: (id: string) => number | undefined;
   /** The process's ledger worker (task 12.3: a test package's, a negative control's); `startLedgerWorker` unless given. */
   readonly ledgerWorker?: () => LedgerHost;
   /** The admin endpoints (task 8.1), as `startProcess` takes them; none unless given. */
@@ -195,7 +197,9 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
       ...(options.stop === undefined ? {} : { stop: Number(options.stop) }),
     }),
     ...(options.revisions ?? []).map((revision) => core(db.setting, Number(revision.start), { extra: { ...extra, ...revision.settings } })),
-    ...(options.core ?? []).map((module) => entryOf(module, options.startOf?.(module.id) ?? Number(options.start))),
+    ...(options.core ?? []).map((module) =>
+      entryOf(module, options.startOf?.(module.id) ?? Number(options.start), {}, options.stopOf?.(module.id)),
+    ),
     ...user.map((module) => entryOf(module, Number(options.start))),
   ];
   const lines: string[] = [];

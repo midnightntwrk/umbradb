@@ -700,6 +700,10 @@ describe("the table items a revision's row records (core_chain.config.provides; 
     const build = buildDeclarations();
     expect(tableItemsOf(build, "core")).toEqual(["blocks", "chain-identity", "digest-checkpoints", "digest-tables"]);
     expect(tableItemsOf(build, "core-ledger-state")).toEqual(["ledger-events", "ledger-state", "segment-results"]);
+    // Task 13.1: both providers of the shared contract-logs record it.
+    expect(tableItemsOf(build, "core-contract-logs-full")).toEqual(["contract-logs"]);
+    expect(tableItemsOf(build, "core-contract-logs-fast")).toEqual(["contract-logs"]);
+    expect(tableItemsOf(build, "core-contract-states")).toEqual(["contract-states"]);
     // By UTF-8 bytes, not UTF-16 code units: U+FF5E (EF BD 9E) before U+1F600 (F0 9F 98 80, a surrogate pair D83D DE00).
     const items = ["zz", "aa", "Zz", "é", "aa", "\u{1F600}", "\uFF5E"].map((name) => ({
       name,

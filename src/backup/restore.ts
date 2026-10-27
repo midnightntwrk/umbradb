@@ -35,7 +35,6 @@
  */
 
 import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
 import { isBlockLedgerSource } from "../backbone/core-block-fetch/ledger-source.js";
 import { CORE_LEDGER_STATE_ID } from "../backbone/core-ledger-state/core-ledger-state.js";
 import { checkHistory, graphInputOf, type HistoryRow } from "../config/history.js";
@@ -134,19 +133,27 @@ function historyRows(manifest: Manifest): HistoryRow[] {
   );
 }
 
-/** The lines of `file` from its second on (the dump), as a stream. */
-function dumpLines(file: string): AsyncIterable<string> {
-  const lines = createInterface({ input: createReadStream(file, { encoding: "utf8" }), crlfDelay: Infinity });
-  return (async function* () {
-    let first = true;
-    for await (const line of lines) {
-      if (first) {
-        first = false;
-        continue;
-      }
-      yield line;
+/**
+ * The lines of `file` from its second on (the dump), as a stream: the text between line feeds, a last line without one
+ * included. Split here rather than by `node:readline`, whose async iterator fails with `ERR_USE_AFTER_CLOSE` when the
+ * file has been read to its end while the restore, slower than the read, still takes the lines buffered (task 13.1 met
+ * it restoring on PostgreSQL), and which also ends a line at a lone carriage return, which a dumped string may hold.
+ */
+export async function* dumpLines(file: string): AsyncGenerator<string> {
+  let rest = "";
+  let first = true;
+  for await (const chunk of createReadStream(file, { encoding: "utf8" })) {
+    rest += chunk as string;
+    let from = 0;
+    for (let at = rest.indexOf("\n"); at >= 0; at = rest.indexOf("\n", from)) {
+      const line = rest.slice(from, at);
+      from = at + 1;
+      if (first) first = false;
+      else yield line;
     }
-  })();
+    rest = rest.slice(from);
+  }
+  if (rest.length > 0 && !first) yield rest;
 }
 
 /** A refusal of the history check, as a restore names it (see the module comment). */

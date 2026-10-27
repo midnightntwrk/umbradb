@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { backupAtStop, firstLine, writeBackup } from "../../src/backup/backup.js";
 import { readBackupFacts } from "../../src/backup/facts.js";
-import { isEmptyDatabase } from "../../src/backup/restore.js";
+import { dumpLines, isEmptyDatabase } from "../../src/backup/restore.js";
 import { runRestore } from "../../src/cli/restore.js";
 import { BACKUP_FORMAT, type Manifest, MANIFEST_PREFIX, manifestLine, readManifestLine } from "../../src/backup/manifest.js";
 import { findPgDump, loadPgliteDump, pgDumpVersion } from "../../src/backup/tools.js";
@@ -384,5 +384,34 @@ describe("a restore's empty target and its refusals before reading the file (BK-
     );
     const outcome = await runRestore({ file: join(dir, "none.backup"), config: file, cwd: project.dir });
     expect(outcome).toMatchObject({ restored: false, error: { code: "invalid-configuration", details: { reason: "private-restore" } } });
+  });
+});
+
+describe("a restore's lines of the dump (BK-3; task 13.1)", () => {
+  it("are the text between line feeds after the manifest's line — a carriage return kept, a last line without a feed given, lines across reads joined — read to the end by a slow reader", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "umbradb-dump-lines-"));
+    try {
+      const file = join(dir, "dump");
+      // Lines of 70 bytes, about 4,000 of them: several reads of the stream's 64 KiB, lines split across reads.
+      const lines = Array.from({ length: 4_000 }, (_, i) => `INSERT INTO t VALUES (${i}, '${"x".repeat(40 + (i % 7))}');`);
+      writeFileSync(file, ["#manifest", "", "SELECT 'a\rb';", ...lines, "-- last"].join("\n"));
+      const seen: string[] = [];
+      for await (const line of dumpLines(file)) {
+        seen.push(line);
+        if (seen.length % 100 === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      expect(seen).toEqual(["", "SELECT 'a\rb';", ...lines, "-- last"]);
+      const all = async (): Promise<string[]> => {
+        const out: string[] = [];
+        for await (const line of dumpLines(file)) out.push(line);
+        return out;
+      };
+      writeFileSync(file, "#manifest only");
+      expect(await all()).toEqual([]);
+      writeFileSync(file, "#manifest\nSELECT 1;\n");
+      expect(await all()).toEqual(["SELECT 1;"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

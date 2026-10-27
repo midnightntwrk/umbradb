@@ -624,5 +624,33 @@ mark-and-sweep of a fixed budget a block (10,000 node units), so every machine d
 The `core` entry's `sweep: off` (development only, with `developmentOptIn`) keeps every node.
 
 **Contracts' states** (LG-13). While `core-contract-states` is active, the `ledger-state` item's `contracts` carries,
-for each contract the block's transactions call or deploy, the keys of its state and of its zswap state after the
-block, persisted and never released: they load from the database whatever later blocks do.
+for each contract the block touched — its transactions call or deploy it, or its chain events name it maintained, and
+at the first v9 block after v8 blocks every contract — the keys of its state and of its zswap state after the block,
+persisted and never released: they load from the database whatever later blocks do.
+
+## Contract states and contract logs
+
+Three core modules, off unless the configuration enables them (task 13.1):
+
+- **`core-contract-states`** (requires `ledger-state`; from genesis or a restored backup only) stores, per contract a
+  block touched, one row of `core_contract_states.states` (`contract_address`, `height`, `state_key`,
+  `zswap_state_key`): the keys of its state and zswap state after the block, so two calls to one contract in one block
+  share one row with the state after both. At the first block a v9 runtime builds after v8 blocks, every contract gets a
+  row with its converted keys. Its `block` item `contract-states` is the same rows.
+- **`core-contract-logs-full`** (requires `vm-logs`; from genesis or a restored backup only) stores the MIP-0002
+  events — what Compact's `emit` logs — exactly as the ledger emitted them while applying the block: the logs of
+  applied segments, none of a fallible segment that failed, none on ledger v8.
+- **`core-contract-logs-fast`** (requires `chain-events` and `block-parsed`; development only, with
+  `developmentOptIn`; may start at any height) reads the same logs from the block's transcripts without the ledger
+  state: a log whose value the transcript pushes as a literal right before it, with no `branch` or `jmp` before them
+  that could skip either, in a transaction that succeeded fully. Anything else — a value read from the contract's
+  state or computed, a log behind a branch, any log of a partially successful transaction — halts processing with
+  `fast-log-unsupported`, naming the height and the transaction: it stores exactly what `-full` would, or halts.
+
+Both log providers give the item `contract-logs` and its table `contract_logs.logs` (`height`, `tx_index`,
+`log_index` — the log's number in the block, in emission order —, `contract_address`, `entry_point`,
+`logical_segment`, `log_version`, `event_type`, `data` in the ledger's serialization). Require `contract-logs`, not a
+provider: the operator picks one per deployment, and one may stop at a height and the other start at the next — a
+database synced with `-full` and backed up can continue with `-fast` after its restore. The `block` item is a frozen
+array of `{ transaction, index, address, entryPoint, logicalSegment, version, eventType, data }`, put before
+`on-compute` (by `-fast` at `on-parse`, by `-full` at `on-compute`), so read it from `on-compute` on.

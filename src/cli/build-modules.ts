@@ -16,9 +16,9 @@
  * **The backbone by side.** A public (core) process's: `core-chain` (task 10.2), `core-block-fetch` (the node source and
  * the block items, task 10.3), `core-block-commit` (tasks 5.2, 10.2), `core-digest` (task 7.1) and the admin parts
  * `core-health`, `core-status`, `core-config` (tasks 8.2–8.4); its core modules — off unless a configuration enables
- * them — `core-chain-events`, `core-block-parsed` and `core-tx-results` (task 11.1) and `core-ledger-state` (task
- * 12.3), the others coming with task 13.x, each adding its declaration here, in `design.md` §6's fixed order and the
- * decision record's table of core modules. A private process's (PP-1, task 14.1): `core-chain`, then the private backbone of one private start
+ * them — `core-chain-events`, `core-block-parsed` and `core-tx-results` (task 11.1), `core-ledger-state` (task 12.3),
+ * and `core-contract-states`, `core-contract-logs-full` and the development-only `core-contract-logs-fast` (task 13.1),
+ * in the decision record's table of core modules' order. A private process's (PP-1, task 14.1): `core-chain`, then the private backbone of one private start
  * (`src/backbone/private.ts`: `core-private-source` from its intake, `core-key-registry`, `core-digest`), then the admin
  * parts; no core module (they are public).
  */
@@ -29,6 +29,9 @@ import { CORE_BLOCK_PARSED } from "../backbone/core-block-parsed/core-block-pars
 import { CORE_CHAIN } from "../backbone/core-chain/index.js";
 import { CORE_CHAIN_EVENTS } from "../backbone/core-chain-events/core-chain-events.js";
 import { CORE_CONFIG } from "../backbone/core-config/core-config.js";
+import { CORE_CONTRACT_LOGS_FAST } from "../backbone/core-contract-logs-fast/core-contract-logs-fast.js";
+import { CORE_CONTRACT_LOGS_FULL } from "../backbone/core-contract-logs-full/core-contract-logs-full.js";
+import { CORE_CONTRACT_STATES } from "../backbone/core-contract-states/core-contract-states.js";
 import { CORE_DIGEST } from "../backbone/core-digest/index.js";
 import { CORE_HEALTH } from "../backbone/core-health/core-health.js";
 import { CORE_LEDGER_STATE } from "../backbone/core-ledger-state/core-ledger-state.js";
@@ -52,12 +55,15 @@ export const PUBLIC_BACKBONE: readonly ModuleDeclaration[] = Object.freeze([
   ...ADMIN_PARTS,
 ]);
 
-/** The core modules the command's build ships, each off unless a configuration enables it (tasks 11.1, 12.3). */
+/** The core modules the command's build ships, each off unless a configuration enables it (tasks 11.1, 12.3, 13.1). */
 export const CORE_MODULES: readonly ModuleDeclaration[] = Object.freeze([
   CORE_CHAIN_EVENTS,
   CORE_BLOCK_PARSED,
   CORE_TX_RESULTS,
   CORE_LEDGER_STATE,
+  CORE_CONTRACT_STATES,
+  CORE_CONTRACT_LOGS_FULL,
+  CORE_CONTRACT_LOGS_FAST,
 ]);
 
 /** What {@link commandBuild} takes besides the user modules. */

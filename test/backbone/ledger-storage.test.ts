@@ -7,6 +7,7 @@ import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CORE_CONTRACT_STATES } from "../../src/backbone/core-contract-states/core-contract-states.js";
 import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -25,7 +26,6 @@ import {
   a104KeyProblems,
   a104Scenario,
   contractNodeKeys,
-  contractStatesStandIn,
   heldNodeProblems,
   loaded,
   retentionSeen,
@@ -261,7 +261,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
     const { scenario, contract } = await a104Scenario();
     const db = await backend.database();
     const sweeps = new Map<bigint, TableSnapshot>();
-    const process = await runTo(db, scenario.records, scenario.head, { core: [...LEDGER_CORE, contractStatesStandIn()], user: [sweepWatcher(sweeps)] });
+    const process = await runTo(db, scenario.records, scenario.head, { core: [...LEDGER_CORE, CORE_CONTRACT_STATES], user: [sweepWatcher(sweeps)] });
     expect(process.status).toMatchObject({ cursor: 40n, reason: null });
     // The rows of 10 and 20; the keys of 10 held, loading from their keys alone, no held state holding the state of 10.
     expect((await db.query("SELECT height::text AS h FROM core_contract_states.states ORDER BY height")).map((r) => r.h)).toEqual(["5", "10", "20"]);

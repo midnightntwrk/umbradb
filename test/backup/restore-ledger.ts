@@ -19,7 +19,7 @@ import { NodeClient } from "../../src/node/client.js";
 import type { BlockSource } from "../../src/runner/block-source.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
-import { genesisOf, ingest, committed, watched, watcher } from "../backbone/ingest-harness.js";
+import { genesisOf, ingest, type IngestOptions, committed, watched, watcher } from "../backbone/ingest-harness.js";
 import { type LedgerScenario, ledgerScenario, recordedGenesis, withNodeRoot } from "../backbone/ledger-tapes.js";
 import { systemTransaction, zswapOutputTransaction, RAW } from "../ledger/adapter-fixtures.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
@@ -66,13 +66,21 @@ export async function ledgerChain(): Promise<LedgerScenario> {
   });
 }
 
-/** Syncs `scenario` from genesis on `db` and backs it up at its head through the process. */
-export async function ledgerBackup(db: BackupDatabase, scenario: LedgerScenario): Promise<LedgerBackup> {
-  const run = await ingest(db as unknown as ProcessDatabase, scenario.records, { start: 0n, core: LEDGER_CORE });
+/**
+ * Syncs `scenario` from genesis on `db` and backs it up at its head through the process — or at `options.at`, with
+ * `options`' records (a tape capped there), core modules and entries (task 13.1's handoff).
+ */
+export async function ledgerBackup(
+  db: BackupDatabase,
+  scenario: LedgerScenario,
+  options: Pick<IngestOptions, "core" | "startOf" | "stopOf"> & { readonly at?: bigint; readonly records?: readonly TapeRecord[] } = {},
+): Promise<LedgerBackup> {
+  const { at, records, ...build } = options;
+  const run = await ingest(db as unknown as ProcessDatabase, records ?? scenario.records, { start: 0n, core: LEDGER_CORE, ...build });
   const file = join(mkdtempSync(join(tmpdir(), "umbradb-ledger-backup-")), "ledger.backup");
   let manifest: Manifest;
   try {
-    await committed(run, scenario.head);
+    await committed(run, at ?? scenario.head);
     ({ manifest } = await run.handle.backup(file));
   } finally {
     await run.close();
@@ -80,14 +88,24 @@ export async function ledgerBackup(db: BackupDatabase, scenario: LedgerScenario)
   return { scenario, file, manifest };
 }
 
+/**
+ * A restore's build other than the ledger's core modules from 0 (task 13.1's handoff, CC-4): the build's core modules
+ * and each one's entry (its start and stop).
+ */
+export interface RestoreBuild {
+  readonly core: readonly ModuleDeclaration[];
+  readonly entry: (module: ModuleDeclaration) => Record<string, unknown>;
+}
+
 /** The configuration and build the ingest's process ran with, its database `database` (secret, so not recorded). */
-function restoreConfig(database: string, records: readonly TapeRecord[]) {
-  const declarations = validateDeclarations(chainDeclarations([watcher(watched())], { core: LEDGER_CORE }));
+function restoreConfig(database: string, records: readonly TapeRecord[], build?: RestoreBuild) {
+  const coreModules = build?.core ?? LEDGER_CORE;
+  const declarations = validateDeclarations(chainDeclarations([watcher(watched())], { core: coreModules }));
   const genesisHash = genesisOf(records) as string;
   const extra = { node: "ws://127.0.0.1:9/node", genesisHash };
   const entries = [
     core(database, 0, { extra }),
-    ...LEDGER_CORE.map((module) => entryOf(module, 0)),
+    ...coreModules.map((module) => build?.entry(module) ?? entryOf(module, 0)),
     entryOf(watcher(watched()), 0),
   ];
   const config = validateConfig({
@@ -100,7 +118,7 @@ function restoreConfig(database: string, records: readonly TapeRecord[]) {
 
 /**
  * Restores `backup` into `target` on `backend`, the chain a tape node serving `records` — or `chain`, a block source of
- * the test's own.
+ * the test's own —, with the ledger's core modules from 0 or `build`'s.
  */
 export async function restoreLedger(
   backend: BackupBackend,
@@ -109,11 +127,12 @@ export async function restoreLedger(
   records: readonly TapeRecord[],
   seams: RestoreSeams = {},
   chain?: BlockSource,
+  build?: RestoreBuild,
 ): Promise<Awaited<ReturnType<typeof restoreBackup>>> {
   const node = await TapeNode.start({ records });
   const client = new NodeClient({ url: node.url });
   const source = chain ?? nodeSourceOf({ settings: { prefetchWindow: 64, tipCap: 600 } }, { nodeClient: client });
-  const { config, declarations } = restoreConfig(target.setting, backup.scenario.records);
+  const { config, declarations } = restoreConfig(target.setting, backup.scenario.records, build);
   const dataDir = target.setting.slice("pglite:".length);
   const input: RestoreInput = {
     file: backup.file,
