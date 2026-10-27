@@ -3344,8 +3344,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage
       floors §13 sets that are still pending — the sweep's 95/90 (`src/backbone/core-ledger-state/sweep.ts`, owner
       decision Q158 A: tests for its eight unreached branches, or the unreachable ones removed, then the floor; A5's
-      `PENDING_FLOORS` emptied); `npm run test:mutation:ci` at break 65.
-      **Acceptance:** A5 (no pending floor); every deferred mutation pass run, its survivors explained.
+      `PENDING_FLOORS` emptied); every coverage floor a task lowered to keep the main scope moving raised back (owner,
+      2026-10-27: "lower the testing floor for lines, branches, so we can move forward"; each record's "Deferred
+      testing" names the file, the floor it had and the one it was given); `npm run test:mutation:ci` at break 65.
+      **Acceptance:** A5 (no pending floor); every lowered floor back at its figure; every deferred mutation pass run,
+      its survivors explained.
 
 ## 18. Whole-system faults, differentials and measurements
 
