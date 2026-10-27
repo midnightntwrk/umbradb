@@ -43,7 +43,7 @@ function cutting(failure: () => Error): new (input: LoopInput) => FinalizedLoop 
       computing.catch(() => undefined);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const cut = new Promise<"cut">((resolve) => {
-        timer = setTimeout(() => resolve("cut"), this.slowBlockMs() as number);
+        timer = setTimeout(() => resolve("cut"), this.slowBlockMs("height") as number);
       });
       const outcome = await Promise.race([computing.then(() => "done" as const), cut]);
       clearTimeout(timer);

@@ -93,7 +93,14 @@
  * been open longer than {@link LoopInput.slowBlockMs} (a timer of the main thread, so not while a callback blocks it),
  * {@link FinalizedLoop.slowBlock} gives the height, its point and the first module running in the point's order, and
  * the observer is told ({@link LoopObserver.slow}); the window closes when the height commits, or when its run fails
- * — a halt, or a retry, whose run opens a window of its own —, and the observer is told again.
+ * or stops — a halt, a retry, whose run opens a window of its own, or a stop at the lockstep wait —, and the observer
+ * is told again. **The callbacks the loop awaits outside a height's processing** (owner decision Q145 B; task 5.5a)
+ * are timed alike, each in a window of its own ({@link SlowWindow}), opened when the loop starts them, timed against
+ * `slowBlockMs`, closed when they end or fail: a height's `on-after-db-write` and `on-stop-height` after its commit
+ * (one window, from the commit to the end of `on-stop-height`; after a `COMMIT` that landed though its connection was
+ * lost, from the retry's start of them), each `on-finalized` (named by the height of the head it announces), and
+ * RN-11's re-delivery at a run's start (the cursor's height). One window is open at a time: the loop awaits them in
+ * series.
  */
 
 import { BLOCKS_TABLE } from "../backbone/core-block-commit/core-block-commit.js";
@@ -156,8 +163,8 @@ export interface LoopInput {
   /** Told of the finalized heads the loop reads and the heights it commits (the process's state). */
   readonly observer?: LoopObserver;
   /**
-   * RN-17's threshold (CF-4's `slowBlockMs`): a height whose window has been open longer is slow (see the module
-   * comment). Absent or null: none is.
+   * RN-17's threshold (CF-4's `slowBlockMs`): a window open longer is slow — a height's processing, or a callback the
+   * loop awaits outside it (see the module comment). Absent or null: none is.
    */
   readonly slowBlockMs?: number | null;
   /** The lockstep wait before each block's transaction (PP-6; see the module comment); none unless given. */
@@ -176,12 +183,23 @@ export interface LoopObserver {
   head?(head: BlockRef): void;
   /** A height that committed: its block, the new cursor. */
   committed?(block: BlockRef): void;
-  /** A height became slow, or the window of a slow height closed (RN-17; see the module comment). */
+  /** A window became slow, or a slow window closed (RN-17; see the module comment). */
   slow?(event: SlowBlockEvent): void;
 }
 
-/** What a height in progress does (RN-17): the point it is in, the first module running there, and since when. */
+/**
+ * RN-17's windows (owner decision Q145 B; see the module comment): `height`, a height's processing from its first
+ * callback after `on-finalized` to its `COMMIT`; `after-commit`, its `on-after-db-write` and `on-stop-height` after the
+ * `COMMIT`; `finalized`, one `on-finalized`; `redelivery`, RN-11's re-delivery at a run's start.
+ */
+export type SlowWindow = "height" | "after-commit" | "finalized" | "redelivery";
+
+/**
+ * What the loop does in an open window (RN-17): which window, its height (for `finalized` the head announced), the
+ * point it is in, the first module running there, and since when.
+ */
 export interface HeightActivity {
+  readonly window: SlowWindow;
   readonly height: bigint;
   readonly point: PointName;
   /** The first module whose callback runs, in the point's order; null while none runs. */
@@ -192,10 +210,19 @@ export interface HeightActivity {
 
 /** What {@link LoopObserver.slow} is told. */
 export type SlowBlockEvent =
-  /** The height's window has been open longer than `slowBlockMs`: what it does now. */
+  /** A window has been open longer than `slowBlockMs`: what it does now. */
   | { readonly kind: "raised"; readonly activity: HeightActivity }
-  /** The slow height's window closed: it committed, or its run failed; `ms` its time. */
-  | { readonly kind: "ended"; readonly height: bigint; readonly committed: boolean; readonly ms: number };
+  /**
+   * A slow window closed, after `ms`: `completed` when its work did — the height committed (`height`), its callbacks
+   * ended (the others) —, not when its run failed or stopped.
+   */
+  | {
+      readonly kind: "ended";
+      readonly window: SlowWindow;
+      readonly height: bigint;
+      readonly completed: boolean;
+      readonly ms: number;
+    };
 
 /**
  * Where a height's processing is (RN-17): the last of its points that began, and the modules whose callbacks run, in
@@ -225,10 +252,11 @@ class Activity {
   }
 }
 
-/** The height the loop is on (RN-17's window; see the module comment). */
+/** An open window of RN-17 (see the module comment): a height's processing, or callbacks awaited outside it. */
 interface Watch {
+  readonly window: SlowWindow;
   readonly height: bigint;
-  /** When its window opened (`performance.now()`); null while none of its callbacks has started. */
+  /** When it opened (`performance.now()`); null while none of a height's callbacks has started. */
   began: number | null;
   activity: Activity | undefined;
   timer: ReturnType<typeof setTimeout> | undefined;
@@ -401,7 +429,10 @@ export class FinalizedLoop {
   #held: HeldHeight | undefined;
   /** The held height this run processes again, once it reaches it. */
   #resume: HeldHeight | undefined;
-  /** The height the loop is on (RN-17), from the start of its processing to its commit or its failure. */
+  /**
+   * The window open (RN-17): the height the loop is on, from the start of its processing to its commit or its failure,
+   * or the callbacks it awaits outside a height's processing while they run.
+   */
   #watch: Watch | undefined;
   /** What the source's queue runs for each height it prepares (`on-fetch`, `on-parse`), while it does. */
   readonly #preparing = new Map<bigint, Activity>();
@@ -412,17 +443,20 @@ export class FinalizedLoop {
   }
 
   /**
-   * The height in progress once its window has been open longer than `slowBlockMs` (RN-17; see the module comment):
-   * the point it is in and the first module running there now, and its time; null otherwise — no height in progress,
-   * none slow yet, or no `slowBlockMs`.
+   * The open window once it has been open longer than `slowBlockMs` (RN-17; see the module comment): which, its height,
+   * the point it is in and the first module running there now, and its time; null otherwise — none open, none slow yet,
+   * or no `slowBlockMs`.
    */
   slowBlock(): HeightActivity | null {
     const watch = this.#watch;
     return watch === undefined || !watch.raised ? null : this.#activityOf(watch);
   }
 
-  /** RN-17's threshold: the input's `slowBlockMs`, null for none (a negative control's seam). */
-  protected slowBlockMs(): number | null {
+  /**
+   * RN-17's threshold for a window of the kind `_window`: the input's `slowBlockMs`, null for none (a negative
+   * control's seam).
+   */
+  protected slowBlockMs(_window: SlowWindow): number | null {
     return this.input.slowBlockMs ?? null;
   }
 
@@ -460,7 +494,8 @@ export class FinalizedLoop {
     let cursor: BlockRef | null;
     if (held === undefined) {
       cursor = await db.read((read) => source.cursor(read));
-      if (cursor !== null) await this.redeliver(cursor);
+      const at = cursor;
+      if (at !== null) await this.#timed("redelivery", at.height, "on-after-db-write", () => this.redeliver(at));
     } else {
       cursor = await this.#settle(held);
     }
@@ -729,14 +764,18 @@ export class FinalizedLoop {
     try {
       run = resume === undefined ? await this.#begin(height, previous) : this.#again(resume);
       await this.prepare(run);
-      if (!(await this.lockstepWait(run))) return null;
+      if (!(await this.lockstepWait(run))) {
+        // Stopped at the lockstep wait: the height's run, and its window, end here.
+        this.#unwatch(watch, false);
+        return null;
+      }
       // The block transaction is on-db-write's (RN-17): its BEGIN, its callbacks, the cursor check, the COMMIT.
       this.#enter("on-db-write");
       await this.commit(run);
       committed = true;
       this.input.observer?.committed?.(run.block);
       this.#unwatch(watch, true);
-      await this.after(run);
+      await this.#afterCommit(run);
       this.#check();
       return run.block;
     } catch (error) {
@@ -767,30 +806,64 @@ export class FinalizedLoop {
    * `on-fetch` or `on-parse` now, else with the first callback of it that starts.
    */
   #watchHeight(height: bigint): Watch {
-    const watch: Watch = { height, began: null, activity: undefined, timer: undefined, raised: false };
+    const watch: Watch = {
+      window: "height",
+      height,
+      began: null,
+      activity: undefined,
+      timer: undefined,
+      raised: false,
+    };
     this.#watch = watch;
     const queued = this.#preparing.get(height);
     if (queued !== undefined) this.#open(watch, queued);
     return watch;
   }
 
+  /**
+   * Runs `body` — callbacks the loop awaits outside a height's processing (Q145 B) — in a window of its own, `window`
+   * at `height`, open from now in `point`, closed when `body` ends or fails.
+   */
+  async #timed(
+    window: Exclude<SlowWindow, "height">,
+    height: bigint,
+    point: PointName,
+    body: () => Promise<void>,
+  ): Promise<void> {
+    const watch: Watch = { window, height, began: null, activity: undefined, timer: undefined, raised: false };
+    this.#watch = watch;
+    this.#open(watch, new Activity(point));
+    let completed = false;
+    try {
+      await body();
+      completed = true;
+    } finally {
+      this.#unwatch(watch, completed);
+    }
+  }
+
+  /** `run`'s points after its `COMMIT` ({@link after}): one window, from the commit to the end of `on-stop-height`. */
+  #afterCommit(run: HeightRun): Promise<void> {
+    return this.#timed("after-commit", run.height, "on-after-db-write", () => this.after(run));
+  }
+
   /** Opens `watch`'s window, recorded in `activity`, and starts the timer of `slowBlockMs` when there is one. */
   #open(watch: Watch, activity: Activity): void {
     watch.began = performance.now();
     watch.activity = activity;
-    const ms = this.slowBlockMs();
+    const ms = this.slowBlockMs(watch.window);
     if (ms !== null) watch.timer = setTimeout(() => this.#raise(watch), ms);
   }
 
-  /** `watch`'s window has been open longer than `slowBlockMs`: the height is slow, and the observer is told. */
+  /** `watch`'s window has been open longer than `slowBlockMs`: it is slow, and the observer is told. */
   #raise(watch: Watch): void {
     watch.raised = true;
     this.input.observer?.slow?.({ kind: "raised", activity: this.#activityOf(watch) });
   }
 
   /**
-   * `point` of the height in progress began, if a height is in progress: its window opens if it was not yet; returns
-   * what records its callbacks.
+   * `point` began in the open window, if one is open: a height's opens if it was not yet; returns what records its
+   * callbacks.
    */
   #enter(point: PointName): Activity | undefined {
     const watch = this.#watch;
@@ -800,20 +873,24 @@ export class FinalizedLoop {
     return watch.activity;
   }
 
-  /** Closes `watch`'s window — its height committed, or its run failed —; the observer is told when it was slow. */
-  #unwatch(watch: Watch, committed: boolean): void {
+  /**
+   * Closes `watch`'s window — `completed`: its height committed, or its callbacks ended; else its run failed or
+   * stopped —; the observer is told when it was slow.
+   */
+  #unwatch(watch: Watch, completed: boolean): void {
     this.#watch = undefined;
     clearTimeout(watch.timer);
     if (!watch.raised) return;
     const ms = performance.now() - (watch.began as number);
-    this.input.observer?.slow?.({ kind: "ended", height: watch.height, committed, ms });
+    this.input.observer?.slow?.({ kind: "ended", window: watch.window, height: watch.height, completed, ms });
   }
 
-  /** What the height of an open window `watch` does now. */
+  /** What the loop does in an open window `watch` now. */
   #activityOf(watch: Watch): HeightActivity {
     const activity = watch.activity as Activity;
     const sinceMs = performance.now() - (watch.began as number);
-    return Object.freeze({ height: watch.height, point: activity.point, module: activity.module, sinceMs });
+    const { window, height } = watch;
+    return Object.freeze({ window, height, point: activity.point, module: activity.module, sinceMs });
   }
 
   /**
@@ -881,7 +958,7 @@ export class FinalizedLoop {
     }
     observer?.committed?.(run.block);
     try {
-      await this.after(run);
+      await this.#afterCommit(run);
       this.#check();
     } catch (error) {
       throw this.#failure(run.height, error, true);
@@ -889,11 +966,15 @@ export class FinalizedLoop {
     return run.block;
   }
 
-  /** `on-finalized` for `head`, before its heights from `next` on: each callback with a read at the cursor. */
+  /**
+   * `on-finalized` for `head`, before its heights from `next` on: each callback with a read at the cursor; a window of
+   * its own, named by the head's height (Q145 B).
+   */
   async #finalized(head: BlockRef, next: bigint): Promise<void> {
     const announced = Object.freeze({ height: head.height, hash: head.hash });
-    await this.#dispatch(this.#rangeAt(next), "on-finalized", (_part, call) =>
-      this.input.db.read((read) => call(announced, read)),
+    const range = this.#rangeAt(next);
+    await this.#timed("finalized", head.height, "on-finalized", () =>
+      this.#dispatch(range, "on-finalized", (_part, call) => this.input.db.read((read) => call(announced, read))),
     );
   }
 

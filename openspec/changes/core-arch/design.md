@@ -154,27 +154,34 @@ logs each of its retries. A condition clears once startup completes, a height co
 process (the client's when it stops retrying); a stop ends the wait. §11's registry is `test/runner/code-registry.ts`
 (A87).
 
-**A slow block** (task 5.5: `src/runner/loop.ts`, `process.ts`; RN-17, Q71). Nothing cuts a height off, times it out or
-retries it for its time; it is reported. Each run of a height has a window, from its first callback after `on-finalized`
-to its `COMMIT`: from its `on-fetch`; for a height the source prepares ahead (the node source), from when the loop asks
-for it if its `on-fetch` or `on-parse` runs in the queue then, else from the first that starts there — so the queue's
-work for it beside the heights before it, and the node's fetch before its first callback, are not its time —; for a
-held height's retry, from where it resumes, so neither the earlier attempt nor the back-off counts. Once a window has
-been open longer than the process revision's `slowBlockMs` (a timer of the main thread), the process shows the
-condition `slow-block` with the height, the point it is in — the last of its points that began; from the block
+**A slow block** (tasks 5.5, 5.5a: `src/runner/loop.ts`, `process.ts`; RN-17, Q71, Q145). Nothing cuts a height off,
+times it out or retries it for its time; it is reported. Each run of a height has a window, from its first callback
+after `on-finalized` to its `COMMIT`: from its `on-fetch`; for a height the source prepares ahead (the node source),
+from when the loop asks for it if its `on-fetch` or `on-parse` runs in the queue then, else from the first that starts
+there — so the queue's work for it beside the heights before it, and the node's fetch before its first callback, are not
+its time —; for a held height's retry, from where it resumes, so neither the earlier attempt nor the back-off counts.
+Once a window has been open longer than the process revision's `slowBlockMs` (a timer of the main thread), the process
+shows the condition `slow-block` with the height, the point it is in — the last of its points that began; from the block
 transaction's request on, `on-db-write`: its `BEGIN`, its callbacks, the cursor check, the `COMMIT` — and the first
 module whose callback runs there, in the point's order (a callback's read waiting in PGlite's queue counts as its
-module's), or null while none runs; it logs `slow block: height <h> is still processing after slowBlockMs (<ms> ms),
-in <point>[ of <module>]` and publishes the snapshot at once. The condition clears when the height commits or its run
-fails (a halt; a retry, whose run is a window of its own), logged (`… committed after <ms> ms`, `… stopped without
-committing after <ms> ms`) and published again; it changes no readiness (AE-4). `on-finalized`, RN-11's re-delivery and
-the points after the `COMMIT` (`on-after-db-write`, `on-stop-height`) are in no window as task 5.5 built it; owner
-decision Q145 B times each in a window of its own, raising the same condition (RN-17 as amended; task 5.5a). A
-callback that blocks the main thread stops the timer and every publication: `/status` answers from
-the snapshot published before it, without a condition raised meanwhile, and `/health/live` (AE-2) is the signal of the
-block; once the thread is free the condition may show until the commit. The ledger worker's step
-(`LedgerHost.activity()`) is not named in the condition: the module whose callback awaits it (`core-ledger-state`,
-`core-block-parsed`) is.
+module's), or null while none runs; it logs `slow block: height <h> is still processing after slowBlockMs (<ms> ms), in
+<point>[ of <module>]` and publishes the snapshot at once. The condition clears when the height commits or its run fails
+or stops (a halt; a retry, whose run is a window of its own; a stop at the lockstep wait), logged (`… committed after
+<ms> ms`, `… stopped without committing after <ms> ms`) and published again; it changes no readiness (AE-4). The
+callbacks the loop awaits outside a height's processing (owner decision Q145 B, task 5.5a; RN-17 as amended) are timed
+alike, each in a window of its own against the same `slowBlockMs`, from when the loop starts them to when they end or
+fail, raising the same condition with the window's height, its point and module: a height's `on-after-db-write` and
+`on-stop-height` after its commit — one window, from the commit to the end of `on-stop-height` (after a `COMMIT` that
+landed though its connection was lost, from when the retry runs them), so the height named has committed —; each
+`on-finalized`, named by the height of the head it announces; RN-11's re-delivery at a run's start, at the cursor's
+height. One window is open at a time (the loop awaits them in series). Their log lines name the window:
+`… in <point>[ of <module>] (after its commit)`, `(the new finalized head)`, `(its re-delivery at the run's start)`,
+and at the end `slow block: height <h>'s points after its commit` (or `on-finalized`, `re-delivery`)
+`ended after <ms> ms`, or `failed after`. A callback that blocks the main thread stops the timer and every publication:
+`/status` answers from the snapshot published before it, without a condition raised meanwhile, and `/health/live`
+(AE-2) is the signal of the block; once the thread is free the condition may show until its window closes. The ledger
+worker's step (`LedgerHost.activity()`) is not named in the condition: the module whose callback awaits it
+(`core-ledger-state`, `core-block-parsed`) is.
 
 ## 3. Block source and ingest
 

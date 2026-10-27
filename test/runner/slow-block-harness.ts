@@ -27,6 +27,10 @@ import { core, entryOf, loggingModule, startProcess, testBuild } from "./process
  * or `/status` read after the commit shows the condition. With `slowBlockMs` 5000 ({@link quietProblems}) nothing shows
  * it and nothing logs it, and the height commits once.
  *
+ * **A161** (task 5.5a, owner decision Q145 B; the oracle {@link a161Problems}): the same for a callback the loop awaits
+ * outside a height's processing — `on-after-db-write` after height 2's commit, or `on-finalized` announcing height 2 —,
+ * gone once that callback ends.
+ *
  * Imports nothing of Vitest: the oracles are applied to the real watchdog and to the negative controls' wrong ones.
  */
 
@@ -59,8 +63,8 @@ export type HoldMode = "await" | "block";
 
 /** What {@link holding} holds. */
 export interface HoldSpec {
-  /** The point held; `on-compute` unless given. */
-  readonly point?: Exclude<PointName, "on-start-db" | "on-start-api" | "on-best-block" | "on-rollback" | "on-finalized">;
+  /** The point held; `on-compute` unless given (`on-finalized` holds the announcement of `height` as the head). */
+  readonly point?: Exclude<PointName, "on-start-db" | "on-start-api" | "on-best-block" | "on-rollback">;
   /** The height held; {@link SLOW_HEIGHT} unless given. */
   readonly height?: bigint;
   /** How long; {@link HOLD_MS} unless given. */
@@ -206,6 +210,10 @@ export interface SlowOptions {
 export interface SlowRun {
   readonly handle: ProcessHandle;
   readonly lines: string[];
+  /** When each of {@link lines} was logged (`performance.now()`), by its index. */
+  readonly lineAt: number[];
+  /** When the process was started (`performance.now()`): before any of its windows opened. */
+  readonly startedAt: number;
   readonly source: AskedSource;
   /** `http://127.0.0.1:<port>` of its admin listener, once it listens. */
   origin(): Promise<string>;
@@ -215,13 +223,18 @@ export interface SlowRun {
 export function startSlow(db: ProcessDatabase, options: SlowOptions): SlowRun {
   const build = testBuild(options.user);
   const lines: string[] = [];
+  const lineAt: number[] = [];
   const source = options.source ?? askedSource(SLOW_HEIGHT);
   const extra = { slowBlockMs: options.slowBlockMs, listen: { admin: "127.0.0.1:0" }, ...options.extra };
+  const startedAt = performance.now();
   const handle = startProcess({
     declarations: build.declarations,
     config: { data: { entries: [core(db.setting, 1, { extra }), ...options.user.map((part) => entryOf(part, 1))] } },
     source: source.source,
-    log: (line) => lines.push(line),
+    log: (line) => {
+      lines.push(line);
+      lineAt.push(performance.now());
+    },
     admin: true,
     ...(options.loop === undefined ? {} : { loop: options.loop }),
   });
@@ -234,7 +247,7 @@ export function startSlow(db: ProcessDatabase, options: SlowOptions): SlowRun {
       await sleep(20);
     }
   };
-  return { handle, lines, source, origin };
+  return { handle, lines, lineAt, startedAt, source, origin };
 }
 
 /** One `status()` read, and when (`performance.now()`). */
@@ -276,9 +289,10 @@ export const slowLines = (lines: readonly string[]): string[] =>
 
 /**
  * Reads `run`'s `status()` every 20 ms and its `/status` every 50 ms from now until `status()` has shown `height`
- * committed for {@link AFTER_COMMIT_MS}, or processing ended, or 60 s passed.
+ * committed for {@link AFTER_COMMIT_MS} — with `ended`, that long after the later of the commit and the moment it
+ * gives (A161: the held callback's end) —, or processing ended, or 60 s passed.
  */
-export async function observe(run: SlowRun, height = SLOW_HEIGHT): Promise<Observed> {
+export async function observe(run: SlowRun, height = SLOW_HEIGHT, ended?: () => number | undefined): Promise<Observed> {
   const statuses: StatusRead[] = [];
   const bodies: BodyRead[] = [];
   const origin = await run.origin();
@@ -290,8 +304,9 @@ export async function observe(run: SlowRun, height = SLOW_HEIGHT): Promise<Obser
     const at = performance.now();
     statuses.push({ at, status });
     if (committedAt === undefined && status.cursor !== null && status.cursor >= height) committedAt = at;
-    const ended = status.ended !== null;
-    if ((committedAt !== undefined && at - committedAt > AFTER_COMMIT_MS) || ended || at > until) done = true;
+    const end = ended?.();
+    const from = ended === undefined ? committedAt : committedAt === undefined || end === undefined ? undefined : Math.max(committedAt, end);
+    if ((from !== undefined && at - from > AFTER_COMMIT_MS) || status.ended !== null || at > until) done = true;
   }, 20);
   try {
     while (!done) {
@@ -405,6 +420,110 @@ export function quietProblems(observed: Observed, seen: Seen, lines: readonly st
   if (bodies.length > 0) problems.push(`/status showed slow-block ${bodies.length} times`);
   const logged = slowLines(lines);
   if (logged.length > 0) problems.push(`slow-block was logged: ${logged.join(" | ")}`);
+  return problems;
+}
+
+/** A161's points: a callback the loop awaits outside a height's processing (RN-17 as amended by Q145 B). */
+export type OutsidePoint = "on-after-db-write" | "on-finalized";
+
+/**
+ * The log line that raises A161's condition: module `slow`'s `point` at height 2 (`on-finalized` announces height 2
+ * as the finalized head), after `slowBlockMs` 1000.
+ */
+export const a161Raised = (point: OutsidePoint): string =>
+  point === "on-after-db-write"
+    ? `slow block: height ${SLOW_HEIGHT} is still processing after slowBlockMs (1000 ms), in on-after-db-write of slow (after its commit)`
+    : `slow block: height ${SLOW_HEIGHT} is still processing after slowBlockMs (1000 ms), in on-finalized of slow (the new finalized head)`;
+
+/** The log line that ends A161's window: its points ended. */
+export const a161Ended = (point: OutsidePoint): RegExp =>
+  point === "on-after-db-write"
+    ? new RegExp(`^slow block: height ${SLOW_HEIGHT}'s points after its commit ended after \\d+ ms$`)
+    : new RegExp(`^slow block: height ${SLOW_HEIGHT}'s on-finalized ended after \\d+ ms$`);
+
+/**
+ * A161's oracle (task 5.5a; RN-17 as amended by Q145 B): with `slowBlockMs` 1000, module `slow`'s `point` at height 2
+ * awaiting 3 s — `on-after-db-write` after height 2's commit, or `on-finalized` announcing height 2 as the head —
+ * `status()` and `/status` show `slow-block` with height 2, `point` and `slow` within 2 s of the callback's start, and
+ * not before its window was open for `slowBlockMs`; the condition is gone once that callback ends: no `status()` read
+ * after the window's end (its log line) and no `/status` answer a heartbeat after it shows the condition at `point`,
+ * each read for a while; nothing is cancelled or retried — the callback ran once, to its end; height 2 committed once,
+ * with no retry, no other condition and no halt.
+ */
+export function a161Problems(observed: Observed, seen: Seen, run: Pick<SlowRun, "lines" | "lineAt" | "startedAt">, point: OutsidePoint): string[] {
+  const problems: string[] = [];
+  const count = (call: string) => seen.calls.filter((made) => made === call).length;
+  const held = count(`slow ${point}@${SLOW_HEIGHT}`);
+  if (held !== 1) problems.push(`slow's ${point} at ${SLOW_HEIGHT} ran ${held} times, not once`);
+  const writes = count(`slow on-db-write@${SLOW_HEIGHT}`);
+  if (writes !== 1) problems.push(`slow's on-db-write at ${SLOW_HEIGHT} ran ${writes} times, not once`);
+  if (seen.start === undefined || seen.end === undefined) problems.push(`slow's ${point} never ended`);
+  else if (seen.end - seen.start < HOLD_MS - 5) problems.push(`slow's ${point} ended after ${ms(seen.end - seen.start)}`);
+  if (observed.committedAt === undefined) problems.push(`height ${SLOW_HEIGHT} never committed`);
+  for (const line of run.lines) if (/retries in /.test(line)) problems.push(`a retry was logged: ${line}`);
+  const others = new Set(observed.statuses.flatMap(({ status }) => status.conditions.map((condition) => condition.code as string)));
+  others.delete("slow-block");
+  if (others.size > 0) problems.push(`conditions other than slow-block were raised: ${[...others].join(", ")}`);
+  const halted = observed.statuses.find(({ status }) => status.state === "halted" || status.state === "refused");
+  if (halted !== undefined) problems.push(`the process was ${halted.status.state}: ${JSON.stringify(halted.status.reason, jsonBigint)}`);
+  const start = seen.start ?? Number.NaN;
+  const expected = { code: "slow-block", height: SLOW_HEIGHT, point, module: "slow" };
+  // status(): the first read showing it, and a read known to come before its window opened — the last before the
+  // commit for on-after-db-write (its window opens at the commit), the process's start for on-finalized.
+  const index = observed.statuses.findIndex(({ status }) => slowOf(status) !== undefined);
+  const first = observed.statuses[index];
+  if (first === undefined) problems.push("status() never showed slow-block");
+  else {
+    const shown = slowOf(first.status);
+    if (JSON.stringify(shown, jsonBigint) !== JSON.stringify(expected, jsonBigint)) {
+      problems.push(`status() showed ${JSON.stringify(shown, jsonBigint)}, not ${JSON.stringify(expected, jsonBigint)}`);
+    }
+    if (first.at - start > WITHIN_MS) problems.push(`status() showed slow-block ${ms(first.at - start)} after ${point} began, not within 2 s`);
+    const before =
+      point === "on-after-db-write"
+        ? observed.statuses.slice(0, index).findLast(({ status }) => status.cursor === null || status.cursor < SLOW_HEIGHT)?.at
+        : run.startedAt;
+    // A Node.js timer may fire up to a millisecond before performance.now() counts its delay: 2 ms of slack.
+    if (before === undefined || first.at - before < 1_000 - 2) {
+      problems.push(`status() showed slow-block before its window was open for slowBlockMs`);
+    }
+    if (point === "on-after-db-write" && (!first.status.ready || first.status.state !== "following")) {
+      problems.push(`the process was ${first.status.state}, ready ${first.status.ready}, with slow-block: a condition changes no readiness`);
+    }
+  }
+  // /status, through core-status.
+  const body = observed.bodies.find((read) => bodySlowOf(read.body) !== undefined);
+  if (body === undefined) problems.push("/status never showed slow-block");
+  else {
+    const shown = bodySlowOf(body.body);
+    const wanted = { ...expected, height: String(SLOW_HEIGHT) };
+    if (JSON.stringify(shown) !== JSON.stringify(wanted)) problems.push(`/status showed ${JSON.stringify(shown)}, not ${JSON.stringify(wanted)}`);
+    if (body.at - start > WITHIN_MS) problems.push(`/status showed slow-block ${ms(body.at - start)} after ${point} began, not within 2 s`);
+    const invalid = STATUS_SCHEMA.problems(body.body);
+    if (invalid.length > 0) problems.push(`/status with slow-block fails its schema: ${invalid.join("; ")}`);
+  }
+  // Logged when raised and when its window ended, after the callback ended.
+  const logged = run.lines.map((line, at) => ({ line, at: run.lineAt[at] as number })).filter(({ line }) => line.startsWith("slow block: "));
+  const raised = logged.filter(({ line }) => line === a161Raised(point));
+  const ends = logged.filter(({ line }) => a161Ended(point).test(line));
+  if (raised.length !== 1 || ends.length !== 1) problems.push(`the slow-block log lines were ${JSON.stringify(logged.map(({ line }) => line))}`);
+  const end = ends[0]?.at;
+  if (end === undefined) problems.push(`the window of ${point} never ended`);
+  else {
+    if (seen.end !== undefined && end < seen.end) problems.push(`the window of ${point} ended before its callback`);
+    // Gone once that callback ended: status() from the window's end on (the same thread: at once), /status a heartbeat
+    // later (the process publishes at once; a request may still be answered from the snapshot before).
+    const after = observed.statuses.filter(({ at }) => at > end);
+    if (after.length === 0 || after[after.length - 1]!.at - end < AFTER_COMMIT_MS - 100) {
+      problems.push(`status() was read for less than ${AFTER_COMMIT_MS} ms after the window ended`);
+    }
+    const still = after.filter(({ status }) => slowOf(status, null)?.point === point);
+    if (still.length > 0) problems.push(`status() showed slow-block in ${point} after the callback ended, ${still.length} times`);
+    const bodies = observed.bodies.filter(({ at }) => at > end + 1_000);
+    if (bodies.length === 0) problems.push("/status was not read a heartbeat after the window ended");
+    const shown = bodies.filter(({ body }) => bodySlowOf(body, null)?.point === point);
+    if (shown.length > 0) problems.push(`/status showed slow-block in ${point} after the callback ended, ${shown.length} times`);
+  }
   return problems;
 }
 

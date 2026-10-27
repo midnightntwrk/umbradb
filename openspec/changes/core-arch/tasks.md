@@ -1427,13 +1427,39 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       explained (the queue's entry for a height never removed: a leak only; no publication at once: the heartbeat
       publishes within A142's 2 s). **Waits:** Q145 (the points after the `COMMIT`, `on-finalized` and RN-11's
       re-delivery are in no window).
-- [ ] 5.5a The owner's answer Q145 B: `slow-block` also over the callbacks the loop awaits outside a height's
+- [x] 5.5a The owner's answer Q145 B: `slow-block` also over the callbacks the loop awaits outside a height's
       processing (RN-17 as amended) — `on-after-db-write` and `on-stop-height` after each `COMMIT` (one window, from the
       commit to the end of `on-stop-height`), each `on-finalized`, and RN-11's re-delivery at a run's start —, each a
       window of its own timed against `slowBlockMs`, raising the same condition with the height (committed or not), the
       point and the module, and clearing it when its window ends; nothing cancelled or retried; `design.md` §2's "A slow
       block", the `/status` schema if it changes, and the tests.
       **Acceptance:** A161; A142 unchanged.
+      **Done (2026-10-27):** besides a height's window, the finalized loop (`src/runner/loop.ts`) opens one for each
+      run of callbacks it awaits outside a height's processing (`SlowWindow`: `after-commit`, `finalized`,
+      `redelivery`): a height's `on-after-db-write` and `on-stop-height`, from the commit — the height's window closes
+      and this one opens in one synchronous step — to the end of `on-stop-height` (after a `COMMIT` that landed though
+      its connection was lost, from the retry's start of them, IN-11); each `on-finalized`, named by the height of the
+      head it announces (before S there is no cursor to name; Q162); RN-11's re-delivery at a run's start, at the
+      cursor's height. Each is timed against the same `slowBlockMs`, with the point that began last and the first
+      module running there, as a height's is; one window is open at a time; it closes when its callbacks end or fail;
+      nothing is cancelled or retried. `HeightActivity` and the end event of `SlowBlockEvent` name the window
+      (`window`; the end's `committed` is now `completed`); the negative controls' seam is `slowBlockMs(window)`. A
+      height stopped at the lockstep wait (14.3) now closes its window: before, its timer could still raise
+      `slow-block` once the loop had ended. The process (`src/runner/process.ts`) lists the same `{ code: "slow-block",
+      height, point, module }` — `/status`'s schema is unchanged, its `point` takes every point — and its log lines
+      name the window: `… in <point>[ of <module>] (after its commit)`, `(the new finalized head)`, `(its re-delivery
+      at the run's start)`; at the end `slow block: height <h>'s points after its commit` (`on-finalized`,
+      `re-delivery`) `ended after <ms> ms` or `failed after <ms> ms`. Tests first: on the old sources the 20 new tests
+      (both backends) failed for the intended reason ("status() never showed slow-block", no event of the window,
+      `slowBlock()` not null after a stop at the lockstep wait). Tests (PostgreSQL 18.6, PGlite 0.5.10): A161
+      `test/runner/slow-block-outside.test.ts` (oracle `a161Problems` in `slow-block-harness.ts`: `on-after-db-write`
+      and `on-finalized` at height 2 awaiting 3 s; also RN-11's re-delivery at a restart, and a failure after the
+      commit that halts); the windows at the loop level, `slow-block-windows.test.ts` (one window over both points
+      after a commit, each `on-finalized` alone, the re-delivery, a landed `COMMIT`'s retry, a failure, a stop at the
+      lockstep wait); committed negative controls `slow-block-outside.negative-control.test.ts` (a watchdog that never
+      times the points after a commit, one that never times `on-finalized`, one that does not clear when the point
+      ends). A142's tests are unchanged but for the seam's argument. No mutation pass here (deferred to the end, owner
+      2026-10-27).
 
 ## 6. Storage helpers
 

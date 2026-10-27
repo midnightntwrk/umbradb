@@ -68,8 +68,11 @@
  * (RN-17, Q71; task 5.5) shows while the loop's height in progress has run longer than the process revision's
  * `slowBlockMs` — its height, the point it is in, the first module running there or null (the window and its limits
  * are `./loop.ts`'s) —, logged when raised and when that height commits or its run fails, and published at once each
- * time; nothing cuts the height off or retries it for its time. The admin endpoints that show all this are tasks
- * 8.1–8.3.
+ * time; nothing cuts the height off or retries it for its time. Likewise (owner decision Q145 B; task 5.5a) while
+ * callbacks the loop awaits outside a height's processing have: a height's `on-after-db-write` and `on-stop-height`
+ * after its commit (one window), an `on-finalized` (the height of the head it announces), RN-11's re-delivery at a
+ * run's start (the cursor's height) — the same condition, cleared when its window ends; the log lines name the window.
+ * The admin endpoints that show all this are tasks 8.1–8.3.
  *
  * **Retries** (IN-10, CORE-ARCH §4.6): a lost database connection (`connection-lost`) or an unreachable node
  * (`node-unreachable`) — the two retryable codes, wherever startup's later steps or the loop meet them — never halts or
@@ -187,7 +190,14 @@ import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import { configurationRefusalLines } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failures.js";
-import { FinalizedLoop, HeightFailure, type LoopEnd, type LoopInput, type SlowBlockEvent } from "./loop.js";
+import {
+  FinalizedLoop,
+  HeightFailure,
+  type LoopEnd,
+  type LoopInput,
+  type SlowBlockEvent,
+  type SlowWindow,
+} from "./loop.js";
 import { ProcessContexts } from "./process-context.js";
 import { type CoreTransport, startCoreTransport, type TransportTls } from "../private/core-transport.js";
 import { type BackupInput, type BackupSeams, type BackupWritten, backupAtStop, writeBackup } from "../backup/backup.js";
@@ -313,8 +323,10 @@ export interface WaitingCondition extends NodeWait {
 
 /**
  * The condition `slow-block` (RN-17, AE-3, Q71; task 5.5): the height in progress has run longer than `slowBlockMs`
- * (`./loop.ts`'s window); `point` is the point it is in, `module` the first module whose callback runs there, null
- * while none runs. Cleared when the height commits or its run fails; nothing cuts the height off.
+ * (`./loop.ts`'s window) — or, owner decision Q145 B (task 5.5a), callbacks the loop awaits outside a height's
+ * processing have: the points after its commit, an `on-finalized` (`height` the head's), RN-11's re-delivery —;
+ * `point` is the point it is in, `module` the first module whose callback runs there, null while none runs. Cleared
+ * when its window ends: the height commits or its run fails, the callbacks end or fail; nothing cuts anything off.
  */
 export interface SlowBlockCondition {
   readonly code: "slow-block";
@@ -322,6 +334,15 @@ export interface SlowBlockCondition {
   readonly point: PointName;
   readonly module: string | null;
 }
+
+/** How the log names a window outside a height's processing (Q145 B): when it is raised, and when it ended. */
+const SLOW_WINDOW_NAMES: Readonly<
+  Record<Exclude<SlowWindow, "height">, { readonly raised: string; readonly ended: string }>
+> = {
+  "after-commit": { raised: "after its commit", ended: "points after its commit" },
+  finalized: { raised: "the new finalized head", ended: "on-finalized" },
+  redelivery: { raised: "its re-delivery at the run's start", ended: "re-delivery" },
+};
 
 /**
  * The process's conditions (AE-3); the block source's own (`finality-stall`, IN-6) among them, `slow-block` (task 5.5)
@@ -1032,17 +1053,24 @@ class Process implements ProcessHandle {
   }
 
   /**
-   * A height became slow, or a slow height's window closed (RN-17, the loop's observer): logged, and published at once
-   * (the heartbeat's next tick may be a second away).
+   * A window became slow, or a slow window closed (RN-17, the loop's observer): logged — the window named unless it is
+   * a height's processing (Q145 B) —, and published at once (the heartbeat's next tick may be a second away).
    */
   #slowBlockEvent(event: SlowBlockEvent, slowBlockMs: number): void {
     if (event.kind === "raised") {
-      const { height, point, module } = event.activity;
+      const { window, height, point, module } = event.activity;
       const where = module === null ? point : `${point} of ${module}`;
-      this.#log(`slow block: height ${height} is still processing after slowBlockMs (${slowBlockMs} ms), in ${where}`);
-    } else {
-      const how = event.committed ? "committed" : "stopped without committing";
+      const which = window === "height" ? "" : ` (${SLOW_WINDOW_NAMES[window].raised})`;
+      this.#log(
+        `slow block: height ${height} is still processing after slowBlockMs (${slowBlockMs} ms), in ${where}${which}`,
+      );
+    } else if (event.window === "height") {
+      const how = event.completed ? "committed" : "stopped without committing";
       this.#log(`slow block: height ${event.height} ${how} after ${Math.round(event.ms)} ms`);
+    } else {
+      const how = event.completed ? "ended" : "failed";
+      const what = SLOW_WINDOW_NAMES[event.window].ended;
+      this.#log(`slow block: height ${event.height}'s ${what} ${how} after ${Math.round(event.ms)} ms`);
     }
     this.#admin?.publish();
   }
