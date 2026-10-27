@@ -110,6 +110,10 @@ export default defineConfig({
         // The ledger worker thread's entry runs only as a thread of its own (`test/ledger/worker-host.test.ts`, the
         // process tests); what it runs, the engine and the bridge, is covered on the main thread too (task 12.3).
         "src/ledger/worker/entry.ts",
+        // The ledger worker thread's main, which task 12.6 moved out of `entry.ts` so a host's own entry can run it
+        // (`runLedgerWorker`): it too runs only as a thread of its own; the engine it runs, ledger tasks included, is
+        // covered on the main thread (`test/ledger/ledger-tasks.test.ts`).
+        "src/ledger/worker/run.ts",
         // TransactionHistory, kept outside the run (task 17.1, LS-3, A3). Vitest matches these globs anywhere in a
         // file's path, so `src/**/*.ts` above would also take in `legacy/transaction-history/src/` if a test loaded it.
         "legacy/**",

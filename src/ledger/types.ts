@@ -210,19 +210,35 @@ export interface StateSummary {
   dustGenerationRoot: Uint8Array;
 }
 
-/** A module's ledger task (LG-17, task 12.6), run in the ledger worker once per block. */
+/**
+ * What a module's ledger task is given for a block (LG-17, `design.md` §5.5; task 12.6), in the ledger worker only: the
+ * block, its native parsed transactions (the block's one parse, LG-7), `rawPackages()` of its ledger and, for a task
+ * that declares `needsState`, the state before the block — read-only, the committed state the worker holds (at an
+ * upgrade's F, the state of the ledger before it; none before block 0).
+ */
+export interface LedgerTaskBlock {
+  readonly height: bigint;
+  readonly hash: Uint8Array;
+  readonly ledger: LedgerName;
+  /** The native parsed objects ({@link LedgerPackage.nativeTransaction}), in application order (CD-5). */
+  readonly transactions: readonly unknown[];
+  /** Only for a task that declares `needsState`, and none at block 0. */
+  readonly stateBefore?: StateHandle;
+  readonly packages: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * A module's ledger task (LG-17, `design.md` §5.5, Q49; task 12.6): run in the ledger worker once per block; its result,
+ * structured-cloneable plain data (or a promise of it), becomes the module's `block` item named
+ * {@link LedgerTask.name}. It writes nothing and keeps no native object between blocks; what it allocates it frees
+ * before it returns.
+ */
 export interface LedgerTask {
-  name: string;
-  /** True: the module must require `ledger-state` (LG-17). */
-  needsState: boolean;
-  run(block: {
-    height: bigint;
-    /** The native parsed objects ({@link LedgerPackage.nativeTransaction}). */
-    transactions: unknown[];
-    /** Only when `needsState`. */
-    stateBefore?: StateHandle;
-    packages: Readonly<Record<string, unknown>>;
-  }): unknown;
+  /** The `block` item of its module its result becomes. */
+  readonly name: string;
+  /** True: it gets the state before the block, and its module must require `ledger-state` (LG-17). */
+  readonly needsState: boolean;
+  run(block: LedgerTaskBlock): unknown;
 }
 
 /** One ledger version's adapter (LG-6). */

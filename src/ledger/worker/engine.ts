@@ -11,8 +11,14 @@
  * **Parse once (LG-7).** {@link LedgerEngine.parse} parses a block's transactions with its ledger's adapter and keeps
  * the very arrays it parsed, under the block's hash, until the block is applied and released
  * ({@link LedgerEngine.release}): the adapter keeps each native object under its array (`../adapter.ts`), so the
- * block's apply — and task 12.6's ledger tasks — find them and parse nothing again. A block parsed again (a retried
- * height) gets the kept parse back. Only plain data leaves (Q49).
+ * block's apply and its ledger tasks find them and parse nothing again. A block parsed again (a retried height) gets the
+ * kept parse back. Only plain data leaves (Q49): the parse is checked as such (`../plain-data.ts`).
+ *
+ * **Ledger tasks (LG-17; task 12.6).** {@link LedgerEngine.tasks} runs a module's tasks — given by the worker's entry,
+ * `./run.ts` — on a block's kept parse: each with the native objects, `rawPackages()` and, for a task that declares
+ * `needsState`, the committed state, which must be the state before the block; each result checked as plain data. A
+ * task that throws or returns anything else fails the request with {@link LedgerTaskFailed}, naming the module and the
+ * task; a trap ends the worker, as an apply's does.
  *
  * **The states.** The engine holds the state committed at a height — its cursor's — and at most one pending state, the
  * one after the block applied last and not yet committed ({@link LedgerEngine.commit}, called once the block's
@@ -92,7 +98,9 @@ import type {
   StateHandle,
   StateSummary,
   StoredNode,
+  LedgerTask,
 } from "../types.js";
+import { plainDataProblem } from "../plain-data.js";
 
 /** What loads an adapter: `loadLedgerPackage`, or a test package's loader. */
 export type LedgerLoader = (ledger: LedgerName, options: LedgerPackageOptions) => Promise<LedgerPackage>;
@@ -112,6 +120,17 @@ export class EvictionRefused extends Error {
   constructor(message: string) {
     super(message);
     this.name = EVICTION_REFUSED;
+  }
+}
+
+/** The name of {@link LedgerTaskFailed}, which an error keeps when it crosses from the worker. */
+export const LEDGER_TASK_FAILED = "LedgerTaskFailed";
+
+/** A module's ledger task that failed a block (LG-17; see {@link LedgerEngine.tasks}), naming the module and the task. */
+export class LedgerTaskFailed extends Error {
+  constructor(module: string, task: string, height: bigint, why: string) {
+    super(`the ledger task ${task} of ${module} at block ${height} ${why} (LG-17)`);
+    this.name = LEDGER_TASK_FAILED;
   }
 }
 
@@ -149,6 +168,35 @@ export interface ContractKeys {
   readonly address: Uint8Array;
   readonly stateKey: Uint8Array | null;
   readonly zswapStateKey: Uint8Array | null;
+}
+
+/** A module as the ledger worker needs it (LG-17; task 12.6): its id and its ledger tasks (its declaration is one). */
+export interface LedgerWorkerModule {
+  readonly id: string;
+  readonly ledgerTasks?: readonly LedgerTask[];
+}
+
+/** The ledger tasks of `modules`, by module id (a module listed twice: its last listing's); throws for a non-module. */
+export function ledgerTasksOf(modules: readonly LedgerWorkerModule[]): Map<string, readonly LedgerTask[]> {
+  const tasks = new Map<string, readonly LedgerTask[]>();
+  for (const module of modules) {
+    if (module === null || typeof module !== "object" || typeof module.id !== "string") {
+      throw new TypeError("the ledger worker takes the modules the host ships: each a declaration, with its id (MD-1)");
+    }
+    tasks.set(module.id, Object.freeze([...(module.ledgerTasks ?? [])]));
+  }
+  return tasks;
+}
+
+/** A block's ledger tasks of one module, as the main thread names them (LG-17; task 12.6; `../tasks.ts`). */
+export interface TaskRun extends BlockId {
+  readonly ledger: LedgerName;
+  readonly parentHash: Uint8Array;
+  /** How many transactions `block-parsed` holds: the parse kept must have as many. */
+  readonly transactions: number;
+  readonly module: string;
+  /** The tasks' names, in the module's order. */
+  readonly tasks: readonly string[];
 }
 
 /** What block 0's apply takes (IN-7). */
@@ -201,6 +249,13 @@ export interface EngineOptions {
   readonly load: LedgerLoader;
   /** The node store the package reads stored nodes from (the bridge's, in the worker); none on the main thread. */
   readonly store?: NodeStore;
+  /** The modules' ledger tasks, by module id: the worker's entry's (`./run.ts`); none unless given. */
+  readonly tasks?: ReadonlyMap<string, readonly LedgerTask[]>;
+  /**
+   * Whether parses and task results are checked as plain data before they leave (`../plain-data.ts`); true (false: a
+   * negative control's).
+   */
+  readonly checkPlainData?: boolean;
 }
 
 /** A state the engine holds, with the block it is after. */
@@ -246,6 +301,8 @@ const NO_KEYS: Keys = Object.freeze({ release: [], contracts: [] });
 export class LedgerEngine {
   readonly #load: LedgerLoader;
   readonly #store: NodeStore | undefined;
+  readonly #tasks: ReadonlyMap<string, readonly LedgerTask[]>;
+  readonly #checkPlainData: boolean;
   readonly #adapters = new Map<LedgerName, Promise<LedgerPackage>>();
   readonly #kept = new Map<string, Kept>();
   /** The adapters whose package has the node store installed. */
@@ -256,6 +313,15 @@ export class LedgerEngine {
   constructor(options: EngineOptions) {
     this.#load = options.load;
     this.#store = options.store;
+    this.#tasks = options.tasks ?? new Map();
+    this.#checkPlainData = options.checkPlainData !== false;
+  }
+
+  /** `value` as it leaves the worker, checked as plain data (see {@link EngineOptions.checkPlainData}); throws `fail`'s. */
+  #plain<T>(value: T, fail: (problem: string) => Error): T {
+    const problem = this.#checkPlainData ? plainDataProblem(value) : null;
+    if (problem !== null) throw fail(problem);
+    return value;
   }
 
   /** The adapter of `ledger`, loaded once (again after a failed load). */
@@ -278,6 +344,8 @@ export class LedgerEngine {
     const adapter = await this.#adapter(ledger);
     const arrays = [...transactions];
     const parsed = Object.freeze(arrays.map((bytes, index) => adapter.parseTransaction(bytes, index)));
+    // `block-parsed` reaches the main thread as plain data (LG-7, Q49): the adapter's parse is checked as such.
+    this.#plain(parsed, (problem) => new TypeError(`the ${ledger} adapter parsed block ${block.height} into ${problem}, not plain data (LG-7)`));
     this.#kept.set(key, { height: block.height, ledger, transactions: arrays, parsed });
     return parsed;
   }
@@ -593,6 +661,81 @@ export class LedgerEngine {
       packages += 1;
     }
     return packages;
+  }
+
+  /**
+   * Block `input`'s ledger tasks of one module (LG-17; task 12.6): each run on the block's kept parse — its native
+   * objects, `rawPackages()` of its ledger and, for a task that declares `needsState`, the committed state, which must be
+   * the state before the block — and its result checked as plain data; by task name. A task that throws, returns
+   * anything else, or that the worker's entry does not give fails with {@link LedgerTaskFailed}; a trap is thrown as it
+   * is (the worker ends).
+   */
+  async tasks(input: TaskRun): Promise<Readonly<Record<string, unknown>>> {
+    const declared = this.#tasks.get(input.module);
+    const named = input.tasks.map((name) => {
+      const task = declared?.find((candidate) => candidate.name === name);
+      if (task === undefined) {
+        throw new LedgerTaskFailed(
+          input.module,
+          name,
+          input.height,
+          "is not one the ledger worker has: its entry gives the worker the modules the host ships, with their tasks " +
+            "(runLedgerWorker(modules), MD-1)",
+        );
+      }
+      return task;
+    });
+    const adapter = await this.#adapter(input.ledger);
+    const kept = this.#transactions(input, input.ledger, input.transactions);
+    const transactions = Object.freeze(kept.map((bytes) => adapter.nativeTransaction(bytes)));
+    const packages = adapter.rawPackages();
+    const results: Record<string, unknown> = {};
+    for (const task of named) {
+      // Block 0 has no state before it (IN-7: the genesis state is made in its apply): such a task gets none there.
+      const stateBefore = task.needsState && input.height > 0n ? this.#stateBefore(input, task.name) : undefined;
+      let result: unknown;
+      try {
+        result = await task.run(
+          Object.freeze({
+            height: input.height,
+            hash: input.hash,
+            ledger: input.ledger,
+            transactions,
+            packages,
+            ...(stateBefore === undefined ? {} : { stateBefore }),
+          }),
+        );
+      } catch (error) {
+        if (error instanceof WebAssembly.RuntimeError) throw error;
+        throw new LedgerTaskFailed(input.module, task.name, input.height, `threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      results[task.name] = this.#plain(
+        result,
+        (problem) =>
+          new LedgerTaskFailed(
+            input.module,
+            task.name,
+            input.height,
+            `returned ${problem}: a task returns structured-cloneable plain data, never a ledger package's object (Q49)`,
+          ),
+      );
+    }
+    return results;
+  }
+
+  /** The state before block `input` for its task `task`: the committed state, which must be at h − 1 (LG-17). */
+  #stateBefore(input: TaskRun, task: string): StateHandle {
+    const committed = this.#committed;
+    if (committed === null || committed.height !== input.height - 1n || !sameBytes(committed.hash, input.parentHash)) {
+      throw new LedgerTaskFailed(
+        input.module,
+        task,
+        input.height,
+        `needs the state before the block, and the ledger worker holds ${committed === null ? "no state" : `the state at ${committed.height}`}` +
+          " (core-ledger-state's on-compute has it hold that state)",
+      );
+    }
+    return committed.state;
   }
 
   /** A retained state's root, the state loaded by its key aside and dropped (LG-12; see the module comment). */

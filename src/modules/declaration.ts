@@ -16,6 +16,7 @@
  * runner (tasks 5.x).
  */
 
+import type { LedgerTask } from "../ledger/types.js";
 import type { z } from "zod";
 import { type EntryBuilder, moduleEntryBuilder } from "../config/entries.js";
 import type { BlockWriteHandle, ReadHandle, SchemaWriteHandle } from "../db/api.js";
@@ -112,6 +113,12 @@ export interface ModuleDeclaration {
   migrations: Migration[];
   /** True when this version may run only on a database no other version of the module wrote (DB-10). */
   requiresResync?: boolean;
+  /**
+   * Functions the ledger worker runs for each block with the native parsed objects, each result becoming the module's
+   * `block` item of the task's name (LG-17, `design.md` §5.5; task 12.6): the module requires `block-parsed`, and
+   * `ledger-state` for a task that declares `needsState`.
+   */
+  ledgerTasks?: readonly LedgerTask[];
   points: Partial<PointCallbacks>;
 }
 

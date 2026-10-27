@@ -9,12 +9,13 @@ import {
 } from "../../src/backbone/contract-logs/contract-logs.js";
 import type { BlockTransaction } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import {
+  CONTRACT_LOG_SITES_TASK,
   CORE_CONTRACT_LOGS_FAST_ID,
   fastLogsFrom,
   fastLogsOf,
   type UnsureLog,
 } from "../../src/backbone/core-contract-logs-fast/core-contract-logs-fast.js";
-import { inThreadLogReader } from "../../src/backbone/core-contract-logs-fast/reader.js";
+import { mainThreadLogReader as inThreadLogReader } from "./main-thread-log-reader.js";
 import { literalAt, type LogSite, logSitesOf } from "../../src/backbone/core-contract-logs-fast/transcripts.js";
 import { fullLogsOf } from "../../src/backbone/core-contract-logs-full/core-contract-logs-full.js";
 import {
@@ -47,9 +48,9 @@ import { LOG_STATE, wrapper } from "./contract-data-checks.js";
  * Task 13.1's modules in parts (`openspec/changes/core-arch/specs/contract-data/spec.md` CC-1 to CC-3; `design.md` §10):
  * `core-contract-logs-fast`'s literal rule over a transcript's ops, its reading of a transaction's transcripts in the
  * ledger's emission order — held to the vendored v9 package's own apply on a transaction of two intents —, its rows and
- * halts per outcome, its in-thread reader; `-full`'s rows from `vm-logs`; `core-contract-states`' rows from the
- * `ledger-state` item's keys; the shared table's columns, design §10's. The process tests are
- * `contract-data.test.ts`.
+ * halts per outcome, its ledger task (task 12.6, on ledger v8, v9 and v9-rc3); `-full`'s rows from `vm-logs`;
+ * `core-contract-states`' rows from the `ledger-state` item's keys; the shared table's columns, design §10's. The process
+ * tests are `contract-data.test.ts`.
  */
 
 const op = (name: string, args?: Record<string, unknown>): unknown => (args === undefined ? name : { [name]: args });
@@ -219,34 +220,34 @@ describe("core-contract-logs-fast's reading of a transaction's transcripts (CC-3
     expect(sitesOfNamed?.[0]?.entryPoint).toEqual(Uint8Array.of(0xff, 0xfe));
   });
 
-  it("reads no ledger v8 transaction (Q54: v8 logs are no MIP-0002 events), loads each ledger once, and forgets what it parsed", async () => {
-    const loads: string[] = [];
-    const forgotten: Uint8Array[][] = [];
-    const reader = inThreadLogReader(async (ledger, options) => {
-      loads.push(ledger);
-      const adapter = await loadLedgerPackage(ledger, options);
-      return { ...adapter, forgetTransactions: (transactions: Uint8Array[]) => (forgotten.push(transactions), adapter.forgetTransactions(transactions)) };
-    });
-    const contract = await contractFixture(RAW.v9);
-    const bytes = callTransaction(RAW.v9, contract, logProgram([cellValue(Uint8Array.of(1))]));
-    expect(await reader.read("v8", [bytes])).toEqual([[]]);
-    expect(await reader.read("v9", [])).toEqual([]);
-    expect(loads).toEqual([]);
-    await reader.read("v9", [bytes]);
-    await reader.read("v9", [bytes]);
-    expect(loads).toEqual(["v9"]);
-    expect(forgotten).toEqual([[bytes], [bytes]]);
-    // A failed load is tried again.
-    let fail = true;
-    const flaky = inThreadLogReader(async (ledger, options) => {
-      if (fail) {
-        fail = false;
-        throw new Error("no package");
-      }
-      return loadLedgerPackage(ledger, options);
-    });
-    await expect(flaky.read("v9", [bytes])).rejects.toThrow(/no package/);
-    expect((await flaky.read("v9", [bytes]))[0]).toHaveLength(1);
+  it("in its ledger task (task 12.6), reads no ledger v8 transaction (Q54: v8 logs are no MIP-0002 events), a transaction without calls as none, and a runtime 2.0 block's with the rc.3 package, its rows that package's own logs as on v9", async () => {
+    // v8: nothing read, not even the packages.
+    const v8 = await CONTRACT_LOG_SITES_TASK.run({ height: 1n, hash: new Uint8Array(32), ledger: "v8", transactions: [{}, {}], packages: {} });
+    expect(v8).toEqual([[], []]);
+    for (const ledger of ["v9", "v9-rc3"] as const) {
+      const adapter = await loadLedgerPackage(ledger, { networkId: NETWORK_ID });
+      const raw = RAW[ledger];
+      const contract = await contractFixture(raw);
+      const deployed = adapter.apply(adapter.emptyState(), block([contract.deploy])).state;
+      const call = callTransaction(raw, contract, logProgram([cellValue(Uint8Array.of(7)), wrapper(1, 5, cellValue(Uint8Array.of(2)))]));
+      const input = block([call, zswapOutputTransaction(raw)], { height: 2n, timestampMs: BigInt(T0 + 6_000), parentTimestampMs: BigInt(T0) });
+      const transactions = input.transactions.map((bytes, index) => parsedOf(adapter, bytes, index));
+      const sites = (await CONTRACT_LOG_SITES_TASK.run({
+        height: 2n,
+        hash: input.hash,
+        ledger,
+        transactions: input.transactions.map((bytes) => adapter.nativeTransaction(bytes)),
+        packages: adapter.rawPackages(),
+      })) as readonly (readonly LogSite[])[];
+      expect(sites[0]?.map((site) => [site.segment, site.fallible, site.call, site.op]), ledger).toEqual([
+        [1, false, 0, 1],
+        [1, false, 0, 3],
+      ]);
+      expect(sites[1], ledger).toEqual([]);
+      const { output } = adapter.apply(deployed, input);
+      expect(output.logs, ledger).toHaveLength(2);
+      expect(fastLogsFrom(2n, transactions, ["success", "success"], sites, unsureThrows), ledger).toEqual(asRows(output.logs));
+    }
   });
 });
 

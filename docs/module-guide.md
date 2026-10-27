@@ -600,7 +600,7 @@ entry starting above 0 is refused at startup with `cannot-start-mid-chain`. Its 
 
 - **`ledger-state`**: the state after the block, as plain data — its root node's key, its root (the node's), the ledger
   parameters after the block, the zswap tree's first free index. The state itself stays in the worker; what a module
-  needs of it that this does not give is a ledger task's (task 12.6).
+  needs of it that this does not give is a ledger task's (see "Ledger tasks").
 - **`ledger-events`**: every ledger event of the block but contract logs — zswap inputs and outputs, contract deploys,
   DUST events, parameter changes —, each with its transaction's index, its segments, its bytes and its nullifier,
   commitment, tree index or contract address where it has one.
@@ -657,3 +657,50 @@ provider: the operator picks one per deployment, and one may stop at a height an
 database synced with `-full` and backed up can continue with `-fast` after its restore. The `block` item is a frozen
 array of `{ transaction, index, address, entryPoint, logicalSegment, version, eventType, data }`, put before
 `on-compute` (by `-fast` at `on-parse`, by `-full` at `on-compute`), so read it from `on-compute` on.
+
+## Ledger tasks
+
+`block-parsed` gives each transaction as plain data; the ledger package's own parsed objects stay in the ledger worker
+(LG-7, LG-17 of the `core-arch` change). A module that needs more — a contract call's decoded arguments, say —
+declares ledger tasks: functions the ledger worker runs for each block on the block's one parse.
+
+```ts
+export const callArgs = defineModule({
+  id: "call-args",
+  // version, side, startsMidChain, configSchema, migrations as for any module
+  requires: ["block-parsed"],
+  provides: [{ name: "call-arguments", lifetimes: ["block"] }],
+  ledgerTasks: [
+    { name: "call-arguments", needsState: false, run: ({ transactions, packages }) => decode(transactions, packages) },
+  ],
+  points: {
+    async "on-compute"(p, b, read, out) {
+      const calls = b.items.get("call-arguments"); // the task's result, plain data
+    },
+  },
+});
+```
+
+- **Its result is a `block` item of the module**, named as the task: provide it with the `block` lifetime, once per
+  task. The result is put, frozen, before the module's own callback at the point the task runs, and any module that
+  requires the item reads it as any other.
+- **What `run` gets:** `height`, `hash`, `ledger` (`v8`, `v9-rc3`, `v9`), `transactions` — the package's own objects
+  of the block's one parse, in `block-parsed`'s order —, `packages` (`rawPackages()`: the block's ledger package by
+  name, `@umbradb/vendored-ledger-v9-rc3` on runtime 2.0 blocks, whose API is v9's) and, only for a task that declares
+  `needsState: true`, `stateBefore`, the ledger state before the block (none at block 0). Read them; change nothing.
+- **When it runs:** a task without `needsState` at the module's `on-parse`, so its item is there from `on-parse` on (a
+  best block's too) and the module may start mid-chain; one with `needsState` at the module's `on-compute`, after
+  `core-ledger-state`'s. A module with tasks requires `block-parsed`, and one with a `needsState` task also
+  `ledger-state`: where `core-ledger-state` is not active the graph refuses it (`item-no-provider`).
+- **Return plain data only:** `undefined`, `null`, booleans, numbers, `bigint`s, strings, arrays, plain objects and
+  `Uint8Array`s. A package's object anywhere in the result (a `LedgerState`, a `ContractCall`, …), or any other class
+  instance, fails the block with `callback-error` naming the module and the task, as a task that throws does.
+- **Free what you allocate; keep nothing.** Free each object the package's getters give you (`free()`) before the task
+  returns: one left live can make the ledger refuse to drop a swept node, which costs a restart of the ledger worker. A
+  task writes nothing and keeps nothing between blocks.
+- **The worker must have the task.** Functions cannot cross threads, so the worker imports the modules itself: the
+  `umbradb` command imports your configuration file there as on the main thread and takes its `modules` export (keep
+  the file free of side effects: it runs in both threads, and again when the worker restarts). A program that starts
+  processes itself gives `startLedgerWorker` an entry of its own that calls `runLedgerWorker` with UmbraDB's core
+  modules' tasks (`CORE_LEDGER_TASK_MODULES`) and its modules. A task the worker lacks fails the block, naming it.
+- A private module has no ledger tasks: a private process has no ledger worker.

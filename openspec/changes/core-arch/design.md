@@ -956,6 +956,38 @@ plain data (`src/backbone/core-contract-logs-fast/transcripts.ts`) —, run for 
 deserialized a second time and freed once read; none on ledger v8, Q54), as `core-block-parsed` parsed in its own
 thread before task 12.3. Task 12.6 runs the same function as a ledger task in the worker, on the block's one parse.
 
+As built (task 12.6): **the declaration.** `ModuleDeclaration.ledgerTasks` holds §5.1's `LedgerTask`s, whose block
+(`LedgerTaskBlock`) also carries its hash and ledger, and whose `run` may return a promise. Each task is named after a
+`block` item its module provides — the item its result becomes —, once; a module with tasks requires `block-parsed` (its
+tasks run on the block's one parse) and, for a task that declares `needsState`, `ledger-state`, so the graph refuses it
+where `core-ledger-state` is not active; a private module has none (no ledger worker). Startup holds a declaration built
+without types to it (`invalid-declaration`, naming the field). **The main thread.** At startup the runner gives each
+module with tasks the points that run them (`src/ledger/tasks.ts`'s `withLedgerTaskPoints`) and binds it to the
+process's ledger worker: a task without `needsState` runs at the module's `on-parse` (after `core-block-parsed`'s, a
+queued best block's included), so its item is published before `on-compute` and kept when a height is processed again
+from `on-compute` (IN-10); one with `needsState` runs at the module's `on-compute` (after `core-ledger-state`'s), on the
+state the worker still holds as committed until the block's `on-after-db-write` — the state before the block —, again on
+a retry from `on-compute`. Each result is put as the module's item before the module's own callback at that point, which
+sees it in its items; results are frozen. **The worker.** `runLedgerWorker(modules)` (`src/ledger/worker/run.ts`) is the
+thread's main; UmbraDB's entry (`entry.ts`) calls it with the core modules' tasks (`src/backbone/ledger-tasks.ts`:
+`-fast`'s, from a file importing only what the task needs) and the `modules` export of the module
+`LedgerWorkerOptions.modules` names — for `umbradb run` its configuration file, the host program (MD-1); a host's own
+entry calls it with its modules (`typeScriptEntry` runs one from its TypeScript sources); the browser's bundle runs
+UmbraDB's entry, which there names no module. A request of the kind `tasks` names the module, its tasks, the block, its
+ledger and how many transactions `block-parsed` holds: `LedgerEngine.tasks` runs each on the kept parse
+(`nativeTransaction` of the kept arrays: no second parse) with `rawPackages()` and, for `needsState`, the committed
+state, which must be at h − 1 (block 0 has none before it: such a task gets none there), and checks each result as plain
+data (`src/ledger/plain-data.ts`: the protocol's types walked — anything else, a class instance above all, refused by
+its class and path — then a structured-clone round trip that must give the same value). A WebAssembly-backed object is
+refused there: a structured clone alone copies it as a plain object holding a pointer into the package's memory. A task
+that throws, returns anything else, or that the entry does not give fails with `LedgerTaskFailed`, naming the module,
+the task and the height (`callback-error` at the module's point); a trap ends the worker. A task's request in flight
+when the worker restarts (§5.4, Q144 B) runs again on the new thread, on the parse sent again. The block's parse is
+checked as plain data the same way before it leaves (LG-7). **`-fast`** reads its log sites in its task
+`contract-log-sites` (its new `block` item) on the block's one parse, every transaction of the block, with the v9
+package of the block's ledger — rc.3's on runtime 2.0 blocks (`v9-rc3`), which task 13.1's reading refused —; task
+13.1's reading on the main thread is gone from the sources (a test helper now, the negative control's).
+
 ## 6. Modules
 
 The declaration is CORE-ARCH §4.10's `ModuleDeclaration`, plus `requiresResync?: boolean` (DB-10); `ProcessContext` also

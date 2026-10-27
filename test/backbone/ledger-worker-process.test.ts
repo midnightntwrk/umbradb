@@ -39,6 +39,7 @@ function counted() {
       load: (...args) => host.load(...args),
       retained: (...args) => host.retained(...args),
       evict: (...args) => host.evict(...args),
+      tasks: (...args) => host.tasks(...args),
       probe: () => host.probe(),
       restart: () => host.restart(),
       get restarts() {

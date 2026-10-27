@@ -21,8 +21,10 @@
  * the VM decodes it, with the package's own `decodeLogItem` over its tagged serialization (`serializeStateValue`): a
  * malformed wrapper is a version-0 `Misc` log of the whole value, and data over the emitted-log bound is no log (null).
  *
- * The function takes what a ledger task takes (`design.md` §5.5, LG-17: the native parsed object and `rawPackages()`), so
- * task 12.6 can run it as one in the ledger worker; until then `./reader.ts` runs it in the calling thread.
+ * The function takes what a ledger task takes (`design.md` §5.5, LG-17: the native parsed object and `rawPackages()`):
+ * the module's ledger task (`./task.ts`, task 12.6) runs it in the ledger worker on the block's one parse. It reads with
+ * the v9 package the block's ledger has — rc.5's, or rc.3's on runtime 2.0 blocks (`v9-rc3`, task 12.2a: the same API, a
+ * module of its own) —, the one `rawPackages()` holds.
  */
 
 import type { LogItem } from "../../ledger/types.js";
@@ -50,6 +52,9 @@ export interface LogSite {
 
 /** The vendored v9 package's name in `rawPackages()` (`src/ledger/releases.ts`). */
 export const V9_PACKAGE = "@umbradb/vendored-ledger-v9";
+
+/** The vendored v9 packages' names in `rawPackages()`: rc.5's, and rc.3's for runtime 2.0 blocks (task 12.2a). */
+export const V9_PACKAGES: readonly string[] = Object.freeze([V9_PACKAGE, "@umbradb/vendored-ledger-v9-rc3"]);
 
 /** What of the v9 package the reading uses. */
 interface V9Raw {
@@ -105,12 +110,15 @@ function decoded(raw: V9Raw, value: unknown): LogItem | null {
 }
 
 /**
- * The `log` sites of `transaction` — a native transaction of the v9 package (a system transaction has none) — in the
- * ledger's order (see the module comment), read with the v9 package of `packages` (`rawPackages()`).
+ * The `log` sites of `transaction` — a native transaction of a v9 package (a system transaction has none) — in the
+ * ledger's order (see the module comment), read with the v9 package of `packages` (`rawPackages()`: rc.5's or rc.3's).
  */
 export function logSitesOf(transaction: unknown, packages: Readonly<Record<string, unknown>>): LogSite[] {
-  const raw = packages[V9_PACKAGE] as V9Raw | undefined;
-  if (raw === undefined) throw new TypeError(`the packages hold no ${V9_PACKAGE}: only ledger v9 has MIP-0002 logs (Q54)`);
+  const name = V9_PACKAGES.find((candidate) => packages[candidate] !== undefined);
+  if (name === undefined) {
+    throw new TypeError(`the packages hold no ${V9_PACKAGES.join(" or ")}: only ledger v9 has MIP-0002 logs (Q54)`);
+  }
+  const raw = packages[name] as V9Raw;
   const intents = (transaction as { readonly intents?: ReadonlyMap<number, unknown> }).intents;
   const ordered = [...(intents ?? new Map<number, unknown>())].sort(([a], [b]) => a - b);
   // Each intent's calls with their transcripts, as plain data, the package's objects freed at once.

@@ -2751,9 +2751,51 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       with `umbradb restore`'s code (BK-2, BK-4), A103's loads and holdings checked on both
       (`test/backbone/ledger-window.test.ts`, about 110 s in all); its revisions test and its control are unchanged.
       **Pending:** nothing of 12.5a.
-- [ ] 12.6 Ledger tasks and the plain-data `block-parsed` (`runLedgerWorker`, the host's worker entry, the
+- [x] 12.6 Ledger tasks and the plain-data `block-parsed` (`runLedgerWorker`, the host's worker entry, the
       structured-clone check).
       **Acceptance:** A137.
+      **Done (2026-10-27):** **the declaration** (`src/modules/declaration.ts`, `validation.ts`): `ledgerTasks` holds
+      §5.1's `LedgerTask`s (`src/ledger/types.ts`; `LedgerTaskBlock`: height, hash, ledger, the native transactions,
+      `packages`, `stateBefore` for `needsState`), each named after a `block` item its module provides, once; a module
+      with tasks requires `block-parsed`, one with a `needsState` task `ledger-state` (so the graph refuses it with
+      `item-no-provider` where `core-ledger-state` is not active); a private module has none; each other shape is
+      `invalid-declaration`, naming the field (no new code). **The main thread** (`src/ledger/tasks.ts`): startup gives
+      each module with tasks the points that run them (`withLedgerTaskPoints`) and binds it to the process's ledger
+      worker (`src/runner/process.ts`, two lines): a task without `needsState` runs at the module's `on-parse`, one with
+      it at the module's `on-compute` after `core-ledger-state`'s, on the committed state at h − 1; each result, frozen,
+      is put as the module's item before its own callback. **The worker:** `runLedgerWorker(modules)`
+      (`src/ledger/worker/run.ts`, the old entry's body) is the thread's main; UmbraDB's entry (`entry.ts`) calls it
+      with the core modules' tasks (`src/backbone/ledger-tasks.ts`) and the `modules` export of
+      `LedgerWorkerOptions.modules`, for `umbradb run` the configuration file (`src/cli/run.ts`); `typeScriptEntry`
+      starts a host's own entry from its sources. The request kind `tasks` (`LedgerEngine.tasks`) runs a module's tasks
+      on the block's kept parse (`nativeTransaction`: no second parse) with `rawPackages()`, and checks each result, and
+      each block's parse, as plain data (`src/ledger/plain-data.ts`: the protocol's types walked, a class instance
+      refused by its class and path, then a structured-clone round trip that must give the same value); a throw, a
+      result that is not plain data, or a task the entry lacks fails with `LedgerTaskFailed` (module, task, height:
+      `callback-error` at the module's point); a trap ends the worker; a task's request in flight at a restart (12.5a)
+      runs again on the new thread. **`-fast`** reads its log sites in its ledger
+      task `contract-log-sites` (`core-contract-logs-fast/task.ts`, its new `block` item) in the worker; `reader.ts`,
+      the main thread's second parse, is gone (a test helper now, `test/backbone/main-thread-log-reader.ts`), and
+      `logSitesOf` reads with rc.3's package on runtime 2.0 blocks, which task 13.1's reading refused. The browser build
+      bundles `run.ts`, `-fast`'s task and the three vendored versions' WebAssembly. `docs/module-guide.md`: "Ledger
+      tasks". `vitest.config.ts`: `run.ts` out of coverage as `entry.ts` is (a thread only). Tests (seen failing first:
+      on `ceea780` with only the new tests, 7 files, 24 of 25 tests; the rc.3 read and the restart before their fixes):
+      `test/ledger/ledger-tasks.test.ts` (9: the engine — one parse per transaction, the state before the block, block
+      0, the failures and their messages, the parse's check —, a real thread from UmbraDB's entry and from a host's
+      own, a trap ending it, a task in flight at a restart, the main thread's points), `plain-data.test.ts` (4),
+      `test/modules/ledger-tasks-validation.test.ts` (14), `test/cli/run-ledger-tasks.test.ts` (`umbradb run`'s worker
+      runs a task of a module its configuration file exports), `contract-modules.test.ts` (-fast's task on v8, v9 and
+      v9-rc3, its rows the package's own logs), and `test/backbone/ledger-tasks.test.ts`, A137 through the process on
+      PostgreSQL 18.6 and PGlite 0.5.10: a test module's task decodes each call's pushed arguments and its `on-compute`
+      receives them; with it, a `needsState` task, `-fast`'s task and three readers of `block-parsed` the package
+      deserializes each transaction once, in the worker, never on the main thread; every `block` item a main-thread
+      callback receives passes a structured-clone round trip; a task returning a `LedgerState`, and one that throws,
+      halt with `callback-error` naming the module, the task and the point; a task without `needsState` runs from S = 2
+      without `core-ledger-state` and gets no state; a module with a `needsState` task is refused (`item-no-provider`).
+      Committed negative controls (`ledger-tasks.negative-control.test.ts`, both backends): the plain-data check off,
+      a task's WebAssembly-backed object reaches a main-thread callback, which the round trip catches; `-fast` reading
+      on the main thread again parses each calling transaction a second time.
+      **Pending:** nothing of 12.6.
 
 ## 13. Contract data
 
@@ -2786,8 +2828,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `contract-logs-handoff.test.ts` (A111 on both: `-full` to 3, a backup at 3, its restore, `-fast` from 4, every
       log once); committed controls in `contract-data.negative-control.test.ts`. The code registry's last pending code
       has its tests (`PENDING` empty).
-      **Pending:** `-fast` as a ledger task in the worker (12.6); a recorded tape with a MIP-0002 log (the devnet's
-      contracts log none); issue 00033-restore-future-module.
+      **Pending:** a recorded tape with a MIP-0002 log (the devnet's contracts log none); issue
+      00033-restore-future-module. (`-fast` reads in its ledger task in the worker since task 12.6.)
 
 ## 14. Private processes
 

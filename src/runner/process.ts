@@ -175,6 +175,7 @@ import type { Database, ReadHandle } from "../db/api.js";
 import { type MigrationPart, startDatabase } from "../db/migrate.js";
 import { startWriter } from "../db/writer-lock.js";
 import type { LedgerTable } from "../ledger/version-table.js";
+import { bindLedgerTasks, hasLedgerTasks, withLedgerTaskPoints } from "../ledger/tasks.js";
 import { type LedgerHost, startLedgerWorker } from "../ledger/worker/host.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
@@ -787,7 +788,8 @@ class Process implements ProcessHandle {
     let loadedInput: ConfigInput | undefined;
     try {
       this.#step();
-      const declarations = validateDeclarations(input.declarations);
+      // A module's ledger tasks run through points of its own (task 12.6, LG-17: `src/ledger/tasks.ts`).
+      const declarations = withLedgerTaskPoints(validateDeclarations(input.declarations));
       const given = input.config ?? {};
       const loaded =
         "data" in given ? { file: given.file, data: plainData(given.data, given.file) } : await loadConfig(given);
@@ -914,6 +916,7 @@ class Process implements ProcessHandle {
       // A request given no read (a parse) reads stored nodes through the process's database.
       this.#ledger.useDatabase({ read: (body) => db.read(body) });
       if (parses) bindLedgerParser(contexts.of(CORE_BLOCK_PARSED_ID), this.#ledger);
+      for (const part of graph.modules) if (hasLedgerTasks(part)) bindLedgerTasks(contexts.of(part.id), this.#ledger);
       if (applies && isBlockLedgerSource(source)) {
         bindCoreLedgerState(contexts.of(CORE_LEDGER_STATE_ID), { ledger: this.#ledger, source });
       }

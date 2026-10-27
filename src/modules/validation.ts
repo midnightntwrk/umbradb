@@ -84,11 +84,13 @@ const DECLARATION_PROPERTIES = [
   "configSchema",
   "migrations",
   "requiresResync",
+  "ledgerTasks",
   "points",
 ];
 const ITEM_PROPERTIES = ["name", "lifetimes", "table"];
 const TABLE_PROPERTIES = ["schema", "tables", "kind", "deterministic"];
 const MIGRATION_PROPERTIES = ["id", "sql"];
+const TASK_PROPERTIES = ["name", "needsState", "run"];
 
 /**
  * semver 2.0.0's grammar (semver.org, "Is there a suggested regular expression"); the configuration's versions are
@@ -264,6 +266,73 @@ function checkItem(shape: Shape, item: unknown, at: string, tables: Map<string, 
   return name;
 }
 
+/**
+ * A declaration's `ledgerTasks` (LG-17; task 12.6): a list of `{ name, needsState, run }`, each named after a `block`
+ * item the module provides, once; a module with tasks requires `block-parsed` (its tasks run on the block's parse,
+ * LG-7), and one with a `needsState` task `ledger-state` (so the graph refuses it where `core-ledger-state` is not
+ * active); a private module has none (a private process has no ledger worker).
+ */
+function checkLedgerTasks(shape: Shape, value: Plain): void {
+  const tasks = value.ledgerTasks;
+  if (tasks === undefined) return;
+  if (!Array.isArray(tasks)) shape.wrong("ledgerTasks", tasks, "a list of ledger tasks, { name, needsState, run }");
+  if (tasks.length === 0) return;
+  if (value.side === "private") {
+    shape.refuse(
+      "ledgerTasks",
+      "nothing, on a private module",
+      `${shape.who} is a private module and declares ledger tasks: a private process has no ledger worker (LG-17, ` +
+        "PP-1); read the public tables instead, or move the task to a public module",
+    );
+  }
+  const requires = value.requires as string[];
+  const provides = value.provides as Plain[];
+  const named = new Map<string, number>();
+  tasks.forEach((task, position) => {
+    const at = `ledgerTasks[${position}]`;
+    if (!isObject(task)) shape.wrong(at, task, "a ledger task, { name, needsState, run }");
+    shape.onlyKnown(task, at, TASK_PROPERTIES);
+    const name = shape.string(task, "name", `${at}.name`);
+    if (typeof task.needsState !== "boolean") shape.wrong(`${at}.needsState`, task.needsState, "true or false");
+    if (typeof task.run !== "function") shape.wrong(`${at}.run`, task.run, "a function, (block) => plain data");
+    const item = provides.find((candidate) => candidate.name === name);
+    if (item === undefined || !(item.lifetimes as string[]).includes("block")) {
+      shape.refuse(
+        `${at}.name`,
+        "a block item the module provides",
+        `${shape.who}'s ledger task ${name} names no block item the module provides: a task's result becomes the ` +
+          `module's block item of its name (LG-17); provide { name: "${name}", lifetimes: ["block"] }`,
+      );
+    }
+    const before = named.get(name);
+    if (before !== undefined) {
+      shape.refuse(
+        `${at}.name`,
+        "a task name used once",
+        `${shape.who} declares the ledger task ${name} twice (ledgerTasks[${before}] and ${at}): each task gives one ` +
+          "item (LG-17)",
+      );
+    }
+    named.set(name, position);
+    if (task.needsState === true && !requires.includes("ledger-state")) {
+      shape.refuse(
+        `${at}.needsState`,
+        "a module that requires ledger-state",
+        `${shape.who}'s ledger task ${name} needs the state before the block, and the module does not require ` +
+          "ledger-state: it must, so that the graph refuses it where core-ledger-state is not active (LG-17)",
+      );
+    }
+  });
+  if (!requires.includes("block-parsed")) {
+    shape.refuse(
+      "requires",
+      "a list holding block-parsed",
+      `${shape.who} declares ledger tasks and does not require block-parsed: its tasks run on the block's one parse, ` +
+        "core-block-parsed's (LG-7, LG-17); require block-parsed",
+    );
+  }
+}
+
 /** Checks everything `ModuleDeclaration`'s type says of `value`, except MD-2's own causes (the rules'). */
 function checkShape(value: unknown, origin: DeclarationOrigin, index: number): ModuleDeclaration {
   const shape: Shape = new Shape(origin, index, isObject(value) ? value.id : undefined);
@@ -334,6 +403,7 @@ function checkShape(value: unknown, origin: DeclarationOrigin, index: number): M
     shape.string(migration, "sql", `${at}.sql`);
   });
   shape.boolean(value, "requiresResync", false);
+  checkLedgerTasks(shape, value);
 
   const points = value.points;
   if (!isObject(points)) return shape.wrong("points", points, "an object of callbacks by point name");

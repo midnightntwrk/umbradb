@@ -5,7 +5,7 @@
  */
 
 import type { LedgerName } from "../types.js";
-import type { ApplyBlock, BlockId, GenesisBlock, LoadState } from "./engine.js";
+import type { ApplyBlock, BlockId, GenesisBlock, LoadState, TaskRun } from "./engine.js";
 
 /** A request of the main thread, by kind (each one `LedgerEngine`'s method of that name, `./engine.ts`). */
 export type LedgerRequest =
@@ -18,6 +18,7 @@ export type LedgerRequest =
   | { readonly type: "load"; readonly input: LoadState }
   | { readonly type: "retained"; readonly input: LoadState }
   | { readonly type: "evict"; readonly keys: Uint8Array[] }
+  | { readonly type: "tasks"; readonly input: TaskRun }
   | { readonly type: "probe" };
 
 /** A request's kind. */

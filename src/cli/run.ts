@@ -14,6 +14,8 @@
  *   process reads the chain from the `core` entry's `node` through `core-block-fetch`'s node source (`nodeSourceOf`,
  *   task 10.3), a private one from its public database through one private intake (`core-private-source`, task 14.1);
  * - the admin endpoints, served by default on `listen.admin` (AE-1, Q128 B: nothing is passed for them);
+ * - a public process's ledger worker given the file to import for its user modules' ledger tasks (MD-1, LG-17: the file
+ *   is the host program, imported in the worker as on the main thread; `LedgerWorkerOptions.modules`, task 12.6);
  * - its log on standard error, redacted by the process (CF-4, AE-6).
  * A file that cannot be loaded is handed to startup as the file, so that startup refuses it as itself, with the
  * build's own modules.
@@ -34,9 +36,11 @@
  * boundary — is not (exit 0).
  */
 
+import { pathToFileURL } from "node:url";
 import { privateIntake } from "../backbone/core-private-source/index.js";
 import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
 import { type LoadedConfig, loadConfig } from "../config/load.js";
+import { startLedgerWorker } from "../ledger/worker/host.js";
 import { type ProcessHandle, type ProcessingEnd, type ProcessInput, startProcess } from "../runner/process.js";
 import { commandBuild } from "./build-modules.js";
 import { inferSide } from "./config-check.js";
@@ -100,7 +104,7 @@ function processOf(
   options: RunOptions,
   loaded: LoadedConfig | null,
   userModules: (loaded: LoadedConfig) => readonly unknown[],
-): Pick<ProcessInput, "config" | "declarations" | "source" | "side"> {
+): Pick<ProcessInput, "config" | "declarations" | "source" | "side" | "ledgerWorker"> {
   if (loaded === null) {
     // Startup loads the file again and refuses it as itself (see the module comment).
     const file = options.file === undefined ? {} : { file: options.file };
@@ -118,7 +122,14 @@ function processOf(
       side: "private",
     };
   }
-  return { config, declarations: commandBuild(user), source: nodeSourceOf, side: "public" };
+  const modules = pathToFileURL(loaded.file);
+  return {
+    config,
+    declarations: commandBuild(user),
+    source: nodeSourceOf,
+    side: "public",
+    ledgerWorker: () => startLedgerWorker({ modules }),
+  };
 }
 
 /**

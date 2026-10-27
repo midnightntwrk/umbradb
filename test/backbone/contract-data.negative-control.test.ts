@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ContractLog } from "../../src/backbone/contract-logs/contract-logs.js";
 import { blockParsedItemOf } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import { coreContractLogsFast } from "../../src/backbone/core-contract-logs-fast/core-contract-logs-fast.js";
-import { inThreadLogReader } from "../../src/backbone/core-contract-logs-fast/reader.js";
+import { mainThreadLogReader as inThreadLogReader } from "./main-thread-log-reader.js";
 import { coreContractLogsFull } from "../../src/backbone/core-contract-logs-full/core-contract-logs-full.js";
 import { type ContractStateRow, contractStatesOf, coreContractStates } from "../../src/backbone/core-contract-states/core-contract-states.js";
 import { txResultsItemOf } from "../../src/backbone/core-tx-results/core-tx-results.js";

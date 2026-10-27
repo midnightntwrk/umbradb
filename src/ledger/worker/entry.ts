@@ -1,87 +1,24 @@
 /**
- * The ledger worker thread's entry (`openspec/changes/core-arch/design.md` §5.3; task 12.3): the engine (`./engine.ts`)
- * over the adapters `../load.ts` loads — or a test package's loader (`workerData.loader`) — and the worker's side of
- * the node-store bridge (`./node-bridge.ts`), answering the main thread's requests one at a time, in the order they
- * came (`./host.ts`). A package that traps (a WebAssembly `RuntimeError`) leaves its module in no known state: the
- * answer says so (`fatal`), nothing runs after it, and the host ends the thread. Runs only as a thread of its own
- * (out of coverage; what it runs, the engine and the bridge, is covered on the main thread too).
+ * UmbraDB's own ledger worker entry (`openspec/changes/core-arch/design.md` §5.3, §5.5; `specs/modules/spec.md` MD-1;
+ * tasks 12.3, 12.6): the thread `startLedgerWorker` starts unless given another entry. It runs the ledger worker
+ * (`./run.ts`) with the ledger tasks of UmbraDB's core modules (`src/backbone/ledger-tasks.ts`) and of the user modules
+ * of the module `workerData.modules` names, if any — its `modules` export, as a configuration file exports its user
+ * modules (`src/config/load.ts`'s `MODULES_EXPORT`, CF-1, Q106): for the `umbradb` command the configuration file, which
+ * is the host program and is imported here as on the main thread; nothing is loaded by name (MD-1). The browser build
+ * bundles this entry (§9.2), which names no module there. Runs only as a thread of its own (out of coverage).
  */
 
-import { parentPort, workerData } from "node:worker_threads";
-import type { LedgerName, LedgerPackage, LedgerPackageOptions } from "../types.js";
-import { LedgerEngine, type LedgerLoader } from "./engine.js";
-import { bridgeStore } from "./node-bridge.js";
-import type { FromLedgerWorker, LedgerRequest, ToLedgerWorker } from "./protocol.js";
+import { workerData } from "node:worker_threads";
+import { CORE_LEDGER_TASK_MODULES } from "../../backbone/ledger-tasks.js";
+import { type LedgerWorkerModule, runLedgerWorker } from "./run.js";
 
-interface LoaderModule {
-  loadLedger?(ledger: LedgerName, options: LedgerPackageOptions, data: unknown): Promise<LedgerPackage>;
-  loadLedgerPackage?: LedgerLoader;
-  probe?(): unknown;
+/** The `modules` export of the module at `url` (none without it); throws for one that is not a list. */
+async function userModulesOf(url: string): Promise<readonly LedgerWorkerModule[]> {
+  const imported = (await import(url)) as { readonly modules?: unknown };
+  if (imported.modules === undefined) return [];
+  if (!Array.isArray(imported.modules)) throw new TypeError(`${url} exports modules as something other than a list (CF-1)`);
+  return imported.modules as readonly LedgerWorkerModule[];
 }
 
-const { memory, loader, loaderData } = workerData as { memory: SharedArrayBuffer; loader: string | null; loaderData?: unknown };
-const port = parentPort as NonNullable<typeof parentPort>;
-const loaded = (loader === null ? await import("../load.js") : await import(loader)) as LoaderModule;
-const load: LedgerLoader =
-  loaded.loadLedger === undefined
-    ? (loaded.loadLedgerPackage as LedgerLoader)
-    : (ledger, options) => (loaded.loadLedger as NonNullable<LoaderModule["loadLedger"]>)(ledger, options, loaderData);
-let current = 0;
-const store = bridgeStore(
-  memory,
-  () => port.postMessage({ type: "node", id: current } satisfies FromLedgerWorker),
-  (key) => engine.pendingNode(key),
-);
-const engine: LedgerEngine = new LedgerEngine({ load, store });
-
-async function run(request: LedgerRequest): Promise<unknown> {
-  switch (request.type) {
-    case "parse":
-      return engine.parse(request.ledger, request.block, request.transactions);
-    case "genesis-root":
-      return engine.genesisRoot(request.ledger, request.bytes);
-    case "genesis":
-      return engine.genesis(request.input);
-    case "apply":
-      return engine.apply(request.input);
-    case "commit":
-      return engine.commit(request.block);
-    case "release":
-      return engine.release(request.drop);
-    case "load":
-      return engine.load(request.input);
-    case "retained":
-      return engine.retained(request.input);
-    case "evict":
-      return engine.evict(request.keys);
-    case "probe":
-      return loaded.probe?.() ?? null;
-  }
-}
-
-let chain: Promise<void> = Promise.resolve();
-/** The trap that left the package in no known state, after which nothing runs (the host ends the thread). */
-let trapped: Error | null = null;
-port.on("message", ({ id, request }: ToLedgerWorker) => {
-  chain = chain.then(async () => {
-    current = id;
-    store.begin();
-    try {
-      if (trapped !== null) throw trapped;
-      const value = await run(request);
-      port.postMessage({ type: "answer", id, ok: true, value } satisfies FromLedgerWorker);
-    } catch (thrown) {
-      const fatal = thrown instanceof WebAssembly.RuntimeError;
-      const error = thrown instanceof Error ? thrown : new Error(String(thrown));
-      const read = store.lastError === null ? "" : ` (the node store: ${store.lastError})`;
-      port.postMessage({
-        type: "answer",
-        id,
-        ok: false,
-        fatal,
-        error: { name: error.name, message: `${error.message}${read}` },
-      } satisfies FromLedgerWorker);
-      if (fatal) trapped = error;
-    }
-  });
-});
+const named = (workerData as { readonly modules?: string | null } | null)?.modules ?? null;
+await runLedgerWorker([...CORE_LEDGER_TASK_MODULES, ...(named === null ? [] : await userModulesOf(named))]);

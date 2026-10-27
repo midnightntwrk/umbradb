@@ -259,7 +259,9 @@ describe("core-contract-states, core-contract-logs-full and core-contract-logs-f
     ]);
     const item = { name: "contract-logs", lifetimes: ["block", "table"], table: { schema: "contract_logs", tables: ["logs"], kind: "append-only" } };
     expect(CORE_CONTRACT_LOGS_FULL.provides).toEqual([item]);
-    expect(CORE_CONTRACT_LOGS_FAST.provides).toEqual([item]);
+    // Task 12.6: -fast's ledger task gives its block item contract-log-sites (CC-3: "in a ledger task").
+    expect(CORE_CONTRACT_LOGS_FAST.provides).toEqual([item, { name: "contract-log-sites", lifetimes: ["block"] }]);
+    expect(CORE_CONTRACT_LOGS_FAST.ledgerTasks?.map((task) => [task.name, task.needsState])).toEqual([["contract-log-sites", false]]);
     expect(CORE_CONTRACT_LOGS_FAST.migrations).toEqual(CORE_CONTRACT_LOGS_FULL.migrations);
     expect(Object.keys(CORE_CONTRACT_LOGS_FULL.points).sort()).toEqual(["on-compute", "on-db-write"]);
     expect(Object.keys(CORE_CONTRACT_LOGS_FAST.points).sort()).toEqual(["on-db-write", "on-parse"]);

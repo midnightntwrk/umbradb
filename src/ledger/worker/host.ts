@@ -28,8 +28,10 @@
  *
  * **The thread's entry** ({@link ledgerWorkerEntry}): beside a build, the compiled `entry.js`; from the TypeScript
  * sources (development, the tests), `entry.ts` through Node.js's type stripping, with a resolve hook mapping the
- * sources' `.js` imports to their `.ts` files, as the admin worker's (`src/admin/server.ts`). The worker imports its
- * adapters from `../load.ts` unless {@link LedgerWorkerOptions.loader} names a test package's loader.
+ * sources' `.js` imports to their `.ts` files, as the admin worker's (`src/admin/server.ts`) — {@link typeScriptEntry}
+ * for any entry of TypeScript sources, a host's own. The worker imports its adapters from `../load.ts` unless
+ * {@link LedgerWorkerOptions.loader} names a test package's loader, and runs the ledger tasks of the modules its entry
+ * gives it (`./run.ts`; UmbraDB's entry, `./entry.ts`, also those of {@link LedgerWorkerOptions.modules}, task 12.6).
  *
  * {@link inThreadLedger} is the same interface over an engine on the main thread: a negative control's (A101: ledger
  * work moved to the main thread) and the tests'. It cannot read stored nodes, which would block the thread that owns
@@ -48,9 +50,13 @@ import {
   type LedgerLoader,
   type LoadedState,
   type LoadState,
+  type LedgerWorkerModule,
+  ledgerTasksOf,
+  type TaskRun,
 } from "./engine.js";
 import { BridgeServer, bridgeMemory, type NodeReader } from "./node-bridge.js";
 import type { FromLedgerWorker, LedgerRequest, LedgerRequestKind, SerializedError, ToLedgerWorker } from "./protocol.js";
+
 
 /** The step a ledger worker runs now (see the module comment). */
 export interface LedgerActivity {
@@ -100,12 +106,17 @@ export interface LedgerHost {
   /**
    * Ends the worker thread and starts a new one (LG-14, owner decision Q144 B; task 12.5a): the new thread holds no
    * state, so the next block's state at h − 1 is loaded from the database; the parses kept for blocks not released yet
-   * are sent to it again (a parse in flight is answered by it), and any other request in flight fails. Rejects for a
-   * worker that failed or is closed.
+   * are sent to it again (a parse in flight is answered by it, and a ledger task's request in flight runs there again,
+   * task 12.6), and any other request in flight fails. Rejects for a worker that failed or is closed.
    */
   restart(): Promise<void>;
   /** How many times {@link LedgerHost.restart} started a new thread. */
   readonly restarts: number;
+  /**
+   * Block `input`'s ledger tasks of one module, by task name (LG-17; task 12.6: `../tasks.ts`); the state's stored nodes,
+   * if a `needsState` task reads any, through `read`.
+   */
+  tasks(input: TaskRun, read?: NodeReader): Promise<Readonly<Record<string, unknown>>>;
   /** A test package's loader's `probe()` (plain data), or null without one. */
   probe(): Promise<unknown>;
   /** The step in progress, or null. */
@@ -131,6 +142,11 @@ export interface LedgerWorkerOptions {
   readonly bridgeBytes?: number;
   /** The thread's entry ({@link ledgerWorkerEntry} unless given). */
   readonly entry?: URL;
+  /**
+   * A module whose `modules` export lists the host's user modules, which UmbraDB's entry (`./entry.ts`) imports in the
+   * thread for their ledger tasks (LG-17, MD-1): for the `umbradb` command, its configuration file (CF-1, Q106).
+   */
+  readonly modules?: URL | string;
 }
 
 /** The failure that ended a ledger worker (see the module comment). */
@@ -145,7 +161,14 @@ export class LedgerWorkerFailure extends Error {
 export function ledgerWorkerEntry(base: string = import.meta.url): URL {
   const compiled = new URL("./entry.js", base);
   if (existsSync(compiled)) return compiled;
-  const source = new URL("./entry.ts", base);
+  return typeScriptEntry(new URL("./entry.ts", base));
+}
+
+/**
+ * A worker entry running the TypeScript module `source` through Node.js's type stripping, its `.js` imports of `.ts`
+ * files resolved (see the module comment): a host's own ledger worker entry from its sources.
+ */
+export function typeScriptEntry(source: URL): URL {
   const bootstrap = `
 import { registerHooks } from "node:module";
 registerHooks({
@@ -181,6 +204,7 @@ function heightOf(request: LedgerRequest): bigint | null {
     case "apply":
     case "load":
     case "retained":
+    case "tasks":
       return request.input.height;
     case "genesis-root":
       return 0n;
@@ -239,6 +263,7 @@ interface Thread {
 /** Starts a ledger worker (see the module comment). */
 export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost {
   const loader = options.loader === undefined ? null : new URL(options.loader).href;
+  const modules = options.modules === undefined ? null : new URL(options.modules).href;
   const entry = options.entry ?? ledgerWorkerEntry();
   const pending = new Map<number, Pending>();
   const parses = new SentParses();
@@ -266,7 +291,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
   /** A new worker thread, its messages and its end handled while it is the host's (see {@link LedgerHost.restart}). */
   const spawn = (): Thread => {
     const memory = bridgeMemory(options.bridgeBytes);
-    const worker = new Worker(entry, { workerData: { memory, loader, loaderData: options.loaderData } });
+    const worker = new Worker(entry, { workerData: { memory, loader, loaderData: options.loaderData, modules } });
     const started: Thread = {
       worker,
       bridge: new BridgeServer(memory),
@@ -355,6 +380,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
     load: (input, read) => send({ type: "load", input }, read),
     retained: (input, read) => send({ type: "retained", input }, read),
     evict: (keys) => send({ type: "evict", keys: [...keys] }),
+    tasks: (input, read) => send({ type: "tasks", input }, read),
     probe: () => send({ type: "probe" }),
     async restart() {
       if (failure !== null) throw failure;
@@ -369,7 +395,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
       restarts += 1;
       answeredAt = performance.now();
       // The parses kept for blocks not released yet, sent again in their order, a parse still in flight answered by
-      // the new thread; any other request in flight fails (it ran on the thread that ended).
+      // the new thread; any other request in flight but a ledger task's fails (it ran on the thread that ended).
       const parsing = new Map(inFlight.filter((request) => request.kind === "parse").map((request) => [hexOf((request.request as ParseRequest).block.hash), request]));
       for (const request of parses.kept()) {
         const key = hexOf(request.block.hash);
@@ -377,8 +403,14 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
         parsing.delete(key);
       }
       for (const request of parsing.values()) post(request.request, request);
+      // A ledger task's request in flight — another block's, run at its module's `on-parse` while this one computed —
+      // runs again there, on the parse sent again: a task keeps nothing between requests (task 12.6; one that needs the
+      // state fails there, as the new thread holds none).
+      for (const request of inFlight) if (request.kind === "tasks") post(request.request, request);
       for (const request of inFlight) {
-        if (request.kind !== "parse") request.reject(new Error(`the ledger worker was restarted while its ${request.kind} request ran (LG-14, Q144 B)`));
+        if (request.kind !== "parse" && request.kind !== "tasks") {
+          request.reject(new Error(`the ledger worker was restarted while its ${request.kind} request ran (LG-14, Q144 B)`));
+        }
       }
       await old.worker.terminate();
       await old.exited;
@@ -414,6 +446,10 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
 export interface InThreadLedgerOptions {
   /** What loads an adapter: `loadLedgerPackage` unless given. */
   readonly load?: LedgerLoader;
+  /** The modules whose ledger tasks the engine runs (task 12.6); none unless given. */
+  readonly modules?: readonly LedgerWorkerModule[];
+  /** The engine's plain-data check (`EngineOptions.checkPlainData`); on unless a negative control turns it off. */
+  readonly checkPlainData?: boolean;
 }
 
 /** The ledger worker's interface over an engine on the main thread (see the module comment). */
@@ -422,7 +458,11 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
   const engineOf = async (): Promise<LedgerEngine> => {
     if (engine === undefined) {
       const load = options.load ?? (await import("../load.js")).loadLedgerPackage;
-      engine = new LedgerEngine({ load });
+      engine = new LedgerEngine({
+        load,
+        tasks: ledgerTasksOf(options.modules ?? []),
+        ...(options.checkPlainData === undefined ? {} : { checkPlainData: options.checkPlainData }),
+      });
     }
     return engine;
   };
@@ -457,6 +497,7 @@ export function inThreadLedger(options: InThreadLedgerOptions = {}): LedgerHost 
     load: (input) => run({ type: "load", input }, (e) => e.load(input)),
     retained: (input) => run({ type: "retained", input }, (e) => e.retained(input)),
     evict: (keys) => run({ type: "evict", keys: [...keys] }, (e) => e.evict(keys)),
+    tasks: (input) => run({ type: "tasks", input }, (e) => e.tasks(input)),
     probe: () => run({ type: "probe" }, () => null),
     async restart() {
       if (closed) throw new Error("the ledger worker is closed");
