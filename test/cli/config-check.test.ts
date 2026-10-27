@@ -424,7 +424,8 @@ describe("modules: the build's, or a host program's", () => {
     configSchema: z.object({ pollMs: z.number().int().meta({ kind: "operational" }) }),
   });
 
-  it("the command checks against the build's own modules, which hold no user module", async () => {
+  it("the command checks against UmbraDB's own modules and the file's: a user module it does not export is refused", async () => {
+    // The file declares stats but does not export it in modules (Q106 B: ./modules.test.ts has the export).
     const file = project.write("stats.config.ts", withStats());
     const result = await check(file);
     expect(result.code).toBe(EXIT.failed);

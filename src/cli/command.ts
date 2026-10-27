@@ -4,12 +4,15 @@
  * {@link runMain} on the process.
  *
  * - `umbradb config check <file> [--database <url>]` checks a configuration file (CF-10, `./config-check.ts`).
- * - `umbradb run [--config <file>]`, `umbradb backup --out <file>` and `umbradb restore <file>` are recognized (A6):
- *   this build does not provide them yet (the runner is built by tasks 5.x, the backups by tasks 15.1 and 15.2), so
- *   each says so on stderr and exits {@link EXIT}`.unavailable` (3), whatever its arguments, never the usage's status
- *   and never success; the task that builds one replaces its entry in {@link COMMANDS}, parsing its own arguments.
+ * - `umbradb run [--config <file>]` starts the process of the configuration file, with the user modules it exports,
+ *   until SIGTERM or SIGINT stops it (`./run.ts`, task 4.4a; Q106 B); it exits 1 when startup refused or processing
+ *   halted, else 0.
+ * - `umbradb backup --out <file>` and `umbradb restore <file>` are recognized (A6): this build does not provide them
+ *   yet (tasks 15.1 and 15.2), so each says so on stderr and exits {@link EXIT}`.unavailable` (3), whatever its
+ *   arguments, never the usage's status and never success; the task that builds one replaces its entry in
+ *   {@link COMMANDS}, parsing its own arguments.
  * - Anything else — no argument, an unknown command (0.9.5's chain-archive sync is no command of this one), a wrong
- *   argument of `config check` — prints the usage on stderr, after one line saying what was wrong, and exits 2;
+ *   argument of `config check` or `run` — prints the usage on stderr, after one line saying what was wrong, and exits 2;
  *   `--help` or `-h` as the only argument prints it on stdout and exits 0.
  *
  * Arguments are parsed with Node.js's `util.parseArgs` (no dependency). No output repeats a `--database` value, and any
@@ -22,6 +25,7 @@ import { parseArgs } from "node:util";
 import { UMBRADB_VERSION } from "../config/build.js";
 import { redactor } from "../config/redact.js";
 import { configCheck, databaseArgumentProblem, errorText } from "./config-check.js";
+import { type RunSeams, runFailed, runProcess } from "./run.js";
 
 /** The exit statuses. */
 export const EXIT = Object.freeze({ ok: 0, failed: 1, usage: 2, unavailable: 3 } as const);
@@ -128,9 +132,47 @@ export function configCommand(check: typeof configCheck = configCheck): CommandH
   };
 }
 
+/** `run`'s arguments — at most one `--config <file>`, nothing else —, or what is wrong with them. */
+function runArguments(args: readonly string[]): { readonly file?: string } | string {
+  const { tokens } = parseArgs({
+    args: [...args],
+    options: { config: { type: "string" } },
+    allowPositionals: true,
+    strict: false,
+    tokens: true,
+  });
+  const files: (string | undefined)[] = [];
+  for (const token of tokens) {
+    if (token.kind === "positional") return "run takes no file of its own: umbradb run [--config <file>]";
+    if (token.kind === "option") {
+      if (token.name !== "config") return `unknown option ${token.rawName} of run`;
+      files.push(token.value);
+    }
+  }
+  if (files.length > 1) return "run takes --config once";
+  const [file] = files;
+  if (files.length === 0) return {};
+  if (file === undefined || file === "") return "--config takes a value: the configuration file";
+  return { file };
+}
+
+/**
+ * `umbradb run` (`./run.ts`): starts the process and resolves, once SIGTERM or SIGINT stopped it, with
+ * {@link EXIT}`.failed` when startup refused or processing halted, else {@link EXIT}`.ok`; the process's log goes to
+ * stderr. `seams` are a test's (its signals, a view of the handle, a negative control's modules).
+ */
+export function runProcessCommand(seams: RunSeams = {}): CommandHandler {
+  return async (args, io) => {
+    const parsed = runArguments(args);
+    if (typeof parsed === "string") return usage(io, parsed);
+    const end = await runProcess({ file: parsed.file, cwd: io.cwd, log: (line) => io.stderr(`${line}\n`) }, seams);
+    return runFailed(end) ? EXIT.failed : EXIT.ok;
+  };
+}
+
 /** The commands, by name (LS-6). */
 export const COMMANDS: Readonly<Record<string, CommandHandler>> = Object.freeze({
-  run: unavailable("run"),
+  run: runProcessCommand(),
   config: configCommand(),
   backup: unavailable("backup"),
   restore: unavailable("restore"),

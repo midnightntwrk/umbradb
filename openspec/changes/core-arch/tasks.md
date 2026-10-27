@@ -1020,9 +1020,53 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (a scratch runner outside the clone): 22, 20 caught on the first run — a gap (a `DELETE` by id from the start on,
       closed by a test) and an equivalent one (the deletes after the writes) — and 21 on the final sources, the
       equivalent one left.
-- [ ] 4.4a The owner's answer Q106 B: the configuration file's exported `modules` are the build's user modules for
+- [x] 4.4a The owner's answer Q106 B: the configuration file's exported `modules` are the build's user modules for
       `umbradb config check` and `umbradb run`, next to UmbraDB's own.
       **Acceptance:** A152.
+      **Done (2026-10-26):** `src/config/load.ts`: `loadConfig` returns the file's `modules` export as
+      `LoadedConfig.modules` (the declarations as given, in the file's order, frozen list, not checked there; empty
+      without the export; a `modules` export that is no array refuses, `invalid-configuration` `modules-not-a-list`).
+      `src/cli/build-modules.ts`: `commandBuild(user, { side })` — a public process's backbone (`core-chain`,
+      `core-block-fetch`, `core-block-commit`, `core-digest`, the admin parts) and core modules, or a private one's
+      (`core-chain`, one `privateIntake()`'s private backbone, the admin parts; no core module) — with the file's
+      modules as its user modules, after UmbraDB's own; `buildDeclarations(user, { side })` validates it (MD-2: a module
+      listed twice `duplicate-id`, a user module with an id of UmbraDB's own `reserved-prefix`, an element that is no
+      declaration `invalid-declaration`). `umbradb config check` builds its declarations from the loaded file unless a
+      host program gives its own; a declaration fault is the configuration check's finding at `modules[<index>]` (with
+      the field), the entries then not validated; the unknown-module finding now says the module is neither UmbraDB's
+      nor in the file's `modules` list (`src/config/validate.ts`). **`umbradb run` is wired here** (no earlier task did
+      it; 5.3's, 5.4's, 8.1's, 8.1a's and 10.3's notes addressed it to 4.4): `src/cli/run.ts` loads the file once
+      (`--config`, default `umbradb.config.ts`; `run`'s arguments parsed in `src/cli/command.ts`, a wrong one exit 2)
+      and calls the runner's `startProcess` with its data, the command's build with the file's modules, the side from
+      the file (public: `nodeSourceOf`; private: the intake's source), the admin endpoints by default (Q128 B), the log
+      on stderr; a file that cannot be loaded is given to startup as the file, which refuses it as itself; the first
+      SIGTERM or SIGINT stops it (RN-13), and it exits once closed — 1 when it ended `refused` or `failed`, else 0. For
+      a refusal before the validation (logged by the process by its code only) the command adds `config check`'s
+      findings of the step that refused, redacted, one `umbradb run: <path>: <message> [<code>]` line each. Design §7
+      (the loader, `config check`'s modules, a `umbradb run` bullet) and §12; the module guide's "Running a module with
+      the `umbradb` command". Tests, seen failing first (`tsc` exit 2, 12 errors: `runProcessCommand`, `commandBuild`,
+      `LoadedConfig.modules`, `userModules` missing; 29 of the new and changed tests failing, stats's entry refused as
+      no module of the build): `test/cli/modules.test.ts` (A152's `config check` half: the entry checked against stats's
+      schema, a wrong, an unknown and a missing setting with their paths, the type check's TS2322 too; a module neither
+      exported nor shipped refused naming it; the merge rules; the private build; a host's declarations used as given;
+      the committed negative control: a check ignoring the file's modules refuses stats's entry), `test/cli/run.test.ts`
+      (A152's `run` half on PostgreSQL 18.6 and PGlite 0.5.10: in this process and through the bundled command in a
+      child process against a tape node, stats writes every height from S to the head, `/status` shows it, SIGTERM exits
+      0; a file listing stats without exporting it refused naming it, up and refused until SIGTERM, exit 1; a halt exit
+      1; SIGINT; the default file; a file that cannot be loaded, refused as itself (exit 1); a private file; `run`'s
+      arguments; the refusal lines and their redaction; the committed negative control: a run ignoring the file's
+      modules is refused), `test/cli/command.test.ts`, `umbradb.test.ts`, `config-check.test.ts` and the pack smoke's
+      oracle 4b updated for the wired `run` (the CLI's child-process bundle now has the admin worker beside it,
+      `test/cli/cli-fixtures.ts`). Wrong variants (a scratch runner outside the clone): 50, 41 caught on the full run;
+      of the 9 survivors 5 were gaps (the private build's backbone and modules, a private file's check, a halt's exit
+      status, the refusal lines' redaction), closed by tests, and 4 equivalent (a declaration fault's origin, the file
+      given as data or as a file under Node.js's module cache, the working directory of a file that failed to load, the
+      signals' listeners removed again after the signal removed them); 46 of 50 caught on the final sources. No question
+      raised; no issue recorded.
+      **Pending:** `configCheck` and the `modules` export in §12's surface (17.3); `core-chain`'s and the core modules'
+      declarations as they come (10.x–13.x, `build-modules.ts`); the ledger worker's entry importing the file's modules
+      (MD-1, §5.5; 12.3); a private process's history check with `--database` (its cursor is
+      `core_private_source.cursor`, not `core_block_commit.blocks`).
 
 ## 5. Runner
 

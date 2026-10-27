@@ -58,7 +58,8 @@ describe("A6: the command's usage and its commands (LS-6)", () => {
     expect(await inChild(project, ["--help"])).toEqual({ code: EXIT.ok, stdout: USAGE, stderr: "" });
   });
 
-  it.each([["run"], ["backup"], ["restore"]])("umbradb %s is recognized: exit 3, not available in this build", async (name) => {
+  // umbradb run starts the process (task 4.4a): ./run.test.ts runs it in a child process.
+  it.each([["backup"], ["restore"]])("umbradb %s is recognized: exit 3, not available in this build", async (name) => {
     const result = await inChild(project, [name]);
     expect(result.code).toBe(EXIT.unavailable);
     expect(result.stdout).toBe("");

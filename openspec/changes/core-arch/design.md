@@ -899,10 +899,13 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
 - **Loading.** `await import(pathToFileURL(file).href)` on Node.js ≥ 24 with type stripping (v24.9.0 reports
   `process.features.typescript === "strip"`); erasable TypeScript only. `loadConfig({ file?, cwd? })`
   (`src/config/load.ts`, task 4.1) resolves the file against the working directory (default `umbradb.config.ts`; 4.4's
-  `--config` gives another), imports it, takes its default export and returns `{ file, data }`, `data` the plain-data
-  check's frozen copy. It refuses with `invalid-configuration` naming the file and a `reason` — `file-not-found`,
-  `load-failed` (the error as the cause, its `code` as `errorCode`; Node.js's own for syntax it cannot erase),
-  `no-default-export` — or with `not-plain-data`. The browser build bundles its configuration and calls `plainData`.
+  `--config` gives another), imports it, takes its default export and returns `{ file, data, modules }`, `data` the
+  plain-data check's frozen copy and `modules` the file's `modules` export as it gives it (CF-1, Q106 B, task 4.4a: its
+  user modules' declarations, code and not data, in its order, not checked here; empty without the export). It refuses
+  with `invalid-configuration` naming the file and a `reason` — `file-not-found`, `load-failed` (the error as the cause,
+  its `code` as `errorCode`; Node.js's own for syntax it cannot erase), `no-default-export`, `modules-not-a-list` (a
+  `modules` export that is no array) — or with `not-plain-data`. The browser build bundles its configuration and calls
+  `plainData`.
 - **Plain-data check.** A walk accepting plain objects (prototype `Object.prototype` or `null`), arrays (prototype
   `Array.prototype`), strings, booleans, `null` and the integers from 0 to 2^53 − 1 (−0 read as 0), reporting the first
   offending place, depth first in property order, as `not-plain-data` with `details.path` (`entries[1].config.onError`;
@@ -982,9 +985,23 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   writer lock, so beside a running process; PGlite: under the file's opt-in, the directory's lock taken, a directory
   holding no database yet checked as a new one and not created) and `entriesAtCursor` and `historyFindings` run on
   them; without it no database is opened and the report says the history checks were not run. The side comes from
-  the file (`instanceId` and no `node`: private); the modules are the command's build's (its backbone parts and core
-  modules: no user module, MD-1), and a host program calls `configCheck` with its own. Every text is redacted
-  (`configSecrets`, the `--database` value, the URL patterns). Exit 0 only if every check that ran passed, else 1.
+  the file (`instanceId` and no `node`: private); the modules are the command's build's — UmbraDB's backbone parts of
+  that side and its core modules — with the file's `modules` as its user modules (Q106 B, task 4.4a:
+  `src/cli/build-modules.ts`, `buildDeclarations(loaded.modules, { side })`, validated as any host's user modules, MD-2:
+  a list element that is no declaration, a module listed twice or with an id of UmbraDB's own is a finding at
+  `modules[<index>]`, and the entries are then not validated); a host program calls `configCheck` with its own
+  declarations, and the file's `modules` are not used. Every text is redacted (`configSecrets`, the `--database` value,
+  the URL patterns). Exit 0 only if every check that ran passed, else 1.
+- **`umbradb run`** (`src/cli/run.ts`, task 4.4a; LS-6, CF-1, Q106 B). Loads the file once (`--config`, or
+  `umbradb.config.ts` in the working directory) and calls `startProcess` with its evaluated data, the command's build
+  with the file's `modules` as user modules (validated by startup, MD-2), the side from the file — public: the node
+  source (`nodeSourceOf`); private: one `privateIntake()` and its backbone —, the admin endpoints by default (Q128 B)
+  and the log on stderr; a file that cannot be loaded is given to startup as the file, which refuses it as itself. The
+  first SIGTERM or SIGINT stops the process (RN-13; a second one gets Node.js's default); the command exits once it
+  closed — 1 when it ended `refused` or `failed`, else 0. A refused or halted process stays up until then (IN-12). For a
+  refusal before the validation, which the process logs by its code only, the command adds `config check`'s findings
+  of the first step that refused (the loader, the declarations with the file's modules, the validation), one
+  `umbradb run: <path>: <message> [<code>]` line each, redacted the same way.
 
 ## 8. Private processes (PP)
 
@@ -1193,8 +1210,10 @@ frame the tape node could not give back byte for byte; the variant transforms' `
 
 **Command:** `umbradb run [--config <file>]`, `umbradb config check <file> [--database <url>]`, `umbradb backup --out
 <file>`, `umbradb restore <file>` — `package.json`'s `bin` `umbradb` (`dist/cli/main.js`, task 4.4). No command, or
-any other, prints the usage and exits 2; a failed check exits 1; until tasks 5.x and 15.x build them, `run`, `backup`
-and `restore` exit 3, not available in this build.
+any other, or a wrong argument, prints the usage and exits 2; a failed check exits 1; `run` (task 4.4a, §7) runs until
+SIGTERM or SIGINT and exits 1 when startup refused or processing halted, else 0; until tasks 15.1 and 15.2 build them,
+`backup` and `restore` exit 3, not available in this build. The configuration file's `modules` export is the
+command's user modules (CF-1, Q106 B).
 
 ## 13. Quality gates: what moves and what is retired (LS-5; for the owner's approval, CORE-ARCH SC-010)
 

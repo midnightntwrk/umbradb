@@ -512,7 +512,9 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
         const ids = [...context.modules.keys()];
         return at(
           `this build has no module ${id}: an entry's id is core or the id of one of the build's modules ` +
-            `(${ids.length === 0 ? "it has none" : ids.join(", ")}) (CF-3)`,
+            `(${ids.length === 0 ? "it has none" : ids.join(", ")}) — UmbraDB's own, or a user module the host ` +
+            "program gives, which for the umbradb command is one the configuration file exports in its modules list " +
+            "(CF-1, CF-3)",
         );
       }),
   },

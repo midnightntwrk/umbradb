@@ -1,16 +1,26 @@
-import { readFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { COMMANDS, configCommand, EXIT, type MainProcess, runMain, USAGE } from "../../src/cli/command.js";
-import { UMBRADB_VERSION } from "../../src/config/build.js";
+import {
+  COMMANDS,
+  configCommand,
+  EXIT,
+  type MainProcess,
+  runMain,
+  runProcessCommand,
+  USAGE,
+} from "../../src/cli/command.js";
+import { buildCoreVersion, UMBRADB_VERSION } from "../../src/config/build.js";
 import { type CommandResult, inProcess, REPOSITORY } from "./cli-fixtures.js";
 
 /**
  * A6 `[CI]` (LS-6), in this process through `runCommand` (`./umbradb.test.ts` runs the command itself, in a child
  * process): `umbradb sync` and `umbradb` with no argument print the usage and exit 2; `run`, `config check`, `backup`
- * and `restore` are recognized — `config check` runs (task 4.4); `run` (tasks 5.x), `backup` and `restore` (tasks
- * 15.1, 15.2) are not built yet and say so, with an exit status of their own, never the usage's and never success.
+ * and `restore` are recognized — `config check` runs (task 4.4), `run` starts the process (task 4.4a; its breadth is
+ * `./run.test.ts`'s); `backup` and `restore` (tasks 15.1, 15.2) are not built yet and say so, with an exit status of
+ * their own, never the usage's and never success.
  * Also the command's argument errors: each prints the usage and exits 2, and a `--database` value is never echoed.
  */
 
@@ -93,10 +103,46 @@ describe("A6: an unknown subcommand or none prints the usage and exits 2 (LS-6)"
 });
 
 describe("A6: run, config check, backup and restore are recognized (LS-6)", () => {
+  it("umbradb run is recognized: it starts the process of the file, which here refuses, and exits 1 once stopped", async () => {
+    // A file written as plain data, refused after its validation and before its database opens (CF-9: PGlite without
+    // the development opt-in), with its admin listener on a port of its own.
+    const directory = mkdtempSync(join(tmpdir(), "umbradb-run-a6-"));
+    try {
+      const config = {
+        entries: [
+          {
+            id: "core",
+            start: 0,
+            version: buildCoreVersion(),
+            config: {
+              network: "preprod",
+              node: "ws://127.0.0.1:9/node",
+              database: `pglite:${join(directory, "db")}`,
+              listen: { admin: "127.0.0.1:0" },
+            },
+          },
+        ],
+      };
+      writeFileSync(join(directory, "a6.config.ts"), `export default ${JSON.stringify(config)};\n`);
+      const signals = new EventEmitter();
+      const run = runProcessCommand({
+        signals,
+        started: (handle) => {
+          void handle.started.catch(() => signals.emit("SIGTERM"));
+        },
+      });
+      const result = await inProcess(["run", "--config", "a6.config.ts"], directory, { run });
+      expect(recognized(result)).toBe(true);
+      expect(result.code).toBe(EXIT.failed);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("startup refused: development-opt-in-required");
+      expect(existsSync(join(directory, "db"))).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each([
-    ["run", ["run"]],
-    ["run", ["run", "--config", "umbradb.config.ts"]],
-    ["run", ["run", "--anything"]],
     ["backup", ["backup", "--out", "backup.sql"]],
     ["backup", ["backup"]],
     ["restore", ["restore", "backup.sql"]],
@@ -194,9 +240,12 @@ describe("the bin entry's work (runMain)", () => {
     const help = stand(["--help"]);
     await runMain(help);
     expect([help.exitCode, help.out, help.err]).toEqual([EXIT.ok, USAGE, ""]);
-    const run = stand(["run"]);
+    const backup = stand(["backup"]);
+    await runMain(backup);
+    expect(backup.exitCode).toBe(EXIT.unavailable);
+    const run = stand(["run", "--confg", "umbradb.config.ts"]);
     await runMain(run);
-    expect(run.exitCode).toBe(EXIT.unavailable);
+    expect([run.exitCode, run.err]).toEqual([EXIT.usage, `umbradb: unknown option --confg of run\n\n${USAGE}`]);
   });
 
   it("reads a relative file from the process's working directory", async () => {

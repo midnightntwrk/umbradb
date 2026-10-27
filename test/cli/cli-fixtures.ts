@@ -21,7 +21,10 @@ export { REPOSITORY };
  * Vitest's resolver nor the compiler reads a `file:` URL).
  *
  * With `cli`, also `umbradb-cli.mjs`: the command (`src/cli/main.ts`) bundled the same way, which a test runs with
- * Node.js itself in a child process — Node.js's own type stripping, real exit codes and streams.
+ * Node.js itself in a child process — Node.js's own type stripping, real exit codes and streams —, and next to it
+ * `worker.js`, the admin endpoints' worker thread (`src/admin/worker.ts`) bundled too: the admin server starts its
+ * thread from `./worker.js` beside the module that starts it (`workerEntry`), which in the bundle is the command's file,
+ * as `dist/admin/worker.js` is beside `dist/admin/server.js` in the package (task 4.4a: `umbradb run` serves them).
  */
 export interface CliProject {
   readonly dir: string;
@@ -92,6 +95,16 @@ export async function cliProject(options: { readonly cli?: boolean } = {}): Prom
       target: "node24",
       packages: "external",
       outfile: cli,
+      logLevel: "silent",
+    });
+    await build({
+      entryPoints: [join(REPOSITORY, "src", "admin", "worker.ts")],
+      bundle: true,
+      platform: "node",
+      format: "esm",
+      target: "node24",
+      packages: "external",
+      outfile: join(dir, "worker.js"),
       logLevel: "silent",
     });
   }

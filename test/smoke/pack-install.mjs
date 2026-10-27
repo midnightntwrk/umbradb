@@ -23,7 +23,8 @@
  *        imports fail: the package no longer exports them (core-arch task 17.1, LS-3).
  *
  *     4b. run the INSTALLED `umbradb` command (package.json `bin`, task 4.4 of the core-arch change; LS-6, A6, CF-10):
- *        with no argument and with `sync` it prints the usage and exits 2; `run` exits 3 (not in this build yet);
+ *        with no argument and with `sync` it prints the usage and exits 2; `run` is recognized (task 4.4a: it parses
+ *        its own arguments, so `run --confg x` names the option, not an unknown command);
  *        `config check` on a configuration written as plain data exits 0 having run the TypeScript compiler -- so the
  *        bin entry, its shebang and its runtime dependency on `typescript` work from the tarball.
  *
@@ -187,9 +188,9 @@ async function dockerIndependentOracles() {
       fail(`umbradb ${args.join(" ")} did not print the usage and exit 2 (A6):\n${usage.status}\n${usage.stdout}\n${usage.stderr}`);
     }
   }
-  const unavailable = command(["run"]);
-  if (unavailable.status !== 3 || !unavailable.stderr.includes("umbradb run: not available in this build")) {
-    fail(`umbradb run did not exit 3 as not available in this build (A6):\n${unavailable.status}\n${unavailable.stderr}`);
+  const runArguments = command(["run", "--confg", "umbradb.config.ts"]);
+  if (runArguments.status !== 2 || !runArguments.stderr.includes("umbradb: unknown option --confg of run")) {
+    fail(`umbradb run did not parse its own arguments as a recognized command (A6):\n${runArguments.status}\n${runArguments.stderr}`);
   }
   // A configuration as plain data (no import: the package's "." export is still 0.9.5's until task 17.3). Its core
   // version is the installed build's (the UmbraDB version and the ledger packages it carries, task 12.2), read from the
@@ -221,7 +222,7 @@ async function dockerIndependentOracles() {
   ) {
     fail(`umbradb config check did not pass a valid file (A35, CF-10):\n${check.status}\n${check.stdout}\n${check.stderr}`);
   }
-  console.log("pack-install smoke: the installed umbradb command prints its usage (exit 2), knows run (exit 3), and config check passes a valid file (exit 0) -- LS-6, A6, A35.");
+  console.log("pack-install smoke: the installed umbradb command prints its usage (exit 2), knows run (its own arguments), and config check passes a valid file (exit 0) -- LS-6, A6, A35.");
 
   // ---- 4c. TransactionHistory is not exported (core-arch task 17.1, LS-3): both imports fail ---------------------
   writeFileSync(join(scratch, "tsconfig.legacy.json"), `${JSON.stringify({

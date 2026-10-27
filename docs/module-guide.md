@@ -301,6 +301,34 @@ build carries (CF-3 and CF-4 of the `core-arch` change).
   schema. An earlier revision is written with `versionEntry({ id, start, version, config })`, its `config` the data
   recorded for it, which startup compares with the history.
 
+## Running a module with the `umbradb` command
+
+The `umbradb` command loads nothing by name: the configuration file is its host program (MD-1). The file imports your
+module like any other import, lists its entries, and exports it in `modules`; `umbradb config check` then checks its
+entries against your schema, and `umbradb run` runs it, next to UmbraDB's own modules (CF-1, owner decision Q106).
+
+```ts
+import { coreEntry, defineConfig } from "umbradb";
+import { stats } from "@example/umbradb-stats";
+
+export const modules = [stats];
+
+export default defineConfig({
+  entries: [
+    coreEntry({ start: 0, config: { network: "preprod", node: process.env.NODE_URL!, database: process.env.DB_URL! } }),
+    stats.entry({ start: 0, config: { label: "daily" } }),
+  ],
+});
+```
+
+- **List each module once.** The modules are the build's user modules, in the order given; startup refuses a module
+  listed twice (`duplicate-id`), an id of UmbraDB's own (`core`, `core-…`: `reserved-prefix`) and an element that is no
+  declaration (`invalid-declaration`), naming its place (`modules[1]`). A `modules` export that is not a list is
+  refused as the file's (`modules-not-a-list`).
+- **An entry needs its module in `modules`.** An entry whose id is neither UmbraDB's nor in the list is refused, naming
+  the module; a module in the list without an entry is in the build but does not run.
+- **A program that calls `startProcess` itself** gives its own declarations; the file's `modules` are then not used.
+
 ## Upgrades
 
 A new version of a module runs from a future height, as a new revision of its configuration; the rows written before

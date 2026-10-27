@@ -21,8 +21,13 @@
  * (MD-3 to MD-6) and, without `--database`, CF-9's PGlite half (opening the database).
  *
  * **The process's side** (`public` or `private`, which `core` schema applies, CF-4) is taken from the file
- * ({@link inferSide}) unless given; **the build's modules** are the command's own (`./build-modules.ts`) unless a host
- * program gives its declarations.
+ * ({@link inferSide}) unless given. **The build's modules** (CF-1, CF-10; owner decision Q106 B, task 4.4a) are the
+ * command's (`./build-modules.ts`): UmbraDB's own backbone parts and core modules, and as its user modules the ones the
+ * file exports in `modules`, so the entries of a user module the file ships are checked against its schema as
+ * UmbraDB's own are; a fault of those declarations (MD-2: a list element that is no declaration, a module listed twice,
+ * a user module with an id of UmbraDB's own) is the configuration check's finding at `modules[<index>]`, and the entries
+ * are then not validated. A host program that ships its modules itself gives its declarations instead, and the file's
+ * `modules` are not used.
  *
  * **No secret is printed** (CF-4, AE-6): every text of the report — findings, notes, the summary — passes through the
  * redaction of `src/config/redact.ts` built from the file's secrets as the validation reads them (`configSecrets`:
@@ -35,7 +40,7 @@ import { resolve } from "node:path";
 import { PUBLIC_CORE_SCHEMA, type ProcessSide } from "../config/core-settings.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { historyFindings, type HistoryRow } from "../config/history.js";
-import { type LoadedConfig, loadConfig } from "../config/load.js";
+import { type LoadedConfig, loadConfig, MODULES_EXPORT } from "../config/load.js";
 import type { PlainData } from "../config/plain-data.js";
 import { processCoreEntry } from "../config/process.js";
 import { type Redactor, redactor } from "../config/redact.js";
@@ -61,7 +66,10 @@ export interface ConfigCheckOptions {
   readonly cwd: string;
   /** `--database`: the database whose history to check against, read-only. Without it no database is opened. */
   readonly database?: string | undefined;
-  /** The build's declarations, validated; the command's own (`buildDeclarations`) unless given. */
+  /**
+   * The build's declarations, validated; unless given, the command's own with the file's `modules` as its user modules
+   * (`buildDeclarations`, Q106 B).
+   */
   readonly declarations?: DeclarationSet<ModuleDeclaration>;
   /** The process's side; taken from the file ({@link inferSide}) unless given. */
   readonly side?: ProcessSide;
@@ -73,6 +81,8 @@ export interface ConfigCheckSeams {
   readonly steps?: readonly CheckStep[];
   /** The redaction of the report's texts; `redactor` of `src/config/redact.ts` unless given. */
   readonly redactor?: (secrets: Iterable<string>) => Redactor;
+  /** The build's user modules from the loaded file; its `modules` export (Q106 B) unless given. */
+  readonly userModules?: (loaded: LoadedConfig) => readonly unknown[];
 }
 
 /** The checks' names. */
@@ -106,8 +116,11 @@ export interface CheckState {
   readonly file: string;
   readonly cwd: string;
   readonly database: string | undefined;
-  readonly declarations: DeclarationSet<ModuleDeclaration>;
+  /** The build's declarations: the host program's, or the command's with the file's `modules` once it is loaded. */
+  declarations: DeclarationSet<ModuleDeclaration> | null;
   readonly side: ProcessSide | undefined;
+  /** The build's user modules from the loaded file (the seam's, or its `modules` export). */
+  readonly userModules: (loaded: LoadedConfig) => readonly unknown[];
   /** The reports of the checks that ran before. */
   readonly reports: readonly StepReport[];
   /** The evaluated file, once loaded. */
@@ -138,6 +151,9 @@ export interface ConfigCheckReport {
 }
 
 const CONFIGURATION_TITLE = "configuration (CF-1, CF-3)";
+
+/** The configuration check's note when the build's declarations with the file's modules were refused. */
+const UNVALIDATED = "the build's modules with the file's modules list were refused, so the entries were not validated";
 
 const HISTORY_TITLE = "history (CF-3 for versionEntry revisions, CF-5, CF-6, CF-8)";
 
@@ -212,8 +228,33 @@ const ruleFinding = (code: string, found: Finding): CheckFinding => ({
   message: found.message,
 });
 
+/** Where a declaration refusal of `user` (MD-2) points: `modules[<index>]`, with its field when it names one. */
+function declarationPath(error: UmbraError, user: readonly unknown[]): string {
+  const details = error.details as {
+    readonly origin?: unknown;
+    readonly index?: unknown;
+    readonly field?: unknown;
+    readonly module?: unknown;
+    readonly second?: { readonly origin?: unknown; readonly index?: unknown };
+  };
+  const at = (index: number, field?: unknown) =>
+    `${MODULES_EXPORT}[${index}]${typeof field === "string" && field !== "" ? `.${field}` : ""}`;
+  if (details.origin === "user" && typeof details.index === "number") return at(details.index, details.field);
+  if (details.second?.origin === "user" && typeof details.second.index === "number") return at(details.second.index);
+  const index = user.findIndex(
+    (module) => typeof module === "object" && module !== null && (module as { id?: unknown }).id === details.module,
+  );
+  return index < 0 ? MODULES_EXPORT : at(index);
+}
+
+/** The finding of a refusal of the build's declarations with the file's `user` modules (MD-2). */
+export function declarationFinding(error: unknown, user: readonly unknown[]): CheckFinding {
+  if (!(error instanceof UmbraError)) throw error;
+  return { code: error.code, path: declarationPath(error, user), message: error.message };
+}
+
 /** The findings of a refusal of the loader, the validation or the process's `core` revision. */
-function refusalFindings(error: unknown, file: string): CheckFinding[] {
+export function refusalFindings(error: unknown, file: string): CheckFinding[] {
   if (!(error instanceof UmbraError)) throw error;
   const details = error.details as {
     readonly findings?: readonly Finding[];
@@ -248,11 +289,16 @@ const CONFIGURATION: CheckStep = {
     } catch (error) {
       return stepReport("configuration", CONFIGURATION_TITLE, refusalFindings(error, state.file));
     }
-    const input = {
-      config: state.loaded,
-      declarations: state.declarations,
-      side: state.side ?? inferSide(state.loaded.data),
-    };
+    const side = state.side ?? inferSide(state.loaded.data);
+    if (state.declarations === null) {
+      const user = state.userModules(state.loaded);
+      try {
+        state.declarations = buildDeclarations(user, { side });
+      } catch (error) {
+        return stepReport("configuration", CONFIGURATION_TITLE, [declarationFinding(error, user)], UNVALIDATED);
+      }
+    }
+    const input = { config: state.loaded, declarations: state.declarations, side };
     state.secrets.push(...configSecrets(input));
     try {
       state.checked = validateConfig(input);
@@ -295,7 +341,7 @@ const HISTORY: CheckStep = {
   name: "history",
   async run(state) {
     if (state.database === undefined) return notRun("history", HISTORY_TITLE, NO_DATABASE);
-    if (state.checked === null || state.process === null) {
+    if (state.checked === null || state.process === null || state.declarations === null) {
       const why = "the configuration did not pass its own checks, which the history checks need";
       return notRun("history", HISTORY_TITLE, why);
     }
@@ -340,7 +386,7 @@ export const CHECK_STEPS: readonly CheckStep[] = Object.freeze([TYPE_CHECK, CONF
 const findingsText = (count: number) => `${count} finding${count === 1 ? "" : "s"}`;
 
 /** One finding's line: its message, which starts with its path (or is given one), and its code. */
-function findingLine(found: CheckFinding): string {
+export function findingLine(found: CheckFinding): string {
   const where = found.path === "" ? "(the default export)" : found.path;
   const text = found.path !== "" && found.message.startsWith(found.path) ? found.message : `${where}: ${found.message}`;
   return `  ${text} [${found.code}]`;
@@ -383,8 +429,9 @@ export async function configCheck(
     file,
     cwd: options.cwd,
     database: options.database,
-    declarations: options.declarations ?? buildDeclarations(),
+    declarations: options.declarations ?? null,
     side: options.side,
+    userModules: seams.userModules ?? ((loaded) => loaded.modules),
     reports,
     loaded: null,
     checked: null,
