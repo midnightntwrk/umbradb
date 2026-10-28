@@ -1540,16 +1540,25 @@ first; `resume()` releases it. Holds are counted, so a backup on signal while a 
 paused. The loop's signal ends a pause: a stop while paused ends the process (RN-13). **The backup on signal.** With
 `backupOnSignal` (CF-4, operational) set, the process listens for SIGUSR2 — Node.js's `process`, or
 `ProcessInput.backupSignals` — from the moment its `core` revision is known (startup step 3) until it has closed;
-without it, SIGUSR2 gets Node.js's default (the process ends). A SIGUSR2 takes a hold; once the loop is paused the
-process writes the backup of the cursor's height to that path (relative to the working directory) by the backup at
-stop's rules — none while the file there is a backup of that height, one of another height replaced, a file that is no
-backup left as it is (`backup-format-unknown`) —, logs it (`backup on signal written to <path>: height h, contents hash
-…`, or why none was written) and releases the hold, so processing goes on from h + 1. A SIGUSR2 while one is pending or
+without it, a process adds no SIGUSR2 listener (`umbradb run` listens itself: task 15.1c, below). A SIGUSR2 takes a
+hold; once the loop is paused the process writes the backup of the cursor's height to that path (relative to the working
+directory) by the backup at stop's rules — none while the file there is a backup of that height, one of another height
+replaced, a file that is no backup left as it is (`backup-format-unknown`) —, logs it (`backup on signal written to
+<path>: height h, contents hash …`, or why none was written) and releases the hold, so processing goes on from h + 1. A
+SIGUSR2 while one is pending or
 being written adds none; one after processing ended (the core's stop, a halt) writes at once; one before any height
 committed is refused (`no-committed-height`, logged); one to a process whose startup refused, or that is stopping,
 writes none. A stop waits for a backup being written before it closes the database. A private process's backup needs
-the development opt-in like every other (PP-12). **Restore.** The command reads the manifest line, makes the
-checks of BK-3 that need no tables, then opens one transaction on the writer connection and runs the file's SQL itself
+the development opt-in like every other (PP-12). As built (task 15.1c, owner decision Q173 C; A175; `src/cli/run.ts`
+`backupSignalRelay`): `umbradb run` listens for SIGUSR2 itself, from before it loads the configuration file until it
+returns, and gives the process its own `backupSignals` source: a signal goes to the process's listener when it has one
+(`backupOnSignal` set), and is otherwise logged as ignored in one line naming `backupOnSignal` — `SIGUSR2 ignored:
+backupOnSignal is not set, so no backup is written` once startup has completed or been refused, a line saying the
+process is starting before that, one saying it has closed after the process removed its listener — and nothing else
+happens: the command never ends on SIGUSR2. The runner is unchanged: a host program's `startProcess` without
+`backupOnSignal` adds no SIGUSR2 listener, so Node.js's default (the process ends) or the host's own handler applies.
+**Restore.** The command reads the manifest line, makes the checks of BK-3 that need no tables, then opens one
+transaction on the writer connection and runs the file's SQL itself
 (no `psql`; statements a tool writes for `psql` alone are handled as `psql` would), creates the module roles the server
 lacks and applies DB-6's and DB-7's owners and grants, recomputes the contents hash, checks the state root, and commits
 only if all hold; on PGlite the same runs as one queued job. A crash mid-restore leaves nothing, since nothing commits

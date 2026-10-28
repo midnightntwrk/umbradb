@@ -350,7 +350,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
         run: runProcessCommand({
           start: (input) => {
             inputs.push(input);
-            return { closed: Promise.resolve(), status: () => ({ ended: null }) } as unknown as ProcessHandle;
+            return { started: Promise.resolve(), closed: Promise.resolve(), status: () => ({ ended: null }) } as unknown as ProcessHandle;
           },
         }),
       });
@@ -362,7 +362,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
       run: runProcessCommand({
         start: (input) => {
           inputs.push(input);
-          return { closed: Promise.resolve(), status: () => ({ ended: null }) } as unknown as ProcessHandle;
+          return { started: Promise.resolve(), closed: Promise.resolve(), status: () => ({ ended: null }) } as unknown as ProcessHandle;
         },
       }),
     });

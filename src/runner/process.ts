@@ -307,8 +307,10 @@ export interface ProcessInput {
   readonly updateHash?: string;
   /**
    * Where SIGUSR2 comes from for the `core` revision's `backupOnSignal` (CF-4, BK-1, owner decision Q152 B; task 15.1a):
-   * Node.js's `process` unless given (a test's emitter). Listened to only when `backupOnSignal` is set, from the moment the
-   * process's `core` revision is known until the process has closed (see the module comment).
+   * Node.js's `process` unless given (a test's emitter; `umbradb run`'s relay, which listens for SIGUSR2 itself for the
+   * whole command and logs one it ignores, owner decision Q173 C, task 15.1c). Listened to only when `backupOnSignal` is
+   * set, from the moment the process's `core` revision is known until the process has closed (see the module comment):
+   * without it a process adds no SIGUSR2 listener, so Node.js's default or the host program's own handler applies.
    */
   readonly backupSignals?: BackupSignals;
 }

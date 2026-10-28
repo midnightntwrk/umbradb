@@ -3574,12 +3574,28 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       self-check). Committed negative control (`test/backup/file-mode.negative-control.test.ts`): a temporary file
       created with the umask's mode, and one created `0666` then narrowed, fail A174's oracle; an unwatched backup is
       reported as not checked. `startTicker` takes `TickerOptions` (`backupSignals`).
-- [ ] 15.1c The owner's answer Q173 C: `umbradb run` always listens for SIGUSR2. Without `backupOnSignal`, one is
+- [x] 15.1c The owner's answer Q173 C: `umbradb run` always listens for SIGUSR2. Without `backupOnSignal`, one is
       logged as ignored (the line names `backupOnSignal`) and the process keeps running; with it, as task 15.1a. A
       process a host program starts with `startProcess` without `backupOnSignal` adds no SIGUSR2 listener, so Node.js's
       default or the host's own handler applies. BK-1 as amended, the operator guide's "A backup of a running process
       (SIGUSR2)".
       **Acceptance:** A175.
+      **Done (2026-10-28):** `src/cli/run.ts`: `backupSignalRelay` (and `IGNORED_SIGUSR2`, its three lines) listens for
+      SIGUSR2 from before the configuration file is loaded until `runProcess` returns and is the process's
+      `backupSignals`: a signal goes to the process's listener when it has one, else one line naming `backupOnSignal`
+      (`SIGUSR2 ignored: backupOnSignal is not set, so no backup is written` once startup settled; a starting and a
+      closed variant); `RunSeams.backupSignals`. The runner unchanged but for `ProcessInput.backupSignals`'s comment.
+      BK-1: one sentence that every backup file is created owner-only (`0600`) from its first byte (task 15.1b's
+      behaviour, which A174 cites). Design §9.1 ("As built (task 15.1c)"), the operator guide's "A backup of a running
+      process (SIGUSR2)". Tests, seen failing first (the command ended on SIGUSR2): `test/backup/signal-ignored.test.ts`
+      (A175: the bundled `umbradb run` on PGlite in a child, a tape node's chain answered slowly so heights keep
+      committing, SIGUSR2 at height ≥ 3, then SIGTERM, exit 0; `startProcess`'s SIGUSR2 listener count, unchanged
+      without `backupOnSignal`, one more while it runs with it) with `signal-ignored-fixtures.ts` (the paced chain, the
+      two oracles) and `signal-ignored.worker.ts` (`runProcess` in a child); `test/cli/backup-signal-relay.test.ts`.
+      Committed negative controls (`test/backup/signal-ignored.negative-control.test.ts`): the command's stand-in
+      whose SIGUSR2 reaches no listener (task 15.1a's command) ends on the signal and fails A175's oracle, the same
+      stand-in with the command's signals passes; a `startProcess` given the command's relay (every process listening,
+      Q173's option B) fails the listener count. `test/cli/run.test.ts`'s two handle stubs given `started`.
 - [x] 15.2 `umbradb restore`: the checks before loading, the file's SQL run in one transaction, owners and grants, the
       contents hash and state root checked before the commit; the operator guide's "restore only trusted backups".
       **Acceptance:** A125, A126, A127, A128.

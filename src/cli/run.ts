@@ -33,10 +33,16 @@
  * stays up until it is stopped (IN-12, AE-3), the admin endpoints saying why; so the command then runs until SIGTERM or
  * SIGINT (Ctrl-C), which stop the process cleanly (RN-13: the height in progress finishes, nothing else starts, the
  * module API, the node client, the database and the admin listener close). A second signal is not listened for:
- * Node.js's default ends the command at once. SIGUSR2 is the runner's: with `backupOnSignal` set it writes a backup at
- * the loop's next pause and the process goes on (BK-1, owner decision Q152 B; task 15.1a). The command then resolves with how processing ended: `refused` or
+ * Node.js's default ends the command at once. The command then resolves with how processing ended: `refused` or
  * `failed` (a halt) is a failure (exit 1), anything else — the stop itself, the core's stop height, an upgrade
  * boundary — is not (exit 0).
+ *
+ * **SIGUSR2** (BK-1 as amended, owner decision Q173 C; task 15.1c) is listened for from the command's start to its end
+ * ({@link backupSignalRelay}), so a SIGUSR2 sent from a shell never ends the indexer: with `backupOnSignal` set the
+ * process writes a backup at the loop's next pause and goes on (owner decision Q152 B; task 15.1a); without it the
+ * signal is logged as ignored, in one line naming `backupOnSignal` (`SIGUSR2 ignored: backupOnSignal is not set, so no
+ * backup is written`), and nothing else happens. A host program's own process (`startProcess`) adds no SIGUSR2
+ * listener without `backupOnSignal`, so Node.js's default or the host's handler applies there.
  */
 
 import { pathToFileURL } from "node:url";
@@ -44,7 +50,13 @@ import { privateIntake } from "../backbone/core-private-source/index.js";
 import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
 import { type LoadedConfig, loadConfig } from "../config/load.js";
 import { startLedgerWorker } from "../ledger/worker/host.js";
-import { type ProcessHandle, type ProcessingEnd, type ProcessInput, startProcess } from "../runner/process.js";
+import {
+  type BackupSignals,
+  type ProcessHandle,
+  type ProcessingEnd,
+  type ProcessInput,
+  startProcess,
+} from "../runner/process.js";
 import { commandBuild } from "./build-modules.js";
 import { inferSide } from "./config-check.js";
 
@@ -77,6 +89,67 @@ export function stopSignal(source: SignalSource): { readonly signal: AbortSignal
   return Object.freeze({ signal: controller.signal, dispose });
 }
 
+/**
+ * `umbradb run`'s SIGUSR2 (BK-1 as amended, owner decision Q173 C; task 15.1c): the command listens for it from its
+ * start to its end, so that a SIGUSR2 sent from a shell never ends the indexer, and hands the process a source of its
+ * own ({@link ProcessInput.backupSignals}), on which the process listens only when its `core` revision sets
+ * `backupOnSignal` (task 15.1a). A signal goes to the process's listener when it has one; otherwise it is logged as
+ * ignored, in one line naming `backupOnSignal`: before startup has settled (its `core` revision may not be read yet),
+ * once it has (`backupOnSignal` is not set), or after the process stopped listening (it has closed).
+ */
+export interface BackupSignalRelay {
+  /** The process's source of SIGUSR2. */
+  readonly signals: BackupSignals;
+  /** Tells the relay that startup has completed or been refused, so a signal no listener takes means it is not set. */
+  settled(): void;
+  /** Stops listening on the command's source; afterwards a signal reaches nothing here. */
+  dispose(): void;
+}
+
+/** The lines of a SIGUSR2 the relay ignores (see {@link BackupSignalRelay}). */
+export const IGNORED_SIGUSR2 = Object.freeze({
+  starting:
+    "SIGUSR2 ignored: the process is starting and has not listened for it (backupOnSignal not set or not yet read)",
+  unset: "SIGUSR2 ignored: backupOnSignal is not set, so no backup is written",
+  closed: "SIGUSR2 ignored: the process has closed, so no backup on signal (backupOnSignal) is written",
+});
+
+/** Listens for SIGUSR2 on `source` until disposed and relays it (see {@link BackupSignalRelay}), logging to `log`. */
+export function backupSignalRelay(source: BackupSignals, log: (line: string) => void): BackupSignalRelay {
+  const listeners = new Set<() => void>();
+  let listened = false;
+  let settled = false;
+  const relay = (): void => {
+    if (listeners.size === 0) {
+      log(listened ? IGNORED_SIGUSR2.closed : settled ? IGNORED_SIGUSR2.unset : IGNORED_SIGUSR2.starting);
+      return;
+    }
+    for (const listener of [...listeners]) listener();
+  };
+  source.on("SIGUSR2", relay);
+  const signals: BackupSignals = Object.freeze({
+    on(_event: "SIGUSR2", listener: () => void) {
+      listeners.add(listener);
+      listened = true;
+      return signals;
+    },
+    removeListener(_event: "SIGUSR2", listener: () => void) {
+      listeners.delete(listener);
+      return signals;
+    },
+  });
+  return Object.freeze({
+    signals,
+    settled: () => {
+      settled = true;
+    },
+    dispose: () => {
+      listeners.clear();
+      source.removeListener("SIGUSR2", relay);
+    },
+  });
+}
+
 /** What {@link runProcess} runs. */
 export interface RunOptions {
   /** `--config`: the configuration file, relative to `cwd`; `umbradb.config.ts` when absent (CF-1). */
@@ -93,6 +166,8 @@ export interface RunOptions {
 export interface RunSeams {
   /** The signals that stop the process; Node.js's `process` unless given. */
   readonly signals?: SignalSource;
+  /** Where the command receives SIGUSR2 ({@link backupSignalRelay}); Node.js's `process` unless given. */
+  readonly backupSignals?: BackupSignals;
   /** Told the process's handle once it is started (a test's view of it). */
   readonly started?: (handle: ProcessHandle) => void;
   /** The build's user modules from the loaded file; its `modules` export (Q106 B) unless given (a negative control's). */
@@ -143,6 +218,8 @@ function processOf(
  */
 export async function runProcess(options: RunOptions, seams: RunSeams = {}): Promise<ProcessingEnd | null> {
   const stop = stopSignal(seams.signals ?? process);
+  // From here to the end, SIGUSR2 is the command's (Q173 C): relayed to the process, or logged as ignored.
+  const usr2 = backupSignalRelay(seams.backupSignals ?? process, options.log);
   try {
     let loaded: LoadedConfig | null = null;
     try {
@@ -156,14 +233,17 @@ export async function runProcess(options: RunOptions, seams: RunSeams = {}): Pro
       ...input,
       signal: stop.signal,
       log: options.log,
+      backupSignals: usr2.signals,
       ...(options.updateHash === undefined ? {} : { updateHash: options.updateHash }),
     });
     seams.started?.(handle);
+    handle.started.then(usr2.settled, usr2.settled);
     // A refusal of the configuration itself closes the process by itself; anything else waits for a signal.
     await handle.closed;
     return handle.status().ended;
   } finally {
     stop.dispose();
+    usr2.dispose();
   }
 }
 

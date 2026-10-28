@@ -103,7 +103,7 @@ The worker is not a security sandbox for malicious packages.
 Task 12.2b now checks ledger packages before use. In `Process.#open`, startup invokes `checkLedgerPackages`
 before starting the worker when the graph requires ledger parsing or replay; a graph loading no ledger package
 does not invoke that check, as decided in Q176 A
-(`src/runner/process.ts:1182`, `src/runner/process.ts:1188`, `src/runner/process.ts:1189`).
+(`src/runner/process.ts:1184`, `src/runner/process.ts:1190`, `src/runner/process.ts:1191`).
 The check validates recorded manifests and their listed files, refusing unavailable `released` sources
 (`src/ledger/identity.ts:201`, `src/ledger/identity.ts:169`, `src/ledger/sources.ts:25`).
 
@@ -134,7 +134,7 @@ module use of the envelope helpers (`src/runner/api-server.ts:92`, `src/runner/a
 These fields neither authenticate the server nor prove its database contents.
 
 Unexpected handler failures receive a fixed client-facing error, while the error itself reaches the reporting
-callback and process log (`src/runner/module-api.ts:377`, `src/runner/process.ts:1255`).
+callback and process log (`src/runner/module-api.ts:377`, `src/runner/process.ts:1257`).
 This limits disclosure to API callers without establishing that logs contain no private values.
 
 ### 6. Admin callers → admin worker
@@ -213,7 +213,7 @@ Task 15.1b creates backup files owner-only from creation: `ownerOnlyFile` opens 
 A refused `chmod` fails the backup and removes the temporary file; completion renames the temporary file
 (`src/backup/backup.ts:99`, `src/backup/backup.ts:236`).
 Where POSIX modes do not apply, folder or mount access controls determine confidentiality
-(`docs/operator-guide.md:141`).
+(`docs/operator-guide.md:147`).
 
 Restore checks compatibility before loading and contents after loading
 (`src/backup/restore.ts:300`, `src/backup/restore.ts:416`).
@@ -266,7 +266,7 @@ Workflow definitions are evidence of configured controls, not evidence that this
 ## The Midnight node
 
 The owner's resolution, Q179 A on 2026-10-28, adds no new check: the core trusts its one configured Midnight node
-for finality and block contents (`openspec/changes/core-arch/tasks.md:3930`).
+for finality and block contents (`openspec/changes/core-arch/tasks.md:3946`).
 The process constructs its node connection from that configured URL
 (`src/backbone/core-chain/core-chain.ts:284`).
 
@@ -292,7 +292,7 @@ An authenticated channel protects the connection to that node; it does not remov
 ## Private reads of public data
 
 The owner's resolution, Q180 A on 2026-10-28, documents disclosure through reads of public data
-(`openspec/changes/core-arch/tasks.md:3932`).
+(`openspec/changes/core-arch/tasks.md:3948`).
 A private process's SQL text and parameters reach the public database. Through transport they also reach the
 core, which decodes parameters and executes the supplied SQL
 (`src/private/private-transport.ts:313`, `src/private/private-transport.ts:368`,
@@ -307,9 +307,9 @@ every result row is public.
 
 A database error can echo a parameter. UmbraDB retains the server's error message and cause, and its own errors,
 details and logs may carry private values (`src/db/postgres.ts:147`, `src/db/postgres.ts:170`,
-`src/db/errors.ts:78`, `src/runner/process.ts:1255`).
+`src/db/errors.ts:78`, `src/runner/process.ts:1257`).
 Process log redaction knows configuration secrets, not arbitrary private-derived query values
-(`src/runner/process.ts:1032`, `src/config/redact.ts:16`).
+(`src/runner/process.ts:1034`, `src/config/redact.ts:16`).
 
 Task 14.2b keeps a refused read's statement text out of the core's refusal log
 (`src/private/core-transport.ts:369`).
@@ -320,7 +320,7 @@ filter them inside the private process.
 ## Backups and restore
 
 The owner's resolution, Q177 A on 2026-10-28, leaves restore unchanged: restore only backups you wrote
-(`openspec/changes/core-arch/tasks.md:3928`).
+(`openspec/changes/core-arch/tasks.md:3944`).
 Restore runs the file's SQL with the database login's, or writer's, rights. The load loop executes statements
 before restoring ownership and checking the loaded contents hash and ledger root
 (`src/backup/restore.ts:407`, `src/backup/restore.ts:412`, `src/backup/restore.ts:416`,
@@ -339,10 +339,10 @@ Post-load checks can refuse damaged or incompatible data, but run after the file
 authority. The enclosing transaction is not a security boundary for hostile SQL
 (`src/backup/restore.ts:470`, `src/backup/restore.ts:407`).
 The operator guide therefore says to restore only backups from a trusted source, your own
-(`docs/operator-guide.md:154`).
+(`docs/operator-guide.md:160`).
 
 Q178 A assigns backup origin and confidentiality to the operator
-(`openspec/changes/core-arch/tasks.md:3929`).
+(`openspec/changes/core-arch/tasks.md:3945`).
 UmbraDB neither signs nor encrypts backups: it writes a manifest and plain dump output
 (`src/backup/manifest.ts:54`, `src/backup/manifest.ts:73`, `src/backup/backup.ts:147`,
 `src/backup/backup.ts:228`).
@@ -351,7 +351,7 @@ not who wrote the file or whether its SQL is safe (`src/backup/restore.ts:417`).
 
 Storing, moving and encrypting backups, and knowing their origin, are the operator's responsibilities.
 A private instance's backup requires development opt-in and contains its private data in clear
-(`src/backup/backup.ts:212`, `src/backup/backup.ts:229`, `docs/operator-guide.md:136`).
+(`src/backup/backup.ts:212`, `src/backup/backup.ts:229`, `docs/operator-guide.md:142`).
 Owner-only file permissions reduce local exposure; they do not provide encryption or authenticate origin.
 
 ## Exposure defaults and hash limits
@@ -455,7 +455,7 @@ Vulnerability reporting, including the private reporting route and fallback cont
 3. **Ledger verification invocation — fixed by task 12.2b, as built.** Startup checks precede the ledger worker when
    the graph loads ledger packages, checks precede package imports once per thread, and browser build checks plus
    fetched-WASM hashing are present; browser hosting-origin trust remains separate
-   (`src/runner/process.ts:1188`, `src/ledger/load.ts:28`, `src/ledger/identity.ts:191`,
+   (`src/runner/process.ts:1190`, `src/ledger/load.ts:28`, `src/ledger/identity.ts:191`,
    `browser/build.ts:171`, `browser/build.ts:294`, `browser/src/ledger/instantiate.ts:29`).
 
 4. **Certificate-to-instance binding — open, issue 00045.** Mutual TLS checks roots but accepts a self-declared
@@ -477,7 +477,7 @@ Vulnerability reporting, including the private reporting route and fallback cont
 7. **Backup file mode — fixed by task 15.1b, as built.** Files are created owner-only and set to `0600` before writing,
    with backup failure if `chmod` is refused; encryption and origin remain the operator's responsibilities
    (`src/backup/backup.ts:65`, `src/backup/backup.ts:95`, `src/backup/backup.ts:97`,
-   `src/backup/backup.ts:99`, `openspec/changes/core-arch/tasks.md:3929`).
+   `src/backup/backup.ts:99`, `openspec/changes/core-arch/tasks.md:3945`).
 
 8. **Vendored Rust advisories and release provenance — open, issue 00048.** Ledger rebuild comparisons do not provide
    an advisory scan of the patched crate graphs or release provenance

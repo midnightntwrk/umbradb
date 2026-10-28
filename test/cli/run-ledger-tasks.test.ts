@@ -67,7 +67,7 @@ describe("umbradb run's ledger worker (task 12.6; MD-1, LG-17)", () => {
       signals: new EventEmitter(),
       start: (given) => {
         input = given;
-        return { closed: Promise.resolve(), status: () => ({ ended: null }) } as unknown as ProcessHandle;
+        return { started: Promise.resolve(), closed: Promise.resolve(), status: () => ({ ended: null }) } as unknown as ProcessHandle;
       },
     });
     await inProcess(["run", "--config", "tasks.config.ts"], project.dir, { run });

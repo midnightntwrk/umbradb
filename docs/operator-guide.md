@@ -121,9 +121,15 @@ on PostgreSQL. At startup the process logs `SIGUSR2 writes a backup to <path> at
 
 The file is written as `umbradb backup` writes one: under a temporary name, renamed only once complete. A SIGUSR2
 while a backup is pending or being written adds none; one after the process stopped at the core's stop height writes
-the backup of that height at once; a stop while a backup is written waits for it. The process listens for SIGUSR2 only
-when `backupOnSignal` is set, and only once its configuration is validated: without it, SIGUSR2 ends the process as
-Node.js does by default, so send it only to a process that sets it. A host program can pause and resume the loop
+the backup of that height at once; a stop while a backup is written waits for it.
+
+Without `backupOnSignal`, `umbradb run` still listens for SIGUSR2 (owner decision Q173): a SIGUSR2 sent by mistake
+logs `SIGUSR2 ignored: backupOnSignal is not set, so no backup is written`, writes no file, and the indexer keeps
+running. While it is still starting it logs `SIGUSR2 ignored: the process is starting and has not listened for it
+(backupOnSignal not set or not yet read)` instead: a process that sets `backupOnSignal` listens once its configuration
+is validated, so send the signal once it has logged `SIGUSR2 writes a backup to <path> …`. A process a host program
+starts with `startProcess` adds no SIGUSR2 listener unless it sets `backupOnSignal`: there SIGUSR2 does what Node.js or
+the host program's own handler does (by default, it ends the process). A host program can pause and resume the loop
 itself with its handle's `pause()` and `resume()`.
 
 ### What a backup holds

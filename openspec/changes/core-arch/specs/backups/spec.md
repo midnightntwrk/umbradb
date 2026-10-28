@@ -23,7 +23,9 @@ the backup at stop writes one, and continue (owner decision Q152): the way to ba
 process, whose directory the command cannot open while the process holds it (DB-11). `umbradb run` SHALL listen for
 SIGUSR2 WHERE `backupOnSignal` is not set too and, on one, log that it was ignored, naming `backupOnSignal`, and
 continue; a process a host program starts (`startProcess`) without `backupOnSignal` SHALL add no SIGUSR2 listener
-(owner decision Q173).
+(owner decision Q173). Every backup file the system writes on Node.js — `umbradb backup`, at stop, on SIGUSR2,
+`ProcessHandle.backup` — SHALL be created owner-only (mode `0600`) from its first byte, its temporary file included,
+and keep that mode through its rename.
 
 #### Scenario: Backup while syncing
 - **WHEN** a backup is written while blocks keep committing
