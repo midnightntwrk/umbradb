@@ -12,13 +12,15 @@ import {
   UNAVAILABLE,
   unavailableModule,
 } from "../../browser/build.js";
+import { copyVendoredLedger, VENDORED_LEDGERS } from "../ledger/version-checks.js";
 import { TEST_CONFIGURATION } from "./browser-harness.js";
 
 /**
  * The browser build itself, statically (task 16.1; `design.md` §9.2): what `npm run build:browser` writes, that the
  * workers bundle UmbraDB's own modules and only the replacements `browser/build.ts` names, that every replacement
  * gives what `src/` imports from the module it replaces, that a built-in module of Node.js no replacement covers fails
- * the build by name, and the rewrite of the vendored ledger packages' Node.js entries.
+ * the build by name, the rewrite of the vendored ledger packages' Node.js entries, and the check of every vendored
+ * package file the build bundles against its recorded SHA-256 (task 12.2b).
  */
 
 const directories: string[] = [];
@@ -210,6 +212,59 @@ describe("the browser build (task 16.1)", () => {
       /node:os, imported by .*fake\.ts, has no browser replacement/,
     );
   });
+
+  it("checks every vendored package file it bundles against its recorded SHA-256 when it builds: a changed one fails the build naming it (task 12.2b)", async () => {
+    const copy = copyVendoredLedger();
+    /** Flips one byte of `file` (under the copy) and returns what restores it. */
+    const change = (file: string): (() => void) => {
+      const path = join(copy.root, file);
+      const original = readFileSync(path);
+      const changed = Buffer.from(original);
+      const at = Math.floor(changed.length / 2);
+      changed[at] = (changed[at] as number) ^ 0x01;
+      writeFileSync(path, changed);
+      return () => writeFileSync(path, original);
+    };
+    const build = (ledgerRoot: string) => buildBrowser({ outdir: temporary("umbradb-build-"), configuration: TEST_CONFIGURATION, ledgerRoot });
+    try {
+      for (const [file, refusal] of [
+        // The manifest itself, against the identity the build records (`LEDGER_RELEASES`), before anything is bundled.
+        ["v9/SHA256SUMS", /the vendored ledger v9 package .* its SHA256SUMS has SHA-256 0x[0-9a-f]{64} where the build records/],
+        // A JavaScript file the ledger worker's bundle holds.
+        ["v9-rc3/pkg/midnight_ledger_wasm_v9_bg.js", /the vendored ledger v9-rc3 package .*: pkg\/midnight_ledger_wasm_v9_bg\.js has SHA-256 0x[0-9a-f]{64} where SHA256SUMS records/],
+        // The WebAssembly the build writes beside the ledger worker.
+        ["v8/pkg/midnight_ledger_wasm_bg.wasm", /the vendored ledger v8 package .*: pkg\/midnight_ledger_wasm_bg\.wasm has SHA-256 0x[0-9a-f]{64} where SHA256SUMS records/],
+      ] as const) {
+        const restore = change(file);
+        try {
+          await expect(build(copy.root), file).rejects.toThrow(refusal);
+        } finally {
+          restore();
+        }
+      }
+      // Unchanged: it builds; every vendored file its bundles hold is one a manifest lists, and the WebAssembly it
+      // writes is the package's.
+      const built = await build(copy.root);
+      const listed = new Set(
+        VENDORED_LEDGERS.flatMap((ledger) =>
+          readFileSync(join(copy.root, ledger, "SHA256SUMS"), "utf8")
+            .trimEnd()
+            .split("\n")
+            .map((line) => `vendor/ledger/${ledger}/${line.slice(66)}`),
+        ),
+      );
+      const bundled = built.inputs.filter((input) => input.startsWith("vendor/ledger/"));
+      expect(bundled.length).toBeGreaterThan(30);
+      expect(bundled.filter((input) => !listed.has(input))).toEqual([]);
+      for (const ledger of VENDORED_LEDGERS) {
+        const wasm = readdirSync(join(copy.root, ledger, "pkg")).filter((name) => name.endsWith(".wasm"));
+        expect(wasm).toHaveLength(1);
+        expect(readFileSync(join(built.outdir, "ledger", ledger, wasm[0] as string)).equals(readFileSync(join(copy.root, ledger, "pkg", wasm[0] as string)))).toBe(true);
+      }
+    } finally {
+      copy.remove();
+    }
+  }, 600_000);
 
   it("rewrites each vendored ledger package's Node.js entry to read its WebAssembly beside the worker, checked against SHA256SUMS", () => {
     for (const [version, lib] of [

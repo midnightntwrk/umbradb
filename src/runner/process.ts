@@ -30,7 +30,9 @@
  *    node client, the revision's ledger table), `core-block-fetch` bound to the block source (`bindCoreBlockFetch`, when
  *    the source gives block items), and so is the core module `core-chain-events` when enabled (`bindCoreChainEvents`,
  *    when the source gives a block's events; task 11.1), and — when the graph has `core-block-parsed` or
- *    `core-ledger-state` — the process's ledger worker started (`startLedgerWorker`, once per process) and bound to
+ *    `core-ledger-state` — the vendored ledger packages checked (`checkLedgerPackages`, LG-5, task 12.2b:
+ *    `package-hash-mismatch` naming a changed file, `invalid-configuration` naming a `ledgerSources` entry that is not
+ *    `vendored`) and the process's ledger worker started (`startLedgerWorker`, once per process) and bound to
  *    them (`bindLedgerParser`; `bindCoreLedgerState`, with the source's ledger calls; task 12.3), the migrations and
  *    `on-start-db` (`startDatabase`, through each
  *    context's publishing window — `core-chain`'s records the history and the identity and publishes its `process`
@@ -194,6 +196,7 @@ import { type CheckedConfig, type CheckedEntry, type ConfigInput, validateConfig
 import type { Database, ReadHandle } from "../db/api.js";
 import { type MigrationPart, startDatabase } from "../db/migrate.js";
 import { startWriter } from "../db/writer-lock.js";
+import { checkLedgerPackages, type VerifyLedgerPackagesOptions } from "../ledger/identity.js";
 import type { LedgerTable } from "../ledger/version-table.js";
 import { bindLedgerTasks, hasLedgerTasks, withLedgerTaskPoints } from "../ledger/tasks.js";
 import { type LedgerHost, startLedgerWorker } from "../ledger/worker/host.js";
@@ -284,6 +287,12 @@ export interface ProcessInput {
    * the process.
    */
   readonly ledgerWorker?: () => LedgerHost;
+  /**
+   * The startup check of the vendored ledger packages (LG-5, A173; task 12.2b), given the `core` revision's
+   * `ledgerSources` before the ledger worker starts: `checkLedgerPackages` (`../ledger/identity.ts`) unless given (a
+   * test's, over a copy of the packages; a negative control's, which checks nothing).
+   */
+  readonly checkLedgerPackages?: (options: VerifyLedgerPackagesOptions) => void;
   /**
    * The process's configuration hash (RN-16, PP-14; task 14.1b), read once at startup after `core-chain` recorded the
    * configuration: `readConfigHash` of its own database unless given (a negative control's, over its secrets).
@@ -1156,6 +1165,10 @@ class Process implements ProcessHandle {
     const parses = graph.modules.some((part) => part.id === CORE_BLOCK_PARSED_ID);
     const applies = graph.modules.some((part) => part.id === CORE_LEDGER_STATE_ID);
     if (parses || applies) {
+      // No ledger package is imported before it is checked (LG-5, A173; task 12.2b): a changed one, or a version
+      // ledgerSources says is released, refuses startup here, before the worker starts and before block S.
+      const sources = settings.ledgerSources as VerifyLedgerPackagesOptions["sources"];
+      (input.checkLedgerPackages ?? checkLedgerPackages)(sources === undefined ? {} : { sources });
       this.#ledger ??= (input.ledgerWorker ?? startLedgerWorker)();
       // A request given no read (a parse) reads stored nodes through the process's database.
       this.#ledger.useDatabase({ read: (body) => db.read(body) });

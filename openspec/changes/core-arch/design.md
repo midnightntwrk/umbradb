@@ -820,6 +820,29 @@ format: a state the rc.3 package stored loads in the rc.5 package with the same 
 2.0 → 2.1 upgrade the ledger worker loads the state at U in rc.5 by its key and applies F to it (§5.4). The identity
 check and the CI rebuild treat it as any vendored version.
 
+As built (task 12.2b, the threat model draft's gap 3; A173): until this task `verifyLedgerPackages` had no caller. A
+thread now checks a version's package before it imports it, and hashes a version's files once: `checkLedgerPackages` and
+`checkLedgerPackage` (`src/ledger/identity.ts`) remember, per thread, each directory and version whose files passed (a
+refusal is not remembered), since a thread imports a package once and keeps it. **The process** calls
+`checkLedgerPackages` with its `core` revision's `ledgerSources` when its graph has `core-block-parsed` or
+`core-ledger-state`, before it starts its ledger worker, before the migrations and before block S
+(`src/runner/process.ts`): a changed file refuses startup with `package-hash-mismatch` naming the version and the file,
+a version whose source is `released` with `invalid-configuration` naming the setting (`src/ledger/sources.ts`, which
+imports no Node.js). A process whose graph loads no package checks none (Q176, answer A). **The ledger
+worker** — and any thread that loads adapters through `src/ledger/load.ts` — calls `checkLedgerPackage` before it
+imports a version's package, so a file changed after the process's check is refused there: the request fails naming
+the file, and the package is not imported. **Cost:** a file is hashed by the main thread once, at startup, and by the
+worker once, before the first block of its version (again by a worker started anew, §5.4), never per block or request.
+The three packages are 35 MB: 15 to 20 ms of the process's startup on an idle Apple M4 Max, up to 40 ms on a loaded
+one; one version 4 to 7 ms of the worker's first block of it. **The browser build** checks the bytes it bundles when it
+builds (`browser/build.ts`): each version's `SHA256SUMS` against `LEDGER_RELEASES` before anything is bundled, then
+every package file the bundles hold and every `.wasm` it writes against its line of that manifest, each read once, so
+the bytes checked are the bytes bundled; a changed file fails the build with `package-hash-mismatch` naming it. In the
+bundles `browser/src/ledger/identity.ts` replaces `src/ledger/identity.ts`: it refuses `ledgerSources` as Node.js does
+and reads no file, and the ledger worker checks each `.wasm` it fetches against its manifest line (task 16.1). The
+build's check covers the bytes from the repository into the bundles, not their hosting: a page runs what its origin
+serves, so the page's integrity is its origin's, which no check inside the page can establish.
+
 ### 5.6 Version selection, the built-in tables and the metadata at upgrades (LG-1 to LG-4)
 
 As built (task 12.2, `src/ledger/version-table.ts`, `networks.ts`, `networks.json`, `metadata.ts`):

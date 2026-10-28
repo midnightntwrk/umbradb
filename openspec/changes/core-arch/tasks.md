@@ -2737,13 +2737,33 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       schemas 3); first run 18 caught, the survivor (F applied by the rc.3 package itself) closed by a carry test on
       stagenet's block 1, whose rules differ; final run 19 of 19. Issue 00036 (the in-memory blocks' runtime 2.0
       named `v9`). **Pending:** A97's CI rebuild of the third package runs when the branch is pushed (Phase 3).
-- [ ] 12.2b The threat model draft's gap 3 (owner, 2026-10-28): `verifyLedgerPackages`
+- [x] 12.2b The threat model draft's gap 3 (owner, 2026-10-28): `verifyLedgerPackages`
       (`src/ledger/identity.ts`) has no caller, so the vendored ledger packages load without the startup check
       design §5.2 describes. Call it before any ledger package is imported — in the process and in the ledger
       worker —, so a package whose JS or WASM differs from its recorded SHA-256, or `ledgerSources: released`,
       refuses startup naming the file or the setting; the browser build checks the bytes it bundles when it builds
       (or `design.md` §5.2 says why not).
       **Acceptance:** A173.
+      **Done (2026-10-28):** a thread checks a version's package before it imports it and hashes its files once
+      (`checkLedgerPackages`, `checkLedgerPackage` in `src/ledger/identity.ts`: each directory and version that
+      passed is remembered per thread, a refusal is not). The process calls `checkLedgerPackages` with its
+      `ledgerSources` when its graph has `core-block-parsed` or `core-ledger-state`, before it starts the ledger
+      worker and before block S (`src/runner/process.ts`: `ProcessInput.checkLedgerPackages`, three lines): a
+      changed file refuses with `package-hash-mismatch` naming the version and the file, `released` with
+      `invalid-configuration` naming `ledgerSources.<version>` (`src/ledger/sources.ts`, no Node.js). The ledger
+      worker's loader (`src/ledger/load.ts`) calls `checkLedgerPackage` before each version's import. Cost: the three
+      packages (35 MB) 15–20 ms of startup on an idle Apple M4 Max, up to 40 ms loaded; one version 4–7 ms in the
+      worker; never per block. The browser build checks the bytes it bundles: each `SHA256SUMS` against
+      `LEDGER_RELEASES`, then every package file its bundles hold and every `.wasm` it writes, each read once
+      (`browser/build.ts`, `ledgerRoot` for a test's copy); in the bundles `browser/src/ledger/identity.ts`
+      replaces the Node.js check (`ledgerSources` refused, no file read). Design §5.2 "As built (task 12.2b)".
+      Tests: `test/ledger/package-startup.test.ts` with `package-startup-checks.ts` (A173 over a copy of `src/` and
+      `vendor/ledger/`: the process; the worker over the copy's `load.ts`, a changed entry recording its import;
+      the per-thread memo), `test/browser/build.test.ts` (a changed manifest, JS file or `.wasm` fails the build
+      naming it) and `test/browser/ledger-identity.test.ts`; seen failing first on `3f3e00a` (5 tests in 4 files,
+      each for its intended reason). Committed negative control `package-startup.negative-control.test.ts`: a process
+      whose check does nothing, and a worker over a `load.ts` without its calls, fail A173. Question Q176 (a
+      process that loads no package checks none): the owner's answer A (2026-10-28). No mutation pass (deferred).
 - [x] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
       root check, outputs.
       **Acceptance:** A82, A99 (the ranges from genesis, Q133), A101, A106, A107.

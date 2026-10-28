@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,7 +10,9 @@ import type { Ledger } from "./adapter-fixtures.js";
 // Task 12.1 (A98; LG-7, Q49): runs `fixtures/adapter-worker.ts` in a worker thread of its own. The entry is bundled
 // with esbuild (a plain worker cannot load the TypeScript sources), leaving the vendored ledger packages out of the
 // bundle as imports of their own files: their Node.js entries read the `.wasm` beside them. This is the hook a build of
-// the adapters needs (task 16.1 maps the same imports to the packages' browser entries).
+// the adapters needs (task 16.1 maps the same imports to the packages' browser entries). The packages' identity check,
+// which `src/ledger/load.ts` runs before each import (task 12.2b), reads them beside its own source, so its
+// `import.meta.url` stays its source file's in the bundle too.
 
 export type AdapterWorkerRequest =
   | { op: "load"; ledger: Ledger; networkId: string; key: Uint8Array; nodes: StoredNode[] }
@@ -63,6 +65,12 @@ export class AdapterWorkerHost {
               const path = resolve(dirname(args.importer), args.path);
               if (!VENDORED.test(path)) return undefined;
               return { path: pathToFileURL(path).href, external: true };
+            });
+            context.onLoad({ filter: /[/\\]src[/\\]ledger[/\\]identity\.ts$/ }, (args) => {
+              const text = readFileSync(args.path, "utf8");
+              if (text.split("import.meta.url").length !== 2) throw new Error("src/ledger/identity.ts no longer names import.meta.url once");
+              const contents = text.replace("import.meta.url", JSON.stringify(pathToFileURL(args.path).href));
+              return { contents, loader: "ts", resolveDir: dirname(args.path) };
             });
           },
         },

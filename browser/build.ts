@@ -19,7 +19,8 @@
  *   the build, naming it.
  * - Whole modules ({@link SUBSTITUTES}): the database's opening (PGlite in memory or OPFS, never PostgreSQL), the
  *   writer lock (Web Locks), the configuration loader (a bundled configuration, no file), the node client's socket (the
- *   browser's `WebSocket`) and the module API's listener (the worker's message channel).
+ *   browser's `WebSocket`), the module API's listener (the worker's message channel) and the ledger packages' identity
+ *   check (`./src/ledger/identity.ts`: `ledgerSources` refused as in Node.js, no file read; see below).
  * - The vendored ledger packages' Node.js entries (`vendor/ledger/<version>/pkg/*_fs.js`, which read their `.wasm`
  *   synchronously): the same entry, its WebAssembly read beside the ledger worker (a synchronous request, as Node.js's
  *   `readFileSync`), checked against the package's `SHA256SUMS` (`package-hash-mismatch` otherwise) and instantiated
@@ -29,6 +30,13 @@
  * - Modules the browser does not carry ({@link UNAVAILABLE}: `umbradb backup`'s file writer, task 15.1) are bundled as
  *   stubs whose exports fail when used. The page's backup and restore (BK-5) run the same code without it: the PGlite
  *   backup's text (`src/backup/pglite-backup.ts`) and `restoreBackup` over the picked file's text (`src/backup/text.ts`).
+ *
+ * **The vendored packages' bytes are checked when the build reads them** (LG-5, A173; task 12.2b): each version's
+ * `SHA256SUMS` against the SHA-256 the build records (`LEDGER_RELEASES`), before anything is bundled, then every file
+ * of a package the bundles hold and every WebAssembly the build writes against its line of that manifest, each read
+ * once, so the bytes checked are the bytes bundled. A changed file fails the build with `package-hash-mismatch` naming
+ * the version and the file, and a file a manifest does not list fails it too. The packages are the repository's
+ * `vendor/ledger/` unless {@link BrowserBuildOptions.ledgerRoot} names a copy (a test's).
  *
  * **The configuration** is a module the page bundles (`umbradb:configuration`): `./src/config.ts` unless given — the
  * host program's choice of modules, as a configuration file is for `umbradb run` (CF-1, MD-1).
@@ -41,7 +49,7 @@
  */
 
 import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
+import { createRequire, registerHooks } from "node:module";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
@@ -68,6 +76,11 @@ export interface BrowserBuildOptions {
   readonly minify?: boolean;
   /** The modules the browser does not carry ({@link UNAVAILABLE} unless given; a test's own). */
   readonly unavailable?: readonly string[];
+  /**
+   * The vendored ledger packages whose files the build bundles: the repository's `vendor/ledger/` unless given (a
+   * test's copy, laid out as it is). The bundles resolve them in the repository and read their bytes from here.
+   */
+  readonly ledgerRoot?: string;
 }
 
 /** What {@link buildBrowser} wrote. */
@@ -87,6 +100,7 @@ export const SUBSTITUTES: Readonly<Record<string, string>> = Object.freeze({
   "src/config/load.ts": "browser/src/config/load.ts",
   "src/db/pglite-lock.ts": "browser/src/db/web-lock.ts",
   "src/db/postgres.ts": "browser/src/db/postgres.ts",
+  "src/ledger/identity.ts": "browser/src/ledger/identity.ts",
   "src/node/ws-socket.ts": "browser/src/node/web-socket.ts",
   "src/runner/api-server.ts": "browser/src/runner/api.ts",
 });
@@ -118,7 +132,7 @@ const PGLITE_ASSETS = ["pglite.wasm", "pglite.data", "initdb.wasm"];
 const PGLITE_TOOLS_ASSETS = ["pg_dump.wasm"];
 
 /** The vendored ledger versions whose WebAssembly the ledger worker fetches. */
-const LEDGERS = ["v8", "v9-rc3", "v9"];
+const LEDGERS = ["v8", "v9-rc3", "v9"] as const;
 
 const NODE_BUILTIN = /^(node:|(assert|async_hooks|buffer|child_process|crypto|events|fs|fs\/promises|http|https|module|net|os|path|perf_hooks|stream|stream\/promises|tls|url|util|worker_threads|zlib)$)/;
 
@@ -139,6 +153,37 @@ const FS_ENTRY_NODE_LINES = [
 ];
 const FS_ENTRY_INSTANCE =
   /^const wasmPath = join\(dirname\(fileURLToPath\(import\.meta\.url\)\), "([^"]+)"\);\nconst wasmModule = new WebAssembly\.Module\(readFileSync\(wasmPath\)\);\nconst wasmInstance = new WebAssembly\.Instance\(wasmModule, imports\);\n/m;
+
+/** The vendored ledger packages' files, each checked when read (see the module comment). */
+interface CheckedLedgers {
+  /** `version`'s manifest, checked against the SHA-256 the build records, as its text. */
+  manifest(version: string): string;
+  /** The `.wasm` files `version`'s manifest lists, by their paths in it (`pkg/…`). */
+  wasm(version: string): readonly string[];
+  /** The bytes of `file` (`pkg/…`) of `version`'s package, once their SHA-256 is its manifest line's. */
+  read(version: string, file: string): Buffer;
+}
+
+/** The packages of {@link LEDGERS} under `root`, their manifests checked now (see the module comment). */
+async function checkedLedgers(root: string): Promise<CheckedLedgers> {
+  // Imported here: when Node.js runs this file itself, `main` first resolves the sources' `.js` imports to `.ts`.
+  const { readPackageFile, readRecordedManifest } = await import("../src/ledger/identity.js");
+  const manifests = new Map<string, ReturnType<typeof readRecordedManifest>>(LEDGERS.map((version) => [version, readRecordedManifest(root, version)]));
+  const linesOf = (version: string) => {
+    const lines = manifests.get(version);
+    if (lines === undefined) throw new Error(`the browser build carries no vendored ledger ${version}`);
+    return lines;
+  };
+  return {
+    manifest: (version) => linesOf(version).map((line) => `${line.sha256.slice(2)}  ${line.path}\n`).join(""),
+    wasm: (version) => linesOf(version).filter((line) => /^pkg\/[^/]+\.wasm$/.test(line.path)).map((line) => line.path),
+    read(version, file) {
+      const line = linesOf(version).find((candidate) => candidate.path === file);
+      if (line === undefined) throw new Error(`vendor/ledger/${version}/${file} is bundled, and its SHA256SUMS does not list it`);
+      return readPackageFile(root, version as (typeof LEDGERS)[number], line);
+    },
+  };
+}
 
 /**
  * A vendored package's `_fs.js` for the browser (see the module comment): its WebAssembly fetched as
@@ -203,6 +248,7 @@ function browserPlugin(options: {
   readonly worker: "host" | "worker";
   readonly control: BrowserControl;
   readonly unavailable: readonly string[];
+  readonly ledgers: CheckedLedgers;
 }): esbuild.Plugin {
   const workerThreads = join(BROWSER, options.worker === "host" ? "src/shims/worker-threads-host.ts" : "src/shims/worker-threads-worker.ts");
   const buffer = join(BROWSER, "src/shims/buffer.ts");
@@ -242,10 +288,12 @@ function browserPlugin(options: {
         contents: unavailableModule(readFileSync(args.path, "utf8"), repositoryPath(args.path)),
         loader: "js",
       }));
-      build.onLoad({ filter: /\/vendor\/ledger\/v\d+(?:-[a-z0-9]+)?\/pkg\/[^/]+_fs\.js$/ }, (args) => {
-        const version = /\/vendor\/ledger\/(v\d+(?:-[a-z0-9]+)?)\//.exec(args.path)?.[1] as string;
-        const sums = readFileSync(join(REPOSITORY, "vendor/ledger", version, "SHA256SUMS"), "utf8");
-        return { contents: browserLedgerEntry(readFileSync(args.path, "utf8"), version, sums), loader: "js", resolveDir: dirname(args.path) };
+      // Every file of a vendored package the bundles hold, its bytes checked as read (see the module comment).
+      build.onLoad({ filter: /\/vendor\/ledger\/v\d+(?:-[a-z0-9]+)?\/pkg\/.+\.js$/ }, (args) => {
+        const [, version, file] = /\/vendor\/ledger\/(v\d+(?:-[a-z0-9]+)?)\/(pkg\/.+)$/.exec(args.path) as unknown as [string, string, string];
+        const text = options.ledgers.read(version, file).toString("utf8");
+        const contents = /^pkg\/[^/]+_fs\.js$/.test(file) ? browserLedgerEntry(text, version, options.ledgers.manifest(version)) : text;
+        return { contents, loader: "js", resolveDir: dirname(args.path) };
       });
       build.onLoad({ filter: /\.ts$/ }, (args) => {
         if (!args.path.startsWith(SRC)) return undefined;
@@ -290,6 +338,7 @@ export async function buildBrowser(options: BrowserBuildOptions): Promise<Browse
   const unavailable = (options.unavailable ?? UNAVAILABLE).map((path) => (isAbsolute(path) ? path : join(REPOSITORY, path)));
   rmSync(outdir, { recursive: true, force: true });
   mkdirSync(outdir, { recursive: true });
+  const ledgers = await checkedLedgers(resolve(options.ledgerRoot ?? join(REPOSITORY, "vendor/ledger")));
   const shared = common({ ...options, outdir });
   const fail = (error: unknown): never => {
     const errors = (error as { errors?: esbuild.Message[] }).errors ?? [];
@@ -302,14 +351,14 @@ export async function buildBrowser(options: BrowserBuildOptions): Promise<Browse
     .build({
       ...shared,
       entryPoints: { "core-worker": join(BROWSER, "src/core-worker.ts"), "private-worker": join(BROWSER, "src/private-worker.ts") },
-      plugins: [browserPlugin({ configuration, worker: "host", control, unavailable })],
+      plugins: [browserPlugin({ configuration, worker: "host", control, unavailable, ledgers })],
     })
     .catch(fail);
   const ledger = await esbuild
     .build({
       ...shared,
       entryPoints: { "ledger-worker": join(BROWSER, "src/ledger-worker.ts") },
-      plugins: [browserPlugin({ configuration, worker: "worker", control, unavailable })],
+      plugins: [browserPlugin({ configuration, worker: "worker", control, unavailable, ledgers })],
     })
     .catch(fail);
   const html = readFileSync(join(BROWSER, "index.html"), "utf8");
@@ -320,11 +369,8 @@ export async function buildBrowser(options: BrowserBuildOptions): Promise<Browse
   const tools = dirname(require.resolve("@electric-sql/pglite-tools/pg_dump"));
   for (const asset of PGLITE_TOOLS_ASSETS) copyFileSync(join(tools, asset), join(outdir, asset));
   for (const version of LEDGERS) {
-    const pkg = join(REPOSITORY, "vendor/ledger", version, "pkg");
     mkdirSync(join(outdir, "ledger", version), { recursive: true });
-    for (const file of readdirSync(pkg).filter((name) => name.endsWith(".wasm"))) {
-      copyFileSync(join(pkg, file), join(outdir, "ledger", version, file));
-    }
+    for (const file of ledgers.wasm(version)) writeFileSync(join(outdir, "ledger", version, basename(file)), ledgers.read(version, file));
   }
   const files = listFiles(outdir).map((file) => relative(outdir, file).split("\\").join("/"));
   const results = [processes, ledger, page];
@@ -355,6 +401,19 @@ function listFiles(directory: string): string[] {
 
 /** `node browser/build.ts [--configuration <module>] [--out <dir>]`. */
 async function main(args: readonly string[]): Promise<void> {
+  // Node.js runs this file itself, through its type stripping: the sources it imports (the packages' identity check,
+  // `checkedLedgers`) import each other by the `.js` names of the TypeScript build, here resolved to their `.ts` files,
+  // as a worker run from the sources resolves them (`typeScriptEntry`, `src/ledger/worker/host.ts`).
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      try {
+        return nextResolve(specifier, context);
+      } catch (error) {
+        if (/^\.\.?\//.test(specifier) && specifier.endsWith(".js")) return nextResolve(`${specifier.slice(0, -3)}.ts`, context);
+        throw error;
+      }
+    },
+  });
   const value = (flag: string): string | undefined => {
     const at = args.indexOf(flag);
     return at < 0 ? undefined : args[at + 1];
