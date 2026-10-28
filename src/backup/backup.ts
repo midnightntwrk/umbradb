@@ -148,6 +148,20 @@ const LIBPQ_CONNECTION = ["PGHOST", "PGHOSTADDR", "PGPORT", "PGUSER", "PGDATABAS
   "PGSERVICE", "PGSERVICEFILE", "PGSSLMODE", "PGSSLROOTCERT", "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY"];
 
 /**
+ * `pg_dump`'s whole environment: the caller's `env` without its unset variables and libpq's connection variables, then
+ * {@link pgDumpEnvironment}'s and the application name. Exported for its tests.
+ */
+export function pgDumpChildEnvironment(env: Environment, connection: PostgresConnection): Record<string, string> {
+  const childEnv: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined && !LIBPQ_CONNECTION.includes(name)) childEnv[name] = value;
+  }
+  Object.assign(childEnv, pgDumpEnvironment(connection));
+  childEnv.PGAPPNAME = "umbradb-backup";
+  return childEnv;
+}
+
+/**
  * Runs `pg_dump` (`tool`) on the database of `connection`, in the snapshot `snapshot` (none: its own), appending its
  * output to `stream`; rejects with `database-error` (`reason: pg-dump-failed`, its message) when it fails.
  */
@@ -165,13 +179,7 @@ async function runPgDump(
     "--no-privileges",
     ...(snapshot === null ? [] : [`--snapshot=${snapshot}`]),
   ];
-  const childEnv: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) {
-    if (value !== undefined && !LIBPQ_CONNECTION.includes(name)) childEnv[name] = value;
-  }
-  Object.assign(childEnv, pgDumpEnvironment(connection));
-  childEnv.PGAPPNAME = "umbradb-backup";
-  const child = spawn(tool.path, args, { env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(tool.path, args, { env: pgDumpChildEnvironment(env, connection), stdio: ["ignore", "pipe", "pipe"] });
   let stderr = "";
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
     if (stderr.length < 65_536) stderr += chunk;

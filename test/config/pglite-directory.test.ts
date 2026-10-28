@@ -297,6 +297,11 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
     expect(error.code).toBe("database-error");
     expect(error.details).toEqual({ reason: "open-failed" });
     expect(error.message).not.toContain(tmp);
+    // The directory's own refusal, with the file system's error as its cause, not the lock's after it (task 17.5b).
+    expect(error.message).toBe(
+      "the PGlite data directory cannot be created: it, or one of its missing parent directories, cannot be made",
+    );
+    expect((error.cause as NodeJS.ErrnoException).code).toBe("ENOTDIR");
     expect(statSync(file).isFile()).toBe(true);
     expect(existsSync(`${directory}.lock.sqlite`)).toBe(false);
   });

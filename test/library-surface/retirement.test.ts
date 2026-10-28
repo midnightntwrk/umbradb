@@ -129,6 +129,8 @@ describe("A5: the gates match design.md §13's retirement list (LS-5)", () => {
       .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name));
     expect(srcEntries).toContain("db/");
     expect(floorProblems(coverage!.thresholds!, coverage!.exclude ?? [], srcEntries, PENDING_FLOORS)).toEqual([]);
+    // No §13 floor is pending (task 17.5b, Q158 A): the sweep's 95/90 is held like the others.
+    expect(PENDING_FLOORS).toEqual([]);
   });
 
   it("Formal/Lean holds exactly §13's files: TemporalKV and Checkpoint gone, the aggregators and APISmoke trimmed", () => {

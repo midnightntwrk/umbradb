@@ -32,6 +32,7 @@ export default defineConfig({
       "test/helpers/cursor-table.test.ts",
       "test/helpers/cursor-table.property.test.ts",
       "test/backbone/ledger-sweep.test.ts",
+      "test/backbone/ledger-sweep-tables.test.ts",
       "test/backbone/node-source.test.ts",
     ],
   },

@@ -238,7 +238,10 @@ export const MUTATION_TARGETS: Readonly<Record<string, readonly string[]>> = {
     "test/helpers/height-versioned.property.test.ts",
   ],
   "src/helpers/cursor-table.ts": ["test/helpers/cursor-table.test.ts", "test/helpers/cursor-table.property.test.ts"],
-  "src/backbone/core-ledger-state/sweep.ts": ["test/backbone/ledger-sweep.test.ts"],
+  "src/backbone/core-ledger-state/sweep.ts": [
+    "test/backbone/ledger-sweep.test.ts",
+    "test/backbone/ledger-sweep-tables.test.ts",
+  ],
   "src/backbone/core-block-fetch/node-source.ts": ["test/backbone/node-source.test.ts"],
 };
 
@@ -316,12 +319,10 @@ export const REQUIRED_FLOORS: Readonly<Record<string, Floor>> = {
 };
 
 /**
- * §13's floors not yet in `vitest.config.ts`, each with the reason; a pending floor may be absent, never weaker. The
- * sweep's 95/90 (Q158): `sweep.ts` measures 100 % lines and 89.33 % branches (67 of 75, 2026-10-27: eight branches
- * are defensive refusals and comparison ties no test reaches), so the floor would fail the gate; it stays under
- * the backbone's 90/85 floor until tests reach those branches or the owner answers otherwise. Empty once applied.
+ * §13's floors not yet in `vitest.config.ts`, each with the reason; a pending floor may be absent, never weaker. Empty:
+ * the last one, the sweep's 95/90 (Q158 A), was applied by task 17.5b.
  */
-export const PENDING_FLOORS: readonly string[] = ["**/src/backbone/core-ledger-state/sweep.ts"];
+export const PENDING_FLOORS: readonly string[] = [];
 
 /** §13's default floor for every file of `src/`. */
 export const DEFAULT_SRC_FLOOR: Floor = { lines: 90, branches: 85 };

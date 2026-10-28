@@ -155,7 +155,7 @@ const FS_ENTRY_INSTANCE =
   /^const wasmPath = join\(dirname\(fileURLToPath\(import\.meta\.url\)\), "([^"]+)"\);\nconst wasmModule = new WebAssembly\.Module\(readFileSync\(wasmPath\)\);\nconst wasmInstance = new WebAssembly\.Instance\(wasmModule, imports\);\n/m;
 
 /** The vendored ledger packages' files, each checked when read (see the module comment). */
-interface CheckedLedgers {
+export interface CheckedLedgers {
   /** `version`'s manifest, checked against the SHA-256 the build records, as its text. */
   manifest(version: string): string;
   /** The `.wasm` files `version`'s manifest lists, by their paths in it (`pkg/…`). */
@@ -164,8 +164,11 @@ interface CheckedLedgers {
   read(version: string, file: string): Buffer;
 }
 
-/** The packages of {@link LEDGERS} under `root`, their manifests checked now (see the module comment). */
-async function checkedLedgers(root: string): Promise<CheckedLedgers> {
+/**
+ * The packages of {@link LEDGERS} under `root`, their manifests checked now (see the module comment). Exported for its
+ * tests.
+ */
+export async function checkedLedgers(root: string): Promise<CheckedLedgers> {
   // Imported here: when Node.js runs this file itself, `main` first resolves the sources' `.js` imports to `.ts`.
   const { readPackageFile, readRecordedManifest } = await import("../src/ledger/identity.js");
   const manifests = new Map<string, ReturnType<typeof readRecordedManifest>>(LEDGERS.map((version) => [version, readRecordedManifest(root, version)]));

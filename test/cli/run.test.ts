@@ -320,6 +320,8 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
   it.each([
     [["extra.config.ts"], "run takes no file of its own: umbradb run [--config <file>] [--update-hash=<hash>]"],
     [["--config"], "--config takes a value: the configuration file"],
+    // An empty value is none (task 17.5b).
+    [["--config="], "--config takes a value: the configuration file"],
     [["--config", "a.config.ts", "--config", "b.config.ts"], "run takes --config once"],
     [["--confg", "a.config.ts"], "unknown option --confg of run"],
     [["--database", "postgres://u:pw-4-4a-RUN@h/db"], "unknown option --database of run"],

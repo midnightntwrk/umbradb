@@ -672,9 +672,9 @@ function namedStartDb(part: MigrationPart): MigrationPart {
 /**
  * Whether `error`, a failure of the loop, came from a call on the node client after it was closed — `handle-closed` of
  * the node client, itself or the cause of what failed (a callback's, a height's) —, which only the process's stop does
- * while the loop runs (task 5.3c).
+ * while the loop runs (task 5.3c). The cause chain is followed eight levels deep at most. Exported for its tests.
  */
-function nodeClientClosed(error: unknown): boolean {
+export function nodeClientClosed(error: unknown): boolean {
   let cause = error;
   for (let depth = 0; depth < 8 && cause instanceof Error; depth++) {
     if (cause instanceof UmbraError && cause.code === "handle-closed" && cause.details.handle === "node-client") {

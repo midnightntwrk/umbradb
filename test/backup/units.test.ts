@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { backupAtStop, firstLine, writeBackup } from "../../src/backup/backup.js";
 import { readBackupFacts } from "../../src/backup/facts.js";
+import { pgliteBackupText } from "../../src/backup/pglite-backup.js";
 import { dumpLines, isEmptyDatabase } from "../../src/backup/restore.js";
 import { runRestore } from "../../src/cli/restore.js";
 import { BACKUP_FORMAT, type Manifest, MANIFEST_PREFIX, manifestLine, readManifestLine } from "../../src/backup/manifest.js";
@@ -342,8 +343,25 @@ describe("pglite-tools' pg_dump of another major version", () => {
       const input = { db, target: { backend: "pglite" as const }, out, optedOut: [], developmentOptIn: true };
       await expect(writeBackup(input, { pgliteTools: fake })).rejects.toMatchObject({
         code: "backup-tools-missing",
+        message:
+          "pg_dump of @electric-sql/pglite-tools is of PostgreSQL 17.2, not 18: install the version made for this " +
+          "build's PGlite (BK-1); no file was written",
         details: { tool: "pglite-tools", version: "17.2" },
       });
+      // A version it cannot read is no version of 18 either (task 17.5b).
+      const unread = join(tools, "pg_dump-unread.mjs");
+      writeFileSync(unread, 'export async function pgDump() { return new Blob(["--\\n-- Dumped by pg_dump version beta\\n"]); }\n');
+      await expect(writeBackup(input, { pgliteTools: unread })).rejects.toMatchObject({
+        code: "backup-tools-missing",
+        details: { version: "beta" },
+      });
+      // pgliteBackupText itself refuses a private database without the opt-in, before it reads anything (the browser's
+      // worker calls it without writeBackup; task 17.5b).
+      await expect(
+        pgliteBackupText({ db, optedOut: [], side: "private", developmentOptIn: false }, async () => {
+          throw new Error("no dump expected");
+        }),
+      ).rejects.toMatchObject({ code: "private-backup-refused" });
       writeFileSync(fake, 'export async function pgDump() { return new Blob(["-- no header\\n"]); }\n');
       const other = join(tools, "pg_dump-2.mjs");
       writeFileSync(other, 'export async function pgDump() { return new Blob(["-- no header\\n"]); }\n');

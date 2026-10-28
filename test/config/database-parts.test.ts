@@ -170,7 +170,10 @@ describe("A177: core.transportReader is required on PostgreSQL with listen.trans
   it("PostgreSQL with listen.transport and no transportReader is refused with its path", () => {
     const found = findings({ ...CORE_SETTINGS, database: postgresOn("db.internal"), ...transport });
     expect(found.map((one) => one.path)).toEqual(["entries[0].config.transportReader"]);
-    expect(found[0]?.message).toMatch(/transportReader.*listen\.transport/);
+    expect(found[0]?.message).toContain(
+      "a PostgreSQL database with listen.transport needs transportReader { user, password }, a login that may only " +
+        "read, which the transport's reads run as (CF-4, owner decision Q175)",
+    );
   });
 
   it("PostgreSQL with both, and PostgreSQL without listen.transport, pass", () => {
@@ -182,7 +185,9 @@ describe("A177: core.transportReader is required on PostgreSQL with listen.trans
     const pglite = { database: { kind: "pglite", memory: true }, developmentOptIn: true };
     const found = findings({ ...CORE_SETTINGS, ...pglite, ...transport, ...reader });
     expect(found.map((one) => one.path)).toEqual(["entries[0].config.transportReader"]);
-    expect(found[0]?.message).toMatch(/PGlite/);
+    // The reader's password, "p", is redacted wherever it appears in the message: its words without a "p" are checked.
+    expect(found[0]?.message).toContain("is refused on PGlite: its database has one session, the writer's, which the");
+    expect(found[0]?.message).toContain("reads share (CF-4, owner decision Q175)");
     expect(findings({ ...CORE_SETTINGS, ...pglite, ...transport })).toEqual([]);
   });
 

@@ -44,15 +44,17 @@ const CORE_ARCH = {
   // §13's default for `src/**`, added with the backbone parts' directory (tasks 7.1 and 5.2: `core-digest`,
   // `core-block-commit`'s cursor table).
   "**/src/backbone/**": { lines: 90, branches: 85, perFile: true },
+  // §13's sweep floor (`src/ledger/sweep*` in §13; as built `src/backbone/core-ledger-state/sweep.ts`, task 12.5),
+  // added by task 17.5b (decision record Q158 A): its tables' reads and writes tested on their own
+  // (`test/backbone/ledger-sweep-tables.test.ts`), the three branches no step could reach removed.
+  "**/src/backbone/core-ledger-state/sweep.ts": { lines: 95, branches: 90, perFile: true },
   // §13's default for `src/**`, added with the node client's directory (task 10.1).
   "**/src/node/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the admin endpoints' directory (task 8.1).
   "**/src/admin/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the process transport's directory (task 14.2).
   "**/src/private/**": { lines: 90, branches: 85, perFile: true },
-  // §13's default for `src/**`, added with the ledger adapters' directory (task 12.1). The sweep (§13's 95/90, as built
-  // `src/backbone/core-ledger-state/sweep.ts`, task 12.5) stays under `src/backbone`'s 90/85 for now: its branches
-  // measure 89.33 % (decision record Q-17.2-2, task 17.2).
+  // §13's default for `src/**`, added with the ledger adapters' directory (task 12.1).
   "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
   // The test tape (task 9.1): not in the package, but the tests of ingest, faults and differentials stand on it, so it
   // is measured and held to §13's default like `src/**`.

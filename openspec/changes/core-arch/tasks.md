@@ -4065,7 +4065,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       model again, `SECURITY.md` has a "Threat model" section linking it, and the operator guide's "What a backup holds"
       (Q178) and "Restoring a backup" (Q177) and the module guide's "Private modules" (Q180) each have the sentence.
       A178's test: `test/library-surface/threat-model{,.test}.ts`, with committed negative controls.
-- [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
+- [x] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage
       floors §13 sets that are still pending — the sweep's 95/90 (`src/backbone/core-ledger-state/sweep.ts`, owner
@@ -4078,6 +4078,15 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Done in part (task 17.5a, 2026-10-27):** the load-bound slow-block tests of issues 00035, 00040 and 00043 fixed
       — each case compares only the windows it holds open, or raises `slowBlockMs` with its holds — and the issues
       closed; issue 00041 (A128, A130) given diagnostics and left open. A142, A161, A128 and A130 unchanged.
+      **Done (task 17.5b, 2026-10-28):** the sweep at 100 % lines and branches — its tables' reads and writes tested on
+      their own (`test/backbone/ledger-sweep-tables.test.ts`, also a test of its mutation target), three branches no
+      step reaches removed (`byBytes`' tie, `makeGrey`'s `removed.delete`, `greyDeleted`'s filter) — and the 95/90
+      floor applied; `PENDING_FLOORS` empty (A5). No floor had been lowered (`vitest.config.ts`' history since the
+      floors began). The deferred mutation passes of 21 tasks run as scoped Stryker passes, their survivors killed by
+      new tests or explained (equivalent, unreachable, the runner's limits, outside the deferred logic, or a gap) in
+      the task's record; four functions exported for their tests (`nodeClientClosed`, `checkPublicBlock`,
+      `pgDumpChildEnvironment`, `checkedLedgers`). `npm run test:mutation:ci`: aggregate 87.98 % over 3,162 valid
+      mutants, break 65 (was 85.33 %; the sweep 90.33 %, was 60.62 %).
 
 ## 18. Whole-system faults, differentials and measurements
 

@@ -238,7 +238,7 @@ interface Checked {
 }
 
 /** What a private process's backup's checks read of its public database, in one read (see the module comment). */
-interface PublicSide {
+export interface PublicSide {
   readonly identity: PublicIdentity;
   /** The public core's `table` items with their heights (PP-13). */
   readonly items: readonly PublicItem[];
@@ -273,8 +273,11 @@ async function checkPublicSide(
   return side;
 }
 
-/** Step 6 against a private process's public database (see the module comment): `backup-block-not-finalized`. */
-function checkPublicBlock(side: PublicSide, manifest: Manifest): void {
+/**
+ * Step 6 against a private process's public database (see the module comment): `backup-block-not-finalized`. Exported
+ * for its tests.
+ */
+export function checkPublicBlock(side: PublicSide, manifest: Manifest): void {
   const height = BigInt(manifest.height);
   const head = side.head?.height ?? null;
   if (head === null || head < height) {

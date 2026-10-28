@@ -83,7 +83,10 @@ export interface GreyView {
   all(): Promise<Uint8Array[]>;
 }
 
-/** Which grey keys a marking round visits: `count` of them (fewer only when the set is smaller). */
+/**
+ * Which grey keys a marking round visits: `count` of them (fewer only when the set is smaller), each a key of the view
+ * (the step counts every key it returns as grey before the round).
+ */
 export type GreyPicker = (grey: GreyView, count: number) => Promise<readonly Uint8Array[]>;
 
 /** LG-14's: the smallest grey keys in byte order. */
@@ -110,7 +113,6 @@ export interface SweepWrites {
 }
 
 const hexOf = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
-const byBytes = (a: Uint8Array, b: Uint8Array): number => (hexOf(a) < hexOf(b) ? -1 : hexOf(a) > hexOf(b) ? 1 : 0);
 
 /** The two key lists merged in byte order, each key once, the first `limit`. */
 function merged(a: readonly Uint8Array[], b: readonly Uint8Array[], limit: number): Uint8Array[] {
@@ -149,11 +151,12 @@ export async function sweepStep(
   };
   const isGrey = (k: string): boolean => added.has(k) || (tableGrey.get(k) === true && !removed.has(k));
   const isMarked = (k: string): boolean => marked.has(k) || tableMarks.get(k) === true;
+  // A key of `removed` was visited in this block, so it is marked: a key that is neither grey nor marked is not grey in
+  // the table either (task 17.5b removed the branch that took it out of `removed`, which no key reaches).
   const makeGrey = (key: Uint8Array): void => {
     const k = hexOf(key);
     if (isGrey(k) || isMarked(k)) return;
-    if (tableGrey.get(k) === true) removed.delete(k);
-    else added.set(k, key);
+    added.set(k, key);
   };
   const view: GreyView = {
     async smallest(count) {
@@ -217,7 +220,7 @@ export async function sweepStep(
     for (const { key, marked } of fromTable) if (!tableMarks.has(hexOf(key))) tableMarks.set(hexOf(key), marked);
     const scanned = merged(
       fromTable.map((row) => row.key),
-      fromInserts.sort(byBytes),
+      fromInserts,
       budget,
     );
     await known(scanned.filter((key) => !tableMarks.has(hexOf(key))));
@@ -234,7 +237,9 @@ export async function sweepStep(
     }
   }
 
-  const greyDeleted = [...removed].sort().map((k) => (tableGrey.get(k) === true ? (k as string) : null)).filter((k): k is string => k !== null);
+  // Every key of `removed` left the table's grey set: a round's keys are grey (`GreyPicker`), and one not added in this
+  // block is the table's.
+  const greyDeleted = [...removed].sort();
   return Object.freeze({
     before,
     after: Object.freeze({ cycle, phase, sweepAfter }),

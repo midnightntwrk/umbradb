@@ -81,3 +81,12 @@ unexpectedly` and the gate exited 1.
 2. Bound the gate's wait for a worker: Vitest's `teardownTimeout` does not cover a worker that stopped running
    JavaScript, so a watchdog in `scripts/conformance-gate.mjs` that ends the run after a fixed time with no test
    reported, naming the files still running, would turn this hang into a failure the gate reports.
+
+### Occurrence of 2026-10-28, task 17.5b's conformance gate
+
+One Vitest fork worker stopped at 98 % CPU for over 30 minutes, the only file not reported being
+`test/backbone/contract-logs-handoff.test.ts` (A111, PGlite and PostgreSQL with backups and restores); every other file
+had passed (`Test Files 338 passed (339)`, `Tests 5513 passed | 56 skipped`). A two-second `sample` of the worker
+(`scratchpad/lane3-17.5b/hung-worker-sample.txt`, not in the repository) shows the same frames: `FreeDeadCode`,
+`WasmImportWrapperCache::Free`, `TryLookupJitPageLocked`, `V8_Fatal`. SIGTERM did not end it; SIGKILL did, and the gate
+exited 1 with `Error: Worker exited unexpectedly` after 2,487 s. The file alone passed (2 tests, 9 s).
