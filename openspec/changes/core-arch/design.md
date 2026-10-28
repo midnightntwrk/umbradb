@@ -121,7 +121,14 @@ or `stop()`: `stopping`, the loop's signal aborted and the loop awaited — the 
 included, finishes —, then the module API, the node client, the database and the block source closed. During startup
 the node client and the block source are closed first, so every wait of startup for the chain ends at once — a node
 call and its retries, a private process's wait for its public side — and no connection is attempted after the stop
-(RN-13, task 5.3b). Log lines go through the configuration's redaction.
+(RN-13, task 5.3b). Once the loop runs, the node client is closed at the stop when no block transaction is open, else
+as soon as the open one has committed or rolled back (`FinalizedLoop.blockTransaction`), so a node call the loop awaits
+outside a transaction — the next height's block through the node source's prefetch, the state root `core-ledger-state`'s
+`on-compute` awaits — ends with its retries; the loop's failure that follows (`handle-closed` of the node client) ends
+processing with the signal: the height in progress stores nothing and is processed again after a restart, and after a
+commit its later points are re-delivered then (RN-11) (RN-13, task 5.3c; the alternative, the loop's signal through
+the block source and the client's `signal`, leaves the client reconnecting for its subscriptions until it is closed).
+Log lines go through the configuration's redaction.
 
 **Failures** (task 5.4: `src/runner/failures.ts`, `process.ts`). A startup refusal leaves the process up in `refused`
 (IN-12, AE-3), its database closed and its writer lock released — except a refusal of the configuration itself, before

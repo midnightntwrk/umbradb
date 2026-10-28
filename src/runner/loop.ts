@@ -38,7 +38,9 @@
  * above it, it processes nothing — and after the height before an upgrade boundary ({@link LoopInput.boundary}), the
  * first height of a revision whose version this build does not carry: it commits that height, completes its
  * `on-after-db-write` and `on-stop-height`, and resolves with a {@link LoopEnd} saying which. Its signal stops it before
- * the next height, or while it waits (RN-13: the height in progress finishes).
+ * the next height, or while it waits (RN-13: the height in progress finishes). While a height's block transaction is
+ * open — from its request until it has committed or rolled back — {@link FinalizedLoop.blockTransaction} gives it: the
+ * process's stop closes the node client at once when none is, else once it settled (task 5.3c, `./process.ts`).
  *
  * **The block context** of each callback (RN-5) holds the block's height, hash and parent hash, the `block` items
  * published before the callback started (`./block-context.ts`: a callback's puts are published when it completes), the
@@ -436,6 +438,8 @@ export class FinalizedLoop {
   #watch: Watch | undefined;
   /** What the source's queue runs for each height it prepares (`on-fetch`, `on-parse`), while it does. */
   readonly #preparing = new Map<bigint, Activity>();
+  /** The open block transaction ({@link blockTransaction}), settling when it has committed or rolled back. */
+  #transaction: Promise<void> | undefined;
 
   constructor(input: LoopInput) {
     this.input = input;
@@ -450,6 +454,15 @@ export class FinalizedLoop {
   slowBlock(): HeightActivity | null {
     const watch = this.#watch;
     return watch === undefined || !watch.raised ? null : this.#activityOf(watch);
+  }
+
+  /**
+   * The height's block transaction while it is open (RN-6, RN-13): from its request — its `BEGIN` waits for the writer
+   * — until it has committed or rolled back, a promise that settles then and never rejects; null while none is open.
+   * The process's stop closes the node client at once when none is, else once it settles (task 5.3c, `./process.ts`).
+   */
+  blockTransaction(): Promise<void> | null {
+    return this.#transaction ?? null;
   }
 
   /**
@@ -771,7 +784,7 @@ export class FinalizedLoop {
       }
       // The block transaction is on-db-write's (RN-17): its BEGIN, its callbacks, the cursor check, the COMMIT.
       this.#enter("on-db-write");
-      await this.commit(run);
+      await this.#transacting(this.commit(run));
       committed = true;
       this.input.observer?.committed?.(run.block);
       this.#unwatch(watch, true);
@@ -783,6 +796,19 @@ export class FinalizedLoop {
       const failure = this.#failure(height, error, committed);
       if (!committed && run !== undefined) this.#hold(run, failure);
       throw failure;
+    }
+  }
+
+  /** Awaits `transaction`, the height's block transaction, held as {@link blockTransaction} until it settles. */
+  async #transacting(transaction: Promise<void>): Promise<void> {
+    this.#transaction = transaction.then(
+      () => undefined,
+      () => undefined,
+    );
+    try {
+      await transaction;
+    } finally {
+      this.#transaction = undefined;
     }
   }
 

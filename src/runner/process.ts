@@ -98,7 +98,12 @@
  * the block source. During startup it stops before the next step and ends every wait for the chain at once (RN-13 as
  * amended; task 5.3b): it closes the node client and the block source first, so each node call startup awaits ends,
  * an unreachable node's retries included, no connection is attempted after the stop, and on a private process a wait
- * for its public side ends too.
+ * for its public side ends too. Once the loop runs it closes the node client at the stop when no block transaction is
+ * open, else as soon as the open one has committed or rolled back (RN-13 as amended; task 5.3c): a node call the loop
+ * awaits outside a transaction — the next height's block through the node source's prefetch, the state root
+ * `core-ledger-state`'s `on-compute` awaits — ends with `handle-closed`, its retries included, and processing ends with
+ * the signal; the height in progress stores nothing and is processed again after a restart (after its commit, its later
+ * points are re-delivered then, RN-11).
  *
  * **A private process** (`side: "private"`, PP-1; task 14.1) starts the same way with the private `core` schema (CF-4):
  * its block source is `core-private-source`'s (`src/backbone/core-private-source/`), whose cursor and committed height
@@ -411,7 +416,9 @@ export interface ProcessHandle {
   /**
    * Stops the process (RN-13): `stopping`; the loop's signal aborted and the loop awaited; the module API, then the
    * database, closed. During startup the node client and the block source are closed first, so every wait of startup
-   * for the chain ends at once (task 5.3b). Resolves once all of it is done; calling it again returns the same
+   * for the chain ends at once (task 5.3b); once the loop runs the node client is closed first — when a block
+   * transaction is open, once it has committed or rolled back —, so every node call the loop awaits outside one ends at
+   * the stop (task 5.3c). Resolves once all of it is done; calling it again returns the same
    * promise. After a refusal of the configuration ended the process, it returns {@link closed}, the state left
    * `refused`.
    */
@@ -566,6 +573,22 @@ function namedStartDb(part: MigrationPart): MigrationPart {
   };
 }
 
+/**
+ * Whether `error`, a failure of the loop, came from a call on the node client after it was closed — `handle-closed` of
+ * the node client, itself or the cause of what failed (a callback's, a height's) —, which only the process's stop does
+ * while the loop runs (task 5.3c).
+ */
+function nodeClientClosed(error: unknown): boolean {
+  let cause = error;
+  for (let depth = 0; depth < 8 && cause instanceof Error; depth++) {
+    if (cause instanceof UmbraError && cause.code === "handle-closed" && cause.details.handle === "node-client") {
+      return true;
+    }
+    cause = cause.cause;
+  }
+  return false;
+}
+
 /** Resolves after `ms`, or as soon as `signal` aborts. */
 function pause(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -624,6 +647,8 @@ class Process implements ProcessHandle {
   readonly #admin: ProcessAdmin | undefined;
   /** The process's one node client (task 10.3), shared by `core-chain`'s `node-client` item and the block source. */
   #nodeClient: NodeClient | null = null;
+  /** The node client's close, once begun (`#closeNode`). */
+  #nodeClosed: Promise<void> | undefined;
   /** The process's ledger worker (task 12.3), once its graph needs one; kept across a retried startup. */
   #ledger: LedgerHost | undefined;
   /** A public process's process transport on `listen.transport` (PP-4; task 14.2, `../private/core-transport.ts`). */
@@ -739,8 +764,8 @@ class Process implements ProcessHandle {
     this.#phase = "stopping";
     this.#admin?.publish();
     this.#stop.abort();
-    // During startup its waits for the chain end now, not once startup has ended (RN-13; task 5.3b).
-    const waits = starting ? this.#endStartupWaits() : undefined;
+    // The waits for the chain end now, not once startup or the loop has ended (RN-13; tasks 5.3b, 5.3c).
+    const waits = starting ? this.#endStartupWaits() : this.#endLoopWaits();
     await this.ended;
     try {
       await this.#api?.close();
@@ -769,9 +794,30 @@ class Process implements ProcessHandle {
     await Promise.allSettled([this.#closeNode(), this.#source?.close?.()]);
   }
 
-  /** Closes the process's node client (every call and subscription ends with `handle-closed`). */
+  /**
+   * A stop once startup has completed (RN-13 as amended; task 5.3c): ends every node call the loop awaits outside a
+   * block transaction — the next height's block through the node source's prefetch, the state root that
+   * `core-ledger-state`'s `on-compute` awaits, a module's node call — rather than once the loop has ended, which
+   * it does not while such a call retries an unreachable node without limit (IN-10). The node client is closed now
+   * when the loop has no block transaction open (`FinalizedLoop.blockTransaction`), else as soon as that one has
+   * committed or rolled back: each call on it ends with `handle-closed`, its retries and the client's reconnection
+   * included, and no connection is attempted after. The loop's failure that follows ends processing with the signal
+   * ({@link nodeClientClosed}). Never rejects.
+   */
+  async #endLoopWaits(): Promise<void> {
+    const open = this.#loop?.blockTransaction() ?? null;
+    if (open !== null) await open;
+    await this.#closeNode().catch(() => undefined);
+  }
+
+  /**
+   * Closes the process's node client (every call and subscription ends with `handle-closed`), once: a stop closes it
+   * early (tasks 5.3b, 5.3c) and the closes after it await the same.
+   */
   async #closeNode(): Promise<void> {
-    await this.#nodeClient?.close();
+    if (this.#nodeClient === null) return;
+    this.#nodeClosed ??= this.#nodeClient.close();
+    await this.#nodeClosed;
   }
 
   /**
@@ -1134,6 +1180,9 @@ class Process implements ProcessHandle {
         end = await loop.run();
         break;
       } catch (error) {
+        // A node call the stop's close of the node client ended (task 5.3c): the height in progress stored nothing and
+        // is processed again after a restart, or, committed, has its later points re-delivered then (RN-11).
+        if (this.#stop.signal.aborted && nodeClientClosed(error)) return this.#ended({ kind: "signal" });
         const code = retryOf(error);
         if (code === null) {
           const { code: halt } = this.#fail("halted", error);

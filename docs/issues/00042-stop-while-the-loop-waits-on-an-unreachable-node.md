@@ -1,6 +1,7 @@
 # 00042 — A stop while the loop waits on an unreachable node does not end the process
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed by task 5.3c (2026-10-27): reproduced by A169's tests, then the node client closed at
+  the stop once the loop runs (see Resolution); never filed on GitHub
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem
@@ -39,3 +40,20 @@ client's `signal` option), the loop ending with `signal` when they abort; or clo
 stop finds no transaction open (the loop would report whether one is). Test it as A167 does: a node that answers up to
 a height and then refuses connections, a stop while the loop waits for the next height, the process ends within 5 s
 with no connection attempt after the stop.
+
+## Resolution
+
+Task 5.3c (2026-10-27) reproduced it before any change: `test/runner/loop-stop.test.ts` (A169) failed on the sources
+of `f183850` on PostgreSQL 18.6 and PGlite 0.5.10, for both `ProcessHandle.stop()` and SIGTERM, both while the loop
+waited for h + 1's block (`chain_getBlockHash` in the node source's prefetch) and while `core-ledger-state`'s
+`on-compute` at h + 1 awaited `midnight_ledgerStateRoot`: no close within 5 s of the stop, processing not ended, the
+node client open, 7 connection attempts after the stop.
+
+The fix takes the issue's second way (`src/runner/process.ts`, `src/runner/loop.ts`; `design.md` §2): once the loop
+runs, a stop closes the node client at once when the loop has no block transaction open
+(`FinalizedLoop.blockTransaction`), else as soon as the open one has committed or rolled back. Each node call the loop
+awaits ends with `handle-closed`, its retries and the client's reconnection included, and no connection is attempted
+after the stop; the loop's failure that follows (`handle-closed` of the node client, itself or as a cause) ends
+processing with the signal, the height in progress storing nothing and processed again after a restart. The first way
+(the loop's signal through `BlockSource.prepared`/`block` and the client's `signal`) was not taken: it ends the loop's
+wait but leaves the client reconnecting for its subscriptions until the process closes it after the module API.

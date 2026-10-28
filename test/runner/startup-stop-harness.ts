@@ -68,11 +68,17 @@ export class NodeWatch {
   attempts = 0;
   late = 0;
   readonly #clients: WatchedClient[] = [];
+  /** How each attempt connects: `ws` unless given (task 5.3c's, which cuts the node at a request). */
+  readonly #through: ConnectSocket;
+
+  constructor(through: ConnectSocket = connectWebSocket) {
+    this.#through = through;
+  }
 
   readonly connect: ConnectSocket = (url, events, timers) => {
     this.attempts += 1;
     if (this.stopped) this.late += 1;
-    return connectWebSocket(url, events, timers);
+    return this.#through(url, events, timers);
   };
 
   /** A client on `options` (the process's, with its `onRetry`), connecting through {@link connect}. */
@@ -165,7 +171,7 @@ export async function databaseLeftOpen(kind: ProcessBackend["kind"], db: Process
 }
 
 /** The process's `node-retrying` attempts, or null without the condition. */
-function retryingOf(handle: ProcessHandle): number | null {
+export function retryingOf(handle: ProcessHandle): number | null {
   const condition = handle.status().conditions.find((one) => one.code === "node-retrying");
   return condition !== undefined && "attempts" in condition ? condition.attempts : null;
 }
@@ -185,7 +191,7 @@ async function startupRetrying(handle: ProcessHandle, watch: NodeWatch): Promise
 }
 
 /** Resolves with the milliseconds from `from` to `closed`, or null once {@link STOP_LIMIT_MS} passed first. */
-async function closedWithin(handle: ProcessHandle, from: number): Promise<number | null> {
+export async function closedWithin(handle: ProcessHandle, from: number): Promise<number | null> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), STOP_LIMIT_MS);

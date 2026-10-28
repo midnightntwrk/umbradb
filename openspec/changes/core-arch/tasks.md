@@ -1494,7 +1494,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       which the stop does not reach). Found on the way and recorded, not fixed: a stop while the loop waits on an
       unreachable node outside a height's transaction does not end either (issue 00042). No mutation pass here
       (deferred to the end, owner 2026-10-27).
-- [ ] 5.3c A stop while the running loop waits on an unreachable node (issue 00042, found by task 5.3b from the code):
+- [x] 5.3c A stop while the running loop waits on an unreachable node (issue 00042, found by task 5.3b from the code):
       `#close()` closes the node client only after the loop ended, and the loop's node calls outside a transaction —
       the next height's block through the node source's prefetch, `core-ledger-state`'s state root in `on-compute` —
       are retried without limit and not tied to the stop. Reproduce it first (a test that fails on the current
@@ -1502,6 +1502,26 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (the loop's signal through the block source and the client, or closing the client when no transaction is
       open), a height in progress storing nothing and processed again after a restart (RN-13 as amended).
       **Acceptance:** A169; A48 and A167 unchanged.
+      **Done (2026-10-27):** reproduced first: on `f183850` the four A169 tests failed on both backends for the
+      intended reason (no close within 5 s, no end, the client open, 7 connection attempts after the stop), while the
+      loop waited for h + 1's block (`chain_getBlockHash` in the node source's prefetch) and while `core-ledger-state`'s
+      `on-compute` at h + 1 awaited `midnight_ledgerStateRoot`. The fix (`src/runner/process.ts`, `loop.ts`; `design.md`
+      §2): once the loop runs, a stop closes the node client at once when the loop has no block transaction open
+      (`FinalizedLoop.blockTransaction`, new), else as soon as the open one has committed or rolled back; each node
+      call the loop awaits ends with `handle-closed`, its retries and the reconnection included, and the loop's failure
+      that follows (`handle-closed` of the node client, itself or as a cause) ends processing with the signal: the
+      height in progress stores nothing and is processed again after a restart (after a commit, its later points are
+      re-delivered then, RN-11). The process closes its client once (a later close awaits the first). Not taken: the
+      loop's signal through the block source, which leaves the client reconnecting for its subscriptions until it is
+      closed. 5.3b's startup path and A48 unchanged. Tests (PostgreSQL 18.6, PGlite 0.5.10): A169
+      `test/runner/loop-stop.test.ts` (harness and oracle `a169Problems` in `loop-stop-harness.ts`: a tape node cut at
+      h + 1's request, after which it no longer listens, `prefetchWindow` 1, `backoffCeilingMs` 1 s; `stop()` and
+      SIGTERM once the loop at cursor h shows `node-retrying` at 2 attempts: `stopping`, closed within 5 s, `ended`
+      `signal`, the client closed, no connection attempt over 2.5 s after, nothing above h stored, the database closed;
+      a restart against a node that answers again commits h + 1), and a stop while `on-db-write` holds the block
+      transaction open closes the client only once it committed; committed negative control
+      `loop-stop.negative-control.test.ts` (the node source on a client of its own, which the stop does not reach).
+      Issue 00042 closed. No mutation pass here (deferred to the end, owner 2026-10-27).
 
 ## 6. Storage helpers
 
