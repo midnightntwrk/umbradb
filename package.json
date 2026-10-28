@@ -1,7 +1,7 @@
 {
   "name": "umbradb",
   "version": "0.10.0",
-  "description": "A local, single-writer, PostgreSQL-backed temporal and content-addressed store for Midnight wallet state.",
+  "description": "A standalone Midnight indexer that reads finalized blocks from a Midnight node into PostgreSQL or PGlite, with modules attached to one runner.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",

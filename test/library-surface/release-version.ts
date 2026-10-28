@@ -1,6 +1,6 @@
 /**
- * Task 17.4 (`openspec/changes/core-arch/tasks.md` 17.4; A4, `specs/library-surface/spec.md` LS-4): the release's
- * version, its breaking-change notice, and the build's version named in one place.
+ * Task 17.4 (`openspec/changes/core-arch/tasks.md` 17.4; A4, `specs/library-surface/spec.md` LS-4), with task 17.4a's
+ * notice (A4 as amended): the release's version, its breaking-change line, and the build's version named in one place.
  *
  * - **The version.** `package.json`'s `version` is `0.10.0`; the code names it once, as `UMBRADB_VERSION` in
  *   `src/config/build.ts` (a constant: the browser build reads no file; `test/config/builders.test.ts` holds it equal
@@ -14,9 +14,10 @@
  *   declaration and has no `version` of its own keeps that declaration's (`PRIVATE_CORE_DIGEST`).
  *   The scan must find a declaration for every id of the command's build, so a part written in a form it does not read
  *   fails here rather than going unchecked.
- * - **The notice** (A4): `CHANGELOG.md`'s `0.10.0` section opens with `### Breaking changes`, which names every
- *   export of 0.9.5's `src/index.ts` and states that every 0.9.5 export is removed or replaced and that 0.9.5
- *   databases are not migrated ({@link changelogProblems}).
+ * - **The notice** (A4 as amended by owner decision Q169): `CHANGELOG.md`'s `0.10.0` section opens with
+ *   `### Breaking changes` and one short line under it — a new architecture, nothing of 0.9.5's API or databases
+ *   carried over; the section names no 0.9.5 export (no per-export list, no migration notes: pre-release, breaking
+ *   changes need no notices) ({@link changelogProblems}).
  *
  * Pure functions over repository-relative paths and file texts; `./release-version.test.ts` gives them the tree.
  */
@@ -30,48 +31,6 @@ export const RELEASE_VERSION = "0.10.0";
 /** The file that names the build's version, and the name it exports. */
 export const BUILD_FILE = "src/config/build.ts";
 export const VERSION_NAME = "UMBRADB_VERSION";
-
-/**
- * The exports of 0.9.5's `src/index.ts` (release commit `19e225b`, "release: name 0.9.5 "Penumbra""): its 36 values and
- * 51 types, in the barrel's order.
- */
-export const EXPORTS_0_9_5_VALUES: readonly string[] = [
-  "createClient", "DEFAULT_SCHEMA", "runMigrations", "MigrationLockTimeoutError",
-  "PgTemporalKV", "PgCheckpointStore", "PgWatermarks", "PgTransactionLeaseLayer", "PgTransactionHistoryStorage",
-  "PgWalletStateEnvelopeStore", "saveAndAdvance", "Rollback",
-  "StorageError", "ValidationError", "SerializationFailedError", "ConnectionError",
-  "VersionConflictError", "HistoryUnavailableError", "TransactionKeyReuseError",
-  "CheckpointNotFoundError", "ChunkMissingError", "ChunkIntegrityError", "ManifestCorruptError",
-  "TransactionRolledBackError", "TransactionFaultError", "LeaseTimeoutError", "LeaseNotHeldError", "LeaseFaultError",
-  "TransactionHandleInvalidError", "EnvelopeVersionUnsupportedError", "EnvelopeCorruptError",
-  "ExclusionViolationError", "ClockRegressionError", "UnrecognizedPostgresError",
-  "DurabilityContractError", "TransactionPoolerDetectedError",
-];
-export const EXPORTS_0_9_5_TYPES: readonly string[] = [
-  "UmbraDBSql", "UmbraDBConnectionOptions", "Migration", "RunMigrationsOptions", "SaveAndAdvanceDeps",
-  "SaveAndAdvanceCursor", "Retryability", "SharedStorageErrorCode",
-  "TemporalKV", "VersionedEntry", "AsOf", "JsonValue", "Namespace", "Scope", "Key", "Version", "TemporalKVErrorCode",
-  "Watermarks", "WatermarkKind", "WatermarkKey", "WatermarkValue",
-  "CheckpointStore", "CheckpointSummary", "CheckpointRecord", "PruneResult", "SaveCheckpointOptions", "HistoryOptions",
-  "CheckpointSequence", "ContentHash", "CheckpointStoreErrorCode",
-  "TransactionLeaseLayer", "TransactionHandle", "Lease", "TransactionOptions", "LeaseAcquireOptions",
-  "TransactionRollbackCause", "TransactionLeaseErrorCode",
-  "TransactionHistoryStorage", "TransactionHistoryReader", "TransactionHistoryWriter", "TransactionHistoryEntry",
-  "TransactionHistoryStatus", "EntryContent", "EntryLifecycle", "EntryLifecycleStatus", "PendingLifecycle",
-  "FinalizedLifecycle", "RejectedLifecycle", "MergeEntriesFn",
-  "WalletStateEnvelope", "WalletStateEnvelopeErrorCode",
-];
-export const EXPORTS_0_9_5: readonly string[] = [...EXPORTS_0_9_5_VALUES, ...EXPORTS_0_9_5_TYPES];
-
-/** TransactionHistory's exports, which task 17.1 moved to `legacy/transaction-history/` (LS-3). */
-export const TRANSACTION_HISTORY_EXPORTS: readonly string[] = [
-  "PgTransactionHistoryStorage", "TransactionHistoryStorage", "TransactionHistoryReader", "TransactionHistoryWriter",
-  "TransactionHistoryEntry", "TransactionHistoryStatus", "EntryContent", "EntryLifecycle", "EntryLifecycleStatus",
-  "PendingLifecycle", "FinalizedLifecycle", "RejectedLifecycle", "MergeEntriesFn",
-];
-
-/** The 0.9.5 name `design.md` §12 exports again, for another type: a module's migration (`{ id, sql }`). */
-export const REPLACED_EXPORTS: readonly string[] = ["Migration"];
 
 /** A source file: its path from the repository root (`/`-separated) and its text. */
 export interface SourceText {
@@ -293,17 +252,18 @@ function section(changelog: string, version: string): string[] | null {
 /** The heading the notice opens the section with. */
 export const NOTICE_HEADING = "### Breaking changes";
 
-/** What LS-4 has the notice state, as the notice words it (any letter case). */
-export const NOTICE_STATEMENTS: readonly string[] = [
-  "every 0.9.5 export is removed or replaced",
-  "0.9.5 databases are not migrated",
-];
+/** What A4 has the notice's line say, as words it holds (any letter case). */
+export const NOTICE_TERMS: readonly string[] = ["new architecture", "nothing of 0.9.5", "api", "database"];
+
+/** One short line: within the 120 columns the repository's Markdown keeps to. */
+export const NOTICE_MAX_LENGTH = 120;
 
 /**
- * A4's problems with `CHANGELOG.md`: its `version` section must open with {@link NOTICE_HEADING}, whose text (up to the
- * next `### ` heading) names each of `names` in backticks and states {@link NOTICE_STATEMENTS}.
+ * A4's problems with `CHANGELOG.md`: its `version` section must open with {@link NOTICE_HEADING} and one line under it
+ * (up to the next `### ` heading), not a list item, at most {@link NOTICE_MAX_LENGTH} characters, holding
+ * {@link NOTICE_TERMS}; and nowhere in the section may a name of `retired` (0.9.5's exports) appear in backticks.
  */
-export function changelogProblems(changelog: string, version: string, names: readonly string[]): string[] {
+export function changelogProblems(changelog: string, version: string, retired: readonly string[]): string[] {
   const lines = section(changelog, version);
   if (lines === null) return [`CHANGELOG.md has no ${version} section (## [${version}] …; A4)`];
   const first = lines.findIndex((line) => line.trim() !== "");
@@ -311,15 +271,23 @@ export function changelogProblems(changelog: string, version: string, names: rea
     return [`CHANGELOG.md's ${version} section does not open with "${NOTICE_HEADING}" (A4, LS-4)`];
   }
   const end = lines.findIndex((line, i) => i > first && line.startsWith("### "));
-  const notice = lines.slice(first + 1, end < 0 ? undefined : end).join("\n");
-  const flat = notice.replace(/\s+/g, " ").toLowerCase();
+  const notice = lines.slice(first + 1, end < 0 ? undefined : end).filter((line) => line.trim() !== "");
   const problems: string[] = [];
-  for (const statement of NOTICE_STATEMENTS) {
-    if (!flat.includes(statement)) problems.push(`the ${version} notice does not state "${statement}" (A4, LS-4)`);
+  if (notice.length !== 1) problems.push(`the ${version} notice is ${notice.length} lines, not one (A4)`);
+  const text = notice.join(" ");
+  if (notice.some((line) => /^\s*(?:[-*+]|\d+[.)])\s/.test(line))) {
+    problems.push(`the ${version} notice is a list, not one line (A4)`);
   }
-  for (const name of names) {
-    if (!notice.includes(`\`${name}\``)) {
-      problems.push(`the ${version} notice does not name 0.9.5's export \`${name}\` (A4)`);
+  if (notice.some((line) => line.length > NOTICE_MAX_LENGTH)) {
+    problems.push(`the ${version} notice is longer than ${NOTICE_MAX_LENGTH} characters (A4)`);
+  }
+  for (const term of NOTICE_TERMS) {
+    if (!text.toLowerCase().includes(term)) problems.push(`the ${version} notice does not say "${term}" (A4)`);
+  }
+  const whole = lines.join("\n");
+  for (const name of retired) {
+    if (whole.includes(`\`${name}\``)) {
+      problems.push(`the ${version} section names 0.9.5's export \`${name}\`: no per-export list (A4)`);
     }
   }
   return problems;

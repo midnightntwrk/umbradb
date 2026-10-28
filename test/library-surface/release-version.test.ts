@@ -5,18 +5,18 @@ import { describe, expect, it } from "vitest";
 import { commandBuild } from "../../src/cli/build-modules.js";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
 import {
-  BUILD_FILE, changelogProblems, declarationProblems, EXPORTS_0_9_5, EXPORTS_0_9_5_TYPES, EXPORTS_0_9_5_VALUES,
-  NOTICE_HEADING, RELEASE_VERSION, REPLACED_EXPORTS, runtimeVersionProblems, scanDeclarations, type SourceText,
-  stringConstants, TRANSACTION_HISTORY_EXPORTS, versionLiteralProblems,
+  BUILD_FILE, changelogProblems, declarationProblems, NOTICE_HEADING, RELEASE_VERSION, runtimeVersionProblems,
+  scanDeclarations, type SourceText, stringConstants, versionLiteralProblems,
 } from "./release-version.js";
 import { RETIRED_EXPORTS } from "./retirement.js";
 
 /**
- * Task 17.4 (`tasks.md` 17.4; A4 `[DOC]`, LS-4): version `0.10.0`, the breaking-change notice in `CHANGELOG.md`, and
- * every backbone part and core module naming the build's version (`UMBRADB_VERSION`), never a literal — `core-digest`
- * wrote `"0.10.0"` by hand until this task. The checks are `./release-version.ts`'s, on the tree as it is: the files of
- * `src/` read and parsed (no program, no type checker), the command's build imported for the versions it carries at
- * run time, `package.json`, its lock and `CHANGELOG.md` read as text. Each check has committed negative controls below,
+ * Task 17.4 (`tasks.md` 17.4; A4 `[DOC]`, LS-4): version `0.10.0`, the breaking-change line in `CHANGELOG.md` (one
+ * line since task 17.4a, A4 as amended by owner decision Q169), and every backbone part and core module naming the
+ * build's version (`UMBRADB_VERSION`), never a literal — `core-digest` wrote `"0.10.0"` by hand until task 17.4. The
+ * checks are `./release-version.ts`'s, on the tree as it is: the files of `src/` read and parsed (no program, no type
+ * checker), the command's build imported for the versions it carries at run time, `package.json`, its lock and
+ * `CHANGELOG.md` read as text. Each check has committed negative controls below,
  * the first of them `core-digest`'s declaration as task 17.4 found it.
  */
 
@@ -50,7 +50,7 @@ const BUILD_IDS = [
 
 const pkg = JSON.parse(read("package.json")) as { version: string };
 
-describe("A4 (LS-4): version 0.10.0, and the breaking-change notice", () => {
+describe("A4 (LS-4, amended by Q169): version 0.10.0, and one breaking line", () => {
   it("package.json's version is 0.10.0, and the lock's own entry and UMBRADB_VERSION are the same", () => {
     expect(pkg.version).toBe(RELEASE_VERSION);
     type Lock = { version: string; packages: Record<string, { version: string }> };
@@ -59,39 +59,21 @@ describe("A4 (LS-4): version 0.10.0, and the breaking-change notice", () => {
     expect(UMBRADB_VERSION).toBe(RELEASE_VERSION);
   });
 
-  it("the 0.9.5 names are its barrel's 87: A5's retired, TransactionHistory's 13, the replaced Migration", () => {
-    const counts = [EXPORTS_0_9_5_VALUES.length, EXPORTS_0_9_5_TYPES.length, new Set(EXPORTS_0_9_5).size];
-    expect(counts).toEqual([36, 51, 87]);
-    const union = [...RETIRED_EXPORTS, ...TRANSACTION_HISTORY_EXPORTS, ...REPLACED_EXPORTS];
-    expect(union).toHaveLength(87);
-    expect([...union].sort()).toEqual([...EXPORTS_0_9_5].sort());
-  });
-
-  it("CHANGELOG.md's 0.10.0 section opens with the notice: each 0.9.5 export named, no migration", () => {
-    expect(changelogProblems(read("CHANGELOG.md"), RELEASE_VERSION, EXPORTS_0_9_5)).toEqual([]);
+  it("CHANGELOG.md's 0.10.0 section opens with one breaking line, and names no 0.9.5 export", () => {
+    expect(RETIRED_EXPORTS).toHaveLength(73);
+    expect(changelogProblems(read("CHANGELOG.md"), RELEASE_VERSION, RETIRED_EXPORTS)).toEqual([]);
   });
 
   describe("negative controls", () => {
-    const names = ["PgTemporalKV", "MergeEntriesFn", "Migration"];
-    const notice = [
-      NOTICE_HEADING,
-      "",
-      "Every 0.9.5 export is removed or replaced, and 0.9.5 databases are not migrated.",
-      "",
-      "- `PgTemporalKV`, `MergeEntriesFn`; `Migration` is replaced.",
-    ];
+    const names = ["PgTemporalKV", "MergeEntriesFn"];
+    const LINE = "UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's API or databases is carried over.";
+    const notice = [NOTICE_HEADING, "", LINE];
     const changelog = (section: readonly string[]) =>
-      ["# Changelog", "", "## [Unreleased]", "", "## [0.10.0] - 2026-10-27", "", ...section, "",
-        "## [0.9.5] - 2026-07-25", "", NOTICE_HEADING, "", "`Rollback`"].join("\n");
+      ["# Changelog", "", "## [Unreleased]", "", "## [0.10.0] - 2026-10-27", "", ...section, "", "### Added", "",
+        "- The runner.", "", "## [0.9.5] - 2026-07-25", "", "### Added", "", "- `PgTemporalKV`"].join("\n");
 
-    it("a notice with everything passes", () => {
+    it("one line passes, whatever an older release names", () => {
       expect(changelogProblems(changelog(notice), RELEASE_VERSION, names)).toEqual([]);
-      // The statements may wrap across lines.
-      const wrapped = [
-        ...notice.slice(0, 2), "Every 0.9.5 export is removed or", "replaced, and 0.9.5 databases are not", "migrated.",
-        ...notice.slice(3),
-      ];
-      expect(changelogProblems(changelog(wrapped), RELEASE_VERSION, names)).toEqual([]);
     });
 
     it("fails without a 0.10.0 section, or with one that does not open with the notice", () => {
@@ -105,36 +87,75 @@ describe("A4 (LS-4): version 0.10.0, and the breaking-change notice", () => {
       expect(changelogProblems(changelog([]), RELEASE_VERSION, names)).toEqual(opening);
     });
 
-    it("fails on each name the notice leaves out, even when another subsection or release names it", () => {
-      const without = notice.map((line) => line.replace("`MergeEntriesFn`", "MergeEntriesFn"));
-      const elsewhere = changelog([...without, "", "### Removed", "", "`MergeEntriesFn`"]);
-      expect(changelogProblems(elsewhere, RELEASE_VERSION, names)).toEqual([
-        "the 0.10.0 notice does not name 0.9.5's export `MergeEntriesFn` (A4)",
+    it("fails on a notice of two lines, a list, or a line too long", () => {
+      const wrapped = [NOTICE_HEADING, "", "UmbraDB 0.10.0 is a new architecture:", "nothing of 0.9.5's API or " +
+        "databases is carried over."];
+      expect(changelogProblems(changelog(wrapped), RELEASE_VERSION, names)).toEqual([
+        "the 0.10.0 notice is 2 lines, not one (A4)",
       ]);
-      expect(changelogProblems(changelog(notice), RELEASE_VERSION, [...names, "Rollback"])).toEqual([
-        "the 0.10.0 notice does not name 0.9.5's export `Rollback` (A4)",
+      expect(changelogProblems(changelog([NOTICE_HEADING, "", `- ${LINE}`]), RELEASE_VERSION, names)).toEqual([
+        "the 0.10.0 notice is a list, not one line (A4)",
+      ]);
+      const long = `${LINE} Run it on a new database: nothing reads or converts 0.9.5's tables.`;
+      expect(changelogProblems(changelog([NOTICE_HEADING, "", long]), RELEASE_VERSION, names)).toEqual([
+        "the 0.10.0 notice is longer than 120 characters (A4)",
+      ]);
+      expect(changelogProblems(changelog([NOTICE_HEADING]), RELEASE_VERSION, names)).toEqual([
+        "the 0.10.0 notice is 0 lines, not one (A4)",
+        'the 0.10.0 notice does not say "new architecture" (A4)',
+        'the 0.10.0 notice does not say "nothing of 0.9.5" (A4)',
+        'the 0.10.0 notice does not say "api" (A4)',
+        'the 0.10.0 notice does not say "database" (A4)',
       ]);
     });
 
-    it("fails when the notice does not say every export is removed or replaced, or databases are not migrated", () => {
-      const statement = (line: string) => notice.map((l, i) => (i === 2 ? line : l));
-      expect(changelogProblems(changelog(statement("0.9.5 databases are not migrated.")), RELEASE_VERSION, names))
-        .toEqual(['the 0.10.0 notice does not state "every 0.9.5 export is removed or replaced" (A4, LS-4)']);
-      const removed = changelog(statement("Every 0.9.5 export is removed or replaced."));
-      expect(changelogProblems(removed, RELEASE_VERSION, names))
-        .toEqual(['the 0.10.0 notice does not state "0.9.5 databases are not migrated" (A4, LS-4)']);
+    it("fails on a line that does not say it is a new architecture, or that leaves out the API or databases", () => {
+      const said = (line: string) => changelogProblems(changelog([NOTICE_HEADING, "", line]), RELEASE_VERSION, names);
+      expect(said("UmbraDB 0.10.0: nothing of 0.9.5's API or databases is carried over.")).toEqual([
+        'the 0.10.0 notice does not say "new architecture" (A4)',
+      ]);
+      expect(said("UmbraDB 0.10.0 is a new architecture; 0.9.5's API and databases are kept.")).toEqual([
+        'the 0.10.0 notice does not say "nothing of 0.9.5" (A4)',
+      ]);
+      expect(said("UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's databases is carried over.")).toEqual([
+        'the 0.10.0 notice does not say "api" (A4)',
+      ]);
+      expect(said("UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's API is carried over.")).toEqual([
+        'the 0.10.0 notice does not say "database" (A4)',
+      ]);
     });
 
-    it("the real changelog fails when its notice loses a name", () => {
-      const changelog = read("CHANGELOG.md");
-      const real = changelog.replaceAll("`MergeEntriesFn`", "MergeEntriesFn");
-      expect(real).not.toBe(changelog);
-      expect(changelogProblems(real, RELEASE_VERSION, EXPORTS_0_9_5)).toEqual([
-        "the 0.10.0 notice does not name 0.9.5's export `MergeEntriesFn` (A4)",
+    it("fails on a 0.9.5 export named anywhere in the section: no per-export list", () => {
+      const listed = [...notice, "", "### Removed", "", "- `PgTemporalKV`, `MergeEntriesFn`."];
+      expect(changelogProblems(changelog(listed), RELEASE_VERSION, names)).toEqual([
+        "the 0.10.0 section names 0.9.5's export `PgTemporalKV`: no per-export list (A4)",
+        "the 0.10.0 section names 0.9.5's export `MergeEntriesFn`: no per-export list (A4)",
       ]);
-      const unstated = changelog.replace("0.9.5 databases are not migrated", "0.9.5 databases are kept");
-      expect(changelogProblems(unstated, RELEASE_VERSION, EXPORTS_0_9_5)).toEqual([
-        'the 0.10.0 notice does not state "0.9.5 databases are not migrated" (A4, LS-4)',
+    });
+
+    it("the real changelog fails with 17.4's notice put back: its statement and a per-export line", () => {
+      const real = read("CHANGELOG.md");
+      const lines = real.split("\n");
+      const at = lines.indexOf(NOTICE_HEADING);
+      expect(at).toBeGreaterThan(0);
+      const notice174 = [
+        ...lines.slice(0, at + 2),
+        "UmbraDB 0.10.0 replaces the 0.9.5 PostgreSQL storage library with a standalone Midnight indexer. " +
+          "**Every 0.9.5 export",
+        "is removed or replaced, and 0.9.5 databases are not migrated:** run 0.10.0 on a new database.",
+        "",
+        "- **TemporalKV** — `PgTemporalKV`, `TemporalKV`, `VersionedEntry`.",
+        ...lines.slice(at + 3),
+      ].join("\n");
+      expect(changelogProblems(notice174, RELEASE_VERSION, RETIRED_EXPORTS)).toEqual([
+        "the 0.10.0 notice is 3 lines, not one (A4)",
+        "the 0.10.0 notice is a list, not one line (A4)",
+        'the 0.10.0 notice does not say "new architecture" (A4)',
+        'the 0.10.0 notice does not say "nothing of 0.9.5" (A4)',
+        'the 0.10.0 notice does not say "api" (A4)',
+        "the 0.10.0 section names 0.9.5's export `PgTemporalKV`: no per-export list (A4)",
+        "the 0.10.0 section names 0.9.5's export `TemporalKV`: no per-export list (A4)",
+        "the 0.10.0 section names 0.9.5's export `VersionedEntry`: no per-export list (A4)",
       ]);
     });
   });

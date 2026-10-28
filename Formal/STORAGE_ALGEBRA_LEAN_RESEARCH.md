@@ -631,15 +631,15 @@ safe until those traces have defined outcomes.
 |---|---|
 | Current-only formal carrier and proposed action | [`STORAGE_TYPES.md` lines 25–33](./STORAGE_TYPES.md#L25-L33) |
 | T3 event definition, retention floor, and replay claim | [`STORAGE_ALGEBRA.md` lines 129–151](./STORAGE_ALGEBRA.md#L129-L151) |
-| Adapter time lookup unions history and current | [`temporal-kv.ts` lines 230–254](../src/postgres/temporal-kv.ts#L230-L254) |
-| Failed CAS performs a later read for `actual` | [`temporal-kv.ts` lines 149–184](../src/postgres/temporal-kv.ts#L149-L184) |
-| Trigger timestamp, transaction-reuse, and strict-clock behavior | [`001_temporal_kv.ts` lines 77–103](../src/postgres/migrations/001_temporal_kv.ts#L77-L103) |
-| Exclusion constraint covers `kv_history` ranges | [`001_temporal_kv.ts` lines 49–64](../src/postgres/migrations/001_temporal_kv.ts#L49-L64) |
-| Checkpoint API requires an ordered hash list | [`checkpoint-store.ts` lines 119–124](../src/interfaces/checkpoint-store.ts#L119-L124) |
+| Adapter time lookup unions history and current | `src/postgres/temporal-kv.ts` lines 230–254 |
+| Failed CAS performs a later read for `actual` | `src/postgres/temporal-kv.ts` lines 149–184 |
+| Trigger timestamp, transaction-reuse, and strict-clock behavior | `src/postgres/migrations/001_temporal_kv.ts` lines 77–103 |
+| Exclusion constraint covers `kv_history` ranges | `src/postgres/migrations/001_temporal_kv.ts` lines 49–64 |
+| Checkpoint API requires an ordered hash list | `src/interfaces/checkpoint-store.ts` lines 119–124 |
 | Proposed checkpoint join table has no ordinal | [`design.md` lines 288–301](../design/design.md#L288-L301) |
 | Algebraic L1 and callback-level P10 use different scopes | [`STORAGE_ALGEBRA.md` lines 296–316](./STORAGE_ALGEBRA.md#L296-L316), [`STORAGE_ALGEBRA.md` lines 383–391](./STORAGE_ALGEBRA.md#L383-L391) |
-| Current P1–P5 property coverage | [`temporal-kv.property.test.ts`](../test/postgres/temporal-kv.property.test.ts) |
-| History-overlap constraint test omits current tail | [`migrate.test.ts` lines 112–128](../test/postgres/migrate.test.ts#L112-L128) |
+| Current P1–P5 property coverage | `test/postgres/temporal-kv.property.test.ts` |
+| History-overlap constraint test omits current tail | `test/postgres/migrate.test.ts` lines 112–128 |
 
 ### 11.2 External primary sources
 

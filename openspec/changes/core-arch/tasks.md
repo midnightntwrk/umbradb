@@ -3714,7 +3714,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       heading's date; shipped 2026-10-27, the close-out sets the release's) and Q169 (the 0.9.5 documents,
       changelog preamble and `description` that describe the removed surface) raised, not blocking. No mutation pass
       (deferred to 17.5, owner 2026-10-27).
-- [ ] 17.4a The owner's answer Q169: 0.9.5's documents removed, not marked (owner, 2026-10-27: "Lets remove the
+- [x] 17.4a The owner's answer Q169: 0.9.5's documents removed, not marked (owner, 2026-10-27: "Lets remove the
       documentation if it no longer exists. It will still be available in the git history… breaking changes are OK
       and we dont need to notify them"). Classify every document under `docs/` and at the root (current, 0.9.5's,
       or process history such as `docs/issues/` and `openspec/`); delete 0.9.5's — at least `docs/STABILITY.md`,
@@ -3725,6 +3725,27 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       19.3's; `README.md` and the module guide stay 17.3a's. Owner decision Q168 A: the `0.10.0` heading keeps
       17.4's date until the close-out (19.x) sets the merge or tag date.
       **Acceptance:** A171; A4 as amended.
+      **Done (2026-10-27):** every document outside `openspec/`, `docs/issues/`, `graphify-out/` and `node_modules/`
+      classified (the task's record holds the table). Deleted as 0.9.5's, 11: `docs/STABILITY.md`, `CONTRACT.md`,
+      `ERROR-CATALOG.md`, `SCHEMA.md`, `durability-contract.md`, `checkpoint-store-contract.md`,
+      `features/full-chain-storage.md`, `releases/v1.0.0.md`, `roadmapv1.html`,
+      `visualizations/cardano-midnight-flow.html`, `notes/2026-07-23-resume-checkpoint.md`; no test read them (0.9.5's
+      doc tests left with 17.2). Links to them dropped in `README.md` (three lines; 17.3a rewrites it), `ROADMAP.md`
+      (one; 19.3) and `docs/releases/v0.9.5.md` (one); the eight links 17.2 left pointing at removed files
+      (`Formal/STORAGE_ALGEBRA_LEAN_RESEARCH.md`, `Performance/CEILINGS.md`) unlinked. `CHANGELOG.md`: the preamble's
+      `docs/STABILITY.md` sentence, the planned `[1.0.0]` entry and its link reference removed, `[Unreleased]` compared
+      from `v0.10.0`; the `0.10.0` notice is one line, "UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's API
+      or databases is carried over."; the `0.9.5` entry kept, its links to the deleted documents unlinked; the
+      heading keeps 17.4's date (Q168 A). `package.json`'s `description` names the indexer. Tests: A171 in
+      `test/library-surface/documents{,.test}.ts` (the 11 absent; the changelog's preamble and 1.0.0 entry; the
+      description; every inline link, image and reference definition of every `.md` in the tree resolves to a file or
+      directory of the tree, code skipped) and A4 as amended in `release-version{,.test}.ts` (one line under
+      `### Breaking changes`, not a list, at most 120 characters, its four terms; no A5 retired export named in the
+      section; 17.4's 87-name lists removed), with committed negative controls (the real tree with a link to a deleted
+      document added or the document put back, the real changelog with 17.4's preamble, 1.0.0 entry or notice put
+      back). Seen failing first: 7 of 29. Documents whose status is unclear kept and asked: Q170 (0.9.5's release
+      record and 1.0.0 program documents), Q171 (`design/`, `Formal/`, `Performance/`, `docs/research/`,
+      `docs/superpowers/`), Q172 (`docs/THREAT_MODEL.md`). No mutation pass (deferred to 17.5).
 - [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage

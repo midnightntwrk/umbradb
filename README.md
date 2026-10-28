@@ -238,10 +238,6 @@ try {
 `retryable` is a string (`"retryable"`, `"non-retryable"`, `"conditional"`), so compare it. A bare
 `if (e.retryable)` is true for every `StorageError`.
 
-The catalog in [`docs/ERROR-CATALOG.md`](docs/ERROR-CATALOG.md) is not maintained by hand, a drift
-test derives it from the exported classes with no hard-coded count, and fails CI if the table, the
-CHANGELOG and the exported surface disagree.
-
 **Known limitation:** Postgres `28xxx` authentication failures currently surface as a retryable
 `ConnectionError`. Bound your retries accordingly. A distinct `AuthenticationError` is an additive
 1.1 candidate, it was deliberately *not* added during the surface freeze, because a freeze freezes
@@ -288,8 +284,6 @@ running against real Postgres via Testcontainers.
 Forward-only, lineage `000` → `006`, applied by `runMigrations` under a bounded advisory lock. There
 is no down-migration: rolling back means restoring a backup. `schema` is a **namespace, not a
 security boundary**, see [Security](#security).
-
-Full reference: [`docs/SCHEMA.md`](docs/SCHEMA.md), contracts in [`docs/CONTRACT.md`](docs/CONTRACT.md).
 
 ## Performance and ceilings
 
@@ -344,7 +338,7 @@ indexer we call. Progress and rationale: [`ROADMAP.md`](ROADMAP.md) § "What blo
 **Next:** [Quint model checking](openspec/changes/v1.1.0-quint-model-checking/) for C2a, C2b, L1 and
 cross-writer T1, the concurrency and liveness laws a sequential proof model handles badly.
 
-- Roadmap: [`ROADMAP.md`](ROADMAP.md) · Stability policy: [`docs/STABILITY.md`](docs/STABILITY.md)
+- Roadmap: [`ROADMAP.md`](ROADMAP.md)
 - Changelog: [`CHANGELOG.md`](CHANGELOG.md) · Release records: [`docs/releases/`](docs/releases/)
 
 ## License

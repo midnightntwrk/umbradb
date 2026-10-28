@@ -14,7 +14,7 @@ tuning, TOAST-mode choice).
 
 The G14 gate is the **existence** of a recorded benchmark baseline, not any performance number
 (`design.md` §5; G14 hard rule). The baseline artifact is
-[`bench/baseline.1.0.0-perf-baseline.1.json`](../bench/baseline.1.0.0-perf-baseline.1.json); the
+`bench/baseline.1.0.0-perf-baseline.1.json`; the
 harness that reproduces it is `bench/` (run `npm run bench`). Reproduction is **structural** — a
 re-run at the recorded harness version against the same pinned image + server settings emits a
 schema-conforming artifact; no latency/throughput number is compared.
