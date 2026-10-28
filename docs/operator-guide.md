@@ -40,6 +40,26 @@ On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` w
 A private process has no node: its `node` is null. The process publishes what `/status` shows at least once a second,
 and at once when the connection's state changes.
 
+## A paused loop on `/status`
+
+The loop that processes finalized blocks can be paused between two heights: by a host program through its handle's
+`pause()` until `resume()`, or by a backup on SIGUSR2 (below) until that backup is written. While it is paused,
+`/status` lists the condition `paused` (AE-3, owner decision Q174):
+
+```json
+{ "code": "paused", "since": "2026-10-28T09:15:02.5Z", "by": "pause" }
+```
+
+- `since`: when the loop paused, as RFC 3339 text in UTC. It stays the same for as long as the loop stays paused.
+- `by`: `pause` while a host program's `pause()` holds the loop — it goes on only after `resume()` —, else `signal`
+  while only a backup on SIGUSR2 does; it goes on once the backup is written.
+
+The condition is gone as soon as the loop may run again, and is published at once when it appears or goes. A paused
+loop reads no new head, so `head` and `lag` are those it read before the pause, and readiness does not change:
+`/health/ready` answers as for an unpaused process with that lag (AE-4). A pause that lasts while the chain moves on
+therefore keeps a ready instance ready on data that grows stale; watch for `paused` with an old `since` if a host
+program pauses the loop for long.
+
 ## Backups
 
 A backup is a `pg_dump` file of the indexer's database at one committed height, with UmbraDB's manifest as its first

@@ -116,7 +116,10 @@ upgrade boundary — the lowest start of a scheduled revision (RN-12) —, and t
 module API still answering, with `upgrade-required` (entry, needed, build) at a boundary. The state is `starting`,
 then `syncing` or `following` by the lag (the head the loop last read minus the cursor) against `followingThreshold`,
 `stopped`, `stopping`; ready when `following` or `stopped`, or `syncing` within a set `readinessLag` (`refused` and
-`halted` below); the block source's conditions (`finality-stall`) are the process's too. SIGTERM (`terminationSignal`)
+`halted` below); the block source's conditions (`finality-stall`) are the process's too, and so is `paused` while the
+loop is paused between heights (§9.1; `since`, the time it paused in RFC 3339 UTC text, and `by`: `pause` while a
+`ProcessHandle.pause()` is kept, else `signal`; owner decision Q174 B, task 8.3b), published at once when it appears or
+goes and changing no readiness. SIGTERM (`terminationSignal`)
 or `stop()`: `stopping`, the loop's signal aborted and the loop awaited — the height in progress, its transaction
 included, finishes —, then the module API, the node client, the database and the block source closed. During startup
 the node client and the block source are closed first, so every wait of startup for the chain ends at once — a node

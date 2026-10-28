@@ -503,6 +503,8 @@ describe("A140 for /status: core-status's, from its own folder, its tests beside
       "core-status.test.ts",
       "node-fields.negative-control.test.ts",
       "node-fields.test.ts",
+      "paused.negative-control.test.ts",
+      "paused.test.ts",
       "secrets.test.ts",
       "status-schema.test.ts",
     ]);

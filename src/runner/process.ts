@@ -204,7 +204,7 @@ import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
 import { type PrivateSideFacts, ProcessAdmin } from "../admin/process-admin.js";
-import type { NodeFacts } from "../admin/snapshot.js";
+import { type NodeFacts, utcText } from "../admin/snapshot.js";
 import { earlyRedactor } from "../admin/redaction.js";
 import type { AdminStarter } from "../admin/server.js";
 import { NodeClient, type NodeClientOptions, type NodeRetry } from "../node/client.js";
@@ -223,7 +223,7 @@ import {
   type SlowBlockEvent,
   type SlowWindow,
 } from "./loop.js";
-import { LoopPauses, type PauseHold } from "./pause.js";
+import { LoopPauses, type PauseBy, type PauseHold } from "./pause.js";
 import { ProcessContexts } from "./process-context.js";
 import { type CoreTransport, startCoreTransport, type TransportTls } from "../private/core-transport.js";
 import { type BackupInput, type BackupSeams, type BackupWritten, backupAtStop, writeBackup } from "../backup/backup.js";
@@ -398,8 +398,20 @@ const SLOW_WINDOW_NAMES: Readonly<
 };
 
 /**
- * The process's conditions (AE-3); the block source's own (`finality-stall`, IN-6) among them, `slow-block` (task 5.5)
- * and `waiting-for-lockstep` (PP-6, task 14.3).
+ * The condition `paused` (AE-3 as amended, owner decision Q174 B; task 8.3b): the finalized loop is paused between
+ * heights (BK-1, `./pause.ts`) — `since` the time it paused, RFC 3339 text in UTC (Q68); `by` `pause` while a
+ * {@link ProcessHandle.pause} is kept, else `signal` (a backup on SIGUSR2). Gone once the loop runs again; like every
+ * condition, it changes no readiness (AE-4).
+ */
+export interface PausedCondition {
+  readonly code: "paused";
+  readonly since: string;
+  readonly by: PauseBy;
+}
+
+/**
+ * The process's conditions (AE-3); the block source's own (`finality-stall`, IN-6) among them, `slow-block` (task 5.5),
+ * `waiting-for-lockstep` (PP-6, task 14.3) and `paused` (task 8.3b).
  */
 export type ProcessCondition =
   | UpgradeCondition
@@ -407,7 +419,8 @@ export type ProcessCondition =
   | WaitingCondition
   | SourceCondition
   | SlowBlockCondition
-  | LockstepCondition;
+  | LockstepCondition
+  | PausedCondition;
 
 /** How processing ended. */
 export type ProcessingEnd =
@@ -723,8 +736,11 @@ class Process implements ProcessHandle {
   #lockstep: Lockstep | undefined;
   /** The schema plan's tables declared `deterministic: false` (Q76), for a backup's contents hash (BK-2). */
   #optedOut: readonly TableName[] = [];
-  /** The holds that pause the loop between heights (BK-1, Q152 B; task 15.1a): {@link pause}'s and SIGUSR2's. */
-  readonly #pauses = new LoopPauses();
+  /**
+   * The holds that pause the loop between heights (BK-1, Q152 B; task 15.1a): {@link pause}'s and SIGUSR2's; a change
+   * of the pause `/status` shows is published at once (Q174 B; task 8.3b).
+   */
+  readonly #pauses = new LoopPauses({ onChange: () => this.#admin?.publish() });
   /** {@link pause}'s hold, until {@link resume}. */
   #pauseHold: PauseHold | undefined;
   /** The backup on SIGUSR2 pending or being written, until it ended (never rejects). */
@@ -774,6 +790,7 @@ class Process implements ProcessHandle {
         ...this.#conditions,
         ...(this.#source?.conditions?.() ?? []),
         ...this.#slowBlock(),
+        ...this.#paused(),
         ...(lockstep === null ? [] : [lockstep]),
         ...(this.#retrying === null ? [] : [this.#retrying]),
         ...(this.#nodeAttempts === null || this.#retrying?.code === "node-retrying"
@@ -797,7 +814,7 @@ class Process implements ProcessHandle {
   }
 
   pause(): Promise<void> {
-    this.#pauseHold ??= this.#pauses.hold();
+    this.#pauseHold ??= this.#pauses.hold("pause");
     return this.#pausedOrEnded(this.#pauseHold);
   }
 
@@ -852,7 +869,7 @@ class Process implements ProcessHandle {
    * released. Logged; never rejects.
    */
   async #backupOnSignal(out: string): Promise<void> {
-    const hold = this.#pauses.hold();
+    const hold = this.#pauses.hold("signal");
     try {
       await this.#pausedOrEnded(hold);
       if (this.#closing !== undefined) {
@@ -1304,6 +1321,12 @@ class Process implements ProcessHandle {
   #nodeRetrying(attempts: number): RetryCondition {
     const height = this.#phase === "running" ? (this.#cursor === null ? this.#start : this.#cursor + 1n) : null;
     return Object.freeze({ code: "node-retrying", attempts, height });
+  }
+
+  /** `paused` while the loop is paused between heights (AE-3, Q174 B; task 8.3b), else none. */
+  #paused(): PausedCondition[] {
+    const paused = this.#pauses.pausedAt;
+    return paused === null ? [] : [Object.freeze({ code: "paused", since: utcText(paused.since), by: paused.by })];
   }
 
   /** `slow-block` while the loop's height in progress is slow (RN-17), else none. */

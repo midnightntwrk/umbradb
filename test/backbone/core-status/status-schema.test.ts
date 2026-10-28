@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { UNVALIDATED_CONFIG } from "../../../src/admin/configuration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -105,6 +106,28 @@ describe("A66: /status's JSON schema", () => {
     expect(STATUS_SCHEMA.problems({ ...body(), conditions: [{ ...slow, point: "on-db-write", module: null }] })).toEqual([]);
   });
 
+  it("holds paused (task 8.3b, Q174 B): the time the loop paused as RFC 3339 UTC text and who paused it", () => {
+    for (const by of ["pause", "signal"]) {
+      const paused = { code: "paused", since: "2026-10-28T09:15:02.5Z", by };
+      expect(STATUS_SCHEMA.problems({ ...body(), conditions: [paused] }), by).toEqual([]);
+      expect(STATUS_SCHEMA.problems({ ...body(), conditions: [{ ...paused, since: "2026-10-28T09:15:02Z" }] }), by).toEqual([]);
+    }
+  });
+
+  it("is the registry of AE-3's conditions: one entry per condition the requirement names, and none it does not", () => {
+    const schema = schemaFile(new URL("./status.schema.json", import.meta.url)) as {
+      $defs: { condition: { oneOf: { properties: { code: { const?: string; enum?: string[] } } }[] } };
+    };
+    const codes = schema.$defs.condition.oneOf.flatMap(({ properties: { code } }) => code.enum ?? [code.const as string]);
+    const spec = readFileSync(new URL("../../../openspec/changes/core-arch/specs/admin-endpoints/spec.md", import.meta.url), "utf8");
+    const requirement = spec.slice(spec.indexOf("### Requirement: AE-3"), spec.indexOf("#### Scenario", spec.indexOf("### Requirement: AE-3")));
+    const listed = requirement.slice(requirement.indexOf("conditions —"), requirement.indexOf("A refused or halted"));
+    // The backticked words of AE-3's list of conditions, less `paused`'s fields (`since`, `by`) and their values.
+    const named = [...listed.matchAll(/`([a-z][a-z-]*)`/g)].map((match) => match[1] as string).filter((word) => !["since", "by", "pause", "signal"].includes(word));
+    expect([...codes].sort()).toEqual([...new Set(named)].sort());
+    expect(codes).toContain("paused");
+  });
+
   it("names the points of MD-1 and every field the endpoint answers, each one required", () => {
     const schema = schemaFile(new URL("./status.schema.json", import.meta.url)) as {
       required: string[];
@@ -139,6 +162,14 @@ describe("A66: /status's JSON schema", () => {
       "a slow block in a point that is none": (b) => (b.conditions = [{ code: "slow-block", height: "4", point: "commit", module: null }]),
       "a slow block of an empty module": (b) => (b.conditions = [{ code: "slow-block", height: "4", point: "on-compute", module: "" }]),
       "a slow block with its time": (b) => (b.conditions = [{ code: "slow-block", height: "4", point: "on-compute", module: "m", ms: 1 }]),
+      "a pause without its time": (b) => (b.conditions = [{ code: "paused", by: "pause" }]),
+      "a pause without who paused it": (b) => (b.conditions = [{ code: "paused", since: "2026-10-28T09:15:02Z" }]),
+      "a pause by another hand": (b) => (b.conditions = [{ code: "paused", since: "2026-10-28T09:15:02Z", by: "host" }]),
+      "a pause's time in PostgreSQL's own text": (b) =>
+        (b.conditions = [{ code: "paused", since: "2026-10-28 09:15:02+00", by: "pause" }]),
+      "a pause's time with an offset": (b) => (b.conditions = [{ code: "paused", since: "2026-10-28T11:15:02+02:00", by: "pause" }]),
+      "a pause's time as milliseconds": (b) => (b.conditions = [{ code: "paused", since: 1_793_178_902_000, by: "pause" }]),
+      "a pause with its height": (b) => (b.conditions = [{ code: "paused", since: "2026-10-28T09:15:02Z", by: "pause", height: "4" }]),
       "an unknown detail": (b) => (b.reason.details = { message: "the raw message" }),
       "a point that is none": (b) => (b.reason.point = "on-commit"),
       "a connection state no /status shows (the client's own open)": (b) => (b.node.connection = "open"),

@@ -467,6 +467,29 @@
               ]
             }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "since",
+            "by"
+          ],
+          "properties": {
+            "code": {
+              "const": "paused"
+            },
+            "since": {
+              "$ref": "#/$defs/utcTime"
+            },
+            "by": {
+              "enum": [
+                "pause",
+                "signal"
+              ]
+            }
+          }
         }
       ]
     },

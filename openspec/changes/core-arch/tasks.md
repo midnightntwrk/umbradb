@@ -2042,11 +2042,26 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       18.6 and PGlite 0.5.10 (`test/backbone/core-status/node-fields.test.ts`: a core against a tape node, `/status`
       read over HTTP, every body validated against the schema), with its committed negative control
       (`node-fields.negative-control.test.ts`: the three published null fail it in exactly those fields).
-- [ ] 8.3b The owner's answer Q174 B: while the finalized loop is paused — `ProcessHandle.pause()`, or a backup on
+- [x] 8.3b The owner's answer Q174 B: while the finalized loop is paused — `ProcessHandle.pause()`, or a backup on
       SIGUSR2 waiting for its pause and being written (task 15.1a) — `/status` lists a condition `paused` with `since`
       (RFC 3339 text in UTC, Q68) and `by` (`pause` or `signal`), gone once the loop runs again; readiness is unchanged
       (AE-4). AE-3 as amended, `/status`'s JSON schema, the conditions' registry, `docs/operator-guide.md`.
       **Acceptance:** A176.
+      **Done (2026-10-28):** `LoopPauses.pausedAt` (`src/runner/pause.ts`): while the loop is paused, the time it paused
+      — kept while any hold is kept, the step from the wait for the head to the next pause included — and `by`: `pause`
+      while a hold of `pause()` is kept, else `signal`; each change told once to `onChange`. The process lists it as
+      `PausedCondition` (`since` through `utcText`) and publishes each change to the admin endpoints at once; holds are
+      taken as `pause` by `pause()` and `signal` by the backup on SIGUSR2. The schema's `condition` has `paused`
+      (`since` a `utcTime`, `by` the two words, nothing else); the registry check (`status-schema.test.ts`) holds AE-3's
+      conditions and the schema's to one list. `docs/operator-guide.md` ("A paused loop on `/status`"), `design.md` §3.
+      Tests first: on `82f7fc0`'s sources the new tests failed for the intended reason (`pausedAt` undefined, the
+      schema without `paused`, A176's four pause phases and its SIGUSR2 phase never showing it, readiness passing).
+      A176 passes on PostgreSQL 18.6 and PGlite 0.5.10 (`test/backbone/core-status/paused.test.ts`, with
+      `paused-harness.ts`: `/status` and `/health/ready` read over HTTP, every body validated; the SIGUSR2 half on
+      PGlite, a read of the test holding PGlite's queue so the backup waits while `/status` is read), with its committed
+      negative controls (`paused.negative-control.test.ts`: a publication without `paused` and one keeping it after the
+      loop runs again, each failing in exactly its phases); `LoopPauses.pausedAt` alone in
+      `test/runner/pause-condition.test.ts`.
 
 ## 9. Test tape
 

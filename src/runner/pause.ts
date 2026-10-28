@@ -15,7 +15,31 @@
  * reached at once, and when the wait ends the loop's next step is a point between heights, where it stays. A pause ends
  * when the loop's signal aborts (a stop while paused ends the process, RN-13): the loop then ends with its signal,
  * whatever holds are kept.
+ *
+ * **What `/status` shows** (AE-3 as amended, owner decision Q174 B; task 8.3b): {@link LoopPauses.pausedAt} gives, while
+ * the loop is paused — a hold kept and the loop between heights —, the time it paused and who holds it, which the
+ * process lists as the condition `paused` (`./process.ts`). The time is the moment the loop paused, kept while a hold is
+ * kept: the loop's step from its wait for the head to its next point between heights does not end the pause. `by` is
+ * `pause` while a hold of `ProcessHandle.pause()` is kept — only `resume()` lifts it —, else `signal` (a backup on
+ * SIGUSR2). Each change of what it gives is told once to `onChange` (the process publishes it to the admin endpoints).
  */
+
+/** Who holds the loop: `ProcessHandle.pause()` (`pause`), or a backup on SIGUSR2 (`signal`). */
+export type PauseBy = "pause" | "signal";
+
+/** The loop's pause as `/status` shows it (see the module comment): when it paused (ms since the epoch), and by whom. */
+export interface LoopPaused {
+  readonly since: number;
+  readonly by: PauseBy;
+}
+
+/** What {@link LoopPauses} is given. */
+export interface LoopPausesOptions {
+  /** Told once each time what {@link LoopPauses.pausedAt} gives changes. */
+  readonly onChange?: () => void;
+  /** The wall clock in ms; `Date.now` unless given (a test's). */
+  readonly now?: () => number;
+}
 
 /** A hold on the loop (see the module comment). */
 export interface PauseHold {
@@ -38,12 +62,23 @@ export interface LoopPause {
 
 /** The pauses of one process's loop (see the module comment). */
 export class LoopPauses implements LoopPause {
-  /** Each hold kept, with what tells it that it was reached (none once told). */
-  readonly #holds = new Map<symbol, (() => void) | null>();
+  /** Each hold kept, with who holds it and what tells it that it was reached (none once told). */
+  readonly #holds = new Map<symbol, { readonly by: PauseBy; tell: (() => void) | null }>();
   /** True while the loop is between heights: at {@link between}, or in {@link idle}. */
   #between = false;
   /** Wakes the loop held at {@link between}. */
   #lift: (() => void) | undefined;
+  /** When the loop paused, while holds have been kept since; null otherwise. */
+  #since: number | null = null;
+  /** What {@link pausedAt} gave when {@link #changed} last looked, as text. */
+  #shown = "none";
+  readonly #onChange: (() => void) | undefined;
+  readonly #now: () => number;
+
+  constructor(options: LoopPausesOptions = {}) {
+    this.#onChange = options.onChange;
+    this.#now = options.now ?? Date.now;
+  }
 
   /** Whether a hold is kept. */
   get held(): boolean {
@@ -55,8 +90,15 @@ export class LoopPauses implements LoopPause {
     return this.held && this.#between;
   }
 
-  /** A new hold (see the module comment): reached at once while the loop is between heights. */
-  hold(): PauseHold {
+  /** While the loop is paused, when it paused and who holds it; else null (see the module comment). */
+  get pausedAt(): LoopPaused | null {
+    if (!this.paused) return null;
+    const by: PauseBy = [...this.#holds.values()].some((hold) => hold.by === "pause") ? "pause" : "signal";
+    return Object.freeze({ since: this.#since as number, by });
+  }
+
+  /** A new hold by `by` (see the module comment): reached at once while the loop is between heights. */
+  hold(by: PauseBy = "pause"): PauseHold {
     const token = Symbol("hold");
     let tell!: () => void;
     const reached = new Promise<void>((resolve) => {
@@ -64,17 +106,23 @@ export class LoopPauses implements LoopPause {
     });
     if (this.#between) {
       tell();
-      this.#holds.set(token, null);
+      this.#holds.set(token, { by, tell: null });
     } else {
-      this.#holds.set(token, tell);
+      this.#holds.set(token, { by, tell });
     }
+    this.#changed();
     return Object.freeze({
       reached,
       release: () => {
-        if (!this.#holds.has(token)) return;
-        this.#holds.get(token)?.();
+        const hold = this.#holds.get(token);
+        if (hold === undefined) return;
+        hold.tell?.();
         this.#holds.delete(token);
-        if (this.#holds.size === 0) this.#lift?.();
+        if (this.#holds.size === 0) {
+          this.#since = null;
+          this.#lift?.();
+        }
+        this.#changed();
       },
     });
   }
@@ -84,6 +132,7 @@ export class LoopPauses implements LoopPause {
     try {
       while (this.held) {
         this.#reached();
+        this.#changed();
         if (signal.aborted) return;
         await new Promise<void>((resolve) => {
           const done = (): void => {
@@ -97,25 +146,38 @@ export class LoopPauses implements LoopPause {
       }
     } finally {
       this.#between = false;
+      this.#changed();
     }
   }
 
   async idle<T>(body: () => Promise<T>): Promise<T> {
     this.#between = true;
     this.#reached();
+    this.#changed();
     try {
       return await body();
     } finally {
+      // Not told: the loop's next step is a point between heights, where a kept hold holds it still (see above).
       this.#between = false;
     }
   }
 
   /** Tells every hold not told yet that the loop is paused for it. */
   #reached(): void {
-    for (const [token, tell] of this.#holds) {
-      if (tell === null) continue;
-      tell();
-      this.#holds.set(token, null);
+    for (const hold of this.#holds.values()) {
+      if (hold.tell === null) continue;
+      hold.tell();
+      hold.tell = null;
     }
+  }
+
+  /** Notes when the loop paused, and tells `onChange` when what {@link pausedAt} gives changed since it last looked. */
+  #changed(): void {
+    if (this.paused) this.#since ??= this.#now();
+    const paused = this.pausedAt;
+    const shown = paused === null ? "none" : `${paused.since} ${paused.by}`;
+    if (shown === this.#shown) return;
+    this.#shown = shown;
+    this.#onChange?.();
   }
 }
