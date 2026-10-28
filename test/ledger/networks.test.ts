@@ -11,7 +11,9 @@ import {
   parseNetworksFile,
 } from "../../src/ledger/networks.js";
 import { type LedgerTable, selectLedgerVersion } from "../../src/ledger/version-table.js";
-import { hashAnswer, headerAnswer } from "../../src/node/decode.js";
+import { hashAnswer, headerAnswer, toHex } from "../../src/node/decode.js";
+import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
+import { haltOf, TapeAnswers } from "./version-checks.js";
 
 /**
  * The built-in ledger version tables (`src/ledger/networks.json`; LG-3, A95; task 12.2): one per known network, keyed
@@ -23,7 +25,11 @@ import { hashAnswer, headerAnswer } from "../../src/node/decode.js";
  *   hashes it vouches for.
  * - **A94's last clause:** each built-in pin passes the header its boundary's record holds, through the node client's
  *   decoder — the boundaries task 0.3 read from the nodes (`test/ledger/fixtures/networks/*.json`), the mainnet pin at
- *   1,774,492 among them.
+ *   1,774,492 among them — and block 1,774,492's header as task 0.3's mainnet tape holds it passes the pin.
+ * - **The tables against the recorded tapes** (task 0.3's, each skipped by name without its tape): every block of every
+ *   public tape selects a ledger through its network's built-in table, built by the runtime in its parent's state;
+ *   every pin in a tape's range passes; every runtime change on a tape is a built-in boundary with its U's and F's
+ *   hashes and versions; a tape from genesis has the built-in genesis hash and runtime.
  * - **The format:** `networksFileProblems` refuses every way a file can break it, one rule per row below.
  */
 
@@ -168,6 +174,110 @@ describe("A94's last clause: every built-in pin passes the header its boundary's
       }
     }
   });
+});
+
+describe("the built-in tables against task 0.3's recorded tapes (each skipped by name without its tape)", () => {
+  /** Reading, checking and walking a 60,000-record tape on a loaded machine. */
+  const WALK_MS = 600_000;
+
+  /** A tape's header at `height`, decoded by the node client's decoder, with its hash. */
+  const blockAt = (answers: TapeAnswers, height: number) => {
+    const text = answers.hashAt(height);
+    const header = headerAnswer("chain_getHeader", "result", answers.answer("chain_getHeader", text));
+    expect(header.number, `the header of ${height}`).toBe(BigInt(height));
+    return { text, header, block: { height: header.number, hash: hashAnswer("chain_getBlockHash", "result", text), digest: header.digest } };
+  };
+
+  tapeTest(
+    "mainnet-1774000-1780000",
+    "A94's last clause: block 1,774,492's header as the mainnet node answered it passes the built-in pin; under U's hash, or with U's MNSV, it does not",
+    (found) => {
+      const answers = new TapeAnswers(found.read().records);
+      const table = builtInLedgerTable("mainnet") as LedgerTable;
+      const f = blockAt(answers, 1_774_492);
+      expect(f.text).toBe("0x380266656e11208adbcaa5ab62a6beb9c09ef86de1cb886eac721099177a1a0b");
+      expect(table.pins).toContainEqual({ height: 1_774_492, hash: f.text, specVersion: 1_000_000 });
+      expect(selectLedgerVersion(table, f.block)).toEqual({ specVersion: 1_000_000, ledger: "v8" });
+      const u = blockAt(answers, 1_774_491);
+      expect(selectLedgerVersion(table, u.block)).toEqual({ specVersion: 22_000, ledger: "v8" });
+      const underUsHash = haltOf(() => selectLedgerVersion(table, { ...f.block, hash: u.block.hash }));
+      expect([underUsHash.code, (underUsHash.details as { differs: unknown }).differs]).toEqual(["pin-mismatch", ["hash"]]);
+      const withUsVersion = haltOf(() => selectLedgerVersion(table, { ...f.block, digest: u.block.digest }));
+      expect([withUsVersion.code, (withUsVersion.details as { differs: unknown }).differs]).toEqual(["pin-mismatch", ["specVersion"]]);
+    },
+    { timeoutMs: WALK_MS },
+  );
+
+  /** Each public tape, the pins in its range and the ledgers its blocks select (task 0.3's manifest). */
+  const PUBLIC_TAPES = [
+    { name: "mainnet-1774000-1780000", pins: [1_774_492], ledgers: ["v8"] },
+    { name: "mainnet-1780000-1790000", pins: [], ledgers: ["v8"] },
+    { name: "preview-0-10000", pins: [], ledgers: ["v8"] },
+    { name: "preview-1073620-1075620", pins: [1_074_621], ledgers: ["v8"] },
+    { name: "preprod-0-10000", pins: [], ledgers: ["v8"] },
+    { name: "stagenet-0-10000", pins: [], ledgers: ["v9-rc3"] },
+  ] as const;
+
+  /** Walks every block of `found` through its network's built-in table (see the describe's title). */
+  function expectTableHolds(found: FoundTape, expected: (typeof PUBLIC_TAPES)[number]): void {
+    const { network, from, to } = found.tape;
+    const entry = builtInNetwork(network);
+    const table = builtInLedgerTable(network) as LedgerTable;
+    expect(entry, network).not.toBeNull();
+    const answers = new TapeAnswers(found.read().records);
+    const ledgers = new Set<string>();
+    const mnsv = new Map<number, number>();
+    const runtimes = new Map<number, number>();
+    const notFromParent: string[] = [];
+    const changes: number[] = [];
+    let parent: string | null = null;
+    for (let h = from; h <= to; h++) {
+      const { text, header, block } = blockAt(answers, h);
+      const selection = selectLedgerVersion(table, block);
+      ledgers.add(selection.ledger);
+      mnsv.set(h, selection.specVersion);
+      runtimes.set(h, answers.runtimeAt(text));
+      if (parent !== null) {
+        expect(toHex(header.parentHash), `block ${h}'s parent`).toBe(parent);
+        // LG-4: a block is built by the runtime in its parent's state, which its MNSV names.
+        if (selection.specVersion !== runtimes.get(h - 1)) notFromParent.push(`${h}: MNSV ${selection.specVersion}, parent's ${runtimes.get(h - 1)}`);
+        // The state's runtime changes at U, whose own state holds the runtime it enacts.
+        if (runtimes.get(h) !== runtimes.get(h - 1)) changes.push(h);
+      }
+      parent = text;
+    }
+    expect(notFromParent).toEqual([]);
+    expect([...ledgers]).toEqual(expected.ledgers);
+    // Every pin in the range was passed by the walk (a block contradicting it halts it).
+    expect(table.pins.filter((pin) => from <= pin.height && pin.height <= to).map((pin) => pin.height)).toEqual(expected.pins);
+    // Every runtime change on the tape is a built-in boundary, read with the same hashes and versions.
+    const boundaries = entry!.boundaries.filter((boundary) => from <= boundary.u.height && boundary.f.height <= to);
+    expect(changes).toEqual(boundaries.map((boundary) => boundary.u.height));
+    for (const boundary of boundaries) {
+      for (const side of [boundary.u, boundary.f]) {
+        expect({ hash: answers.hashAt(side.height), specVersion: mnsv.get(side.height) }, `${network} ${side.height}`).toEqual({
+          hash: side.hash,
+          specVersion: side.specVersion,
+        });
+      }
+      expect(runtimes.get(boundary.u.height)).toBe(boundary.f.specVersion);
+    }
+    if (from === 0) {
+      expect({ hash: answers.hashAt(0), specVersion: runtimes.get(0) }, `${network}'s genesis`).toEqual({
+        hash: entry!.genesis?.hash,
+        specVersion: entry!.genesis?.specVersion,
+      });
+    }
+  }
+
+  for (const expected of PUBLIC_TAPES) {
+    tapeTest(
+      expected.name,
+      `its network's built-in table selects every block of ${expected.name}: built by its parent's runtime, every pin in range passed, every runtime change a recorded boundary${expected.name.endsWith("-0-10000") ? ", the genesis hash and runtime the built-in ones" : ""}`,
+      (found) => expectTableHolds(found, expected),
+      { timeoutMs: WALK_MS },
+    );
+  }
 });
 
 // ---- the format ----------------------------------------------------------------------------------------------------

@@ -3,10 +3,12 @@ import { buildCoreVersion } from "../../src/config/build.js";
 import { checkPackageFiles, readManifest, verifyLedgerPackages } from "../../src/ledger/identity.js";
 import { type MetadataNode, RuntimeMetadata, type RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import { ledgerOfSpecVersion, mnsvSpecVersion, selectLedgerVersion } from "../../src/ledger/version-table.js";
-import { toHex } from "../../src/node/decode.js";
+import { hashAnswer, headerAnswer, toHex } from "../../src/node/decode.js";
+import { tapeTest } from "../tape/real/real-tapes.js";
 import {
   copyVendoredLedger,
   CountingNode,
+  devnetUpgradeOf,
   expectBadVersionDigestHalts,
   expectEveryPackageFileChecked,
   expectPinsChecked,
@@ -19,6 +21,8 @@ import {
   runtimeAt,
   type Select,
   SYNTHETIC_TABLE,
+  TapeAnswers,
+  tapeMetadataNode,
   UPGRADE,
   type Walk,
 } from "./version-checks.js";
@@ -31,7 +35,8 @@ import {
  *   pin clause — while passing its other two, which do not depend on pins.
  * - **A metadata cache keyed by the block's own `spec_version` and read at the block's own state** (instead of the
  *   parent's runtime, read at the parent's state) decodes U with the new metadata and stores it under the old
- *   `spec_version`, and fails A96's synthetic case.
+ *   `spec_version`, and fails A96's synthetic case — and the same check on task 0.3's devnet upgrade tape (skipped by
+ *   name without the tape).
  * - **An identity check that skips one package file** (the last line of each manifest) accepts that file changed by one
  *   byte, and fails A97.
  */
@@ -124,6 +129,38 @@ describe("A96's negative control: a cache keyed by the block's own spec_version,
   it("the real cache passes A96's check over the same node in this file's build", async () => {
     await expectUpgradeDecoding(walk, () => new RuntimeMetadata(node()));
   });
+
+  tapeTest(
+    "devnet-v8-v9-0-235",
+    "on task 0.3's devnet upgrade tape, it decodes U (102) with the new metadata from a cold cache and fails A96 there too; the real cache passes",
+    async (found) => {
+      const answers = new TapeAnswers(found.read().records);
+      const boundary = (found.tape.notes as { readonly boundaries: readonly Parameters<typeof devnetUpgradeOf>[1][] }).boundaries[0]!;
+      const upgrade = devnetUpgradeOf(answers, boundary, found.tape.to);
+      // The walk over the tape's headers: each block's MNSV version, its parent's hash.
+      const tapeWalk: Walk = async (from, metadata) => {
+        const decoded = new Map<number, RuntimeMetadataEntry>();
+        for (let h = from; h <= upgrade.last; h++) {
+          const hash = hashAnswer("chain_getBlockHash", "result", answers.hashAt(h));
+          const header = headerAnswer("chain_getHeader", "result", answers.answer("chain_getHeader", answers.hashAt(h)));
+          const specVersion = mnsvSpecVersion({ height: header.number, hash, digest: header.digest });
+          decoded.set(h, await metadata.forBlock({ height: header.number, hash, parentHash: header.parentHash, specVersion }));
+        }
+        return decoded;
+      };
+      const wrong = new OwnStateMetadata(tapeMetadataNode(answers, upgrade));
+      const decoded = await tapeWalk(upgrade.u, wrong);
+      expect(decoded.get(upgrade.u)).toEqual({ specVersion: upgrade.old, metadata: upgrade.metadata.new });
+      expect(wrong.cached(upgrade.old)).toEqual(upgrade.metadata.new);
+      const failure = await assertionFailure(() =>
+        expectUpgradeDecoding(tapeWalk, () => new OwnStateMetadata(tapeMetadataNode(answers, upgrade)), upgrade),
+      );
+      expect(failure.message).toMatch(/block 102 from 102/);
+      await expectUpgradeDecoding(tapeWalk, () => new RuntimeMetadata(tapeMetadataNode(answers, upgrade)), upgrade);
+    },
+    // Three walks of 236 blocks, each comparing every block's metadata (hundreds of kilobytes) on a loaded machine.
+    { timeoutMs: 300_000 },
+  );
 });
 
 describe("A97's negative control: an identity check that skips one package file", () => {

@@ -1,18 +1,27 @@
 import { describe, expect, it } from "vitest";
+import { systemEventsKey } from "../../src/backbone/core-block-fetch/events.js";
+import { metadataView } from "../../src/backbone/core-chain-events/core-chain-events.js";
+import { decodeChainEvents } from "../../src/backbone/core-chain-events/events.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { contentStateOf, RuntimeMetadata, type RuntimeMetadataEntry } from "../../src/ledger/metadata.js";
 import { type LedgerTable, selectLedgerVersion } from "../../src/ledger/version-table.js";
 import { toHex } from "../../src/node/decode.js";
 import { type ConnectSocket, connectWebSocket, NodeClient } from "../../src/node/index.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
+import { restartAt } from "../backbone/ledger-restart.js";
+import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 import {
   CountingNode,
+  devnetUpgradeOf,
   expectUpgradeDecoding,
   hashOf,
   METADATA,
+  mnsvItem,
   mnsvOf,
   SYNTHETIC_TABLE,
+  TapeAnswers,
   UPGRADE,
+  type UpgradeCase,
   upgradeTape,
   type Walk,
 } from "./version-checks.js";
@@ -24,8 +33,10 @@ import {
  * block 0) — whose `spec_version` (`state_getRuntimeVersion` there) must be the block's `MNSV` version, or processing
  * halts with `metadata-mismatch`; metadata is cached by that `spec_version`. So U is decoded with the old metadata and F
  * with the new, and the cache never holds the new metadata under the old `spec_version`. The tape node serves the tape
- * and the node client of `src/node/` reads it, unchanged, as `core-block-fetch` will (task 10.3); task 0.3's devnet
- * upgrade tape replaces the synthetic one (the walk below is what it must answer).
+ * and the node client of `src/node/` reads it, unchanged, as `core-block-fetch` does (task 10.3). The same checks run
+ * on task 0.3's recorded devnet upgrade tape (`devnet-v8-v9-0-235`: runtime 1_000_000 until U = 102 enacts 2_001_000;
+ * F = 103), skipped by name when the tape is absent: there U's and F's events are decoded besides, and U's do not
+ * decode with the new runtime's metadata.
  */
 
 const TIMEOUT_MS = 60_000;
@@ -47,10 +58,10 @@ async function withNode<T>(records: readonly TapeRecord[], body: (client: NodeCl
  * The walk `core-block-fetch` makes per height (task 10.3): the block's hash and header, its ledger version from the
  * table (LG-1), then the metadata its content is decoded with (LG-4).
  */
-function walkOver(client: NodeClient, table: LedgerTable = SYNTHETIC_TABLE): Walk {
+function walkOver(client: NodeClient, table: LedgerTable = SYNTHETIC_TABLE, last: number = UPGRADE.last): Walk {
   return async (from, metadata) => {
     const decoded = new Map<number, RuntimeMetadataEntry>();
-    for (let h = from; h <= UPGRADE.last; h++) {
+    for (let h = from; h <= last; h++) {
       const hash = await client.blockHash(BigInt(h));
       const header = await client.header(hash);
       const { specVersion } = selectLedgerVersion(table, { height: header.number, hash, digest: header.digest });
@@ -114,6 +125,132 @@ describe("A96 on the synthetic devnet upgrade tape (LG-4)", { timeout: TIMEOUT_M
       expect(metadata.specVersions()).toEqual([UPGRADE.old]);
     });
   });
+});
+
+describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without the tape)", () => {
+  const TAPE = "devnet-v8-v9-0-235";
+  /** A whole walk of the tape's 236 blocks through the tape node, on a loaded machine. */
+  const WALK_MS = 300_000;
+
+  interface Boundary {
+    readonly u: { readonly height: number; readonly hash: string; readonly specVersion: number };
+    readonly f: { readonly height: number; readonly hash: string; readonly specVersion: number };
+  }
+
+  /** The devnet's upgrade as task 0.3's manifest records it, checked against the tape's answers. */
+  function devnetOf(found: FoundTape): { readonly boundary: Boundary; readonly answers: TapeAnswers; readonly upgrade: UpgradeCase } {
+    const boundary = (found.tape.notes as { readonly boundaries: readonly Boundary[] }).boundaries[0] as Boundary;
+    expect(boundary).toMatchObject({ u: { height: 102, specVersion: 1_000_000 }, f: { height: 103, specVersion: 2_001_000 } });
+    const answers = new TapeAnswers(found.read().records);
+    expect([answers.hashAt(102), answers.hashAt(103)]).toEqual([boundary.u.hash, boundary.f.hash]);
+    return { boundary, answers, upgrade: devnetUpgradeOf(answers, boundary, found.tape.to) };
+  }
+
+  /** The devnet's own table, a custom network's (task 0.3's note (c)): runtime 1.0 → v8, 2.x → v9; F pinned. */
+  const devnetTable = (boundary: Boundary): LedgerTable => ({
+    rows: [
+      { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
+      { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
+    ],
+    pins: [{ height: boundary.f.height, hash: boundary.f.hash, specVersion: boundary.f.specVersion }],
+  });
+
+  tapeTest(
+    TAPE,
+    "decodes U (102) with the old metadata and F (103) with the new, from genesis and from a cold cache at U, through the tape node and the node client",
+    async (found) => {
+      const { boundary, answers, upgrade } = devnetOf(found);
+      expect(upgrade.last).toBe(235);
+      // A walk from U is a process restarted at cursor U − 1: the tape gains that cursor's header and the metadata at
+      // its hash, copied from its runtime's record (decision record Q135 A; test/backbone/ledger-restart.ts).
+      const records = restartAt(found.read().records, BigInt(upgrade.u - 1));
+      await withNode(records, async (client, node) => {
+        await expectUpgradeDecoding(walkOver(client, devnetTable(boundary), upgrade.last), () => new RuntimeMetadata(client), upgrade);
+        // The metadata read once per runtime: from genesis at block 0 and at U; from U at U − 1 and at U.
+        const metadataReads = node.calls.filter((call) => call.method === "state_getMetadata").map((call) => call.params);
+        const at = (h: number) => [answers.hashAt(h)];
+        expect(metadataReads).toEqual([at(0), at(upgrade.u), at(upgrade.u - 1), at(upgrade.u)]);
+        // The runtime read at every block's parent (block 0: at its own).
+        const runtimeReads = node.calls.filter((call) => call.method === "state_getRuntimeVersion").map((call) => call.params);
+        const parents = (from: number) => Array.from({ length: upgrade.last - from + 1 }, (_, i) => at(Math.max(0, from + i - 1)));
+        expect(runtimeReads).toEqual([...parents(0), ...parents(upgrade.u)]);
+      });
+    },
+    { timeoutMs: WALK_MS },
+  );
+
+  tapeTest(
+    TAPE,
+    "decodes every block's events with its parent's runtime's metadata; U's events do not decode with the new runtime's",
+    async (found) => {
+      const { boundary, upgrade } = devnetOf(found);
+      await withNode(found.read().records, async (client) => {
+        const metadata = new RuntimeMetadata(client);
+        const table = devnetTable(boundary);
+        const names = new Map<number, readonly string[]>();
+        let eventsOfU: Uint8Array | null = null;
+        for (let h = 0; h <= upgrade.last; h++) {
+          const hash = await client.blockHash(BigInt(h));
+          const header = await client.header(hash);
+          const { specVersion } = selectLedgerVersion(table, { height: header.number, hash, digest: header.digest });
+          const entry = await metadata.forBlock({ height: header.number, hash, parentHash: header.parentHash, specVersion });
+          const events = await client.storage(systemEventsKey(), hash);
+          if (h === upgrade.u) eventsOfU = events;
+          const decoded = decodeChainEvents(metadataView(entry.metadata, header.number), events, header.number);
+          names.set(h, decoded.map((event) => `${event.pallet}.${event.name}`));
+        }
+        // Block 0 has no events (no block executed the genesis state); every other block has some.
+        expect(names.get(0)).toEqual([]);
+        for (let h = 1; h <= upgrade.last; h++) expect(names.get(h)?.length, `block ${h}'s events`).toBeGreaterThan(0);
+        // U enacts the runtime (`set_code`); F carries the node's three DUST reapply system transactions (task 0.3).
+        expect(names.get(upgrade.u)).toContain("System.CodeUpdated");
+        expect(names.get(upgrade.u + 1)?.filter((name) => name === "MidnightSystem.SystemTransactionApplied")).toHaveLength(3);
+        // U's events, written by the old runtime, do not decode with the new runtime's metadata (U's own state's).
+        expect(eventsOfU).not.toBeNull();
+        expect(() => decodeChainEvents(metadataView(upgrade.metadata.new, BigInt(upgrade.u)), eventsOfU, BigInt(upgrade.u))).toThrow();
+      });
+    },
+    { timeoutMs: WALK_MS },
+  );
+
+  tapeTest(
+    TAPE,
+    "halts with metadata-mismatch at U when U's header names the new runtime, whose parent's state runs the old one",
+    async (found) => {
+      const { boundary, answers, upgrade } = devnetOf(found);
+      const hashOfU = answers.hashAt(upgrade.u);
+      let forged = 0;
+      const records = found.read().records.map((record): TapeRecord => {
+        if (!("method" in record) || record.method !== "chain_getHeader" || (record.params as unknown[])[0] !== hashOfU) return record;
+        const header = (record as unknown as { readonly result: { readonly digest: { readonly logs: readonly string[] } } }).result;
+        const logs = header.digest.logs.map((item) => (item === toHex(mnsvItem(upgrade.old)) ? toHex(mnsvItem(upgrade.new)) : item));
+        forged += logs.filter((item, index) => item !== header.digest.logs[index]).length;
+        return { ...record, result: { ...header, digest: { ...header.digest, logs } } } as TapeRecord;
+      });
+      expect(forged).toBe(1);
+      await withNode(records, async (client) => {
+        const metadata = new RuntimeMetadata(client);
+        let halt: unknown;
+        try {
+          await walkOver(client, devnetTable(boundary), upgrade.last)(0, metadata);
+        } catch (error) {
+          halt = error;
+        }
+        expect(halt).toBeInstanceOf(UmbraError);
+        expect((halt as UmbraError).code).toBe("metadata-mismatch");
+        expect((halt as UmbraError).details).toEqual({
+          height: BigInt(upgrade.u),
+          hash: hashOfU,
+          at: answers.hashAt(upgrade.u - 1),
+          specVersion: upgrade.new,
+          runtimeSpecVersion: upgrade.old,
+        });
+        expect(metadata.cached(upgrade.new)).toBeUndefined();
+        expect(metadata.specVersions()).toEqual([upgrade.old]);
+      });
+    },
+    { timeoutMs: WALK_MS },
+  );
 });
 
 describe("the metadata cache (LG-4)", () => {

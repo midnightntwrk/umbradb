@@ -26,7 +26,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `npm audit --omit=dev` 0 vulnerabilities, image pins agree, `flake.lock` unchanged, gitleaks). `npm run
       test:conformance` green on the otherwise unchanged code: 553 tests passed, 17 skipped (the environment-gated
       ones), 25/25 required ids. The CI run is pending until the branch is pushed (Phase 3).
-- [ ] 0.2 Vendored ledger builds (`vendor/ledger/`, `design.md` §5.2): pin the v8 release; build v9 and the v8→v9
+- [x] 0.2 Vendored ledger builds (`vendor/ledger/`, `design.md` §5.2): pin the v8 release; build v9 and the v8→v9
       conversion (`v8-to-v9-state-translation`, `midnight-ledger` `da96e33d78ee9b7d3867b15c1037510d499cd909`) from one
       aligned v9 version; list each function of `LedgerPackage` the published packages lack and write the patches; make
       the build reproducible and record each SHA-256; add the CI job that rebuilds and compares; run the conversion on
@@ -48,10 +48,21 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       v8 state giving the same v9 root in two fresh instances. First acceptance item met locally (arm64): two runs of
       `npm run vendor:ledger` gave the recorded SHA-256; the CI run (amd64 and arm64) is pending until the branch is
       pushed (Phase 3).
-      **Pending:** the second acceptance item — the conversion's root against the node's at a devnet fork's F — needs
-      the devnet tape of task 0.3, which runs after task 9.2. No v8 `decodeLogItem` patch: the v8 adapter returns
-      null (owner decision Q54, task 12.1). Q53 (root counts as signed changes) and Q55 (`stateKey` in
-      `LedgerPackage`): owner decisions A. Proposing the patches upstream is the owner's, later (Q56).
+      **Done (2026-10-27, lane 2):** the second acceptance item, on task 0.3's devnet tape (`devnet-v8-v9-0-235`: v8
+      runtime 1_000_000 until U = 102 enacts 2_001_000, ledger v9, at F = 103), a tape test of
+      `test/ledger/devnet-upgrade.test.ts` (skipped by name without the tape). The process replays the devnet from
+      genesis to F on PGlite; the v8 state at U it stored, loaded from the stored nodes alone in a fresh instance of the
+      vendored v8 package, has the node's root at U (`00e81880…bc093c`); the vendored v9 package's `convertFromV8` on
+      it, in a fresh instance (twice: the same state), followed by F — the node's three DUST reapply system
+      transactions, as the process gave them to its worker — applied by the reference replay (`adapter-fixtures.ts`, not
+      the adapters or the worker's engine), gives the node's `midnight_ledgerStateRoot` at F (`00d88519…29beb7`). The
+      node reports no root between its conversion and F, so the converted state's own root has no node value; it, and
+      the root after an F without its transactions, differ from the node's at F. Task 12.4's A100 tape test checks the
+      same through the worker's engine. No v8 `decodeLogItem` patch: the v8 adapter returns null (owner decision Q54,
+      task 12.1). Q53 (root counts as signed changes) and Q55 (`stateKey` in `LedgerPackage`): owner decisions A.
+      Proposing the patches upstream is the owner's, later (Q56).
+      **Pending:** the CI rebuild on amd64 and arm64 runners (`vendored-ledger.yml`) runs when the branch is pushed
+      (Phase 3).
 - [x] 0.3 Tapes (owner decisions Q123, Q130): record, with the builder of task 9.2, mainnet ranges around 1,774,492 and
       1,788,980 (`rpc.mainnet.midnight.network`), preview 0–10,000 and a preview range across the runtime 1.0.300
       upgrade (`rpc.preview`), preprod 0–10,000 (`rpc.preprod`), and an undeployed devnet we build (`midnight-node` 2.x
@@ -2499,7 +2510,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       package identity check); 16.1 (the browser entry, `node:crypto` and `Buffer`); 17.2 (0.9.5's decoder, still used
       by `test/integration/chain-archive-replay-decode.integration.test.ts`); 17.3 (the surface and `package.json`'s
       `files`).
-- [ ] 12.2 Version selection, the built-in tables (`networks.json`, from task 0.3), pins, package identity checks,
+- [x] 12.2 Version selection, the built-in tables (`networks.json`, from task 0.3), pins, package identity checks,
       metadata selection at upgrades.
       **Acceptance:** A94, A95, A96, A97.
       **Partial (2026-10-26):** in `src/ledger/`. **Selection** (`version-table.ts`, LG-1, LG-2):
@@ -2543,10 +2554,33 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `ledgers: []`. Wrong variants: 145 on the first run, 129 caught, 16 survivors — 13 gaps closed by tests, 1
       redundant check removed (the date's pattern), 2 equivalent —; the final run on the final sources: 144 variants,
       142 caught, the 2 survivors equivalent. Coverage of the new code 100 %.
-      **Pending (task 0.3):** A94's last clause (the mainnet pin at 1,774,492 and its header), A95's real `[CI]` half
-      (task 0.3's devnet tape, with 10.3/11.1's extraction of transactions), A96 on the real devnet upgrade tape, the
-      built-in tables' remaining data (preprod's and stagenet's genesis, every runtime at genesis, every boundary);
-      A97's CI rebuild runs when the branch is pushed (Phase 3). Q116 and Q117 (not blocking).
+      **Done (2026-10-27, lane 2):** what waited for task 0.3. **The built-in tables' data:** task 0.3 read every known
+      network's genesis (hash and runtime) and every boundary (U and F: height, hash, `MNSV`) from its node into
+      `networks.json`, the node's answers in `test/ledger/fixtures/networks/`, so each boundary's F is a pin (mainnet
+      1,774,492 and 2,738,211; preprod 1,568,258 and 2,648,469; preview 1,074,621; stagenet none). Checked here against
+      task 0.3's tapes (`networks.test.ts`, a tape test per public tape, skipped by name without it): each of the 48,006
+      headers of the six public tapes selects its ledger through its network's built-in table, its `MNSV` the runtime in
+      its parent's state (LG-4); the pins in the tapes' ranges (1,774,492, 1,074,621) pass; every runtime change on a
+      tape is a built-in boundary with the same hashes and versions; and the tapes from genesis carry the built-in
+      genesis hash and runtime (preview, preprod, stagenet). A second read of the public nodes (2026-10-27, 42 calls,
+      not committed) gave every genesis and boundary again, the three no tape covers (mainnet 2,738,210; preprod
+      1,568,257 and 2,648,468) among them, and each network's finalized head still on its last boundary's runtime.
+      **A94's last clause:** block 1,774,492's header as the mainnet tape holds it passes the built-in pin (v8,
+      1,000,000), and under U's hash, or with U's `MNSV`, halts with `pin-mismatch` naming what differs. **A95 `[CI]`**
+      (`devnet-upgrade.test.ts`, on the devnet tape): a configured table "every `spec_version` → v8" selects v8 for all
+      236 blocks; the process parses and applies every block the devnet's v8 runtime built (0 to U = 102) with v8, each
+      root the node's; at F = 103, built by runtime 2.1 on ledger v9, v8's parse of its v9 transactions fails and the
+      process halts (`callback-error`, `core-block-parsed`, `on-parse`). **A96 `[CI]`** (`runtime-metadata.test.ts`, on
+      the devnet tape through the tape node and the node client): U = 102 decoded with the old runtime's metadata and F
+      with the new, from genesis and from a cold cache at U (a restart at 101, its metadata record added as Q135 A
+      says), each runtime's metadata read once and the runtime at every parent; every block's events decoded with that
+      metadata (U's `System.CodeUpdated`, F's three `SystemTransactionApplied`), U's not decoding with the new
+      runtime's; U's header forged to the new `MNSV` halts with `metadata-mismatch`. Committed control
+      (`version.negative-control.test.ts`): the cache keyed by the block's own version and read at its own state fails
+      the same check on the tape (`block 102 from 102`). `version-checks.ts`' A96 check takes the upgrade it checks
+      (`UpgradeCase`, `devnetUpgradeOf`, `TapeAnswers`, `tapeMetadataNode`). No `src/` change. Q116 and Q117: owner
+      decisions (resolved).
+      **Pending:** A97's CI rebuild of every vendored package runs when the branch is pushed (Phase 3).
 - [x] 12.1a The owner's answer Q113 A: patches for v8 and v9 exporting the node's exact post-block update (the summed
       `SyntheticCost` normalized and clamped to the block limits in Rust) and a system transaction's cost; the packages
       rebuilt and their `SHA256SUMS` re-recorded; `ApplyInput` gains each transaction's chain outcome, and the adapters

@@ -12,7 +12,8 @@ import type { TapeRecord } from "../../tools/tape/index.js";
 /**
  * The checks of A94, A96 and A97 (task 12.2) that both the tests and their committed negative controls
  * (`version.negative-control.test.ts`) run, so that a control shows the very check failing against a wrong selector,
- * a wrong metadata cache or a wrong identity check — and the real ones pass it in the same build.
+ * a wrong metadata cache or a wrong identity check — and the real ones pass it in the same build. A96's check runs on
+ * the synthetic devnet and on task 0.3's recorded devnet upgrade tape ({@link devnetUpgradeOf}).
  */
 
 // ---- headers and digests -----------------------------------------------------------------------------------------
@@ -193,21 +194,124 @@ export function upgradeTape(digestOf: (h: number) => number = mnsvOf): TapeRecor
 export type Walk = (from: number, metadata: MetadataSelector) => Promise<Map<number, RuntimeMetadataEntry>>;
 
 /**
- * A96 on the synthetic devnet: U is decoded with the old metadata (its parent's runtime) and F with the new (U's), and
- * the cache never holds the new metadata under the old `spec_version` — from genesis, and from a cold cache at U (a
- * restart at cursor U − 1, where nothing older is cached to mask a wrong read).
+ * A runtime upgrade a walk crosses (A96): the old runtime builds every block up to U, which enacts the new one; F =
+ * U + 1 and every block after it to `last` are built by the new runtime; each runtime's metadata as its node answers
+ * it.
  */
-export async function expectUpgradeDecoding(walk: Walk, makeSelector: () => MetadataSelector): Promise<void> {
-  for (const from of [0, UPGRADE.u]) {
+export interface UpgradeCase {
+  readonly u: number;
+  readonly last: number;
+  readonly old: number;
+  readonly new: number;
+  readonly metadata: { readonly old: Uint8Array; readonly new: Uint8Array };
+}
+
+/** The synthetic devnet's upgrade ({@link UPGRADE}, {@link METADATA}). */
+export const SYNTHETIC_UPGRADE: UpgradeCase = Object.freeze({
+  u: UPGRADE.u,
+  last: UPGRADE.last,
+  old: UPGRADE.old,
+  new: UPGRADE.new,
+  metadata: METADATA,
+});
+
+/**
+ * A96: U is decoded with the old metadata (its parent's runtime) and F with the new (U's), and the cache never holds
+ * the new metadata under the old `spec_version` — from genesis, and from a cold cache at U (a restart at cursor U − 1,
+ * where nothing older is cached to mask a wrong read). On the synthetic devnet unless `upgrade` names another (task
+ * 0.3's devnet tape: {@link devnetUpgradeOf}).
+ */
+export async function expectUpgradeDecoding(
+  walk: Walk,
+  makeSelector: () => MetadataSelector,
+  upgrade: UpgradeCase = SYNTHETIC_UPGRADE,
+): Promise<void> {
+  const mnsv = (h: number): number => (h <= upgrade.u ? upgrade.old : upgrade.new);
+  for (const from of [0, upgrade.u]) {
     const metadata = makeSelector();
     const decoded = await walk(from, metadata);
-    for (let h = from; h <= UPGRADE.last; h++) {
-      const expected = mnsvOf(h) === UPGRADE.old ? METADATA.old : METADATA.new;
-      expect(decoded.get(h), `block ${h} from ${from}`).toEqual({ specVersion: mnsvOf(h), metadata: expected });
+    for (let h = from; h <= upgrade.last; h++) {
+      const expected = mnsv(h) === upgrade.old ? upgrade.metadata.old : upgrade.metadata.new;
+      expect(decoded.get(h), `block ${h} from ${from}`).toEqual({ specVersion: mnsv(h), metadata: expected });
     }
-    expect(metadata.cached(UPGRADE.old), `the old version's metadata, walking from ${from}`).toEqual(METADATA.old);
-    expect(metadata.cached(UPGRADE.new), `the new version's metadata, walking from ${from}`).toEqual(METADATA.new);
+    expect(metadata.cached(upgrade.old), `the old version's metadata, walking from ${from}`).toEqual(upgrade.metadata.old);
+    expect(metadata.cached(upgrade.new), `the new version's metadata, walking from ${from}`).toEqual(upgrade.metadata.new);
   }
+}
+
+// ---- task 0.3's devnet upgrade tape (A96 on real data) --------------------------------------------------------------
+
+type CallRecord = Extract<TapeRecord, { readonly method: string; readonly result: unknown }>;
+
+const isCall = (record: TapeRecord): record is CallRecord => "method" in record && "result" in record && !("subscribe" in record);
+
+/** The answers of a recorded tape by method and first parameter (the tape holds each call of a height once). */
+export class TapeAnswers {
+  readonly #answers = new Map<string, unknown>();
+
+  constructor(records: readonly TapeRecord[]) {
+    for (const record of records) {
+      if (!isCall(record)) continue;
+      const key = `${record.method} ${JSON.stringify((record.params as readonly unknown[] | undefined)?.[0] ?? null)}`;
+      if (!this.#answers.has(key)) this.#answers.set(key, record.result);
+    }
+  }
+
+  /** The answer to `method` with `param` first, or undefined when the tape holds none. */
+  answer(method: string, param: unknown): unknown {
+    return this.#answers.get(`${method} ${JSON.stringify(param)}`);
+  }
+
+  /** Block `height`'s hash (`chain_getBlockHash`); throws when the tape holds none. */
+  hashAt(height: number): string {
+    const hash = this.answer("chain_getBlockHash", height);
+    if (typeof hash !== "string") throw new Error(`the tape holds no block hash for ${height}`);
+    return hash;
+  }
+
+  /** The `spec_version` of the runtime in the state at `hash` (`state_getRuntimeVersion`); throws when none. */
+  runtimeAt(hash: string): number {
+    const version = (this.answer("state_getRuntimeVersion", hash) as { readonly specVersion?: unknown } | undefined)?.specVersion;
+    if (typeof version !== "number") throw new Error(`the tape holds no runtime version at ${hash}`);
+    return version;
+  }
+}
+
+const bytesOf = (text: unknown): Uint8Array => {
+  if (typeof text !== "string" || !/^0x([0-9a-f]{2})*$/.test(text)) throw new Error("the tape's metadata is not 0x hex");
+  return Uint8Array.from(Buffer.from(text.slice(2), "hex"));
+};
+
+/**
+ * Task 0.3's devnet upgrade as an {@link UpgradeCase}: U and F as its manifest records them (U 102, MNSV 1_000_000; F
+ * 103, MNSV 2_001_000), checked against the tape's own answers — U's state already runs the new runtime, U − 1's the
+ * old —, `last` the tape's last height, and each runtime's metadata as the node answered it (`state_getMetadata` at
+ * block 0 and at U: the tape holds it once per runtime, decision record Q135).
+ */
+export function devnetUpgradeOf(
+  answers: TapeAnswers,
+  boundary: { readonly u: { readonly height: number; readonly specVersion: number }; readonly f: { readonly specVersion: number } },
+  last: number,
+): UpgradeCase {
+  const u = boundary.u.height;
+  expect(answers.runtimeAt(answers.hashAt(u - 1)), "the runtime in U − 1's state").toBe(boundary.u.specVersion);
+  expect(answers.runtimeAt(answers.hashAt(u)), "the runtime in U's state").toBe(boundary.f.specVersion);
+  const old = bytesOf(answers.answer("state_getMetadata", answers.hashAt(0)));
+  const updated = bytesOf(answers.answer("state_getMetadata", answers.hashAt(u)));
+  expect(Buffer.compare(old, updated), "the two runtimes' metadata").not.toBe(0);
+  return Object.freeze({ u, last, old: boundary.u.specVersion, new: boundary.f.specVersion, metadata: Object.freeze({ old, new: updated }) });
+}
+
+/**
+ * A node over a recorded tape's answers for the metadata cache: the runtime version at a hash as recorded, and the
+ * metadata at any hash a runtime's own (the tape holds it once per runtime; the node answers the same bytes at every
+ * block of a runtime, decision record Q135) — so a cache may read it at a hash the tape has no metadata record for.
+ */
+export function tapeMetadataNode(answers: TapeAnswers, upgrade: UpgradeCase): MetadataNode {
+  return new CountingNode(
+    (hash) => answers.runtimeAt(hash),
+    (hash) => (answers.runtimeAt(hash) === upgrade.old ? upgrade.metadata.old : upgrade.metadata.new),
+  );
 }
 
 /** A {@link MetadataNode} over plain functions, counting the calls (for the cache's unit tests). */
