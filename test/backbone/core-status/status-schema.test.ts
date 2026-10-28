@@ -33,7 +33,8 @@ import { entryOf, loggingModule } from "../../runner/process-build.js";
  *
  * Committed negative controls: a body without any one of its required fields, with a field the schema does not have, or
  * with a value of the wrong form (a height as a number, another state, a time in PostgreSQL's own text, an upper-case
- * digest, a condition no task raises, an unknown detail) fails the schema.
+ * digest, a condition no task raises, an unknown detail, a node connection state outside AE-5's four, a negative queue
+ * depth) fails the schema.
  */
 
 const STATUS_SCHEMA = validatorOf(schemaFile(new URL("./status.schema.json", import.meta.url)));
@@ -86,6 +87,18 @@ describe("A66: /status's JSON schema", () => {
     expect(STATUS_SCHEMA.problems({ ...body(), public: { cursor: null, lockstep: null } })).toEqual([]);
   });
 
+  it("holds the node's best head, connection state and queue depth (task 8.3a; AE-5, A168), or null for each", () => {
+    const node = (body() as { node: Record<string, unknown> }).node;
+    for (const connection of ["connecting", "connected", "retrying", "closed"]) {
+      const shown = { ...body(), node: { ...node, bestHead: "103", connection, queueDepth: 2 } };
+      expect(STATUS_SCHEMA.problems(shown), connection).toEqual([]);
+    }
+    expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, bestHead: null, connection: null, queueDepth: null } })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, bestHead: "0", connection: "connecting", queueDepth: 0 } })).toEqual([]);
+    // A private process has no node (A168: the three are null with it).
+    expect(STATUS_SCHEMA.problems({ ...body(), node: null })).toEqual([]);
+  });
+
   it("holds slow-block (task 5.5, RN-17): the height, the point, the module or null while none runs", () => {
     const slow = { code: "slow-block", height: "4", point: "on-compute", module: "m" };
     expect(STATUS_SCHEMA.problems({ ...body(), conditions: [slow] })).toEqual([]);
@@ -128,7 +141,14 @@ describe("A66: /status's JSON schema", () => {
       "a slow block with its time": (b) => (b.conditions = [{ code: "slow-block", height: "4", point: "on-compute", module: "m", ms: 1 }]),
       "an unknown detail": (b) => (b.reason.details = { message: "the raw message" }),
       "a point that is none": (b) => (b.reason.point = "on-commit"),
-      "a node field the runner has no value for, given one": (b) => (b.node.connection = "connected"),
+      "a connection state no /status shows (the client's own open)": (b) => (b.node.connection = "open"),
+      "a connection state in another case": (b) => (b.node.connection = "Connected"),
+      "a connection state as a flag": (b) => (b.node.connection = true),
+      "a best head as a number": (b) => (b.node.bestHead = 103),
+      "a best head with a sign": (b) => (b.node.bestHead = "-1"),
+      "a negative queue depth": (b) => (b.node.queueDepth = -1),
+      "a queue depth as text": (b) => (b.node.queueDepth = "2"),
+      "a fractional queue depth": (b) => (b.node.queueDepth = 1.5),
       "a ledger before its task": (b) => (b.ledger = { version: "v8" }),
       "private instances that are no list": (b) => (b.privateInstances = { id: "i" }),
       "a private instance with its hash": (b) =>
@@ -231,7 +251,9 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
     const after = Date.now();
     // A core with no transport and no lockstep list: no private instance (task 14.4).
     expect(shown).toMatchObject({ state: "following", instance: { role: "core", id: null }, public: null, ledger: null, privateInstances: [] });
-    expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: null, retries: 0, queueDepth: null, tipCap: 600, finalityStall: false });
+    // The in-memory source keeps no best-block queue and hears no best head; the process's node client, which it never
+    // uses, has not connected (A168's `connecting` before the first connection; task 8.3a).
+    expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: "connecting", retries: 0, queueDepth: null, tipCap: 600, finalityStall: false });
     const committed = Date.parse(shown.lastCommitAt);
     expect(committed).toBeGreaterThanOrEqual(before);
     expect(committed).toBeLessThanOrEqual(after);

@@ -2014,12 +2014,27 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       full body and for every `/config` read through the process on PostgreSQL 18.6 and PGlite 0.5.10; the build with
       `commit: null` in the two expectations). A66 for `/config` passes on both backends; with `test/admin`,
       `test/backbone/core-status` and `core-health`: 18 files, 198 tests passed (3 skipped, environment-gated).
-- [ ] 8.3a `/status`'s node fields (AE-5 as amended): `node.bestHead`, `node.connection` and `node.queueDepth` are
+- [x] 8.3a `/status`'s node fields (AE-5 as amended): `node.bestHead`, `node.connection` and `node.queueDepth` are
       always `null` — `src/admin/types.ts` types `connection` as `null`, and 8.3 left the three to 10.3, which reports
       none. The node source and its client report the best head, the connection's state (`connecting`, `connected`,
       `retrying`, `closed`) and the best-block queue's depth to the process's published state; the schema and
       `docs/operator-guide.md` follow. On a private process, which has no node, they stay `null`.
       **Acceptance:** A168; A66 with the three fields.
+      **Done (2026-10-27):** `NodeClient.connection` (`NodeConnection`: `connecting` before the first connection opened,
+      `connected` while one is open, `retrying` from a failed or lost connection until the next one opens, `closed`)
+      and `onConnectionChange`, told each change once; the node source's `nodeView()` (`BlockSource.nodeView`,
+      `SourceNodeView`): the best head the node announced last — each new-heads notification's height, taken before
+      the queue decides anything, so also during startup, a catch-up and a full queue — and the queue's length. The
+      process gives both to `ProcessAdmin` (`node`, `NodeFacts`) at each snapshot, and publishes at once on a connection
+      change and once its client and source are made; `NodeStatus.connection` is the four or null, and so is the
+      schema's; `queueDepth` is null only for a source without a queue (the in-memory one). On a private process `node`
+      stays null, so the three are null with it. `docs/operator-guide.md` ("The node on `/status`") and `design.md` §3
+      follow. Tests first: on `0465efa`'s sources the new unit tests failed for the intended reason (`connection`
+      undefined, `nodeView is not a function`, the three fields null, the schema refusing a state), and A168's process
+      test on both backends with exactly the three fields null in each of its six phases. A168 passes on PostgreSQL
+      18.6 and PGlite 0.5.10 (`test/backbone/core-status/node-fields.test.ts`: a core against a tape node, `/status`
+      read over HTTP, every body validated against the schema), with its committed negative control
+      (`node-fields.negative-control.test.ts`: the three published null fail it in exactly those fields).
 
 ## 9. Test tape
 

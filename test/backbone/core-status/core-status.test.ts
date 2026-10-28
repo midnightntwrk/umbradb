@@ -29,9 +29,11 @@ import { loggingModule } from "../../runner/process-build.js";
  * The backbone part `core-status` (task 8.3; AE-1, AE-5, AE-6; CORE-ARCH §4.11, §4.18; Q68, Q70): its declaration — a
  * backbone part with no points and no items, after `core-health` in RN-3's order and in the command's build —, its
  * endpoint (the published status and the uptime at the request), what the runner's side publishes for it (the
- * instance, the node, every part of the database with its digest rows, the last commit's time as RFC 3339 UTC text),
- * and A140 for it: `core-status`'s, from its own folder, its tests beside it here, mounted as the part gives it, and
- * answered by a refused process. A66 (its JSON schema) is `./status-schema.test.ts`, A67 `./secrets.test.ts`.
+ * instance, the node — with its best head, connection state and queue depth as the process reports them, task 8.3a —,
+ * every part of the database with its digest rows, the last commit's time as RFC 3339 UTC text), and A140 for it:
+ * `core-status`'s, from its own folder, its tests beside it here, mounted as the part gives it, and answered by a
+ * refused process. A66 (its JSON schema) is `./status-schema.test.ts`, A67 `./secrets.test.ts`, A168 (the node's fields
+ * through a core against a tape node) `./node-fields.test.ts`.
  */
 
 /** `status()` of a process running at 3 with the finalized head 9. */
@@ -127,9 +129,33 @@ describe("what /status shows besides status() (AE-5)", () => {
     expect(snapshotOf(status({ head: null }), FACTS).status.node?.finalizedHead).toBeNull();
   });
 
+  it("on the core: the best head the node announced last, the connection's state, the queue's depth (task 8.3a)", () => {
+    const node = { bestHead: 103n, connection: "connected" as const, queueDepth: 2 };
+    expect(snapshotOf(status(), { ...FACTS, node }).status.node).toEqual({
+      finalizedHead: "9",
+      bestHead: "103",
+      connection: "connected",
+      retries: 0,
+      queueDepth: 2,
+      tipCap: 600,
+      finalityStall: false,
+    });
+    for (const connection of ["connecting", "connected", "retrying", "closed"] as const) {
+      expect(snapshotOf(status(), { ...FACTS, node: { ...node, connection } }).status.node?.connection).toBe(connection);
+    }
+    // What the process does not know yet: null (a source without a queue, a best head not announced, no client yet).
+    const unknown = { bestHead: null, connection: null, queueDepth: null };
+    expect(snapshotOf(status(), { ...FACTS, node: unknown }).status.node).toMatchObject(unknown);
+    expect(snapshotOf(status(), { ...FACTS, node: { ...node, queueDepth: 0 } }).status.node?.queueDepth).toBe(0);
+    expect(Object.isFrozen(snapshotOf(status(), { ...FACTS, node }).status.node)).toBe(true);
+  });
+
   it("on a private process: its instance id and the public cursor; no node", () => {
     const shown = snapshotOf(status({ head: 12n }), { ...FACTS, side: "private", instanceId: "wallet-a" });
     expect(shown.status).toMatchObject({ instance: { role: "private", id: "wallet-a" }, node: null, public: { cursor: "12", lockstep: null } });
+    // Whatever the process reports of a node, a private process has none to show (A168: its node fields are null).
+    const reported = { ...FACTS, side: "private" as const, node: { bestHead: 7n, connection: "connected" as const, queueDepth: 1 } };
+    expect(snapshotOf(status(), reported).status.node).toBeNull();
   });
 
   it("on the core, its private instances once startup opened the database: id, connection, lockstep, synced height (PP-9)", () => {
@@ -397,6 +423,34 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     expect(privately.published.at(-1)?.status).toMatchObject({ privateInstances: null, public: { lockstep: true } });
     await other.close();
   });
+
+  it("asks the process for its node at each snapshot: the best head, the connection's state, the queue's depth (8.3a)", async () => {
+    const node = { bestHead: null as bigint | null, connection: "connecting" as "connecting" | "connected" | "retrying" | "closed", queueDepth: 0 };
+    let asked = 0;
+    const fake = recording();
+    const admin = new ProcessAdmin({ status: () => status(), log: () => undefined, start: fake.start, node: () => (asked++, node) });
+    const config = checked();
+    await admin.serve(config, config.entries[0] as never);
+    expect(fake.published.at(-1)?.status.node).toMatchObject({ bestHead: null, connection: "connecting", queueDepth: 0 });
+    const before = asked;
+    node.bestHead = 104n;
+    node.connection = "connected";
+    node.queueDepth = 3;
+    admin.publish();
+    expect(asked).toBeGreaterThan(before);
+    expect(fake.published.at(-1)?.status.node).toMatchObject({ bestHead: "104", connection: "connected", queueDepth: 3 });
+    node.connection = "closed";
+    admin.publish();
+    expect(fake.published.at(-1)?.status.node).toMatchObject({ connection: "closed" });
+    await admin.close();
+
+    // Without it, nothing is known of the node beyond status(): the three are null.
+    const bare = recording();
+    const plain = new ProcessAdmin({ status: () => status(), log: () => undefined, start: bare.start });
+    await plain.serve(config, config.entries[0] as never);
+    expect(bare.published.at(-1)?.status.node).toMatchObject({ bestHead: null, connection: null, queueDepth: null });
+    await plain.close();
+  });
 });
 
 describe("A140 for /status: core-status's, from its own folder, its tests beside it", () => {
@@ -445,7 +499,13 @@ describe("A140 for /status: core-status's, from its own folder, its tests beside
     const source = fileURLToPath(new URL("../../../src/backbone/core-status/", import.meta.url));
     for (const file of ["core-status.ts", "endpoints.ts", "index.ts"]) expect(existsSync(`${source}${file}`), file).toBe(true);
     const here = readdirSync(fileURLToPath(new URL(".", import.meta.url)));
-    expect(here.filter((file) => file.endsWith(".test.ts")).sort()).toEqual(["core-status.test.ts", "secrets.test.ts", "status-schema.test.ts"]);
+    expect(here.filter((file) => file.endsWith(".test.ts")).sort()).toEqual([
+      "core-status.test.ts",
+      "node-fields.negative-control.test.ts",
+      "node-fields.test.ts",
+      "secrets.test.ts",
+      "status-schema.test.ts",
+    ]);
     expect(here).toContain("status.schema.json");
     expect(buildCoreVersion().umbradb).toBe(UMBRADB_VERSION);
   });

@@ -206,6 +206,7 @@ interface BlockSource {
   attach?(runner: QueueRunner): () => void;                  // the runner's queue interface, for one run of the loop
   prepared?(height: bigint): Promise<{ block: BlockRef; items: BlockItems }>;  // on-fetch and on-parse already run
   conditions?(): readonly { code: "finality-stall"; tipCap: number; height: bigint }[];
+  nodeView?(): { bestHead: bigint | null; queueDepth: number };  // what /status shows of the node (AE-5; task 8.3a)
   close?(): Promise<void>;
 }
 
@@ -238,7 +239,12 @@ interface QueueRunner {                                      // given by the fin
   names with another hash dropped with those above it. At finality a queued block with the finalized hash goes on with
   its items, unfetched (A81); one with another hash is dropped with those above (`on-rollback`) and the block fetched —
   the heights look into the queue in height order, so that is one `on-rollback`, from the lowest. Its `close` (the
-  process's stop) ends its subscriptions and ends every pending wait and later call with an error. The part's
+  process's stop) ends its subscriptions and ends every pending wait and later call with an error. For `/status`
+  (AE-5; task 8.3a) it reports (`nodeView`) the best head the node announced last — each new-heads notification's
+  height, taken before anything decides whether the block is queued, so also during startup and a catch-up — and the
+  queue's length; the connection's state is the node client's (`NodeClient.connection`: `connecting` before the first
+  connection opened, `connected`, `retrying` from a failed or lost connection until the next one opens, `closed`), which
+  the process publishes at once when it changes. The part's
   `on-fetch` puts the four `block` items (CD-2) the bound source gives (`bindCoreBlockFetch`): for the node source
   `block-header` (height, hashes, roots, digest, the `MNSV` `spec_version`, the time from the `Timestamp::set`
   inherent, 0 for a block 0 without one), `block-body` (the extrinsics, each unsigned one's call named by the metadata),

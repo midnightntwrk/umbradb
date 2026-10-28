@@ -83,6 +83,11 @@ export interface BlockSource {
   /** Optional: the source's conditions now (AE-3): IN-6's `finality-stall` while its queue is full. */
   conditions?(): readonly SourceCondition[];
   /**
+   * Optional (a source over the node; AE-5, task 8.3a): what `/status` shows of the node besides the finalized head —
+   * the best head it announced last and the best-block queue's length. The connection's state is the node client's.
+   */
+  nodeView?(): SourceNodeView;
+  /**
    * Optional: closes what the source opened and ends its own work — a private process's public database, the node
    * source's subscriptions and queue —; the process calls it once it has stopped.
    */
@@ -128,3 +133,11 @@ export interface FinalityStallCondition {
 
 /** A condition a block source reports (AE-3). */
 export type SourceCondition = FinalityStallCondition;
+
+/** What a source over the node reports of it for `/status` (AE-5; {@link BlockSource.nodeView}). */
+export interface SourceNodeView {
+  /** The height of the best head the node announced last (its latest new-heads notification); null before any. */
+  readonly bestHead: bigint | null;
+  /** How many best blocks the queue holds now (IN-6): 0 while it holds none. */
+  readonly queueDepth: number;
+}

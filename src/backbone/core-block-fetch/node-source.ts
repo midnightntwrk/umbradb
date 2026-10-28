@@ -41,6 +41,10 @@
  * from there on are dropped (`on-rollback`). Every queue change, the prefetch's taking of a queued block included, runs
  * one at a time.
  *
+ * **What `/status` shows** ({@link NodeBlockSource.nodeView}; AE-5, task 8.3a): the best head the node announced last —
+ * each new-heads notification's height, taken before anything decides whether the block is queued, so also during
+ * startup, a catch-up and while the queue is full — and the queue's length.
+ *
  * **While the loop runs only.** The source runs callbacks only between the loop's `attach` and the function it returns;
  * when a run ends (stopped, halted, retried) the queue and the prefetch are dropped, and the next run starts afresh.
  * `close` (the process's stop) ends its subscriptions and counts as its failure: a pending wait, and every later call,
@@ -80,6 +84,7 @@ import type {
   PreparedBlock,
   QueueRunner,
   SourceCondition,
+  SourceNodeView,
 } from "../../runner/block-source.js";
 import { readCursor } from "../core-block-commit/core-block-commit.js";
 import { blockTimeOf, decodeExtrinsics } from "./extrinsics.js";
@@ -195,6 +200,8 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   #queueWork: Promise<void> = Promise.resolve();
   /** The highest best block the node announced while the queue ran. */
   #best: bigint | null = null;
+  /** The best head the node announced last, whatever the queue did with it (`/status`'s); null before any. */
+  #announcedBest: bigint | null = null;
   /** The blocks being prepared, by hash: what `core-block-fetch`'s `on-fetch` reads, and whether best (no retries). */
   readonly #fetched = new Map<string, { readonly node: NodeBlock; readonly best: boolean }>();
 
@@ -301,6 +308,10 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   /** Resolves once the queue's work asked for so far is done (each best block, each head's check): for tests. */
   idle(): Promise<void> {
     return this.#queueWork;
+  }
+
+  nodeView(): SourceNodeView {
+    return Object.freeze({ bestHead: this.#announcedBest, queueDepth: this.#queue.length });
   }
 
   conditions(): readonly SourceCondition[] {
@@ -644,6 +655,7 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   }
 
   #onBest(header: NodeHeader): void {
+    this.#announcedBest = header.number;
     if (this.#runner === undefined || this.#failure !== undefined) return;
     // A notification may come before the head read that the subscription preceded has settled: after it.
     const started = this.#started;

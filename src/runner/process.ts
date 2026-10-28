@@ -142,7 +142,9 @@
  * the admin listener starts on `listen.admin` once the process's `core` revision is known, before the database opens
  * (a listener that cannot listen — an address another listener holds — refuses startup, `listen-failed`), and never
  * before (a refusal before that ends the process, above); it closes after the database at {@link ProcessHandle.stop},
- * and the heartbeat ends when a refusal of the configuration ends the process.
+ * and the heartbeat ends when a refusal of the configuration ends the process. `/status`'s node (AE-5; task 8.3a) shows
+ * the node client's connection state — published at once when it changes, and once the client and the source are
+ * made — and the block source's best head announced last and queue depth (`BlockSource.nodeView`).
  */
 
 import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
@@ -189,6 +191,7 @@ import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
 import { type PrivateSideFacts, ProcessAdmin } from "../admin/process-admin.js";
+import type { NodeFacts } from "../admin/snapshot.js";
 import { earlyRedactor } from "../admin/redaction.js";
 import type { AdminStarter } from "../admin/server.js";
 import { NodeClient, type NodeClientOptions, type NodeRetry } from "../node/client.js";
@@ -680,6 +683,7 @@ class Process implements ProcessHandle {
             log: (line) => this.#log(line),
             side: input.side ?? "public",
             privateSide: () => this.#privateSide(),
+            node: () => this.#nodeFacts(),
             ...(typeof admin === "function" ? { start: admin } : {}),
           });
     this.closed = new Promise((resolve) => {
@@ -840,6 +844,19 @@ class Process implements ProcessHandle {
     });
   }
 
+  /**
+   * What `/status` shows of the node besides `status()` (AE-5; task 8.3a): the node client's connection state, and the
+   * best head announced last and the queue's depth as the block source reports them (`nodeView`); null without them.
+   */
+  #nodeFacts(): NodeFacts {
+    const view = this.#source?.nodeView?.();
+    return Object.freeze({
+      bestHead: view?.bestHead ?? null,
+      connection: this.#nodeClient?.connection ?? null,
+      queueDepth: view?.queueDepth ?? null,
+    });
+  }
+
   /** A log line, through the configuration's redaction once it is known. */
   #log(text: string): void {
     (this.#input.log ?? standardError)(this.#redactor === undefined ? text : this.#redactor.text(text));
@@ -892,6 +909,8 @@ class Process implements ProcessHandle {
               onRetryingChange: (retrying) => {
                 if (!retrying) this.#nodeAttempts = null;
               },
+              // `/status` shows a change of the connection at once (task 8.3a): the heartbeat may be a second away.
+              onConnectionChange: () => this.#admin?.publish(),
             });
       const shared: SourceShared = {
         nodeClient: this.#nodeClient,
@@ -901,6 +920,8 @@ class Process implements ProcessHandle {
       };
       const source = typeof input.source === "function" ? input.source(core, shared) : input.source;
       this.#source = source;
+      // `/status` shows the client's `connecting` and the source's queue from now on (task 8.3a).
+      this.#admin?.publish();
       // A read's height is the cursor's (DB-2): the core's cursor table, or a private process's own (its source's).
       const db = await openConfiguredDatabase(core, { committedHeight: source.committedHeight ?? cursorHeight });
       this.#db = db;

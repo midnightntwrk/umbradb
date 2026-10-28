@@ -5,7 +5,8 @@
  * `/status` (AE-5) for JSON, on the main thread: heights as decimal text (JSON has no `bigint`, 3.2's note (d)), the
  * conditions as the runner raised them, the reason as a sanitized error (`./errors.ts`), never `ended`, which holds the
  * raw error; the wall-clock time of the last commit as RFC 3339 UTC text ({@link utcText}, Q68); the node as the core
- * sees it; every part of the database with its tables' digest rows (DT-5); on the core its private instances, each
+ * sees it (its best head, connection state and queue depth as the process reports them, {@link NodeFacts}; task 8.3a);
+ * every part of the database with its tables' digest rows (DT-5); on the core its private instances, each
  * with its id, connection, lockstep flag and synced height only (PP-9), and on a private process whether it runs in
  * lockstep (task 14.4). A field nothing reports a value for yet is null (AE-5). The configuration's part is already
  * redacted (`./redaction.ts`). The result is plain, frozen, structured-clone data: it crosses to the worker as one
@@ -16,6 +17,7 @@
 import type { PlainData, PlainObject } from "../config/plain-data.js";
 import { type ProcessSide, PUBLIC_CORE_SCHEMA } from "../config/core-settings.js";
 import type { Redactor } from "../config/redact.js";
+import type { NodeConnection } from "../node/client.js";
 import type { ProcessStatus } from "../runner/process.js";
 import { sanitizedError } from "./errors.js";
 import type { AdminSnapshot, ConfigSnapshot, ModuleStatus, NodeStatus, PrivateInstanceStatus, StatusSnapshot } from "./types.js";
@@ -89,6 +91,17 @@ export interface PrivateInstanceFacts {
   readonly height: bigint | null;
 }
 
+/**
+ * What the process knows of its node besides `status()` (AE-5; task 8.3a): the best head the node announced last and
+ * the best-block queue's length, as its block source reports them (`BlockSource.nodeView`), and its node client's
+ * connection state; null for each the process cannot tell (no node source, no client yet).
+ */
+export interface NodeFacts {
+  readonly bestHead: bigint | null;
+  readonly connection: NodeConnection | null;
+  readonly queueDepth: number | null;
+}
+
 /** What a snapshot holds besides `status()`. */
 export interface SnapshotFacts {
   /** The process's liveness timeout (`livenessTimeoutMs`). */
@@ -117,6 +130,8 @@ export interface SnapshotFacts {
   readonly privateInstances?: readonly PrivateInstanceFacts[];
   /** On a private process, whether it runs in lockstep, null while unknown (task 14.4); null unless given. */
   readonly publicLockstep?: boolean | null;
+  /** On the core, its node besides `status()` (task 8.3a); the three null unless given. A private process has none. */
+  readonly node?: NodeFacts;
 }
 
 /** The private instances as `/status` shows them: the four fields of each, its height as text, nothing else (PP-9). */
@@ -133,17 +148,17 @@ function instancesOf(instances: readonly PrivateInstanceFacts[]): readonly Priva
   );
 }
 
-/** The node as the core sees it (see {@link NodeStatus}). */
-function nodeOf(status: ProcessStatus, tipCap: number): NodeStatus {
+/** The node as the core sees it (see {@link NodeStatus}): `status()`'s, and `node`'s three facts. */
+function nodeOf(status: ProcessStatus, tipCap: number, node: NodeFacts | undefined): NodeStatus {
   const retrying = status.conditions.find((condition) => condition.code === "node-retrying") as
     | { readonly attempts: number }
     | undefined;
   return Object.freeze({
     finalizedHead: height(status.head),
-    bestHead: null,
-    connection: null,
+    bestHead: height(node?.bestHead ?? null),
+    connection: node?.connection ?? null,
     retries: retrying?.attempts ?? 0,
-    queueDepth: null,
+    queueDepth: node?.queueDepth ?? null,
     tipCap,
     finalityStall: status.conditions.some((condition) => (condition.code as string) === "finality-stall"),
   });
@@ -191,7 +206,7 @@ export function snapshotOf(status: ProcessStatus, facts: SnapshotFacts): AdminSn
     // The public `core` schema has no `instanceId`: on the core it is null.
     instance: Object.freeze({ role: core ? "core" : "private", id: facts.instanceId }),
     lastCommitAt: facts.lastCommitMs === null ? null : utcText(facts.lastCommitMs),
-    node: core ? nodeOf(status, facts.tipCap) : null,
+    node: core ? nodeOf(status, facts.tipCap, facts.node) : null,
     modules: facts.modules === null ? null : Object.freeze(modulesOf(facts.modules, facts.digests, status.cursor)),
     ledger: null,
     // The core's instances once startup opened the database (its parts known); a private process has none.

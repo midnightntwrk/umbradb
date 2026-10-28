@@ -561,17 +561,31 @@
           "$ref": "#/$defs/heightOrNull"
         },
         "bestHead": {
+          "description": "The best head the node announced last (task 8.3a): its latest new-heads notification's height; null before it announced one, or without a node source.",
           "$ref": "#/$defs/heightOrNull"
         },
         "connection": {
-          "type": "null",
-          "description": "The node connection's state: null until the block source reports it (task 10.3)."
+          "description": "The node connection's state (AE-5; task 8.3a): connecting before the first connection opened, connected while one is open, retrying from a failed or lost connection until the next one opens, closed once closed; null only before the process made its node client.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "connecting",
+                "connected",
+                "retrying",
+                "closed"
+              ]
+            }
+          ]
         },
         "retries": {
           "type": "integer",
           "minimum": 0
         },
         "queueDepth": {
+          "description": "The best-block queue's length (IN-6; task 8.3a); null for a block source that keeps no queue.",
           "type": [
             "integer",
             "null"

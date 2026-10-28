@@ -23,7 +23,11 @@
  * keeps one connection until {@link NodeClient.close}. When it fails or ends, the client connects again after
  * {@link backoffDelay} of the failed connections since the node last answered on one — 1 s, 2 s, 4 s, … up to
  * `backoffCeilingMs` (30 s by default), without limit; a connection the node accepts and drops before answering does
- * not reset the count. A connection attempt not open within the call timeout is given up and counts as failed.
+ * not reset the count. A connection attempt not open within the call timeout is given up and counts as failed. Its
+ * state, as `/status` shows it ({@link NodeClient.connection}; AE-5, task 8.3a): `connecting` before the first
+ * connection opened (the client unused, or its first attempt pending), `connected` while one is open, `retrying` from a
+ * failed or lost connection until the next one opens (its back-off and each attempt), `closed` once closed;
+ * `onConnectionChange` reports each change.
  *
  * **Timeouts and retries (IN-10).** Every try of a call ends after its timeout (`callTimeoutMs`, 30 s by default, or
  * the call's `timeoutMs`); the connection stays (the transport's heartbeat finds a dead one, `./ws-socket.ts`). A call
@@ -81,6 +85,9 @@ export const DEFAULT_CALL_TIMEOUT_MS = 30_000;
 /** `backoffCeilingMs`'s default (CF-4). */
 export const DEFAULT_BACKOFF_CEILING_MS = 30_000;
 
+/** The node connection's state, AE-5's four (see the module comment and {@link NodeClient.connection}). */
+export type NodeConnection = "connecting" | "connected" | "retrying" | "closed";
+
 export interface NodeClientOptions {
   /** The node's WebSocket URL (`ws://` or `wss://`), the `core` entry's `node` field: a secret, never shown. */
   readonly url: string;
@@ -96,6 +103,8 @@ export interface NodeClientOptions {
   readonly onRetry?: (retry: NodeRetry) => void;
   /** Called each time {@link NodeClient.retrying} changes. */
   readonly onRetryingChange?: (retrying: boolean) => void;
+  /** Called each time {@link NodeClient.connection} changes, with the new state. */
+  readonly onConnectionChange?: (connection: NodeConnection) => void;
 }
 
 /** One call's options. */
@@ -183,6 +192,7 @@ export class NodeClient {
   readonly #timers: NodeTimers;
   readonly #onRetry: ((retry: NodeRetry) => void) | undefined;
   readonly #onRetryingChange: ((retrying: boolean) => void) | undefined;
+  readonly #onConnectionChange: ((connection: NodeConnection) => void) | undefined;
 
   #state: State = "idle";
   #connection: Connection | undefined;
@@ -193,6 +203,8 @@ export class NodeClient {
   #reconnecting = false;
   #retryingCalls = 0;
   #reported = false;
+  /** The connection's state last reported to `onConnectionChange` (a new client's is `connecting`). */
+  #reportedConnection: NodeConnection = "connecting";
   #nextId = 1;
   #closed: Promise<void> | undefined;
   readonly #waiters = new Set<Waiter>();
@@ -216,11 +228,22 @@ export class NodeClient {
     this.#timers = options.timers ?? SYSTEM_TIMERS;
     this.#onRetry = options.onRetry;
     this.#onRetryingChange = options.onRetryingChange;
+    this.#onConnectionChange = options.onConnectionChange;
   }
 
   /** IN-10's `node-retrying`: the connection is being re-established, or a call waits for its next try. */
   get retrying(): boolean {
     return this.#reconnecting || this.#retryingCalls > 0;
+  }
+
+  /**
+   * The connection's state (AE-5): `closed` once closed; `connected` while a connection is open; `retrying` from a
+   * failed or lost connection until the next one opens; `connecting` before the first one opened.
+   */
+  get connection(): NodeConnection {
+    if (this.#state === "closed") return "closed";
+    if (this.#state === "open") return "connected";
+    return this.#reconnecting ? "retrying" : "connecting";
   }
 
   /** `chain_getFinalizedHead`: the hash of the node's finalized head. */
@@ -341,6 +364,7 @@ export class NodeClient {
     this.#byNodeId.clear();
     this.#reconnecting = false;
     this.#report();
+    this.#reportConnection();
     const connection = this.#connection;
     this.#connection = undefined;
     if (connection === undefined || connection.ended || connection.socket === undefined) {
@@ -560,6 +584,7 @@ export class NodeClient {
     this.#state = "open";
     this.#reconnecting = false;
     this.#report();
+    this.#reportConnection();
     for (const waiter of [...this.#waiters]) waiter.resolve();
     for (const subscription of this.#subscriptions) if (subscription.needsAgain) this.#again(subscription);
   }
@@ -657,6 +682,7 @@ export class NodeClient {
     this.#state = "waiting";
     this.#reconnecting = true;
     this.#report();
+    this.#reportConnection();
     const delayMs = backoffDelay(this.#failures, this.#ceilingMs);
     this.#onRetry?.({ operation: "connect", attempt: this.#failures, delayMs, error });
     this.#reconnectTimer = this.#timers.setTimeout(() => this.#startConnecting(), delayMs);
@@ -689,6 +715,18 @@ export class NodeClient {
     if (retrying === this.#reported) return;
     this.#reported = retrying;
     this.#onRetryingChange?.(retrying);
+  }
+
+  /**
+   * Tells `onConnectionChange` the connection's state when it changed: after a close, an open and an end. A new
+   * attempt changes none (the first reads `connecting` as the unused client did, a later one `retrying` as its back-off
+   * did), so `#startConnecting` does not report.
+   */
+  #reportConnection(): void {
+    const connection = this.connection;
+    if (connection === this.#reportedConnection) return;
+    this.#reportedConnection = connection;
+    this.#onConnectionChange?.(connection);
   }
 }
 

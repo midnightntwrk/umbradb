@@ -14,12 +14,13 @@
  *   log only (owner decision Q137 B, task 8.1b; Q127's address before the validation went with it).
  * - **What `/status` shows besides `status()`** (AE-5): the process's side and `instanceId`, its revision's `tipCap`,
  *   its private side as the process gives it at each snapshot ({@link ProcessAdminOptions.privateSide}: the core's
- *   private instances, a private process's lockstep flag; task 14.4),
- *   the wall-clock time of the last commit ({@link ProcessAdmin.committed}, which the loop's commit observer calls),
- *   and, once startup has resolved the graph and migrated the database ({@link ProcessAdmin.opened}), every part of the
- *   database with its revisions and its tables' rows of `core_digest.tables` (DT-5), which it reads from the process's
- *   database on the main thread — at most one read at a time, at a publication after a commit — so the worker still
- *   reads none.
+ *   private instances, a private process's lockstep flag; task 14.4), the core's node as the process reports it at each
+ *   snapshot ({@link ProcessAdminOptions.node}: the best head announced last, the connection's state, the queue's
+ *   depth; task 8.3a), the wall-clock time of the last commit ({@link ProcessAdmin.committed}, which the loop's commit
+ *   observer calls), and, once startup has resolved the graph and migrated the database ({@link ProcessAdmin.opened}),
+ *   every part of the database with its revisions and its tables' rows of `core_digest.tables` (DT-5), which it reads
+ *   from the process's database on the main thread — at most one read at a time, at a publication after a commit — so
+ *   the worker still reads none.
  * - **At `stop()`**, after the database closed, or when a refusal of the configuration ended the process:
  *   {@link ProcessAdmin.close} ends the heartbeat and the listener's thread. Nothing of it is left to keep Node.js
  *   alive.
@@ -43,6 +44,7 @@ import {
   DEFAULT_TIP_CAP,
   type DigestRow,
   type ModuleFacts,
+  type NodeFacts,
   type PrivateInstanceFacts,
   snapshotOf,
   tableKey,
@@ -64,6 +66,11 @@ export interface ProcessAdminOptions {
    * on a private process whether it runs in lockstep; none unless given.
    */
   readonly privateSide?: () => PrivateSideFacts;
+  /**
+   * The process's node besides `status()` (AE-5; task 8.3a), asked at each snapshot: the best head the node announced
+   * last, its connection's state, the best-block queue's length; the three null unless given.
+   */
+  readonly node?: () => NodeFacts;
 }
 
 /** What `/status` shows of the private side (see {@link ProcessAdminOptions.privateSide}). */
@@ -154,6 +161,7 @@ export class ProcessAdmin {
   readonly #heartbeat: Heartbeat;
   readonly #side: ProcessSide;
   readonly #privateSide: (() => PrivateSideFacts) | undefined;
+  readonly #node: (() => NodeFacts) | undefined;
   readonly #startedNs = process.hrtime.bigint();
   #redactor: Redactor = earlyRedactor(undefined);
   #liveness = DEFAULT_LIVENESS_TIMEOUT_MS;
@@ -188,6 +196,7 @@ export class ProcessAdmin {
     this.#start = options.start ?? startAdminServer;
     this.#side = options.side ?? "public";
     this.#privateSide = options.privateSide;
+    this.#node = options.node;
     this.#heartbeat = new Heartbeat(() => this.publish());
   }
 
@@ -326,8 +335,10 @@ export class ProcessAdmin {
         ? this.#config
         : Object.freeze({ ...this.#config, database: Object.freeze({ ...database, writerLock }) });
     const privateSide = this.#privateSide?.();
+    const node = this.#node?.();
     return snapshotOf(status, {
       ...(privateSide === undefined ? {} : { privateInstances: privateSide.instances, publicLockstep: privateSide.lockstep }),
+      ...(node === undefined ? {} : { node }),
       livenessTimeoutMs: this.#liveness,
       readinessLag: this.#readinessLag,
       redactor: this.#redactor,

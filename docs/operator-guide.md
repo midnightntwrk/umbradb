@@ -18,6 +18,28 @@ a new, empty database instead of failing. What only reads creates nothing: `umbr
 missing directory as a new database, and `umbradb backup` refuses one (`no-committed-height`). Beside the directory
 the process keeps its writer lock, `<directory>.lock.sqlite` (DB-11): one process at a time opens a PGlite directory.
 
+## The node on `/status`
+
+On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` what the process knows of its node
+(AE-5). Heights are decimal text:
+
+- `finalizedHead`: the node's finalized head the process last read.
+- `bestHead`: the best head the node announced last, the height of its latest new-heads notification (lower than an
+  earlier one after the node switched to another branch); null until the node announced one.
+- `connection`: the state of the process's one connection to the node. `connecting` before it first connected,
+  `connected` while it is open, `retrying` from a failed or lost connection until the next one opens, `closed` once
+  the process closed it (a stop, a refused start). Null only for the moment before the process makes its client.
+- `retries`: how many times the node has failed in the retry now under way (the condition `node-retrying`); 0 when
+  none is.
+- `queueDepth`: how many best blocks above the finalized head are queued, fetched and parsed ahead of finality
+  (IN-6); 0 during startup and while the process catches up, when it queues none.
+- `tipCap`: the most best blocks the queue holds (the `core` entry's `tipCap`).
+- `finalityStall`: whether the queue is full, so that new best blocks wait for finality (the condition
+  `finality-stall`).
+
+A private process has no node: its `node` is null. The process publishes what `/status` shows at least once a second,
+and at once when the connection's state changes.
+
 ## Backups
 
 A backup is a `pg_dump` file of the indexer's database at one committed height, with UmbraDB's manifest as its first

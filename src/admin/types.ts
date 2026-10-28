@@ -14,6 +14,7 @@
  */
 
 import type { PlainData, PlainObject } from "../config/plain-data.js";
+import type { NodeConnection } from "../node/client.js";
 import type { ProcessState } from "../runner/process.js";
 
 /**
@@ -41,19 +42,19 @@ export interface InstanceStatus {
 }
 
 /**
- * The node as the core sees it (AE-5): what the runner knows of it, `null` where nothing reports a value yet (the
- * block source's best head, connection and queue are task 10.3's).
+ * The node as the core sees it (AE-5): what the runner knows of it — the loop's finalized head and conditions, the node
+ * client's connection, the block source's best head and queue (task 8.3a) —, `null` where nothing reports a value yet.
  */
 export interface NodeStatus {
   /** The node's finalized head the loop last read (decimal text), null before it read one. */
   readonly finalizedHead: string | null;
-  /** The node's best head (decimal text); null until the block source reports it. */
+  /** The best head the node announced last (decimal text); null before it announced one, or without a node source. */
   readonly bestHead: string | null;
-  /** The node connection's state; null until the block source reports it. */
-  readonly connection: null;
+  /** The node connection's state (the node client's, AE-5's four); null before the process made its client. */
+  readonly connection: NodeConnection | null;
   /** The failures of the node being retried now (`node-retrying`'s attempts, IN-10); 0 when none is. */
   readonly retries: number;
-  /** The best-block queue's depth (IN-6); null until the block source reports it. */
+  /** The best-block queue's length (IN-6); null for a block source that keeps no queue (not the node's). */
   readonly queueDepth: number | null;
   /** The best-block queue's cap: the process revision's `tipCap` (CF-4, IN-6). */
   readonly tipCap: number;
