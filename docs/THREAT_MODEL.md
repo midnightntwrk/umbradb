@@ -22,7 +22,7 @@ The operator controls configuration, modules, deployment, credentials, transport
 The host, database administrator and storage are trusted. Module authors supply trusted executable code,
 including SQL; modules within a process are not mutually isolated. Database roles protect against mistakes,
 not malicious modules (`src/db/roles.ts:27`;
-`openspec/changes/core-arch/proposal.md:83`).
+`openspec/changes/core-arch/proposal.md:87`).
 
 Network peers and readers of exposed services can be hostile. Admin callers should be restricted to operators,
 but the server does not authenticate them (`src/admin/serve.ts:66`). A private process trusts its public
@@ -32,7 +32,7 @@ The backup producer and browser hosting origin must also be trusted. Dependency 
 build tools supply executable code within these trust domains.
 
 The core does not manage private keys or provide TEE attestation; private modules own their key handling
-(`openspec/changes/core-arch/proposal.md:80`). The configured Midnight node is trusted for finality and block
+(`openspec/changes/core-arch/proposal.md:84`). The configured Midnight node is trusted for finality and block
 contents, subject to the consistency checks described below.
 
 ## Boundaries, threats and controls
@@ -206,19 +206,19 @@ Query confidentiality is addressed in “Private reads of public data”.
 
 Plain SQL and a manifest cross the filesystem boundary.
 PostgreSQL dumps use the manifest read's exported snapshot; PGlite gathers facts and dump text in one exclusive
-queued job (`src/backup/backup.ts:215`, `src/backup/backup.ts:201`,
+queued job (`src/backup/backup.ts:223`, `src/backup/backup.ts:209`,
 `src/backup/pglite-backup.ts:103`; BK-1).
 
 Task 15.1b creates backup files owner-only from creation: `ownerOnlyFile` opens a new file with
 `BACKUP_FILE_MODE` (`0600`) and applies that mode before writing, regardless of umask
 (`src/backup/backup.ts:68`, `src/backup/backup.ts:98`, `src/backup/backup.ts:100`).
 A refused `chmod` fails the backup and removes the temporary file; completion renames the temporary file
-(`src/backup/backup.ts:99`, `src/backup/backup.ts:252`).
+(`src/backup/backup.ts:99`, `src/backup/backup.ts:260`).
 Where POSIX modes do not apply, folder or mount access controls determine confidentiality
 (`docs/operator-guide.md:246`).
 
 Restore checks compatibility before loading and contents after loading
-(`src/backup/restore.ts:300`, `src/backup/restore.ts:416`).
+(`src/backup/restore.ts:303`, `src/backup/restore.ts:419`).
 These checks do not make hostile SQL safe. Restore authority, origin and encryption are addressed in
 “Backups and restore”.
 
@@ -231,8 +231,8 @@ Web Locks prevent cooperating tabs or workers from opening the same OPFS databas
 (`browser/src/db/web-lock.ts:83`).
 
 The build checks each ledger version's `SHA256SUMS` against the recorded manifest hash and checks every package
-file it bundles against that manifest (`browser/build.ts:171`, `browser/build.ts:183`,
-`browser/build.ts:294`).
+file it bundles against that manifest (`browser/build.ts:174`, `browser/build.ts:186`,
+`browser/build.ts:297`).
 The ledger worker also hashes fetched WASM before instantiation
 (`browser/src/ledger/instantiate.ts:29`, `browser/src/ledger/instantiate.ts:37`).
 Displayed log lines use text content (`browser/src/page.ts:283`).
@@ -268,7 +268,7 @@ Workflow definitions are evidence of configured controls, not evidence that this
 ## The Midnight node
 
 The owner's resolution, Q179 A on 2026-10-28, adds no new check: the core trusts its one configured Midnight node
-for finality and block contents (`openspec/changes/core-arch/tasks.md:3995`).
+for finality and block contents (`openspec/changes/core-arch/tasks.md:4047`).
 The process constructs its node connection from that configured URL
 (`src/backbone/core-chain/core-chain.ts:284`).
 
@@ -294,7 +294,7 @@ An authenticated channel protects the connection to that node; it does not remov
 ## Private reads of public data
 
 The owner's resolution, Q180 A on 2026-10-28, documents disclosure through reads of public data
-(`openspec/changes/core-arch/tasks.md:3997`).
+(`openspec/changes/core-arch/tasks.md:4049`).
 A private process's SQL text and parameters reach the public database. Through transport they also reach the
 core, which decodes parameters and executes the supplied SQL
 (`src/private/private-transport.ts:313`, `src/private/private-transport.ts:368`,
@@ -322,15 +322,15 @@ filter them inside the private process.
 ## Backups and restore
 
 The owner's resolution, Q177 A on 2026-10-28, leaves restore unchanged: restore only backups you wrote
-(`openspec/changes/core-arch/tasks.md:3993`).
+(`openspec/changes/core-arch/tasks.md:4045`).
 Restore runs the file's SQL with the database login's, or writer's, rights. The load loop executes statements
 before restoring ownership and checking the loaded contents hash and ledger root
-(`src/backup/restore.ts:407`, `src/backup/restore.ts:412`, `src/backup/restore.ts:416`,
-`src/backup/restore.ts:431`).
+(`src/backup/restore.ts:410`, `src/backup/restore.ts:415`, `src/backup/restore.ts:419`,
+`src/backup/restore.ts:434`).
 
 Before loading, restore checks the target, manifest, configuration history, migrations and chain identity
-(`src/backup/restore.ts:455`, `src/backup/restore.ts:302`, `src/backup/restore.ts:316`,
-`src/backup/restore.ts:329`, `src/backup/restore.ts:361`).
+(`src/backup/restore.ts:458`, `src/backup/restore.ts:305`, `src/backup/restore.ts:319`,
+`src/backup/restore.ts:332`, `src/backup/restore.ts:364`).
 The splitter is a format reader, not a SQL safety policy: apart from malformed or truncated input, it refuses
 `psql` meta-commands other than matching `\restrict` and `\unrestrict`, and `COPY … FROM stdin`
 (`src/backup/statements.ts:169`, `src/backup/statements.ts:197`,
@@ -339,21 +339,21 @@ It does not restrict SQL to safe data-loading operations.
 
 Post-load checks can refuse damaged or incompatible data, but run after the file has exercised the writer's
 authority. The enclosing transaction is not a security boundary for hostile SQL
-(`src/backup/restore.ts:470`, `src/backup/restore.ts:407`).
+(`src/backup/restore.ts:473`, `src/backup/restore.ts:410`).
 The operator guide therefore says to restore only backups from a trusted source, your own
 (`docs/operator-guide.md:259`).
 
 Q178 A assigns backup origin and confidentiality to the operator
-(`openspec/changes/core-arch/tasks.md:3994`).
+(`openspec/changes/core-arch/tasks.md:4046`).
 UmbraDB neither signs nor encrypts backups: it writes a manifest and plain dump output
-(`src/backup/manifest.ts:54`, `src/backup/manifest.ts:73`, `src/backup/backup.ts:162`,
-`src/backup/backup.ts:244`).
+(`src/backup/manifest.ts:54`, `src/backup/manifest.ts:73`, `src/backup/backup.ts:176`,
+`src/backup/backup.ts:252`).
 Manifest hashes compare loaded contents with claims carried in the same file; they establish self-consistency,
-not who wrote the file or whether its SQL is safe (`src/backup/restore.ts:417`).
+not who wrote the file or whether its SQL is safe (`src/backup/restore.ts:420`).
 
 Storing, moving and encrypting backups, and knowing their origin, are the operator's responsibilities.
 A private instance's backup requires development opt-in and contains its private data in clear
-(`src/backup/backup.ts:228`, `src/backup/backup.ts:245`, `docs/operator-guide.md:241`).
+(`src/backup/backup.ts:236`, `src/backup/backup.ts:253`, `docs/operator-guide.md:241`).
 Owner-only file permissions reduce local exposure; they do not provide encryption or authenticate origin.
 
 ## Exposure defaults and hash limits
@@ -374,7 +374,7 @@ The current defaults are:
 - **API reads:** a default 30-second PostgreSQL statement and idle timeout; PGlite validates the option but does
   not apply it (`src/config/core-settings.ts:185`, `src/db/postgres.ts:377`, `src/db/pglite.ts:308`).
 - **Development features:** opt-in defaults to false; PGlite and private backups require it
-  (`src/config/core-settings.ts:190`, `src/db/durability-probe.ts:11`, `src/backup/backup.ts:228`).
+  (`src/config/core-settings.ts:190`, `src/db/durability-probe.ts:11`, `src/backup/backup.ts:236`).
 - **Browser:** development opt-in, memory storage by default, optional OPFS, and a new database starting at the
   node's finalized head (`browser/src/config.ts:33`, `browser/src/page.ts:95`,
   `browser/src/db/database.ts:33`, `browser/src/process-worker.ts:186`).
@@ -425,7 +425,7 @@ The operator must protect database access, host files, executable configuration,
 Module trust and database administration remain outside the protection supplied by module roles
 (`src/db/roles.ts:27`). Private modules must define their own key custody, API authorization and retention;
 core key handling and TEE attestation are outside scope
-(`openspec/changes/core-arch/proposal.md:80`).
+(`openspec/changes/core-arch/proposal.md:84`).
 
 Private database separation does not conceal queries sent to public infrastructure, authenticate transport
 instance ids or authorize module API callers
@@ -463,7 +463,7 @@ Vulnerability reporting, including the private reporting route and fallback cont
    the graph loads ledger packages, checks precede package imports once per thread, and browser build checks plus
    fetched-WASM hashing are present; browser hosting-origin trust remains separate
    (`src/runner/process.ts:1239`, `src/ledger/load.ts:28`, `src/ledger/identity.ts:191`,
-   `browser/build.ts:171`, `browser/build.ts:294`, `browser/src/ledger/instantiate.ts:29`).
+   `browser/build.ts:174`, `browser/build.ts:297`, `browser/src/ledger/instantiate.ts:29`).
 
 4. **Certificate-to-instance binding — open, issue 00045.** Mutual TLS checks roots but accepts a self-declared
    instance id and counts its initial height without checking its hash
@@ -484,7 +484,7 @@ Vulnerability reporting, including the private reporting route and fallback cont
 7. **Backup file mode — fixed by task 15.1b, as built.** Files are created owner-only and set to `0600` before writing,
    with backup failure if `chmod` is refused; encryption and origin remain the operator's responsibilities
    (`src/backup/backup.ts:68`, `src/backup/backup.ts:98`, `src/backup/backup.ts:100`,
-   `src/backup/backup.ts:99`, `openspec/changes/core-arch/tasks.md:3994`).
+   `src/backup/backup.ts:99`, `openspec/changes/core-arch/tasks.md:4046`).
 
 8. **Vendored Rust advisories and release provenance — open, issue 00048.** Ledger rebuild comparisons do not provide
    an advisory scan of the patched crate graphs or release provenance

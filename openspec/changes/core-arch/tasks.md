@@ -4120,7 +4120,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 - [x] 19.1 Check off every task above with the criteria it demonstrated; map every acceptance criterion to its test in
       the pull request.
       **Done (2026-10-28):** every task of §0–§17 is checked with its **Done** paragraph and the ids it demonstrated,
-      except 17.5 (running on its own branch, which checks it) and the dependency pins 0.1 and 0.6, whose acceptance
+      17.5 included (task 17.5b, integrated after this check), except the dependency pins 0.1 and 0.6, whose acceptance
       is their probe tests and audit rather than an `A` id; §18 is the owner's and stays open. The dated **Pending**
       clauses are kept as written: each names a later task that is done, except the CI runs that wait for the push
       (0.1, 0.2, 0.4, 2.1, 2.2, 2.2a; A97's rebuild on amd64 and arm64) and 9.2's `[MANUAL]` run, which task 0.3 did
@@ -4133,16 +4133,21 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       A154) and none missing. Of §17's 22 required ids, 19 are already in their tests' titles; the other three
       (`runner.crash-sweep.*`, `runner.restart-20.*`, `core.full-crash-sweep`) come with 18.1 and 18.2.
 - [x] 19.2 Set the proposal's status line to Implemented.
-      **Done (2026-10-28):** Implemented, with what is left named: 17.5 on its own branch, §18's whole-system runs and
-      the pull-request record (19.5); the approval at `52cc6d4` and decisions Q53–Q56 kept.
+      **Done (2026-10-28):** Implemented, with what is left named: §18's whole-system runs and the pull-request record
+      (19.5); the approval at `52cc6d4` and decisions Q53–Q56 kept. (Its first wording also named 17.5, then running;
+      the close-out commit, 19.4, removed it once 17.5b was integrated.)
 - [x] 19.3 Update `ROADMAP.md`: this change, the new architecture, and the "36 symbols" statement at `ROADMAP.md:455`
       (`docs/v1-implementation-guideline.md` is deleted by task 17.4b, owner decision Q170 C).
       **Done (2026-10-28):** rewritten for 0.10.0: 0.9.5 as released, with its kept release record; the architecture;
       the surface as design §12 lists it, 54 names (27 values, 27 types) pinned by A1, replacing the 36 symbols; the
       change's status by `tasks.md` section, the gates, what comes after 0.10.0 and the non-goals. 0.9.5's milestones,
       the 1.0.0 program and its checklist, the WSL incident and the unmerged design tracks are deleted.
-- [ ] 19.4 Run `npm run graph:refresh` and commit `graphify-out/` with the close-out commit; `npm run graph:check`
+- [x] 19.4 Run `npm run graph:refresh` and commit `graphify-out/` with the close-out commit; `npm run graph:check`
       exits 0.
+      **Done (2026-10-28):** the close-out commit, after 17.5b: the proposal's status and 19.1/19.2's paragraphs no
+      longer name 17.5 as running; `docs/THREAT_MODEL.md`'s citations re-pointed to the lines the tasks since 4.5
+      moved (each matched by its exact text, none ambiguous); `graphify-out/` refreshed with this commit and
+      `npm run graph:check` 0.
 - [ ] 19.5 Record in the pull request, per `docs/PULL_REQUEST_CHECKLIST.md`: the reviewed commit, each lane's verdict
       and model id, the fix check, the owner's decisions (including the approval of `design.md` §13), the
       `[MANUAL]` evidence (A71, A136), and the CI runs.
