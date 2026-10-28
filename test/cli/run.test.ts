@@ -4,7 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EXIT, runProcessCommand, USAGE } from "../../src/cli/command.js";
 import { startProcess as startWithoutAdmin } from "../runner/process-build.js";
-import type { ProcessHandle } from "../../src/runner/process.js";
+import type { ProcessHandle, ProcessInput } from "../../src/runner/process.js";
 import { ask, statusWhen } from "../admin/admin-harness.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { type CliProject, cliProject, inProcess } from "./cli-fixtures.js";
@@ -33,6 +33,11 @@ import {
  * halted process stays up until signalled and exits 1; SIGINT stops it as SIGTERM does; `run`'s arguments; and the
  * committed negative control, a run that ignores the file's modules.
  */
+
+/** What `run` says of an `--update-hash` that is not a configuration hash (task 14.1c). */
+const UPDATE_HASH_FORM =
+  "--update-hash takes the public configuration hash to accept, 0x and 64 lowercase hex digits, as a start that " +
+  "stopped with public-config-changed names it";
 
 /** How long a process may take to reach the head, and to exit after its signal, on a loaded machine. */
 const PATIENCE_MS = Number(process.env.UMBRADB_TEST_PATIENCE_MS ?? 240_000);
@@ -313,11 +318,20 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
   }, PATIENCE_MS * 2);
 
   it.each([
-    [["extra.config.ts"], "run takes no file of its own: umbradb run [--config <file>]"],
+    [["extra.config.ts"], "run takes no file of its own: umbradb run [--config <file>] [--update-hash=<hash>]"],
     [["--config"], "--config takes a value: the configuration file"],
     [["--config", "a.config.ts", "--config", "b.config.ts"], "run takes --config once"],
     [["--confg", "a.config.ts"], "unknown option --confg of run"],
     [["--database", "postgres://u:pw-4-4a-RUN@h/db"], "unknown option --database of run"],
+    // Task 14.1c (PP-14, Q159): the hash to accept, in the form a stop names it, once.
+    [["--update-hash"], UPDATE_HASH_FORM],
+    [["--update-hash="], UPDATE_HASH_FORM],
+    [["--update-hash=0x12"], UPDATE_HASH_FORM],
+    [[`--update-hash=0X${"ab".repeat(32)}`], UPDATE_HASH_FORM],
+    [[`--update-hash=0x${"AB".repeat(32)}`], UPDATE_HASH_FORM],
+    [[`--update-hash=${"ab".repeat(32)}`], UPDATE_HASH_FORM],
+    [[`--update-hash=0x${"ab".repeat(33)}`], UPDATE_HASH_FORM],
+    [[`--update-hash=0x${"ab".repeat(32)}`, `--update-hash=0x${"cd".repeat(32)}`], "run takes --update-hash once"],
   ])("umbradb run %j prints the usage and exits 2, starting nothing", async (args, problem) => {
     let started = false;
     const result = await inProcess(["run", ...args], project.dir, {
@@ -326,6 +340,33 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     expect(result).toEqual({ code: EXIT.usage, stdout: "", stderr: `umbradb: ${problem}\n\n${USAGE}` });
     expect(started).toBe(false);
     expect(result.stderr).not.toContain("pw-4-4a-RUN");
+  });
+
+  it("--update-hash=<hash> (or --update-hash <hash>) reaches startProcess as its updateHash, exactly as given (PP-14, Q159)", async () => {
+    const hash = `0x${"5a".repeat(32)}`;
+    for (const args of [[`--update-hash=${hash}`], ["--update-hash", hash], ["--config", "absent.config.ts", `--update-hash=${hash}`]]) {
+      const inputs: ProcessInput[] = [];
+      const result = await inProcess(["run", ...args], project.dir, {
+        run: runProcessCommand({
+          start: (input) => {
+            inputs.push(input);
+            return { closed: Promise.resolve(), status: () => ({ ended: null }) } as unknown as ProcessHandle;
+          },
+        }),
+      });
+      expect(result.code).toBe(EXIT.ok);
+      expect(inputs.map((input) => input.updateHash)).toEqual([hash]);
+    }
+    const inputs: ProcessInput[] = [];
+    await inProcess(["run"], project.dir, {
+      run: runProcessCommand({
+        start: (input) => {
+          inputs.push(input);
+          return { closed: Promise.resolve(), status: () => ({ ended: null }) } as unknown as ProcessHandle;
+        },
+      }),
+    });
+    expect(inputs.map((input) => "updateHash" in input)).toEqual([false]);
   });
 
   it("negative control (committed): a run that ignores the file's modules is refused and never runs stats", async () => {

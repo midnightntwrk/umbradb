@@ -22,7 +22,10 @@ import {
   readPublicConfiguration,
   readPublicIdentity,
   readPublicItems,
+  readAcceptedConfigHash,
   type SourceTransport,
+  startHashDecision,
+  CORE_PRIVATE_SOURCE_MIGRATIONS,
 } from "../../src/backbone/core-private-source/index.js";
 import { configHashOf } from "../../src/config/history.js";
 import { PRIVATE_CORE_DIGEST, privateBackbone } from "../../src/backbone/private.js";
@@ -511,11 +514,25 @@ describe("the private backbone (PP-1, RN-3)", () => {
     expect(PRIVATE_CORE_DIGEST).toMatchObject({ side: "private", requires: ["private-cursor"] });
     expect(PRIVATE_CORE_DIGEST.migrations).toEqual(CORE_DIGEST.migrations);
     expect(PRIVATE_CORE_DIGEST.points).toBe(CORE_DIGEST.points);
-    expect(intake.part.provides.map((item) => item.name)).toEqual(["private-cursor"]);
+    expect(intake.part.provides.map((item) => item.name)).toEqual(["private-cursor", "accepted-config-hash"]);
   });
 });
 
-/** The `hello-ack` of the cores these tests stand in for: network 0xa1, S = 3, cursor 9. */
+/** {@link PUBLIC_CONFIG}'s rows as the configuration hash takes them (RN-16, PP-14). */
+const configRows = (rows: readonly Record<string, unknown>[]) =>
+  rows.map((row) => ({
+    id: row.entry_id as string,
+    start: row.start as bigint,
+    stop: row.stop as bigint | null,
+    version: row.version as string,
+    dataHash: row.data_hash as Uint8Array | null,
+    provides: row.provides as string[],
+  }));
+
+/**
+ * The `hello-ack` of the cores these tests stand in for: network 0xa1, S = 3, cursor 9, and the configuration hash of
+ * {@link PUBLIC_CONFIG}, the history a real core's own hash is of (task 14.1c compares the two at a start).
+ */
 const ACK_OF_CORE: HelloAck = {
   v: 1,
   type: "hello-ack",
@@ -524,7 +541,7 @@ const ACK_OF_CORE: HelloAck = {
   start: "3",
   cursor: "9",
   refused: null,
-  configHash: `0x${"0c".repeat(32)}`,
+  configHash: configHashOf(configRows(PUBLIC_CONFIG)),
 };
 
 /** A transport stand-in for the source (`SourceTransport`): its connection's answer, the reports sent, its flag. */
@@ -731,17 +748,6 @@ describe("lockstep on the private side (task 14.3; PP-6, PP-7, Q142)", () => {
   });
 });
 
-/** {@link PUBLIC_CONFIG}'s rows as the configuration hash takes them (RN-16, PP-14). */
-const configRows = (rows: readonly Record<string, unknown>[]) =>
-  rows.map((row) => ({
-    id: row.entry_id as string,
-    start: row.start as bigint,
-    stop: row.stop as bigint | null,
-    version: row.version as string,
-    dataHash: row.data_hash as Uint8Array | null,
-    provides: row.provides as string[],
-  }));
-
 describe("PP-14: a changed public configuration halts a private process (task 14.1b, owner decision Q147)", () => {
   /** A public database of {@link publicAnswers} over `config` (changeable), whose lost sessions the test counts. */
   function reconnecting() {
@@ -847,5 +853,221 @@ describe("PP-14: a changed public configuration halts a private process (task 14
     state.config = state.config.map((row) => (row.start === 8n ? { ...row, data_hash: bytes(0x99) } : row));
     state.lost += 1;
     expect((await source.block(5n)).height).toBe(5n);
+  });
+});
+
+describe("PP-14 at a start: the public configuration hash a private process accepted (task 14.1c, owner decision Q159)", () => {
+  const H1 = `0x${"01".repeat(32)}`;
+  // H2 with letters, so that its upper-case form is another text.
+  const H2 = `0x${"2b".repeat(32)}`;
+  const H3 = `0x${"03".repeat(32)}`;
+  const hashOfConfig = configHashOf(configRows(PUBLIC_CONFIG));
+  const core = (start = 3) => ({ id: "core", start, settings: {} }) as unknown as CheckedEntry;
+
+  it("decides by the recorded hash, the hashes found and the one given: record, keep or stop", () => {
+    const decide = (recorded: string | null, history: string | null, coreHash: string | null, given: string | null) =>
+      startHashDecision({ recorded, history, core: coreHash, given });
+    // A first start records the hash it finds — the core's, else the history's —, whatever was given.
+    expect(decide(null, H1, H1, null)).toEqual({ refusal: null, record: H1, reason: "first-start" });
+    expect(decide(null, H1, null, null)).toEqual({ refusal: null, record: H1, reason: "first-start" });
+    expect(decide(null, H1, H1, H2)).toEqual({ refusal: null, record: H1, reason: "first-start" });
+    // The hash it accepted: nothing to record.
+    expect(decide(H1, H1, H1, null)).toEqual({ refusal: null, record: null, reason: "unchanged" });
+    expect(decide(H1, H1, null, H2)).toEqual({ refusal: null, record: null, reason: "unchanged" });
+    // Another hash, and the operator gave it: recorded after the full checks.
+    expect(decide(H1, H2, H2, H2)).toEqual({ refusal: null, record: H2, reason: "accepted" });
+    expect(decide(H1, H2, null, H2)).toEqual({ refusal: null, record: H2, reason: "accepted" });
+    // Nothing found: nothing to compare or record.
+    expect(decide(H1, null, null, null)).toEqual({ refusal: null, record: null, reason: "none" });
+  });
+
+  it("stops with public-config-changed, naming the new hash and --update-hash, when another hash is found and not given", () => {
+    for (const [given, coreHash] of [[null, H2], [null, null], [H1, H2], [H3, null], [H2.toUpperCase().replace("0X", "0x"), H2]] as const) {
+      const { refusal, record, reason } = startHashDecision({ recorded: H1, history: H2, core: coreHash, given });
+      expect([record, reason]).toEqual([null, "refused"]);
+      expect(refusal).toBeInstanceOf(UmbraError);
+      expect(refusal).toMatchObject({
+        code: "public-config-changed",
+        retryable: false,
+        details: { via: "startup", recorded: H1, found: H2, history: H2, core: coreHash, given },
+      });
+      expect(refusal?.message).toContain(`--update-hash=${H2}`);
+      expect(refusal?.message).toContain(H1);
+      expect(refusal?.message).toContain("PP-14");
+      if (given !== null) expect(refusal?.message).toContain(`The --update-hash given, ${given}, is not that hash`);
+    }
+  });
+
+  it("stops when the core's first hello-ack and the public history it read differ, at any start, whatever was given", () => {
+    for (const [recorded, given] of [[null, null], [H2, null], [H2, H3], [H3, H3]] as const) {
+      const { refusal, record } = startHashDecision({ recorded, history: H2, core: H3, given });
+      expect(record).toBeNull();
+      expect(refusal).toMatchObject({
+        code: "public-config-changed",
+        details: { via: "startup", recorded, found: H3, history: H2, core: H3, given },
+      });
+      expect(refusal?.message).toContain(`the core at coreTransport sends the configuration hash ${H3}`);
+      expect(refusal?.message).toContain(`hashes to ${H2}`);
+      expect(refusal?.message).toContain(`--update-hash=${H3}`);
+    }
+  });
+
+  /** A source of an intake over the fake public database whose startup read of the private cursor found `accepted`. */
+  const sourceWith = async (
+    accepted: string | null,
+    options: { readonly updateHash?: string; readonly transport?: SourceTransport; readonly binding?: number; readonly lines?: string[] } = {},
+  ) => {
+    const publicDb = fakePublic(publicAnswers({})).db;
+    const given = {
+      log: (line: string) => options.lines?.push(line),
+      ...(options.updateHash === undefined ? {} : { updateHash: options.updateHash }),
+    };
+    // With a transport stand-in the source is made by hand, as the intake makes it.
+    const source =
+      options.transport === undefined
+        ? privateIntake({ publicDatabase: () => publicDb, wakes: () => manualWakes().wakes }).source(core(), { start: 3n, ...given })
+        : new PrivateBlockSource(publicDb, manualWakes().wakes, options.transport, { start: 3n }, given);
+    const row = {
+      height: 4n,
+      hash: bytes(4),
+      parent_hash: bytes(3),
+      public_genesis_hash: bytes(options.binding ?? 0xa1),
+      public_start_height: 3n,
+    };
+    await source.cursor(
+      fakeRead((sql) => {
+        if (sql.includes("to_regclass('core_private_source.accepted_config')")) return [{ present: accepted !== null }];
+        if (sql.includes("to_regclass")) return [{ present: true }];
+        if (sql.includes("FROM core_private_source.accepted_config")) {
+          return accepted === null ? [] : [{ config_hash: new Uint8Array(Buffer.from(accepted.slice(2), "hex")) }];
+        }
+        return [row];
+      }),
+    );
+    return source;
+  };
+
+  it("reads the accepted hash with the private cursor at startup: null before its table exists or holds a row", async () => {
+    const none = fakeRead((sql) => (sql.includes("to_regclass") ? [{ present: false }] : []));
+    expect(await readAcceptedConfigHash(none)).toBeNull();
+    const empty = fakeRead((sql) => (sql.includes("to_regclass") ? [{ present: true }] : []));
+    expect(await readAcceptedConfigHash(empty)).toBeNull();
+    const one = fakeRead((sql) => (sql.includes("to_regclass") ? [{ present: true }] : [{ config_hash: bytes(0x07) }]));
+    expect(await readAcceptedConfigHash(one)).toBe(hexOf(bytes(0x07)));
+  });
+
+  it("its startup check compares the accepted hash with the public history's, after PP-2's checks, before the graph", async () => {
+    // The hash it accepted: it starts, nothing to record.
+    const same = await sourceWith(hashOfConfig);
+    expect((await same.checkChain(configuredAs("custom", bytes(0xa1)))).publicItems).toEqual(PUBLIC_ITEMS);
+    expect(same.pendingAcceptedHash).toBeNull();
+    // Another: it stops before the graph, naming the history's hash.
+    const changed = await refusalOf((await sourceWith(H1)).checkChain(configuredAs("custom", bytes(0xa1))));
+    expect(changed).toMatchObject({ code: "public-config-changed", details: { recorded: H1, found: hashOfConfig, core: null } });
+    // A database bound to another public database is refused for its binding first (PP-2).
+    const elsewhere = await refusalOf((await sourceWith(H1, { binding: 0xb2 })).checkChain(configuredAs("custom", bytes(0xa1))));
+    expect(elsewhere).toMatchObject({ code: "private-binding-mismatch", details: { reason: "genesis" } });
+    // Given the hash found: it passes, and the hash is pending for the part's on-start-db.
+    const given = await sourceWith(H1, { updateHash: hashOfConfig });
+    await given.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(given.pendingAcceptedHash).toBe(hashOfConfig);
+    // A first start: the hash found is pending.
+    const fresh = await sourceWith(null);
+    await fresh.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(fresh.pendingAcceptedHash).toBe(hashOfConfig);
+  });
+
+  it("with a transport, compares the first hello-ack's configHash too: another than the history's stops the start", async () => {
+    const moved = fakeTransport({ configHash: H3 });
+    const refusal = await refusalOf(
+      (await sourceWith(hashOfConfig, { transport: moved.transport })).checkChain(configuredAs("custom", bytes(0xa1))),
+    );
+    expect(moved.state.asked).toBe(1);
+    expect(refusal).toMatchObject({ code: "public-config-changed", details: { history: hashOfConfig, core: H3, found: H3 } });
+    const agreeing = fakeTransport({ configHash: hashOfConfig });
+    const source = await sourceWith(H1, { transport: agreeing.transport, updateHash: hashOfConfig });
+    await source.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(source.pendingAcceptedHash).toBe(hashOfConfig);
+  });
+
+  it("logs an --update-hash it does not use: at a first start, and when the hash found is the one accepted", async () => {
+    const lines: string[] = [];
+    const fresh = await sourceWith(null, { updateHash: H2, lines });
+    await fresh.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(fresh.pendingAcceptedHash).toBe(hashOfConfig);
+    const same = await sourceWith(hashOfConfig, { updateHash: H2, lines });
+    await same.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(same.pendingAcceptedHash).toBeNull();
+    expect(lines).toEqual([
+      `--update-hash ${H2} not used: the private database's first start records the hash it finds, ${hashOfConfig} (PP-14)`,
+      `--update-hash ${H2} not used: the public configuration hash is ${hashOfConfig}, the one this private process ` +
+        "accepted (PP-14)",
+    ]);
+  });
+
+  it("takes the negative controls' start decision from its intake", async () => {
+    const publicDb = fakePublic(publicAnswers({})).db;
+    const seen: unknown[] = [];
+    const source = privateIntake({
+      publicDatabase: () => publicDb,
+      wakes: () => manualWakes().wakes,
+      acceptance: (hashes) => {
+        seen.push(hashes);
+        return { refusal: null, record: hashes.history, reason: "accepted" };
+      },
+    }).source(core(), { start: 3n, log: () => undefined, updateHash: H2 });
+    await source.checkChain(configuredAs("custom", bytes(0xa1)));
+    expect(seen).toEqual([{ recorded: null, history: hashOfConfig, core: null, given: H2 }]);
+    expect(source.pendingAcceptedHash).toBe(hashOfConfig);
+  });
+
+  it("its on-start-db records the pending hash after the binding, in its transaction, and logs it; none pending, none written", async () => {
+    const lines: string[] = [];
+    const publicDb = fakePublic(publicAnswers({})).db;
+    const intake = privateIntake({ publicDatabase: () => publicDb, wakes: () => manualWakes().wakes });
+    const source = intake.source(core(), { start: 3n, log: (line) => lines.push(line), updateHash: hashOfConfig });
+    await source.cursor(
+      fakeRead((sql) =>
+        sql.includes("FROM core_private_source.accepted_config")
+          ? [{ config_hash: new Uint8Array(Buffer.from(H1.slice(2), "hex")) }]
+          : sql.includes("to_regclass")
+            ? [{ present: true }]
+            : [{ height: 4n, hash: bytes(4), parent_hash: bytes(3), public_genesis_hash: bytes(0xa1), public_start_height: 3n }],
+      ),
+    );
+    await source.checkChain(configuredAs("custom", bytes(0xa1)));
+    const setup = intake.part.points["on-start-db"] as (p: ProcessContext, w: SchemaWriteHandle) => Promise<void>;
+    const executed: { sql: string; params: unknown[] }[] = [];
+    const w = {
+      height: null,
+      query: async () => [{ public_genesis_hash: bytes(0xa1), public_start_height: 3n }],
+      execute: async (sql: string, params: unknown[] = []) => {
+        executed.push({ sql, params });
+        return 1;
+      },
+    } as SchemaWriteHandle;
+    const context = { revisions: [{ start: 3n, stop: null, version: "1.0.0", settings: {} }] } as unknown as ProcessContext;
+    await setup.call(intake.part.points, context, w);
+    expect(executed).toHaveLength(1);
+    expect(executed[0]?.sql).toContain("core_private_source.accepted_config");
+    expect(executed[0]?.params).toEqual([new Uint8Array(Buffer.from(hashOfConfig.slice(2), "hex"))]);
+    expect(source.pendingAcceptedHash).toBeNull();
+    expect(lines.some((line) => line.includes(`public configuration hash ${hashOfConfig} accepted`) && line.includes(H1))).toBe(true);
+    // Again (a retried startup's on-start-db): nothing pending, nothing written.
+    await setup.call(intake.part.points, context, w);
+    expect(executed).toHaveLength(1);
+  });
+
+  it("keeps the hash in a table of its own, declared deterministic: false, created by its migration 002", () => {
+    const item = privateIntake().part.provides.find((provided) => provided.name === "accepted-config-hash");
+    expect(item?.table).toEqual({ schema: "core_private_source", tables: ["accepted_config"], kind: "mutable", deterministic: false });
+    expect(CORE_PRIVATE_SOURCE_MIGRATIONS.map((migration) => migration.id)).toEqual(["001", "002"]);
+    expect(CORE_PRIVATE_SOURCE_MIGRATIONS[1]?.sql).toContain("CREATE TABLE core_private_source.accepted_config");
+  });
+
+  it("the halt at a later message names the new hash with --update-hash, so the restart that accepts it is named", () => {
+    const halt = publicConfigChanged(H1, H2, "transport");
+    expect(halt.message).toContain(`--update-hash=${H2}`);
+    expect(publicConfigChanged(H1, null, "public-database").message).not.toContain("--update-hash=");
   });
 });

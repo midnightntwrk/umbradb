@@ -86,7 +86,7 @@ describe("A6: an unknown subcommand or none prints the usage and exits 2 (LS-6)"
 
   it("the usage names each command in design §12's form, and the exit statuses", () => {
     expect(USAGE).toContain("Usage: umbradb <command>");
-    expect(USAGE).toContain("umbradb run [--config <file>]");
+    expect(USAGE).toContain("umbradb run [--config <file>] [--update-hash=<hash>]");
     expect(USAGE).toContain("umbradb config check <file> [--database <url>]");
     expect(USAGE).toContain("umbradb backup --out <file> [--config <file>]");
     expect(USAGE).toContain("umbradb restore <file> [--config <file>]");

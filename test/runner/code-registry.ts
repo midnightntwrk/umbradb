@@ -318,6 +318,15 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
         "A156 configured for another network refuses with private-binding-mismatch before any migration, and binds for its own",
     },
   ],
+  "refusal:public-config-changed": [
+    {
+      file: "test/private/accepted-hash.test.ts",
+      test:
+        "A165: a first start records the hash; after a changed configuration a start stops with public-config-changed " +
+        "naming the new hash and --update-hash; updateHash set to it runs the full checks, records it and continues; " +
+        "another value stops; a core changed during the start stops it",
+    },
+  ],
   "refusal:needs-lockstep-not-listed": [
     {
       file: "test/private/lockstep-refusals.test.ts",

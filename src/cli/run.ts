@@ -1,9 +1,9 @@
 /**
- * `umbradb run [--config <file>]` (`openspec/changes/core-arch/specs/library-surface/spec.md` LS-6;
- * `specs/configuration/spec.md` CF-1; `specs/runner/spec.md` RN-13; `specs/admin-endpoints/spec.md` AE-1, AE-3;
- * `design.md` §12; owner decisions Q106 B, Q128 B, Q137 B; tasks 4.4a, 8.1b): starts a core or private process from its
- * configuration file, with the user modules the file exports, and runs it until it is signalled, or until a refusal of
- * the configuration itself ends it.
+ * `umbradb run [--config <file>] [--update-hash=<hash>]` (`openspec/changes/core-arch/specs/library-surface/spec.md`
+ * LS-6; `specs/configuration/spec.md` CF-1; `specs/runner/spec.md` RN-13; `specs/admin-endpoints/spec.md` AE-1, AE-3;
+ * `specs/private-processes/spec.md` PP-14; `design.md` §12; owner decisions Q106 B, Q128 B, Q137 B, Q159; tasks 4.4a,
+ * 8.1b, 14.1c): starts a core or private process from its configuration file, with the user modules the file exports,
+ * and runs it until it is signalled, or until a refusal of the configuration itself ends it.
  *
  * **What it starts** ({@link runProcess}): the configuration file — `--config`, or `umbradb.config.ts` in the working
  * directory (CF-1) — is loaded once (`loadConfig`), and the process is the runner's `startProcess` with
@@ -16,7 +16,9 @@
  * - the admin endpoints, served by default on `listen.admin` (AE-1, Q128 B: nothing is passed for them);
  * - a public process's ledger worker given the file to import for its user modules' ledger tasks (MD-1, LG-17: the file
  *   is the host program, imported in the worker as on the main thread; `LedgerWorkerOptions.modules`, task 12.6);
- * - its log on standard error, redacted by the process (CF-4, AE-6).
+ * - its log on standard error, redacted by the process (CF-4, AE-6);
+ * - `--update-hash`, when given, as its `updateHash`: the public configuration hash a private process accepts at this
+ *   start (PP-14, owner decision Q159; task 14.1c), which a public process's block source ignores.
  * A file that cannot be loaded is handed to startup as the file, so that startup refuses it as itself, with the
  * build's own modules.
  *
@@ -78,6 +80,8 @@ export function stopSignal(source: SignalSource): { readonly signal: AbortSignal
 export interface RunOptions {
   /** `--config`: the configuration file, relative to `cwd`; `umbradb.config.ts` when absent (CF-1). */
   readonly file?: string | undefined;
+  /** `--update-hash`: the public configuration hash a private process accepts at this start (PP-14, Q159). */
+  readonly updateHash?: string | undefined;
   /** The working directory. */
   readonly cwd: string;
   /** Where the process's log lines go (already redacted by the process). */
@@ -147,7 +151,12 @@ export async function runProcess(options: RunOptions, seams: RunSeams = {}): Pro
     }
     const userModules = seams.userModules ?? ((file: LoadedConfig) => file.modules);
     const input = processOf(options, loaded, userModules);
-    const handle = (seams.start ?? startProcess)({ ...input, signal: stop.signal, log: options.log });
+    const handle = (seams.start ?? startProcess)({
+      ...input,
+      signal: stop.signal,
+      log: options.log,
+      ...(options.updateHash === undefined ? {} : { updateHash: options.updateHash }),
+    });
     seams.started?.(handle);
     // A refusal of the configuration itself closes the process by itself; anything else waits for a signal.
     await handle.closed;

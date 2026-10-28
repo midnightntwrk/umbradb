@@ -107,18 +107,24 @@ export interface PrivateTransportOptions {
  * PP-14's halt (`public-config-changed`, not retried; owner decision Q147, task 14.1b): the core's configuration hash is
  * `found`, not `recorded`, the one it was when this private process started — learned from a message of the core
  * (`transport`) or from the public configuration history read again at a reconnection to the public database
- * (`public-database`). Its message names the two hashes, never a setting.
+ * (`public-database`). Its message names the two hashes, never a setting, and how to accept the new one: a start with
+ * `--update-hash=<found>` (owner decision Q159, task 14.1c; a start without it stops, the hash it accepted kept).
  */
 export function publicConfigChanged(recorded: string | null, found: string | null, via: "transport" | "public-database"): UmbraError {
   const how =
     via === "transport"
       ? `a message of the core at coreTransport carries the configuration hash ${found}`
       : `the public configuration history, read again at a reconnection to the public database, hashes to ${found}`;
+  const accept =
+    found === null
+      ? "start it again, which checks the public side again"
+      : `to accept ${found}, start it again with --update-hash=${found}: the start checks the public side again and ` +
+        "records it (a start without it stops, Q159)";
   return new UmbraError(
     "public-config-changed",
     `${how}, and it was ${recorded} when this private process started (PP-14): the public core restarted with another ` +
       "configuration, so the public table items this process checked at its startup (PP-13) may no longer be what it " +
-      "reads, and it halts before it processes another height; start it again, which checks the public side again",
+      `reads, and it halts before it processes another height; ${accept}`,
     { recorded, found, via },
   );
 }

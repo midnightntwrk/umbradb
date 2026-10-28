@@ -78,6 +78,21 @@
  * database read directly, so no other height is processed. Without `coreTransport`, the source's first read after the
  * public database lost a connection ({@link PublicDatabase.reconnections}) reads the history again, in that read and
  * before its body, and fails with `public-config-changed` ({@link publicConfigChanged}) when its hash is not startup's.
+ *
+ * **The public configuration hash it accepted** (PP-14, owner decision Q159; task 14.1c). The part keeps, in its own
+ * table `core_private_source.accepted_config` (one row, `id = 1`: `config_hash`, 32 bytes; migration `002`), the
+ * public configuration hash the private process last accepted — a table of its own, declared `deterministic: false`
+ * (item `accepted-config-hash`), so that neither change capture nor the digests nor the contents hash read its row: it
+ * records an operator's acceptance at a start, not a function of the chain, and two private processes bound to one
+ * public database hold the same private data whichever hashes each accepted on the way (Q75). Startup's read of the
+ * private cursor reads it too ({@link readAcceptedConfigHash}); the chain check, after PP-2's checks and before the
+ * graph, compares it with the hashes this start found — the public history's it read, and with `coreTransport` the
+ * first `hello-ack`'s — and the operator's `updateHash` (`umbradb run --update-hash`; {@link startHashDecision}): a
+ * first start records what it finds; the hash it accepted runs on; another hash stops the start with
+ * `public-config-changed`, naming it and `--update-hash=<hash>`, unless it is the one given, which is then recorded by
+ * the part's `on-start-db`, in its transaction after the binding — once the full checks passed (PP-2 in the chain
+ * check, PP-13 in the graph) —; and two hashes found that differ (the core's configuration changed during the start, or
+ * `coreTransport` and `publicDatabase` are not one core's, Q149) stop it whatever was given.
  */
 
 import { z } from "zod";
@@ -119,6 +134,14 @@ export const CORE_PRIVATE_SOURCE_MIGRATIONS: readonly { readonly id: string; rea
   CHECK ((height IS NULL) = (hash IS NULL) AND (height IS NULL) = (parent_hash IS NULL))
 )`,
   },
+  {
+    // PP-14, owner decision Q159 (task 14.1c): the public configuration hash the private process accepted.
+    id: "002",
+    sql: `CREATE TABLE core_private_source.accepted_config (
+  id smallint PRIMARY KEY CHECK (id = 1),
+  config_hash bytea NOT NULL CHECK (octet_length(config_hash) = 32)
+)`,
+  },
 ]);
 
 const PRESENT_SQL = "SELECT to_regclass('core_private_source.cursor') IS NOT NULL AS present";
@@ -128,6 +151,11 @@ const BINDING_SQL = "SELECT public_genesis_hash, public_start_height FROM core_p
 const BIND_SQL =
   "INSERT INTO core_private_source.cursor (id, public_genesis_hash, public_start_height) VALUES (1, $1, $2)";
 const MOVE_SQL = "UPDATE core_private_source.cursor SET height = $1, hash = $2, parent_hash = $3 WHERE id = 1";
+const ACCEPTED_PRESENT_SQL = "SELECT to_regclass('core_private_source.accepted_config') IS NOT NULL AS present";
+const ACCEPTED_SQL = "SELECT config_hash FROM core_private_source.accepted_config WHERE id = 1";
+const ACCEPT_SQL =
+  "INSERT INTO core_private_source.accepted_config (id, config_hash) VALUES (1, $1) " +
+  "ON CONFLICT (id) DO UPDATE SET config_hash = EXCLUDED.config_hash";
 
 /**
  * The private cursor, read through `read` (a read handle, or the block's transaction): the public block the private
@@ -177,6 +205,17 @@ export const privateCursorHeight = async (read: Pick<ReadHandle, "query">): Prom
 
 /** A byte string as `0x`-prefixed lowercase hex. */
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex")}`;
+
+/**
+ * The public configuration hash a private database accepted (PP-14, owner decision Q159; task 14.1c), as `0x` hex, read
+ * through `read`; null before its first start recorded one, and before its table exists (migration `002`).
+ */
+export async function readAcceptedConfigHash(read: Pick<ReadHandle, "query">): Promise<string | null> {
+  const [table] = await read.query(ACCEPTED_PRESENT_SQL);
+  if (table?.present !== true) return null;
+  const [row] = await read.query(ACCEPTED_SQL);
+  return row?.config_hash instanceof Uint8Array ? hex(row.config_hash) : null;
+}
 
 /** Whether two byte strings are equal. */
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => Buffer.from(a).equals(Buffer.from(b));
@@ -343,6 +382,81 @@ export function lockstepBehind(height: bigint, cursor: bigint | null): UmbraErro
   );
 }
 
+/** The public configuration hashes a private start compares (PP-14, owner decision Q159; task 14.1c), each `0x` hex. */
+export interface StartHashes {
+  /** The hash the private database accepted when it last ran; null on its first start. */
+  readonly recorded: string | null;
+  /** The hash of the public configuration history this start read; null when the public database has none. */
+  readonly history: string | null;
+  /** The `configHash` of the core's `hello-ack` this start waited for; null without `coreTransport`. */
+  readonly core: string | null;
+  /**
+   * The hash the operator accepts for this start (`umbradb run --update-hash`, `startProcess`'s `updateHash`), or
+   * null.
+   */
+  readonly given: string | null;
+}
+
+/** What a private start does with the hashes it compared ({@link startHashDecision}). */
+export interface StartHashDecision {
+  /** Why the start stops (`public-config-changed`), or null. */
+  readonly refusal: UmbraError | null;
+  /** The hash the part's `on-start-db` records, after the full checks; null when the recorded one stays. */
+  readonly record: string | null;
+  /**
+   * Why: `first-start` (nothing recorded yet: the hash found is recorded), `unchanged` (the hash found is the one
+   * recorded), `accepted` (another, given: recorded), `refused`, or `none` (no hash found, nothing compared).
+   */
+  readonly reason: "first-start" | "unchanged" | "accepted" | "refused" | "none";
+}
+
+/** The start's stop when another hash is found than the one accepted, or two hashes found differ (PP-14, Q159). */
+function startStop(hashes: StartHashes, found: string, moved: boolean): UmbraError {
+  const accept = `--update-hash=${found}`;
+  const given =
+    hashes.given === null || hashes.given === found
+      ? ""
+      : ` The --update-hash given, ${hashes.given}, is not that hash, so nothing was accepted.`;
+  const instead = hashes.recorded === null ? "" : `, in place of ${hashes.recorded}, the one it accepted`;
+  const message = moved
+    ? `the core at coreTransport sends the configuration hash ${hashes.core}, and the public configuration ` +
+      `history this start read hashes to ${hashes.history} (PP-14): the core's configuration changed during this ` +
+      "start, or coreTransport and publicDatabase are not one core's (decision record Q149), so the public table " +
+      "items checked are not the core's. Start the private process again once both give one hash — with " +
+      `${accept}, to accept the core's${instead}.${given}`
+    : `the public core's configuration hash is ${found}, and this private process last ran on ` +
+      `${hashes.recorded}, the one it accepted (PP-14): the public configuration changed since, so the public ` +
+      `table items its modules read may no longer be what it checked.${given} To accept ${found}, start it with ` +
+      `${accept} (startProcess's updateHash): the start then runs its full checks of the public side and records ` +
+      "the new hash";
+  return new UmbraError("public-config-changed", message, {
+    via: "startup",
+    recorded: hashes.recorded,
+    found,
+    history: hashes.history,
+    core: hashes.core,
+    given: hashes.given,
+  });
+}
+
+/**
+ * PP-14's comparison at a private start (owner decision Q159; task 14.1c): the hash found is the core's first
+ * `hello-ack`'s, else the public history's. Two hashes found that differ stop the start, whatever was given or
+ * recorded; a first start records the hash found; the hash recorded runs on; another hash is recorded when it is the
+ * one given, and stops the start otherwise — naming it and `--update-hash` (`public-config-changed`, not retried).
+ */
+export function startHashDecision(hashes: StartHashes): StartHashDecision {
+  if (hashes.core !== null && hashes.history !== null && hashes.core !== hashes.history) {
+    return { refusal: startStop(hashes, hashes.core, true), record: null, reason: "refused" };
+  }
+  const found = hashes.core ?? hashes.history;
+  if (found === null) return { refusal: null, record: null, reason: "none" };
+  if (hashes.recorded === null) return { refusal: null, record: found, reason: "first-start" };
+  if (hashes.recorded === found) return { refusal: null, record: null, reason: "unchanged" };
+  if (hashes.given === found) return { refusal: null, record: found, reason: "accepted" };
+  return { refusal: startStop(hashes, found, false), record: null, reason: "refused" };
+}
+
 /** The checks a {@link PrivateBlockSource} runs at startup, each replaceable by a negative control. */
 export interface PrivateChecks {
   /** The configured network's check; {@link networkRefusal} unless given. */
@@ -366,6 +480,19 @@ export interface PrivateChecks {
    * negative control's, which goes on after the public configuration changed.
    */
   readonly configHash?: "check" | "ignore";
+  /**
+   * PP-14's comparison at a start (task 14.1c); {@link startHashDecision} unless given — the negative controls' never
+   * compare the recorded hash, or accept any hash given.
+   */
+  readonly acceptance?: typeof startHashDecision;
+}
+
+/** What a {@link PrivateBlockSource} takes from its process besides its public side and checks. */
+export interface PrivateSourceOptions {
+  /** The public configuration hash the operator accepts for this start (PP-14, Q159; `startProcess`'s `updateHash`). */
+  readonly updateHash?: string | null;
+  /** Where it logs the hash it records; nowhere unless given. */
+  readonly log?: (line: string) => void;
 }
 
 /** The block source of a private process (see the module comment). */
@@ -386,12 +513,33 @@ export class PrivateBlockSource implements BlockSource {
   #publicConfigHash: string | null = null;
   /** How many reconnections of the public database the configuration was last checked after (PP-14). */
   #reconnections = 0;
+  /** The public configuration hash the private database accepted, as last read or written (PP-14, Q159). */
+  #accepted: string | null = null;
+  /**
+   * Whether {@link cursor} reads it again: at first, and after the part's `on-start-db` wrote it (a retried startup
+   * reads what the database holds).
+   */
+  #acceptedStale = true;
+  /** The hash startup's chain check decided to record, for the part's `on-start-db`; null when none. */
+  #pending: string | null = null;
+  /** Why it is pending: a first start's, or accepted (`updateHash`). */
+  #pendingReason: StartHashDecision["reason"] = "none";
+  readonly #updateHash: string | null;
+  readonly #log: (line: string) => void;
 
-  constructor(publicDatabase: PublicDatabase, wakes: PublicWakes, transport: SourceTransport | null = null, checks: PrivateChecks = {}) {
+  constructor(
+    publicDatabase: PublicDatabase,
+    wakes: PublicWakes,
+    transport: SourceTransport | null = null,
+    checks: PrivateChecks = {},
+    options: PrivateSourceOptions = {},
+  ) {
     this.#public = publicDatabase;
     this.#wakes = wakes;
     this.#transport = transport;
     this.#checks = checks;
+    this.#updateHash = options.updateHash ?? null;
+    this.#log = options.log ?? (() => undefined);
   }
 
   /**
@@ -436,6 +584,29 @@ export class PrivateBlockSource implements BlockSource {
   }
 
   /**
+   * The public configuration hash the part's `on-start-db` records (PP-14, Q159): the one startup's chain check found,
+   * on a first start or when the operator gave it; null when the recorded one stays, and once recorded.
+   */
+  get pendingAcceptedHash(): string | null {
+    return this.#pending;
+  }
+
+  /** The part's `on-start-db` recorded `hash` (see {@link pendingAcceptedHash}): logged, and read again at a retry. */
+  acceptedRecorded(hash: string): void {
+    const was = this.#accepted;
+    this.#log(
+      this.#pendingReason === "accepted"
+        ? `public configuration hash ${hash} accepted (--update-hash) in place of ${was}: recorded after the full ` +
+            "checks (PP-14)"
+        : `public configuration hash ${hash} recorded: the private database's first start records the hash it ` +
+            "finds (PP-14)",
+    );
+    this.#accepted = hash;
+    this.#acceptedStale = true;
+    this.#pending = null;
+  }
+
+  /**
    * One read of public data for the loop (PP-14; task 14.1b): none once the core's transport is refused for good — its
    * refusal is the read's failure, so no other height is processed —; and, without a transport, the first read after
    * the public database lost a connection reads the public configuration history again, in that read and before
@@ -466,6 +637,11 @@ export class PrivateBlockSource implements BlockSource {
     const { cursor, binding } = await readPrivateRow(read);
     this.#recorded = binding;
     if (this.#position === undefined) this.#position = cursor;
+    // PP-14 (Q159): the hash it accepted, for the chain check — at startup, and once more after on-start-db wrote it.
+    if (this.#acceptedStale) {
+      this.#accepted = await readAcceptedConfigHash(read);
+      this.#acceptedStale = false;
+    }
     return cursor;
   }
 
@@ -528,9 +704,11 @@ export class PrivateBlockSource implements BlockSource {
    * ({@link publicNotStarted}, Q125) —; its genesis hash compared with the configured network's, `input.configured`
    * (Q136 B; {@link networkRefusal}); the binding the startup read of the private cursor found compared with it
    * ({@link bindingRefusal}: `genesis`, `start`, `private-start-below`; task 14.1a — the part's `on-start-db` compares
-   * again in its transaction). Resolves with the genesis hash, which `core-chain` records with the private S on a new
-   * private database, and the public core's `table` items with their heights, read with the identity
-   * ({@link readPublicItems}; PP-13), which the runner gives the graph.
+   * again in its transaction); with `coreTransport`, the core's `hello-ack` (its network, its lockstep flag); then the
+   * public configuration hash it accepted against the hashes found ({@link startHashDecision}; PP-14, Q159, task
+   * 14.1c). Resolves with the genesis hash, which `core-chain` records with the private S on a new private database,
+   * and the public core's `table` items with their heights, read with the identity ({@link readPublicItems}; PP-13),
+   * which the runner gives the graph.
    */
   async checkChain(input: Pick<ChainCheckInput, "configured">): Promise<ChainCheck> {
     const reconnections = this.#public.reconnections?.() ?? 0;
@@ -544,6 +722,7 @@ export class PrivateBlockSource implements BlockSource {
     if (network !== null) throw network;
     const binding = (this.#checks.binding ?? bindingRefusal)(this.#recorded, identity, this.#checks.start ?? identity.start);
     if (binding !== null) throw binding;
+    let coreHash: string | null = null;
     if (this.#transport !== null) {
       // The core the instance reports to (PP-6, task 14.3): of the configured network, and whether it lists it.
       const ack = await this.#transport.connection();
@@ -551,6 +730,26 @@ export class PrivateBlockSource implements BlockSource {
       const other = (this.#checks.network ?? networkRefusal)(input.configured, core, "transport");
       if (other !== null) throw other;
       this.#lockstepAtStart = ack.lockstep;
+      coreHash = ack.configHash;
+    }
+    // PP-14 at a start (Q159, task 14.1c): the hash it accepted against the hashes found, before the graph.
+    const decision = (this.#checks.acceptance ?? startHashDecision)({
+      recorded: this.#accepted,
+      history: configHash,
+      core: coreHash,
+      given: this.#updateHash,
+    });
+    if (decision.refusal !== null) throw decision.refusal;
+    this.#pending = decision.record;
+    this.#pendingReason = decision.reason;
+    if (this.#updateHash !== null && decision.reason !== "accepted") {
+      this.#log(
+        `--update-hash ${this.#updateHash} not used: ` +
+          (decision.reason === "first-start"
+            ? `the private database's first start records the hash it finds, ${decision.record}`
+            : `the public configuration hash is ${coreHash ?? configHash}, the one this private process accepted`) +
+          " (PP-14)",
+      );
     }
     // PP-14: the public configuration as startup checked it; without a transport, read again at each reconnection.
     this.#publicConfigHash = configHash;
@@ -628,6 +827,16 @@ export interface PrivateIntakeOptions {
   readonly reread?: boolean;
   /** The negative control's private process that ignores the public configuration hash (PP-14); checked unless `ignore`. */
   readonly configHash?: "check" | "ignore";
+  /** The negative controls' comparison at a start (PP-14, Q159); {@link startHashDecision} unless given. */
+  readonly acceptance?: typeof startHashDecision;
+}
+
+/** What the process shares with its private source: S, its log and the hash its operator accepts (`updateHash`). */
+export interface PrivateShared {
+  readonly start: bigint;
+  readonly log: (line: string) => void;
+  /** `startProcess`'s `updateHash` (`umbradb run --update-hash`; PP-14, Q159); none unless given. */
+  readonly updateHash?: string;
 }
 
 /** One private process start's `core-private-source`: the part and the block source it is bound to. */
@@ -635,11 +844,11 @@ export interface PrivateIntake {
   /** The backbone part `core-private-source` (see the module comment). */
   readonly part: ModuleDeclaration;
   /**
-   * The process's block source, made from its `core` revision and what the process shares with it — S and its log
-   * (`ProcessInput.source`; without them S is the revision's start and nothing is logged): once, before the part's
-   * `on-start-db`, which reads its public database.
+   * The process's block source, made from its `core` revision and what the process shares with it — S, its log and
+   * the hash its operator accepts (`ProcessInput.source`; without them S is the revision's start, nothing is logged
+   * and no hash is given): once, before the part's `on-start-db`, which reads its public database.
    */
-  source(core: CheckedEntry, shared?: { readonly start: bigint; readonly log: (line: string) => void }): PrivateBlockSource;
+  source(core: CheckedEntry, shared?: PrivateShared): PrivateBlockSource;
 }
 
 /** A private process start's `core-private-source` (see the module comment). */
@@ -656,6 +865,13 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
         name: "private-cursor",
         lifetimes: ["table"],
         table: { schema: "core_private_source", tables: ["cursor"], kind: "mutable" },
+      },
+      {
+        // The public configuration hash it accepted (PP-14, Q159; task 14.1c): an operator's acceptance at a start, not
+        // a function of the chain, so out of change capture, the digests and the contents hash (Q76).
+        name: "accepted-config-hash",
+        lifetimes: ["table"],
+        table: { schema: "core_private_source", tables: ["accepted_config"], kind: "mutable", deterministic: false },
       },
     ],
     // Every backbone part starts at S, which is a mid-chain start when S is above genesis (Q96).
@@ -677,6 +893,12 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
         const refusal = binding(recorded, current, (p.revisions[0] as Revision).start);
         if (refusal !== null) throw refusal;
         if (recorded === null) await w.execute(BIND_SQL, [current.genesisHash, current.start]);
+        // PP-14 (Q159, task 14.1c): the hash startup's chain check accepted, now that the full checks passed.
+        const accepted = made.pendingAcceptedHash;
+        if (accepted !== null) {
+          await w.execute(ACCEPT_SQL, [bytesOfHex(accepted)]);
+          made.acceptedRecorded(accepted);
+        }
       },
       async "on-db-write"(_p, b, w) {
         await w.execute(MOVE_SQL, [b.height, b.hash, b.parentHash]);
@@ -688,7 +910,7 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
   };
   return Object.freeze({
     part,
-    source(core: CheckedEntry, shared?: { readonly start: bigint; readonly log: (line: string) => void }): PrivateBlockSource {
+    source(core: CheckedEntry, shared?: PrivateShared): PrivateBlockSource {
       const start = shared?.start ?? BigInt(core.start);
       const side = openPublicSide(
         core,
@@ -707,9 +929,10 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
         ...(options.publicItems === undefined ? {} : { publicItems: options.publicItems }),
         ...(options.reread === undefined ? {} : { reread: options.reread }),
         ...(options.configHash === undefined ? {} : { configHash: options.configHash }),
+        ...(options.acceptance === undefined ? {} : { acceptance: options.acceptance }),
         binding,
         start,
-      });
+      }, { updateHash: shared?.updateHash ?? null, log: shared?.log ?? (() => undefined) });
       return made;
     },
   });

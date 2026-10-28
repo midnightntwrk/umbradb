@@ -717,7 +717,9 @@ describe("the table items a revision's row records (core_chain.config.provides; 
   });
 
   it("records a private process's core from its own backbone (core-private-source, core-digest)", () => {
+    // Task 14.1c: core-private-source's accepted-config-hash (PP-14, Q159) beside its private-cursor.
     expect(tableItemsOf(buildDeclarations([], { side: "private" }), "core")).toEqual([
+      "accepted-config-hash",
       "chain-identity",
       "digest-checkpoints",
       "digest-tables",

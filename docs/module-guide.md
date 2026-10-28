@@ -508,15 +508,19 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
   process's own backbone parts (`chain-identity`, the digests) are its own database's, and an item of yours may not
   take the name of a public item the public core provides at the same heights (`providers-overlap`). The check is made
   at the private process's startup, against the public configuration as it is then.
-- **A changed public configuration halts you.** The private process remembers the public core's configuration hash
-  from its startup — the `configHash` of the core's first `hello-ack` through `coreTransport`, or, without a
-  transport, the hash of the public configuration history it read (PP-14). When the core restarts with another
-  configuration — a data field, a revision, the `table` items a module provides —, the process halts with
-  `public-config-changed` at the core's next message, before it processes another height, since the public tables you
-  read may no longer be what startup checked; without `coreTransport` it notices when it next connects to its public
-  database again. Restart it: startup checks the public side again (and refuses, naming the item, if what you require
-  is gone). A core restarted with the same configuration, or with only secrets or operational settings changed, keeps
-  its hash, and nothing happens.
+- **A changed public configuration halts you, until the operator accepts it.** The private process keeps, in its own
+  database, the public core's configuration hash it accepted (PP-14): its first start records the hash it finds — the
+  `configHash` of the core's first `hello-ack` through `coreTransport`, or, without a transport, the hash of the public
+  configuration history it read. When the core restarts with another configuration — a data field, a revision, the
+  `table` items a module provides —, the running process halts with `public-config-changed` at the core's next
+  message, before it processes another height, since the public tables you read may no longer be what startup checked;
+  without `coreTransport` it notices when it next connects to its public database again. Each later start stops with
+  the same code, naming the new hash, until the operator starts it with `umbradb run --update-hash=<hash>` (a host
+  program: `startProcess`'s `updateHash`): that start checks the public side again (and refuses, naming the item, if
+  what you require is gone), then records the new hash, and later starts need no flag. A core restarted with the same
+  configuration, or with only secrets or operational settings changed, keeps its hash, and nothing happens. The hash
+  is kept in `core_private_source.accepted_config`, out of the digests and the contents hash: which hashes an instance
+  accepted on the way never changes its private data.
 - **The same determinism rules.** Your private tables are checked, digested and hashed as the core's are (Q75): the
   sections above all apply, `deterministic: false` included. Two private processes with the same configuration, bound
   to the same public database, hold the same private data at the same height.

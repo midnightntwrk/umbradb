@@ -4,9 +4,11 @@
  * {@link runMain} on the process.
  *
  * - `umbradb config check <file> [--database <url>]` checks a configuration file (CF-10, `./config-check.ts`).
- * - `umbradb run [--config <file>]` starts the process of the configuration file, with the user modules it exports,
- *   until SIGTERM or SIGINT stops it (`./run.ts`, task 4.4a; Q106 B); it exits 1 when startup refused or processing
- *   halted, else 0.
+ * - `umbradb run [--config <file>] [--update-hash=<hash>]` starts the process of the configuration file, with the user
+ *   modules it exports, until SIGTERM or SIGINT stops it (`./run.ts`, task 4.4a; Q106 B); it exits 1 when startup
+ *   refused or processing halted, else 0. `--update-hash`, a configuration hash (`0x` and 64 lowercase hex digits, as a
+ *   start that stopped with `public-config-changed` names it), is the public configuration hash a private process
+ *   accepts at this start (PP-14, owner decision Q159; task 14.1c).
  * - `umbradb backup --out <file> [--config <file>]` writes a backup of the configuration file's database (`./backup.ts`,
  *   task 15.1; BK-1): exit 0 once written, 1 when refused (nothing written).
  * - `umbradb restore <file> [--config <file>]` restores a backup into the configuration file's database, which must be
@@ -38,8 +40,10 @@ export const EXIT = Object.freeze({ ok: 0, failed: 1, usage: 2, unavailable: 3 }
 export const USAGE = `Usage: umbradb <command> [options]
 
 Commands:
-  umbradb run [--config <file>]
-      Start a core or private process from its configuration (default umbradb.config.ts).
+  umbradb run [--config <file>] [--update-hash=<hash>]
+      Start a core or private process from its configuration (default umbradb.config.ts). With --update-hash, a
+      private process accepts that public configuration hash, the one a start that stopped with
+      public-config-changed names, and records it once its checks pass.
   umbradb config check <file> [--database <url>]
       Type-check and validate a configuration file without starting a process; with --database, also check it
       against that database's configuration history, read-only.
@@ -129,28 +133,47 @@ export function configCommand(check: typeof configCheck = configCheck): CommandH
   };
 }
 
-/** `run`'s arguments — at most one `--config <file>`, nothing else —, or what is wrong with them. */
-function runArguments(args: readonly string[]): { readonly file?: string } | string {
+/** A public configuration hash as a start that stopped with `public-config-changed` names it (PP-14, Q159). */
+const CONFIG_HASH = /^0x[0-9a-f]{64}$/;
+
+/**
+ * `run`'s arguments — at most one `--config <file>` and one `--update-hash=<hash>` (or `--update-hash <hash>`), nothing
+ * else —, or what is wrong with them.
+ */
+function runArguments(args: readonly string[]): { readonly file?: string; readonly updateHash?: string } | string {
   const { tokens } = parseArgs({
     args: [...args],
-    options: { config: { type: "string" } },
+    options: { config: { type: "string" }, "update-hash": { type: "string" } },
     allowPositionals: true,
     strict: false,
     tokens: true,
   });
   const files: (string | undefined)[] = [];
+  const hashes: (string | undefined)[] = [];
   for (const token of tokens) {
-    if (token.kind === "positional") return "run takes no file of its own: umbradb run [--config <file>]";
+    if (token.kind === "positional") {
+      return "run takes no file of its own: umbradb run [--config <file>] [--update-hash=<hash>]";
+    }
     if (token.kind === "option") {
-      if (token.name !== "config") return `unknown option ${token.rawName} of run`;
-      files.push(token.value);
+      if (token.name === "config") files.push(token.value);
+      else if (token.name === "update-hash") hashes.push(token.value);
+      else return `unknown option ${token.rawName} of run`;
     }
   }
   if (files.length > 1) return "run takes --config once";
+  if (hashes.length > 1) return "run takes --update-hash once";
   const [file] = files;
-  if (files.length === 0) return {};
-  if (file === undefined || file === "") return "--config takes a value: the configuration file";
-  return { file };
+  const [hash] = hashes;
+  if (files.length === 1 && (file === undefined || file === "")) {
+    return "--config takes a value: the configuration file";
+  }
+  if (hashes.length === 1 && (hash === undefined || !CONFIG_HASH.test(hash))) {
+    return (
+      "--update-hash takes the public configuration hash to accept, 0x and 64 lowercase hex digits, as a start that " +
+      "stopped with public-config-changed names it"
+    );
+  }
+  return { ...(file === undefined ? {} : { file }), ...(hash === undefined ? {} : { updateHash: hash }) };
 }
 
 /**
@@ -162,7 +185,10 @@ export function runProcessCommand(seams: RunSeams = {}): CommandHandler {
   return async (args, io) => {
     const parsed = runArguments(args);
     if (typeof parsed === "string") return usage(io, parsed);
-    const end = await runProcess({ file: parsed.file, cwd: io.cwd, log: (line) => io.stderr(`${line}\n`) }, seams);
+    const end = await runProcess(
+      { file: parsed.file, updateHash: parsed.updateHash, cwd: io.cwd, log: (line) => io.stderr(`${line}\n`) },
+      seams,
+    );
     return runFailed(end) ? EXIT.failed : EXIT.ok;
   };
 }

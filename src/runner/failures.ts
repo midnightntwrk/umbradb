@@ -75,6 +75,7 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "package-hash-mismatch",
   "private-binding-mismatch",
   "needs-lockstep-not-listed",
+  "public-config-changed",
 ] as const);
 
 /**

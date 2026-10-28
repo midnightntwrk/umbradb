@@ -204,9 +204,13 @@ export async function restorePrivate(
   return { ...outcome, lines };
 }
 
-/** The contents hash of a private database as `0x` hex (no table of `pm` is declared `deterministic: false`). */
+/**
+ * The contents hash of a private database as `0x` hex, as its process and its backup's manifest compute it: no table of
+ * `pm` is declared `deterministic: false`; the private backbone's `core_private_source.accepted_config` is (task 14.1c).
+ */
 export async function privateHashOf(db: BackupDatabase): Promise<string> {
-  const hash = await db.read((read) => contentsHash(read, { optedOut: [] }), privateCursorHeight);
+  const optedOut = [{ schema: "core_private_source", table: "accepted_config" }];
+  const hash = await db.read((read) => contentsHash(read, { optedOut }), privateCursorHeight);
   return `0x${Buffer.from(hash).toString("hex")}`;
 }
 

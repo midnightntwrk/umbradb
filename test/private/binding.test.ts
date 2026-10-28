@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { type PrivateIntakeOptions, privateCursorHeight } from "../../src/backbone/core-private-source/index.js";
+import {
+  type PrivateIntakeOptions,
+  privateCursorHeight,
+  startHashDecision,
+} from "../../src/backbone/core-private-source/index.js";
 import {
   PRIVATE_BACKENDS,
   type PrivateBackend,
@@ -384,8 +388,16 @@ describe.each(PRIVATE_BACKENDS)("A113 a private database is bound to one public 
     "negative control: a private chain check that compares nothing — no configured network, no binding — fails A113",
     async () => {
       // A binding check that compares nothing alone is no longer enough (Q136 B): the configured network's check
-      // refuses the other network's public database first, so both are skipped.
-      const problems = a113Problems(await a113Run(backend, { binding: () => null, network: () => null }));
+      // refuses the other network's public database first, so both are skipped; and so is, since task 14.1c, the
+      // comparison of the public configuration hash the private database accepted (PP-14, Q159), which another public
+      // database's configuration fails too: every start is taken for a first one.
+      const problems = a113Problems(
+        await a113Run(backend, {
+          binding: () => null,
+          network: () => null,
+          acceptance: (hashes) => startHashDecision({ ...hashes, recorded: null }),
+        }),
+      );
       expect(problems).toContain("against a public database of another network: the private process started");
       expect(problems).toContain("against a public database with another S: the private process started");
     },

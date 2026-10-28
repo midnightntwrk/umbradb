@@ -361,6 +361,11 @@ export interface PrivateOptions {
   readonly extra?: Readonly<Record<string, unknown>>;
   /** The admin endpoints, as {@link PublicCoreOptions.admin}: none unless given. */
   readonly admin?: boolean | AdminStarter;
+  /**
+   * The public configuration hash the operator accepts for this start (`startProcess`'s `updateHash`, `umbradb run
+   * --update-hash`; PP-14, owner decision Q159): none unless given.
+   */
+  readonly updateHash?: string;
 }
 
 /** The private process's `core` entry. */
@@ -429,6 +434,7 @@ export function launchPrivate(options: PrivateOptions): PrivateProcess {
       log: options.lines === undefined ? quiet : (line) => options.lines?.push(line),
       ...(options.loop === undefined ? {} : { loop: options.loop }),
       ...(options.admin === undefined ? {} : { admin: options.admin }),
+      ...(options.updateHash === undefined ? {} : { updateHash: options.updateHash }),
     });
   const handle = options.within === undefined ? start() : options.within(start);
   return {

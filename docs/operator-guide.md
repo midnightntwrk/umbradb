@@ -113,3 +113,24 @@ be the ones the backup's database is bound to, else `private-binding-mismatch` n
 loading, inside the restore's transaction), and the public database's committed block at the backup's height must be
 the backup's (`backup-block-not-finalized`). The restored private process continues from its public database at the
 backup's height + 1.
+
+## A private process and a changed public configuration
+
+A private process keeps the public configuration hash it accepted: `X-Umbra-Config-Hash`, which every answer of the
+core's module API carries, a hash of the core's recorded configuration that leaves out secrets and operational
+settings (PP-14, RN-16). Its first start records the hash it finds. When the core restarts with another configuration
+— a data field, a revision, the table items a module provides —, a running private process halts with
+`public-config-changed`, and each later start stops with the same code, its log line naming the new hash and the flag
+that accepts it. Check that the core's new configuration still provides what the private modules read, then start the
+private process with that hash:
+
+```sh
+umbradb run --update-hash=0x<64 hex digits> [--config umbradb.config.ts]
+```
+
+That start runs every check of the public side — the binding, the public table items its modules require — and
+records the hash once they pass; later starts need no flag. A hash given that is not the one found accepts nothing, and
+the start stops as before; a value that is not `0x` and 64 lowercase hex digits prints the usage (exit 2). A start can
+also stop when the core's configuration changes during it, or when `coreTransport` and `publicDatabase` are not one
+core's: start it again once both give one hash. A restored private backup holds the hash its process had accepted, so
+the restored process's first start compares it the same way.

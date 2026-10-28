@@ -1342,8 +1342,34 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   the public rows with the identity and computes the same hash; the public database counts the read sessions its pool
   lost (`onReadSessionLost`, `src/db/postgres.ts`), and the source's first read after one — a reconnection — reads the
   rows again, in that read and before its body, and halts alike (`via: "public-database"`) when the hash differs. A
-  restart runs the full checks again (PP-2, PP-13). The protocol's `v` stays 1: no transport of an earlier build
-  exists.
+  restart runs the full checks again (PP-2, PP-13), and stops until the operator accepts the new hash (next
+  paragraph); the halt's message names `--update-hash=<found>`. The protocol's `v` stays 1: no transport of an earlier
+  build exists.
+- **The public configuration hash a private process accepted** (PP-14, owner decision Q159, task 14.1c). *Where it is
+  kept:* `core-private-source`'s own table `core_private_source.accepted_config` (§10; migration `002` of the part), one
+  row, `config_hash`, the hash the private process last accepted — a table of its own, provided as the item
+  `accepted-config-hash` declared `deterministic: false` (MD-1, Q76), so change capture, the digests (DT-4) and the
+  contents hash (DT-3) leave its row out: it records an operator's acceptance at a start, not a function of the chain,
+  and two private processes bound to one public database hold the same private data at a height whichever hashes each
+  accepted on the way (Q75); a column of `core_private_source.cursor` would have entered every block's digest of that
+  row. A backup of a private database (PP-12's opt-in) holds the row, so a restored private process starts with the
+  hash its source had accepted (§9.1). *At each start* (`src/backbone/core-private-source/`): startup's read of the
+  private cursor also reads the accepted hash (`readAcceptedConfigHash`; null on a first start, and before migration
+  `002` created the table); the source's chain check, after PP-2's checks and the core's `hello-ack` and before the
+  graph, compares it with the hashes this start found — the public history's it read and, with `coreTransport`, the
+  `hello-ack`'s — and the operator's `updateHash` (`startHashDecision`): two hashes found that differ — the core's
+  configuration changed between the read of the history and the `hello-ack`, or `coreTransport` and `publicDatabase`
+  are not one core's (Q149) — stop the start whatever was given; else the hash found is the `hello-ack`'s, or the
+  history's without a transport; a first start records it; the one accepted runs on; another stops the start with
+  `public-config-changed` (`details { via: "startup", recorded, found, history, core, given }`, not retried), its
+  message naming the new hash and `--update-hash=<hash>` (and the value given, when another), unless it is the one
+  given. A hash to record is written by the part's `on-start-db`, in its transaction after the binding, so only once
+  the full checks passed (PP-2 in the chain check and the part, PP-13 in the graph): a start the graph refuses records
+  nothing. With a PGlite `publicDatabase` the history is read through the core after the first `hello-ack`, so a core
+  restarted between the two is caught by the transport's own check (`via: "transport"`, whose message names
+  `--update-hash` too). The hash given reaches the source as `startProcess`'s `updateHash` (`ProcessInput.updateHash`,
+  passed in `SourceShared`, which a public process's source ignores) and as `umbradb run --update-hash=<hash>` (§12);
+  a hash given that is not used is logged (`--update-hash … not used`), as is each hash recorded.
 - **Mutual TLS** (PP-11, Q34, task 14.2). `tls` is PEM text: `certificate` and `key` the process's own, `trustedRoots`
   the CAs it trusts. On the core the transport is then an `https` server with `requestCert` and `rejectUnauthorized`
   against `trustedRoots`; a private process presents its certificate and checks the core's against its
@@ -1458,7 +1484,10 @@ its block there has another hash. After loading, after the contents hash, the bi
 `core_private_source.cursor` row records is compared with the public database's identity (`genesis`, `start`): the
 manifest holds the public genesis hash (the private chain identity's) but not the public S, which only that row
 records. A private process's backup restored with a public configuration, or the reverse, is refused by the build's
-checks (the other side's backbone migrations).
+checks (the other side's backbone migrations). The backup holds the public configuration hash its process had accepted
+(`core_private_source.accepted_config`, §8; task 14.1c): the restore does not compare it, and the restored process's
+first start does, so a public configuration changed since the backup stops that start with `public-config-changed`
+until the operator gives the new hash with `--update-hash` (PP-14, Q159).
 
 ### 9.2 Browser build (BR)
 
@@ -1539,6 +1568,7 @@ per-block tables are append-only and partitioned by height range; no table store
 | `core-contract-states` | `core_contract_states.states` | (contract_address, height) | state_key, zswap_state_key — each 32 bytes, persisted (LG-13); range-partitioned by height (task 13.1) |
 | `core-contract-logs-*` | `contract_logs.logs` | (height, tx_index, log_index) | contract_address, entry_point, logical_segment (int), log_version (bigint), event_type (text), data (ledger serialization) — log_index numbers the block's logs from 0 in emission order; event_type one of the eleven MIP-0002 types; the shared item's one migration `001`, recorded under `contract-logs`; range-partitioned by height (task 13.1) |
 | `core-private-source` (private) | `core_private_source.cursor` | id = 1 | height (null), hash (null), parent_hash (null; Q124), public_genesis_hash, public_start_height |
+| `core-private-source` (private) | `core_private_source.accepted_config` | id = 1 | config_hash (32 bytes): the public configuration hash the private process accepted (PP-14, Q159, task 14.1c) — migration `002`; its item `accepted-config-hash` declared `deterministic: false`, so no change capture, digest or contents of its row (§8) |
 
 **Storage helpers' tables (SH-1, SH-2; CORE-ARCH §4.11a, Q30).** A helper's table belongs to the module that calls the
 helper: a migration the module includes in its own `migrations` creates it in the module's schema, and the module writes
@@ -1593,7 +1623,9 @@ revision is known, logs every finding and ends the process, serving no admin end
 `item-no-lifetime`, `table-item-no-kind`, `field-no-kind`, `invalid-declaration` (these five: decision record Q94),
 `item-no-provider`, `providers-overlap`, `graph-cycle`, `item-not-available`, `no-requirement`,
 `cannot-start-mid-chain`, `process-item-missing`, `duplicate-api-route`, `development-opt-in-required`,
-`needs-lockstep-not-listed`, `private-binding-mismatch`, `package-hash-mismatch`,
+`needs-lockstep-not-listed`, `private-binding-mismatch`, `public-config-changed` (a private start finding another
+public configuration hash than the one it accepted, not given with --update-hash: PP-14, owner decision Q159, task
+14.1c; §8), `package-hash-mismatch`,
 `writer-lock-held`, `durability-fsync-off`, `durability-pooler`, `durability-full-page-writes-off`; `callback-error` (a
 failing `on-start-db` or `on-start-api`, with point and module) and `listen-failed` (a listener that cannot bind)
 (Q115). **Backup and restore refuse** (the command exits non-zero; nothing is written or committed):
@@ -1643,8 +1675,11 @@ settled by task 17.3).
 `SchemaWriteHandle`, `ApiRegistry`, `BlockRef`, `BlockSource`, `LedgerPackage`, `Entry`, `CoreVersion`, `UmbraConfig`,
 `ProcessHandle`, `ProcessState`, `ErrorCode`, `ParsedTransaction`, `LedgerTask`.
 
-**Command:** `umbradb run [--config <file>]`, `umbradb config check <file> [--database <url>]`, `umbradb backup --out
-<file> [--config <file>]`, `umbradb restore <file>` — `package.json`'s `bin` `umbradb` (`dist/cli/main.js`, task 4.4).
+**Command:** `umbradb run [--config <file>] [--update-hash=<hash>]`, `umbradb config check <file> [--database <url>]`,
+`umbradb backup --out <file> [--config <file>]`, `umbradb restore <file>` — `package.json`'s `bin` `umbradb`
+(`dist/cli/main.js`, task 4.4). `--update-hash` (task 14.1c, PP-14, Q159) takes a configuration hash as a start that
+stopped with `public-config-changed` names it (`0x` and 64 lowercase hex digits; another form, or the flag twice,
+prints the usage and exits 2) and is `startProcess`'s `updateHash`: the hash a private process accepts at this start.
 No command, or any other, or a wrong argument, prints the usage and exits 2; a failed check exits 1; `run` (task 4.4a,
 §7) runs until SIGTERM or SIGINT and exits 1 when startup refused or processing halted, else 0, and exits 1 at once
 when the configuration itself is refused (Q137 B, task 8.1b); `backup` exits 0 once its file is written and 1 when

@@ -3079,13 +3079,53 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       first hello-ack's hash without comparing it with the public history it read) raised, not blocking, shipped A;
       issue `docs/issues/00038-registry-conditional-tests.md` (the A87 registry cannot name an `it.runIf` test)
       recorded (OPEN). Waits: Q159 (owner).
-- [ ] 14.1c The owner's answer Q159: a private process keeps the public configuration hash it accepted in its private
+- [x] 14.1c The owner's answer Q159: a private process keeps the public configuration hash it accepted in its private
       database; at every start it compares it with the core's first `hello-ack`'s and with the hash of the public
       history it read, and on a difference stops with `public-config-changed`, naming the new hash and
       `--update-hash=<hash>`; `umbradb run --update-hash=<hash>` (and `startProcess`'s `updateHash`) accepts it after
       the full checks; a first start records the hash it finds (PP-14 as amended); `design.md` §8, the module guide and
       the operator guide; the tests.
       **Acceptance:** A165; A162 unchanged.
+      **Done (2026-10-27):** where the hash is kept (design §8, §10): `core-private-source`'s migration `002` creates
+      `core_private_source.accepted_config` (one row, `config_hash`, 32 bytes), provided as the item
+      `accepted-config-hash` declared `deterministic: false`, so change capture, the digests and the contents hash
+      leave its row out — an operator's acceptance at a start, not a function of the chain; two private databases bound
+      to one public database hold the same data whichever hashes each accepted. Startup's read of the private cursor
+      reads it (`readAcceptedConfigHash`); `PrivateBlockSource.checkChain`, after PP-2's checks and the core's
+      `hello-ack` and before the graph, compares it with the hashes found — the public history's and, with
+      `coreTransport`, the `hello-ack`'s — and the hash given (`startHashDecision`): two hashes found that differ stop
+      the start whatever was given; a first start records the hash found; the hash accepted runs on; another stops the
+      start with `public-config-changed` (`details { via: "startup", recorded, found, history, core, given }`), its
+      message naming the new hash and `--update-hash=<hash>`, unless it is the one given; the part's `on-start-db`
+      records it in its transaction after the binding, so only once the full checks passed (a start the graph refuses
+      records nothing). The runtime halt's message (14.1b's `publicConfigChanged`) names `--update-hash=<found>` too,
+      which also covers a PGlite public database, read through the core after the first `hello-ack`. The hash given:
+      `startProcess`'s `updateHash` (`ProcessInput.updateHash`, passed in `SourceShared`; a public process's source
+      ignores it) and `umbradb run --update-hash=<hash>` (or `--update-hash <hash>`; `0x` and 64 lowercase hex digits,
+      once, else the usage and exit 2). `public-config-changed` joins §11's startup refusals, `REFUSAL_CODES` and the
+      code registry (A87, A165's test); design §8, §9.1, §10, §11, §12, the module guide's bullet and the operator
+      guide's new section. Tests, seen failing first (`tsc` 19 errors: `startHashDecision`, `StartHashes`,
+      `readAcceptedConfigHash`, `pendingAcceptedHash`, `PrivateIntakeOptions.acceptance`, `ProcessInput.updateHash`,
+      the source's options; Vitest 6 files, 28 tests — no hash stored, no stop, no `--update-hash` in any message, the
+      flag unknown to `run`, §11 without the code): `test/private/accepted-hash.test.ts` with `accepted-hash-checks.ts`
+      (A165 on PostgreSQL 18.6 with and without a transport and on PGlite 0.5.10 with one: a first start records H1; the
+      core restarted with a data field changed (H2): a start stops naming H2 and `--update-hash=H2`, H1 kept, the
+      cursor unchanged; `updateHash` H1 stops alike; `updateHash` H2 with a module requiring an item no public module
+      provides is refused by the graph (`item-no-provider`), H1 kept; `updateHash` H2 runs on and records H2; a start
+      without it then runs on; a new private database at the same height has the same contents hash; with a transport,
+      a core restarted (H3) between the history's read and the `hello-ack` (PostgreSQL: the `hello` held by a relay) or
+      between the `hello-ack` and the first read through the core (PGlite: the `read` held) stops the start naming
+      H3), `test/private/relays.ts`'s `HoldingRelay`, unit rows in `test/backbone/core-private-source.test.ts` (the
+      decision, the read, the check's order, the `hello-ack`'s hash, the record in `on-start-db`, the item and
+      migration, the logs, the halt's message) and `test/cli/` (the flag reaching `startProcess`, its refused forms,
+      the usage). Committed negative controls (`test/private/accepted-hash.negative-control.test.ts`, both backends):
+      a start that never compares the hash it recorded runs on after a changed configuration, and an `--update-hash`
+      that accepts any hash runs on with the old hash given — each fails A165. Test rows changed by the new item or
+      check: `core-chain.test.ts` (the private `core`'s items), `core-private-source.test.ts` (the part's items; the
+      stand-in core's `hello-ack` carries its history's hash), `binding.test.ts`'s A113 negative control (also skips
+      the hash comparison), `test/backup/restore-private.ts` (`privateHashOf` with the process's opted-out table). A162
+      unchanged. Question Q166 (the browser page cannot pass `updateHash` to a private instance) raised, not
+      blocking.
 - [x] 14.2 The process transport and its messages; opt-in mutual TLS.
       **Acceptance:** A115, A121.
       **Done (2026-10-26):** `src/private/` (new; design §1's row): `messages.ts` — design §8's eight messages as zod

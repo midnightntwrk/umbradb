@@ -275,6 +275,13 @@ export interface ProcessInput {
    * configuration: `readConfigHash` of its own database unless given (a negative control's, over its secrets).
    */
   readonly configHash?: (read: ReadHandle, core: CheckedEntry) => Promise<string>;
+  /**
+   * The public configuration hash the operator accepts for this start (`umbradb run --update-hash`; PP-14, owner
+   * decision Q159, task 14.1c): a private process's source records it after the full checks when it is the hash the
+   * start finds in place of the one the private database accepted; given to the block source ({@link SourceShared}),
+   * which a public process's ignores.
+   */
+  readonly updateHash?: string;
 }
 
 /** What the process shares with the block source it makes (task 10.3): its one node connection, S and its log. */
@@ -285,6 +292,8 @@ export interface SourceShared {
   readonly start: bigint;
   /** The process's log, redacted (a private source's transport logs its connections; task 14.2). */
   readonly log: (line: string) => void;
+  /** {@link ProcessInput.updateHash}, when given (a private source's; task 14.1c). */
+  readonly updateHash?: string;
 }
 
 /** The process's state (CORE-ARCH §4.18, AE-3): exactly one at a time. */
@@ -888,6 +897,7 @@ class Process implements ProcessHandle {
         nodeClient: this.#nodeClient,
         start: BigInt(checked.start),
         log: (line) => this.#log(line),
+        ...(input.updateHash === undefined ? {} : { updateHash: input.updateHash }),
       };
       const source = typeof input.source === "function" ? input.source(core, shared) : input.source;
       this.#source = source;
