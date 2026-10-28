@@ -3923,7 +3923,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       17.4b and checks `AGENTS.md` (the 18 rules' leads, no deleted document, no 0.9.5 name) and
       `Formal/STORAGE_ALGEBRA.md` (W1 and T5 headings, no retired law), with negative controls. Comments and
       `openspec/config.yaml` still naming deleted documents: issue 00052.
-- [ ] 17.4c The owner's answer Q181 A: the 0.10.0 threat model at `docs/THREAT_MODEL.md`, after 17.4b and before
+- [x] 17.4c The owner's answer Q181 A: the 0.10.0 threat model at `docs/THREAT_MODEL.md`, after 17.4b and before
       17.3a. Codex redrafts it from `~/todo/Umbra/experiments/00028-threat-model-draft.md` against the tree, adding the
       owner's review (2026-10-28): backups (Q177 A: a restore runs the file's SQL with the writer's rights before its
       checks — restore only backups you wrote; Q178 A: origin and confidentiality are the operator's — store, move and
@@ -3936,6 +3936,18 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       it; the operator guide's backup and restore sections, and the module guide's private modules (Q180), say the same
       in a sentence each.
       **Acceptance:** A178.
+      **Done (2026-10-28):** Codex (`gpt-6.1-sol`, `codex exec -s read-only`, the id from the CLI's header; the session
+      did not report it) redrafted the model from the draft against `69dba1f`: the draft's ten boundaries, then "The
+      Midnight node", "Private reads of public data" and "Backups and restore" (Q179 A, Q180 A, Q177 A and Q178 A, each
+      documented, not fixed), the exposure defaults and hash limits (task 4.5's database parts, `ssl` per Q182 B and
+      Q183 A, and `core.transportReader` per Q175 A described as still to come), residual risks, and "Known gaps": 1, 3,
+      7, 9 as built by 14.2b, 12.2b, 15.1b and 17.4b, 2 to come in 4.5, 4, 5, 6, 8 as issues 00045–00048, and issue
+      00051. All 278 `path:line` citations were checked against the tree. Five line numbers were fixed (three had moved
+      with this task's own edits to `SECURITY.md` and the operator guide), and three wordings (the 256 MiB bridge is a
+      maximum, not a default; the scope paragraph; "requires" in restore). `README.md`'s "Security" link points at the
+      model again, `SECURITY.md` has a "Threat model" section linking it, and the operator guide's "What a backup holds"
+      (Q178) and "Restoring a backup" (Q177) and the module guide's "Private modules" (Q180) each have the sentence.
+      A178's test: `test/library-surface/threat-model{,.test}.ts`, with committed negative controls.
 - [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage

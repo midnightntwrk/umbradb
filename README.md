@@ -298,7 +298,8 @@ anti-join curve is measured to 10⁶ chunks in the baseline artifact.
 
 ## Security
 
-Read [`SECURITY.md`](SECURITY.md) before deploying. The load-bearing points:
+Read the threat model, [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md), and [`SECURITY.md`](SECURITY.md) before
+deploying. The load-bearing points:
 
 - **Single trusted writer.** The threat model assumes one writer that is trusted.
 - **`schema` is namespacing, not a tenant boundary.** Do not use it to isolate mutually distrusting

@@ -7,6 +7,7 @@ for Linux Foundation projects.
 
 - [Disclosing a security issue](#disclosing-a-security-issue)
 - [Vulnerability management](#vulnerability-management)
+- [Threat model](#threat-model)
 - [Commit policy](#commit-policy)
 - [Suggesting changes](#suggesting-changes)
 
@@ -56,6 +57,12 @@ following steps:
 - determining affected versions of the project
 - auditing code to find any potential similar problems
 - preparing fixes for all releases under maintenance
+
+## Threat model
+
+UmbraDB's threat model — what it protects, whom it trusts, each trust boundary with its controls, and the known gaps —
+is [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md). Read it before deploying; report a way around one of its controls
+as a security issue, as above.
 
 ## Commit policy
 

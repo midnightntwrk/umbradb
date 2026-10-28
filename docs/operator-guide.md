@@ -140,7 +140,9 @@ no one else can. Its temporary file has that mode from its creation, before its 
 renamed to the path; a file it replaces there does not pass its own mode on. Where file modes do not apply — on
 Windows, where Node.js's file modes set only whether a file can be written, and on file systems mounted without POSIX
 permissions — the folder's or the mount's permissions decide who can read a backup; a file system that refuses to set
-the mode fails the backup, and no file is written.
+the mode fails the backup, and no file is written. UmbraDB neither encrypts nor signs a backup: storing, moving and
+encrypting backups, and knowing where each one came from, are the operator's (owner decision Q178; the threat model's
+[Backups and restore](THREAT_MODEL.md#backups-and-restore)).
 
 ### Restoring a backup
 
@@ -152,7 +154,9 @@ umbradb restore indexer-1774000.backup [--config umbradb.config.ts]
 rights: a file that was changed, or written by someone else, can create functions, triggers or views, change any
 table, and on a server whose login is a superuser do more than that, before any check after loading can refuse it
 (BK-3, owner decision Q83). The manifest's checks and the contents hash catch a backup that is damaged or from another
-chain; they do not make a hostile file safe to run.
+chain; they do not make a hostile file safe to run. UmbraDB keeps it that way on purpose — a restore runs the file's
+SQL with the writer's rights before its checks after loading, so restore only backups you wrote (owner decision Q177;
+the threat model's [Backups and restore](THREAT_MODEL.md#backups-and-restore)).
 
 The command restores into the configuration file's database, which must be empty — a new PostgreSQL database, or a
 PGlite directory with no database in it (the command creates it, with any missing parent directory, once the checks

@@ -544,6 +544,11 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
   (Q16): never put them in an error message, which the process logs when it halts (a secret setting's value in any
   other form than the one written is not redacted), in an API answer, or in a read of public data through the core
   (its statements and parameters cross the transport).
+- **Your reads of public data are seen.** The text and parameters of each read reach the public database's operator
+  and its logs (`log_statement`, `log_min_duration_statement`, `auto_explain`, `pg_stat_statements`) and, through
+  `coreTransport`, the core, and UmbraDB's own logs and error details may carry them: keep values derived from private
+  data out of these queries where you can — read public rows by height and filter them in your module (owner decision
+  Q180; the threat model's [Private reads of public data](THREAT_MODEL.md#private-reads-of-public-data)).
 
 ## Blocks from the node
 
