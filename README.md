@@ -49,10 +49,11 @@ file imports `umbradb` from the project's `node_modules`, and the install also a
 (`npx umbradb`).
 
 ```sh
-npm install https://github.com/midnightntwrk/umbradb/releases/download/v0.10.0/umbradb-0.10.0.tgz
+npm install https://github.com/midnightntwrk/umbradb/releases/download/v0.10.0-rc.1/umbradb-0.10.0.tgz
 ```
 
-To update, run it again with the new version's URL. To build the package yourself, or to run UmbraDB from a clone,
+`v0.10.0-rc.1` is a pre-release of 0.10.0, for review and feedback. To update, run it again with the new release's
+URL. To build the package yourself, or to run UmbraDB from a clone,
 see [Building from source](docs/building-from-source.md).
 
 ### `umbradb.config.ts`

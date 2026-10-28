@@ -18,7 +18,7 @@ The tarball holds what a release's tarball holds: `npm pack` follows `package.js
 quick start goes on as written: `umbradb.config.ts`, then `npx umbradb config check umbradb.config.ts` and
 `npx umbradb run`.
 
-To build a release's version, check out its tag (`git checkout v0.10.0`) before `npm ci`. Its tarball's SHA-256
+To build a release's version, check out its tag (`git checkout v0.10.0-rc.1`) before `npm ci`. Its tarball's SHA-256
 (`shasum -a 256 umbradb-0.10.0.tgz`) can be compared with the one the release lists; a different npm or Node.js
 version may give a different tarball from the same sources.
 
