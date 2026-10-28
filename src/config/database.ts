@@ -8,11 +8,15 @@
  *
  * CF-9's PGlite half is the backend's own: `openPglite` refuses without the development opt-in before anything is
  * opened or created (`development-opt-in-required`, `details { feature: "pglite" }`, task 2.5), so nothing here checks
- * it again. Node.js only (`openPglite`'s lock reads the file system); the browser build opens its own (task 16.x).
+ * it again — and a `pglite:<directory>` is created here, with any missing parent directory, under the opt-in only,
+ * before `openPglite` takes its writer lock beside the directory (CF-4, owner decision Q163; task 2.2c:
+ * `createPgliteDirectory`). Node.js only (`openPglite`'s lock reads the file system); the browser build opens its own
+ * (task 16.x).
  */
 
 import type { CommittedHeight, Database } from "../db/api.js";
 import { openPglite, type PgliteOptions } from "../db/pglite.js";
+import { createPgliteDirectory } from "../db/pglite-lock.js";
 import { openPostgres, type PostgresOptions } from "../db/postgres.js";
 import type { PlainObject } from "./plain-data.js";
 import type { CheckedEntry } from "./validate.js";
@@ -62,13 +66,17 @@ export function databaseOptions(entry: CheckedEntry, options: ConfiguredDatabase
 
 /**
  * Opens the database of `entry` as {@link databaseOptions} says: PGlite refuses without the development opt-in (CF-9),
- * PostgreSQL makes no connection until one is needed. Rejects with the backends' refusals and failures
- * (`development-opt-in-required`, `writer-lock-held`, `database-error`, `invalid-configuration`).
+ * and under it a directory that does not exist is created first with its missing parents (CF-4, Q163); PostgreSQL makes
+ * no connection until one is needed. Rejects with the backends' refusals and failures (`development-opt-in-required`,
+ * `writer-lock-held`, `database-error`, `invalid-configuration`).
  */
 export async function openConfiguredDatabase(
   entry: CheckedEntry,
   options: ConfiguredDatabaseOptions,
 ): Promise<Database> {
   const configured = databaseOptions(entry, options);
-  return configured.backend === "pglite" ? openPglite(configured.options) : openPostgres(configured.options);
+  if (configured.backend === "postgres") return openPostgres(configured.options);
+  // Without the opt-in nothing is created: `openPglite` refuses first (CF-9).
+  if (configured.options.developmentOptIn) createPgliteDirectory(configured.options.dataDir);
+  return openPglite(configured.options);
 }

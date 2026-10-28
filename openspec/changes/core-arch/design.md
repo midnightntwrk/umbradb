@@ -1140,7 +1140,13 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   (`src/config/database.ts`) opens what `database` names (`pglite:memory`, `pglite:<directory>`, a PostgreSQL URL),
   PGlite refusing without the opt-in (CF-9, DB-12). A process, and a restore into its target, create a
   `pglite:<directory>` with any missing parent before the writer lock is taken (its file sits beside the directory);
-  `umbradb config check --database` and `umbradb backup` create none (CF-4, owner decision Q163).
+  `umbradb config check --database` and `umbradb backup` create none (CF-4, owner decision Q163). As built (task 2.2c):
+  `createPgliteDirectory` (`src/db/pglite-lock.ts`, reading the directory as the lock does: `file://` and a bare path,
+  nothing for `memory://`, the browser's file systems refused) creates a missing directory with its missing parents
+  (`mkdirSync`, `recursive`), a failure `database-error` (`open-failed`, the path not named); `openConfiguredDatabase`
+  calls it under the opt-in only, before `openPglite`, and `umbradb restore` through `openRestoreTarget`
+  (`src/cli/configured.ts`), which runs once the checks before loading passed, so a refused restore creates nothing.
+  `openPglite` itself still refuses a missing parent (`open-failed`).
 - **`umbradb config check`** (`src/cli/`, task 4.4; CF-10). Three checks, every finding of each reported with its path
   in one run: the TypeScript compiler (`typescript`, a runtime dependency, 5.9.3 installed) with `noEmit` and fixed
   options, those of a Node.js ES module loaded by type stripping (`NodeNext`, `erasableSyntaxOnly`,

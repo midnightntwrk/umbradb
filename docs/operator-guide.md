@@ -4,6 +4,20 @@ For the operator who runs an UmbraDB indexer: the commands it ships and what eac
 specification is the OpenSpec change `core-arch` (`openspec/changes/core-arch/`); this guide names its requirements
 where it relies on them.
 
+## The database
+
+The `core` entry's `database` names where the indexer keeps its data (CF-4): a PostgreSQL URL (`postgres://…` or
+`postgresql://…`) or, under the development opt-in (`developmentOptIn: true`, CF-9), `pglite:<directory>` — a PGlite
+database in that directory, a relative path read from the process's working directory — or `pglite:memory`, a
+database that lives inside its process only. The setting is secret: logs and `/config` show it as `[redacted]`.
+
+A PGlite directory that does not exist yet is created, with any missing parent directory, by what writes the database:
+`umbradb run` (and a host program's process) and `umbradb restore` into its target (owner decision Q163). In a new
+checkout, `pglite:data/preview` creates `data/` and `data/preview` at the first `umbradb run`; a mistyped path creates
+a new, empty database instead of failing. What only reads creates nothing: `umbradb config check --database` checks a
+missing directory as a new database, and `umbradb backup` refuses one (`no-committed-height`). Beside the directory
+the process keeps its writer lock, `<directory>.lock.sqlite` (DB-11): one process at a time opens a PGlite directory.
+
 ## Backups
 
 A backup is a `pg_dump` file of the indexer's database at one committed height, with UmbraDB's manifest as its first
@@ -67,9 +81,10 @@ table, and on a server whose login is a superuser do more than that, before any 
 chain; they do not make a hostile file safe to run.
 
 The command restores into the configuration file's database, which must be empty — a new PostgreSQL database, or a
-PGlite directory with no database in it (the command creates it). The configuration must be the one the backup's
-indexer ran with: the same S and the same entries up to the backup's height (later changes, above it, are allowed),
-and a build that carries their versions and every migration the backup's database applied. The command reads the
+PGlite directory with no database in it (the command creates it, with any missing parent directory, once the checks
+before loading have passed: a refused restore creates nothing). The configuration must be the one the backup's indexer
+ran with: the same S and the same entries up to the backup's height (later changes, above it, are allowed), and a
+build that carries their versions and every migration the backup's database applied. The command reads the
 configuration's node to check the chain. It refuses, and leaves the target as it was, when:
 
 | Code | Why |

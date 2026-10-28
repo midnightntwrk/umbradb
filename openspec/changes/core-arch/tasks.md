@@ -676,11 +676,30 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       — `core-chain` publishing `readOnlyDatabase(db)` as the item (task 10.2) and the runner handing process items to
       modules (task 5.2a); the `on-db-write` case through the runner's own block loop, where a `nested-call` rejects the
       callback (`callback-error`, tasks 5.2 and 5.x).
-- [ ] 2.2c The owner's answer Q163 A: a process (`startProcess`, `umbradb run`) and a restore into its target create a
+- [x] 2.2c The owner's answer Q163 A: a process (`startProcess`, `umbradb run`) and a restore into its target create a
       `pglite:<directory>` with any missing parent directory, before the writer lock is taken (`src/db/pglite-lock.ts`
       puts the lock's file beside the directory and today refuses a missing parent); `umbradb config check
       --database` and `umbradb backup` create none; `design.md` §7 and the operator guide.
       **Acceptance:** A166.
+      **Done (2026-10-27):** `createPgliteDirectory` (`src/db/pglite-lock.ts`) reads the data directory as the lock
+      does (`file://` and a bare path, nothing for `memory://`, the browser's file systems `invalid-configuration`)
+      and creates a missing one with its missing parents (`mkdirSync`, `recursive`); a failure is `database-error`
+      (`open-failed`) naming no path. `openConfiguredDatabase` (`src/config/database.ts`) calls it under the
+      development opt-in only, before `openPglite` takes the lock — so `startProcess` and `umbradb run` create the
+      directory, and without the opt-in nothing is created (CF-9) —; `umbradb restore` opens its target through
+      `openRestoreTarget` (`src/cli/configured.ts`, one line in `src/cli/restore.ts`), called once the checks before
+      loading passed, so a refused restore creates nothing. `openPglite`, `umbradb config check --database` and
+      `umbradb backup` are unchanged and create nothing (the lock still refuses a missing parent). A166 passes
+      (`test/config/pglite-directory.test.ts`): `startProcess` on `<tmp>/a/b`, `umbradb run` in this process on an
+      absolute path and as the command in a child process on CF-4's relative `pglite:data/preview`, each committing
+      block S with the lock file beside the directory; a restore into `<tmp>/c/d` (a PGlite backup at height 3) and
+      one refused before loading (`backup-format-unknown`, nothing created); `config check --database` and `backup`
+      creating nothing; at `openConfiguredDatabase`: no opt-in, `file://`, a path through a file, an existing
+      directory, `pglite:memory` and `idb://`. The committed negative control
+      (`pglite-directory.negative-control.test.ts`, `vi.mock` of `createPgliteDirectory`) fails the first clause with
+      `database-error open-failed` and passes with the real function. The new tests failed on `4c2a5df` for the
+      intended reason (6 of 11, each `database-error`, `open-failed`). `design.md` §7 ("As built") and
+      `docs/operator-guide.md` ("The database"; the restore's target) updated.
 
 ## 3. Modules
 

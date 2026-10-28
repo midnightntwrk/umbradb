@@ -10,7 +10,8 @@
  * makes no connection until it is used; PGlite only under the development opt-in (`openPglite` refuses without it),
  * from a directory relative to the working directory, taking its operating-system lock (`writer-lock-held` while a
  * process holds it, DB-11). `pglite:memory` names a database that exists only inside its own process, so the commands
- * refuse it (`invalid-configuration`).
+ * refuse it (`invalid-configuration`). Only a restore's target ({@link openRestoreTarget}) is created when missing,
+ * with any missing parent directory (CF-4, owner decision Q163); `umbradb backup` creates nothing.
  */
 
 import { join, resolve } from "node:path";
@@ -27,6 +28,7 @@ import { type CheckedConfig, type CheckedEntry, configSecrets, validateConfig } 
 import type { CommittedHeight, Database } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import { openPglite } from "../db/pglite.js";
+import { createPgliteDirectory } from "../db/pglite-lock.js";
 import { openPostgres } from "../db/postgres.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
@@ -138,6 +140,16 @@ export async function openCommandDatabase(
 ): Promise<Database> {
   if (target.backend === "postgres") return openPostgres({ url: target.url, committedHeight, readConnections: 1 });
   return openPglite({ dataDir: target.dataDir, committedHeight, developmentOptIn: config.developmentOptIn });
+}
+
+/**
+ * Opens the target of `umbradb restore` as {@link openCommandDatabase} does, a PGlite directory that does not exist
+ * created first with its missing parents under the opt-in (CF-4, owner decision Q163): the restore opens a target with
+ * no database only once its checks before loading passed (BK-3), so a refused restore creates nothing.
+ */
+export async function openRestoreTarget(target: CommandTarget, config: CommandConfig): Promise<Database> {
+  if (target.backend === "pglite" && config.developmentOptIn) createPgliteDirectory(target.dataDir);
+  return openCommandDatabase(target, config);
 }
 
 /** The tables the build declares `deterministic: false` (MD-1, Q76): every module of `declarations`, each table once. */

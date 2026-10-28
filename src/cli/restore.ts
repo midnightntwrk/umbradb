@@ -3,7 +3,8 @@
  * `design.md` §9.1, §12; owner decisions Q83, Q85, Q153; tasks 15.2, 15.2a): restores a backup into the database the
  * configuration file names (`./configured.ts`), which must be empty, through `src/backup/restore.ts` (`restoreBackup`):
  * the checks before loading, the file's SQL in one transaction on the writer connection, the owners and grants, the
- * contents hash and the ledger state root checked before the commit.
+ * contents hash and the ledger state root checked before the commit. A PGlite directory not there yet is created, with
+ * any missing parent directory, once the checks before loading passed (`openRestoreTarget`; CF-4, owner decision Q163).
  *
  * - **The configuration file** — `--config`, or `umbradb.config.ts` in the working directory, as for `umbradb run` —
  *   gives the database and the opt-in (its process's `core` revision, Q102), the history the backup's must equal up to
@@ -35,7 +36,7 @@ import { redactor } from "../config/redact.js";
 import { UmbraError } from "../db/errors.js";
 import { NodeClient } from "../node/client.js";
 import type { BlockSource } from "../runner/block-source.js";
-import { type CommandConfig, commandTarget, openCommandDatabase, readCommandConfig } from "./configured.js";
+import { type CommandConfig, commandTarget, openRestoreTarget, readCommandConfig } from "./configured.js";
 
 /** `restore`'s arguments — one file, at most one `--config <file>`, nothing else —, or what is wrong with them. */
 export function restoreArguments(args: readonly string[]): { readonly file: string; readonly config?: string } | string {
@@ -150,7 +151,7 @@ export async function runRestore(options: RestoreCommandOptions, seams: RestoreC
       {
         file,
         target: target.backend === "postgres" ? { backend: "postgres" } : { backend: "pglite", exists: target.exists },
-        open: () => openCommandDatabase(target, config),
+        open: () => openRestoreTarget(target, config),
         config: config.checked,
         declarations: config.declarations,
         ...chain,
