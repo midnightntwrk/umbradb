@@ -1,4 +1,5 @@
 import { createServer, type Server, type Socket, connect } from "node:net";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { privateCursorHeight } from "../../src/backbone/core-private-source/index.js";
@@ -104,7 +105,7 @@ describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name (PP-
       seen,
       lines,
       coreTransport: proxy.address,
-      ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as string } : {}),
+      ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
     });
     let cursorDuringDrop: bigint | null;
     let reconnectedAt: number;

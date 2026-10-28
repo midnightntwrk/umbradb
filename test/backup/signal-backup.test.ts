@@ -159,7 +159,7 @@ describe("A163: a real SIGUSR2 to a running PGlite process (BK-1, Q152 B)", () =
       "signal-run.config.ts",
       [
         `import { coreEntry, defineConfig } from ${JSON.stringify(project.builders)};`,
-        `const core = coreEntry({ start: 1, config: ${runCoreSettings(`pglite:${directory}`, tape.url, { backupOnSignal: out })} });`,
+        `const core = coreEntry({ start: 1, config: ${runCoreSettings({ kind: "pglite", path: directory }, tape.url, { backupOnSignal: out })} });`,
         "export default defineConfig({ entries: [core] });",
         "",
       ].join("\n"),

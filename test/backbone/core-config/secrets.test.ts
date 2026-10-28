@@ -5,13 +5,15 @@ import { type AdminRun, mainThreadAdmin, observe, startWithAdmin, statusWhen } f
 import { SECRET_FORMS, secretDatabase, secretProblems } from "../../admin/secrets.js";
 import { PROCESS_BACKENDS } from "../../runner/process-backends.js";
 import { loggingModule } from "../../runner/process-build.js";
+import type { DatabaseParts } from "../../../src/config/database-parts.js";
 
 /**
  * A29 (task 8.4; CF-4, AE-6): with a password in `database`, the password appears in neither `/config`, `/status` nor
- * the captured logs — through the process on PostgreSQL 18, whose `database` URL holds a password (a PGlite setting is
+ * the captured logs — through the process on PostgreSQL 18, whose `database` parts hold a password (a PGlite setting is
  * a directory and has none): a login role of the test's own whose password is `test/admin/secrets.ts`'s secret, every
- * character URL encodings treat differently. To give the logs a line that would carry it, a callback at height 2 throws
- * an error holding the `database` URL as written (as a driver's error may) and the password in each of its six forms;
+ * character URL encodings treat differently. `/config` shows the other parts and the password as `[redacted]` (CF-4,
+ * owner decision Q167 A). To give the logs a line that would carry it, a callback at height 2 throws an error holding
+ * the `database` parts as JSON (as a careless message may) and the password in each of its six forms;
  * the process halts and logs it through the configuration's redaction. The full bodies of the four endpoints and every
  * captured line are searched for each form.
  *
@@ -22,14 +24,14 @@ import { loggingModule } from "../../runner/process-build.js";
 const POSTGRES = PROCESS_BACKENDS.filter((backend) => backend.kind === "postgres");
 
 /** Module `d`: at height 2 its `on-compute` throws an error holding `database` and every form of the secret. */
-function leaking(database: string): ModuleDeclaration {
+function leaking(database: DatabaseParts): ModuleDeclaration {
   const base = loggingModule("d", [], ["on-db-write"]);
   return {
     ...base,
     points: {
       ...base.points,
       async "on-compute"(_p, b) {
-        if (b.height === 2n) throw new Error(`could not connect to ${database}: ${SECRET_FORMS.join(" | ")}`);
+        if (b.height === 2n) throw new Error(`could not connect to ${JSON.stringify(database)}: ${SECRET_FORMS.join(" | ")}`);
       },
     },
   };
@@ -44,11 +46,14 @@ describe.each(POSTGRES)("A29: a password in database on $name", (backend) => {
     const run = startWithAdmin({ database, user: [leaking(database)] });
     const origin = await run.origin();
     const { core } = await run.handle.started;
-    // The process runs on that database: its settings hold the password, as written.
-    expect(String(core.settings?.database)).toContain(SECRET_FORMS[1]);
+    // The process runs on that database: its settings hold the password.
+    expect((core.settings?.database as { password?: string } | undefined)?.password).toBe(SECRET_FORMS[0]);
     await statusWhen(origin, (body) => body.state === "halted", 60_000);
     const seen = await observe(origin);
-    expect(seen.config.json).toMatchObject({ core: { settings: { database: "[redacted]" } }, database: { backend: "postgres", writerLock: true } });
+    expect(seen.config.json).toMatchObject({
+      core: { settings: { database: { kind: "postgres", user: database.kind === "postgres" ? database.user : "", password: "[redacted]" } } },
+      database: { backend: "postgres", writerLock: true },
+    });
     const texts = {
       "/health/live": seen.live.text,
       "/health/ready": seen.ready.text,
@@ -57,7 +62,7 @@ describe.each(POSTGRES)("A29: a password in database on $name", (backend) => {
       logs: run.lines.join("\n"),
     };
     expect(secretProblems(texts)).toEqual([]);
-    // The logs did carry a line built from the URL and the password, redacted.
+    // The logs did carry a line built from the parts and the password, redacted.
     const halt = run.lines.find((line) => line.startsWith("processing halted (callback-error)"));
     expect(halt).toMatch(/could not connect to .*\[redacted\]/);
     await run.handle.stop();
@@ -76,7 +81,8 @@ describe.each(POSTGRES)("A29: a password in database on $name", (backend) => {
     const origin = await run.origin();
     await statusWhen(origin, (body) => body.cursor === "3", 60_000);
     const seen = await observe(origin);
-    expect(secretProblems({ "/config": seen.config.text })).toContain("/config holds form 1 of the secret");
+    // The settings as JSON hold the password JSON-escaped (form 5).
+    expect(secretProblems({ "/config": seen.config.text })).toContain("/config holds form 5 of the secret");
     await run.handle.stop();
   }, 120_000);
 });

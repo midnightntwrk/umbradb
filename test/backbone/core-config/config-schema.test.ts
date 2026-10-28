@@ -8,7 +8,7 @@ import { configRedactor } from "../../../src/config/redact.js";
 import { FIELD_KINDS, LIFETIMES, type ModuleDeclaration, POINTS, TABLE_KINDS } from "../../../src/modules/declaration.js";
 import { validateDeclarations } from "../../../src/modules/validation.js";
 import { validateConfig } from "../../../src/config/validate.js";
-import { adminCore, adminCoreSettings, type AdminRun, ask, startWithAdmin, statusWhen } from "../../admin/admin-harness.js";
+import { adminCore, adminCoreSettings, type AdminRun, ask, shownDatabase, startWithAdmin, statusWhen } from "../../admin/admin-harness.js";
 import { schemaFile, validatorOf } from "../../admin/json-schema.js";
 import { PROCESS_BACKENDS } from "../../runner/process-backends.js";
 import { entryOf, loggingModule } from "../../runner/process-build.js";
@@ -39,7 +39,7 @@ function moded(version = "1.0.0"): ModuleDeclaration {
 function body(): Record<string, unknown> {
   const m = moded();
   const declarations = validateDeclarations({ backbone: [], core: [], user: [m] });
-  const entries = [coreEntry({ start: 1, config: adminCoreSettings("pglite:memory") as never }), entryOf(m, 1, { mode: "b" })];
+  const entries = [coreEntry({ start: 1, config: adminCoreSettings({ kind: "pglite", memory: true }) as never }), entryOf(m, 1, { mode: "b" })];
   const checked = validateConfig({ config: { data: { entries: entries as never } }, declarations, side: "public" });
   const check = checkHistory({ config: checked, cursor: null, declarations, history: [] });
   const genesis = new Uint8Array(32).fill(0x81);
@@ -140,9 +140,9 @@ describe.each(PROCESS_BACKENDS)("A66: /config through the process validates on $
   it("A66: refused before the database opens, refused after it, and running with everything the process knows", async () => {
     // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in,
     // CF-9); a refusal of the configuration itself ends the process and serves no /config (task 8.1b, Q137 B).
-    const early = startWithAdmin({ database: "pglite:memory", extra: { developmentOptIn: false } });
+    const early = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     expect(await valid(early, (b) => b.state === "refused")).toMatchObject({
-      core: { settings: { database: "[redacted]" } },
+      core: { settings: { database: { kind: "pglite", memory: true } } },
       history: null,
       modules: null,
       // Known from the `core` revision; not opened: no server version, no writer lock.
@@ -159,7 +159,7 @@ describe.each(PROCESS_BACKENDS)("A66: /config through the process validates on $
       user: [loggingModule("m", [], ["on-db-write"], { migrations: [{ id: "001", sql: "CREATE TABLE m.rows (height bigint PRIMARY KEY, x int)" }] })],
     });
     const late = await valid(changed, (b) => b.state === "refused");
-    expect(late).toMatchObject({ core: { settings: { database: "[redacted]" } }, history: null, modules: null });
+    expect(late).toMatchObject({ core: { settings: { database: shownDatabase(db.setting) } }, history: null, modules: null });
     expect(late.entries.map((entry: { id: string }) => entry.id)).toEqual(["core", "m"]);
     await changed.handle.stop();
 

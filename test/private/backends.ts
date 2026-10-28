@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
 import type { CommittedHeight, ReadHandle } from "../../src/db/api.js";
 import { openPglite } from "../../src/db/pglite.js";
+import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
 import { openPostgres } from "../../src/db/postgres.js";
 import { startPostgresServer, type PostgresTestServer } from "../db/postgres-server.js";
+import { connectionOfUrl } from "../db/connection.js";
 
 /**
  * Databases for the private processes' tests (task 14.1): each test gets a public database, for a core, and private
@@ -15,7 +17,8 @@ import { startPostgresServer, type PostgresTestServer } from "../db/postgres-ser
  *
  * On PostgreSQL the processes connect with logins of their own, as deployments do: the core as the server's login
  * (`test`), a private process to its own database as `umbradb_private`, and to the public database as `umbradb_reader`,
- * which may only read (`pg_read_all_data`). Every database records each session that logs in — its login and
+ * which may only read (`pg_read_all_data`); a core's transport reads as `umbradb_transport`, which may only read too
+ * (CF-4, owner decision Q175 A). Every database records each session that logs in — its login and
  * application name — through a login event trigger (PostgreSQL 17+) into `public.session_log`, a table of the schema
  * `public`, which neither the determinism rules nor the contents hash read (DT-3): A112's view of which connections
  * reached which database, every one of them, not samples.
@@ -27,6 +30,13 @@ export const PRIVATE_LOGIN = "umbradb_private";
 /** The login a private process reads the public database with. */
 export const READER_LOGIN = "umbradb_reader";
 
+/**
+ * The login a core reads the public database with for its transport (`core.transportReader`, CF-4, owner decision
+ * Q175 A; task 4.5): `pg_read_all_data` only, as {@link READER_LOGIN}, but a login of its own, so that a test telling a
+ * private process's direct reads from the core's sees them apart.
+ */
+export const TRANSPORT_LOGIN = "umbradb_transport";
+
 /** One session a PostgreSQL database saw log in. */
 export interface SessionSeen {
   readonly login: string;
@@ -35,10 +45,12 @@ export interface SessionSeen {
 
 /** One database of a test. */
 export interface TestDatabase {
-  /** The `database` setting of the process that owns it (CF-4). */
-  readonly setting: string;
-  /** PostgreSQL: the setting of the login that may only read it — a private process's `publicDatabase`. */
-  readonly readerSetting?: string;
+  /** The `database` setting of the process that owns it (CF-4): its parts. */
+  readonly setting: DatabaseParts;
+  /** PostgreSQL: the parts of the login that may only read it — a private process's `publicDatabase`. */
+  readonly readerSetting?: DatabaseParts;
+  /** PostgreSQL: that login as a core's `transportReader` (CF-4, owner decision Q175 A). */
+  readonly transportReader?: { readonly user: string; readonly password: string };
   /** PostgreSQL: every session that logged in to the database, in order. */
   sessions?(): Promise<SessionSeen[]>;
   /**
@@ -78,7 +90,6 @@ export interface PrivateBackend {
 /** The login event trigger and its table (see the module comment). */
 const SESSION_LOG_SQL = `
 CREATE TABLE public.session_log (position bigint GENERATED ALWAYS AS IDENTITY, login text, application text);
-GRANT INSERT ON public.session_log TO PUBLIC;
 CREATE FUNCTION public.log_session() RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
   INSERT INTO public.session_log (login, application) VALUES (session_user, current_setting('application_name'));
@@ -87,12 +98,9 @@ CREATE EVENT TRIGGER log_session ON login EXECUTE FUNCTION public.log_session();
 
 const noHeight: CommittedHeight = async () => null;
 
-/** `url` with another login and password. */
-function withLogin(url: string, login: string): string {
-  const next = new URL(url);
-  next.username = login;
-  next.password = login;
-  return next.toString();
+/** `parts` with another login, whose password is its name. */
+function withLogin(parts: PostgresParts, login: string): PostgresParts {
+  return { ...parts, user: login, password: login };
 }
 
 function postgresBackend(): PrivateBackend {
@@ -105,7 +113,8 @@ function postgresBackend(): PrivateBackend {
       const created = await server.createDatabase();
       await created.exec(
         `CREATE ROLE ${PRIVATE_LOGIN} LOGIN SUPERUSER PASSWORD '${PRIVATE_LOGIN}'; ` +
-          `CREATE ROLE ${READER_LOGIN} LOGIN PASSWORD '${READER_LOGIN}'; GRANT pg_read_all_data TO ${READER_LOGIN};`,
+          `CREATE ROLE ${READER_LOGIN} LOGIN PASSWORD '${READER_LOGIN}'; GRANT pg_read_all_data TO ${READER_LOGIN}; ` +
+          `CREATE ROLE ${TRANSPORT_LOGIN} LOGIN PASSWORD '${TRANSPORT_LOGIN}'; GRANT pg_read_all_data TO ${TRANSPORT_LOGIN};`,
       );
     },
     async stop() {
@@ -115,10 +124,11 @@ function postgresBackend(): PrivateBackend {
       if (server === undefined) throw new Error("backend not started");
       const database = await server.createDatabase();
       await database.exec(SESSION_LOG_SQL);
-      const setting = owner === "public" ? database.url : withLogin(database.url, PRIVATE_LOGIN);
+      const setting = owner === "public" ? database.setting : withLogin(database.setting, PRIVATE_LOGIN);
       return {
         setting,
-        readerSetting: withLogin(database.url, READER_LOGIN),
+        readerSetting: withLogin(database.setting, READER_LOGIN),
+        transportReader: { user: TRANSPORT_LOGIN, password: TRANSPORT_LOGIN },
         async sessions() {
           const rows = await database.admin.unsafe("SELECT login, application FROM public.session_log ORDER BY position");
           return rows.map((row) => ({ login: String(row.login), application: String(row.application) }));
@@ -155,7 +165,7 @@ function postgresBackend(): PrivateBackend {
           return rows.filter((row) => row.ended === true).length;
         },
         async read(body, committedHeight = cursorHeight) {
-          const db = openPostgres({ url: database.url, committedHeight: committedHeight ?? noHeight, readConnections: 1 });
+          const db = openPostgres({ connection: connectionOfUrl(database.url), committedHeight: committedHeight ?? noHeight, readConnections: 1 });
           try {
             return await db.read(body);
           } finally {
@@ -183,7 +193,7 @@ function pgliteBackend(): PrivateBackend {
       if (root === undefined) throw new Error("backend not started");
       const directory = join(root, `${owner}-${next++}`);
       return {
-        setting: `pglite:${directory}`,
+        setting: { kind: "pglite", path: directory },
         async read(body, committedHeight = cursorHeight) {
           const db = await openPglite({ dataDir: directory, committedHeight, developmentOptIn: true });
           try {

@@ -57,7 +57,7 @@ describe("umbradb run's ledger worker (task 12.6; MD-1, LG-17)", () => {
     project.write(
       "tasks.config.ts",
       statsConfig(project.builders, {
-        core: runCoreSettings("pglite:memory", "ws://127.0.0.1:9/node"),
+        core: runCoreSettings({ kind: "pglite", memory: true }, "ws://127.0.0.1:9/node"),
         before: ['import { fileTasks } from "./file-tasks.ts";'],
         modules: "[stats, fileTasks]",
       }),

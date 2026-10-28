@@ -6,6 +6,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { backupCommand, EXIT, runProcessCommand } from "../../src/cli/command.js";
 import { openConfiguredDatabase } from "../../src/config/database.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { plainData } from "../../src/config/plain-data.js";
 import { processCoreEntry } from "../../src/config/process.js";
 import { validateConfig } from "../../src/config/validate.js";
@@ -31,12 +32,12 @@ import { committedIn, processOn, processProblems, rowsIn, S } from "./pglite-dir
  * A166 `[CI]` (task 2.2c; CF-4, CF-9, CF-10, BK-1, BK-3; `design.md` §7; owner decision Q163 A): under the development
  * opt-in, a PGlite directory whose parent is missing is created with that parent by what writes the database — the
  * runner's `startProcess` and `umbradb run` (here in this process, and as the command itself in a child process with
- * CF-4's relative `pglite:data/preview`), and `umbradb restore` into its target —, each then committing (block S; the
+ * CF-4's relative path `data/preview`), and `umbradb restore` into its target —, each then committing (block S; the
  * backup's height), while the read-only uses — `umbradb config check --database` and `umbradb backup` — create no
  * directory. Also, at `openConfiguredDatabase`: nothing is created without the opt-in (CF-9: PGlite refuses before
  * anything is created), a restore refused before loading creates nothing, `file://` paths are created as bare ones, a
  * path through a file is refused (`database-error`, `open-failed`, not naming the path) creating nothing, and
- * `pglite:memory` and the browser's file systems create nothing. The committed negative control (a build that never
+ * PGlite in memory and the browser's file systems create nothing. The committed negative control (a build that never
  * creates the parents) is `./pglite-directory.negative-control.test.ts`.
  */
 
@@ -69,7 +70,7 @@ afterAll(async () => {
 let files = 0;
 
 /** A configuration file of a public process on `database` reading the tape node `node`: one `core` entry, from S. */
-function runConfigText(database: string, node: string): string {
+function runConfigText(database: DatabaseParts, node: string): string {
   return [
     `import { coreEntry, defineConfig } from ${JSON.stringify(project.builders)};`,
     `const core = coreEntry({ start: ${S}, config: ${runCoreSettings(database, node)} });`,
@@ -101,7 +102,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
     const tape = await chainNode();
     const directory = join(tmp, "run", "a", "b");
     try {
-      const file = project.write(`run-${++files}.config.ts`, runConfigText(`pglite:${directory}`, tape.url));
+      const file = project.write(`run-${++files}.config.ts`, runConfigText({ kind: "pglite", path: directory }, tape.url));
       const signals = new EventEmitter();
       let handle: ProcessHandle | undefined;
       const run = runProcessCommand({
@@ -126,6 +127,8 @@ describe("A166: what writes a PGlite database creates its directory with any mis
       signals.emit("SIGTERM");
       const { code, stderr } = await result;
       expect(stderr).not.toMatch(/startup refused|processing halted/);
+      // Q165 B with Q167 A: the log names the directory created, as configured.
+      expect(stderr).toContain(`created a new PGlite data directory ${directory} (and 2 missing parent directories)`);
       expect(code).toBe(EXIT.ok);
     } finally {
       await tape.close();
@@ -135,14 +138,14 @@ describe("A166: what writes a PGlite database creates its directory with any mis
   }, PATIENCE_MS * 2);
 
   it(
-    "umbradb run, the command in a child process, creates CF-4's relative pglite:data/preview with data/ in its " +
+    "umbradb run, the command in a child process, creates CF-4's relative path data/preview with data/ in its " +
       "working directory and commits block S",
     async () => {
       const tape = await chainNode();
       const work = join(project.dir, `work-${++files}`);
       mkdirSync(work);
       try {
-        writeFileSync(join(work, "umbradb.config.ts"), runConfigText("pglite:data/preview", tape.url));
+        writeFileSync(join(work, "umbradb.config.ts"), runConfigText({ kind: "pglite", path: "data/preview" }, tape.url));
         const run = runInChild(project, [], work);
         try {
           const port = await run.adminPort(PATIENCE_MS);
@@ -159,6 +162,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
           run.child.kill("SIGTERM");
           expect(await exitWithin(run, PATIENCE_MS)).toBe(EXIT.ok);
           expect(run.stderr()).not.toMatch(/startup refused|processing halted/);
+          expect(run.stderr()).toContain("created a new PGlite data directory data/preview (and 1 missing parent directory)");
         } finally {
           run.child.kill("SIGKILL");
         }
@@ -172,8 +176,8 @@ describe("A166: what writes a PGlite database creates its directory with any mis
   );
 
   it(
-    "umbradb restore into pglite:<tmp>/c/d creates it with <tmp>/c and restores; a restore refused before loading " +
-      "creates nothing",
+    "umbradb restore into <tmp>/c/d creates it with <tmp>/c, says so naming it, and restores; a restore refused " +
+      "before loading creates nothing",
     async () => {
       const { file } = await backupAt(project, PGLITE, BACKUP_HEIGHT, join(tmp, "ticker.backup"));
 
@@ -181,7 +185,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
       const garbage = join(tmp, "garbage.backup");
       writeFileSync(garbage, "-- not a manifest\nSELECT 1;\n");
       const refusedTarget = join(tmp, "x", "y");
-      const refusedConfig = writeTickerConfig(project, { database: `pglite:${refusedTarget}` });
+      const refusedConfig = writeTickerConfig(project, { database: { kind: "pglite", path: refusedTarget } });
       const refused = await restoreRun(project, garbage, refusedConfig, chain(CHAIN_HEAD));
       expect(codeIn(refused.stderr)).toBe("backup-format-unknown");
       expect(refused.code).toBe(EXIT.failed);
@@ -189,10 +193,11 @@ describe("A166: what writes a PGlite database creates its directory with any mis
 
       const target = join(tmp, "c", "d");
       expect(existsSync(join(tmp, "c"))).toBe(false);
-      const config = writeTickerConfig(project, { database: `pglite:${target}` });
+      const config = writeTickerConfig(project, { database: { kind: "pglite", path: target } });
       const restored = await restoreRun(project, file, config, chain(CHAIN_HEAD));
       expect(restored.stderr).toBe("");
       expect(restored.code).toBe(EXIT.ok);
+      expect(restored.stdout).toContain(`created a new PGlite data directory ${target} (and 1 missing parent directory)`);
       expect(restored.stdout).toContain(`height ${BACKUP_HEIGHT}, contents hash`);
       const [row] = await rowsIn(
         target,
@@ -203,8 +208,8 @@ describe("A166: what writes a PGlite database creates its directory with any mis
     PATIENCE_MS * 2,
   );
 
-  it("umbradb config check --database pglite:<tmp>/e/f checks a new database and creates no directory", async () => {
-    const checked = `pglite:${join(tmp, "e", "f")}`;
+  it("umbradb config check --database on a file naming <tmp>/e/f checks a new database and creates no directory", async () => {
+    const checked: DatabaseParts = { kind: "pglite", path: join(tmp, "e", "f") };
     const file = project.write(
       `check-${++files}.config.ts`,
       configText(project.builders, [
@@ -212,14 +217,14 @@ describe("A166: what writes a PGlite database creates its directory with any mis
         "export default defineConfig({ entries: [core] });",
       ]),
     );
-    const result = await inProcess(["config", "check", file, "--database", checked], project.dir);
+    const result = await inProcess(["config", "check", file, "--database"], project.dir);
     expect(result.stdout).toContain("passed — no PGlite database at that directory yet: checked as a new database");
     expect(result.code).toBe(EXIT.ok);
     expect(existsSync(join(tmp, "e"))).toBe(false);
   }, 120_000);
 
-  it("umbradb backup against pglite:<tmp>/g/h refuses, nothing to back up, and creates no directory", async () => {
-    const config = writeTickerConfig(project, { database: `pglite:${join(tmp, "g", "h")}` });
+  it("umbradb backup of <tmp>/g/h refuses, nothing to back up, and creates no directory", async () => {
+    const config = writeTickerConfig(project, { database: { kind: "pglite", path: join(tmp, "g", "h") } });
     const out = join(tmp, "g-h.backup");
     let stderr = "";
     const code = await backupCommand()(["--out", out, "--config", config], {
@@ -242,7 +247,7 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
   const noHeight: CommittedHeight = async () => null;
 
   /** The process's `core` revision for `database`, with `extra` settings (the opt-in unless they say otherwise). */
-  const coreRevision = (database: string, extra: Readonly<Record<string, unknown>> = {}) =>
+  const coreRevision = (database: DatabaseParts, extra: Readonly<Record<string, unknown>> = {}) =>
     processCoreEntry(
       validateConfig({
         config: { data: plainData({ entries: [core(database, 1, { extra })] }) },
@@ -263,7 +268,7 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
   }
 
   it("creates nothing without the development opt-in: PGlite refuses first (CF-9)", async () => {
-    const entry = coreRevision(`pglite:${join(tmp, "n", "o")}`, { developmentOptIn: false });
+    const entry = coreRevision({ kind: "pglite", path: join(tmp, "n", "o") }, { developmentOptIn: false });
     const error = await refusal(() => openConfiguredDatabase(entry, { committedHeight: noHeight }));
     expect(error.code).toBe("development-opt-in-required");
     expect(existsSync(join(tmp, "n"))).toBe(false);
@@ -271,7 +276,9 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
 
   it("creates a file:// directory with its parents, as a bare one", async () => {
     const directory = join(tmp, "p", "q");
-    const db = await openConfiguredDatabase(coreRevision(`pglite:file://${directory}`), { committedHeight: noHeight });
+    const db = await openConfiguredDatabase(coreRevision({ kind: "pglite", path: `file://${directory}` }), {
+      committedHeight: noHeight,
+    });
     try {
       expect(await db.read((read) => read.query("SELECT 1 AS one"))).toEqual([{ one: 1 }]);
     } finally {
@@ -285,7 +292,7 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
     const file = join(tmp, "a-file");
     writeFileSync(file, "x");
     const directory = join(file, "r", "s");
-    const entry = coreRevision(`pglite:${directory}`);
+    const entry = coreRevision({ kind: "pglite", path: directory });
     const error = await refusal(() => openConfiguredDatabase(entry, { committedHeight: noHeight }));
     expect(error.code).toBe("database-error");
     expect(error.details).toEqual({ reason: "open-failed" });
@@ -297,13 +304,19 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
   it("opens an existing directory as it is; creates nothing for pglite:memory or a browser file system", async () => {
     const existing = join(tmp, "existing");
     mkdirSync(existing);
-    const db = await openConfiguredDatabase(coreRevision(`pglite:${existing}`), { committedHeight: noHeight });
+    const lines: string[] = [];
+    const db = await openConfiguredDatabase(coreRevision({ kind: "pglite", path: existing }), {
+      committedHeight: noHeight,
+      log: (line) => lines.push(line),
+    });
     await db.close();
     expect(readdirSync(existing)).toContain("PG_VERSION");
+    // An existing directory is not created: no line says so.
+    expect(lines).toEqual([]);
     // `memory://` and `idb://…` read as relative paths would be `memory:` and `idb:` in the working directory.
-    const memory = await openConfiguredDatabase(coreRevision("pglite:memory"), { committedHeight: noHeight });
+    const memory = await openConfiguredDatabase(coreRevision({ kind: "pglite", memory: true }), { committedHeight: noHeight });
     await memory.close();
-    const idb = coreRevision("pglite:idb://umbradb-2-2c");
+    const idb = coreRevision({ kind: "pglite", path: "idb://umbradb-2-2c" });
     const browser = await refusal(() => openConfiguredDatabase(idb, { committedHeight: noHeight }));
     expect(browser.code).toBe("invalid-configuration");
     expect(existsSync(resolve("memory:"))).toBe(false);

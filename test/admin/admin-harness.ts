@@ -20,6 +20,7 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { type ProcessHandle, startProcess } from "../../src/runner/process.js";
 import { genesisBlock, genesisHex, TEST_LEDGER_TABLE } from "../private/builds.js";
 import { coreSettings, entryOf, testBuild, type TestBuildOptions } from "../runner/process-build.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * The admin endpoints' tests (task 8.1; AE-1–AE-3, AE-6; A62, A64): a process started with its admin endpoints on
@@ -39,13 +40,21 @@ export function adminSource(head: bigint): InMemoryBlockSource {
 }
 
 /** The `core` settings of the tests on `database`, on the test network: `coreSettings`' with `extra` over them. */
-export function adminCoreSettings(database: string, extra: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
+export function adminCoreSettings(database: DatabaseParts, extra: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
   return coreSettings(database, { network: "custom", genesisHash: ADMIN_GENESIS, ledgerTable: TEST_LEDGER_TABLE, ...extra });
+}
+
+/**
+ * How `/config` shows the `database` setting `database` (CF-4, owner decision Q167 A): its parts, the password as
+ * `[redacted]`.
+ */
+export function shownDatabase(database: DatabaseParts): Record<string, unknown> {
+  return "password" in database && database.password !== undefined ? { ...database, password: "[redacted]" } : { ...database };
 }
 
 /** A `core` entry of the tests from `start` (see {@link adminCoreSettings}). */
 export function adminCore(
-  database: string,
+  database: DatabaseParts,
   start = 1,
   rest: { readonly stop?: number; readonly extra?: Readonly<Record<string, unknown>> } = {},
 ) {
@@ -208,7 +217,7 @@ export async function statusWhen(
 /** What {@link startWithAdmin} takes. */
 export interface AdminRunOptions {
   /** The `database` setting. */
-  readonly database: string;
+  readonly database: DatabaseParts;
   readonly user?: readonly ModuleDeclaration[];
   /** More settings of the `core` entry; `listen.admin` is `127.0.0.1:0` unless they give it. */
   readonly extra?: Readonly<Record<string, unknown>>;

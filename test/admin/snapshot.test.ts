@@ -27,6 +27,8 @@ import { statusOf, type ProcessStatus, type StatusFacts } from "../../src/runner
 
 const PASSWORD = "pw-8-1-SECRET";
 const DATABASE = `postgres://indexer:${PASSWORD}@db.example:5432/umbra`;
+/** The same database as the `database` setting's parts (CF-4, owner decision Q167 A). */
+const DATABASE_PARTS = { kind: "postgres", host: "db.example", port: 5432, user: "indexer", password: PASSWORD, name: "umbra" } as const;
 
 /** `status()` from `facts` over a process that is `running` at 3. */
 function status(facts: Partial<StatusFacts> = {}): ProcessStatus {
@@ -60,9 +62,9 @@ const FACTS = {
 /** The build's declarations without modules. */
 const NO_MODULES: DeclarationSet = { backbone: [], core: [], user: [] };
 
-/** A validated configuration of one `core` revision on {@link DATABASE}. */
+/** A validated configuration of one `core` revision on {@link DATABASE_PARTS}. */
 function checked() {
-  const entry = coreEntry({ start: 1, config: { network: "preprod", database: DATABASE, node: "ws://node:9944" } });
+  const entry = coreEntry({ start: 1, config: { network: "preprod", database: DATABASE_PARTS, node: "ws://node:9944" } });
   return validateConfig({ config: { data: { entries: [entry as never] } }, declarations: NO_MODULES as never, side: "public" });
 }
 
@@ -221,8 +223,10 @@ describe("sanitized errors (AE-6: texts from codes and allowlisted fields only)"
     const shown = sanitizedError(reasonOf(error), error, { text } as never);
     expect(shown.details).toEqual({
       reason: "invalid-entries",
-      // The whole database URL is a secret of the configuration: it reads [redacted] as a whole.
-      findings: [{ path: "entries[0].config.livenessTimeoutMs", message: `expected number (${REDACTED})` }],
+      // The database's password is a secret of the configuration (CF-4, Q167 A), and a URL's userinfo is redacted.
+      findings: [
+        { path: "entries[0].config.livenessTimeoutMs", message: `expected number (postgres://${REDACTED}@db.example:5432/umbra)` },
+      ],
     });
     expect(JSON.stringify(shown)).not.toContain(PASSWORD);
     const many = new UmbraError("invalid-configuration", "x", {
@@ -236,11 +240,16 @@ describe("sanitized errors (AE-6: texts from codes and allowlisted fields only)"
 });
 
 describe("the settings as they may be shown (4.2's note (d)), and the early redaction (Q127)", () => {
-  it("a revision of the build's version: secret fields redacted, the others' strings through the redaction", () => {
+  it("a revision of the build's version: secret fields and parts redacted, the others' strings through the redaction", () => {
     const config = checked();
     const [entry] = config.entries;
     const shown = shownSettings(configRedactor(config), entry as never);
-    expect(shown).toMatchObject({ network: "preprod", database: REDACTED, node: REDACTED, listen: { admin: DEFAULT_ADMIN_ADDRESS } });
+    expect(shown).toMatchObject({
+      network: "preprod",
+      database: { ...DATABASE_PARTS, password: REDACTED, ssl: "require" },
+      node: REDACTED,
+      listen: { admin: DEFAULT_ADMIN_ADDRESS },
+    });
     expect(JSON.stringify(shown)).not.toContain(PASSWORD);
   });
 
@@ -252,7 +261,7 @@ describe("the settings as they may be shown (4.2's note (d)), and the early reda
   });
 
   it("earlyRedactor: the configuration's secrets as the validation would read them; without one, URL credentials only", () => {
-    const data = { entries: [{ id: "core", start: 1, version: buildCoreVersion(), config: { database: DATABASE, node: "ws://n" } }] };
+    const data = { entries: [{ id: "core", start: 1, version: buildCoreVersion(), config: { database: DATABASE_PARTS, node: "ws://n" } }] };
     const early = earlyRedactor({ config: { data }, declarations: NO_MODULES as never, side: "public" });
     expect(early.text(`password ${PASSWORD} and ${encodeURIComponent(PASSWORD)}`)).toBe(`password ${REDACTED} and ${REDACTED}`);
     expect(earlyRedactor(undefined).text(`see ${DATABASE}`)).toBe(`see postgres://${REDACTED}@db.example:5432/umbra`);

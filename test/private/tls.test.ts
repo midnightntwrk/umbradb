@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { mutualTlsOptions, startCoreTransport } from "../../src/private/core-transport.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
@@ -129,7 +130,7 @@ describe.each(PRIVATE_BACKENDS)("A121: private processes and a core with tls on 
         instanceId,
         coreTransport: core.transport(),
         ...(tls === undefined ? {} : { tls }),
-        ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as string } : {}),
+        ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
         lines,
       }),
     };

@@ -8,6 +8,8 @@
  * validates it as it would a file.
  */
 
+import type { PgliteMemoryParts, PglitePathParts } from "../../src/config/database-parts.js";
+
 /** What the page knows when it starts a process (see the module comment). */
 export interface BrowserRun {
   /** The node's WebSocket URL: the page's `node` parameter. */
@@ -43,9 +45,14 @@ export interface BrowserConfiguration {
   instances?(run: BrowserRun): readonly PrivateInstance[];
 }
 
-/** The `database` setting of `storage` for the process `name` (`core`, or an instance's id): memory or an OPFS name. */
-export function databaseOf(storage: string, name: string): string {
-  return storage === "memory" ? "pglite:memory" : `pglite:${storage}${name === "core" ? "" : `-${name}`}`;
+/**
+ * The `database` setting of `storage` for the process `name` (`core`, or an instance's id), as parts (CF-4, owner
+ * decision Q167 A): PGlite in memory, or a `path` that names a database in the origin's private file system.
+ */
+export function databaseOf(storage: string, name: string): PgliteMemoryParts | PglitePathParts {
+  return storage === "memory"
+    ? { kind: "pglite", memory: true }
+    : { kind: "pglite", path: `${storage}${name === "core" ? "" : `-${name}`}` };
 }
 
 /** `data` with the development opt-in set on every `core` entry (BR-1: the browser build always sets it). */

@@ -10,6 +10,7 @@ import { markMigration } from "../../src/db/truncate-guard.js";
 import { MIGRATION_MARK } from "../../src/deterministic-postgresql/index.js";
 import { BACKENDS } from "./backends.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
+import { connectionOfUrl } from "./connection.js";
 
 /**
  * Migrations, `core_chain.migrations` and setup after migrations (DB-9; task 2.4), on both backends: A16 — a changed
@@ -667,7 +668,7 @@ describe("a connection lost during a migration (DB-13), on PostgreSQL 18", () =>
 describe("a lost connection during startup (DB-13)", () => {
   it("is connection-lost and retryable, not a migration failure (0.9.5's connection failure)", async () => {
     const db = openPostgres({
-      url: "postgres://nouser:nopass@127.0.0.1:1/nonexistent",
+      connection: connectionOfUrl("postgres://nouser:nopass@127.0.0.1:1/nonexistent"),
       committedHeight: async () => null,
       connectTimeoutSeconds: 2,
     });

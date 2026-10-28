@@ -135,7 +135,7 @@
     },
     "settings": {
       "type": "object",
-      "description": "A revision's settings as they may be shown: each secret field, and each credential in a URL, [redacted]."
+      "description": "A revision's settings as they may be shown: each secret field, each password part of a database setting, and each credential in a URL, [redacted]."
     },
     "packages": {
       "type": "array",

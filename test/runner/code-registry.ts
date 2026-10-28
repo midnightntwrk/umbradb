@@ -327,6 +327,12 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
         "another value stops; a core changed during the start stops it",
     },
   ],
+  "refusal:transport-reader-can-write": [
+    {
+      file: "test/private/transport-reader.test.ts",
+      test: "a login holding INSERT on a public table refuses startup, naming the table",
+    },
+  ],
   "refusal:needs-lockstep-not-listed": [
     {
       file: "test/private/lockstep-refusals.test.ts",

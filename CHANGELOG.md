@@ -30,7 +30,8 @@ UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's API or databases is car
 - **The database API** over PostgreSQL and PGlite: read and write handles, a role and schema per module, per-module
   migrations, the single-writer lock, the durability probe, and the `deterministic_postgresql` rules.
 - **Configuration in TypeScript** (`umbradb.config.ts`): zod settings schemas, a recorded configuration history with
-  future-only revisions, and one version per build.
+  future-only revisions, and one version per build. The database is given as parts with an `ssl` mode, never a
+  connection string, and a core on PostgreSQL reads its transport with a login that may only read.
 - **The ledger:** version selection from the runtime's digest with built-in network tables, the vendored ledger
   packages v8 and v9 (the rc.3 build runtime 2.0 uses and the rc.5 release runtime 2.1 uses) behind one adapter
   interface, the v8 to v9 conversion, the ledger worker and its tasks, the ledger state stored in the database with a

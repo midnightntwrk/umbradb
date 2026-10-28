@@ -1,4 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
+import type { PostgresConnection } from "../../src/db/postgres.js";
+import { connectionOfUrl, partsOfUrl } from "../db/connection.js";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +19,7 @@ import { spawnChild } from "../child-processes.js";
 import type { CliProject } from "../cli/cli-fixtures.js";
 import { startPostgresServer, type PostgresTestServer } from "../db/postgres-server.js";
 import { coreSettings, startProcess } from "../runner/process-build.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * What the backups' tests share (tasks 15.1, 15.2; BK-1 to BK-4, PP-12; `design.md` §9.1).
@@ -95,7 +98,7 @@ export const TICKER_OPTED_OUT = Object.freeze([Object.freeze({ schema: "ticker",
 /** What a configuration file of these tests holds besides `ticker`'s entry. */
 export interface TickerConfig {
   /** The `database` setting. */
-  readonly database: string;
+  readonly database: DatabaseParts;
   /** The core's stop. */
   readonly stop?: number;
   /** More `core` settings (`backupAtStop`, `developmentOptIn`). */
@@ -205,9 +208,29 @@ export async function startTicker(
   };
 }
 
+/** The directory of a PGlite `database` setting (`{ kind: "pglite", path }`); throws for another. */
+export function pathOf(setting: DatabaseParts): string {
+  if (setting.kind !== "pglite" || !("path" in setting)) throw new Error("not a PGlite directory");
+  return setting.path;
+}
+
+/** The connection of a PostgreSQL `database` setting, as `openPostgres` and a backup's target take it. */
+export function connectionOf(setting: DatabaseParts): PostgresConnection {
+  if (setting.kind !== "postgres") throw new Error("not a PostgreSQL database");
+  const { kind: _kind, ...connection } = setting;
+  return connection;
+}
+
+/** A PostgreSQL `database` setting written as a URL, for the tests' own plain driver connections. */
+export function urlOf(setting: DatabaseParts): string {
+  const { host, port, user, password, name } = connectionOf(setting);
+  const login = password === undefined ? user : `${user}:${encodeURIComponent(password)}`;
+  return `postgres://${login}@${host}:${port}/${name}`;
+}
+
 /** One database of a test, by its `database` setting. */
 export interface BackupDatabase {
-  readonly setting: string;
+  readonly setting: DatabaseParts;
   /** Runs `body` on a read through the database API (PGlite: only while no process holds the directory). */
   read<T>(body: (read: ReadHandle) => Promise<T>, committedHeight?: CommittedHeight): Promise<T>;
   /** One statement's rows, through a read. */
@@ -243,14 +266,8 @@ function pgliteText(file: string): string {
 function pgDumpWrapper(container: string): string {
   return [
     "#!/bin/sh",
-    "for arg do",
-    "  shift",
-    '  case "$arg" in',
-    "    --dbname=*) arg=$(printf '%s' \"$arg\" | sed -E 's#@[^/]*/#@127.0.0.1:5432/#') ;;",
-    "  esac",
-    '  set -- "$@" "$arg"',
-    "done",
-    `exec docker exec -i -e PGPASSWORD -e PGAPPNAME ${container} pg_dump "$@"`,
+    // The backup gives the connection as libpq's environment (task 4.5); inside the container the server is local.
+    `exec docker exec -i -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER -e PGDATABASE -e PGPASSWORD -e PGSSLMODE -e PGAPPNAME ${container} pg_dump "$@"`,
     "",
   ].join("\n");
 }
@@ -284,14 +301,14 @@ function postgresBackend(): BackupBackend {
   let tools: string | undefined;
   const of = (url: string): BackupDatabase => {
     const read = async <T>(body: (read: ReadHandle) => Promise<T>, committedHeight: CommittedHeight = cursorHeight) => {
-      const db = openPostgres({ url, committedHeight, readConnections: 1 });
+      const db = openPostgres({ connection: connectionOfUrl(url), committedHeight, readConnections: 1 });
       try {
         return await db.read(body);
       } finally {
         await db.close();
       }
     };
-    return { setting: url, read, query: (sql) => read((r) => r.query(sql)) };
+    return { setting: partsOfUrl(url), read, query: (sql) => read((r) => r.query(sql)) };
   };
   return {
     name: "PostgreSQL 18",
@@ -336,7 +353,7 @@ function pgliteBackend(): BackupBackend {
         await db.close();
       }
     };
-    return { setting: `pglite:${dir}`, read, query: (sql) => read((r) => r.query(sql)) };
+    return { setting: { kind: "pglite", path: dir }, read, query: (sql) => read((r) => r.query(sql)) };
   };
   return {
     name: "PGlite 0.5.10",

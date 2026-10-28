@@ -8,6 +8,7 @@ import type { BackupSignals, ProcessHandle } from "../../src/runner/process.js";
 import type { CliProject } from "../cli/cli-fixtures.js";
 import { coreSettings, startProcess } from "../runner/process-build.js";
 import { type BackupBackend, hashOf, PATIENCE_MS } from "./backup-fixtures.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * What A163's tests share (task 15.1a; BK-1 as amended, owner decision Q152 B; `design.md` §9.1): a running process on
@@ -111,7 +112,7 @@ export function recorderModule(builders: string): string {
 /** What a configuration file of A163's tests holds. */
 export interface PausableConfig {
   /** The `database` setting. */
-  readonly database: string;
+  readonly database: DatabaseParts;
   /** The core's stop. */
   readonly stop?: number;
   /** S, and the modules' start; 1 unless given. */

@@ -4,6 +4,7 @@ import type { ProcessInput } from "../../src/runner/process.js";
 import { type PrivateBackend, READER_LOGIN, type TestDatabase } from "./backends.js";
 import { launchPrivate, launchPublicCore, type PrivateProcess, type PublicCore } from "./builds.js";
 import { RetargetProxy } from "./relays.js";
+import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
 
 /**
  * A162 (task 14.1b; PP-14, RN-16, PP-4, owner decision Q147): a private process halts when the public core restarts
@@ -61,12 +62,9 @@ export const SECRETS = Object.freeze({
   second: Object.freeze({ node: "second-node-secret", database: "second-db-secret" }),
 });
 
-/** `url` with the login `login` and `password`. */
-function asLogin(url: string, login: string, password: string): string {
-  const next = new URL(url);
-  next.username = login;
-  next.password = password;
-  return next.toString();
+/** The PostgreSQL parts `setting` with the login `login` and `password`. */
+function asLogin(setting: DatabaseParts, login: string, password: string): DatabaseParts {
+  return { ...(setting as PostgresParts), user: login, password };
 }
 
 /** The `X-Umbra-Config-Hash` of one module API answer, and where it was read. */
@@ -202,7 +200,7 @@ export async function a162Run(backend: PrivateBackend, options: A162Options): Pr
         database: privateDb.setting,
         instanceId: "watcher",
         ...(options.transport ? { coreTransport: proxy.address } : {}),
-        ...(postgres ? { publicDatabase: publicDb.readerSetting as string } : {}),
+        ...(postgres ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
         extra: { backoffCeilingMs: 1_000, listen: { api: "127.0.0.1:0" } },
         ...(options.ignore === true ? { intake: { configHash: "ignore" as const } } : {}),
       });

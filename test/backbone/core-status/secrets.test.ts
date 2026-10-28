@@ -6,12 +6,13 @@ import { adminCore, type AdminRun, mainThreadAdmin, observe, startWithAdmin, sta
 import { SECRET_FORMS, SECRET_NODE, SECRET_TEXT, secretDatabase, secretProblems } from "../../admin/secrets.js";
 import { PROCESS_BACKENDS } from "../../runner/process-backends.js";
 import { entryOf, loggingModule } from "../../runner/process-build.js";
+import type { DatabaseParts } from "../../../src/config/database-parts.js";
 
 /**
  * A67 (task 8.3; AE-6): a halt caused by an error whose message contains a secret shows the error code, height, module
  * and point, and the secret appears nowhere in the response — through the process on PostgreSQL 18 and PGlite. The
  * secret (`test/admin/secrets.ts`) is a real secret of the configuration, in each of its six forms: the `node` URL's
- * password (a secret field, CF-4), a user module's `secret` setting, and on PostgreSQL the `database` URL's password (a
+ * password (a secret field, CF-4), a user module's `secret` setting, and on PostgreSQL the `database` parts' password (a
  * login role of the test's own). The callback that halts throws a message holding every form; the full bodies of the
  * four endpoints and every captured log line are searched for each, and the halt's log line shows the redaction.
  *
@@ -35,7 +36,7 @@ function failing(): ModuleDeclaration {
 }
 
 /** A process on `database` with the secret in its `node` and in `f`'s `apiKey`, `f` halting at 2. */
-function halting(database: string, starter?: Parameters<typeof startWithAdmin>[0]["starter"]): AdminRun {
+function halting(database: DatabaseParts, starter?: Parameters<typeof startWithAdmin>[0]["starter"]): AdminRun {
   const f = failing();
   return startWithAdmin({
     database,
@@ -78,7 +79,7 @@ describe.each(PROCESS_BACKENDS)("A67: a halt whose error holds a secret, on $nam
     // The halt was logged, its message through the configuration's redaction.
     const halt = run.lines.find((line) => line.startsWith("processing halted (callback-error)"));
     expect(halt).toContain("[redacted]");
-    if (backend.kind === "postgres") expect(database).toContain(SECRET_FORMS[1]);
+    if (backend.kind === "postgres") expect((database as { password?: string }).password).toBe(SECRET_FORMS[0]);
     await run.handle.stop();
   }, 120_000);
 

@@ -12,6 +12,7 @@ import type { CliProject } from "../cli/cli-fixtures.js";
 import { genesisHex, type PublicCore, startPublicCore, TEST_LEDGER_TABLE } from "../private/builds.js";
 import { startProcess } from "../runner/process-build.js";
 import { type BackupBackend, type BackupDatabase, PATIENCE_MS } from "./backup-fixtures.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * What the restores of a private process's backup share (task 15.2a; BK-3, BK-4, PP-2, PP-12, owner decision Q153;
@@ -19,7 +20,7 @@ import { type BackupBackend, type BackupDatabase, PATIENCE_MS } from "./backup-f
  *
  * **The public side** is a public core of `../private/builds.ts` (`startPublicCore`: the in-memory chain, the custom
  * network {@link genesisHex}(0xa1) unless another is given), on a database of the backend. A private process reads it
- * as in production: on PostgreSQL directly, its `publicDatabase` the public database's URL; on PGlite, which only the
+ * as in production: on PostgreSQL directly, its `publicDatabase` the public database's parts; on PGlite, which only the
  * core opens, through the core's process transport (`coreTransport`, the core's `listen.transport`).
  *
  * **A private process** is started from a configuration file of a command project, as `umbradb run` starts one
@@ -69,13 +70,13 @@ export function pmModule(builders: string): string {
   ].join("\n");
 }
 
-/** Where a private process reads its public database: a PostgreSQL URL (`publicDatabase`) or the core's transport. */
-export type PublicSetting = { readonly publicDatabase: string } | { readonly coreTransport: string };
+/** Where a private process reads its public database: PostgreSQL's parts (`publicDatabase`) or the core's transport. */
+export type PublicSetting = { readonly publicDatabase: DatabaseParts } | { readonly coreTransport: string };
 
 /** What a private configuration file of these tests holds. */
 export interface PrivateConfig {
   /** The private database's `database` setting. */
-  readonly database: string;
+  readonly database: DatabaseParts;
   /** S of the private process (its `core` entry and `pm`). */
   readonly start: number;
   readonly public: PublicSetting;

@@ -52,7 +52,15 @@ describe("configurationRefusalLines", () => {
             coreEntry({
               start: 1,
               config: {
-                ...coreSettings(`postgres://indexer:${PASSWORD}@127.0.0.1:9/umbra`),
+                ...coreSettings({
+                  kind: "postgres",
+                  host: "127.0.0.1",
+                  port: 9,
+                  user: "indexer",
+                  password: PASSWORD,
+                  name: "umbra",
+                  ssl: "disable",
+                }),
                 livenessTimeoutMs: "30s",
                 apiReadTimeoutMs: 0,
               } as never,

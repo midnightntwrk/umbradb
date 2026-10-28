@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import {
   chmodSync,
   cpSync,
@@ -27,6 +28,7 @@ import {
   type BackupBackend,
   manifestOf,
   PATIENCE_MS,
+  pathOf,
   startTicker,
   type TickerProcess,
   tickerModule,
@@ -165,12 +167,12 @@ async function syncedTo(config: string, stop: bigint): Promise<void> {
  * directory, which this process never opened — it holds the writer lock of every directory it opened until it ends
  * (`src/db/pglite-lock.ts`), so the command in a child would refuse `writer-lock-held`; on PostgreSQL, `setting`.
  */
-function forAnotherProcess(backend: BackupBackend, setting: string): string {
+function forAnotherProcess(backend: BackupBackend, setting: DatabaseParts): DatabaseParts {
   if (backend.kind !== "pglite") return setting;
-  const dir = setting.slice("pglite:".length);
+  const dir = pathOf(setting);
   const copy = `${dir}-copy`;
   cpSync(dir, copy, { recursive: true });
-  return `pglite:${copy}`;
+  return { kind: "pglite", path: copy };
 }
 
 describe("A174: the observer (a umask of 000)", () => {

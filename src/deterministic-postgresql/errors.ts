@@ -210,6 +210,12 @@ export const ERROR_CODES = [
    * transport — the public configuration history read again at a reconnection hashes to another. Not retryable.
    */
   "public-config-changed",
+  /**
+   * A public process's startup refusal of a `core.transportReader` login that could write (CF-4, PP-4, owner decision
+   * Q175 A; task 4.5, `src/private/transport-reader.ts`): a superuser, `CREATEROLE`, `CREATEDB`, `BYPASSRLS`, a member of
+   * `database`'s login, or a privilege beyond reading on a public schema or table; `details { user, found }`.
+   */
+  "transport-reader-can-write",
   // The backup's refusals (BK-1, PP-12; `src/backup/`, task 15.1): the command exits 1 and writes no file.
   /**
    * The tool a backup needs is missing or of another major version than 18: the PostgreSQL 18 client's `pg_dump` for a

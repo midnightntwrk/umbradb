@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { privateCursorHeight, type PrivateIntakeOptions } from "../../src/backbone/core-private-source/index.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -172,7 +173,7 @@ export async function a165Run(backend: PrivateBackend, options: A165Options): Pr
     database: database.setting,
     instanceId: "acceptor",
     ...(relay === null ? {} : { coreTransport: relay.address }),
-    ...(postgres ? { publicDatabase: publicDb.readerSetting as string } : {}),
+    ...(postgres ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
     extra: { backoffCeilingMs: 1_000 },
     ...(options.acceptance === undefined ? {} : { intake: { acceptance: options.acceptance } }),
     ...rest,

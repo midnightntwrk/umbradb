@@ -8,7 +8,7 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { BlockRef, BlockSource } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { ProcessHandle, ProcessStatus } from "../../src/runner/process.js";
-import { cursorIn, pairs, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
+import { createdDirectory, cursorIn, pairs, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
@@ -65,7 +65,7 @@ function start(
     declarations: build.declarations,
     config: { data: { entries: [core(db.setting, 1, { extra }), ...user.map((part) => entryOf(part, 1))] } },
     source,
-    log: (line) => lines.push(line),
+    log: (line) => createdDirectory(line) || lines.push(line),
   });
   return { handle, lines };
 }
@@ -243,7 +243,7 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
       declarations: testBuild([]).declarations,
       config: { data: { entries: [core(db.setting, 1, { extra: { backoffCeilingMs: CEILING } })] } },
       source: flaky,
-      log: (line) => lines.push(line),
+      log: (line) => createdDirectory(line) || lines.push(line),
       nodeClient,
     });
     try {

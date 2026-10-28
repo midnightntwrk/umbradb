@@ -1,10 +1,12 @@
 import { connect, createServer, type Server, type Socket } from "node:net";
+import type { PostgresParts } from "../../src/config/database-parts.js";
 
 /**
  * A TCP proxy between a process and its PostgreSQL server that terminates the writer's backend at a `COMMIT` (task
  * 10.4; IN-11, A86): "the backend is terminated after the server committed h but before the client saw the result",
- * and "… before the server got the `COMMIT`", made deterministic. The process's `database` URL names the proxy
- * ({@link CommitProxy.url}); every connection it opens — the writer's session and the read pool's — goes through it.
+ * and "… before the server got the `COMMIT`", made deterministic. The process's `database` parts name the proxy
+ * ({@link CommitProxy.setting}); every connection it opens — the writer's session and the read pool's — goes
+ * through it.
  *
  * {@link CommitProxy.arm} arms it for the next `COMMIT` a client sends — the simple-protocol `Query` message
  * `Q, length 11, "COMMIT\0"`, which is how the database API ends every transaction (`src/db/postgres.ts`); reads end
@@ -79,10 +81,9 @@ export class CommitProxy {
     this.#upstream = upstream;
   }
 
-  /** Starts a proxy to the PostgreSQL server of `url` (a `postgres://` URL). */
-  static async start(url: string): Promise<CommitProxy> {
-    const parsed = new URL(url);
-    const upstream = { host: parsed.hostname, port: Number(parsed.port) };
+  /** Starts a proxy to the PostgreSQL server of `database`, the `database` setting's parts (CF-4, Q167 A). */
+  static async start(database: PostgresParts): Promise<CommitProxy> {
+    const upstream = { host: database.host, port: database.port };
     const server = createServer();
     const proxy = new CommitProxy(server, upstream);
     server.on("connection", (client) => void proxy.#accept(client));
@@ -102,14 +103,11 @@ export class CommitProxy {
     return proxy;
   }
 
-  /** `url` with its host and port the proxy's. */
-  url(url: string): string {
-    const parsed = new URL(url);
+  /** `database` with its host and port the proxy's. */
+  setting(database: PostgresParts): PostgresParts {
     const address = this.#server.address();
     if (address === null || typeof address === "string") throw new Error("the commit proxy is not listening");
-    parsed.hostname = "127.0.0.1";
-    parsed.port = String(address.port);
-    return parsed.toString();
+    return { ...database, host: "127.0.0.1", port: address.port };
   }
 
   /** The faults made so far, in order: each one's kind (`"before"`, `"after"`), or `"<kind> failed: <why>"`. */

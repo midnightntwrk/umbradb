@@ -24,7 +24,8 @@ import { type LedgerScenario, ledgerScenario, recordedGenesis, withNodeRoot } fr
 import { systemTransaction, zswapOutputTransaction, RAW } from "../ledger/adapter-fixtures.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import { core, entryOf } from "../runner/process-build.js";
-import type { BackupBackend, BackupDatabase } from "./backup-fixtures.js";
+import { type BackupBackend, type BackupDatabase, connectionOf, pathOf } from "./backup-fixtures.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * A backup with `core-ledger-state` in its history, and its restore checked against a node (task 15.2; BK-3's
@@ -98,7 +99,7 @@ export interface RestoreBuild {
 }
 
 /** The configuration and build the ingest's process ran with, its database `database` (secret, so not recorded). */
-function restoreConfig(database: string, records: readonly TapeRecord[], build?: RestoreBuild) {
+function restoreConfig(database: DatabaseParts, records: readonly TapeRecord[], build?: RestoreBuild) {
   const coreModules = build?.core ?? LEDGER_CORE;
   const declarations = validateDeclarations(chainDeclarations([watcher(watched())], { core: coreModules }));
   const genesisHash = genesisOf(records) as string;
@@ -133,13 +134,13 @@ export async function restoreLedger(
   const client = new NodeClient({ url: node.url });
   const source = chain ?? nodeSourceOf({ settings: { prefetchWindow: 64, tipCap: 600 } }, { nodeClient: client });
   const { config, declarations } = restoreConfig(target.setting, backup.scenario.records, build);
-  const dataDir = target.setting.slice("pglite:".length);
+  const dataDir = backend.kind === "pglite" ? pathOf(target.setting) : "";
   const input: RestoreInput = {
     file: backup.file,
     target: backend.kind === "postgres" ? { backend: "postgres" } : { backend: "pglite", exists: false },
     open: async () =>
       backend.kind === "postgres"
-        ? openPostgres({ url: target.setting, committedHeight: cursorHeight })
+        ? openPostgres({ connection: connectionOf(target.setting), committedHeight: cursorHeight })
         : openPglite({ dataDir, committedHeight: cursorHeight, developmentOptIn: true }),
     config,
     declarations,

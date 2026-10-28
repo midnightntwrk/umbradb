@@ -1,4 +1,5 @@
 import type { ChildProcess } from "node:child_process";
+import type { PostgresParts } from "../../src/config/database-parts.js";
 import { once } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -138,7 +139,10 @@ describe("A76 (IN-1): the database holds finalized blocks only", () => {
   it("a source that writes a best block to the database fails A76 (its committed negative control, PostgreSQL)", async () => {
     const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "postgres") as ProcessBackend;
     const db = await backend.database();
-    await killedWhileQueued(db, db.setting);
+    // The control's own driver connection takes a URL: the database's parts written as one.
+    const parts = db.setting as PostgresParts;
+    const url = `postgres://${parts.user}:${encodeURIComponent(parts.password ?? "")}@${parts.host}:${parts.port}/${parts.name}`;
+    await killedWhileQueued(db, url);
     expect(await heightsIn(db)).toEqual([1, 2, 3]);
     expect(await a76Problems(db, F)).toEqual(["watch.rows holds 20 rows above the finalized head 3"]);
   }, PATIENCE_MS * 2);

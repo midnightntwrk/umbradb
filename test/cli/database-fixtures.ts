@@ -1,4 +1,5 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
@@ -32,8 +33,8 @@ export interface Snapshot {
 
 /** A database the command checks. */
 export interface CheckTarget {
-  /** The `--database` value. */
-  readonly url: string;
+  /** The database's parts, as a configuration file's `database` names it (Q167 A: `--database` takes no value). */
+  readonly database: DatabaseParts;
   /** Records the history of `entries` on a new database (cursor null), then commits blocks 0 to `cursor` (none: null). */
   setup(entries: readonly unknown[], cursor: bigint | null): Promise<void>;
   snapshot(): Promise<Snapshot>;
@@ -43,7 +44,7 @@ export interface CheckTarget {
 
 export interface CliBackend {
   readonly name: string;
-  /** The password in {@link CheckTarget.url}, which no output may hold; null for PGlite. */
+  /** The password in {@link CheckTarget.database}, which no output may hold; null for PGlite. */
   readonly password: string | null;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -112,12 +113,9 @@ export function postgresCliBackend(): CliBackend {
     async target() {
       if (server === undefined) throw new Error("backend not started");
       const database: PostgresTestDatabase = await server.createDatabase();
-      const url = new URL(database.url);
-      url.username = "checker";
-      url.password = password;
       const open = () => database.open({ committedHeight: cursorHeight });
       return {
-        url: url.toString(),
+        database: { ...database.setting, user: "checker", password },
         async setup(entries, cursor) {
           const db = open();
           try {
@@ -168,7 +166,7 @@ export function pgliteCliBackend(): CliBackend {
         }
       };
       return {
-        url: `pglite:${dataDir}`,
+        database: { kind: "pglite", path: dataDir },
         setup: (entries, cursor) => withDatabase((db) => record(db, entries, cursor)),
         async snapshot() {
           if (!existsSync(join(dataDir, "PG_VERSION"))) return { exists: false, tables: {}, migrations: [], config: [] };

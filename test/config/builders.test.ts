@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import type { DatabasePartsInput } from "../../src/config/database-parts.js";
 import { join } from "node:path";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
@@ -72,7 +73,10 @@ describe("A27: a misspelled core field is a type error (CF-2)", () => {
   });
 
   it("control: the same entries with the fields spelled right compile", () => {
-    const right = coreEntry({ start: 0, config: { ...CORE_SETTINGS, database: "postgres://db", retainStates: 1000 } });
+    const right = coreEntry({
+      start: 0,
+      config: { ...CORE_SETTINGS, database: { kind: "postgres", host: "db", user: "u", name: "n" }, retainStates: 1000 },
+    });
     expectTypeOf(right.config).toEqualTypeOf<CoreSettings>();
     expectTypeOf<Accepts<typeof coreEntry, CoreSettingsGiven>>().toEqualTypeOf<true>();
     expectTypeOf<Accepts<typeof coreEntry, Omit<CoreSettingsGiven, "database"> & { databse: string }>>().toEqualTypeOf<
@@ -188,7 +192,7 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
       coreEntry({
         start: 0,
         // @ts-expect-error CF-4: `lockstepInstances` is the public core's, and this entry has a private `instanceId`.
-        config: { network: "preprod", database: "pglite:memory", instanceId: "wallet-1", lockstepInstances: [] },
+        config: { network: "preprod", database: { kind: "pglite", memory: true }, instanceId: "wallet-1", lockstepInstances: [] },
       });
     expectTypeOf(mixedPublic).toBeFunction();
     expectTypeOf(mixedPrivate).toBeFunction();
@@ -196,17 +200,20 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
 
   it("requires a public process's node or a private one's instanceId, and refuses the other's fields built first", () => {
     // Types, not literals: an object built first gets no excess-property check, so only the types refuse these.
-    type Minimal = { network: "preprod"; database: string };
+    type Minimal = { network: "preprod"; database: DatabasePartsInput };
     expectTypeOf<Accepts<typeof coreEntry, Minimal & { node: string }>>().toEqualTypeOf<true>();
     expectTypeOf<Accepts<typeof coreEntry, Minimal & { instanceId: string }>>().toEqualTypeOf<true>();
     expectTypeOf<Accepts<typeof coreEntry, Minimal>>().toEqualTypeOf<false>();
     type Public = Minimal & { node: string };
     expectTypeOf<Accepts<typeof coreEntry, Public & { instanceId: string }>>().toEqualTypeOf<false>();
-    expectTypeOf<Accepts<typeof coreEntry, Public & { publicDatabase: string }>>().toEqualTypeOf<false>();
+    expectTypeOf<Accepts<typeof coreEntry, Public & { publicDatabase: DatabasePartsInput }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Public & { coreTransport: string }>>().toEqualTypeOf<false>();
     type Private = Minimal & { instanceId: string };
     expectTypeOf<Accepts<typeof coreEntry, Private & { node: string }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Private & { lockstepInstances: string[] }>>().toEqualTypeOf<false>();
+    expectTypeOf<Accepts<typeof coreEntry, Private & { transportReader: { user: string } }>>().toEqualTypeOf<false>();
+    // Q167 A: a connection string is no database setting.
+    expectTypeOf<Accepts<typeof coreEntry, { network: "preprod"; database: string; node: string }>>().toEqualTypeOf<false>();
     // The negative control: the loose builder accepts each of them.
     expectTypeOf<Accepts<typeof loose, Minimal>>().toEqualTypeOf<true>();
     expectTypeOf<Accepts<typeof loose, Public & { instanceId: string }>>().toEqualTypeOf<true>();
@@ -226,9 +233,10 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
         ledgerSources: { v8: "vendored", v9: "released" },
         sweep: "on",
         retainStates: 0,
-        database: "postgres://indexer@db/umbradb",
+        database: { kind: "postgres", host: "db", port: 5432, user: "indexer", password: "p", name: "umbradb", ssl: "require" },
         node: "ws://127.0.0.1:9944",
         listen: { api: "0.0.0.0:8080", admin: "0.0.0.0:8081", transport: "0.0.0.0:8082" },
+        transportReader: { user: "umbradb_transport", password: "r" },
         tipCap: 600,
         prefetchWindow: 64,
         backoffCeilingMs: 30_000,
@@ -248,9 +256,9 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
       start: 0,
       config: {
         network: "preprod",
-        database: "pglite:/var/lib/umbradb/wallet",
+        database: { kind: "pglite", path: "/var/lib/umbradb/wallet" },
         instanceId: "wallet-1",
-        publicDatabase: "postgres://reader@db/umbradb",
+        publicDatabase: { kind: "postgres", host: "db", user: "reader", name: "umbradb", ssl: "verify-full" },
         coreTransport: "core.internal:8082",
         developmentOptIn: true,
       },

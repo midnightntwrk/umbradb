@@ -1,6 +1,7 @@
 /**
- * Reading a database for `umbradb config check --database <url>` (`openspec/changes/core-arch/specs/configuration/
- * spec.md` CF-10; `design.md` §7; task 2.5's note (c), task 4.3's note (a)): the cursor and the rows of
+ * Reading a database for `umbradb config check --database` (`openspec/changes/core-arch/specs/configuration/spec.md`
+ * CF-10; `design.md` §7; task 2.5's note (c), task 4.3's note (a)) — the database the file's `core` revision configures
+ * (owner decision Q167 A, task 4.5: the flag takes no value) —: the cursor and the rows of
  * `core_chain.config`, read read-only — no migration, no write, no writer lock — in one read, so the two are of one
  * committed height.
  *
@@ -16,8 +17,8 @@
  *   reading and closing the directory change PostgreSQL's own files in it (probed on 0.5.10: hint bits on the pages
  *   read, the relation cache's init files, `pg_control`, the write-ahead log), as any read and restart does on
  *   PostgreSQL, but no statement writes a row, a table or a migration — the read is the same read-only transaction. A
- *   relative directory is read from the working directory. `pglite:memory` is refused by the command (an in-memory
- *   database exists only inside its own process).
+ *   relative directory is read from the working directory. A PGlite database in memory is refused by the command (it
+ *   exists only inside its own process).
  *
  * The cursor is `core-block-commit`'s (`core_block_commit.blocks`, task 5.2; task 10.2 completes the table), read as
  * the database API's committed height; the rows by `readHistory` (none before `core_chain.config` exists).
@@ -28,6 +29,7 @@ import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js
 import { readHistory } from "../backbone/core-chain/history.js";
 import type { HistoryRow } from "../config/history.js";
 import { databaseTarget } from "../config/database.js";
+import type { DatabaseParts } from "../config/database-parts.js";
 import type { Database } from "../db/api.js";
 import { pgliteNeedsDevelopmentOptIn } from "../db/durability-probe.js";
 import { openPglite } from "../db/pglite.js";
@@ -52,11 +54,11 @@ export interface ReadDatabaseOptions {
 /** The file whose presence tells that a PGlite directory holds a database (PGlite's own test before its `initdb`). */
 const PGLITE_DATABASE_MARK = "PG_VERSION";
 
-/** Opens the database `url` names for reading only, or tells that no PGlite database is there yet. */
-async function open(url: string, options: ReadDatabaseOptions): Promise<Database | null> {
-  const target = databaseTarget(url);
+/** Opens the database of `database` for reading only, or tells that no PGlite database is there yet. */
+async function open(database: DatabaseParts, options: ReadDatabaseOptions): Promise<Database | null> {
+  const target = databaseTarget(database);
   if (target.backend === "postgres") {
-    return openPostgres({ url: target.url, committedHeight: cursorHeight, readConnections: 1 });
+    return openPostgres({ connection: target.connection, committedHeight: cursorHeight, readConnections: 1 });
   }
   if (!options.developmentOptIn) throw pgliteNeedsDevelopmentOptIn();
   const dataDir = resolve(options.cwd, target.dataDir);
@@ -65,12 +67,12 @@ async function open(url: string, options: ReadDatabaseOptions): Promise<Database
 }
 
 /**
- * Reads the cursor and the history of the database `url` names (see the module comment), read-only, and closes it.
+ * Reads the cursor and the history of the database of `database` (see the module comment), read-only, and closes it.
  * Rejects with the backends' refusals and failures (`development-opt-in-required`, `writer-lock-held`,
  * `connection-lost`, `database-error`).
  */
-export async function readDatabaseState(url: string, options: ReadDatabaseOptions): Promise<DatabaseState> {
-  const db = await open(url, options);
+export async function readDatabaseState(database: DatabaseParts, options: ReadDatabaseOptions): Promise<DatabaseState> {
+  const db = await open(database, options);
   if (db === null) return Object.freeze({ kind: "absent" });
   try {
     return await db.read(async (read) =>

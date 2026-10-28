@@ -206,9 +206,10 @@ describe("the browser build's node:path (POSIX, from /)", () => {
 
 describe("the browser build's database, lock and configuration", () => {
   it("keeps a database in memory or under an OPFS name, never PostgreSQL, under one Web Lock per OPFS database", () => {
-    expect(databaseTarget("pglite:memory")).toEqual({ backend: "pglite", dataDir: "memory://" });
-    expect(databaseTarget("pglite:a129")).toEqual({ backend: "pglite", dataDir: "opfs-ahp://a129" });
-    expect(() => databaseTarget("postgres://u@h/db")).toThrow(UmbraError);
+    expect(databaseTarget({ kind: "pglite", memory: true })).toEqual({ backend: "pglite", dataDir: "memory://" });
+    expect(databaseTarget({ kind: "pglite", path: "a129" })).toEqual({ backend: "pglite", dataDir: "opfs-ahp://a129" });
+    const postgres = { kind: "postgres", host: "h", port: 5432, user: "u", name: "db", ssl: "require" } as const;
+    expect(() => databaseTarget(postgres)).toThrow(UmbraError);
     expect(pgliteLockFile("memory://")).toBeUndefined();
     expect(pgliteLockFile("")).toBeUndefined();
     expect(pgliteLockFile("opfs-ahp://a129")).toBe(`${WEB_LOCK_PREFIX}a129`);
@@ -216,10 +217,10 @@ describe("the browser build's database, lock and configuration", () => {
     for (const refused of ["/tmp/db", "file:///tmp/db", "idb://x", "opfs-ahp://", "opfs-ahp://a/b", "opfs-ahp://.x"]) {
       expect(() => pgliteLockFile(refused), refused).toThrow(expect.objectContaining({ code: "invalid-configuration" }));
     }
-    expect(databaseOf("memory", "core")).toBe("pglite:memory");
-    expect(databaseOf("memory", "p1")).toBe("pglite:memory");
-    expect(databaseOf("a129", "core")).toBe("pglite:a129");
-    expect(databaseOf("a129", "p1")).toBe("pglite:a129-p1");
+    expect(databaseOf("memory", "core")).toEqual({ kind: "pglite", memory: true });
+    expect(databaseOf("memory", "p1")).toEqual({ kind: "pglite", memory: true });
+    expect(databaseOf("a129", "core")).toEqual({ kind: "pglite", path: "a129" });
+    expect(databaseOf("a129", "p1")).toEqual({ kind: "pglite", path: "a129-p1" });
   });
 
   it("sets the development opt-in on every core entry and nothing else (BR-1)", () => {

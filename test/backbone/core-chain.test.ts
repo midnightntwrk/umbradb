@@ -446,7 +446,7 @@ const LEDGER_TABLE: LedgerTable = ledgerTableOf("preprod", undefined);
 
 /** The configuration of the chain's tests: a `core` entry from each of `starts` (S is the lowest). */
 function configOf(declarations: DeclarationSet<ModuleDeclaration>, starts: readonly bigint[] = [S]): CheckedConfig {
-  const entries = starts.map((start) => core("pglite:memory", Number(start)));
+  const entries = starts.map((start) => core({ kind: "pglite", memory: true }, Number(start)));
   return validateConfig({ config: { data: plainData({ entries }) }, declarations, side: "public" });
 }
 

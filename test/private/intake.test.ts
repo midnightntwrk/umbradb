@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { privateCursorHeight } from "../../src/backbone/core-private-source/index.js";
 import { inMemoryBlock } from "../../src/runner/in-memory-source.js";
@@ -79,7 +80,7 @@ function readProblems(seen: readonly PrivateSeen[]): string[] {
 /** A private start's options against `core`'s public database `db`. */
 function against(backend: PrivateBackend, db: TestDatabase, core: PublicCore, rest: PrivateOptions): PrivateOptions {
   return backend.kind === "postgres"
-    ? { ...rest, publicDatabase: db.readerSetting as string }
+    ? { ...rest, publicDatabase: db.readerSetting as DatabaseParts }
     : { ...rest, direct: () => core.db() };
 }
 

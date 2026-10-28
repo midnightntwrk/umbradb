@@ -77,10 +77,10 @@ async function refusal(run: () => Promise<unknown>): Promise<UmbraError> {
 }
 
 describe("A34: PGlite refuses without developmentOptIn, through a configuration file (CF-9)", () => {
-  it("refuses pglite:<directory> naming PGlite and the opt-in, creating nothing; opens it with the opt-in", async () => {
+  it("refuses a PGlite path naming PGlite and the opt-in, creating nothing; opens it with the opt-in", async () => {
     const dataDir = join(directory, "pglite-data");
     const coreOf = (optIn: string) =>
-      `coreEntry({ start: 0, config: { ...settings, database: ${JSON.stringify(`pglite:${dataDir}`)}${optIn} } })`;
+      `coreEntry({ start: 0, config: { ...settings, database: ${JSON.stringify({ kind: "pglite", path: dataDir })}${optIn} } })`;
     const declarations = build([]);
     const without = processCoreEntry(validateConfig({ config: await load(coreOf("")), declarations, side: "public" }));
     const error = await refusal(() => openConfiguredDatabase(without, { committedHeight: noHeight }));
@@ -100,29 +100,31 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
     expect(existsSync(dataDir)).toBe(true);
   });
 
-  it("refuses pglite:memory (CF-9's scenario), and takes the opt-in of the latest core revision (Q102, option A)", async () => {
+  it("refuses PGlite in memory (CF-9's scenario), and takes the opt-in of the latest core revision (Q102, option A)", async () => {
     const declarations = build([]);
     const process = async (entries: string) =>
       processCoreEntry(validateConfig({ config: await load(entries), declarations, side: "public" }));
     const earlierOnly = await process(
-      'coreEntry({ start: 0, config: { ...settings, database: "pglite:memory", developmentOptIn: true } }), ' +
-        'coreEntry({ start: 10, config: { ...settings, database: "pglite:memory" } })',
+      'coreEntry({ start: 0, config: { ...settings, database: { kind: "pglite", memory: true }, developmentOptIn: true } }), ' +
+        'coreEntry({ start: 10, config: { ...settings, database: { kind: "pglite", memory: true } } })',
     );
     expect((await refusal(() => openConfiguredDatabase(earlierOnly, { committedHeight: noHeight }))).details).toEqual({ feature: "pglite" });
     const latest = await process(
-      'coreEntry({ start: 0, config: { ...settings, database: "pglite:memory" } }), ' +
-        'coreEntry({ start: 10, config: { ...settings, database: "pglite:memory", developmentOptIn: true } })',
+      'coreEntry({ start: 0, config: { ...settings, database: { kind: "pglite", memory: true } } }), ' +
+        'coreEntry({ start: 10, config: { ...settings, database: { kind: "pglite", memory: true }, developmentOptIn: true } })',
     );
     const db = await openConfiguredDatabase(latest, { committedHeight: noHeight });
     await db.close();
   });
 
-  it("maps the database setting to a backend: pglite:memory, a PGlite directory, a PostgreSQL URL (task 2.5's note)", () => {
-    expect(databaseTarget("pglite:memory")).toEqual({ backend: "pglite", dataDir: "memory://" });
-    expect(databaseTarget("pglite:/var/lib/umbradb")).toEqual({ backend: "pglite", dataDir: "/var/lib/umbradb" });
-    expect(databaseTarget("pglite:data/db")).toEqual({ backend: "pglite", dataDir: "data/db" });
-    expect(databaseTarget("postgres://u:p@db:5432/x")).toEqual({ backend: "postgres", url: "postgres://u:p@db:5432/x" });
-    expect(databaseTarget("postgresql://db/x")).toEqual({ backend: "postgres", url: "postgresql://db/x" });
+  it("maps the database parts to a backend: PGlite in memory, a PGlite directory, PostgreSQL (task 2.5's note)", () => {
+    expect(databaseTarget({ kind: "pglite", memory: true })).toEqual({ backend: "pglite", dataDir: "memory://" });
+    expect(databaseTarget({ kind: "pglite", path: "/var/lib/umbradb" })).toEqual({ backend: "pglite", dataDir: "/var/lib/umbradb" });
+    expect(databaseTarget({ kind: "pglite", path: "data/db" })).toEqual({ backend: "pglite", dataDir: "data/db" });
+    const parts = { host: "db", port: 5432, user: "u", password: "p", name: "x", ssl: "require" } as const;
+    expect(databaseTarget({ kind: "postgres", ...parts })).toEqual({ backend: "postgres", connection: parts });
+    const { password: _password, ...withoutPassword } = parts;
+    expect(databaseTarget({ kind: "postgres", ...withoutPassword })).toEqual({ backend: "postgres", connection: withoutPassword });
   });
 
   it("passes the revision's developmentOptIn to PGlite and its fullPageWritesOffAllowed to PostgreSQL (DB-12)", async () => {
@@ -130,19 +132,24 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
     const process = async (config: string) =>
       processCoreEntry(validateConfig({ config: await load(`coreEntry({ start: 0, config: { ...settings, ${config} } })`), declarations, side: "public" }));
     const options = { committedHeight: noHeight };
-    expect(databaseOptions(await process('database: "pglite:memory"'), options)).toEqual({
+    expect(databaseOptions(await process('database: { kind: "pglite", memory: true }'), options)).toEqual({
       backend: "pglite",
       options: { dataDir: "memory://", committedHeight: noHeight, developmentOptIn: false },
     });
-    expect(databaseOptions(await process('database: "pglite:memory", developmentOptIn: true'), options).options).toMatchObject({
+    expect(databaseOptions(await process('database: { kind: "pglite", memory: true }, developmentOptIn: true'), options).options).toMatchObject({
       developmentOptIn: true,
     });
-    expect(databaseOptions(await process('database: "postgres://db/x", developmentOptIn: true'), options)).toEqual({
+    const postgres = 'database: { kind: "postgres", host: "db", user: "u", name: "x" }';
+    expect(databaseOptions(await process(`${postgres}, developmentOptIn: true`), options)).toEqual({
       backend: "postgres",
-      options: { url: "postgres://db/x", committedHeight: noHeight, fullPageWritesOffAllowed: false },
+      options: {
+        connection: { host: "db", port: 5432, user: "u", name: "x", ssl: "require" },
+        committedHeight: noHeight,
+        fullPageWritesOffAllowed: false,
+      },
     });
     expect(
-      databaseOptions(await process('database: "postgres://db/x", fullPageWritesOffAllowed: true'), options).options,
+      databaseOptions(await process(`${postgres}, fullPageWritesOffAllowed: true`), options).options,
     ).toMatchObject({ fullPageWritesOffAllowed: true });
   });
 
@@ -150,7 +157,10 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
     const declarations = build([]);
     const entry = processCoreEntry(
       validateConfig({
-        config: await load('coreEntry({ start: 0, config: { ...settings, database: "postgres://127.0.0.1:1/none" } })'),
+        config: await load(
+          'coreEntry({ start: 0, config: { ...settings, database: { kind: "postgres", host: "127.0.0.1", port: 1, ' +
+            'user: "u", name: "none" } } })',
+        ),
         declarations,
         side: "public",
       }),
@@ -173,20 +183,20 @@ describe("A34: a development-only module refuses without developmentOptIn, throu
   const devtool = "DEVTOOL.entry({ start: 0, config: {} })";
 
   it("refuses it naming the module and the feature, and accepts it with the opt-in", async () => {
-    const error = await refusal(() => resolve(`coreEntry({ start: 0, config: { ...settings, database: "pglite:memory" } }), ${devtool}`));
+    const error = await refusal(() => resolve(`coreEntry({ start: 0, config: { ...settings, database: { kind: "pglite", memory: true } } }), ${devtool}`));
     expect(error.code).toBe("development-opt-in-required");
     expect(error.details).toEqual({ feature: "development-only-module", module: "devtool" });
     for (const words of ["devtool", "developmentOptIn: true"]) expect(error.message).toContain(words);
     const graph = await resolve(
-      `coreEntry({ start: 0, config: { ...settings, database: "pglite:memory", developmentOptIn: true } }), ${devtool}`,
+      `coreEntry({ start: 0, config: { ...settings, database: { kind: "pglite", memory: true }, developmentOptIn: true } }), ${devtool}`,
     );
     expect(graph.segments.get("devtool")).toEqual([{ from: 0n, to: null }]);
   });
 
   it("takes the opt-in of the latest core revision of the build's version (Q102, option A)", async () => {
     const earlierOnly =
-      'coreEntry({ start: 0, config: { ...settings, database: "pglite:memory", developmentOptIn: true } }), ' +
-      `coreEntry({ start: 10, config: { ...settings, database: "pglite:memory" } }), ${devtool}`;
+      'coreEntry({ start: 0, config: { ...settings, database: { kind: "pglite", memory: true }, developmentOptIn: true } }), ' +
+      `coreEntry({ start: 10, config: { ...settings, database: { kind: "pglite", memory: true } } }), ${devtool}`;
     expect((await refusal(() => resolve(earlierOnly))).details).toEqual({ feature: "development-only-module", module: "devtool" });
   });
 });
@@ -196,7 +206,7 @@ describe("CF-9: sweep: off refuses without developmentOptIn, through a configura
     const declarations = build([]);
     const check = async (optIn: string) => {
       const config = validateConfig({
-        config: await load(`coreEntry({ start: 0, config: { ...settings, database: "pglite:memory", sweep: "off"${optIn} } })`),
+        config: await load(`coreEntry({ start: 0, config: { ...settings, database: { kind: "pglite", memory: true }, sweep: "off"${optIn} } })`),
         declarations,
         side: "public",
       });

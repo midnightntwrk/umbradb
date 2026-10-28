@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import type { PostgresParts } from "../../src/config/database-parts.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
@@ -115,7 +116,10 @@ export async function restoreOnPostgres(target: ProcessDatabase, backup: WindowB
     return await restoreBackup({
       file: backup.file,
       target: { backend: "postgres" },
-      open: async () => openPostgres({ url: target.setting, committedHeight: cursorHeight }),
+      open: async () => {
+        const { kind: _kind, ...connection } = target.setting as PostgresParts;
+        return openPostgres({ connection, committedHeight: cursorHeight });
+      },
       config,
       declarations,
       source,

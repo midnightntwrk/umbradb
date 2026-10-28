@@ -39,9 +39,23 @@ import { TEST_LEDGER_TABLE } from "../../private/builds.js";
  * A140 for it. A66 (its JSON schema) is `./config-schema.test.ts`, A29 `./secrets.test.ts`.
  */
 
-/** A password in the `database` URL and in a module's URL setting: neither may be shown. */
+/** A password in the `database` parts and in a module's URL setting: neither may be shown. */
 const PASSWORD = "pw-8-4-SECRET";
-const DATABASE = `postgres://indexer:${PASSWORD}@db.example:5432/umbra`;
+const DATABASE = {
+  kind: "postgres",
+  host: "db.example",
+  port: 5432,
+  user: "indexer",
+  password: PASSWORD,
+  name: "umbra",
+  ssl: "require",
+} as const;
+
+/** The parts of a PostgreSQL database no server answers (port 9), with the password. */
+const UNREACHABLE = { ...DATABASE, host: "127.0.0.1", port: 9, name: "umbradb", ssl: "disable" } as const;
+
+/** `DATABASE` as `/config` shows it (CF-4, Q167 A): every part but the password. */
+const DATABASE_SHOWN = { ...DATABASE, password: "[redacted]" };
 
 /** Module `m`: a `data` setting `mode`, a `secret` one `apiKey`, a `data` URL `feed`, one table; `version` given. */
 function module(version = "1.0.0"): ModuleDeclaration {
@@ -113,7 +127,7 @@ describe("configOf: what /config shows (AE-5), every secret redacted (AE-6)", ()
     const m = module();
     const { checked: config } = checked([core(), entryOf(m, 1, { mode: "b", feed: `https://u:${PASSWORD}@feed.example/x`, apiKey: PASSWORD })], [m]);
     const shown = configOf({ redactor: configRedactor(config), checked: config, core: config.entries[0] as never, opened: null }, false);
-    expect(shown.core).toMatchObject({ start: 1, settings: { network: "custom", database: "[redacted]", node: "[redacted]" } });
+    expect(shown.core).toMatchObject({ start: 1, settings: { network: "custom", database: DATABASE_SHOWN, node: "[redacted]" } });
     expect(shown.entries).toEqual([
       { id: "core", start: 1, stop: null, version: buildCoreVersion(), buildVersion: true, started: null, scheduled: null, settings: shown.core?.settings },
       {
@@ -351,17 +365,23 @@ describe("A140 for /config: core-config's, from its own folder, its tests beside
   it("a configuration refused by its validation serves no /config (the process ends); one past the validation answers with its configuration redacted", async () => {
     // A refusal of the configuration itself ends the process before any admin listener opens (task 8.1b, Q137 B):
     // nothing is asked of the admin starter, and the process closes by itself.
-    const early = startWithAdmin({ database: `postgres://indexer:${PASSWORD}@127.0.0.1:9/umbradb`, extra: { tipCap: "many" } });
+    const early = startWithAdmin({ database: UNREACHABLE, extra: { tipCap: "many" } });
     await expect(early.handle.started).rejects.toMatchObject({ code: "invalid-configuration" });
     await early.handle.closed;
     expect(await within(early.requested, 100)).toBe(false);
     expect(early.lines.join("\n")).not.toContain(PASSWORD);
 
     // Past the validation, still starting: the database cannot be reached (port 9), its connection retried.
-    const late = startWithAdmin({ database: `postgres://indexer:${PASSWORD}@127.0.0.1:9/umbradb`, extra: { backoffCeilingMs: 100 } });
+    const late = startWithAdmin({ database: UNREACHABLE, extra: { backoffCeilingMs: 100 } });
     const origin = await late.origin();
     const shown = await ask(origin, "/config");
-    expect(shown).toMatchObject({ status: 200, json: { core: { settings: { database: "[redacted]" } }, database: { backend: "postgres", writerLock: false } } });
+    expect(shown).toMatchObject({
+      status: 200,
+      json: {
+        core: { settings: { database: { ...UNREACHABLE, password: "[redacted]" } } },
+        database: { backend: "postgres", writerLock: false },
+      },
+    });
     expect(shown.text).not.toContain(PASSWORD);
     await late.handle.stop();
   });

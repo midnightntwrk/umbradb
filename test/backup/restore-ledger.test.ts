@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isEmptyDatabase } from "../../src/backup/restore.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { hex } from "../backbone/fetch-fixtures.js";
-import { BACKUP_BACKENDS, type BackupBackend } from "./backup-fixtures.js";
+import { BACKUP_BACKENDS, type BackupBackend, pathOf } from "./backup-fixtures.js";
 import { disagreeingNode, ledgerBackup, ledgerChain, restoreLedger } from "./restore-ledger.js";
 
 /**
@@ -43,8 +43,7 @@ describe.each(BACKUP_BACKENDS)("the ledger state root's check on $name (BK-3)", 
         (caught: unknown) => caught,
       );
       expect(error).toMatchObject({ code: "backup-root-mismatch", details: { height: String(scenario.head), stored: hex(root) } });
-      const dir = refusedTarget.setting.slice("pglite:".length);
-      if (backend.kind === "postgres" || existsSync(join(dir, "PG_VERSION"))) {
+      if (backend.kind === "postgres" || existsSync(join(pathOf(refusedTarget.setting), "PG_VERSION"))) {
         expect(await refusedTarget.read((read) => isEmptyDatabase(read), async () => null)).toBe(true);
       }
 

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { z } from "zod";
 import type { PrivateIntakeOptions } from "../../src/backbone/core-private-source/index.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -141,7 +142,7 @@ const jsonSafe = (_key: string, value: unknown): unknown => (typeof value === "b
 /** A private start's options against `core`'s public database `db`. */
 function against(backend: PrivateBackend, db: TestDatabase, core: PublicCore, rest: PrivateOptions): PrivateOptions {
   return backend.kind === "postgres"
-    ? { ...rest, publicDatabase: db.readerSetting as string }
+    ? { ...rest, publicDatabase: db.readerSetting as DatabaseParts }
     : { ...rest, direct: () => core.db() };
 }
 

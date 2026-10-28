@@ -1,4 +1,5 @@
 import type { AdminStarter } from "../../src/admin/server.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { ask, statusWhen } from "../admin/admin-harness.js";
 import type { PrivateBackend } from "./backends.js";
 import { adminOrigin, launchPrivate, launchPublicCore, type PrivateProcess, type PublicCore } from "./builds.js";
@@ -67,7 +68,7 @@ export async function instancesRun(backend: PrivateBackend, options: InstancesOp
       return launchPrivate({
         database: db.setting,
         coreTransport: transport,
-        ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as string } : {}),
+        ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
         extra: { listen: { admin: "127.0.0.1:0" } },
         admin: true,
         instanceId,

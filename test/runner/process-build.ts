@@ -15,6 +15,7 @@ import {
   startProcess as startRunnerProcess,
 } from "../../src/runner/process.js";
 import { LOOP_BACKBONE } from "./loop-harness.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * A build for the process's tests (task 5.3; RN-7, RN-9–RN-13, CF-3, CF-4, Q102): the test backbone of
@@ -127,13 +128,13 @@ const TEST_NETWORK = Object.freeze({
  * The `core` entry's settings for a process on `database`: a public process on the tests' network ({@link TEST_GENESIS};
  * `extra` naming another network replaces it), with the development opt-in.
  */
-export function coreSettings(database: string, extra: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
+export function coreSettings(database: DatabaseParts, extra: Readonly<Record<string, unknown>> = {}): Record<string, unknown> {
   const network = extra.network === undefined || extra.network === "custom" ? TEST_NETWORK : {};
   return { ...network, database, node: "ws://127.0.0.1:9/node", developmentOptIn: true, ...extra };
 }
 
 /** A `core` entry from `start`: `coreEntry` with {@link coreSettings}. */
-export function core(database: string, start = 1, rest: { readonly stop?: number; readonly extra?: Readonly<Record<string, unknown>> } = {}) {
+export function core(database: DatabaseParts, start = 1, rest: { readonly stop?: number; readonly extra?: Readonly<Record<string, unknown>> } = {}) {
   return coreEntry({
     start,
     ...(rest.stop === undefined ? {} : { stop: rest.stop }),

@@ -313,13 +313,25 @@ import { stats } from "@example/umbradb-stats";
 
 export const modules = [stats];
 
+const database = {
+  kind: "postgres",
+  host: "db.internal",
+  user: "umbradb",
+  password: process.env.DB_PASSWORD!,
+  name: "indexer",
+} as const;
+
 export default defineConfig({
   entries: [
-    coreEntry({ start: 0, config: { network: "preprod", node: process.env.NODE_URL!, database: process.env.DB_URL! } }),
+    coreEntry({ start: 0, config: { network: "preprod", node: process.env.NODE_URL!, database } }),
     stats.entry({ start: 0, config: { label: "daily" } }),
   ],
 });
 ```
+
+The `database` setting is given as parts, never a connection string; only its `password` is secret, and `ssl`
+defaults to `require` for a host other than `localhost`, `127.0.0.1`, `::1` or a socket directory. The operator guide
+(`docs/operator-guide.md`, "The database") lists the parts, `ssl`'s modes and PGlite's forms.
 
 - **List each module once.** The modules are the build's user modules, in the order given; startup refuses a module
   listed twice (`duplicate-id`), an id of UmbraDB's own (`core`, `core-…`: `reserved-prefix`) and an element that is no

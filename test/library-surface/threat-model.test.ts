@@ -61,7 +61,7 @@ describe("A178 (Q181 A): docs/THREAT_MODEL.md describes 0.10.0, and README.md an
     expect(headingProblems(model)).toEqual([]);
   });
 
-  it("its known gaps name the tasks that fixed them (14.2b, 12.2b, 15.1b, 17.4b), 4.5, and issues 00045-00048", () => {
+  it("its known gaps name the tasks that fixed them (14.2b, 4.5, 12.2b, 15.1b, 17.4b) and issues 00045-00048", () => {
     expect(GAP_TASKS).toHaveLength(5);
     expect(GAP_ISSUES).toHaveLength(4);
     expect(knownGapProblems(model)).toEqual([]);

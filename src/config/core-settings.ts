@@ -11,6 +11,11 @@
  * one's fields `never` (and the reverse) and the compiler's messages name the fields as written;
  * `test/config/core-settings.test.ts` holds them equal to these schemas' input types, so the two cannot drift apart.
  *
+ * **`database`** (task 4.5; CF-4, owner decisions Q167 A, Q182 B): the database's parts, never a connection string
+ * ({@link databaseSetting}, also a private process's `publicDatabase`): operational, its `password` part secret; a
+ * public process's `transportReader` (Q175 A) is required with a PostgreSQL database and `listen.transport`, and
+ * refused with PGlite (`transportReaderRule`).
+ *
  * Choices CF-4 leaves open (task 4.2): `genesisHash` is a data field, required with `network: "custom"` and refused
  * with the four known networks, whose genesis hashes are built in; hashes are 32 bytes; `ledgerSources` names each of
  * the ledger versions (four since task 12.2a's `v9-rc3`), `vendored` unless given; `listen.admin` defaults to
@@ -30,6 +35,14 @@
 
 import { z } from "zod";
 import { MAX_READ_TIMEOUT_MS } from "../db/read-options.js";
+import {
+  type DatabaseParts,
+  type DatabasePartsInput,
+  DEFAULT_POSTGRES_PORT,
+  defaultSsl,
+  SSL_MODES,
+  type SslMode,
+} from "./database-parts.js";
 import { ledgerTableIssuesOf, ledgerTableOf } from "../ledger/networks.js";
 import type { ConfiguredLedgerTable } from "../ledger/version-table.js";
 import { SEMVER } from "../modules/validation.js";
@@ -76,13 +89,52 @@ function isAddress(value: string): boolean {
 const address = () =>
   z.string().refine(isAddress, { error: "expected an address host:port, its port from 0 to 65535 (CF-4)" });
 
-/** A PostgreSQL URL, `pglite:<directory>` or `pglite:memory` (CF-4; the backends are DB-1's). */
-const DATABASE = /^(?:postgres(?:ql)?:\/\/\S+|pglite:\S.*)$/;
+/** A port: 1 to 65535. */
+const port = () => z.number().int().min(1).max(65_535);
 
-const database = () =>
-  z.string().regex(DATABASE, {
-    error: "expected a PostgreSQL URL (postgres:// or postgresql://), pglite:<directory> or pglite:memory (CF-4)",
+/** PostgreSQL's parts (CF-4, Q167): `ssl` filled with its default for the host (Q182 B) once parsed. */
+const POSTGRES_PARTS = z
+  .strictObject({
+    kind: z.literal("postgres"),
+    host: text(),
+    port: port().default(DEFAULT_POSTGRES_PORT),
+    user: text(),
+    password: z.string().optional(),
+    name: text(),
+    ssl: z.enum(SSL_MODES as [SslMode, ...SslMode[]]).optional(),
+  })
+  .overwrite((parts) => ({ ...parts, ssl: parts.ssl ?? defaultSsl(parts.host) }));
+
+/** PGlite's parts: exactly one of `path` and `memory: true`. */
+const PGLITE_PARTS = z
+  .strictObject({ kind: z.literal("pglite"), path: text().optional(), memory: z.literal(true).optional() })
+  .superRefine((parts, context) => {
+    if ((parts.path === undefined) === (parts.memory === undefined)) {
+      context.addIssue({
+        code: "custom",
+        message: 'a PGlite database is { kind: "pglite", path } or { kind: "pglite", memory: true }, one of the two (CF-4)',
+      });
+    }
   });
+
+/** A connection string's refusal (Q167): the message never repeats the value, which may hold a password. */
+const CONNECTION_STRING =
+  'a connection string is refused: give the database\'s parts, { kind: "postgres", host, port, user, password, name, ' +
+  'ssl }, { kind: "pglite", path } or { kind: "pglite", memory: true } (CF-4, owner decision Q167)';
+
+/**
+ * The `database` setting, and a private process's `publicDatabase` (CF-4, owner decision Q167): the database's parts
+ * (`./database-parts.ts`), never a connection string. Typed by hand as the parts' union (zod infers PGlite's two forms
+ * as one object with both parts optional; its refinement takes exactly one), so that the builders' types and these
+ * schemas' input types stay equal (`test/config/core-settings.test.ts`).
+ */
+export const databaseSetting = (): z.ZodType<DatabaseParts, DatabasePartsInput> =>
+  z.discriminatedUnion("kind", [POSTGRES_PARTS, PGLITE_PARTS], {
+    error: (issue) => (typeof issue.input === "string" ? CONNECTION_STRING : undefined),
+  }) as unknown as z.ZodType<DatabaseParts, DatabasePartsInput>;
+
+/** `core.transportReader` (CF-4, owner decision Q175 A): a login; its other parts are `database`'s. */
+const transportReader = () => z.strictObject({ user: text(), password: z.string().optional() });
 
 /** The node's WebSocket URL (CF-4, IN). */
 const NODE = /^wss?:\/\/\S+$/;
@@ -109,7 +161,8 @@ const BASE = {
   ledgerSources: z.strictObject({ v8: SOURCE, "v9-rc3": SOURCE, v9: SOURCE, v10: SOURCE }).prefault({}).meta(DATA),
   sweep: z.enum(["on", "off"]).default("on").meta(DATA),
   retainStates: count().default(0).meta(DATA),
-  database: database().meta(SECRET),
+  // Operational, its `password` part secret (CF-4, Q167): `./redact.ts` hides a `password` part of an operational field.
+  database: databaseSetting().meta(OPERATIONAL),
   listen: z
     .strictObject({
       api: address().optional(),
@@ -157,6 +210,39 @@ function genesisHashRule(settings: { network: string; genesisHash?: string | und
   }
 }
 
+/** The `core` settings `transportReader`'s rule reads. */
+type TransportReaderSettings = {
+  database: DatabaseParts;
+  listen: { transport?: string | undefined };
+  transportReader?: unknown;
+};
+
+/**
+ * CF-4, owner decision Q175 A: `transportReader` is required where the database is PostgreSQL and `listen.transport` is
+ * set (the transport's reads run as that login), and refused on PGlite (one session, the writer's).
+ */
+function transportReaderRule(settings: TransportReaderSettings, context: z.RefinementCtx) {
+  const given = settings.transportReader !== undefined;
+  if (settings.database.kind === "postgres" && settings.listen.transport !== undefined && !given) {
+    context.addIssue({
+      code: "custom",
+      path: ["transportReader"],
+      message:
+        "a PostgreSQL database with listen.transport needs transportReader { user, password }, a login that may only " +
+        "read, which the transport's reads run as (CF-4, owner decision Q175)",
+    });
+  }
+  if (settings.database.kind === "pglite" && given) {
+    context.addIssue({
+      code: "custom",
+      path: ["transportReader"],
+      message:
+        "transportReader is refused on PGlite: its database has one session, the writer's, which the transport's reads " +
+        "share (CF-4, owner decision Q175)",
+    });
+  }
+}
+
 /** The `core` settings `ledgerTable` reads: the network, and the table as configured. */
 type LedgerTableSettings = { network: string; ledgerTable?: ConfiguredLedgerTable | undefined };
 
@@ -178,8 +264,10 @@ export const PUBLIC_CORE_SCHEMA = z
     ...BASE,
     node: z.string().regex(NODE, { error: "expected the node's WebSocket URL, ws:// or wss:// (CF-4)" }).meta(SECRET),
     lockstepInstances: z.array(text()).default([]).meta(OPERATIONAL),
+    transportReader: transportReader().optional().meta(OPERATIONAL),
   })
   .superRefine(genesisHashRule)
+  .superRefine(transportReaderRule)
   .superRefine(ledgerTableRule)
   .overwrite(withLedgerTable);
 
@@ -188,7 +276,7 @@ export const PRIVATE_CORE_SCHEMA = z
   .strictObject({
     ...BASE,
     instanceId: text().meta(OPERATIONAL),
-    publicDatabase: database().optional().meta(SECRET),
+    publicDatabase: databaseSetting().optional().meta(OPERATIONAL),
     coreTransport: address().optional().meta(OPERATIONAL),
   })
   .superRefine(genesisHashRule)

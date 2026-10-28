@@ -6,6 +6,7 @@ import ts from "typescript";
 import { type CommandIo, runCommand } from "../../src/cli/command.js";
 import { REPOSITORY } from "../config/config-fixtures.js";
 import { spawnChild } from "../child-processes.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 export { REPOSITORY };
 
@@ -191,7 +192,7 @@ export function inChild(
 }
 
 /** The `core` settings of a public process that every check accepts, with `database` as given. */
-export function coreSettings(database: string, extra: Readonly<Record<string, unknown>> = {}): string {
+export function coreSettings(database: DatabaseParts, extra: Readonly<Record<string, unknown>> = {}): string {
   const fields = { network: "preprod", node: "ws://127.0.0.1:9944", database, ...extra };
   return JSON.stringify(fields);
 }

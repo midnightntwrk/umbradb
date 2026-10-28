@@ -1171,12 +1171,26 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   cursor that differs from its row or has none, and a module's stop changed above the cursor. `openConfiguredDatabase`
   (`src/config/database.ts`) opens what `database`'s parts name (PostgreSQL's host, port, user, password, name and
   `ssl`; a PGlite `path`; PGlite in memory; owner decision Q167, task 4.5: never a connection string), PGlite refusing
-  without the opt-in (CF-9, DB-12). A process, and a restore into its target, create a
-  `pglite:<directory>` with any missing parent before the writer lock is taken (its file sits beside the directory);
+  without the opt-in (CF-9, DB-12). As built (task 4.5): `databaseSetting()` (`src/config/core-settings.ts`) parses the
+  parts (`src/config/database-parts.ts`; a string refused as a connection string, its message never repeating it),
+  filling `port` 5432 and `ssl` — `disable` for `localhost`, `127.0.0.1`, `::1` or a `host` starting with `/`, else
+  `require` (Q182 B); the redaction treats a `password` part inside an operational field as secret, so `/config` and
+  the log show the other parts. `driverConnectionOptions` (`src/db/postgres.ts`) gives `postgres` 3.4.9 the host and
+  port as one-element lists (its text form splits a host at `:`), a socket directory as its `.s.PGSQL.<port>` path,
+  and `ssl` as the driver reads it: `disable` as `false` (the text would be read as a request for TLS), `require` as
+  `"require"` (TLS, certificate unchecked), `verify-full` as `{ rejectUnauthorized: true, host }` merged into Node.js's
+  `tls.connect`, so the certificate is checked against Node.js's built-in roots and the host name against it (Q183
+  A); `umbradb backup` gives `pg_dump` the same parts as libpq's environment (`PGHOST` … `PGSSLMODE`, the password
+  as `PGPASSWORD`, `verify-full` with `PGSSLROOTCERT=system`, libpq's system roots), never a URL on its command
+  line. A process, and a restore into its target, create a PGlite
+  `path` with any missing parent before the writer lock is taken (its file sits beside the directory), and say so,
+  naming the path as configured: `created a new PGlite data directory <path> (and <n> missing parent directories)`, in
+  the process's log or on the restore's standard output (owner decisions Q165 B, Q167 A; task 4.5);
   `umbradb config check --database` and `umbradb backup` create none (CF-4, owner decision Q163). As built (task 2.2c):
   `createPgliteDirectory` (`src/db/pglite-lock.ts`, reading the directory as the lock does: `file://` and a bare path,
   nothing for `memory://`, the browser's file systems refused) creates a missing directory with its missing parents
-  (`mkdirSync`, `recursive`), a failure `database-error` (`open-failed`, the path not named); `openConfiguredDatabase`
+  (`mkdirSync`, `recursive`), a failure `database-error` (`open-failed`, the path not named), returning how many
+  missing parents it made (task 4.5); `openConfiguredDatabase`
   calls it under the opt-in only, before `openPglite`, and `umbradb restore` through `openRestoreTarget`
   (`src/cli/configured.ts`), which runs once the checks before loading passed, so a refused restore creates nothing.
   `openPglite` itself still refuses a missing parent (`open-failed`).
@@ -1186,7 +1200,9 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   `verbatimModuleSyntax`, `allowImportingTsExtensions`, `strict`, `skipLibCheck`; a `.ts` file whose nearest
   `package.json` has no `type` is read as an ES module, as Node.js detects it), each diagnostic at `file:line:column`;
   then the loader, the plain-data check, the validation and the process's `core` revision (Q102); then, with
-  `--database` only, the cursor and `core_chain.config` read in one read-only read (PostgreSQL: a read connection, no
+  `--database` only — it takes no value: the database the file's `core` revision configures (owner decision Q167 A,
+  task 4.5), a PGlite database in memory a finding and not opened —, the cursor and `core_chain.config` read in one
+  read-only read (PostgreSQL: a read connection, no
   writer lock, so beside a running process; PGlite: under the file's opt-in, the directory's lock taken, a directory
   holding no database yet checked as a new one and not created) and `entriesAtCursor` and `historyFindings` run on
   them; without it no database is opened and the report says the history checks were not run. The side comes from
@@ -1195,7 +1211,7 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   `src/cli/build-modules.ts`, `buildDeclarations(loaded.modules, { side })`, validated as any host's user modules, MD-2:
   a list element that is no declaration, a module listed twice or with an id of UmbraDB's own is a finding at
   `modules[<index>]`, and the entries are then not validated); a host program calls `configCheck` with its own
-  declarations, and the file's `modules` are not used. Every text is redacted (`configSecrets`, the `--database` value,
+  declarations, and the file's `modules` are not used. Every text is redacted (`configSecrets`, the `password` parts,
   the URL patterns). Exit 0 only if every check that ran passed, else 1.
 - **`umbradb run`** (`src/cli/run.ts`, task 4.4a; LS-6, CF-1, Q106 B). Loads the file once (`--config`, or
   `umbradb.config.ts` in the working directory) and calls `startProcess` with its evaluated data, the command's build
@@ -1273,8 +1289,9 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   the rows, a `nextval` after a `COMMIT` moved its sequence, `pg_advisory_lock` left its lock held). *Where the
   database could refuse it:* on PostgreSQL the read pool logs in as the writer's login (one `database` setting, CF-4),
   and a role that may only read, entered with `SET ROLE` or `SET LOCAL ROLE`, is left with `RESET ROLE` or
-  `set_config('role', …)`: a login that may only read needs a setting the core does not have — task 14.2b's question
-  Q175 —, and no role entered in the writer's session holds. On PGlite there is one session, the writer's, under
+  `set_config('role', …)`: a login that may only read needs a setting of its own — Q175 A's
+  `core.transportReader`, built by task 4.5 (**The transport reader** below) —, and no role entered in the writer's
+  session holds. On PGlite there is one session, the writer's, under
   its superuser, so no role or login apart from the read-only transaction exists to refuse a write. *So* the database
   refuses the write — the read-only transaction —, and the core keeps every statement inside it: before any statement
   of a `read` runs, each must be one read, or the core runs none of them and answers `read-result` `error:
@@ -1301,6 +1318,22 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   committed height, the catalog's type names, a `report`'s hash) are not gated. The module API's reads, and every other
   read of the database API, are unchanged. A private process's own client fails the query with the `UmbraError`
   `read-refused` (not retryable; `details` `statement`, `reason`, `name`, its message naming the statement).
+- **The transport reader** (CF-4, PP-4, A177; owner decision Q175 A, task 4.5; `src/private/transport-reader.ts`). On
+  PostgreSQL with `listen.transport`, `core.transportReader` (`{ user, password }`, the host, port, name and `ssl`
+  `database`'s) is required, and the transport's reads — a private process's `read`s and the checks of its `report`s
+  — run on a read pool of their own logged in as it (default size, opened once the migrations ran, closed with the
+  transport); PGlite refuses the setting (one session). Before the transport listens, startup reads on that pool what
+  the login is and holds and refuses `transport-reader-can-write`, naming the login and each finding (`details { user,
+  found }`), when it is a superuser (nothing else listed), holds `CREATEROLE`, `CREATEDB` or `BYPASSRLS`, is a member
+  of `database`'s login (`pg_has_role … 'MEMBER'`, the login itself included), or holds a privilege beyond reading:
+  `CREATE` on the database or a public schema (any schema but `pg_catalog`, `information_schema` and `pg_*`), `INSERT`,
+  `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, `TRIGGER` or `MAINTAIN` on a table, view or foreign table there, `USAGE`
+  or `UPDATE` on a sequence there — counted as the `has_*_privilege` functions count them (`PUBLIC`, roles it is a
+  member of, `pg_write_all_data`). A table a later migration makes is checked at the next start. The process logs
+  `transport reads as <login>, a login that may only read`. The gate above stays in front of this login on both
+  backends: what a login that may only read can still do — advisory locks, session settings, functions any login may
+  call — is the gate's. A177's test seam `transportReads: "unconfined"` turns the gate off, and a write in a `read` is
+  then refused by the database (SQLSTATE 42501).
 - **The private process** (task 14.1) is task 5.3's `startProcess` with `side: "private"`: the private `core` schema,
   its own database (`database`), and a backbone of `core-chain` (task 10.2's, unchanged: its configuration history, its
   identity, the process items `config`, `db` and `ledger-table`; no node client), then `src/backbone/private.ts`'s
@@ -1734,7 +1767,8 @@ revision is known, logs every finding and ends the process, serving no admin end
 `cannot-start-mid-chain`, `process-item-missing`, `duplicate-api-route`, `development-opt-in-required`,
 `needs-lockstep-not-listed`, `private-binding-mismatch`, `public-config-changed` (a private start finding another
 public configuration hash than the one it accepted, not given with --update-hash: PP-14, owner decision Q159, task
-14.1c; §8), `package-hash-mismatch`,
+14.1c; §8), `transport-reader-can-write` (a public process's `core.transportReader` login that could write: CF-4, PP-4,
+owner decision Q175, task 4.5; §8), `package-hash-mismatch`,
 `writer-lock-held`, `durability-fsync-off`, `durability-pooler`, `durability-full-page-writes-off`; `callback-error` (a
 failing `on-start-db` or `on-start-api`, with point and module) and `listen-failed` (a listener that cannot bind)
 (Q115). **Backup and restore refuse** (the command exits non-zero; nothing is written or committed):

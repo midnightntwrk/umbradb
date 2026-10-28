@@ -385,7 +385,7 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
 
     // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in,
     // CF-9); a refusal of the configuration itself ends the process and serves no /status (task 8.1b, Q137 B).
-    const unopened = startWithAdmin({ database: "pglite:memory", extra: { developmentOptIn: false } });
+    const unopened = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     const early = await valid(unopened, (b) => b.state === "refused");
     expect(early.reason).toMatchObject({ code: "development-opt-in-required", height: null, module: null, point: null });
     await unopened.handle.stop();

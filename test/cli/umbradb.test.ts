@@ -4,7 +4,8 @@ import { HISTORY_NOT_RUN } from "../../src/cli/config-check.js";
 import { coreEntry } from "../../src/config/entries.js";
 import { acquirePgliteLock } from "../../src/db/pglite-lock.js";
 import { type CliProject, cliProject, configText, coreSettings, inChild, lineOf } from "./cli-fixtures.js";
-import { CLI_BACKENDS } from "./database-fixtures.js";
+import { type CheckTarget, CLI_BACKENDS } from "./database-fixtures.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * A6 and A35 `[CI]` through the command itself (task 4.4; LS-6, CF-10): `src/cli/main.ts` bundled with esbuild and run
@@ -28,7 +29,10 @@ beforeAll(async () => {
 afterAll(() => project?.remove());
 
 /** A public process's file with one core entry from 0, `before` written above the default export. */
-function coreOnly(database: string, extra: Readonly<Record<string, unknown>> = {}, before: readonly string[] = []): string {
+/** A PostgreSQL database no check opens: nothing listens on port 1. */
+const UNREACHED: DatabaseParts = { kind: "postgres", host: "127.0.0.1", port: 1, user: "indexer", name: "indexer", ssl: "disable" };
+
+function coreOnly(database: DatabaseParts, extra: Readonly<Record<string, unknown>> = {}, before: readonly string[] = []): string {
   return configText(project.builders, [
     ...before,
     "export default defineConfig({",
@@ -81,7 +85,7 @@ describe("A6: the command's usage and its commands (LS-6)", () => {
 
 describe("A35: umbradb config check without --database", () => {
   it("exits 0 on a valid file and says the history checks were not run", async () => {
-    const file = project.write("valid.config.ts", coreOnly("postgres://indexer@127.0.0.1:1/indexer"));
+    const file = project.write("valid.config.ts", coreOnly(UNREACHED));
     const result = await inChild(project, ["config", "check", file]);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(EXIT.ok);
@@ -89,7 +93,7 @@ describe("A35: umbradb config check without --database", () => {
   });
 
   it("prints a type error and a schema error with their paths, exits 1, and says the history checks were not run", async () => {
-    const text = coreOnly("postgres://indexer@127.0.0.1:1/indexer", { apiReadTimeoutMs: 0 }, [
+    const text = coreOnly(UNREACHED, { apiReadTimeoutMs: 0 }, [
       'const label: number = "core";',
       "void label;",
     ]);
@@ -103,7 +107,7 @@ describe("A35: umbradb config check without --database", () => {
   });
 
   it("an enum: the compiler refuses it, and so does Node.js's type stripping when it evaluates the file", async () => {
-    const text = coreOnly("postgres://indexer@127.0.0.1:1/indexer", {}, ['enum Network { Preprod = "preprod" }', "void Network;"]);
+    const text = coreOnly(UNREACHED, {}, ['enum Network { Preprod = "preprod" }', "void Network;"]);
     const file = project.write("enum.config.ts", text);
     const result = await inChild(project, ["config", "check", file]);
     expect(result.code).toBe(EXIT.failed);
@@ -114,7 +118,7 @@ describe("A35: umbradb config check without --database", () => {
 
   it("a .ts file whose package.json has no type field loads as an ES module, and the compiler agrees", async () => {
     project.write("plain-package/package.json", "{}\n");
-    const file = project.write("plain-package/umbradb.config.ts", coreOnly("postgres://indexer@127.0.0.1:1/indexer"));
+    const file = project.write("plain-package/umbradb.config.ts", coreOnly(UNREACHED));
     const result = await inChild(project, ["config", "check", file]);
     expect(result.stdout).toMatch(/^type check \(TypeScript 5\.9\.\d+, noEmit\): passed$/m);
     expect(result.stdout).toMatch(/^configuration \(CF-1, CF-3\): passed$/m);
@@ -123,7 +127,7 @@ describe("A35: umbradb config check without --database", () => {
 
   it('a .ts file under "type": "commonjs": the compiler and Node.js both refuse its import and export', async () => {
     project.write("cjs-package/package.json", '{ "type": "commonjs" }\n');
-    const file = project.write("cjs-package/umbradb.config.ts", coreOnly("postgres://indexer@127.0.0.1:1/indexer"));
+    const file = project.write("cjs-package/umbradb.config.ts", coreOnly(UNREACHED));
     const result = await inChild(project, ["config", "check", file]);
     expect(result.code).toBe(EXIT.failed);
     expect(result.stdout).toMatch(/\[TS1295\]$/m);
@@ -133,29 +137,29 @@ describe("A35: umbradb config check without --database", () => {
 
 describe.each(CLI_BACKENDS.map((make) => make()))("A35: umbradb config check --database on $name", (backend) => {
   const pglite = backend.password === null;
-  const history = [coreEntry({ start: 0, config: { network: "preprod", node: "ws://n", database: "pglite:memory" } })];
+  const history = [coreEntry({ start: 0, config: { network: "preprod", node: "ws://n", database: { kind: "pglite", memory: true } } })];
 
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  /** The file: core from 0 with `retainStates`, the opt-in on PGlite. */
-  const fileWith = (name: string, retainStates: number) =>
+  /** The file: core from 0 on `target`'s database with `retainStates`, the opt-in on PGlite (Q167 A: its own database). */
+  const fileWith = (name: string, target: CheckTarget, retainStates: number) =>
     project.write(
       name,
-      coreOnly("postgres://indexer@127.0.0.1:1/indexer", { retainStates, ...(pglite ? { developmentOptIn: true } : {}) }),
+      coreOnly(target.database, { retainStates, ...(pglite ? { developmentOptIn: true } : {}) }),
     );
 
   it("reports changes-past for a changed recorded entry, exits non-zero, and leaves the database unchanged", async () => {
     const target = await backend.target();
     await target.setup(history, 20n);
     const before = await target.snapshot();
-    const result = await inChild(project, ["config", "check", fileWith("changed.config.ts", 3), "--database", target.url]);
+    const result = await inChild(project, ["config", "check", fileWith("changed.config.ts", target, 3), "--database"]);
     expect(result.code).toBe(EXIT.failed);
     expect(result.stdout).toMatch(/^ {2}entries\[0\]\.config\.retainStates \(core from 0\): .* \[changes-past data\]$/m);
     expect(result.stdout).toMatch(/^failed: 1 finding$/m);
     expect(await target.snapshot()).toEqual(before);
     if (backend.password !== null) expect(`${result.stdout}${result.stderr}`).not.toContain(backend.password);
-    const same = await inChild(project, ["config", "check", fileWith("same.config.ts", 0), "--database", target.url]);
+    const same = await inChild(project, ["config", "check", fileWith("same.config.ts", target, 0), "--database"]);
     expect(same.code).toBe(EXIT.ok);
     expect(await target.snapshot()).toEqual(before);
   });
@@ -164,9 +168,9 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35: umbradb config check --d
     it("a PGlite database another process holds is not read: writer-lock-held, exit 1", async () => {
       const target = await backend.target();
       await target.setup(history, 20n);
-      const lock = await acquirePgliteLock(target.url.slice("pglite:".length));
+      const lock = await acquirePgliteLock((target.database as { path: string }).path);
       try {
-        const result = await inChild(project, ["config", "check", fileWith("held.config.ts", 0), "--database", target.url]);
+        const result = await inChild(project, ["config", "check", fileWith("held.config.ts", target, 0), "--database"]);
         expect(result.code).toBe(EXIT.failed);
         expect(result.stdout).toMatch(
           /^ {2}--database: another process holds the PGlite data directory's lock .* \[writer-lock-held\]$/m,

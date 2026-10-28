@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
+import type { PostgresParts } from "../../src/config/database-parts.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
@@ -124,7 +125,7 @@ type Fault = "terminated" | CommitFault | "neither";
  */
 async function recoveryRun(fault: Fault, loop?: new (input: LoopInput) => FinalizedLoop): Promise<RecoveryObservation> {
   const db = await backend.database();
-  const proxy = await CommitProxy.start(db.setting);
+  const proxy = await CommitProxy.start(db.setting as PostgresParts);
   const seen: Recorded = { calls: [], computed: new Map(), retrying: [] };
   const lines: string[] = [];
   const terminated: string[] = [];
@@ -145,7 +146,7 @@ async function recoveryRun(fault: Fault, loop?: new (input: LoopInput) => Finali
   handle = startProcess({
     declarations: testBuild([rec]).declarations,
     config: {
-      data: { entries: [core(proxy.url(db.setting), 1, { extra: { backoffCeilingMs: CEILING } }), entryOf(rec, 1)] },
+      data: { entries: [core(proxy.setting(db.setting as PostgresParts), 1, { extra: { backoffCeilingMs: CEILING } }), entryOf(rec, 1)] },
     },
     source,
     log: (line) => lines.push(line),

@@ -1,4 +1,5 @@
 import { privateCursorHeight } from "../../src/backbone/core-private-source/index.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { PrivateBackend, TestDatabase } from "./backends.js";
@@ -84,7 +85,7 @@ async function coreRefusal(backend: PrivateBackend, sql: string): Promise<Refusa
 /** A private start's options against `core`'s public database `db`. */
 export function against(backend: PrivateBackend, db: TestDatabase, core: PublicCore, rest: PrivateOptions): PrivateOptions {
   return backend.kind === "postgres"
-    ? { ...rest, publicDatabase: db.readerSetting as string }
+    ? { ...rest, publicDatabase: db.readerSetting as DatabaseParts }
     : { ...rest, direct: () => core.db() };
 }
 

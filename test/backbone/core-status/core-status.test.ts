@@ -272,12 +272,12 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
             coreEntry({
               start: 1,
               config: (side === "public"
-                ? { ...adminCoreSettings("pglite:memory"), tipCap: 40, listen: { admin: "127.0.0.1:0" } }
+                ? { ...adminCoreSettings({ kind: "pglite", memory: true }), tipCap: 40, listen: { admin: "127.0.0.1:0" } }
                 : {
                     network: "custom",
-                    genesisHash: adminCoreSettings("x").genesisHash,
-                    ledgerTable: adminCoreSettings("x").ledgerTable,
-                    database: "pglite:memory",
+                    genesisHash: adminCoreSettings({ kind: "pglite", memory: true }).genesisHash,
+                    ledgerTable: adminCoreSettings({ kind: "pglite", memory: true }).ledgerTable,
+                    database: { kind: "pglite", memory: true },
                     instanceId: "wallet-a",
                     developmentOptIn: true,
                     listen: { admin: "127.0.0.1:0" },
@@ -464,7 +464,7 @@ describe("A140 for /status: core-status's, from its own folder, its tests beside
   it("a refused process answers /status: refused, its reason, the instance; its parts not yet known", async () => {
     // Refused once the configuration is validated — PGlite without the development opt-in (CF-9) —, before the
     // database opens; a refusal of the configuration itself would end the process instead, serving nothing (task 8.1b).
-    const run = startWithAdmin({ database: "pglite:memory", extra: { developmentOptIn: false } });
+    const run = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     await expect(run.handle.started).rejects.toMatchObject({ code: "development-opt-in-required" });
     const body = await statusWhen(await run.origin(), (each) => each.state === "refused");
     expect(body).toMatchObject({
@@ -483,12 +483,12 @@ describe("A140 for /status: core-status's, from its own folder, its tests beside
   it("a refused private process shows its role and instance, no node and the public side", async () => {
     // A private `core` entry (CF-4: `instanceId`, no `node`) refused once validated — PGlite without the development
     // opt-in —, before the database opens: a refusal of the configuration itself ends the process (task 8.1b).
-    const { node: _node, ...settings } = adminCoreSettings("pglite:memory", {
+    const { node: _node, ...settings } = adminCoreSettings({ kind: "pglite", memory: true }, {
       developmentOptIn: false,
       instanceId: "instance-1",
       listen: { admin: "127.0.0.1:0" },
     });
-    const run = startWithAdmin({ database: "pglite:memory", side: "private", entries: [coreEntry({ start: 1, config: settings as never })] });
+    const run = startWithAdmin({ database: { kind: "pglite", memory: true }, side: "private", entries: [coreEntry({ start: 1, config: settings as never })] });
     await expect(run.handle.started).rejects.toMatchObject({ code: "development-opt-in-required" });
     const body = await statusWhen(await run.origin(), (each) => each.state === "refused");
     expect(body).toMatchObject({ instance: { role: "private", id: "instance-1" }, node: null, public: { cursor: null, lockstep: null } });

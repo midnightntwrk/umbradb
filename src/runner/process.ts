@@ -132,8 +132,11 @@
  * **The process transport** (PP-4; task 14.2, `../private/core-transport.ts`): a public process whose `core` revision
  * has `listen.transport` starts it once its database is open and its chain known (step 7, before the bootstrap's wait),
  * tells it each commit (`committed`), and closes it at its stop or at a refusal; a listener that cannot listen refuses
- * startup (`listen-failed`). A private process's side of it is its block source's (`openPublicSide`), which the
- * process gives S and its log ({@link SourceShared}).
+ * startup (`listen-failed`). On PostgreSQL its reads run on a read pool of their own, logged in as `core.transportReader`
+ * (CF-4, owner decision Q175 A; task 4.5, `../private/transport-reader.ts`), which startup first checks cannot write
+ * (`transport-reader-can-write`) and closes with the transport; on PGlite they share the database's one session. A
+ * private process's side of it is its block source's (`openPublicSide`), which the process gives S and its log
+ * ({@link SourceShared}).
  *
  * **Lockstep** (PP-6, PP-7; task 14.3, `../private/lockstep.ts`): a public process whose `core` revision lists
  * `lockstepInstances` keeps one bookkeeping of them for its run, which its transport tells of their `hello`s, reports
@@ -185,6 +188,9 @@ import { publicLockstepOf } from "../backbone/core-private-source/index.js";
 import { buildCoreVersion, type CoreVersion } from "../config/build.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import { openConfiguredDatabase } from "../config/database.js";
+import { type DatabaseParts, databaseText, type TransportReader } from "../config/database-parts.js";
+import { openPostgres } from "../db/postgres.js";
+import { refuseWritingReader, transportReaderFacts, type TransportReaderFacts } from "../private/transport-reader.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkHistory, graphInputOf, type HistoryCheck, versionText } from "../config/history.js";
 import { loadConfig, type LoadOptions } from "../config/load.js";
@@ -313,6 +319,17 @@ export interface ProcessInput {
    * without it a process adds no SIGUSR2 listener, so Node.js's default or the host program's own handler applies.
    */
   readonly backupSignals?: BackupSignals;
+  /**
+   * The test seam of A177 (task 4.5): the core transport's read path — `"unconfined"` turns task 14.2b's gate off, so
+   * that a statement it would refuse reaches the database, which then refuses a write by the transport reader's login;
+   * each statement checked first (`"confined"`) unless given.
+   */
+  readonly transportReads?: "confined" | "unconfined";
+  /**
+   * The negative control's judgement of the transport reader's login (A177; task 4.5): `canWriteFindings`
+   * (`../private/transport-reader.ts`) unless given.
+   */
+  readonly transportReaderCheck?: (facts: TransportReaderFacts) => readonly string[];
 }
 
 /** What delivers SIGUSR2 for `backupOnSignal` (task 15.1a): Node.js's `process`, or a test's emitter. */
@@ -732,6 +749,8 @@ class Process implements ProcessHandle {
   #ledger: LedgerHost | undefined;
   /** A public process's process transport on `listen.transport` (PP-4; task 14.2, `../private/core-transport.ts`). */
   #transport: CoreTransport | undefined;
+  /** The transport's read pool on PostgreSQL, logged in as `core.transportReader` (Q175 A; task 4.5). */
+  #transportReader: Database | undefined;
   /** The loop startup made (its slow height, RN-17). */
   #loop: FinalizedLoop | undefined;
   /** A public process's bookkeeping of its `lockstepInstances` (PP-6; task 14.3), once startup read them. */
@@ -908,10 +927,10 @@ class Process implements ProcessHandle {
   /** What a backup of the process's database is given (BK-1): its backend, its opted-out tables, its side and opt-in. */
   #backupInput(out: string): BackupInput {
     const settings = (this.#core as CheckedEntry).settings as PlainObject;
-    const target = databaseTarget(String(settings.database));
+    const target = databaseTarget(settings.database as unknown as DatabaseParts);
     return {
       db: this.#db as Database,
-      target: target.backend === "postgres" ? { backend: "postgres", url: target.url } : { backend: "pglite" },
+      target: target.backend === "postgres" ? { backend: "postgres", connection: target.connection } : { backend: "pglite" },
       out,
       optedOut: this.#optedOut,
       side: this.#input.side ?? "public",
@@ -954,6 +973,7 @@ class Process implements ProcessHandle {
     } finally {
       await waits;
       await this.#transport?.close();
+      await this.#transportReader?.close();
       await this.#closeNode();
       await this.#ledger?.close();
       // A backup on SIGUSR2 being written ends before the database closes (task 15.1a).
@@ -1096,7 +1116,12 @@ class Process implements ProcessHandle {
       // `/status` shows the client's `connecting` and the source's queue from now on (task 8.3a).
       this.#admin?.publish();
       // A read's height is the cursor's (DB-2): the core's cursor table, or a private process's own (its source's).
-      const db = await openConfiguredDatabase(core, { committedHeight: source.committedHeight ?? cursorHeight });
+      const db = await openConfiguredDatabase(core, {
+        committedHeight: source.committedHeight ?? cursorHeight,
+        log: (line) => this.#log(line),
+      });
+      // CF-4, Q167 A: the database's parts but the password are shown in the log.
+      this.#log(`database: ${databaseText((core.settings as PlainObject).database as unknown as DatabaseParts)}`);
       this.#db = db;
       for (;;) {
         this.#step();
@@ -1120,6 +1145,7 @@ class Process implements ProcessHandle {
       }
       // The module API opens in the last step, after which only a stop throws: the stop closes it.
       await this.#transport?.close();
+      await this.#transportReader?.close();
       await this.#closeNode();
       await this.#ledger?.close();
       await this.#db?.close();
@@ -1129,6 +1155,29 @@ class Process implements ProcessHandle {
   }
 
   /** Startup's steps once the database opened (4 to 7 of the module comment), run again after a retryable failure. */
+  /**
+   * What the process transport reads on (CF-4, PP-4, owner decision Q175 A; task 4.5): on PostgreSQL a read pool of its
+   * own, logged in as `core.transportReader` (the host, port, name and `ssl` `database`'s; the schema requires it there),
+   * refused with `transport-reader-can-write` when that login could write (`../private/transport-reader.ts`), the
+   * judgement `input.transportReaderCheck`'s when given (the negative control's); on PGlite the database itself, whose
+   * one session is the writer's.
+   */
+  async #transportReads(settings: PlainObject, db: Database, source: BlockSource): Promise<Pick<Database, "read">> {
+    const database = settings.database as unknown as DatabaseParts;
+    if (database.kind !== "postgres") return db;
+    const reader = settings.transportReader as unknown as TransportReader;
+    const { kind: _kind, password: _password, ...parts } = database;
+    const connection = { ...parts, user: reader.user, ...(reader.password === undefined ? {} : { password: reader.password }) };
+    // A retried startup opens it again.
+    await this.#transportReader?.close();
+    const pool = openPostgres({ connection, committedHeight: source.committedHeight ?? cursorHeight });
+    this.#transportReader = pool;
+    const facts = await pool.read((read) => transportReaderFacts(read, database.user));
+    refuseWritingReader(facts, this.#input.transportReaderCheck);
+    this.#log(`transport reads as ${facts.user}, a login that may only read`);
+    return pool;
+  }
+
   async #open({ declarations, checked, core, source, db }: Opened): Promise<Startup> {
     const input = this.#input;
     const settings = core.settings as PlainObject;
@@ -1227,10 +1276,12 @@ class Process implements ProcessHandle {
       this.#lockstep = new Lockstep({ listed: lockstepInstances, log: (line) => this.#log(line) });
     }
     if (this.#transport === undefined && (input.side ?? "public") === "public" && transportAddress !== undefined) {
+      const reads = await this.#transportReads(settings, db, source);
       this.#transport = await startCoreTransport({
         address: transportAddress,
         tls: settings.tls as TransportTls | undefined,
-        db,
+        db: reads,
+        ...(input.transportReads === undefined ? {} : { reads: input.transportReads }),
         genesis: genesisHash,
         start,
         cursor: () => this.#cursor,

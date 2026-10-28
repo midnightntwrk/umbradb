@@ -682,7 +682,7 @@ const ACCEPTED: readonly (Case & {
   {
     name: "operational and secret settings of the core (tipCap, database, node)",
     first: { entries: [CORE], cursor: null },
-    then: { entries: [core(0, { tipCap: 7, database: "postgres://u:p@db/x", node: "wss://node" })], cursor: C },
+    then: { entries: [core(0, { tipCap: 7, database: { kind: "postgres", host: "db", user: "u", password: "p", name: "x" }, node: "wss://node" })], cursor: C },
     writes: [],
     allowance: "operational",
   },

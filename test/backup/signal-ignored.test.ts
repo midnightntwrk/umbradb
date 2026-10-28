@@ -50,7 +50,7 @@ describe("A175: SIGUSR2 without backupOnSignal (BK-1, Q173 C)", () => {
       const cwd = join(dir, "command");
       mkdirSync(cwd);
       try {
-        const config = writeRunConfig(project, "ignored-run.config.ts", `pglite:${join(cwd, "db")}`, node.url);
+        const config = writeRunConfig(project, "ignored-run.config.ts", { kind: "pglite", path: join(cwd, "db") }, node.url);
         const run = runInChild(project, ["--config", config], cwd);
         await sigusr2Ignored(run, cwd, "db", PATIENCE_MS);
         expect(run.stderr()).toMatch(/^SIGUSR2 ignored: backupOnSignal is not set, so no backup is written$/m);

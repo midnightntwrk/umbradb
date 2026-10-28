@@ -76,6 +76,7 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "private-binding-mismatch",
   "needs-lockstep-not-listed",
   "public-config-changed",
+  "transport-reader-can-write",
 ] as const);
 
 /**

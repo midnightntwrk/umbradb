@@ -4,6 +4,8 @@ import { POSTGRES_IMAGE } from "../postgres-image.js";
 import type { Database } from "../../src/db/api.js";
 import { openPostgres, type PostgresOptions } from "../../src/db/postgres.js";
 import { startContainer } from "../containers.js";
+import type { PostgresParts } from "../../src/config/database-parts.js";
+import { connectionOfUrl, partsOfUrl } from "./connection.js";
 
 /**
  * A PostgreSQL 18 server for the database API's tests (the repository's one image, `../postgres-image.ts`, through
@@ -17,8 +19,10 @@ import { startContainer } from "../containers.js";
 
 /** One empty database on the test server. */
 export interface PostgresTestDatabase {
-  /** The database's URL, as the `database` setting gives it (CF-4). */
+  /** The database's URL, for the tests' own plain driver connections. */
   readonly url: string;
+  /** The database's parts, as the `database` setting gives them (CF-4, owner decision Q167 A); `ssl` `disable`. */
+  readonly setting: PostgresParts;
   /** A plain driver connection to the database, outside the API: setup SQL and fault injection only. */
   readonly admin: Sql;
   /** Runs setup SQL (several statements allowed) through `admin`, committed when it returns. */
@@ -45,13 +49,20 @@ export interface PostgresTestServer {
 
 const noCommittedHeight = async (): Promise<bigint | null> => null;
 
+/** The server's password for its login `test`. */
+export const TEST_PASSWORD = "pw-umbradb-test-server";
+
 /** How long a terminated backend may take to leave `pg_stat_activity`: it leaves at once; this is load's margin. */
 const BACKEND_END_MS = 30_000;
 
 export async function startPostgresServer(): Promise<PostgresTestServer> {
   // Each test database holds an admin connection and the API's own (a writer and its readers): room for many databases.
   const container = await startContainer(
-    new PostgreSqlContainer(POSTGRES_IMAGE).withCommand(["postgres", "-c", "max_connections=400"]),
+    // A password unlike the login's name (`test`): the redaction hides a password wherever it appears, so a login
+    // whose name equals it would be hidden too (CF-4, Q167 A).
+    new PostgreSqlContainer(POSTGRES_IMAGE)
+      .withPassword(TEST_PASSWORD)
+      .withCommand(["postgres", "-c", "max_connections=400"]),
   );
   const root = postgres(container.getConnectionUri(), { max: 1, onnotice: () => undefined });
   const admins: Sql[] = [];
@@ -68,12 +79,13 @@ export async function startPostgresServer(): Promise<PostgresTestServer> {
       admins.push(admin);
       return {
         url: url.toString(),
+        setting: partsOfUrl(url.toString()),
         admin,
         exec: async (text) => {
           await admin.unsafe(text).simple();
         },
         open(options) {
-          const db = openPostgres({ url: url.toString(), committedHeight: noCommittedHeight, ...options });
+          const db = openPostgres({ connection: connectionOfUrl(url.toString()), committedHeight: noCommittedHeight, ...options });
           opened.push(db);
           return db;
         },

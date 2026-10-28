@@ -1,5 +1,5 @@
 /**
- * `umbradb config check <file> [--database <url>]` (`openspec/changes/core-arch/specs/configuration/spec.md` CF-10;
+ * `umbradb config check <file> [--database]` (`openspec/changes/core-arch/specs/configuration/spec.md` CF-10;
  * `design.md` §7, §12; CORE-ARCH §4.12): checks a configuration file without starting a process, and reports every
  * finding of every check it ran, each with its path. The checks, in order ({@link CHECK_STEPS}):
  *
@@ -9,7 +9,8 @@
  *    `not-plain-data` at its path), validated (CF-3's shape and the schema checks of every revision of the build's
  *    version, every violation at once, `src/config/validate.ts`), and the process's `core` revision taken (decision
  *    record Q102, `src/config/process.ts`: a file whose every `core` entry is a `versionEntry` has none);
- * 3. **history** — with `--database` only: the database read read-only (`./database.ts`) and the history's checks run
+ * 3. **history** — with `--database` only: the database the file's `core` revision configures (owner decision Q167 A,
+ *    task 4.5: the flag takes no value) read read-only (`./database.ts`) and the history's checks run
  *    on the validated configuration at its cursor — CF-3's checks of the `versionEntry` revisions
  *    (`entriesAtCursor`), then CF-5, CF-6, CF-8 and CF-9's `sweep: off` (`historyFindings`, `src/config/history.ts`),
  *    every finding of every code. Without `--database` no database is opened, and the report says the history checks
@@ -31,13 +32,14 @@
  *
  * **No secret is printed** (CF-4, AE-6): every text of the report — findings, notes, the summary — passes through the
  * redaction of `src/config/redact.ts` built from the file's secrets as the validation reads them (`configSecrets`:
- * `secret` settings and settings of no known kind, URL passwords elsewhere) and the `--database` value, which is never
- * printed itself; the redaction's patterns also hide any URL's credentials. When the file cannot be evaluated nothing
- * tells its secrets apart, so an error it throws is shown through the patterns and the `--database` value only.
+ * `secret` settings and settings of no known kind, the `password` parts of the database settings, URL passwords
+ * elsewhere); the redaction's patterns also hide any URL's credentials. When the file cannot be evaluated nothing tells
+ * its secrets apart, so an error it throws is shown through the patterns only.
  */
 
 import { resolve } from "node:path";
-import { PUBLIC_CORE_SCHEMA, type ProcessSide } from "../config/core-settings.js";
+import type { ProcessSide } from "../config/core-settings.js";
+import { type DatabaseParts, isMemoryDatabase } from "../config/database-parts.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { historyFindings, type HistoryRow } from "../config/history.js";
 import { type ConfigFinding, findingText, refusalFindings } from "../config/findings.js";
@@ -65,8 +67,11 @@ export interface ConfigCheckOptions {
   readonly file: string;
   /** The working directory. */
   readonly cwd: string;
-  /** `--database`: the database whose history to check against, read-only. Without it no database is opened. */
-  readonly database?: string | undefined;
+  /**
+   * `--database`: check against the history of the database the file's `core` revision configures, read-only (Q167 A).
+   * Without it no database is opened.
+   */
+  readonly database?: boolean | undefined;
   /**
    * The build's declarations, validated; unless given, the command's own with the file's `modules` as its user modules
    * (`buildDeclarations`, Q106 B).
@@ -117,7 +122,7 @@ export interface CheckState {
   /** The file, absolute. */
   readonly file: string;
   readonly cwd: string;
-  readonly database: string | undefined;
+  readonly database: boolean;
   /** The build's declarations: the host program's, or the command's with the file's `modules` once it is loaded. */
   declarations: DeclarationSet<ModuleDeclaration> | null;
   readonly side: ProcessSide | undefined;
@@ -184,20 +189,6 @@ export function inferSide(data: PlainData | unknown): ProcessSide {
   return has("instanceId") && !has("node") ? "private" : "public";
 }
 
-/**
- * Why `value` cannot be `--database`, or null: it must be what the `database` setting accepts (CF-4), and not
- * `pglite:memory`, an in-memory database that only its own process can read. The reason never repeats the value.
- */
-export function databaseArgumentProblem(value: string): string | null {
-  if (value === "") return "--database takes a value: the database's URL";
-  if (!PUBLIC_CORE_SCHEMA.shape.database.safeParse(value).success) {
-    return "--database takes a PostgreSQL URL (postgres:// or postgresql://) or pglite:<directory>";
-  }
-  if (value === "pglite:memory") {
-    return "--database names an in-memory PGlite database, which only the process holding it can read";
-  }
-  return null;
-}
 
 /** An error's code: an `UmbraError`'s own, `error` for any other. */
 export const errorCode = (error: unknown): string => (error instanceof UmbraError ? error.code : "error");
@@ -303,7 +294,7 @@ function readNote(state: DatabaseState): string {
     return "no PGlite database at that directory yet: checked as a new database, which startup creates; nothing was " +
       "opened or created";
   }
-  const from = "read-only, from the database given with --database";
+  const from = "read-only, from the configuration's database";
   const count = state.history.length;
   if (state.cursor === null && count === 0) return `${from}, a new database (nothing committed, no history)`;
   const at = state.cursor === null ? "with nothing committed" : `at the cursor ${state.cursor}`;
@@ -311,35 +302,46 @@ function readNote(state: DatabaseState): string {
 }
 
 /**
- * A failure to open or read the `--database` database, as a finding: the refusals of the backends (CF-9's
+ * A failure to open or read the configuration's database, as a finding: the refusals of the backends (CF-9's
  * `development-opt-in-required`, `writer-lock-held`) as they are, any other error — the backends' `connection-lost` and
- * `database-error`, or a URL the driver cannot read — as the database not read.
+ * `database-error` — as the database not read.
  */
 function databaseFinding(error: unknown): CheckFinding {
   const code = errorCode(error);
   const text = errorText(error);
   const own = code === "development-opt-in-required" || code === "writer-lock-held";
-  const message = own ? text : `the database given with --database could not be read: ${text}`;
+  const message = own ? text : `the configuration's database could not be read: ${text}`;
   return { code, path: DATABASE_PATH, message };
 }
 
-/** The history's checks against the `--database` database (see the module comment). */
+/** The history's checks against the configuration's database, with `--database` (see the module comment). */
 const HISTORY: CheckStep = {
   name: "history",
   async run(state) {
-    if (state.database === undefined) return notRun("history", HISTORY_TITLE, NO_DATABASE);
+    if (!state.database) return notRun("history", HISTORY_TITLE, NO_DATABASE);
     if (state.checked === null || state.process === null || state.declarations === null) {
       const why = "the configuration did not pass its own checks, which the history checks need";
       return notRun("history", HISTORY_TITLE, why);
     }
+    const database = state.process.settings?.database as unknown as DatabaseParts;
+    if (isMemoryDatabase(database)) {
+      const finding = {
+        code: "invalid-configuration",
+        path: DATABASE_PATH,
+        message:
+          "the configuration's database is PGlite in memory, which only the process holding it can read; " +
+          "nothing was opened",
+      };
+      return stepReport("history", HISTORY_TITLE, [finding], "the configuration's database was not read");
+    }
     let read: DatabaseState;
     try {
-      read = await readDatabaseState(state.database, {
+      read = await readDatabaseState(database, {
         cwd: state.cwd,
         developmentOptIn: state.process.settings?.developmentOptIn === true,
       });
     } catch (error) {
-      const why = "the database given with --database was not read";
+      const why = "the configuration's database was not read";
       return stepReport("history", HISTORY_TITLE, [databaseFinding(error)], why);
     }
     const cursor = read.kind === "read" ? read.cursor : null;
@@ -397,23 +399,18 @@ function reportText(file: string, steps: readonly StepReport[]): string {
 
 /**
  * Runs `umbradb config check` on `options.file` (see the module comment) and returns its report; never starts a
- * process, and opens a database only with `options.database`, read-only. Throws an `Error` for a `database` that is no
- * `--database` value ({@link databaseArgumentProblem}: the caller's error).
+ * process, and opens a database only with `options.database` — the file's own, read-only.
  */
 export async function configCheck(
   options: ConfigCheckOptions,
   seams: ConfigCheckSeams = {},
 ): Promise<ConfigCheckReport> {
-  if (options.database !== undefined) {
-    const problem = databaseArgumentProblem(options.database);
-    if (problem !== null) throw new Error(`configCheck: ${problem}`);
-  }
   const file = resolve(options.cwd, options.file);
   const reports: StepReport[] = [];
   const state: CheckState = {
     file,
     cwd: options.cwd,
-    database: options.database,
+    database: options.database === true,
     declarations: options.declarations ?? null,
     side: options.side,
     userModules: seams.userModules ?? ((loaded) => loaded.modules),
@@ -421,7 +418,7 @@ export async function configCheck(
     loaded: null,
     checked: null,
     process: null,
-    secrets: options.database === undefined ? [] : [options.database],
+    secrets: [],
   };
   for (const step of seams.steps ?? CHECK_STEPS) reports.push(await step.run(state));
   const redact = (seams.redactor ?? redactor)(state.secrets);

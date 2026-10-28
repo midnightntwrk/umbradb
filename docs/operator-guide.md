@@ -6,17 +6,116 @@ where it relies on them.
 
 ## The database
 
-The `core` entry's `database` names where the indexer keeps its data (CF-4): a PostgreSQL URL (`postgres://…` or
-`postgresql://…`) or, under the development opt-in (`developmentOptIn: true`, CF-9), `pglite:<directory>` — a PGlite
-database in that directory, a relative path read from the process's working directory — or `pglite:memory`, a
-database that lives inside its process only. The setting is secret: logs and `/config` show it as `[redacted]`.
+The `core` entry's `database` names where the indexer keeps its data (CF-4), as parts, never a connection string
+(owner decision Q167): a URL such as `postgres://…` or a `pglite:` text is refused, with its path, before anything
+opens.
+
+```ts
+// PostgreSQL
+database: { kind: "postgres", host: "db.internal", port: 5432, user: "umbradb", password: "…", name: "indexer" },
+// PGlite in a directory, under the development opt-in (developmentOptIn: true, CF-9)
+database: { kind: "pglite", path: "data/preview" },
+// PGlite in memory, under the development opt-in: the database lives inside its process only
+database: { kind: "pglite", memory: true },
+```
+
+- `port` is 5432 unless given. `password` may be left out: the PostgreSQL driver then takes `PGPASSWORD` from the
+  process's environment, as libpq does.
+- A `host` starting with `/` is a Unix socket directory: the process connects to `<host>/.s.PGSQL.<port>`.
+- A PGlite `path` is a directory, a relative one read from the process's working directory.
+- Only `password` is secret: `/config` shows it as `[redacted]`, and every log line and error hides it wherever it
+  appears. The host, port, user, name, `ssl` and a PGlite `path` are shown in `/config` and in the log, so a mistyped
+  host or directory can be seen.
+
+### TLS to PostgreSQL: `ssl`
+
+`ssl` says how the connection to PostgreSQL is protected (CF-4; owner decisions Q182, Q183):
+
+- `disable`: no TLS.
+- `require`: TLS, the server's certificate not checked. The traffic is encrypted, but a machine that can intercept it
+  can pose as the server.
+- `verify-full`: TLS, the certificate checked against Node.js's built-in trust roots and the host name checked against
+  the certificate.
+
+Without `ssl`, the default is `disable` for a host that never leaves the machine — `localhost`, `127.0.0.1`, `::1`, or
+a socket directory — and `require` for every other host. A port forwarded to `localhost` therefore runs in clear by
+default; write `ssl: "require"` or `ssl: "verify-full"` for it.
+
+`verify-full` takes no setting for another certificate authority: it checks against Node.js's built-in roots only. A
+server whose certificate comes from a private CA (common for self-hosted and some managed PostgreSQL) cannot be
+verified this way; use `require` for it, or give the server a certificate from a public CA. Node.js reads extra roots
+from `NODE_EXTRA_CA_CERTS` at its start, which is the process's own trust configuration, not UmbraDB's.
+
+`umbradb backup` hands the same parts to `pg_dump` in libpq's environment (`PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`,
+`PGPASSWORD`, `PGSSLMODE`); for `verify-full` it adds `PGSSLROOTCERT=system`, which makes libpq check against the
+operating system's trust store, the closest libpq has to Node.js's roots.
+
+### A PGlite directory that does not exist
 
 A PGlite directory that does not exist yet is created, with any missing parent directory, by what writes the database:
-`umbradb run` (and a host program's process) and `umbradb restore` into its target (owner decision Q163). In a new
-checkout, `pglite:data/preview` creates `data/` and `data/preview` at the first `umbradb run`; a mistyped path creates
-a new, empty database instead of failing. What only reads creates nothing: `umbradb config check --database` checks a
-missing directory as a new database, and `umbradb backup` refuses one (`no-committed-height`). Beside the directory
-the process keeps its writer lock, `<directory>.lock.sqlite` (DB-11): one process at a time opens a PGlite directory.
+`umbradb run` (and a host program's process) and `umbradb restore` into its target (owner decision Q163). Each says
+so, naming the path as configured (owner decision Q165): the process logs, and the restore prints,
+
+```text
+created a new PGlite data directory data/preview (and 1 missing parent directory)
+```
+
+In a new checkout, `path: "data/preview"` creates `data/` and `data/preview` at the first `umbradb run`; a mistyped
+path creates a new, empty database instead of failing, and that line names it. What only reads creates nothing:
+`umbradb config check --database` checks a missing directory as a new database, and `umbradb backup` refuses one
+(`no-committed-height`). Beside the directory the process keeps its writer lock, `<directory>.lock.sqlite` (DB-11):
+one process at a time opens a PGlite directory.
+
+### Checking a configuration against its database
+
+`umbradb config check <file> --database` reads the configuration history of the database the file's `core` entry
+configures, read-only, and checks the file against it (CF-10). The flag takes no value: to check against another
+database, write a file that names it. On PostgreSQL the check uses one read connection and takes no writer lock, so it
+runs beside the process that writes the database; on PGlite it needs the file's development opt-in and the
+directory's lock, so it cannot run while a process has the directory open. A PGlite database in memory cannot be read
+from outside its process, and the check says so.
+
+### The transport reader
+
+A core on PostgreSQL that listens for private processes (`listen.transport`) runs their reads on a login of its own,
+`transportReader` (owner decision Q175). The setting is required there, and refused on PGlite, whose database has one
+session:
+
+```ts
+database: { kind: "postgres", host: "db.internal", user: "umbradb", password: "…", name: "indexer" },
+listen: { transport: "0.0.0.0:7000" },
+transportReader: { user: "umbradb_transport", password: "…" },
+```
+
+The login uses `database`'s host, port, name and `ssl`; only its `user` and `password` are its own, and its
+`password` is secret like `database`'s. The core opens a separate pool of read connections with it, and every `read`
+a private process sends runs there, so a statement that tries to write is refused by PostgreSQL itself, whatever its
+text. Before the transport listens, the core checks the login and refuses to start with `transport-reader-can-write`,
+naming the login and what it found, if the login:
+
+- is a superuser;
+- holds `CREATEROLE`, `CREATEDB` or `BYPASSRLS`;
+- is a member of `database`'s login (or is that login);
+- holds anything beyond reading on the database's own schemas: `CREATE` on the database or on a schema; `INSERT`,
+  `UPDATE`, `DELETE`, `TRUNCATE`, `REFERENCES`, `TRIGGER` or `MAINTAIN` on a table or view; `USAGE` or `UPDATE` on a
+  sequence (`nextval`). Grants to `PUBLIC` and through other roles count.
+
+Create the login once, as a superuser or a role that may grant `pg_read_all_data`:
+
+```sql
+CREATE ROLE umbradb_transport LOGIN PASSWORD '…';
+GRANT pg_read_all_data TO umbradb_transport;
+```
+
+`pg_read_all_data` gives `SELECT` on every table and `USAGE` on every schema, including tables a module creates later,
+and nothing else. Allow the login in `pg_hba.conf` for the database. Grant it nothing that writes, and do not make it a
+member of the indexer's login: the check refuses such a login at every start. A table that a later
+migration creates is checked at the next start.
+
+The core's own rules for a `read` still apply in front of this login: one statement, `SELECT`, `WITH`, `VALUES` or
+`TABLE` only, no `pg_` functions and none of a list of others (`docs/THREAT_MODEL.md`). Together they keep a private
+process's reads to reads: the rules stop what any login may still do (advisory locks, session settings), and the login
+stops a write the rules miss.
 
 ## The node on `/status`
 
@@ -84,8 +183,8 @@ argument.
   not a dependency of UmbraDB: install the PostgreSQL 18 client (`postgresql-client-18` on Debian and Ubuntu,
   `postgresql18` on Alpine and Fedora, `postgresql@18` with Homebrew) and put its `pg_dump` on `PATH`, or name it with
   `UMBRADB_PG_DUMP=/path/to/pg_dump`. A missing `pg_dump`, or one of another major version, fails with
-  `backup-tools-missing` and says what to install. The database URL's password reaches `pg_dump` in its environment,
-  never on its command line.
+  `backup-tools-missing` and says what to install. The database's parts reach `pg_dump` in libpq's environment (see
+  "TLS to PostgreSQL" above), the password as `PGPASSWORD`, never on its command line.
 - **On PGlite** (a development database, under the development opt-in) it runs `pg_dump` of
   `@electric-sql/pglite-tools`, which is not installed with UmbraDB either: `npm install
   @electric-sql/pglite-tools@0.4.10`, the version made for UmbraDB's PGlite 0.5.10. A PGlite directory opens in one

@@ -5,6 +5,7 @@ import { UmbraError } from "../../src/db/errors.js";
 import { classifyDriverError, openPostgres } from "../../src/db/postgres.js";
 import { TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
+import { connectionOfUrl } from "./connection.js";
 
 /**
  * A19 [FAULT] (DB-13): terminating the writer's backend mid-transaction yields `connection-lost` with `retryable:
@@ -174,7 +175,7 @@ describe("A19 (DB-13) — a lost connection is connection-lost, retryable", () =
       });
     });
     const db = openPostgres({
-      url: `postgres://postgres:postgres@127.0.0.1:${port}/postgres`,
+      connection: connectionOfUrl(`postgres://postgres:postgres@127.0.0.1:${port}/postgres`),
       committedHeight: async () => null,
       connectTimeoutSeconds: 5,
     });
@@ -235,7 +236,7 @@ describe("A19 (DB-13) — every other database error is not retryable", () => {
     const database = await server.createDatabase();
     const url = new URL(database.url);
     url.password = "wrong";
-    const db = openPostgres({ url: url.toString(), committedHeight: async () => null });
+    const db = openPostgres({ connection: connectionOfUrl(url.toString()), committedHeight: async () => null });
     try {
       const error = await failure(() => db.read(async () => 1));
       expect(error).toMatchObject({ code: "database-error", retryable: false });

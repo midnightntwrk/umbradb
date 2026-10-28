@@ -22,6 +22,7 @@ import {
   writerLockHolders,
 } from "./writer-lock-checks.js";
 import { spawnChild } from "../child-processes.js";
+import { connectionOfUrl } from "./connection.js";
 
 /**
  * A17 [FAULT] (DB-11): exactly one process writes each database. This file holds the halves that run in this process
@@ -160,7 +161,7 @@ describe("the PostgreSQL writer lock (DB-11)", () => {
     await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
     const port = (closed.address() as { port: number }).port;
     await new Promise<void>((resolve) => closed.close(() => resolve()));
-    const db = openPostgres({ url: `postgres://u:p@127.0.0.1:${port}/x`, committedHeight: noHeight, connectTimeoutSeconds: 2 });
+    const db = openPostgres({ connection: connectionOfUrl(`postgres://u:p@127.0.0.1:${port}/x`), committedHeight: noHeight, connectTimeoutSeconds: 2 });
     try {
       const error = await rejection(() => startWriter(db));
       expect(error.code).toBe("connection-lost");

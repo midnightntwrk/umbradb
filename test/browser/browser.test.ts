@@ -130,7 +130,8 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
           `window.umbradb.${who === "core" ? "core" : "instances.p1"}.call("admin", "/config")`,
         )).body;
         expect(config.core.settings.developmentOptIn).toBe(true);
-        expect(config.core.settings.database).toBe("[redacted]");
+        // CF-4, Q167 A: the parts are shown; PGlite in memory has no password.
+        expect(config.core.settings.database).toEqual({ kind: "pglite", memory: true });
         const version = await readOf(tab, who, "SELECT version() AS v");
         expect(String(version.rows[0]?.v)).toMatch(/^PostgreSQL 18\.\d+ .*emscripten/i);
       }

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { buildDeclarations, commandBuild } from "../../src/cli/build-modules.js";
 import { EXIT } from "../../src/cli/command.js";
 import { configCheck, type ConfigCheckReport } from "../../src/cli/config-check.js";
@@ -21,8 +22,16 @@ import { runCoreSettings, statsConfig, statsModule } from "./run-fixtures.js";
 vi.setConfig({ testTimeout: 60_000 });
 
 let project: CliProject;
-/** A database URL no check opens (no test here passes --database). */
-const DATABASE = "postgres://checker:pw-4-4a-MODULES@127.0.0.1:9/indexer";
+/** A database no check opens (no test here passes --database). */
+const DATABASE: DatabaseParts = {
+  kind: "postgres",
+  host: "127.0.0.1",
+  port: 9,
+  user: "checker",
+  password: "pw-4-4a-MODULES",
+  name: "indexer",
+  ssl: "disable",
+};
 const NODE = "ws://127.0.0.1:9944";
 
 beforeAll(async () => {

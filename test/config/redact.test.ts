@@ -34,6 +34,10 @@ const PASSWORD = 'pa ss/w@rd"%';
 /** The password as the URL writes it (`encodeURIComponent`). */
 const WRITTEN = "pa%20ss%2Fw%40rd%22%25";
 
+/** The database's parts (Q167 A): only its password is secret. */
+const PARTS = { kind: "postgres", host: "db", port: 5432, user: "indexer", password: PASSWORD, name: "umbradb" } as const;
+
+/** The same database as a URL, as a log line or an error may write it. */
 const DATABASE = `postgres://indexer:${WRITTEN}@db:5432/umbradb`;
 
 /**
@@ -53,7 +57,7 @@ const FORMS = [
 /** The forms of the password `text` holds. */
 const leaked = (text: string): string[] => FORMS.filter((form) => text.includes(form));
 
-/** A configuration whose `database` URL holds the password, as a process's validated configuration. */
+/** A configuration whose `database` parts hold the password, as a process's validated configuration. */
 function checked() {
   return validateConfig(
     input({
@@ -62,7 +66,7 @@ function checked() {
           start: 0,
           config: {
             ...CORE_SETTINGS,
-            database: DATABASE,
+            database: PARTS,
             node: "wss://node-user:node-pass@node.example:443",
             tls: { certificate: "CERT-4-2", key: "the-tls-key", trustedRoots: ["ROOT-4-2"] },
           },
@@ -101,14 +105,14 @@ describe("A29 (helper): the password of the database URL appears nowhere", () =>
     expect(leaked(all)).toEqual([...FORMS]);
   });
 
-  it("the settings /config shows: database, node and tls read [redacted], the rest unchanged", () => {
+  it("the settings /config shows: the database's password, node and tls read [redacted], the rest unchanged", () => {
     const config = checked();
     const redact = configRedactor(config);
     const core = config.entries[0];
     const shown = redact.settings(core?.settings as PlainObject, core?.kinds as FieldKinds);
     expect(shown).toMatchObject({
       network: "preprod",
-      database: REDACTED,
+      database: { ...PARTS, password: REDACTED, ssl: "require" },
       node: REDACTED,
       tls: REDACTED,
       listen: { admin: "0.0.0.0:8081" },
@@ -128,10 +132,14 @@ describe("A29 (helper): the password of the database URL appears nowhere", () =>
     });
   }
 
-  it("the database URL reads [redacted] as a whole, and the text around it is kept", () => {
+  it("the database URL keeps its host and name, its userinfo redacted, and the text around it is kept", () => {
     const redact = configRedactor(checked());
     expect(redact.text(`could not connect to ${DATABASE}: connect ECONNREFUSED`)).toBe(
-      "could not connect to [redacted]: connect ECONNREFUSED",
+      "could not connect to postgres://[redacted]@db:5432/umbradb: connect ECONNREFUSED",
+    );
+    // The other parts are no secret (Q167 A): a log line naming the database shows them.
+    expect(redact.text("opened postgres indexer@db:5432/umbradb (ssl require)")).toBe(
+      "opened postgres indexer@db:5432/umbradb (ssl require)",
     );
   });
 
@@ -239,6 +247,23 @@ describe("CF-4: which strings are secret", () => {
         { tls: "secret", tokens: "secret", feedUrl: "operational", plain: "data", count: "data" },
       ),
     ).toEqual(["C", "K", "R1", "R2", "feed", "0x01", "pw"]);
+  });
+
+  it("a password part inside an operational field is secret, at any depth; a data field's is not (Q167 A)", () => {
+    const settings = {
+      database: { kind: "postgres", host: "db", user: "u", password: "db-pw", name: "n" },
+      transportReader: { user: "r", password: "reader-pw" },
+      nested: [{ inner: { password: "deep-pw" } }],
+      recorded: { password: "data-pw" },
+    };
+    const kinds = { database: "operational", transportReader: "operational", nested: "operational", recorded: "data" } as const;
+    expect(secretStrings(settings, kinds)).toEqual(["db-pw", "reader-pw", "deep-pw"]);
+    expect(redactor([]).settings(settings, kinds)).toEqual({
+      database: { kind: "postgres", host: "db", user: "u", password: REDACTED, name: "n" },
+      transportReader: { user: "r", password: REDACTED },
+      nested: [{ inner: { password: REDACTED } }],
+      recorded: { password: "data-pw" },
+    });
   });
 
   it("a field without a known kind counts as secret (fail closed); empty strings are no secret", () => {

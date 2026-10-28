@@ -1,4 +1,5 @@
 import postgres from "postgres";
+import { connectionOfUrl } from "./connection.js";
 import { expect } from "vitest";
 import type { ErrorCode, UmbraError } from "../../src/db/errors.js";
 import { startDatabase } from "../../src/db/migrate.js";
@@ -24,7 +25,7 @@ export async function expectRefusedBeforeAnyWrite(
   code: ErrorCode,
   options: Partial<PostgresOptions> = {},
 ): Promise<UmbraError> {
-  const db = openPostgres({ url, committedHeight: noHeight, ...options });
+  const db = openPostgres({ connection: connectionOfUrl(url), committedHeight: noHeight, ...options });
   const admin = postgres(url, { max: 1, onnotice: () => undefined });
   try {
     const refused = await rejection(() => startWriter(db));

@@ -102,6 +102,21 @@ function directoryPath(dataDir: string): string | undefined {
   return resolve(dataDir.startsWith("file://") ? dataDir.slice("file://".length) : dataDir);
 }
 
+/** What {@link createPgliteDirectory} created: the directory, and this many missing parent directories with it. */
+export interface CreatedDirectory {
+  readonly missingParents: number;
+}
+
+/**
+ * The log line of a PGlite data directory created (owner decisions Q165 B, Q167 A): `path` as configured, so that a
+ * mistyped path is seen as written.
+ */
+export function createdDirectoryLine(path: string, created: CreatedDirectory): string {
+  const { missingParents: n } = created;
+  const parents = n === 0 ? "" : ` (and ${n} missing parent ${n === 1 ? "directory" : "directories"})`;
+  return `created a new PGlite data directory ${path}${parents}`;
+}
+
 /**
  * Creates the data directory `dataDir` (read as {@link pgliteLockFile} reads it) when it does not exist, with every
  * missing parent directory, so that its lock's file can sit beside it (CF-4, owner decision Q163): what writes the
@@ -109,13 +124,19 @@ function directoryPath(dataDir: string): string | undefined {
  * —, never what only reads it. Does nothing for a database kept in memory or a path that exists (a file there is the
  * lock's refusal, "not a directory"). Throws `invalid-configuration` for the browser's file systems and
  * `database-error` (`reason: open-failed`) when a directory cannot be created (a file on the path, no permission); the
- * message names no path (CF-4: `database` is secret).
+ * message names no path (the caller logs the path as configured, owner decisions Q165 B, Q167 A). Returns what it
+ * created — how many missing parent directories with it — so the caller can say so; null when it created nothing.
  */
-export function createPgliteDirectory(dataDir: string): void {
+export function createPgliteDirectory(dataDir: string): CreatedDirectory | null {
   const path = directoryPath(dataDir);
-  if (path === undefined || existsSync(path)) return;
+  if (path === undefined || existsSync(path)) return null;
+  let missingParents = 0;
+  for (let parent = dirname(path); !existsSync(parent) && dirname(parent) !== parent; parent = dirname(parent)) {
+    missingParents += 1;
+  }
   try {
     mkdirSync(path, { recursive: true });
+    return { missingParents };
   } catch (error) {
     throw new UmbraError(
       "database-error",

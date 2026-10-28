@@ -11,6 +11,7 @@ import { EXIT } from "../../src/cli/command.js";
 import { buildCoreVersion } from "../../src/config/build.js";
 import { defineModule } from "../../src/modules/declaration.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
+import type { PostgresParts } from "../../src/config/database-parts.js";
 import { type CliProject, cliProject, configText, coreSettings, inProcess, lineOf, treeOf } from "./cli-fixtures.js";
 
 /**
@@ -29,8 +30,8 @@ vi.setConfig({ testTimeout: 60_000 });
 let project: CliProject;
 let listener: Server;
 let connections = 0;
-/** A PostgreSQL URL no server answers: a TCP listener that counts the connections made to it. */
-let unanswered = "";
+/** A PostgreSQL database's parts no server answers: a TCP listener that counts the connections made to it. */
+let unanswered: PostgresParts = { kind: "postgres", host: "127.0.0.1", port: 1, user: "checker", name: "indexer", ssl: "disable" };
 
 beforeAll(async () => {
   project = await cliProject();
@@ -40,7 +41,7 @@ beforeAll(async () => {
   });
   await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
   const { port } = listener.address() as { port: number };
-  unanswered = `postgres://checker:pw-4-4-CONFIG@127.0.0.1:${port}/indexer`;
+  unanswered = { ...unanswered, port, password: "pw-4-4-CONFIG" };
 }, 120_000);
 
 afterAll(async () => {
@@ -463,7 +464,7 @@ describe("no database is opened without --database", () => {
     const data = join(project.dir, "never-created");
     const file = project.write(
       "pglite.config.ts",
-      coreOnly(coreSettings(`pglite:${data}`, { developmentOptIn: true })),
+      coreOnly(coreSettings({ kind: "pglite", path: data }, { developmentOptIn: true })),
     );
     const before = treeOf(project.dir).filter((path) => !path.startsWith("node_modules"));
     const report = await configCheck({ file, cwd: project.dir });
@@ -482,22 +483,29 @@ describe("the report's other paths", () => {
     expect(report.text).toMatch(/^ {2}\(the default export\): .* \[invalid-configuration top-level\]$/m);
   });
 
-  it("a --database the check cannot take is the caller's error", async () => {
-    const file = project.write("caller.config.ts", coreOnly(coreSettings(unanswered)));
-    await expect(configCheck({ file, cwd: project.dir, database: "mysql://u:pw@h/db" })).rejects.toThrow(
-      "configCheck: --database takes a PostgreSQL URL (postgres:// or postgresql://) or pglite:<directory>",
+  it("--database on a file whose database is PGlite in memory is a finding at --database, opening nothing", async () => {
+    const file = project.write(
+      "memory.config.ts",
+      coreOnly(coreSettings({ kind: "pglite", memory: true }, { developmentOptIn: true })),
     );
-    await expect(configCheck({ file, cwd: project.dir, database: "pglite:memory" })).rejects.toThrow("in-memory");
+    const report = await configCheck({ file, cwd: project.dir, database: true });
+    expect(codesOf(report, "history")).toEqual(["invalid-configuration --database"]);
+    expect(report.text).toContain(
+      "  --database: the configuration's database is PGlite in memory, which only the process holding it can read; " +
+        "nothing was opened [invalid-configuration]",
+    );
+    expect(report.text).toMatch(/— the configuration's database was not read$/m);
   });
 
-  it("a --database URL the driver cannot read is a finding at --database", async () => {
-    const file = project.write("bad-url.config.ts", coreOnly(coreSettings(unanswered)));
-    const report = await configCheck({ file, cwd: project.dir, database: "postgres://checker:pw-4-4-PORT@h:notaport/db" });
-    expect(codesOf(report, "history")).toEqual(["error --database"]);
-    expect(report.text).toContain(
-      "  --database: the database given with --database could not be read: Invalid URL [error]",
+  it("--database on a file whose database cannot be reached is a finding at --database, without its password", async () => {
+    const file = project.write(
+      "refused.config.ts",
+      coreOnly(coreSettings({ ...unanswered, port: 1, password: "pw-4-4-PORT" })),
     );
-    expect(report.text).toMatch(/— the database given with --database was not read$/m);
+    const report = await configCheck({ file, cwd: project.dir, database: true });
+    expect(codesOf(report, "history")).toEqual(["connection-lost --database"]);
+    expect(report.text).toContain("  --database: the configuration's database could not be read: ");
+    expect(report.text).toMatch(/— the configuration's database was not read$/m);
     expect(report.text).not.toContain("pw-4-4-PORT");
   });
 
@@ -547,7 +555,7 @@ describe("the type check's view of the file's surroundings", () => {
 
   /** A plain-data configuration with no import, so that it needs no package. */
   const plain = `export default { entries: [{ id: "core", start: 0, version: ${JSON.stringify(buildCoreVersion())}, config: ${coreSettings(
-    "postgres://indexer@127.0.0.1:1/indexer",
+    { kind: "postgres", host: "127.0.0.1", port: 1, user: "indexer", name: "indexer", ssl: "disable" },
   )} }] };\n`;
 
   it("a file with no package.json above it is an ES module, as Node.js's syntax detection reads it", async () => {
@@ -620,7 +628,7 @@ describe("no secret is printed (CF-4, AE-6)", () => {
     expect(result.stdout).not.toContain("pw-4-4-CONFIG");
   });
 
-  it("the --database URL in an error the file throws is redacted, though the file gave no data", async () => {
+  it("a URL's credentials in an error the file throws are redacted, though the file gave no data", async () => {
     const url = "postgres://checker:pw-4-4-FLAG@127.0.0.1:1/indexer";
     process.env.UMBRADB_4_4_URL = url;
     try {
@@ -628,13 +636,13 @@ describe("no secret is printed (CF-4, AE-6)", () => {
         "throws-url.config.ts",
         configText(project.builders, ["throw new Error(`cannot use ${process.env.UMBRADB_4_4_URL}`);", "export default {};"]),
       );
-      const result = await check(file, ["--database", url]);
+      const result = await check(file, ["--database"]);
       expect(result.code).toBe(EXIT.failed);
-      expect(result.stdout).toContain("cannot use [redacted]");
+      expect(result.stdout).toContain("cannot use postgres://[redacted]@127.0.0.1:1/indexer");
       expect(`${result.stdout}${result.stderr}`).not.toContain("pw-4-4-FLAG");
       // The control: the same check with the redaction left out prints the password.
       const leaky = await configCheck(
-        { file, cwd: project.dir, database: url },
+        { file, cwd: project.dir, database: true },
         { redactor: () => ({ text: (text: string) => text, settings: (settings) => settings }) },
       );
       expect(leaky.text).toContain("pw-4-4-FLAG");

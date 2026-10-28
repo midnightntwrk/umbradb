@@ -68,8 +68,8 @@ export function pgliteLockFile(dataDir: string): string | undefined {
   if (name === null || !OPFS_NAME.test(name)) {
     throw new UmbraError(
       "invalid-configuration",
-      "the browser build keeps a database in memory (pglite:memory) or in the origin's private file system " +
-        "(pglite:<name>, a name of letters, digits, '.', '_' and '-')",
+      "the browser build keeps a database in memory ({ kind: \"pglite\", memory: true }) or in the origin's private " +
+        "file system ({ kind: \"pglite\", path: <name> }, a name of letters, digits, '.', '_' and '-')",
       { parameter: "database" },
     );
   }

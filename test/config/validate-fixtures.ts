@@ -101,7 +101,7 @@ export const CORE = coreEntry({ start: 0, config: { ...CORE_SETTINGS } });
 /** A private process's `core` settings with the required fields only. */
 export const PRIVATE_SETTINGS = {
   network: "preprod",
-  database: "pglite:memory",
+  database: { kind: "pglite", memory: true },
   instanceId: "wallet-1",
 } as const;
 

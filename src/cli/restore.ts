@@ -83,6 +83,8 @@ export interface RestoreCommandOptions {
   readonly cwd: string;
   /** Where the node client's retries are told. */
   readonly log?: (line: string) => void;
+  /** Where what the restore did besides restoring is told: a PGlite directory it created (Q165 B, Q167 A). */
+  readonly say?: (line: string) => void;
 }
 
 /** What `umbradb restore` restored, or why it did not. */
@@ -151,7 +153,7 @@ export async function runRestore(options: RestoreCommandOptions, seams: RestoreC
       {
         file,
         target: target.backend === "postgres" ? { backend: "postgres" } : { backend: "pglite", exists: target.exists },
-        open: () => openRestoreTarget(target, config),
+        open: () => openRestoreTarget(target, config, (line) => options.say?.(redact.text(`umbradb restore: ${line}`))),
         config: config.checked,
         declarations: config.declarations,
         ...chain,

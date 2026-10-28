@@ -19,6 +19,7 @@
  * there, while the identity and version are always the build's.
  */
 
+import type { DatabasePartsInput, TransportReader } from "./database-parts.js";
 import type { z } from "zod";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import { buildCoreVersion, type CoreVersion, type LedgerName } from "./build.js";
@@ -67,8 +68,8 @@ export type CoreSettingsBase = {
   readonly ledgerSources?: LedgerSources;
   readonly sweep?: "on" | "off";
   readonly retainStates?: number;
-  /** A PostgreSQL URL, `pglite:<directory>` or `pglite:memory`. */
-  readonly database: string;
+  /** The database's parts, never a connection string (CF-4, owner decision Q167). */
+  readonly database: DatabasePartsInput;
   readonly listen?: Listen;
   readonly tipCap?: number;
   readonly prefetchWindow?: number;
@@ -95,6 +96,8 @@ export type PublicCoreSettings = CoreSettingsBase & {
   readonly node: string;
   /** Instance ids. */
   readonly lockstepInstances?: readonly string[];
+  /** The login of the transport's reads; required with a PostgreSQL database and `listen.transport` (Q175 A). */
+  readonly transportReader?: TransportReader;
   readonly instanceId?: never;
   readonly publicDatabase?: never;
   readonly coreTransport?: never;
@@ -103,11 +106,13 @@ export type PublicCoreSettings = CoreSettingsBase & {
 /** A private process's `core` entry (CF-4): instead of `node` and `lockstepInstances`, its own three fields. */
 export type PrivateCoreSettings = CoreSettingsBase & {
   readonly instanceId: string;
-  readonly publicDatabase?: string;
+  /** The public database's parts: a login that may only read (CF-4, Q167). */
+  readonly publicDatabase?: DatabasePartsInput;
   /** The core's transport address. */
   readonly coreTransport?: string;
   readonly node?: never;
   readonly lockstepInstances?: never;
+  readonly transportReader?: never;
 };
 
 /** The `core` entry's `config` (CF-4). */

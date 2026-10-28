@@ -501,7 +501,7 @@ const A28: readonly Row[] = [
     ],
   },
   {
-    name: "a database that is neither a PostgreSQL URL nor PGlite",
+    name: "a database given as a connection string (Q167 A)",
     rule: "settings-schema",
     config: () => withCore({ ...CORE_SETTINGS, database: "mysql://db/umbradb" }),
     findings: [
@@ -509,9 +509,15 @@ const A28: readonly Row[] = [
         path: "entries[0].config.database",
         entry: core0,
         field: "database",
-        says: ["postgres://", "pglite:<directory>", "pglite:memory"],
+        says: ["a connection string is refused", '{ kind: "postgres", host, port, user, password, name, ssl }'],
       },
     ],
+  },
+  {
+    name: "a database of an unknown kind",
+    rule: "settings-schema",
+    config: () => withCore({ ...CORE_SETTINGS, database: { kind: "mysql", host: "db" } }),
+    findings: [{ path: "entries[0].config.database.kind", entry: core0, field: "database", says: ["postgres", "pglite"] }],
   },
   {
     name: "a node that is not a WebSocket URL",
@@ -546,14 +552,14 @@ const A28: readonly Row[] = [
   {
     name: "no node in a public core entry",
     rule: "settings-schema",
-    config: () => withCore({ network: "preprod", database: "pglite:memory" }),
+    config: () => withCore({ network: "preprod", database: { kind: "pglite", memory: true } }),
     findings: [{ path: "entries[0].config.node", entry: core0, field: "node", says: ["received undefined"] }],
   },
   {
     name: "no instanceId in a private core entry",
     rule: "settings-schema",
     side: "private",
-    config: () => withPrivateCore({ network: "preprod", database: "pglite:memory" }),
+    config: () => withPrivateCore({ network: "preprod", database: { kind: "pglite", memory: true } }),
     findings: [{ path: "entries[0].config.instanceId", entry: core0, field: "instanceId", says: ["received undefined"] }],
   },
   {
@@ -711,7 +717,7 @@ describe("A28: entry-shape and schema violations each refuse, naming the entry a
     // CF-2's scenario: `databse` for `database`, which is then missing; and a second entry's own fault.
     const config = {
       entries: [
-        coreEntry({ start: 0, config: { network: "preprod", node: "ws://n:9944", databse: "pglite:memory" } as never }),
+        coreEntry({ start: 0, config: { network: "preprod", node: "ws://n:9944", databse: { kind: "pglite", memory: true } } as never }),
         stats.entry({ start: 10, stop: 9, config: { pollMs: 1000 } }),
       ],
       extra: true,
@@ -854,7 +860,7 @@ describe("A28: absent fields take their declared defaults (CF-3, CF-4)", () => {
       ledgerSources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" },
       sweep: "on",
       retainStates: 0,
-      database: "pglite:memory",
+      database: { kind: "pglite", memory: true },
       node: "ws://127.0.0.1:9944",
       listen: { admin: "0.0.0.0:8081" },
       tipCap: 600,
@@ -878,7 +884,7 @@ describe("A28: absent fields take their declared defaults (CF-3, CF-4)", () => {
       ledgerSources: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" },
       sweep: "on",
       retainStates: 0,
-      database: "pglite:memory",
+      database: { kind: "pglite", memory: true },
       listen: { admin: "0.0.0.0:8081" },
       tipCap: 600,
       prefetchWindow: 64,
@@ -956,7 +962,7 @@ describe("CF-3, CF-4: the validated configuration", () => {
         retainStates: 0,
       },
     });
-    expect(checked.entries[0]?.kinds).toMatchObject({ network: "data", database: "secret", listen: "operational" });
+    expect(checked.entries[0]?.kinds).toMatchObject({ network: "data", database: "operational", listen: "operational" });
   });
 
   it("takes a string with a well-formed surrogate pair (a character beyond U+FFFF)", () => {
@@ -1028,7 +1034,7 @@ describe("CF-3, CF-4: the validated configuration", () => {
           entries: [
             ...withPrivateCore({
               ...PRIVATE_SETTINGS,
-              publicDatabase: "postgres://reader@db/umbradb",
+              publicDatabase: { kind: "postgres", host: "db", user: "reader", name: "umbradb" },
               coreTransport: "core.internal:8082",
             }).entries,
             WALLET.entry({ start: 0, config: { pollMs: 1000 } }),
@@ -1041,7 +1047,7 @@ describe("CF-3, CF-4: the validated configuration", () => {
     expect(checked.side).toBe("private");
     expect(checked.entries[0]?.kinds).toMatchObject({
       instanceId: "operational",
-      publicDatabase: "secret",
+      publicDatabase: "operational",
       coreTransport: "operational",
     });
   });
@@ -1279,13 +1285,20 @@ describe("A28: what needs the cursor (CF-3)", () => {
 describe("CF-4, AE-6: a refusal never carries a secret's value", () => {
   const PASSWORD = "pw-4-2-SECRET";
   const URL = `postgres://indexer:${PASSWORD}@db:5432/umbradb`;
+  const PARTS = { kind: "postgres", host: "db", user: "indexer", password: PASSWORD, name: "umbradb" };
 
   it("a fault beside a secret setting names the fault, never the secret", () => {
-    const error = refusal(() => validateConfig(input(withCore({ ...CORE_SETTINGS, database: URL, tipCap: "600" }))));
+    const error = refusal(() => validateConfig(input(withCore({ ...CORE_SETTINGS, database: PARTS, tipCap: "600" }))));
     expect(JSON.stringify({ message: error.message, details: error.details })).not.toContain(PASSWORD);
   });
 
-  it("a secret refused by its own schema is named by its path, not its value", () => {
+  it("a fault inside the database's parts names the part, never the password", () => {
+    const error = refusal(() => validateConfig(input(withCore({ ...CORE_SETTINGS, database: { ...PARTS, port: "5432" } }))));
+    expect(findingsOf(error).map((f) => f.path)).toEqual(["entries[0].config.database.port"]);
+    expect(JSON.stringify({ message: error.message, details: error.details })).not.toContain(PASSWORD);
+  });
+
+  it("a connection string refused by the schema is named by its path, not its value", () => {
     const error = refusal(() => validateConfig(input(withCore({ ...CORE_SETTINGS, database: `mysql://u:${PASSWORD}@h/db` }))));
     expect(findingsOf(error).map((f) => f.path)).toEqual(["entries[0].config.database"]);
     expect(JSON.stringify({ message: error.message, details: error.details })).not.toContain(PASSWORD);

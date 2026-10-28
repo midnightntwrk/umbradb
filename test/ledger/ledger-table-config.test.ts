@@ -61,7 +61,7 @@ describe("the default: the network's built-in table (CF-4, LG-3)", () => {
   });
 
   it("checks a private process's table by the same rules", () => {
-    const required = { database: "pglite:memory", instanceId: "wallet-1" };
+    const required = { database: { kind: "pglite", memory: true }, instanceId: "wallet-1" };
     const paths = (settings: Record<string, unknown>) =>
       (PRIVATE_CORE_SCHEMA.safeParse({ ...required, ...settings }).error?.issues ?? []).map((issue) => issue.path);
     expect(paths({ network: "custom", genesisHash: H(1) })).toEqual([["ledgerTable"]]);
@@ -71,7 +71,7 @@ describe("the default: the network's built-in table (CF-4, LG-3)", () => {
   });
 
   it("gives a private process's revision the same table", () => {
-    const parsed = PRIVATE_CORE_SCHEMA.parse({ network: "preprod", database: "pglite:memory", instanceId: "wallet-1" });
+    const parsed = PRIVATE_CORE_SCHEMA.parse({ network: "preprod", database: { kind: "pglite", memory: true }, instanceId: "wallet-1" });
     expect(parsed.ledgerTable).toEqual(BUILT_IN_PREPROD);
     expect(PUBLIC_CORE_SCHEMA.parse({ ...CORE_SETTINGS }).ledgerTable).toEqual(BUILT_IN_PREPROD);
   });

@@ -46,8 +46,8 @@ malformed settings and changes to already processed data settings; they do not s
 A malicious configuration or module has process privileges.
 
 Secret-kind settings are redacted, and text redaction covers known configuration secrets and URL credentials
-(`src/config/redact.ts:195`, `src/config/redact.ts:188`). Redaction cannot catch arbitrary encodings or values
-unknown to configuration (`src/config/redact.ts:21`). Modules must classify secrets correctly and protect their
+(`src/config/redact.ts:223`, `src/config/redact.ts:216`). Redaction cannot catch arbitrary encodings or values
+unknown to configuration (`src/config/redact.ts:24`). Modules must classify secrets correctly and protect their
 own logs, responses and keys. Private query values need separate care; see “Private reads of public data”.
 
 ### 2. Midnight node → public process
@@ -70,7 +70,7 @@ SQL, parameters and computed block data cross into storage. The runner puts a fi
 transaction and checks that its cursor matches the block before commit
 (`src/runner/loop.ts:726`, `src/runner/loop.ts:747`; RN-6).
 PostgreSQL writer sessions take the writer lock and run the durability probe
-(`src/db/postgres.ts:458`, `src/db/postgres.ts:459`; DB-11, DB-12).
+(`src/db/postgres.ts:516`, `src/db/postgres.ts:517`; DB-11, DB-12).
 These controls depend on cooperating code and trusted database administration.
 
 Per-module `NOLOGIN` roles, role switching and restricted routine grants limit accidental cross-module writes
@@ -82,12 +82,10 @@ Canonical row encoding, primary-key order and captured changes support reproduci
 `src/backbone/core-digest/core-digest.ts:16`; DT-1–DT-6).
 These unsigned comparisons do not protect against an administrator rewriting both data and hashes.
 
-Today, `database` is a URL, and the whole setting is secret
-(`src/config/core-settings.ts:80`, `src/config/core-settings.ts:112`).
-UmbraDB forwards the URL without an explicit TLS option to the PostgreSQL driver
-(`src/config/database.ts:64`, `src/db/postgres.ts:193`).
-Task 4.5's structured database settings and explicit TLS policy are still to come; see “Exposure defaults and
-hash limits”.
+`database` is given as parts, never a connection string, and only its `password` is secret
+(`src/config/core-settings.ts:131`, `src/config/core-settings.ts:165`, `src/config/redact.ts:129`; CF-4, Q167).
+Its `ssl` reaches the PostgreSQL driver as the driver reads it
+(`src/db/postgres.ts:100`, `src/db/postgres.ts:580`); see “Exposure defaults and hash limits”.
 
 ### 4. Main thread ↔ ledger worker
 
@@ -103,7 +101,7 @@ The worker is not a security sandbox for malicious packages.
 Task 12.2b now checks ledger packages before use. In `Process.#open`, startup invokes `checkLedgerPackages`
 before starting the worker when the graph requires ledger parsing or replay; a graph loading no ledger package
 does not invoke that check, as decided in Q176 A
-(`src/runner/process.ts:1184`, `src/runner/process.ts:1190`, `src/runner/process.ts:1191`).
+(`src/runner/process.ts:1233`, `src/runner/process.ts:1239`, `src/runner/process.ts:1240`).
 The check validates recorded manifests and their listed files, refusing unavailable `released` sources
 (`src/ledger/identity.ts:201`, `src/ledger/identity.ts:169`, `src/ledger/sources.ts:25`).
 
@@ -134,7 +132,7 @@ module use of the envelope helpers (`src/runner/api-server.ts:92`, `src/runner/a
 These fields neither authenticate the server nor prove its database contents.
 
 Unexpected handler failures receive a fixed client-facing error, while the error itself reaches the reporting
-callback and process log (`src/runner/module-api.ts:377`, `src/runner/process.ts:1257`).
+callback and process log (`src/runner/module-api.ts:377`, `src/runner/process.ts:1308`).
 This limits disclosure to API callers without establishing that logs contain no private values.
 
 ### 6. Admin callers → admin worker
@@ -150,15 +148,15 @@ Responses disable caching, and displayed errors use fixed messages and allowlist
 These controls reduce accidental disclosure and keep monitoring separate from database work.
 They do not authorize callers or conceal metadata from the network: the HTTP request path has no authentication
 (`src/admin/serve.ts:66`), and admin defaults to all interfaces
-(`src/config/core-settings.ts:47`; gap 5).
+(`src/config/core-settings.ts:60`; gap 5).
 
 ### 7. Public process/database ↔ private process
 
 A private process reads public tables directly through PostgreSQL or sends SQL and parameters through the core
-transport (`src/backbone/core-private-source/public-database.ts:176`,
+transport (`src/backbone/core-private-source/public-database.ts:179`,
 `src/private/private-transport.ts:313`).
 Direct access needs an operator-provided login that may only read; opening a read-only API handle does not
-establish that login's privileges (`src/backbone/core-private-source/public-database.ts:169`).
+establish that login's privileges (`src/backbone/core-private-source/public-database.ts:171`).
 
 Task 14.2b now prechecks every statement of a transport `read` before any statement runs.
 Each must contain one statement whose first word, after opening parentheses, is `SELECT`, `WITH`, `VALUES`
@@ -172,16 +170,20 @@ A refusal returns `read-refused` and runs nothing from the request; its log name
 number, never the statement text (`src/private/core-transport.ts:382`,
 `src/private/core-transport.ts:369`, `src/private/core-transport.ts:376`).
 Accepted statements execute inside the read-only transaction opened by `Database.read`
-(`src/private/core-transport.ts:389`, `src/db/postgres.ts:284`, `src/db/pglite.ts:393`;
+(`src/private/core-transport.ts:389`, `src/db/postgres.ts:342`, `src/db/pglite.ts:393`;
 PP-4, design §8 “Confined reads”).
 
-On PostgreSQL these reads still use the writer's login. The gate's token rules are the only barrier against a
-privileged function they do not list (`src/db/postgres.ts:531`, `src/private/read-gate.ts:134`).
-After task 4.5, `core.transportReader` (`{ user, password }`) will be required on PostgreSQL with
-`listen.transport`, use its own read pool and cause startup to refuse `transport-reader-can-write` for a login
-that could write; it will be refused on PGlite, and the gate will remain on both backends
-(`openspec/changes/core-arch/tasks.md:1132`; Q175 A).
-That separate login is not a current control.
+On PostgreSQL these reads run on a read pool of their own, logged in as `core.transportReader`
+(`{ user, password }`), which is required there with `listen.transport` and refused on PGlite
+(`src/config/core-settings.ts:224`, `src/runner/process.ts:1165`, `src/runner/process.ts:1283`; CF-4, Q175 A).
+Before the transport listens, startup refuses `transport-reader-can-write` when that login is a superuser, holds
+`CREATEROLE`, `CREATEDB` or `BYPASSRLS`, is a member of the writer's login, or holds a privilege beyond reading on
+the database or a public schema, table or sequence (`src/private/transport-reader.ts:89`,
+`src/private/transport-reader.ts:107`, `src/runner/process.ts:1176`).
+A write the gate misses is then refused by PostgreSQL itself, and the writer's session cannot be ended from the
+reader's. On PGlite the gate and the read-only transaction remain the only barriers: there is one session, the
+writer's. The gate stays in front of the reader login on both backends, since advisory locks and session settings
+are open to any login.
 
 Binding checks compare public genesis and start height; transport messages wake intake rather than replace
 public database reads (`src/backbone/core-private-source/core-private-source.ts:288`,
@@ -204,16 +206,16 @@ Query confidentiality is addressed in “Private reads of public data”.
 
 Plain SQL and a manifest cross the filesystem boundary.
 PostgreSQL dumps use the manifest read's exported snapshot; PGlite gathers facts and dump text in one exclusive
-queued job (`src/backup/backup.ts:199`, `src/backup/backup.ts:201`,
+queued job (`src/backup/backup.ts:215`, `src/backup/backup.ts:201`,
 `src/backup/pglite-backup.ts:103`; BK-1).
 
 Task 15.1b creates backup files owner-only from creation: `ownerOnlyFile` opens a new file with
 `BACKUP_FILE_MODE` (`0600`) and applies that mode before writing, regardless of umask
-(`src/backup/backup.ts:65`, `src/backup/backup.ts:95`, `src/backup/backup.ts:97`).
+(`src/backup/backup.ts:68`, `src/backup/backup.ts:98`, `src/backup/backup.ts:100`).
 A refused `chmod` fails the backup and removes the temporary file; completion renames the temporary file
-(`src/backup/backup.ts:99`, `src/backup/backup.ts:236`).
+(`src/backup/backup.ts:99`, `src/backup/backup.ts:252`).
 Where POSIX modes do not apply, folder or mount access controls determine confidentiality
-(`docs/operator-guide.md:147`).
+(`docs/operator-guide.md:246`).
 
 Restore checks compatibility before loading and contents after loading
 (`src/backup/restore.ts:300`, `src/backup/restore.ts:416`).
@@ -266,7 +268,7 @@ Workflow definitions are evidence of configured controls, not evidence that this
 ## The Midnight node
 
 The owner's resolution, Q179 A on 2026-10-28, adds no new check: the core trusts its one configured Midnight node
-for finality and block contents (`openspec/changes/core-arch/tasks.md:3946`).
+for finality and block contents (`openspec/changes/core-arch/tasks.md:3995`).
 The process constructs its node connection from that configured URL
 (`src/backbone/core-chain/core-chain.ts:284`).
 
@@ -284,7 +286,7 @@ Finality justifications are not verified: finalized head comes from RPC, and the
 and extrinsics while leaving justifications unused
 (`src/node/client.ts:250`, `src/node/decode.ts:100`).
 The `node` setting accepts `ws://` to any host; the socket uses the configured URL without a TLS-only policy
-(`src/config/core-settings.ts:88`, `src/node/ws-socket.ts:30`).
+(`src/config/core-settings.ts:140`, `src/node/ws-socket.ts:30`).
 
 Run or trust your own node, and use `wss://` across networks.
 An authenticated channel protects the connection to that node; it does not remove trust in the node's answers.
@@ -292,13 +294,13 @@ An authenticated channel protects the connection to that node; it does not remov
 ## Private reads of public data
 
 The owner's resolution, Q180 A on 2026-10-28, documents disclosure through reads of public data
-(`openspec/changes/core-arch/tasks.md:3948`).
+(`openspec/changes/core-arch/tasks.md:3997`).
 A private process's SQL text and parameters reach the public database. Through transport they also reach the
 core, which decodes parameters and executes the supplied SQL
 (`src/private/private-transport.ts:313`, `src/private/private-transport.ts:368`,
 `src/private/core-transport.ts:392`).
 Direct reads use the configured public PostgreSQL connection
-(`src/backbone/core-private-source/public-database.ts:176`).
+(`src/backbone/core-private-source/public-database.ts:179`).
 
 The public database operator can observe those queries and values. Treat database logging and query inspection,
 including `log_statement`, `log_min_duration_statement`, `auto_explain` and `pg_stat_statements`, as disclosure
@@ -306,10 +308,10 @@ surfaces. A query containing a private-derived identifier or filter can disclose
 every result row is public.
 
 A database error can echo a parameter. UmbraDB retains the server's error message and cause, and its own errors,
-details and logs may carry private values (`src/db/postgres.ts:147`, `src/db/postgres.ts:170`,
-`src/db/errors.ts:78`, `src/runner/process.ts:1257`).
+details and logs may carry private values (`src/db/postgres.ts:203`, `src/db/postgres.ts:226`,
+`src/db/errors.ts:78`, `src/runner/process.ts:1308`).
 Process log redaction knows configuration secrets, not arbitrary private-derived query values
-(`src/runner/process.ts:1034`, `src/config/redact.ts:16`).
+(`src/runner/process.ts:1054`, `src/config/redact.ts:16`).
 
 Task 14.2b keeps a refused read's statement text out of the core's refusal log
 (`src/private/core-transport.ts:369`).
@@ -320,7 +322,7 @@ filter them inside the private process.
 ## Backups and restore
 
 The owner's resolution, Q177 A on 2026-10-28, leaves restore unchanged: restore only backups you wrote
-(`openspec/changes/core-arch/tasks.md:3944`).
+(`openspec/changes/core-arch/tasks.md:3993`).
 Restore runs the file's SQL with the database login's, or writer's, rights. The load loop executes statements
 before restoring ownership and checking the loaded contents hash and ledger root
 (`src/backup/restore.ts:407`, `src/backup/restore.ts:412`, `src/backup/restore.ts:416`,
@@ -339,19 +341,19 @@ Post-load checks can refuse damaged or incompatible data, but run after the file
 authority. The enclosing transaction is not a security boundary for hostile SQL
 (`src/backup/restore.ts:470`, `src/backup/restore.ts:407`).
 The operator guide therefore says to restore only backups from a trusted source, your own
-(`docs/operator-guide.md:160`).
+(`docs/operator-guide.md:259`).
 
 Q178 A assigns backup origin and confidentiality to the operator
-(`openspec/changes/core-arch/tasks.md:3945`).
+(`openspec/changes/core-arch/tasks.md:3994`).
 UmbraDB neither signs nor encrypts backups: it writes a manifest and plain dump output
-(`src/backup/manifest.ts:54`, `src/backup/manifest.ts:73`, `src/backup/backup.ts:147`,
-`src/backup/backup.ts:228`).
+(`src/backup/manifest.ts:54`, `src/backup/manifest.ts:73`, `src/backup/backup.ts:162`,
+`src/backup/backup.ts:244`).
 Manifest hashes compare loaded contents with claims carried in the same file; they establish self-consistency,
 not who wrote the file or whether its SQL is safe (`src/backup/restore.ts:417`).
 
 Storing, moving and encrypting backups, and knowing their origin, are the operator's responsibilities.
 A private instance's backup requires development opt-in and contains its private data in clear
-(`src/backup/backup.ts:212`, `src/backup/backup.ts:229`, `docs/operator-guide.md:142`).
+(`src/backup/backup.ts:228`, `src/backup/backup.ts:245`, `docs/operator-guide.md:241`).
 Owner-only file permissions reduce local exposure; they do not provide encryption or authenticate origin.
 
 ## Exposure defaults and hash limits
@@ -359,44 +361,49 @@ Owner-only file permissions reduce local exposure; they do not provide encryptio
 The current defaults are:
 
 - **Admin:** plain HTTP on `0.0.0.0:8081`, without caller authentication
-  (`src/config/core-settings.ts:47`, `src/admin/serve.ts:82`).
+  (`src/config/core-settings.ts:60`, `src/admin/serve.ts:82`).
 - **Module API:** no listener unless `listen.api` is set; then HTTP and WebSocket
   (`src/runner/api-server.ts:483`, `src/runner/api-server.ts:408`,
   `src/runner/api-server.ts:418`).
 - **Private transport:** no configured listener by default; without `tls`, its server is plaintext HTTP/WebSocket
-  (`src/config/core-settings.ts:117`, `src/private/core-transport.ts:264`).
-- **PostgreSQL:** URL configuration, with no explicit UmbraDB TLS option passed to the driver; whatever the URL or
-  environment enables applies (`src/config/database.ts:64`, `src/db/postgres.ts:193`).
+  (`src/config/core-settings.ts:170`, `src/private/core-transport.ts:264`).
+- **PostgreSQL:** the database's parts, `ssl` passed to the driver explicitly: `require` unless the host is loopback
+  or a socket directory, where it is `disable` (`src/config/database.ts:69`, `src/db/postgres.ts:250`,
+  `src/config/database-parts.ts:77`).
   The lockfile pins `postgres` 3.4.9 (`package-lock.json:5054`).
 - **API reads:** a default 30-second PostgreSQL statement and idle timeout; PGlite validates the option but does
-  not apply it (`src/config/core-settings.ts:132`, `src/db/postgres.ts:319`, `src/db/pglite.ts:308`).
+  not apply it (`src/config/core-settings.ts:185`, `src/db/postgres.ts:377`, `src/db/pglite.ts:308`).
 - **Development features:** opt-in defaults to false; PGlite and private backups require it
-  (`src/config/core-settings.ts:137`, `src/db/durability-probe.ts:11`, `src/backup/backup.ts:212`).
+  (`src/config/core-settings.ts:190`, `src/db/durability-probe.ts:11`, `src/backup/backup.ts:228`).
 - **Browser:** development opt-in, memory storage by default, optional OPFS, and a new database starting at the
   node's finalized head (`browser/src/config.ts:33`, `browser/src/page.ts:95`,
   `browser/src/db/database.ts:33`, `browser/src/process-worker.ts:186`).
 
 Transport `tls` applies to that transport, not the admin listener, module API or database
 (`src/private/core-transport.ts:266`, `src/admin/serve.ts:82`,
-`src/runner/api-server.ts:408`, `src/db/postgres.ts:193`).
+`src/runner/api-server.ts:408`, `src/db/postgres.ts:250`).
 Browser transport uses page message channels and refuses the TLS option
 (`browser/src/net/https.ts:9`).
 Browser admin monitoring shares its process worker and can stall with it
 (`browser/src/process-worker.ts:14`, `browser/src/admin.ts:42`).
 
-After task 4.5, `database` and a private process's `publicDatabase` will use parts:
+`database` and a private process's `publicDatabase` use parts:
 `{ kind: "postgres", host, port, user, password, name, ssl }`,
 `{ kind: "pglite", path }` or `{ kind: "pglite", memory: true }`.
-Connection strings will be refused, and only `password` will be secret
-(`openspec/changes/core-arch/tasks.md:1122`).
-These are planned settings, not the schema at this commit.
+Connection strings are refused by the schema, and only `password` is secret; the host, port, user, name, `ssl` and
+a PGlite `path` are shown in `/config` and the log
+(`src/config/core-settings.ts:131`, `src/config/core-settings.ts:279`, `src/config/redact.ts:224`; CF-4, Q167).
+A process or restore that creates a PGlite directory logs the path
+(`src/config/database.ts:88`; Q165 B).
 
-After task 4.5, `ssl` will reach the PostgreSQL driver. It will default to `require`, except for `localhost`,
-`127.0.0.1`, `::1` and socket-directory hosts, which will default to `disable` under Q182 B.
-`require` will encrypt without checking the server's identity; `verify-full` will check the certificate and
-host name against Node.js's built-in roots only, with no CA setting under Q183 A
-(`openspec/changes/core-arch/tasks.md:1128`,
-`openspec/changes/core-arch/specs/configuration/spec.md:123`).
+`ssl` reaches the PostgreSQL driver. It defaults to `require`, except for `localhost`, `127.0.0.1`, `::1` and
+socket-directory hosts, which default to `disable` under Q182 B (`src/config/database-parts.ts:77`).
+A port forwarded to `localhost` therefore runs in clear unless its configuration sets `ssl`.
+`require` encrypts without checking the server's identity; `verify-full` checks the certificate and host name against
+Node.js's built-in roots only, with no CA setting under Q183 A (`src/db/postgres.ts:100`).
+A server with a private CA can therefore be reached only with `require`, which an active network attacker can
+impersonate. Backups hand `pg_dump` the same parts through libpq's environment, `verify-full` against the system's
+roots (`src/backup/backup.ts:134`).
 
 The configuration hash covers recorded revision identities, heights, versions, data hashes and provided table
 items, including scheduled revisions. It excludes operational settings and secrets
@@ -441,21 +448,21 @@ Vulnerability reporting, including the private reporting route and fallback cont
 
 ## Known gaps
 
-1. **Transport SQL confinement — fixed by task 14.2b, as built.** The gate checks the whole request before execution
-   and returns `read-refused` without running any statement; PostgreSQL transport reads still use the writer's login,
-   and the separate `core.transportReader` pool is to come in task 4.5
-   (`src/private/core-transport.ts:382`, `src/private/read-gate.ts:318`, `src/db/postgres.ts:531`,
-   `openspec/changes/core-arch/tasks.md:1132`).
+1. **Transport SQL confinement — fixed by tasks 14.2b and 4.5, as built.** The gate checks the whole request before
+   execution and returns `read-refused` without running any statement; on PostgreSQL the transport's reads run as
+   `core.transportReader`, a login startup checks cannot write; PGlite keeps the gate and the read-only transaction
+   only (`src/private/core-transport.ts:382`, `src/private/read-gate.ts:318`, `src/runner/process.ts:1165`,
+   `src/private/transport-reader.ts:107`).
 
-2. **Database parts and TLS — to come in task 4.5.** Today the URL setting is wholly secret and no explicit TLS option
-   reaches the driver; structured parts, password-only secrecy and the explicit TLS policy described above remain
-   unbuilt (`src/config/core-settings.ts:112`, `src/config/database.ts:64`, `src/db/postgres.ts:193`,
-   `openspec/changes/core-arch/tasks.md:1122`).
+2. **Database parts and TLS — fixed by task 4.5, as built.** The setting is parts with only `password` secret, and
+   `ssl` reaches the driver; what remains is the default `disable` on loopback hosts and `verify-full`'s built-in
+   roots only, both described above (`src/config/core-settings.ts:131`, `src/config/redact.ts:129`,
+   `src/db/postgres.ts:100`, `src/config/database-parts.ts:77`).
 
 3. **Ledger verification invocation — fixed by task 12.2b, as built.** Startup checks precede the ledger worker when
    the graph loads ledger packages, checks precede package imports once per thread, and browser build checks plus
    fetched-WASM hashing are present; browser hosting-origin trust remains separate
-   (`src/runner/process.ts:1190`, `src/ledger/load.ts:28`, `src/ledger/identity.ts:191`,
+   (`src/runner/process.ts:1239`, `src/ledger/load.ts:28`, `src/ledger/identity.ts:191`,
    `browser/build.ts:171`, `browser/build.ts:294`, `browser/src/ledger/instantiate.ts:29`).
 
 4. **Certificate-to-instance binding — open, issue 00045.** Mutual TLS checks roots but accepts a self-declared
@@ -465,7 +472,7 @@ Vulnerability reporting, including the private reporting route and fallback cont
 
 5. **Admin and module API access policy — open, issue 00046.** Admin defaults to all interfaces, and HTTP services
    supply no caller authentication or WebSocket Origin policy
-   (`docs/issues/00046-admin-and-api-exposure-defaults.md:3`, `src/config/core-settings.ts:47`,
+   (`docs/issues/00046-admin-and-api-exposure-defaults.md:3`, `src/config/core-settings.ts:60`,
    `src/admin/serve.ts:66`, `src/runner/api-server.ts:408`, `src/runner/api-server.ts:418`).
 
 6. **Service resource bounds — open, issue 00047.** Connections and subscriptions have no aggregate admission limit,
@@ -476,8 +483,8 @@ Vulnerability reporting, including the private reporting route and fallback cont
 
 7. **Backup file mode — fixed by task 15.1b, as built.** Files are created owner-only and set to `0600` before writing,
    with backup failure if `chmod` is refused; encryption and origin remain the operator's responsibilities
-   (`src/backup/backup.ts:65`, `src/backup/backup.ts:95`, `src/backup/backup.ts:97`,
-   `src/backup/backup.ts:99`, `openspec/changes/core-arch/tasks.md:3945`).
+   (`src/backup/backup.ts:68`, `src/backup/backup.ts:98`, `src/backup/backup.ts:100`,
+   `src/backup/backup.ts:99`, `openspec/changes/core-arch/tasks.md:3994`).
 
 8. **Vendored Rust advisories and release provenance — open, issue 00048.** Ledger rebuild comparisons do not provide
    an advisory scan of the patched crate graphs or release provenance

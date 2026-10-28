@@ -1,4 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
+import type { DatabaseParts, PglitePathParts, PostgresParts } from "../../src/config/database-parts.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
@@ -113,17 +114,24 @@ export async function a112Run(backend: PrivateBackend, wiring: Wiring = "own"): 
   const publicDb = await backend.database("public");
   const privateDb = await backend.database("private");
   const postgres = backend.kind === "postgres";
-  const coreLogin = postgres ? new URL(publicDb.setting).username : undefined;
-  const privateSetting =
+  const coreLogin = postgres ? (publicDb.setting as PostgresParts).user : undefined;
+  // The core's login and password (`test`, the server's).
+  const privateSetting: DatabaseParts =
     postgres && wiring === "core-settings"
-      ? Object.assign(new URL(privateDb.setting), { username: coreLogin, password: coreLogin }).toString()
+      ? {
+          ...(privateDb.setting as PostgresParts),
+          user: coreLogin as string,
+          ...((publicDb.setting as PostgresParts).password === undefined
+            ? {}
+            : { password: (publicDb.setting as PostgresParts).password as string }),
+        }
       : privateDb.setting;
   const first = engines.length;
   const core = await owner.run("core", () => startPublicCore({ database: publicDb.setting, head: 5n }));
   try {
     const options: PrivateOptions = {
       database: privateSetting,
-      ...(postgres ? { publicDatabase: publicDb.readerSetting as string } : { direct: () => core.db() }),
+      ...(postgres ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : { direct: () => core.db() }),
       within: (start) => owner.run(wiring === "core-settings" && !postgres ? "core" : "private", start),
     };
     const running = await startPrivate(options);
@@ -144,8 +152,8 @@ export async function a112Run(backend: PrivateBackend, wiring: Wiring = "own"): 
             }
           : {
               engines: engines.slice(first),
-              publicDir: publicDb.setting.slice("pglite:".length),
-              privateDir: privateDb.setting.slice("pglite:".length),
+              publicDir: (publicDb.setting as PglitePathParts).path,
+              privateDir: (privateDb.setting as PglitePathParts).path,
             }),
       };
     } finally {

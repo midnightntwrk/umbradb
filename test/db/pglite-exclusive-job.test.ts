@@ -3,6 +3,7 @@ import type { Database } from "../../src/db/api.js";
 import { exclusiveJob, openPglite } from "../../src/db/pglite.js";
 import { openPostgres } from "../../src/db/postgres.js";
 import { askedLater } from "./backends.js";
+import { connectionOfUrl } from "./connection.js";
 
 /**
  * The PGlite backend's exclusive job (task 15.1; DB-4, BK-1; `src/db/pglite.ts` `exclusiveJob`): one job of the
@@ -96,7 +97,7 @@ describe("the PGlite exclusive job (DB-4, BK-1)", () => {
   });
 
   it("is null for a database that is not a PGlite one", async () => {
-    const postgres = openPostgres({ url: "postgres://u:p@127.0.0.1:1/x", committedHeight: async () => null });
+    const postgres = openPostgres({ connection: connectionOfUrl("postgres://u:p@127.0.0.1:1/x"), committedHeight: async () => null });
     try {
       expect(exclusiveJob(postgres, async () => "ran")).toBeNull();
     } finally {

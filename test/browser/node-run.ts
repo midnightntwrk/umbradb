@@ -51,7 +51,7 @@ export async function nodeRun(records: readonly TapeRecord[], params: Readonly<R
     const run: BrowserRun = { node: node.url, storage: "memory", start, params };
     const { data, modules } = coreConfiguration(run);
     const entries = (withDevelopmentOptIn(data) as { entries: Record<string, unknown>[] }).entries.map((entry) =>
-      entry.id === "core" ? { ...entry, config: { ...(entry.config as object), database: `pglite:${directory}` } } : entry,
+      entry.id === "core" ? { ...entry, config: { ...(entry.config as object), database: { kind: "pglite", path: directory } } } : entry,
     );
     const handle = startProcess({
       declarations: commandBuild(modules),

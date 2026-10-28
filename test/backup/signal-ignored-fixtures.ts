@@ -8,6 +8,7 @@ import { type ChainBlock, chainOf, finalized, hex, opening, RUNTIME } from "../b
 import { spawnChild } from "../child-processes.js";
 import type { CliProject } from "../cli/cli-fixtures.js";
 import { adminPortIn, type RunningCommand, runCoreSettings } from "../cli/run-fixtures.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * What A175's tests share (task 15.1c; BK-1 as amended, owner decision Q173 C): a chain whose heights keep committing
@@ -60,7 +61,7 @@ export function pacedNode(): Promise<TapeNode> {
 export function writeRunConfig(
   project: CliProject,
   name: string,
-  database: string,
+  database: DatabaseParts,
   node: string,
   extra: Readonly<Record<string, unknown>> = {},
 ): string {

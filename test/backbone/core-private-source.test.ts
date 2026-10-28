@@ -406,7 +406,7 @@ describe("the public database and the wake-ups a private process starts with", (
     ({ id: "core", start: 0, settings }) as unknown as CheckedEntry;
 
   it("refuses no publicDatabase and a PGlite one, which the core's transport reads instead (task 14.2)", () => {
-    for (const settings of [{}, { publicDatabase: "pglite:/tmp/public" }]) {
+    for (const settings of [{}, { publicDatabase: { kind: "pglite", path: "/tmp/public" } }]) {
       let error: unknown;
       try {
         openPublicDatabase(core(settings));
@@ -421,7 +421,8 @@ describe("the public database and the wake-ups a private process starts with", (
   });
 
   it("opens a PostgreSQL publicDatabase for reads, connecting only when it reads", async () => {
-    const opened = openPublicDatabase(core({ publicDatabase: "postgres://nobody:none@127.0.0.1:9/public" }));
+    const publicDatabase = { kind: "postgres", host: "127.0.0.1", port: 9, user: "nobody", password: "none", name: "public", ssl: "disable" };
+    const opened = openPublicDatabase(core({ publicDatabase }));
     expect(Object.isFrozen(opened)).toBe(true);
     await opened.close();
     await expect(opened.read(async () => 1)).rejects.toMatchObject({ code: "handle-closed" });

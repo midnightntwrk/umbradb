@@ -115,7 +115,7 @@ export async function runBackup(options: BackupCommandOptions, seams: BackupSeam
       const { manifest } = await writeBackup(
         {
           db,
-          target: target.backend === "postgres" ? { backend: "postgres", url: target.url } : { backend: "pglite" },
+          target: target.backend === "postgres" ? { backend: "postgres", connection: target.connection } : { backend: "pglite" },
           out,
           optedOut: declaredOptOuts(config.declarations),
           side: config.side,

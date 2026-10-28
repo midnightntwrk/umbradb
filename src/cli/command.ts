@@ -3,7 +3,8 @@
  * commands, their arguments, the usage and the exit statuses. `./main.ts` is the package's `bin` entry, which runs
  * {@link runMain} on the process.
  *
- * - `umbradb config check <file> [--database <url>]` checks a configuration file (CF-10, `./config-check.ts`).
+ * - `umbradb config check <file> [--database]` checks a configuration file (CF-10, `./config-check.ts`); with
+ *   `--database`, against the history of the database the file configures (owner decision Q167 A).
  * - `umbradb run [--config <file>] [--update-hash=<hash>]` starts the process of the configuration file, with the user
  *   modules it exports, until SIGTERM or SIGINT stops it (`./run.ts`, task 4.4a; Q106 B); it exits 1 when startup
  *   refused or processing halted, else 0. `--update-hash`, a configuration hash (`0x` and 64 lowercase hex digits, as a
@@ -19,15 +20,14 @@
  *   argument of `config check` or `run` — prints the usage on stderr, after one line saying what was wrong, and exits 2;
  *   `--help` or `-h` as the only argument prints it on stdout and exits 0.
  *
- * Arguments are parsed with Node.js's `util.parseArgs` (no dependency). No output repeats a `--database` value, and any
- * argument a message repeats passes through the redaction's patterns (a URL's credentials hidden): an operator may
+ * Arguments are parsed with Node.js's `util.parseArgs` (no dependency). Any argument a message repeats passes through the redaction's patterns (a URL's credentials hidden): an operator may
  * paste a URL in the wrong place. The exit statuses: 0 every check passed (or the usage was asked for); 1 a check
  * failed or could not be completed; 2 the usage; 3 a command this build does not provide yet.
  */
 
 import { parseArgs } from "node:util";
 import { redactor } from "../config/redact.js";
-import { configCheck, databaseArgumentProblem, errorText } from "./config-check.js";
+import { configCheck, errorText } from "./config-check.js";
 import type { BackupSeams } from "../backup/backup.js";
 import { backupArguments, runBackup } from "./backup.js";
 import { type RestoreCommandSeams, restoreArguments, runRestore } from "./restore.js";
@@ -44,9 +44,9 @@ Commands:
       Start a core or private process from its configuration (default umbradb.config.ts). With --update-hash, a
       private process accepts that public configuration hash, the one a start that stopped with
       public-config-changed names, and records it once its checks pass.
-  umbradb config check <file> [--database <url>]
+  umbradb config check <file> [--database]
       Type-check and validate a configuration file without starting a process; with --database, also check it
-      against that database's configuration history, read-only.
+      against the configuration history of the database it configures, read-only.
   umbradb backup --out <file> [--config <file>]
       Back up the configuration's database (default umbradb.config.ts): a pg_dump file with its manifest.
   umbradb restore <file> [--config <file>]
@@ -83,29 +83,28 @@ function usage(io: CommandIo, problem: string): number {
 }
 
 /** `config check`'s arguments, or what is wrong with them. */
-function checkArguments(args: readonly string[]): { readonly file: string; readonly database?: string } | string {
+function checkArguments(args: readonly string[]): { readonly file: string; readonly database: boolean } | string {
   const { tokens } = parseArgs({
     args: [...args],
-    options: { database: { type: "string" } },
+    options: { database: { type: "boolean" } },
     allowPositionals: true,
     strict: false,
     tokens: true,
   });
   const files: string[] = [];
-  const databases: (string | undefined)[] = [];
+  let databases = 0;
   for (const token of tokens) {
     if (token.kind === "positional") files.push(token.value);
     else if (token.kind === "option") {
       if (token.name !== "database") return `unknown option ${token.rawName} of config check`;
-      databases.push(token.value);
+      // Q167 A: the database is the file's own; `--database=<value>` is the earlier form, refused.
+      if (token.inlineValue === true) return "--database takes no value: it reads the database the file configures";
+      databases += 1;
     }
   }
-  if (files.length !== 1) return "config check takes one file: umbradb config check <file> [--database <url>]";
-  if (databases.length > 1) return "config check takes --database once";
-  const [database] = databases;
-  if (databases.length === 0) return { file: files[0] as string };
-  const problem = databaseArgumentProblem(database ?? "");
-  return problem ?? { file: files[0] as string, database: database as string };
+  if (files.length !== 1) return "config check takes one file: umbradb config check <file> [--database]";
+  if (databases > 1) return "config check takes --database once";
+  return { file: files[0] as string, database: databases === 1 };
 }
 
 /**
@@ -126,7 +125,7 @@ export function configCommand(check: typeof configCheck = configCheck): CommandH
       io.stdout(report.text);
       return report.passed ? EXIT.ok : EXIT.failed;
     } catch (error) {
-      const shownError = redactor(parsed.database === undefined ? [] : [parsed.database]).text(errorText(error));
+      const shownError = redactor([]).text(errorText(error));
       io.stderr(`umbradb config check: the check could not be completed: ${shownError}\n`);
       return EXIT.failed;
     }
@@ -223,7 +222,13 @@ export function restoreCommand(seams: RestoreCommandSeams = {}): CommandHandler 
     const parsed = restoreArguments(args);
     if (typeof parsed === "string") return usage(io, parsed);
     const outcome = await runRestore(
-      { file: parsed.file, config: parsed.config, cwd: io.cwd, log: (line) => io.stderr(`${line}\n`) },
+      {
+        file: parsed.file,
+        config: parsed.config,
+        cwd: io.cwd,
+        log: (line) => io.stderr(`${line}\n`),
+        say: (line) => io.stdout(`${line}\n`),
+      },
       seams,
     );
     if (outcome.restored) {

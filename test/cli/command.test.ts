@@ -87,7 +87,7 @@ describe("A6: an unknown subcommand or none prints the usage and exits 2 (LS-6)"
   it("the usage names each command in design §12's form, and the exit statuses", () => {
     expect(USAGE).toContain("Usage: umbradb <command>");
     expect(USAGE).toContain("umbradb run [--config <file>] [--update-hash=<hash>]");
-    expect(USAGE).toContain("umbradb config check <file> [--database <url>]");
+    expect(USAGE).toContain("umbradb config check <file> [--database]");
     expect(USAGE).toContain("umbradb backup --out <file> [--config <file>]");
     expect(USAGE).toContain("umbradb restore <file> [--config <file>]");
     for (const status of ["0 ", "1 ", "2 ", "3 "]) expect(USAGE).toContain(`  ${status}`);
@@ -117,7 +117,7 @@ describe("A6: run, config check, backup and restore are recognized (LS-6)", () =
             config: {
               network: "preprod",
               node: "ws://127.0.0.1:9/node",
-              database: `pglite:${join(directory, "db")}`,
+              database: { kind: "pglite", path: join(directory, "db") },
               listen: { admin: "127.0.0.1:0" },
             },
           },
@@ -191,25 +191,27 @@ describe("config check's arguments: a wrong one prints the usage and exits 2", (
     [["config", "check", "a.config.ts", "b.config.ts"], "config check takes one file"],
     [["config", "check", "--databse", "postgres://x/y", "a.config.ts"], "unknown option --databse"],
     [["config", "check", "a.config.ts", "-d", "postgres://x/y"], "unknown option -d"],
-    [["config", "check", "a.config.ts", "--database"], "--database takes a value"],
-    [["config", "check", "a.config.ts", "--database", ""], "--database takes a value"],
-    [["config", "check", "a.config.ts", "--database=postgres://x/a", "--database=postgres://x/b"], "--database once"],
-    [["config", "check", "a.config.ts", "--database", "mysql://x/y"], "--database takes a PostgreSQL URL"],
-    [["config", "check", "a.config.ts", "--database", "pglite:memory"], "an in-memory PGlite database"],
+    // Q167 A: --database takes no value; it reads the database the file configures.
+    [["config", "check", "a.config.ts", "--database=postgres://x/a"], "--database takes no value"],
+    [["config", "check", "a.config.ts", "--database="], "--database takes no value"],
+    [["config", "check", "a.config.ts", "--database", "postgres://x/y"], "config check takes one file"],
+    [["config", "check", "a.config.ts", "--database", "--database"], "--database once"],
   ])("%j", async (argv, words) => {
     const result = await inProcess(argv, CWD);
     expect(printsUsage(result)).toBe(true);
     expect(result.stderr).toContain(words);
   });
 
-  it("a --database value is never echoed, also when it is refused", async () => {
+  it("a value given to --database is never echoed: it is refused", async () => {
     const secret = "pw-4-4-NEVER-SHOWN";
     for (const value of [`mysql://u:${secret}@h/db`, `postgres:/u:${secret}@h/db`, `pglite:memory${secret}`]) {
-      const result = await inProcess(["config", "check", "a.config.ts", "--database", value], CWD);
-      expect(`${result.stdout}${result.stderr}`).not.toContain(secret);
+      const inline = await inProcess(["config", "check", "a.config.ts", `--database=${value}`], CWD);
+      expect(printsUsage(inline)).toBe(true);
+      expect(`${inline.stdout}${inline.stderr}`).not.toContain(secret);
+      const apart = await inProcess(["config", "check", "a.config.ts", "--database", value], CWD);
+      expect(printsUsage(apart)).toBe(true);
+      expect(`${apart.stdout}${apart.stderr}`).not.toContain(secret);
     }
-    const memory = await inProcess(["config", "check", "a.config.ts", "--database", "pglite:memory"], CWD);
-    expect(memory.stderr).not.toContain("pglite:memory");
   });
 
   it("a file named after --, or starting with -, is a file", async () => {
@@ -277,14 +279,15 @@ describe("the bin entry's work (runMain)", () => {
     const failing = configCommand(async () => {
       throw new Error(`boom with ${url} and postgres://other:pw-4-4-OTHER@h/db`);
     });
-    const result = await inProcess(["config", "check", "a.config.ts", "--database", url], CWD, {
+    const result = await inProcess(["config", "check", "a.config.ts", "--database"], CWD, {
       ...COMMANDS,
       config: failing,
     });
     expect(result.code).toBe(EXIT.failed);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe(
-      "umbradb config check: the check could not be completed: boom with [redacted] and postgres://[redacted]@h/db\n",
+      "umbradb config check: the check could not be completed: boom with postgres://[redacted]@h/db and " +
+        "postgres://[redacted]@h/db\n",
     );
     const thrown = configCommand(async () => {
       throw "a string";

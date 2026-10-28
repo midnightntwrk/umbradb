@@ -6,7 +6,7 @@ import type { RestoreCommandSeams } from "../../src/cli/restore.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { CliProject } from "../cli/cli-fixtures.js";
-import { type BackupBackend, type BackupDatabase, startTicker, writeTickerConfig } from "./backup-fixtures.js";
+import { type BackupBackend, type BackupDatabase, pathOf, startTicker, writeTickerConfig } from "./backup-fixtures.js";
 
 /**
  * What the restores' tests share (task 15.2; BK-3, BK-4): a backup of a ticker database written by its stop
@@ -69,6 +69,6 @@ export async function restoreTarget(
 
 /** Whether `db` holds nothing (BK-3's empty target); a PGlite directory not created yet is empty too. */
 export async function emptied(backend: BackupBackend, db: BackupDatabase): Promise<boolean> {
-  if (backend.kind === "pglite" && !existsSync(join(db.setting.slice("pglite:".length), "PG_VERSION"))) return true;
+  if (backend.kind === "pglite" && !existsSync(join(pathOf(db.setting), "PG_VERSION"))) return true;
   return db.read((read) => isEmptyDatabase(read), async () => null);
 }

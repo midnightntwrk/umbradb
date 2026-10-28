@@ -1,8 +1,6 @@
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { UmbraError } from "../../src/db/errors.js";
 import { openPostgres } from "../../src/db/postgres.js";
-import { SESSION_SETTINGS } from "../../src/deterministic-postgresql/index.js";
 import { TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
@@ -133,33 +131,18 @@ describe("A12 (DB-5) — a reader never sees a block's rows before its COMMIT", 
   }, 60_000);
 });
 
-describe("the database URL (CF-4's `database`)", () => {
-  it("refuses a URL query parameter that would override a session setting (pinned or a zero timeout), before connecting", () => {
-    expect(SESSION_SETTINGS.map(([setting]) => setting)).toContain("idle_session_timeout");
-    for (const name of SESSION_SETTINGS.map(([setting]) => setting)) {
-      for (const spelling of [name, name.toLowerCase(), name.toUpperCase()]) {
-        let error: unknown;
-        try {
-          openPostgres({
-            url: `postgres://user:secret@127.0.0.1:1/db?sslmode=disable&${spelling}=x`,
-            committedHeight: async () => null,
-          });
-        } catch (caught) {
-          error = caught;
-        }
-        expect(error, spelling).toBeInstanceOf(UmbraError);
-        expect((error as UmbraError).code).toBe("invalid-configuration");
-        expect((error as UmbraError).message).toContain(name);
-        expect((error as UmbraError).message).not.toContain("secret");
-      }
-    }
-  });
-
+describe("the database's parts (CF-4's `database`, owner decision Q167 A)", () => {
+  // Task 4.5 removed the refusal of a URL query parameter overriding a session setting: the parts carry no URL, so
+  // nothing but the backend's own `connection` option sets a startup parameter.
   it("refuses a read pool size that is not a positive integer", () => {
     for (const readConnections of [0, -1, 1.5, Number.NaN]) {
       let error: unknown;
       try {
-        openPostgres({ url: "postgres://127.0.0.1:1/db", committedHeight: async () => null, readConnections });
+        openPostgres({
+          connection: { host: "127.0.0.1", port: 1, user: "u", name: "db", ssl: "disable" },
+          committedHeight: async () => null,
+          readConnections,
+        });
       } catch (caught) {
         error = caught;
       }
@@ -167,10 +150,11 @@ describe("the database URL (CF-4's `database`)", () => {
     }
   });
 
-  it("accepts unrelated query parameters, and a URL without any", async () => {
+  it("connects with the database's parts", async () => {
     const database = await server.createDatabase();
-    for (const url of [database.url, `${database.url}?application_name=umbradb-test`]) {
-      const db = openPostgres({ url, committedHeight: async () => null });
+    const { kind: _kind, ...connection } = database.setting;
+    for (const parts of [connection]) {
+      const db = openPostgres({ connection: parts, committedHeight: async () => null });
       expect(await db.read(async (read) => (await read.query("SELECT 1 AS one"))[0])).toEqual({ one: 1 });
       await db.close();
     }

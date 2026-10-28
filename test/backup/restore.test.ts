@@ -21,9 +21,11 @@ import {
   hashOf,
   heightsAt,
   manifestOf,
+  pathOf,
   startTicker,
   tableHeights,
   tickerModule,
+  urlOf,
   writeTickerConfig,
 } from "./backup-fixtures.js";
 import {
@@ -148,9 +150,11 @@ describe("A125: a backup written on one backend restores on the other (BK-2, BK-
         const result = await restoreRun(file, config);
         expect(result.stderr, `${from.kind} → ${to.kind}`).toBe("");
         expect(result.code).toBe(EXIT.ok);
+        // A PGlite target not created yet is created, which the command says, naming it (owner decisions Q165 B, Q167 A).
+        const created = to.kind === "pglite" ? `umbradb restore: created a new PGlite data directory ${pathOf(db.setting)}\n` : "";
         expect(result.stdout).toBe(
-          `umbradb restore: restored ${file}: height ${H}, contents hash ${manifest.contentsHash}; the database resumes ` +
-            `from ${H + 1n}\n`,
+          `${created}umbradb restore: restored ${file}: height ${H}, contents hash ${manifest.contentsHash}; the database ` +
+            `resumes from ${H + 1n}\n`,
         );
         expect(await tableHeights(db)).toEqual(heightsAt(String(H)));
         expect(await hashOf(db)).toBe(manifest.contentsHash);
@@ -185,7 +189,8 @@ describe.each(BACKUP_BACKENDS)("A126: each refusal of BK-3 on $name, in its orde
       const refused = async (path: string, config: string, code: string, seams?: RestoreCommandSeams) => {
         const result = await restoreRun(path, config, seams);
         expect(result.code, `${code}: ${result.stderr}`).toBe(EXIT.failed);
-        expect(result.stdout).toBe("");
+        // The first refusal after loading on PGlite created the target's directory, which the command says (Q165 B).
+        expect(result.stdout.replace(/^umbradb restore: created a new PGlite data directory \S+\n/, "")).toBe("");
         expect(codeIn(result.stderr)).toBe(code);
         return result.stderr;
       };
@@ -355,7 +360,7 @@ describe("the restore's own transaction", () => {
           blockItems: (block: BlockRef) => inner.blockItems(block),
           blockEvents: (block: BlockRef) => inner.blockEvents(block),
           async finalizedHead() {
-            const admin = postgres(db.setting, { max: 1, onnotice: () => undefined });
+            const admin = postgres(urlOf(db.setting), { max: 1, onnotice: () => undefined });
             try {
               await admin.unsafe("CREATE SCHEMA intruder");
             } finally {

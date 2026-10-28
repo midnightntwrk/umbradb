@@ -10,6 +10,7 @@ import { startWriter } from "../../src/db/writer-lock.js";
 import { expectRefusedBeforeAnyWrite } from "./durability-checks.js";
 import { WRITER_LOCK_HOLDERS_SQL } from "./writer-lock-checks.js";
 import { startContainer } from "../containers.js";
+import { connectionOfUrl } from "./connection.js";
 
 /**
  * A18's committed negative control (DB-12): a durability probe that ignores `fsync` must make A18's `fsync=off` check
@@ -62,7 +63,7 @@ describe("A18's negative control: a durability probe that ignores fsync", () => 
     const admin = postgres(fsyncOff.getConnectionUri(), { max: 1, onnotice: () => undefined });
     await expect.poll(async () => (await admin.unsafe(WRITER_LOCK_HOLDERS_SQL)).length, { timeout: 5_000 }).toBe(0);
     await admin.end({ timeout: 5 });
-    const db = openPostgres({ url: fsyncOff.getConnectionUri(), committedHeight: async () => null });
+    const db = openPostgres({ connection: connectionOfUrl(fsyncOff.getConnectionUri()), committedHeight: async () => null });
     try {
       expect(await startWriter(db)).toEqual({ durabilityWarnings: [] });
       await startDatabase(db, { plan: planSchemas([]), parts: [], committedVersions: new Map(), handles: { height: null } });

@@ -9,8 +9,8 @@
  * **The database** ({@link openCommandDatabase}): PostgreSQL through the database API with one read connection, which
  * makes no connection until it is used; PGlite only under the development opt-in (`openPglite` refuses without it),
  * from a directory relative to the working directory, taking its operating-system lock (`writer-lock-held` while a
- * process holds it, DB-11). `pglite:memory` names a database that exists only inside its own process, so the commands
- * refuse it (`invalid-configuration`). Only a restore's target ({@link openRestoreTarget}) is created when missing,
+ * process holds it, DB-11). A PGlite database in memory exists only inside its own process, so the commands refuse it
+ * (`invalid-configuration`). Only a restore's target ({@link openRestoreTarget}) is created when missing,
  * with any missing parent directory (CF-4, owner decision Q163); `umbradb backup` creates nothing.
  */
 
@@ -19,6 +19,7 @@ import { readCursor } from "../backbone/core-block-commit/core-block-commit.js";
 import { readPrivateCursor } from "../backbone/core-private-source/core-private-source.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import { databaseTarget } from "../config/database.js";
+import type { DatabaseParts, PglitePathParts } from "../config/database-parts.js";
 import { findingText, refusalFindings } from "../config/findings.js";
 import { DEFAULT_CONFIG_FILE, type LoadedConfig, loadConfig } from "../config/load.js";
 import type { PlainObject } from "../config/plain-data.js";
@@ -28,8 +29,8 @@ import { type CheckedConfig, type CheckedEntry, configSecrets, validateConfig } 
 import type { CommittedHeight, Database } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import { openPglite } from "../db/pglite.js";
-import { createPgliteDirectory } from "../db/pglite-lock.js";
-import { openPostgres } from "../db/postgres.js";
+import { createdDirectoryLine, createPgliteDirectory } from "../db/pglite-lock.js";
+import { openPostgres, type PostgresConnection } from "../db/postgres.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
 import { isPrivateDatabase } from "../backup/facts.js";
@@ -46,10 +47,10 @@ export interface CommandConfig {
   readonly side: ProcessSide;
   /** The process's `core` revision (Q102). */
   readonly core: CheckedEntry;
-  /** Its `database` setting. */
-  readonly database: string;
+  /** Its `database` setting's parts. */
+  readonly database: DatabaseParts;
   readonly developmentOptIn: boolean;
-  /** Hides the file's secrets — the database URL among them — and any URL's credentials. */
+  /** Hides the file's secrets — the database's password among them — and any URL's credentials. */
   readonly redact: Redactor;
 }
 
@@ -96,7 +97,7 @@ export async function readCommandConfig(
     declarations,
     side,
     core,
-    database: String(settings.database),
+    database: settings.database as unknown as DatabaseParts,
     developmentOptIn: settings.developmentOptIn === true,
     redact,
   });
@@ -113,17 +114,17 @@ export const PGLITE_DATABASE_MARK = "PG_VERSION";
 
 /** Where a command's database is, and whether a PGlite directory holds a database yet. */
 export type CommandTarget =
-  | { readonly backend: "postgres"; readonly url: string }
+  | { readonly backend: "postgres"; readonly connection: PostgresConnection }
   | { readonly backend: "pglite"; readonly dataDir: string; readonly exists: boolean };
 
-/** Where the database of `config` is (see the module comment); `pglite:memory` refused. */
+/** Where the database of `config` is (see the module comment); a PGlite database in memory refused. */
 export function commandTarget(config: CommandConfig, cwd: string): CommandTarget {
   const target = databaseTarget(config.database);
   if (target.backend === "postgres") return target;
   if (target.dataDir === "memory://") {
     throw new UmbraError(
       "invalid-configuration",
-      "the configuration's database is pglite:memory, a database that exists only inside the process holding it: back " +
+      "the configuration's database is PGlite in memory, a database that exists only inside the process holding it: back " +
         "it up through that process (its backup), or configure a PGlite directory or a PostgreSQL database",
       { reason: "memory-database" },
     );
@@ -138,17 +139,27 @@ export async function openCommandDatabase(
   config: CommandConfig,
   committedHeight: CommittedHeight = commandCommittedHeight,
 ): Promise<Database> {
-  if (target.backend === "postgres") return openPostgres({ url: target.url, committedHeight, readConnections: 1 });
+  if (target.backend === "postgres") {
+    return openPostgres({ connection: target.connection, committedHeight, readConnections: 1 });
+  }
   return openPglite({ dataDir: target.dataDir, committedHeight, developmentOptIn: config.developmentOptIn });
 }
 
 /**
  * Opens the target of `umbradb restore` as {@link openCommandDatabase} does, a PGlite directory that does not exist
- * created first with its missing parents under the opt-in (CF-4, owner decision Q163): the restore opens a target with
- * no database only once its checks before loading passed (BK-3), so a refused restore creates nothing.
+ * created first with its missing parents under the opt-in (CF-4, owner decision Q163), which `log` is told, naming the
+ * path as configured (owner decisions Q165 B, Q167 A): the restore opens a target with no database only once its checks
+ * before loading passed (BK-3), so a refused restore creates nothing.
  */
-export async function openRestoreTarget(target: CommandTarget, config: CommandConfig): Promise<Database> {
-  if (target.backend === "pglite" && config.developmentOptIn) createPgliteDirectory(target.dataDir);
+export async function openRestoreTarget(
+  target: CommandTarget,
+  config: CommandConfig,
+  log: (line: string) => void = () => undefined,
+): Promise<Database> {
+  if (target.backend === "pglite" && config.developmentOptIn) {
+    const created = createPgliteDirectory(target.dataDir);
+    if (created !== null) log(createdDirectoryLine((config.database as PglitePathParts).path, created));
+  }
   return openCommandDatabase(target, config);
 }
 

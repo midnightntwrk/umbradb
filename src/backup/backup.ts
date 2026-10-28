@@ -37,6 +37,7 @@ import { type FileHandle, open, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { finished } from "node:stream/promises";
 import { UmbraError } from "../db/errors.js";
+import type { PostgresConnection } from "../db/postgres.js";
 import { type Manifest, manifestLine, type ManifestTool, readManifestLine } from "./manifest.js";
 import {
   type DumpInput,
@@ -49,8 +50,10 @@ import {
 } from "./pglite-backup.js";
 import { type Environment, findPgDump, loadPgliteDump, type PgDumpTool } from "./tools.js";
 
-/** The database a backup reads, by backend: a PostgreSQL URL (for `pg_dump`), or PGlite (its engine, in the job). */
-export type BackupTarget = { readonly backend: "postgres"; readonly url: string } | { readonly backend: "pglite" };
+/** The database a backup reads, by backend: PostgreSQL's parts (for `pg_dump`), or PGlite (its engine, in the job). */
+export type BackupTarget =
+  | { readonly backend: "postgres"; readonly connection: PostgresConnection }
+  | { readonly backend: "pglite" };
 
 /** What {@link writeBackup} backs up, and where (the database, its opt-outs, side and opt-in: `DumpInput`). */
 export interface BackupInput extends DumpInput {
@@ -122,38 +125,51 @@ async function abandonStream(stream: WriteStream): Promise<void> {
   await finished(stream).catch(() => undefined);
 }
 
-/** The URL without its password, and the password (for `PGPASSWORD`), decoded. */
-function withoutPassword(url: string): { readonly url: string; readonly password: string | null } {
-  const parsed = new URL(url);
-  if (parsed.password === "") return { url, password: null };
-  const password = decodeURIComponent(parsed.password);
-  parsed.password = "";
-  return { url: parsed.toString(), password };
+/**
+ * libpq's environment for `connection` (CF-4, task 4.5): its parts as `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE`, the
+ * password as `PGPASSWORD` (never on the command line), and `ssl` as `PGSSLMODE` — `disable`, `require`, or
+ * `verify-full` with `PGSSLROOTCERT=system`, libpq's name for the system's trust roots (no other authority, owner
+ * decision Q183 A). An environment variable of libpq the caller's environment sets for these is replaced.
+ */
+export function pgDumpEnvironment(connection: PostgresConnection): Record<string, string> {
+  return {
+    PGHOST: connection.host,
+    PGPORT: String(connection.port),
+    PGUSER: connection.user,
+    PGDATABASE: connection.name,
+    ...(connection.password === undefined ? {} : { PGPASSWORD: connection.password }),
+    PGSSLMODE: connection.ssl,
+    ...(connection.ssl === "verify-full" ? { PGSSLROOTCERT: "system" } : {}),
+  };
 }
 
+/** The libpq variables {@link pgDumpEnvironment} decides, which the caller's environment never sets for `pg_dump`. */
+const LIBPQ_CONNECTION = ["PGHOST", "PGHOSTADDR", "PGPORT", "PGUSER", "PGDATABASE", "PGPASSWORD", "PGPASSFILE",
+  "PGSERVICE", "PGSERVICEFILE", "PGSSLMODE", "PGSSLROOTCERT", "PGREQUIRESSL", "PGSSLCERT", "PGSSLKEY"];
+
 /**
- * Runs `pg_dump` (`tool`) on the database `url` names, in the snapshot `snapshot` (none: its own), appending its output
- * to `stream`; rejects with `database-error` (`reason: pg-dump-failed`, its message) when it fails.
+ * Runs `pg_dump` (`tool`) on the database of `connection`, in the snapshot `snapshot` (none: its own), appending its
+ * output to `stream`; rejects with `database-error` (`reason: pg-dump-failed`, its message) when it fails.
  */
 async function runPgDump(
   tool: PgDumpTool,
-  url: string,
+  connection: PostgresConnection,
   snapshot: string | null,
   stream: WriteStream,
   env: Environment,
 ): Promise<void> {
-  const target = withoutPassword(url);
   const args = [
     "--format=plain",
     "--inserts",
     "--no-owner",
     "--no-privileges",
     ...(snapshot === null ? [] : [`--snapshot=${snapshot}`]),
-    `--dbname=${target.url}`,
   ];
   const childEnv: Record<string, string> = {};
-  for (const [name, value] of Object.entries(env)) if (value !== undefined) childEnv[name] = value;
-  if (target.password !== null) childEnv.PGPASSWORD = target.password;
+  for (const [name, value] of Object.entries(env)) {
+    if (value !== undefined && !LIBPQ_CONNECTION.includes(name)) childEnv[name] = value;
+  }
+  Object.assign(childEnv, pgDumpEnvironment(connection));
   childEnv.PGAPPNAME = "umbradb-backup";
   const child = spawn(tool.path, args, { env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
   let stderr = "";
@@ -178,7 +194,7 @@ async function runPgDump(
 
 /** A PostgreSQL backup into `stream` (see the module comment); resolves with its manifest. */
 async function postgresBackup(
-  input: BackupInput & { readonly target: { readonly url: string } },
+  input: BackupInput & { readonly target: { readonly connection: PostgresConnection } },
   tool: PgDumpTool,
   stream: WriteStream,
   env: Environment,
@@ -190,7 +206,7 @@ async function postgresBackup(
     await seams.outsideSnapshot.between();
     const manifest = manifestOf(facts, name);
     await writeText(stream, manifestLine(manifest));
-    await runPgDump(tool, input.target.url, null, stream, env);
+    await runPgDump(tool, input.target.connection, null, stream, env);
     return manifest;
   }
   return input.db.read(async (read) => {
@@ -198,7 +214,7 @@ async function postgresBackup(
     const manifest = manifestOf(facts, name);
     const [exported] = await read.query("SELECT pg_export_snapshot() AS snapshot");
     await writeText(stream, manifestLine(manifest));
-    await runPgDump(tool, input.target.url, exported?.snapshot as string, stream, env);
+    await runPgDump(tool, input.target.connection, exported?.snapshot as string, stream, env);
     return manifest;
   });
 }

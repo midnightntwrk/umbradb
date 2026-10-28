@@ -11,7 +11,7 @@
  * not change), and the public cursor, which is `core-block-commit`'s own `readCursor` — the blocks table's last row, as
  * the core reads it.
  *
- * **Where the public data comes from** ({@link PublicDatabase}): on PostgreSQL directly — `publicDatabase`, the URL of
+ * **Where the public data comes from** ({@link PublicDatabase}): on PostgreSQL directly — `publicDatabase`, the parts of
  * a login that may only read, opened by {@link openPublicDatabase} with reads only (one `REPEATABLE READ READ ONLY`
  * transaction each, its height the public cursor's, DB-2); when the public database is PGlite, which only the core can
  * open (DB-4), or when none is given, through the core's transport (`read` messages, PP-4; task 14.2,
@@ -23,6 +23,7 @@
  * {@link PUBLIC_POLL_MS} instead ({@link pollingWakes}). {@link openPublicSide} makes both from the `core` revision.
  */
 
+import type { PostgresParts } from "../../config/database-parts.js";
 import { BLOCKS_TABLE, cursorHeight, readCursor } from "../core-block-commit/core-block-commit.js";
 import { readIdentity } from "../core-chain/core-chain.js";
 import { readConfigRows } from "../core-chain/history.js";
@@ -150,11 +151,12 @@ export async function readPublicBlock(read: Pick<ReadHandle, "query">, height: b
 /** The public cursor: the last block the core committed (`core-block-commit`'s cursor table), or null before any. */
 export const readPublicCursor: (read: Pick<ReadHandle, "query">) => Promise<BlockRef | null> = readCursor;
 
-/** Whether `setting` is a `publicDatabase` read directly: a PostgreSQL URL (not PGlite, which only the core opens). */
-const readsDirectly = (setting: unknown): setting is string => typeof setting === "string" && !setting.startsWith("pglite:");
+/** Whether `setting` is a `publicDatabase` read directly: PostgreSQL's parts (not PGlite, which only the core opens). */
+const readsDirectly = (setting: unknown): setting is PostgresParts =>
+  typeof setting === "object" && setting !== null && (setting as { kind?: unknown }).kind === "postgres";
 
 /**
- * The public database of `core`, a private process's `core` revision (Q102): its `publicDatabase`, a PostgreSQL URL,
+ * The public database of `core`, a private process's `core` revision (Q102): its `publicDatabase`, PostgreSQL's parts,
  * opened for reads only — no writer, no lock; no connection until the first read —, counting the read sessions it lost
  * ({@link PublicDatabase.reconnections}, PP-14). Throws `invalid-configuration`
  * (`details.reason` `public-database-transport`, not retried) without one, or for a PGlite one, which is read through
@@ -173,8 +175,9 @@ export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
     );
   }
   let lost = 0;
+  const { kind: _kind, ...connection } = setting as PostgresParts;
   const db = openPostgres({
-    url: setting,
+    connection,
     committedHeight: cursorHeight,
     onReadSessionLost: () => {
       lost += 1;
@@ -208,7 +211,7 @@ export interface PublicSide {
 /**
  * The public side of a private process from its `core` revision (see the module comment): a transport to the core when
  * it has `coreTransport` (with its `tls`, `instanceId` and `backoffCeilingMs`); its public database read directly when
- * `publicDatabase` is a PostgreSQL URL, else through that transport; its wake-ups the transport's, else a poll. Throws
+ * `publicDatabase` is PostgreSQL's parts, else through that transport; its wake-ups the transport's, else a poll. Throws
  * `invalid-configuration` (`public-database-transport`) for a revision with neither a PostgreSQL `publicDatabase` nor a
  * `coreTransport`: it has no way to read public data. `given` replaces either part (the tests' direct reads and links).
  */

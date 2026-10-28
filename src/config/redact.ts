@@ -14,7 +14,10 @@
  *   and a query parameter whose name says it is a credential (`?password=…`, `&token=…`, `?apiKey=…`).
  *
  * **Which strings are secret** ({@link secretStrings}): each string inside a secret field (or one of unknown kind), at
- * any depth, and the password of every URL with credentials in the strings of the other fields. **The forms of a
+ * any depth; each string of a `password` part ({@link SECRET_PART}) of an object inside an operational field, at any
+ * depth — the `database` setting's parts and `transportReader` (CF-4, owner decisions Q167 A, Q175 A: only the password
+ * of a database's parts is secret) —; and the password of every URL with credentials in the strings of the other
+ * fields. {@link Redactor.settings} shows such a `password` part as {@link REDACTED} and the other parts as they are. **The forms of a
  * secret** are its parts ({@link SECRET_PARTS}: the value itself; for a URL with credentials, its password as written
  * and decoded) in each encoding ({@link SECRET_ENCODINGS}: as written; URI-component encoded, with upper- and
  * lower-case hex; form-encoded, a space as `+`; as WHATWG URL serialization writes a userinfo, which leaves `%` alone;
@@ -119,6 +122,28 @@ function stringsIn(value: PlainData): string[] {
   return [];
 }
 
+/**
+ * The part of an object inside an operational field that is secret (CF-4, owner decision Q167 A): a database's
+ * `password`, and `transportReader`'s. A data field's parts are never secret: they are recorded and shown.
+ */
+export const SECRET_PART = "password";
+
+/** The strings of the {@link SECRET_PART} parts inside `value`, at any depth. */
+function secretPartsIn(value: PlainData): string[] {
+  if (Array.isArray(value)) return value.flatMap(secretPartsIn);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, inner]) => (key === SECRET_PART ? stringsIn(inner) : secretPartsIn(inner)));
+}
+
+/** `value` with each {@link SECRET_PART} part inside it, at any depth, as {@link REDACTED}. */
+function withoutSecretParts(value: PlainData): PlainData {
+  if (Array.isArray(value)) return value.map(withoutSecretParts);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, inner]) => [key, key === SECRET_PART ? REDACTED : withoutSecretParts(inner)]),
+  );
+}
+
 /** The kind of `field`, or undefined when `kinds` does not classify it (an own property only). */
 function kindOf(kinds: FieldKinds, field: string): string | undefined {
   return Object.hasOwn(kinds, field) ? kinds[field] : undefined;
@@ -130,15 +155,17 @@ export function credentialsIn(text: string): string[] {
 }
 
 /**
- * The secret strings of `settings` (CF-4): every string inside a field whose kind is `secret` or not in `kinds`, and
- * the passwords of the URLs in the strings of the other fields; each once, in order, empty strings left out.
+ * The secret strings of `settings` (CF-4): every string inside a field whose kind is `secret` or not in `kinds`, the
+ * strings of the `password` parts inside an operational field, and the passwords of the URLs in the strings of the other
+ * fields; each once, in order, empty strings left out.
  */
 export function secretStrings(settings: PlainObject, kinds: FieldKinds): string[] {
   const found: string[] = [];
   for (const [field, value] of Object.entries(settings)) {
     const kind = kindOf(kinds, field);
     const strings = stringsIn(value);
-    found.push(...(kind === undefined || kind === "secret" ? strings : strings.flatMap(credentialsIn)));
+    if (kind === undefined || kind === "secret") found.push(...strings);
+    else found.push(...(kind === "operational" ? secretPartsIn(value) : []), ...strings.flatMap(credentialsIn));
   }
   return [...new Set(found)].filter((secret) => secret !== "");
 }
@@ -149,7 +176,8 @@ export interface Redactor {
   text(text: string): string;
   /**
    * `settings` as they may be shown: a field of kind `secret`, or of a kind `kinds` does not give, as
-   * {@link REDACTED}; every string of the other fields through {@link Redactor.text}. A frozen copy.
+   * {@link REDACTED}; a `password` part inside an operational field as {@link REDACTED}; every string of the other
+   * fields through {@link Redactor.text}. A frozen copy.
    */
   settings(settings: PlainObject, kinds: FieldKinds): PlainObject;
 }
@@ -192,7 +220,8 @@ export function redactorWith(secrets: Iterable<string>, forms: RedactionForms): 
   const settings = (values: PlainObject, kinds: FieldKinds): PlainObject => {
     const shown = Object.entries(values).map(([field, value]) => {
       const kind = kindOf(kinds, field);
-      return [field, kind === undefined || kind === "secret" ? REDACTED : redactedCopy(value, text)] as const;
+      if (kind === undefined || kind === "secret") return [field, REDACTED] as const;
+      return [field, redactedCopy(kind === "operational" ? withoutSecretParts(value) : value, text)] as const;
     });
     return Object.freeze(Object.fromEntries(shown));
   };

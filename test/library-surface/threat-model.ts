@@ -60,7 +60,7 @@ export const OWNER_AREAS: readonly string[] = [
 /** The heading of the gap list. */
 export const KNOWN_GAPS = "Known gaps";
 
-/** The tasks that fixed a gap of the draft (14.2b: 1, 12.2b: 3, 15.1b: 7, 17.4b: 9) or will (4.5: 2, and Q175). */
+/** The tasks that fixed a gap of the draft (14.2b and 4.5: 1, Q175; 4.5: 2; 12.2b: 3; 15.1b: 7; 17.4b: 9). */
 export const GAP_TASKS: readonly string[] = ["14.2b", "4.5", "12.2b", "15.1b", "17.4b"];
 
 /** The issues that record the draft's gaps 4, 5, 6 and 8. */

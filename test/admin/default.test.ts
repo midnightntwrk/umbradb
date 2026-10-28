@@ -24,6 +24,7 @@ import {
   statusWhen,
   within,
 } from "./admin-harness.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * The admin endpoints by default (task 8.1a; owner decision Q128 B; AE-1, A62, A64): `startProcess` serves them on
@@ -40,7 +41,7 @@ type Start = (input: ProcessInput) => ProcessHandle;
 const optIn: Start = (input) => startProcess(input.admin === undefined ? { ...input, admin: false } : input);
 
 /** The entries of a process of the tests on `database` with `listen.admin` at `address`, with `user`'s from 1. */
-const entriesOf = (database: string, address: string, user: readonly ModuleDeclaration[] = []) => [
+const entriesOf = (database: DatabaseParts, address: string, user: readonly ModuleDeclaration[] = []) => [
   adminCore(database, 1, { extra: { listen: { admin: address } } }),
   ...user.map((part) => entryOf(part, 1)),
 ];
@@ -48,7 +49,7 @@ const entriesOf = (database: string, address: string, user: readonly ModuleDecla
 /** A process of the tests' build (the admin endpoints' parts among its backbone, as the command's) started by `start`. */
 function started(
   start: Start,
-  database: string,
+  database: DatabaseParts,
   address: string,
   rest: { readonly user?: readonly ModuleDeclaration[]; readonly admin?: AdminStarter } = {},
 ): { readonly handle: ProcessHandle; readonly lines: string[] } {
@@ -79,7 +80,7 @@ async function stateOf(handle: ProcessHandle, state: string, patienceMs = 60_000
  * the head, A64's oracle over its four endpoints — live 200, ready 200, `/status` `following`, `/config` 200 —; none
  * when it answers.
  */
-async function defaultProblems(start: Start, database: string): Promise<string[]> {
+async function defaultProblems(start: Start, database: DatabaseParts): Promise<string[]> {
   const port = await freePort();
   const run = started(start, database, `127.0.0.1:${port}`);
   try {
@@ -96,7 +97,7 @@ async function defaultProblems(start: Start, database: string): Promise<string[]
 
 /** On PostgreSQL, the sessions `db`'s database has had (`total`) and has (`now`), read from `observer`'s. */
 async function sessionsOf(observer: ProcessDatabase, db: ProcessDatabase): Promise<{ total: number; now: number }> {
-  const name = new URL(db.setting).pathname.slice(1);
+  const name = (db.setting as { name: string }).name;
   const [row] = await observer.query(
     `SELECT sessions::int AS total, numbackends::int AS now FROM pg_stat_database WHERE datname = '${name}'`,
   );
@@ -111,7 +112,7 @@ async function sessionsOf(observer: ProcessDatabase, db: ProcessDatabase): Promi
  * and its database must have no session — PostgreSQL's cumulative session count of that database unchanged, read
  * from another database's connection once its sessions ended — or, on PGlite, no data directory. None when so.
  */
-async function takenProblems(backend: ProcessBackend, start: Start, admin?: (database: string) => AdminStarter): Promise<string[]> {
+async function takenProblems(backend: ProcessBackend, start: Start, admin?: (database: DatabaseParts) => AdminStarter): Promise<string[]> {
   const problems: string[] = [];
   const address = `127.0.0.1:${await freePort()}`;
   const firstDb = await backend.database();
@@ -159,7 +160,7 @@ async function takenProblems(backend: ProcessBackend, start: Start, admin?: (dat
  * (PostgreSQL) or the data directory (PGlite) exists when the listen fails; the database closed after.
  */
 const databaseFirst =
-  (database: string): AdminStarter =>
+  (database: DatabaseParts): AdminStarter =>
   async (options) => {
     const checked = validateConfig({
       config: { data: { entries: entriesOf(database, options.address) as never } },

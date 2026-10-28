@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { ProcessHandle } from "../../src/runner/process.js";
-import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
+import { createdDirectory, cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
@@ -39,7 +39,7 @@ async function startOn(
       },
     },
     source,
-    log: (line) => lines.push(line),
+    log: (line) => createdDirectory(line) || lines.push(line),
   });
   await handle.started.catch(() => undefined);
   return { handle, lines, source };
@@ -159,7 +159,7 @@ describe("refused startups without a database", () => {
       declarations: { backbone: [], core: [], user: [{ id: "Bad" }] },
       config: { data: { entries: [] } },
       source: new InMemoryBlockSource({ head: 1n }),
-      log: (line) => lines.push(line),
+      log: (line) => createdDirectory(line) || lines.push(line),
     });
     expect(await handle.ended).toMatchObject({ kind: "refused" });
     expect(handle.status()).toEqual({
@@ -188,11 +188,11 @@ describe("refused startups without a database", () => {
     const lines: string[] = [];
     const handle = startProcess({
       declarations: testBuild([]).declarations,
-      config: { data: { entries: [core("pglite:memory")] } },
+      config: { data: { entries: [core({ kind: "pglite", memory: true })] } },
       source: () => {
         throw "the source cannot be made";
       },
-      log: (line) => lines.push(line),
+      log: (line) => createdDirectory(line) || lines.push(line),
     });
     await expect(handle.started).rejects.toBe("the source cannot be made");
     expect(handle.status()).toMatchObject({
@@ -208,7 +208,7 @@ describe("refused startups without a database", () => {
     controller.abort();
     const handle = startProcess({
       declarations: testBuild([]).declarations,
-      config: { data: { entries: [core("pglite:memory")] } },
+      config: { data: { entries: [core({ kind: "pglite", memory: true })] } },
       source: new InMemoryBlockSource({ head: 1n }),
       signal: controller.signal,
       log: () => undefined,

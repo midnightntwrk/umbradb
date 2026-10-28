@@ -108,7 +108,7 @@ describe("the tests' processes opt out of the admin endpoints unless they ask (t
       const port = await freePort();
       const handle = startProcess({
         declarations: testBuild([]).declarations,
-        config: { data: { entries: [adminCore("pglite:memory", 1, { extra: { listen: { admin: `127.0.0.1:${port}` } } })] } },
+        config: { data: { entries: [adminCore({ kind: "pglite", memory: true }, 1, { extra: { listen: { admin: `127.0.0.1:${port}` } } })] } },
         source: adminSource(1n),
         log: () => undefined,
         ...admin,

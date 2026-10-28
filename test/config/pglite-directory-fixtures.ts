@@ -8,8 +8,8 @@ import { core, settle, startProcess, testBuild } from "../runner/process-build.j
 /**
  * A166's first clause (task 2.2c; CF-4, owner decision Q163 A), shared by its test (`./pglite-directory.test.ts`) and
  * its committed negative control (`./pglite-directory.negative-control.test.ts`): the runner's `startProcess` on
- * `database: "pglite:<directory>"` under the development opt-in, the directory's parent missing, over an in-memory
- * chain whose head is S — and what it left on disk.
+ * `database: { kind: "pglite", path: <directory> }` under the development opt-in, the directory's parent missing,
+ * over an in-memory chain whose head is S — and what it left on disk.
  */
 
 /** S, and the in-memory chain's head: the process commits block S and waits for the next. */
@@ -27,6 +27,8 @@ export interface ProcessObservation {
   readonly committedS: boolean;
   /** Whether the writer lock's file is beside the directory (DB-11: taken once the directory existed). */
   readonly lockBeside: boolean;
+  /** The lines the process logged. */
+  readonly lines: readonly string[];
 }
 
 /**
@@ -51,14 +53,15 @@ export async function committedIn(directory: string, height: bigint): Promise<bo
   return rows.length === 1;
 }
 
-/** Starts a process on `pglite:<directory>` (see the module comment) until it waits for the block after S; stops it. */
+/** Starts a process on the PGlite `directory` (see the module comment) until it waits past S; stops it. */
 export async function processOn(directory: string): Promise<ProcessObservation> {
   const source = new InMemoryBlockSource({ head: S });
+  const lines: string[] = [];
   const handle = startProcess({
     declarations: testBuild([]).declarations,
-    config: { data: { entries: [core(`pglite:${directory}`, Number(S))] } },
+    config: { data: { entries: [core({ kind: "pglite", path: directory }, Number(S))] } },
     source,
-    log: () => undefined,
+    log: (line) => lines.push(line),
   });
   let refused: string | null = null;
   let ended: string | null = null;
@@ -78,6 +81,7 @@ export async function processOn(directory: string): Promise<ProcessObservation> 
     created,
     committedS: created && (await committedIn(directory, S)),
     lockBeside: existsSync(`${directory}.lock.sqlite`),
+    lines,
   };
 }
 
@@ -89,5 +93,9 @@ export function processProblems(observed: ProcessObservation): string[] {
   if (!observed.created) problems.push("the directory was not created");
   if (!observed.committedS) problems.push("block S was not committed");
   if (!observed.lockBeside) problems.push("no writer lock file beside the directory");
+  // Q165 B with Q167 A: the process says it created the directory, naming it as configured.
+  if (!observed.lines.some((line) => /^created a new PGlite data directory .+ \(and 1 missing parent directory\)$/.test(line))) {
+    problems.push("no log line names the directory created");
+  }
   return problems;
 }

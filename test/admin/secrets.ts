@@ -1,3 +1,4 @@
+import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 
 /**
@@ -39,16 +40,13 @@ export function secretProblems(texts: Readonly<Record<string, string>>): string[
 let roles = 0;
 
 /**
- * `db`'s `database` setting with {@link SECRET} as its password (CF-4: the setting is a secret; its password is
- * redacted wherever it appears): on PostgreSQL a login role of its own, a superuser as the tests' own user is, whose
- * password is the secret; PGlite's setting is a directory and has no password, so it is returned as it is.
+ * `db`'s `database` setting with {@link SECRET} as its password (CF-4, owner decision Q167 A: the `password` part is
+ * secret, redacted wherever it appears): on PostgreSQL a login role of its own, a superuser as the tests' own user is,
+ * whose password is the secret; PGlite's setting is a directory and has no password, so it is returned as it is.
  */
-export async function secretDatabase(db: ProcessDatabase): Promise<string> {
+export async function secretDatabase(db: ProcessDatabase): Promise<DatabaseParts> {
   if (db.admin === undefined) return db.setting;
   const role = `secret_role_${process.pid}_${roles++}`;
   await db.admin.unsafe(`CREATE ROLE ${role} LOGIN SUPERUSER PASSWORD '${SECRET.replaceAll("'", "''")}'`);
-  const url = new URL(db.setting);
-  url.username = role;
-  url.password = "";
-  return url.toString().replace(`//${role}@`, `//${role}:${SECRET_WRITTEN}@`);
+  return { ...(db.setting as PostgresParts), user: role, password: SECRET };
 }

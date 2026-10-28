@@ -19,7 +19,8 @@ import type { FinalizedLoop, LoopInput } from "../../src/runner/loop.js";
 import type { ProcessHandle, ProcessInput } from "../../src/runner/process.js";
 import { startProcess } from "../runner/process-build.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
-import { REACH_TIMEOUT_MS } from "./backends.js";
+import { REACH_TIMEOUT_MS, TRANSPORT_LOGIN } from "./backends.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * Builds and processes for the private processes' tests (task 14.1; PP-1–PP-5, DT-3, DT-6, Q75): a public core — the
@@ -37,7 +38,7 @@ import { REACH_TIMEOUT_MS } from "./backends.js";
  * `ledger-table`; no node client, as its `core` entry has no `node` —, then the private backbone of
  * `src/backbone/private.ts` — `core-private-source` from a {@link privateIntake}, `core-digest` —
  * and its private modules. Its public data comes from the public database: on PostgreSQL through `publicDatabase`, the
- * URL of a login that may only read (the production path, `openPublicDatabase`); on PGlite, whose public database the
+ * parts of a login that may only read (the production path, `openPublicDatabase`); on PGlite, whose public database the
  * core alone opens, through direct reads of the core's `db` item — the "direct calls in tests" of PP-4 —, or, given
  * `coreTransport`, through the core's process transport (task 14.2: `read` messages, and its wake-ups in place of the
  * tests' poll), which a core started with `listen.transport` serves.
@@ -90,7 +91,7 @@ export interface PublicCore {
 /** Options of {@link startPublicCore}. */
 export interface PublicCoreOptions {
   /** The `database` setting of the public database. */
-  readonly database: string;
+  readonly database: DatabaseParts;
   /** The finalized head to start with. */
   readonly head: bigint;
   /** S; 1 unless given. */
@@ -114,6 +115,10 @@ export interface PublicCoreOptions {
   readonly admin?: boolean | AdminStarter;
   /** A negative control's configuration hash (RN-16; `ProcessInput.configHash`); the process's own unless given. */
   readonly configHash?: ProcessInput["configHash"];
+  /** A177's test seam: the transport's read path (`ProcessInput.transportReads`). */
+  readonly transportReads?: ProcessInput["transportReads"];
+  /** A177's negative control's judgement of the transport reader (`ProcessInput.transportReaderCheck`). */
+  readonly transportReaderCheck?: ProcessInput["transportReaderCheck"];
 }
 
 /** The public core's module that keeps the core's `db` item for the tests' direct reads (see the module comment). */
@@ -135,13 +140,27 @@ function publicReads(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaration {
   };
 }
 
-/** The public core's `core` entry. */
+/**
+ * The login every PostgreSQL test database's core reads its transport with (`./backends.ts`'s `umbradb_transport`,
+ * which holds `pg_read_all_data` only): a core on PostgreSQL with `listen.transport` requires one (CF-4, Q175 A).
+ */
+const TRANSPORT_READER = Object.freeze({ user: TRANSPORT_LOGIN, password: TRANSPORT_LOGIN });
+
+/**
+ * The public core's `core` entry. On PostgreSQL with `listen.transport`, `transportReader` is the tests' reader login
+ * unless `extra` names it — `transportReader: undefined` for none (A177's refusal).
+ */
 export function publicCoreEntry(
-  database: string,
+  database: DatabaseParts,
   start = 1,
   genesisHash = genesisHex(0xa1),
-  extra: Readonly<Record<string, unknown>> = {},
+  given: Readonly<Record<string, unknown>> = {},
 ) {
+  const listen = given.listen as { readonly transport?: string } | undefined;
+  const reader = database.kind === "postgres" && listen?.transport !== undefined && !Object.hasOwn(given, "transportReader");
+  const extra = Object.fromEntries(
+    Object.entries({ ...(reader ? { transportReader: TRANSPORT_READER } : {}), ...given }).filter(([, value]) => value !== undefined),
+  );
   return coreEntry({
     start,
     config: {
@@ -202,6 +221,8 @@ export function launchPublicCore(options: PublicCoreOptions): PublicCore {
     ...(options.loop === undefined ? {} : { loop: options.loop }),
     ...(options.admin === undefined ? {} : { admin: options.admin }),
     ...(options.configHash === undefined ? {} : { configHash: options.configHash }),
+    ...(options.transportReads === undefined ? {} : { transportReads: options.transportReads }),
+    ...(options.transportReaderCheck === undefined ? {} : { transportReaderCheck: options.transportReaderCheck }),
   });
   return {
     handle,
@@ -319,9 +340,9 @@ export interface PrivateProcess {
 /** Options of {@link startPrivate}. */
 export interface PrivateOptions {
   /** The `database` setting of the private database. */
-  readonly database: string;
+  readonly database: DatabaseParts;
   /** The `publicDatabase` setting, if any. */
-  readonly publicDatabase?: string;
+  readonly publicDatabase?: DatabaseParts;
   /** Public data read some other way than `publicDatabase` (PGlite's direct reads). */
   readonly direct?: () => ReadOnlyDatabase;
   /** What wakes the private source; with `coreTransport` the transport's, else a 50 ms poll, unless given. */

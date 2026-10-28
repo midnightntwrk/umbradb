@@ -25,10 +25,12 @@ import {
   adminCoreSettings,
   adminSource,
   ask,
+  shownDatabase,
   startWithAdmin,
   statusWhen,
   within,
 } from "./admin-harness.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * The admin endpoints' life with the process (task 8.1; AE-1, AE-3, IN-12, RN-13): `startProcess({ admin: true })`
@@ -75,9 +77,14 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints' life with the process on $
     expect(lines).toContain(`admin endpoints listening on 127.0.0.1:${port}`);
     const config = await ask(origin, "/config");
     expect(config.json).toMatchObject({
-      core: { start: 1, settings: { network: "custom", genesisHash: ADMIN_GENESIS, database: "[redacted]", node: "[redacted]" } },
+      core: {
+        start: 1,
+        settings: { network: "custom", genesisHash: ADMIN_GENESIS, database: shownDatabase(db.setting), node: "[redacted]" },
+      },
     });
-    expect(config.text).not.toContain(db.setting);
+    // CF-4, Q167 A: the parts are shown, the password never.
+    const { password } = db.setting as { password?: string };
+    if (password !== undefined) expect(config.text).not.toContain(`"${password}"`);
     await handle.stop();
     expect(await ask(origin, "/health/live")).toMatchObject({ status: null, error: "ECONNREFUSED" });
   }, 120_000);
@@ -170,7 +177,7 @@ describe("the process publishes at once when startup ends, processing ends and t
     const build = testBuild([failing]);
     const handle = startProcess({
       declarations: build.declarations,
-      config: { data: { entries: [adminCore("pglite:memory", 1, { extra: { listen: { admin: "127.0.0.1:0" } } }), entryOf(failing, 1)] } },
+      config: { data: { entries: [adminCore({ kind: "pglite", memory: true }, 1, { extra: { listen: { admin: "127.0.0.1:0" } } }), entryOf(failing, 1)] } },
       source: adminSource(3n),
       log: () => undefined,
       admin: async (options) => {
@@ -212,7 +219,7 @@ describe("the process publishes at once when startup ends, processing ends and t
       let release!: () => void;
       const handle = startProcess({
         declarations: build.declarations,
-        config: { data: { entries: [adminCore(`pglite:${database}`, 1, { extra: { listen: { admin: "127.0.0.1:0" } } })] } },
+        config: { data: { entries: [adminCore({ kind: "pglite", path: database }, 1, { extra: { listen: { admin: "127.0.0.1:0" } } })] } },
         source: adminSource(1n),
           log: () => undefined,
         admin: async (options) => {
@@ -243,7 +250,7 @@ describe("a stop before the configuration was read", () => {
     let asked = 0;
     const handle = startProcess({
       declarations: build.declarations,
-      config: { data: { entries: [adminCore("pglite:memory", 1)] } },
+      config: { data: { entries: [adminCore({ kind: "pglite", memory: true }, 1)] } },
       source: adminSource(1n),
       signal: controller.signal,
       log: () => undefined,
@@ -265,8 +272,8 @@ interface Child {
   readonly exited: Promise<number | null>;
 }
 
-function startChild(database: string, mode: "run" | "refuse" | "taken", address?: string): Child {
-  const args = ["--import", "tsx", WORKER, database, mode, ...(address === undefined ? [] : [address])];
+function startChild(database: DatabaseParts, mode: "run" | "refuse" | "taken", address?: string): Child {
+  const args = ["--import", "tsx", WORKER, JSON.stringify(database), mode, ...(address === undefined ? [] : [address])];
   const child = spawnChild(process.execPath, args, { cwd: REPOSITORY, stdio: ["ignore", "pipe", "inherit"] });
   const lines: string[] = [];
   createInterface({ input: child.stdout as NodeJS.ReadableStream }).on("line", (line) => lines.push(line));
@@ -287,7 +294,7 @@ async function lineOf(child: Child, key: string, patienceMs = 120_000): Promise<
 describe("the worker thread ends with the process (no orphan, nothing left keeping Node.js alive)", () => {
   it("a real process (run): up and live until SIGTERM, then it closes and exits by itself, its admin port released", async () => {
     const directory = mkdtempSync(join(tmpdir(), "umbradb-admin-exit-"));
-    const child = startChild(`pglite:${join(directory, "db")}`, "run");
+    const child = startChild({ kind: "pglite", path: join(directory, "db") }, "run");
     try {
       const { port } = (await lineOf(child, "port")) as { port: number };
       const origin = `http://127.0.0.1:${port}`;
@@ -307,7 +314,7 @@ describe("the worker thread ends with the process (no orphan, nothing left keepi
 
   it("a real process whose configuration is refused (refuse) ends by itself, unsignalled: no admin listener, nothing left keeping Node.js alive (Q137 B)", async () => {
     const directory = mkdtempSync(join(tmpdir(), "umbradb-admin-exit-"));
-    const child = startChild(`pglite:${join(directory, "db")}`, "refuse");
+    const child = startChild({ kind: "pglite", path: join(directory, "db") }, "refuse");
     try {
       // No signal is sent: the refusal ends the process, and nothing of the admin endpoints keeps Node.js alive.
       expect(await Promise.race([child.exited, sleep(60_000).then(() => "still running")])).toBe(0);
@@ -324,7 +331,7 @@ describe("the worker thread ends with the process (no orphan, nothing left keepi
   it("a real process whose admin listener cannot listen: refused, up until SIGTERM, then it exits by itself (its thread ended)", async () => {
     const held = await heldPort();
     const directory = mkdtempSync(join(tmpdir(), "umbradb-admin-exit-"));
-    const child = startChild(`pglite:${join(directory, "db")}`, "taken", `127.0.0.1:${held.port}`);
+    const child = startChild({ kind: "pglite", path: join(directory, "db") }, "taken", `127.0.0.1:${held.port}`);
     try {
       expect(await lineOf(child, "ended")).toEqual({ ended: "refused" });
       expect(await within(child.exited, 1_500)).toBe(false);
@@ -367,7 +374,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
 
   const checked = () =>
     validateConfig({
-      config: { data: { entries: [coreEntry({ start: 1, config: { ...adminCoreSettings("pglite:memory"), livenessTimeoutMs: 7_000, listen: { admin: "127.0.0.1:0" } } as never }) as never] } },
+      config: { data: { entries: [coreEntry({ start: 1, config: { ...adminCoreSettings({ kind: "pglite", memory: true }), livenessTimeoutMs: 7_000, listen: { admin: "127.0.0.1:0" } } as never }) as never] } },
       declarations: { backbone: [], core: [], user: [] },
       side: "public",
     });
@@ -382,7 +389,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     expect(fake.started).toEqual([expect.objectContaining({ address: "127.0.0.1:0", beat: expect.any(SharedArrayBuffer) })]);
     expect(fake.published).toHaveLength(1);
     expect(fake.published[0]).toMatchObject({ livenessTimeoutMs: 7_000, readinessLag: null, status: { state: "following", cursor: "1" } });
-    expect(fake.published[0]?.config.core?.settings).toMatchObject({ database: "[redacted]", node: "[redacted]" });
+    expect(fake.published[0]?.config.core?.settings).toMatchObject({ database: { kind: "pglite", memory: true }, node: "[redacted]" });
     expect(lines).toEqual(["admin endpoints listening on 127.0.0.1:10001"]);
     admin.publish();
     admin.publish();
@@ -516,7 +523,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
             coreEntry({
               start: 1,
               config: {
-                ...adminCoreSettings(`postgres://indexer:${password}@127.0.0.1:9/umbra`),
+                ...adminCoreSettings({ kind: "postgres", host: "127.0.0.1", port: 9, user: "indexer", password, name: "umbra", ssl: "disable" }),
                 backupAtStop: `/backups/${password}`,
                 listen: { admin: "127.0.0.1:0" },
               } as never,
@@ -530,7 +537,10 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => running(), log: () => undefined, start: fake.start });
     await admin.serve(config, config.entries[0] as never);
-    expect(fake.published[0]?.config.core?.settings).toMatchObject({ database: "[redacted]", backupAtStop: "/backups/[redacted]" });
+    expect(fake.published[0]?.config.core?.settings).toMatchObject({
+      database: { kind: "postgres", host: "127.0.0.1", port: 9, user: "indexer", password: "[redacted]", name: "umbra", ssl: "disable" },
+      backupAtStop: "/backups/[redacted]",
+    });
     expect(JSON.stringify(fake.published)).not.toContain(password);
     await admin.close();
   });

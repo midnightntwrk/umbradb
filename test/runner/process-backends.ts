@@ -4,19 +4,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Sql } from "postgres";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { TAKE_WRITER_LOCK_SQL, WRITER_LOCK_HOLDER_SQL } from "../../src/db/writer-lock.js";
 import { startPostgresServer, type PostgresTestServer } from "../db/postgres-server.js";
 
 /**
  * Databases for the process's tests (task 5.3): the process opens its database itself, from the `core` entry's
- * `database` setting (CF-4, Q102), so each test gets a setting — a PostgreSQL 18 URL on a Testcontainers server, or
- * `pglite:<directory>` in a temporary directory — and a way to look at the database from outside the process.
+ * `database` setting (CF-4, Q102), so each test gets a setting — the parts of a PostgreSQL 18 database on a
+ * Testcontainers server, or a PGlite `path` in a temporary directory — and a way to look at the database from outside
+ * the process.
  */
 
 /** One empty database, by its `database` setting. */
 export interface ProcessDatabase {
-  /** The `database` setting (CF-4). */
-  readonly setting: string;
+  /** The `database` setting's parts (CF-4, owner decision Q167 A). */
+  readonly setting: DatabaseParts;
   /**
    * Runs one statement outside the process and returns its rows: on PostgreSQL through a plain driver connection, at
    * any time; on PGlite through a plain engine on the directory, so only while no process holds it.
@@ -60,7 +62,7 @@ function postgresBackend(): ProcessBackend {
       const database = await server.createDatabase();
       const { admin } = database;
       return {
-        setting: database.url,
+        setting: database.setting,
         admin,
         query: async (sql) => [...(await admin.unsafe(sql))] as Record<string, unknown>[],
         async terminateWriter() {
@@ -99,7 +101,7 @@ function pgliteBackend(): ProcessBackend {
       if (root === undefined) throw new Error("backend not started");
       const directory = join(root, `db-${next++}`);
       return {
-        setting: `pglite:${directory}`,
+        setting: { kind: "pglite", path: directory },
         directory,
         async query(sql) {
           const engine = await PGlite.create(directory);
@@ -129,3 +131,11 @@ export async function cursorIn(db: ProcessDatabase): Promise<number | null> {
   const [row] = await db.query("SELECT max(height)::int AS h FROM core_block_commit.blocks");
   return row?.h === null || row?.h === undefined ? null : Number(row.h);
 }
+
+/**
+ * Whether `line` is one of the lines a process logs as it opens its database (CF-4, owner decisions Q165 B, Q167 A; task
+ * 4.5): the PGlite directory it created — a new PGlite database of these tests is a directory the process creates — and
+ * `database: <the database's parts>`. Tests that count the other lines it logs leave these out.
+ */
+export const createdDirectory = (line: string): boolean =>
+  line.startsWith("created a new PGlite data directory ") || line.startsWith("database: ");

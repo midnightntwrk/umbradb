@@ -31,6 +31,7 @@ import {
   statusWhen,
   within,
 } from "./admin-harness.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * A157 `[CI]` (task 8.1b; AE-1, AE-3, CF-1–CF-3; owner decision Q137 B): a configuration that cannot be loaded, one that
@@ -73,7 +74,7 @@ interface Refusal {
   readonly what: string;
   readonly code: "invalid-configuration" | "not-plain-data";
   /** The configuration on `database`, its `listen.admin` at `address` where it has one. */
-  config(database: string, address: string): ProcessConfig;
+  config(database: DatabaseParts, address: string): ProcessConfig;
   /** The paths of findings it must log (besides every other finding its refusal carries). */
   paths(): readonly string[];
 }
@@ -233,7 +234,7 @@ function findingProblems(lines: readonly string[], error: unknown, paths: readon
 
 /** On PostgreSQL, the sessions `db`'s database has had (`total`) and has (`now`), read from `observer`'s. */
 async function sessionsOf(observer: ProcessDatabase, db: ProcessDatabase): Promise<{ total: number; now: number }> {
-  const name = new URL(db.setting).pathname.slice(1);
+  const name = (db.setting as { name: string }).name;
   const [row] = await observer.query(
     `SELECT sessions::int AS total, numbackends::int AS now FROM pg_stat_database WHERE datname = '${name}'`,
   );
@@ -312,7 +313,7 @@ const migrating = (sql: string): ModuleDeclaration =>
   loggingModule("m", [], ["on-db-write"], { migrations: [{ id: "001", sql }] });
 
 /** A process of the tests' build on `database` with `user`'s entries from 1 and its admin listener at `address`. */
-function started(start: Start, database: string, address: string, user: readonly ModuleDeclaration[], admin: ProcessInput["admin"]) {
+function started(start: Start, database: DatabaseParts, address: string, user: readonly ModuleDeclaration[], admin: ProcessInput["admin"]) {
   return start({
     declarations: declarationsOf(user),
     config: { data: { entries: [adminCore(database, 1, { extra: { listen: { admin: address } } }), ...user.map((part) => entryOf(part, 1))] } },
@@ -492,7 +493,7 @@ describe("A157: umbradb run on a refused configuration logs every finding and ex
 
   /** The `core` settings (JSON) of a file on a PGlite database of its own, its `listen.admin` at `address`. */
   const settings = (address: string, extra: Readonly<Record<string, unknown>> = {}) =>
-    runCoreSettings(`pglite:${join(project.dir, `db-${count}`)}`, SECRET_NODE, { listen: { admin: address }, ...extra });
+    runCoreSettings({ kind: "pglite", path: join(project.dir, `db-${count}`) }, SECRET_NODE, { listen: { admin: address }, ...extra });
 
   /** A file of the project with one `core` entry whose `config` is `config` (a TypeScript expression). */
   const coreFile = (config: string) =>

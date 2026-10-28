@@ -4,6 +4,7 @@ import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
 import { type ChainBlock, chainOf, finalized, hex, opening, RUNTIME } from "../backbone/fetch-fixtures.js";
 import { spawnChild } from "../child-processes.js";
 import type { CliProject } from "./cli-fixtures.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * What the tests of `umbradb run` share (task 4.4a; A152, CF-1, LS-6, MD-1, Q106 B): a chain on a tape node, the user
@@ -39,7 +40,7 @@ export function chainNode(): Promise<TapeNode> {
 const LEDGER_TABLE = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v9" }] };
 
 /** The `core` settings of a process on `database` reading the chain from `node` (see the module comment). */
-export function runCoreSettings(database: string, node: string, extra: Readonly<Record<string, unknown>> = {}): string {
+export function runCoreSettings(database: DatabaseParts, node: string, extra: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify({
     network: "custom",
     genesisHash: hex((CHAIN[0] as ChainBlock).hash),

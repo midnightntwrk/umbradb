@@ -23,6 +23,7 @@ import { expectRefusedBeforeAnyWrite } from "./durability-checks.js";
 import { cleanUp, workDirectory } from "./pglite-processes.js";
 import { BACKEND_END_MS, rejection, WRITER_LOCK_HOLDERS_SQL } from "./writer-lock-checks.js";
 import { startContainers } from "../containers.js";
+import { connectionOfUrl } from "./connection.js";
 
 /**
  * The durability probe at its new path (`src/db/durability-probe.ts`, moved from 0.9.5's
@@ -132,7 +133,7 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
 
   /** Opens `container`'s database, starts its writer and runs startup with no parts; resolves with the warnings. */
   async function startsAndMigrates(container: StartedPostgreSqlContainer, options: Partial<PostgresOptions> = {}) {
-    const db = openPostgres({ url: container.getConnectionUri(), committedHeight: noHeight, ...options });
+    const db = openPostgres({ connection: connectionOfUrl(container.getConnectionUri()), committedHeight: noHeight, ...options });
     try {
       const { durabilityWarnings } = await startWriter(db);
       await startDatabase(db, { plan: planSchemas([]), parts: [], committedVersions: new Map(), handles: { height: null } });
@@ -172,7 +173,7 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
     const holder = postgres(fsyncOff.getConnectionUri(), { max: 1, onnotice: () => undefined });
     try {
       await holder.unsafe("SELECT pg_advisory_lock(3, hashtext('umbradb-writer'))");
-      const db = openPostgres({ url: fsyncOff.getConnectionUri(), committedHeight: noHeight });
+      const db = openPostgres({ connection: connectionOfUrl(fsyncOff.getConnectionUri()), committedHeight: noHeight });
       try {
         expect((await rejection(() => startWriter(db))).code).toBe("writer-lock-held");
       } finally {
@@ -218,7 +219,7 @@ describe("A18 — the durability probe on PostgreSQL 18 (DB-12)", () => {
   }, 60_000);
 
   it("reports the first start's warnings again to a later start of the same writer", async () => {
-    const db = openPostgres({ url: syncOff.getConnectionUri(), committedHeight: noHeight });
+    const db = openPostgres({ connection: connectionOfUrl(syncOff.getConnectionUri()), committedHeight: noHeight });
     try {
       await db.transaction(async () => undefined);
       expect((await startWriter(db)).durabilityWarnings).toHaveLength(1);

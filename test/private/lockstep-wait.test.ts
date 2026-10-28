@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { privateCursorHeight } from "../../src/backbone/core-private-source/index.js";
 import type { Transaction } from "../../src/db/api.js";
@@ -54,8 +55,8 @@ function lockstepCore(db: TestDatabase, head: bigint, listed: readonly string[],
   });
 }
 
-/** The login of a database setting (a URL). */
-const loginOf = (setting: string): string => decodeURIComponent(new URL(setting).username);
+/** The login of a database setting (PostgreSQL's parts). */
+const loginOf = (setting: DatabaseParts): string => (setting as PostgresParts).user;
 
 /** One look at the core while it should wait for lockstep. */
 interface WaitSample {
@@ -185,7 +186,7 @@ async function a117Problems(backend: PrivateBackend): Promise<string[]> {
       database: privateDb.setting,
       instanceId: LISTED,
       coreTransport: proxy.address,
-      ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as string } : {}),
+      ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
       extra: { backoffCeilingMs: 1_000 },
       seen,
     });

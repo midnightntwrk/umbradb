@@ -28,6 +28,8 @@ import {
   writeTickerConfig,
 } from "./backup-fixtures.js";
 
+import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
+
 /**
  * A124 `[CI]` and A122 `[CI]` (task 15.1; BK-1, BK-2, PP-12; `design.md` §9.1; owner decisions Q83, Q85), on PostgreSQL
  * 18.6 and PGlite 0.5.10: a backup written while blocks commit — by the running process (`ProcessHandle.backup`) on both,
@@ -319,7 +321,7 @@ describe("umbradb backup beside a running process", () => {
     expect(result.stdout).toBe(
       `umbradb backup: wrote ${out}: height ${manifest.height}, contents hash ${manifest.contentsHash}, pg_dump 18.6\n`,
     );
-    expect(result.stdout).not.toContain(new URL(db.setting).password);
+    expect(result.stdout).not.toContain((db.setting as PostgresParts).password);
     expect(after as bigint).toBeGreaterThanOrEqual(BigInt(manifest.height));
     const loaded = await POSTGRES.load(out);
     expect(await tableHeights(loaded)).toEqual(heightsAt(manifest.height));
@@ -350,7 +352,7 @@ describe("umbradb backup beside a running process", () => {
 });
 
 describe("pg_dump's command line and failures (BK-1)", () => {
-  it("passes the database URL's password to pg_dump in PGPASSWORD, never on its command line; a pg_dump that fails leaves no file", async () => {
+  it("passes the database's parts to pg_dump in libpq's environment, the password in PGPASSWORD, never on its command line; a pg_dump that fails leaves no file", async () => {
     const db = await POSTGRES.database();
     const config = writeTickerConfig(project, { database: db.setting, stop: 3 });
     const ticker = await startTicker(config, 5n);
@@ -369,6 +371,7 @@ describe("pg_dump's command line and failures (BK-1)", () => {
         'if [ "$1" = "--version" ]; then echo "pg_dump (PostgreSQL) 18.6"; exit 0; fi',
         `printf '%s\n' "$@" > ${log}.args`,
         `printf '%s' "$PGPASSWORD" > ${log}.password`,
+        `printf '%s\n' "$PGHOST" "$PGPORT" "$PGUSER" "$PGDATABASE" "$PGSSLMODE" > ${log}.env`,
         'if [ -n "$FAKE_SILENT" ]; then exit 4; fi',
         'if [ -n "$FAKE_LOUD" ]; then head -c 100000 /dev/zero | tr "\\0" x >&2; exit 5; fi',
         'if [ -n "$FAKE_FAILS" ]; then echo "pg_dump: error: the dump failed" >&2; exit 3; fi',
@@ -377,15 +380,19 @@ describe("pg_dump's command line and failures (BK-1)", () => {
       ].join("\n"),
     );
     const out = output("fake");
-    const password = new URL(db.setting).password;
+    const parts = db.setting as PostgresParts;
+    const password = parts.password ?? "";
     expect(password).not.toBe("");
     const written = await backupRun(["backup", "--out", out, "--config", config], { PATH: String(process.env.PATH), UMBRADB_PG_DUMP: fake });
     expect(written.code).toBe(EXIT.ok);
     const args = readFileSync(`${log}.args`, "utf8");
-    // The URL on the command line has no password part (the tests' login is `test`, its password `test`).
-    expect(args).not.toContain(`:${password}@`);
-    expect(args).toMatch(/^--format=plain\n--inserts\n--no-owner\n--no-privileges\n--snapshot=\S+\n--dbname=postgres/);
+    // No connection on the command line (the tests' login is `test`, its password `test`): libpq's environment has it.
+    expect(args).not.toContain(password);
+    expect(args).toMatch(/^--format=plain\n--inserts\n--no-owner\n--no-privileges\n--snapshot=\S+\n$/);
     expect(readFileSync(`${log}.password`, "utf8")).toBe(password);
+    expect(readFileSync(`${log}.env`, "utf8")).toBe(
+      `${parts.host}\n${parts.port}\n${parts.user}\n${parts.name}\n${parts.ssl}\n`,
+    );
     expect(readFileSync(out, "utf8").split("\n").slice(1, 2)).toEqual(["-- the dump"]);
 
     // A failed backup over an earlier one leaves the earlier file as it was.
@@ -411,28 +418,36 @@ describe("pg_dump's command line and failures (BK-1)", () => {
     expect(existsSync(failed)).toBe(false);
     noPartialFiles();
 
-    // A URL without a password: nothing in PGPASSWORD; an unset variable of the environment is not passed on.
-    const opened = openPostgres({ url: db.setting, committedHeight: commandCommittedHeight, readConnections: 1 });
+    // Parts without a password: nothing in PGPASSWORD, also when the environment has one; an unset variable of the
+    // environment is not passed on, and libpq's connection variables of the environment give way to the parts.
+    const { kind: _kind, password: _password, ...plain } = parts;
+    const opened = openPostgres({ connection: { ...plain, password }, committedHeight: commandCommittedHeight, readConnections: 1 });
     try {
-      const plain = new URL(db.setting);
-      plain.password = "";
       await writeBackup({
         db: opened,
-        target: { backend: "postgres", url: plain.toString() },
+        target: { backend: "postgres", connection: plain },
         out: output("no-password"),
         optedOut: TICKER_OPTED_OUT,
         developmentOptIn: true,
-        env: { PATH: String(process.env.PATH), UMBRADB_PG_DUMP: fake, UNSET: undefined },
+        env: {
+          PATH: String(process.env.PATH),
+          UMBRADB_PG_DUMP: fake,
+          UNSET: undefined,
+          PGPASSWORD: "from-the-environment",
+          PGHOST: "elsewhere.example",
+          PGSSLMODE: "verify-ca",
+        },
       });
     } finally {
       await opened.close();
     }
     expect(readFileSync(`${log}.password`, "utf8")).toBe("");
+    expect(readFileSync(`${log}.env`, "utf8")).toBe(`${parts.host}\n${parts.port}\n${parts.user}\n${parts.name}\ndisable\n`);
   }, TEST_TIMEOUT_MS);
 });
 
 /** A private process's configuration file for the command: its `core` entry only, with or without the opt-in. */
-function privateConfig(database: string, developmentOptIn: boolean): string {
+function privateConfig(database: DatabaseParts, developmentOptIn: boolean): string {
   const core = JSON.stringify({
     network: "custom",
     genesisHash: genesisHex(0xa1),
@@ -482,9 +497,10 @@ describe("PP-12: a private database is not backed up by UmbraDB without the deve
         expect(existsSync(out)).toBe(false);
 
         // A host program's backup of it, without the opt-in, alike.
-        const db = openPostgres({ url: privateDb.setting, committedHeight: commandCommittedHeight, readConnections: 1 });
+        const { kind: _private, ...privateConnection } = privateDb.setting as PostgresParts;
+        const db = openPostgres({ connection: privateConnection, committedHeight: commandCommittedHeight, readConnections: 1 });
         try {
-          const target = { backend: "postgres" as const, url: privateDb.setting };
+          const target = { backend: "postgres" as const, connection: privateConnection };
           for (const side of ["private", "public"] as const) {
             const error = await writeBackup({ db, target, out, optedOut: [], side, developmentOptIn: false, env }).then(
               () => null,
@@ -496,8 +512,9 @@ describe("PP-12: a private database is not backed up by UmbraDB without the deve
           await db.close();
         }
         // A private process's own side refuses on any database, before it is read: here the public one.
-        const publicTarget = { backend: "postgres" as const, url: publicDb.setting };
-        const publicOpened = openPostgres({ url: publicDb.setting, committedHeight: commandCommittedHeight });
+        const { kind: _public, ...publicConnection } = publicDb.setting as PostgresParts;
+        const publicTarget = { backend: "postgres" as const, connection: publicConnection };
+        const publicOpened = openPostgres({ connection: publicConnection, committedHeight: commandCommittedHeight });
         try {
           await expect(
             writeBackup({ db: publicOpened, target: publicTarget, out, optedOut: [], side: "private", developmentOptIn: false, env }),

@@ -6,8 +6,9 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, HeightFailure, type LoopInput } from "../../src/runner/loop.js";
 import type { ProcessingEnd, ProcessStatus } from "../../src/runner/process.js";
-import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
+import { createdDirectory, cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * Start and stop heights through the process (task 5.3; RN-9, RN-10, RN-11's re-delivery at the cursor, CF-6's raised
@@ -44,7 +45,7 @@ function modules(log: string[]): ModuleDeclaration[] {
 }
 
 /** A45's configuration on `database`, with the core's stop. */
-function entries(database: string, user: readonly ModuleDeclaration[], stop: number | undefined) {
+function entries(database: DatabaseParts, user: readonly ModuleDeclaration[], stop: number | undefined) {
   const of = (id: string) => user.find((part) => part.id === id) as ModuleDeclaration;
   return [
     core(database, 1, { ...(stop === undefined ? {} : { stop }), extra: { listen: { api: "127.0.0.1:0" } } }),
@@ -84,7 +85,7 @@ async function run(
     declarations: build.declarations,
     config: { data: { entries: entries(db.setting, user, stop) } },
     source,
-    log: (line) => lines.push(line),
+    log: (line) => createdDirectory(line) || lines.push(line),
     ...(loop === undefined ? {} : { loop }),
   });
   let observation: Omit<RunObservation, "cursor">;
@@ -426,7 +427,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
           declarations: build.declarations,
           config: { data: { entries: [core(db.setting), entryOf(failing, 4, {}, 6)] } },
           source,
-          log: (line) => lines.push(line),
+          log: (line) => createdDirectory(line) || lines.push(line),
         });
         const ended = await settle(handle, source, 8n);
         await handle.stop();

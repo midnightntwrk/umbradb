@@ -47,10 +47,8 @@ async function loginOn(
   const password = randomBytes(16).toString("hex");
   await database.exec(`CREATE ROLE ${name} LOGIN ${attributes} PASSWORD '${password}'`);
   if (grantCreate) await database.exec(`GRANT CREATE ON DATABASE ${new URL(database.url).pathname.slice(1)} TO ${name}`);
-  const url = new URL(database.url);
-  url.username = name;
-  url.password = password;
-  return database.open({ url: url.toString() });
+  const { kind: _kind, ...connection } = database.setting;
+  return database.open({ connection: { ...connection, user: name, password } });
 }
 
 async function outcome(run: Promise<unknown>): Promise<unknown> {

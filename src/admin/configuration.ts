@@ -22,6 +22,7 @@
  * Before the configuration is validated nothing of it is shown ({@link UNVALIDATED_CONFIG}): its secrets are not known.
  */
 
+import type { DatabaseParts } from "../config/database-parts.js";
 import { UMBRADB_VERSION, buildCoreVersion } from "../config/build.js";
 import { databaseTarget } from "../config/database.js";
 import type { HistoryRow } from "../config/history.js";
@@ -175,7 +176,7 @@ export function configOf(facts: ConfigFacts, writerLock: boolean): ConfigSnapsho
     }),
     ledger: Object.freeze({ table: jsonReady(settings.ledgerTable), packages: jsonReady(buildCoreVersion().ledgers) as PlainData }),
     database: Object.freeze({
-      backend: databaseTarget(String(settings.database)).backend,
+      backend: databaseTarget(settings.database as unknown as DatabaseParts).backend,
       version: opened?.databaseVersion ?? null,
       writerLock,
     }),

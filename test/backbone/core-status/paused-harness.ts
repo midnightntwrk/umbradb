@@ -14,6 +14,7 @@ import { hookAt, recorderModule } from "../../backup/pause-fixtures.js";
 import { type CliProject, cliProject } from "../../cli/cli-fixtures.js";
 import type { ProcessDatabase } from "../../runner/process-backends.js";
 import { coreSettings, startProcess } from "../../runner/process-build.js";
+import type { DatabaseParts } from "../../../src/config/database-parts.js";
 
 /**
  * A176 (task 8.3b; `openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-3 as amended, AE-4; owner decision
@@ -98,7 +99,7 @@ function keeperModule(builders: string): string {
 let files = 0;
 
 /** Writes a configuration file of A176's process on `database`, with `extra` `core` settings; its absolute path. */
-function writeConfig(project: CliProject, database: string, extra: Readonly<Record<string, unknown>> = {}): string {
+function writeConfig(project: CliProject, database: DatabaseParts, extra: Readonly<Record<string, unknown>> = {}): string {
   files += 1;
   const core = JSON.stringify(
     coreSettings(database, { listen: { admin: "127.0.0.1:0" }, readinessLag: Number(READINESS_LAG), ...extra }),

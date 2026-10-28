@@ -3,6 +3,7 @@ import { PGlite } from "@electric-sql/pglite";
 import type { Database } from "../../src/db/api.js";
 import { openPgliteOn, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
 import { openPostgres } from "../../src/db/postgres.js";
+import { connectionOfUrl } from "../db/connection.js";
 
 /**
  * A139's child process (`time-values.test.ts`): started with `node --import tsx` and a time zone in `TZ`, it opens one
@@ -48,7 +49,7 @@ async function open(job: Job): Promise<{ readonly db: Database; readonly engine?
   const committedHeight = async (): Promise<bigint | null> => null;
   if (job.backend === "PostgreSQL") {
     if (job.url === undefined) throw new Error("a PostgreSQL job needs the database's url");
-    return { db: openPostgres({ url: job.url, committedHeight, readConnections: 1 }) };
+    return { db: openPostgres({ connection: connectionOfUrl(job.url), committedHeight, readConnections: 1 }) };
   }
   const engine = await PGlite.create("memory://", { startParams: [...PGLITE_START_PARAMS] });
   if (job.setup !== undefined) await engine.exec(job.setup);

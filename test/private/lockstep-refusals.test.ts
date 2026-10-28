@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { privateCursorHeight } from "../../src/backbone/core-private-source/index.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -55,7 +56,7 @@ const coreOn = (db: TestDatabase, head: bigint, listed: readonly string[]): Publ
 
 /** A private process's public side on `backend`: PostgreSQL read directly, PGlite through the core. */
 const publicSide = (backend: PrivateBackend, db: TestDatabase): Partial<PrivateOptions> =>
-  backend.kind === "postgres" ? { publicDatabase: db.readerSetting as string } : {};
+  backend.kind === "postgres" ? { publicDatabase: db.readerSetting as DatabaseParts } : {};
 
 /** Waits until `process` has halted or ended, and gives its status. */
 async function haltOf(process: PrivateProcess): Promise<ProcessStatus> {
@@ -326,7 +327,7 @@ describe.each(PRIVATE_BACKENDS)("lockstep's refusals and halts on $name (PP-6, P
         const lone = await refusalOf(
           options(loneDb, {
             instanceId: "needs-lone",
-            ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as string } : { direct: () => core.db() }),
+            ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : { direct: () => core.db() }),
           }),
         );
         expect([lone.state, lone.code]).toEqual(["refused", "needs-lockstep-not-listed"]);

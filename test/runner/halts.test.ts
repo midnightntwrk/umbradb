@@ -11,8 +11,9 @@ import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-s
 import { chainDataHeaders, readChainDataView } from "../../src/runner/envelope.js";
 import { FinalizedLoop, type HeightRun, type LoopEnd, type LoopInput } from "../../src/runner/loop.js";
 import type { ProcessingEnd, ProcessStatus } from "../../src/runner/process.js";
-import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
+import { createdDirectory, cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, loggingModule, startProcess, testBuild } from "./process-build.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * A43 (task 5.4; RN-8) through the process from its configuration, on PostgreSQL 18 and PGlite: a thrown error in each
@@ -103,7 +104,7 @@ function a43Modules(log: string[]): ModuleDeclaration[] {
 }
 
 /** A43's configuration on `database`. */
-function a43Entries(database: string, user: readonly ModuleDeclaration[]) {
+function a43Entries(database: DatabaseParts, user: readonly ModuleDeclaration[]) {
   const of = (id: string) => user.find((part) => part.id === id) as ModuleDeclaration;
   return [
     core(database, 1, { extra: { listen: { api: "127.0.0.1:0" } } }),
@@ -155,7 +156,7 @@ async function a43Run(
     declarations: build.declarations,
     config: { data: { entries: a43Entries(db.setting, user) } },
     source,
-    log: (line) => lines.push(line),
+    log: (line) => createdDirectory(line) || lines.push(line),
     ...(loop === undefined ? {} : { loop }),
   });
   const patience = new AbortController();
@@ -265,7 +266,7 @@ async function haltOf(
     declarations: build.declarations,
     config: { data: { entries: [core(db.setting), ...user.map((part) => entryOf(part, 1))] } },
     source,
-    log: (line) => lines.push(line),
+    log: (line) => createdDirectory(line) || lines.push(line),
   });
   try {
     const ended = await handle.ended;
@@ -480,7 +481,7 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
         declarations: build.declarations,
         config: { data: { entries: [core(db.setting), entryOf(late, 1)] } },
         source: new InMemoryBlockSource({ head: HEAD }),
-        log: (line) => lines.push(line),
+        log: (line) => createdDirectory(line) || lines.push(line),
       });
       await atThree;
       const stopping = handle.stop();

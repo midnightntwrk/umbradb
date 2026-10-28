@@ -1,9 +1,11 @@
 import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildCoreVersion } from "../../src/config/build.js";
+import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
 import { coreEntry } from "../../src/config/entries.js";
 import { canonicalJson, checkHistory } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
@@ -54,7 +56,7 @@ interface A149Startup {
 /** What A149's two startups showed, and the two databases afterwards. */
 interface A149Observation {
   readonly runs: readonly A149Startup[];
-  readonly later: { readonly setting: string; readonly cursor: number | null };
+  readonly later: { readonly setting: DatabaseParts; readonly cursor: number | null };
   readonly earlierTouched: boolean;
 }
 
@@ -65,7 +67,7 @@ async function touched(db: ProcessDatabase): Promise<boolean> {
 }
 
 /** A149's configuration: `core` from 1 on `earlier` (N1, no opt-in, `retainStates` 0), from 50 on `later` (N2, opt-in, 4). */
-function a149Entries(earlier: string, later: string, devtool: ModuleDeclaration, extra: Record<string, unknown> = {}) {
+function a149Entries(earlier: DatabaseParts, later: DatabaseParts, devtool: ModuleDeclaration, extra: Record<string, unknown> = {}) {
   return [
     core(earlier, 1, { extra: { node: N1, developmentOptIn: false, retainStates: 0, ...extra } }),
     core(later, 50, { extra: { node: N2, developmentOptIn: true, retainStates: 4 } }),
@@ -131,7 +133,7 @@ function a149Problems(observed: A149Observation): string[] {
     for (let height = first; height <= last; height++) {
       const settings = run.settings.get(height);
       const expected = { node: N2, developmentOptIn: true, database: observed.later.setting, retainStates: 0 };
-      if (settings === undefined || Object.entries(expected).some(([field, value]) => settings[field] !== value)) {
+      if (settings === undefined || Object.entries(expected).some(([field, value]) => !isDeepStrictEqual(settings[field], value))) {
         wrong.push(height);
       }
     }
@@ -358,38 +360,44 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
       expect(await cursorIn(db)).toBe(2);
     }, 180_000);
 
-    it("logs through the configuration's redaction: a module API error naming the database shows it as [redacted]", async () => {
-      const db = await backend.database();
-      const lines: string[] = [];
-      const leaky = loggingModule("leaky", [], [], {
-        points: {
-          async "on-start-api"(_p, api) {
-            api.http("GET", "/leak", async () => {
-              throw new Error(`cannot reach ${db.setting}`);
-            });
+    // CF-4, owner decision Q167 A: only the database's password is secret (a PGlite path has none, and is shown).
+    it.runIf(backend.kind === "postgres")(
+      "logs through the configuration's redaction: a module API error naming the database's password shows it as [redacted]",
+      async () => {
+        const db = await backend.database();
+        const { password } = db.setting as PostgresParts;
+        const lines: string[] = [];
+        const leaky = loggingModule("leaky", [], [], {
+          points: {
+            async "on-start-api"(_p, api) {
+              api.http("GET", "/leak", async () => {
+                throw new Error(`cannot reach the database with the password ${password}`);
+              });
+            },
           },
-        },
-      });
-      const build = testBuild([leaky]);
-      const source = new InMemoryBlockSource({ head: 1n });
-      const handle = startProcess({
-        declarations: build.declarations,
-        config: { data: { entries: [core(db.setting, 1, { extra: { listen: { api: "127.0.0.1:0" } } }), entryOf(leaky, 1)] } },
-        source,
-        log: (line) => lines.push(line),
-      });
-      try {
-        await settle(handle, source, 1n);
-        const { api } = await handle.started;
-        expect((await fetch(`http://${api!.host}:${api!.port}/leak`)).status).toBe(500);
-      } finally {
-        await handle.stop();
-      }
-      const leak = lines.find((line) => line.includes("/leak"));
-      expect(leak).toBeDefined();
-      expect(leak).toContain("[redacted]");
-      expect(lines.join("\n")).not.toContain(db.setting);
-    }, 180_000);
+        });
+        const build = testBuild([leaky]);
+        const source = new InMemoryBlockSource({ head: 1n });
+        const handle = startProcess({
+          declarations: build.declarations,
+          config: { data: { entries: [core(db.setting, 1, { extra: { listen: { api: "127.0.0.1:0" } } }), entryOf(leaky, 1)] } },
+          source,
+          log: (line) => lines.push(line),
+        });
+        try {
+          await settle(handle, source, 1n);
+          const { api } = await handle.started;
+          expect((await fetch(`http://${api!.host}:${api!.port}/leak`)).status).toBe(500);
+        } finally {
+          await handle.stop();
+        }
+        const leak = lines.find((line) => line.includes("/leak"));
+        expect(leak).toBeDefined();
+        expect(leak).toContain("with the password [redacted]");
+        expect(lines.join("\n")).not.toContain(`password ${password}`);
+      },
+      180_000,
+    );
   });
 
   describe("the state (CORE-ARCH §4.18, task 5.3's part)", () => {
@@ -572,7 +580,7 @@ describe("upgradeBoundary: RN-12's first height of a version the build does not 
   const settings = { pollMs: 1 };
 
   it("is none without a scheduled revision, and the lowest start of one otherwise, with every entry starting there", () => {
-    const base = [coreEntry({ start: 1, config: coreSettings("pglite:memory") as never }), entryOf(m, 1, settings), entryOf(n, 1, settings)];
+    const base = [coreEntry({ start: 1, config: coreSettings({ kind: "pglite", memory: true }) as never }), entryOf(m, 1, settings), entryOf(n, 1, settings)];
     const none = checked(base, [m, n]);
     expect(upgradeBoundary(none.check, none.declarations)).toBeNull();
     const later = { id: "m", start: 90, version: "3.0.0" };
@@ -593,7 +601,7 @@ describe("upgradeBoundary: RN-12's first height of a version the build does not 
 
   it("names the core version for a scheduled core revision (an UmbraDB upgrade)", () => {
     const newer = { umbradb: "0.11.0", ledgers: [] };
-    const entries = [coreEntry({ start: 1, config: coreSettings("pglite:memory") as never }), { id: "core", start: 30, version: newer }];
+    const entries = [coreEntry({ start: 1, config: coreSettings({ kind: "pglite", memory: true }) as never }), { id: "core", start: 30, version: newer }];
     const { check, declarations } = checked(entries, []);
     expect(upgradeBoundary(check, declarations)).toEqual({
       height: 30n,
@@ -606,7 +614,7 @@ describe("processRevisions: each part's revisions for its process context (RN-7,
   it("gives a module its revisions in start order with their effective stops and settings, and none to a module without", () => {
     const m = declaration("m");
     const entries = [
-      coreEntry({ start: 1, config: coreSettings("pglite:memory") as never }),
+      coreEntry({ start: 1, config: coreSettings({ kind: "pglite", memory: true }) as never }),
       entryOf(m, 20, { pollMs: 2, limit: 3 }),
       entryOf(m, 1, { pollMs: 1 }, 5),
       entryOf(m, 40, { pollMs: 3 }, 30_000),
@@ -625,8 +633,8 @@ describe("processRevisions: each part's revisions for its process context (RN-7,
 
   it("gives every backbone part the core's revisions: each one's data fields, and every other field from the process's revision", () => {
     const entries = [
-      coreEntry({ start: 1, config: coreSettings("pglite:/a", { node: N1, retainStates: 0, developmentOptIn: false }) as never }),
-      coreEntry({ start: 50, config: coreSettings("pglite:/b", { node: N2, retainStates: 4 }) as never }),
+      coreEntry({ start: 1, config: coreSettings({ kind: "pglite", path: "/a" }, { node: N1, retainStates: 0, developmentOptIn: false }) as never }),
+      coreEntry({ start: 50, config: coreSettings({ kind: "pglite", path: "/b" }, { node: N2, retainStates: 4 }) as never }),
       { id: "core", start: 90, version: { umbradb: "0.11.0", ledgers: [] } },
     ];
     const { check } = checked(entries, []);
@@ -636,15 +644,15 @@ describe("processRevisions: each part's revisions for its process context (RN-7,
     expect(processRevisions(reordered, reordered.process)("core-chain")).toEqual(revisions("core-chain"));
     const [first, second, scheduled] = revisions("core-chain");
     expect([first?.start, first?.stop, second?.start, second?.stop, scheduled?.start, scheduled?.stop]).toEqual([1n, 49n, 50n, 89n, 90n, null]);
-    expect(first?.settings).toMatchObject({ database: "pglite:/b", node: N2, developmentOptIn: true, retainStates: 0, network: "custom" });
-    expect(second?.settings).toMatchObject({ database: "pglite:/b", node: N2, developmentOptIn: true, retainStates: 4 });
-    expect(scheduled?.settings).toMatchObject({ database: "pglite:/b", node: N2 });
+    expect(first?.settings).toMatchObject({ database: { kind: "pglite", path: "/b" }, node: N2, developmentOptIn: true, retainStates: 0, network: "custom" });
+    expect(second?.settings).toMatchObject({ database: { kind: "pglite", path: "/b" }, node: N2, developmentOptIn: true, retainStates: 4 });
+    expect(scheduled?.settings).toMatchObject({ database: { kind: "pglite", path: "/b" }, node: N2 });
     expect(scheduled?.settings).not.toHaveProperty("retainStates");
     expect(first?.version).toBe(canonicalJson(buildCoreVersion()));
     expect(revisions("core-block-commit")).toBe(revisions("core-chain"));
     // A control's process revision: the first one's operational fields.
     const firstRevision = processRevisions(check, check.entries[0] as CheckedEntry)("core-chain");
-    expect(firstRevision[1]?.settings).toMatchObject({ database: "pglite:/a", node: N1, developmentOptIn: false, retainStates: 4 });
+    expect(firstRevision[1]?.settings).toMatchObject({ database: { kind: "pglite", path: "/a" }, node: N1, developmentOptIn: false, retainStates: 4 });
   });
 });
 
@@ -710,7 +718,7 @@ describe("startProcess without a database", () => {
     const build = testBuild([throwing]);
     const handle = startProcess({
       declarations: build.declarations,
-      config: { data: { entries: [core("pglite:memory"), entryOf(throwing, 1)] } },
+      config: { data: { entries: [core({ kind: "pglite", memory: true }), entryOf(throwing, 1)] } },
       source: new InMemoryBlockSource({ head: 1n }),
       log: (line) => lines.push(line),
     });
@@ -723,15 +731,16 @@ describe("startProcess without a database", () => {
     });
     await handle.stop();
     expect(lines).toEqual([
+      "database: pglite in memory",
       "startup refused: callback-error: the on-start-db callback of throwing failed: on-start-db throws a string",
     ]);
   });
 
   it("holds configuration data to CF-1's plain data: a function refuses with not-plain-data at its path", async () => {
-    const settings = { ...coreSettings("pglite:memory"), onError: () => 0 };
+    const settings = { ...coreSettings({ kind: "pglite", memory: true }), onError: () => 0 };
     const handle = startProcess({
       declarations: testBuild([]).declarations,
-      config: { data: { entries: [{ ...core("pglite:memory"), config: settings }] } },
+      config: { data: { entries: [{ ...core({ kind: "pglite", memory: true }), config: settings }] } },
       source: new InMemoryBlockSource({ head: 1n }),
       log: () => undefined,
     });
@@ -779,7 +788,7 @@ describe("startProcess without a database", () => {
     const build = testBuild([]);
     const handle: ProcessHandle = startProcess({
       declarations: build.declarations,
-      config: { data: { entries: [core("pglite:memory")] } },
+      config: { data: { entries: [core({ kind: "pglite", memory: true })] } },
       source: failing,
       log: () => undefined,
     });

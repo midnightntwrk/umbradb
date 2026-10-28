@@ -151,7 +151,7 @@ describe("A140 for /health/live and /health/ready: core-health's, from its own f
   it("a refused process answers both: live 200 while it ticks, ready 503 with the state refused", async () => {
     // Refused once the configuration is validated — PGlite without the development opt-in (CF-9) —, so no database is
     // opened; a refusal of the configuration itself would end the process instead, serving nothing (task 8.1b).
-    const run = startWithAdmin({ database: "pglite:memory", extra: { developmentOptIn: false } });
+    const run = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     await expect(run.handle.started).rejects.toMatchObject({ code: "development-opt-in-required" });
     const origin = await run.origin();
     await statusWhen(origin, (body) => body.state === "refused");

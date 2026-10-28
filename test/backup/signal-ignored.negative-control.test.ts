@@ -54,7 +54,7 @@ async function standIn(signals: WorkerSignals): Promise<void> {
   const cwd = join(dir, signals);
   mkdirSync(cwd);
   try {
-    const config = writeRunConfig(project, `${signals}.config.ts`, `pglite:${join(cwd, "db")}`, node.url);
+    const config = writeRunConfig(project, `${signals}.config.ts`, { kind: "pglite", path: join(cwd, "db") }, node.url);
     await sigusr2Ignored(runWorkerInChild({ configFile: config, cwd, signals }), cwd, "db", PATIENCE_MS);
   } finally {
     await node.close();

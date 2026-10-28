@@ -14,6 +14,7 @@ import { openPostgres } from "../../src/db/postgres.js";
 import { type CliProject, cliProject } from "../cli/cli-fixtures.js";
 import { coreSettings } from "../runner/process-build.js";
 import { writeScript } from "./backup-fixtures.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * The parts of task 15.1's backup that need no running process (BK-1, BK-2; `src/backup/`, `src/cli/backup.ts`): the
@@ -187,7 +188,7 @@ describe("umbradb backup's arguments and its refusals before a database is read 
   });
 
   /** A configuration file for the command with `database`. */
-  const config = (name: string, database: string): string =>
+  const config = (name: string, database: DatabaseParts): string =>
     project.write(
       name,
       [
@@ -197,13 +198,13 @@ describe("umbradb backup's arguments and its refusals before a database is read 
       ].join("\n"),
     );
 
-  it("refuses pglite:memory and a PGlite directory with no database in it, which it does not create", async () => {
+  it("refuses PGlite in memory and a PGlite directory with no database in it, which it does not create", async () => {
     const out = join(dir, "never.backup");
-    const memory = await runBackup({ out, config: config("memory.config.ts", "pglite:memory"), cwd: project.dir });
+    const memory = await runBackup({ out, config: config("memory.config.ts", { kind: "pglite", memory: true }), cwd: project.dir });
     expect(memory).toMatchObject({ written: false, error: { code: "invalid-configuration" } });
     expect(memory.line).toContain("a database that exists only inside the process holding it");
     const empty = join(dir, "empty-db");
-    const absent = await runBackup({ out, config: config("absent.config.ts", `pglite:${empty}`), cwd: project.dir });
+    const absent = await runBackup({ out, config: config("absent.config.ts", { kind: "pglite", path: empty }), cwd: project.dir });
     expect(absent).toMatchObject({ written: false, error: { code: "no-committed-height" } });
     expect(existsSync(empty)).toBe(false);
     expect(existsSync(out)).toBe(false);
@@ -216,7 +217,10 @@ describe("umbradb backup's arguments and its refusals before a database is read 
       [
         `import { coreEntry, defineConfig } from ${JSON.stringify(project.builders)};`,
         "export default defineConfig({ entries: [coreEntry({ start: 1, config: " +
-          `${JSON.stringify({ ...coreSettings(`postgres://u:${password}@127.0.0.1:1/x`), tipCap: "many" })} })] });`,
+          `${JSON.stringify({
+            ...coreSettings({ kind: "postgres", host: "127.0.0.1", port: 1, user: "u", password, name: "x", ssl: "disable" }),
+            tipCap: "many",
+          })} })] });`,
         "",
       ].join("\n"),
     );
@@ -245,7 +249,8 @@ describe("a backup with nothing to back up, and the backup at stop's file", () =
   });
 
   it("refuses a PGlite target whose database the PGlite backend did not open, and a path it cannot read", async () => {
-    const postgres = openPostgres({ url: "postgres://u:p@127.0.0.1:1/x", committedHeight: async () => null });
+    const connection = { host: "127.0.0.1", port: 1, user: "u", password: "p", name: "x", ssl: "disable" } as const;
+    const postgres = openPostgres({ connection, committedHeight: async () => null });
     try {
       const input = { db: postgres, target: { backend: "pglite" as const }, out: join(dir, "x.backup"), optedOut: [], developmentOptIn: true };
       await expect(writeBackup(input)).rejects.toThrow("is not one the PGlite backend opened");
@@ -378,7 +383,7 @@ describe("a restore's empty target and its refusals before reading the file (BK-
       [
         `import { coreEntry, defineConfig } from ${JSON.stringify(project.builders)};`,
         "export default defineConfig({ entries: [coreEntry({ start: 1, config: " +
-          `${JSON.stringify({ network: "custom", genesisHash: HASH, ledgerTable: { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v9" }] }, database: "postgres://u:p@127.0.0.1:1/x", instanceId: "i-1" })} })] });`,
+          `${JSON.stringify({ network: "custom", genesisHash: HASH, ledgerTable: { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v9" }] }, database: { kind: "postgres", host: "127.0.0.1", port: 1, user: "u", password: "p", name: "x" }, instanceId: "i-1" })} })] });`,
         "",
       ].join("\n"),
     );

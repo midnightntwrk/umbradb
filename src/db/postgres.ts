@@ -27,11 +27,12 @@
  * runs), and every parameter as the text the mapping gives it, untyped. Every session pins the component's session
  * settings ({@link SESSION_SETTINGS}, `../deterministic-postgresql/settings.ts`: the five that decide how values print,
  * and the zero timeouts) as startup parameters, which take precedence over the server's, the database's and the role's
- * defaults; a `database` URL that would override one is refused.
+ * defaults. The connection is the `database` setting's parts (CF-4, owner decision Q167 A): no URL, so nothing can
+ * add a startup parameter; `ssl` reaches the driver as {@link driverConnectionOptions} maps it (task 4.5).
  *
  * **Errors (DB-13).** A lost connection is `connection-lost` (retryable); every other error of the driver or the server
  * is `database-error` (not retryable), with the server's SQLSTATE and the names it gives (constraint, table, schema,
- * column) — never the server's `detail`, which can hold row values, nor the URL — except a `TRUNCATE` the
+ * column) — never the server's `detail`, which can hold row values, nor the password — except a `TRUNCATE` the
  * `deterministic_postgresql` component's trigger refused, which is `truncate-not-allowed` (DB-14), and a bounded read
  * one of its timeouts ended, which is `query-timeout` (DB-15; only such a read reports it).
  *
@@ -43,6 +44,7 @@
  */
 
 import postgres, { type Sql } from "postgres";
+import type { SslMode } from "../config/database-parts.js";
 import { mapRows, parameterText, type Row, SESSION_SETTINGS } from "../deterministic-postgresql/index.js";
 import type { CommittedHeight, Database, ReadHandle, ReadOptions, Transaction } from "./api.js";
 import { type DurabilityWarning, probeDurability } from "./durability-probe.js";
@@ -51,10 +53,72 @@ import { allowMultiStatement } from "./multi-statement.js";
 import { readTimeoutMs } from "./read-options.js";
 import { allowWriterStart, takeWriterLock, type WriterSession } from "./writer-lock.js";
 
+/**
+ * The database a backend connects to: the `database` setting's PostgreSQL parts (CF-4, owner decision Q167 A), its
+ * defaults applied (`../config/database-parts.ts`): the host (a Unix socket directory when it starts with `/`), the
+ * port, the login and its password, the database's name and `ssl`.
+ */
+export interface PostgresConnection {
+  readonly host: string;
+  readonly port: number;
+  readonly user: string;
+  /** Absent: none passed, so the driver takes `PGPASSWORD` as libpq does. */
+  readonly password?: string;
+  readonly name: string;
+  readonly ssl: SslMode;
+}
+
+/** The driver's connection options {@link driverConnectionOptions} gives (`postgres` 3.4.9). */
+export interface DriverConnectionOptions {
+  readonly host: readonly string[];
+  readonly port: readonly number[];
+  /** A Unix socket's file, for a host that is a socket directory. */
+  readonly path?: string;
+  readonly user: string;
+  readonly pass?: string;
+  readonly database: string;
+  readonly ssl: false | "require" | { readonly rejectUnauthorized: true; readonly host: string };
+}
+
+/**
+ * The driver's options for `connection` (CF-4; owner decisions Q182 B, Q183 A), as `postgres` 3.4.9 reads them:
+ * - `disable` is `false`: the driver takes an `ssl` option as given when it is set (`src/index.js`, `parseOptions`), and
+ *   would read the text `"disable"` as a request for TLS;
+ * - `require` is the driver's own `"require"`: TLS, the certificate not checked (`src/connection.js`, `secure()`, sets
+ *   `rejectUnauthorized: false` for it);
+ * - `verify-full` is an object the driver merges into Node.js's `tls.connect` options: `rejectUnauthorized: true`, so the
+ *   certificate is checked against Node.js's default roots (no other authority, Q183 A), and the `host`, which Node.js's
+ *   `checkServerIdentity` compares with the certificate's names — the driver sets `servername` only for a host that is
+ *   no IP address, so without it an IP address would be compared as `localhost`.
+ *
+ * The host, port, login, password and name are given, so the driver's environment defaults (`PGHOST`, `PGSSLMODE`, …)
+ * never apply, except `PGPASSWORD` when no password is given. The host and port are given as lists of one, which the
+ * driver takes as they are: given as text, it would split the host at `:` to find a port (`src/index.js`), turning
+ * `::1` into an empty host. A host starting with `/` is a socket directory: `path` is its `.s.PGSQL.<port>`, as libpq
+ * and the driver name it.
+ */
+export function driverConnectionOptions(connection: PostgresConnection): DriverConnectionOptions {
+  const ssl =
+    connection.ssl === "disable"
+      ? false
+      : connection.ssl === "require"
+        ? "require"
+        : ({ rejectUnauthorized: true, host: connection.host } as const);
+  return {
+    host: [connection.host],
+    port: [connection.port],
+    ...(connection.host.startsWith("/") ? { path: `${connection.host}/.s.PGSQL.${connection.port}` } : {}),
+    user: connection.user,
+    ...(connection.password === undefined ? {} : { pass: connection.password }),
+    database: connection.name,
+    ssl,
+  };
+}
+
 /** Options of {@link openPostgres}. */
 export interface PostgresOptions {
-  /** A PostgreSQL URL (the `database` setting, CF-4). It must not set a {@link SESSION_SETTINGS} name. */
-  readonly url: string;
+  /** The database's parts (the `database` setting, CF-4). */
+  readonly connection: PostgresConnection;
   /** How a read learns its committed height (DB-2). */
   readonly committedHeight: CommittedHeight;
   /** The read pool's size; default 10. */
@@ -68,16 +132,8 @@ export interface PostgresOptions {
    * private process's reading of its public database again at a reconnection (PP-14; task 14.1b). None unless given.
    */
   readonly onReadSessionLost?: () => void;
-}
-
-/**
- * The first of `names` that `url` sets as a query parameter (PostgreSQL setting names are case-insensitive), or
- * undefined. The driver adds a URL's query parameters to the startup parameters after its own `connection` option, so
- * such a parameter would silently win. A plain text search, not `new URL()`, which cannot parse the driver's multi-host
- * URLs (`host1,host2`). Shared with 0.9.5's `createClient` (`../postgres/client.ts`).
- */
-export function overridingUrlParameter(url: string, names: readonly string[]): string | undefined {
-  return names.find((name) => new RegExp(`[?&]${name}=`, "i").test(url));
+  /** The negative control's mapping of the parts to the driver's options; {@link driverConnectionOptions} unless given. */
+  readonly driverOptions?: (connection: PostgresConnection) => DriverConnectionOptions;
 }
 
 /** Which connection a session is. */
@@ -186,11 +242,13 @@ class Session {
   private state: "open" | "lost" | "ended" = "open";
 
   constructor(
-    url: string,
+    connection: DriverConnectionOptions,
     private readonly role: Role,
     connectTimeoutSeconds: number | undefined,
   ) {
-    this.sql = postgres(url, {
+    // The driver's types take one host as text; it takes the lists `driverConnectionOptions` gives as they are.
+    this.sql = (postgres as unknown as (options: object) => Sql)({
+      ...connection,
       max: 1,
       fetch_types: false,
       prepare: false,
@@ -512,23 +570,15 @@ async function rollBack(session: Session): Promise<void> {
   }
 }
 
-/** Opens the PostgreSQL backend on the database at `options.url`. No connection is made until it is needed. */
+/** Opens the PostgreSQL backend on the database `options.connection` names. No connection is made until it is needed. */
 export function openPostgres(options: PostgresOptions): Database {
-  const overriding = overridingUrlParameter(options.url, SESSION_SETTINGS.map(([name]) => name));
-  if (overriding !== undefined) {
-    throw new UmbraError(
-      "invalid-configuration",
-      `the database URL must not set "${overriding}": the database API pins it on every connection, and the URL's ` +
-        "value would silently replace it",
-      { parameter: overriding },
-    );
-  }
   const readConnections = options.readConnections ?? 10;
   if (!Number.isSafeInteger(readConnections) || readConnections < 1) {
     const message = `readConnections must be a positive integer, not ${readConnections}`;
     throw new UmbraError("invalid-configuration", message, { parameter: "readConnections" });
   }
-  const session = (role: Role) => () => new Session(options.url, role, options.connectTimeoutSeconds);
+  const connection = (options.driverOptions ?? driverConnectionOptions)(options.connection);
+  const session = (role: Role) => () => new Session(connection, role, options.connectTimeoutSeconds);
   const writer = new Writer(session("writer"), options.fullPageWritesOffAllowed ?? false);
   const pool = new ReadPool(readConnections, session("reader"), options.onReadSessionLost);
   let closed = false;

@@ -1119,7 +1119,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `core_private_source.cursor`, not `core_block_commit.blocks`: issue
       `docs/issues/00029-private-config-check-cursor.md`, recorded with task 14.2).
 
-- [ ] 4.5 The owner's answers Q167 A and Q165 B: `database` and a private process's `publicDatabase` given as parts
+- [x] 4.5 The owner's answers Q167 A and Q165 B: `database` and a private process's `publicDatabase` given as parts
       (`{ kind: "postgres", host, port, user, password, name, ssl }`, `{ kind: "pglite", path }`, `{ kind:
       "pglite", memory: true }`), a connection string refused; only `password` secret, the other parts shown in
       `/config` and the log; `umbradb config check --database` without a value, reading the file's own database; a
@@ -1134,6 +1134,55 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       startup refuses `transport-reader-can-write` (a new refusal code: design §11 and the registry) for a login that
       could write; task 14.2b's gate stays on both backends; the operator guide says how to create that login.
       **Acceptance:** A170, A177; A166 and A35 as amended.
+      **Done (2026-10-28):** `src/config/database-parts.ts` (the parts' types, `defaultSsl`: `disable` for `localhost`,
+      `127.0.0.1`, `::1` and a `host` starting with `/`, else `require`, Q182 B; `databaseText`, how the log names a
+      database without its password); `src/config/core-settings.ts`: `databaseSetting()` (a discriminated union on
+      `kind`, typed by hand as the parts' union; a string refused as a connection string, the message never repeating
+      it; `port` 5432; PGlite exactly one of `path` and `memory: true`) for `database` and `publicDatabase`, both
+      operational; the public `transportReader` (`{ user, password? }`, strict, operational) and its rule — required
+      with a PostgreSQL database and `listen.transport`, refused on PGlite, each at `entries[i].config.transportReader`;
+      `src/config/redact.ts`: a `password` part inside an operational field is secret (`SECRET_PART`: searched for in
+      text, `[redacted]` in `/config`), so the other parts are shown; `src/db/postgres.ts`: `PostgresOptions.connection`
+      (the parts) replaces the URL, and the URL-parameter refusal goes with it (no URL is left to carry a startup
+      parameter); `driverConnectionOptions` maps the parts to `postgres` 3.4.9's options as its source reads them
+      (`src/index.js:438-479`, `src/connection.js:265-289`): host and port as one-element lists (its text form splits a
+      host at `:`), a socket directory as `path`, `disable` as `false` (the text would ask for TLS), `require` as
+      `"require"` (TLS, `rejectUnauthorized: false`), `verify-full` as `{ rejectUnauthorized: true, host }` merged into
+      `tls.connect` (Node.js's built-in roots, the host name checked; Q183 A); a negative control's `driverOptions`
+      seam; `src/backup/backup.ts`: `pg_dump` gets the parts as libpq's environment (`pgDumpEnvironment`: `PGHOST` …
+      `PGSSLMODE`, `PGPASSWORD`, `PGSSLROOTCERT=system` for `verify-full`), the caller's own `PG*` connection variables
+      dropped, no URL on its command line; `src/config/database.ts`, `src/cli/configured.ts`: a PGlite directory created
+      is said, naming the path as configured (`createPgliteDirectory` returns how many missing parents it made;
+      `createdDirectoryLine`): `created a new PGlite data directory <path> (and <n> missing parent directories)` in the
+      process's log and on the restore's standard output (Q165 B); the process logs `database: <databaseText>` once its
+      database opened; `umbradb config check --database` takes no value (`src/cli/command.ts`: `--database=<x>` a usage
+      error) and reads the file's own `core` revision's database (`src/cli/config-check.ts`, `src/cli/database.ts`), a
+      PGlite database in memory a finding at `--database`; `src/private/transport-reader.ts` and `src/runner/process.ts`
+      (`#transportReads`): on PostgreSQL with `listen.transport` the transport's reads (`read`s and `report` checks) run
+      on a read pool logged in as `transportReader`, opened after the migrations and closed with the transport; before
+      the transport listens startup reads the login's facts on that pool and refuses `transport-reader-can-write`
+      (`details { user, found }`) for a superuser, `CREATEROLE`, `CREATEDB`, `BYPASSRLS`, a member of `database`'s
+      login, or `CREATE` on the database or a public schema, a write privilege on a public table, view or foreign table,
+      `USAGE` or `UPDATE` on a public sequence; logs `transport reads as <login>, a login that may only read`; seams
+      `transportReads` (A177's gate off) and `transportReaderCheck` (its negative control); the code in `ERROR_CODES`,
+      `REFUSAL_CODES`, design §11 and the registry; the browser build (`browser/src/configuration.ts`'s `databaseOf`
+      gives parts; `browser/src/db/database.ts` takes them; Q166 A: no `updateHash`, unchanged). Every configuration the
+      tests, the pack smoke, the browser fixtures and the docs build moved to the parts (`test/db/connection.ts`:
+      `partsOfUrl`, `connectionOfUrl`, `ssl: "disable"` for the test servers). Design §7, §8 (**The transport reader**),
+      §11; the operator guide ("The database"); the module guide's example; the threat model's gaps 1 and 2 and its
+      "after task 4.5" passages as built; the changelog's 0.10.0 configuration bullet. Tests, seen failing first (`tsc`
+      59 errors, all the missing API and the string setting): `test/config/database-parts.test.ts` (A170's schema half,
+      A177's `ssl` defaults, `transportReader`'s rules, the redaction; the committed negative control: a schema that
+      also takes a URL fails it), `test/config/database-parts-process.test.ts` (A170's process half on both backends:
+      `/config` and the log show every part, the password only `[redacted]`), `test/db/postgres-tls.test.ts` with
+      `postgres-tls-server.ts` (the mapping; against a PostgreSQL 18.6 container serving TLS only, its certificate made
+      at run time by `openssl`: `require` encrypted per `pg_stat_ssl`, `disable` refused (28000), `verify-full` refused
+      for a CA outside the roots, connected once the CA is among the default roots, refused for a host name the
+      certificate does not name; the committed negative control: a mapping that drops `ssl` fails the `require` test),
+      `test/private/transport-reader.test.ts` (A177 on PostgreSQL 18.6) and its committed negative control (a check that
+      accepts a superuser lets that core start), A166's `test/config/pglite-directory*.ts` (the line naming the path;
+      the negative control's expected problems gain it) and A35's `test/cli/config-check-database.test.ts` (`--database`
+      without a value, on the file's database). No mutation pass (deferred to task 17.5 by the owner).
 
 ## 5. Runner
 

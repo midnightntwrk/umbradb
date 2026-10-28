@@ -53,7 +53,7 @@ const VALID = [
   'const settings: Settings = { node: "ws://127.0.0.1:9944" };',
   "",
   "export default defineConfig({",
-  '  entries: [coreEntry({ start: 0, config: { network: "preprod", database: "pglite:memory", node: settings.node } })],',
+  '  entries: [coreEntry({ start: 0, config: { network: "preprod", database: { kind: "pglite", memory: true }, node: settings.node } })],',
   "});",
   "",
 ].join("\n");
@@ -120,14 +120,15 @@ describe("CF-1: the loader takes the file's default export as plain data", () =>
   });
 
   it("evaluates the file, so it may read environment variables, for example for secrets", async () => {
-    process.env.UMBRADB_TEST_4_1_DATABASE = "postgres://indexer@db/umbradb";
+    process.env.UMBRADB_TEST_4_1_DATABASE = "pw-4-1-ENV";
     try {
       const file = write(
         "env.config.ts",
-        "export default { entries: [{ id: \"core\", config: { database: process.env.UMBRADB_TEST_4_1_DATABASE! } }] };\n",
+        "export default { entries: [{ id: \"core\", config: { database: { kind: \"postgres\", host: \"db\", " +
+          "password: process.env.UMBRADB_TEST_4_1_DATABASE! } } }] };\n",
       );
       expect((await loadConfig({ file })).data).toEqual({
-        entries: [{ id: "core", config: { database: "postgres://indexer@db/umbradb" } }],
+        entries: [{ id: "core", config: { database: { kind: "postgres", host: "db", password: "pw-4-1-ENV" } } }],
       });
     } finally {
       delete process.env.UMBRADB_TEST_4_1_DATABASE;
@@ -236,7 +237,7 @@ describe("CF-1: in a plain Node.js process, the file is loaded by Node.js's own 
         "interface Node { readonly url: string }",
         'const node: Node = { url: "ws://127.0.0.1:9944" } as const;',
         "export default defineConfig({",
-        '  entries: [coreEntry({ start: 0, config: { network: "preprod", database: "pglite:memory", node: node.url } })],',
+        '  entries: [coreEntry({ start: 0, config: { network: "preprod", database: { kind: "pglite", memory: true }, node: node.url } })],',
         "} satisfies UmbraConfig);",
         "",
       ].join("\n"),
@@ -262,7 +263,7 @@ describe("CF-1: in a plain Node.js process, the file is loaded by Node.js's own 
         "import { coreEntry, defineConfig, versionEntry } from \"./umbradb-config.mjs\";",
         "export default defineConfig({",
         "  entries: [",
-        '    coreEntry({ start: 0, config: { network: "preprod", database: "pglite:memory", node: "ws://n" } }),',
+        '    coreEntry({ start: 0, config: { network: "preprod", database: { kind: "pglite", memory: true }, node: "ws://n" } }),',
         '    versionEntry({ id: "stats", start: 1, version: "1.0.0", config: { onError: (() => 0) as never } }),',
         "  ],",
         "});",

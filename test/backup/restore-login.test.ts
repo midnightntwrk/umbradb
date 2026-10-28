@@ -21,6 +21,7 @@ import {
   writeTickerConfig,
 } from "./backup-fixtures.js";
 import { backupAt, chain, codeIn, emptied, restoreRun } from "./restore-fixtures.js";
+import { connectionOfUrl, partsOfUrl } from "../db/connection.js";
 
 /**
  * A125's owners and grants with a login that is not a superuser (task 15.2; BK-3, DB-6, DB-7, decision record Q90), on a
@@ -58,9 +59,9 @@ async function databaseAs(login: string): Promise<BackupDatabase> {
   const url = new URL(created.url);
   url.username = login;
   url.password = login;
-  const setting = url.toString();
+  const setting = partsOfUrl(url.toString());
   const read = async <T>(body: (r: ReadHandle) => Promise<T>) => {
-    const db = openPostgres({ url: setting, committedHeight: cursorHeight, readConnections: 1 });
+    const db = openPostgres({ connection: connectionOfUrl(url.toString()), committedHeight: cursorHeight, readConnections: 1 });
     try {
       return await db.read(body);
     } finally {

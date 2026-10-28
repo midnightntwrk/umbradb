@@ -51,6 +51,6 @@ export const prices = defineModule({
 /** A public process's `core` settings with the required fields only. */
 export const CORE_SETTINGS = {
   network: "preprod",
-  database: "pglite:memory",
+  database: { kind: "pglite", memory: true },
   node: "ws://127.0.0.1:9944",
 } as const;

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { DatabaseParts, PglitePathParts } from "../../src/config/database-parts.js";
 import {
   type PrivateIntakeOptions,
   privateCursorHeight,
@@ -152,7 +153,7 @@ async function withCore<T>(db: TestDatabase, genesis: string, start: number, bod
 /** A private start's options against `core`'s public database `db`. */
 function against(backend: PrivateBackend, db: TestDatabase, core: PublicCore, rest: PrivateOptions): PrivateOptions {
   return backend.kind === "postgres"
-    ? { ...rest, publicDatabase: db.readerSetting as string }
+    ? { ...rest, publicDatabase: db.readerSetting as DatabaseParts }
     : { ...rest, direct: () => core.db() };
 }
 
@@ -364,13 +365,14 @@ describe.each(PRIVATE_BACKENDS)("A113 a private database is bound to one public 
       let opened: Database | undefined;
       const options: PrivateOptions =
         backend.kind === "postgres"
-          ? { database: privateDb.setting, publicDatabase: publicDb.readerSetting as string }
+          ? { database: privateDb.setting, publicDatabase: publicDb.readerSetting as DatabaseParts }
           : {
               database: privateDb.setting,
               direct: () => opened as Database,
             };
       if (backend.kind === "pglite") {
-        opened = await openPglite({ dataDir: publicDb.setting.slice("pglite:".length), committedHeight: cursorHeight, developmentOptIn: true });
+        const dataDir = (publicDb.setting as PglitePathParts).path;
+        opened = await openPglite({ dataDir, committedHeight: cursorHeight, developmentOptIn: true });
       }
       try {
         const outcome = await outcomeOf(options);

@@ -39,7 +39,8 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   ledgerSources: ["data", { default: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" } }],
   sweep: ["data", { default: "on" }],
   retainStates: ["data", { default: 0 }],
-  database: ["secret", "required"],
+  // Operational, its `password` part secret (owner decision Q167 A; `src/config/redact.ts`).
+  database: ["operational", "required"],
   listen: ["operational", { default: { admin: "0.0.0.0:8081" } }],
   tipCap: ["operational", { default: 600 }],
   prefetchWindow: ["operational", { default: 64 }],
@@ -61,18 +62,20 @@ const PUBLIC: Readonly<Record<string, readonly [string, Absent]>> = {
   ...BASE,
   node: ["secret", "required"],
   lockstepInstances: ["operational", { default: [] }],
+  // Its `password` part secret (owner decision Q175 A); required with a PostgreSQL database and listen.transport.
+  transportReader: ["operational", "absent"],
 };
 
 /** A private process's own fields. */
 const PRIVATE: Readonly<Record<string, readonly [string, Absent]>> = {
   ...BASE,
   instanceId: ["operational", "required"],
-  publicDatabase: ["secret", "absent"],
+  publicDatabase: ["operational", "absent"],
   coreTransport: ["operational", "absent"],
 };
 
-const REQUIRED_PUBLIC = { network: "preprod", database: "pglite:memory", node: "ws://127.0.0.1:9944" };
-const REQUIRED_PRIVATE = { network: "preprod", database: "pglite:memory", instanceId: "wallet-1" };
+const REQUIRED_PUBLIC = { network: "preprod", database: { kind: "pglite", memory: true }, node: "ws://127.0.0.1:9944" };
+const REQUIRED_PRIVATE = { network: "preprod", database: { kind: "pglite", memory: true }, instanceId: "wallet-1" };
 
 describe("CF-4: the core entry's fields, kinds and defaults", () => {
   for (const [side, schema, table, required] of [
@@ -88,7 +91,7 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
       const parsed = schema.parse(required) as Record<string, unknown>;
       for (const [field, [, absent]] of Object.entries(table)) {
         if (absent === "required") {
-          expect(parsed[field], field).toBe((required as Record<string, unknown>)[field]);
+          expect(parsed[field], field).toEqual((required as Record<string, unknown>)[field]);
           const { [field]: _left, ...without } = required as Record<string, unknown>;
           const issues = schema.safeParse(without).error?.issues ?? [];
           expect(issues.map((issue) => issue.path), field).toEqual([[field]]);
@@ -129,9 +132,10 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
         ledgerSources: { v8: "vendored", v9: "released", v10: "vendored" },
         sweep: "off",
         retainStates: 4,
-        database: "postgresql://indexer@db/umbradb",
+        database: { kind: "postgres", host: "db", port: 5432, user: "indexer", password: "p", name: "umbradb", ssl: "require" },
         node: "wss://node.example:443",
         listen: { api: "0.0.0.0:8080", admin: "[::1]:8081", transport: "localhost:8082" },
+        transportReader: { user: "umbradb_transport", password: "r" },
         tipCap: 1,
         prefetchWindow: 0,
         backoffCeilingMs: 1,
@@ -151,28 +155,38 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
     expect(
       PRIVATE_CORE_SCHEMA.safeParse({
         ...REQUIRED_PRIVATE,
-        database: "pglite:/var/lib/umbradb/wallet",
-        publicDatabase: "postgres://reader@db/umbradb",
+        database: { kind: "pglite", path: "/var/lib/umbradb/wallet" },
+        publicDatabase: { kind: "postgres", host: "db", user: "reader", name: "umbradb" },
         coreTransport: "core.internal:8082",
       }).error,
     ).toBeUndefined();
   });
 
-  it("takes the database as a PostgreSQL URL, pglite:<directory> or pglite:memory, and the node as ws:// or wss://", () => {
-    const database = (value: string) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, database: value }).success;
-    expect(["postgres://h/db", "postgresql://u:p@h1,h2/db", "pglite:memory", "pglite:./data"].map(database)).toEqual([
-      true,
-      true,
-      true,
-      true,
-    ]);
-    expect(["pglite:", "postgres://", "mysql://h/db", "memory://", ""].map(database)).toEqual([
-      false,
-      false,
-      false,
-      false,
-      false,
-    ]);
+  it("takes the database as parts, never a connection string (Q167 A), and the node as ws:// or wss://", () => {
+    const database = (value: unknown) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, database: value }).success;
+    const postgres = { kind: "postgres", host: "h", user: "u", name: "db" };
+    expect(
+      [
+        postgres,
+        { ...postgres, port: 6543, password: "p", ssl: "verify-full" },
+        { kind: "pglite", memory: true },
+        { kind: "pglite", path: "./data" },
+      ].map(database),
+    ).toEqual([true, true, true, true]);
+    expect(
+      [
+        "postgres://h/db",
+        "postgresql://u:p@h1,h2/db",
+        "pglite:memory",
+        "pglite:./data",
+        { kind: "pglite", path: "" },
+        { kind: "pglite" },
+        { ...postgres, port: 0 },
+        { ...postgres, ssl: "prefer" },
+        { ...postgres, host: "" },
+        "",
+      ].map(database),
+    ).toEqual([false, false, false, false, false, false, false, false, false, false]);
     const node = (value: string) => PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, node: value }).success;
     expect(["ws://n:9944", "wss://n", "ws://", "http://n:9944"].map(node)).toEqual([true, true, false, false]);
   });
@@ -269,7 +283,7 @@ type DeepReadonly<T> = T extends readonly (infer E)[]
 
 /** The fields one side's type declares `never`, to refuse the other side's (task 4.1). */
 type PrivateOnly = "instanceId" | "publicDatabase" | "coreTransport";
-type PublicOnly = "node" | "lockstepInstances";
+type PublicOnly = "node" | "lockstepInstances" | "transportReader";
 
 describe("CF-2, CF-4: the builders' types and the schemas say the same", () => {
   it("a public process's CoreSettings is the public schema's input", () => {
