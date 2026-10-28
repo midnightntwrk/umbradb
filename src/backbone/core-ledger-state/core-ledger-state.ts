@@ -71,7 +71,7 @@ import { firstRegularAtParentTime, parentTimestampMs } from "../../ledger/replay
 import type { ChainOutcome, LedgerEvent, LedgerName, StateSummary, TransactionResult, VmLog } from "../../ledger/types.js";
 import { type AppliedState, type ContractKeys, isEvictionRefused } from "../../ledger/worker/engine.js";
 import type { LedgerHost } from "../../ledger/worker/host.js";
-import { type BlockContext, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
+import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
 import { BLOCKS_TABLE, blockHeaderOf, ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
 import type { BlockLedgerSource } from "../core-block-fetch/ledger-source.js";
 import { blockParsedItemOf } from "../core-block-parsed/core-block-parsed.js";
@@ -712,7 +712,7 @@ export function retainedStatesOf(p: ProcessContext): RetainedStates {
  * `ledger-version` (`core-block-fetch`'s), `block-parsed`, `tx-results` and `config` (`core-chain`'s), provides its four
  * items (`ledger-state` also as a `process` item), and cannot start mid-chain.
  */
-export function coreLedgerState(options: CoreLedgerStateOptions = {}): ModuleDeclaration {
+export function coreLedgerState(options: CoreLedgerStateOptions = {}): DefinedModule<ModuleDeclaration> {
   return defineModule({
     id: CORE_LEDGER_STATE_ID,
     version: UMBRADB_VERSION,

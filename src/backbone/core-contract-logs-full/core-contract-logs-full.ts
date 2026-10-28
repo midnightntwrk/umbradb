@@ -18,7 +18,7 @@
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { VmLog } from "../../ledger/types.js";
-import { type BlockContext, defineModule, type ModuleDeclaration } from "../../modules/declaration.js";
+import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration } from "../../modules/declaration.js";
 import {
   type ContractLog,
   contractLogsItem,
@@ -69,7 +69,7 @@ export interface CoreContractLogsFullOptions {
  * `core-contract-logs-full` with `options`' rule (see the module comment): a core module that requires `vm-logs`
  * (`core-ledger-state`'s), provides the shared `contract-logs` and cannot start mid-chain.
  */
-export function coreContractLogsFull(options: CoreContractLogsFullOptions = {}): ModuleDeclaration {
+export function coreContractLogsFull(options: CoreContractLogsFullOptions = {}): DefinedModule<ModuleDeclaration> {
   return defineModule({
     id: CORE_CONTRACT_LOGS_FULL_ID,
     version: UMBRADB_VERSION,

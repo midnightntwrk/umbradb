@@ -3867,13 +3867,44 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       fail until then), the bench smoke and its baseline (`npm run bench` and `bench:smoke` name files this task
       removed) and `typedoc.json`'s entry points (17.3); the crash worker driving the runner (18.1); the §17 ids (18.4);
       the sweep's floor (Q158).
-- [ ] 17.3 `src/index.ts` with exactly the §12 surface; the surface pin; the `umbradb` command; the pack smoke rewritten
+- [x] 17.3 `src/index.ts` with exactly the §12 surface; the surface pin; the `umbradb` command; the pack smoke rewritten
       (§12 imports, the retired-name failure, a tape sync on PostgreSQL in Docker, `umbradb config check`); the bench
       smoke retargeted with a fresh baseline; `typedoc.json` entry points. `package.json`'s `files` carries the
       vendored ledger packages (`vendor/ledger/*/pkg`, `SHA256SUMS`, `upstream.json`): without them an installed
       package halts at height 0 once `core-block-parsed` runs (`src/ledger/load.ts` imports them; found by the README
       draft, 2026-10-27), so the pack smoke's configuration enables `core-block-parsed`.
       **Acceptance:** A1, A2, A6; `npm run test:smoke` passes.
+      **Done (2026-10-28):** `src/index.ts` exports §12's 27 values and 27 types. §12 now names the core modules'
+      declarations by their source constants (Q186, shipped A): `CORE_CHAIN_EVENTS`, `CORE_BLOCK_PARSED`,
+      `CORE_TX_RESULTS`, `CORE_LEDGER_STATE`, `CORE_CONTRACT_STATES`, `CORE_CONTRACT_LOGS_FULL`,
+      `CORE_CONTRACT_LOGS_FAST` (a configuration writes `CORE_BLOCK_PARSED.entry({ start, config: {} })`); the four
+      built by factories return `DefinedModule<ModuleDeclaration>`, so `entry` is in their type. Nothing else is
+      exported (Q187, shipped A: types §12's signatures name, such as `ProcessInput` or `CursorTable`, stay
+      unexported; `typedoc.json` has `src/index.ts` as its entry point and `validation.notExported` off, and
+      `npm run docs:storage:check` exits 0). A1: `test/library-surface/surface.ts` and `surface.test.ts` read §12's
+      **Values** and **Types** from this design and compare them with the barrel's exports as the compiler resolves
+      them (value or type by meaning) and with the run-time namespace; committed controls compile barrels that add,
+      drop or re-export a 0.9.5 name or export a class type-only, each failing with the name. A2:
+      `excluded-not-exported.test.ts` holds the six LS-2 names absent (at run time and as `@ts-expect-error` type
+      imports), and the pack smoke type-checks, in a consumer of the installed tarball, a file importing every §12
+      export (none `any`) and a file importing any LS-2 or TransactionHistory name (each fails as not exported). A6:
+      the smoke runs the installed command (usage and exit 2 for none and `sync`; `run`, `backup`, `restore`
+      recognized; `config check` passing a file that imports §12's builders from `umbradb`). The pack smoke rewritten:
+      the tarball ships `dist/index.d.ts` and exactly the vendored packages' files (`package.json` `files`:
+      `vendor/ledger/*/pkg/**` — npm skips the `pkg` directory written without `/**`, as it holds its own
+      `package.json` —, `SHA256SUMS`, `upstream.json`, and `!vendor/ledger/README.md`; 106 files, 18.6 MB packed) and
+      nothing of `legacy/`; the deep import `umbradb/dist/runner/process.js` is blocked; with Docker, the installed
+      `umbradb run` syncs a tape (`test/smoke/tape-node.ts`: the browser tests' chain, ledger v9 transactions at 4 and
+      6) on PostgreSQL from 3 to 9 with `core-chain-events` and `core-block-parsed`, storing 2 and 3 transactions, and
+      exits 0 on SIGTERM; a start that refuses or halts fails it at once. Seen failing first: the tarball check (no
+      vendored file packed); and a scratch variant without that check or the vendored `files` entries, whose sync
+      refused at startup (`package-hash-mismatch … its SHA256SUMS is missing`). The bench smoke: `bench/core.ts` measures `runner.commitEmptyBlock` per backend (the
+      command's build over an `InMemoryBlockSource`, through §12's `startProcess`); `npm run bench` (`bench/harness.ts`)
+      wrote `bench/baseline.json` (500 blocks each, on a loaded 16-core machine: PGlite p99 7.0 ms, PostgreSQL 18.6 p99
+      69.2 ms, CV 0.77); `npm run bench:smoke` (`bench/smoke.ts`, `bench/compare.ts`) warns above 10× and exits 0;
+      `test/bench/compare.test.ts`. A5's transcription no longer lists `bench/harness.ts` and `bench/smoke.ts` as
+      retired: §13 keeps the job and these are its new files. The CI mutation job's timeout (`conformance.yml`) goes
+      from 45 to 120 minutes: task 17.2 measured `npm run test:mutation:ci` at about 58 minutes.
 - [ ] 17.3a The module guide rewritten (owner, 2026-10-27; decisions Q160 A, Q161 A), after 17.3: `docs/module-guide.md`
       replaced by the reviewed outline and first draft (an overview, one complete example, then the detail sections; a
       "Deterministic PostgreSQL" section for the column types; migrations and upgrades late), every code block

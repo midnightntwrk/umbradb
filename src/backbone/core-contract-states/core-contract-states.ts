@@ -26,7 +26,7 @@ import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { BlockWriteHandle } from "../../db/api.js";
 import type { ContractKeys } from "../../ledger/worker/engine.js";
-import { type BlockContext, defineModule, type ModuleDeclaration } from "../../modules/declaration.js";
+import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration } from "../../modules/declaration.js";
 import { CORE_CONTRACT_STATES_ID, LEDGER_STATE_ITEM } from "../core-ledger-state/core-ledger-state.js";
 import { heightPartitionsSql } from "../height-partitions.js";
 
@@ -109,7 +109,7 @@ export interface CoreContractStatesOptions {
  * `core-contract-states` with `options`' rule (see the module comment): a core module that requires `ledger-state`,
  * provides `contract-states` and cannot start mid-chain.
  */
-export function coreContractStates(options: CoreContractStatesOptions = {}): ModuleDeclaration {
+export function coreContractStates(options: CoreContractStatesOptions = {}): DefinedModule<ModuleDeclaration> {
   return defineModule({
     id: CORE_CONTRACT_STATES_ID,
     version: UMBRADB_VERSION,

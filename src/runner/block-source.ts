@@ -69,7 +69,7 @@ export interface BlockSource {
    */
   checkModules?(modules: readonly ModuleDeclaration[]): void;
   /**
-   * Optional (a source that fetches ahead): the loop gives the source its {@link QueueRunner} as each of its runs
+   * Optional (a source that fetches ahead): the loop gives the source its `QueueRunner` as each of its runs
    * starts; the source may run the queue-side points through it until the returned function is called, which the loop
    * does when the run ends — stopped, halted, or before a retry runs it again.
    */

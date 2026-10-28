@@ -445,11 +445,10 @@ export const RETIRED_PATHS: readonly string[] = [
   "test/api-surface/withtx-methods.test.ts",
   "test/api-surface/chain-archive-routing.test.ts",
   // The benchmarks: the TemporalKV, Watermarks, CheckpointStore (with its GC curve) and Lease workloads, their baseline,
-  // the harness and smoke guard that run them, and the TransactionHistory workload moved by task 17.1.
+  // and the TransactionHistory workload moved by task 17.1. The harness and the smoke guard that ran them were removed
+  // too; task 17.3 wrote new ones at the same paths, for the core (`bench/core.ts`; §13 keeps the non-gating job).
   "bench/workloads/",
   "bench/baseline.1.0.0-perf-baseline.1.json",
-  "bench/harness.ts",
-  "bench/smoke.ts",
   "legacy/transaction-history/bench/",
 ];
 

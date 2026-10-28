@@ -28,6 +28,20 @@ import type { FinalizedLifecycle } from "../../src/index.js";
 import type { RejectedLifecycle } from "../../src/index.js";
 // @ts-expect-error not exported (LS-3)
 import type { MergeEntriesFn } from "../../src/index.js";
+// LS-2 (core-arch task 17.3, A2): 0.9.5's storage parts are retired and not exported; importing any of them fails to
+// type-check, as the pack smoke shows for the installed package.
+// @ts-expect-error not exported (LS-2)
+import type { PgTemporalKV } from "../../src/index.js";
+// @ts-expect-error not exported (LS-2)
+import type { PgCheckpointStore } from "../../src/index.js";
+// @ts-expect-error not exported (LS-2)
+import type { PgWatermarks } from "../../src/index.js";
+// @ts-expect-error not exported (LS-2)
+import type { PgTransactionLeaseLayer } from "../../src/index.js";
+// @ts-expect-error not exported (LS-2)
+import type { PgWalletStateEnvelopeStore } from "../../src/index.js";
+// @ts-expect-error not exported (LS-2)
+import type { saveAndAdvance } from "../../src/index.js";
 
 /**
  * G1 / acceptance A2 + G3 / acceptance C7: internal symbols and the six chain-archive error
@@ -41,6 +55,15 @@ describe("frozen barrel: excluded symbols are not exported (A2, C7)", () => {
   it("TransactionHistory is not exported: it is kept in legacy/transaction-history/, outside the package (LS-3)", () => {
     for (const name of ["PgTransactionHistoryStorage", "InMemoryTransactionHistoryStorage", "referenceMergeEntries"]) {
       expect(name in barrel, `${name} must NOT be exported from the barrel (LS-3)`).toBe(false);
+    }
+  });
+
+  it("0.9.5's storage parts are not exported (LS-2, A2)", () => {
+    for (const name of [
+      "PgTemporalKV", "PgCheckpointStore", "PgWatermarks", "PgTransactionLeaseLayer", "PgWalletStateEnvelopeStore",
+      "saveAndAdvance",
+    ]) {
+      expect(name in barrel, `${name} must NOT be exported from the barrel (LS-2)`).toBe(false);
     }
   });
 

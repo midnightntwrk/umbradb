@@ -252,7 +252,7 @@ export const ERROR_CODES = [
 ] as const;
 
 /**
- * A code of {@link ERROR_CODES}. The determinism errors pass their `reason` as their code, so the compiler checks there
+ * A code of `ERROR_CODES`. The determinism errors pass their `reason` as their code, so the compiler checks there
  * that every `CanonicalEncodingFailure` and `ModuleContentsFailure` is one.
  */
 export type ErrorCode = (typeof ERROR_CODES)[number];

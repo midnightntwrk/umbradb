@@ -18,6 +18,10 @@
   },
   "files": [
     "dist",
+    "vendor/ledger/*/pkg/**",
+    "vendor/ledger/*/SHA256SUMS",
+    "vendor/ledger/*/upstream.json",
+    "!vendor/ledger/README.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",

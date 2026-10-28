@@ -34,7 +34,7 @@ import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import { UmbraError } from "../../db/errors.js";
 import type { ChainOutcome } from "../../ledger/types.js";
-import { type BlockContext, defineModule, type ModuleDeclaration } from "../../modules/declaration.js";
+import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration } from "../../modules/declaration.js";
 import {
   type ContractLog,
   contractLogsItem,
@@ -198,7 +198,7 @@ export async function fastLogsOf(b: BlockContext, options: CoreContractLogsFastO
  * `chain-events` and `block-parsed`, provides the shared `contract-logs` and its ledger task's `contract-log-sites`, and
  * may start mid-chain.
  */
-export function coreContractLogsFast(options: CoreContractLogsFastOptions = {}): ModuleDeclaration {
+export function coreContractLogsFast(options: CoreContractLogsFastOptions = {}): DefinedModule<ModuleDeclaration> {
   return defineModule({
     id: CORE_CONTRACT_LOGS_FAST_ID,
     version: UMBRADB_VERSION,

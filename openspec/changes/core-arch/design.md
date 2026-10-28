@@ -1810,8 +1810,11 @@ database's core never started, Q125), `network` (its genesis hash is not the con
 the module guide's example (owner decision Q161 A): the module API's envelope helpers `readChainDataView`,
 `chainDataHeaders`, `withViewExtensions` and `answerChainData` (`src/runner/envelope.ts`), `hexBytes`
 (`src/config/core-settings.ts`), `retainedStatesOf` (`src/backbone/core-ledger-state/`), and the core modules'
-declarations, so that a configuration file writes their entries (`<module>.entry({ … })`; their exported names are
-settled by task 17.3).
+declarations, so that a configuration file writes their entries (`<module>.entry({ … })`), under the names the source
+gives them (task 17.3): `CORE_CHAIN_EVENTS`, `CORE_BLOCK_PARSED`, `CORE_TX_RESULTS`, `CORE_LEDGER_STATE`,
+`CORE_CONTRACT_STATES`, `CORE_CONTRACT_LOGS_FULL`, `CORE_CONTRACT_LOGS_FAST`. Nothing else is exported: the backbone
+parts run in every build and take no entry, and the configuration's types that §12 does not name (the core
+settings, the database parts) reach a host program through `coreEntry`'s parameter.
 
 **Types:** `ModuleDeclaration`, `ItemDeclaration`, `Lifetime`, `FieldKind`, `FieldSchema`, `Migration`, `Revision`,
 `PointName`, `PointCallbacks`, `ProcessContext`, `BlockContext`, `ItemSink`, `ReadHandle`, `BlockWriteHandle`,
