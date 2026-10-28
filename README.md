@@ -112,6 +112,7 @@ modules); name your own module to change it.
 ```sh
 git clone https://github.com/midnightntwrk/umbradb my-web-indexer
 cd my-web-indexer
+git checkout -q v0.10.0-rc.1                                  # the release's code
 npm ci
 node browser/build.ts --configuration browser/src/config.ts   # builds the page into dist-browser/
 node browser/serve.ts                                         # serves it on 127.0.0.1:8090; Ctrl-C stops it
