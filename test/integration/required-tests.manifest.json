@@ -1,6 +1,6 @@
 {
   "$schema-note": "The required-test manifest of the conformance gate (scripts/conformance-gate.mjs, test/integration/check-required-tests.ts). 'required' lists the stable id of every test that MUST execute and pass in the gate: check-required-tests.ts fails the gate by id if any is missing or reported skipped, todo or failed, binds each id to its 'file', and pins required.length to EXPECTED_REQUIRED_COUNT (and 'deferred' to EXPECTED_DEFERRED_COUNT), so adding or deleting an entry without updating the pin fails the gate. Each governed test embeds its id as a [[id]] token in its title. 'deferred' lists WHERE-gated optional-feature ids, exempt while their feature is unshipped (none now).",
-  "$retirement-note": "openspec/changes/core-arch design.md §13 (task 17.2, 2026-10-27): ids 1-4 (crash-harness.smoke.*) are kept, retargeted by task 18.1 to a crash worker that drives the runner; ids 5-25 (the 0.9.5 crash-worker hooks, the T1/T2/T3/T5 crash tests, the soak and load-under-prune runs, P3, the differential fault schedule and its controls, the saveAndAdvance co-transaction crash) and the deferred crash.pg-kill-save.no-duplicate-with-idempotency-key are retired with the 0.9.5 parts their tests drove. Task 18.4 adds the ids of acceptance.md §17, the pinned count becoming 4 + 23 = 27. test/library-surface/retirement.test.ts (A5) compares this file with §13.",
+  "$retirement-note": "openspec/changes/core-arch design.md §13 (task 17.2, 2026-10-27): ids 1-4 (crash-harness.smoke.*) are kept, retargeted by task 18.1 to a crash worker that drives the runner; ids 5-25 (the 0.9.5 crash-worker hooks, the T1/T2/T3/T5 crash tests, the soak and load-under-prune runs, P3, the differential fault schedule and its controls, the saveAndAdvance co-transaction crash) and the deferred crash.pg-kill-save.no-duplicate-with-idempotency-key are retired with the 0.9.5 parts their tests drove. Task 18.4 (owner decision Q191 A) adds the 18 ids of acceptance.md §17 whose tests exist, the pinned count becoming 4 + 18 = 22; the other four (runner.crash-sweep.contents-hash-equal, runner.crash-sweep.negative-control-fires, runner.restart-20.contents-hash-equal, core.full-crash-sweep) join with the crash runs after 0.10.0, making 26. test/library-surface/retirement.test.ts (A5) compares this file with §13.",
   "required": [
     {
       "id": "crash-harness.smoke.spawn-sigkill-container-survives",
@@ -21,6 +21,96 @@
       "id": "crash-harness.smoke.suite-watchdog-default-bound",
       "file": "test/integration/crash/crash-harness.smoke.test.ts",
       "description": "0.3: withSuiteWatchdog with NO explicit override applies SUITE_WATCHDOG_MS as its default bound (proven fast via fake timers, so the default is wired without a real 60s wait)."
+    },
+    {
+      "id": "runner.fault.pre-commit-failure-leaves-nothing",
+      "file": "test/runner/halts.test.ts",
+      "description": "18.4: A43: an error thrown at any point before the commit halts at h with its module and point and keeps nothing of h, on PostgreSQL and PGlite."
+    },
+    {
+      "id": "runner.fault.start-height-at-least-once",
+      "file": "test/runner/crash.test.ts",
+      "description": "18.4: A44: killed after on-start-height at a module's start h and before h commits, on-start-height fires again for h after the restart."
+    },
+    {
+      "id": "runner.fault.after-write-at-least-once",
+      "file": "test/runner/crash.test.ts",
+      "description": "18.4: A46: killed after h's COMMIT and before its on-after-db-write completed, on-after-db-write fires for h after the restart, before any callback of h + 1."
+    },
+    {
+      "id": "runner.fault.sigterm-in-transaction",
+      "file": "test/runner/sigterm.test.ts",
+      "description": "18.4: A48: SIGTERM during on-db-write of h leaves h fully present or fully absent, and a restart resumes from the cursor."
+    },
+    {
+      "id": "db.writer-lock.single-writer",
+      "file": "test/db/writer-lock.test.ts",
+      "description": "18.4: A17: a second writer refuses with writer-lock-held, on PostgreSQL and PGlite."
+    },
+    {
+      "id": "db.connection-lost.retryable",
+      "file": "test/db/postgres-faults.test.ts",
+      "description": "18.4: A19: terminating the writer's backend mid-transaction gives a retryable connection-lost."
+    },
+    {
+      "id": "db.pglite.no-outside-read-in-transaction",
+      "file": "test/db/pglite-no-outside-read.test.ts",
+      "description": "18.4: A11: no read outside the block's transaction runs between its BEGIN and COMMIT on PGlite, under a constant read load."
+    },
+    {
+      "id": "db.pglite.no-outside-read.negative-control-fires",
+      "file": "test/db/pglite-no-outside-read.negative-control.test.ts",
+      "description": "18.4: A11's negative control: reads run inside block transactions make A11's test fail."
+    },
+    {
+      "id": "db.roles.cross-schema-write-rejected",
+      "file": "test/db/roles.test.ts",
+      "description": "18.4: A13: a module's write into another module's table is rejected by the database and the block rolls back. The id is on the PostgreSQL 18 copy; the PGlite copy runs untagged (an id names one test)."
+    },
+    {
+      "id": "determinism.contents-hash.cross-backend",
+      "file": "test/determinism/cross-backend.test.ts",
+      "description": "18.4: A55: the contents hash is equal on PostgreSQL and PGlite, at several page sizes."
+    },
+    {
+      "id": "db.block.truncate-refused",
+      "file": "test/deterministic-postgresql/block-transactions.test.ts",
+      "description": "18.4: A73: TRUNCATE of a module's own table in a block fails with truncate-not-allowed and the block rolls back. The id is on the PostgreSQL 18 copy; the PGlite copy runs untagged (an id names one test)."
+    },
+    {
+      "id": "ingest.no-unfinalized-rows-after-crash",
+      "file": "test/backbone/ingest-crash.test.ts",
+      "description": "18.4: A76: killing the process with best blocks queued leaves no row of a non-finalized block, nor does the restart."
+    },
+    {
+      "id": "ingest.uncertain-commit-recovery",
+      "file": "test/runner/recovery.test.ts",
+      "description": "18.4: A86: the writer's backend terminated during h's COMMIT recovers by the cursor: h kept and not processed again, h processed again, or a halt with unexpected-cursor."
+    },
+    {
+      "id": "ledger.sweep-cross-backend-identical",
+      "file": "test/backbone/ledger-sweep-process.test.ts",
+      "description": "18.4: A105: the ledger sweep's grey, marked and stored sets equal the reference model's after every block, on PostgreSQL and PGlite."
+    },
+    {
+      "id": "ledger.root-check-halts",
+      "file": "test/backbone/ledger-state.test.ts",
+      "description": "18.4: A106: a wrong ledger state root for one block halts with root-mismatch and stores nothing of that block."
+    },
+    {
+      "id": "contract-logs.fast-equals-full",
+      "file": "test/backbone/contract-data.test.ts",
+      "description": "18.4: A110: core-contract-logs-full and core-contract-logs-fast give identical contract logs, on PostgreSQL 18 and PGlite."
+    },
+    {
+      "id": "private.lockstep-waits-no-transaction",
+      "file": "test/private/lockstep-wait.test.ts",
+      "description": "18.4: A117: a stopped lockstep instance makes the core wait before BEGIN, with no transaction open. The id is on the PostgreSQL 18 copy; the PGlite copy runs untagged (an id names one test)."
+    },
+    {
+      "id": "backup.restore-equals-uninterrupted",
+      "file": "test/backup/restore.test.ts",
+      "description": "18.4: A128: a backup restored and resumed gives the contents hash of a process that never stopped."
     }
   ],
   "deferred": []

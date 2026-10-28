@@ -93,7 +93,9 @@ describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend
     expect([await count(db, "a.t"), await count(db, "b.t")]).toEqual(before);
   }
 
-  it("[[db.roles.cross-schema-write-rejected]] A13: a module's write into another module's table is rejected by the database and the block rolls back", async () => {
+  // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy (task 18.4).
+  const requiredId = backend.name.startsWith("PostgreSQL") ? "[[db.roles.cross-schema-write-rejected]] " : "";
+  it(`${requiredId}A13: a module's write into another module's table is rejected by the database and the block rolls back`, async () => {
     const { db, plan } = await twoModules();
     await expectCrossSchemaWriteRejected(db, plan);
   });

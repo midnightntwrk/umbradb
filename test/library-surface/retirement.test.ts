@@ -94,11 +94,16 @@ async function vitestConfig(file: string): Promise<VitestConfig> {
 const manifest = JSON.parse(read("test/integration/required-tests.manifest.json")) as RequiredTestsManifest;
 const added = acceptanceIds(read("openspec/changes/core-arch/acceptance.md"));
 /**
- * `acceptance.md` §17's ids, which task 18.4 adds to the manifest (with the pinned count 4 + 22 = 26, A120's key-half id
- * withdrawn by Q154). Until then they may be absent; task 18.4 empties this list, and the comparison is exact from then
- * on.
+ * `acceptance.md` §17's ids that may still be absent from the manifest: the four the crash runs bring after 0.10.0
+ * (owner decision Q191). Task 18.4 added the other 18 (pinned count 4 + 18 = 22, A120's key-half id withdrawn by Q154);
+ * once the crash runs empty this list, the comparison is exact (4 + 22 = 26).
  */
-const PENDING_UNTIL_18_4: readonly string[] = added;
+const PENDING_CRASH_RUNS: readonly string[] = [
+  "runner.crash-sweep.contents-hash-equal",
+  "runner.crash-sweep.negative-control-fires",
+  "runner.restart-20.contents-hash-equal",
+  "core.full-crash-sweep",
+];
 
 describe("A5: the gates match design.md §13's retirement list (LS-5)", () => {
   it("design.md §13 still says every item retirement.ts transcribes from it", () => {
@@ -109,7 +114,8 @@ describe("A5: the gates match design.md §13's retirement list (LS-5)", () => {
 
   it("the required-test manifest: ids 1–4 kept, ids 5–25 and the deferred id retired, the count pinned to the list", () => {
     expect(added).toHaveLength(22); // acceptance.md §17's table, read (Q154 withdrew one)
-    expect(manifestProblems(manifest, added, PENDING_UNTIL_18_4, EXPECTED_REQUIRED_COUNT, EXPECTED_DEFERRED_COUNT))
+    for (const id of PENDING_CRASH_RUNS) expect(added).toContain(id);
+    expect(manifestProblems(manifest, added, PENDING_CRASH_RUNS, EXPECTED_REQUIRED_COUNT, EXPECTED_DEFERRED_COUNT))
       .toEqual([]);
     for (const entry of manifest.required) expect(read(entry.file!)).toContain(`[[${entry.id}]]`);
   });
@@ -187,7 +193,7 @@ describe("A5's negative controls: a list that differs from design.md §13 fails,
       "EXPECTED_REQUIRED_COUNT is 25 but the manifest requires 4 ids",
       "EXPECTED_DEFERRED_COUNT is 1 but the manifest defers 0 ids",
     ]);
-    // Once task 18.4 passes no pending id, every §17 id is required; with them all, the list is exact.
+    // With no pending id (after the crash runs), every §17 id is required; with them all, the list is exact.
     expect(manifestProblems(manifestOf(kept), added, [], 4, 0)).toHaveLength(added.length);
     expect(manifestProblems(manifestOf([...kept, ...added]), added, [], 26, 0)).toEqual([]);
     // The 0.9.5 manifest (ids 1–25, the deferred id) fails on every retired id.

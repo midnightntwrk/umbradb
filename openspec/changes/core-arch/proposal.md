@@ -1,10 +1,11 @@
 # Proposal — CORE-ARCH: the standalone indexer's core architecture (`core-arch`)
 
 > **Status:** Implemented (2026-10-28, tasks 19.1–19.4): the tasks of `tasks.md` §0–§17 are done, each checked with
-> the acceptance criteria it demonstrated, 17.5 (the deferred mutation passes and coverage floors) included. Left to
-> the owner: the whole-system runs of §18 (18.1–18.5: the crash sweeps, the
-> full-core syncs and the three-backend comparison, the ingest benchmark, the required ids of `acceptance.md` §17, the
-> tape-apply baseline) and the pull-request record (19.5). Approved by the owner on 2026-10-22, at commit `52cc6d4`,
+> the acceptance criteria it demonstrated, 17.5 (the deferred mutation passes and coverage floors) included, and
+> 18.4 for the 18 required ids whose tests exist. 0.10.0 goes out first as a pre-release (owner decision Q191); the
+> whole-system runs of §18 (18.1, 18.2, 18.3, 18.5: the crash sweeps, the full-core syncs and the three-backend
+> comparison, the ingest benchmark, the tape-apply baseline) and the four required ids they bring follow it. Left to the
+> owner: the pull-request record (19.5). Approved by the owner on 2026-10-22, at commit `52cc6d4`,
 > after the stage-1 gate: two cold adversarial reviews (Codex `gpt-6-astra`), their fixes, and targeted fix checks
 > ending in PASS. Change id `core-arch`; capabilities `library-surface`, `database-api`, `modules`, `configuration`,
 > `runner`, `determinism`, `storage-helpers`, `admin-endpoints`, `test-tape`, `ingest`, `chain-data`, `ledger`,

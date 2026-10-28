@@ -97,8 +97,9 @@ export function statusesFromReport(report: JsonReport): Map<string, string[]> {
  *  manifest so silently deleting (or adding) a required entry fails the gate: {@link loadManifest}
  *  rejects a manifest whose `required` length drifts from this constant. Bump it deliberately when
  *  a required test is genuinely added/removed. Core-arch task 17.2 set it to 4 (ids 1-4, `crash-harness.smoke.*`;
- *  `openspec/changes/core-arch/design.md` §13 retired ids 5-25); task 18.4 sets it to 27 (acceptance.md §17). */
-export const EXPECTED_REQUIRED_COUNT = 4;
+ *  `openspec/changes/core-arch/design.md` §13 retired ids 5-25); task 18.4 set it to 22 (acceptance.md §17's 18 ids whose
+ *  tests exist, owner decision Q191 A), and the crash runs after 0.10.0 bring the other four (26). */
+export const EXPECTED_REQUIRED_COUNT = 22;
 
 /** The pinned count of `deferred` (WHERE-gated optional-feature) tests (BLOCK 6). Structurally PINS
  *  the deferred exemption set so deleting the sole deferred entry (a green "0 deferred" gate) fails the

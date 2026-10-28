@@ -53,9 +53,10 @@ pinned by `test/library-surface/surface.test.ts` (A1); the command is `umbradb` 
   was written test first and lists the acceptance criteria it demonstrated; the conformance gate passes.
 - [x] The deferred testing (task 17.5): the mutation passes and the coverage floors held back while the build moved.
   The mutation gate scores 87.98 % against its break of 65, and no coverage floor is pending.
-- [ ] The whole-system runs, the owner's (§18): the crash sweeps with test modules and with every core module, the
-  stagenet and preview syncs from genesis, the three-backend comparison, the ingest benchmark against the official
-  indexer, the required test ids of `acceptance.md` §17, and the tape-apply baseline.
+- [x] The required test ids (task 18.4): the 18 ids of `acceptance.md` §17 whose tests exist are in the conformance
+  gate's manifest, which fails the gate if any of them is missing, skipped or failing.
+- [ ] A pre-release of 0.10.0, its pull request and GitHub release open for review and feedback; the release gates
+  below follow it.
 - [ ] Review and the pull-request record (`docs/PULL_REQUEST_CHECKLIST.md`), then the merge.
 
 **Gates.** The conformance gate (`npm run test:conformance`: every suite, the coverage floors of `vitest.config.ts`,
@@ -64,6 +65,32 @@ cursor table and the interval fact T5 rests on, [`Formal/STORAGE_ALGEBRA.md`](Fo
 supply-chain gate, the vendored ledger rebuild, and `npm run graph:check`.
 
 ## After 0.10.0
+
+### Release gates still to run
+
+0.10.0 goes out first as a pre-release; these whole-system runs follow it (`tasks.md` §18):
+
+- **The crash sweeps** (18.1): kill the runner at every point that matters and at 100 random ones, with test modules,
+  and check every restart ends with the same data as a run that never stopped; the same with 20 restarts; and a
+  negative control the sweep must catch.
+- **The full-core runs** (18.2): stagenet and preview from genesis to block 10,000 with every core module, every
+  ledger state root matching the node's; the crash sweep repeated on that chain; PostgreSQL, PGlite in Node.js and
+  PGlite in Chrome giving the same contents hash.
+- **The ingest benchmark** (18.3): UmbraDB against the official Midnight indexer over stagenet 0–10,000, on the same
+  machine.
+- **The tape-apply baseline** (18.5): the time to apply 2,000 recorded stagenet blocks on each backend, committed as
+  a reference.
+- **The last four required test ids**, which the crash runs bring.
+
+### Later core work
+
+Deferred from the core by the feature catalogue, for a version after 0.10.0:
+
+- **D1. Unfinalized blocks in the database:** storing the tip, with rollbacks and queries that choose the latest or
+  the finalized data.
+- **D2. Tip queries:** for example a quick, not yet final, confirmation that a transaction is in a block. It needs D1
+  or a core endpoint over the in-memory best-block queue.
+- **D3. A raw block archive** in the database, so a full node is not needed for every block.
 
 ### Feature modules
 
@@ -95,9 +122,10 @@ the catalogue's, where it sets one.
 
 ## Non-goals
 
-- **No unfinalized data.** No tip in the database, no tip queries, no rollback of stored data.
-- **No other data source** than the Midnight node, and no raw block archive: the node serves every block and its
-  state.
+- **No unfinalized data in 0.10.0.** No tip in the database, no tip queries, no rollback of stored data; D1 and D2
+  above may add them later.
+- **No other data source** than the Midnight node. In 0.10.0 there is no raw block archive either: the node serves
+  every block and its state (D3 above).
 - **No security boundary against modules.** Modules and configuration files are trusted code.
 - **No migration of 0.9.5 databases.** The indexer always starts a new database.
 - **Not a distributed store.** One writer per database, held by the writer lock.

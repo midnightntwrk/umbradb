@@ -24,8 +24,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 
 1. Every task in `tasks.md` is checked, each with its named criteria demonstrated by a passing test — not asserted.
 2. Every criterion below passes; every id of §17 is in the required-test manifest and passes in the conformance gate.
+   For 0.10.0's pre-release (owner decision Q191), the criteria marked deferred and §17's four ids of the crash runs
+   wait for a later release.
 3. **Every negative control has been observed failing** (A11, A13, A50, A56, A105, A134): a control never seen to
-   fire is not evidence.
+   fire is not evidence. A50's and A134's wait with their runs (Q191).
 4. The retirement list of `design.md` §13 is applied exactly (A5) and approved by the owner in the pull request.
 5. The cold adversarial review of the spec and of the code, the spec-compliance and release lanes, and the fix check
    are recorded in the pull request (`AGENTS.md`).
@@ -272,9 +274,11 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   recorded; height uniform over the range, point uniform over the instrumented points); after every restart the run
   completes and its contents hash equals an uninterrupted run's. **Negative control:** a runner variant that commits
   the cursor in a transaction separate from the modules' writes is detected by the sweep. (RN-6, RN-8, RN-11)
+  **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
 - **A51** `[DIFF]` The same in-memory chain and configuration, run once uninterrupted and once restarted 20 times,
   give equal contents hashes and equal digests, on each backend; and PostgreSQL and PGlite give equal contents hashes.
   (RN-6, DT-3, DT-5)
+  **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
 - **A74** `[CI]` A process item published in its provider's `on-start-db` is visible to a requiring module from
   `on-start-api` on; publishing twice, publishing from `on-compute`, or publishing an undeclared item fails the
   callback; a required process item left unpublished refuses startup with `process-item-missing`. (MD-7)
@@ -643,30 +647,37 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 
 - **A133** `[CI]` Stagenet blocks 0–10,000 and preview blocks 0–10,000, from genesis, with every core module except
   `-fast`, sync with every state root matching the node's. (IN-4, LG-15)
+  **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
 - **A154** **Withdrawn** (owner decision Q155: the full syncs are skipped).
 - **A134** `[FAULT]` The crash sweep of A50 repeated on the stagenet 0–10,000 tape with every core module except
   `-fast`: every mandatory point (inside `on-compute`; inside `on-db-write` after the first and the last callback; just
   before and just after COMMIT; during a sweep step) and 100 seeded random points leave no partial block, no skipped
   height, and a contents hash equal to an uninterrupted run's; **negative control:** a build that writes the ledger
   nodes in a transaction of their own is detected. (RN-6, IN-1, LG-11, LG-14)
+  **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
 - **A135** `[DIFF]` The same range and configuration on PostgreSQL, on PGlite in Node.js and on PGlite in Chrome give
   equal contents hashes. (DT-3, BR-4)
+  **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
 - **A136** `[MANUAL]` Ingest throughput over stagenet 0–10,000 with every core module except `-fast`, on PostgreSQL 18,
   median of 3 runs — each from an empty database on a freshly started PostgreSQL, against the same local archive node
   in Docker after one warm-up pass, timed from process start to the commit of block 10,000 — is equal to or better than
   the official midnight-indexer's (release/4.4, PostgreSQL backend) on the same machine; the measurements are recorded
   in the pull request. (CORE-ARCH SC-009)
+  **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
 - **A143** `[MEASURE]` The tape-apply baseline: the first 2,000 blocks of A133's stagenet tape, applied from an empty
   database with every core module except `-fast`, 5 times on PostgreSQL 18 and 5 times on PGlite; the run reports, per
   backend, the median total time and the median time per block next to the committed reference
   (`bench/baselines/tape-apply.json`, which names the machine it was measured on), and whether `slowBlockMs`'s default
   is at least 10 times the median time per block; the figures are recorded in the pull request. (Q72)
+  **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
 
 ## 17. Required test ids added to the manifest
 
 Each id is a `[[id]]` token in its test title (`test/integration/required-tests.manifest.json`); the pinned count
 becomes 4 (kept harness ids) + 22. The id `private.no-key-bytes-public` (A120's key half) is withdrawn by owner
-decision Q154.
+decision Q154. At 0.10.0's pre-release the manifest holds the 18 ids whose tests exist (pinned count 22, owner decision
+Q191); `runner.crash-sweep.contents-hash-equal`, `runner.crash-sweep.negative-control-fires`,
+`runner.restart-20.contents-hash-equal` and `core.full-crash-sweep` join with the crash runs after it.
 
 | Id | Criterion |
 |---|---|

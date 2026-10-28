@@ -4095,25 +4095,40 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Acceptance:** A50, A51; required ids 1–4 pass.
       Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
       Q155).
+      **Moved after 0.10.0 (2026-10-28, owner decision Q191):** 0.10.0 goes out as a pre-release without this run;
+      `ROADMAP.md` lists it with the release gates still to run.
 - [ ] 18.2 The full-core runs: stagenet and preview 0–10,000 from genesis; the full-core crash sweep and its negative
       control; the three-backend comparison.
       **Acceptance:** A133, A134, A135.
       Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
       Q155).
+      **Moved after 0.10.0 (2026-10-28, owner decision Q191):** 0.10.0 goes out as a pre-release without this run;
+      `ROADMAP.md` lists it with the release gates still to run.
+      A smoke check on `a81462d` (2026-10-28; not A133): stagenet 0–100 from genesis, every core module except
+      `-fast`, the node `wss://rpc.stagenet.shielded.tools`, in Docker; the core stopped at 100 with every state root
+      checked, on PostgreSQL 18 and on PGlite in Node.js, and both backups give contents hash
+      `0x7d8ee00280d74919703b5a6e8289225c6471f75fb34b6d5b9014373a2e3bc878`.
 - [ ] 18.3 The ingest benchmark against the official indexer (`bench/ingest-vs-official/`), recorded in the PR.
       **Acceptance:** A136.
       Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
       Q155).
-- [ ] 18.4 Add the 22 ids of `acceptance.md` §17 to the manifest and set the pinned count to 26 (A120's key-half id
+      **Moved after 0.10.0 (2026-10-28, owner decision Q191):** 0.10.0 goes out as a pre-release without this run;
+      `ROADMAP.md` lists it with the release gates still to run.
+- [x] 18.4 Add the 22 ids of `acceptance.md` §17 to the manifest and set the pinned count to 26 (A120's key-half id
       withdrawn, owner decision Q154).
       **Acceptance:** `npm run test:conformance` passes with every required id reported passed in its file.
       Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
       Q155).
+      **Done for 0.10.0 (2026-10-28, owner decision Q191 A):** the 18 ids whose tests exist are in the manifest and the
+      pinned count is 22; A5's check allows only the four ids the crash runs bring (`runner.crash-sweep.*`,
+      `runner.restart-20.contents-hash-equal`, `core.full-crash-sweep`), which make it 26 after 0.10.0.
 - [ ] 18.5 The tape-apply baseline (Q72): the measurement of A143 in CI, its committed reference
       (`bench/baselines/tape-apply.json`), and the check of `slowBlockMs`'s default against it.
       **Acceptance:** A143; its figures recorded in the pull request.
       Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
       Q155).
+      **Moved after 0.10.0 (2026-10-28, owner decision Q191):** 0.10.0 goes out as a pre-release without this run;
+      `ROADMAP.md` lists it with the release gates still to run.
 
 ## 19. Close-out
 

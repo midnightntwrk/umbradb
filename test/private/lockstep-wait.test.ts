@@ -237,8 +237,10 @@ describe.each(PRIVATE_BACKENDS)("A117: the core waits for a lockstep instance on
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
+  // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy (task 18.4).
+  const requiredId = backend.kind === "postgres" ? "[[private.lockstep-waits-no-transaction]] " : "";
   it(
-    "[[private.lockstep-waits-no-transaction]] A117: a stopped lockstep instance makes the core wait before BEGIN with no " +
+    `${requiredId}A117: a stopped lockstep instance makes the core wait before BEGIN with no ` +
       "transaction open and waiting-for-lockstep, and resume when it reports; restarting the core while the instance " +
       "is at the public cursor does not deadlock",
     async () => {

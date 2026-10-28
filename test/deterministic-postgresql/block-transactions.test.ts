@@ -96,7 +96,9 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     expect(refused.message).toContain("DELETE");
   }
 
-  it("[[db.block.truncate-refused]] A73: TRUNCATE of a module's own table in a block fails with truncate-not-allowed and the block rolls back", async () => {
+  // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy (task 18.4).
+  const requiredId = backend.name.startsWith("PostgreSQL") ? "[[db.block.truncate-refused]] " : "";
+  it(`${requiredId}A73: TRUNCATE of a module's own table in a block fails with truncate-not-allowed and the block rolls back`, async () => {
     const { db, plan } = await guarded();
     const result = await outcome(
       block(db, plan, async (tx) => {
