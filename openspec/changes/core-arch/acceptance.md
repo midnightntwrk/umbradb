@@ -39,8 +39,13 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   `PgTransactionLeaseLayer`, `PgWalletStateEnvelopeStore`, `saveAndAdvance` fails to type-check. (LS-2)
 - **A3** `[STATIC]` The packed tarball contains no file under `legacy/`; the TypeScript build and the conformance run
   include no file from `legacy/`; `legacy/transaction-history/` holds the source and its tests. (LS-3)
-- **A4** `[DOC]` `package.json` version is `0.10.0`; `CHANGELOG.md`'s `0.10.0` section opens with a breaking-change
-  notice naming the removed exports and stating that 0.9.5 databases are not migrated. (LS-4)
+- **A4** `[DOC]` `package.json` version is `0.10.0`; `CHANGELOG.md`'s `0.10.0` section opens with one short breaking
+  line: a new architecture, nothing of 0.9.5's API or databases carried over — no per-export list, no migration notes
+  (owner decision Q169: pre-release, breaking changes need no notices). (LS-4)
+- **A171** `[STATIC]` No document in the repository describes a removed 0.9.5 part as current: the documents task
+  17.4a lists as 0.9.5's are absent, `CHANGELOG.md` has no preamble pointing at them and no planned `1.0.0` entry,
+  `package.json`'s `description` describes the indexer, and no Markdown link in the tree points at a missing file.
+  (owner decision Q169)
 - **A5** `[STATIC]` A test compares the required-test manifest, `stryker.conf.json` `mutate`, the coverage floors of
   `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on any difference.
   (LS-5)

@@ -3714,6 +3714,17 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       heading's date; shipped 2026-10-27, the close-out sets the release's) and Q169 (the 0.9.5 documents,
       changelog preamble and `description` that describe the removed surface) raised, not blocking. No mutation pass
       (deferred to 17.5, owner 2026-10-27).
+- [ ] 17.4a The owner's answer Q169: 0.9.5's documents removed, not marked (owner, 2026-10-27: "Lets remove the
+      documentation if it no longer exists. It will still be available in the git history… breaking changes are OK
+      and we dont need to notify them"). Classify every document under `docs/` and at the root (current, 0.9.5's,
+      or process history such as `docs/issues/` and `openspec/`); delete 0.9.5's — at least `docs/STABILITY.md`,
+      `CONTRACT.md`, `ERROR-CATALOG.md`, `SCHEMA.md`, `durability-contract.md`, `checkpoint-store-contract.md` —
+      and the tests that read them; fix every link to them; `CHANGELOG.md`'s preamble and planned `1.0.0` entry
+      removed and 17.4's `0.10.0` notice cut to one breaking line (A4 as amended); `package.json`'s `description`
+      describes the indexer. A document whose status is unclear is a question, not a deletion. `ROADMAP.md` stays
+      19.3's; `README.md` and the module guide stay 17.3a's. Owner decision Q168 A: the `0.10.0` heading keeps
+      17.4's date until the close-out (19.x) sets the merge or tag date.
+      **Acceptance:** A171; A4 as amended.
 - [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage
