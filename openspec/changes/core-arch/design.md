@@ -1488,7 +1488,16 @@ backs it up itself — on SIGUSR2 at a pause of its loop under owner decision Q1
 and the contents hash are read in the snapshot; a
 private database (its side, or `core_private_source.cursor` in it) is refused without the opt-in before anything is read
 (PP-12); the URL's password reaches `pg_dump` as `PGPASSWORD`, never on its command line; the file is written under a
-temporary name beside its path, flushed and renamed only once complete. A sequence is not transactional: `pg_dump`
+temporary name beside its path, flushed and renamed only once complete. As built (task 15.1b, the threat model draft's
+gap 7; A174): every backup file UmbraDB writes on Node.js — `umbradb backup`, `ProcessHandle.backup`, the backups at
+stop and on signal, all through `writeBackup` — is owner-only from creation: the temporary file is created with mode
+`0600` (`open(…, "wx", 0o600)`; a umask only takes bits away, so it is never wider, even for an instant) and set to
+exactly `0600` on its handle before its first byte (for a umask that took the owner's bits too); the manifest line,
+PGlite's dump and `pg_dump`'s output — which reaches the file through a pipe, `pg_dump` never opening it — are written
+through that one handle, flushed and closed before the rename, so the file is never opened again by name; the rename
+keeps the mode, and an earlier file at the path is replaced, its mode not carried over. A file system that refuses the
+`chmod` fails the backup (its temporary file removed, no file written). The page's backup (BK-5) is a download,
+outside this. A sequence is not transactional: `pg_dump`
 reads a sequence's position when it reads it, so on PostgreSQL beside commits the dump can hold an opted-out table's
 sequence ahead of its rows (never behind them). The backup at stop is skipped when the file at `backupAtStop` is a
 backup of that height, replaces a backup of another height, and refuses (`backup-format-unknown`, logged; the process

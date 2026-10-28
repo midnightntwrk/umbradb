@@ -12,7 +12,7 @@ import { openPglite, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
 import { openPostgres } from "../../src/db/postgres.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import type { ProcessHandle, ProcessInput } from "../../src/runner/process.js";
+import type { BackupSignals, ProcessHandle, ProcessInput } from "../../src/runner/process.js";
 import { spawnChild } from "../child-processes.js";
 import type { CliProject } from "../cli/cli-fixtures.js";
 import { startPostgresServer, type PostgresTestServer } from "../db/postgres-server.js";
@@ -155,11 +155,22 @@ export interface TickerProcess {
 /** How often {@link TickerProcess.feed} finalizes the next block. */
 export const FEED_MS = 5;
 
+/** What {@link startTicker} takes besides the file and the chain. */
+export interface TickerOptions {
+  /** Where SIGUSR2 comes from (`backupOnSignal`): a test's emitter in place of Node.js's `process`. */
+  readonly backupSignals?: BackupSignals;
+}
+
 /**
  * Starts the process of the configuration `file` over an in-memory chain up to `head` (see the module comment), or over
  * `chain` — the configuration's node through `core-block-fetch`'s node source (`nodeSourceOf`), say.
  */
-export async function startTicker(file: string, head: bigint, chain?: ProcessInput["source"]): Promise<TickerProcess> {
+export async function startTicker(
+  file: string,
+  head: bigint,
+  chain?: ProcessInput["source"],
+  options: TickerOptions = {},
+): Promise<TickerProcess> {
   const loaded = await loadConfig({ file });
   const source = new InMemoryBlockSource({ head });
   const lines: string[] = [];
@@ -167,6 +178,7 @@ export async function startTicker(file: string, head: bigint, chain?: ProcessInp
     declarations: commandBuild(loaded.modules),
     config: { data: loaded.data, file: loaded.file },
     source: chain ?? source,
+    ...(options.backupSignals === undefined ? {} : { backupSignals: options.backupSignals }),
     log: (line) => lines.push(line),
   });
   return {

@@ -113,6 +113,15 @@ declared `deterministic: false` with their rows and their sequences' positions. 
 taken beside a running indexer on PostgreSQL, its position in the file can be ahead of its table's rows (never behind
 them), so values a restored indexer gives such a column may skip some numbers.
 
+A backup holds every row of the database — a private process's too, when written under the development opt-in — so
+every backup file UmbraDB writes (`umbradb backup`, at the core's stop, on SIGUSR2, a handle's `backup(file)`) is
+created with mode `0600`, whatever the process's umask: its owner, the user the indexer runs as, can read and write it;
+no one else can. Its temporary file has that mode from its creation, before its first byte, and keeps it when it is
+renamed to the path; a file it replaces there does not pass its own mode on. Where file modes do not apply — on
+Windows, where Node.js's file modes set only whether a file can be written, and on file systems mounted without POSIX
+permissions — the folder's or the mount's permissions decide who can read a backup; a file system that refuses to set
+the mode fails the backup, and no file is written.
+
 ### Restoring a backup
 
 ```sh

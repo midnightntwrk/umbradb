@@ -20,13 +20,22 @@
  * Any committed height is a block boundary (RN-6), so the dump holds whole blocks. **The file** is written next to its
  * path under a temporary name, flushed to disk and renamed over the path only once complete, so a failed or interrupted
  * backup leaves no file at the path and never half a file; the temporary file is removed on failure.
+ *
+ * **Owner-only from creation** (task 15.1b, the threat model draft's gap 7; A174): a backup holds every row of the
+ * database, so the temporary file is created with mode {@link BACKUP_FILE_MODE} (`0600`; a umask only takes bits away,
+ * so it is never wider, even for an instant) and set to exactly that on its handle before its first byte (for a umask
+ * that took the owner's bits too); a file system that refuses the `chmod` fails the backup, its temporary file removed.
+ * The manifest line and the dump — PGlite's text, or `pg_dump`'s output, piped in: `pg_dump` never opens the file — go
+ * through that one handle, which is flushed to disk and closed before the rename, so the file is never opened again by
+ * name. The rename keeps its mode; an earlier file at the path is replaced, its mode not carried over.
  */
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createReadStream, createWriteStream, type WriteStream } from "node:fs";
-import { open, rename, rm, stat } from "node:fs/promises";
+import { createReadStream, type WriteStream } from "node:fs";
+import { type FileHandle, open, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { finished } from "node:stream/promises";
 import { UmbraError } from "../db/errors.js";
 import { type Manifest, manifestLine, type ManifestTool, readManifestLine } from "./manifest.js";
 import {
@@ -52,10 +61,18 @@ export interface BackupInput extends DumpInput {
   readonly env?: Environment;
 }
 
+/** The mode of every backup file written, and of its temporary file from its creation: its owner's only (A174). */
+export const BACKUP_FILE_MODE = 0o600;
+
 /** What the tests replace (the dump outside the manifest's snapshot: `SnapshotSeams`). */
 export interface BackupSeams extends SnapshotSeams {
   /** The `pglite-tools` module to import (a missing one: A124's `backup-tools-missing` on PGlite). */
   readonly pgliteTools?: string;
+  /**
+   * Creates the temporary file at `path` (a new name) and opens it for writing: A174's negative control creates it
+   * other ways. The backup writes through the handle, closes it and removes the file on failure.
+   */
+  readonly createTemporary?: (path: string) => Promise<FileHandle>;
 }
 
 /** A backup written: its file and its manifest. */
@@ -64,11 +81,26 @@ export interface BackupWritten {
   readonly manifest: Manifest;
 }
 
-/** A temporary file next to `out`, created now (never an existing file's name). */
-async function temporaryFile(out: string): Promise<string> {
-  const path = join(dirname(out), `.${basename(out)}.${process.pid}.${randomBytes(6).toString("hex")}.partial`);
-  await (await open(path, "wx")).close();
-  return path;
+/** A temporary file's name next to `out`, new to this backup. */
+function temporaryPath(out: string): string {
+  return join(dirname(out), `.${basename(out)}.${process.pid}.${randomBytes(6).toString("hex")}.partial`);
+}
+
+/**
+ * Creates the file `path` (never an existing one: `wx`) with mode {@link BACKUP_FILE_MODE}, sets exactly that mode on
+ * its handle, and resolves with the handle, open for writing; on a refused `chmod` closes and removes the file and
+ * rejects with that error.
+ */
+async function ownerOnlyFile(path: string): Promise<FileHandle> {
+  const handle = await open(path, "wx", BACKUP_FILE_MODE);
+  try {
+    await handle.chmod(BACKUP_FILE_MODE);
+    return handle;
+  } catch (error) {
+    await handle.close().catch(() => undefined);
+    await rm(path, { force: true });
+    throw error;
+  }
 }
 
 /** Writes `text` to `stream` and waits until it is taken. */
@@ -78,12 +110,16 @@ function writeText(stream: WriteStream, text: string): Promise<void> {
   });
 }
 
-/** Ends `stream`, waiting for its last write. */
-function endStream(stream: WriteStream): Promise<void> {
-  return new Promise((resolve, reject) => {
-    stream.once("error", reject);
-    stream.end(() => resolve());
-  });
+/** Ends `stream`, waiting until its last write is flushed to disk and its file closed (`flush`, `autoClose`). */
+async function endStream(stream: WriteStream): Promise<void> {
+  stream.end();
+  await finished(stream);
+}
+
+/** Ends `stream` after a failure, waiting until its file is closed; its own errors give way to the failure. */
+async function abandonStream(stream: WriteStream): Promise<void> {
+  stream.destroy();
+  await finished(stream).catch(() => undefined);
 }
 
 /** The URL without its password, and the password (for `PGPASSWORD`), decoded. */
@@ -177,9 +213,11 @@ export async function writeBackup(input: BackupInput, seams: BackupSeams = {}): 
   const env = input.env ?? process.env;
   const pgDump = input.target.backend === "postgres" ? await findPgDump(env) : null;
   const pgliteDump = input.target.backend === "pglite" ? await loadPgliteDump(seams.pgliteTools) : null;
-  const temporary = await temporaryFile(input.out);
+  const temporary = temporaryPath(input.out);
+  const handle = await (seams.createTemporary ?? ownerOnlyFile)(temporary);
   try {
-    const stream = createWriteStream(temporary, { flags: "w" });
+    // The one handle: the stream fsyncs it (`flush`) and closes it (`autoClose`) when it ends.
+    const stream = handle.createWriteStream({ flush: true });
     let manifest: Manifest;
     try {
       if (input.target.backend === "postgres") {
@@ -190,15 +228,11 @@ export async function writeBackup(input: BackupInput, seams: BackupSeams = {}): 
         await writeText(stream, manifestLine(manifest));
         await writeText(stream, backup.text);
       }
-    } finally {
-      await endStream(stream);
+    } catch (error) {
+      await abandonStream(stream);
+      throw error;
     }
-    const handle = await open(temporary, "r+");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
+    await endStream(stream);
     await rename(temporary, input.out);
     return Object.freeze({ file: input.out, manifest });
   } catch (error) {

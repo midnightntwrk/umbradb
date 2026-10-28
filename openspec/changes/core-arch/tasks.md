@@ -3519,11 +3519,26 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       raised, not blocking. Issue 00027 (a V8 fatal error in a test worker's wasm code hung the conformance gate)
       seen again; issues 00049 (`a141-read-timeout-bound-under-load`) and 00050
       (`a165-race-step-fails-once-under-load`) recorded.
-- [ ] 15.1b The threat model draft's gap 7 (owner, 2026-10-28): a backup file's mode depends on the umask
+- [x] 15.1b The threat model draft's gap 7 (owner, 2026-10-28): a backup file's mode depends on the umask
       (`src/backup/backup.ts` creates its temporary file without one). Every backup UmbraDB writes on Node.js —
       `umbradb backup`, at stop, on SIGUSR2, `ProcessHandle.backup` — is created owner-only (`0600`) from its first
       byte and keeps that mode through its rename; the operator guide says so.
       **Acceptance:** A174.
+      **Done (2026-10-28):** `src/backup/backup.ts`: `BACKUP_FILE_MODE` (`0o600`); `writeBackup`'s temporary file is
+      created by `ownerOnlyFile` — `open(path, "wx", 0o600)`, then `chmod(0o600)` on its handle before its first byte
+      (a refused `chmod` closes and removes it and fails the backup) — and written through that one handle
+      (`createWriteStream({ flush: true })`: fsynced and closed when it ends), the reopen by name to `sync` it removed;
+      `BackupSeams.createTemporary` (the negative control's seam). Design §9.1 ("As built (task 15.1b)"), the operator
+      guide's "What a backup holds". Tests, seen failing first (11 of 13 for the mode, `0666`):
+      `test/backup/file-modes.ts` (the observer: Node.js's `open`, `writeFile`, `appendFile`, `copyFile` and `rename`
+      wrapped on a watched directory, a 1 ms poll, a `pg_dump` wrapper listing the modes while it runs; the oracle) and
+      `file-modes.preload.ts` (the observer in a child); `test/backup/file-mode.test.ts` (A174 under umask `000` on
+      PostgreSQL 18.6 and PGlite 0.5.10: `ProcessHandle.backup` while blocks commit, an earlier `0644` file replaced;
+      `backupAtStop`; SIGUSR2 through `backupSignals`; `umbradb backup` in this process and the bundled command in a
+      child under `sh -c 'umask 000 && exec …'`; a refused `chmod` fails the backup, no file left; the observer's
+      self-check). Committed negative control (`test/backup/file-mode.negative-control.test.ts`): a temporary file
+      created with the umask's mode, and one created `0666` then narrowed, fail A174's oracle; an unwatched backup is
+      reported as not checked. `startTicker` takes `TickerOptions` (`backupSignals`).
 - [ ] 15.1c The owner's answer Q173 C: `umbradb run` always listens for SIGUSR2. Without `backupOnSignal`, one is
       logged as ignored (the line names `backupOnSignal`) and the process keeps running; with it, as task 15.1a. A
       process a host program starts with `startProcess` without `backupOnSignal` adds no SIGUSR2 listener, so Node.js's
