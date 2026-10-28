@@ -46,7 +46,9 @@
  * (`./messages.ts`'s `decodeValue`). Each is its own consistent read of the public database, at the public cursor when
  * the core runs it, so at or above the handle's `height`: what an independent instance reading append-only public
  * tables by height needs (PP-5); a lockstep instance's check of the cursor is task 14.3's. A `read-result` with
- * `error` fails the query with that code (`connection-lost` among them, retried).
+ * `error` fails the query with that code (`connection-lost` among them, retried); `read-refused` (task 14.2b: a
+ * statement that is not one read, which the core runs nothing of) with `details` `statement`, `reason` and `name`, the
+ * message naming the statement — not retried: the same statement is refused again.
  *
  * **What the core may ask** (PP-9): nothing but `hello` and `report`, which a private process sends unasked. A message
  * from the core that is not JSON, has an unknown `v` or `type` (an `api` or `api-result` among them: owner decision
@@ -151,8 +153,28 @@ function lost(why: string): UmbraError {
   });
 }
 
-/** A `read-result`'s error code as the failure of its read. */
-function readFailure(code: string): UmbraError {
+/** What a refusal's reason says of the statement it names (task 14.2b; `./read-gate.ts`). */
+const REFUSAL_TEXT: Readonly<Record<NonNullable<ReadResult["refused"]>["reason"], (name: string | null) => string>> = {
+  command: (name) => `${name ?? "it"} is not a read (only SELECT, WITH, VALUES or TABLE runs through the core)`,
+  function: (name) => `it names ${name}, which the core refuses in a read`,
+  statements: () => "it holds more than one statement",
+  unreadable: () => "the core cannot read it (an unterminated literal, comment or quoted name, a U& escape or a NUL)",
+};
+
+/**
+ * A `read-result`'s error as the failure of its read: its code — `read-refused` naming the refused statement (its
+ * place, from 1, and what it names) —, `database-error` for a code this build does not know.
+ */
+function readFailure(answer: ReadResult): UmbraError {
+  const code = answer.error as string;
+  const { refused } = answer;
+  if (refused !== undefined) {
+    return new UmbraError(
+      "read-refused",
+      `the core refused statement ${refused.statement + 1} of the read: ${REFUSAL_TEXT[refused.reason](refused.name)}`,
+      { transportCode: code, statement: refused.statement, reason: refused.reason, name: refused.name },
+    );
+  }
   const known = (ERROR_CODES as readonly string[]).includes(code) ? (code as ErrorCode) : "database-error";
   return new UmbraError(known, `the core's read of the public database failed: ${code}`, { transportCode: code });
 }
@@ -345,7 +367,7 @@ export class PrivateTransport {
       this.#pending.set(id, { resolve, reject });
       socket.send(messageText({ v: 1, type: "read", id, statements }));
     });
-    if (answer.error !== undefined) throw readFailure(answer.error);
+    if (answer.error !== undefined) throw readFailure(answer);
     return answer;
   }
 

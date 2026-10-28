@@ -484,7 +484,12 @@ database the core writes (PP-1 to PP-5 of the `core-arch` change).
   goes through the core's process transport (`coreTransport`): each `query` of it is then its own read at the public
   cursor when it runs, never below `read.height`, and its values come back as the core reads them (a `bigint` as a
   `bigint`, `bytea` as bytes, `jsonb` as its value). A parameter that is a string of `0x` and lowercase hex pairs is
-  sent as bytes.
+  sent as bytes. Through the core each statement must be one read, since the core runs it on the public database: its
+  first word `SELECT`, `WITH`, `VALUES` or `TABLE`, one statement, naming nothing that starts with `pg_` (PostgreSQL's
+  own functions and catalogs, `pg_advisory_lock` among them) and none of `set_config`, `setseed`, `nextval`, `setval`,
+  the large-object functions, `query_to_xml` and the others `design.md` §8 lists (**Confined reads**). Anything else —
+  `BEGIN`, `COMMIT`, `SET`, a second statement — fails with `read-refused` (not retried), its message and `details`
+  naming the statement, and the core runs nothing of it. Plain `SELECT`s by height are all `on-fetch` needs.
 - **Mutable public tables need lockstep.** Declare `needsLockstep: true`, and run your module on an instance the core
   lists in its `lockstepInstances`, with `coreTransport` set to the core's `listen.transport`: the private process
   refuses to start otherwise (`needs-lockstep-not-listed`, naming your module), before any migration. A lockstep

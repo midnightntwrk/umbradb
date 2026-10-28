@@ -40,6 +40,12 @@
  *   `./messages.ts` writes it; or `error`, a code (an `UmbraError`'s, `database-error` for anything else, never a
  *   message, which may hold a credential, AE-6). A result whose message would exceed {@link MAX_MESSAGE_BYTES} is
  *   answered `error: result-too-large`.
+ * - **Confined reads** (PP-4, A172; task 14.2b, the threat model draft's gap 1; `design.md` §8): before any statement
+ *   of a `read` runs, each must be one read (`./read-gate.ts`: its command `SELECT`, `WITH`, `VALUES` or `TABLE`, one
+ *   statement, no function or catalog the core refuses), so that none can leave the read-only transaction the database
+ *   refuses every write in, nor change the session. A `read` with one that is not is answered `error: read-refused`
+ *   with `refused` naming the first such statement, none of its statements runs, the refusal is logged (the instance,
+ *   the statement's place and what it names, never its text), and the connection stays open.
  * - `report` (lockstep): checked and counted (see **Lockstep**); its height and hash are the instance's last known.
  *
  * **What closes a connection** (PP-4): a message that is not JSON, has an unknown `v` or `type` — an `api` or
@@ -62,6 +68,7 @@ import { BLOCKS_TABLE } from "../backbone/core-block-commit/core-block-commit.js
 import { RESULT_TYPES, resultColumns, type ResultColumn } from "../deterministic-postgresql/index.js";
 import type { BlockRef } from "../runner/block-source.js";
 import { Lockstep } from "./lockstep.js";
+import { type RefusedStatement, refusedStatement } from "./read-gate.js";
 import {
   decodeParameter,
   encodeValue,
@@ -72,6 +79,7 @@ import {
   messageText,
   parseMessage,
   type Read,
+  READ_REFUSED,
   type Report,
   type StatementResult,
 } from "./messages.js";
@@ -160,6 +168,11 @@ export interface CoreTransportOptions {
   readonly duplicates?: "refuse" | "accept";
   /** The negative controls' check of a `report`'s hash; compared with the public block's unless `"accept"`. */
   readonly reports?: "check" | "accept";
+  /**
+   * The negative control's read path: task 14.2's — every statement of a `read` run as sent, in the read-only
+   * transaction and nothing more — when `"unconfined"`; each statement checked first (`./read-gate.ts`) unless given.
+   */
+  readonly reads?: "confined" | "unconfined";
   /** The tests' limits; {@link TRANSPORT_LIMITS} unless given. */
   readonly limits?: Partial<TransportLimits>;
 }
@@ -344,7 +357,33 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     lockstep.reported(instance, height);
   };
 
+  /** Answers a `read` the gate refused (see the module comment): nothing of it ran. */
+  const refuse = (session: Session, request: Read, refused: RefusedStatement): void => {
+    const place = `statement ${refused.statement + 1}`;
+    const what = {
+      command: refused.name === null ? `${place} is not a read` : `${place} is ${refused.name}, not a read`,
+      function: `${place} names ${refused.name}`,
+      statements: `${place} holds more than one statement`,
+      unreadable: `${place} cannot be read (an unterminated literal, comment or quoted name, a U& escape or a NUL)`,
+    }[refused.reason];
+    options.log(`transport: refused a read of ${(session.hello as Hello).instance}: ${what}`);
+    send(session, {
+      v: 1,
+      type: "read-result",
+      id: request.id,
+      height: null,
+      configHash: options.configHash,
+      error: READ_REFUSED,
+      refused: { statement: refused.statement, reason: refused.reason, name: refused.name },
+    });
+  };
+
   const onRead = async (session: Session, request: Read): Promise<void> => {
+    const refused = options.reads === "unconfined" ? null : refusedStatement(request.statements);
+    if (refused !== null) {
+      refuse(session, request, refused);
+      return;
+    }
     session.pending += 1;
     try {
       const { height, results } = await options.db.read(async (read) => {

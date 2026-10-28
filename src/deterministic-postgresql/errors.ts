@@ -29,6 +29,13 @@ export const ERROR_CODES = [
    */
   "query-timeout",
   /**
+   * A statement of a private process's read through the core's process transport that is not one read — transaction
+   * or session control (`COMMIT`, `SET`), a second statement, a function or catalog the core refuses
+   * (`pg_advisory_lock`) —: the core runs none of the read's statements and answers with the statement it refused
+   * (PP-4, task 14.2b; `src/private/read-gate.ts`).
+   */
+  "read-refused",
+  /**
    * A chain-data read before block S commits, which has no committed height to answer from: the read's view
    * (`readChainDataView`) fails with it, which the module API answers 503 when the handler does not catch it (RN-16,
    * `src/runner/envelope.ts`).

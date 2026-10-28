@@ -3281,7 +3281,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       outside the clone): 11 (either type's schema put back, the unknown-type check and its reason, a wrong-direction
       message ignored, on both sides), 11 caught; the three schema variants again against the transport suites alone,
       3 caught; none equivalent.
-- [ ] 14.2b The threat model draft's gap 1 (owner, 2026-10-28): the transport's `read` runs each statement a
+- [x] 14.2b The threat model draft's gap 1 (owner, 2026-10-28): the transport's `read` runs each statement a
       private process sends (`src/private/core-transport.ts`) in a read-only transaction on a session whose login
       may write, so a `COMMIT` ends the read and the next statement writes; PGlite's read shares the writer's
       session. Confine a `read` so that nothing it sends can write or change session state, on both backends, with
@@ -3289,6 +3289,28 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       that cannot write; a question if that needs a new setting); refuse transaction and session control with an
       error naming the statement, the transport staying up. `design.md` §8 says how.
       **Acceptance:** A172; A115 and A117 unchanged.
+      **Done (2026-10-28):** the escape reproduced first: on task 14.2's path, on PostgreSQL 18.6 and PGlite 0.5.10,
+      `COMMIT`, `ROLLBACK` or `END` then `INSERT` wrote `pub.rows`, `COMMIT` then `nextval` moved `pub.log_id_seq`,
+      `pg_advisory_lock` left its lock held, and each was answered as a read. `src/private/read-gate.ts` (new): before
+      any statement of a `read` runs, each must be one read — first word `SELECT`, `WITH`, `VALUES` or `TABLE`, one
+      statement, no name starting `pg_`, `dblink` or `binary_upgrade_` and none of `set_config`, `setseed`,
+      `nextval`, `setval`, the functions that run SQL given as text, BRIN/GIN maintenance or large objects, and
+      readable —, the text read into tokens as PostgreSQL 18's lexer reads it, plain strings with
+      `standard_conforming_strings` on and off; so the read-only transaction `Database.read` opens, in which the
+      database refuses the write, is never left. Otherwise the core (`core-transport.ts`) runs none of the read's
+      statements, answers `read-result` `error: read-refused` with `refused: { statement, reason, name }`, logs the
+      instance and the statement's place and name (never its text; names in printable ASCII, at most 64 characters)
+      and keeps the connection; a private process's client (`private-transport.ts`) fails the query with the
+      `UmbraError` `read-refused` (new in `ERROR_CODES`; not retryable), naming the statement. A login that may only
+      read on PostgreSQL would need a new setting: question Q175; PGlite has one session,
+      the writer's, so the gate is what holds there. Design §8 (**Confined reads**, `refused` in the table), PP-4
+      amended (the `refused` field and the confined-reads sentence), the module guide. Tests: `read-gate.test.ts`
+      (units, `refused`'s schema), `read-confinement.test.ts` (A172 through a running core on both backends: every
+      escape refused naming its statement, the next read served, the contents hash, row counts and sequences
+      unchanged, no advisory lock held; a private client's `read-refused`), the committed negative control
+      `read-confinement.negative-control.test.ts` (task 14.2's path fails the oracle), `transport-faults.test.ts`
+      (each reason's answer and log line, nothing run; the private side's message per reason). A115's and A117's
+      suites pass unchanged. No mutation pass (deferred to task 17.5 by the owner).
 - [x] 14.3 Lockstep and the behind-instance refusal. Through the core, a read of public data is one `read` per
       statement (owner decision Q142): a lockstep instance reads the public cursor again after its block's data and
       halts with `lockstep-behind` if it moved past h.

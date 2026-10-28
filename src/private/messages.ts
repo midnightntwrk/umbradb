@@ -13,7 +13,13 @@
  * | `committed` | core → private | `height: H`, `hash: X`, `configHash: X` |
  * | `report` | private → core | `height: H`, `hash: X` |
  * | `read` | private → core | `id`, `statements`: `[{ sql, params: Value[] }]`, run as one consistent read |
- * | `read-result` | core → private | `id`, `height: H` or null (before the first commit), `configHash: X`, and `results` — per statement `{ columns: [{ name, type }], rows: Value[][] }` — or `error`, a code |
+ * | `read-result` | core → private | `id`, `height: H` or null (before the first commit), `configHash: X`, and `results` — per statement `{ columns: [{ name, type }], rows: Value[][] }` — or `error`, a code — `read-refused` with `refused: { statement, reason, name }`, the statement the core refused (task 14.2b) |
+ *
+ * **`refused`** (task 14.2b, A172; `./read-gate.ts`): a `read` whose statement is not one read — transaction or session
+ * control, a second statement, a function or catalog the core refuses — is answered `error: read-refused` and nothing
+ * of it runs; `refused` names the statement: `statement`, its index in `statements` (from 0), `reason` (`command`,
+ * `function`, `statements` or `unreadable`) and `name` (its first word, `COMMIT`, or the function, `pg_advisory_lock`;
+ * null when none). It is there exactly when the error is `read-refused`.
  *
  * **`configHash`** (PP-4, PP-14, RN-16; owner decision Q147, task 14.1b): the core's configuration hash, 32 bytes, on
  * each of its three messages — which a private process compares with the one its first `hello-ack` gave
@@ -47,6 +53,7 @@
 
 import { z } from "zod";
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
+import { NAME_MAX, READ_REFUSAL_REASONS } from "./read-gate.js";
 
 /** The protocol version every message carries. */
 export const PROTOCOL_VERSION = 1;
@@ -125,6 +132,16 @@ const COLUMN = z.strictObject({ name: z.string(), type: z.string().min(1) });
 /** One statement's result: its columns and rows, each row a value per column. */
 const RESULT = z.strictObject({ columns: z.array(COLUMN), rows: z.array(z.array(value())) });
 
+/** The error of a `read` the core refused (task 14.2b; `./read-gate.ts`): `read-result.refused` names the statement. */
+export const READ_REFUSED = "read-refused";
+
+/** `read-result.refused`: the statement the core refused — its index in `statements` —, why, and what it names. */
+const REFUSED_STATEMENT = z.strictObject({
+  statement: z.number().int().nonnegative(),
+  reason: z.enum(READ_REFUSAL_REASONS),
+  name: z.string().min(1).max(NAME_MAX).nullable(),
+});
+
 /** `read-result` (core → private): the read's results, or its error, with the height it read. */
 export const READ_RESULT = z
   .strictObject({
@@ -134,9 +151,13 @@ export const READ_RESULT = z
     configHash: hash(),
     results: z.array(RESULT).optional(),
     error: z.string().min(1).optional(),
+    refused: REFUSED_STATEMENT.optional(),
   })
   .refine((message) => (message.results === undefined) !== (message.error === undefined), {
     message: "a read-result has either results or error",
+  })
+  .refine((message) => (message.refused === undefined) === (message.error !== READ_REFUSED), {
+    message: "a read-result has refused exactly when its error is read-refused",
   })
   .refine((message) => message.results === undefined || message.results.every((result) => rowsFit(result)), {
     message: "every row of a result has one value per column",

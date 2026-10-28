@@ -150,16 +150,56 @@ describe("the core's side: limits and faults", () => {
   it("a failure that is no UmbraError is answered database-error, never its message; an UmbraError by its code", async () => {
     const { transport, url } = await core(
       fakeDb(async (sql) => {
-        if (sql === "boom") throw new Error("password=hunter2 in the message");
+        if (sql === "SELECT boom") throw new Error("password=hunter2 in the message");
         throw new UmbraError("query-timeout", "slow", {});
       }),
     );
     opened.push(transport);
     const client = await greeted(url, "fails");
-    client.send({ v: 1, type: "read", id: "a", statements: [{ sql: "boom", params: [] }] });
-    client.send({ v: 1, type: "read", id: "b", statements: [{ sql: "slow", params: [] }] });
+    client.send({ v: 1, type: "read", id: "a", statements: [{ sql: "SELECT boom", params: [] }] });
+    client.send({ v: 1, type: "read", id: "b", statements: [{ sql: "SELECT slow", params: [] }] });
     expect(await client.next("read-result")).toEqual({ v: 1, type: "read-result", id: "a", height: null, configHash: CONFIG, error: "database-error" });
     expect(await client.next("read-result")).toEqual({ v: 1, type: "read-result", id: "b", height: null, configHash: CONFIG, error: "query-timeout" });
+    client.close();
+  });
+
+  it("a read with a statement that is not one read is refused before any runs, each reason logged (A172)", async () => {
+    const ran: string[] = [];
+    const { transport, url, lines } = await core(
+      fakeDb(async (sql) => {
+        ran.push(sql);
+        return rowsOf([], []);
+      }),
+    );
+    opened.push(transport);
+    const client = await greeted(url, "gated");
+    const reads: [string, string[], unknown, string][] = [
+      ["c", ["SELECT 1", "COMMIT"], { statement: 1, reason: "command", name: "COMMIT" }, "statement 2 is COMMIT, not a read"],
+      ["n", ["42"], { statement: 0, reason: "command", name: null }, "statement 1 is not a read"],
+      ["f", ["SELECT pg_advisory_lock(1)"], { statement: 0, reason: "function", name: "pg_advisory_lock" }, "statement 1 names pg_advisory_lock"],
+      ["s", ["SELECT 1; SELECT 2"], { statement: 0, reason: "statements", name: null }, "statement 1 holds more than one statement"],
+      ["u", ["SELECT 1", "SELECT 2", "SELECT 'open"], { statement: 2, reason: "unreadable", name: null }, "statement 3 cannot be read"],
+    ];
+    for (const [id, statements, refused, logged] of reads) {
+      client.send({ v: 1, type: "read", id, statements: statements.map((sql) => ({ sql, params: [] })) });
+      expect(await client.next("read-result")).toEqual({
+        v: 1,
+        type: "read-result",
+        id,
+        height: null,
+        configHash: CONFIG,
+        error: "read-refused",
+        refused,
+      });
+      expect(lines.at(-1)).toMatch(new RegExp(`^transport: refused a read of gated: ${logged}`));
+    }
+    // Nothing of a refused read ran, a statement before the refused one included; no line holds a statement's text.
+    expect(ran).toEqual([]);
+    expect(lines.filter((line) => line.includes("SELECT") || line.includes("'open"))).toEqual([]);
+    // The connection stays open, and its next read runs.
+    client.send({ v: 1, type: "read", id: "ok", statements: [{ sql: "SELECT 1", params: [] }] });
+    expect(await client.next("read-result")).toMatchObject({ id: "ok", results: [{ columns: [], rows: [] }] });
+    expect(ran).toEqual(["SELECT 1"]);
     client.close();
   });
 
@@ -624,6 +664,40 @@ describe("a private process's side against a stand-in core", () => {
     await expect(transport.read(async () => 1)).rejects.toMatchObject({ code: "connection-lost", message: expect.stringContaining("stopping") });
     expect(transport.state).toBe("closed");
     await transport.close();
+  });
+
+  it.each([
+    [{ statement: 0, reason: "command", name: "COMMIT" }, "COMMIT is not a read (only SELECT, WITH, VALUES or TABLE runs through the core)"],
+    [{ statement: 0, reason: "command", name: null }, "it is not a read (only SELECT, WITH, VALUES or TABLE runs through the core)"],
+    [{ statement: 0, reason: "function", name: "pg_advisory_lock" }, "it names pg_advisory_lock, which the core refuses in a read"],
+    [{ statement: 0, reason: "statements", name: null }, "it holds more than one statement"],
+    [
+      { statement: 2, reason: "unreadable", name: null },
+      "the core cannot read it (an unterminated literal, comment or quoted name, a U& escape or a NUL)",
+    ],
+  ] as const)("a read the core refused (%j) fails read-refused naming it, not retried", async (refused, text) => {
+    let reads = 0;
+    const core = await standIn((socket, message) => {
+      if (message.type === "hello") socket.send(messageText(ACK));
+      if (message.type !== "read") return;
+      reads += 1;
+      socket.send(messageText({ v: 1, type: "read-result", id: message.id, height: null, configHash: CONFIG, error: "read-refused", refused }));
+    });
+    const { transport } = client(core.address);
+    try {
+      const failed = transport.read((read) => read.query("COMMIT"));
+      await expect(failed).rejects.toMatchObject({
+        code: "read-refused",
+        retryable: false,
+        message: `the core refused statement ${refused.statement + 1} of the read: ${text}`,
+        details: { transportCode: "read-refused", ...refused },
+      });
+      expect(reads).toBe(1);
+      expect(transport.state).toBe("connected");
+    } finally {
+      await transport.close();
+      await core.close();
+    }
   });
 
   it("a wait stops with its signal's reason, before it starts and while it waits", async () => {

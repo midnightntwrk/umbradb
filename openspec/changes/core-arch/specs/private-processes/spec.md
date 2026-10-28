@@ -65,17 +65,21 @@ strings and hashes as `0x`-prefixed lowercase hex, exactly as the schemas of `de
 (core → private: `height`, `hash`, `configHash`); `report` (lockstep private → core: `height`, `hash`); `read` (private
 → core: `id`, `statements` — an array of `{ sql, params }` run as one consistent read; used when the public database is
 PGlite) and `read-result` (core → private: `id`, `height` — `null` before the first commit —, `configHash`, and either,
-per statement, `columns` (name and PostgreSQL type of each column) with `rows`, or `error`, a code) — and no other
-message (owner decision Q140: a private process uses this connection and its reads of public data, and nothing calls a
-module across it). `configHash` SHALL be the core's configuration hash (RN-16), which a private process checks on
-every message that carries it (PP-14, owner decision Q147). In rows and
-params, `bigint` and `numeric` values SHALL be decimal strings, `bytea` values `0x`-prefixed hex, and `jsonb` values
-JSON; a parameter string of `0x` and lowercase hex pairs SHALL be sent to the database as `bytea`, so it has a `bytea`
-column's own type and index, every other string as text (owner decision Q141). A private module's read handle through
-the core SHALL send one `read` per statement, each a consistent read at or above the handle's height, so two statements
-of one callback may see two heights (owner decision Q142). IF a message fails its schema, or has an unknown `v` or
-`type`, THEN the connection SHALL close; IF an instance id is already connected THEN the second `hello` SHALL be
-refused with `duplicate-instance`.
+per statement, `columns` (name and PostgreSQL type of each column) with `rows`, or `error`, a code, with `refused`
+naming the statement when the code is `read-refused`) — and no other message (owner decision Q140: a private process
+uses this connection and its reads of public data, and nothing calls a module across it). `configHash` SHALL be the
+core's configuration hash (RN-16), which a private process checks on every message that carries it (PP-14, owner
+decision Q147). In rows and params, `bigint` and `numeric` values SHALL be decimal strings, `bytea` values `0x`-prefixed
+hex, and `jsonb` values JSON; a parameter string of `0x` and lowercase hex pairs SHALL be sent to the database as
+`bytea`, so it has a `bytea` column's own type and index, every other string as text (owner decision Q141). A private
+module's read handle through the core SHALL send one `read` per statement, each a consistent read at or above the
+handle's height, so two statements of one callback may see two heights (owner decision Q142). THE core SHALL run a
+`read`'s statements only when each is one read — its command `SELECT`, `WITH`, `VALUES` or `TABLE`, one statement,
+naming no function or catalog the core refuses (`design.md` §8, **Confined reads**) —, so that none leaves the read-only
+transaction or changes the session; IF one is not THEN the core SHALL run none of them, answer `read-refused` naming it,
+and keep the connection (task 14.2b, A172). IF a message fails its schema, or has an unknown `v` or `type`, THEN the
+connection SHALL close; IF an instance id is already connected THEN the second `hello` SHALL be refused with
+`duplicate-instance`.
 
 #### Scenario: A read through the core
 - **WHEN** a private process sends `read` with id `7` and two statements while the public database is PGlite

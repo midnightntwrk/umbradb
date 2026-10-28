@@ -1199,7 +1199,7 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   | `committed` | `v: 1`, `height: H`, `hash: X`, `configHash: X` |
   | `report` | `v: 1`, `height: H`, `hash: X` |
   | `read` | `v: 1`, `id: string`, `statements`: an array of `{ sql: string, params: Value[] }` |
-  | `read-result` | `v: 1`, `id: string`, `height: H` or `null` (before the first commit), `configHash: X`, and either `results`: one `{ columns: { name: string, type: string }[], rows: Value[][] }` per statement, or `error: string` (a code); `type` is the PostgreSQL type name that says how to read each `Value` back |
+  | `read-result` | `v: 1`, `id: string`, `height: H` or `null` (before the first commit), `configHash: X`, and either `results`: one `{ columns: { name: string, type: string }[], rows: Value[][] }` per statement, or `error: string` (a code); `type` is the PostgreSQL type name that says how to read each `Value` back; with `error: "read-refused"`, and only then, `refused: { statement: number, reason: "command" \| "function" \| "statements" \| "unreadable", name: string or null }` (**Confined reads** below) |
 
   `Value` is `null`, a boolean, a string (text; `bigint` and `numeric` as decimal strings; `bytea` as `X`), or JSON (for
   `jsonb`); the column types of the statement say how to read each string back. `configHash` is the core's
@@ -1222,8 +1222,9 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   <host>:<port>`, `(mutual TLS)` with `tls`; a taken address refuses startup, `listen-failed`), and closes it at its
   stop. A connection speaks after its `hello`; a `hello` of an id another connection (or this one) holds is answered
   `refused: duplicate-instance` and closed; `committed` goes to every connection past its `hello` after each commit;
-  each `read` runs in one `Database.read` bounded by `apiReadTimeoutMs`, its error a code only (`database-error` for
-  anything not an `UmbraError`), a result over 64 MiB answered `error: result-too-large`; a `report` is checked and
+  each `read` passes the gate first (**Confined reads** below), then runs in one `Database.read` bounded by
+  `apiReadTimeoutMs`, its error a code only (`database-error` for anything not an `UmbraError`), a result over 64 MiB
+  answered `error: result-too-large`; a `report` is checked and
   counted (**Lockstep** below, task 14.3). A connection closes (1008, the reason a fault's name) on a text that is no
   message (an `api` message among them: `unknown-type`), a binary frame, a message only the core sends, a message
   before `hello`, more than 64 reads (or report checks) at once, more than 128 MiB waiting in its socket (a slow reader:
@@ -1238,6 +1239,42 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   no statement (its height is the handle's `height`), then one `read` per `query`, each its own consistent read at
   the public cursor then, at or above the handle's height. A message from the core that is no message (an `api` among
   them), fails its schema or only a private process sends closes the connection, which is made again.
+- **Confined reads** (PP-4, A172; task 14.2b, the threat model draft's gap 1; `src/private/read-gate.ts`). A `read`
+  carries SQL text from a private process, which the core runs on the public database in a `REPEATABLE READ READ ONLY`
+  transaction (DB-2), where the database refuses every write. Task 14.2 ran each statement as sent, so a statement
+  could leave that transaction: `COMMIT` (or `ROLLBACK`, `END`) ended it, and the next statement — an `INSERT` —
+  ran outside it, with the core's own login, and wrote (A172's negative control: on both backends `pub.rows` gained
+  the rows, a `nextval` after a `COMMIT` moved its sequence, `pg_advisory_lock` left its lock held). *Where the
+  database could refuse it:* on PostgreSQL the read pool logs in as the writer's login (one `database` setting, CF-4),
+  and a role that may only read, entered with `SET ROLE` or `SET LOCAL ROLE`, is left with `RESET ROLE` or
+  `set_config('role', …)`: a login that may only read needs a setting the core does not have — task 14.2b's question
+  Q175 —, and no role entered in the writer's session holds. On PGlite there is one session, the writer's, under
+  its superuser, so no role or login apart from the read-only transaction exists to refuse a write. *So* the database
+  refuses the write — the read-only transaction —, and the core keeps every statement inside it: before any statement
+  of a `read` runs, each must be one read, or the core runs none of them and answers `read-result` `error:
+  read-refused` with `refused` naming the first that is not (`statement`, its index from 0; `reason`; `name`), logs
+  `transport: refused a read of <instance>: statement <n> is <COMMIT>, not a read` (or `names <function>`; never the
+  statement's text), and keeps the connection. One read is: **its first word**, after any `(`, `SELECT`, `WITH`,
+  `VALUES` or `TABLE` (`reason: command`, `name` the word in upper case) — none of which can end a transaction or
+  change the session: PostgreSQL runs transaction and session control (`BEGIN`, `COMMIT`, `ROLLBACK`, `SET`,
+  `RESET`, `SET ROLE`, `LISTEN`, `PREPARE`, `DO`, `CALL`, `COPY`) only as statements of their own, and a function a
+  `SELECT` calls cannot commit; a `WITH` that writes, `SELECT … FOR UPDATE` and `SELECT … INTO` pass the gate and the
+  read-only transaction refuses them (`database-error`); **one statement** (`statements`); **no function or
+  catalog the core refuses** (`function`, `name` it): every name starting with `pg_` (the server's functions —
+  `pg_advisory_lock`, whose lock outlives the read, `pg_terminate_backend`, `pg_read_file` — and its catalogs, such
+  as `pg_authid`), `dblink`'s and `binary_upgrade_`'s, and `set_config`, `setseed`, `nextval`, `setval`, the
+  functions that run SQL given as text or read relations by name (`query_to_xml`, `table_to_xml`, `schema_to_xml`,
+  `database_to_xml`, `cursor_to_xml` and their `…schema` kin, `ts_stat`, `ts_rewrite`), BRIN and GIN maintenance and
+  large objects (`lo_*`, `loread`, `lowrite`), wherever the name stands (called, quoted, qualified, as a column),
+  without regard to ASCII case; and **readable** (`unreadable`): no unterminated literal, comment or quoted name, no
+  `U&` escape, no NUL. The gate reads the text into tokens as PostgreSQL 18's lexer does — comments (nested),
+  strings (`''`, `E'…'` with backslash escapes, `B'…'` and `X'…'` ended by their first quote, `N'…'`, dollar quotes),
+  quoted names, parameters, numbers, words folded as PostgreSQL folds them —, a plain string both ways, since a
+  session whose `standard_conforming_strings` is off (the core does not pin it) reads a backslash in one as an
+  escape: a statement must pass both. It parses nothing beyond tokens. The core's own statements in the read (the
+  committed height, the catalog's type names, a `report`'s hash) are not gated. The module API's reads, and every other
+  read of the database API, are unchanged. A private process's own client fails the query with the `UmbraError`
+  `read-refused` (not retryable; `details` `statement`, `reason`, `name`, its message naming the statement).
 - **The private process** (task 14.1) is task 5.3's `startProcess` with `side: "private"`: the private `core` schema,
   its own database (`database`), and a backbone of `core-chain` (task 10.2's, unchanged: its configuration history, its
   identity, the process items `config`, `db` and `ledger-table`; no node client), then `src/backbone/private.ts`'s
