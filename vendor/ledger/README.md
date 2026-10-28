@@ -92,7 +92,15 @@ upstream's own release recipe (`midnight-ledger` `bagel.nix`): `cargo build --pr
 `wasm-opt -Os --enable-reference-types`, the hand-written declarations assembled from the template. Paths inside the
 container are fixed, so the bytes do not depend on where the repository is checked out. Each host runs the image's
 native variant (the amd64 Rust toolchain cannot run under emulation on an arm64 Mac); CI rebuilds on amd64 and arm64
-runners and compares both with `SHA256SUMS` (`.github/workflows/vendored-ledger.yml`).
+runners and compares both with `SHA256SUMS` (`.github/workflows/vendored-ledger.yml`), and uploads a build that differs.
+
+Cargo derives each crate's `-C metadata`, which rustc folds into every symbol name, partly from `rustc -vV`, whose
+`host:` line names the build machine. Built as Cargo alone builds them, the packages had other symbol names on amd64
+than on arm64 (`wasm_bindgen_77465864…` against `wasm_bindgen_564f7ebd…`), and so another `.wasm` and `_bg.js`
+(PR #16's first CI run, 2026-10-28). `build-in-container.sh` therefore builds through a `RUSTC_WRAPPER` that replaces
+each crate's metadata with a hash of its package name, version and manifest directory and of its rustc arguments,
+Cargo's own 16-digit hashes masked; every host then gives the same names. Two crates given the same value would make
+rustc refuse the build rather than build something else.
 
 ## What the patches add
 

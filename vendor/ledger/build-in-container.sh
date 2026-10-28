@@ -46,8 +46,40 @@ for patch in /in/patches/*.patch; do
 done
 shopt -u nullglob
 
+# Cargo derives each crate's `-C metadata`, which rustc folds into every symbol name, from `rustc -vV` among other
+# things, and its `host:` line names the build machine: the same sources gave other symbol names, and other bytes, on
+# amd64 than on arm64 (PR #16's first CI run). This wrapper gives each crate a metadata hashed from its own package
+# and arguments instead, Cargo's 16-digit hashes masked, so every host builds the same. Two crates given the same
+# value would make rustc refuse the build, never build something else.
+wrapper=/build/rustc-wrapper.sh
+cat > "$wrapper" <<'WRAPPER'
+#!/usr/bin/env bash
+set -euo pipefail
+rustc=$1
+shift
+args=("$@")
+at=""
+for i in "${!args[@]}"; do
+  case "${args[$i]}" in
+    -Cmetadata=*) at=$i ;;
+    metadata=*) if [ "$i" -gt 0 ] && [ "${args[$((i - 1))]}" = "-C" ]; then at=$i; fi ;;
+  esac
+done
+if [ -z "$at" ]; then
+  exec "$rustc" "${args[@]}"
+fi
+key=$(printf '%s\n' "${CARGO_PKG_NAME:-}" "${CARGO_PKG_VERSION:-}" "${CARGO_MANIFEST_DIR:-}" "${args[@]}" \
+  | grep -vE '^(-C)?metadata=' | sed -E 's/-[0-9a-f]{16}([^0-9a-f]|$)/-H\1/g' | sha256sum | cut -c1-16)
+case "${args[$at]}" in
+  -C*) args[$at]="-Cmetadata=$key" ;;
+  *) args[$at]="metadata=$key" ;;
+esac
+exec "$rustc" "${args[@]}"
+WRAPPER
+chmod +x "$wrapper"
+
 cd "$src"
-cargo build --locked --profile wasm --target wasm32-unknown-unknown -p "$crate"
+RUSTC_WRAPPER="$wrapper" cargo build --locked --profile wasm --target wasm32-unknown-unknown -p "$crate"
 
 lib=${crate//-/_}
 raw="$CARGO_TARGET_DIR/wasm32-unknown-unknown/wasm/$lib.wasm"
