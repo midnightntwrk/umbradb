@@ -255,15 +255,18 @@ describe("the db item over the PGlite backend's own Database, as openPglite retu
 
 describe("A144 [DOC]: the module guide", () => {
   const guide = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "module-guide.md"), "utf8");
-  const heading = "\n## Reading through `db`\n";
+  // The guide's "Reading and writing tables" section (task 17.3a's rewrite): the handles, then `db.read`.
+  const heading = "\n## 5. Reading and writing tables\n";
   const start = guide.indexOf(heading);
   const end = guide.indexOf("\n## ", start + 1);
-  const section = start === -1 ? "" : guide.slice(start, end === -1 ? undefined : end);
+  // Line breaks and indentation as single spaces, so a phrase may wrap.
+  const section = start === -1 ? "" : guide.slice(start, end === -1 ? undefined : end).replace(/\s+/g, " ");
 
-  it("has a section on reading through db, beside the one on writing in callbacks", () => {
-    const writing = guide.indexOf("\n## Writing in callbacks\n");
-    expect(writing).toBeGreaterThan(-1);
-    expect(start).toBeGreaterThan(writing);
+  it("has a section on reading and writing tables that gives the handles before db.read", () => {
+    expect(start).toBeGreaterThan(-1);
+    const handles = section.indexOf("**The handles.**");
+    expect(handles).toBeGreaterThan(-1);
+    expect(section.indexOf("**Reading outside the points: `db.read`.**")).toBeGreaterThan(handles);
   });
 
   it("states when to use the handle and when db.read, and what db.read does inside a callback on each backend", () => {

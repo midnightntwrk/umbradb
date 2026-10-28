@@ -3905,7 +3905,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `test/bench/compare.test.ts`. A5's transcription no longer lists `bench/harness.ts` and `bench/smoke.ts` as
       retired: §13 keeps the job and these are its new files. The CI mutation job's timeout (`conformance.yml`) goes
       from 45 to 120 minutes: task 17.2 measured `npm run test:mutation:ci` at about 58 minutes.
-- [ ] 17.3a The module guide rewritten (owner, 2026-10-27; decisions Q160 A, Q161 A), after 17.3: `docs/module-guide.md`
+- [x] 17.3a The module guide rewritten (owner, 2026-10-27; decisions Q160 A, Q161 A), after 17.3: `docs/module-guide.md`
       replaced by the reviewed outline and first draft (an overview, one complete example, then the detail sections; a
       "Deterministic PostgreSQL" section for the column types; migrations and upgrades late), every code block
       importing from `umbradb`; the example in the repository at `examples/stats-module/` (module id `stats-module`,
@@ -3915,6 +3915,24 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       which builds the browser page and serves it with the two headers it needs (COOP and COEP).
       **Acceptance:** `examples/stats-module/` type-checks against `src/index.ts`; `umbradb config check` passes on its
       configuration file; the README's two quick starts run as written.
+      **Done (2026-10-28):** `docs/module-guide.md` rewritten from the outline and draft (§1 overview, §2 the example,
+      §3–§14 the details with §4 "Deterministic PostgreSQL", §15 migrations, §16 upgrades, §17, appendix A), every
+      `ts` block importing from `umbradb`, `zod` or the example's file; the database as parts, confined reads,
+      `--update-hash` and Q180's seen reads folded in. `examples/stats-module/`: `stats-module.ts`, `umbradb.config.ts`,
+      `run.sh` (`run`, `check`), `try.sh`, `tsconfig.json` (`umbradb` mapped to `src/index.ts`; `npm run typecheck`
+      runs it). `test/examples/stats-module.test.ts`: the type check, `umbradb config check` on the configuration in a
+      project whose `node_modules/umbradb` is the package built from the sources, the guide's and README's imports
+      against the barrel's exports, and the guide's §2 lines against the example's files; its negative control fails
+      each on a changed copy. The guide's draft assumed `BlockParsed`, `ChainOutcome`, `ReadOnlyDatabase` and
+      `commandBuild`, which §12 does not export (Q187): the guide uses `ParsedTransaction` and local types, and leaves
+      out the `startProcess` recipe (question Q188; issue `00053-start-process-declarations`). The [DOC]
+      tests of A72, A144 and Q76 read the new sections. `README.md` replaced by the reviewed draft, updated to the tree
+      (parts, `npm run web`, SIGUSR2 backups, `--update-hash`, the restore warning of Q177 A linking
+      `docs/THREAT_MODEL.md`); its "Choosing a database" section is `docs/choosing-a-database.md`. `npm run web`:
+      `browser/serve.ts` (COOP, COEP; `--dir`, `--port`/`WEB_PORT`), which the browser tests' page server now shares;
+      `test/browser/serve.test.ts` and its negative control. Both quick starts run as written: the CLI one from a
+      packed tarball (`config check` passed, `run` syncing preview), the browser one (`following`, lag 0, in headless
+      Chrome); the README's PostgreSQL configuration also ran against PostgreSQL 18 in Docker.
 - [x] 17.4 Version `0.10.0` and the breaking-change notice in `CHANGELOG.md`; every backbone part and core module
       names the build's version (`UMBRADB_VERSION`), `core-digest` among them, which names `0.10.0` by hand
       (`src/backbone/core-digest/core-digest.ts`).

@@ -216,16 +216,23 @@ describe("A20: the same declaration built without types is refused at startup wi
 
 describe("[DOC] the module guide's section on tables declared deterministic: false (MD-1, Q76)", () => {
   const guide = readFileSync(join(REPOSITORY, "docs", "module-guide.md"), "utf8");
-  const heading = "\n## Data that is not a function of the chain\n";
+  // A subsection of "Deterministic PostgreSQL" since task 17.3a's rewrite, up to the next heading of either level.
+  const heading = "\n### 4.3 Data that is not a function of the chain: `deterministic: false`\n";
   const start = guide.indexOf(heading);
-  const end = guide.indexOf("\n## ", start + 1);
-  const section = start === -1 ? "" : guide.slice(start, end === -1 ? undefined : end);
+  const end = guide.slice(start + 1).search(/\n##+ /);
+  // Line breaks and indentation as single spaces, so a phrase may wrap.
+  const text = start === -1 ? "" : guide.slice(start, end === -1 ? undefined : start + 1 + end);
+  const section = text.replace(/\s+/g, " ");
 
-  it("has the section, after the one on reading through db, which names the opt-out", () => {
-    const reading = guide.indexOf("\n## Reading through `db`\n");
+  it("has the subsection in Deterministic PostgreSQL, after its rules, and db.read's text names the opt-out", () => {
+    const deterministic = guide.indexOf("\n## 4. Deterministic PostgreSQL\n");
+    const rules = guide.indexOf("\n### 4.2 Rules\n");
+    expect(deterministic).toBeGreaterThan(-1);
+    expect(rules).toBeGreaterThan(deterministic);
+    expect(start).toBeGreaterThan(rules);
+    const reading = guide.indexOf("**Reading outside the points: `db.read`.**");
     expect(reading).toBeGreaterThan(-1);
-    expect(start).toBeGreaterThan(reading);
-    expect(guide.slice(reading, start)).toContain("`deterministic: false`");
+    expect(guide.slice(reading, guide.indexOf("\n## ", reading))).toContain("`deterministic: false`");
   });
 
   it("states how to declare it, what it skips, what it keeps, and that nothing deterministic may come from it", () => {

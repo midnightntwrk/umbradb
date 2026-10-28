@@ -126,15 +126,16 @@ describe.each(BACKENDS)("A72: a version that requires a resync, on $name (DB-10)
 
 describe("A72 [DOC]: the module guide", () => {
   const guide = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "module-guide.md"), "utf8");
+  // A section's text with its line breaks and indentation as single spaces, so a phrase may wrap (task 17.3a).
   const section = (heading: string): string => {
     const start = guide.indexOf(`\n## ${heading}\n`);
     expect(start, heading).toBeGreaterThan(-1);
     const end = guide.indexOf("\n## ", start + 1);
-    return guide.slice(start, end === -1 ? undefined : end);
+    return guide.slice(start, end === -1 ? undefined : end).replace(/\s+/g, " ");
   };
 
   it("states the additive-only rule for upgrade migrations, and when a version declares requiresResync", () => {
-    const upgrades = section("Upgrades");
+    const upgrades = section("16. Upgrades");
     for (const allowed of ["tables", "nullable columns", "columns with defaults", "indexes", "constraints", "functions"]) {
       expect(upgrades, allowed).toContain(allowed);
     }
@@ -146,19 +147,14 @@ describe("A72 [DOC]: the module guide", () => {
   });
 
   it("states how migrations run: in order, once, each with its record, never edited, under the module's role", () => {
-    const migrationsSection = section("Migrations");
-    for (const text of [
-      "migration-checksum-changed",
-      "migration-missing",
-      "migration-failed",
-      "SHA-256",
-      "on-start-db",
-      "TRUNCATE",
-      "schema",
-      "SECURITY DEFINER",
-      "SET search_path = pg_catalog",
-    ]) {
+    const migrationsSection = section("15. Migrations");
+    const facts = ["migration-checksum-changed", "migration-missing", "migration-failed", "SHA-256", "on-start-db", "schema"];
+    for (const text of facts) {
       expect(migrationsSection, text).toContain(text);
     }
+    // Task 17.3a's rewrite moved TRUNCATE to the table rules and provider functions to "Providing items".
+    expect(section("4. Deterministic PostgreSQL"), "TRUNCATE").toContain("`TRUNCATE` only in a migration");
+    const providing = section("13. Providing items to other modules");
+    for (const text of ["SECURITY DEFINER", "SET search_path = pg_catalog"]) expect(providing, text).toContain(text);
   });
 });

@@ -39,9 +39,10 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p examples/stats-module",
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "build:browser": "node browser/build.ts",
+    "web": "node browser/build.ts && node browser/serve.ts",
     "docs:storage": "typedoc",
     "docs:storage:check": "typedoc --emit none --treatWarningsAsErrors",
     "test": "vitest run",
