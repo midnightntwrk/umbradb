@@ -202,10 +202,14 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   prints both with their paths and exits non-zero, opening no database, and says the history checks were not run; with
   `--database` it reports `changes-past` for a changed recorded entry, exits non-zero, and leaves the database unchanged
   (row counts and `core_chain.migrations` compared before and after). (CF-10)
-- **A166** `[CI]` Under the opt-in, `database: "pglite:<tmp>/a/b"` with `<tmp>/a` missing: `startProcess` and
-  `umbradb run` create `<tmp>/a/b` and commit block S; `umbradb restore` into `pglite:<tmp>/c/d` creates it and
-  restores; `umbradb config check --database pglite:<tmp>/e/f` and `umbradb backup` against `pglite:<tmp>/g/h` create
-  no directory. (CF-4, owner decision Q163)
+- **A166** `[CI]` Under the opt-in, a PGlite `path` `<tmp>/a/b` with `<tmp>/a` missing: `startProcess` and `umbradb
+  run` create `<tmp>/a/b`, log that they created it, naming it, and commit block S; `umbradb restore` into `<tmp>/c/d`
+  creates it and restores; `umbradb config check --database` on a file naming `<tmp>/e/f` and `umbradb backup` of
+  `<tmp>/g/h` create no directory. (CF-4, owner decisions Q163, Q165)
+- **A170** `[CI]` `database` and a private process's `publicDatabase` given as parts start on both backends; `/config`
+  and the log show the host, port, user, name, `ssl` and a PGlite `path`, and the password only as `[redacted]`; a
+  connection string in either field is refused by its schema with its path; `umbradb config check --database` reads
+  the history of the database the file configures, read-only. (CF-4, CF-10, owner decision Q167)
 
 ## 5. Runner
 

@@ -1108,6 +1108,15 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `core_private_source.cursor`, not `core_block_commit.blocks`: issue
       `docs/issues/00029-private-config-check-cursor.md`, recorded with task 14.2).
 
+- [ ] 4.5 The owner's answers Q167 A and Q165 B: `database` and a private process's `publicDatabase` given as parts
+      (`{ kind: "postgres", host, port, user, password, name, ssl }`, `{ kind: "pglite", path }`, `{ kind:
+      "pglite", memory: true }`), a connection string refused; only `password` secret, the other parts shown in
+      `/config` and the log; `umbradb config check --database` without a value, reading the file's own database; a
+      process or a restore that creates a PGlite directory logs it, naming the path. Every configuration the code,
+      the tests, the browser page and the docs build moves to the parts; design §7, §8 and §12, the operator guide.
+      Owner decision Q166 A: the browser page passes no `updateHash`.
+      **Acceptance:** A170; A166 and A35 as amended.
+
 ## 5. Runner
 
 - [x] 5.1 Point dispatch and order within points; parallel waves.

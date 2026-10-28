@@ -90,7 +90,7 @@ module entry's `stop`; the `core` entry's `stop` SHALL be operational (it stops 
 | `ledgerSources` | data | per ledger version, `vendored` or `released`; default `vendored` |
 | `sweep` | data | `on` or `off`; default `on` (`off` only under the development opt-in) |
 | `retainStates` | data | integer ≥ 0; default 0 (LG-12) |
-| `database` | secret | a PostgreSQL URL, `pglite:<directory>` (created if missing, Q163) or `pglite:memory` |
+| `database` | operational; its `password` secret | the database's parts, never a connection string (Q167) |
 | `node` | secret | the node's WebSocket URL (core process only) |
 | `listen` | operational | `{ api?, admin?, transport? }` addresses; admin default `0.0.0.0:8081` |
 | `tipCap`, `prefetchWindow` | operational | integers; 600, 64 |
@@ -108,17 +108,23 @@ module entry's `stop`; the `core` entry's `stop` SHALL be operational (it stops 
 | `developmentOptIn` | operational | boolean; false |
 
 A private process's `core` entry has, instead of `node` and `lockstepInstances`: `instanceId` (operational, string),
-`publicDatabase` (secret) and `coreTransport` (operational, address). The core handles no keys: keys, and private items
-in general, are a module's (owner decision Q154).
+`publicDatabase` (the same parts as `database`, its `password` secret) and `coreTransport` (operational, address). The
+core handles no keys: keys, and private items in general, are a module's (owner decision Q154).
 
 A process SHALL take every operational and secret field of the `core` entry from the latest `core` revision whose
 version is the build's (by start), for its whole run; the operational and secret fields of the other `core` revisions
 SHALL be validated (CF-3) but not used. The data fields of each `core` revision apply from its start, like any entry's
 (owner decision Q102).
 
-A process, and a restore into its target, SHALL create a `pglite:<directory>` that does not exist together with any
-missing parent directory; the read-only uses — `umbradb config check --database` and `umbradb backup` — SHALL create
-none (owner decision Q163).
+`database` SHALL be given as parts, and a connection string SHALL be refused (owner decision Q167): `{ kind:
+"postgres", host, port, user, password, name, ssl }` (`port` default 5432; `ssl` one of `disable`, `require` — the
+default — and `verify-full`; `password` may be absent), `{ kind: "pglite", path }` or `{ kind: "pglite", memory:
+true }`. Only `password` SHALL be secret; the other parts are operational and SHALL be shown in `/config` and the
+log.
+
+A process, and a restore into its target, SHALL create a PGlite `path` that does not exist together with any missing
+parent directory, and SHALL log that it created it, naming the path (owner decisions Q163, Q165); the read-only uses
+— `umbradb config check --database` and `umbradb backup` — SHALL create none.
 
 #### Scenario: Two `core` revisions with different databases
 - **WHEN** the file holds `core` revisions from 0 (`database: A`, `node: N1`) and from 9,000 (`database: B`, `node: N2`,
@@ -126,13 +132,13 @@ none (owner decision Q163).
 - **THEN** the process opens `B`, reads from `N2` and has the development opt-in from startup to exit
 
 #### Scenario: A PGlite directory whose parent is missing
-- **WHEN** `database` is `pglite:data/preview` under the opt-in and `data/` does not exist
-- **THEN** `umbradb run` creates `data/` and `data/preview` and starts, while `umbradb config check --database
-  pglite:data/preview` and `umbradb backup` against it create no directory
+- **WHEN** `database` is `{ kind: "pglite", path: "data/preview" }` under the opt-in and `data/` does not exist
+- **THEN** `umbradb run` creates `data/` and `data/preview`, logs that it created `data/preview`, and starts, while
+  `umbradb config check --database` and `umbradb backup` on that file create no directory
 
 #### Scenario: A secret never appears
-- **WHEN** `/config` is read and the logs are collected for a process whose `database` URL contains a password
-- **THEN** the URL appears only as `[redacted]`
+- **WHEN** `/config` is read and the logs are collected for a process whose `database` has a `password`
+- **THEN** the password appears only as `[redacted]`, while its host, port, user, name and `ssl` are shown
 
 ### Requirement: CF-5 Entries are revised by `(id, start)`
 
@@ -201,25 +207,25 @@ PGlite backend, `sweep: off` and backups of a private database — only when the
 true`; otherwise startup SHALL refuse and name the feature.
 
 #### Scenario: PGlite without the opt-in
-- **WHEN** `database` is `pglite:memory` and `developmentOptIn` is false
+- **WHEN** `database` is `{ kind: "pglite", memory: true }` and `developmentOptIn` is false
 - **THEN** startup refuses and names PGlite and the opt-in
 
 ### Requirement: CF-10 `umbradb config check`
 
-THE package SHALL provide the command `umbradb config check <file> [--database <url>]`, which type-checks the file with
-the TypeScript compiler (`noEmit`), evaluates it, and runs CF-1 and the schema checks of CF-3 for the revisions whose
+THE package SHALL provide the command `umbradb config check <file> [--database]`, which type-checks the file with the
+TypeScript compiler (`noEmit`), evaluates it, and runs CF-1 and the schema checks of CF-3 for the revisions whose
 version is the build's, without starting a process. WITHOUT `--database` it SHALL open no database and SHALL report that
 the history checks (CF-3 for `versionEntry` revisions, CF-5, CF-6, CF-8) were not run; WITH `--database` it SHALL read
-the history read-only — no migration, no write — and run them too. It SHALL check the entries of the file's exported
-user modules (CF-1, Q106) as it checks UmbraDB's own. It SHALL exit 0 only if every check it ran passes, and SHALL print
-each finding with its path.
+the history of the database the file's `core` entry configures (owner decision Q167) read-only — no migration, no write
+— and run them too. It SHALL check the entries of the file's exported user modules (CF-1, Q106) as it checks UmbraDB's
+own. It SHALL exit 0 only if every check it ran passes, and SHALL print each finding with its path.
 
 #### Scenario: A file with a type error and a schema error
 - **WHEN** `umbradb config check` runs on a file with one unknown property and one wrong type
 - **THEN** it prints both findings with their paths and exits non-zero
 
 #### Scenario: Checking against a database
-- **WHEN** `umbradb config check --database <url>` runs on a file that changes a recorded entry's data field
+- **WHEN** `umbradb config check --database` runs on a file that changes a recorded entry's data field
 - **THEN** it reports `changes-past` and exits non-zero, and the database is unchanged
 
 <!-- CF-11 withdrawn by owner decision Q154 (keys are a module's, not the core's) -->

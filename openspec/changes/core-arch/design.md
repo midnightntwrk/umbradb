@@ -1137,8 +1137,9 @@ whose providers are not checked, `providerOf` leaves out an item several parts p
   `on-start-db` calls `recordHistory`, which checks again with the rows its transaction reads and, in that transaction,
   deletes the check's `deletes` — the omitted rows above the cursor — and records its writes — every entry above the
   cursor that differs from its row or has none, and a module's stop changed above the cursor. `openConfiguredDatabase`
-  (`src/config/database.ts`) opens what `database` names (`pglite:memory`, `pglite:<directory>`, a PostgreSQL URL),
-  PGlite refusing without the opt-in (CF-9, DB-12). A process, and a restore into its target, create a
+  (`src/config/database.ts`) opens what `database`'s parts name (PostgreSQL's host, port, user, password, name and
+  `ssl`; a PGlite `path`; PGlite in memory; owner decision Q167, task 4.5: never a connection string), PGlite refusing
+  without the opt-in (CF-9, DB-12). A process, and a restore into its target, create a
   `pglite:<directory>` with any missing parent before the writer lock is taken (its file sits beside the directory);
   `umbradb config check --database` and `umbradb backup` create none (CF-4, owner decision Q163). As built (task 2.2c):
   `createPgliteDirectory` (`src/db/pglite-lock.ts`, reading the directory as the lock does: `file://` and a bare path,
@@ -1675,7 +1676,7 @@ settled by task 17.3).
 `SchemaWriteHandle`, `ApiRegistry`, `BlockRef`, `BlockSource`, `LedgerPackage`, `Entry`, `CoreVersion`, `UmbraConfig`,
 `ProcessHandle`, `ProcessState`, `ErrorCode`, `ParsedTransaction`, `LedgerTask`.
 
-**Command:** `umbradb run [--config <file>] [--update-hash=<hash>]`, `umbradb config check <file> [--database <url>]`,
+**Command:** `umbradb run [--config <file>] [--update-hash=<hash>]`, `umbradb config check <file> [--database]`,
 `umbradb backup --out <file> [--config <file>]`, `umbradb restore <file>` — `package.json`'s `bin` `umbradb`
 (`dist/cli/main.js`, task 4.4). `--update-hash` (task 14.1c, PP-14, Q159) takes a configuration hash as a start that
 stopped with `public-config-changed` names it (`0x` and 64 lowercase hex digits; another form, or the flag twice,
