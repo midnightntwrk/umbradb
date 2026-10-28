@@ -42,9 +42,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A4** `[DOC]` `package.json` version is `0.10.0`; `CHANGELOG.md`'s `0.10.0` section opens with one short breaking
   line: a new architecture, nothing of 0.9.5's API or databases carried over — no per-export list, no migration notes
   (owner decision Q169: pre-release, breaking changes need no notices). (LS-4)
-- **A171** `[STATIC]` No document in the repository describes a removed 0.9.5 part as current: the documents task
-  17.4a lists as 0.9.5's are absent, `CHANGELOG.md` has no preamble pointing at them and no planned `1.0.0` entry,
-  `package.json`'s `description` describes the indexer, and no Markdown link in the tree points at a missing file.
+- **A171** `[STATIC]` No document in the repository describes a removed 0.9.5 part as current: the documents tasks
+  17.4a and 17.4b list as 0.9.5's are absent, `CHANGELOG.md` has no preamble pointing at them and no planned `1.0.0`
+  entry, `package.json`'s `description` describes the indexer, and no Markdown link in the tree points at a missing
+  file.
   (owner decision Q169)
 - **A5** `[STATIC]` A test compares the required-test manifest, `stryker.conf.json` `mutate`, the coverage floors of
   `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on any difference.
@@ -459,6 +460,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A96** `[CI]` With a devnet runtime-upgrade tape, U is decoded with the old metadata and F with the new, and the
   metadata cache never holds the new metadata under the old `spec_version`; a parent runtime whose `spec_version`
   differs from the block's `MNSV` halts with `metadata-mismatch`. (LG-4)
+- **A173** `[CI]` A vendored ledger package whose JS or WASM file differs from its recorded SHA-256 refuses startup
+  before block S, naming the file, in the process and in the ledger worker, before that package is imported;
+  `ledgerSources: released` refuses, naming the setting; an unchanged package starts. A committed negative control
+  (a startup that never calls the check) fails it. (LG-5, design §5.2, the threat model draft's gap 3)
 - **A97** `[CI]` CI rebuilds every vendored ledger package from its pinned source and patches and gets the recorded
   SHA-256; a package file changed by one byte refuses startup with `package-hash-mismatch`. (LG-5)
 - **A98** `[CI]` One adapter test suite runs against the v8 and the v9 adapters and passes on both; `versionName` and
@@ -534,6 +539,12 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   decode back to the value the core read; an unknown `v` or `type` (`api` among them, Q140), or a message failing its
   schema, closes the connection; a second `hello` with a connected id is refused with
   `duplicate-instance`. (PP-4)
+- **A172** `[FAULT]` On both backends, a private process's `read` whose statements try to leave the read — `COMMIT`
+  then `INSERT`, `ROLLBACK`, `BEGIN`, `SET TRANSACTION READ WRITE`, `SET`/`RESET` of a setting or the role, `DO`, a
+  function that writes (`nextval`, `pg_advisory_lock`), `COPY`, `LISTEN` — changes nothing: the public database's
+  contents hash, row counts and sequences are unchanged; the answer is an error naming the refused statement; the
+  transport stays up for the next `read`. A committed negative control (the read path before the change) fails it.
+  (PP-4, the threat model draft's gap 1)
 - **A116** `[CI]` An independent instance stopped for 100 blocks never pauses the core and catches up from public data.
   (PP-5)
 - **A117** `[FAULT]` A stopped lockstep instance makes the core wait before `BEGIN` with no transaction open
@@ -582,6 +593,9 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   (its committed heights and contents hash equal an unpaused run's); with `backupOnSignal` set, SIGUSR2 writes a backup
   at its next pause, the process goes on, and the file restores like any other, every check of BK-3 passing. (BK-1,
   owner decision Q152)
+- **A174** `[CI]` With a umask of `000`, every backup file UmbraDB writes on Node.js — `umbradb backup`, at stop, on
+  SIGUSR2, `ProcessHandle.backup` — has mode `0600` from creation (its temporary file included) to after its rename.
+  (BK-1, the threat model draft's gap 7)
 - **A125** `[DIFF]` A backup written on PostgreSQL 18 restores on PGlite and one written on PGlite restores on
   PostgreSQL 18, each with every check of BK-3 passing; a restored database's schemas, tables, sequences and functions
   have the owners and grants of a database built by migrations (compared in the catalogs). (BK-2, BK-3)

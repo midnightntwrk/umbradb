@@ -1125,7 +1125,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `/config` and the log; `umbradb config check --database` without a value, reading the file's own database; a
       process or a restore that creates a PGlite directory logs it, naming the path. Every configuration the code,
       the tests, the browser page and the docs build moves to the parts; design §7, §8 and §12, the operator guide.
-      Owner decision Q166 A: the browser page passes no `updateHash`.
+      Owner decision Q166 A: the browser page passes no `updateHash`. `ssl` reaches the PostgreSQL driver: `require`
+      by default, `verify-full` checking the server's certificate and host name, `disable` only when set (the threat
+      model draft's gap 2: no TLS option is passed today).
       **Acceptance:** A170; A166 and A35 as amended.
 
 ## 5. Runner
@@ -2725,6 +2727,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       schemas 3); first run 18 caught, the survivor (F applied by the rc.3 package itself) closed by a carry test on
       stagenet's block 1, whose rules differ; final run 19 of 19. Issue 00036 (the in-memory blocks' runtime 2.0
       named `v9`). **Pending:** A97's CI rebuild of the third package runs when the branch is pushed (Phase 3).
+- [ ] 12.2b The threat model draft's gap 3 (owner, 2026-10-28): `verifyLedgerPackages`
+      (`src/ledger/identity.ts`) has no caller, so the vendored ledger packages load without the startup check
+      design §5.2 describes. Call it before any ledger package is imported — in the process and in the ledger
+      worker —, so a package whose JS or WASM differs from its recorded SHA-256, or `ledgerSources: released`,
+      refuses startup naming the file or the setting; the browser build checks the bytes it bundles when it builds
+      (or `design.md` §5.2 says why not).
+      **Acceptance:** A173.
 - [x] 12.3 The ledger worker and the node-store bridge; `core-ledger-state` apply, replay rules, block 0's ledger path,
       root check, outputs.
       **Acceptance:** A82, A99 (the ranges from genesis, Q133), A101, A106, A107.
@@ -3267,6 +3276,14 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       outside the clone): 11 (either type's schema put back, the unknown-type check and its reason, a wrong-direction
       message ignored, on both sides), 11 caught; the three schema variants again against the transport suites alone,
       3 caught; none equivalent.
+- [ ] 14.2b The threat model draft's gap 1 (owner, 2026-10-28): the transport's `read` runs each statement a
+      private process sends (`src/private/core-transport.ts`) in a read-only transaction on a session whose login
+      may write, so a `COMMIT` ends the read and the next statement writes; PGlite's read shares the writer's
+      session. Confine a `read` so that nothing it sends can write or change session state, on both backends, with
+      the database refusing the write rather than a statement parser where the backend allows it (a login or role
+      that cannot write; a question if that needs a new setting); refuse transaction and session control with an
+      error naming the statement, the transport staying up. `design.md` §8 says how.
+      **Acceptance:** A172; A115 and A117 unchanged.
 - [x] 14.3 Lockstep and the behind-instance refusal. Through the core, a read of public data is one `read` per
       statement (owner decision Q142): a lockstep instance reads the public cursor again after its block's data and
       halts with `lockstep-behind` if it moved past h.
@@ -3443,6 +3460,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       one, then continues: the way to back up a running PGlite process from a shell (BK-1 as amended); the `core`
       schema's new field, `design.md` §9.1, the operator guide and the tests.
       **Acceptance:** A163.
+- [ ] 15.1b The threat model draft's gap 7 (owner, 2026-10-28): a backup file's mode depends on the umask
+      (`src/backup/backup.ts` creates its temporary file without one). Every backup UmbraDB writes on Node.js —
+      `umbradb backup`, at stop, on SIGUSR2, `ProcessHandle.backup` — is created owner-only (`0600`) from its first
+      byte and keeps that mode through its rename; the operator guide says so.
+      **Acceptance:** A174.
 - [x] 15.2 `umbradb restore`: the checks before loading, the file's SQL run in one transaction, owners and grants, the
       contents hash and state root checked before the commit; the operator guide's "restore only trusted backups".
       **Acceptance:** A125, A126, A127, A128.
@@ -3746,6 +3768,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       back). Seen failing first: 7 of 29. Documents whose status is unclear kept and asked: Q170 (0.9.5's release
       record and 1.0.0 program documents), Q171 (`design/`, `Formal/`, `Performance/`, `docs/research/`,
       `docs/superpowers/`), Q172 (`docs/THREAT_MODEL.md`). No mutation pass (deferred to 17.5).
+- [ ] 17.4b The owner's answer Q172 A: `docs/THREAT_MODEL.md` (0.9.5's trust model) deleted, its commit policy —
+      no secret of any value in git, restrictive file modes, the one suppression kept by its exact fingerprint —
+      moved to `SECURITY.md` first; the pointers to it in `README.md`, `ROADMAP.md` and `nix/midnight-env/` changed
+      (their link lines only); A171's list gains it. A 0.10.0 threat model comes from the owner's review of the
+      draft (`~/todo/Umbra/experiments/00028-threat-model-draft.md`) as a task of its own. Owner decisions Q170 and
+      Q171, once answered, extend this task.
+      **Acceptance:** A171 with `docs/THREAT_MODEL.md` listed.
 - [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage
