@@ -25,15 +25,13 @@ jobs:
     # available (or wanted) in CI (`design.md` §7.4). TransactionHistory's tests, the live tier among
     # them, are kept in `legacy/transaction-history/` outside this run (core-arch task 17.1, LS-3).
     #
-    # Timeout posture (v1.0.0-recovery-testing Task 7.1): the crash (~26s), soak (~73s) and
-    # differential (~10s) suites now RUN in this gate (Testcontainers, `UMBRADB_LIVE_PREPROD`
-    # unset), plus v8 coverage instrumentation. Measured wall-clock for the whole deterministic set
-    # is ~100s on a 24-core host; on a 4-core runner with coverage it is comfortably single-digit
-    # minutes, so the soak stays in THIS job and `timeout-minutes: 30` is kept (no split needed).
-    # StrykerJS mutation is a SEPARATE still-required job (below) so its cost never competes with
-    # this one's clock.
+    # Timeout posture: 0.10.0's suite (345 files, about 5,600 tests, with v8 coverage) takes 10 to 16 minutes on a
+    # many-core host and about 8,800 CPU-seconds in all; on the first pull request run (PR #16, 2026-10-28) a hosted
+    # runner finished 137 of 345 files in 30 minutes, all passing, and was cancelled. `timeout-minutes: 120`, as the
+    # mutation job's, until the suite is split across jobs. StrykerJS mutation is a SEPARATE still-required job (below)
+    # so its cost never competes with this one's clock.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

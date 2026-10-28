@@ -6,7 +6,8 @@
 # Rebuilds each vendored ledger package (default: every vendor/ledger/v*/ directory) in Docker from
 # its pinned upstream commit and patches, then checks that the new build and the committed pkg/
 # both have exactly the files and SHA-256 recorded in that version's SHA256SUMS. Exits 1 on any
-# difference. With --record, the new build replaces pkg/ and SHA256SUMS is rewritten instead.
+# difference. With --record, the new build replaces pkg/ and SHA256SUMS is rewritten instead. With the
+# environment's VENDOR_LEDGER_KEEP set to a directory, a rebuilt package that differs is copied there.
 set -euo pipefail
 
 ledger_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -50,6 +51,12 @@ for version in $versions; do
   if ! diff -u "$dir/SHA256SUMS" "$work/$version.sums"; then
     echo "vendor:ledger: $version: the rebuilt package differs from SHA256SUMS" >&2
     status=1
+    # With VENDOR_LEDGER_KEEP, the differing build is kept there (CI uploads it) to compare with the committed pkg/.
+    if [ -n "${VENDOR_LEDGER_KEEP:-}" ]; then
+      mkdir -p "$VENDOR_LEDGER_KEEP"
+      cp -R "$out" "$VENDOR_LEDGER_KEEP/$version"
+      echo "vendor:ledger: $version: the rebuilt package is kept in $VENDOR_LEDGER_KEEP/$version" >&2
+    fi
   else
     echo "vendor:ledger: $version: the rebuilt package matches SHA256SUMS" >&2
   fi
