@@ -1725,7 +1725,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 |---|---|---|---|
 | Lean (`Formal/Lean`, `lean.yml`) | `UmbraDBFormal/TemporalKV/**` (T1–T5 and retention), `UmbraDBFormal/Checkpoint/**` (C1) and their `UmbraDBFormalTest` counterparts; `APISmoke` lemmas `checkpoint_union_comm/assoc/idem` | `UmbraDBFormal/Watermarks/**` and tests: W1 is the law of the cursor table (SH-1); `APISmoke.watermark_overwrite`; `APISmoke.adjacent_Ico_disjoint` (the half-open rule of SH-2); `Trust.lean` (imports trimmed); the `lean.yml` job unchanged | — |
 | Aggregators | `Formal/Lean/UmbraDBFormal/Checkpoint.lean`, `UmbraDBFormal/TemporalKV/Retention.lean` | `Formal/Lean/UmbraDBFormal.lean` keeps the `APISmoke` and `Watermarks` imports and drops `Checkpoint` and the three `TemporalKV` imports; `UmbraDBFormalTest/Trust.lean` trimmed the same way; `vitest.mutation.config.ts` `include` (lines 20-26) replaced by the test files of the new mutation targets; the `chain-archive` coverage exclusion of `vitest.config.ts:75-79` removed | — |
-| `Formal/STORAGE_ALGEBRA.md` and the formalization roadmaps | Laws T1–T4, C1, C2a, C2b, L1 and property tests P1–P8, P10, P11 marked retired (header note, kept as history) | W1/P9 re-bound to the cursor table; T5's half-open rule restated for heights | — |
+| `Formal/STORAGE_ALGEBRA.md` and the formalization roadmaps | Laws T1–T4, C1, C2a, C2b, L1 and property tests P1–P8, P10, P11 removed from `Formal/STORAGE_ALGEBRA.md`; the roadmaps and every other `Formal/*.md` deleted (owner decision Q171 A, task 17.4b; first marked retired by a header note, task 17.2) | `Formal/STORAGE_ALGEBRA.md` holds W1/P9, re-bound to the cursor table, and T5's half-open rule restated for heights; the `Formal/Lean` code | — |
 | `openspec/changes/v1.1.0-quint-model-checking` (Proposed) | Status set to Archived: its laws (C2a, C2b, L1, T1 cross-writer) are retired | — | — |
 | Required test ids (`test/integration/required-tests.manifest.json`, `EXPECTED_REQUIRED_COUNT = 25`) | Ids 5–25 and the deferred `crash.pg-kill-save.no-duplicate-with-idempotency-key` | Ids 1–4 (`crash-harness.smoke.*`), retargeted to a crash worker that drives the runner | The ids of `acceptance.md` §17; the pinned count becomes 4 + their number |
 | Test files | TemporalKV, Watermarks (`test/postgres/watermarks.test.ts`; its cases that still apply rewritten in `test/helpers/cursor-table.test.ts`, Q108), CheckpointStore, Lease, `saveAndAdvance`, WalletStateEnvelope and cross-part durability tests; `no-consumer-import-in-bench`; `chain-archive-{migrate,rollover,store}` tests (replaced by the core block table tests); `chain-archive-{sync,sync-retry,replay-decode,preprod-cloud-crossval}` integration tests (they drive the official-indexer client, deleted by rule b); `api-surface/chain-archive-routing`; `no-chain-sync-import-guard` (the folder is gone) | `durability-probe.test.ts` (as `test/db/durability-probe.test.ts`); `migrate` (as `test/db/migrate.test.ts`), `client`, `errors` and `chain-archive-sync/node-rpc-client.test.ts` refactored onto `src/db/` and `src/node/`; `migration-lock-timeout` retired with the migration advisory lock (§4: the writer lock keeps a second instance from waiting or migrating, A17, and the zero timeouts keep a migration from being cut off, A141); `watermarks.property.test.ts` (P9) retargeted; `no-sdk-import-guard`; gate machinery | One test file per acceptance group |
@@ -1736,7 +1736,7 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 | Benchmarks (`bench/`, non-gating `bench-smoke.yml`) | TemporalKV, Watermarks, CheckpointStore, Lease and TransactionHistory workloads and their baseline (the TransactionHistory workload left `bench/harness.ts` with the source in task 17.1, to `legacy/transaction-history/bench/`) | The non-gating job | `runner.commitEmptyBlock` per backend; the ingest comparison with the official indexer (SC-009, `bench/ingest-vs-official/`); the tape-apply baseline (A143, Q72), reported and never failing |
 | Scripts | `archive:sync` | — | `build:browser`, `vendor:ledger` |
 | `docs:storage` (`typedoc.json`, not run in CI) | The five 0.9.5 entry points | — | The §12 surface |
-| Documents stating "36 symbols" | — | `docs/releases/v0.9.5.md` unchanged (history) | `ROADMAP.md:455` and `docs/v1-implementation-guideline.md:194` updated at close-out |
+| Documents stating "36 symbols" | `docs/v1-implementation-guideline.md` deleted, its rules still in force moved into `AGENTS.md` (owner decision Q170 C, task 17.4b) | `docs/releases/v0.9.5.md` unchanged (0.9.5's release record, Q170 C) | `ROADMAP.md:455` updated at close-out |
 
 ## 14. External claims and their evidence
 
@@ -1787,10 +1787,15 @@ Inventory taken at `a75ed95`. Besides the rows below, every file that only aggre
 
 ## 15. Relation to the existing design documents
 
-- `design/design.md` §2 (TemporalKV), §3 (checkpoint chunker), §4 (Watermarks) and §5 (commit/transaction layer)
-  describe the parts this change retires or refactors; §5's transaction rule survives as one transaction per block
-  (RN-6) and its lease as the writer lock (DB-11). Those sections stay as the record of 0.9.5; `ROADMAP.md` points here.
-- `design/design-interfaces.md` §1.1 (thrown, `code`-discriminated errors with retryability) is kept; §3.1–§3.4 are
-  superseded by §12 of this document.
-- `Formal/STORAGE_ALGEBRA.md`: W1 is kept (cursor table); T5's interval rule is restated for heights (SH-2); the other
-  laws are retired as in §13, each listed for the owner's approval.
+- `design/` is deleted by task 17.4b (owner decision Q171 A); git keeps it as 0.9.5's record. `design/design.md` §2
+  (TemporalKV), §3 (checkpoint chunker), §4 (Watermarks) and §5 (commit/transaction layer) described the parts this
+  change retires or refactors; §5's transaction rule survives as one transaction per block (RN-6) and its lease as the
+  writer lock (DB-11). `design/design-interfaces.md` §1.1 (thrown, `code`-discriminated errors) survives as §11 of this
+  document; its §3.1–§3.4 are superseded by §12. `ROADMAP.md` points here.
+- `Formal/STORAGE_ALGEBRA.md` is cut to W1 (the cursor table) and T5's interval rule restated for heights (SH-2); the
+  other laws and the other `Formal/*.md` documents are deleted (Q171 A), the `Formal/Lean` code is kept as in §13.
+- Deleted with them (Q171 A): `Performance/`, `docs/superpowers/` and `docs/research/` except
+  `indexer-parallelism-roadmap.md` and `midnight-node-peer-flapping.md`, kept for the indexer. Kept as 0.9.5's release
+  record (owner decision Q170 C): `docs/releases/v0.9.5.md`, `docs/releases/v0.9.5-notes.md`,
+  `docs/recovery/EVIDENCE.md`. `docs/v1-implementation-guideline.md` and `docs/v1-lessons-learned.md` are deleted, the
+  guideline's rules still in force moved into `AGENTS.md` (Q170 C).

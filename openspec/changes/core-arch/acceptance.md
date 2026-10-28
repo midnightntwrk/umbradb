@@ -45,8 +45,9 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A171** `[STATIC]` No document in the repository describes a removed 0.9.5 part as current: the documents tasks
   17.4a and 17.4b list as 0.9.5's are absent, `CHANGELOG.md` has no preamble pointing at them and no planned `1.0.0`
   entry, `package.json`'s `description` describes the indexer, and no Markdown link in the tree points at a missing
-  file.
-  (owner decision Q169)
+  file; `AGENTS.md` holds the 1.0.0 guideline's rules still in force and points at no deleted document;
+  `Formal/STORAGE_ALGEBRA.md` states W1 and T5 and no retired law.
+  (owner decisions Q169, Q170, Q171)
 - **A5** `[STATIC]` A test compares the required-test manifest, `stryker.conf.json` `mutate`, the coverage floors of
   `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on any difference.
   (LS-5)
@@ -379,6 +380,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   `connecting`; once connected, `connected`, with `node.bestHead` the best head the node announced last and
   `node.queueDepth` the best-block queue's length; with the node gone, `retrying`, `node.retries` counting; after the
   stop, `closed`. On a private process the three are `null`. (AE-5)
+- **A176** `[CI]` On PostgreSQL 18.6 and PGlite 0.5.10, `/status` of a process paused by `pause()` lists one condition
+  `{ code: "paused", since, by: "pause" }`, valid against its JSON schema, and none once `resume()` let the loop run;
+  on PGlite, a backup on SIGUSR2 lists `by: "signal"` from its pause until the backup is written; `/health/ready`
+  answers as an unpaused process with the same lag would. (AE-3, owner decision Q174)
 
 ## 9. Test tape
 
@@ -596,6 +601,9 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 - **A174** `[CI]` With a umask of `000`, every backup file UmbraDB writes on Node.js — `umbradb backup`, at stop, on
   SIGUSR2, `ProcessHandle.backup` — has mode `0600` from creation (its temporary file included) to after its rename.
   (BK-1, the threat model draft's gap 7)
+- **A175** `[CI]` `umbradb run` on PGlite without `backupOnSignal`, sent SIGUSR2 while blocks commit, logs one line
+  naming the signal and `backupOnSignal`, writes no backup, keeps committing heights and exits 0 on SIGTERM; a process
+  started with `startProcess` without `backupOnSignal` adds no SIGUSR2 listener. (BK-1, owner decision Q173)
 - **A125** `[DIFF]` A backup written on PostgreSQL 18 restores on PGlite and one written on PGlite restores on
   PostgreSQL 18, each with every check of BK-3 passing; a restored database's schemas, tables, sequences and functions
   have the owners and grants of a database built by migrations (compared in the catalogs). (BK-2, BK-3)

@@ -2037,6 +2037,11 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       18.6 and PGlite 0.5.10 (`test/backbone/core-status/node-fields.test.ts`: a core against a tape node, `/status`
       read over HTTP, every body validated against the schema), with its committed negative control
       (`node-fields.negative-control.test.ts`: the three published null fail it in exactly those fields).
+- [ ] 8.3b The owner's answer Q174 B: while the finalized loop is paused — `ProcessHandle.pause()`, or a backup on
+      SIGUSR2 waiting for its pause and being written (task 15.1a) — `/status` lists a condition `paused` with `since`
+      (RFC 3339 text in UTC, Q68) and `by` (`pause` or `signal`), gone once the loop runs again; readiness is unchanged
+      (AE-4). AE-3 as amended, `/status`'s JSON schema, the conditions' registry, `docs/operator-guide.md`.
+      **Acceptance:** A176.
 
 ## 9. Test tape
 
@@ -3492,6 +3497,12 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `umbradb backup`, at stop, on SIGUSR2, `ProcessHandle.backup` — is created owner-only (`0600`) from its first
       byte and keeps that mode through its rename; the operator guide says so.
       **Acceptance:** A174.
+- [ ] 15.1c The owner's answer Q173 C: `umbradb run` always listens for SIGUSR2. Without `backupOnSignal`, one is
+      logged as ignored (the line names `backupOnSignal`) and the process keeps running; with it, as task 15.1a. A
+      process a host program starts with `startProcess` without `backupOnSignal` adds no SIGUSR2 listener, so Node.js's
+      default or the host's own handler applies. BK-1 as amended, the operator guide's "A backup of a running process
+      (SIGUSR2)".
+      **Acceptance:** A175.
 - [x] 15.2 `umbradb restore`: the checks before loading, the file's SQL run in one transaction, owners and grants, the
       contents hash and state root checked before the commit; the operator guide's "restore only trusted backups".
       **Acceptance:** A125, A126, A127, A128.
@@ -3799,9 +3810,25 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       no secret of any value in git, restrictive file modes, the one suppression kept by its exact fingerprint —
       moved to `SECURITY.md` first; the pointers to it in `README.md`, `ROADMAP.md` and `nix/midnight-env/` changed
       (their link lines only); A171's list gains it. A 0.10.0 threat model comes from the owner's review of the
-      draft (`~/todo/Umbra/experiments/00028-threat-model-draft.md`) as a task of its own. Owner decisions Q170 and
-      Q171, once answered, extend this task.
-      **Acceptance:** A171 with `docs/THREAT_MODEL.md` listed.
+      draft (`~/todo/Umbra/experiments/00028-threat-model-draft.md`) as a task of its own.
+      The owner's answer Q170 C (2026-10-28): `docs/releases/v0.9.5.md`, `docs/releases/v0.9.5-notes.md` and
+      `docs/recovery/EVIDENCE.md` kept as 0.9.5's release record; `docs/v1-implementation-guideline.md` and
+      `docs/v1-lessons-learned.md` deleted, after the guideline's rules still in force move into `AGENTS.md`, which
+      drops its pointer to the guideline (`AGENTS.md:4`). The rules, as the owner confirmed them (2026-10-28):
+      acceptance criteria are the contract; verify external claims; test first on real databases; traceability;
+      deterministic tests; no placeholders; SQL discipline; typed errors; stop and escalate; review evidence and
+      negative controls; test honesty; floors only go up, except with the owner's approval; the flaky-test policy; the
+      Lean gate; the supply-chain gates; secrets; per-change security checks; no AI attribution. Each is restated for
+      0.10.0 (its 0.9.5 file names, suites, versions and figures replaced or removed); a rule `AGENTS.md` already
+      carries in part is merged into its stage or section. Dropped: the guideline's §0 (its invariants included), §1,
+      §2.4, §2.5's G15–G17 and Z1–Z6, §2.1's scope and §2.3's performance and deferred-behaviour rules, §3 to §6.
+      The owner's answer Q171 A (2026-10-28): deleted — `design/` (every file), `Formal/*.md` except
+      `Formal/STORAGE_ALGEBRA.md`, `Performance/`, `docs/research/` except `indexer-parallelism-roadmap.md` and
+      `midnight-node-peer-flapping.md`, and `docs/superpowers/`; `Formal/STORAGE_ALGEBRA.md` cut to the current laws W1
+      (the cursor table) and T5 (heights), the retired laws and property tests removed; the `Formal/Lean` code
+      unchanged. Every link to a deleted document (`ROADMAP.md`, `README.md`, `nix/midnight-env/`, the kept documents)
+      changed, its link line only; design §13 and §15 as amended.
+      **Acceptance:** A171 with every document above listed.
 - [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage
@@ -3848,8 +3875,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 - [ ] 19.1 Check off every task above with the criteria it demonstrated; map every acceptance criterion to its test in
       the pull request.
 - [ ] 19.2 Set the proposal's status line to Implemented.
-- [ ] 19.3 Update `ROADMAP.md`: this change, the new architecture, and the "36 symbols" statements at `ROADMAP.md:455`
-      and `docs/v1-implementation-guideline.md:194`.
+- [ ] 19.3 Update `ROADMAP.md`: this change, the new architecture, and the "36 symbols" statement at `ROADMAP.md:455`
+      (`docs/v1-implementation-guideline.md` is deleted by task 17.4b, owner decision Q170 C).
 - [ ] 19.4 Run `npm run graph:refresh` and commit `graphify-out/` with the close-out commit; `npm run graph:check`
       exits 0.
 - [ ] 19.5 Record in the pull request, per `docs/PULL_REQUEST_CHECKLIST.md`: the reviewed commit, each lane's verdict

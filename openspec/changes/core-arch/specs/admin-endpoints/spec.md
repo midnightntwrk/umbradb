@@ -41,7 +41,9 @@ definition — long computation belongs in a worker thread (as the ledger's does
 THE process SHALL be in exactly one state — `starting` (startup and migrations), `refused`, `syncing` (lag above the
 following threshold), `following` (lag at or below it; default 3), `stopped`, `halted`, `stopping` (after SIGTERM) —
 with zero or more conditions — `waiting-for-node`, `waiting-for-lockstep`, `finality-stall`, `node-retrying`,
-`database-retrying`, `upgrade-required`, `slow-block` (RN-17). A refused or halted process SHALL stay up and live,
+`database-retrying`, `upgrade-required`, `slow-block` (RN-17), `paused` (while the finalized loop is paused between
+heights, BK-1: with `since` and `by`, `pause` for `ProcessHandle.pause()` or `signal` for a backup on SIGUSR2; owner
+decision Q174). A refused or halted process SHALL stay up and live,
 except that IF the build's module declarations fail their validation (MD-2), or the configuration cannot be loaded, is
 not plain data (CF-1) or fails its schemas (CF-2, CF-3), THEN the process SHALL log every finding with its path and exit
 with a non-zero code, having served no admin endpoint (owner decisions Q137, Q148).
@@ -52,6 +54,11 @@ its own.
 - **WHEN** startup refuses because a migration checksum changed
 - **THEN** the process keeps running, `/health/live` answers 200, `/health/ready` answers 503, and `/status` reports
   `refused` with the reason
+
+#### Scenario: A paused loop
+- **WHEN** a host program calls `pause()` and the loop stays paused
+- **THEN** `/status` lists the condition `paused` with `by: "pause"` and the time it paused, until `resume()` lets the
+  loop run again
 
 #### Scenario: A refused configuration ends the process
 - **WHEN** startup refuses because a setting fails its schema (`livenessTimeoutMs: "30s"`)

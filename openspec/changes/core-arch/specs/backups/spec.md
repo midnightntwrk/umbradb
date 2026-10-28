@@ -20,7 +20,10 @@ commits wait. THE finalized loop SHALL pause and continue on request (`ProcessHa
 heights — no transaction open and the height's reads finished —, so a paused process loses and repeats no height; WHERE
 `backupOnSignal` (CF-4) is set, a running process SHALL, on SIGUSR2, write a backup to that path at its next pause, as
 the backup at stop writes one, and continue (owner decision Q152): the way to back up from a shell a running PGlite
-process, whose directory the command cannot open while the process holds it (DB-11).
+process, whose directory the command cannot open while the process holds it (DB-11). `umbradb run` SHALL listen for
+SIGUSR2 WHERE `backupOnSignal` is not set too and, on one, log that it was ignored, naming `backupOnSignal`, and
+continue; a process a host program starts (`startProcess`) without `backupOnSignal` SHALL add no SIGUSR2 listener
+(owner decision Q173).
 
 #### Scenario: Backup while syncing
 - **WHEN** a backup is written while blocks keep committing
@@ -29,6 +32,10 @@ process, whose directory the command cannot open while the process holds it (DB-
 #### Scenario: A backup of a running PGlite process
 - **WHEN** a process on PGlite with `backupOnSignal` set receives SIGUSR2 while blocks commit
 - **THEN** it writes a backup at its next pause and goes on from the next height, and the file restores like any other
+
+#### Scenario: SIGUSR2 to `umbradb run` without `backupOnSignal`
+- **WHEN** `umbradb run` without `backupOnSignal` receives SIGUSR2 while blocks commit
+- **THEN** it logs that the signal was ignored because `backupOnSignal` is not set, writes no file, and keeps running
 
 #### Scenario: No `pg_dump` on the machine
 - **WHEN** `umbradb backup` runs against PostgreSQL on a machine without the PostgreSQL 18 client
