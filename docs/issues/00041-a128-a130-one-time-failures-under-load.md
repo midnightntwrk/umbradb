@@ -2,6 +2,15 @@
 
 - **Status:** OPEN
 - **GitHub:** NOT IN GITHUB ISSUE
+- **Diagnostics added:** task 17.5a (2026-10-27). `test/backup/restore.test.ts`'s `continueTo` puts how processing
+  ended — for a refusal or a failure the error's name, code and message and each cause's — and the ticker's log lines
+  in its assertion's message. In the browser suite each page wait (`statusWhen`, `eventWhen`, the backup's and the
+  restore's waits) bounds every call it makes to the page by its own deadline (240 s, below the test's 900 s) and fails
+  naming what it waited for when the page has not answered; every other DevTools call fails after 240 s, naming its
+  method; `ChromeBrowser.close` waits at most 10 s for `Browser.close`'s answer and 10 s for Chrome to exit, then kills
+  it with SIGKILL, and fails if it has not exited 10 s later; `browser.test.ts`'s `afterAll` closes every Chrome, node
+  and the page's server even when one Chrome fails to end. The cause is still unknown: read the next occurrence's
+  message before changing runtime code.
 
 ## Problem
 

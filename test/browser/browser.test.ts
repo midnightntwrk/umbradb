@@ -82,10 +82,14 @@ beforeAll(async () => {
 }, BROWSER_TEST_TIMEOUT_MS);
 
 afterAll(async () => {
-  for (const browser of browsers.splice(0)) await browser.close();
+  // Each Chrome is closed with bounded waits, then killed (`./chrome.ts`; issue 00041); one that fails to end does not
+  // keep the others, the nodes or the page's server open: its failure is reported once everything else is closed.
+  const failures: unknown[] = [];
+  for (const browser of browsers.splice(0)) await browser.close().catch((error: unknown) => failures.push(error));
   for (const node of nodes.splice(0)) await node.close();
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
   await bench?.close();
+  if (failures.length > 0) throw new AggregateError(failures, `${failures.length} Chrome process(es) did not end`);
 }, BROWSER_TEST_TIMEOUT_MS);
 
 describe("the browser build in headless Chrome (task 16.1)", () => {

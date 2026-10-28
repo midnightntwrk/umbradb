@@ -3735,6 +3735,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       testing" names the file, the floor it had and the one it was given); `npm run test:mutation:ci` at break 65.
       **Acceptance:** A5 (no pending floor); every lowered floor back at its figure; every deferred mutation pass run,
       its survivors explained.
+      **Done in part (task 17.5a, 2026-10-27):** the load-bound slow-block tests of issues 00035, 00040 and 00043 fixed
+      — each case compares only the windows it holds open, or raises `slowBlockMs` with its holds — and the issues
+      closed; issue 00041 (A128, A130) given diagnostics and left open. A142, A161, A128 and A130 unchanged.
 
 ## 18. Whole-system faults, differentials and measurements
 

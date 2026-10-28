@@ -10,8 +10,10 @@ import { a161Problems, AFTER_COMMIT_MS, HOLD_MS, holding, observe, type OutsideP
  * - one that never times the points after a commit (task 5.5's watchdog: RN-17 before Q145) fails "shown" for
  *   `on-after-db-write`;
  * - one that never times `on-finalized` fails "shown" for it;
- * - one that does not clear the condition when the point ends (it keeps the last slow activity) fails "gone once that
- *   callback ends".
+ * - one that does not clear the condition when the point ends (it keeps the last slow activity outside a height's
+ *   processing) fails "gone once that callback ends".
+ * Height 2's own processing, which these watchdogs still time, can pass `slowBlockMs` 1000 on a loaded machine; the
+ * oracle does not count that `slow-block` as A161's (issue 00043), so a control fails for its own reason only.
  */
 
 const BUDGET_MS = 2 * HOLD_MS + AFTER_COMMIT_MS + 60_000;
@@ -25,13 +27,18 @@ function untimed(skipped: SlowWindow): new (input: LoopInput) => FinalizedLoop {
   };
 }
 
-/** A watchdog that does not clear: it keeps giving the last slow activity it gave. */
+/**
+ * A watchdog that does not clear A161's windows: it keeps giving the last slow activity it gave outside a height's
+ * processing. A height's own window, which a loaded machine can make slow (issue 00043), it gives only while open, as
+ * the real one does — kept, it would replace A161's activity in what the control shows.
+ */
 class NeverClears extends FinalizedLoop {
   #last: HeightActivity | null = null;
 
   override slowBlock(): HeightActivity | null {
-    this.#last = super.slowBlock() ?? this.#last;
-    return this.#last;
+    const now = super.slowBlock();
+    if (now !== null && now.window !== "height") this.#last = now;
+    return now ?? this.#last;
   }
 }
 

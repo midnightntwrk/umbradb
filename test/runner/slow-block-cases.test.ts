@@ -12,6 +12,7 @@ import {
   askedSource,
   bodySlowOf,
   goneProblems,
+  HEIGHT_POINTS,
   slowLines,
   hold,
   HOLD_MS,
@@ -23,6 +24,7 @@ import {
   type Seen,
   SLOW_HEIGHT,
   slowOf,
+  type SlowRun,
   STATUS_SCHEMA,
   startSlow,
   WITHIN_MS,
@@ -44,6 +46,12 @@ import {
  * - **a callback that blocks the main thread** stops the watchdog's timer and every publication: `/status`, answered
  *   from the snapshot published before the block, shows no `slow-block` throughout, then the height commits once and no
  *   read after the commit shows the condition.
+ *
+ * A height's processing that no case holds — on PostgreSQL its `on-db-write` and `COMMIT` — can pass `slowBlockMs` on
+ * a loaded machine and is then reported, correctly (issues 00035, 00040). So the cases look at height 2 only; where a
+ * case says it is never reported, it checks that it is not reported before its own window can have run `slowBlockMs`
+ * (the node's fetch, the queue's earlier work), or never after its commit (a height that commits in time), or leaves
+ * its reads and commit 2.7 s (a held height's retry).
  *
  * Each test waits on purpose (seconds of callbacks): its budget is that plus Vitest's 60 s.
  */
@@ -146,8 +154,11 @@ function timed(holds: Readonly<Record<string, number>>, times: Times): ModuleDec
   };
 }
 
-/** The in-memory chain whose block 2 the source gives only after 3 s (a node slow to answer). */
-function slowFetch(): AskedSource {
+/**
+ * The in-memory chain whose block 2 the source gives only after 3 s (a node slow to answer); `given.at` is when it
+ * gave it (`performance.now()`).
+ */
+function slowFetch(given: { at?: number }): AskedSource {
   const inner = askedSource(SLOW_HEIGHT);
   return {
     ...inner,
@@ -155,7 +166,10 @@ function slowFetch(): AskedSource {
       ...inner.source,
       block: async (height) => {
         const block = inner.source.block(height);
-        if (height === SLOW_HEIGHT) await sleep(HOLD_MS);
+        if (height === SLOW_HEIGHT) {
+          await sleep(HOLD_MS);
+          given.at = performance.now();
+        }
         return block;
       },
     },
@@ -171,6 +185,53 @@ function neverShown(observed: Observed, lines: readonly string[]): string[] {
   const logged = slowLines(lines);
   if (logged.length > 0) problems.push(`slow-block was logged: ${logged.join(" | ")}`);
   if (observed.committedAt === undefined) problems.push(`height ${SLOW_HEIGHT} never committed`);
+  return problems;
+}
+
+/**
+ * Every `slow-block` problem of a run that must not report height 2 before `from` + `slowBlockMs` − `slack`, the earliest
+ * moment its own window can have run `slowBlockMs` — in `status()`, in `/status`, in the log —; and it committed. That
+ * window holds no callback of the case, but on a loaded machine its own processing (on PostgreSQL its `on-db-write` and
+ * `COMMIT`) can pass `slowBlockMs` and raise a correct `slow-block`, never earlier than that (issue 00040).
+ */
+function earlyProblems(observed: Observed, run: SlowRun, from: number, slowBlockMs: number, slack: number): string[] {
+  const problems: string[] = [];
+  const bound = from + slowBlockMs - slack;
+  const shown = shownOf(observed).find(({ at }) => at < bound);
+  if (shown !== undefined) {
+    problems.push(`status() showed slow-block ${Math.round(bound - shown.at)} ms too early: ${JSON.stringify(shown, jsonBigint)}`);
+  }
+  if (observed.bodies.some(({ at, body }) => at < bound && bodySlowOf(body) !== undefined)) problems.push("/status showed slow-block too early");
+  const logged = run.lines.filter((line, index) => slowLines([line]).length > 0 && (run.lineAt[index] as number) < bound);
+  if (logged.length > 0) problems.push(`slow-block was logged too early: ${logged.join(" | ")}`);
+  if (observed.committedAt === undefined) problems.push(`height ${SLOW_HEIGHT} never committed`);
+  return problems;
+}
+
+/**
+ * Every problem of a run in which no height may be reported after it committed: no `status()` read shows `slow-block`
+ * for a height's own processing ({@link HEIGHT_POINTS}) at or below its cursor, and each log line raising a height's
+ * own `slow-block` is followed by the one saying it committed after at least `slowBlockMs` (less 2 ms of timer slack).
+ * A height a loaded machine took longer than `slowBlockMs` to process is reported while it runs, and its commit clears
+ * it (issue 00040).
+ */
+function afterCommitProblems(observed: Observed, lines: readonly string[], slowBlockMs: number): string[] {
+  const problems: string[] = [];
+  for (const { status } of observed.statuses) {
+    const slow = slowOf(status, null);
+    if (slow === undefined || !HEIGHT_POINTS.has(slow.point as string)) continue;
+    if (status.cursor !== null && status.cursor >= (slow.height as bigint)) {
+      problems.push(`status() showed ${JSON.stringify(slow, jsonBigint)} with the cursor at ${status.cursor}`);
+    }
+  }
+  const logged = lines.filter((line) => line.startsWith("slow block: "));
+  for (const [index, line] of logged.entries()) {
+    const raised = /^slow block: height (\d+) is still processing after slowBlockMs \(\d+ ms\), in on-([a-z-]+)/.exec(line);
+    if (raised === null || !HEIGHT_POINTS.has(`on-${raised[2]}`)) continue;
+    const end = logged.slice(index + 1).find((later) => later.startsWith(`slow block: height ${raised[1]} `));
+    const after = end === undefined ? undefined : /^slow block: height \d+ committed after (\d+) ms$/.exec(end)?.[1];
+    if (after === undefined || Number(after) < slowBlockMs - 2) problems.push(`logged "${line}", then ${end === undefined ? "nothing" : `"${end}"`}`);
+  }
   return problems;
 }
 
@@ -256,12 +317,13 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
     "a height that committed within slowBlockMs is never reported afterwards: its timer ends with its window",
     async () => {
       // Heights 1 and 2 commit fast; the watch is read until 2.5 s after the last commit, past both timers' due time.
+      // A height a loaded machine took longer than slowBlockMs is reported while it runs, never after its commit.
       const run = startSlow(await backend.database(), { slowBlockMs: 2_000, user: [marking({ wrote: false })] });
       try {
         const observed = await observe(run);
         while (performance.now() < (observed.committedAt ?? 0) + 2_500) await sleep(100);
-        expect(run.lines.filter((line) => line.startsWith("slow block"))).toEqual([]);
-        expect(observed.statuses.filter(({ status }) => slowOf(status, null) !== undefined)).toEqual([]);
+        expect(observed.committedAt).toBeDefined();
+        expect(afterCommitProblems(observed, run.lines, 2_000)).toEqual([]);
         expect(slowOf(run.handle.status(), null)).toBeUndefined();
       } finally {
         await run.handle.stop();
@@ -304,10 +366,11 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
       const seen: Seen = { calls: [] };
       // Three attempts fail after 800 ms (node-unreachable: retried), with back-offs of 1, 2 and 4 s; the fourth
       // commits. Counted from the first attempt, or through the last back-off alone, height 2 would pass slowBlockMs
-      // 2500; each run is 800 ms and the commit (well within it on a loaded machine).
+      // 3500; each run is 800 ms with its reads, and the last its commit: 2.7 s is left for those on a loaded machine
+      // (issue 00040).
       const unreachable = () => new UmbraError("node-unreachable", "the test's node did not answer");
       const flaky = holding("slow", seen, { ms: 800, calls: (call) => (call < 4 ? { then: unreachable() } : {}) });
-      const run = startSlow(await backend.database(), { slowBlockMs: 2_500, user: [flaky], extra: { backoffCeilingMs: 4_000 } });
+      const run = startSlow(await backend.database(), { slowBlockMs: 3_500, user: [flaky], extra: { backoffCeilingMs: 4_000 } });
       try {
         const observed = await observe(run);
         expect(seen.calls.filter((call) => call === "slow on-compute@2")).toHaveLength(4);
@@ -336,7 +399,9 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
         const shown = shownOf(observed);
         expect(shown[0]).toMatchObject({ height: SLOW_HEIGHT, point: "on-parse", module: "slow" });
         const asked = source.asked.get(SLOW_HEIGHT) as number;
-        expect(shown[0]!.at - asked).toBeGreaterThan(1_000);
+        // Its window opens just after the ask, when the queue starts height 2 (a Node.js timer may fire up to a
+        // millisecond before performance.now() counts its delay: 2 ms of slack).
+        expect(shown[0]!.at - asked).toBeGreaterThan(1_000 - 2);
         expect(shown[0]!.at - (seen.start as number)).toBeLessThanOrEqual(WITHIN_MS);
         expect(slowLines(run.lines)[0]).toBe(
           "slow block: height 2 is still processing after slowBlockMs (1000 ms), in on-parse of slow",
@@ -353,10 +418,11 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
     "a height whose on-parse already runs in the queue when the loop asks for it: from the ask, that point and module",
     async () => {
       const times: Times = new Map();
-      // Height 2's on-parse (4 s, in the queue) begins beside height 1's on-compute (0.9 s): the loop asks for 2 while
-      // it runs. From the ask, 2 is slow 1.5 s later; from the queue's start it would be 0.9 s earlier.
+      // Height 2's on-parse (6 s, in the queue) begins beside height 1's on-compute (0.9 s): the loop asks for 2 while
+      // it runs, and it still runs 1.5 s later however long height 1's commit took on a loaded machine (up to 3.5 s).
+      // From the ask, 2 is slow 1.5 s later; from the queue's start it would be at most 0.6 s after the ask.
       const source = preparingSource(askedSource(SLOW_HEIGHT), 2);
-      const holds = { "on-compute@1": 900, "on-parse@2": 4_000 };
+      const holds = { "on-compute@1": 900, "on-parse@2": 6_000 };
       const run = startSlow(await backend.database(), { slowBlockMs: 1_500, user: [timed(holds, times)], source });
       try {
         const observed = await observe(run);
@@ -365,7 +431,9 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
         expect(asked > parse.start && asked < parse.end).toBe(true);
         const shown = shownOf(observed);
         expect(shown[0]).toMatchObject({ height: SLOW_HEIGHT, point: "on-parse", module: "p" });
-        expect(shown[0]!.at - asked).toBeGreaterThan(1_500);
+        // The window opens just before the ask (the loop opens it, then asks the source), and a Node.js timer may fire up
+        // to a millisecond early: the bound sits between the ask's 1.5 s and the queue's start's 0.6 s (issue 00035).
+        expect(shown[0]!.at - asked).toBeGreaterThan(1_000);
         expect(goneProblems(observed)).toEqual([]);
       } finally {
         await run.handle.stop();
@@ -377,9 +445,15 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
   it(
     "the node's fetch before a height's first callback is not its time",
     async () => {
-      const run = startSlow(await backend.database(), { slowBlockMs: 1_000, user: [marking({ wrote: false })], source: slowFetch() });
+      // Height 2's window opens at its first callback, after the block came: counted from the ask, it would be slow 2 s
+      // before then. Its own processing, held by nothing here, is reported only if it ran slowBlockMs from there.
+      const given: { at?: number } = {};
+      const run = startSlow(await backend.database(), { slowBlockMs: 1_000, user: [marking({ wrote: false })], source: slowFetch(given) });
       try {
-        expect(neverShown(await observe(run), run.lines)).toEqual([]);
+        const observed = await observe(run);
+        expect(given.at).toBeDefined();
+        // 2 ms of slack: a Node.js timer may fire up to a millisecond before performance.now() counts its delay.
+        expect(earlyProblems(observed, run, given.at as number, 1_000, 2)).toEqual([]);
       } finally {
         await run.handle.stop();
       }
@@ -392,7 +466,9 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
     async () => {
       const times: Times = new Map();
       // Height 2's on-parse (2 s, in the queue) runs beside height 1's on-compute (2 s); then its own on-compute (2 s).
-      // From the queue's start height 2 would be slow at slowBlockMs 3000; its own window is about 2 s.
+      // Counted from the queue's start, 2 s or more before the loop asks for it, height 2 would be slow at slowBlockMs
+      // 3000; its own window, opened at the ask at the earliest, is about 2 s, and is reported only if a loaded machine
+      // made it pass 3 s.
       const source = preparingSource(askedSource(SLOW_HEIGHT), 2);
       const holds = { "on-compute@1": 2_000, "on-parse@2": 2_000, "on-compute@2": 2_000 };
       const run = startSlow(await backend.database(), { slowBlockMs: 3_000, user: [timed(holds, times)], source });
@@ -401,7 +477,8 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
         const parse = times.get("on-parse@2");
         const first = times.get("on-compute@1");
         expect(parse !== undefined && first !== undefined && parse.start < first.end).toBe(true);
-        expect(neverShown(observed, run.lines)).toEqual([]);
+        // 500 ms of slack: when the queue still runs height 2's on-parse, the loop opens its window, then asks.
+        expect(earlyProblems(observed, run, source.asked.get(SLOW_HEIGHT) as number, 3_000, 500)).toEqual([]);
       } finally {
         await run.handle.stop();
       }

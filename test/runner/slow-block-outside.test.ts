@@ -136,7 +136,11 @@ describe.each(PROCESS_BACKENDS)("A161: slow-block outside a height's processing 
         expect(slowOf(status, null)).toBeUndefined();
         const body = await statusWhen(await run.origin(), (shown) => shown.state === "halted");
         expect(bodySlowOf(body, null)).toBeUndefined();
-        const lines = run.lines.filter((line) => line.startsWith("slow block: ") || line.startsWith("processing halted"));
+        // The window after height 2's commit, and the halt: a height's own processing, if a loaded machine made it slow,
+        // logs lines of its own, which this case does not hold (issue 00043).
+        const lines = run.lines.filter(
+          (line) => (line.startsWith("slow block: ") && line.includes("after its commit")) || line.startsWith("processing halted"),
+        );
         expect(lines).toEqual([
           "slow block: height 2 is still processing after slowBlockMs (1000 ms), in on-after-db-write of slow (after its commit)",
           expect.stringMatching(/^slow block: height 2's points after its commit failed after \d+ ms$/),

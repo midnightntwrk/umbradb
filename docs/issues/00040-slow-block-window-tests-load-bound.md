@@ -1,6 +1,11 @@
 # 00040 — slow-block-windows.test.ts asserts no other slow-block within a 1 s threshold, which loaded heights cross
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed by task 17.5a (2026-10-27): `slow-block-windows.test.ts` compares only the windows each
+  case holds open (`<window>@<height>`), and its `on-finalized` and lockstep cases raise `slowBlockMs` and the holds
+  together (2,000 ms) so the held window's own reads have at least 0.8 s; `slow-block-cases.test.ts` checks that height
+  2 is not reported before its own window can have run `slowBlockMs` (the node's fetch, the queue's earlier work), that
+  no height is reported after its commit (a height that commits in time), and gives a held height's retry
+  `slowBlockMs` 3,500. Every case still fails a wrong watchdog the way it did.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

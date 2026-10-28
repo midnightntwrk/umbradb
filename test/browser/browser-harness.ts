@@ -13,8 +13,30 @@ import { type PageServer, servePage } from "./page-server.js";
  * calls made through Chrome (`window.umbradb`, `browser/src/page.ts`): the admin endpoints' `/status` (BR-3), the
  * contents hash, a read, what each worker told the page, and the page's backup and restore as the user makes them
  * (BK-5: the "Back up" button's saved file, a file picked in "Restore a backup"). Every wait is for a condition, read again until it holds
- * or the patience runs out (a loaded machine), never a single sample.
+ * or the patience runs out (a loaded machine), never a single sample. Each wait has its own deadline, below a test's
+ * budget, which also bounds each call it makes to the page: a page that never answers fails the wait at its deadline,
+ * naming what it waited for, instead of holding the test to its timeout (issue 00041); the tab's report for such a
+ * failure gives each of its reads {@link REPORT_MS}.
  */
+
+/** How long the tab's report ({@link tabReport}) waits for each thing it reads from the page. */
+const REPORT_MS = 10_000;
+
+/** `promise`'s value, or `late` once `deadline` (`Date.now()`) has passed without it. */
+async function byDeadline<T, L>(promise: Promise<T>, deadline: number, late: L): Promise<T | L> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const missed = new Promise<L>((resolve) => {
+    timer = setTimeout(() => resolve(late), Math.max(0, deadline - Date.now()));
+  });
+  try {
+    return await Promise.race([promise, missed]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** What a wait's call to the page gives when the page has not answered by the wait's deadline. */
+const NO_ANSWER: unique symbol = Symbol("no answer from the page");
 
 /** The tests' configuration module (bundled into the page; the Node.js run of A132 imports it too). */
 export const TEST_CONFIGURATION = fileURLToPath(new URL("./fixtures/configuration.ts", import.meta.url));
@@ -104,16 +126,36 @@ export async function logOf(tab: ChromeTab, who: ProcessName): Promise<string[]>
   return (await tab.evaluate<string[] | null>(`${viewOf(who)}?.log ?? null`).catch(() => null)) ?? [];
 }
 
-/** What the tab shows for a failure's message: each process's log, the page's errors, the console. */
+/**
+ * What the tab shows for a failure's message: each process's log, the page's errors, the console; each read from the
+ * page given {@link REPORT_MS}.
+ */
 export async function tabReport(tab: ChromeTab, who: readonly ProcessName[] = ["core"]): Promise<string> {
-  const logs = await Promise.all(who.map(async (name) => `${name}: ${(await logOf(tab, name)).join(" | ")}`));
-  const errors = await tab.evaluate<string[] | null>("window.umbradb?.errors ?? null").catch(() => null);
-  return `${logs.join("\n")}\npage errors: ${JSON.stringify(errors)}\nconsole: ${tab.console.slice(-40).join(" | ")}`;
+  const deadline = Date.now() + REPORT_MS;
+  const logs = await Promise.all(
+    who.map(async (name) => {
+      const log = await byDeadline(logOf(tab, name), deadline, NO_ANSWER);
+      return `${name}: ${log === NO_ANSWER ? "(the page did not answer)" : log.join(" | ")}`;
+    }),
+  );
+  const errors = await byDeadline(
+    tab.evaluate<string[] | null>("window.umbradb?.errors ?? null").catch(() => null),
+    Date.now() + REPORT_MS,
+    NO_ANSWER,
+  );
+  const shown = errors === NO_ANSWER ? "(the page did not answer)" : JSON.stringify(errors);
+  return `${logs.join("\n")}\npage errors: ${shown}\nconsole: ${tab.console.slice(-40).join(" | ")}`;
+}
+
+/** The failure of a wait for `what` whose call to the page had no answer by the wait's deadline, `patience` after it began. */
+async function noAnswer(tab: ChromeTab, who: ProcessName, what: string, patience: number): Promise<Error> {
+  return new Error(`the page did not answer within ${patience} ms, waiting for ${what}\n${await tabReport(tab, [who])}`);
 }
 
 /**
- * Waits until `who`'s `/status` satisfies `check`; fails, naming `what` with the tab's report, after `patience`, or at
- * once when the process is refused or halted and `check` does not take that.
+ * Waits until `who`'s `/status` satisfies `check`; fails, naming `what` with the tab's report, after `patience` — also
+ * when the page has not answered by then —, or at once when the process is refused or halted and `check` does not
+ * take that.
  */
 export async function statusWhen(
   tab: ChromeTab,
@@ -125,7 +167,9 @@ export async function statusWhen(
   const deadline = Date.now() + patience;
   let last: StatusBody | null = null;
   for (;;) {
-    last = await statusOf(tab, who);
+    const answer = await byDeadline(statusOf(tab, who), deadline, NO_ANSWER);
+    if (answer === NO_ANSWER) throw await noAnswer(tab, who, `${who}: ${what}; last /status ${JSON.stringify(last)}`, patience);
+    last = answer;
     if (last !== null && check(last)) return last;
     // A refused or halted process stays so until stopped: no use waiting longer.
     const ended = last !== null && (last.state === "refused" || last.state === "halted");
@@ -136,11 +180,13 @@ export async function statusWhen(
   }
 }
 
-/** Waits until `who` told the page an event of `type`; fails after `patience`. */
+/** Waits until `who` told the page an event of `type`; fails after `patience`, also when the page has not answered. */
 export async function eventWhen(tab: ChromeTab, who: ProcessName, type: string, patience: number = PATIENCE_MS): Promise<PageEvent> {
   const deadline = Date.now() + patience;
   for (;;) {
-    const found = (await eventsOf(tab, who)).find((event) => event.type === type);
+    const events = await byDeadline(eventsOf(tab, who), deadline, NO_ANSWER);
+    if (events === NO_ANSWER) throw await noAnswer(tab, who, `${who}'s ${type}`, patience);
+    const found = events.find((event) => event.type === type);
     if (found !== undefined) return found;
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${who}'s ${type}\n${await tabReport(tab, [who])}`);
     await sleep(200);
@@ -188,10 +234,16 @@ export interface PageRestore {
   readonly statements?: number;
 }
 
-/** Waits until `expression` (evaluated in the page) is true; fails naming `what` with the tab's report. */
+/**
+ * Waits until `expression` (evaluated in the page) is true; fails naming `what` with the tab's report after `patience`,
+ * also when the page has not answered by then.
+ */
 async function pageWhen(tab: ChromeTab, expression: string, what: string, patience: number = PATIENCE_MS): Promise<void> {
   const deadline = Date.now() + patience;
-  while ((await tab.evaluate<boolean>(`Boolean(${expression})`).catch(() => false)) !== true) {
+  for (;;) {
+    const holds = await byDeadline(tab.evaluate<boolean>(`Boolean(${expression})`).catch(() => false), deadline, NO_ANSWER);
+    if (holds === NO_ANSWER) throw await noAnswer(tab, "core", what, patience);
+    if (holds === true) return;
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}\n${await tabReport(tab)}`);
     await sleep(200);
   }

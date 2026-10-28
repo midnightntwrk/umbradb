@@ -19,10 +19,34 @@ import { spawnChild } from "../child-processes.js";
  * or background networking, so the only requests are the pages'. On Linux under CI it runs with `--no-sandbox` (a
  * container's or runner's user namespaces may refuse Chrome's sandbox); the pages it loads are the tests' own.
  *
- * **Ending.** {@link ChromeBrowser.close} asks Chrome to close (`Browser.close`), then kills it with SIGKILL if it has
- * not exited within 10 s; Chrome's own helper processes exit with it. The process is started with `spawnChild`, so it
- * is killed too if the test process ends first.
+ * **Ending.** {@link ChromeBrowser.close} asks Chrome to close (`Browser.close`), waiting at most 10 s for its answer,
+ * then kills it with SIGKILL if it has not exited within 10 s more, and fails if it has not exited 10 s after that: a
+ * stuck browser never holds the suite's last hook (issue 00041). Chrome's own helper processes exit with it. The process
+ * is started with `spawnChild`, so it is killed too if the test process ends first.
+ *
+ * **No call waits forever.** Each DevTools call fails, naming its method, when Chrome has not answered within
+ * {@link CDP_CALL_MS} (a page that never settles an evaluated promise, a browser that stopped answering): the test that
+ * made it fails with that reason, well within its own budget, instead of running to its timeout (issue 00041).
  */
+
+/** How long a DevTools call may wait for Chrome's answer (see the module comment): a page wait's patience. */
+export const CDP_CALL_MS = 240_000;
+
+/** How long {@link ChromeBrowser.close} waits at each of its steps (see the module comment). */
+const CLOSE_MS = 10_000;
+
+/** Whether `exited` settles within `ms`. */
+async function exitsWithin(exited: Promise<void>, ms: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), ms);
+  });
+  try {
+    return await Promise.race([exited.then(() => true as const), late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** Where the machine's Chrome is (see the module comment); throws, naming `UMBRADB_CHROME`, when none is found. */
 export function chromePath(): string {
@@ -64,7 +88,10 @@ export interface CdpEvent {
 /** A connection to Chrome's DevTools endpoint. */
 export class Cdp {
   readonly #socket: WebSocket;
-  readonly #pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void; method: string }>();
+  readonly #pending = new Map<
+    number,
+    { resolve(value: unknown): void; reject(error: Error): void; method: string; timer: ReturnType<typeof setTimeout> }
+  >();
   readonly #listeners = new Set<(event: CdpEvent) => void>();
   #next = 1;
   #closed: Error | null = null;
@@ -74,7 +101,10 @@ export class Cdp {
     socket.addEventListener("message", (event: MessageEvent) => this.#receive(String(event.data)));
     socket.addEventListener("close", () => {
       this.#closed = new Error("the DevTools connection closed");
-      for (const call of this.#pending.values()) call.reject(this.#closed);
+      for (const call of this.#pending.values()) {
+        clearTimeout(call.timer);
+        call.reject(this.#closed);
+      }
       this.#pending.clear();
     });
   }
@@ -87,12 +117,24 @@ export class Cdp {
     });
   }
 
-  /** Sends `method` (on `sessionId`'s target, else the browser) and resolves with its result. */
-  send<T = Record<string, unknown>>(method: string, params: Record<string, unknown> = {}, sessionId?: string): Promise<T> {
+  /**
+   * Sends `method` (on `sessionId`'s target, else the browser) and resolves with its result; rejects, naming it, when
+   * Chrome has not answered within `timeoutMs`.
+   */
+  send<T = Record<string, unknown>>(
+    method: string,
+    params: Record<string, unknown> = {},
+    sessionId?: string,
+    timeoutMs: number = CDP_CALL_MS,
+  ): Promise<T> {
     if (this.#closed !== null) return Promise.reject(this.#closed);
     const id = this.#next++;
     return new Promise<T>((resolve, reject) => {
-      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, method });
+      const timer = setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new Error(`${method}: Chrome did not answer within ${timeoutMs} ms`));
+      }, timeoutMs);
+      this.#pending.set(id, { resolve: resolve as (value: unknown) => void, reject, method, timer });
       this.#socket.send(JSON.stringify({ id, method, params, ...(sessionId === undefined ? {} : { sessionId }) }));
     });
   }
@@ -119,6 +161,7 @@ export class Cdp {
     if (message.id !== undefined) {
       const call = this.#pending.get(message.id);
       this.#pending.delete(message.id);
+      if (call !== undefined) clearTimeout(call.timer);
       if (message.error !== undefined) call?.reject(new Error(`${call.method}: ${message.error.message}`));
       else call?.resolve(message.result);
       return;
@@ -302,14 +345,20 @@ export class ChromeBrowser {
     await this.#cdp.send("Browser.setDownloadBehavior", { behavior: "allowAndName", downloadPath: directory, eventsEnabled: true });
   }
 
-  /** Closes Chrome (SIGKILL after 10 s) and deletes its profile. */
+  /**
+   * Closes Chrome and deletes its profile: `Browser.close`, its answer awaited at most 10 s; SIGKILL if Chrome has not
+   * exited 10 s later; a failure if it has not exited 10 s after that (see the module comment).
+   */
   close(): Promise<void> {
     this.#closing ??= (async () => {
-      await this.#cdp.send("Browser.close").catch(() => undefined);
+      await this.#cdp.send("Browser.close", {}, undefined, CLOSE_MS).catch(() => undefined);
       this.#cdp.close();
-      const timer = setTimeout(this.#kill, 10_000);
-      await this.#exited;
-      clearTimeout(timer);
+      if (!(await exitsWithin(this.#exited, CLOSE_MS))) {
+        this.#kill();
+        if (!(await exitsWithin(this.#exited, CLOSE_MS))) {
+          throw new Error(`Chrome (profile ${this.profile}) did not exit within ${CLOSE_MS} ms of SIGKILL`);
+        }
+      }
       rmSync(this.profile, { recursive: true, force: true });
     })();
     return this.#closing;

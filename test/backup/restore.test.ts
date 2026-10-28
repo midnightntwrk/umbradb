@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EXIT } from "../../src/cli/command.js";
 import type { RestoreCommandSeams } from "../../src/cli/restore.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
+import type { ProcessingEnd } from "../../src/runner/process.js";
 import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import postgres from "postgres";
 import { nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
@@ -97,11 +98,31 @@ async function stateOf(db: BackupDatabase): Promise<{ hash: string; digests: str
   return { hash: await hashOf(db), digests: rows.map((row) => `${row.t} ${row.schema}.${row.table} ${row.height} ${row.d}`) };
 }
 
+/**
+ * How processing ended, for an assertion's message (issue 00041): its kind; for a refusal or a failure, the error's
+ * name, code and message, and each cause's; then the process's log lines.
+ */
+function endedText(ended: ProcessingEnd, lines: readonly string[]): string {
+  const parts = [`processing ended ${ended.kind}`];
+  if (ended.kind === "refused" || ended.kind === "failed") {
+    let error: unknown = ended.error;
+    for (let depth = 0; error !== undefined && error !== null && depth < 5; depth++) {
+      const { name, code, message } = error as { name?: unknown; code?: unknown; message?: unknown };
+      const what = `${String(name ?? typeof error)}${code === undefined ? "" : ` (${String(code)})`}: ${String(message ?? error)}`;
+      parts.push(`${depth === 0 ? "error" : "caused by"} ${what}`);
+      error = (error as { cause?: unknown }).cause;
+    }
+  }
+  parts.push(`log: ${lines.join(" | ")}`);
+  return parts.join("\n");
+}
+
 /** Runs a ticker process on `db` from its cursor to the core's stop at `stop`. */
 async function continueTo(db: BackupDatabase, stop: bigint): Promise<void> {
   const ticker = await startTicker(writeTickerConfig(project, { database: db.setting, stop: Number(stop) }), stop + 5n);
   try {
-    expect(await ticker.handle.ended).toMatchObject({ kind: "stopped", height: stop, core: true });
+    const ended = await ticker.handle.ended;
+    expect(ended, endedText(ended, ticker.lines)).toMatchObject({ kind: "stopped", height: stop, core: true });
   } finally {
     await ticker.handle.stop();
   }

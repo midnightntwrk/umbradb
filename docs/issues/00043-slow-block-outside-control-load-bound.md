@@ -1,6 +1,11 @@
 # 00043 — slow-block-outside.negative-control.test.ts's 1 s threshold, which loaded heights cross
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed by task 17.5a (2026-10-27): A161's oracle (`a161Problems`) does not count a
+  `slow-block` at a height's own points (`HEIGHT_POINTS`: `on-fetch` to `on-db-write`) as A161's, so each negative
+  control fails for its own reason only and A161 itself is not failed by a slow height; the control that does not
+  clear keeps the last activity of A161's windows only (it kept any window's, and a slow height after `on-finalized`
+  replaced A161's: seen once in task 17.5a's runs, `/status` no longer showing `on-finalized` a heartbeat after it
+  ended); A161's case of a failure after the commit filters its log lines the same way.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

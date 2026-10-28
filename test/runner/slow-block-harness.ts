@@ -427,6 +427,17 @@ export function quietProblems(observed: Observed, seen: Seen, lines: readonly st
 export type OutsidePoint = "on-after-db-write" | "on-finalized";
 
 /**
+ * The points of a height's own window (RN-17, task 5.5). A `slow-block` at one of them is that height's processing,
+ * never one of A161's windows: no test holds it, but on a loaded machine a height's `on-db-write` and `COMMIT` can pass
+ * `slowBlockMs` 1000 and raise it, correctly (issue 00043).
+ */
+export const HEIGHT_POINTS: ReadonlySet<string> = new Set(["on-fetch", "on-parse", "on-start-height", "on-compute", "on-db-write"]);
+
+/** Whether `condition` (a `slow-block`, in `status()` or `/status`) is outside a height's processing: A161's. */
+const outsideHeight = (condition: Readonly<Record<string, unknown>> | undefined): boolean =>
+  condition !== undefined && !HEIGHT_POINTS.has(condition.point as string);
+
+/**
  * The log line that raises A161's condition: module `slow`'s `point` at height 2 (`on-finalized` announces height 2
  * as the finalized head), after `slowBlockMs` 1000.
  */
@@ -448,7 +459,8 @@ export const a161Ended = (point: OutsidePoint): RegExp =>
  * not before its window was open for `slowBlockMs`; the condition is gone once that callback ends: no `status()` read
  * after the window's end (its log line) and no `/status` answer a heartbeat after it shows the condition at `point`,
  * each read for a while; nothing is cancelled or retried — the callback ran once, to its end; height 2 committed once,
- * with no retry, no other condition and no halt.
+ * with no retry, no other condition and no halt. A `slow-block` at a height's own points ({@link HEIGHT_POINTS}) is not
+ * A161's condition and is not compared.
  */
 export function a161Problems(observed: Observed, seen: Seen, run: Pick<SlowRun, "lines" | "lineAt" | "startedAt">, point: OutsidePoint): string[] {
   const problems: string[] = [];
@@ -469,8 +481,9 @@ export function a161Problems(observed: Observed, seen: Seen, run: Pick<SlowRun, 
   const start = seen.start ?? Number.NaN;
   const expected = { code: "slow-block", height: SLOW_HEIGHT, point, module: "slow" };
   // status(): the first read showing it, and a read known to come before its window opened — the last before the
-  // commit for on-after-db-write (its window opens at the commit), the process's start for on-finalized.
-  const index = observed.statuses.findIndex(({ status }) => slowOf(status) !== undefined);
+  // commit for on-after-db-write (its window opens at the commit), the process's start for on-finalized. Height 2's own
+  // processing, if a loaded machine made it slow, is not A161's condition (issue 00043).
+  const index = observed.statuses.findIndex(({ status }) => outsideHeight(slowOf(status)));
   const first = observed.statuses[index];
   if (first === undefined) problems.push("status() never showed slow-block");
   else {
@@ -492,7 +505,7 @@ export function a161Problems(observed: Observed, seen: Seen, run: Pick<SlowRun, 
     }
   }
   // /status, through core-status.
-  const body = observed.bodies.find((read) => bodySlowOf(read.body) !== undefined);
+  const body = observed.bodies.find((read) => outsideHeight(bodySlowOf(read.body)));
   if (body === undefined) problems.push("/status never showed slow-block");
   else {
     const shown = bodySlowOf(body.body);

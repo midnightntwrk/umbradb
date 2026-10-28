@@ -12,6 +12,7 @@ import {
   type LoopEnd,
   type LoopInput,
   type SlowBlockEvent,
+  type SlowWindow,
 } from "../../src/runner/loop.js";
 import { declaration } from "../modules/declarations.js";
 import { entry } from "../modules/graph-fixtures.js";
@@ -30,12 +31,22 @@ import { InMemoryBlockSource, loopInput, RUNNER_BACKENDS, type Started, startWit
  *   the commit;
  * - **a failure closes the window** it happened in (the event says it did not complete); **a height stopped at the
  *   lockstep wait** (PP-6, task 14.3) closes its window too, so nothing is raised once the loop ended.
- * The observer's events and `slowBlock()` are read directly (`window` names which window).
+ * The observer's events and `slowBlock()` are read directly (`window` names which window), and only those of the
+ * windows a case holds open are compared (issue 00040): a window no case holds — a height's own processing, on
+ * PostgreSQL its `on-db-write` and `COMMIT`, or a callback's read — can pass `slowBlockMs` on a loaded machine and raise
+ * a correct `slow-block` of its own. A held window's own reads count toward its time: each case leaves them at least
+ * 0.8 s, which the `on-finalized` and lockstep cases get from a `slowBlockMs` of 2,000 with their holds raised alike.
  *
- * Each test waits on purpose (callbacks of up to 1.5 s): its budget is that plus Vitest's 60 s.
+ * Each test waits on purpose (callbacks of up to 2.5 s, waits of up to 2.7 s): its budget is that plus Vitest's 60 s.
  */
 
 const BUDGET_MS = 10_000 + 60_000;
+
+/** The windows a case holds open, each `<window>@<height>`: the only ones its checks compare. */
+type Held = readonly `${SlowWindow}@${bigint}`[];
+
+/** Whether the window `window` at `height` is one of `held`. */
+const isHeld = (held: Held, window: SlowWindow, height: bigint): boolean => held.includes(`${window}@${height}`);
 
 /** What the test saw of the watchdog: the observer's events and `slowBlock()` every 10 ms, each with when. */
 interface Watched {
@@ -86,12 +97,23 @@ async function runWatched(
   }
 }
 
-/** The raised events of `watched`, as plain data. */
-const raisedOf = (watched: Watched) =>
-  watched.events.flatMap(({ at, event }) => (event.kind === "raised" ? [{ at, ...event.activity }] : []));
+/** The events of `watched` in the windows `held`, in order. */
+const eventsOf = (watched: Watched, held: Held) =>
+  watched.events.filter(({ event }) =>
+    event.kind === "raised" ? isHeld(held, event.activity.window, event.activity.height) : isHeld(held, event.window, event.height),
+  );
 
-/** The ended events of `watched`, as plain data. */
-const endedOf = (watched: Watched) => watched.events.flatMap(({ at, event }) => (event.kind === "ended" ? [{ at, ...event }] : []));
+/** The raised events of `watched` in the windows `held`, as plain data. */
+const raisedOf = (watched: Watched, held: Held) =>
+  eventsOf(watched, held).flatMap(({ at, event }) => (event.kind === "raised" ? [{ at, ...event.activity }] : []));
+
+/** The ended events of `watched` in the windows `held`, as plain data. */
+const endedOf = (watched: Watched, held: Held) =>
+  eventsOf(watched, held).flatMap(({ at, event }) => (event.kind === "ended" ? [{ at, ...event }] : []));
+
+/** The reads of `slowBlock()` in `watched` that showed one of the windows `held`. */
+const shownOf = (watched: Watched, held: Held) =>
+  watched.reads.filter(({ slow }) => slow !== null && isHeld(held, slow.window, slow.height));
 
 /** When a module's timed callback began and ended (`performance.now()`), by `<point>@<height>`. */
 type Times = Map<string, { readonly start: number; readonly end: number }>;
@@ -176,23 +198,24 @@ describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processi
       const source = new InMemoryBlockSource({ head: 2n });
       const { loop, stop, watched } = watchedLoop(started, source, 1_600);
       expect(await runWatched(loop, source, stop, watched, 2n)).toEqual({ kind: "signal" });
+      const held: Held = ["after-commit@2"];
       const stopping = times.get("on-stop-height@2") as { start: number; end: number };
-      expect(raisedOf(watched)).toEqual([
+      expect(raisedOf(watched, held)).toEqual([
         expect.objectContaining({ window: "after-commit", height: 2n, point: "on-stop-height", module: "m" }),
       ]);
-      const raised = raisedOf(watched)[0]!;
+      const raised = raisedOf(watched, held)[0]!;
       expect(raised.at).toBeGreaterThan(stopping.start);
       // Raised by the window's 1,600 ms, not by on-stop-height's 1,500 (a Node.js timer may fire up to a millisecond
       // before performance.now() counts its delay).
       expect(raised.sinceMs).toBeGreaterThanOrEqual(1_600 - 2);
-      expect(endedOf(watched)).toEqual([expect.objectContaining({ window: "after-commit", height: 2n, completed: true })]);
-      expect(endedOf(watched)[0]!.at).toBeGreaterThanOrEqual(stopping.end);
+      expect(endedOf(watched, held)).toEqual([expect.objectContaining({ window: "after-commit", height: 2n, completed: true })]);
+      expect(endedOf(watched, held)[0]!.at).toBeGreaterThanOrEqual(stopping.end);
       // slowBlock() showed it in on-stop-height only, and none after the window ended.
-      const shown = watched.reads.filter(({ slow }) => slow !== null);
+      const shown = shownOf(watched, held);
       expect(new Set(shown.map(({ slow }) => `${slow!.window} ${slow!.height} ${slow!.point} ${slow!.module}`))).toEqual(
         new Set(["after-commit 2 on-stop-height m"]),
       );
-      expect(shown.every(({ at }) => at >= stopping.start && at <= endedOf(watched)[0]!.at)).toBe(true);
+      expect(shown.every(({ at }) => at >= stopping.start && at <= endedOf(watched, held)[0]!.at)).toBe(true);
       expect(loop.slowBlock()).toBeNull();
     },
     BUDGET_MS,
@@ -203,22 +226,28 @@ describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processi
     async () => {
       const { db } = await backend.database();
       const times: Times = new Map();
-      // Head 1's on-finalized awaits 700 ms, head 2's (announced after the loop waited 1.2 s) 1,500 ms; slowBlockMs 1,000.
-      const f = holder("f", { "on-finalized@1": 700, "on-finalized@2": 1_500 }, times);
+      // Head 1's on-finalized awaits 1 s, head 2's (announced after the loop waited 1.5 s) 2.5 s; slowBlockMs 2,000. Each
+      // window's own read counts too: head 1's has 1 s left for it on a loaded machine.
+      const f = holder("f", { "on-finalized@1": 1_000, "on-finalized@2": 2_500 }, times);
       const started = await startWith(db, [f], [entry("f", 1)]);
       const source = new InMemoryBlockSource({ head: 1n });
-      const { loop, stop, watched } = watchedLoop(started, source, 1_000);
+      const { loop, stop, watched } = watchedLoop(started, source, 2_000);
       const running = runWatched(loop, source, stop, watched, 2n);
       await source.waiting(1n);
-      await sleep(1_200);
+      await sleep(1_500);
       source.finalize(2n);
       expect(await running).toEqual({ kind: "signal" });
+      const held: Held = ["finalized@1", "finalized@2"];
+      const first = times.get("on-finalized@1") as { start: number; end: number };
       const second = times.get("on-finalized@2") as { start: number; end: number };
-      const raised = raisedOf(watched);
+      const raised = raisedOf(watched, held);
       expect(raised).toEqual([expect.objectContaining({ window: "finalized", height: 2n, point: "on-finalized", module: "f" })]);
-      expect(raised[0]!.at - second.start).toBeGreaterThan(500);
-      expect(endedOf(watched)).toEqual([expect.objectContaining({ window: "finalized", height: 2n, completed: true })]);
-      expect(watched.reads.filter(({ at, slow }) => slow !== null && at < second.start)).toEqual([]);
+      // The window that raised opened after head 1's callback had ended: neither it nor the wait is in it.
+      expect(raised[0]!.at - raised[0]!.sinceMs).toBeGreaterThanOrEqual(first.end);
+      // About 2 s into head 2's callback, less its read's opening; head 1's time carried into it would raise it within 1 s.
+      expect(raised[0]!.at - second.start).toBeGreaterThan(1_200);
+      expect(endedOf(watched, held)).toEqual([expect.objectContaining({ window: "finalized", height: 2n, completed: true })]);
+      expect(shownOf(watched, held).filter(({ at }) => at < second.start)).toEqual([]);
       expect(loop.slowBlock()).toBeNull();
     },
     BUDGET_MS,
@@ -236,15 +265,17 @@ describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processi
       const source = new InMemoryBlockSource({ head: 2n });
       const first = watchedLoop(started, source, 1_000);
       expect(await runWatched(first.loop, source, first.stop, first.watched, 2n)).toEqual({ kind: "signal" });
-      expect(first.watched.events).toEqual([]);
+      // The first run held nothing (its heights' own windows are not this case's).
+      expect(times.has("on-after-db-write@2")).toBe(false);
       armed = true;
       const { loop, stop, watched } = watchedLoop(started, source, 1_000);
       expect(await runWatched(loop, source, stop, watched, 2n)).toEqual({ kind: "signal" });
       expect(times.has("on-after-db-write@2")).toBe(true);
-      expect(raisedOf(watched)).toEqual([
+      const held: Held = ["redelivery@2"];
+      expect(raisedOf(watched, held)).toEqual([
         expect.objectContaining({ window: "redelivery", height: 2n, point: "on-after-db-write", module: "m" }),
       ]);
-      expect(endedOf(watched)).toEqual([expect.objectContaining({ window: "redelivery", height: 2n, completed: true })]);
+      expect(endedOf(watched, held)).toEqual([expect.objectContaining({ window: "redelivery", height: 2n, completed: true })]);
       expect(loop.slowBlock()).toBeNull();
     },
     BUDGET_MS,
@@ -272,15 +303,16 @@ describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processi
       expect(failure).toBeInstanceOf(HeightFailure);
       expect(failure).toMatchObject({ height: 2n, committed: false });
       expect(times.has("on-after-db-write@2")).toBe(false);
-      expect(raisedOf(watched)).toEqual([]);
+      const held: Held = ["after-commit@2"];
+      expect(raisedOf(watched, held)).toEqual([]);
       // The retry, on the same loop: the cursor read finds 2 committed; its on-after-db-write (1,500 ms) runs in the
       // window after the commit, which opens there.
       expect(await runWatched(loop, source, stop, watched, 2n)).toEqual({ kind: "signal" });
       expect(times.has("on-after-db-write@2")).toBe(true);
-      expect(raisedOf(watched)).toEqual([
+      expect(raisedOf(watched, held)).toEqual([
         expect.objectContaining({ window: "after-commit", height: 2n, point: "on-after-db-write", module: "m" }),
       ]);
-      expect(endedOf(watched)).toEqual([expect.objectContaining({ window: "after-commit", height: 2n, completed: true })]);
+      expect(endedOf(watched, held)).toEqual([expect.objectContaining({ window: "after-commit", height: 2n, completed: true })]);
       expect(loop.slowBlock()).toBeNull();
     },
     BUDGET_MS,
@@ -298,13 +330,14 @@ describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processi
       const failure = await runWatched(loop, source, stop, watched, 2n);
       expect(failure).toBeInstanceOf(HeightFailure);
       expect(failure).toMatchObject({ height: 2n, committed: true, point: "on-after-db-write", module: "m" });
-      expect(raisedOf(watched)).toEqual([
+      const held: Held = ["after-commit@2"];
+      expect(raisedOf(watched, held)).toEqual([
         expect.objectContaining({ window: "after-commit", height: 2n, point: "on-after-db-write", module: "m" }),
       ]);
-      expect(endedOf(watched)).toEqual([expect.objectContaining({ window: "after-commit", height: 2n, completed: false })]);
+      expect(endedOf(watched, held)).toEqual([expect.objectContaining({ window: "after-commit", height: 2n, completed: false })]);
       expect(loop.slowBlock()).toBeNull();
       await sleep(1_200);
-      expect(watched.events).toHaveLength(2);
+      expect(eventsOf(watched, held)).toHaveLength(2);
     },
     BUDGET_MS,
   );
@@ -312,8 +345,11 @@ describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processi
   it(
     "a height stopped at the lockstep wait closes its window: raised before the stop, ended with it, nothing after",
     async () => {
+      // slowBlockMs 2,000: height 1's window opens at its first callback, and its reads before the lockstep wait count
+      // too — at least 1.8 s is left for them on a loaded machine.
+      const held: Held = ["height@1"];
       for (const [stopAfterMs, raises] of [
-        [1_200, true],
+        [2_700, true],
         [200, false],
       ] as const) {
         const { db } = await backend.database();
@@ -327,7 +363,7 @@ describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processi
               signal.addEventListener("abort", () => resolve(false), { once: true });
             }),
         };
-        const { loop, stop, watched } = watchedLoop(started, source, 500, { lockstep: gate });
+        const { loop, stop, watched } = watchedLoop(started, source, 2_000, { lockstep: gate });
         const atGate = new Promise<void>((resolve) => {
           asked = resolve;
         });
@@ -338,12 +374,14 @@ describe.each(RUNNER_BACKENDS)("slow-block's windows outside a height's processi
         expect(await running).toEqual({ kind: "signal" });
         expect(loop.slowBlock()).toBeNull();
         if (raises) {
-          expect(raisedOf(watched)).toEqual([expect.objectContaining({ window: "height", height: 1n, point: "on-compute", module: null })]);
-          expect(endedOf(watched)).toEqual([expect.objectContaining({ window: "height", height: 1n, completed: false })]);
+          expect(raisedOf(watched, held)).toEqual([
+            expect.objectContaining({ window: "height", height: 1n, point: "on-compute", module: null }),
+          ]);
+          expect(endedOf(watched, held)).toEqual([expect.objectContaining({ window: "height", height: 1n, completed: false })]);
         }
-        // Past the timer's due time with the loop ended: nothing more is raised.
-        await sleep(800);
-        expect(watched.events.map(({ event }) => event.kind)).toEqual(raises ? ["raised", "ended"] : []);
+        // Past the timer's due time (at most 2 s after the wait began) with the loop ended: nothing more is raised.
+        await sleep(2_300);
+        expect(eventsOf(watched, held).map(({ event }) => event.kind)).toEqual(raises ? ["raised", "ended"] : []);
         expect(loop.slowBlock()).toBeNull();
       }
     },
