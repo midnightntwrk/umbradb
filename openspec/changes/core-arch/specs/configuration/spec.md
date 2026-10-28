@@ -117,10 +117,20 @@ SHALL be validated (CF-3) but not used. The data fields of each `core` revision 
 (owner decision Q102).
 
 `database` SHALL be given as parts, and a connection string SHALL be refused (owner decision Q167): `{ kind:
-"postgres", host, port, user, password, name, ssl }` (`port` default 5432; `ssl` one of `disable`, `require` — the
-default — and `verify-full`; `password` may be absent), `{ kind: "pglite", path }` or `{ kind: "pglite", memory:
-true }`. Only `password` SHALL be secret; the other parts are operational and SHALL be shown in `/config` and the
-log.
+"postgres", host, port, user, password, name, ssl }` (`port` default 5432; `ssl` one of `disable`, `require` and
+`verify-full`; `password` may be absent), `{ kind: "pglite", path }` or `{ kind: "pglite", memory: true }`. `ssl`
+SHALL default to `require`, except for a loopback host (`localhost`, `127.0.0.1`, `::1`) or a Unix socket directory (a
+`host` starting with `/`), where it SHALL default to `disable` (owner decision Q182); `verify-full` SHALL check the
+server's certificate and host name against Node.js's built-in trust roots, with no setting for another authority
+(owner decision Q183). Only `password` SHALL be secret; the other parts are operational and SHALL be shown in
+`/config` and the log.
+
+WHERE the public process's `database` is PostgreSQL and `listen.transport` is set, `core.transportReader` (`{ user,
+password }`, the other parts `database`'s; `password` secret, `user` operational) SHALL be required, and the core
+SHALL run the transport's reads (PP-4) on a pool of its own logged in as that user; startup SHALL refuse with
+`transport-reader-can-write`, naming what it found, IF that login is a superuser, holds `CREATEROLE`, `CREATEDB` or
+`BYPASSRLS`, is a member of `database`'s login, or holds any privilege other than `SELECT` (and `USAGE` on schemas) on
+a public schema or table (owner decision Q175). On PGlite the setting SHALL be refused, since there is one session.
 
 A process, and a restore into its target, SHALL create a PGlite `path` that does not exist together with any missing
 parent directory, and SHALL log that it created it, naming the path (owner decisions Q163, Q165); the read-only uses

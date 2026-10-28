@@ -48,6 +48,10 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   file; `AGENTS.md` holds the 1.0.0 guideline's rules still in force and points at no deleted document;
   `Formal/STORAGE_ALGEBRA.md` states W1 and T5 and no retired law.
   (owner decisions Q169, Q170, Q171)
+- **A178** `[STATIC]` `docs/THREAT_MODEL.md` describes 0.10.0 (no 0.9.5 part named as current: checkpoint store,
+  chunk pool, wallet envelope, TemporalKV), covers the draft's ten boundaries and the owner's three areas (backups and
+  restore, the node, private reads), and each `path:line` it cites names an existing file with at least that many
+  lines; `README.md` and `SECURITY.md` link it. (owner decision Q181)
 - **A5** `[STATIC]` A test compares the required-test manifest, `stryker.conf.json` `mutate`, the coverage floors of
   `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on any difference.
   (LS-5)
@@ -217,6 +221,12 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
   and the log show the host, port, user, name, `ssl` and a PGlite `path`, and the password only as `[redacted]`; a
   connection string in either field is refused by its schema with its path; `umbradb config check --database` reads
   the history of the database the file configures, read-only. (CF-4, CF-10, owner decision Q167)
+- **A177** `[CI]` On PostgreSQL 18.6 with `listen.transport`: a core whose `transportReader` login has only `SELECT`
+  on the public schemas serves a private process's reads on that login (`current_user` in a read is it); one whose
+  login is a superuser, holds `CREATEROLE`, is a member of the writer's login or holds `INSERT` on a public table
+  refuses startup with `transport-reader-can-write`, naming it; without `transportReader` the start is refused with its
+  path; with the gate turned off (a test seam), a `read` that writes is refused by the database. `ssl` defaults to
+  `disable` for `localhost` and to `require` for another host. (CF-4, PP-4, owner decisions Q175, Q182)
 
 ## 5. Runner
 

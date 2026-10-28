@@ -1127,8 +1127,13 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the tests, the browser page and the docs build moves to the parts; design §7, §8 and §12, the operator guide.
       Owner decision Q166 A: the browser page passes no `updateHash`. `ssl` reaches the PostgreSQL driver: `require`
       by default, `verify-full` checking the server's certificate and host name, `disable` only when set (the threat
-      model draft's gap 2: no TLS option is passed today).
-      **Acceptance:** A170; A166 and A35 as amended.
+      model draft's gap 2: no TLS option is passed today). Owner decision Q182 B: a loopback host (`localhost`,
+      `127.0.0.1`, `::1`) or a socket directory defaults to `disable`. Owner decision Q183 A: `verify-full` uses
+      Node.js's built-in roots, no CA setting. Owner decision Q175 A: `core.transportReader` (`{ user, password }`),
+      required on PostgreSQL with `listen.transport`, refused on PGlite; the transport's reads run on its own pool;
+      startup refuses `transport-reader-can-write` (a new refusal code: design §11 and the registry) for a login that
+      could write; task 14.2b's gate stays on both backends; the operator guide says how to create that login.
+      **Acceptance:** A170, A177; A166 and A35 as amended.
 
 ## 5. Runner
 
@@ -3831,8 +3836,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 - [ ] 17.4b The owner's answer Q172 A: `docs/THREAT_MODEL.md` (0.9.5's trust model) deleted, its commit policy —
       no secret of any value in git, restrictive file modes, the one suppression kept by its exact fingerprint —
       moved to `SECURITY.md` first; the pointers to it in `README.md`, `ROADMAP.md` and `nix/midnight-env/` changed
-      (their link lines only); A171's list gains it. A 0.10.0 threat model comes from the owner's review of the
-      draft (`~/todo/Umbra/experiments/00028-threat-model-draft.md`) as a task of its own.
+      (their link lines only, pointing at `SECURITY.md` until task 17.4c writes the 0.10.0 model at the same path,
+      owner decision Q181 A); A171's list does not gain it.
       The owner's answer Q170 C (2026-10-28): `docs/releases/v0.9.5.md`, `docs/releases/v0.9.5-notes.md` and
       `docs/recovery/EVIDENCE.md` kept as 0.9.5's release record; `docs/v1-implementation-guideline.md` and
       `docs/v1-lessons-learned.md` deleted, after the guideline's rules still in force move into `AGENTS.md`, which
@@ -3851,6 +3856,19 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       unchanged. Every link to a deleted document (`ROADMAP.md`, `README.md`, `nix/midnight-env/`, the kept documents)
       changed, its link line only; design §13 and §15 as amended.
       **Acceptance:** A171 with every document above listed.
+- [ ] 17.4c The owner's answer Q181 A: the 0.10.0 threat model at `docs/THREAT_MODEL.md`, after 17.4b and before
+      17.3a. Codex redrafts it from `~/todo/Umbra/experiments/00028-threat-model-draft.md` against the tree, adding the
+      owner's review (2026-10-28): backups (Q177 A: a restore runs the file's SQL with the writer's rights before its
+      checks — restore only backups you wrote; Q178 A: origin and confidentiality are the operator's — store, move and
+      encrypt them yourself), the node (Q179 A: the core trusts its node for finality and contents; its checks catch an
+      inconsistent node, not a lying one; run or trust your own node, and use `wss://` across networks) and private
+      reads (Q180 A: a private process's read text and parameters reach the public database's operator and its logs,
+      and through the transport the core; UmbraDB's logs and errors may carry them; keep private-derived values out of
+      queries where you can). The gaps say what each task fixed (14.2b, 12.2b, 15.1b, 4.5, 17.4b) and point at issues
+      00045–00048 for the rest. Every `file:line` it cites checked against the tree; `README.md` and `SECURITY.md` link
+      it; the operator guide's backup and restore sections, and the module guide's private modules (Q180), say the same
+      in a sentence each.
+      **Acceptance:** A178.
 - [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage
