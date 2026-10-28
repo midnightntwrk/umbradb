@@ -1,12 +1,16 @@
 # Proposal — CORE-ARCH: the standalone indexer's core architecture (`core-arch`)
 
-> **Status:** Approved — by the owner on 2026-10-22, at commit `52cc6d4`, after the stage-1 gate: two cold
-> adversarial reviews (Codex `gpt-6-astra`), their fixes, and targeted fix checks ending in PASS. Change id `core-arch`;
-> capabilities `library-surface`, `database-api`, `modules`, `configuration`, `runner`, `determinism`,
-> `storage-helpers`, `admin-endpoints`, `test-tape`, `ingest`, `chain-data`, `ledger`, `contract-data`,
-> `private-processes`, `backups`, `browser`, and the removal of `temporal-kv`. Stage 2, the test-first build, is
-> under way; owner decisions Q53–Q56 (2026-10-23) amend the ledger interface (signed root-count changes, `stateKey`),
-> v8 contract logs (none stored) and LG-5 (the owner proposes the patches upstream later).
+> **Status:** Implemented (2026-10-28, tasks 19.1–19.3): the tasks of `tasks.md` §0–§17 are done, each checked with
+> the acceptance criteria it demonstrated, except 17.5 (the deferred mutation passes and coverage floors), which
+> finishes on its own branch. Left to the owner: the whole-system runs of §18 (18.1–18.5: the crash sweeps, the
+> full-core syncs and the three-backend comparison, the ingest benchmark, the required ids of `acceptance.md` §17, the
+> tape-apply baseline) and the pull-request record (19.5). Approved by the owner on 2026-10-22, at commit `52cc6d4`,
+> after the stage-1 gate: two cold adversarial reviews (Codex `gpt-6-astra`), their fixes, and targeted fix checks
+> ending in PASS. Change id `core-arch`; capabilities `library-surface`, `database-api`, `modules`, `configuration`,
+> `runner`, `determinism`, `storage-helpers`, `admin-endpoints`, `test-tape`, `ingest`, `chain-data`, `ledger`,
+> `contract-data`, `private-processes`, `backups`, `browser`, and the removal of `temporal-kv`. Owner decisions
+> Q53–Q56 (2026-10-23) amend the ledger interface (signed root-count changes, `stateKey`), v8 contract logs (none
+> stored) and LG-5 (the owner proposes the patches upstream later).
 
 ## Why
 

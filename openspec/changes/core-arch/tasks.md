@@ -2212,6 +2212,9 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       the PR records the network, the node's version, the command and the printed `<sha256>  <file>` line.
       **Pending:** the `[MANUAL]` run (owner, with 0.3); the real tapes (0.3, best recorded through the builder by the
       client that replays them); Q111; `docs/issues/00016-heartbeat-above-timer-limit.md`.
+      **The `[MANUAL]` run (task 0.3, 2026-10-26):** `check` against the undeployed devnet (node 2.1.0-1b2b31c7):
+      `fc1895ac1a3714c10c9196d724ce6a6e754d757abd0157fabb33ef28773b5d29`, identical, 12 frames sent and 16 received;
+      the same against preview (node 1.0.400-87c0fbdb), identical. The pull request records them (19.5).
 
 ## 10. Node client and ingest
 
@@ -4105,11 +4108,30 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
 
 ## 19. Close-out
 
-- [ ] 19.1 Check off every task above with the criteria it demonstrated; map every acceptance criterion to its test in
+- [x] 19.1 Check off every task above with the criteria it demonstrated; map every acceptance criterion to its test in
       the pull request.
-- [ ] 19.2 Set the proposal's status line to Implemented.
-- [ ] 19.3 Update `ROADMAP.md`: this change, the new architecture, and the "36 symbols" statement at `ROADMAP.md:455`
+      **Done (2026-10-28):** every task of §0–§17 is checked with its **Done** paragraph and the ids it demonstrated,
+      except 17.5 (running on its own branch, which checks it) and the dependency pins 0.1 and 0.6, whose acceptance
+      is their probe tests and audit rather than an `A` id; §18 is the owner's and stays open. The dated **Pending**
+      clauses are kept as written: each names a later task that is done, except the CI runs that wait for the push
+      (0.1, 0.2, 0.4, 2.1, 2.2, 2.2a; A97's rebuild on amd64 and arm64) and 9.2's `[MANUAL]` run, which task 0.3 did
+      (9.2 now says so). The map, one row per criterion of `acceptance.md` with its test files and titles, its tasks
+      and its status, read from the conformance report and the test titles' ids, is kept outside the repository for
+      the pull request (19.5): 178 rows, 167 PASSING (each with a test that passed in the conformance run; the
+      recorded-tape cases of A78, A94–A96, A99, A100, A102, A108 and A159 skip by name without `UMBRADB_TAPES` and
+      passed in their tasks' runs with the tapes), 2 MANUAL (A136, the owner's with 18.3; A153, task 0.5's six
+      consecutive runs), 6 deferred to §18 (A50, A51: 18.1; A133–A135: 18.2; A143: 18.5), 3 withdrawn (A119, A123,
+      A154) and none missing. Of §17's 22 required ids, 19 are already in their tests' titles; the other three
+      (`runner.crash-sweep.*`, `runner.restart-20.*`, `core.full-crash-sweep`) come with 18.1 and 18.2.
+- [x] 19.2 Set the proposal's status line to Implemented.
+      **Done (2026-10-28):** Implemented, with what is left named: 17.5 on its own branch, §18's whole-system runs and
+      the pull-request record (19.5); the approval at `52cc6d4` and decisions Q53–Q56 kept.
+- [x] 19.3 Update `ROADMAP.md`: this change, the new architecture, and the "36 symbols" statement at `ROADMAP.md:455`
       (`docs/v1-implementation-guideline.md` is deleted by task 17.4b, owner decision Q170 C).
+      **Done (2026-10-28):** rewritten for 0.10.0: 0.9.5 as released, with its kept release record; the architecture;
+      the surface as design §12 lists it, 54 names (27 values, 27 types) pinned by A1, replacing the 36 symbols; the
+      change's status by `tasks.md` section, the gates, what comes after 0.10.0 and the non-goals. 0.9.5's milestones,
+      the 1.0.0 program and its checklist, the WSL incident and the unmerged design tracks are deleted.
 - [ ] 19.4 Run `npm run graph:refresh` and commit `graphify-out/` with the close-out commit; `npm run graph:check`
       exits 0.
 - [ ] 19.5 Record in the pull request, per `docs/PULL_REQUEST_CHECKLIST.md`: the reviewed commit, each lane's verdict
