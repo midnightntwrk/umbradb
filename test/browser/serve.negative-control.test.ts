@@ -4,7 +4,7 @@ import { isolationProblems } from "./serve-checks.js";
 
 /**
  * Negative control of `./serve.test.ts` (task 17.3a): the header check fails on a plain static server, which sends
- * neither COOP nor COEP — the server the README's browser quick start warns against (the page then cannot start its
+ * neither COOP nor COEP — the server `docs/browser.md` warns against (the page then cannot start its
  * ledger worker: `SharedArrayBuffer is not defined`).
  */
 

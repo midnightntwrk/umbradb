@@ -172,6 +172,15 @@ The rules every change is checked against, besides those of the stages above.
   findings on them without failing. `vendored-ledger.yml` rebuilds every vendored ledger package
   from its pinned commit and fails when a built file differs from its `SHA256SUMS`. Workflow actions
   are pinned by commit SHA, and the scanners install from version-pinned, checksum-verified releases.
+- **Release artifacts.** A version bump (`package.json`'s `version`, with its `CHANGELOG.md` entry)
+  SHOULD produce the package and publish it on that version's GitHub Release (tag `v<version>`), so
+  a user installs it with one `npm install <release asset URL>`, with no clone and no build. The
+  package is `npm pack`'s tarball from a clean `npm ci` and `npm run build` at the tagged commit,
+  after the pack smoke passes on it; the release carries the tarball, its SHA-256, and a build
+  attestation where the build platform provides one. No release workflow exists yet: the owner
+  decides where release automation lives (owner decision, 2026-10-28) before one is written, and
+  until then the owner runs these steps by hand. A release is the owner's: agents prepare the
+  tarball and its checksum and never push a tag or create a release.
 - **Secrets.** The commit policy is `SECURITY.md`'s: no secret of any value in git, files holding one
   generated locally with mode 0600 and ignored, the one historical finding suppressed by its exact
   fingerprints in `.gitleaksignore`. `.gitleaks.toml` keeps no global path allowlist, and git history

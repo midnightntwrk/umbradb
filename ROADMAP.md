@@ -51,7 +51,8 @@ pinned by `test/library-surface/surface.test.ts` (A1); the command is `umbradb` 
   storage helpers, digests, the admin endpoints, the test tape, the node client and ingest, chain data, the ledger,
   contract data, private processes, backups, the browser build, the library surface and the moved gates. Each task
   was written test first and lists the acceptance criteria it demonstrated; the conformance gate passes.
-- [ ] The deferred testing (task 17.5): the mutation passes and the coverage floors held back while the build moved.
+- [x] The deferred testing (task 17.5): the mutation passes and the coverage floors held back while the build moved.
+  The mutation gate scores 87.98 % against its break of 65, and no coverage floor is pending.
 - [ ] The whole-system runs, the owner's (§18): the crash sweeps with test modules and with every core module, the
   stagenet and preview syncs from genesis, the three-backend comparison, the ingest benchmark against the official
   indexer, the required test ids of `acceptance.md` §17, and the tape-apply baseline.
@@ -64,10 +65,32 @@ supply-chain gate, the vendored ledger rebuild, and `npm run graph:check`.
 
 ## After 0.10.0
 
-- **Feature modules**, each with its own specification: public wallet and dApp APIs, token metadata, DUST and
-  shielded sync, private wallet data (the 0.9.5 TransactionHistory code waits for it, unexported, under `legacy/`),
-  key handling, Passport and an explorer.
-- **Publication on npm.** UmbraDB is built from the repository until then.
+### Feature modules
+
+The features planned on top of the core, from the owner's catalogue of 2026-10-22. Each is a module (or a public and a
+private module) built on the items the core modules provide ("Builds on"), and each gets its own specification and
+pull request before it is built: the catalogue fixes what each needs from the core, not how it is built. Priority is
+the catalogue's, where it sets one.
+
+| ID | Feature | Side | What it gives | Builds on | Priority |
+|---|---|---|---|---|---|
+| F1 | Public API, wallets | Public | The official indexer's wallet operations: `block`, `transactions`, and the `blocks`, `unshieldedTransactions`, `zswapLedgerEvents` and `dustLedgerEvents` subscriptions | `blocks`, `chain-events`, `block-parsed`, `tx-results`, `segment-results`, `ledger-events` | P1 |
+| F2 | Public API, dApps | Public | The official indexer's contract operations: `contractAction`, `contract`, `contractZswapState`, and the `contractActions` and `contractEvents` subscriptions | F1's items, `contract-states`, `contract-logs`, retained ledger states (`retainStates`) | — |
+| F3 | Public API, SPO | Public | The stake-pool operator data a Midnight node can serve | `blocks`, `chain-events`, node runtime calls | — |
+| F4 | Token metadata (MIP-0018) | Public | Token metadata from MIP-0018 events: the latest value per contract, token and key | `contract-logs` | P1 |
+| F5 | Unshielded token state (MIP-0014, NIGHT) | Public | Balances of NIGHT and MIP-0014 unshielded tokens | `block-parsed`, `segment-results` | — |
+| F6 | Shielded token state (MIP-0011), MIP-0006 data | Public and private | Public data on MIP-0011 shielded tokens and what MIP-0006 atomic swaps need on chain | `ledger-events`; F9's items on the private side | — |
+| F7 | Fast DUST sync | Public and private | A usable DUST state for a wallet quickly: a keyless public mirror of the DUST trees, the key's work in a private process | `ledger-events`, the ledger states (DUST tree indices and roots) | P2 |
+| F8 | Fast shielded sync | Private, public mirror | Shielded wallet sync, client-side by default, server-assisted as the fast option | `ledger-events`, the ledger states (zswap first-free index and root) | P2 |
+| F9 | Private wallet data | Private | What a viewing key finds in public data, kept in a private database; 0.9.5's TransactionHistory, unexported under `legacy/`, is its starting point | `ledger-events`, `tx-results`, `segment-results`, F12's values | — |
+| F10 | JSON-RPC for Passport | Private, in a TEE | Token balances for a viewing key: NIGHT, DUST, MIP-0011, MIP-0014, with MIP-0018 metadata | F4, F5, F7, F9 | P3 |
+| F11 | Explorer | Public | Browsable blocks, transactions, chain events and contract logs, on a server or in the browser build | `blocks`, `block-parsed`, `chain-events`, `contract-logs` | — |
+| F12 | User secrets (`user-secrets`) | Private | The private values private modules need (viewing keys and others), kept only in the private database | The private process; no core item | — |
+
+### Also next
+
+- **Publication on npm.** Until then each version's package is attached to its GitHub release, and UmbraDB can be
+  built from the repository ([Building from source](docs/building-from-source.md)).
 - **Open issues** are tracked in [`docs/issues/`](docs/issues/) and, once approved, on GitHub.
 
 ## Non-goals

@@ -2,8 +2,8 @@
 
 ![A near-total solar eclipse: a black disc ringed by a faint corona](docs/assets/penumbra.png)
 
-A Midnight indexer. UmbraDB reads finalized blocks from a Midnight node and writes what its modules compute into
-PostgreSQL 18 or PGlite, one database transaction per block.
+A Midnight Modular Indexer. UmbraDB reads blocks from Midnight, and stores what the modules compute in PostgreSQL
+deterministically. Run what you need, extend what is missing.
 
 ## What UmbraDB is
 
@@ -25,26 +25,41 @@ PostgreSQL 18 or PGlite, one database transaction per block.
 ## Requirements
 
 - **Node.js 24** or later. The configuration file is TypeScript, loaded through Node.js's type stripping.
-- **A database:** PostgreSQL 18, or nothing extra with PGlite (bundled; development only, see
-  [Choosing a database](docs/choosing-a-database.md)).
 - **A Midnight node's WebSocket RPC** (`ws://` or `wss://`), such as the public preview node
   `wss://rpc.preview.midnight.network`.
-- **For backups:** PostgreSQL 18's `pg_dump`, or on PGlite `@electric-sql/pglite-tools@0.4.10`.
-- **Docker** only for the tests (PostgreSQL 18 runs in Testcontainers), and Chrome for the browser tests.
+- **A database (OPTIONAL):** PostgreSQL 18, or nothing extra with PGlite (bundled; development only, see
+  [Choosing a database](docs/choosing-a-database.md)).
+- **For backups (OPTIONAL):** PostgreSQL 18's `pg_dump`, or on PGlite `@electric-sql/pglite-tools@0.4.10`.
+- **For the tests (OPTIONAL):** Docker (PostgreSQL 18 runs in Testcontainers), and Chrome for the browser tests.
 
 ## Quick start (CLI)
 
-UmbraDB is not on npm yet. Build a package from the repository, and install it in a new project:
+### Create a project
 
 ```sh
-git clone https://github.com/midnightntwrk/umbradb
-cd umbradb && npm ci && npm run build && npm pack      # writes umbradb-0.10.0.tgz
-cd .. && mkdir my-indexer && cd my-indexer
+mkdir my-indexer && cd my-indexer
 npm init -y && npm pkg set type=module
-npm install ../umbradb/umbradb-0.10.0.tgz
 ```
 
-`umbradb.config.ts`:
+### Install UmbraDB
+
+UmbraDB is not on npm yet; each version's package is attached to its
+[GitHub release](https://github.com/midnightntwrk/umbradb/releases). Install it in the project: the configuration
+file imports `umbradb` from the project's `node_modules`, and the install also adds the `umbradb` command
+(`npx umbradb`).
+
+```sh
+npm install https://github.com/midnightntwrk/umbradb/releases/download/v0.10.0/umbradb-0.10.0.tgz
+```
+
+To update, run it again with the new version's URL. To build the package yourself, or to run UmbraDB from a clone,
+see [Building from source](docs/building-from-source.md).
+
+### `umbradb.config.ts`
+
+Create `umbradb.config.ts` in `my-indexer/`, next to `package.json`, with this content. It is the configuration file:
+a TypeScript module whose default export names the network, the node, the database, the addresses to listen on, and
+the modules to run. `umbradb run` reads `./umbradb.config.ts` unless `--config` names another file.
 
 ```ts
 import { coreEntry, defineConfig } from "umbradb";
@@ -64,6 +79,8 @@ export default defineConfig({
   ],
 });
 ```
+
+### Check and run
 
 ```sh
 npx umbradb config check umbradb.config.ts   # checks the file without starting anything
@@ -87,36 +104,24 @@ minute. To index something, add modules: [Example: loading `stats-module`](#exam
 
 ## Quick start (browser)
 
-The browser build runs the same core in a page: the core in a worker with PGlite, the ledger in a worker of its own,
-the database held through a Web Lock. From the repository after `npm ci`:
+The same core runs in a Chrome page, with PGlite, from a clone of the repository. The page has no
+`umbradb.config.ts`: its configuration is a module bundled into it, `browser/src/config.ts` (the core and three core
+modules); name your own module to change it.
 
 ```sh
-npm run web      # builds dist-browser/ (the page, its workers, PGlite's and the ledger's WebAssembly) and serves it
+git clone https://github.com/midnightntwrk/umbradb my-web-indexer
+cd my-web-indexer
+npm ci
+node browser/build.ts --configuration browser/src/config.ts   # builds the page into dist-browser/
+node browser/serve.ts                                         # serves it on 127.0.0.1:8090; Ctrl-C stops it
+# npm run web: both steps with the default configuration (it rebuilds: not after your own build)
 ```
 
-It serves the page on `http://127.0.0.1:8090` (`WEB_PORT` names another port) with the two headers the page needs,
-`Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`: the page must be
-cross-origin isolated for the ledger worker's `SharedArrayBuffer`. Any static server works if it sends them; without
-them the page's log shows `the worker could not start its process: SharedArrayBuffer is not defined`.
+Then open [http://127.0.0.1:8090/?node=wss://rpc.preview.midnight.network][preview-page] in Chrome. Within
+seconds the page shows the core `following`, lag 0. [UmbraDB in a browser](docs/browser.md) covers the headers the
+page needs, its parameters (kept storage, other networks, restore), your own modules and backups.
 
-Open `http://127.0.0.1:8090/?node=wss://rpc.preview.midnight.network` in Chrome. The page picks S, its first height,
-as the node's finalized head, runs `core-chain-events`, `core-block-parsed` and `core-tx-results` from there, and shows
-the core's state, cursor, head and lag: `following`, lag 0, within seconds. It reaches only its own origin and the
-node.
-
-The page's parameters:
-
-- `node`: the node's WebSocket URL (required); the node must accept the page's origin.
-- `storage`: `memory` (the default: a new database at each load), or a name: a database in the origin's private file
-  system (OPFS), kept across reloads. A second tab on the same name refuses with `writer-lock-held`.
-- `network`: `preview` (the default), `preprod`, `mainnet`, `stagenet`, or `custom` with `genesis=<hash>`.
-- `restore`: with a `storage` name, the page waits for a backup file to restore into that new database before it
-  starts the core, then resumes from the backup's height + 1.
-
-The page is a development setup: it always runs under the development opt-in. Its configuration is bundled
-(`browser/src/config.ts`); `node browser/build.ts --configuration <module>` builds a page with your own modules (the
-shape is `browser/src/configuration.ts`). Its Back up button saves a backup of the database as a file. In the console,
-`await umbradb.core.call("admin", "/status")` answers what `/status` answers.
+[preview-page]: http://127.0.0.1:8090/?node=wss://rpc.preview.midnight.network
 
 ## Configuration files
 
@@ -366,6 +371,37 @@ Subscriptions are JSON messages over WebSocket, on any path:
 ← {"type":"complete","id":"s1"}
 ```
 
+## UmbraDB node architecture
+
+A process reads the Midnight node on two paths. Best blocks, not yet final, are worked on early and never stored.
+Each finalized height is processed in one database transaction, then the loop goes back to the node for the next.
+Module callbacks (`on-*`) run at fixed points on these paths:
+
+```mermaid
+flowchart TD
+  startdb["on-start-db"] --> startapi["on-start-api"]
+  startapi --> node(["Midnight node"])
+  node -- new best block --> best["on-best-block"]
+  best --> bestfetch["on-fetch, on-parse"]
+  bestfetch --> rollback["on-rollback"]
+  node -- new finalized head --> fin["on-finalized"]
+  fin --> fetch["on-fetch, on-parse"]
+  bestfetch -. reused at finality .-> fetch
+  fetch --> starth["on-start-height"]
+  starth --> compute["on-compute"]
+  compute --> write["on-db-write<br/>one transaction"]
+  write --> after["on-after-db-write"]
+  after -- next height, or wait --> node
+  after -. once .-> stoph["on-stop-height"]
+  classDef unfinalized fill:#EEEDFE,stroke:#534AB7,color:#3C3489
+  classDef finalized fill:#E1F5EE,stroke:#0F6E56,color:#085041
+  class best,bestfetch,rollback unfinalized
+  class fin,fetch,starth,compute,write,after,stoph finalized
+```
+
+[UmbraDB node architecture](docs/node-architecture.md) explains each step: the best-block queue and rollbacks, the
+prefetch, the block transaction, failures, and private processes.
+
 ## Modules, briefly
 
 A module is one `defineModule({ … })` declaration in TypeScript:
@@ -514,6 +550,11 @@ coreEntry({
 
 **Status.** Pre-1.0: version `0.10.0`. Under SemVer a `0.y.z` release makes no compatibility promise.
 
+**Roadmap.** The [ROADMAP](ROADMAP.md) says where the project stands and what comes next: feature modules built on
+the core, each with its own specification. Wallet and dApp APIs compatible with the official indexer, token metadata
+(MIP-0018), unshielded and shielded token state, fast DUST and shielded sync, private wallet data, a JSON-RPC for
+Passport, an explorer, and private user secrets.
+
 **Breaking change from 0.9.5.** 0.9.5 was a PostgreSQL storage library for wallet state. 0.10.0 is the indexer: no
 0.9.5 export or database is carried over; the indexer starts a new database. The [CHANGELOG](CHANGELOG.md) lists what
 changed. The specification is the OpenSpec change [`core-arch`](openspec/changes/core-arch/) (`proposal.md`,
@@ -523,15 +564,8 @@ changed. The specification is the OpenSpec change [`core-arch`](openspec/changes
 modules and configuration files are trusted code, the node is trusted for what it says is finalized, and a restore
 runs its file's SQL. Report vulnerabilities through GitHub's private vulnerability reporting, not public issues.
 
-**Building.**
-
-```sh
-npm ci
-npm run build             # dist/ and the umbradb command
-npm run build:browser     # dist-browser/: the browser page
-npm run web               # builds the page and serves it on 127.0.0.1:8090
-npm run typecheck         # the sources, the tests and examples/stats-module
-```
+**Building.** [Building from source](docs/building-from-source.md) covers the build, packing your own tarball, and
+running from a clone.
 
 **Tests.**
 
