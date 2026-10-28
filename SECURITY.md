@@ -7,6 +7,7 @@ for Linux Foundation projects.
 
 - [Disclosing a security issue](#disclosing-a-security-issue)
 - [Vulnerability management](#vulnerability-management)
+- [Commit policy](#commit-policy)
 - [Suggesting changes](#suggesting-changes)
 
 ## Disclosing a security issue
@@ -55,6 +56,27 @@ following steps:
 - determining affected versions of the project
 - auditing code to find any potential similar problems
 - preparing fixes for all releases under maintenance
+
+## Commit policy
+
+What may go into this repository's git history:
+
+- **No secret of any value is committed.** No key, seed, password or credential with any value, ever: not a mainnet
+  one, not a testnet key with funds, not "for now". A file that holds a secret is generated locally, ignored by git and
+  created with a restrictive mode, 0600 (only its owner reads and writes it). The Preview test wallet is the example:
+  `nix/midnight-env/test-wallets/generate-test-wallet.sh` writes `preview-test-wallet.json` with mode 0600,
+  `.gitignore` lists it, and only `preview-test-wallet.example.json`, which holds placeholders, is tracked (see
+  `nix/midnight-env/test-wallets/README.md`).
+- **One historical finding is suppressed, by its exact fingerprint.** A Preview testnet wallet,
+  `nix/midnight-env/test-wallets/preview-test-wallet.json`, was committed before this policy. Preview tDUST has no
+  monetary value, so the history was not rewritten, and the file's bytes stay in it. That one finding is suppressed in
+  `.gitleaksignore` by its exact fingerprints (commit, path, rule and line: the file's seed and the key derived from
+  it), not by a path allowlist in `.gitleaks.toml`, which would exempt the path for ever and hide a real key committed
+  there later. `.gitleaks.toml` has no global path allowlist: the template's all-zero placeholder is allowed only in
+  the template, by an allowlist of its rule that requires both the path and the value (`condition = "AND"`).
+- **CI enforces it.** The `deps` job of `.github/workflows/supply-chain.yml` runs `gitleaks detect` with
+  `.gitleaks.toml` over the full git history on every pull request and every push to `main`. A new secret fails it on
+  any path, the historical wallet file's included, since the suppression names the finding, not the path.
 
 ## Preferred Languages
 

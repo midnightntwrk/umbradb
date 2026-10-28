@@ -3868,7 +3868,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       back). Seen failing first: 7 of 29. Documents whose status is unclear kept and asked: Q170 (0.9.5's release
       record and 1.0.0 program documents), Q171 (`design/`, `Formal/`, `Performance/`, `docs/research/`,
       `docs/superpowers/`), Q172 (`docs/THREAT_MODEL.md`). No mutation pass (deferred to 17.5).
-- [ ] 17.4b The owner's answer Q172 A: `docs/THREAT_MODEL.md` (0.9.5's trust model) deleted, its commit policy —
+- [x] 17.4b The owner's answer Q172 A: `docs/THREAT_MODEL.md` (0.9.5's trust model) deleted, its commit policy —
       no secret of any value in git, restrictive file modes, the one suppression kept by its exact fingerprint —
       moved to `SECURITY.md` first; the pointers to it in `README.md`, `ROADMAP.md` and `nix/midnight-env/` changed
       (their link lines only, pointing at `SECURITY.md` until task 17.4c writes the 0.10.0 model at the same path,
@@ -3891,6 +3891,23 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       unchanged. Every link to a deleted document (`ROADMAP.md`, `README.md`, `nix/midnight-env/`, the kept documents)
       changed, its link line only; design §13 and §15 as amended.
       **Acceptance:** A171 with every document above listed.
+      **Done (2026-10-28):** `SECURITY.md` gained a "Commit policy" section (no secret of any value in git; secret
+      files generated locally, ignored and created 0600; the Preview wallet's one historical finding suppressed by its
+      exact fingerprints in `.gitleaksignore`, no global path allowlist; the full-history gitleaks job) before
+      `docs/THREAT_MODEL.md` was deleted. `AGENTS.md` drops its pointer to the guideline and holds the 18 rules,
+      restated for 0.10.0 against the tree: verify external claims in stage 1; acceptance criteria as the contract,
+      test first on real databases (PostgreSQL in Docker and PGlite), no placeholders and traceability in stage 2;
+      floors only go up (the floors of `vitest.config.ts`, mutation break 65) in stage 3; review evidence and negative
+      controls with the review lanes; the Lean gate in "Lean"; the other ten in a new "Engineering rules" section.
+      Deleted (32 files): `docs/v1-implementation-guideline.md`, `docs/v1-lessons-learned.md`, `design/` (14),
+      `Formal/*.md` but `STORAGE_ALGEBRA.md` (6), `Performance/` (4), `docs/research/a1-unbounded-bytea-insert.md`,
+      `docs/superpowers/` (4), `docs/THREAT_MODEL.md`. `Formal/STORAGE_ALGEBRA.md` rewritten to W1 (§3) and T5 (§2),
+      their Lean model and property tests (A59, A60); no Lean file, workflow or test read a deleted document. Links
+      changed: `README.md` (2), `ROADMAP.md` (3), `nix/midnight-env/test-wallets/README.md`; pointers in
+      `nix/midnight-env/README.md` and three of its scripts' comments. A171's test lists the 42 documents of 17.4a and
+      17.4b and checks `AGENTS.md` (the 18 rules' leads, no deleted document, no 0.9.5 name) and
+      `Formal/STORAGE_ALGEBRA.md` (W1 and T5 headings, no retired law), with negative controls. Comments and
+      `openspec/config.yaml` still naming deleted documents: issue 00052.
 - [ ] 17.4c The owner's answer Q181 A: the 0.10.0 threat model at `docs/THREAT_MODEL.md`, after 17.4b and before
       17.3a. Codex redrafts it from `~/todo/Umbra/experiments/00028-threat-model-draft.md` against the tree, adding the
       owner's review (2026-10-28): backups (Q177 A: a restore runs the file's SQL with the writer's rights before its

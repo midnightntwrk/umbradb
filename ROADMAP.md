@@ -6,7 +6,7 @@ archived under `openspec/changes/archive/`, while the completed and merged Sprin
 CheckpointStore, Sprint 4 Watermarks, Sprint 7 TransactionHistory, and Sprint 8 wallet-state
 envelope persistence records remain under `openspec/changes/` pending archival. The next work is
 the cross-cutting formal, testing, equivalence, and performance program.
-[`design/tasks.md`](design/tasks.md) is the
+`design/tasks.md` is the
 ORIGINAL task breakdown from before this project split into its own repo and is now retired/superseded —
 see that file's own supersession note; it is kept only as a historical phase-number map, not a
 source of task detail. This page is the public-facing summary, and the target for everything
@@ -283,7 +283,7 @@ committed under `openspec/changes/v1.0.0-*` (`api-surface`, `durable-checkpoint-
 `recovery-testing`, `perf-baseline`, `infosec-signoff`). They follow the workflow in
 [`AGENTS.md`](AGENTS.md) (spec → test-first build → automated checks → three review lanes including
 a cold cross-vendor one → merge), and the 1.0.0-specific rules and tag gate in
-[`docs/v1-implementation-guideline.md`](docs/v1-implementation-guideline.md).
+`docs/v1-implementation-guideline.md`.
 
 **All 20 gate items G1–G20 are merged to `main`, and all five changes are implemented.** Open 1.0.0
 obligations the guideline still requires are listed at the end of "What blocks 1.0.0" below.
@@ -314,7 +314,7 @@ obligations for the tag are delivered as **documentation + CI + dev-environment 
 `src/` runtime behavior change** (G16 is doc-comment-only). The change also closes **R7**, the
 release-publication artifact the guideline assigns here:
 
-- **G15** — [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) threat model (single trusted writer; `schema` is
+- **G15** — [`SECURITY.md`](SECURITY.md) threat model (single trusted writer; `schema` is
   namespacing, not a tenant boundary; the global chunk pool's cross-wallet dedup side channel; no
   at-rest encryption as a binding precondition; commit policy + vulnerability reporting), linked from
   `README.md`.

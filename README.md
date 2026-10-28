@@ -293,12 +293,12 @@ lease contention. Hot paths are batched: chunk and junction inserts are multi-ro
 is a single grouped query rather than N+1.
 
 **No performance number gates a release**, only that a reproducible baseline exists. Documented
-scalability ceilings (SC-1…SC-6) are in [`Performance/CEILINGS.md`](Performance/CEILINGS.md); the GC
+scalability ceilings (SC-1…SC-6) are in `Performance/CEILINGS.md`; the GC
 anti-join curve is measured to 10⁶ chunks in the baseline artifact.
 
 ## Security
 
-Read [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) before deploying. The load-bearing points:
+Read [`SECURITY.md`](SECURITY.md) before deploying. The load-bearing points:
 
 - **Single trusted writer.** The threat model assumes one writer that is trusted.
 - **`schema` is namespacing, not a tenant boundary.** Do not use it to isolate mutually distrusting
