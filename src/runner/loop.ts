@@ -29,6 +29,14 @@
  * true once every listed instance has committed h − 1, and the loop goes on to `BEGIN`; false when the loop's signal
  * stopped it first (RN-13: h's transaction never began), and the loop ends with its signal, h not committed.
  *
+ * **The pause between heights** (BK-1 as amended, owner decision Q152 B; task 15.1a): given {@link LoopInput.pause},
+ * the loop stops at each point between two heights — before it reads the head (after RN-11's re-delivery at a run's
+ * start, after a head's last height, after a wait) and before each height (after `on-finalized`, after the height
+ * before's `on-stop-height`) — while a hold is kept (`./pause.ts`): no transaction is open there and every read of the
+ * height before has ended. Its wait for the head counts as between heights: a hold asked for meanwhile is reached at
+ * once, and when the head rises the loop stops at its next step. Paused, the loop reads no head and runs no point, and
+ * no window of RN-17 is open; its signal ends the pause, and the loop then ends with it (RN-13).
+ *
  * **At a restart** (RN-11), with the cursor c, the loop first runs `on-after-db-write` for c and `on-stop-height` for
  * the entries stopping at c — the core's when c is at or above its stop — in the order of the range holding c, with the
  * block context of c and no `block` items, before c + 1: a crash may have come before they completed. Both points run in
@@ -131,6 +139,7 @@ import {
   startHeightSchedule,
   stopHeightSchedule,
 } from "./dispatch.js";
+import type { LoopPause } from "./pause.js";
 import type { MisuseReports } from "./process-context.js";
 
 /** What the loop runs over. */
@@ -171,6 +180,8 @@ export interface LoopInput {
   readonly slowBlockMs?: number | null;
   /** The lockstep wait before each block's transaction (PP-6; see the module comment); none unless given. */
   readonly lockstep?: LockstepWait;
+  /** The pause between heights (BK-1, owner decision Q152 B; see the module comment); none unless given. */
+  readonly pause?: LoopPause;
 }
 
 /** The lockstep wait (PP-6, `src/private/lockstep.ts`'s `Lockstep`): before `BEGIN` of `height`. */
@@ -516,13 +527,16 @@ export class FinalizedLoop {
     if (cursor !== null && last !== null && cursor.height >= last) return this.#stopped(cursor.height);
     for (;;) {
       if (this.#signal.aborted) return SIGNALLED;
+      // Between heights (BK-1, Q152 B): a pause holds the loop here, before it reads the head.
+      await this.pauseBetween();
+      if (this.#signal.aborted) return SIGNALLED;
       const next = cursor === null ? graph.start : cursor.height + 1n;
       let head: BlockRef;
       try {
         head = await source.finalizedHead();
         observer?.head?.(head);
         if (head.height < next) {
-          await this.wait(next - 1n);
+          await this.#idle(() => this.wait(next - 1n));
           continue;
         }
         await this.#finalized(head, next);
@@ -533,6 +547,9 @@ export class FinalizedLoop {
         throw failure;
       }
       for (let height = next; height <= head.height; height++) {
+        if (this.#signal.aborted) return SIGNALLED;
+        // Between heights: before this one, after on-finalized or the height before's points.
+        await this.pauseBetween();
         if (this.#signal.aborted) return SIGNALLED;
         const done = await this.#process(height, cursor);
         // Stopped at the lockstep wait: the height's transaction never began.
@@ -579,6 +596,21 @@ export class FinalizedLoop {
       core: coreStop !== null && height >= coreStop,
       boundary: boundary !== null && height === boundary - 1n ? boundary : null,
     });
+  }
+
+  /**
+   * A point between two heights (BK-1, owner decision Q152 B; see the module comment): resolves at once unless a pause
+   * holds the loop ({@link LoopInput.pause}), else once it is lifted or the loop's signal aborts. A negative control's
+   * seam.
+   */
+  protected pauseBetween(): Promise<void> {
+    return this.input.pause?.between(this.#signal) ?? Promise.resolve();
+  }
+
+  /** Runs `body`, the wait for the head, as between heights for the pause (see the module comment). */
+  #idle(body: () => Promise<void>): Promise<void> {
+    const { pause } = this.input;
+    return pause === undefined ? body() : pause.idle(body);
   }
 
   /** Waits for the source's head to exceed `above`, or for the signal to stop the loop (checked by the caller). */

@@ -9,7 +9,8 @@
  * re-delivery and the upgrade boundary, its state and SIGTERM (`./process.ts`). Failures (task 5.4): the `refused` and
  * `halted` states with their reasons, and the retries of a lost connection or an unreachable node (`./process.ts`,
  * `./failures.ts`). The slow-block watchdog (tasks 5.5, 5.5a): the loop's window of each height and of the callbacks
- * it awaits outside a height's processing, and `slow-block` (`./loop.ts`, `./process.ts`).
+ * it awaits outside a height's processing, and `slow-block` (`./loop.ts`, `./process.ts`). The pause between heights
+ * and the backup on SIGUSR2 (task 15.1a): `./pause.ts`, `./loop.ts`, `./process.ts`.
  */
 
 export * from "./api-server.js";
@@ -21,5 +22,6 @@ export * from "./failures.js";
 export * from "./in-memory-source.js";
 export * from "./loop.js";
 export * from "./module-api.js";
+export * from "./pause.js";
 export * from "./process.js";
 export * from "./process-context.js";

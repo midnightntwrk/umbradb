@@ -122,6 +122,8 @@ const BASE = {
   prefetchWindow: count().default(64).meta(OPERATIONAL),
   backoffCeilingMs: count().default(30_000).meta(OPERATIONAL),
   backupAtStop: text().optional().meta(OPERATIONAL),
+  // SIGUSR2 writes a backup there at the loop's next pause (BK-1, owner decision Q152 B; task 15.1a).
+  backupOnSignal: text().optional().meta(OPERATIONAL),
   tls: z
     .strictObject({ certificate: text(), key: text(), trustedRoots: z.array(text()) })
     .optional()

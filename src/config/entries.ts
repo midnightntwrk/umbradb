@@ -75,6 +75,8 @@ export type CoreSettingsBase = {
   readonly backoffCeilingMs?: number;
   /** A file path (BK-1). */
   readonly backupAtStop?: string;
+  /** A file path: SIGUSR2 writes a backup there at the loop's next pause (BK-1, owner decision Q152 B). */
+  readonly backupOnSignal?: string;
   readonly tls?: TlsSettings;
   readonly livenessTimeoutMs?: number;
   /** A whole number from 1 to 2,147,483,647 (DB-15, `./core-settings.ts`). */

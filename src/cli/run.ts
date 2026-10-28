@@ -33,7 +33,8 @@
  * stays up until it is stopped (IN-12, AE-3), the admin endpoints saying why; so the command then runs until SIGTERM or
  * SIGINT (Ctrl-C), which stop the process cleanly (RN-13: the height in progress finishes, nothing else starts, the
  * module API, the node client, the database and the admin listener close). A second signal is not listened for:
- * Node.js's default ends the command at once. The command then resolves with how processing ended: `refused` or
+ * Node.js's default ends the command at once. SIGUSR2 is the runner's: with `backupOnSignal` set it writes a backup at
+ * the loop's next pause and the process goes on (BK-1, owner decision Q152 B; task 15.1a). The command then resolves with how processing ended: `refused` or
  * `failed` (a halt) is a failure (exit 1), anything else — the stop itself, the core's stop height, an upgrade
  * boundary — is not (exit 0).
  */

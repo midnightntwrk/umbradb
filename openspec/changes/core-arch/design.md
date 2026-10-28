@@ -1455,7 +1455,28 @@ temporary name beside its path, flushed and renamed only once complete. A sequen
 reads a sequence's position when it reads it, so on PostgreSQL beside commits the dump can hold an opted-out table's
 sequence ahead of its rows (never behind them). The backup at stop is skipped when the file at `backupAtStop` is a
 backup of that height, replaces a backup of another height, and refuses (`backup-format-unknown`, logged; the process
-stays `stopped`) a file there that is no backup. **Restore.** The command reads the manifest line, makes the
+stays `stopped`) a file there that is no backup. As built (task 15.1a, owner decision Q152 B; `src/runner/pause.ts`,
+`loop.ts`, `process.ts`): **the pause.** The loop stops at each point between two heights — before it reads the head
+(after RN-11's re-delivery at a run's start, after a head's last height, after a wait) and before each height (after
+`on-finalized`, after the height before's `on-stop-height`) — while a hold of `LoopPauses` is kept; there no
+transaction is open and every read of the height before has ended. Its wait for the head counts as between heights: a
+hold asked for meanwhile is reached at once, and when the head rises the loop stops at its next step. Paused, it reads
+no head and runs no point; reads go on (the module API, the admin endpoints, the process transport, a backup), and the
+node source's queue may still fetch and prepare blocks ahead. `ProcessHandle.pause()` takes the process's one hold and
+resolves once the loop is paused for it, once processing has ended (nothing processes then), or once `resume()` came
+first; `resume()` releases it. Holds are counted, so a backup on signal while a host program paused the loop leaves it
+paused. The loop's signal ends a pause: a stop while paused ends the process (RN-13). **The backup on signal.** With
+`backupOnSignal` (CF-4, operational) set, the process listens for SIGUSR2 — Node.js's `process`, or
+`ProcessInput.backupSignals` — from the moment its `core` revision is known (startup step 3) until it has closed;
+without it, SIGUSR2 gets Node.js's default (the process ends). A SIGUSR2 takes a hold; once the loop is paused the
+process writes the backup of the cursor's height to that path (relative to the working directory) by the backup at
+stop's rules — none while the file there is a backup of that height, one of another height replaced, a file that is no
+backup left as it is (`backup-format-unknown`) —, logs it (`backup on signal written to <path>: height h, contents hash
+…`, or why none was written) and releases the hold, so processing goes on from h + 1. A SIGUSR2 while one is pending or
+being written adds none; one after processing ended (the core's stop, a halt) writes at once; one before any height
+committed is refused (`no-committed-height`, logged); one to a process whose startup refused, or that is stopping,
+writes none. A stop waits for a backup being written before it closes the database. A private process's backup needs
+the development opt-in like every other (PP-12). **Restore.** The command reads the manifest line, makes the
 checks of BK-3 that need no tables, then opens one transaction on the writer connection and runs the file's SQL itself
 (no `psql`; statements a tool writes for `psql` alone are handled as `psql` would), creates the module roles the server
 lacks and applies DB-6's and DB-7's owners and grants, recomputes the contents hash, checks the state root, and commits

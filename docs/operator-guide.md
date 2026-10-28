@@ -70,8 +70,8 @@ argument.
   `@electric-sql/pglite-tools`, which is not installed with UmbraDB either: `npm install
   @electric-sql/pglite-tools@0.4.10`, the version made for UmbraDB's PGlite 0.5.10. A PGlite directory opens in one
   process at a time: while the indexer runs on it the command refuses with `writer-lock-held`. Back a running PGlite
-  indexer up through the process itself — set `backupAtStop`, below, or, from a host program, call its handle's
-  `backup(file)`, which runs between two blocks.
+  indexer up through the process itself — set `backupOnSignal` and send it SIGUSR2, or set `backupAtStop`, both
+  below, or, from a host program, call its handle's `backup(file)`, which runs between two blocks.
 - **A private process's database** is not backed up by UmbraDB unless the development opt-in is set (PP-12):
   `private-backup-refused`. PostgreSQL's own tools can still copy it; that rule governs only what UmbraDB writes.
 
@@ -82,6 +82,29 @@ core's stop height commits, the process writes a backup of that height there (CO
 cursor at the stop writes none while the file there is a backup of that height; a backup of another height there is
 replaced once the new one is complete. A file there that is not an UmbraDB backup is never overwritten: the process
 logs `backup at stop failed (backup-format-unknown)` and stays `stopped`.
+
+### A backup of a running process (SIGUSR2)
+
+Set the `core` entry's `backupOnSignal` to a file path (relative to the process's working directory) and send the
+running process SIGUSR2 — `kill -USR2 <pid>` — to write a backup there without stopping it (BK-1, owner decision
+Q152): the process finishes the height it is on, pauses between two heights, writes the backup of its last committed
+height, and goes on from the next one. This is how to back up a running PGlite indexer from a shell; it works the same
+on PostgreSQL. At startup the process logs `SIGUSR2 writes a backup to <path> at the loop's next pause
+(backupOnSignal)`; for each signal it logs what it did:
+
+- `backup on signal written to <path>: height <h>, contents hash <hash>`;
+- `backup on signal: <path> holds a backup of height <h> already, so none was written` — nothing committed since that
+  backup;
+- `backup on signal failed (<code>): …` — the file at the path is not an UmbraDB backup and is left as it is
+  (`backup-format-unknown`), the tool is missing (`backup-tools-missing`), nothing is committed yet
+  (`no-committed-height`), or a private process's backup without the development opt-in (`private-backup-refused`).
+
+The file is written as `umbradb backup` writes one: under a temporary name, renamed only once complete. A SIGUSR2
+while a backup is pending or being written adds none; one after the process stopped at the core's stop height writes
+the backup of that height at once; a stop while a backup is written waits for it. The process listens for SIGUSR2 only
+when `backupOnSignal` is set, and only once its configuration is validated: without it, SIGUSR2 ends the process as
+Node.js does by default, so send it only to a process that sets it. A host program can pause and resume the loop
+itself with its handle's `pause()` and `resume()`.
 
 ### What a backup holds
 

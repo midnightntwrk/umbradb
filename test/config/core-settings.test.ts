@@ -45,6 +45,8 @@ const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   prefetchWindow: ["operational", { default: 64 }],
   backoffCeilingMs: ["operational", { default: 30_000 }],
   backupAtStop: ["operational", "absent"],
+  // SIGUSR2 writes a backup there (BK-1, owner decision Q152 B; task 15.1a).
+  backupOnSignal: ["operational", "absent"],
   tls: ["secret", "absent"],
   livenessTimeoutMs: ["operational", { default: 30_000 }],
   apiReadTimeoutMs: ["operational", { default: 30_000 }],
@@ -135,6 +137,7 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
         backoffCeilingMs: 1,
         lockstepInstances: ["wallet-1"],
         backupAtStop: "/backups/at-stop.dump",
+        backupOnSignal: "/backups/on-signal.dump",
         tls: { certificate: "-----BEGIN CERTIFICATE-----", key: "-----BEGIN PRIVATE KEY-----", trustedRoots: [] },
         livenessTimeoutMs: 1,
         apiReadTimeoutMs: 1,
@@ -196,6 +199,8 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
   it("takes text that is not empty", () => {
     expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, instanceId: "" }).success).toBe(false);
     expect(PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, backupAtStop: "" }).success).toBe(false);
+    expect(PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, backupOnSignal: "" }).success).toBe(false);
+    expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, backupOnSignal: "" }).success).toBe(false);
   });
 
   it("requires genesisHash with a custom network and refuses it otherwise, for either side", () => {

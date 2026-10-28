@@ -3454,12 +3454,39 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       (`test/backup/backup.negative-control.test.ts`). The command cannot back up a PGlite directory a running
       process holds (`writer-lock-held`; Q152, not blocking); the restore is task 15.2. Issue 00032 (the
       runtime `npm audit`'s zod advisory, found while checking the new dependency) recorded.
-- [ ] 15.1a The owner's answer Q152 B: the finalized loop pauses and continues between heights (no transaction open,
+- [x] 15.1a The owner's answer Q152 B: the finalized loop pauses and continues between heights (no transaction open,
       the height's reads finished) — `ProcessHandle.pause()` and `resume()` —, and a running process given
       `backupOnSignal` (CF-4) writes, on SIGUSR2, a backup to that path at its next pause, as the backup at stop writes
       one, then continues: the way to back up a running PGlite process from a shell (BK-1 as amended); the `core`
       schema's new field, `design.md` §9.1, the operator guide and the tests.
       **Acceptance:** A163.
+      **Done (2026-10-27):** `src/runner/pause.ts` (new): `LoopPauses`, counted holds (`hold()`: `reached`,
+      `release()`); the loop (`LoopInput.pause`) stops at each point between two heights — before it reads the head and
+      before each height — while one is kept (`pauseBetween`, a negative control's seam), its wait for the head counting
+      as between heights; its signal ends a pause (RN-13). `ProcessHandle.pause()` (resolves once paused, once
+      processing ended, or once `resume()` came first) and `resume()`; `backupOnSignal` (operational, both sides) and
+      `ProcessInput.backupSignals` (Node.js's `process` unless given): SIGUSR2, listened for from the `core` revision's
+      choice until the process closed, takes a hold and writes the backup of the cursor's height at the pause by the
+      backup at stop's rules, then releases it; a second one while pending adds none, one after processing ended writes
+      at once, one while stopping or after a refused startup none; a stop waits for a backup being written. Design §9.1
+      ("As built (task 15.1a)"), the operator guide's "A backup of a running process (SIGUSR2)". Tests, seen failing
+      first (`tsc` 30 errors; Vitest 16 failed): `test/runner/pause.test.ts` (the holds; the loop on PostgreSQL 18.6
+      and PGlite 0.5.10: a hold asked for at `on-fetch`, at `on-compute` or in the block transaction reached once the
+      height committed and its later points ended, no transaction open; while waiting for the head at once; released,
+      every height once; a stop while paused ends the run), `test/backup/pause.test.ts` (A163 on PGlite: three pauses
+      to the core's stop at 60 — every height's points once, committed heights and contents hash an unpaused run's;
+      the idle pause, RN-13 while paused; SIGUSR2 at height 20 writes the backup of 20 at the next pause with nothing
+      run meanwhile, the process goes on, the file restores with every check of BK-3 and an unpaused run's contents
+      hash; after the core's stop, while stopping, before any commit, after a refused startup),
+      `test/backup/signal-backup.test.ts` (a real SIGUSR2 to a process of its own while blocks commit, then SIGTERM,
+      the file restored; `umbradb run` on PGlite given SIGUSR2 from outside writes it, keeps running, exits 0 on
+      SIGTERM), `test/config/core-settings.test.ts`'s row. Committed negative controls
+      (`test/backup/pause.negative-control.test.ts`): a loop that pauses inside the height, one that does not hold, one
+      that stays paused, one whose pause a stop does not end, and one that pauses by ending its run each fail A163's
+      oracle. Q173 (SIGUSR2 without `backupOnSignal`) and Q174 (`/status` does not show a paused loop)
+      raised, not blocking. Issue 00027 (a V8 fatal error in a test worker's wasm code hung the conformance gate)
+      seen again; issues 00049 (`a141-read-timeout-bound-under-load`) and 00050
+      (`a165-race-step-fails-once-under-load`) recorded.
 - [ ] 15.1b The threat model draft's gap 7 (owner, 2026-10-28): a backup file's mode depends on the umask
       (`src/backup/backup.ts` creates its temporary file without one). Every backup UmbraDB writes on Node.js —
       `umbradb backup`, at stop, on SIGUSR2, `ProcessHandle.backup` — is created owner-only (`0600`) from its first

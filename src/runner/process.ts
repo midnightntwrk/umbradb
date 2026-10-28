@@ -105,6 +105,16 @@
  * the signal; the height in progress stores nothing and is processed again after a restart (after its commit, its later
  * points are re-delivered then, RN-11).
  *
+ * **The pause, and the backup on SIGUSR2** (BK-1 as amended, owner decision Q152 B; task 15.1a): the loop pauses
+ * between heights while a hold of the process's {@link LoopPauses} is kept (`./pause.ts`, `./loop.ts`) —
+ * {@link ProcessHandle.pause} takes one until {@link ProcessHandle.resume} —, and a process whose `core` revision sets
+ * `backupOnSignal` (CF-4) listens for SIGUSR2 ({@link ProcessInput.backupSignals}: Node.js's `process` unless given) from
+ * the moment that revision is known until it has closed: each SIGUSR2 takes a hold, writes the backup of the cursor's
+ * height once the loop is paused there — by the backup at stop's rules (`backupAtStop`, `../backup/backup.ts`) — and
+ * releases it, so processing goes on from the next height; all of it logged. A SIGUSR2 while one is pending or being
+ * written adds none; after processing ended (the core's stop, a halt) it writes at once; while stopping, or after a
+ * refused startup, it writes none. A stop waits for a backup being written before it closes the database.
+ *
  * **A private process** (`side: "private"`, PP-1; task 14.1) starts the same way with the private `core` schema (CF-4):
  * its block source is `core-private-source`'s (`src/backbone/core-private-source/`), whose cursor and committed height
  * are the private cursor's and whose blocks are the public database's; step 6 is that source's own check (it reads the
@@ -210,6 +220,7 @@ import {
   type SlowBlockEvent,
   type SlowWindow,
 } from "./loop.js";
+import { LoopPauses, type PauseHold } from "./pause.js";
 import { ProcessContexts } from "./process-context.js";
 import { type CoreTransport, startCoreTransport, type TransportTls } from "../private/core-transport.js";
 import { type BackupInput, type BackupSeams, type BackupWritten, backupAtStop, writeBackup } from "../backup/backup.js";
@@ -285,6 +296,18 @@ export interface ProcessInput {
    * which a public process's ignores.
    */
   readonly updateHash?: string;
+  /**
+   * Where SIGUSR2 comes from for the `core` revision's `backupOnSignal` (CF-4, BK-1, owner decision Q152 B; task 15.1a):
+   * Node.js's `process` unless given (a test's emitter). Listened to only when `backupOnSignal` is set, from the moment the
+   * process's `core` revision is known until the process has closed (see the module comment).
+   */
+  readonly backupSignals?: BackupSignals;
+}
+
+/** What delivers SIGUSR2 for `backupOnSignal` (task 15.1a): Node.js's `process`, or a test's emitter. */
+export interface BackupSignals {
+  on(event: "SIGUSR2", listener: () => void): unknown;
+  removeListener(event: "SIGUSR2", listener: () => void): unknown;
 }
 
 /** What the process shares with the block source it makes (task 10.3): its one node connection, S and its log. */
@@ -449,6 +472,20 @@ export interface ProcessHandle {
    * negative controls' only (`BackupSeams`: a dump outside the manifest's snapshot), not for programs.
    */
   backup(out: string, seams?: BackupSeams): Promise<BackupWritten>;
+  /**
+   * Pauses the finalized loop between heights (BK-1 as amended, owner decision Q152 B; task 15.1a): at its next point
+   * between two heights — no transaction open, every read of the height before ended; at once while it waits for the
+   * head — it stops, and starts nothing (no head read, no point, no height) until {@link resume}. Reads go on meanwhile:
+   * the module API, the admin endpoints, a {@link backup}. Resolves once the loop is paused, once processing has ended
+   * (nothing processes then), or once `resume()` came first; asked again before `resume()`, the same pause. A stop while
+   * paused ends the process (RN-13).
+   */
+  pause(): Promise<void>;
+  /**
+   * Lets the loop go on after {@link pause}, from the next height; a backup on SIGUSR2 being written keeps it paused
+   * until written. Without a pause, nothing.
+   */
+  resume(): void;
 }
 
 /** What {@link statusOf} computes the state from. */
@@ -556,6 +593,12 @@ export function terminationSignal(target: SignalTarget = process): { readonly si
   const listener = (): void => controller.abort();
   target.once("SIGTERM", listener);
   return Object.freeze({ signal: controller.signal, dispose: () => void target.removeListener("SIGTERM", listener) });
+}
+
+/** Node.js's `process` as the source of SIGUSR2, or undefined where there is none (a browser's worker). */
+function nodeSignals(): BackupSignals | undefined {
+  const node = (globalThis as { readonly process?: Partial<BackupSignals> }).process;
+  return typeof node?.on === "function" ? (node as BackupSignals) : undefined;
 }
 
 /** A log line to standard error. */
@@ -671,6 +714,14 @@ class Process implements ProcessHandle {
   #lockstep: Lockstep | undefined;
   /** The schema plan's tables declared `deterministic: false` (Q76), for a backup's contents hash (BK-2). */
   #optedOut: readonly TableName[] = [];
+  /** The holds that pause the loop between heights (BK-1, Q152 B; task 15.1a): {@link pause}'s and SIGUSR2's. */
+  readonly #pauses = new LoopPauses();
+  /** {@link pause}'s hold, until {@link resume}. */
+  #pauseHold: PauseHold | undefined;
+  /** The backup on SIGUSR2 pending or being written, until it ended (never rejects). */
+  #signalBackup: Promise<void> | undefined;
+  /** Stops listening for SIGUSR2, once the process listens. */
+  #unlisten: (() => void) | undefined;
 
   constructor(input: ProcessInput) {
     this.#input = input;
@@ -736,6 +787,96 @@ class Process implements ProcessHandle {
     return writeBackup(this.#backupInput(resolve(out)), seams);
   }
 
+  pause(): Promise<void> {
+    this.#pauseHold ??= this.#pauses.hold();
+    return this.#pausedOrEnded(this.#pauseHold);
+  }
+
+  resume(): void {
+    const hold = this.#pauseHold;
+    this.#pauseHold = undefined;
+    hold?.release();
+  }
+
+  /** Resolves once the loop is paused for `hold`, or once processing has ended. */
+  #pausedOrEnded(hold: PauseHold): Promise<void> {
+    return Promise.race([hold.reached, this.ended.then(() => undefined)]);
+  }
+
+  /**
+   * Listens for SIGUSR2 when the `core` revision sets `backupOnSignal` (BK-1, Q152 B; see the module comment), until
+   * the process has closed.
+   */
+  #listenForBackups(core: CheckedEntry): void {
+    const out = (core.settings as PlainObject).backupOnSignal;
+    if (typeof out !== "string") return;
+    const signals = this.#input.backupSignals ?? nodeSignals();
+    if (signals === undefined) {
+      this.#log("backupOnSignal is set, but this process receives no signals: SIGUSR2 writes no backup here");
+      return;
+    }
+    const listener = (): void => this.#onBackupSignal(out);
+    signals.on("SIGUSR2", listener);
+    this.#unlisten = () => void signals.removeListener("SIGUSR2", listener);
+    this.#log(`SIGUSR2 writes a backup to ${out} at the loop's next pause (backupOnSignal)`);
+  }
+
+  /** A SIGUSR2 (see the module comment): a backup to `out` at the loop's next pause, unless one is pending. */
+  #onBackupSignal(out: string): void {
+    if (this.#closing !== undefined) {
+      this.#log("SIGUSR2: no backup on signal, the process is stopping");
+      return;
+    }
+    if (this.#signalBackup !== undefined) {
+      this.#log(`SIGUSR2: a backup on signal to ${out} is already being written; this signal adds none`);
+      return;
+    }
+    this.#log(`SIGUSR2: a backup to ${out} at the loop's next pause`);
+    this.#signalBackup = this.#backupOnSignal(out).finally(() => {
+      this.#signalBackup = undefined;
+    });
+  }
+
+  /**
+   * The backup on signal (BK-1, Q152 B): a hold on the loop; once it is paused — or processing ended —, the backup of
+   * the cursor's height to `out` (relative to the working directory) by the backup at stop's rules; then the hold
+   * released. Logged; never rejects.
+   */
+  async #backupOnSignal(out: string): Promise<void> {
+    const hold = this.#pauses.hold();
+    try {
+      await this.#pausedOrEnded(hold);
+      if (this.#closing !== undefined) {
+        this.#log("backup on signal not written: the process is stopping");
+        return;
+      }
+      try {
+        await this.started;
+      } catch {
+        this.#log("backup on signal not written: startup refused, so no database is open");
+        return;
+      }
+      const height = this.#cursor;
+      const how = this.#end === null ? "paused" : "ended";
+      this.#log(
+        `backup on signal: processing ${how} ${height === null ? "before any height committed" : `at height ${height}`}`,
+      );
+      const input = this.#backupInput(resolve(out));
+      const { written, manifest } =
+        height === null ? { written: true, ...(await writeBackup(input)) } : await backupAtStop(input, height);
+      this.#log(
+        written
+          ? `backup on signal written to ${out}: height ${manifest.height}, contents hash ${manifest.contentsHash}`
+          : `backup on signal: ${out} holds a backup of height ${height} already, so none was written`,
+      );
+    } catch (error) {
+      const code = error instanceof UmbraError ? error.code : "error";
+      this.#log(`backup on signal failed (${code}): ${messageOf(error)}; no backup was written`);
+    } finally {
+      hold.release();
+    }
+  }
+
   /** What a backup of the process's database is given (BK-1): its backend, its opted-out tables, its side and opt-in. */
   #backupInput(out: string): BackupInput {
     const settings = (this.#core as CheckedEntry).settings as PlainObject;
@@ -787,9 +928,12 @@ class Process implements ProcessHandle {
       await this.#transport?.close();
       await this.#closeNode();
       await this.#ledger?.close();
+      // A backup on SIGUSR2 being written ends before the database closes (task 15.1a).
+      await this.#signalBackup;
       await this.#db?.close();
       await this.#source?.close?.();
       if (this.#admin !== undefined) await this.#admin.close();
+      this.#unlisten?.();
       this.#resolveClosed();
     }
   }
@@ -894,6 +1038,7 @@ class Process implements ProcessHandle {
       this.#start = BigInt(checked.start);
       const core = (input.processCore ?? processCoreEntry)(checked);
       this.#core = core;
+      this.#listenForBackups(core);
       if (this.#admin !== undefined) {
         await this.#admin.serve(checked, core);
         this.#step();
@@ -1094,6 +1239,7 @@ class Process implements ProcessHandle {
       boundary: this.#upgrade?.height ?? null,
       slowBlockMs: settings.slowBlockMs as number,
       ...(this.#lockstep === undefined ? {} : { lockstep: this.#lockstep }),
+      pause: this.#pauses,
       observer: {
         slow: (event) => this.#slowBlockEvent(event, settings.slowBlockMs as number),
         head: (head) => {
