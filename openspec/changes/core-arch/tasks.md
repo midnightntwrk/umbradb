@@ -3682,10 +3682,38 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       which builds the browser page and serves it with the two headers it needs (COOP and COEP).
       **Acceptance:** `examples/stats-module/` type-checks against `src/index.ts`; `umbradb config check` passes on its
       configuration file; the README's two quick starts run as written.
-- [ ] 17.4 Version `0.10.0` and the breaking-change notice in `CHANGELOG.md`; every backbone part and core module
+- [x] 17.4 Version `0.10.0` and the breaking-change notice in `CHANGELOG.md`; every backbone part and core module
       names the build's version (`UMBRADB_VERSION`), `core-digest` among them, which names `0.10.0` by hand
       (`src/backbone/core-digest/core-digest.ts`).
       **Acceptance:** A4.
+      **Done (2026-10-27):** `package.json` and the lock's own entry at `0.10.0`; the code's one source stays
+      `UMBRADB_VERSION` (`src/config/build.ts`, a constant because the browser build reads no file), now `0.10.0`, held
+      equal to `package.json` by `test/config/builders.test.ts` and, for the lock and the newest dated changelog
+      heading, by `test/api-surface/package-json-strict.test.ts`. Of the 15 backbone parts and core modules of the
+      command's build (both sides), `core-digest` was the one that wrote its version as a literal; it now names
+      `UMBRADB_VERSION` like the other 14. `CHANGELOG.md`'s `0.10.0` section opens with `### Breaking changes`: every
+      0.9.5 export is removed or replaced and 0.9.5 databases are not migrated; it names all 87 exports of 0.9.5's
+      `src/index.ts` (36 values, 51 types; release commit `19e225b`) by part with what replaces each (`Migration`
+      replaced by a module's `{ id, sql }`; TransactionHistory's 13 in `legacy/`), the other removals (the
+      `chain_archive` store and `chain-archive-sync`, `archive:sync` and `test:live`, the retired laws, property tests,
+      Quint change, required ids, mutation targets, floors and benchmarks), then what the release adds. Tests: A4 and
+      the version rules in `test/library-surface/release-version{,.test}.ts` (19): the version and lock; the 87 names
+      against A5's `RETIRED_EXPORTS`, TransactionHistory's 13 and `Migration`; the notice; a scan of `src/` (parsed, no
+      type checker) that every module declaration — an object literal with its own `side: "public"|"private"` and an
+      `id` or a spread — has `version` bound to `build.ts`'s `UMBRADB_VERSION` (aliases allowed; a literal, another
+      name, a shorthand, a local or hidden constant, a type-only or other import refused) and that it finds each of the
+      15 ids; that no file of `src/` but `build.ts` writes the version string; the run-time versions of the command's
+      build. Committed negative controls: `core-digest`'s declaration as found (line and id named), each refused form,
+      a missing or computed id, the version written in another file or twice, a changed run-time version, and
+      changelogs without the section, with another heading first, missing a name (also when only another subsection
+      or release names it) or either statement, the real changelog with a name or a statement removed. Seen failing
+      first (5 of 19: `core-digest`'s literal in the scan and the string check, its control, and the missing section).
+      Tests that pinned the version: `test/ledger/package-identity.test.ts` (`0.10.0`), `test/config/history.test.ts`
+      (the written-out core version `0.10.0`; the build's rows and message by `UMBRADB_VERSION`; an older and a newer
+      build `0.9.4` and `0.10.1`), `test/runner/process.test.ts` (a newer core `0.11.0`). Questions Q168 (the
+      heading's date; shipped 2026-10-27, the close-out sets the release's) and Q169 (the 0.9.5 documents,
+      changelog preamble and `description` that describe the removed surface) raised, not blocking. No mutation pass
+      (deferred to 17.5, owner 2026-10-27).
 - [ ] 17.5 The deferred extensive testing (owner, 2026-10-27: "we want to move all the extensive testing to the end,
       before the full test"), run after 17.4 and before the whole-system runs: the mutation passes the tasks from
       2026-10-27 on deferred (each record's "Deferred testing" sub-item names the logic to cover), and the coverage

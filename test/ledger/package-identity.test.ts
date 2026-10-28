@@ -49,7 +49,7 @@ describe("the core version's ledgers (CF-2, LG-5)", () => {
         },
       ],
     }));
-    expect(buildCoreVersion()).toEqual({ umbradb: "0.9.5", ledgers });
+    expect(buildCoreVersion()).toEqual({ umbradb: "0.10.0", ledgers });
     expect(CORE_VERSION_SCHEMA.safeParse(buildCoreVersion()).success).toBe(true);
   });
 

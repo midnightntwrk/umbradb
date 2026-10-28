@@ -44,7 +44,7 @@ export type CoreVersion = {
 };
 
 /** This build's UmbraDB version: `package.json`'s `version`. */
-export const UMBRADB_VERSION = "0.9.5";
+export const UMBRADB_VERSION = "0.10.0";
 
 /**
  * This build's core version, as a new plain object at every call (so that no caller's change reaches another's). Its

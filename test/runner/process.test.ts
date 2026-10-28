@@ -592,7 +592,7 @@ describe("upgradeBoundary: RN-12's first height of a version the build does not 
   });
 
   it("names the core version for a scheduled core revision (an UmbraDB upgrade)", () => {
-    const newer = { umbradb: "0.10.0", ledgers: [] };
+    const newer = { umbradb: "0.11.0", ledgers: [] };
     const entries = [coreEntry({ start: 1, config: coreSettings("pglite:memory") as never }), { id: "core", start: 30, version: newer }];
     const { check, declarations } = checked(entries, []);
     expect(upgradeBoundary(check, declarations)).toEqual({
@@ -627,7 +627,7 @@ describe("processRevisions: each part's revisions for its process context (RN-7,
     const entries = [
       coreEntry({ start: 1, config: coreSettings("pglite:/a", { node: N1, retainStates: 0, developmentOptIn: false }) as never }),
       coreEntry({ start: 50, config: coreSettings("pglite:/b", { node: N2, retainStates: 4 }) as never }),
-      { id: "core", start: 90, version: { umbradb: "0.10.0", ledgers: [] } },
+      { id: "core", start: 90, version: { umbradb: "0.11.0", ledgers: [] } },
     ];
     const { check } = checked(entries, []);
     const revisions = processRevisions(check, check.process);

@@ -24,6 +24,7 @@
  */
 
 import { z } from "zod";
+import { UMBRADB_VERSION } from "../../config/build.js";
 import type { BlockWriteHandle } from "../../db/api.js";
 import { capturedTables, SHADOW_SCHEMA, takeChanges } from "../../db/change-capture.js";
 import { isCheckpointHeight, nextDigest, tableChanges } from "../../determinism/digest.js";
@@ -89,11 +90,12 @@ export async function digestBlock(w: BlockWriteHandle, height: bigint): Promise<
 
 /**
  * `core-digest`, the backbone part (CORE-ARCH §4.11): it requires `blocks` (`core-block-commit`'s) and provides
- * `digest-tables` and `digest-checkpoints`, its two tables. Its version is UmbraDB's (task 17.4 sets the release's).
+ * `digest-tables` and `digest-checkpoints`, its two tables. Its version is the build's (`UMBRADB_VERSION`), as every
+ * backbone part's and core module's is.
  */
 export const CORE_DIGEST = defineModule({
   id: "core-digest",
-  version: "0.10.0",
+  version: UMBRADB_VERSION,
   side: "public",
   requires: ["blocks"],
   provides: [

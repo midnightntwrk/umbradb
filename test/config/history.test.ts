@@ -63,7 +63,7 @@ const BUILD_CORE_VERSION_TEXT =
       return `{"ledger":"${ledger}","packages":[{"name":"${name}","sha256":"${sha256}","version":"${version}"}],"versionName":"${versionName}"}`;
     })
     .join(",") +
-  '],"umbradb":"0.9.5"}';
+  '],"umbradb":"0.10.0"}';
 
 /**
  * The configuration history (task 4.3; CF-5 to CF-9, `design.md` §7, §10): `core-chain` compares the configuration
@@ -949,7 +949,7 @@ function versionOutcome(entries: readonly unknown[], user: Start["user"], cursor
 }
 
 describe("A33: one version per build — the revision covering cursor + 1 names the build's version (CF-8)", () => {
-  const recordedM = [coreRow(0, "0.9.5"), mRow(0, "1.0.0")];
+  const recordedM = [coreRow(0, UMBRADB_VERSION), mRow(0, "1.0.0")];
   const asRecorded = versionEntry({ id: "m", start: 0, version: "1.0.0", config: M_DEFAULTS });
 
   it("refuses a newer build of a module with upgrade-required, the entry, the version needed and the build's", () => {
@@ -969,7 +969,7 @@ describe("A33: one version per build — the revision covering cursor + 1 names 
   });
 
   it("refuses an older and a newer build of UmbraDB itself (the core entry)", () => {
-    for (const umbradb of ["0.9.4", "0.9.6"]) {
+    for (const umbradb of ["0.9.4", "0.10.1"]) {
       expect(versionOutcome([oldCore(0, umbradb), core(100)], [], C, [coreRow(0, umbradb)])).toEqual({
         code: "upgrade-required",
         height: 21n,
@@ -989,7 +989,7 @@ describe("A33: one version per build — the revision covering cursor + 1 names 
   });
 
   it("refuses the old build restarted at a boundary: a revision of another version starting at cursor + 1", () => {
-    const history = [coreRow(0, "0.9.5"), mRow(0, "1.0.0"), { ...mRow(21, "1.1.0"), data: null, dataHash: null }];
+    const history = [coreRow(0, UMBRADB_VERSION), mRow(0, "1.0.0"), { ...mRow(21, "1.1.0"), data: null, dataHash: null }];
     expect(versionOutcome([CORE, m(0), versionEntry({ id: "m", start: 21, version: "1.1.0" })], [M_1_0], C, history)).toMatchObject({
       code: "upgrade-required",
       entries: [{ id: "m", start: 21, needed: "1.1.0", build: "1.0.0" }],
@@ -999,11 +999,11 @@ describe("A33: one version per build — the revision covering cursor + 1 names 
   it("accepts revisions of other versions starting above cursor + 1, and a module with no revision at cursor + 1", () => {
     expect(versionOutcome([CORE, m(0), versionEntry({ id: "m", start: 22, version: "1.1.0" })], [M_1_0], C, recordedM)).toBe("accepted");
     // m stopped at 10: no revision of m covers 21, so this build's version of m is not compared.
-    const stopped = [coreRow(0, "0.9.5"), mRow(0, "1.0.0", 10)];
+    const stopped = [coreRow(0, UMBRADB_VERSION), mRow(0, "1.0.0", 10)];
     const entries = [CORE, versionEntry({ id: "m", start: 0, stop: 10, version: "1.0.0", config: M_DEFAULTS })];
     expect(versionOutcome(entries, [M_1_1], C, stopped)).toBe("accepted");
     // The core's stop is operational: after stopping at 10, the revision from 0 still covers 11.
-    expect(versionOutcome([core(0, {}, 10)], [], 10n, [coreRow(0, "0.9.5")])).toBe("accepted");
+    expect(versionOutcome([core(0, {}, 10)], [], 10n, [coreRow(0, UMBRADB_VERSION)])).toBe("accepted");
   });
 
   it("names every entry at once, in the configuration's order", () => {
@@ -1033,7 +1033,7 @@ describe("A33: one version per build — the revision covering cursor + 1 names 
 });
 
 describe("DB-10's input: the versions of each module's revisions that cover committed heights", () => {
-  const rows = [coreRow(0, "0.9.5"), mRow(0, "1.0.0"), mRow(50, "1.1.0"), { ...mRow(90, "2.0.0"), data: null, dataHash: null }, { ...mRow(3, "0.1.0", 6), id: "n" }];
+  const rows = [coreRow(0, UMBRADB_VERSION), mRow(0, "1.0.0"), mRow(50, "1.1.0"), { ...mRow(90, "2.0.0"), data: null, dataHash: null }, { ...mRow(3, "0.1.0", 6), id: "n" }];
 
   it("is empty on a new database", () => {
     expect(committedVersions(rows, 0n, null)).toEqual(new Map());
@@ -1092,7 +1092,7 @@ describe("Q102 (option A): the process's operational settings are the latest cor
     const error = refusal(() => processCoreEntry(checked([oldCore(0, "0.9.4")], build([]))));
     expect(error.code).toBe("invalid-configuration");
     expect(error.details).toEqual({ file: FILE, reason: "no-build-core-revision" });
-    for (const words of ["no core revision", "0.9.5", "coreEntry", "Q102"]) expect(error.message).toContain(words);
+    for (const words of ["no core revision", UMBRADB_VERSION, "coreEntry", "Q102"]) expect(error.message).toContain(words);
   });
 });
 
