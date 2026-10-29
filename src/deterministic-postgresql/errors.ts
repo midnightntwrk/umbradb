@@ -3,7 +3,7 @@
  * says whether retrying can succeed (`retryable`), and carries structured `details`. [design §4, §12]
  *
  * It keeps 0.9.5's split between retryable and not-retryable errors: thrown errors are told apart by `code`, and each
- * says whether a retry can clear it. Only two codes are retryable: [design-interfaces §1.1]
+ * says whether a retry can clear it. Only two codes are retryable: [design §4]
  *
  * - for the database, a lost connection (`connection-lost`), so the caller can reconnect and retry [DB-13];
  * - for the node, a node that could not be reached or did not answer in time (`node-unreachable`) [IN-10].

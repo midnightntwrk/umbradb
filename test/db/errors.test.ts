@@ -9,7 +9,7 @@ import { TRUNCATE_NOT_ALLOWED_SQLSTATE } from "../../src/deterministic-postgresq
 /**
  * `UmbraError { code, retryable, details }`, keeping 0.9.5's split between retryable and not-retryable errors. A lost
  * connection is the one retryable database error, and an unreachable node the one retryable node error.
- * [DB-13, IN-10; design §4, §12; design-interfaces §1.1]
+ * [DB-13, IN-10; design §4, §12]
  */
 
 describe("UmbraError", () => {

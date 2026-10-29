@@ -6,7 +6,7 @@ import { configDefaults, defineConfig } from "vitest/config";
  * Behaviour of `vitest run` is unchanged from the pre-config defaults (default `forks` pool,
  * default `**​/*.{test,spec}.ts` include, no global setup) — this file exists to add the
  * **coverage gate** that `v1.0.0-recovery-testing` owns and must CI-wire before G9 is declared
- * CLOSED (`docs/v1-implementation-guideline.md` §1.0, §2.3, §3.6). `src/` behaviour is untouched;
+ * CLOSED (the coverage rules are now in `AGENTS.md`). `src/` behaviour is untouched;
  * coverage only READS `src`.
  *
  * ── Coverage floors ──────────────────────────────────────────────────────────────────────────────────────────────

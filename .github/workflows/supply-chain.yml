@@ -198,7 +198,7 @@ jobs:
 
           # A MERGE commit landing on main is the prescribed roll-forward path: the PR-side check
           # above already adjudicated it (label present, or the PR failed). Rejecting it here would
-          # fail the very workflow the guideline tells contributors to use. Enforce only against a
+          # fail the very workflow contributors are told to use. Enforce only against a
           # NON-merge direct push, which bypasses PR review entirely.
           if [ "$(git rev-list --parents -n 1 "$GITHUB_SHA" | wc -w)" -gt 2 ]; then
             echo "flake.lock changed via a MERGE commit — already adjudicated by the PR-side check; ok"

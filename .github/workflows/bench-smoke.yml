@@ -5,8 +5,7 @@ name: Bench smoke guard (non-gating)
 # merge gate and is EXPLICITLY NON-RELEASE-GATING: `bench/smoke.ts` flags a >10x p99 move versus the
 # committed baseline as a WARNING and exits 0 — it never fails the build on a calibrated performance
 # number. The step is additionally marked `continue-on-error: true` as belt-and-suspenders. The
-# calibrated, CV-aware regression gate is deferred to the first post-1.0.0 obligation. See
-# Performance/CEILINGS.md ("Regression gating posture").
+# calibrated, CV-aware regression gate is deferred to the first post-1.0.0 obligation.
 
 permissions:
   contents: read
