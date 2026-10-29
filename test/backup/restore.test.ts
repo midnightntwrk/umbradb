@@ -175,6 +175,90 @@ describe("A125: a backup written on one backend restores on the other (BK-2, BK-
   );
 });
 
+/**
+ * The module `late`, as a module package's file declares it: a table and a routine in its schema `late`, written at
+ * every height, that may start above S. A configuration that lists it from above a backup's height names a schema no
+ * backup at that height holds. [BK-3, MD-6]
+ */
+const LATE_MODULE = [
+  'import { z } from "zod";',
+  `import { defineModule } from "@BUILDERS@";`,
+  "export const late = defineModule({",
+  '  id: "late",',
+  '  version: "1.0.0",',
+  '  side: "public",',
+  '  requires: ["block-header"],',
+  '  provides: [{ name: "late-rows", lifetimes: ["table"], table: { schema: "late", tables: ["rows"], kind: "append-only" } }],',
+  "  startsMidChain: true,",
+  "  configSchema: z.object({}),",
+  "  migrations: [{",
+  '    id: "001",',
+  "    sql: `CREATE TABLE late.rows (height bigint PRIMARY KEY);",
+  "CREATE FUNCTION late.twice(h bigint) RETURNS bigint LANGUAGE sql IMMUTABLE AS 'SELECT h * 2';`,",
+  "  }],",
+  "  points: {",
+  '    async "on-db-write"(_p, b, w) {',
+  '      await w.execute("INSERT INTO late.rows (height) VALUES ($1)", [b.height]);',
+  "    },",
+  "  },",
+  "});",
+  "",
+].join("\n");
+
+describe.each(BACKUP_BACKENDS)("a configuration with a module from above the backup's height on $name (BK-3)", (backend) => {
+  it(
+    "restores a backup at h with a configuration that adds a module from h + 1, whose schema the backup does not hold, " +
+      "and the restored database continues with that configuration, the module's routine not executable by PUBLIC",
+    async () => {
+      const { file } = await backupAt(backend, H);
+      const manifest = manifestOf(file);
+      const db = await backend.database();
+      project.write("late.ts", LATE_MODULE.replace("@BUILDERS@", project.builders));
+      const settings = JSON.stringify(coreSettings(db.setting, { listen: { admin: "127.0.0.1:0" } }));
+      const config = project.write(
+        `late-from-above-${backend.kind}.config.ts`,
+        [
+          `import { coreEntry, defineConfig } from ${JSON.stringify(project.builders)};`,
+          'import { ticker } from "./ticker.ts";',
+          'import { late } from "./late.ts";',
+          "export const modules = [ticker, late];",
+          "export default defineConfig({ entries: [",
+          `  coreEntry({ start: 1, stop: ${H + 3n}, config: ${settings} }),`,
+          "  ticker.entry({ start: 1, config: {} }),",
+          `  late.entry({ start: ${H + 1n}, config: {} }),`,
+          "] });",
+          "",
+        ].join("\n"),
+      );
+      const result = await restoreRun(file, config);
+      expect(result.stderr).toBe("");
+      expect(result.code).toBe(EXIT.ok);
+      expect(await hashOf(db)).toBe(manifest.contentsHash);
+      // The module's schema is made for it, empty, owned by its role, as startup makes it.
+      expect(await db.query("SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname = 'late'")).toEqual([
+        { owner: "umbradb_m_late" },
+      ]);
+
+      const ticker = await startTicker(config, H + 8n);
+      try {
+        const ended = await ticker.handle.ended;
+        expect(ended, endedText(ended, ticker.lines)).toMatchObject({ kind: "stopped", height: H + 3n, core: true });
+      } finally {
+        await ticker.handle.stop();
+      }
+      expect(await db.query("SELECT height::text FROM late.rows ORDER BY height")).toEqual(
+        [H + 1n, H + 2n, H + 3n].map((height) => ({ height: String(height) })),
+      );
+      // The routine its migration made after the restore: its owner's default privilege kept PUBLIC (`=X/`) from it.
+      const catalog = await catalogOf(db);
+      const routine = catalog.find((line) => line.startsWith("routine late.late.twice(bigint) "));
+      expect(routine).toMatch(/^routine late\.late\.twice\(bigint\) owner=umbradb_m_late acl=umbradb_m_late=X\//);
+      expect(routine).not.toMatch(/(acl=|,)=X\//);
+    },
+    TEST_TIMEOUT_MS,
+  );
+});
+
 describe.each(BACKUP_BACKENDS)("A126: each refusal of BK-3 on $name, in its order", (backend) => {
   it(
     "A126: each restore refusal of BK-3 is triggered and checked before or after loading, as BK-3 orders them; after " +

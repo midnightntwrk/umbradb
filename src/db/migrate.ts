@@ -376,19 +376,22 @@ export function checkRecordedMigrations(
  * The grants of a restored database, in the restore's transaction, once its objects belong to their schemas' roles
  * (`restoreOwnership`). `pg_dump --no-privileges` writes no grant, so this makes again what startup's bootstrap grants:
  * [BK-3, DB-6, DB-7]
- * 1. `EXECUTE` on every routine of a module schema is taken from `PUBLIC` (a routine its migration made after the
- *    owner's default privilege revoked it never had it);
- * 2. as each schema's owner, `USAGE`, `SELECT`, `EXECUTE` and their default privileges (`prepareSchemas`);
+ * 1. as each schema's owner, `USAGE`, `SELECT`, `EXECUTE` and their default privileges (`prepareSchemas`), which also
+ *    creates, empty, the schema of a module the configuration starts above the backup's height, so the backup holds
+ *    none;
+ * 2. `EXECUTE` on every routine of a module schema is taken from `PUBLIC` (a routine its migration made after the
+ *    owner's default privilege revoked it never had it; an empty schema has none). The grants of step 1 name roles,
+ *    not `PUBLIC`, so this takes none of them back;
  * 3. `USAGE` and `SELECT` on `core_chain`, and on `core_digest` once `core-digest`'s migrations made it, for every role
  *    of the plan.
  */
 export async function restoreGrants(tx: Transaction, plan: SchemaPlan): Promise<void> {
+  await prepareSchemas(tx, plan);
   for (const schema of plan.schemas) {
     await tx.execute(`SET LOCAL ROLE ${quoteIdentifier(schema.role)}`);
     await tx.execute(`REVOKE EXECUTE ON ALL ROUTINES IN SCHEMA ${quoteIdentifier(schema.name)} FROM PUBLIC`);
     await tx.execute("RESET ROLE");
   }
-  await prepareSchemas(tx, plan);
   await grantReads(tx, plan, "core_chain");
   if (await captureReady(tx)) await grantReads(tx, plan, "core_digest");
 }

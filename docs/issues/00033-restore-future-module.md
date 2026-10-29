@@ -1,6 +1,8 @@
 # 00033 — `umbradb restore` fails on a configuration with a module whose entry starts above the backup's height
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-29: `restoreGrants` runs `prepareSchemas` before the `REVOKE`, so the schema of a
+  module starting above the backup's height exists; `test/backup/restore.test.ts` restores with such a module on both
+  backends.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem
