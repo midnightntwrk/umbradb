@@ -3,10 +3,10 @@
  * API serves. Every name is written with its schema: UmbraDB sets no `search_path` (`docs/module-guide.md` §2.2).
  */
 
-import type { BlockWriteHandle, ReadHandle } from "umbradb";
+import type { BlockWriteHandle, Migration, ReadHandle } from "umbradb";
 
 /** The module's table, created once and changed only by a new migration at the end (§2.2). */
-export const migrations = [
+export const migrations: Migration[] = [
   {
     id: "001",
     sql: `CREATE TABLE stats_module.blocks (

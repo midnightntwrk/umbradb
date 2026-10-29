@@ -51,8 +51,13 @@ type Outcome = "success" | "partial" | "failure";
 export const statsModule = defineModule({
   id: "stats-module", // its schema is stats_module
   version: "1.0.0",
+  // "public": it stores only public chain data, no private information (no keys), so its database can be shared.
   side: "public",
+  // The items it needs from other modules, all from UmbraDB's core: `blocks`, the core's blocks table (read for each
+  // block's time); `block-parsed`, the block's parsed transactions; `tx-results`, each transaction's outcome.
   requires: ["blocks", "block-parsed", "tx-results"],
+  // The items it offers other modules: its table, which another module may read by requiring
+  // `stats-module-blocks`. "append-only": rows are only added, never changed, so private modules may read it too.
   provides: [
     {
       name: "stats-module-blocks",
@@ -61,11 +66,20 @@ export const statsModule = defineModule({
     },
   ],
   startsMidChain: false, // the running total needs every height from 0
+  // Its settings, given by its entry in the configuration file and checked at startup. Each field has a kind:
+  // "data" changes what is stored, so it is recorded and may change only from a future height; "operational" does
+  // not, and may change at any restart.
   configSchema: z.object({
+    // Whether system transactions count too, not only regular ones.
     countSystem: z.boolean().default(true).meta({ kind: "data" }),
+    // How many rows /stats-module/recent returns when the request gives no ?limit= (1 to 100).
     recentLimit: z.number().int().min(1).max(100).default(10).meta({ kind: "operational" }),
   }),
-  migrations, // ./sql.ts
+  // SQL migrations: they create the module's table in its own schema, once each and in order (./sql.ts).
+  migrations,
+  // The points: where the module's code runs. The runner calls each callback at its point, at startup or for every
+  // block: on-db-write inside the block's transaction, on-start-api to register routes, on-after-db-write after the
+  // commit.
   points: {/* §2.3, §2.4 */},
 });
 ```
@@ -80,7 +94,9 @@ require them. `countSystem` changes what is stored, so it is a `data` setting, c
 The module keeps its SQL in `sql.ts`: the migrations, the statements it writes with and the queries its routes serve.
 
 ```ts
-export const migrations = [
+import type { BlockWriteHandle, Migration, ReadHandle } from "umbradb";
+
+export const migrations: Migration[] = [
   {
     id: "001",
     sql: `CREATE TABLE stats_module.blocks (
