@@ -17,7 +17,7 @@ import { IN_MEMORY_LEDGER, IN_MEMORY_SPEC_VERSION, IN_MEMORY_START_MS } from "..
  * time {@link STAND_IN_START_MS} + height × 6,000 ms (a chain of 6-second blocks); a test gives its own per block.
  */
 
-/** The spec version of every stand-in block: the in-memory source's, runtime 2.0's, ledger v9. [CORE-ARCH §4.8] */
+/** The spec version of every stand-in block: the in-memory source's, runtime 2.1's, ledger v9. [CORE-ARCH §4.8] */
 export const STAND_IN_SPEC_VERSION = IN_MEMORY_SPEC_VERSION;
 
 /** The ledger version of every stand-in block: the in-memory source's. */

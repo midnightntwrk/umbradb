@@ -26,10 +26,14 @@ import type { CoreBlockItems } from "../backbone/core-block-fetch/items.js";
 import type { ReadHandle } from "../db/api.js";
 import type { BlockRef, BlockSource } from "./block-source.js";
 
-/** The `spec_version` of every in-memory block unless given: runtime 2.0's, whose ledger is v9. [CORE-ARCH §4.8] */
-export const IN_MEMORY_SPEC_VERSION = 2_000_000;
+/**
+ * The `spec_version` of every in-memory block unless given: runtime 2.1's, which every known network's built-in ledger
+ * table maps to v9 ({@link IN_MEMORY_LEDGER}); those tables map runtime 2.0 (2,000,000–2,000,999) to `v9-rc3`.
+ * [CORE-ARCH §4.8, LG-3]
+ */
+export const IN_MEMORY_SPEC_VERSION = 2_001_000;
 
-/** The ledger version of every in-memory block unless given. */
+/** The ledger version of every in-memory block unless given: the one the tables pair with its runtime. [LG-3] */
 export const IN_MEMORY_LEDGER = "v9";
 
 /** The time of the in-memory block at height 0 unless given, in milliseconds since 1970: 2025-06-15T15:06:40Z. */
