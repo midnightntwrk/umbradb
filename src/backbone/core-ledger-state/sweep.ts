@@ -137,7 +137,7 @@ export interface SweepWrites {
   readonly units: number;
 }
 
-const hexOf = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+const hexOf = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
 /** The two key lists merged in byte order, each key once, the first `limit`. */
 function merged(a: readonly Uint8Array[], b: readonly Uint8Array[], limit: number): Uint8Array[] {

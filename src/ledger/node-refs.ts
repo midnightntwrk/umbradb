@@ -38,10 +38,15 @@ class ChildReader {
   }
 
   skip(length: number): Uint8Array {
+    const start = this.#offset;
+    this.pass(length);
+    return this.bytes.slice(start, start + length);
+  }
+
+  /** Moves past `length` bytes without copying them (an embedded node's payload, which no caller keeps). */
+  pass(length: number): void {
     if (this.#offset + length > this.bytes.length) throw this.#refuse(`${length} bytes are announced`);
-    const taken = this.bytes.slice(this.#offset, this.#offset + length);
     this.#offset += length;
-    return taken;
   }
 
   /** A SCALE compact integer used as a length: at most the bytes left, so no length can make the reader loop. */
@@ -79,7 +84,7 @@ function readChildren(reader: ChildReader, keys: Uint8Array[]): void {
     const discriminant = reader.byte();
     if (discriminant === 0) keys.push(reader.skip(32));
     else if (discriminant === 1) {
-      reader.skip(reader.length());
+      reader.pass(reader.length());
       readChildren(reader, keys);
     } else throw reader.refuseHere(`a child of kind ${discriminant}`);
   }

@@ -45,6 +45,10 @@ UmbraDB 0.10.0 is a new architecture: nothing of 0.9.5's API or databases is car
   the `slow-block` condition.
 - **The `umbradb` command:** `run`, `config check`, `backup` and `restore`.
 - **Testing tools:** the test tape (record and replay of a node's answers) and the tape-apply baseline.
+- **Ingest speed:** the ledger root is requested in the finalized prefetch, PostgreSQL prepares the statements it
+  repeats, and the fixed statements of each block are fewer (about 77 per block instead of 101 on PostgreSQL, 72
+  instead of 111 on PGlite). On the 2,000-block preprod tape: 22.1 → 11.7 ms per block on PostgreSQL and 32.3 → 19.8 ms
+  on PGlite, with every core table unchanged.
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
