@@ -579,6 +579,10 @@ npm run test:conformance    # the required gate: every suite with coverage floor
 The PostgreSQL suites run PostgreSQL 18 in Docker (Testcontainers); the browser suites drive the machine's Chrome
 headless (`UMBRADB_CHROME` names another).
 
+Recorded tapes: [releases](https://github.com/midnight-experiments/umbradb-tapes/releases) ·
+[v0.10.0-rc.1](https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1).
+Set `UMBRADB_TAPES` to the download directory; see the [fixture note](openspec/changes/core-arch/acceptance.md) for filenames.
+
 **Knowledge graph.** The code, docs and specs are graphified in `graphify-out/`, committed. `npm run graph:refresh`
 rebuilds it; commit the result with the change that prompted it. `npm run graph:check` exits 0 when it is current, 1
 when stale, 2 when missing or not written by `graph:refresh`.
