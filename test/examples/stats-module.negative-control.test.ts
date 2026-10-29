@@ -39,7 +39,7 @@ describe("the example's checks fail on a changed copy (task 17.3a)", () => {
   }, 120_000);
 
   it("umbradb config check fails when a setting breaks the module's schema", async () => {
-    project.copyExample(["stats-module.ts", "umbradb.config.ts"], (file, text) =>
+    project.copyExample(["sql.ts", "stats-module.ts", "umbradb.config.ts"], (file, text) =>
       file === "umbradb.config.ts" ? text.replace("recentLimit: 5", "recentLimit: 500") : text,
     );
     const result = await runNode([project.command, "config", "check", "umbradb.config.ts"], project.dir);

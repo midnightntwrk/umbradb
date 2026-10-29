@@ -27,7 +27,7 @@ each finalized block, writes rows, and serves them over its own API. This guide 
 
   Most modules need only `on-db-write`, `on-start-api` and, for subscriptions, `on-after-db-write` (all twelve: §3).
 - **Items.** Modules exchange data as named items, each with one or more lifetimes: `block`, one block's data, read
-  from `b.items` (`block-parsed`); `table`, tables its provider writes and others read with SQL (`blocks` is
+  from `block.items` (`block-parsed`); `table`, tables its provider writes and others read with SQL (`blocks` is
   `core_block_commit.blocks`); `process`, a value set once per process (`db`, a read-only database). A module lists
   what it reads in `requires`, and startup refuses a configuration in which a required item has no provider at a
   height the module runs. UmbraDB's core modules provide the chain's data (§6, §9).
@@ -36,14 +36,15 @@ each finalized block, writes rows, and serves them over its own API. This guide 
 
 `stats-module` stores one row per height — the block's hash, how many Midnight transactions it carried, how many
 failed, and a running total — and serves the rows over HTTP and a subscription. The complete module is in
-[`examples/stats-module/`](../examples/stats-module/): `stats-module.ts`, its configuration `umbradb.config.ts`, and
-the scripts `run.sh` and `try.sh`. The blocks below are excerpts of those files.
+[`examples/stats-module/`](../examples/stats-module/): `stats-module.ts`, its SQL in `sql.ts`, its configuration
+`umbradb.config.ts`, and the scripts `run.sh` and `try.sh`. The blocks below are excerpts of those files.
 
 ### 2.1 The declaration
 
 ```ts
 import { z } from "zod";
-import { answerChainData, defineModule, type ParsedTransaction, type ReadHandle } from "umbradb";
+import { answerChainData, defineModule, type ParsedTransaction } from "umbradb";
+import { insertRow, lastTotal, migrations, recentRows, rowAt } from "./sql.ts";
 
 type Outcome = "success" | "partial" | "failure";
 
@@ -64,7 +65,7 @@ export const statsModule = defineModule({
     countSystem: z.boolean().default(true).meta({ kind: "data" }),
     recentLimit: z.number().int().min(1).max(100).default(10).meta({ kind: "operational" }),
   }),
-  migrations: [/* §2.2 */],
+  migrations, // ./sql.ts
   points: {/* §2.3, §2.4 */},
 });
 ```
@@ -76,20 +77,22 @@ require them. `countSystem` changes what is stored, so it is a `data` setting, c
 
 ### 2.2 Its table
 
+The module keeps its SQL in `sql.ts`: the migrations, the statements it writes with and the queries its routes serve.
+
 ```ts
-  migrations: [
-    {
-      id: "001",
-      sql: `CREATE TABLE stats_module.blocks (
+export const migrations = [
+  {
+    id: "001",
+    sql: `CREATE TABLE stats_module.blocks (
         height bigint PRIMARY KEY,
         hash bytea NOT NULL,
         tx_count integer NOT NULL,
         failed_count integer NOT NULL,
         total_tx bigint NOT NULL
       )`,
-    },
-    { id: "002", sql: "CREATE INDEX blocks_with_transactions ON stats_module.blocks (height) WHERE tx_count > 0" },
-  ],
+  },
+  { id: "002", sql: "CREATE INDEX blocks_with_transactions ON stats_module.blocks (height) WHERE tx_count > 0" },
+];
 ```
 
 Each migration runs once, in order. Write every name with its schema: UmbraDB sets no `search_path`. `002` shows how a
@@ -99,43 +102,73 @@ has a primary key and uses the types of §4.
 ### 2.3 Writing each block
 
 ```ts
-    async "on-db-write"(_p, b, w) {
-      const { transactions } = b.items.get("block-parsed") as { transactions: readonly ParsedTransaction[] };
-      const outcomes = b.items.get("tx-results") as readonly Outcome[]; // one per transaction, same order
-      const counted = outcomes.filter((_, i) => transactions[i]?.kind === "regular" || b.settings.countSystem === true);
-      const failed = counted.filter((outcome) => outcome === "failure").length;
-      const [last] = await w.query("SELECT total_tx FROM stats_module.blocks ORDER BY height DESC LIMIT 1");
-      const total = ((last?.total_tx as bigint | undefined) ?? 0n) + BigInt(counted.length);
-      await w.execute(
-        "INSERT INTO stats_module.blocks (height, hash, tx_count, failed_count, total_tx) VALUES ($1, $2, $3, $4, $5)",
-        [b.height, b.hash, counted.length, failed, total],
+    async "on-db-write"(_processContext, block, writer) {
+      const { transactions } = block.items.get("block-parsed") as { transactions: readonly ParsedTransaction[] };
+      const outcomes = block.items.get("tx-results") as readonly Outcome[]; // one per transaction, same order
+      const counted = outcomes.filter(
+        (_outcome, index) => transactions[index]?.kind === "regular" || block.settings.countSystem === true,
       );
+      const failed = counted.filter((outcome) => outcome === "failure").length;
+      const totalTx = (await lastTotal(writer)) + BigInt(counted.length);
+      await insertRow(writer, {
+        height: block.height,
+        hash: block.hash,
+        txCount: counted.length,
+        failedCount: failed,
+        totalTx,
+      });
     },
 ```
 
-`on-db-write` runs inside the height's transaction, through its write handle `w`: if any module fails at this height,
-nothing of the height is stored. Every value comes from the block, its items, the settings and the module's own table,
-never from the clock, so every machine writes the same row (§4). A `bigint` column reads back as a `bigint`.
+In `sql.ts`:
+
+```ts
+const SELECT_LAST_TOTAL = "SELECT total_tx FROM stats_module.blocks ORDER BY height DESC LIMIT 1";
+const INSERT_ROW =
+  "INSERT INTO stats_module.blocks (height, hash, tx_count, failed_count, total_tx) VALUES ($1, $2, $3, $4, $5)";
+
+export async function lastTotal(writer: BlockWriteHandle): Promise<bigint> {
+  const [last] = await writer.query(SELECT_LAST_TOTAL);
+  return (last?.total_tx as bigint | undefined) ?? 0n;
+}
+
+export async function insertRow(writer: BlockWriteHandle, row: StatsRow): Promise<void> {
+  await writer.execute(INSERT_ROW, [row.height, row.hash, row.txCount, row.failedCount, row.totalTx]);
+}
+```
+
+`on-db-write` runs inside the height's transaction, through its write handle `writer`: if any module fails at this
+height, nothing of the height is stored. Every value comes from the block, its items, the settings and the module's own
+table, never from the clock, so every machine writes the same row (§4). A `bigint` column reads back as a `bigint`.
 
 ### 2.4 Serving it
+
+In `sql.ts`, a row joined with its block's time from the core's blocks table:
+
+```ts
+const SELECT_ROWS = `
+  SELECT stats.height, stats.hash, chain.block_time, stats.tx_count, stats.failed_count, stats.total_tx
+  FROM stats_module.blocks stats JOIN core_block_commit.blocks chain USING (height)`;
+const SELECT_ROW_AT = `${SELECT_ROWS} WHERE stats.height = $1`;
+
+export async function rowAt(read: ReadHandle, height: bigint): Promise<Record<string, unknown> | undefined> {
+  return (await read.query(SELECT_ROW_AT, [height]))[0];
+}
+```
 
 Beside the declaration:
 
 ```ts
-const ROW_SQL = `SELECT s.height, s.hash, b.block_time, s.tx_count, s.failed_count, s.total_tx
-  FROM stats_module.blocks s JOIN core_block_commit.blocks b USING (height)`;
-const rowAt = async (read: ReadHandle, height: bigint) =>
-  (await read.query(`${ROW_SQL} WHERE s.height = $1`, [height]))[0];
 const subscribers = new Set<{ minTx: number; emit: (value: unknown) => void }>();
 ```
 
 In `points`:
 
 ```ts
-    async "on-start-api"(p, api) {
-      const recentLimit = Number(p.revisions.at(-1)?.settings.recentLimit ?? 10);
+    async "on-start-api"(processContext, api) {
+      const recentLimit = Number(processContext.revisions.at(-1)?.settings.recentLimit ?? 10);
 
-      api.http("GET", "/stats-module/latest", async (_req, read) =>
+      api.http("GET", "/stats-module/latest", async (_request, read) =>
         answerChainData(read, async (view) => {
           const row = await rowAt(read, view.height);
           return row === undefined ? { status: 404, body: { error: "no-row" } } : { status: 200, body: row };
@@ -149,9 +182,11 @@ In `points`:
       });
     },
 
-    async "on-after-db-write"(_p, b, read) {
-      const row = subscribers.size > 0 ? await rowAt(read, b.height) : undefined;
-      for (const s of subscribers) if (row !== undefined && Number(row.tx_count) >= s.minTx) s.emit(row);
+    async "on-after-db-write"(_processContext, block, read) {
+      const row = subscribers.size > 0 ? await rowAt(read, block.height) : undefined;
+      for (const subscriber of subscribers) {
+        if (row !== undefined && Number(row.tx_count) >= subscriber.minTx) subscriber.emit(row);
+      }
     },
 ```
 
@@ -243,8 +278,8 @@ Next: types §4, chain data §6 and §9, routes §7, settings §8, ready-made ta
 | `on-after-db-write` | after the commit; no `block` items | read at h | in series |
 | `on-stop-height` | after your entry's stop height committed | read at h | in series |
 
-- **Arguments.** Every callback gets the process context `p` first (§8, §13). The block points get `b`: `height`,
-  `hash`, `parentHash`, `items`, `settings` (your revision's at this height) and `active(moduleId)`.
+- **Arguments.** Every callback gets the process context `processContext` first (§8, §13). The block points get `block`:
+  `height`, `hash`, `parentHash`, `items`, `settings` (your revision's at this height) and `active(moduleId)`.
 - **Which point for which job.** Compute in `on-compute`: it reads the state before the block, and modules there run in
   parallel. Write in `on-db-write`, the only point inside the block's transaction. Notify in `on-after-db-write`, once
   the height is committed. Set up in `on-start-db`; register routes in `on-start-api`.
@@ -380,7 +415,7 @@ table: { schema: "keys", tables: ["requests"], kind: "append-only", deterministi
   these; do not parse the bytes again.
 - **`tx-results`** is `success`, `partial` or `failure` per transaction, in `block-parsed`'s order; which segment failed
   is in `segment-results` (§9). A block whose events do not account for its transactions halts processing.
-- **Lifetimes.** "both" is `block` and `table`. A `block` item is in `b.items` from the point in "From" through
+- **Lifetimes.** "both" is `block` and `table`. A `block` item is in `block.items` from the point in "From" through
   `on-db-write`; `on-after-db-write` gets none.
 
 ## 7. The module API
@@ -426,9 +461,9 @@ configSchema: z.object({
   numbers, times as RFC 3339 text and bytes as `0x` lowercase hex (`hexBytes()` checks one); transform none into a
   `bigint`, a `Date` or a class instance. The schema parses synchronously and refuses a value with an issue, never by
   throwing.
-- **Reading them.** `b.settings` holds your revision's settings at the block's height. Where there is no block, as in
-  `on-start-api`, `p.revisions` lists your revisions (`start`, `stop`, `version`, `settings`):
-  `p.revisions.at(-1)?.settings.recentLimit`.
+- **Reading them.** `block.settings` holds your revision's settings at the block's height. Where there is no block, as
+  in `on-start-api`, `processContext.revisions` lists your revisions (`start`, `stop`, `version`, `settings`):
+  `processContext.revisions.at(-1)?.settings.recentLimit`.
 
 ## 9. Ledger state, contract states and contract logs
 
@@ -465,12 +500,12 @@ you must, in a later migration of your own.
 import { cursorTable, heightVersionedTable } from "umbradb";
 
 const cursors = cursorTable({ schema: "my_module", table: "cursors" }); // migration: cursors.migration("001")
-await cursors.write(w, "wallet-1", { height: b.height });               // in on-db-write
+await cursors.write(writer, "wallet-1", { height: block.height });      // in on-db-write
 const value = await cursors.read(read, "wallet-1");                     // through any handle
 
 const metadata = heightVersionedTable({ schema: "my_module", table: "metadata" });
-await metadata.write(w, b, "token-1", { name: "Night" });               // in on-db-write; or metadata.delete(w, b, key)
-const then = await metadata.read(read, "token-1", b.height - 10n);      // as of a height; without one, the current
+await metadata.write(writer, block, "token-1", { name: "Night" });      // in on-db-write; or metadata.delete(…)
+const then = await metadata.read(read, "token-1", block.height - 10n);  // as of a height; without one, the current
 ```
 
 - **Cursor table: one value per key.** The last write of a key wins, also within one block. `read` gives `undefined`
@@ -483,9 +518,9 @@ const then = await metadata.read(read, "token-1", b.height - 10n);      // as of
 ## 11. Start and stop heights
 
 - **Entries and revisions.** Each entry is a revision: `statsModule.entry({ start, stop?, config })`. Revisions that
-  follow each other are one run: with entries starting at 1 and 5, `b.settings` holds the first's settings at heights 1
-  to 4 and the second's from 5, and the module does not start again at 5. A revision whose `stop` is below the next
-  one's start leaves a gap: the module stops there and starts again.
+  follow each other are one run: with entries starting at 1 and 5, `block.settings` holds the first's settings at
+  heights 1 to 4 and the second's from 5, and the module does not start again at 5. A revision whose `stop` is below the
+  next one's start leaves a gap: the module stops there and starts again.
 - **Starting mid-chain.** A module may start above height 0 only if it declares `startsMidChain: true`, promising that,
   started at any height h, it writes from h the rows a run from 0 would write; otherwise startup refuses with
   `cannot-start-mid-chain`. Only starts above the cursor are checked, so a restored backup continues as it was.
@@ -516,7 +551,7 @@ const then = await metadata.read(read, "token-1", b.height - 10n);      // as of
 ## 13. Providing items to other modules
 
 - **`block` items.** Declare the item with the `block` lifetime and put it once per block with `out.put(item, value)`,
-  from `on-fetch`, `on-parse` or `on-compute`; the modules that require it run after you and read `b.items`.
+  from `on-fetch`, `on-parse` or `on-compute`; the modules that require it run after you and read `block.items`.
 - **`table` items** list your tables (`schema`, `tables`, `kind`: `append-only` if rows are only added, else
   `mutable`). Others require the item to read them; private modules read only append-only ones (§14).
 - **`process` items.** Declare the item with the `process` lifetime and publish it once, from your `on-start-db`:
@@ -536,18 +571,18 @@ const then = await metadata.read(read, "token-1", b.height - 10n);      // as of
   PostgreSQL database's parts) or the public process's transport (`coreTransport`, the public `listen.transport`). It
   keeps its own database; §4 applies to it, so two private processes with the same configuration, bound to the same
   public database, hold the same private rows.
-- **Reading public data in `on-fetch`.** `on-fetch(p, b, out, read)` gets a fourth argument, a read of the public
-  database at its committed height, which may be above `b.height`. Read public tables by height (`WHERE height = $1`),
-  and only append-only ones: their rows for a height never change. Through `coreTransport` each statement must be one
-  read — its first word `SELECT`, `WITH`, `VALUES` or `TABLE`, naming no `pg_` function and none of the others the
-  [threat model](THREAT_MODEL.md) lists —, else it fails with `read-refused` and the core runs nothing of it.
+- **Reading public data in `on-fetch`.** `on-fetch(processContext, block, out, read)` gets a fourth argument, a read of
+  the public database at its committed height, which may be above `block.height`. Read public tables by height (`WHERE
+  height = $1`), and only append-only ones: their rows for a height never change. Through `coreTransport` each statement
+  must be one read — its first word `SELECT`, `WITH`, `VALUES` or `TABLE`, naming no `pg_` function and none of the
+  others the [threat model](THREAT_MODEL.md) lists —, else it fails with `read-refused` and the core runs nothing of it.
 - **Which public items you may require.** Public `table` items (`blocks`, `ledger-events`, a public module's tables):
   require each one you read, and startup checks that the public process provides it at every height you run. Public
   `block` and `process` items (`block-header`, `node-client`) are not available; a private process has its own
   `config`, `db` and `ledger-table`.
 - **Mutable public tables need lockstep.** Declare `needsLockstep: true` and run the module on an instance the public
   `core` entry lists in `lockstepInstances`, with `coreTransport` set (`needs-lockstep-not-listed` otherwise). The
-  public process then waits for the instance at each height, so your read sees exactly `b.height`. An instance that
+  public process then waits for the instance at each height, so your read sees exactly `block.height`. An instance that
   falls behind halts with `lockstep-behind`; one listed late needs a new private database starting above the public
   cursor.
 - **Binding and public changes.** A private database is bound to the public database it first started against

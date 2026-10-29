@@ -29,7 +29,7 @@ describe("examples/stats-module (task 17.3a)", () => {
 
   beforeAll(async () => {
     project = await installedProject();
-    project.copyExample(["stats-module.ts", "umbradb.config.ts"]);
+    project.copyExample(["sql.ts", "stats-module.ts", "umbradb.config.ts"]);
   }, 300_000);
 
   afterAll(() => project?.remove());
@@ -58,7 +58,7 @@ describe("the documents' code (task 17.3a, Q161 A)", () => {
     const guide = read("docs/module-guide.md");
     const walkthrough = codeBlocks(section(guide, "2. ")).filter(({ language }) => language === "ts");
     expect(walkthrough.length).toBeGreaterThanOrEqual(5);
-    const files = ["stats-module.ts", "umbradb.config.ts"].map((file) => readFileSync(join(EXAMPLE, file), "utf8"));
+    const files = ["sql.ts", "stats-module.ts", "umbradb.config.ts"].map((file) => readFileSync(join(EXAMPLE, file), "utf8"));
     expect(linesMissing(walkthrough, files)).toEqual([]);
   });
 });

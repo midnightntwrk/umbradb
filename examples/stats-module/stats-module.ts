@@ -5,15 +5,12 @@
  */
 
 import { z } from "zod";
-import { answerChainData, defineModule, type ParsedTransaction, type ReadHandle } from "umbradb";
+import { answerChainData, defineModule, type ParsedTransaction } from "umbradb";
+import { insertRow, lastTotal, migrations, recentRows, rowAt } from "./sql.ts";
 
 /** The `tx-results` item: one outcome per transaction, in `block-parsed`'s order. */
 type Outcome = "success" | "partial" | "failure";
 
-const ROW_SQL = `SELECT s.height, s.hash, b.block_time, s.tx_count, s.failed_count, s.total_tx
-  FROM stats_module.blocks s JOIN core_block_commit.blocks b USING (height)`;
-const rowAt = async (read: ReadHandle, height: bigint) =>
-  (await read.query(`${ROW_SQL} WHERE s.height = $1`, [height]))[0];
 const subscribers = new Set<{ minTx: number; emit: (value: unknown) => void }>();
 
 export const statsModule = defineModule({
@@ -34,47 +31,39 @@ export const statsModule = defineModule({
     recentLimit: z.number().int().min(1).max(100).default(10).meta({ kind: "operational" }),
   }),
 
-  migrations: [
-    {
-      id: "001",
-      sql: `CREATE TABLE stats_module.blocks (
-        height bigint PRIMARY KEY,
-        hash bytea NOT NULL,
-        tx_count integer NOT NULL,
-        failed_count integer NOT NULL,
-        total_tx bigint NOT NULL
-      )`,
-    },
-    { id: "002", sql: "CREATE INDEX blocks_with_transactions ON stats_module.blocks (height) WHERE tx_count > 0" },
-  ],
+  migrations, // ./sql.ts
 
   points: {
-    async "on-db-write"(_p, b, w) {
-      const { transactions } = b.items.get("block-parsed") as { transactions: readonly ParsedTransaction[] };
-      const outcomes = b.items.get("tx-results") as readonly Outcome[]; // one per transaction, same order
-      const counted = outcomes.filter((_, i) => transactions[i]?.kind === "regular" || b.settings.countSystem === true);
-      const failed = counted.filter((outcome) => outcome === "failure").length;
-      const [last] = await w.query("SELECT total_tx FROM stats_module.blocks ORDER BY height DESC LIMIT 1");
-      const total = ((last?.total_tx as bigint | undefined) ?? 0n) + BigInt(counted.length);
-      await w.execute(
-        "INSERT INTO stats_module.blocks (height, hash, tx_count, failed_count, total_tx) VALUES ($1, $2, $3, $4, $5)",
-        [b.height, b.hash, counted.length, failed, total],
+    async "on-db-write"(_processContext, block, writer) {
+      const { transactions } = block.items.get("block-parsed") as { transactions: readonly ParsedTransaction[] };
+      const outcomes = block.items.get("tx-results") as readonly Outcome[]; // one per transaction, same order
+      const counted = outcomes.filter(
+        (_outcome, index) => transactions[index]?.kind === "regular" || block.settings.countSystem === true,
       );
+      const failed = counted.filter((outcome) => outcome === "failure").length;
+      const totalTx = (await lastTotal(writer)) + BigInt(counted.length);
+      await insertRow(writer, {
+        height: block.height,
+        hash: block.hash,
+        txCount: counted.length,
+        failedCount: failed,
+        totalTx,
+      });
     },
 
-    async "on-start-api"(p, api) {
-      const recentLimit = Number(p.revisions.at(-1)?.settings.recentLimit ?? 10);
+    async "on-start-api"(processContext, api) {
+      const recentLimit = Number(processContext.revisions.at(-1)?.settings.recentLimit ?? 10);
 
-      api.http("GET", "/stats-module/latest", async (_req, read) =>
+      api.http("GET", "/stats-module/latest", async (_request, read) =>
         answerChainData(read, async (view) => {
           const row = await rowAt(read, view.height);
           return row === undefined ? { status: 404, body: { error: "no-row" } } : { status: 200, body: row };
         }),
       );
 
-      api.http("GET", "/stats-module/blocks/:height", async (req, read) =>
+      api.http("GET", "/stats-module/blocks/:height", async (request, read) =>
         answerChainData(read, async (view) => {
-          const text = req.params.height ?? "";
+          const text = request.params.height ?? "";
           if (!/^\d{1,15}$/.test(text)) {
             return { status: 400, body: { error: "bad-height", message: "a height is a whole number" } };
           }
@@ -84,13 +73,12 @@ export const statsModule = defineModule({
         }),
       );
 
-      // `?limit=` is a query parameter: a handler gets the query's and the path's parameters in `req.params`.
-      api.http("GET", "/stats-module/recent", async (req, read) =>
+      // `?limit=` is a query parameter: a handler gets the query's and the path's parameters in `request.params`.
+      api.http("GET", "/stats-module/recent", async (request, read) =>
         answerChainData(read, async () => {
-          const asked = Number(req.params.limit ?? recentLimit);
+          const asked = Number(request.params.limit ?? recentLimit);
           const limit = Number.isInteger(asked) && asked >= 1 ? Math.min(asked, 100) : recentLimit;
-          const rows = await read.query(`${ROW_SQL} WHERE s.tx_count > 0 ORDER BY s.height DESC LIMIT $1`, [limit]);
-          return { status: 200, body: { blocks: rows } };
+          return { status: 200, body: { blocks: await recentRows(read, limit) } };
         }),
       );
 
@@ -101,9 +89,11 @@ export const statsModule = defineModule({
       });
     },
 
-    async "on-after-db-write"(_p, b, read) {
-      const row = subscribers.size > 0 ? await rowAt(read, b.height) : undefined;
-      for (const s of subscribers) if (row !== undefined && Number(row.tx_count) >= s.minTx) s.emit(row);
+    async "on-after-db-write"(_processContext, block, read) {
+      const row = subscribers.size > 0 ? await rowAt(read, block.height) : undefined;
+      for (const subscriber of subscribers) {
+        if (row !== undefined && Number(row.tx_count) >= subscriber.minTx) subscriber.emit(row);
+      }
     },
   },
 });
