@@ -33,7 +33,7 @@ import { ManualTimers, until } from "./manual-timers.js";
  */
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
-  connectWebSocket(url, events, timers, { heartbeatMs: 3_600_000_000 });
+  connectWebSocket(url, events, timers, { heartbeatMs: 2 ** 31 - 1 });
 
 const nodes: FakeNode[] = [];
 const clients: NodeClient[] = [];

@@ -188,11 +188,16 @@ export function invalidParameter(method: NodeMethod, parameter: string, expected
 }
 
 /** A client option that cannot be used (the URL never shown). */
-export function invalidOption(field: "node" | "callTimeoutMs" | "backoffCeilingMs", reason: string): UmbraError {
+export function invalidOption(
+  field: "node" | "callTimeoutMs" | "backoffCeilingMs" | "heartbeatMs",
+  reason: string,
+): UmbraError {
   const what =
     field === "node"
       ? "the node's address must be a ws:// or wss:// URL"
-      : `${field} must be a positive integer of milliseconds`;
+      : field === "heartbeatMs"
+        ? "heartbeatMs must be a whole number of milliseconds from 1 to 2147483647"
+        : `${field} must be a positive integer of milliseconds`;
   return new UmbraError("invalid-configuration", `the node client cannot start: ${what}`, { field, reason });
 }
 

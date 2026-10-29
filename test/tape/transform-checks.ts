@@ -115,9 +115,8 @@ export function expectVariantOutput(name: string): void {
   expect(tapeText(variant.apply(baseRecords()))).toBe(expectedText(name));
 }
 
-const HOUR = 3_600_000;
 const quietConnect: ConnectSocket = (url, events, timers) =>
-  connectWebSocket(url, events, timers, { heartbeatMs: 1_000_000 * HOUR });
+  connectWebSocket(url, events, timers, { heartbeatMs: 2 ** 31 - 1 });
 const hash = (n: number): string => `0x${n.toString(16).padStart(64, "0")}`;
 
 function header(n: number): Json {

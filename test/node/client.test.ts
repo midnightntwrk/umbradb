@@ -38,9 +38,12 @@ import { ManualTimers, turns, until } from "./manual-timers.js";
  */
 
 const HOUR = 3_600_000;
-/** The WebSocket transport with its heartbeat out of the way (no beat in any test's hours): it has its own tests below. */
+/**
+ * The WebSocket transport with its heartbeat out of the way: 2^31 − 1 ms (about 596 hours, the longest a timer holds)
+ * is more than any test moves its clock. It has its own tests below.
+ */
 const quietConnect: ConnectSocket = (url, events, timers) =>
-  connectWebSocket(url, events, timers, { heartbeatMs: 1_000_000 * HOUR });
+  connectWebSocket(url, events, timers, { heartbeatMs: 2 ** 31 - 1 });
 
 const nodes: FakeNode[] = [];
 const clients: NodeClient[] = [];
@@ -1210,6 +1213,37 @@ describe("the WebSocket transport's heartbeat", () => {
     expect(retries).toEqual([]);
     expect(node.connections).toBe(1);
     expect(node.open).toBe(1);
+  });
+
+  it("refuses a heartbeatMs a timer cannot hold (Node.js runs a delay above 2^31 − 1 ms after 1 ms), before connecting", async () => {
+    const node = await startNode();
+    const refusals: readonly [number, string][] = [
+      [2 ** 31, "above-timer-limit"],
+      [1_000_000 * HOUR, "above-timer-limit"],
+      [Number.POSITIVE_INFINITY, "not-a-positive-integer"],
+      [0, "not-a-positive-integer"],
+      [-1, "not-a-positive-integer"],
+      [1.5, "not-a-positive-integer"],
+      [Number.NaN, "not-a-positive-integer"],
+    ];
+    const events: NodeSocketEvents = { open: () => undefined, message: () => undefined, closed: () => undefined };
+    for (const [heartbeatMs, reason] of refusals) {
+      let error: unknown;
+      try {
+        connectWebSocket(node.url(), events, new ManualTimers(), { heartbeatMs });
+      } catch (thrown) {
+        error = thrown;
+      }
+      expect(error, String(heartbeatMs)).toBeInstanceOf(UmbraError);
+      expect(error, String(heartbeatMs)).toMatchObject({
+        code: "invalid-configuration",
+        retryable: false,
+        details: { field: "heartbeatMs", reason },
+      });
+    }
+    // Refused before any connection was made.
+    await turns();
+    expect(node.connections).toBe(0);
   });
 });
 

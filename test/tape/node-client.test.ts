@@ -28,7 +28,7 @@ const HOUR = 3_600_000;
 const TEST_TIMEOUT_MS = 60_000;
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
-  connectWebSocket(url, events, timers, { heartbeatMs: 1_000_000 * HOUR });
+  connectWebSocket(url, events, timers, { heartbeatMs: 2 ** 31 - 1 });
 
 /** Every request every tape node of this file received. */
 const received: TapeCall[] = [];

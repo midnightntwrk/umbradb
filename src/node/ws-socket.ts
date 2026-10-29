@@ -11,13 +11,21 @@
  * transport pings; when neither the pong nor any other frame arrived since the previous ping, it ends the connection
  * (`closed` with 1006), and the client connects again. A dead connection is thus found within two heartbeats. Pings
  * are WebSocket control frames: the node, a tape node and a recording proxy answer them without any JSON-RPC call.
+ *
+ * `heartbeatMs` is a whole number from 1 to {@link MAX_HEARTBEAT_MS}, or the transport refuses it with
+ * `invalid-configuration` before connecting: Node.js runs a timer whose delay is above 2^31 − 1 ms after 1 ms instead,
+ * which would ping, find no pong 1 ms later and end every connection as soon as it opens. [IN-10]
  */
 
 import { WebSocket } from "ws";
+import { invalidOption } from "./errors.js";
 import type { NodeSocket, NodeSocketEvents, NodeTimers } from "./socket.js";
 
 /** The heartbeat's interval. */
 export const DEFAULT_HEARTBEAT_MS = 30_000;
+
+/** The longest heartbeat interval: the largest delay a Node.js timer holds (a signed 32-bit integer of ms). */
+const MAX_HEARTBEAT_MS = 2_147_483_647;
 
 /** Opens a WebSocket to `url` with `ws`; `heartbeatMs` sets the heartbeat's interval. */
 export function connectWebSocket(
@@ -27,6 +35,10 @@ export function connectWebSocket(
   options: { readonly heartbeatMs?: number } = {},
 ): NodeSocket {
   const heartbeatMs = options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+  if (!Number.isSafeInteger(heartbeatMs) || heartbeatMs < 1) {
+    throw invalidOption("heartbeatMs", "not-a-positive-integer");
+  }
+  if (heartbeatMs > MAX_HEARTBEAT_MS) throw invalidOption("heartbeatMs", "above-timer-limit");
   const socket = new WebSocket(url);
   let opened = false;
   let status: number | undefined;
