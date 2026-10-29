@@ -772,6 +772,7 @@ export class FinalizedLoop {
       const context = this.#context(run, part, run.items.visible());
       return writes.write(part.id, (w) => call(context, w));
     });
+    await writes.end();
     this.#check();
     const cursor = await this.input.source.cursor(tx);
     if (cursor === null || cursor.height !== run.height || !sameBytes(cursor.hash, run.block.hash)) {

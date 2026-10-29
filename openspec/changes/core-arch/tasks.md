@@ -597,9 +597,10 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       parts' `on-db-write` callbacks inside the block transaction the runner opens, one `write(part, callback)` at a time
       (one asked for while another runs is refused before anything is sent): each callback first sets its part's role —
       `SET LOCAL ROLE` to its write role (a shared item's provider: the item's, Q89), or `RESET ROLE` for `core-chain`
-      and `core-digest`, which write as the login — so no part runs under the role the one before it left, and after a
-      callback that returned `RESET ROLE` returns the block to the login, also undoing a role the callback selected
-      itself; `runOnStartDb` runs `on-start-db` the same way in a transaction of its own, and `startDatabase` calls it
+      and `core-digest`, which write as the login — so no part runs under the role the one before it left; `RESET ROLE`
+      returns the block to the login, also undoing a role a callback selected itself, before an own part's callback and
+      at `writes.end()` after the last one (ingest profile 00033: between two modules' callbacks the next
+      `SET LOCAL ROLE` replaces the role directly); `runOnStartDb` runs `on-start-db` the same way in a transaction of its own, and `startDatabase` calls it
       (`StartupInput.handles`: the cursor at startup and the report hook; `MigrationPart.onStartDb` takes a
       `SchemaWriteHandle`). A handle offers exactly `height`, `query` and `execute` — not the transaction, not the
       migrations' script path, never the migration mark (A73's block test now goes through it). When its callback

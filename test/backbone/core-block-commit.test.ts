@@ -14,6 +14,7 @@ import {
   CURSOR_TABLE,
   cursorHeight,
   HASHES_TABLE,
+  openedCursorHeight,
   readCursor,
 } from "../../src/backbone/core-block-commit/sql.js";
 import {
@@ -574,3 +575,43 @@ async function a145Stored(
   );
   return stored.map((row) => ({ text: row.text, microseconds: row.microseconds }));
 }
+
+describe("the committed height of one opened database (00033 F3c)", () => {
+  /** A read whose blocks table appears when `present` says, holding height 7; counts the existence checks. */
+  function stubRead(present: () => boolean) {
+    let checks = 0;
+    return {
+      checks: () => checks,
+      read: {
+        query: async (sql: string) => {
+          if (sql.includes("to_regclass")) {
+            checks += 1;
+            return [{ present: present() }];
+          }
+          return [{ height: 7n, hash: new Uint8Array(32), parent_hash: new Uint8Array(32) }];
+        },
+      },
+    };
+  }
+
+  it("checks for the blocks table until it exists, then reads the height without checking again", async () => {
+    let exists = false;
+    const { read, checks } = stubRead(() => exists);
+    const height = openedCursorHeight();
+    expect(await height(read)).toBeNull();
+    expect(await height(read)).toBeNull();
+    expect(checks()).toBe(2);
+    exists = true;
+    expect(await height(read)).toBe(7n);
+    expect(await height(read)).toBe(7n);
+    expect(await height(read)).toBe(7n);
+    expect(checks()).toBe(3);
+  });
+
+  it("keeps what it learned per opened database: another one checks again", async () => {
+    const { read, checks } = stubRead(() => true);
+    await openedCursorHeight()(read);
+    await openedCursorHeight()(read);
+    expect(checks()).toBe(2);
+  });
+});

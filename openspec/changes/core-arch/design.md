@@ -477,8 +477,11 @@ interface QueueRunner {                                      // given by the fin
   `write(part, callback)` at a time in RN-3's order (one asked for while another runs is refused, a programming error).
   Each callback starts by setting its part's role — `SET LOCAL ROLE` to its write role (a shared item's provider: the
   item's, Q89), `RESET ROLE` for `core-chain` and `core-digest`, which write as the login — so it never runs under the
-  role the callback before it left; after a callback that returned, `RESET ROLE` returns the block to the login, also
-  undoing a role the callback selected itself. `on-start-db` runs through `runOnStartDb` in a transaction of its own
+  role the callback before it left. `RESET ROLE` returns the block to the login, also undoing a role a callback
+  selected itself, before an own part's callback and at `writes.end()`, which the runner calls after the last callback
+  and before its own cursor check; between two modules' callbacks the next `SET LOCAL ROLE` replaces the role directly,
+  and a reset is skipped after an own part's callback (the block is at the login already). Ingest profile 00033: about
+  9 statements fewer per block, the same role for every callback. `on-start-db` runs `runOnStartDb` in a transaction of its own
   the same way (the migration runner calls it). A handle offers exactly `height`, `query` and `execute` (CORE-ARCH
   §4.10): not the transaction, not the migrations' script path, never the migration mark (so `TRUNCATE` stays refused,
   A73). `height` is what the runner gives: the cursor before the block (h − 1, null for the first block), the cursor at

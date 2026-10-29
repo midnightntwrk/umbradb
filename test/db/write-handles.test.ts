@@ -138,34 +138,40 @@ async function expectClosedInNextCallback(db: Database, plan: SchemaPlan, open: 
   expect(await rows(db, "b.t")).toEqual([{ k: 8n, who: "umbradb_m_b" }]);
 }
 
-/** The role check: each part's callback runs under its own write role, and the block returns to the login after it. */
+/**
+ * The role check: each part's callback runs under its own write role — an own part's under the login, after a module's
+ * — and the block is back at the login after an own part and after `end`, whose module ran last.
+ */
 async function expectOwnRoles(db: Database, plan: SchemaPlan, login: string, open: BlockOpener): Promise<void> {
   const seen: [string, unknown][] = [];
   await block(
     db,
     plan,
     async (writes, tx) => {
-      for (const part of ["a", "b", "p", "core-digest"]) {
+      for (const part of ["a", "b", "core-digest", "p"]) {
         await writes.write(part, async (w) => {
           const [row] = await w.query("SELECT current_user AS role");
           seen.push([part, row?.role]);
         });
-        const [between] = await tx.query("SELECT current_user AS role");
-        seen.push(["between", between?.role]);
+        if (part === "core-digest") {
+          const [between] = await tx.query("SELECT current_user AS role");
+          seen.push(["between", between?.role]);
+        }
       }
+      await writes.end();
+      const [after] = await tx.query("SELECT current_user AS role");
+      seen.push(["end", after?.role]);
     },
     { height: 4n },
     open,
   );
   expect(seen).toEqual([
     ["a", "umbradb_m_a"],
-    ["between", login],
     ["b", "umbradb_m_b"],
-    ["between", login],
-    ["p", "umbradb_i_shared_s"],
-    ["between", login],
     ["core-digest", login],
     ["between", login],
+    ["p", "umbradb_i_shared_s"],
+    ["end", login],
   ]);
 }
 
@@ -184,6 +190,7 @@ const staysOpen: BlockOpener = (tx, plan, options) => ({
     await tx.execute("RESET ROLE");
     return result;
   },
+  async end() {},
 });
 
 /**
@@ -214,6 +221,7 @@ const keepsFirstRole: BlockOpener = (tx, plan, options) => {
         open = false;
       }
     },
+    async end() {},
   };
 };
 
@@ -467,6 +475,39 @@ describe.each(BACKENDS)("write handles and their closing on $name (DB-3, A10)", 
     it("runs each callback under its own role — a shared item's provider under the item's (Q89), UmbraDB's own parts as the login — and returns to the login after each", async () => {
       const { db, plan, login } = await setUp();
       await expectOwnRoles(db, plan, login, openBlockWrites);
+    });
+
+    it("undoes a role a module's callback selected itself: the next module runs under its own, end() and the next transaction as the login (00033 F3d)", async () => {
+      const { db, plan, login } = await setUp();
+      const seen: [string, unknown][] = [];
+      await block(db, plan, async (writes, tx) => {
+        await writes.write("a", async (w) => {
+          await w.execute("SET ROLE umbradb_i_shared_s");
+        });
+        await writes.write("b", async (w) => {
+          const [row] = await w.query("SELECT current_user AS role");
+          seen.push(["b", row?.role]);
+          await w.execute("SET ROLE umbradb_m_a");
+        });
+        await writes.write("core-digest", async (w) => {
+          const [row] = await w.query("SELECT current_user AS role");
+          seen.push(["core-digest", row?.role]);
+        });
+        await writes.write("a", async (w) => {
+          await w.execute("SET ROLE umbradb_m_b");
+        });
+        await writes.end();
+        const [after] = await tx.query("SELECT current_user AS role");
+        seen.push(["end", after?.role]);
+      });
+      const next = await db.transaction(async (tx) => (await tx.query("SELECT current_user AS role, session_user AS login"))[0]);
+      seen.push(["next transaction", next?.role]);
+      expect(seen).toEqual([
+        ["b", "umbradb_m_b"],
+        ["core-digest", login],
+        ["end", login],
+        ["next transaction", login],
+      ]);
     });
 
     it("gives the next part its own role even when a callback changed the role itself, and leaves no role on the writer's session", async () => {

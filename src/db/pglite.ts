@@ -394,9 +394,8 @@ class PgliteDatabase implements Database {
   private async readInJob<T>(body: (read: ReadHandle) => Promise<T>, ended: () => void = () => undefined): Promise<T> {
     let open = true;
     try {
-      await this.statement("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-      await this.statement("RESET ALL");
-      await this.statement("RESET ROLE");
+      // One call to the engine for the three: they are sent in this order either way.
+      await this.script("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY; RESET ALL; RESET ROLE");
       const query = async (sql: string, params?: unknown[]): Promise<Row[]> => {
         if (!open) throw handleClosed("read");
         return (await this.statement(sql, params)).rows;

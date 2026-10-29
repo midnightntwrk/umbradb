@@ -190,13 +190,33 @@ export async function capturedTables(read: ConsistentRead): Promise<CapturedTabl
 }
 
 /**
+ * Those of `tables` whose shadow table holds a row, this transaction's or any other's, in their order, read in one
+ * statement. {@link takeChanges} of any other table finds nothing and deletes nothing, so the caller may skip it.
+ */
+export async function tablesWithChanges(read: ConsistentRead, tables: readonly CapturedTable[]): Promise<CapturedTable[]> {
+  if (tables.length === 0) return [];
+  const rows = await read.query(
+    tables
+      .map((table, i) => `SELECT ${i} AS i WHERE EXISTS (SELECT 1 FROM ${shadowOf(table)})`)
+      .join("\nUNION ALL\n"),
+  );
+  const listed = new Set(rows.map((row) => Number(row.i)));
+  return tables.filter((_, i) => listed.has(i));
+}
+
+/** The shadow table of `table`, quoted. */
+function shadowOf(table: CapturedTable): string {
+  return `${SHADOW_SCHEMA}.${quoteIdentifier(shadowTableName(table.schema, table.name))}`;
+}
+
+/**
  * The keys of `table` this transaction touched, in primary-key order. Each comes with its row as it was before the
  * transaction first touched it and as it is now (null where there is no row), as canonical row-encoding values. The
  * table's shadow rows are deleted, this transaction's and any other's. `core-digest` calls it last in the block.
  * [DT-1, DT-2, DT-4, DT-5]
  */
 export async function takeChanges(read: ConsistentRead, table: CapturedTable): Promise<TouchedRow[]> {
-  const shadow = `${SHADOW_SCHEMA}.${quoteIdentifier(shadowTableName(table.schema, table.name))}`;
+  const shadow = shadowOf(table);
   const target = `${table.partitioned ? "" : "ONLY "}${quoteIdentifier(table.schema)}.${quoteIdentifier(table.name)}`;
   const old = table.columns.map((_, i) => `d.c${i} AS o${i}`);
   const now = table.columns.map((column, i) => `t.${quoteIdentifier(column.name)} AS n${i}`);

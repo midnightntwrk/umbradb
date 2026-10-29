@@ -113,3 +113,21 @@ export async function readCursor(read: Pick<ReadHandle, "query">): Promise<Block
 
 /** The database API's committed height: the cursor's height, read through the read's own handle. [DB-2] */
 export const cursorHeight: CommittedHeight = async (read) => (await readCursor(read))?.height ?? null;
+
+/**
+ * {@link cursorHeight} for one opened database: once a read found the blocks table, later reads skip the `to_regclass`
+ * check, one statement fewer in every read. The table is append-only and never dropped while the database is open.
+ * [DB-2]
+ */
+export function openedCursorHeight(): CommittedHeight {
+  let present = false;
+  return async (read) => {
+    if (!present) {
+      const [table] = await read.query(PRESENT_SQL);
+      if (table?.present !== true) return null;
+      present = true;
+    }
+    const [row] = await read.query(CURSOR_SQL);
+    return (row?.height as bigint | undefined) ?? null;
+  };
+}

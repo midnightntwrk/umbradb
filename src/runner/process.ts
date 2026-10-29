@@ -197,7 +197,7 @@
  *   (`BlockSource.nodeView`) [AE-5].
  */
 
-import { cursorHeight } from "../backbone/core-block-commit/sql.js";
+import { openedCursorHeight } from "../backbone/core-block-commit/sql.js";
 import { bindCoreBlockFetch, CORE_BLOCK_FETCH_ID, isBlockItemSource } from "../backbone/core-block-fetch/core-block-fetch.js";
 import { isBlockEventSource } from "../backbone/core-block-fetch/events.js";
 import { bindLedgerParser, CORE_BLOCK_PARSED_ID } from "../backbone/core-block-parsed/core-block-parsed.js";
@@ -1166,7 +1166,7 @@ class Process implements ProcessHandle {
       this.#admin?.publish();
       // A read's height is the cursor's: the core's cursor table, or a private process's own (its source's). [DB-2]
       const db = await openConfiguredDatabase(core, {
-        committedHeight: source.committedHeight ?? cursorHeight,
+        committedHeight: source.committedHeight ?? openedCursorHeight(),
         log: (line) => this.#log(line),
       });
       // The log shows the database's parts, except the password. [CF-4, Q167 A]
@@ -1224,7 +1224,7 @@ class Process implements ProcessHandle {
     // Private clients send this pool their own SQL, whose texts vary: it prepares none of it.
     const pool = openPostgres({
       connection,
-      committedHeight: source.committedHeight ?? cursorHeight,
+      committedHeight: source.committedHeight ?? openedCursorHeight(),
       preparedStatements: false,
     });
     this.#transportReader = pool;

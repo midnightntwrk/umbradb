@@ -12,8 +12,14 @@
  *   part's role. It is `SET LOCAL ROLE` to the part's write role (a shared item's provider writes under the item's
  *   role), or `RESET ROLE` for UmbraDB's own parts ({@link OWN_PARTS}), which write as the writer's login. [Q89]
  * - The callback gets a handle of its own.
- * - When the callback settles the handle closes. After a callback that returned, the block goes back to the login
- *   (`RESET ROLE`), which also undoes a role the callback selected itself.
+ * - When the callback settles the handle closes.
+ *
+ * The block goes back to the login (`RESET ROLE`, which also undoes a role a callback selected itself) before an own
+ * part's callback, and at {@link BlockWrites.end}, which the runner calls after the last callback and before any
+ * statement of its own. Between two modules' callbacks the next `SET LOCAL ROLE` replaces the role directly. A
+ * `RESET ROLE` is skipped where the block is known to be at the login already: after an own part's callback, since
+ * UmbraDB's own code selects no role. The block's start is not trusted, as PGlite's one session carries whatever the
+ * job before left.
  *
  * A callback asked for while another runs is rejected before anything is sent: `on-db-write` runs in series, so this is
  * a programming error. A block write handle is the block's transaction, so it reads committed data plus what earlier
@@ -67,6 +73,8 @@ export interface BlockWrites {
    * call made while another part's callback runs. [RN-8]
    */
   write<T>(part: string, callback: (w: BlockWriteHandle) => Promise<T>): Promise<T>;
+  /** Takes the block back to the writer's login (`RESET ROLE`) unless it is known to be there; after the last callback. */
+  end(): Promise<void>;
 }
 
 type Point = "on-db-write" | "on-start-db";
@@ -94,6 +102,19 @@ async function runCallback<T>(
   callback: (w: BlockWriteHandle) => Promise<T>,
 ): Promise<T> {
   await setPartRole(tx, plan, part);
+  const result = await runHandle(tx, part, point, options, callback);
+  await tx.execute("RESET ROLE");
+  return result;
+}
+
+/** Runs `callback` with a handle for `part` at `point` on `tx`, under whatever role is set; closes it when it settles. */
+async function runHandle<T>(
+  tx: Transaction,
+  part: string,
+  point: Point,
+  options: WriteHandleOptions,
+  callback: (w: BlockWriteHandle) => Promise<T>,
+): Promise<T> {
   let open = true;
   const refuse = (): UmbraError => {
     const error = writeHandleClosed(point === "on-db-write" ? "block-write" : "schema-write", part);
@@ -111,14 +132,11 @@ async function runCallback<T>(
       return tx.execute(sql, params);
     },
   };
-  let result: T;
   try {
-    result = await callback(handle);
+    return await callback(handle);
   } finally {
     open = false;
   }
-  await tx.execute("RESET ROLE");
-  return result;
 }
 
 /**
@@ -127,6 +145,11 @@ async function runCallback<T>(
  */
 export function openBlockWrites(tx: Transaction, plan: SchemaPlan, options: WriteHandleOptions): BlockWrites {
   let running: string | undefined;
+  /**
+   * Whether the block is known to run as the writer's login: after an own part's callback. Not at its start, since on
+   * PGlite the engine's one session carries whatever the job before left, so the first own part still resets.
+   */
+  let atLogin = false;
   return {
     async write(part, callback) {
       if (running !== undefined) {
@@ -137,10 +160,21 @@ export function openBlockWrites(tx: Transaction, plan: SchemaPlan, options: Writ
       }
       running = part;
       try {
-        return await runCallback(tx, plan, part, "on-db-write", options, callback);
+        const own = OWN_PARTS.includes(part);
+        if (!own) await setModuleRole(tx, plan, part);
+        else if (!atLogin) await tx.execute("RESET ROLE");
+        atLogin = false;
+        const result = await runHandle(tx, part, "on-db-write", options, callback);
+        atLogin = own;
+        return result;
       } finally {
         running = undefined;
       }
+    },
+    async end() {
+      if (running !== undefined) throw new Error(`openBlockWrites: end was asked for while the on-db-write of ${running} runs`);
+      if (!atLogin) await tx.execute("RESET ROLE");
+      atLogin = true;
     },
   };
 }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Database } from "../../../src/db/api.js";
+import type { BlockWriteHandle, Database, Transaction } from "../../../src/db/api.js";
+import { digestBlock } from "../../../src/backbone/core-digest/core-digest.js";
 import {
   CAPTURE_TRIGGER,
   captureFunctionName,
@@ -223,6 +224,73 @@ describe.each(BACKENDS)("change capture across startups, on $name (DT-4)", (back
     const d2 = sha256(hex(d1?.digest ?? ""), hex("02"), hex("81 82"), text("update"), hex("82 01"), text("c"));
     expect((await digestRows(db))["m.t"]).toEqual({ height: 2n, digest: d2 });
     expect(await shadowRows(db, "m", "t")).toBe(0);
+  }, 60_000);
+
+  it("empties the shadow rows another transaction left in a table the block did not touch, and keeps its digest (00033 F3b)", async () => {
+    const { db } = await backend.database("SELECT 1");
+    const module = moduleM({
+      tables: ["t", "u"],
+      migrations: ["CREATE TABLE m.t (k bigint PRIMARY KEY, v text NOT NULL)", "CREATE TABLE m.u (k bigint PRIMARY KEY, v text NOT NULL)"],
+      writes: (h) =>
+        h === 1n ? ["INSERT INTO m.t (k, v) VALUES (1, 'a')", "INSERT INTO m.u (k, v) VALUES (1, 'a')"] : ["UPDATE m.t SET v = 'c' WHERE k = 1"],
+    });
+    const chain = await startChain(db, [module]);
+    await runBlock(chain);
+    const before = await digestRows(db);
+    await db.transaction(async (tx) => {
+      await tx.execute("SET LOCAL ROLE umbradb_m_m");
+      await tx.execute("INSERT INTO m.u (k, v) VALUES (2, 'z')");
+    });
+    expect(await shadowRows(db, "m", "u")).toBe(1);
+    expect(await shadowRows(db, "m", "t")).toBe(0);
+    await runBlock(chain);
+    const after = await digestRows(db);
+    expect(after["m.u"]).toEqual(before["m.u"]);
+    expect(after["m.t"]?.height).toBe(2n);
+    expect(await shadowRows(db, "m", "u")).toBe(0);
+    expect(await shadowRows(db, "m", "t")).toBe(0);
+  }, 60_000);
+
+  /**
+   * Digests two blocks written straight in transactions, each through a handle that counts the catalog reads of the
+   * captured tables (`pg_trigger`), passing `process` for both; returns the counts and the digests after them.
+   */
+  let nextKey = 1;
+  async function catalogReads(db: Database, process: object | undefined): Promise<number[]> {
+    const counts: number[] = [];
+    for (const height of [1n, 2n]) {
+      await db.transaction(async (tx: Transaction) => {
+        await tx.execute("SET LOCAL ROLE umbradb_m_m");
+        await tx.execute(`INSERT INTO m.t (k, v) VALUES (${nextKey++}, 'v')`);
+        await tx.execute("RESET ROLE");
+        let reads = 0;
+        const w: BlockWriteHandle = {
+          height: height - 1n,
+          query: (sql, params) => {
+            if (sql.includes("pg_trigger")) reads += 1;
+            return tx.query(sql, params);
+          },
+          execute: (sql, params) => tx.execute(sql, params),
+        };
+        await digestBlock(w, height, process);
+        counts.push(reads);
+      });
+    }
+    return counts;
+  }
+
+  it("reads the captured tables once per process context, and again for a new one (a new startup) (00033 F3a)", async () => {
+    const { db } = await backend.database("SELECT 1");
+    await startChain(db, [moduleM({ tables: ["t"], migrations: ["CREATE TABLE m.t (k bigint PRIMARY KEY, v text NOT NULL)"] })]);
+    // One catalog read is a few statements on pg_trigger; what counts is that the second block makes none.
+    const once = await catalogReads(db, {});
+    expect(once[0]).toBeGreaterThan(0);
+    expect(once[1]).toBe(0);
+    expect(await catalogReads(db, {})).toEqual(once);
+    // Negative control: without a process context, every block reads the catalog — the count above can tell.
+    expect(await catalogReads(db, undefined)).toEqual([once[0], once[0]]);
+    const digests = await digestRows(db);
+    expect(digests["m.t"]?.height).toBe(2n);
   }, 60_000);
 
   it("reads an ordinary table with ONLY: a table inheriting from it is a table of its own", async () => {

@@ -10,7 +10,8 @@
  * `core-digest`'s, so it sees the digests of h − 1.
  *
  * **Its `on-db-write`** runs last in the block. The runner calls it through `writes.write("core-digest", …)`, which
- * runs it as the login. For each table whose changes are captured, in the fixed table order: [RN-3, DT-3]
+ * runs it as the login. It reads which tables are captured once per process, and asks in one statement which of them
+ * hold shadow rows. For each such table, in the fixed table order: [RN-3, DT-3]
  * - it takes the keys the block touched, with their rows before and after ({@link takeChanges}, which also empties the
  *   shadow table);
  * - it computes the table's changes and new digest (`src/determinism/digest.ts`);
@@ -27,23 +28,40 @@
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { BlockWriteHandle } from "../../db/api.js";
-import { capturedTables, takeChanges } from "../../db/change-capture.js";
+import { type CapturedTable, capturedTables, tablesWithChanges, takeChanges } from "../../db/change-capture.js";
 import { isCheckpointHeight, nextDigest, tableChanges } from "../../determinism/digest.js";
 import { defineModule } from "../../modules/declaration.js";
 import { CHECKPOINT_INTERVAL } from "./build-flags.js";
 import { CORE_DIGEST_MIGRATIONS, checkpointDigests, readDigests, setDigest } from "./sql.js";
 
 /**
+ * The captured tables, read once per process. Startup attaches the capture triggers (`captureTables`, after the
+ * migrations) and nothing changes them while the loop runs, so the catalog is not read again in every block. Each
+ * startup makes a new process context, so a new build reads them again.
+ */
+const capturedByProcess = new WeakMap<object, readonly CapturedTable[]>();
+
+/** The captured tables ({@link capturedByProcess}): read through `w` once for `process`, or every time without one. */
+async function capturedOf(w: BlockWriteHandle, process: object | undefined): Promise<readonly CapturedTable[]> {
+  const known = process === undefined ? undefined : capturedByProcess.get(process);
+  if (known !== undefined) return known;
+  const tables = Object.freeze(await capturedTables(w));
+  if (process !== undefined) capturedByProcess.set(process, tables);
+  return tables;
+}
+
+/**
  * `core-digest`'s work for the block at `height` (see the module comment), on the block's write handle, after every
  * other part's `on-db-write`. [DT-4, DT-5]
  */
-export async function digestBlock(w: BlockWriteHandle, height: bigint): Promise<void> {
-  const tables = await capturedTables(w);
+export async function digestBlock(w: BlockWriteHandle, height: bigint, process?: object): Promise<void> {
+  const tables = await capturedOf(w, process);
   const previous = new Map<string, Uint8Array>();
   for (const row of await readDigests(w)) {
     previous.set(JSON.stringify([row.schema, row.table]), row.digest);
   }
-  for (const table of tables) {
+  // A table whose shadow table holds no row has no change to take, so its digest stays. [DT-4]
+  for (const table of await tablesWithChanges(w, tables)) {
     const touched = await takeChanges(w, table);
     const changes = tableChanges(
       table.columns.map((column) => column.type),
@@ -83,8 +101,8 @@ export const CORE_DIGEST = defineModule({
   configSchema: z.object({}),
   migrations: CORE_DIGEST_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
   points: {
-    async "on-db-write"(_p, b, w) {
-      await digestBlock(w, b.height);
+    async "on-db-write"(p, b, w) {
+      await digestBlock(w, b.height, p);
     },
   },
 });
