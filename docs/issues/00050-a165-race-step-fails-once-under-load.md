@@ -1,6 +1,7 @@
 # 00050 — A165's race step on PostgreSQL with a transport failed once under load
 
-- **Status:** OPEN
+- **Status:** OPEN — diagnostics added 2026-10-29, cause not found: `test/private/accepted-hash-checks.ts` now prints
+  the race step's error when its H3 is null or its start was not refused as expected.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

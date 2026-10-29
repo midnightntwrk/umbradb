@@ -67,7 +67,10 @@ export interface Attempt {
   /** Its state, and its reason's code, when it ended or was stopped. */
   readonly state: string;
   readonly code: string | null;
-  /** The refusal's message ("" when it started). */
+  /**
+   * The refusal's message, or the error of the step run during its startup (the race's restart), prefixed as such;
+   * "" when it started.
+   */
   readonly message: string;
   /** The hash its private database holds as accepted after it stopped; null when none. */
   readonly stored: string | null;
@@ -180,7 +183,9 @@ export async function a165Run(backend: PrivateBackend, options: A165Options): Pr
   });
   /**
    * One start on `database`: `beforeStarted` runs while its startup runs (the race's restart); once started it is taken
-   * to `reach` (none: stopped at once), then stopped either way, and its database read.
+   * to `reach` (none: stopped at once), then stopped either way, and its database read. When `beforeStarted` throws,
+   * the start is not awaited and the attempt's message is that error, so a failure tells a restart that did not
+   * finish from a start that ended first.
    */
   const attempt = async (
     database: TestDatabase,
@@ -190,14 +195,17 @@ export async function a165Run(backend: PrivateBackend, options: A165Options): Pr
   ): Promise<Attempt> => {
     const running = launchPrivate(privateOptions(database, rest));
     let startedOk = false;
+    let stepDone = beforeStarted === undefined;
     let message = "";
     try {
       await beforeStarted?.();
+      stepDone = true;
       await running.handle.started;
       startedOk = true;
       if (reach !== null) await running.reach(reach).catch(() => undefined);
     } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
+      const text = error instanceof Error ? error.message : String(error);
+      message = stepDone ? text : `the step run during its startup failed: ${text}`;
     }
     const status = running.handle.status();
     await running.stop();
@@ -261,11 +269,17 @@ export async function a165Run(backend: PrivateBackend, options: A165Options): Pr
   }
 }
 
-/** The problems of a start that must stop with `public-config-changed` naming `found`, `stored` still recorded. */
+/**
+ * The problems of a start that must stop with `public-config-changed` naming `found`, `stored` still recorded. A start
+ * that ended otherwise carries its message, so the refusal's own words, or the error of a step run during its startup,
+ * show with the problem.
+ */
 function stopProblems(what: string, attempt: Attempt, found: string | null, stored: string | null, cursor: bigint): string[] {
   const problems: string[] = [];
   if (attempt.started) problems.push(`${what}: the private process started (${attempt.state}, ${attempt.code}), it did not stop`);
-  else if (attempt.code !== "public-config-changed") problems.push(`${what}: refused with ${attempt.code}, not public-config-changed`);
+  else if (attempt.code !== "public-config-changed") {
+    problems.push(`${what}: refused with ${attempt.code}, not public-config-changed${attempt.message === "" ? "" : `: ${attempt.message}`}`);
+  }
   if (found !== null && !attempt.message.includes(`--update-hash=${found}`)) {
     problems.push(`${what}: its message does not name the new hash ${found} with --update-hash: ${attempt.message}`);
   }
@@ -314,7 +328,11 @@ export function a165Problems(run: A165Run): string[] {
     }
   }
   if (!run.transport) return problems;
-  if (h3 === null || h3 === h2) problems.push(`the core's H3 is ${h3}`);
+  // An H3 never read means the race's restart did not reach its last line; the race's message says why.
+  if (h3 === null || h3 === h2) {
+    const why = h3 === null && run.race !== undefined && run.race.message !== "" ? ` (the race's start: ${run.race.message})` : "";
+    problems.push(`the core's H3 is ${h3}${why}`);
+  }
   if (run.race === undefined) problems.push("no start raced the core's restart");
   else problems.push(...stopProblems("a start whose core changed its configuration during it", run.race, h3, h2, 10n));
   return problems;
