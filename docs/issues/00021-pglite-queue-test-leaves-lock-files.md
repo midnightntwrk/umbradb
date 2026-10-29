@@ -3,6 +3,7 @@
 - **Status:** CLOSED — fixed 2026-10-26 by task 0.5 of `openspec/changes/core-arch` (owner decision Q122), in the task's
   local commit: `test/db/pglite-queue.test.ts` makes its data directories inside one temporary root and removes the
   root, lock files included. See "Resolution" below.
+- **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 5.4 of `openspec/changes/core-arch`, checking the temporary folder for anything its
   test runs left: a run of the suite adds up to three `umbradb-pglite-test-<random>.lock.sqlite` files (and their

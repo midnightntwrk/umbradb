@@ -3,6 +3,7 @@
 - **Status:** CLOSED — core-arch task 17.2 (2026-10-27) retired the TemporalKV workload, the smoke guard and the
   baseline with the 0.9.5 parts (`openspec/changes/core-arch/design.md` §13); task 17.3 retargets the bench smoke to the
   core with a fresh baseline.
+- **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-24, during task 0.4 of `openspec/changes/core-arch` (PostgreSQL 18 pins), when `npm run
   bench:smoke` was run locally to check that the benchmark starts from the new pin.

@@ -6,6 +6,7 @@
   clear keeps the last activity of A161's windows only (it kept any window's, and a slow height after `on-finalized`
   replaced A161's: seen once in task 17.5a's runs, `/status` no longer showing `on-finalized` a heartbeat after it
   ended); A161's case of a failure after the commit filters its log lines the same way.
+- **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

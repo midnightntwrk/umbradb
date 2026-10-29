@@ -6,6 +6,7 @@
   2 is not reported before its own window can have run `slowBlockMs` (the node's fetch, the queue's earlier work), that
   no height is reported after its commit (a height that commits in time), and gives a held height's retry
   `slowBlockMs` 3,500. Every case still fails a wrong watchdog the way it did.
+- **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

@@ -3,6 +3,7 @@
 - **Status:** CLOSED — fixed by task 17.5a (2026-10-27): the case bounds the report at more than 1 s after the ask,
   between the ask's 1.5 s (less the moment between the window's opening and the ask) and the queue's start's 0.6 s at
   most, and height 2's `on-parse` holds 6 s, so it still runs at the report however long height 1's commit takes.
+- **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

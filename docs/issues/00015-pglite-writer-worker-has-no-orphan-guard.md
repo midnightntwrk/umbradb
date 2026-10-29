@@ -4,6 +4,7 @@
   local commit: every test starts its child processes with `spawnChild` (`test/child-processes.ts`), whose watcher kills
   them when the test process ends; the PGlite writer worker is started through it (`test/db/pglite-processes.ts`). See
   "Resolution" below.
+- **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 5.3 of `openspec/changes/core-arch` (the process and SIGTERM), after its mutation
   pass left 66 of its own SIGTERM workers running.

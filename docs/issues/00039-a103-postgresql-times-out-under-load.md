@@ -3,6 +3,7 @@
 - **Status:** CLOSED — fixed by task 12.5a (owner decision Q122): A103's 5,000-block run now happens once, on
   PGlite, and PostgreSQL continues from its backup at 4,990 restored with `umbradb restore`'s code
   (`test/backbone/ledger-window.ts`, `ledger-window.test.ts`); the case in `ledger-storage.test.ts` is gone.
+- **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

@@ -2,6 +2,7 @@
 
 - **Status:** CLOSED — fixed 2026-10-21 in the graphify-rules update, which rewrote the workflow's
   header comment; never filed on GitHub
+- **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-21, while moving the review workflow into `AGENTS.md`
 
