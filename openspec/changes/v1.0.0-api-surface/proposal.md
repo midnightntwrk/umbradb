@@ -1,6 +1,7 @@
 # Proposal — v1.0.0 API Surface & Release Contract
 
-> **Status:** Draft for the 1.0.0 program. Capability: `release-contract`. Change id:
+> **Status:** Implemented: merged to `main` in `726f567`; written for the 1.0.0 program.
+> Capability: `release-contract`. Change id:
 > `v1.0.0-api-surface`. This change is the **keystone** of the 1.0.0 gate — the roadmap's
 > critical path routes the API freeze (Phase 2) *after* the one API-affecting correctness fix
 > (G5, a separate change) and *before* the CI/test gates; nothing else in the 1.0.0 program is

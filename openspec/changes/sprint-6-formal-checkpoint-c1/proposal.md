@@ -1,6 +1,6 @@
 # Proposal — Sprint 6: Lean M3b CheckpointStore C1
 
-> **Status:** Complete — abstract save-side projection only.
+> **Status:** Implemented — abstract save-side projection only.
 
 ## Why
 

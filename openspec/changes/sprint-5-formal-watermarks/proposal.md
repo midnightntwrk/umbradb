@@ -1,6 +1,6 @@
 # Proposal — Sprint 5: Lean M3a Watermarks W1
 
-> **Status:** Complete; proof implementation, integrated validation, exact-commit three-persona
+> **Status:** Implemented: proof implementation, integrated validation, exact-commit three-persona
 > audit, push/CI evidence, and PR review readiness are recorded.
 
 ## Why
