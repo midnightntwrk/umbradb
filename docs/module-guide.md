@@ -502,7 +502,9 @@ configSchema: z.object({
   transcripts and halts with `fast-log-unsupported` at a log it cannot read that way. Both fill `contract_logs.logs`:
   `height`, `tx_index`, `log_index` (its number in the block), `contract_address`, `entry_point`, `logical_segment`,
   `log_version`, `event_type`, `data`. The `block` item, read from `on-compute` on, is an array of `{ transaction,
-  index, address, entryPoint, logicalSegment, version, eventType, data }`.
+  index, address, entryPoint, logicalSegment, version, eventType, data }`. With the vendored v9 ledger,
+  `logical_segment` is 0 for every log, whichever segment emitted it: the ledger labels a fallible segment's contract
+  events with the guaranteed segment, so the column cannot tell a guaranteed log from a fallible one.
 
 Their entries are written as for the others: `CORE_LEDGER_STATE.entry({ start: 0, config: {} })`,
 `CORE_CONTRACT_STATES`, `CORE_CONTRACT_LOGS_FULL`, `CORE_CONTRACT_LOGS_FAST`.
