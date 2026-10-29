@@ -83,6 +83,15 @@
  * `./ledger-source.ts`): `midnight_ledgerStateRoot` at a finalized block's hash and `system_properties.genesis_state`,
  * for `core-ledger-state`. Both use the client's retries, since `core-ledger-state` asks only for finalized heights, at
  * `on-compute`. [LG-15, IN-7]
+ *
+ * **The roots' prefetch.** Once `core-ledger-state` has asked for a root in a run, the prefetch also asks for the root of
+ * each finalized height it fetches itself (never a queued best block's), in a slot of its own after the block's take.
+ * `on-compute` then finds the answer waiting instead of paying the node's latency in every block. It is the same call,
+ * with the same retries, at the same finalized hash, so its answer or its error is the one `on-compute` gets. It is kept
+ * until the loop passes the height, so a block applied again (the restart after a refused eviction) asks no second
+ * time. A root `on-compute` asks for before any prefetch did (a run's first heights, a block taken from the queue) is
+ * asked at once, outside the slots as before, and kept the same way. A run that ends aborts all its roots' calls
+ * through their `signal`, as it drops the prefetch. [IN-5, IN-9, LG-14]
  */
 
 import { UmbraError } from "../../db/errors.js";
@@ -222,6 +231,14 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   #announcedBest: bigint | null = null;
   /** The blocks being prepared, by hash: what `core-block-fetch`'s `on-fetch` reads, and whether best (no retries). */
   readonly #fetched = new Map<string, { readonly node: NodeBlock; readonly best: boolean }>();
+  /** The ledger roots the prefetch asked for, by hash, until the loop passes their height. */
+  readonly #roots = new Map<string, { readonly height: bigint; readonly root: Promise<Uint8Array> }>();
+  /** The finalized heights of this run the prefetch fetched itself (not taken from the queue): those whose root it may ask. */
+  readonly #fetchedFinalized = new Map<bigint, Uint8Array>();
+  /** Whether `ledgerStateRoot` was asked for in this run: only then does the prefetch ask for roots. */
+  #rootsWanted = false;
+  /** Aborts the roots' calls of this run when it ends. */
+  #rootsAbort = new AbortController();
 
   // ── the metadata ────────────────────────────────────────────────────────────────────────────────────────────────
   readonly #metadata: RuntimeMetadata;
@@ -313,6 +330,8 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     this.#cursor = height - 1n;
     for (const key of this.#prefetch.keys()) if (key < height) this.#prefetch.delete(key);
     for (const key of this.#finalized.keys()) if (key < height - 1n) this.#finalized.delete(key);
+    for (const [key, { height: at }] of this.#roots) if (at < height - 1n) this.#roots.delete(key);
+    for (const key of this.#fetchedFinalized.keys()) if (key < height) this.#fetchedFinalized.delete(key);
     this.#queued(async () => {
       this.#queue = this.#queue.filter((queued) => queued.block.height >= height);
     }).catch(() => undefined);
@@ -396,7 +415,21 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
    * [LG-15]
    */
   async ledgerStateRoot(block: BlockRef): Promise<Uint8Array> {
-    return this.client.ledgerStateRoot(block.hash);
+    if (!this.#rootsWanted && this.#runner !== undefined) {
+      this.#rootsWanted = true;
+      // The heights the prefetch fetched before this first ask, all within the window, get their roots asked now.
+      for (const [height, hash] of this.#fetchedFinalized) if (height > block.height) this.#prefetchRoot(height, hash);
+    }
+    if (this.#runner === undefined) return this.client.ledgerStateRoot(block.hash);
+    const key = hexOf(block.hash);
+    const known = this.#roots.get(key);
+    if (known !== undefined) return known.root;
+    // Not prefetched (a run's first heights, or a block taken from the queue): asked now, outside the prefetch's slots
+    // as before, and kept and aborted with the run like a prefetched root.
+    const root = this.client.ledgerStateRoot(block.hash, { signal: this.#rootsAbort.signal });
+    root.catch(() => undefined);
+    this.#roots.set(key, { height: block.height, root });
+    return root;
   }
 
   /** The genesis ledger state: `system_properties.genesis_state`, with the client's retries. [IN-7] */
@@ -537,6 +570,11 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
   /** Drops the queue and the prefetch (a run ended, or began). */
   #reset(): void {
     this.#prefetch.clear();
+    this.#rootsAbort.abort(new Error("the loop's run that asked for these roots ended"));
+    this.#rootsAbort = new AbortController();
+    this.#roots.clear();
+    this.#fetchedFinalized.clear();
+    this.#rootsWanted = false;
     this.#lastTake = Promise.resolve();
     this.#queue = [];
     this.#best = null;
@@ -612,12 +650,29 @@ export class NodeBlockSource implements BlockSource, BlockItemSource, BlockEvent
     }
     live();
     if (queued !== undefined) return queued;
+    this.#fetchedFinalized.set(height, hash);
+    if (this.#rootsWanted) this.#prefetchRoot(height, hash);
     return this.#slot(async () => {
       const node = await this.client.block(hash);
       live();
       this.#checkHeight(node.header, height, "chain_getBlock");
       return this.#prepare(runner, refOf(node.header, hash), node, false);
     });
+  }
+
+  /** Asks, in a slot, for the ledger root at the finalized `hash` of `height`, for `ledgerStateRoot` to take. */
+  #prefetchRoot(height: bigint, hash: Uint8Array): void {
+    const key = hexOf(hash);
+    if (this.#roots.has(key)) return;
+    const signal = this.#rootsAbort.signal;
+    const root = this.#slot(async () => {
+      // A root queued for a slot by a run that ended is never asked.
+      signal.throwIfAborted();
+      return this.client.ledgerStateRoot(hash, { signal });
+    });
+    // `ledgerStateRoot` awaits it when it takes it; a root the loop passed, or a run that ended, leaves it unawaited.
+    root.catch(() => undefined);
+    this.#roots.set(key, { height, root });
   }
 
   /** `on-fetch` and `on-parse` for `block`, fetched as `node`, through `runner`. */

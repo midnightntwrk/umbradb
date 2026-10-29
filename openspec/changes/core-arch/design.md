@@ -282,7 +282,10 @@ interface QueueRunner {                                      // given by the fin
   as the official indexer takes it) and LG-8's first-regular rule for the `MNSV` runtime (`src/ledger/replay.ts`:
   `spec_version` 22,000–22,999, 1,000,000–1,000,299, 2,000,000–2,000,999; never block 0), while it reads the node's root
   after h through its bound block source (`ledgerStateRoot`, `src/backbone/core-block-fetch/ledger-source.ts`:
-  `midnight_ledgerStateRoot` at the block's hash, IN-8); block 0's genesis state is the source's `genesisState`
+  `midnight_ledgerStateRoot` at the block's hash, IN-8). Once asked in a run, the node source requests the root of each
+  finalized height it fetches itself in the prefetch (IN-5's slots and window), so `on-compute` takes an answer already
+  requested: the same call, retries and error, kept until the loop passes the height, aborted when the run ends; a
+  height taken from the best-block queue is asked at `on-compute` only. Block 0's genesis state is the source's `genesisState`
   (`system_properties.genesis_state`), included or not as IN-7 says by comparing its root with the node's at block 0.
   A root other than the node's throws `root-mismatch` (`UmbraError`: height, hash, both roots), a halt before the
   block's transaction, so nothing of it is stored (LG-15). It puts `ledger-state` (the state's key, root, summary and

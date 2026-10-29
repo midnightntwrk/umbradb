@@ -1092,6 +1092,38 @@ describe("close() and abort signals", () => {
   });
 });
 
+describe("abort signals at the edges (00033 F1, Codex R2-1)", () => {
+  it("sends nothing for a call whose signal aborts after its connection opened, before it was sent", async () => {
+    const node = await startNode();
+    node.on("chain_getFinalizedHead", () => ({ result: MAINNET_BLOCK }));
+    const controller = new AbortController();
+    // The abort runs as a microtask queued while the connection becomes open: after the call's wait for it ended,
+    // before the call continues to send.
+    const c = client(node.url(), {
+      onConnectionChange: (connection) => {
+        if (connection === "connected") queueMicrotask(() => controller.abort("aborted at the open"));
+      },
+    });
+    const call = caught(c.finalizedHead({ signal: controller.signal }));
+    expect(await call).toBe("aborted at the open");
+    await turns();
+    expect(node.count("chain_getFinalizedHead")).toBe(0);
+  });
+
+  it("ends a retry's sleep at once when its signal aborted before the sleep began", async () => {
+    const node = await startNode();
+    const controller = new AbortController();
+    // The node's error makes the call retry; the abort lands in onRetry, just before the sleep begins.
+    node.on("chain_getBlockHash", () => ({ error: { code: -32999, message: "RPC rate limit exceeded" } }));
+    const timers = new ManualTimers();
+    const c = client(node.url(), { timers, onRetry: () => controller.abort("aborted before the sleep") });
+    const call = caught(c.blockHash(1n, { signal: controller.signal }));
+    // Settled without advancing the clock: no back-off sleep was left waiting (only the heartbeat's timer is).
+    expect(await call).toBe("aborted before the sleep");
+    expect(timers.pending()).not.toContain(1_000);
+  });
+});
+
 describe("the WebSocket transport's heartbeat", () => {
   it("pings every heartbeatMs (30 s by default) once the connection is open", async () => {
     const node = await startNode();

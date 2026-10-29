@@ -495,6 +495,8 @@ export class NodeClient {
     onAnswer: ((result: unknown) => void) | undefined,
   ): Promise<unknown> {
     await this.#opened(method, retry, signal);
+    // An abort while the connection opened has no listener yet: nothing is sent for it.
+    signal?.throwIfAborted();
     // The connection opened; a socket may still have ended it before this continuation ran.
     const socket = this.#state === "open" ? this.#connection?.socket : undefined;
     if (socket === undefined) {
@@ -706,6 +708,10 @@ export class NodeClient {
   /** Waits `ms` on the client's clock; ends with the signal's reason, or `handle-closed` on `close()`. */
   #sleep(ms: number, signal: AbortSignal | undefined): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted === true) {
+        reject(signal.reason);
+        return;
+      }
       const done = (): void => {
         this.#timers.clearTimeout(timer);
         this.#sleeps.delete(end);

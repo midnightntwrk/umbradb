@@ -1095,6 +1095,29 @@ describe("the best-block queue (IN-6)", () => {
     await opened.source.idle();
     expect(runner.calls).toEqual([]);
   }, PATIENCE_MS);
+  it("never asks a root speculatively for a finalized height taken from the queue (00033 F1)", async () => {
+    const rootOf = (block: ChainBlock): TapeRecord => ({ method: "midnight_ledgerStateRoot", params: [block.hex], result: Array.from({ length: 32 }, () => 7) });
+    const records: TapeRecord[] = [
+      rootOf(head),
+      newHead(A(101)),
+      fetched(A(101)),
+      finalizedHead(A(101)),
+      { method: "chain_getBlockHash", params: [101], result: A(101).hex },
+      rootOf(A(101)),
+    ];
+    const { source, runner, node } = await following(records);
+    await source.ledgerStateRoot({ height: head.height, hash: head.hash, parentHash: head.parentHash });
+    await until(() => runner.calls.includes("prepare 101A"), "101 queued");
+    await source.waitForHead(100n, never);
+    expect((await source.finalizedHead()).height).toBe(101n);
+    await source.idle();
+    await source.prepared(101n);
+    await sleep(50);
+    const roots = () => node.calls.filter((c) => c.method === "midnight_ledgerStateRoot" && (c.params as string[])[0] === A(101).hex).length;
+    expect(roots()).toBe(0);
+    await source.ledgerStateRoot({ height: 101n, hash: A(101).hash, parentHash: head.hash });
+    expect(roots()).toBe(1);
+  }, PATIENCE_MS);
 });
 
 describe("core-block-fetch's items from the node (CD-2, LG-1, LG-4)", () => {
@@ -1145,5 +1168,157 @@ describe("core-block-fetch's items from the node (CD-2, LG-1, LG-4)", () => {
     expect(await rejection(broken.source.blockItems(block(9), table))).toMatchObject({
       message: expect.stringMatching(/the runtime metadata block 9 is decoded with cannot be read/),
     });
+  }, PATIENCE_MS);
+});
+
+describe("the ledger roots' prefetch (00033 F1; LG-15, IN-5, IN-9, IN-10)", () => {
+  const rootBytes = (block: ChainBlock): number[] => Array.from({ length: 32 }, () => Number(block.height % 250n) + 1);
+  const root = (block: ChainBlock): string => hex(rootBytes(block));
+  const rootRecord = (block: ChainBlock, extra: Partial<{ delayMs: number }> = {}): TapeRecord => ({
+    method: "midnight_ledgerStateRoot",
+    params: [block.hex],
+    result: rootBytes(block),
+    ...extra,
+  });
+  const catchUpWithRoots = (head: number, extra: Partial<{ delayMs: number }> = {}): TapeRecord[] => [
+    ...subscriptions(),
+    ...headRead(at(head)),
+    ...chain.slice(1, head + 1).flatMap((block) => [...hashAndBlock(block), rootRecord(block, extra)]),
+  ];
+  const rootCalls = (node: TapeNode, block?: ChainBlock): number =>
+    node.calls.filter((c) => c.method === "midnight_ledgerStateRoot" && (block === undefined || (c.params as string[])[0] === block.hex)).length;
+  const refOf = (block: ChainBlock): BlockRef => ({ height: block.height, hash: block.hash, parentHash: block.parentHash });
+
+  it("asks no root while no one asks for one", async () => {
+    const { source, node } = await open(catchUpWithRoots(30), { prefetchWindow: 8 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    for (let height = 1n; height <= 30n; height++) await source.prepared(height);
+    await sleep(50);
+    expect(rootCalls(node)).toBe(0);
+  }, PATIENCE_MS);
+
+  it("asks each finalized height's root once, ahead of on-compute, and gives the node's answer", async () => {
+    const { source, node } = await open(catchUpWithRoots(40), { prefetchWindow: 8, concurrency: 3 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    for (let height = 1n; height <= 40n; height++) {
+      await source.prepared(height);
+      const block = at(Number(height));
+      // From the third height on, the prefetch asks the root before on-compute does (it may wait for a slot).
+      if (height > 2n) await until(() => rootCalls(node, block) === 1, `root ${height} prefetched`);
+      expect(hex(await source.ledgerStateRoot(refOf(block)))).toBe(root(block));
+    }
+    for (let height = 1; height <= 40; height++) expect(rootCalls(node, at(height))).toBe(1);
+  }, PATIENCE_MS);
+
+  it("asks no second time when the block is applied again in the run (LG-14's restart after a refused eviction)", async () => {
+    const { source, node } = await open(catchUpWithRoots(10), { prefetchWindow: 4 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    await source.prepared(1n);
+    // Height 1's root is asked at on-compute (nothing prefetched it); height 3's by the prefetch. Each is asked once.
+    expect(hex(await source.ledgerStateRoot(refOf(at(1))))).toBe(root(at(1)));
+    expect(hex(await source.ledgerStateRoot(refOf(at(1))))).toBe(root(at(1)));
+    expect(rootCalls(node, at(1))).toBe(1);
+    await source.prepared(2n);
+    await until(() => rootCalls(node, at(3)) === 1, "root 3 prefetched");
+    await source.prepared(3n);
+    expect(hex(await source.ledgerStateRoot(refOf(at(3))))).toBe(root(at(3)));
+    expect(hex(await source.ledgerStateRoot(refOf(at(3))))).toBe(root(at(3)));
+    expect(rootCalls(node, at(3))).toBe(1);
+  }, PATIENCE_MS);
+
+  it("never asks a root above the window: the first ask's backfill takes only heights the prefetch fetched", async () => {
+    const records: TapeRecord[] = [
+      ...subscriptions(),
+      ...headRead(at(100)),
+      ...chain.slice(1, 101).flatMap((block) => [...hashAndBlock(block), rootRecord(block)]),
+    ];
+    const { source, node } = await open(records, { prefetchWindow: 4, concurrency: 1 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    await source.prepared(1n);
+    await source.ledgerStateRoot(refOf(at(1)));
+    await sleep(100);
+    const asked = node.calls.filter((c) => c.method === "midnight_ledgerStateRoot").map((c) => (c.params as string[])[0]);
+    const allowed = new Set(chain.slice(1, 6).map((block) => block.hex));
+    expect(asked.length).toBeGreaterThan(1);
+    for (const hash of asked) expect(allowed.has(hash as string)).toBe(true);
+    expect(rootCalls(node, at(100))).toBe(0);
+  }, PATIENCE_MS);
+
+  it("gives a prefetched root's node error as it is, asking no second time (IN-9: a halt stays a halt)", async () => {
+    const failing = at(3);
+    const records: TapeRecord[] = [
+      ...subscriptions(),
+      ...headRead(at(6)),
+      ...chain.slice(1, 7).flatMap((block) =>
+        block === failing
+          ? [...hashAndBlock(block), { method: "midnight_ledgerStateRoot", params: [block.hex], error: { code: -32000, message: "state unavailable" } }]
+          : [...hashAndBlock(block), rootRecord(block)],
+      ),
+    ];
+    const { source, node } = await open(records, { prefetchWindow: 4 });
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    await source.prepared(1n);
+    await source.ledgerStateRoot(refOf(at(1)));
+    await source.prepared(2n);
+    await source.prepared(3n);
+    const error = await rejection(source.ledgerStateRoot(refOf(failing)));
+    // The node's own error, as a direct call gets it: not retried, not turned into another error.
+    expect(error).toBeInstanceOf(UmbraError);
+    expect(error).toMatchObject({ code: "node-error", retryable: false });
+    expect(rootCalls(node, failing)).toBe(1);
+  }, PATIENCE_MS);
+
+  /**
+   * The run-end check: with every root slow (5 s) and one slot, a run asks a root at on-compute (height 1, nothing
+   * prefetched it), the prefetch asks the next ones, and further ones wait for the slot. When the run ends every root
+   * call it made must have had its signal aborted, none waiting for the slot may be sent afterwards, and the next run's
+   * fetches must not wait for them. Throws when any of this fails.
+   */
+  async function expectRootsEndWithTheirRun(Source: typeof NodeBlockSource): Promise<void> {
+    const records = catchUpWithRoots(10, { delayMs: 5_000 });
+    const { source, node, client } = await open([...records, ...chain.slice(1, 11).flatMap(hashAndBlock)], { prefetchWindow: 4, concurrency: 1 }, Source);
+    const signals: (AbortSignal | undefined)[] = [];
+    const ask = client.ledgerStateRoot.bind(client);
+    client.ledgerStateRoot = (at, options) => {
+      signals.push(options?.signal);
+      return ask(at, options);
+    };
+    const detach = source.attach(new Recorder());
+    await source.finalizedHead();
+    await source.prepared(1n);
+    void source.ledgerStateRoot(refOf(at(1))).catch(() => undefined);
+    await until(() => rootCalls(node) >= 2, "the on-compute root and a prefetched one asked");
+    detach();
+    const sent = rootCalls(node);
+    expect(signals.length).toBeGreaterThanOrEqual(2);
+    for (const signal of signals) expect(signal?.aborted).toBe(true);
+    await sleep(300);
+    expect(rootCalls(node)).toBe(sent);
+    source.attach(new Recorder());
+    await source.finalizedHead();
+    const started = Date.now();
+    await source.prepared(1n);
+    await source.prepared(2n);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  }
+
+  it("ends a run's root calls with the run: aborted, none sent after, the next run's fetches never waiting", async () => {
+    await expectRootsEndWithTheirRun(NodeBlockSource);
+  }, PATIENCE_MS);
+
+  it("negative control: a source whose on-compute root is asked without the run's signal fails that check", async () => {
+    // The real source still prefetches; the root on-compute waits for is asked again, directly, as before 00033.
+    class RootWithoutSignal extends NodeBlockSource {
+      override async ledgerStateRoot(block: BlockRef): Promise<Uint8Array> {
+        void super.ledgerStateRoot(block).catch(() => undefined);
+        return this.client.ledgerStateRoot(block.hash);
+      }
+    }
+    await expect(expectRootsEndWithTheirRun(RootWithoutSignal)).rejects.toThrow();
   }, PATIENCE_MS);
 });
