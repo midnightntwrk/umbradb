@@ -1,6 +1,8 @@
 # 00027 — A Vitest worker hung for 24 minutes in V8's fatal-error path while freeing WebAssembly code
 
-- **Status:** OPEN
+- **Status:** OPEN — mitigated 2026-10-29, cause not fixed: `scripts/conformance-gate.mjs` kills Vitest's whole process
+  group past `UMBRADB_CONFORMANCE_DEADLINE_MS` (default 60 min) and fails with exit 124, so a hung worker no longer
+  blocks the gate forever.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 10.2a of `openspec/changes/core-arch`, in a run of `npx vitest run test/runner
   test/backbone test/admin test/private test/config test/cli` (76 files) on Node.js v24.9.0 at a load average of 10–28.

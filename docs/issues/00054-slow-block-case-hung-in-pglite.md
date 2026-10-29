@@ -1,6 +1,7 @@
 # 00054 — A slow-block test hung inside PGlite for over an hour
 
-- **Status:** OPEN
+- **Status:** OPEN — mitigated 2026-10-29, cause not fixed: the conformance gate's deadline (see 00027) ends a hung run
+  with exit 124 instead of leaving it running.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

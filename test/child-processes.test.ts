@@ -235,10 +235,17 @@ const IMPORT = new RegExp(String.raw`import\s+([^;]*?)\s+from\s+${MODULE}`, "g")
 const LOADED = new RegExp(String.raw`(?:require|import)\s*\(\s*${MODULE}\s*\)`);
 
 /**
- * The files that may start children otherwise: the guard itself, the negative control's parent, and this file (it
- * plants the forbidden imports in its negative controls).
+ * The files that may start children otherwise: the guard itself, the negative control's parent, this file (it plants the
+ * forbidden imports in its negative controls), and the conformance gate test's stand-in for Vitest, whose grandchild
+ * must be unguarded so that the test shows the gate's own kill reaching it (the test lists both pids with the guard
+ * once it reads them). [docs/issues/00027, docs/issues/00054]
  */
-const UNGUARDED = new Set(["test/child-processes.ts", "test/child-processes.parent.ts", "test/child-processes.test.ts"]);
+const UNGUARDED = new Set([
+  "test/child-processes.ts",
+  "test/child-processes.parent.ts",
+  "test/child-processes.test.ts",
+  "test/integration/conformance-gate.vitest-stand-in.mjs",
+]);
 
 /** Every way the files start a child process without {@link spawnChild}. */
 function unguardedStarts(files: readonly SourceFile[]): string[] {
