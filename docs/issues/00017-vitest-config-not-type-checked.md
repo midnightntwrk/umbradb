@@ -1,6 +1,7 @@
 # 00017 — `vitest.config.ts` is in no TypeScript program and does not type-check (`coverage.all`, gone in Vitest 4)
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-29: `coverage.all` is gone (Vitest 4 reports every file `coverage.include`
+  matches), and `tsconfig.json` includes both Vitest configs, so `npm run typecheck` checks them.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 17.1 of `openspec/changes/core-arch` (TransactionHistory to `legacy/`), when A3's
   static test first imported the run's configuration with a plain `import`.

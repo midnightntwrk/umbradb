@@ -95,7 +95,8 @@ export default defineConfig({
     testTimeout: 60_000,
     coverage: {
       provider: "v8",
-      all: true,
+      // Setting `include` also makes Vitest report every matching file no test loaded, at 0 %, so such a file is held
+      // to its floor like any other.
       include: ["src/**/*.ts", "tools/**/*.ts"],
       exclude: [
         "src/**/index.ts",

@@ -101,9 +101,9 @@ interface VitestConfig {
 }
 
 /**
- * A Vitest configuration file's export, as Vitest reads it. Imported by a computed specifier, so that the configuration
- * files stay outside the repository's TypeScript program, which has never included them (`vitest.config.ts` does not
- * type-check as it is). [docs/issues/00017-vitest-config-not-type-checked.md]
+ * A Vitest configuration file's export, as Vitest reads it, imported by the file's path. Both configuration files are
+ * in the repository's TypeScript program (`tsconfig.json`'s `include`), so `npm run typecheck` checks their options
+ * against the installed Vitest; this reads only the fields the checks below look at.
  */
 async function vitestConfig(file: string): Promise<VitestConfig> {
   return ((await import(pathToFileURL(path.join(ROOT, file)).href)) as { default: VitestConfig }).default;
