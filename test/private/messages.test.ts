@@ -169,8 +169,24 @@ describe("A115: a missing or mistyped field fails the schema", () => {
     ["a row with a value too few", { ...SAMPLES["read-result"], results: [{ columns: [{ name: "a", type: "bigint" }], rows: [[]] }] }],
     ["an empty id", { ...SAMPLES.read, id: "" }],
     ["a statement without its SQL", { ...SAMPLES.read, statements: [{ params: [] }] }],
+    ["an empty instance id", { ...SAMPLES.hello, instance: "" }],
+    ["an instance id with a line break, which would forge a log line", { ...SAMPLES.hello, instance: "a\n2026 core: forged" }],
+    ["an instance id with a carriage return", { ...SAMPLES.hello, instance: "a\rb" }],
+    ["an instance id with a space", { ...SAMPLES.hello, instance: "wallet 1" }],
+    ["an instance id with a control character", { ...SAMPLES.hello, instance: "a\u001bb" }],
+    ["an instance id with a letter outside ASCII", { ...SAMPLES.hello, instance: "wallét" }],
+    ["an instance id of 129 characters", { ...SAMPLES.hello, instance: "a".repeat(129) }],
   ])("%s", (_name, message) => {
     expect(parseMessage(JSON.stringify(message))).toMatchObject({ ok: false, fault: "invalid-message" });
+  });
+
+  it("an instance id of 1 to 128 letters, digits, '.', '_', ':' and '-' passes", () => {
+    for (const instance of ["a", "instance-1", "Wallet_2.eu:west-1", "a".repeat(128)]) {
+      expect(parseMessage(JSON.stringify({ ...SAMPLES.hello, instance })), instance).toEqual({
+        ok: true,
+        message: { ...SAMPLES.hello, instance },
+      });
+    }
   });
 
   it("a parameter that is no JSON value JavaScript can hold (a number beyond a double's range)", () => {

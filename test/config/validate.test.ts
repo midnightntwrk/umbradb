@@ -569,6 +569,30 @@ const A28: readonly Row[] = [
     findings: [{ path: "entries[0].config.instanceId", entry: core0, field: "instanceId", says: ["received undefined"] }],
   },
   {
+    name: "an instanceId with a line break",
+    rule: "settings-schema",
+    side: "private",
+    config: () =>
+      withPrivateCore({ network: "preprod", database: { kind: "pglite", memory: true }, instanceId: "wallet-1\nforged" }),
+    findings: [{ path: "entries[0].config.instanceId", entry: core0, field: "instanceId", says: ["1 to 128"] }],
+  },
+  {
+    name: "an instanceId of 129 characters",
+    rule: "settings-schema",
+    side: "private",
+    config: () =>
+      withPrivateCore({ network: "preprod", database: { kind: "pglite", memory: true }, instanceId: "a".repeat(129) }),
+    findings: [{ path: "entries[0].config.instanceId", entry: core0, field: "instanceId", says: ["1 to 128"] }],
+  },
+  {
+    name: "a lockstep instance with a line break",
+    rule: "settings-schema",
+    config: () => withCore({ ...CORE_SETTINGS, lockstepInstances: ["wallet-1", "wallet-2\nforged"] }),
+    findings: [
+      { path: "entries[0].config.lockstepInstances[1]", entry: core0, field: "lockstepInstances", says: ["1 to 128"] },
+    ],
+  },
+  {
     name: "a module schema that throws",
     rule: "settings-schema",
     config: () => withEntry(thrower.entry({ start: 0, config: { apiKey: "key-123" } })),
@@ -700,6 +724,12 @@ describe("A28: entry-shape and schema violations each refuse, naming the entry a
       expect(error.message).not.toMatch(/\b(?!UTF-)(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
     });
   }
+
+  it("an instance id refused for its characters is not echoed in the refusal", () => {
+    const privateRow = A28.find((row) => row.name === "an instanceId with a line break") as Row;
+    const publicRow = A28.find((row) => row.name === "a lockstep instance with a line break") as Row;
+    for (const row of [privateRow, publicRow]) expect(refusal(() => validateConfig(rowInput(row))).message).not.toContain("forged");
+  });
 
   it("names each finding with its path, its entry and its words", () => {
     const error = refusal(() => validateConfig(input(withCore({ ...CORE_SETTINGS, livenessTimeoutMs: "30000" }))));

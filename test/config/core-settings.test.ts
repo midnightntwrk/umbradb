@@ -219,6 +219,18 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
     expect(PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, backupOnSignal: "" }).success).toBe(false);
   });
 
+  it("takes instance ids as the transport's hello does: 1 to 128 letters, digits, '.', '_', ':' and '-'", () => {
+    const privateId = (instanceId: string) => PRIVATE_CORE_SCHEMA.safeParse({ ...REQUIRED_PRIVATE, instanceId }).success;
+    const listed = (instance: string) =>
+      PUBLIC_CORE_SCHEMA.safeParse({ ...REQUIRED_PUBLIC, lockstepInstances: ["wallet-1", instance] }).success;
+    const good = ["a", "wallet-1", "Wallet_2.eu:west-1", "a".repeat(128)];
+    const bad = ["", "a\nb", "a\rb", "wallet 1", "a\u0000b", "wallét", "a".repeat(129)];
+    expect(good.map(privateId)).toEqual(Array(good.length).fill(true));
+    expect(good.map(listed)).toEqual(Array(good.length).fill(true));
+    expect(bad.map(privateId)).toEqual(Array(bad.length).fill(false));
+    expect(bad.map(listed)).toEqual(Array(bad.length).fill(false));
+  });
+
   it("requires genesisHash with a custom network and refuses it otherwise, for either side", () => {
     const hash = `0x${"ab".repeat(32)}`;
     for (const [schema, required] of [

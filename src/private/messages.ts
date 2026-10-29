@@ -53,6 +53,7 @@
 
 import { z } from "zod";
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
+import { instanceIdSchema } from "./instance-id.js";
 import { NAME_MAX, READ_REFUSAL_REASONS } from "./read-gate.js";
 
 /** The protocol version every message carries. */
@@ -91,10 +92,10 @@ const value = json;
 
 const base = <T extends string>(type: T) => ({ v: z.literal(PROTOCOL_VERSION), type: z.literal(type) });
 
-/** `hello` (private → core). */
+/** `hello` (private → core). Its `instance` follows `./instance-id.ts`, as the core logs and shows it. [PP-4] */
 export const HELLO = z.strictObject({
   ...base("hello"),
-  instance: z.string().min(1),
+  instance: instanceIdSchema(),
   version: z.string().min(1),
   height: height(),
   hash: hash().nullable(),

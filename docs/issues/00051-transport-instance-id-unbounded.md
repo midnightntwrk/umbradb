@@ -1,6 +1,8 @@
 # 00051 — The transport's instance id is any text: line breaks reach the core's log
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-29: one rule (`src/private/instance-id.ts`: 1 to 128 of `[A-Za-z0-9._:-]`) bounds a
+  `hello`'s `instance`, `instanceId` and `lockstepInstances`; any other id fails the message schema or is refused at
+  startup.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem
