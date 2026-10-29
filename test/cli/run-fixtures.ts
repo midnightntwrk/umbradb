@@ -7,14 +7,15 @@ import type { CliProject } from "./cli-fixtures.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * What the tests of `umbradb run` share (task 4.4a; A152, CF-1, LS-6, MD-1, Q106 B): a chain on a tape node, the user
- * module `stats` as a module package's file declares it, a configuration file that imports it, lists its entry and
- * exports it in `modules`, and the command run in a child process until it is signalled.
+ * What the tests of `umbradb run` share: a chain on a tape node, the user module `stats` as a module package's file
+ * declares it, a configuration file that imports it, lists its entry and exports it in `modules`, and the command run
+ * in a child process until it is signalled. [A152, CF-1, LS-6, MD-1, Q106 B]
  *
  * The chain is synthetic, in the node's own answer shapes (`test/backbone/fetch-fixtures.ts`): blocks 0–5, the head 5,
  * the process starting at S = 1. The `core` entry's network is `custom`, its genesis hash the chain's block 0 and its
- * ledger table one row (every `spec_version` is ledger v9's), so the configured network and the node agree; its admin
- * listener is on `127.0.0.1:0` (the process logs the port), never CF-4's `0.0.0.0:8081` on a shared machine.
+ * ledger table one row (every `spec_version` is ledger v9's), so the configured network and the node agree. Its admin
+ * listener is on `127.0.0.1:0` (the process logs the port), never the default `0.0.0.0:8081` on a shared machine.
+ * [CF-4]
  */
 
 /** The chain's blocks 0 to {@link HEAD}. */
@@ -36,7 +37,7 @@ export function chainNode(): Promise<TapeNode> {
   return TapeNode.start({ records: chainTape() });
 }
 
-/** The ledger table of the tests' custom network: every `spec_version` is ledger v9's (LG-3). */
+/** The ledger table of the tests' custom network: every `spec_version` is ledger v9's. [LG-3] */
 const LEDGER_TABLE = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v9" }] };
 
 /** The `core` settings of a process on `database` reading the chain from `node` (see the module comment). */
@@ -55,8 +56,8 @@ export function runCoreSettings(database: DatabaseParts, node: string, extra: Re
 
 /**
  * The user module `stats` 1.2.0 as its package's file declares it, importing `defineModule` from `builders` and `zod`:
- * at every height it writes a row with its data setting `label` (CF-4: recorded in the history) — what "runs stats"
- * is seen by —; `pollMs` is an operational setting from 1.
+ * at every height it writes a row with its data setting `label` (recorded in the history), which is how a test sees
+ * that it runs. `pollMs` is an operational setting from 1. [CF-4]
  */
 export function statsModule(builders: string, id = "stats"): string {
   const schema = id.replaceAll("-", "_");
@@ -104,7 +105,7 @@ export interface StatsConfig {
 
 /**
  * A configuration file that imports `stats`, lists `stats.entry({ start: 1, config })` and — unless `modules` is null —
- * exports `modules`, CF-1's scenario "A user module from the configuration file".
+ * exports `modules`: the scenario "A user module from the configuration file". [CF-1]
  */
 export function statsConfig(builders: string, options: StatsConfig): string {
   const modules = options.modules === undefined ? "[stats]" : options.modules;

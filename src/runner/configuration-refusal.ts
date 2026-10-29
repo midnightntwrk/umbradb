@@ -1,17 +1,20 @@
 /**
- * How a process logs a refusal of its configuration itself (`openspec/changes/core-arch/specs/admin-endpoints/spec.md`
- * AE-1, AE-3; `specs/configuration/spec.md` CF-1–CF-3; owner decision Q137 B, task 8.1b): a refusal before the
- * process's `core` revision is known — the build's declarations (MD-2), the configuration's loading and plain data
- * (CF-1), its validation (CF-2, CF-3) and the choice of its `core` revision (Q102) — ends the process
- * (`./process.ts`): no admin listener opens, since no validated `listen.admin` exists yet, and nothing else is opened.
+ * How a process logs a refusal of its own configuration.
+ *
+ * Some refusals come before the process's `core` revision is known: a fault in the build's declarations, in loading
+ * the configuration or checking that it is plain data, in its validation, or in choosing its `core` revision. Such a
+ * refusal ends the process (`./process.ts`). No admin listener opens, since no validated `listen.admin` exists yet,
+ * and nothing else is opened either. [AE-1, AE-3, MD-2, CF-1, CF-2, CF-3, Q102, Q137 B]
+ *
  * The log is then the only place that says why, so it says it in full, for `umbradb run` and for any program that
  * calls `startProcess`:
- *
- * - `startup refused: <code> (<n> finding(s)); the process ends`, `<code>` the refusal's (`./failures.ts`, §11);
- * - then one `startup refused: <finding>` per finding — `<path>: <message> [<code>]`, as `umbradb config check` prints
- *   it (`../config/findings.ts`): each finding of the validation at its path, a value that is not plain data at its
- *   path, the loader's refusal or a missing `core` revision at the file —; a fault of the declarations, or anything
- *   else thrown, as its message (a declaration's names the module and its place) and its code.
+ * - first `startup refused: <code> (<n> finding(s)); the process ends`, where `<code>` is the refusal's code
+ *   (`./failures.ts`) [design §11];
+ * - then one `startup refused: <finding>` per finding. A finding reads `<path>: <message> [<code>]`, as
+ *   `umbradb config check` prints it (`../config/findings.ts`). A validation finding or a value that is not plain data
+ *   is reported at its path; the loader's refusal or a missing `core` revision is reported at the file. A fault of the
+ *   declarations, or anything else thrown, is reported as its message (a declaration's message names the module and
+ *   its place) and its code.
  *
  * Every line goes through the redaction its caller gives: before the validation nothing tells a configuration's
  * secrets apart but the validation's own reading of them (`configSecrets`, `earlyRedactor`), and the URL patterns.

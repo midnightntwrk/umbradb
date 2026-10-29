@@ -11,9 +11,14 @@ import {
 } from "./code-registry.js";
 
 /**
- * A87's negative controls (task 10.4): the registry's check fails on a code planted in §11 with no test, on a test that
- * does not check its code, on a test that is not there, on a pending code that was not pending at task 10.4, and on a
- * pending code whose task is done.
+ * The code registry's negative controls. [A87; design §11]
+ *
+ * The registry's check fails on:
+ * - a code planted in the design's "Refusals and halts" section with no test;
+ * - a test that does not check its code;
+ * - a test that is not there;
+ * - a pending code that was not pending when the registry was made;
+ * - a pending code whose task is done.
  */
 
 const DESIGN = readRepositoryFile("openspec/changes/core-arch/design.md") as string;

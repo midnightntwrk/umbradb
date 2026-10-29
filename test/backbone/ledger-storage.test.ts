@@ -36,24 +36,27 @@ import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from 
 import { sweepTables, sweepWatcher, type TableSnapshot } from "./sweep-tapes.js";
 
 /**
- * `core-ledger-state`'s stored state through the real process (task 12.4; `openspec/changes/core-arch/acceptance.md`
- * A100, A102, A103, A104; LG-9, LG-11, LG-12, LG-13), on PostgreSQL 18 and PGlite 0.5.10: `startProcess` with the
- * backbone over the node source, the ledger's core modules from genesis and the ledger in its worker thread, against a
- * tape node serving the synthetic tapes of `./ledger-tapes.ts` (real ledger transactions; the node's roots the reference
- * replay's, which converts at an upgrade as the node does).
+ * `core-ledger-state`'s stored state through the real process, on PostgreSQL 18 and PGlite 0.5.10. The setup:
+ * - `startProcess` with the backbone over the node source;
+ * - the ledger's core modules from genesis, with the ledger in its worker thread;
+ * - a tape node serving the synthetic tapes of `./ledger-tapes.ts`. They hold real ledger transactions, and the node's
+ *   roots are the reference replay's, which converts at an upgrade as the node does.
+ * [A100, A102, A103, A104; LG-9, LG-11, LG-12, LG-13]
  *
- * - A100 (LG-9): a v8 range whose runtime upgrade's F has no transaction, and one whose F has one: the state converted
- *   before F's apply, every root the node's.
- * - A102 (LG-11): a process killed with SIGKILL at the upgrade's U and restarted loads the state at U from the database
- *   (the node's root), converts it at F and goes on with every root the node's; a stored node changed under its key
- *   fails the restart's read; `[STATIC]` the tables are design §10's node layout, and no stored value is a whole state.
- * - A103 (LG-12): a revision raising `retainStates` fills the window from its start, one lowering it releases the
- *   states leaving the window in its first block; `retainStates` 1,000 at cursor 5,000 — the state at 4,000 loads,
- *   3,999 fails with `state-not-retained` — is `ledger-window.test.ts` (5,000 blocks once, on PGlite, and PostgreSQL
- *   from its backup: task 12.5a, owner decision Q122).
- * - A104 (LG-13; tasks 12.4, 12.5): with `retainStates` 0 a contract's state and zswap-state keys persisted at 10 stay
- *   held after the contract changed at 20, every state holding them was released and two sweep cycles completed, and
- *   load from their keys alone (the run without persisting them is `ledger-sweep.negative-control.test.ts`'s).
+ * What is checked:
+ * - A v8 range whose runtime upgrade's F has no transaction, and one whose F has one: the state is converted before F
+ *   is applied, and every root is the node's. [A100, LG-9]
+ * - A process killed with SIGKILL at the upgrade's U and restarted loads the state at U from the database (the node's
+ *   root), converts it at F and goes on with every root the node's. A stored node changed under its key fails the
+ *   restart's read. `[STATIC]` The tables follow the node layout, and no stored value is a whole state.
+ *   [A102, LG-11; design §10]
+ * - A revision raising `retainStates` fills the window from its start; one lowering it releases the states leaving the
+ *   window in its first block. The case of `retainStates` 1,000 at cursor 5,000 (the state at 4,000 loads, 3,999 fails
+ *   with `state-not-retained`) is in `ledger-window.test.ts`: 5,000 blocks once on PGlite, and PostgreSQL from its
+ *   backup. [A103, LG-12, Q122]
+ * - With `retainStates` 0, a contract's state and zswap-state keys persisted at 10 stay held and load from their keys
+ *   alone. This holds after the contract changed at 20, every state holding them was released, and two sweep cycles
+ *   completed. The run without persisting them is in `ledger-sweep.negative-control.test.ts`. [A104, LG-13]
  */
 
 const WORKER = fileURLToPath(new URL("./ledger-restart.worker.ts", import.meta.url));
@@ -263,7 +266,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state's stored state through the pr
 describe("A102 [STATIC]: core-ledger-state's tables are the node layout of design §10, and no table stores a whole serialized state", () => {
   const DESIGN = fileURLToPath(new URL("../../openspec/changes/core-arch/design.md", import.meta.url));
 
-  /** The columns design §10's table rows give each `core_ledger_state` table (the key's, then the others'). */
+  /** The columns the table rows of `DESIGN` give each `core_ledger_state` table (the key's, then the others'). [design §10] */
   function designColumns(): Map<string, string[]> {
     const tables = new Map<string, string[]>();
     for (const line of readFileSync(DESIGN, "utf8").split("\n")) {

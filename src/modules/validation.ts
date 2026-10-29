@@ -1,30 +1,34 @@
 /**
- * Declaration validation at startup (`openspec/changes/core-arch/specs/modules/spec.md` MD-1, MD-2; `design.md` §6,
- * §11; decision record Q94): the runner validates every declaration the host gives it before anything else runs, and
- * refuses the first fault, naming the module and the cause.
+ * Declaration validation at startup. Before anything else runs, the runner checks every declaration the host gives it
+ * and stops at the first fault, naming the module and the cause. [MD-1, MD-2, Q94; design §6, §11]
  *
- * **One validation, typed or not.** A declaration may come from TypeScript, where `defineModule`'s type checked it
- * (`./declaration.ts`), or from JavaScript or a value built at run time, where nothing did. Validation takes `unknown` and refuses
- * everything `ModuleDeclaration`'s type forbids — a missing or misspelled property, a value of the wrong type, a version
- * that is not semver, `deterministic: true` — with `invalid-declaration`, naming the field; so a module built without
- * types is held to the same declaration (A20). It also refuses so a public module that declares a private module's own
- * field `needsLockstep` (PP-6; task 14.1), which no public process could honour.
+ * **One validation, typed or not.** A declaration written in TypeScript was already checked by `defineModule`'s type
+ * (`./declaration.ts`); one written in JavaScript or built at run time was not. So validation takes `unknown` and
+ * rejects, with `invalid-declaration` and the field's name, everything `ModuleDeclaration`'s type forbids: a missing
+ * or misspelled property, a value of the wrong type, a version that is not semver, `deterministic: true`. It also
+ * rejects `needsLockstep` on a public module, since only a private process can run in lockstep. [MD-1, A20, PP-6]
  *
- * **MD-2's causes**, each a rule of {@link DECLARATION_RULES} with its own code, checked in that order over every
- * declaration once their shapes are valid: an id or item name DB-8's pattern does not allow (`bad-id`, the same check
- * as the schema plan's, `src/db/roles.ts`); a user module's id that is `core` — the id of the core's own configuration
- * entries (CF-2) — or starts with `core-` or `on-` (`reserved-prefix`); an id another declaration has (`duplicate-id`
- * — refused here as itself, before the schema plan would call it a schema collision); a module, or a core module, that
- * requires nothing (`no-requirement`; backbone parts may); an item without a lifetime (`item-no-lifetime`); a `table`
- * item without a kind (`table-item-no-kind`); a settings field without a kind (`field-no-kind`, read as
- * `schema.shape[field].meta().kind`, design §7); and a callback under a name that is not a point (`unknown-point`,
- * MD-1). MD-2's last cause, a schema name that collides, is the schema plan's (`planSchemas`, with
- * `shared-item-migrations-differ`), which takes the declarations of one database through `./adapters.ts`; the
- * requirement graph is task 3.2's.
+ * **The rules.** Once every declaration has a valid shape, each rule of {@link DECLARATION_RULES} runs over all of
+ * them, in this order, each with its own error code [MD-2]:
+ * - `bad-id`: an id or item name that breaks the name pattern (the same check the schema plan makes,
+ *   `src/db/roles.ts`) [DB-8];
+ * - `reserved-prefix`: a user module whose id is `core` (the id of the core's own configuration entries) or starts with
+ *   `core-` or `on-` [CF-2];
+ * - `duplicate-id`: an id that another declaration already has (caught here, before the schema plan would report it as
+ *   a schema collision);
+ * - `no-requirement`: a user or core module that requires no item (backbone parts may require none);
+ * - `item-no-lifetime`: an item without a lifetime;
+ * - `table-item-no-kind`: a `table` item without a kind;
+ * - `field-no-kind`: a settings field without a kind, read from `schema.shape[field].meta().kind` [CF-4; design §7];
+ * - `unknown-point`: a callback under a name that is not a point [MD-1].
  *
- * **Who declares what.** The set has three lists: UmbraDB's own backbone parts, the core modules it ships, and the
- * host's user modules. Only user modules are refused a reserved prefix, and only backbone parts may require nothing
- * (CORE-ARCH §4.11: `core-chain` and the admin endpoints' parts require no item).
+ * Two related checks live elsewhere: colliding schema names are caught by the schema plan (`planSchemas`, including
+ * `shared-item-migrations-differ`), which receives one database's declarations through `./adapters.ts`; and the
+ * requirements between modules are checked by the requirement graph (`./graph.ts`). [MD-2]
+ *
+ * **Who declares what.** A set has three lists: UmbraDB's own backbone parts, the core modules it ships, and the host's
+ * user modules. Only user modules are barred from the reserved prefixes, and only backbone parts may require nothing
+ * (`core-chain` and the admin endpoints' parts require no item). [MD-2; CORE-ARCH §4.11]
  */
 
 import { CORE_ENTRY_ID } from "../config/entries.js";
@@ -56,7 +60,7 @@ export interface PlacedDeclaration {
   readonly declaration: ModuleDeclaration;
 }
 
-/** One cause MD-2 or MD-1 names, checked over every declaration of a set. */
+/** One validation rule, checked over every declaration of a set. [MD-1, MD-2] */
 export interface DeclarationRule {
   readonly code: ErrorCode;
   /** The first refusal of this cause, in the set's order, or undefined. */
@@ -93,8 +97,8 @@ const MIGRATION_PROPERTIES = ["id", "sql"];
 const TASK_PROPERTIES = ["name", "needsState", "run"];
 
 /**
- * semver 2.0.0's grammar (semver.org, "Is there a suggested regular expression"); the configuration's versions are
- * checked with it too (`src/config/validate.ts`).
+ * The semver 2.0.0 grammar, as suggested on semver.org. Configuration versions are checked with it too
+ * (`src/config/validate.ts`).
  */
 export const SEMVER =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
@@ -158,7 +162,7 @@ class Shape {
     return this.refuse(
       field,
       expected,
-      `${this.who}: ${field} is ${shown(found)}, where a module declaration has ${expected} (MD-1)${then}`,
+      `${this.who}: ${field} is ${shown(found)}, where a module declaration has ${expected}${then}`,
     );
   }
 
@@ -171,7 +175,7 @@ class Shape {
     this.refuse(
       field,
       `one of ${known.join(", ")}`,
-      `${this.who} has the property ${field}, which ${where} does not have (MD-1): its properties are ` +
+      `${this.who} has the property ${field}, which ${where} does not have: its properties are ` +
         `${known.join(", ")}; remove it, or correct its name`,
     );
   }
@@ -217,7 +221,7 @@ function isZodObject(value: unknown): value is { readonly shape: Record<string, 
   );
 }
 
-/** One item's shape; MD-2's own causes (no lifetime, no kind) are left to the rules. */
+/** Checks one item's shape. A missing lifetime or kind is left to the rules, which report it with its own code. */
 function checkItem(shape: Shape, item: unknown, at: string, tables: Map<string, string>): string {
   if (!isObject(item)) shape.wrong(at, item, "an item, { name, lifetimes, table? }");
   shape.onlyKnown(item, at, ITEM_PROPERTIES);
@@ -239,7 +243,7 @@ function checkItem(shape: Shape, item: unknown, at: string, tables: Map<string, 
       `${at}.table.deterministic`,
       table.deterministic,
       "false, or nothing",
-      "tables are deterministic unless declared deterministic: false, so omit it for a deterministic table (Q76)",
+      "tables are deterministic unless declared deterministic: false, so omit it for a deterministic table",
     );
   }
   if (Array.isArray(lifetimes) && lifetimes.length > 0 && !lifetimes.includes("table")) {
@@ -247,7 +251,7 @@ function checkItem(shape: Shape, item: unknown, at: string, tables: Map<string, 
       `${at}.table`,
       "no table on an item without the lifetime table",
       `${shape.who} declares a table for the item ${name}, which does not have the lifetime table: only a table ` +
-        "item has tables (MD-1); add \"table\" to its lifetimes, or remove its table",
+        "item has tables; add \"table\" to its lifetimes, or remove its table",
     );
   }
   names.forEach((listed, index) => {
@@ -258,7 +262,7 @@ function checkItem(shape: Shape, item: unknown, at: string, tables: Map<string, 
         `${at}.table.tables[${index}]`,
         "a table no other item of the module lists",
         `${shape.who} lists the table ${qualified} in the items ${other} and ${name}: a table belongs to one item, ` +
-          "whose kind and deterministic flag decide how it is kept (MD-1); list it in one item only",
+          "whose kind and deterministic flag decide how it is kept; list it in one item only",
       );
     }
     tables.set(qualified, name);
@@ -267,10 +271,11 @@ function checkItem(shape: Shape, item: unknown, at: string, tables: Map<string, 
 }
 
 /**
- * A declaration's `ledgerTasks` (LG-17; task 12.6): a list of `{ name, needsState, run }`, each named after a `block`
- * item the module provides, once; a module with tasks requires `block-parsed` (its tasks run on the block's parse,
- * LG-7), and one with a `needsState` task `ledger-state` (so the graph refuses it where `core-ledger-state` is not
- * active); a private module has none (a private process has no ledger worker).
+ * Checks a declaration's `ledgerTasks`: a list of `{ name, needsState, run }`, each named after a different `block`
+ * item the module provides. A module with tasks must require `block-parsed`, since its tasks run on the block's parse.
+ * If any task sets `needsState`, the module must also require `ledger-state`, so the graph rejects it wherever
+ * `core-ledger-state` is not active. A private module has no tasks, because a private process has no ledger worker.
+ * [LG-7, LG-17]
  */
 function checkLedgerTasks(shape: Shape, value: Plain): void {
   const tasks = value.ledgerTasks;
@@ -281,8 +286,8 @@ function checkLedgerTasks(shape: Shape, value: Plain): void {
     shape.refuse(
       "ledgerTasks",
       "nothing, on a private module",
-      `${shape.who} is a private module and declares ledger tasks: a private process has no ledger worker (LG-17, ` +
-        "PP-1); read the public tables instead, or move the task to a public module",
+      `${shape.who} is a private module and declares ledger tasks: a private process has no ledger worker; ` +
+        "read the public tables instead, or move the task to a public module",
     );
   }
   const requires = value.requires as string[];
@@ -301,7 +306,7 @@ function checkLedgerTasks(shape: Shape, value: Plain): void {
         `${at}.name`,
         "a block item the module provides",
         `${shape.who}'s ledger task ${name} names no block item the module provides: a task's result becomes the ` +
-          `module's block item of its name (LG-17); provide { name: "${name}", lifetimes: ["block"] }`,
+          `module's block item of its name; provide { name: "${name}", lifetimes: ["block"] }`,
       );
     }
     const before = named.get(name);
@@ -310,7 +315,7 @@ function checkLedgerTasks(shape: Shape, value: Plain): void {
         `${at}.name`,
         "a task name used once",
         `${shape.who} declares the ledger task ${name} twice (ledgerTasks[${before}] and ${at}): each task gives one ` +
-          "item (LG-17)",
+          "item",
       );
     }
     named.set(name, position);
@@ -319,7 +324,7 @@ function checkLedgerTasks(shape: Shape, value: Plain): void {
         `${at}.needsState`,
         "a module that requires ledger-state",
         `${shape.who}'s ledger task ${name} needs the state before the block, and the module does not require ` +
-          "ledger-state: it must, so that the graph refuses it where core-ledger-state is not active (LG-17)",
+          "ledger-state: it must, so that the graph refuses it where core-ledger-state is not active",
       );
     }
   });
@@ -328,12 +333,12 @@ function checkLedgerTasks(shape: Shape, value: Plain): void {
       "requires",
       "a list holding block-parsed",
       `${shape.who} declares ledger tasks and does not require block-parsed: its tasks run on the block's one parse, ` +
-        "core-block-parsed's (LG-7, LG-17); require block-parsed",
+        "core-block-parsed's; require block-parsed",
     );
   }
 }
 
-/** Checks everything `ModuleDeclaration`'s type says of `value`, except MD-2's own causes (the rules'). */
+/** Checks everything `ModuleDeclaration`'s type requires of `value`, except what the rules check. */
 function checkShape(value: unknown, origin: DeclarationOrigin, index: number): ModuleDeclaration {
   const shape: Shape = new Shape(origin, index, isObject(value) ? value.id : undefined);
   if (!isObject(value)) {
@@ -341,7 +346,7 @@ function checkShape(value: unknown, origin: DeclarationOrigin, index: number): M
       "",
       "a module declaration object",
       `${shape.who} is not an object (it is ${shown(value)}): a module is a declaration object, the one its package ` +
-        "exports, made with defineModule (MD-1)",
+        "exports, made with defineModule",
     );
   }
   shape.onlyKnown(value, "", DECLARATION_PROPERTIES);
@@ -366,7 +371,7 @@ function checkShape(value: unknown, origin: DeclarationOrigin, index: number): M
         `${at}.name`,
         "an item provided once",
         `${shape.who} provides the item ${name} twice (provides[${first}] and ${at}): a module declares each item ` +
-          "once, with all its lifetimes (MD-1); merge the two",
+          "once, with all its lifetimes; merge the two",
       );
     }
     names.set(name, position);
@@ -375,12 +380,12 @@ function checkShape(value: unknown, origin: DeclarationOrigin, index: number): M
   shape.boolean(value, "startsMidChain", true);
   shape.boolean(value, "needsLockstep", false);
   if (value.side === "public" && value.needsLockstep !== undefined) {
-    // A private module's own field (PP-6): a public module has no lockstep.
+    // Only a private module can run in lockstep with the public side. [PP-6]
     shape.refuse(
       "needsLockstep",
       "nothing, on a public module",
-      `${shape.who} is a public module and declares needsLockstep, which only a private module declares (MD-1): ` +
-        `lockstep is a private process's (PP-6); declare the module side: "private", or remove needsLockstep`,
+      `${shape.who} is a public module and declares needsLockstep, which only a private module declares: ` +
+        `lockstep is a private process's; declare the module side: "private", or remove needsLockstep`,
     );
   }
   shape.boolean(value, "developmentOnly", false);
@@ -389,7 +394,7 @@ function checkShape(value: unknown, origin: DeclarationOrigin, index: number): M
       "configSchema",
       value.configSchema,
       "a zod 4 object schema, z.object({ … }), from the zod package",
-      "declare the module's settings with z.object, each field with .meta({ kind }) (CF-4)",
+      "declare the module's settings with z.object, each field with .meta({ kind })",
     );
   }
 
@@ -416,7 +421,7 @@ function checkShape(value: unknown, origin: DeclarationOrigin, index: number): M
   return value as unknown as ModuleDeclaration;
 }
 
-// ── MD-2's causes ───────────────────────────────────────────────────────────────────────────────────────────────────
+// ── the rules ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The first refusal `check` gives for a declaration of `declarations`, in order. */
 function first(
@@ -431,8 +436,8 @@ function first(
 }
 
 /**
- * DB-8's pattern, for every id and item name: the schema plan's own check (`checkNames`), whose refusal this rule
- * returns (anything else it might throw, `validateWith` throws as it is).
+ * Every id and item name must match the name pattern. Uses the schema plan's own check (`checkNames`) and returns its
+ * refusal; any other error it throws reaches `validateWith` unchanged. [DB-8]
  */
 const badId: DeclarationRule = {
   code: "bad-id",
@@ -450,9 +455,9 @@ const badId: DeclarationRule = {
 const PREFIXES = ["core-", "on-"];
 
 /**
- * MD-2: a user module's id that is `core` or starts with `core-` or `on-`. `core` is the id of the core's own entries in
- * the configuration (CF-2), which identifies an entry by its id and start (CF-5): a module with that id could not be
- * told from the core there (docs/issues/00012).
+ * A user module's id may not be `core` or start with `core-` or `on-`. `core` is the id of the core's own configuration
+ * entries, and the configuration identifies an entry by its id and start, so a module with that id could not be told
+ * apart from the core. [MD-2, CF-2, CF-5]
  */
 const reservedPrefix: DeclarationRule = {
   code: "reserved-prefix",
@@ -464,7 +469,7 @@ const reservedPrefix: DeclarationRule = {
           "reserved-prefix",
           `the user module core has the id "core", which is the id of the core's own configuration entries: the ` +
             "configuration identifies each entry by its id and start, so it could not tell this module's revisions " +
-            "from the core's (MD-2, CF-2, CF-5); choose another id",
+            "from the core's; choose another id",
           { module: id },
         );
       }
@@ -473,14 +478,14 @@ const reservedPrefix: DeclarationRule = {
       return new UmbraError(
         "reserved-prefix",
         `the user module ${id} has an id starting with ${JSON.stringify(prefix)}: ids starting with "core-" are ` +
-          'UmbraDB\'s own (its backbone parts and core modules), and those starting with "on-" read as point names ' +
-          "(MD-2); choose an id without either prefix",
+          'UmbraDB\'s own (its backbone parts and core modules), and those starting with "on-" read as point names;' +
+          " choose an id without either prefix",
         { module: id, prefix },
       );
     }),
 };
 
-/** MD-2: an id another declaration of the set has. */
+/** No two declarations of a set may share an id. [MD-2] */
 const duplicateId: DeclarationRule = {
   code: "duplicate-id",
   check: (declarations) => {
@@ -494,8 +499,8 @@ const duplicateId: DeclarationRule = {
         "duplicate-id",
         `the ${LABEL[placed.origin]} ${id} (position ${placed.index + 1}) has the id of the ` +
           `${LABEL[earlier.origin]} at position ${earlier.index + 1}: every module needs an id of its own, since its ` +
-          "schema, its database role, its configuration entries and its migrations' records are named after it " +
-          "(MD-2, DB-8); rename one of them, or ship the module once",
+          "schema, its database role, its configuration entries and its migrations' records are named after it; " +
+          "rename one of them, or ship the module once",
         {
           module: id,
           first: { origin: earlier.origin, index: earlier.index },
@@ -506,7 +511,7 @@ const duplicateId: DeclarationRule = {
   },
 };
 
-/** MD-2: a module, user or core, that requires no item; backbone parts may. */
+/** User and core modules must require at least one item; backbone parts may require none. [MD-2] */
 const noRequirement: DeclarationRule = {
   code: "no-requirement",
   check: (declarations) =>
@@ -515,14 +520,14 @@ const noRequirement: DeclarationRule = {
       return new UmbraError(
         "no-requirement",
         `the ${LABEL[origin]} ${id} requires no item: every module requires at least one item another part provides — ` +
-          "the data its own is derived from, which also places it in each point's order (MD-2, MD-3, RN-3); list in " +
+          "the data its own is derived from, which also places it in each point's order; list in " +
           'requires the items it reads, for example "block-header"',
         { module: id },
       );
     }),
 };
 
-/** MD-2: an item provided without a lifetime. */
+/** Every item a module provides must have a lifetime. [MD-2] */
 const itemNoLifetime: DeclarationRule = {
   code: "item-no-lifetime",
   check: (declarations) =>
@@ -536,13 +541,13 @@ const itemNoLifetime: DeclarationRule = {
         "item-no-lifetime",
         `module ${id} provides the item ${item.name} without a lifetime: every item has one or more — "process" (set ` +
           'once per process), "block" (passed in each block\'s context) or "table" (stored in tables) — which say ' +
-          'when and how its consumers get it (MD-1, MD-2); declare them, for example lifetimes: ["block", "table"]',
+          'when and how its consumers get it; declare them, for example lifetimes: ["block", "table"]',
         { module: id, item: item.name },
       );
     }),
 };
 
-/** MD-2: an item with the lifetime `table` whose table has no kind, or that has no table. */
+/** An item with the lifetime `table` must declare a table, and that table must have a kind. [MD-2] */
 const tableItemNoKind: DeclarationRule = {
   code: "table-item-no-kind",
   check: (declarations) =>
@@ -556,15 +561,15 @@ const tableItemNoKind: DeclarationRule = {
       const lead = `module ${id} declares the table item ${item.name} without a kind:`;
       const message =
         item.table === undefined
-          ? `${lead} it has the lifetime "table" but no table — no schema, tables or kind (MD-1, MD-2); add table: ` +
+          ? `${lead} it has the lifetime "table" but no table — no schema, tables or kind; add table: ` +
             '{ schema, tables, kind: "append-only" or "mutable" }'
           : `${lead} a table item's tables are either only appended to ("append-only") or also changed ` +
-            '("mutable") (MD-1, MD-2); add kind: "append-only" or kind: "mutable" to its table';
+            '("mutable"); add kind: "append-only" or kind: "mutable" to its table';
       return new UmbraError("table-item-no-kind", message, { module: id, item: item.name });
     }),
 };
 
-/** MD-2: a settings field whose outermost schema carries no `kind` of CF-4 (design §7). */
+/** Every settings field's outermost schema must carry a `kind`: data, operational or secret. [MD-2, CF-4] */
 const fieldNoKind: DeclarationRule = {
   code: "field-no-kind",
   check: (declarations) =>
@@ -577,7 +582,7 @@ const fieldNoKind: DeclarationRule = {
         return new UmbraError(
           "field-no-kind",
           `the setting ${JSON.stringify(field)} of module ${id} ${has}: every setting is "data" (recorded in the ` +
-            'configuration history), "operational" (not recorded) or "secret" (never shown or logged) (CF-4, MD-2); ' +
+            'configuration history), "operational" (not recorded) or "secret" (never shown or logged); ' +
             'declare it with .meta({ kind: "data" }) on the field\'s outermost schema — after .default() or ' +
             ".optional(), which hide metadata set before them",
           { module: id, field, kind: kind ?? null },
@@ -587,7 +592,7 @@ const fieldNoKind: DeclarationRule = {
     }),
 };
 
-/** MD-1: a callback under a name that is not a point. */
+/** Every callback must be registered under a point's name. [MD-1] */
 const unknownPoint: DeclarationRule = {
   code: "unknown-point",
   check: (declarations) =>
@@ -597,13 +602,13 @@ const unknownPoint: DeclarationRule = {
       return new UmbraError(
         "unknown-point",
         `module ${id} declares a callback under ${JSON.stringify(point)}, which is not a point: the points are ` +
-          `${POINTS.join(", ")} (MD-1); move the callback to the point it is meant for`,
+          `${POINTS.join(", ")}; move the callback to the point it is meant for`,
         { module: id, point },
       );
     }),
 };
 
-/** MD-2's causes (and MD-1's unknown point), in the order they are checked. */
+/** The validation rules, in the order they are checked. [MD-1, MD-2] */
 export const DECLARATION_RULES: readonly DeclarationRule[] = Object.freeze([
   badId,
   reservedPrefix,
@@ -637,8 +642,8 @@ export function validateWith(
 }
 
 /**
- * Validates the declarations of a build at startup (MD-1, MD-2): see the module comment. Throws an `UmbraError` (not
- * retryable) naming the module and the cause; returns the same declarations, typed.
+ * Validates a build's declarations at startup, as the module comment describes. Throws a non-retryable `UmbraError`
+ * naming the module and the cause; otherwise returns the same declarations, typed. [MD-1, MD-2]
  */
 export function validateDeclarations(set: DeclarationSet): DeclarationSet<ModuleDeclaration> {
   return validateWith(set, DECLARATION_RULES);

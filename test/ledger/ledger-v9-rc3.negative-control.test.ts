@@ -6,16 +6,16 @@ import { V8_PACKAGE_PATH, V9_PACKAGE_PATH } from "./ledger-states.js";
 import { carriedLoadProblems, stagenetReplay } from "./v9-rc3-checks.js";
 
 /**
- * Committed negative controls of task 12.2a (A159, A99; owner decision Q139 A): each runs a check of
- * `./v9-rc3-checks.ts` with one thing wrong and must see it fail, and the real packages pass the same check here.
+ * Committed negative controls of the rc.3 package checks: each runs a check of `./v9-rc3-checks.ts` with one thing
+ * wrong and must see it fail, and the real packages pass the same check here. [A159, A99, Q139 A]
  *
- * - **The old table** (runtime 2.0 → rc.5, what tasks 12.2 and 12.3 shipped): the rc.5 package replaying stagenet's
- *   runtime 2.0 blocks gives another root than the node's from block 1 on, the block of its first DUST generation — the
- *   adapter-level form of the stagenet tape's control ("A99's control" in `test/backbone/ledger-state.test.ts`).
+ * - **The old table** (runtime 2.0 → rc.5, what an earlier build shipped): the rc.5 package replaying stagenet's
+ *   runtime 2.0 blocks gives another root than the node's from block 1 on, the block of its first DUST generation. This
+ *   is the adapter-level form of the stagenet tape's control in `test/backbone/ledger-state.test.ts`. [A99]
  * - **A package that does not share rc.3's storage format**: the v8 package (another `LedgerState` type, under another
- *   tag) reads the state rc.3 stored by its key — the root of a state loaded by its key is that key, in any package —
- *   but not as rc.3's state: what it serializes is another, so A159's load check fails; the rc.5 package, which shares
- *   the format, passes.
+ *   tag) reads the state rc.3 stored by its key, since the root of a state loaded by its key is that key in any
+ *   package. But it does not read it as rc.3's state: what it serializes is another, so the load check fails. The rc.5
+ *   package, which shares the format, passes. [A159]
  */
 
 const LONG = 240_000;

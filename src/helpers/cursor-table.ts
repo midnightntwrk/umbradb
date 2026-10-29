@@ -1,52 +1,58 @@
 /**
- * The cursor-table helper (`openspec/changes/core-arch/specs/storage-helpers/spec.md` SH-1; `design.md` §1, §10, §12;
- * CORE-ARCH §4.11a; owner decisions Q27, Q30), refactored from 0.9.5's Watermarks (`src/postgres/watermarks.ts`): a
- * table with one row per key, `key text` → `value jsonb`, where the last write of a key wins — for example a private
- * module's per-key cursors.
+ * The cursor-table helper, refactored from 0.9.5's Watermarks (`src/postgres/watermarks.ts`): a table with one row per
+ * key, `key text` → `value jsonb`, where the last write of a key wins. A private module's per-key cursors are one
+ * example. [SH-1, Q27; CORE-ARCH §4.11a; design §1, §10, §12]
  *
- * **A library, not a module (Q30).** {@link cursorTable} names a table in the calling module's own schema and gives its
- * migration, which the module puts in its own `migrations` list, and the functions that read and write it through the
- * handles the module's callbacks are given: `write` through the block write handle of its `on-db-write`, so the write
- * runs inside the block's one transaction, under the module's role (DB-3, DB-6, RN-4); `read` through any handle's
- * `query`. The helper registers nothing, takes no point, and opens no connection or transaction of its own: this file
- * imports types only. Since the table is the module's, stopping, digests (change capture, DT-4), backups and dropping
- * treat it as any other table of the module; other modules may read it (DB-6's `SELECT`), and the role refuses their
- * writes. Writing it from `on-db-write` only is the module's obligation — modules are trusted code (Q46), and a schema
- * write handle has the same shape as a block write handle.
+ * **A library, not a module.** {@link cursorTable} names a table in the calling module's own schema. It gives the
+ * table's migration, which the module puts in its own `migrations` list, and the functions that read and write the
+ * table through the handles the module's callbacks are given:
+ * - `write` goes through the block write handle of the module's `on-db-write`, so the write runs inside the block's one
+ *   transaction, under the module's role [DB-3, DB-6, RN-4];
+ * - `read` goes through any handle's `query`.
  *
- * **Last write wins (SH-1, Law W1 of `Formal/STORAGE_ALGEBRA.md` §3).** A write is one upsert, so a key written again
- * — in a later block, or in the same one — holds the last value; a write of a block that rolls back is gone with it.
- * SH-3's one write per key per block is the height-versioned table's rule (task 6.2), not this table's, which keeps no
- * history: a second write of a key in one block replaces the first, as 0.9.5's Watermarks did.
+ * The helper registers nothing, takes no point, and opens no connection or transaction of its own: this file imports
+ * types only. Since the table is the module's, stopping, digests (change capture), backups and dropping treat it as
+ * any other table of the module. Other modules may read it (with `SELECT`), and the role refuses their writes. Writing
+ * it from `on-db-write` only is the module's obligation: modules are trusted code, and a schema write handle has the
+ * same shape as a block write handle. [Q30, DT-4, DB-6, Q46]
  *
- * **Deterministic (DT-1, DT-2, DT-6).** The key is `text`, an allowed key type: its uniqueness is by bytes (the
- * database's collation is a deterministic one), and DT-2's byte order is the `deterministic_postgresql` component's to
- * apply where rows are read in key order (`keyOrderTerm`, the contents hash and digests), so the table names no
- * collation of its own (A138: the component alone writes DT-2's collation, owner decision Q69); the value is `jsonb`,
- * which the database API's module rules give the `CHECK` of Q57
- * (`umbradb_integers_value`): a JSON number must be an integer within the signed 64-bit range, else the write fails the
- * block (`database-error`, SQLSTATE `23514`). No column holds a time: 0.9.5's `updated_at DEFAULT now()` is gone (a
- * non-immutable default is refused by DT-6, and no table stores wall-clock time, `design.md` §10), and so is its
- * `kind`: SH-1 has one key, and a module wanting several kinds uses several tables or composite keys. `fillfactor =
- * 90` stays (0.9.5's reason: a cursor is updated in place often, and the free space lets an update stay on its page,
- * heap-only); so does its rule never to index `value`.
+ * **Last write wins.** A write is one upsert, so a key written again, in a later block or in the same one, holds the
+ * last value; a write of a block that rolls back is gone with it. The rule of one write per key per block belongs to
+ * the height-versioned table, not to this table, which keeps no history: a second write of a key in one block replaces
+ * the first, as 0.9.5's Watermarks did. [SH-1, SH-3; `Formal/STORAGE_ALGEBRA.md` §3, Law W1]
+ *
+ * **Deterministic.** [DT-1, DT-2, DT-6]
+ * - The key is `text`, an allowed key type. Its uniqueness is by bytes, since the database's collation is a
+ *   deterministic one. The byte order for reading rows in key order (`keyOrderTerm`, the contents hash and digests) is
+ *   the `deterministic_postgresql` component's to apply, so the table names no collation of its own: only that
+ *   component writes the collation. [DT-2, A138, Q69]
+ * - The value is `jsonb`, which the database API's module rules give the `CHECK` `umbradb_integers_value`: a JSON
+ *   number must be an integer within the signed 64-bit range, or else the write fails the block (`database-error`,
+ *   SQLSTATE `23514`). [DT-1, Q57]
+ * - No column holds a time. 0.9.5's `updated_at DEFAULT now()` is gone, since a non-immutable default is refused and
+ *   no table stores wall-clock time. [DT-6; design §10]
+ * - 0.9.5's `kind` is gone too: the table has one key, and a module wanting several kinds uses several tables or
+ *   composite keys. [SH-1]
+ * - `fillfactor = 90` stays, for 0.9.5's reason: a cursor is updated in place often, and the free space lets an update
+ *   stay on its page, heap-only. So does 0.9.5's rule never to index `value`.
  *
  * **Values.** A value is any JSON value, sent as JSON text by the database API's parameter mapping (`parameterText` of
- * the `deterministic_postgresql` component, which writes a `bigint` exactly and refuses what JSON cannot hold —
- * `undefined`, `NaN`, a `Date`, a `Map`, … — with `invalid-parameter` before anything is sent); JSON `null` is stored
- * as a value, never as SQL NULL. A read gives it back through the API's lossless reader (DB-2): an integer beyond
- * ±(2^53 − 1) as a `bigint`, exactly — 0.9.5 asked for decimal strings there, because its driver's `JSON.parse` rounded
- * them. A key never written reads as `undefined`.
+ * the `deterministic_postgresql` component). That mapping writes a `bigint` exactly, and refuses what JSON cannot hold
+ * (`undefined`, `NaN`, a `Date`, a `Map`, …) with `invalid-parameter` before anything is sent. JSON `null` is stored
+ * as a value, never as SQL NULL. A read gives the value back through the API's lossless reader: an integer beyond
+ * ±(2^53 − 1) comes back exactly, as a `bigint`. (0.9.5 asked for decimal strings there, because its driver's
+ * `JSON.parse` rounded them.) A key never written reads as `undefined`. [DB-2]
  *
- * **The migration's SQL is fixed.** Its checksum is part of each module's migration record (DB-9), so another text in a
- * later build would make every database that applied it refuse to start (`migration-checksum-changed`); a change to the
- * table is a new migration of the module, after this one. `test/helpers/cursor-table.test.ts` pins the text.
+ * **The migration's SQL is fixed.** Its checksum is part of each module's migration record, so a different text in a
+ * later build would make every database that applied it refuse to start (`migration-checksum-changed`). A change to
+ * the table is a new migration of the module, after this one. `test/helpers/cursor-table.test.ts` pins the text.
+ * [DB-9]
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../db/api.js";
 import type { Migration } from "../modules/declaration.js";
 
-/** A JSON value a cursor holds (DT-1: numbers must be integers within the signed 64-bit range). */
+/** A JSON value a cursor holds: its numbers must be integers within the signed 64-bit range. [DT-1] */
 export type CursorValue =
   | null
   | boolean
@@ -56,7 +62,7 @@ export type CursorValue =
   | readonly CursorValue[]
   | { readonly [key: string]: CursorValue };
 
-/** Where the table is: the calling module's schema (the module's id with `-` → `_`, DB-8) and the table's name. */
+/** Where the table is: the calling module's schema (the module's id with `-` → `_`) and the table's name. [DB-8] */
 export interface CursorTableOptions {
   readonly schema: string;
   readonly table: string;
@@ -101,8 +107,8 @@ function checkName(what: "schema" | "table", name: unknown): string {
 }
 
 /**
- * The cursor table `options.table` in the calling module's schema `options.schema` (SH-1; see the module comment).
- * Throws a `TypeError` for a name that is not a lowercase identifier of at most 63 bytes.
+ * The cursor table `options.table` in the calling module's schema `options.schema` (see the module comment). Throws a
+ * `TypeError` for a name that is not a lowercase identifier of at most 63 bytes. [SH-1]
  */
 export function cursorTable(options: CursorTableOptions): CursorTable {
   const schema = checkName("schema", options.schema);

@@ -1,17 +1,20 @@
 /**
- * A PGlite database's backup as text (`openspec/changes/core-arch/specs/backups/spec.md` BK-1, BK-2, BK-5;
- * `specs/private-processes/spec.md` PP-12; `design.md` §9.1, §9.2; tasks 15.1, 16.1): its manifest (`./manifest.ts`)
- * and the dump `pg_dump` of `@electric-sql/pglite-tools` writes, taken in one exclusive job of the database's queue
- * (`exclusiveJob`, DB-4), so commits wait and both see one committed height. `writeBackup` (`./backup.ts`) writes them to
- * a file; the browser page's core worker hands them to the page, which saves them (BK-5). This module imports nothing
- * of Node.js, so the browser build bundles it as it is; the caller brings the `pg_dump` function (`./tools.ts`'s
- * `loadPgliteDump` in Node.js, the page's bundled `pglite-tools` in the browser).
+ * A PGlite database's backup as text: its manifest (`./manifest.ts`) and the dump that the `pg_dump` of
+ * `@electric-sql/pglite-tools` writes. Both are taken in one exclusive job of the database's queue (`exclusiveJob`), so
+ * commits wait and both see one committed height. [BK-1, BK-2, DB-4; design §9.1, §9.2]
  *
- * **In this order:** a private process's backup refused without the development opt-in (`private-backup-refused`,
- * PP-12) — by its side, before anything is read, and by its database (`core_private_source.cursor`) inside the job —;
- * the facts (`./facts.ts`) read in the job, then the dump of the engine (it adds `--inserts`; `--no-owner` and
- * `--no-privileges` given; its `DEALLOCATE ALL` and everything it set on the one session end with the job); the dump's
- * own header must name a `pg_dump` of major version {@link PG_DUMP_MAJOR}, else `backup-tools-missing`.
+ * `writeBackup` (`./backup.ts`) writes them to a file; the browser page's core worker hands them to the page, which
+ * saves them. This module imports nothing of Node.js, so the browser build bundles it as it is. The caller brings the
+ * `pg_dump` function: `./tools.ts`'s `loadPgliteDump` in Node.js, the page's bundled `pglite-tools` in the browser.
+ * [BK-5]
+ *
+ * **In this order:**
+ * - A private process's backup is refused without the development opt-in (`private-backup-refused`): by its side,
+ *   before anything is read, and by its database (`core_private_source.cursor`) inside the job. [PP-12]
+ * - The facts (`./facts.ts`) are read in the job.
+ * - The engine is dumped. The tool adds `--inserts`, and `--no-owner` and `--no-privileges` are given. Its
+ *   `DEALLOCATE ALL`, and everything it set on the one session, end with the job.
+ * - The dump's own header must name a `pg_dump` of major version {@link PG_DUMP_MAJOR}, else `backup-tools-missing`.
  */
 
 import type { PGlite } from "@electric-sql/pglite";
@@ -24,7 +27,7 @@ import type { TableName } from "../deterministic-postgresql/index.js";
 import { type BackupFacts, isPrivateDatabase, readBackupFacts } from "./facts.js";
 import { BACKUP_FORMAT, type Manifest, type ManifestTool } from "./manifest.js";
 
-/** The PostgreSQL major version both backends run (Q82), and so the one `pg_dump` must have. */
+/** The PostgreSQL major version both backends run, and so the one `pg_dump` must have. [Q82] */
 export const PG_DUMP_MAJOR = 18;
 
 /** The version `pg_dump --version` printed (`pg_dump (PostgreSQL) 18.6 …`), or null when it printed none. */
@@ -41,28 +44,29 @@ export type PgliteDump = (options: { readonly pg: PGlite; readonly args?: string
 export interface DumpInput {
   /** The database, opened through the database API. */
   readonly db: Database;
-  /** The tables declared `deterministic: false` (MD-1, Q76): the contents hash records them by name only. */
+  /** The tables declared `deterministic: false`: the contents hash records them by name only. [MD-1, Q76] */
   readonly optedOut: readonly TableName[];
-  /** The process's side: a private process's backup needs the development opt-in (PP-12). */
+  /** The process's side: a private process's backup needs the development opt-in. [PP-12] */
   readonly side?: ProcessSide;
-  /** The development opt-in of the process's `core` revision (CF-4, Q102). */
+  /** The development opt-in of the process's `core` revision. [CF-4, Q102] */
   readonly developmentOptIn: boolean;
 }
 
 /** What the negative controls replace. */
 export interface SnapshotSeams {
   /**
-   * A124's negative control only: the dump taken outside the manifest's snapshot — the facts read and their read ended,
-   * then `between` awaited (while blocks commit), then the dump in a snapshot of its own.
+   * For the negative control of the consistent-snapshot test only: the dump is taken outside the manifest's snapshot.
+   * The facts are read and their read ended, then `between` is awaited (while blocks commit), then the dump is taken
+   * in a snapshot of its own. [A124]
    */
   readonly outsideSnapshot?: { between(): Promise<void> };
 }
 
-/** `private-backup-refused` (PP-12). */
+/** `private-backup-refused`. [PP-12] */
 export function privateRefused(): UmbraError {
   return new UmbraError(
     "private-backup-refused",
-    "UmbraDB does not back up a private process's database unless the development opt-in is set (PP-12): a private " +
+    "UmbraDB does not back up a private process's database unless the development opt-in is set: a private " +
       "database holds what its modules computed from their private inputs; no file was written. PostgreSQL's own " +
       "tools can still copy it, outside this rule",
     { feature: "private-backup" },
@@ -74,7 +78,7 @@ export function manifestOf(facts: BackupFacts, tool: ManifestTool): Manifest {
   return Object.freeze({ format: BACKUP_FORMAT, ...facts.manifest, umbradb: UMBRADB_VERSION, tool });
 }
 
-/** The facts of the database `read` sees, a private database refused without the opt-in (PP-12). */
+/** The facts of the database `read` sees, a private database refused without the opt-in. [PP-12] */
 export async function factsOf(read: Parameters<typeof readBackupFacts>[0], input: DumpInput): Promise<BackupFacts> {
   if (!input.developmentOptIn && (await isPrivateDatabase(read))) throw privateRefused();
   return readBackupFacts(read, { optedOut: input.optedOut });
@@ -127,7 +131,7 @@ export async function pgliteBackupText(
     throw new UmbraError(
       "backup-tools-missing",
       `pg_dump of @electric-sql/pglite-tools is of PostgreSQL ${version ?? "an unknown version"}, not ` +
-        `${PG_DUMP_MAJOR}: install the version made for this build's PGlite (BK-1); no file was written`,
+        `${PG_DUMP_MAJOR}: install the version made for this build's PGlite; no file was written`,
       { tool: "pglite-tools", needed: String(PG_DUMP_MAJOR), version },
     );
   }

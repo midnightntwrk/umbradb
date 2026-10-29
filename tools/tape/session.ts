@@ -1,6 +1,5 @@
 /**
- * A tape's sessions and the state of one being served (`openspec/changes/core-arch/specs/test-tape/spec.md` TT-2,
- * TT-3; task 9.1).
+ * A tape's sessions and the state of one being served. [TT-2, TT-3]
  *
  * **Sessions.** A tape's records up to and including each `disconnect` form a session, and the records after the last
  * one the last session (empty when the tape ends with a `disconnect`): "the records after it belong to the next

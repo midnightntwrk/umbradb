@@ -9,13 +9,16 @@ import { BACKBONE_ORDER } from "../../src/modules/graph.js";
 import { OTHER_REQUESTS, statusSnapshot } from "./admin-harness.js";
 
 /**
- * The admin route table (task 8.1; AE-1, AE-2, Q70): the endpoints of the backbone parts `core-health`
- * (`/health/live`, `/health/ready`), `core-status` (`/status`) and `core-config` (`/config`), mounted by path; only
- * backbone parts may provide one; `GET` of one of their paths runs its function of the snapshot (the query aside),
- * anything else is 404 `not-found`; an endpoint that throws is 500 with a fixed message (AE-6). The endpoints' minimal
- * functions: `/health/live` from the heartbeat's age against the liveness timeout, `/health/ready` from the published
- * readiness, `/status` the published state, `/config` the published (redacted) `core` revision — tasks 8.2–8.4 complete
- * their bodies.
+ * The admin route table:
+ * - It mounts by path the endpoints of the backbone parts `core-health` (`/health/live`, `/health/ready`),
+ *   `core-status` (`/status`) and `core-config` (`/config`). Only backbone parts may provide one. [AE-1, Q70]
+ * - `GET` of one of their paths runs that endpoint's function on the snapshot (the query aside); anything else is 404
+ *   `not-found`. [AE-1, AE-2]
+ * - An endpoint that throws answers 500 with a fixed message. [AE-6]
+ *
+ * The endpoints' minimal functions here: `/health/live` from the heartbeat's age against the liveness timeout,
+ * `/health/ready` from the published readiness, `/status` the published state, `/config` the published (redacted)
+ * `core` revision. Their full bodies are tested with their parts (`test/backbone/core-*`).
  */
 
 /** A snapshot of a process `following` at 3, ready, with the liveness timeout `liveness`. */
@@ -51,7 +54,7 @@ describe("the admin route table (AE-1, Q70)", () => {
   it("refuses a part that is no backbone part, a path two parts give, and a path that is not absolute", () => {
     const answer = () => ({ status: 200, body: null });
     expect(() => adminRoutes([{ id: "m", endpoints: [{ path: "/m", answer }] }])).toThrow(
-      new TypeError("admin endpoints come from backbone parts only (AE-1, Q70): m is not a backbone part"),
+      new TypeError("admin endpoints come from backbone parts only: m is not a backbone part"),
     );
     expect(() => adminRoutes([CORE_HEALTH_ENDPOINTS, { id: "core-chain", endpoints: [{ path: "/health/live", answer }] }])).toThrow(
       new TypeError("the admin endpoint /health/live is given twice: by core-health and by core-chain"),

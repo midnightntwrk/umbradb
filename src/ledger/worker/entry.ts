@@ -1,11 +1,15 @@
 /**
- * UmbraDB's own ledger worker entry (`openspec/changes/core-arch/design.md` §5.3, §5.5; `specs/modules/spec.md` MD-1;
- * tasks 12.3, 12.6): the thread `startLedgerWorker` starts unless given another entry. It runs the ledger worker
- * (`./run.ts`) with the ledger tasks of UmbraDB's core modules (`src/backbone/ledger-tasks.ts`) and of the user modules
- * of the module `workerData.modules` names, if any — its `modules` export, as a configuration file exports its user
- * modules (`src/config/load.ts`'s `MODULES_EXPORT`, CF-1, Q106): for the `umbradb` command the configuration file, which
- * is the host program and is imported here as on the main thread; nothing is loaded by name (MD-1). The browser build
- * bundles this entry (§9.2), which names no module there. Runs only as a thread of its own (out of coverage).
+ * UmbraDB's own ledger worker entry: the thread `startLedgerWorker` starts unless it is given another entry. It runs
+ * the ledger worker (`./run.ts`) with the ledger tasks of UmbraDB's core modules (`src/backbone/ledger-tasks.ts`).
+ * [MD-1; design §5.3, §5.5]
+ *
+ * If `workerData.modules` names a module, the tasks of that module's user modules are added: its `modules` export, the
+ * same export a configuration file uses for its user modules (`src/config/load.ts`'s `MODULES_EXPORT`). For the
+ * `umbradb` command that module is the configuration file, which is the host program and is imported here just as on
+ * the main thread; nothing is loaded by name. [MD-1, CF-1, Q106]
+ *
+ * The browser build bundles this entry and names no module there. It runs only as a thread of its own, so it is out
+ * of coverage. [design §9.2]
  */
 
 import { workerData } from "node:worker_threads";
@@ -16,7 +20,7 @@ import { type LedgerWorkerModule, runLedgerWorker } from "./run.js";
 async function userModulesOf(url: string): Promise<readonly LedgerWorkerModule[]> {
   const imported = (await import(url)) as { readonly modules?: unknown };
   if (imported.modules === undefined) return [];
-  if (!Array.isArray(imported.modules)) throw new TypeError(`${url} exports modules as something other than a list (CF-1)`);
+  if (!Array.isArray(imported.modules)) throw new TypeError(`${url} exports modules as something other than a list`);
   return imported.modules as readonly LedgerWorkerModule[];
 }
 

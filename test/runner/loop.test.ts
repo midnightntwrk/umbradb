@@ -35,10 +35,15 @@ import {
 } from "./loop-harness.js";
 
 /**
- * The finalized loop (task 5.2; RN-1, RN-2, RN-4, RN-5, RN-8's typed failure, RN-14; `design.md` §2, §3) through an
- * in-memory block source and the real cursor table, on both backends: A36 (the points of RN-1 per height), A37 (every row
- * in a module's or a backbone part's schema, written through a handle), A39 (each point's handle), A40 (the item sink).
- * A41 and A49 (one transaction per height, none while waiting) are `catch-up.test.ts`.
+ * The finalized loop through an in-memory block source and the real cursor table, on both backends. It covers the
+ * loop's typed failure and:
+ * - the points delivered per height [A36, RN-1];
+ * - every row in a module's or a backbone part's schema, written through a handle [A37];
+ * - each point's handle [A39];
+ * - the item sink [A40].
+ *
+ * One transaction per height, and none while waiting, are tested in `catch-up.test.ts` [A41, A49].
+ * [RN-1, RN-2, RN-4, RN-5, RN-8, RN-14; design §2, §3]
  */
 
 /** A module requiring `requires` whose `points` are given; one table `<schema>.rows (height)` unless `rest` says not. */
@@ -81,13 +86,13 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       const height = (h: number): string[] =>
         ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"].map((p) => `${p}@${h}`);
       const calls = () => seen.map((c) => (c.height === undefined ? c.point : `${c.point}@${c.height}`));
-      // on-start-db ran at startup (startDatabase); RN-1's scenario: head 3 on an empty database, S = 1. The recorder's
-      // entry starts at 1: on-start-height between on-parse and on-compute there (RN-1, RN-9; task 5.3).
+      // on-start-db ran at startup (startDatabase). The scenario: head 3 on an empty database, S = 1. The recorder's
+      // entry starts at 1: on-start-height between on-parse and on-compute there. [RN-1, RN-9]
       const [fetch1, parse1, ...rest1] = height(1);
       expect(calls()).toEqual(["on-start-db", "on-finalized@3", fetch1, parse1, "on-start-height@1", ...rest1, ...height(2), ...height(3)]);
 
-      // The head rises: a loop run again re-delivers the cursor's on-after-db-write (RN-11; task 5.3), then one
-      // on-finalized for the new head, before its heights, from the cursor on.
+      // The head rises: a loop run again delivers the cursor's on-after-db-write a second time, then one
+      // on-finalized for the new head, before its heights, from the cursor on. [RN-11]
       source.finalize(5n);
       await runUntilWaiting(started, source, 5n);
       expect(calls().slice(18)).toEqual(["on-after-db-write@3", "on-finalized@5", ...height(4), ...height(5)]);
@@ -278,7 +283,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       }
     }
 
-    /** A39's oracle for on-compute: its read reports h − 1 (null before the first commit) and holds no row of h. */
+    /** The oracle for on-compute: its read reports h − 1 (null before the first commit) and holds no row of h. [A39] */
     function computeProblems(given: readonly Given[]): string[] {
       const computes = given.filter((g) => g.point === "on-compute");
       if (computes.length !== 3) return [`on-compute ran ${computes.length} times, not 3`];
@@ -749,7 +754,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
       return { started, written, source };
     }
 
-    /** A37's oracle: the problems found (none when every row is where it may be and was written through a handle). */
+    /** The oracle: the problems found, none when each row is where it may be and was written through a handle. [A37] */
     async function problems(started: Started, written: { rows: number }): Promise<string[]> {
       const found: string[] = [];
       const counts = await rowCounts(started);
@@ -775,7 +780,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     it("after 50 heights, every row is in an allowed schema and every row there was written through a handle", async () => {
       const { started, written, source } = await fifty();
       expect(await problems(started, written)).toEqual([]);
-      // Per height: the three modules' rows, and core-block-commit's two (its blocks and hashes rows, task 10.2).
+      // Per height: the three modules' rows, and core-block-commit's two (its blocks and hashes rows).
       expect(written.rows).toBe(250);
       // The cursor table holds one row per height, written by core-block-commit's callback from the source's blocks.
       const blocks = await started.db.read((read) =>
@@ -960,7 +965,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
 
     for (const [what, hashOf] of [
       ["another hash than the block's", () => new Uint8Array(32).fill(7)],
-      // Its last byte changed: a hash of another length the blocks table's CHECK refuses (task 10.2).
+      // Its last byte changed: a hash of another length the blocks table's CHECK refuses.
       ["the block's hash with one byte changed", (b: BlockContext) => Uint8Array.from(b.hash, (x, i) => (i === 31 ? x ^ 1 : x))],
     ] as const) {
       it(`a cursor row with ${what} stops it before COMMIT`, async () => {
@@ -1222,7 +1227,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
   });
 
   describe("A144 through the loop: the db item from inside a callback (DB-4, Q73)", () => {
-    /** m's process context holds the `db` item as core-chain will publish it (task 10.2): the database, read-only. */
+    /** m's process context holds the `db` item as core-chain will publish it: the database, read-only. */
     class WithDb extends Contexts {
       constructor(readonly item: ReadOnlyDatabase) {
         super();
@@ -1286,7 +1291,7 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
         { start: 1n, stop: null, version: "1.0.0", settings: Object.freeze({ k: 1 }) },
         { start: 3n, stop: null, version: "1.0.0", settings: Object.freeze({ k: 2 }) },
       ];
-      /** m's process context carries its two revisions (task 4.3 reads them from the configuration). */
+      /** m's process context carries its two revisions (the process reads them from the configuration). */
       class WithRevisions extends Contexts {
         readonly #m = Object.freeze({ items: new Map(), revisions, publish: () => undefined });
 

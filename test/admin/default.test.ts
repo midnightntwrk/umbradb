@@ -27,17 +27,18 @@ import {
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * The admin endpoints by default (task 8.1a; owner decision Q128 B; AE-1, A62, A64): `startProcess` serves them on
- * `listen.admin` unless its caller passes `admin: false` — a process started without `admin`, as `umbradb run` will
- * start one, answers on its admin listener in every state it reaches, its four endpoints and 404 elsewhere —, and an
- * admin address another listener holds refuses startup with `listen-failed` before the database opens (the owner:
- * "check if free; or it does not start"): no session on PostgreSQL 18.6, no data directory on PGlite 0.5.10.
+ * The admin endpoints by default:
+ * - `startProcess` serves them on `listen.admin` unless its caller passes `admin: false`. A process started without
+ *   `admin`, as `umbradb run` will start one, answers on its admin listener in every state it reaches: its four
+ *   endpoints, and 404 elsewhere. [Q128 B, AE-1, A62, A64]
+ * - An admin address another listener holds refuses startup with `listen-failed` before the database opens: no
+ *   session on PostgreSQL 18.6, no data directory on PGlite 0.5.10. [Q128 B]
  */
 
 /** How a test starts a process: the runner's `startProcess`, or a negative control's. */
 type Start = (input: ProcessInput) => ProcessHandle;
 
-/** A negative control: task 8.1's opt-in default (Q128's option A) — a process started without `admin` serves none. */
+/** A negative control: the earlier opt-in default, where a process started without `admin` serves none. [Q128 A] */
 const optIn: Start = (input) => startProcess(input.admin === undefined ? { ...input, admin: false } : input);
 
 /** The entries of a process of the tests on `database` with `listen.admin` at `address`, with `user`'s from 1. */
@@ -75,10 +76,10 @@ async function stateOf(handle: ProcessHandle, state: string, patienceMs = 60_000
 }
 
 /**
- * The 8.1a criterion "a process started without `admin` answers on its admin listener" over a process started by
- * `start` without `admin` on `database`, its `listen.admin` a free port: once the process says it is `following` at
- * the head, A64's oracle over its four endpoints — live 200, ready 200, `/status` `following`, `/config` 200 —; none
- * when it answers.
+ * Checks that a process started without `admin` answers on its admin listener. The process is started by `start`
+ * without `admin` on `database`, its `listen.admin` a free port. Once it says it is `following` at the head, the
+ * endpoint-state oracle runs over its four endpoints: live 200, ready 200, `/status` `following`, `/config` 200.
+ * None when it answers. [Q128 B, A64]
  */
 async function defaultProblems(start: Start, database: DatabaseParts): Promise<string[]> {
   const port = await freePort();

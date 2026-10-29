@@ -13,13 +13,14 @@ import { MESSAGE_SCHEMAS, parseMessage, messageText, type ReadResult } from "../
 import { ESCAPES } from "./read-confinement-checks.js";
 
 /**
- * A172's gate, statement by statement (task 14.2b; PP-4, `design.md` §8 **Confined reads**,
- * `src/private/read-gate.ts`): every escape A172 sends is refused as the core names it; the reads a private process
- * makes — its own source's and a module's — pass; and the text is read as PostgreSQL 18's lexer reads it — comments,
- * nested comments, strings of each kind, dollar quotes, quoted names, parameters, numbers —, with
- * `standard_conforming_strings` on and off, a text the gate could read otherwise than the server refused
- * (`unreadable`). The `refused` field of `read-result` (A115's schema, as amended) is there exactly when the error is
- * `read-refused`.
+ * The read gate (`src/private/read-gate.ts`), statement by statement. [A172, PP-4; design §8]
+ * - Every escape the confinement test sends is refused as the core names it.
+ * - The reads a private process makes (its own source's and a module's) pass.
+ * - The text is read as PostgreSQL 18's lexer reads it (comments, nested comments, strings of each kind, dollar quotes,
+ *   quoted names, parameters, numbers), with `standard_conforming_strings` on and off. A text the gate could read
+ *   otherwise than the server is refused (`unreadable`).
+ * - The `refused` field of `read-result` (in the message schema, as amended) is there exactly when the error is
+ *   `read-refused`. [A115]
  */
 
 const command = (name: string | null) => ({ reason: "command", name });

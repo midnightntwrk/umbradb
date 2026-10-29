@@ -15,10 +15,10 @@ import {
 } from "./surface.js";
 
 /**
- * A1 `[STATIC]` (LS-1, task 17.3): the sorted value exports and the type exports of `"."` (`src/index.ts`) are pinned to
- * `openspec/changes/core-arch/design.md` §12, read from §12's text (`./surface.ts`); adding or removing an export fails
- * with the name — the negative controls below compile barrels that add, drop or change the kind of one export, and each
- * fails naming it. The core modules' declarations §12 exports are what a configuration writes entries of.
+ * The sorted value exports and the type exports of `"."` (`src/index.ts`) are pinned to the design's exported surface,
+ * read from the design's text (`./surface.ts`). Adding or removing an export fails with the name: the negative controls
+ * below compile barrels that add, drop or change the kind of one export, and each fails naming it. The core modules'
+ * declarations the surface exports are what a configuration writes entries of. [A1 STATIC, LS-1; design §12]
  */
 
 // The checks start the TypeScript compiler on the barrel and every file it reaches: a few seconds alone, more under the
@@ -36,7 +36,7 @@ describe("A1: src/index.ts exports exactly design.md §12's surface (LS-1)", () 
     expect(expected.values).toHaveLength(27);
     expect(expected.types).toHaveLength(27);
     for (const name of Object.keys(CORE_MODULE_EXPORTS)) expect(expected.values).toContain(name);
-    // Not read as exports: a path and the entry call §12's text holds in code spans.
+    // Not read as exports: a path and the entry call the surface's text holds in code spans. [design §12]
     expect(expected.values).not.toContain("src/runner/envelope.ts");
   });
 

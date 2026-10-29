@@ -1,6 +1,6 @@
 /**
- * The tape tools' command line (tasks 9.2, 0.3): `npx tsx tools/tape/main.ts record|check|range|boundaries --node
- * <ws-url> --out <file> …`.
+ * The tape tools' command line: `npx tsx tools/tape/main.ts record|check|range|boundaries --node <ws-url> --out
+ * <file> …`.
  * Everything it does is `./command.ts`'s (tested there); this file only connects it to the process: its arguments,
  * its output, Ctrl-C (SIGINT) or SIGTERM as the end of a recording, and its exit code.
  */

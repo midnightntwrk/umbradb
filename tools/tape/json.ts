@@ -1,10 +1,10 @@
 /**
- * JSON for the test tape (task 9.1): read without loss, written in one form.
+ * JSON for the test tape: read without loss, written in one form.
  *
  * **Reading.** With UmbraDB's own reader (`parseJsonLossless`, `src/deterministic-postgresql/mapping.ts`), not
  * `JSON.parse`: an integer written outside ±(2^53 − 1) — a node may answer a 128-bit balance as a JSON number — is read
  * as a `bigint` instead of being rounded, so a tape keeps every answer as the node gave it; and Node.js 24's
- * `JSON.parse` can misread an object key that is one escape sequence (decision record Q78, `docs/issues/00007`).
+ * `JSON.parse` can misread an object key that is one escape sequence. [Q78; docs/issues/00007]
  *
  * **Writing** ({@link jsonText}): the one form `JSON.stringify` gives — no spaces; strings with its escapes; numbers as
  * it writes them (`1e+21`, `5e-7`, `0` for −0); object keys in the object's own order (JavaScript's: integer-like keys

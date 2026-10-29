@@ -1,10 +1,13 @@
-// The test packages of task 12.3 (`openspec/changes/core-arch` A92, A101, A106; `src/ledger/worker/`): a loader the
-// ledger worker imports in place of `src/ledger/load.ts` (`startLedgerWorker({ loader, loaderData })`), so that the
-// worker thread itself runs the instrumented adapter. It loads the real adapter and, by `loaderData`, counts the
-// package's native parses, returns a wrong state root for one height (A106's "test package returning a wrong root"),
-// spends a long synchronous step in one height's apply (A101's 60 s ledger step), fails, ends the thread, or traps as
-// WebAssembly does; and (task 12.5) records each eviction the package is asked for and each parse whose native objects
-// it is told to free. Erasable TypeScript only: the worker runs it through Node.js's type stripping.
+// The test packages of the ledger worker tests (`src/ledger/worker/`): a loader the ledger worker imports in place of
+// `src/ledger/load.ts` (`startLedgerWorker({ loader, loaderData })`), so that the worker thread itself runs the
+// instrumented adapter. It loads the real adapter and, by `loaderData`:
+// - counts the package's native parses;
+// - returns a wrong state root for one height (a test package returning a wrong root) [A106];
+// - spends a long synchronous step in one height's apply (a 60 s ledger step) [A101];
+// - fails, ends the thread, or traps as WebAssembly does;
+// - records each eviction the package is asked for and each parse whose native objects it is told to free.
+// [A92]
+// Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
 import { loadLedgerPackage } from "../../../src/ledger/load.js";
 import type { LedgerName, LedgerPackage, LedgerPackageOptions, StateHandle } from "../../../src/ledger/types.js";
@@ -35,7 +38,7 @@ export interface TestLoaderData {
   /** Records every `evict` (its keys, and whether the package refused) and `forgetTransactions` (how many). */
   readonly recordEvictions?: boolean;
   /**
-   * Memory the threads share (task 12.5a): the loader of each thread that loads an adapter takes the next slot after
+   * Memory the threads share: the loader of each thread that loads an adapter takes the next slot after
    * the first (the first counts the threads) and adds 1 to it every 5 ms while the thread runs, so a test sees which
    * threads still run.
    */
@@ -96,7 +99,7 @@ export async function loadLedger(
       hold.start = `${process.hrtime.bigint()}`;
       const end = process.hrtime.bigint() + BigInt(slow.ms) * 1_000_000n;
       while (process.hrtime.bigint() < end) {
-        // A step the main thread must not wait on (A101).
+        // A step the main thread must not wait on. [A101]
       }
       hold.end = `${process.hrtime.bigint()}`;
     }

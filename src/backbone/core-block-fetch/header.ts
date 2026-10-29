@@ -1,11 +1,13 @@
 /**
- * A block header's hash (task 10.3; task 10.1's note (c)): the Midnight node's head notifications
- * (`chain_newHead`, `chain_finalizedHead`) carry the header without its hash, while `on-best-block`'s header, the
- * best-block queue's parent links (IN-6) and IN-4's finality check need one. A Substrate block's hash is BLAKE2b-256 of
- * its header's SCALE encoding — `parentHash ‖ Compact(number) ‖ stateRoot ‖ extrinsicsRoot ‖ Compact(digest length)
- * ‖ digest items` — where each digest item is the SCALE bytes the node sent (`NodeHeader.digest`), so the encoding is
- * the node's own. Checked against a real mainnet header and the hash `chain_getBlockHash` gives for it
- * (`test/node/fixtures/mainnet-answers.json`, block 3,174,332). Pure: no Node.js import.
+ * A block header's hash. The Midnight node's head notifications (`chain_newHead`, `chain_finalizedHead`) carry the
+ * header without its hash. The hash is still needed: for `on-best-block`'s header, for the parent links of the
+ * best-block queue, and for checking that each finalized block follows the one before it. [IN-4, IN-6]
+ *
+ * A Substrate block's hash is the BLAKE2b-256 of its header's SCALE encoding: `parentHash ‖ Compact(number) ‖
+ * stateRoot ‖ extrinsicsRoot ‖ Compact(digest length) ‖ digest items`. Each digest item is the SCALE bytes the node
+ * sent (`NodeHeader.digest`), so the encoding is the node's own. It is checked against a real mainnet header and the
+ * hash `chain_getBlockHash` gives for it (`test/node/fixtures/mainnet-answers.json`, block 3,174,332). Pure: no
+ * Node.js import.
  */
 
 import type { NodeHeader } from "../../node/decode.js";

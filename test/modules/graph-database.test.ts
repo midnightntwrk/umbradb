@@ -12,18 +12,21 @@ import { declaration } from "./declarations.js";
 import { consumer, entry, graphInput } from "./graph-fixtures.js";
 
 /**
- * The resolved graph's outputs fed to the database API's real inputs, on both backends (task 3.2; MD-6, RN-3, DB-6,
- * DB-8, DB-9; decision record Q89, Q95): `schemaPlan(graph.modules)` to `planSchemas` and `prepareSchemas`, and
- * `graph.modules.map(migrationPart)` to `startDatabase`, whose order puts every provider's migrations before its
- * consumers'; and A25's "a consumer reads one continuous table" — two providers of a shared item with adjacent ranges
- * write its one table under the item's role, each at the heights the graph gives it, and the consumer reads every height
- * once. The block loop here stands in for the runner's (task 5.2): one transaction per height, the `on-db-write`
- * callbacks of the range's `writeOrder` through block write handles. The refusals themselves are `graph.test.ts`.
+ * The resolved graph's outputs fed to the database API's real inputs, on both backends:
+ * - `schemaPlan(graph.modules)` to `planSchemas` and `prepareSchemas`;
+ * - `graph.modules.map(migrationPart)` to `startDatabase`, whose order puts every provider's migrations before its
+ *   consumers' [RN-3, DB-9, Q95];
+ * - a consumer reads one continuous table: two providers of a shared item with adjacent ranges write its one table
+ *   under the item's role, each at the heights the graph gives it, and the consumer reads every height once
+ *   [A25, MD-6, DB-6, DB-8, Q89].
+ *
+ * The block loop here stands in for the runner's: one transaction per height, running the `on-db-write` callbacks of
+ * the range's `writeOrder` through block write handles. The refusals themselves are tested in `graph.test.ts`.
  */
 
 const CONTEXT: ProcessContext = { items: new Map(), revisions: [], publish: () => undefined };
 
-/** The block context of height `h` (CORE-ARCH §4.10): no items or settings are needed here. */
+/** The block context of height `h`: no items or settings are needed here. [CORE-ARCH §4.10] */
 function blockAt(h: bigint): BlockContext {
   return {
     height: h,
@@ -117,7 +120,7 @@ describe.each(BACKENDS)("the resolved graph through planSchemas and startDatabas
       ),
     );
     const { plan, applied } = await start(db, graph.modules);
-    // The item's migration is recorded once, under the item, after the backbone's (DB-8, DB-9).
+    // The item's migration is recorded once, under the item, after the backbone's. [DB-8, DB-9]
     expect(applied).toEqual([
       { module: "core-chain", migration: "001", position: 1 },
       { module: "core-block-commit", migration: "001", position: 1 },

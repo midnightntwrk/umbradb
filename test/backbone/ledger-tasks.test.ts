@@ -15,16 +15,18 @@ import {
 } from "./ledger-tasks-checks.js";
 
 /**
- * A137 `[CI]` (task 12.6; `openspec/changes/core-arch/acceptance.md` A137, LG-7, LG-17; CC-3's "in a ledger task"), on
- * PostgreSQL 18 and PGlite 0.5.10, through the real process (`./ledger-tasks-checks.ts`): a test module's ledger task
- * decodes each contract call's arguments in the ledger worker with the native parsed objects and `rawPackages()`, and
- * its `on-compute` receives them as its `block` item; with that task, `-fast`'s (now a ledger task too) and three
- * modules reading `block-parsed`, the package's parse function runs once per transaction — in the worker, never on the
- * main thread; a task returning a WebAssembly-backed object, or throwing, fails the block with `callback-error` naming
- * the module and the task; a task without `needsState` gets no state and runs mid-chain, while a module with a
- * `needsState` task — which gets the state before each block — refuses to start where `core-ledger-state` is not active;
- * no main-thread callback receives a native ledger object (each `block` item passes a structured-clone round trip).
- * Committed negative controls: `ledger-tasks.negative-control.test.ts`.
+ * Ledger tasks, on PostgreSQL 18 and PGlite 0.5.10, through the real process (`./ledger-tasks-checks.ts`):
+ * - A test module's ledger task decodes each contract call's arguments in the ledger worker, with the native parsed
+ *   objects and `rawPackages()`. Its `on-compute` receives them as its `block` item.
+ * - With that task, `-fast`'s task (`-fast` also reads in a ledger task) and three modules reading `block-parsed`, the
+ *   package's parse function runs once per transaction: in the worker, never on the main thread.
+ * - A task that returns a WebAssembly-backed object, or throws, fails the block with `callback-error` naming the
+ *   module and the task.
+ * - A task without `needsState` gets no state and runs mid-chain. A module with a `needsState` task, which gets the
+ *   state before each block, refuses to start where `core-ledger-state` is not active.
+ * - No main-thread callback receives a native ledger object: each `block` item passes a structured-clone round trip.
+ *
+ * Committed negative controls: `ledger-tasks.negative-control.test.ts`. [A137 CI, LG-7, LG-17, CC-3]
  */
 
 describe.each(PROCESS_BACKENDS)("A137 (LG-7, LG-17): ledger tasks through the process on $name", (backend: ProcessBackend) => {
@@ -87,7 +89,7 @@ describe.each(PROCESS_BACKENDS)("A137 (LG-7, LG-17): ledger tasks through the pr
   it("A137: a task without needsState gets no state and runs mid-chain, without core-ledger-state", async () => {
     const expected = await tasksScenario();
     const seen = taskSeen();
-    // S = 2: the tape with the header and metadata of block 1, which a start there reads (Q135 A, `./ledger-restart.ts`).
+    // S = 2: the tape with the header and metadata of block 1, which a start there reads (`./ledger-restart.ts`). [Q135 A]
     const records = restartAt(expected.scenario.records, 1n);
     const run = await runTasks(await backend.database(), expected, { start: 2n, core: PARSE_CORE, user: [callArgsModule(seen)], records });
     expect(run.status).toMatchObject({ cursor: expected.scenario.head, reason: null });

@@ -66,31 +66,32 @@ const BUILD_CORE_VERSION_TEXT =
   '],"umbradb":"0.10.0"}';
 
 /**
- * The configuration history (task 4.3; CF-5 to CF-9, `design.md` §7, §10): `core-chain` compares the configuration
- * with `core_chain.config` at every startup and records what starts above the cursor, so configuration changes only
- * the future. Here the history is checked without a database — each startup's writes applied to the rows the next one
- * reads (`Simulation`, `./history-fixtures.ts`); `./history-database.test.ts` runs the same through `core_chain.config`
- * on both backends, and `./history.property.test.ts` holds A32.
+ * The configuration history. `core-chain` compares the configuration with `core_chain.config` at every startup and
+ * records what starts above the cursor, so a configuration change only affects the future. Here the history is
+ * checked without a database: each startup's writes are applied to the rows the next one reads (`Simulation`,
+ * `./history-fixtures.ts`). `./history-database.test.ts` runs the same through `core_chain.config` on both backends,
+ * and `./history.property.test.ts` holds the hash properties. [CF-5, CF-6, CF-7, CF-8, CF-9; design §7, §10]
  *
- * - CF-7: a revision's row — its stop (null for `core`, whose stop is operational), its version (a module's semver, the
- *   core version's canonical JSON), its data fields (canonical JSON) and `data_hash`, SHA-256 of their canonical
- *   encoding (DT-1);
- * - CF-5 (A30): revisions identified by `(id, start)`, a later one superseding an earlier one from its start (its
- *   effective stop is the next start − 1, or its own lower stop), and `missing-entry` for a recorded entry starting at
- *   or below the cursor that the configuration omits; one starting above it may be omitted or moved, its row deleted
- *   (owner decision Q103, option B);
- * - CF-6 (A31): an entry starting at or below the cursor c refuses `changes-past` when it differs in a data field or
- *   its version (or is not recorded), except a module's stop above c in both values; operational fields are not
- *   recorded and may change; entries above c are recorded, or re-recorded;
- * - CF-8 (A33): the revision covering c + 1 (S on a new database) must name the build's version, or startup refuses
- *   `upgrade-required` naming each entry, the version needed and the build's;
- * - CF-9: `sweep: "off"` needs the development opt-in, taken from the latest `core` revision of the build's version
- *   (decision record Q102, option A, `processCoreEntry`);
- * - and what startup passes on: the graph's input (`resolveGraph`) and DB-10's committed versions.
+ * - A revision's row: its stop (null for `core`, whose stop is operational), its version (a module's semver, or the
+ *   core version's canonical JSON), its data fields (canonical JSON) and `data_hash`, the SHA-256 of their canonical
+ *   encoding. [CF-7, DT-1]
+ * - Revisions are identified by `(id, start)`. A later one supersedes an earlier one from its start (the earlier one's
+ *   effective stop is the next start − 1, or its own lower stop). A recorded entry starting at or below the cursor
+ *   that the configuration omits refuses with `missing-entry`; one starting above it may be omitted or moved, and its
+ *   row is deleted. [CF-5, A30, Q103 B]
+ * - An entry starting at or below the cursor c refuses `changes-past` when it differs in a data field or its version
+ *   (or is not recorded), except for a module's stop that is above c in both values. Operational fields are not
+ *   recorded and may change. Entries above c are recorded, or re-recorded. [CF-6, A31]
+ * - The revision covering c + 1 (S on a new database) must name the build's version, or startup refuses
+ *   `upgrade-required`, naming each entry, the version needed and the build's. [CF-8, A33]
+ * - `sweep: "off"` needs the development opt-in, taken from the latest `core` revision of the build's version
+ *   (`processCoreEntry`). [CF-9, Q102 A]
+ * - What startup passes on: the graph's input (`resolveGraph`) and the committed versions. [DB-10]
  *
- * The committed negative controls: each rule of `HISTORY_RULES` left out loses exactly its cases; CF-6's two
- * allowances replaced — a stop compared strictly, operational fields recorded — and CF-5's omission above the cursor
- * refused (the rule before Q103) each refuse exactly their cases.
+ * The committed negative controls each refuse exactly their cases:
+ * - each rule of `HISTORY_RULES` left out loses exactly its cases;
+ * - the two allowances for past entries replaced: a stop compared strictly, and operational fields recorded; [CF-6]
+ * - an omission above the cursor refused, as the rule was before omissions were allowed. [CF-5, Q103 B]
  */
 
 /** `m` 1.0.0's revision from `start` with `config` (defaults for the rest), stopping at `stop` when given. */
@@ -179,7 +180,7 @@ describe("CF-7: the history row of a revision, its canonical JSON and its data_h
       dataHash: dataHash({ limit: 3, mode: "full" }),
     });
     expect(second).toEqual({ id: "m", start: 41n, stop: null, version: "1.0.0", data: M_DEFAULTS, dataHash: dataHash(M_DEFAULTS) });
-    // Operational and secret settings are never recorded (CF-4).
+    // Operational and secret settings are never recorded. [CF-4]
     expect(JSON.stringify(first, (_key, value: unknown) => (typeof value === "bigint" ? String(value) : value))).not.toContain(
       "s3cret",
     );
@@ -221,9 +222,9 @@ describe("CF-5, A30: revisions by (id, start); a later one supersedes the earlie
     );
     expect(graphEntries(config.entries)).toEqual([
       { id: "m", start: 0n, stop: 49n },
-      // Its own stop below the next start − 1 is kept: a gap, then a new start (MD-4 checks it).
+      // Its own stop below the next start − 1 is kept: a gap, then a new start (the requirement graph checks it). [MD-4]
       { id: "m", start: 50n, stop: 60n },
-      // Its own stop at or above the next start is superseded (CF-5): the later revision covers it from its start.
+      // Its own stop at or above the next start is superseded: the later revision covers it from its start. [CF-5]
       { id: "m", start: 100n, stop: 149n },
       { id: "m", start: 150n, stop: null },
       { id: "n", start: 3n, stop: 30n },
@@ -285,9 +286,10 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
       expect(error.details.missing).toEqual([{ id: "m", start: 50 }]);
       expect(error.details).toMatchObject({ file: FILE, cursor });
       expect(found(error)).toEqual([["listed", "entries", null]]);
-      for (const words of ["m from 50", "does not list", `at or below the cursor ${cursor}`, "CF-5", "Q103", FILE]) {
+      for (const words of ["m from 50", "does not list", `at or below the cursor ${cursor}`, FILE]) {
         expect(error.message).toContain(words);
       }
+      expect(error.message).not.toMatch(/\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
     }
   });
 
@@ -300,7 +302,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
     });
     const error = db.refusal({ entries: [CORE, m(1)], user: [M_1_0], cursor: 60n });
     expect(error.code).toBe("missing-entry");
-    // (n, 70) starts above the cursor: it may be omitted (Q103), so it is not named.
+    // (n, 70) starts above the cursor: it may be omitted, so it is not named. [Q103 B]
     expect(error.details.missing).toEqual([
       { id: "core", start: 10 },
       { id: "m", start: 60 },
@@ -331,7 +333,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
     const history = [rowOf(config.entries[0]!), { ...rowOf(config.entries[1]!), start: 50n }];
     const error = refusal(() => checkHistory({ config, cursor: 50n, declarations, history }));
     expect(
-      error.message.startsWith("the configuration omits entries the history records at or below the cursor (CF-5): entries: "),
+      error.message.startsWith("the configuration omits entries the history records at or below the cursor: entries: "),
     ).toBe(true);
     expect(error.details.file).toBeNull();
     const none = refusal(() => processCoreEntry({ ...checked([oldCore(0, "0.9.4")], build([])), file: null }));
@@ -364,7 +366,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
   it("refuses before any other check, and accepts the same configuration with every entry listed", () => {
     const db = new Simulation();
     db.start({ entries: [CORE, m(1), m(50)], cursor: null });
-    // Also a changed past (limit) and an omitted entry: the omission is named first (CF-5 before CF-6).
+    // Also a changed past (limit) and an omitted entry: the omission is named first. [CF-5, CF-6]
     expect(db.refusal({ entries: [CORE, m(1, { limit: 2 })], cursor: 60n }).code).toBe("missing-entry");
     expect(db.start({ entries: [CORE, m(1), m(50)], cursor: 60n }).writes).toEqual([]);
   });
@@ -414,7 +416,7 @@ describe("A30, Q103 B: a recorded entry that starts above the cursor may be omit
         ["m", 0],
         ["m", 100],
       ]);
-      // The revision from 0 now ends at 99, the moved one's start − 1 (CF-5).
+      // The revision from 0 now ends at 99, the moved one's start − 1. [CF-5]
       expect(revisionAt(check.entries, "m", 99n)?.start, label).toBe(0);
       expect(revisionAt(check.entries, "m", 100n)?.start, label).toBe(100);
     }
@@ -425,7 +427,7 @@ describe("A30, Q103 B: a recorded entry that starts above the cursor may be omit
     for (const later of [[scheduled(100)], []]) {
       const db = new Simulation();
       db.start({ entries: [CORE, m(0), scheduled(50)], cursor: null });
-      // At cursor 49 the 1.0.0 build is refused: the revision covering 50 names 1.1.0 (RN-12, CF-8).
+      // At cursor 49 the 1.0.0 build is refused: the revision covering 50 names 1.1.0. [RN-12, CF-8]
       expect(db.refusal({ entries: [CORE, m(0), scheduled(50)], cursor: 49n }).code).toBe("upgrade-required");
       const check = db.start({ entries: [CORE, m(0), ...later], cursor: 49n });
       expect(check.deletes.map(keyOf)).toEqual([["m", 50]]);
@@ -493,7 +495,7 @@ describe("A30, Q103 B: a recorded entry that starts above the cursor may be omit
   });
 });
 
-/** A case of CF-6: the startup that records the history, then the one checked at the cursor. */
+/** A case of a past entry: the startup that records the history, then the one checked at the cursor. [CF-6] */
 interface Case {
   readonly name: string;
   readonly first: Start;
@@ -502,7 +504,10 @@ interface Case {
 
 const C = 20n;
 
-/** CF-6's refusals (`changes-past`), each by one rule; `path` and `field` are the finding's. */
+/**
+ * The refusals of a changed past entry (`changes-past`), each by one rule; `path` and `field` are the finding's.
+ * [CF-6]
+ */
 const CHANGES: readonly (Case & { readonly rule: string; readonly path: string; readonly field: string | null })[] = [
   {
     name: "a data field of a module revision starting below the cursor",
@@ -643,8 +648,8 @@ const CHANGES: readonly (Case & { readonly rule: string; readonly path: string; 
 ];
 
 /**
- * CF-6's acceptances, and CF-5's omissions above the cursor (Q103 B): what may change at the cursor, what is
- * (re-)recorded then and what is deleted.
+ * The accepted changes, including omissions above the cursor: what may change at the cursor, what is (re-)recorded
+ * then and what is deleted. [CF-6, CF-5, Q103 B]
  */
 const ACCEPTED: readonly (Case & {
   readonly writes: readonly [string, number][];
@@ -801,9 +806,10 @@ describe("A31: configuration changes only the future (CF-6)", () => {
     expect(error.details).toMatchObject({ file: FILE, cursor: C });
     const [finding] = error.details.findings as HistoryFinding[];
     expect(finding).toMatchObject({ code: "changes-past", entry: { index: 1, id: "m", start: 10 }, field: "limit" });
-    for (const words of ["entries[1].config.limit (m from 10)", "the cursor 20", "CF-6", "resync"]) {
+    for (const words of ["entries[1].config.limit (m from 10)", "the cursor 20", "resync"]) {
       expect(error.message).toContain(words);
     }
+    expect(error.message).not.toMatch(/\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
     expect(error.message).not.toContain("4141");
     expect(error.message).not.toContain("4242");
   });
@@ -889,7 +895,7 @@ describe("A28's history half: versionEntry revisions against their recorded rows
       user: [M_FOO],
       cursor: null,
     });
-    // The 1.0.0 build stopped at 49 (RN-12); the 1.1.0 build's file writes 1.0.0's revision as recorded.
+    // The 1.0.0 build stopped at 49; the 1.1.0 build's file writes 1.0.0's revision as recorded. [RN-12]
     const upgrade = db.start({
       entries: [CORE, versionEntry({ id: "m", start: 1, version: "1.0.0", config: { foo: 1 } }), M_BAR.entry({ start: 50, config: { bar: 1 } })],
       user: [M_BAR],
@@ -921,7 +927,7 @@ describe("A28's history half: versionEntry revisions against their recorded rows
 
 /**
  * The core version a build of UmbraDB `umbradb` would carry: this build's for its own version (with its ledger
- * packages, task 12.2), and one with no ledger version for any other.
+ * packages), and one with no ledger version for any other.
  */
 const coreVersion = (umbradb: string): CoreVersion =>
   umbradb === UMBRADB_VERSION ? buildCoreVersion() : { umbradb, ledgers: [] };
@@ -1092,7 +1098,8 @@ describe("Q102 (option A): the process's operational settings are the latest cor
     const error = refusal(() => processCoreEntry(checked([oldCore(0, "0.9.4")], build([]))));
     expect(error.code).toBe("invalid-configuration");
     expect(error.details).toEqual({ file: FILE, reason: "no-build-core-revision" });
-    for (const words of ["no core revision", UMBRADB_VERSION, "coreEntry", "Q102"]) expect(error.message).toContain(words);
+    for (const words of ["no core revision", UMBRADB_VERSION, "coreEntry"]) expect(error.message).toContain(words);
+    expect(error.message).not.toMatch(/\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
   });
 });
 
@@ -1103,7 +1110,8 @@ describe("CF-9: sweep: off needs the development opt-in", () => {
     expect(error.code).toBe("development-opt-in-required");
     expect(error.details).toMatchObject({ feature: "sweep-off", file: FILE, cursor: null });
     expect(found(error)).toEqual([["sweep-off", "entries[0].config.sweep", "sweep"]]);
-    for (const words of ["sweep", "developmentOptIn", "CF-9"]) expect(error.message).toContain(words);
+    for (const words of ["sweep", "developmentOptIn"]) expect(error.message).toContain(words);
+    expect(error.message).not.toMatch(/\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
     expect(db.start({ entries: [core(0, { sweep: "off", developmentOptIn: true })], cursor: null }).writes).toHaveLength(1);
   });
 
@@ -1174,7 +1182,10 @@ describe("the graph's input and the caller's errors", () => {
   });
 });
 
-/** Each rule's cases: a refusal of `CHANGES` (by its rule), A30's, A33's and CF-9's. */
+/**
+ * Each rule's cases: a refusal of `CHANGES` (by its rule), an omitted entry, a newer build and sweep off.
+ * [A30, A33, CF-9]
+ */
 function ruleCases(): { readonly rule: string; readonly test: Case }[] {
   const base = { entries: [CORE, m(1), m(50)], cursor: null };
   return [
@@ -1308,7 +1319,7 @@ describe("PP-13: the public table items a private process reads from the history
       range("blocks", "core", 0, 99),
       range("chain-identity", "core", 0, 99),
       range("blocks", "core", 100, null),
-      // m from 0 stops at 50 by its own stop… but m from 30 supersedes it from 30 (CF-5).
+      // m from 0 stops at 50 by its own stop… but m from 30 supersedes it from 30. [CF-5]
       range("m-rows", "m", 0, 29),
       range("m-sums", "m", 0, 29),
       range("m-rows", "m", 30, 90),

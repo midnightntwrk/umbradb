@@ -1,6 +1,6 @@
 /**
  * PGlite's Node.js file system (`@electric-sql/pglite`'s `fs/nodefs.js`, which imports `fs` and `path`) in the
- * browser build (task 16.1): PGlite picks it only for a data directory that is a path, which the browser build never
+ * browser build: PGlite picks it only for a data directory that is a path, which the browser build never
  * gives (`browser/src/db/web-lock.ts` refuses one before PGlite opens anything). It refuses.
  */
 

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { described, keyLeftovers, leftoversIn } from "./key-handling-checks.js";
 
 /**
- * Task 14.4a's committed negative control: a key part left in place fails the static check of
+ * The key-handling check's committed negative control: a key part left in place fails the static check of
  * `./key-handling-removed.test.ts`. Each case writes, in a scratch folder laid out as the repository, the files the check
  * reads — copies of the real `src/modules/declaration.ts`, `docs/module-guide.md` and the change's design, unchanged —
  * plus one leftover, and runs the same check there: the copies alone pass, and each leftover is found, named by its

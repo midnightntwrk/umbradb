@@ -1,48 +1,51 @@
 /**
- * `umbradb run [--config <file>] [--update-hash=<hash>]` (`openspec/changes/core-arch/specs/library-surface/spec.md`
- * LS-6; `specs/configuration/spec.md` CF-1; `specs/runner/spec.md` RN-13; `specs/admin-endpoints/spec.md` AE-1, AE-3;
- * `specs/private-processes/spec.md` PP-14; `design.md` §12; owner decisions Q106 B, Q128 B, Q137 B, Q159; tasks 4.4a,
- * 8.1b, 14.1c): starts a core or private process from its configuration file, with the user modules the file exports,
- * and runs it until it is signalled, or until a refusal of the configuration itself ends it.
+ * `umbradb run [--config <file>] [--update-hash=<hash>]`: starts a core or private process from its configuration
+ * file, with the user modules the file exports, and runs it until it is signalled, or until a refusal of the
+ * configuration itself ends it. [LS-6; design §12]
  *
- * **What it starts** ({@link runProcess}): the configuration file — `--config`, or `umbradb.config.ts` in the working
- * directory (CF-1) — is loaded once (`loadConfig`), and the process is the runner's `startProcess` with
- * - the evaluated data as its configuration, so startup holds it to CF-1 and validates it as it would the file;
+ * **What it starts** ({@link runProcess}). The configuration file (`--config`, or `umbradb.config.ts` in the working
+ * directory) is loaded once (`loadConfig`), and the process is the runner's `startProcess` with: [CF-1]
+ * - the evaluated data as its configuration, so startup holds it to the plain-data rule and validates it as it would
+ *   the file [CF-1];
  * - the command's build (`./build-modules.ts`): UmbraDB's backbone parts and core modules, and as its user modules the
- *   ones the file exports in `modules` (Q106 B; the runner validates them, MD-2, and refuses a fault naming the module);
- * - the side taken from the file (`inferSide`: private when a `core` entry has `instanceId` and none has `node`): a public
- *   process reads the chain from the `core` entry's `node` through `core-block-fetch`'s node source (`nodeSourceOf`,
- *   task 10.3), a private one from its public database through one private intake (`core-private-source`, task 14.1);
- * - the admin endpoints, served by default on `listen.admin` (AE-1, Q128 B: nothing is passed for them);
- * - a public process's ledger worker given the file to import for its user modules' ledger tasks (MD-1, LG-17: the file
- *   is the host program, imported in the worker as on the main thread; `LedgerWorkerOptions.modules`, task 12.6);
- * - its log on standard error, redacted by the process (CF-4, AE-6);
+ *   ones the file exports in `modules`; the runner validates them and refuses a fault, naming the module [MD-2, Q106 B];
+ * - the side taken from the file (`inferSide`: private when a `core` entry has `instanceId` and none has `node`). A
+ *   public process reads the chain from the `core` entry's `node` through `core-block-fetch`'s node source
+ *   (`nodeSourceOf`); a private one reads it from its public database through one private intake
+ *   (`core-private-source`);
+ * - the admin endpoints, served by default on `listen.admin`, so nothing is passed for them [AE-1, Q128 B];
+ * - for a public process, a ledger worker given the file to import for its user modules' ledger tasks. The file is the
+ *   host program, imported in the worker as on the main thread (`LedgerWorkerOptions.modules`) [MD-1, LG-17];
+ * - its log on standard error, redacted by the process [CF-4, AE-6];
  * - `--update-hash`, when given, as its `updateHash`: the public configuration hash a private process accepts at this
- *   start (PP-14, owner decision Q159; task 14.1c), which a public process's block source ignores.
+ *   start, which a public process's block source ignores [PP-14, Q159].
+ *
  * A file that cannot be loaded is handed to startup as the file, so that startup refuses it as itself, with the
  * build's own modules.
  *
- * **Why startup refused** is the process's log, which the command writes to stderr as it is: a refusal of the
- * configuration itself — the loader's (CF-1), a fault of the build's declarations with the file's modules (MD-2), every
- * finding of the validation (CF-3) — finding by finding, each with its path, redacted (`startup refused: <path>:
- * <message> [<code>]`, the runner's `./configuration-refusal.ts`); any later refusal with its code and message. The
- * command adds no line of its own, so no finding is printed twice.
+ * **Why startup refused** is in the process's log, which the command writes to stderr as it is. A refusal of the
+ * configuration itself (the loader's, a fault of the build's declarations with the file's modules, or every finding of
+ * the validation) is logged finding by finding, each with its path, redacted (`startup refused: <path>: <message>
+ * [<code>]`, the runner's `./configuration-refusal.ts`). Any later refusal is logged with its code and message. The
+ * command adds no line of its own, so no finding is printed twice. [CF-1, CF-3, MD-2]
  *
- * **How it ends.** A refusal of the configuration itself ends the process (owner decision Q137 B, task 8.1b): it
- * served no admin endpoint, and the command exits 1 at once, with no signal. Any other refused or halted process
- * stays up until it is stopped (IN-12, AE-3), the admin endpoints saying why; so the command then runs until SIGTERM or
- * SIGINT (Ctrl-C), which stop the process cleanly (RN-13: the height in progress finishes, nothing else starts, the
- * module API, the node client, the database and the admin listener close). A second signal is not listened for:
- * Node.js's default ends the command at once. The command then resolves with how processing ended: `refused` or
- * `failed` (a halt) is a failure (exit 1), anything else — the stop itself, the core's stop height, an upgrade
- * boundary — is not (exit 0).
+ * **How it ends.** A refusal of the configuration itself ends the process: it served no admin endpoint, and the
+ * command exits 1 at once, with no signal. [Q137 B]
  *
- * **SIGUSR2** (BK-1 as amended, owner decision Q173 C; task 15.1c) is listened for from the command's start to its end
- * ({@link backupSignalRelay}), so a SIGUSR2 sent from a shell never ends the indexer: with `backupOnSignal` set the
- * process writes a backup at the loop's next pause and goes on (owner decision Q152 B; task 15.1a); without it the
- * signal is logged as ignored, in one line naming `backupOnSignal` (`SIGUSR2 ignored: backupOnSignal is not set, so no
- * backup is written`), and nothing else happens. A host program's own process (`startProcess`) adds no SIGUSR2
- * listener without `backupOnSignal`, so Node.js's default or the host's handler applies there.
+ * Any other refused or halted process stays up until it is stopped, with the admin endpoints saying why. So the command
+ * then runs until SIGTERM or SIGINT (Ctrl-C), which stop the process cleanly: the height in progress finishes, nothing
+ * else starts, and the module API, the node client, the database and the admin listener close. A second signal is not
+ * listened for: Node.js's default ends the command at once. [IN-12, AE-3, RN-13]
+ *
+ * The command then resolves with how processing ended. `refused` or `failed` (a halt) is a failure (exit 1); anything
+ * else (the stop itself, the core's stop height, an upgrade boundary) is not (exit 0).
+ *
+ * **SIGUSR2** is listened for from the command's start to its end ({@link backupSignalRelay}), so a SIGUSR2 sent from
+ * a shell never ends the indexer. With `backupOnSignal` set, the process writes a backup at the loop's next pause and
+ * goes on. Without it, the signal is logged as ignored, in one line naming `backupOnSignal` (`SIGUSR2 ignored:
+ * backupOnSignal is not set, so no backup is written`), and nothing else happens. A host program's own process
+ * (`startProcess`) adds no SIGUSR2 listener without `backupOnSignal`, so Node.js's default or the host's handler
+ * applies there. [BK-1, Q152 B, Q173 C]
  */
 
 import { pathToFileURL } from "node:url";
@@ -60,7 +63,7 @@ import {
 import { commandBuild } from "./build-modules.js";
 import { inferSide } from "./config-check.js";
 
-/** The signals that stop the process (RN-13). */
+/** The signals that stop the process. [RN-13] */
 export const STOP_SIGNALS = Object.freeze(["SIGTERM", "SIGINT"] as const);
 
 /** A signal that stops the process. */
@@ -90,12 +93,15 @@ export function stopSignal(source: SignalSource): { readonly signal: AbortSignal
 }
 
 /**
- * `umbradb run`'s SIGUSR2 (BK-1 as amended, owner decision Q173 C; task 15.1c): the command listens for it from its
- * start to its end, so that a SIGUSR2 sent from a shell never ends the indexer, and hands the process a source of its
- * own ({@link ProcessInput.backupSignals}), on which the process listens only when its `core` revision sets
- * `backupOnSignal` (task 15.1a). A signal goes to the process's listener when it has one; otherwise it is logged as
- * ignored, in one line naming `backupOnSignal`: before startup has settled (its `core` revision may not be read yet),
- * once it has (`backupOnSignal` is not set), or after the process stopped listening (it has closed).
+ * `umbradb run`'s SIGUSR2. The command listens for it from its start to its end, so that a SIGUSR2 sent from a shell
+ * never ends the indexer. It hands the process a source of its own ({@link ProcessInput.backupSignals}), on which the
+ * process listens only when its `core` revision sets `backupOnSignal`. [BK-1, Q173 C]
+ *
+ * A signal goes to the process's listener when it has one. Otherwise it is logged as ignored, in one line naming
+ * `backupOnSignal`:
+ * - before startup has settled (its `core` revision may not be read yet);
+ * - once it has, when `backupOnSignal` is not set;
+ * - after the process stopped listening (it has closed).
  */
 export interface BackupSignalRelay {
   /** The process's source of SIGUSR2. */
@@ -152,9 +158,9 @@ export function backupSignalRelay(source: BackupSignals, log: (line: string) => 
 
 /** What {@link runProcess} runs. */
 export interface RunOptions {
-  /** `--config`: the configuration file, relative to `cwd`; `umbradb.config.ts` when absent (CF-1). */
+  /** `--config`: the configuration file, relative to `cwd`; `umbradb.config.ts` when absent. [CF-1] */
   readonly file?: string | undefined;
-  /** `--update-hash`: the public configuration hash a private process accepts at this start (PP-14, Q159). */
+  /** `--update-hash`: the public configuration hash a private process accepts at this start. [PP-14, Q159] */
   readonly updateHash?: string | undefined;
   /** The working directory. */
   readonly cwd: string;
@@ -170,7 +176,7 @@ export interface RunSeams {
   readonly backupSignals?: BackupSignals;
   /** Told the process's handle once it is started (a test's view of it). */
   readonly started?: (handle: ProcessHandle) => void;
-  /** The build's user modules from the loaded file; its `modules` export (Q106 B) unless given (a negative control's). */
+  /** The build's user modules from the loaded file; its `modules` export unless given (a negative control's). [Q106 B] */
   readonly userModules?: (loaded: LoadedConfig) => readonly unknown[];
   /**
    * How the process is started; the runner's `startProcess` unless given (a test's: one that serves no admin endpoints,
@@ -197,7 +203,7 @@ function processOf(
     return {
       config,
       declarations: commandBuild(user, { side: "private", intake }),
-      // The runner's S and log: a private process's transport `hello`s with S − 1 before its first commit (task 14.2).
+      // The runner's S and log: a private process's transport `hello`s with S − 1 before its first commit.
       source: (core, shared) => intake.source(core, shared),
       side: "private",
     };
@@ -218,7 +224,7 @@ function processOf(
  */
 export async function runProcess(options: RunOptions, seams: RunSeams = {}): Promise<ProcessingEnd | null> {
   const stop = stopSignal(seams.signals ?? process);
-  // From here to the end, SIGUSR2 is the command's (Q173 C): relayed to the process, or logged as ignored.
+  // From here to the end, SIGUSR2 is the command's: relayed to the process, or logged as ignored. [Q173 C]
   const usr2 = backupSignalRelay(seams.backupSignals ?? process, options.log);
   try {
     let loaded: LoadedConfig | null = null;

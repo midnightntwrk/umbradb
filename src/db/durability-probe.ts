@@ -1,20 +1,23 @@
 /**
- * The durability probe (DB-12; `openspec/changes/core-arch/design.md` §4 "Durability probe", §11), moved from 0.9.5's
- * `src/postgres/durability-probe.ts` unchanged in behaviour: on PostgreSQL, startup refuses `fsync=off`, a transaction
- * pooler, and `full_page_writes=off` unless the operator set `fullPageWritesOffAllowed` (CF-4); `synchronous_commit=off`
- * is a warning, not a refusal. What changed: each refusal is an {@link UmbraError} with its §11 code
- * (`durability-fsync-off`, `durability-full-page-writes-off`, `durability-pooler`) instead of 0.9.5's two error classes;
- * the override is CF-4's `fullPageWritesOffAllowed`; and the probe runs on the writer's session when the writer starts —
- * right after the writer lock (`./writer-lock.ts`, `./postgres.ts`), before the first write — instead of inside 0.9.5's
- * `runMigrations`. Task 17.2 removed 0.9.5's file with its `runMigrations`.
+ * The durability probe, moved from 0.9.5's `src/postgres/durability-probe.ts` with its behaviour unchanged. On
+ * PostgreSQL, startup is refused for `fsync=off`, for a transaction pooler, and for `full_page_writes=off` unless the
+ * operator set `fullPageWritesOffAllowed`. `synchronous_commit=off` is a warning, not a refusal.
+ * [DB-12, CF-4; design §4]
  *
- * WHERE the backend is PGlite, which runs without fsync, the process starts only under the development opt-in
+ * What changed from 0.9.5:
+ * - each refusal is an {@link UmbraError} with its own code (`durability-fsync-off`, `durability-full-page-writes-off`,
+ *   `durability-pooler`) instead of 0.9.5's two error classes [design §11];
+ * - the override is the configuration's `fullPageWritesOffAllowed` [CF-4];
+ * - the probe runs on the writer's session when the writer starts, right after the writer lock (`./writer-lock.ts`,
+ *   `./postgres.ts`) and before the first write, instead of inside 0.9.5's `runMigrations` (whose file is gone).
+ *
+ * When the backend is PGlite, which runs without fsync, the process starts only under the development opt-in
  * ({@link pgliteNeedsDevelopmentOptIn}, checked by `openPglite` before anything is opened or created).
  *
  * The decisions are pure functions ({@link classifyFsync}, {@link classifyFullPageWrites},
- * {@link classifySynchronousCommit}, {@link assertNoTransactionPooler}), tested exhaustively without a server; the
- * probe ({@link probeDurability}) reads the settings on one session and runs them. It interpolates nothing into SQL:
- * a setting's name is a parameter of `current_setting($1)`, and the pooler check's key is a parameter.
+ * {@link classifySynchronousCommit}, {@link assertNoTransactionPooler}), tested exhaustively without a server. The
+ * probe ({@link probeDurability}) reads the settings on one session and runs them. It interpolates nothing into SQL: a
+ * setting's name is a parameter of `current_setting($1)`, and the pooler check's key is a parameter.
  */
 
 import type { Row } from "../deterministic-postgresql/index.js";
@@ -25,11 +28,11 @@ export interface ProbeSession {
   query(sql: string, params?: unknown[]): Promise<Row[]>;
 }
 
-/** What the probe needs of the configuration (CF-4). */
+/** What the probe needs of the configuration. [CF-4] */
 export interface DurabilityProbeOptions {
   /**
-   * Permit `full_page_writes=off` (CF-4's `fullPageWritesOffAllowed`, default false). Only when the storage guarantees
-   * atomic 8 kB page writes, so that no page can be torn by a crash.
+   * Permit `full_page_writes=off` (the configuration's `fullPageWritesOffAllowed`, default false). Only when the
+   * storage guarantees atomic 8 kB page writes, so that no page can be torn by a crash. [CF-4]
    */
   readonly fullPageWritesOffAllowed: boolean;
 }
@@ -184,8 +187,8 @@ export async function probeDurability(session: ProbeSession, options: Durability
 }
 
 /**
- * The refusal of PGlite without the development opt-in (DB-12, CF-9): PGlite runs without fsync, so it is a
- * development backend. Names PGlite and the opt-in, never the data directory (the `database` setting is secret, CF-4).
+ * The refusal of PGlite without the development opt-in: PGlite runs without fsync, so it is a development backend.
+ * Names PGlite and the opt-in, never the data directory, because the `database` setting is secret. [DB-12, CF-9, CF-4]
  */
 export function pgliteNeedsDevelopmentOptIn(): UmbraError {
   return new UmbraError(

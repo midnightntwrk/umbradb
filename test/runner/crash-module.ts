@@ -2,12 +2,12 @@ import { z } from "zod";
 import type { BlockContext, ModuleDeclaration, PointName } from "../../src/modules/declaration.js";
 
 /**
- * The module of A44's and A46's crash tests (task 5.4; RN-5, RN-9, RN-11): `c` logs every point it registers with what
+ * The module of the crash tests (`crash.test.ts`): `c` logs every point it registers with what
  * its callback was given — the height, and for a block context its hash, its `block` items and its settings —, puts its
  * `block` item `c-note` in `on-parse` and writes one row per height in `on-db-write`. At the point and height to hold
  * it reports that it holds there and waits for ever, so the test kills the process at exactly that point. Shared by the
  * worker process (`crash.worker.ts`) and the test's restart in its own process, so both run the same declaration (the
- * same migration checksum).
+ * same migration checksum). [A44, A46, RN-5, RN-9, RN-11]
  */
 
 /** The points `c` registers. */

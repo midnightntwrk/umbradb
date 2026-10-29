@@ -10,16 +10,17 @@ import {
 } from "./writer-lock-checks.js";
 
 /**
- * A17 [FAULT] (DB-11, owner decision Q50): the PGlite halves that need processes of their own — a writer paused with
- * `SIGSTOP`, a writer killed with `SIGKILL` and restarted, ten processes started together — each a PGlite writer
- * started with `node --import tsx` (`pglite-writer.worker.ts`) in a temporary directory deleted afterwards.
+ * The PGlite writer-lock cases that need processes of their own: a writer paused with `SIGSTOP`, a writer killed with
+ * `SIGKILL` and restarted, and ten processes started together. Each is a PGlite writer started with
+ * `node --import tsx` (`pglite-writer.worker.ts`) in a temporary directory deleted afterwards.
+ * [A17 FAULT, DB-11, Q50]
  *
- * **The pause lasts A17's 5 minutes** (300 s) unless `UMBRADB_A17_SIGSTOP_SECONDS` is set: a shorter pause is for local
- * iteration and mutation runs only, and the test's title says how long it ran. The pause costs one test worker 5
- * minutes of waiting, not CPU, so the conformance run keeps the full length.
+ * **The pause lasts the required 5 minutes** (300 s) unless `UMBRADB_A17_SIGSTOP_SECONDS` is set: a shorter pause is
+ * for local iteration and mutation runs only, and the test's title says how long it ran. The pause costs one test
+ * worker 5 minutes of waiting, not CPU, so the conformance run keeps the full length.
  *
- * "Stays up, not ready" (the refused process) and "processing halts" are the runner's (task 5.x); "continues from the
- * cursor" is shown with the test's own cursor (the highest height of `t.blocks`), as the runner's cursor will be read.
+ * "Stays up, not ready" (the refused process) and "processing halts" belong to the runner. "Continues from the cursor"
+ * is shown with the test's own cursor (the highest height of `t.blocks`), as the runner's cursor will be read.
  *
  * **Committed negative control:** a lock released when its statement ends instead of at process exit
  * (`lockKind: "statement-scoped"`) makes the second-writer, paused-writer and ten-starters checks fail.

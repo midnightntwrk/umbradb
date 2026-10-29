@@ -15,14 +15,26 @@ import {
 } from "../../src/modules/validation.js";
 import { declaration, userModules } from "./declarations.js";
 
+/** A requirement or question id, which no message carries (`MD-1`, `CF-4`, `Q76`). */
+const SPEC_ID = /\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/;
+
 /**
- * A21 (MD-2; task 3.1): declarations are validated at startup, and each cause MD-2 names refuses with its code, naming
- * the module and what is wrong — a duplicate id, a user module's id that is `core` (the `core` entry's, task 4.1) or
- * starts with `core-` or `on-`, no requirement, an item without a lifetime, a `table` item without a kind, a settings
- * field without a kind. MD-2's other causes are checked by the same validation (`bad-id`, below) or by the schema plan
- * it feeds (`schema-collision` and `shared-item-migrations-differ`, `planSchemas`, task 2.3, A15). Everything else the
- * declaration's type forbids is refused as well (`invalid-declaration`), so a module built without types is held to the
- * same declaration (A20). "Startup refuses" is the runner's (task 5.x); here the validation is called directly.
+ * Declarations are validated at startup. Each listed cause is refused with its code, naming the module and what is
+ * wrong:
+ * - a duplicate id;
+ * - a user module's id that is `core` (reserved for the `core` entry) or starts with `core-` or `on-`;
+ * - no requirement;
+ * - an item without a lifetime;
+ * - a `table` item without a kind;
+ * - a settings field without a kind.
+ * [A21, MD-2]
+ *
+ * The validation rules' other causes are checked by the same validation (`bad-id`, below) or by the schema plan it
+ * feeds (`schema-collision` and `shared-item-migrations-differ`, in `planSchemas`). [MD-2, A15]
+ *
+ * Everything else the declaration's type forbids is refused as well (`invalid-declaration`), so a module built without
+ * types is held to the same declaration. Refusing at startup is the runner's job; here the validation is called
+ * directly. [A20]
  */
 
 /** The refusal `run` throws, or undefined when it returns. */
@@ -55,7 +67,7 @@ function firstItem(d: Record<string, unknown>): Record<string, unknown> {
   return item;
 }
 
-/** One cause of MD-2 triggered alone: the declarations, and the refusal's code, names and words. */
+/** One validation cause triggered alone: the declarations, and the refusal's code, names and words. [MD-2] */
 interface Case {
   readonly name: string;
   readonly set: DeclarationSet;
@@ -184,14 +196,14 @@ const A21: readonly Case[] = [
   },
 ];
 
-/** The rule each case of A21 is about, by its code. */
+/** The rule each case of the startup validation is about, by its code. [A21] */
 function ruleOf(c: Case): DeclarationRule {
   const rule = DECLARATION_RULES.find((candidate) => candidate.code === c.code);
   if (rule === undefined) throw new Error(`no rule refuses with ${c.code}`);
   return rule;
 }
 
-/** The cases of A21 that `rules` do not refuse as the case says: each with what went wrong. */
+/** The validation cases that `rules` do not refuse as the case says: each with what went wrong. [A21] */
 function failures(rules: readonly DeclarationRule[]): string[] {
   const out: string[] = [];
   for (const c of A21) {
@@ -211,8 +223,8 @@ describe("A21: each refusal of MD-2, with its code and names", () => {
       expect(error.retryable).toBe(false);
       expect(error.details).toEqual(c.details);
       for (const text of c.says) expect(error.message, text).toContain(text);
-      // Every message gives the requirement it applies.
-      expect(error.message).toMatch(/\((MD-1|MD-2|CF-4|DB-8)[,)]/);
+      // A message explains itself: it cites no requirement id.
+      expect(error.message).not.toMatch(SPEC_ID);
     });
   }
 
@@ -457,7 +469,7 @@ const SHAPES: readonly ShapeCase[] = [
   },
   { name: "no startsMidChain", build: () => loose("stats", (d) => void delete d.startsMidChain), field: "startsMidChain" },
   { name: "needsLockstep not a boolean", build: () => loose("stats", (d) => void (d.needsLockstep = "yes")), field: "needsLockstep" },
-  // A private module's own field on a public module (PP-6; task 14.1).
+  // A private module's own field on a public module. [PP-6]
   {
     name: "needsLockstep on a public module",
     build: () => loose("stats", (d) => Object.assign(d, { needsLockstep: false })),
@@ -525,7 +537,7 @@ describe("MD-1: a declaration of a shape its type forbids is refused (invalid-de
       expect(error.retryable).toBe(false);
       expect(error.details).toMatchObject({ origin: "user", index: 0, field: c.field });
       for (const text of c.says ?? []) expect(error.message, text).toContain(text);
-      expect(error.message).toContain("(MD-1)");
+      expect(error.message).not.toMatch(SPEC_ID);
     });
   }
 
@@ -539,7 +551,7 @@ describe("MD-1: a declaration of a shape its type forbids is refused (invalid-de
       expected: '"public" or "private"',
     });
     expect(named.message).toBe(
-      'the user module stats: side is "x", where a module declaration has "public" or "private" (MD-1)',
+      'the user module stats: side is "x", where a module declaration has "public" or "private"',
     );
     const placed = refusal(() => validateDeclarations({ backbone: [], core: [declaration("core-a"), 7], user: [] }));
     expect(placed.details).toMatchObject({ module: null, origin: "core", index: 1, field: "" });

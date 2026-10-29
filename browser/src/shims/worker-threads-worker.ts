@@ -1,8 +1,8 @@
 /**
  * `node:worker_threads` inside a worker the browser build starts with `./worker-threads-host.ts`'s `Worker` — the
- * ledger worker, whose entry is `src/ledger/worker/entry.ts` unchanged (`openspec/changes/core-arch/design.md` §5.3,
- * §9.2; task 16.1): `workerData` is the first message's, and `parentPort` the worker's own port. {@link runEntry}
- * waits for that first message, then imports the entry, which reads `workerData` as it starts.
+ * ledger worker, whose entry is `src/ledger/worker/entry.ts` unchanged: `workerData` is the first message's, and
+ * `parentPort` the worker's own port. {@link runEntry} waits for that first message, then imports the entry, which
+ * reads `workerData` as it starts. [design §5.3, §9.2]
  *
  * A Web Worker's port delivers each message as it comes, listener or not, while a Node.js port holds messages until a
  * listener is attached; the entry attaches its listener only once it has loaded its ledger packages, and the host may

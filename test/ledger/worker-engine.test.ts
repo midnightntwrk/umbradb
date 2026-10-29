@@ -19,10 +19,10 @@ import {
   zswapOutputTransaction,
 } from "./adapter-fixtures.js";
 
-// Task 12.3 of `openspec/changes/core-arch` (design.md §5.1, §5.3, §5.5; specs/ledger LG-7, LG-8, LG-11, LG-15, LG-16;
-// specs/ingest IN-7): the ledger worker's logic, run here in the test's thread over the real v9 adapter (the worker
-// thread runs the same engine, `worker-host.test.ts`). Oracles: the reference replay of task 12.1
-// (`./adapter-fixtures.ts`, the packages' own API, never the adapters) and the vendored package's own exports.
+// The ledger worker's logic, run here in the test's thread over the real v9 adapter (the worker thread runs the same
+// engine, `worker-host.test.ts`). Oracles: the reference replay (`./adapter-fixtures.ts`, which uses the packages' own
+// API, never the adapters) and the vendored package's own exports.
+// [LG-7, LG-8, LG-11, LG-15, LG-16, IN-7; design §5.1, §5.3, §5.5]
 
 const LONG = 240_000;
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
@@ -136,7 +136,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     expect(hex(applied.stateRoot)).toBe(hex(RAW.v9.stateRoot(reference.state)));
     expect(hex(applied.stateKey)).toBe(hex(RAW.v9.stateKey(reference.state)));
     expect(applied.summary.zswapFirstFree).toBe(reference.state.zswap.firstFree);
-    // LG-16's six tree values of the reference state, by the package's `stateTrees` (task 12.1b).
+    // The six tree values of the reference state, by the package's `stateTrees`. [LG-16]
     expect(applied.summary).toEqual(RAW.v9.stateTrees(reference.state));
     expect(applied.output.results.map((r) => r.outcome)).toEqual(["success", "success", "success", "partial", "success"]);
     // The call's log and the partial success's guaranteed segment's.
@@ -147,7 +147,7 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     expect([applied.ledger, applied.height, hex(applied.hash)]).toEqual(["v9", 1n, hex(at(1n).hash)]);
     expect(plainProblems(applied)).toEqual([]);
     expect(structuredClone(applied)).toEqual(applied);
-    // LG-11: the state after the block persisted, the one before released, in one batch with the new nodes.
+    // The state after the block persisted, the one before released, in one batch with the new nodes. [LG-11]
     expect(applied.batch.rootCounts.map((c) => [hex(c.key), c.delta]).sort()).toEqual(
       [
         [hex(applied.stateKey), 1],
@@ -270,7 +270,8 @@ describe("the ledger worker's engine (design §5.3, §5.5; LG-7, LG-8, LG-11, LG
     await expect(
       engine.genesis({ ledger: "v9", ...at(0n), parentHash: new Uint8Array(32), timestampMs: 0n, transactions: 0, genesisState: blankGenesis(), includesBlockZero: true }),
     ).rejects.toThrow(/block 0/);
-    // Committed blocks move on; a commit of a block not pending changes nothing (RN-11's re-delivery).
+    // Committed blocks move on; a commit of a block not pending changes nothing, as when the callbacks are delivered
+    // again after a restart. [RN-11]
     expect(engine.commit(at(5n))).toBe(false);
     const one = await engine.apply(applyBlock(1n, 0));
     expect(engine.holds()).toMatchObject({ committed: at(0n), pending: at(1n) });

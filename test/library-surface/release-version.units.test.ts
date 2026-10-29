@@ -5,10 +5,10 @@ import {
 } from "./release-version.js";
 
 /**
- * Task 17.5b (the mutation pass task 17.4 deferred): `./release-version.ts`'s scan on small sources — the import forms
- * `versionBindings` must skip (a bare specifier, a side-effect import, a default or namespace import, another name of
- * `build.ts`), `build.ts`'s own binding, a name an anonymous function cannot hide, constants given twice, sides that
- * are not literals, the version constant's own declaration — and `changelogProblems`' section and notice bounds.
+ * `./release-version.ts`'s scan on small sources — the import forms `versionBindings` must skip (a bare specifier, a
+ * side-effect import, a default or namespace import, another name of `build.ts`), `build.ts`'s own binding, a name an
+ * anonymous function cannot hide, constants given twice, sides that are not literals, the version constant's own
+ * declaration — and `changelogProblems`' section and notice bounds.
  */
 
 const FILE = "src/backbone/core-x/core-x.ts";

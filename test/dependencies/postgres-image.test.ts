@@ -5,10 +5,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { POSTGRES_IMAGE } from "../postgres-image.js";
 
-// Task 0.4 of `openspec/changes/core-arch` (owner decision Q82), acceptance A148 [STATIC]: every PostgreSQL image the
-// repository pins is one `postgres:18-alpine` pin — the tests, the Testcontainers helpers, the benchmarks, the pack
-// smoke test and the supply-chain gate's image-pin agreement check. The pin lives in `test/postgres-image.ts`; this
-// file holds the same value, so moving it is a reviewed change of three files.
+// Every PostgreSQL image the repository pins is one `postgres:18-alpine` pin — the tests, the Testcontainers helpers,
+// the benchmarks, the pack smoke test and the supply-chain gate's image-pin agreement check. The pin lives in
+// `test/postgres-image.ts`; this file holds the same value, so moving it is a reviewed change of three files.
+// [Q82, A148 STATIC]
 
 /** The pin: PostgreSQL 18.6 on Alpine 3.24.2, the `18-alpine` index of 2026-09-21 (see `test/postgres-image.ts`). */
 const PINNED = "postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873";
@@ -31,8 +31,9 @@ const SCRIPT = new Set([".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"]);
 const HASH_COMMENTED = new Set([".yml", ".yaml", ".sh", ".nix", ".toml"]);
 
 /**
- * Files that may name a PostgreSQL image without pinning one, as a record of a run. None since task 17.2 retired the
- * 0.9.5 benchmark baseline (measured on PostgreSQL 17.10, before Q82) with its workloads (`design.md` §13).
+ * Files that may name a PostgreSQL image without pinning one, as a record of a run. None since the 0.9.5 benchmark
+ * baseline (measured on PostgreSQL 17.10, before the PostgreSQL 18 pin) was retired with its workloads.
+ * [Q82; design §13]
  */
 const RECORDS = new Set<string>();
 
@@ -66,7 +67,10 @@ function canPin(path: string): boolean {
   return SCRIPT.has(extension) || HASH_COMMENTED.has(extension) || extension === ".json" || basename(path) === "Dockerfile";
 }
 
-/** Every way the files fail A148: an image other than the pin, or a container started from anything but the constant. */
+/**
+ * Every way the files fail the image pin: an image other than the pin, or a container started from anything but the
+ * constant. [A148 STATIC]
+ */
 function pinViolations(files: readonly RepositoryFile[], pin: string): string[] {
   const violations: string[] = [];
   for (const file of files) {
@@ -194,7 +198,7 @@ describe("A148 — one PostgreSQL image, postgres:18-alpine pinned by digest (Q8
       for (const [path, text] of harmless) {
         expect(pinViolations([{ path, text }], POSTGRES_IMAGE), path).toEqual([]);
       }
-      // No file is exempt as a record since task 17.2 retired the 0.9.5 benchmark baseline: one naming an older image
+      // No file is exempt as a record since the 0.9.5 benchmark baseline was retired: one naming an older image
       // is caught like any other configuration file.
       const baseline = "bench/baseline.1.0.0-perf-baseline.1.json";
       expect(pinViolations([{ path: baseline, text: `{"postgresImage": "${older}"}` }], POSTGRES_IMAGE)).toEqual([

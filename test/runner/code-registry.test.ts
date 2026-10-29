@@ -11,14 +11,15 @@ import {
 } from "./code-registry.js";
 
 /**
- * A87 `[STATIC]` (IN-12; task 10.4): every refusal and halt code of `design.md` §11 has a test that triggers it and
+ * `[STATIC]`: every refusal and halt code of the design's "Refusals and halts" section has a test that triggers it and
  * checks its code (`./code-registry.ts`'s registry, checked against the test files' text), or is pending with the task
- * that adds it — a list that only shrinks: no code may be pending that was not pending when task 10.4 made the list,
- * and a pending code's task may not be checked done in `tasks.md`. The pending codes are reported (the test's
- * annotation and its output).
+ * that adds it. The pending list only shrinks: no code may be pending that was not pending when the list was made, and
+ * a pending code's task may not be checked done in `tasks.md`. The pending codes are reported (the test's annotation
+ * and its output). [A87 STATIC, IN-12; design §11]
  */
 
-/** The codes pending when task 10.4 made the registry: a later code of §11 comes with its test, never pending. */
+/** The codes pending when the registry was made: a code added to the design later comes with its test, never pending.
+ *  [design §11] */
 const PENDING_AT_10_4 = Object.freeze([
   "refusal:needs-lockstep-not-listed",
   "backup:backup-tools-missing",
@@ -61,13 +62,13 @@ describe("A87: the refusal and halt registry (IN-12)", () => {
   it("reads §11's three lists whole: its states and points are no codes, and every UmbraError code it names is the runner's", () => {
     const codes = section11Codes(DESIGN);
     expect(codes.refusal.length).toBeGreaterThan(40);
-    // Ten backup and restore codes, and `private-binding-mismatch` for a private process's backup (task 15.2a, Q153).
+    // Ten backup and restore codes, and `private-binding-mismatch` for a private process's backup. [Q153]
     expect(codes.backup).toHaveLength(11);
     expect(codes.halt.length).toBeGreaterThan(14);
     for (const word of ["refused", "halted", "on-start-db", "on-start-api"]) {
       expect([...codes.refusal, ...codes.backup, ...codes.halt]).not.toContain(word);
     }
-    // The codes reasons keep (task 5.4) are the registry's lists' codes that are UmbraError codes.
+    // The codes reasons keep are the registry's lists' codes that are UmbraError codes.
     const known = (list: readonly string[]) => list.filter((code) => (ERROR_CODES as readonly string[]).includes(code)).sort();
     expect([...REFUSAL_CODES].sort()).toEqual(known(codes.refusal));
     expect([...HALT_CODES].sort()).toEqual(known(codes.halt));

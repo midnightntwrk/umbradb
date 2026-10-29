@@ -8,10 +8,11 @@ import { BACKUP_BACKENDS, type BackupBackend, hashOf, killedRestore, manifestOf,
 import { backupAt, chain, emptied, restoreRun, restoreTarget } from "./restore-fixtures.js";
 
 /**
- * A127 `[FAULT]` (task 15.2; BK-3), on PostgreSQL 18.6 and PGlite 0.5.10: `umbradb restore`'s work in a process of its own
- * (`./restore-kill.worker.ts`), killed with SIGKILL while it runs the file's SQL — 20 statements in, inside its one
- * transaction —, leaves the target empty, and a new restore into it then succeeds. Its committed negative control (the
- * statements each committed on their own) is `./restore.negative-control.test.ts`.
+ * On PostgreSQL 18.6 and PGlite 0.5.10: `umbradb restore`'s work in a process of its own (`./restore-kill.worker.ts`),
+ * killed with SIGKILL while it runs the file's SQL — 20 statements in, inside its one transaction —, leaves the target
+ * empty, and a new restore into it then succeeds. [A127 FAULT, BK-3]
+ *
+ * Its committed negative control (the statements each committed on their own) is `./restore.negative-control.test.ts`.
  */
 
 const TEST_TIMEOUT_MS = 900_000;

@@ -18,11 +18,11 @@ import { BACKBONE } from "../modules/graph-fixtures.js";
 import { CORE_SETTINGS } from "./config-fixtures.js";
 
 /**
- * Modules, configurations and simulated startups for the tests of the configuration history (task 4.3; CF-5 to CF-9,
- * A28's history half, A30–A34): the history is `checkHistory` over the validated configuration, the cursor, the build's
- * declarations and the rows of `core_chain.config`; a startup records its `writes` and deletes its `deletes` (task
- * 4.3a), so a sequence of startups is simulated here without a database by applying each one's to the rows the next one
- * reads ({@link Simulation}).
+ * Modules, configurations and simulated startups for the tests of the configuration history. The history check is
+ * `checkHistory` over the validated configuration, the cursor, the build's declarations and the rows of
+ * `core_chain.config`. A startup records its `writes` and deletes its `deletes`, so a sequence of startups is
+ * simulated here without a database: each one's changes are applied to the rows the next one reads
+ * ({@link Simulation}). [CF-5, CF-6, CF-7, CF-8, CF-9, A28, A30, A31, A32, A33, A34]
  * The database tests run the same sequence through `core_chain.config` (`./history-startup.ts`).
  */
 
@@ -47,7 +47,7 @@ export function moduleM(version: string, rest: Partial<ModuleDeclaration> = {}) 
 
 /** `m` 1.0.0, the version most tests' builds carry. */
 export const M_1_0 = moduleM("1.0.0");
-/** `m` 1.1.0, a newer version: its migration 002 only adds a column (DB-10). */
+/** `m` 1.1.0, a newer version: its migration 002 only adds a column. [DB-10] */
 export const M_1_1 = moduleM("1.1.0", { migrations: [M_001, M_002] });
 /** `m` 0.9.0, an older version. */
 export const M_0_9 = moduleM("0.9.0");
@@ -60,13 +60,16 @@ export function moduleN(version: string) {
 /** `n` 1.0.0. */
 export const N = moduleN("1.0.0");
 
-/** A module that cannot start mid-chain (MD-4): its revisions must continue each other (CF-5). */
+/** A module that cannot start mid-chain: its revisions must continue each other. [MD-4, CF-5] */
 export const HISTORIC = defineModule({ ...declaration("historic"), startsMidChain: false, configSchema: M_SETTINGS });
 
-/** A development-only module (MD-5, CF-9). */
+/** A development-only module. [MD-5, CF-9] */
 export const DEVTOOL = defineModule({ ...declaration("devtool"), developmentOnly: true, configSchema: M_SETTINGS });
 
-/** `m` 1.0.0 with the setting `foo`, and 1.1.0 whose schema renames it `bar` (CF-3's scenario "An upgrade that renames"). */
+/**
+ * `m` 1.0.0 with the setting `foo`, and 1.1.0 whose schema renames it `bar` (the scenario "An upgrade that renames").
+ * [CF-3]
+ */
 export const M_FOO = defineModule({
   ...declaration("m"),
   version: "1.0.0",
@@ -81,8 +84,8 @@ export const M_BAR = defineModule({
 });
 
 /**
- * The data fields of a public `core` entry written with {@link CORE_SETTINGS} only: CF-4's defaults applied, the
- * ledger table among them (the network's built-in one, task 12.2).
+ * The data fields of a public `core` entry written with {@link CORE_SETTINGS} only: the `core` defaults applied, the
+ * ledger table among them (the network's built-in one). [CF-4]
  */
 export const CORE_DATA = {
   network: "preprod",

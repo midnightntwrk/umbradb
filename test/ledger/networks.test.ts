@@ -16,17 +16,18 @@ import { type FoundTape, tapeTest } from "../tape/real/real-tapes.js";
 import { haltOf, TapeAnswers } from "./version-checks.js";
 
 /**
- * The built-in ledger version tables (`src/ledger/networks.json`; LG-3, A95; task 12.2): one per known network, keyed
- * by its genesis hash, with LG-3's rows, and a pin for each runtime upgrade boundary read from the network's node.
+ * The built-in ledger version tables (`src/ledger/networks.json`): one per known network, keyed by its genesis hash,
+ * with the runtime-to-ledger rows, and a pin for each runtime upgrade boundary read from the network's node. [LG-3, A95 STATIC]
  *
- * - **A95 `[STATIC]`:** every pin of the built-in tables has a height, a hash and a `spec_version`, with a recorded
- *   source — the node it was read from, when, the file in this repository holding the node's answers — and the U and F
- *   hashes; the format makes a pin of nothing else (a pin is a boundary's F). Each source's record exists and holds the
- *   hashes it vouches for.
- * - **A94's last clause:** each built-in pin passes the header its boundary's record holds, through the node client's
- *   decoder — the boundaries task 0.3 read from the nodes (`test/ledger/fixtures/networks/*.json`), the mainnet pin at
- *   1,774,492 among them — and block 1,774,492's header as task 0.3's mainnet tape holds it passes the pin.
- * - **The tables against the recorded tapes** (task 0.3's, each skipped by name without its tape): every block of every
+ * - **Every pin has a recorded source:** every pin of the built-in tables has a height, a hash and a `spec_version`,
+ *   with a recorded source (the node it was read from, when, the file in this repository holding the node's answers)
+ *   and the U and F hashes; the format makes a pin of nothing else (a pin is a boundary's F). Each source's record exists and holds the
+ *   hashes it vouches for. [A95 STATIC]
+ * - **Each pin passes its boundary's header:** each built-in pin passes the header its boundary's record holds, through
+ *   the node client's decoder. These are the boundaries read from the nodes (`test/ledger/fixtures/networks/*.json`),
+ *   the mainnet pin at 1,774,492 among them; block 1,774,492's header as the recorded mainnet tape holds it passes the
+ *   pin too. [A94]
+ * - **The tables against the recorded tapes** (each skipped by name without its tape): every block of every
  *   public tape selects a ledger through its network's built-in table, built by the runtime in its parent's state;
  *   every pin in a tape's range passes; every runtime change on a tape is a built-in boundary with its U's and F's
  *   hashes and versions; a tape from genesis has the built-in genesis hash and runtime.
@@ -34,8 +35,8 @@ import { haltOf, TapeAnswers } from "./version-checks.js";
  */
 
 /**
- * LG-3's rows: runtimes 0.22 and 1.0.x to v8; runtime 2.0 to v9 as it built it (`ledger-9.1.0.0-rc.3`, a package of
- * its own: owner decision Q139 A, task 12.2a, A159); 2.1 on to v9 (`ledger-9.1.0.0-rc.5`).
+ * The built-in rows: runtimes 0.22 and 1.0.x to v8; runtime 2.0 to v9 as it built it (`ledger-9.1.0.0-rc.3`, a package
+ * of its own); 2.1 on to v9 (`ledger-9.1.0.0-rc.5`). [LG-3, Q139 A, A159]
  */
 const LG3_ROWS = [
   { specVersionMin: 22_000, specVersionMax: 22_999, ledger: "v8" },
@@ -65,7 +66,7 @@ describe("the committed file (LG-3)", () => {
   });
 
   it("keys each network by the genesis hash and runtime its node reported (task 0.3's records)", () => {
-    // Read by task 0.3 (2026-10-26) from each network's node with tools/tape/main.ts boundaries; the record holds the
+    // Read on 2026-10-26 from each network's node with tools/tape/main.ts boundaries; the record holds the
     // node's answers. Stagenet, a temporary network with no midnight.network node, from the third-party
     // rpc.stagenet.shielded.tools.
     const read = (network: string) =>
@@ -86,7 +87,7 @@ describe("the committed file (LG-3)", () => {
       );
     }
     expect(BUILT_IN_NETWORKS.map((entry) => entry.genesis?.specVersion ?? null)).toEqual([22_000, 22_000, 1_000_000, 2_000_000]);
-    // The hashes task 0.2 read on 2026-10-23 for mainnet and preview (node-roots.json) are the same blocks.
+    // The hashes read on 2026-10-23 for mainnet and preview (node-roots.json) are the same blocks.
     const roots = JSON.parse(readFileSync(repository("test/ledger/fixtures/genesis/node-roots.json"), "utf8")) as {
       states: { network: string; node: string; block0: string }[];
     };
@@ -208,7 +209,7 @@ describe("the built-in tables against task 0.3's recorded tapes (each skipped by
     { timeoutMs: WALK_MS },
   );
 
-  /** Each public tape, the pins in its range and the ledgers its blocks select (task 0.3's manifest). */
+  /** Each public tape, the pins in its range and the ledgers its blocks select (from the tapes' manifest). */
   const PUBLIC_TAPES = [
     { name: "mainnet-1774000-1780000", pins: [1_774_492], ledgers: ["v8"] },
     { name: "mainnet-1780000-1790000", pins: [], ledgers: ["v8"] },
@@ -239,7 +240,7 @@ describe("the built-in tables against task 0.3's recorded tapes (each skipped by
       runtimes.set(h, answers.runtimeAt(text));
       if (parent !== null) {
         expect(toHex(header.parentHash), `block ${h}'s parent`).toBe(parent);
-        // LG-4: a block is built by the runtime in its parent's state, which its MNSV names.
+        // A block is built by the runtime in its parent's state, which its MNSV names. [LG-4]
         if (selection.specVersion !== runtimes.get(h - 1)) notFromParent.push(`${h}: MNSV ${selection.specVersion}, parent's ${runtimes.get(h - 1)}`);
         // The state's runtime changes at U, whose own state holds the runtime it enacts.
         if (runtimes.get(h) !== runtimes.get(h - 1)) changes.push(h);

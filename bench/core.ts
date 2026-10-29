@@ -9,14 +9,14 @@ import { measureManual, summarize } from "./stats.js";
 import type { Backend, LatencyStats } from "./types.js";
 
 /**
- * The core's benchmark (`openspec/changes/core-arch/design.md` §13, Benchmarks: "`runner.commitEmptyBlock` per
- * backend"; task 17.3): the time from a new finalized head to the runner having committed that block and waiting for
- * the next, for an empty block (an in-memory block: no extrinsic, no chain event), on PGlite and on PostgreSQL.
+ * The core's benchmark, `runner.commitEmptyBlock` per backend: the time from a new finalized head to the runner having
+ * committed that block and waiting for the next. It is measured for an empty block (an in-memory block: no extrinsic,
+ * no chain event), on PGlite and on PostgreSQL. [design §13]
  *
  * The process is the `umbradb` command's build (`commandBuild`: the public backbone, its core modules off, no user
- * module) over an `InMemoryBlockSource`, started through §12's `startProcess` and `coreEntry` on a `custom` network
- * whose genesis is the in-memory chain's, the admin endpoints off. Each sample is one block: the source's head raised
- * by one, then the wait until the loop waits past it (`waiting`).
+ * module) over an `InMemoryBlockSource`, started through the exported `startProcess` and `coreEntry` on a `custom`
+ * network whose genesis is the in-memory chain's, the admin endpoints off. Each sample is one block: the source's head
+ * raised by one, then the wait until the loop waits past it (`waiting`). [design §12]
  */
 
 /** The workload name of a backend, as the baseline records it. */

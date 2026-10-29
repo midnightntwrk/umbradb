@@ -10,10 +10,11 @@ import { chainDeclarations } from "./chain-build.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
 
 /**
- * The process's ledger worker (task 12.3; LG-10, design.md §5.3): the runner starts one when its graph has
- * `core-block-parsed` or `core-ledger-state` — once, though a retryable failure runs startup again (IN-10) — and closes
- * it with the process, so no thread of it outlives `stop()`; a graph with neither starts none. On PGlite: the criterion
- * is about the runner's threads, not stored data.
+ * The process's ledger worker. The runner starts one when its graph has `core-block-parsed` or `core-ledger-state`.
+ * It starts only once, even when a retryable failure runs startup again. It closes the worker with the process, so no
+ * thread of it outlives `stop()`. A graph with neither module starts none. [LG-10, IN-10; design §5.3]
+ *
+ * The test runs on PGlite only: it is about the runner's threads, not stored data.
  */
 
 const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;

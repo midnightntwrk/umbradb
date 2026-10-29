@@ -5,10 +5,14 @@ import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-s
 import { settlesWithin } from "../db/backends.js";
 
 /**
- * The in-memory block source (task 5.2; RN-14, `design.md` §3): the block-source interface over blocks held in memory,
- * for tests and module authors — a finalized head that only rises, the finalized block at each height up to it (given,
- * or a default chain whose hashes link), a wait for the head to pass a height that a signal ends, and the cursor read
- * from the cursor table through the read it is given (`core-block-commit`, `src/backbone/core-block-commit/`).
+ * The in-memory block source: the block-source interface over blocks held in memory, for tests and module authors.
+ * [RN-14; design §3]
+ *
+ * - A finalized head that only rises.
+ * - The finalized block at each height up to it (given, or a default chain whose hashes link).
+ * - A wait for the head to pass a height, which a signal ends.
+ * - The cursor, read from the cursor table through the read it is given (`core-block-commit`,
+ *   `src/backbone/core-block-commit/`).
  */
 
 const sha256 = (text: string): Uint8Array => new Uint8Array(createHash("sha256").update(text, "utf8").digest());

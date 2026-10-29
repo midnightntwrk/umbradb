@@ -1,25 +1,27 @@
 /**
- * What `/config` shows (`openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-5, AE-6; `specs/configuration/
- * spec.md` CF-3–CF-7; CORE-ARCH §4.18; decision records Q70, Q102): {@link configOf} builds the configuration part of
- * the snapshot the runner publishes (`./types.ts`, `ConfigSnapshot`), on the main thread, from what startup knows —
- * so the admin worker never holds a secret or reads the database:
- * - **the process's `core` revision** (Q102: its operational and secret fields are the process's) and **the entries in
- *   effect**, every revision of the configuration as validated, each one's settings through `shownSettings`
- *   (`./redaction.ts`): a `secret` field or one of unknown kind `[redacted]`, every other string's URL credentials
- *   redacted, a `versionEntry`'s fields all redacted until the history found it equal to its recorded row (4.2's note
- *   (d)); once startup read the cursor, each one placed against it (`started`, `scheduled`);
- * - **the configuration history** as startup read it from `core_chain.config` (CF-7): data fields only, their URL
- *   credentials redacted;
- * - **the parts of the database with their declarations** without callbacks ({@link declarationView});
- * - **the chain identity** (CD-1): the network, the genesis hash (configured, then the chain's), S and the anchor hash
- *   once block S committed;
- * - **the ledger version table in effect** — the process revision's `ledgerTable`, the built-in table with the
- *   configuration's rows and pins (LG-3) — **with the build's package identities** (`buildCoreVersion().ledgers`);
- * - **the database**: its backend, the server's version, and whether the process holds its writer lock (the caller's:
- *   the process knows it from its writer's start and its failures);
- * - **the build**: UmbraDB's version — no commit: a running build does not know the commit it was built from (AE-5,
- *   owner decision Q134 D).
- * Before the configuration is validated nothing of it is shown ({@link UNVALIDATED_CONFIG}): its secrets are not known.
+ * What `/config` shows. {@link configOf} builds the configuration part of the snapshot the runner publishes
+ * (`./types.ts`, `ConfigSnapshot`). It runs on the main thread, from what startup knows, so the admin worker never
+ * holds a secret or reads the database. It shows:
+ * - **the process's `core` revision** (the revision whose operational and secret fields the process uses) and **the
+ *   entries in effect**: every revision of the configuration as validated, each one's settings through
+ *   `shownSettings` (`./redaction.ts`). A `secret` field, or one of unknown kind, shows as `[redacted]`; every other
+ *   string has its URL credentials redacted; and a `versionEntry` has all its fields redacted until the history check
+ *   finds it equal to its recorded row. Once startup has read the cursor, each revision is placed against it
+ *   (`started`, `scheduled`). [AE-5, AE-6, CF-3, CF-4, CF-5, CF-6, Q102]
+ * - **the configuration history** as startup read it from `core_chain.config`: data fields only, with their URL
+ *   credentials redacted. [CF-7]
+ * - **the parts of the database with their declarations**, without callbacks ({@link declarationView}). [AE-5]
+ * - **the chain identity**: the network, the genesis hash (as configured, then the chain's), S, and the anchor hash
+ *   once block S has committed. [CD-1]
+ * - **the ledger version table in effect** (the process revision's `ledgerTable`: the built-in table with the
+ *   configuration's rows and pins), **with the build's package identities** (`buildCoreVersion().ledgers`). [LG-3]
+ * - **the database**: its backend, the server's version, and whether the process holds its writer lock. The caller
+ *   supplies the last, since the process knows it from its writer's start and failures.
+ * - **the build**: UmbraDB's version. There is no commit, since a running build does not know the commit it was built
+ *   from. [AE-5, Q134 D]
+ *
+ * Before the configuration is validated, nothing of it is shown ({@link UNVALIDATED_CONFIG}), since its secrets are not
+ * known yet. [AE-6; CORE-ARCH §4.18]
  */
 
 import type { DatabaseParts } from "../config/database-parts.js";
@@ -77,7 +79,7 @@ export interface ConfigFacts {
   /** The configuration's redaction. */
   readonly redactor: Redactor;
   readonly checked: CheckedConfig;
-  /** The process's `core` revision (Q102). */
+  /** The process's `core` revision: the one whose operational and secret fields the process uses. [Q102] */
   readonly core: CheckedEntry;
   /** Null until the database is open. */
   readonly opened: OpenedConfig | null;
@@ -120,7 +122,7 @@ export function declarationView(declaration: ModuleDeclaration, origin: Declarat
 
 /** One revision as `/config` shows it; `placed` once startup placed it against the cursor. */
 function entryView(redactor: Redactor, entry: CheckedEntry, placed: PlacedEntry | undefined): EntryView {
-  // A started revision passed the history check: it equals its recorded row (CF-6), so a `versionEntry` shows as data.
+  // A started revision passed the history check: it equals its recorded row, so a `versionEntry` shows as data. [CF-6]
   const recorded = placed?.started === true;
   return Object.freeze({
     id: entry.id,

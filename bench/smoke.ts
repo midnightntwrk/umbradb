@@ -3,11 +3,11 @@ import { commitEmptyBlockPglite, commitEmptyBlockPostgres, workloadName } from "
 import type { LatencyStats } from "./types.js";
 
 /**
- * `npm run bench:smoke`, the non-gating `bench-smoke.yml` job (`openspec/changes/core-arch/design.md` §13; task 17.3):
- * a short run of the core's benchmark (`./core.ts`, `runner.commitEmptyBlock` on PGlite and on PostgreSQL in Docker)
- * compared with the committed baseline (`bench/baseline.json`, `npm run bench`). A p99 more than ten times the
- * baseline's is a warning for a person to look at; the guard exits 0 whatever the numbers, and 1 only when it could
- * not run (Docker or the process failing), which is not a performance result.
+ * `npm run bench:smoke`, the `bench-smoke.yml` job, which never gates a build: a short run of the core's benchmark
+ * (`./core.ts`, `runner.commitEmptyBlock` on PGlite and on PostgreSQL in Docker) compared with the committed baseline
+ * (`bench/baseline.json`, `npm run bench`). A p99 more than ten times the baseline's is a warning for a person to look
+ * at; the guard exits 0 whatever the numbers, and 1 only when it could not run (Docker or the process failing), which
+ * is not a performance result. [design §13]
  */
 
 const METHOD = { warmup: 20, iterations: 100 } as const;

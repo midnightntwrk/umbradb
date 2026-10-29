@@ -1,26 +1,31 @@
 /**
- * The node-store bridge (`openspec/changes/core-arch/design.md` §5.3; `specs/ledger/spec.md` LG-10, LG-11; task 12.3):
- * how the ledger worker reads stored nodes synchronously from a database the main thread owns. The ledger package
- * reads a node it does not hold in memory through a synchronous `NodeStore.get` (`../types.ts`): the worker's store
- * ({@link bridgeStore}) writes the node's key into memory both threads share, tells the main thread (a message naming
- * the request it serves), and blocks with `Atomics.wait` until the main thread ({@link BridgeServer}) — which never
- * blocks on the worker — has read the node through the read handle that request was given and written it back.
+ * The node-store bridge: how the ledger worker reads stored nodes synchronously from a database the main thread owns.
+ * The ledger package reads a node it does not hold in memory through a synchronous `NodeStore.get` (`../types.ts`).
+ * The worker's store ({@link bridgeStore}) writes the node's key into memory both threads share, sends the main thread
+ * a message naming the request it serves, and blocks with `Atomics.wait`. The main thread ({@link BridgeServer}), which
+ * never blocks on the worker, reads the node through the read handle that request was given, writes it back and wakes
+ * the worker. [LG-10, LG-11; design §5.3]
  *
- * **Batched:** a miss brings the node's referenced nodes along — the main thread reads their keys from its child list
- * (`../node-refs.ts`, no ledger package) and reads them in one more statement —, and the worker serves them from its
- * side during its request (the next request drops them), so a state's walk costs one round trip per level rather
- * than per node.
+ * **Batched.** A miss also brings along the nodes the missed node references. The main thread reads their keys from
+ * its child list (`../node-refs.ts`, without a ledger package) and reads them in one more statement. The worker serves
+ * them from its side for the rest of its request (the next request drops them), so walking a state costs one round
+ * trip per level rather than per node.
  *
- * **The shared memory** ({@link bridgeMemory}) is a growable `SharedArrayBuffer`: a 16-byte header of four `Int32`s
- * (the state — idle, asked, answered —, the answer's length, its status — the nodes, or an error —, unused) and the
- * data, where the worker writes the key and the main thread the answer: its node count (`u32`), then per node its key
- * (32 bytes), its payload and its child list, each with its length (`u32`), little-endian. The main thread grows it for
- * an answer that does not fit, up to its largest size ({@link BRIDGE_MAX_BYTES}); a node larger than that is an error,
- * and referenced nodes that do not fit are left out.
+ * **The shared memory** ({@link bridgeMemory}) is a growable `SharedArrayBuffer`. It starts with a 16-byte header of
+ * four `Int32`s:
+ * - the state: idle, asked or answered;
+ * - the answer's length;
+ * - the answer's status: nodes, or an error;
+ * - unused.
  *
- * **Failures** never throw into the package, which turns a store that throws into an abort: an error — no read given
- * to the request, a failed statement, a node too large — makes the store answer "no node" and keeps the error, which
- * the worker reports with the request's own failure ({@link BridgeStore.lastError}).
+ * The data follows: the worker writes the key there and the main thread the answer. The answer is its node count
+ * (`u32`), then for each node its key (32 bytes), its payload and its child list, each of the last two preceded by its
+ * length (`u32`), all little-endian. The main thread grows the memory for an answer that does not fit, up to
+ * {@link BRIDGE_MAX_BYTES}. A node larger than that is an error; referenced nodes that do not fit are left out.
+ *
+ * **Failures** never throw into the package, which would turn a throwing store into an abort. On an error (no read
+ * given to the request, a failed statement, a node too large) the store answers "no node" and keeps the error. The
+ * worker reports it along with the request's own failure ({@link BridgeStore.lastError}).
  */
 
 import type { ReadHandle } from "../../db/api.js";
@@ -49,7 +54,7 @@ export const BRIDGE_INITIAL_BYTES = 1 << 20;
 /** The largest the shared memory grows to: 256 MiB. */
 export const BRIDGE_MAX_BYTES = 256 << 20;
 
-/** The statement reading stored nodes by key (`core_ledger_state.nodes`, `design.md` §10). */
+/** The statement reading stored nodes by key from `core_ledger_state.nodes`. [design §10] */
 export const NODES_SQL = "SELECT node_key, data, children FROM core_ledger_state.nodes WHERE node_key = ANY($1::bytea[])";
 
 /** What the main thread reads nodes through: a read handle's `query`. */

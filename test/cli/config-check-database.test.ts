@@ -15,16 +15,18 @@ import { type CliProject, cliProject, configText, coreSettings, inProcess } from
 import { type CheckTarget, CLI_BACKENDS } from "./database-fixtures.js";
 
 /**
- * A35 `[CI]` with `--database` (CF-10, as amended by owner decision Q167 A; task 4.5), through `runCommand` and
- * `configCheck` in this process, on PostgreSQL 18 and PGlite 0.5.10 (`./umbradb.test.ts` runs the command itself in a
- * child process): `umbradb config check <file> --database`, which takes no value, reads the database the file's `core`
- * revision configures — the cursor and `core_chain.config`, read-only, no migration, no write — and runs the history
- * checks too (CF-3 for `versionEntry` revisions, CF-5, CF-6, CF-8): a file that changes a recorded entry's data field
- * reports `changes-past` and exits non-zero, and the database is unchanged (every table's row count, and the rows of
- * `core_chain.migrations` and `core_chain.config` with their `xmin`, before and after). PGlite opens only under the
- * development opt-in, which comes from the file (decision record Q102); its directory's lock is taken (a PGlite
- * database another process holds cannot be read); a PostgreSQL database is read beside a running writer. A170's last
- * clause is the same: the history read is the configured database's.
+ * `umbradb config check` with `--database` `[CI]`, through `runCommand` and `configCheck` in this process, on
+ * PostgreSQL 18 and PGlite 0.5.10 (`./umbradb.test.ts` runs the command itself in a child process). [A35 CI, CF-10, Q167 A]
+ *
+ * `umbradb config check <file> --database` takes no value. It reads the database that the file's `core` revision
+ * configures: the cursor and `core_chain.config`, read-only, with no migration and no write. It then runs the history
+ * checks too (for `versionEntry` revisions as well). A file that changes a recorded entry's data field reports
+ * `changes-past` and exits non-zero, and the database is unchanged (every table's row count, and the rows of
+ * `core_chain.migrations` and `core_chain.config` with their `xmin`, before and after). [CF-3, CF-5, CF-6, CF-8]
+ *
+ * PGlite opens only under the development opt-in, which comes from the file. Its directory's lock is taken (a PGlite
+ * database another process holds cannot be read). A PostgreSQL database is read beside a running writer. The same
+ * tests show that the history is read from the configured database. [Q102, A170]
  */
 
 // Each test runs the TypeScript compiler on a file (about a second alone) and many open a database or start a process;
@@ -107,9 +109,9 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
     const result = await check(file);
     expect(result.code).toBe(EXIT.failed);
     expect(result.stdout).toMatch(/^type check \(TypeScript 5\.9\.\d+, noEmit\): passed$/m);
-    expect(result.stdout).toMatch(/^configuration \(CF-1, CF-3\): passed$/m);
+    expect(result.stdout).toMatch(/^configuration \(evaluation, validation\): passed$/m);
     expect(result.stdout).toMatch(
-      /^history \(CF-3 for versionEntry revisions, CF-5, CF-6, CF-8\): 1 finding — read-only, from the configuration's database at the cursor 20, 2 recorded revisions$/m,
+      /^history \(versionEntry revisions, revisions by \(id, start\), changes only to the future, one version per build\): 1 finding — read-only, from the configuration's database at the cursor 20, 2 recorded revisions$/m,
     );
     expect(result.stdout).toMatch(
       /^ {2}entries\[0\]\.config\.retainStates \(core from 0\): the revision starts at or below the cursor 20, and this data field differs from the history's: .* \[changes-past data\]$/m,
@@ -123,7 +125,7 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
     const file = fileOf("same.config.ts", [core(0, { livenessTimeoutMs: 5_000 }, pglite), core(100, { retainStates: 2 }, pglite)]);
     const result = await check(file);
     expect(result.stdout).toMatch(
-      /^history \(CF-3 for versionEntry revisions, CF-5, CF-6, CF-8\): passed — read-only, from the configuration's database at the cursor 20, 2 recorded revisions$/m,
+      /^history \(versionEntry revisions, revisions by \(id, start\), changes only to the future, one version per build\): passed — read-only, from the configuration's database at the cursor 20, 2 recorded revisions$/m,
     );
     expect(result.stdout).toMatch(/^passed: every check that ran passed$/m);
     expect(result.code).toBe(EXIT.ok);
@@ -132,7 +134,7 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
 
   it("prints every finding of every history check at once: missing-entry, changes-past, upgrade-required", async () => {
     const before = await target.snapshot();
-    // core from 0 (at or below the cursor) and from 100 (above it, Q103: may be omitted) are both left out.
+    // core from 0 (at or below the cursor) and from 100 (above it, where it may be omitted) are both left out. [Q103]
     const file = fileOf("everything.config.ts", [
       core(5, { retainStates: 5 }, pglite),
       'versionEntry({ id: "core", start: 21, version: { umbradb: "0.9.6", ledgers: [] } })',
@@ -161,7 +163,7 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
     expect(history?.findings.map((f) => `${f.code} ${f.path}`)).toEqual([
       "invalid-configuration scheduled-config entries[2].config",
     ]);
-    expect(history?.note).toContain("CF-5, CF-6 and CF-8 were not run");
+    expect(history?.note).toContain("so the other history checks were not run");
   });
 
   it("a configuration whose S is above the cursor is a finding, not a crash", async () => {
@@ -182,7 +184,7 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
       ["history", "not run"],
     ]);
     expect(report.text).toContain(
-      "history (CF-3 for versionEntry revisions, CF-5, CF-6, CF-8): not run — the configuration did not pass its own " +
+      "history (versionEntry revisions, revisions by (id, start), changes only to the future, one version per build): not run — the configuration did not pass its own " +
         "checks, which the history checks need",
     );
   });
@@ -195,8 +197,8 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
     const result = await check(file);
     expect(result.stdout).toMatch(
       pglite
-        ? /^history \(CF-3 for versionEntry revisions, CF-5, CF-6, CF-8\): passed — no PGlite database at that directory yet: checked as a new database, which startup creates; nothing was opened or created$/m
-        : /^history \(CF-3 for versionEntry revisions, CF-5, CF-6, CF-8\): passed — read-only, from the configuration's database, a new database \(nothing committed, no history\)$/m,
+        ? /^history \(versionEntry revisions, revisions by \(id, start\), changes only to the future, one version per build\): passed — no PGlite database at that directory yet: checked as a new database, which startup creates; nothing was opened or created$/m
+        : /^history \(versionEntry revisions, revisions by \(id, start\), changes only to the future, one version per build\): passed — read-only, from the configuration's database, a new database \(nothing committed, no history\)$/m,
     );
     expect(result.code).toBe(EXIT.ok);
     expect(await fresh.snapshot()).toEqual(before);

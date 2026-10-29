@@ -16,22 +16,24 @@ import { buildCoreVersion, UMBRADB_VERSION } from "../../src/config/build.js";
 import { type CommandResult, inProcess, REPOSITORY } from "./cli-fixtures.js";
 
 /**
- * A6 `[CI]` (LS-6), in this process through `runCommand` (`./umbradb.test.ts` runs the command itself, in a child
- * process): `umbradb sync` and `umbradb` with no argument print the usage and exit 2; `run`, `config check`, `backup`
- * and `restore` are recognized — `config check` runs (task 4.4), `run` starts the process (task 4.4a; its breadth is
- * `./run.test.ts`'s), `backup` and `restore` read their configuration file (tasks 15.1, 15.2; their breadth is
- * `test/backup/`).
+ * The `umbradb` subcommands `[CI]`, tested in this process through `runCommand` (`./umbradb.test.ts` runs the command
+ * itself, in a child process):
+ * - `umbradb sync` and `umbradb` with no argument print the usage and exit 2.
+ * - `run`, `config check`, `backup` and `restore` are recognized: `config check` runs, `run` starts the process (the
+ *   full coverage is in `./run.test.ts`), and `backup` and `restore` read their configuration file (the full coverage
+ *   is in `test/backup/`). [A6 CI, LS-6]
+ *
  * Also the command's argument errors: each prints the usage and exits 2, and a `--database` value is never echoed.
  */
 
 const CWD = tmpdir();
 
-/** A6's "prints the usage and exits 2": the usage on stderr, nothing on stdout. */
+/** "Prints the usage and exits 2": the usage on stderr, nothing on stdout. [A6 CI] */
 function printsUsage(result: CommandResult): boolean {
   return result.code === EXIT.usage && result.stderr.includes(USAGE) && result.stdout === "";
 }
 
-/** A6's "recognized": neither the usage's exit nor its text. */
+/** "Recognized": neither the usage's exit code nor its text. [A6 CI] */
 function recognized(result: CommandResult): boolean {
   return result.code !== EXIT.usage && !result.stderr.includes(USAGE) && !result.stdout.includes(USAGE);
 }
@@ -104,8 +106,8 @@ describe("A6: an unknown subcommand or none prints the usage and exits 2 (LS-6)"
 
 describe("A6: run, config check, backup and restore are recognized (LS-6)", () => {
   it("umbradb run is recognized: it starts the process of the file, which here refuses, and exits 1 once stopped", async () => {
-    // A file written as plain data, refused after its validation and before its database opens (CF-9: PGlite without
-    // the development opt-in), with its admin listener on a port of its own.
+    // A file written as plain data, refused after its validation and before its database opens (PGlite without the
+    // development opt-in), with its admin listener on a port of its own. [CF-9]
     const directory = mkdtempSync(join(tmpdir(), "umbradb-run-a6-"));
     try {
       const config = {
@@ -191,7 +193,7 @@ describe("config check's arguments: a wrong one prints the usage and exits 2", (
     [["config", "check", "a.config.ts", "b.config.ts"], "config check takes one file"],
     [["config", "check", "--databse", "postgres://x/y", "a.config.ts"], "unknown option --databse"],
     [["config", "check", "a.config.ts", "-d", "postgres://x/y"], "unknown option -d"],
-    // Q167 A: --database takes no value; it reads the database the file configures.
+    // --database takes no value; it reads the database the file configures. [Q167 A]
     [["config", "check", "a.config.ts", "--database=postgres://x/a"], "--database takes no value"],
     [["config", "check", "a.config.ts", "--database="], "--database takes no value"],
     [["config", "check", "a.config.ts", "--database", "postgres://x/y"], "config check takes one file"],

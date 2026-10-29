@@ -16,7 +16,7 @@ import { syntheticChain } from "../synthetic-chain.js";
 import { findTape, MANIFEST, type RealTape, TAPES_ENV, TapeRefusedError, tapeTest } from "./real-tapes.js";
 
 /**
- * The negative controls of task 0.3's real-tape checks (owner decisions Q123, Q130), each seen to fire:
+ * The negative controls of the real-tape checks, each seen to fire: [Q123, Q130]
  *
  * - **An absent tape is skipped, never passed** — as Vitest reports it: a Vitest of its own runs
  *   `skip-probe.fixture.ts` (one `tapeTest` per tape of a probe manifest) and its JSON report and its verbose output

@@ -5,10 +5,9 @@ import { childRefKeys } from "../../src/ledger/node-refs.js";
 import { RAW } from "./adapter-fixtures.js";
 import { type Child, decodeChildren, encodeChildren, free, hex, refsOf } from "./node-format.js";
 
-// Task 12.3 of `openspec/changes/core-arch` (design.md §5.3: "a miss prefetches the node's referenced keys"): the
-// main thread reads a stored node's referenced keys from its serialized child list without the ledger package, which
-// it never loads. The oracle is task 0.2's independent node format (`./node-format.ts`) and the vendored package's own
-// `childRefs` over the nodes a real state flushes.
+// The main thread reads a stored node's referenced keys from its serialized child list, without the ledger package,
+// which it never loads; a miss prefetches those keys. The oracle is the independent node format
+// (`./node-format.ts`) and the vendored package's own `childRefs` over the nodes a real state flushes. [design §5.3]
 
 /** The fast-check seed of the property below. */
 const SEED = 20261026;

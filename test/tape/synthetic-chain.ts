@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import { type Script, type ScriptedRequest, type Step } from "./scripted-node.js";
 
 /**
- * A synthetic Midnight chain for the recording driver's tests (task 0.3): every IN-8 call answered from a model in the
+ * A synthetic Midnight chain for the recording driver's tests: every allowed node call answered from a model in the
  * node's answer shapes (`src/node/decode.ts` reads them), by a {@link Script} of the scripted node
- * (`./scripted-node.ts`), on any connection and in any order, as a public node answers. Its runtime upgrades follow
- * LG-1's terms: block U enacts the upgrade, so the state at U already has the new runtime (`state_getRuntimeVersion`
- * at U's hash) while U's header still carries the old one in its `MNSV` digest, and F = U + 1 is the first block
- * built by the new runtime. Block 0's header carries the runtime at genesis.
+ * (`./scripted-node.ts`), on any connection and in any order, as a public node answers. [IN-8]
+ *
+ * Its runtime upgrades follow the ledger's boundary terms: block U enacts the upgrade, so the state at U already has
+ * the new runtime (`state_getRuntimeVersion` at U's hash) while U's header still carries the old one in its `MNSV`
+ * digest, and F = U + 1 is the first block built by the new runtime. Block 0's header carries the runtime at genesis.
+ * [LG-1]
  *
  * `fault` lets a test break a request — by its method, its params and which request of that pair it is (counting from
  * 1, across connections) — with a dropped connection, an error answer, another result, or no answer, to see the driver

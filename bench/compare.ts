@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url";
 import type { Baseline, LatencyStats } from "./types.js";
 
 /**
- * The bench smoke's comparison (`./smoke.ts`; `openspec/changes/core-arch/design.md` §13, Benchmarks: the non-gating
- * job): a measured p99 more than an order of magnitude above the committed baseline's is flagged for a person to look
- * at; nothing here fails a build on a number.
+ * The bench smoke's comparison (`./smoke.ts`), a job that never gates a build: a measured p99 more than an order of
+ * magnitude above the committed baseline's is flagged for a person to look at; nothing here fails a build on a number.
+ * [design §13]
  */
 
 /** A p99 this many times the baseline's is flagged. */

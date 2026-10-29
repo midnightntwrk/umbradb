@@ -1,20 +1,26 @@
 /**
- * The runtime metadata `core-block-fetch` decodes a block's content with (CD-2, LG-4; task 10.3): `state_getMetadata`'s
- * answer, read far enough to name each extrinsic's call — the portable type registry and the pallets with their
- * indices and call enums.
+ * The runtime metadata `core-block-fetch` decodes a block's content with: `state_getMetadata`'s answer, read far enough
+ * to name each extrinsic's call. That is the portable type registry, and the pallets with their indices and call enums.
+ * [CD-2, LG-4]
  *
  * **Which version.** `state_getMetadata` answers the runtime API `Metadata_metadata`, which FRAME's `construct_runtime`
- * implements with metadata **V14** for every runtime (newer versions only through `Metadata_metadata_at_version`, which
- * IN-8 does not list), so V14 is read whole and its end checked; V15, whose registry and pallets differ from V14's only by
- * the pallets' documentation, is read up to its pallets; any other version is refused. The layout is `frame-metadata`'s
- * (`RuntimeMetadataPrefixed`: the magic `meta`, the version byte, then the version's struct) over `scale-info`'s portable
- * registry, whose encoding every version shares — checked against a Midnight node's V16 metadata file (task 10.3's
- * probe; the record).
+ * implements with metadata **V14** for every runtime. Newer versions are only available through
+ * `Metadata_metadata_at_version`, which is not among the node calls the system may make. [IN-8]
+ * - V14 is read whole and its end is checked.
+ * - V15, whose registry and pallets differ from V14's only by the pallets' documentation, is read up to its pallets.
+ * - Any other version is refused.
  *
- * The value read is frozen: types by id, and the pallets in their order with their index (the byte that opens their
- * calls), the type ids of their call, event and error enums, and their storage entries — the storage prefix and, per
- * entry, its name, modifier and types (task 11.1: `core-chain-events` finds `System::Events`' type there, CD-4). Pure: no
- * Node.js import.
+ * The layout is `frame-metadata`'s (`RuntimeMetadataPrefixed`: the magic `meta`, the version byte, then the version's
+ * struct) over `scale-info`'s portable registry, whose encoding every version shares. It was checked against a
+ * Midnight node's V16 metadata file.
+ *
+ * The value read is frozen. It holds the types by id, and the pallets in their order, each with:
+ * - its index (the byte that opens its calls);
+ * - the type ids of its call, event and error enums;
+ * - its storage entries: the storage prefix and, for each entry, its name, modifier and types. `core-chain-events`
+ *   finds the type of `System::Events` there. [CD-4]
+ *
+ * Pure: no Node.js import.
  */
 
 import { ScaleError, ScaleReader } from "./scale.js";

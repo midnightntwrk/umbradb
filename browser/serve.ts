@@ -1,5 +1,5 @@
 /**
- * `npm run web`'s server (task 17.3a): serves the browser build (`dist-browser/`, written by `npm run build:browser`)
+ * `npm run web`'s server: serves the browser build (`dist-browser/`, written by `npm run build:browser`)
  * on 127.0.0.1 with the headers the page needs. The page must be cross-origin isolated — `Cross-Origin-Opener-Policy:
  * same-origin` and `Cross-Origin-Embedder-Policy: require-corp` — for the ledger worker's `SharedArrayBuffer`; without
  * them its log shows `SharedArrayBuffer is not defined`. Every answer also carries `Cross-Origin-Resource-Policy:

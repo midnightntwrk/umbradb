@@ -7,12 +7,12 @@ import { createInterface } from "node:readline";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawnChild } from "../child-processes.js";
 
-// Task 0.1 of `openspec/changes/core-arch` (design.md §4 "Writer lock" and §14, owner decision Q50): characterization
-// test of the operating-system lock the PGlite backend takes in Node.js. A process opens `<data directory>.lock.sqlite`
-// with the built-in `node:sqlite` (`DatabaseSync`), sets `busy_timeout` to 0 and runs `BEGIN EXCLUSIVE`, never
-// committing. SQLite's file locks are operating-system locks: a second process is refused at once while the holder
-// lives — also while it is stopped with SIGSTOP — and a new process takes the lock at once after the holder is killed
-// with SIGKILL. These tests exercise Node.js and SQLite, not UmbraDB code.
+// A characterization test of the operating-system lock the PGlite backend takes in Node.js. A process opens `<data
+// directory>.lock.sqlite` with the built-in `node:sqlite` (`DatabaseSync`), sets `busy_timeout` to 0 and runs `BEGIN
+// EXCLUSIVE`, never committing. SQLite's file locks are operating-system locks: a second process is refused at once
+// while the holder lives — also while it is stopped with SIGSTOP — and a new process takes the lock at once after the
+// holder is killed with SIGKILL. These tests exercise Node.js and SQLite, not UmbraDB code.
+// [Q50; design §4 "Writer lock", §14]
 
 /**
  * The lock-taking process. It prints one JSON line: `{ locked: true }` once `BEGIN EXCLUSIVE` succeeded, or

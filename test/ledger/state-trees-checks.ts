@@ -2,12 +2,13 @@ import { readFileSync } from "node:fs";
 import type { StateSummary } from "../../src/ledger/types.js";
 import { hex, type Ledger } from "./adapter-fixtures.js";
 
-// Task 12.1b of `openspec/changes/core-arch` (A158; LG-16; owner decision Q138 A): the clause the state-trees test
-// (`state-trees.test.ts`) runs against the real packages and adapters and its committed negative control
-// (`state-trees.negative-control.test.ts`) against a wrong one. The oracle is `fixtures/state-trees/expected.json`:
-// LG-16's six tree values of fixed states, read from the ledger's Rust state as the official indexer reads them, by
-// `fixtures/state-trees/oracle/main.rs` built against an unpatched `midnight-ledger` checkout at each vendored version's
-// pinned commit — nothing of the vendored packages or of UmbraDB.
+// The state-trees check. The state-trees test (`state-trees.test.ts`) runs it against the real packages and adapters,
+// and its committed negative control (`state-trees.negative-control.test.ts`) against a wrong one. [A158, LG-16, Q138 A]
+//
+// The oracle is `fixtures/state-trees/expected.json`: the six tree values (first free indexes and roots) of fixed
+// states, read from the ledger's Rust state as the official indexer reads them. They are written by
+// `fixtures/state-trees/oracle/main.rs`, built against an unpatched `midnight-ledger` checkout at each vendored
+// version's pinned commit, so nothing comes from the vendored packages or from UmbraDB. [A158, LG-16]
 
 /** A fixed state and its six values as the oracle wrote them (first free indexes decimal, roots hex). */
 export interface OracleState {
@@ -60,9 +61,9 @@ function written(value: unknown): string {
 }
 
 /**
- * A158: for each of `ledger`'s fixed states, the six values `summaryOf` gives — from the state's tagged serialization
- * — are the oracle's exactly: each first free index a `bigint` and each root a `Uint8Array`, none null. A line per value
- * that differs.
+ * For each of `ledger`'s fixed states, the six values `summaryOf` gives from the state's tagged serialization are
+ * exactly the oracle's: each first free index a `bigint` and each root a `Uint8Array`, none null. Returns a line per
+ * value that differs. [A158]
  */
 export function stateTreesProblems(ledger: Ledger, summaryOf: (bytes: Uint8Array) => StateSummary): string[] {
   const problems: string[] = [];

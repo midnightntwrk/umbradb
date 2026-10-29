@@ -5,12 +5,12 @@ import {
 } from "./threat-model.js";
 
 /**
- * Task 17.5b (the mutation pass task 17.4c deferred): `./threat-model.ts` on small texts — the `CITATION` pattern's
- * ranges, a line 0, the fences around prose, the retired parts written without a separator, `headingProblems`'
- * counting by level and title, `knownGapProblems`' section end and the line breaks in it.
+ * `./threat-model.ts` on small texts — the `CITATION` pattern's ranges, a line 0, the fences around prose, the retired
+ * parts written without a separator, `headingProblems`' counting by level and title, `knownGapProblems`' section end
+ * and the line breaks in it.
  */
 
-/** A model whose every heading A178 asks for is there once, and `extra` after it. */
+/** A model whose every required heading is there once, and `extra` after it. [A178] */
 function model(extra = ""): string {
   return [
     ...BOUNDARIES.map((boundary, index) => `### ${index + 1}. ${boundary}`),

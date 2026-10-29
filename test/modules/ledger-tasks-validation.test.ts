@@ -5,11 +5,13 @@ import { validateDeclarations } from "../../src/modules/validation.js";
 import { CALL_ARGS_TASK, callArgsModule, STATE_BEFORE_TASK, stateBeforeModule } from "../ledger/fixtures/task-modules.js";
 import { userModules } from "./declarations.js";
 
-// Task 12.6 of `openspec/changes/core-arch` (specs/ledger LG-17; specs/modules MD-1, MD-2; design.md §5.5): a module's
-// `ledgerTasks` as validation holds a declaration built without types to them — a list of `{ name, needsState, run }`,
-// each naming one of the module's `block` items once; a module with tasks requires `block-parsed`, and one whose task
-// needs the state `ledger-state` (so the graph refuses it where `core-ledger-state` is not active, A137); a private
-// module has none. Each refusal is `invalid-declaration`, naming the field.
+// Validation of a module's `ledgerTasks`, applied also to a declaration built without types:
+// - the field is a list of `{ name, needsState, run }`, each task naming one of the module's `block` items once;
+// - a module with tasks requires `block-parsed`;
+// - a module with a task that needs the state requires `ledger-state`, so the graph refuses it where
+//   `core-ledger-state` is not active [A137];
+// - a private module has no tasks.
+// Each refusal is `invalid-declaration`, naming the field. [LG-17, MD-1, MD-2; design §5.5]
 
 /** The refusal of validating `declaration` alone as a user module. */
 function refusal(declaration: unknown): UmbraError {
@@ -50,7 +52,7 @@ describe("ledgerTasks in a declaration (task 12.6; LG-17, MD-1)", () => {
       name: "a task naming no item of the module",
       build: () => changed((d) => void (d.ledgerTasks = [{ ...CALL_ARGS_TASK, name: "other" }])),
       field: "ledgerTasks[0].name",
-      says: 'names no block item the module provides: a task\'s result becomes the module\'s block item of its name (LG-17); provide { name: "other", lifetimes: ["block"] }',
+      says: 'names no block item the module provides: a task\'s result becomes the module\'s block item of its name; provide { name: "other", lifetimes: ["block"] }',
     },
     {
       name: "a task naming an item without the block lifetime",
@@ -68,7 +70,7 @@ describe("ledgerTasks in a declaration (task 12.6; LG-17, MD-1)", () => {
       name: "a task that needs the state in a module that does not require ledger-state",
       build: () => changed((d) => void (d.requires = ["block-parsed"]), stateBeforeModule()),
       field: "ledgerTasks[0].needsState",
-      says: "does not require ledger-state: it must, so that the graph refuses it where core-ledger-state is not active (LG-17)",
+      says: "does not require ledger-state: it must, so that the graph refuses it where core-ledger-state is not active",
     },
     {
       name: "a module with tasks that does not require block-parsed",

@@ -47,16 +47,18 @@ import { core } from "../runner/process-build.js";
 import { chainDeclarations } from "./chain-build.js";
 
 /**
- * The backbone part `core-chain` (task 10.2; CD-1, IN-2, IN-3, MD-7; `design.md` §10; CORE-ARCH §4.4, §4.11): its
- * declaration; its migrations — `001` the configuration history's table (task 4.3, unchanged), `002`
- * `core_chain.identity`; the startup checks, which ask the block source — the node, through `core-block-fetch` (task
- * 10.3), or the in-memory source — for the genesis hash (block 0's), the finalized head and the finalized hash at the
- * cursor ({@link checkChain}, {@link waitForNode}); and the part's work once the runner binds it to its process
- * context ({@link bindCoreChain}): in `on-start-db` the history recorded, the identity's genesis hash and S recorded on
- * a database without a cursor, and the four `process` items published — `config`, `node-client`, `db` (read-only) and
- * `ledger-table` —; in `on-db-write` of block S the anchor hash, in S's own transaction.
+ * The backbone part `core-chain`. These tests cover:
+ * - its declaration [CORE-ARCH §4.11];
+ * - its migrations: `001` the configuration history's table, `002` `core_chain.identity` [design §10];
+ * - the startup checks ({@link checkChain}, {@link waitForNode}), which ask the block source (the node, through
+ *   `core-block-fetch`, or the in-memory source) for the genesis hash (block 0's), the finalized head and the
+ *   finalized hash at the cursor [IN-2, IN-3; CORE-ARCH §4.4];
+ * - the part's work once the runner binds it to its process context ({@link bindCoreChain}). In `on-start-db`: the
+ *   history recorded; the identity's genesis hash and S recorded on a database without a cursor; and the four
+ *   `process` items published (`config`, `node-client`, `db` (read-only) and `ledger-table`). In `on-db-write` of block
+ *   S: the anchor hash, in S's own transaction [CD-1, MD-7].
  *
- * Through the real process — A77, A78, A88 — these are `chain-process.test.ts`'s.
+ * The same through the real process are in `chain-process.test.ts`. [A77, A78, A88]
  */
 
 const S = 5n;
@@ -66,7 +68,7 @@ const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex
 /** A block 0 another chain has. */
 const OTHER_GENESIS: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0xee), parentHash: new Uint8Array(32) };
 
-/** The configured network whose genesis is `genesis`'s hash: a `custom` network (task 10.2a; Q120). */
+/** The configured network whose genesis is `genesis`'s hash: a `custom` network. [Q120] */
 const configuredAs = (genesis: BlockRef): ConfiguredGenesis => ({ network: "custom", hash: genesis.hash });
 
 /** The tests' configured network: `custom`, its genesis the in-memory chain's block 0. */
@@ -117,8 +119,9 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
     expect(CORE_CHAIN.migrations).toEqual(CORE_CHAIN_MIGRATIONS.map(({ id, sql }) => ({ id, sql })));
     expect(CORE_CHAIN_MIGRATIONS.map(({ id }) => id)).toEqual(["001", "002"]);
     const sha = (sql: string) => createHash("sha256").update(sql, "utf8").digest("hex");
-    // 001 is task 4.3's text (`ed1b51f`) with task 14.1a's column `provides` (PP-13), changed in place since no
-    // database exists yet; from now on a database that applied it keeps its checksum.
+    // 001 is the configuration history's original text (`ed1b51f`) with the column `provides` added for private
+    // processes, changed in place since no database exists yet. From now on a database that applied it keeps its
+    // checksum. [PP-13]
     expect(sha(CONFIG_MIGRATION.sql)).toBe(CONFIG_MIGRATION_SHA256);
     expect(CONFIG_MIGRATION.sql).toContain("  provides text[] NOT NULL,\n");
     expect(sha(IDENTITY_MIGRATION.sql)).toBe(IDENTITY_MIGRATION_SHA256);
@@ -127,12 +130,12 @@ describe("core-chain's declaration (CD-1, design §10, task 3.2's note (e))", ()
 
   it("makes the node client's options from the process's core settings: its node and back-off ceiling, none without a node", () => {
     expect(nodeOptionsOf({ node: NODE, backoffCeilingMs: 5_000 })).toEqual({ url: NODE, backoffCeilingMs: 5_000 });
-    // A private process has no node (CF-4): it publishes no node client.
+    // A private process has no node: it publishes no node client. [CF-4]
     expect(nodeOptionsOf({ instanceId: "p", backoffCeilingMs: 30_000 })).toBeNull();
   });
 });
 
-/** The pinned SHA-256 of migration 001 (`core_chain.config`: task 4.3's, with task 14.1a's `provides`). */
+/** The pinned SHA-256 of migration 001 (`core_chain.config`, with the private processes' `provides`). */
 const CONFIG_MIGRATION_SHA256 = "33861745ea470f413c9f6d042c2398e366d3b42be2e5dbf12e2c0147eff43a74";
 /** The pinned SHA-256 of migration 002 (`core_chain.identity`). */
 const IDENTITY_MIGRATION_SHA256 = "c5474e25be7bdd0bf5a68965a20471039819cbb222750a5099252d130e074fc1";
@@ -406,15 +409,16 @@ describe("the configured network's genesis hash (IN-3; decision records Q117, Q1
   it("is the built-in table's for each known network, read through task 12.2's table; every one has it in this build", () => {
     for (const network of KNOWN_NETWORKS) {
       const recorded = builtInNetwork(network)?.genesis?.hash;
-      // Task 0.3 recorded every known network's genesis from its node (src/ledger/networks.json), so Q117's refusal
-      // applies to none of them in this build.
+      // Every known network's genesis was recorded from its node (src/ledger/networks.json), so the refusal of a known
+      // network with no recorded genesis applies to none of them in this build. [Q117]
       expect(recorded, network).toMatch(/^0x[0-9a-f]{64}$/);
       expect(configuredGenesisOf({ network }), network).toEqual({ network, hash: bytes(recorded as string) });
     }
   });
 
   it("is null for a known network whose built-in table records no genesis hash, or that has no built-in entry", () => {
-    // A networks file of 12.2's format whose stagenet entry records no genesis hash yet (as before task 0.3).
+    // A networks file in the built-in format whose stagenet entry records no genesis hash yet, as before the genesis
+    // hashes were recorded.
     const file = structuredClone(networksFile) as { networks: { network: string; genesis: unknown }[] };
     for (const entry of file.networks) if (entry.network === "stagenet") entry.genesis = null;
     const networks = parseNetworksFile(file);
@@ -422,7 +426,8 @@ describe("the configured network's genesis hash (IN-3; decision records Q117, Q1
     expect(configuredGenesisOf({ network: "stagenet" }, lookup)).toEqual({ network: "stagenet", hash: null });
     expect(configuredGenesisOf({ network: "mainnet" }, lookup).hash).toEqual(bytes(builtInNetwork("mainnet")?.genesis?.hash as string));
     expect(configuredGenesisOf({ network: "preview" }, () => null)).toEqual({ network: "preview", hash: null });
-    // A known network's genesis is the build's only: never a genesisHash (which the configuration refuses there, CF-4).
+    // A known network's genesis is the build's only: never a genesisHash (which the configuration refuses there).
+    // [CF-4]
     expect(configuredGenesisOf({ network: "stagenet", genesisHash: `0x${"cd".repeat(32)}` }, lookup)).toEqual({ network: "stagenet", hash: null });
     expect(configuredGenesisOf({ network: "mainnet", genesisHash: `0x${"cd".repeat(32)}` }).hash).toEqual(
       bytes(builtInNetwork("mainnet")?.genesis?.hash as string),
@@ -437,11 +442,11 @@ interface ChainStarted {
   readonly contexts: ProcessContexts;
   readonly facts: CoreChainFacts;
   readonly binding: ReturnType<typeof bindCoreChain>;
-  /** Closes what the test made for it: the node client (the process closes its own, task 10.3). */
+  /** Closes what the test made for it: the node client (the process closes its own). */
   close(): Promise<void>;
 }
 
-/** The `core` revision's ledger table in effect the tests give `core-chain` (task 12.2's preprod table, LG-3). */
+/** The `core` revision's ledger table in effect that the tests give `core-chain` (the preprod table). [LG-3] */
 const LEDGER_TABLE: LedgerTable = ledgerTableOf("preprod", undefined);
 
 /** The configuration of the chain's tests: a `core` entry from each of `starts` (S is the lowest). */
@@ -451,8 +456,8 @@ function configOf(declarations: DeclarationSet<ModuleDeclaration>, starts: reado
 }
 
 /**
- * The runner's startup up to the seal (task 5.3's order): the history checked, the graph, the contexts, `core-chain`
- * bound with `facts` (the source's genesis hash unless given), `startDatabase`, the seal.
+ * The runner's startup up to the seal, in the runner's order: the history checked, the graph, the contexts,
+ * `core-chain` bound with `facts` (the source's genesis hash unless given), `startDatabase`, the seal.
  */
 async function startChain(
   db: Database,
@@ -481,7 +486,7 @@ async function startChain(
     ledgerTable: LEDGER_TABLE,
   };
   const binding = bindCoreChain(contexts.of(CORE_CHAIN_ID), facts);
-  // core-block-fetch puts the in-memory source's block items (task 10.3): every in-memory source gives the same ones.
+  // core-block-fetch puts the in-memory source's block items: every in-memory source gives the same ones.
   if (graph.modules.some((part) => part.id === CORE_BLOCK_FETCH_ID)) {
     bindCoreBlockFetch(contexts.of(CORE_BLOCK_FETCH_ID), new InMemoryBlockSource({ head: 0n }));
   }
@@ -563,7 +568,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
       { module: "core-chain", migration_id: "001" },
       { module: "core-chain", migration_id: "002" },
     ]);
-    // A module role reads it (DB-6: the database API's default privileges on core_chain), never writes it.
+    // A module role reads it (through the database API's default privileges on core_chain), never writes it. [DB-6]
     const role = schemaPlan(started.graph.modules).writeRole("core-block-commit");
     const asRole = await db.transaction(async (tx) => {
       await tx.execute(`SET LOCAL ROLE ${role}`);
@@ -580,7 +585,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     expect(row).toMatchObject({ id: 1, genesis_hash: inMemoryBlock(0n).hash, start_height: S, anchor_hash: null });
     expect(await db.read((read) => readIdentity(read))).toEqual({ genesisHash: inMemoryBlock(0n).hash, start: S, anchorHash: null });
     expect(Object.isFrozen(await db.read((read) => readIdentity(read)))).toBe(true);
-    // The history was recorded in the same callback (CF-6): the core entry's row.
+    // The history was recorded in the same callback: the core entry's row. [CF-6]
     expect((await db.read((read) => readHistory(read))).map((h) => [h.id, h.start])).toEqual([["core", S]]);
     await started.close();
   }, 120_000);
@@ -596,8 +601,8 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     const { db } = await backend.database("SELECT 1", cursorHeight);
     const first = await startChain(db);
     await first.close();
-    // Another node's genesis, and S moved down by a core revision from 3: nothing was processed yet, so the bootstrap
-    // is repeated (IN-2), not refused (IN-3 compares the genesis hash on a database with a cursor).
+    // Another node's genesis, and S moved down by a core revision from 3. Nothing was processed yet, so the bootstrap
+    // is repeated, not refused: the genesis hash is compared only on a database with a cursor. [IN-2, IN-3]
     const second = await startChain(db, { genesis: OTHER_GENESIS.hash, starts: [3n, S] });
     const [row] = await identityRow(db);
     expect(row).toMatchObject({ genesis_hash: OTHER_GENESIS.hash, start_height: 3n, anchor_hash: null });
@@ -653,7 +658,7 @@ describe.each(BACKENDS)("core-chain bound to a process on $name", (backend: Test
     expect(items.get("node-client")).toBeInstanceOf(NodeClient);
     expect(items.get("node-client")).toBe(started.binding.nodeClient);
     expect(items.get("node-client")).toBe(started.facts.nodeClient);
-    // The core revision's table in effect, as the process gives it (task 10.3; 12.2's note (c)).
+    // The core revision's table in effect, as the process gives it.
     expect(items.get("ledger-table")).toBe(LEDGER_TABLE);
     const item = items.get("db") as object;
     expect(readOnlyProblems(item, db)).toEqual([]);
@@ -700,7 +705,7 @@ describe("the table items a revision's row records (core_chain.config.provides; 
     const build = buildDeclarations();
     expect(tableItemsOf(build, "core")).toEqual(["blocks", "chain-identity", "digest-checkpoints", "digest-tables"]);
     expect(tableItemsOf(build, "core-ledger-state")).toEqual(["ledger-events", "ledger-state", "segment-results"]);
-    // Task 13.1: both providers of the shared contract-logs record it.
+    // Both providers of the shared contract-logs record it.
     expect(tableItemsOf(build, "core-contract-logs-full")).toEqual(["contract-logs"]);
     expect(tableItemsOf(build, "core-contract-logs-fast")).toEqual(["contract-logs"]);
     expect(tableItemsOf(build, "core-contract-states")).toEqual(["contract-states"]);
@@ -717,7 +722,7 @@ describe("the table items a revision's row records (core_chain.config.provides; 
   });
 
   it("records a private process's core from its own backbone (core-private-source, core-digest)", () => {
-    // Task 14.1c: core-private-source's accepted-config-hash (PP-14, Q159) beside its private-cursor.
+    // core-private-source's accepted-config-hash beside its private-cursor. [PP-14, Q159]
     expect(tableItemsOf(buildDeclarations([], { side: "private" }), "core")).toEqual([
       "accepted-config-hash",
       "chain-identity",

@@ -15,10 +15,10 @@ import { configurationRefusalLines } from "../../src/runner/configuration-refusa
 import { coreSettings } from "./process-build.js";
 
 /**
- * How a process logs a refusal of its configuration itself (task 8.1b; AE-3, CF-1–CF-3; owner decision Q137 B): one
- * line with the refusal's code, how many findings it has and that the process ends, then one line per finding — its
- * path and message with its code, as `umbradb config check` prints it —, every line through the redaction it is given;
- * the cases the command's own lines (task 4.4a's `refusalLines`, which these replace) covered.
+ * How a process logs a refusal of its configuration itself: one line with the refusal's code, how many findings it has
+ * and that the process ends, then one line per finding (its path and message with its code, as `umbradb config check`
+ * prints it), every line through the redaction it is given. Also the cases the command's own lines covered (its earlier
+ * `refusalLines`, which these replace). [AE-3, CF-1–CF-3, Q137 B]
  */
 
 const PASSWORD = "pw-8-1b-LINES";

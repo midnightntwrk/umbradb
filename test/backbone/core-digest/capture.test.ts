@@ -14,11 +14,13 @@ import { concatBytes, fromHex } from "../../determinism/cbor-decoder.js";
 import { type Chain, digestRows, runBlock, startChain, testModule } from "./chain.js";
 
 /**
- * Change capture across startups (DT-4; task 7.1; `src/db/change-capture.ts`), on both backends: what the database API
- * does after each part's migrations and when startup ends, so that a block's digests hold the block's changes and
- * nothing else — not a part's `on-start-db` writes, not a migration's — and follow the tables as their migrations change
- * them: a column added, a column dropped, a table renamed, a partition added, a table declared `deterministic: false`
- * later, a trigger disabled by hand, a shared item's table.
+ * Change capture across startups (`src/db/change-capture.ts`), on both backends. These tests cover what the database
+ * API does after each part's migrations and when startup ends, so that:
+ * - a block's digests hold the block's changes and nothing else: not a part's `on-start-db` writes, not a migration's;
+ * - the digests follow the tables as their migrations change them: a column added, a column dropped, a table renamed,
+ *   a partition added, a table declared `deterministic: false` later, a trigger disabled by hand, a shared item's
+ *   table.
+ * [DT-4]
  *
  * Expected digests are computed here with `node:crypto` from CBOR written out by hand (RFC 8949).
  */
@@ -208,7 +210,7 @@ describe.each(BACKENDS)("change capture across startups, on $name (DT-4)", (back
     const chain = await startChain(db, [module]);
     await runBlock(chain);
     const d1 = (await digestRows(db))["m.t"];
-    // Writes outside any block (no block's changes, DT-4) leave shadow rows of their own transaction behind.
+    // Writes outside any block (so no block's changes) leave shadow rows of their own transaction behind. [DT-4]
     await db.transaction(async (tx) => {
       await tx.execute("SET LOCAL ROLE umbradb_m_m");
       await tx.execute("UPDATE m.t SET v = 'b' WHERE k = 1");
@@ -253,7 +255,7 @@ describe.each(BACKENDS)("change capture across startups, on $name (DT-4)", (back
     });
     const chain = await startChain(db, [module]);
     await runBlock(chain);
-    // DT-2: by the bytes of the key, column by column — "B" < "a" < "b", and in the second column "B" < "y".
+    // Ordered by the bytes of the key, column by column: "B" < "a" < "b", and in the second column "B" < "y". [DT-2]
     const changes = concatBytes(
       hex("84"),
       ...[
@@ -270,7 +272,7 @@ describe.each(BACKENDS)("change capture across startups, on $name (DT-4)", (back
     "keys a shadow table with a nondeterministic collation as its table does: one change for one key (PostgreSQL)",
     async () => {
       // PGlite 0.5.10's ICU treats this collation as deterministic ('a' = 'A' is false there), so this runs on
-      // PostgreSQL alone (docs/issues: nondeterministic collations differ between the backends).
+      // PostgreSQL alone: nondeterministic collations behave differently on the two backends.
       const { db } = await backend.database("SELECT 1");
       const module = moduleM({
         tables: ["names"],
@@ -305,7 +307,7 @@ describe.each(BACKENDS)("change capture across startups, on $name (DT-4)", (back
       () => undefined,
       (error: unknown) => error,
     );
-    expect((refused as Error).message).toBe("change capture: m.nokey has no primary key (DT-6's check runs first)");
+    expect((refused as Error).message).toBe("change capture: m.nokey has no primary key (the determinism check runs first)");
   }, 60_000);
 
   it("digests a shared item's table, written under the item's role", async () => {

@@ -12,14 +12,17 @@ import { entry } from "../modules/graph-fixtures.js";
 import { InMemoryBlockSource, type Process, runLoop, startProcess } from "./process-harness.js";
 
 /**
- * A141's request half through a registered handler (task 5.2a; DB-15, RN-15, owner decision Q71): the module API reads
- * for each request with `db.read(…, { timeoutMs: apiReadTimeoutMs })`, so on PostgreSQL a handler's read running
- * `pg_sleep(60)` with `apiReadTimeoutMs` 1000 fails with `query-timeout`, not retryable, within 2 s — the response 504 —
- * and the next read on that connection succeeds; a handler's read that awaits 2 s between two statements fails with
- * `query-timeout`, and the next read succeeds on a new connection; on PGlite an API read sets neither timeout. The
- * database API's half (the read option itself) is task 2.7's `test/db/read-timeouts.test.ts`.
+ * API read timeouts, the request half, through a registered handler. The module API reads for each request with
+ * `db.read(…, { timeoutMs: apiReadTimeoutMs })`. With `apiReadTimeoutMs` 1000, on PostgreSQL:
+ * - a handler's read running `pg_sleep(60)` fails with `query-timeout`, not retryable, within 2 s (the response is
+ *   504), and the next read on that connection succeeds;
+ * - a handler's read that awaits 2 s between two statements fails with `query-timeout`, and the next read succeeds on a
+ *   new connection.
  *
- * Every test has a timeout far above its work; "within 2 s" is asserted as A141 states it.
+ * On PGlite an API read sets neither timeout. The database API's half (the read option itself) is
+ * `test/db/read-timeouts.test.ts`. [A141, DB-15, RN-15, Q71]
+ *
+ * Every test has a timeout far above its work; "within 2 s" is asserted as the acceptance criterion states it. [A141]
  */
 
 const TIMEOUT_MS = 1_000;
@@ -75,15 +78,15 @@ function slowApi(seen: Seen): ModuleDeclaration {
   });
 }
 
-/** The error a handler's read failed with is A141's: `query-timeout`, not retryable. */
+/** The error a handler's read failed with is the expected one: `query-timeout`, not retryable. [A141] */
 function isQueryTimeout(error: unknown): boolean {
   return error instanceof UmbraError && error.code === "query-timeout" && error.retryable === false;
 }
 
 /**
- * A141's request-half oracle on PostgreSQL over a process serving `slow-api` with `apiReadTimeoutMs` 1000 and one read
- * connection: the problems found — none when the handler's read is bounded as DB-15 says. `cancel` ends a statement a
- * read without the bound would leave running, so the check ends either way.
+ * The request-half oracle on PostgreSQL over a process serving `slow-api` with `apiReadTimeoutMs` 1000 and one read
+ * connection: the problems found, none when the handler's read is bounded by the timeout. `cancel` ends a statement a
+ * read without the bound would leave running, so the check ends either way. [A141, DB-15]
  */
 async function a141Problems(url: string, seen: Seen, cancel: (pid: number) => Promise<void>): Promise<string[]> {
   const problems: string[] = [];

@@ -4,11 +4,11 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Task 0.2 of `openspec/changes/core-arch` (design.md §5.2, specs/ledger LG-5): what the repository records for each
-// vendored ledger build — the pinned upstream source, the patches, the build pins — and that the committed package is
-// exactly the one SHA256SUMS records. Task 12.2a (A159, owner decision Q139 A) adds a third: v9 as runtime 2.0 built
-// it, `ledger-9.1.0.0-rc.3`. (`npm run vendor:ledger` rebuilds the packages and compares them with
-// SHA256SUMS; this test checks the committed files without rebuilding.)
+// What the repository records for each vendored ledger build (the pinned upstream source, the patches, the build pins),
+// and that the committed package is exactly the one SHA256SUMS records. (`npm run vendor:ledger` rebuilds the packages
+// and compares them with SHA256SUMS; this test checks the committed files without rebuilding.) [LG-5; design §5.2]
+//
+// There is a third build besides v8 and v9: v9 as runtime 2.0 built it, `ledger-9.1.0.0-rc.3`. [A159, Q139 A]
 
 const ledgerDir = fileURLToPath(new URL("../../vendor/ledger/", import.meta.url));
 

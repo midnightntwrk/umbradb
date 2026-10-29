@@ -1,61 +1,71 @@
 /**
- * The core's side of the process transport (`openspec/changes/core-arch/specs/private-processes/spec.md` PP-3, PP-4,
- * PP-5, PP-9, PP-11; `design.md` §8; CORE-ARCH §4.14, §4.20; task 14.2): the core process listens for private
- * processes on its `listen.transport` address over WebSocket (`ws`), and answers them with the messages of
- * `./messages.ts`. The process starts it once its database is open and its chain known, before the bootstrap's wait,
- * when `listen.transport` is set, and closes it at its stop (`src/runner/process.ts`).
+ * The core's side of the process transport. The core process listens for private processes on its `listen.transport`
+ * address over WebSocket (`ws`), and answers them with the messages of `./messages.ts`. When `listen.transport` is set,
+ * the process starts the transport once its database is open and its chain known, before the bootstrap's wait, and
+ * closes it at its stop (`src/runner/process.ts`). [PP-3, PP-4, PP-5, PP-9, PP-11; design §8; CORE-ARCH §4.14, §4.20]
  *
- * **Mutual TLS** (PP-11, owner decision Q34: opt-in). With the `core` entry's `tls` set — `certificate` and `key`, the
- * core's own, and `trustedRoots`, the certificate authorities whose certificates it accepts, each PEM text — the server
+ * **Mutual TLS** is opt-in, through the `core` entry's `tls`: `certificate` and `key` (the core's own) and
+ * `trustedRoots` (the certificate authorities whose certificates it accepts), each PEM text. With `tls` set, the server
  * is an `https` server that requires a client certificate signed by one of `trustedRoots` (`requestCert`,
- * `rejectUnauthorized`): a private process without one, or with another, is refused in the TLS handshake, before any
- * WebSocket exists (design §14: `CERTIFICATE_REQUIRED`); without `tls` it is a plain `http` server and the transport is
- * unauthenticated, for trusted networks, one host, a TEE with its own channel. TEE attestation is out of scope.
+ * `rejectUnauthorized`). A private process without such a certificate is refused in the TLS handshake, before any
+ * WebSocket exists (`CERTIFICATE_REQUIRED`). Without `tls`, it is a plain `http` server and the transport is
+ * unauthenticated: for trusted networks, one host, or a TEE with its own channel. TEE attestation is out of scope.
+ * [PP-11, Q34; design §14]
  *
  * **A connection** speaks after its `hello`: any other message first closes it. A `hello` whose instance id another
- * connection holds — or this one already, a `hello` sent twice — is refused with `hello-ack.refused`
- * `duplicate-instance` and its connection closed, the first connection unchanged (PP-4); otherwise it is answered with
- * `hello-ack`: whether the instance is listed in `lockstepInstances`, the public genesis hash, S, and the public cursor
- * (null before the first commit). Each of the core's three messages carries its configuration hash, `configHash`
- * (RN-16, PP-4, PP-14; task 14.1b: computed once at the process's startup, `../runner/process.ts`).
+ * connection holds (or this one already, when `hello` is sent twice) is refused with `hello-ack.refused`
+ * `duplicate-instance`, and its connection is closed; the first connection is unchanged. Any other `hello` is answered
+ * with `hello-ack`: whether the instance is listed in `lockstepInstances`, the public genesis hash, S, and the public
+ * cursor (null before the first commit). Each of the core's three messages carries its configuration hash,
+ * `configHash`, computed once at the process's startup (`../runner/process.ts`). [PP-4, PP-14, RN-16]
  *
- * **Lockstep** (PP-6, PP-7; task 14.3). A listed instance's `hello` below the public cursor − 1 — it was listed late, or
- * its database was replaced: the mutable public state of the heights it missed is gone — is answered `refused:
- * lockstep-behind`, and its connection kept: it holds its id, is answered, and halts by its own check at its first
- * height (the public cursor is past it), while the core keeps waiting for it (Q24) and names it. The core's
- * bookkeeping (`./lockstep.ts`, the process's, which the finalized loop waits on before `BEGIN`) is told of each listed
- * instance's `hello`, of each `report` that counts, and of the close of the connection holding its id. A `report` counts
- * once its hash is the public block's at its height, read in one `Database.read` (bounded as a read, counted with the
- * connection's reads); one whose hash differs, or at a height with no public block, closes the connection (1008,
- * `report-hash-mismatch`), which tells the instance to halt (PP-6), and the core holds the instance refused until its
- * next `hello`; one the core cannot check (its read failed) closes it 1011 (`report-unchecked`), and the instance
- * connects again, its `hello` giving its height. A refused instance's report counts for nothing.
+ * **Lockstep.** A listed instance's `hello` below the public cursor − 1 means it was listed late or its database was
+ * replaced, and the mutable public state of the heights it missed is gone. It is answered `refused: lockstep-behind`,
+ * and its connection is kept: it holds its id and is answered, and it halts by its own check at its first height (the
+ * public cursor is past it). Meanwhile the core keeps waiting for it and names it. [PP-7, Q24]
+ *
+ * The core's bookkeeping (`./lockstep.ts`, which the finalized loop waits on before `BEGIN`) is told of each listed
+ * instance's `hello`, of each `report` that counts, and of the close of the connection holding the instance's id. A
+ * `report` is checked against the public block's hash at its height, read in one `Database.read` (bounded as a read,
+ * counted with the connection's reads):
+ * - a matching hash counts;
+ * - a different hash, or a height with no public block, closes the connection (1008, `report-hash-mismatch`), which
+ *   tells the instance to halt; the core holds the instance refused until its next `hello` [PP-6];
+ * - a report the core cannot check (its read failed) closes the connection with 1011 (`report-unchecked`), and the
+ *   instance connects again, its `hello` giving its height.
+ *
+ * A refused instance's report counts for nothing. [PP-6]
  *
  * **What the core sends and answers.**
- * - `committed` after each public commit, to every connection past its `hello` (PP-3: it only wakes a private process,
- *   which reads the public cursor itself, so a lost one costs nothing).
- * - `read-result` for each `read`: its statements run in one consistent read of the public database (`Database.read`,
- *   bounded by `apiReadTimeoutMs` as a module API request is, DB-15), the height read (null on a database with nothing
- *   committed) and, per statement, each column's name and PostgreSQL type name with the rows, every value as
- *   `./messages.ts` writes it; or `error`, a code (an `UmbraError`'s, `database-error` for anything else, never a
- *   message, which may hold a credential, AE-6). A result whose message would exceed {@link MAX_MESSAGE_BYTES} is
- *   answered `error: result-too-large`.
- * - **Confined reads** (PP-4, A172; task 14.2b, the threat model draft's gap 1; `design.md` §8): before any statement
- *   of a `read` runs, each must be one read (`./read-gate.ts`: its command `SELECT`, `WITH`, `VALUES` or `TABLE`, one
- *   statement, no function or catalog the core refuses), so that none can leave the read-only transaction the database
- *   refuses every write in, nor change the session. A `read` with one that is not is answered `error: read-refused`
- *   with `refused` naming the first such statement, none of its statements runs, the refusal is logged (the instance,
- *   the statement's place and what it names, never its text), and the connection stays open.
+ * - `committed` after each public commit, to every connection past its `hello`. It only wakes a private process, which
+ *   reads the public cursor itself, so a lost one costs nothing. [PP-3]
+ * - `read-result` for each `read`. Its statements run in one consistent read of the public database (`Database.read`,
+ *   bounded by `apiReadTimeoutMs` as a module API request is). It holds the height read (null on a database with
+ *   nothing committed) and, per statement, each column's name and PostgreSQL type name with the rows, every value as
+ *   `./messages.ts` writes it. On failure it holds `error`, a code: an `UmbraError`'s, or `database-error` for anything
+ *   else, never a message, which may hold a credential. A result whose message would exceed {@link MAX_MESSAGE_BYTES}
+ *   is answered `error: result-too-large`. [PP-4, DB-15, AE-6]
+ * - **Confined reads.** Before any statement of a `read` runs, each must be one read (`./read-gate.ts`: its command
+ *   `SELECT`, `WITH`, `VALUES` or `TABLE`, one statement, no function or catalog the core refuses). So none can leave
+ *   the read-only transaction, in which the database refuses every write, nor change the session. A `read` with a
+ *   statement that is not one read is answered `error: read-refused`, with `refused` naming the first such statement.
+ *   None of its statements runs, the refusal is logged (the instance, the statement's place and what it names, never
+ *   its text), and the connection stays open. [PP-4, A172; design §8]
  * - `report` (lockstep): checked and counted (see **Lockstep**); its height and hash are the instance's last known.
  *
- * **What closes a connection** (PP-4): a message that is not JSON, has an unknown `v` or `type` — an `api` or
- * `api-result` among them: nothing calls a module across the transport (owner decision Q140 C) —, or fails its schema; a
- * binary frame; a message over {@link MAX_MESSAGE_BYTES} (`ws`'s `maxPayload`); a message only the core sends
- * (`hello-ack`, `committed`, `read-result`); more than {@link MAX_PENDING_READS} reads unanswered at once; a peer that
- * reads so slowly that more than {@link MAX_BUFFERED_BYTES} wait in its socket (PP-5: the core never waits for an
- * instance — it drops it, and the instance reconnects and catches up from the public cursor); a peer that does not
- * answer a ping within {@link PING_INTERVAL_MS} (a half-open connection would otherwise hold its instance id). Each
- * close is logged with its reason, never with the message's text.
+ * **What closes a connection** [PP-4]:
+ * - a message that is not JSON, has an unknown `v` or `type`, or fails its schema; an `api` or `api-result` message is
+ *   an unknown `type`, since nothing calls a module across the transport [Q140 C];
+ * - a binary frame;
+ * - a message over {@link MAX_MESSAGE_BYTES} (`ws`'s `maxPayload`);
+ * - a message only the core sends (`hello-ack`, `committed`, `read-result`);
+ * - more than {@link MAX_PENDING_READS} reads unanswered at once;
+ * - a peer that reads so slowly that more than {@link MAX_BUFFERED_BYTES} wait in its socket: the core never waits for
+ *   an instance, it drops it, and the instance reconnects and catches up from the public cursor [PP-5];
+ * - a peer that does not answer a ping within {@link PING_INTERVAL_MS} (a half-open connection would otherwise hold its
+ *   instance id).
+ *
+ * Each close is logged with its reason, never with the message's text.
  */
 
 import { createServer as createHttpServer, type IncomingMessage, type Server } from "node:http";
@@ -88,7 +98,7 @@ import { unrefTimer } from "./timers.js";
 /** The largest message either side sends or takes, in bytes (`ws`'s `maxPayload`; a `read-result` above it is refused). */
 export const MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
 
-/** The most bytes waiting in a connection's socket before the core drops it as too slow (PP-5). */
+/** The most bytes waiting in a connection's socket before the core drops it as too slow. [PP-5] */
 export const MAX_BUFFERED_BYTES = 2 * MAX_MESSAGE_BYTES;
 
 /** The most reads of one connection the core runs or holds at once. */
@@ -103,7 +113,9 @@ export const CLOSE_PROTOCOL = 1008;
 /** The WebSocket close code of a report the core could not check (RFC 6455's internal error): connect again. */
 export const CLOSE_UNCHECKED = 1011;
 
-/** The close reason that tells a lockstep instance its report's hash is not the public block's, and to halt (PP-6). */
+/**
+ * The close reason that tells a lockstep instance its report's hash is not the public block's, and to halt. [PP-6]
+ */
 export const REPORT_HASH_MISMATCH = "report-hash-mismatch";
 
 /** The transport's limits (see the module comment); the tests give smaller ones. */
@@ -122,14 +134,14 @@ export const TRANSPORT_LIMITS: TransportLimits = Object.freeze({
   pingIntervalMs: PING_INTERVAL_MS,
 });
 
-/** The `tls` setting (CF-4, PP-11): the process's certificate and key, and the roots it trusts, each PEM text. */
+/** The `tls` setting: the process's certificate and key, and the roots it trusts, each PEM text. [CF-4, PP-11] */
 export interface TransportTls {
   readonly certificate: string;
   readonly key: string;
   readonly trustedRoots: readonly string[];
 }
 
-/** What the core knows of a connected instance (PP-9: its id, its connection, its lockstep flag, its height). */
+/** What the core knows of a connected instance: its id, its connection, its lockstep flag, its height. [PP-9] */
 export interface InstanceView {
   readonly instance: string;
   readonly lockstep: boolean;
@@ -156,9 +168,9 @@ export interface CoreTransportOptions {
   readonly lockstepInstances: readonly string[];
   /** The process's lockstep bookkeeping, which the transport tells (`./lockstep.ts`); one of its own unless given. */
   readonly lockstep?: Lockstep;
-  /** The bound of each read (`apiReadTimeoutMs`, DB-15). */
+  /** The bound of each read (`apiReadTimeoutMs`). [DB-15] */
   readonly readTimeoutMs: number;
-  /** The process's configuration hash (RN-16, PP-4; task 14.1b), on its `hello-ack`, `committed` and `read-result`. */
+  /** The process's configuration hash, sent on its `hello-ack`, `committed` and `read-result`. [RN-16, PP-4] */
   readonly configHash: string;
   /** Where log lines go. */
   readonly log: (line: string) => void;
@@ -169,8 +181,8 @@ export interface CoreTransportOptions {
   /** The negative controls' check of a `report`'s hash; compared with the public block's unless `"accept"`. */
   readonly reports?: "check" | "accept";
   /**
-   * The negative control's read path: task 14.2's — every statement of a `read` run as sent, in the read-only
-   * transaction and nothing more — when `"unconfined"`; each statement checked first (`./read-gate.ts`) unless given.
+   * The negative control's read path. With `"unconfined"`, every statement of a `read` runs as sent, in the read-only
+   * transaction and nothing more; unless given, each statement is checked first (`./read-gate.ts`).
    */
   readonly reads?: "confined" | "unconfined";
   /** The tests' limits; {@link TRANSPORT_LIMITS} unless given. */
@@ -213,7 +225,7 @@ interface Session {
   readonly socket: WebSocket;
   hello: Hello | null;
   reported: Report | null;
-  /** Why the core does not count this connection's instance (PP-6, PP-7), or null. */
+  /** Why the core does not count this connection's instance, or null. [PP-6, PP-7] */
   refused: "lockstep-behind" | "report-hash-mismatch" | null;
   pending: number;
   alive: boolean;
@@ -253,7 +265,7 @@ async function statementResult(read: ReadHandle, rows: Record<string, unknown>[]
   };
 }
 
-/** A failure as a `read-result`'s code: an `UmbraError`'s, `database-error` otherwise (AE-6). */
+/** A failure as a `read-result`'s code: an `UmbraError`'s, `database-error` otherwise. [AE-6] */
 const codeOf = (error: unknown): string => (error instanceof UmbraError ? error.code : "database-error");
 
 /** Starts the core's transport (see the module comment): resolves once it listens; rejects with `listen`'s error. */
@@ -310,14 +322,14 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     if (session.hello !== null && connected.get(session.hello.instance) === session) connected.delete(session.hello.instance);
     session.hello = hello;
     connected.set(hello.instance, session);
-    // PP-7: a listed instance below the public cursor − 1 cannot process the heights it missed.
+    // A listed instance below the public cursor − 1 cannot process the heights it missed. [PP-7]
     const cursor = options.cursor();
     const listed = lockstep.isListed(hello.instance);
     const behind = listed && cursor !== null && BigInt(hello.height) < cursor - 1n;
     session.refused = behind ? "lockstep-behind" : null;
     if (listed) lockstep.hello(hello.instance, BigInt(hello.height), behind ? "lockstep-behind" : null);
     ack(session, hello.instance, behind ? "lockstep-behind" : null);
-    const refusal = behind ? `; refused lockstep-behind: below the public cursor ${cursor} − 1 (PP-7)` : "";
+    const refusal = behind ? `; refused lockstep-behind: below the public cursor ${cursor} − 1` : "";
     options.log(`transport: instance ${hello.instance} connected at ${hello.height}${refusal}`);
   };
 
@@ -344,7 +356,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
       const found = stored === null ? null : hexOf(stored);
       if (found !== report.hash) {
         const there = found === null ? "the public database has no block there" : `the public block there has hash ${found}`;
-        options.log(`transport: instance ${instance} reported height ${height} with hash ${report.hash}, and ${there}: ${REPORT_HASH_MISMATCH} (PP-6)`);
+        options.log(`transport: instance ${instance} reported height ${height} with hash ${report.hash}, and ${there}: ${REPORT_HASH_MISMATCH}`);
         session.refused = REPORT_HASH_MISMATCH;
         lockstep.mismatched(instance);
         drop(session, CLOSE_PROTOCOL, REPORT_HASH_MISMATCH);

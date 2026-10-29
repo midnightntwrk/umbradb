@@ -5,9 +5,9 @@ import { delimiter, join } from "node:path";
 import { spawnChild } from "../child-processes.js";
 
 /**
- * Headless Chrome for the browser build's tests (task 16.1; A129–A132 `[CI]`, `[DIFF]`): the machine's Chrome, driven
- * over the Chrome DevTools Protocol with Node.js's own `WebSocket` — no test dependency is added (no Playwright or
- * Puppeteer, which `.npmrc`'s supply-chain rules would make a new pinned package and its browser download).
+ * Headless Chrome for the browser build's tests: the machine's Chrome, driven over the Chrome DevTools Protocol with
+ * Node.js's own `WebSocket`. No test dependency is added (no Playwright or Puppeteer, which `.npmrc`'s supply-chain
+ * rules would make a new pinned package and its browser download). [A129–A132]
  *
  * **Which Chrome.** `UMBRADB_CHROME` when set; else the platform's usual place — `/Applications/Google Chrome.app` on
  * macOS, `google-chrome-stable`, `google-chrome`, `chromium` or `chromium-browser` on `PATH` elsewhere (GitHub's Ubuntu
@@ -15,18 +15,18 @@ import { spawnChild } from "../child-processes.js";
  * never skipped silently.
  *
  * **A profile** is a Chrome process of its own on a new, empty user data directory (deleted when it closes): "a fresh
- * profile" (A130, A131) is a new {@link launchChrome}. Chrome runs headless with no first-run, sync, component update
- * or background networking, so the only requests are the pages'. On Linux under CI it runs with `--no-sandbox` (a
- * container's or runner's user namespaces may refuse Chrome's sandbox); the pages it loads are the tests' own.
+ * profile" is a new {@link launchChrome}. Chrome runs headless with no first-run, sync, component update or background
+ * networking, so the only requests are the pages'. On Linux under CI it runs with `--no-sandbox` (a container's or
+ * runner's user namespaces may refuse Chrome's sandbox); the pages it loads are the tests' own. [A130, A131]
  *
  * **Ending.** {@link ChromeBrowser.close} asks Chrome to close (`Browser.close`), waiting at most 10 s for its answer,
  * then kills it with SIGKILL if it has not exited within 10 s more, and fails if it has not exited 10 s after that: a
- * stuck browser never holds the suite's last hook (issue 00041). Chrome's own helper processes exit with it. The process
- * is started with `spawnChild`, so it is killed too if the test process ends first.
+ * stuck browser never holds the suite's last hook. Chrome's own helper processes exit with it. The process is started
+ * with `spawnChild`, so it is killed too if the test process ends first. [docs/issues/00041]
  *
- * **No call waits forever.** Each DevTools call fails, naming its method, when Chrome has not answered within
- * {@link CDP_CALL_MS} (a page that never settles an evaluated promise, a browser that stopped answering): the test that
- * made it fails with that reason, well within its own budget, instead of running to its timeout (issue 00041).
+ * **No call waits forever.** Each DevTools call fails, naming its method, when Chrome has not answered within {@link
+ * CDP_CALL_MS} (a page that never settles an evaluated promise, a browser that stopped answering): the test that made
+ * it fails with that reason, well within its own budget, instead of running to its timeout. [docs/issues/00041]
  */
 
 /** How long a DevTools call may wait for Chrome's answer (see the module comment): a page wait's patience. */
@@ -323,8 +323,8 @@ export class ChromeBrowser {
   }
 
   /**
-   * Lets its pages save files (a page's backup, BK-5) into `directory`, each named by its download's id, and records
-   * them in {@link downloads} (headless Chrome saves nothing unless told where).
+   * Lets its pages save files (a page's backup) into `directory`, each named by its download's id, and records them
+   * in {@link downloads} (headless Chrome saves nothing unless told where). [BK-5]
    */
   async saveDownloads(directory: string): Promise<void> {
     this.#cdp.listen((event) => {

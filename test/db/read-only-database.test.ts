@@ -13,22 +13,27 @@ import { askedLater, BACKENDS, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from ".
 import { readOnlyProblems } from "./read-only-checks.js";
 
 /**
- * The read-only database of the `db` item (task 2.8; A144; CD-1, RN-4, DB-2, DB-4, DB-15; owner decision Q73, resolved
- * E). `core-chain` provides the `process` item `db` (CD-1), and a module that requires it reads through it for work
- * outside the points; it offers `read` and nothing that writes, opens a transaction or closes the database. Inside a
- * callback a module uses the handle it was given (RN-4): on PGlite a `db.read` from inside its own `on-db-write` — which
- * runs in the block's job of the one queue — fails at once with `nested-call` (task 2.2's guard, kept by Q73), and on
- * PostgreSQL it runs on a pooled read connection, outside the block's transaction, and returns the data committed
- * before the block. Modules are trusted (Q46): what is checked here is what a module finds by ordinary use, not a
- * defence against one that goes around it.
+ * The read-only database of the `db` item. [A144 DOC, DB-2, DB-4, DB-15, Q73]
  *
- * Built here on the database API: {@link readOnlyDatabase} makes the item from a `Database`. "A module that requires
- * `db` gets" it through `ProcessContext.items` once `core-chain` publishes it (task 10.2) and the runner hands process
- * items to modules (task 5.2a); the runner's own `on-db-write` loop is played here by the test calling
- * {@link BlockWrites.write} inside one transaction of the database API, as task 2.6's tests do.
+ * `core-chain` provides the `process` item `db`. A module that requires it reads through it for work outside the
+ * points. It offers `read` and nothing that writes, opens a transaction or closes the database. [CD-1]
+ *
+ * Inside a callback a module uses the handle it was given. [RN-4]
+ * - On PGlite, a `db.read` from inside the module's own `on-db-write` (which runs in the block's job of the one
+ *   queue) fails at once with `nested-call`: the queue's guard against nested calls is kept for this item. [Q73]
+ * - On PostgreSQL it runs on a pooled read connection, outside the block's transaction, and returns the data committed
+ *   before the block.
+ *
+ * Modules are trusted: what is checked here is what a module finds by ordinary use, not a defence against one that
+ * goes around it. [Q46]
+ *
+ * Built here on the database API: {@link readOnlyDatabase} makes the item from a `Database`. A module that requires
+ * `db` gets it through `ProcessContext.items` once `core-chain` publishes it and the runner hands process items to
+ * modules. The runner's own `on-db-write` loop is played here by the test calling {@link BlockWrites.write} inside one
+ * transaction of the database API, as the tests of the block write handles do.
  */
 
-/** The type-level form of A144's check: true when `T` offers `read` and nothing else. */
+/** The type-level form of the check: true when `T` offers `read` and nothing else. [A144 DOC] */
 type OffersReadOnly<T> = [keyof T] extends ["read"] ? (["read"] extends [keyof T] ? true : false) : false;
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -52,7 +57,7 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
   );
 }
 
-/** Q73's refusal on PGlite: `database-error`, `nested-call`, not retryable. */
+/** The refusal of a nested `db.read` on PGlite: `database-error`, `nested-call`, not retryable. [Q73] */
 function expectNestedCall(error: unknown): void {
   expect(error).toBeInstanceOf(UmbraError);
   const refused = error as UmbraError;
@@ -90,8 +95,8 @@ async function snapshot(read: ReadHandle): Promise<Record<string, unknown>> {
 
 /**
  * Runs `body` as the block at `height`: one transaction of the database API whose first statement writes the cursor's
- * row (as `core-block-commit` does first in every block, CD-3), then the parts' `on-db-write` calls, opened as the
- * runner opens them (`openBlockWrites`, with the cursor before the block as the handles' height).
+ * row (as `core-block-commit` does first in every block), then the parts' `on-db-write` calls, opened as the
+ * runner opens them (`openBlockWrites`, with the cursor before the block as the handles' height). [CD-3]
  */
 function block<T>(db: Database, plan: SchemaPlan, height: bigint, body: (writes: BlockWrites) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
@@ -112,13 +117,13 @@ describe("the db item's type (CD-1, Q73, A144)", () => {
     expectTypeOf(readOnlyDatabase).parameters.toEqualTypeOf<[Database]>();
     expectTypeOf(readOnlyDatabase).returns.toEqualTypeOf<ReadOnlyDatabase>();
     const misuse = (db: ReadOnlyDatabase) => [
-      // @ts-expect-error A144: the db item opens no transaction.
+      // @ts-expect-error the db item opens no transaction. [A144 DOC]
       db.transaction,
-      // @ts-expect-error A144: the db item does not close the database.
+      // @ts-expect-error the db item does not close the database. [A144 DOC]
       db.close,
-      // @ts-expect-error A144: the db item does not write.
+      // @ts-expect-error the db item does not write. [A144 DOC]
       db.execute,
-      // @ts-expect-error A144: statements run through a read's handle, not the item.
+      // @ts-expect-error statements run through a read's handle, not the item. [A144 DOC]
       db.query,
     ];
     expectTypeOf(misuse).toBeFunction();
@@ -255,7 +260,7 @@ describe("the db item over the PGlite backend's own Database, as openPglite retu
 
 describe("A144 [DOC]: the module guide", () => {
   const guide = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "module-guide.md"), "utf8");
-  // The guide's "Reading and writing tables" section (task 17.3a's rewrite): the handles, then `db.read`.
+  // The guide's "Reading and writing tables" section: the handles, then `db.read`.
   const heading = "\n## 5. Reading and writing tables\n";
   const start = guide.indexOf(heading);
   const end = guide.indexOf("\n## ", start + 1);
@@ -294,7 +299,7 @@ describe("A144 [DOC]: the module guide", () => {
 // On both backends
 
 // Each test opens a fresh database and migrates two parts before its blocks: a few seconds on PostgreSQL under the full
-// conformance run's parallel load (task 2.6's suite saw 5 s), so each test gets 30 s.
+// conformance run's parallel load (the block write handles' suite saw 5 s), so each test gets 30 s.
 describe.each(BACKENDS)("the read-only db item on $name (A144)", { timeout: 30_000 }, (backend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
@@ -342,7 +347,7 @@ describe.each(BACKENDS)("the read-only db item on $name (A144)", { timeout: 30_0
     const seen = await ro.read(async (read) => {
       const first = await snapshot(read);
       commit.gate();
-      // On PGlite the block waits in the one queue until the read ends (DB-4); on PostgreSQL it commits now (DB-5).
+      // On PGlite the block waits in the one queue until the read ends; on PostgreSQL it commits now. [DB-4, DB-5]
       if (backend.singleQueue) expect(await settlesWithin(commit.result, 50)).toBe(false);
       else await commit.result;
       return { first, second: await snapshot(read) };

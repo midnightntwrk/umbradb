@@ -14,18 +14,19 @@ import { REPOSITORY } from "./config-fixtures.js";
 import { build, DEVTOOL } from "./history-fixtures.js";
 
 /**
- * A34 `[CI]` (CF-9; task 4.3): the development-only features refuse without the `core` entry's `developmentOptIn`,
- * naming the feature — each through a configuration file, loaded, validated and taken to where the refusal is made:
+ * The development-only features refuse without the `core` entry's `developmentOptIn`, naming the feature (`[CI]`).
+ * Each goes through a configuration file, loaded, validated and taken to where the refusal is made: [A34 CI, CF-9]
  *
- * - PGlite: the `database` setting of the process's `core` revision (the latest of the build's version, decision record
- *   Q102, option A) opens the database (`openConfiguredDatabase`), and `openPglite` refuses without the opt-in before
- *   anything is created (task 2.5, reused);
- * - a development-only module: the requirement graph refuses it (MD-5, `development-opt-in-required`, task 3.2a), given
- *   the history check's opt-in;
- * - `sweep: "off"`: the history check refuses it (CF-9's configuration half; the sweep itself is task 12.x's).
+ * - PGlite: the `database` setting of the process's `core` revision (the latest of the build's version) opens the
+ *   database (`openConfiguredDatabase`), and `openPglite` refuses without the opt-in before anything is created;
+ *   [Q102 A]
+ * - a development-only module: the requirement graph refuses it (`development-opt-in-required`), given the history
+ *   check's opt-in; [MD-5]
+ * - `sweep: "off"`: the history check refuses it. This is the configuration side only; the sweep itself is tested
+ *   elsewhere.
  *
- * Backups of a private database (CF-9's fourth feature) are task 15.x's. "Startup refuses" through the runner's
- * refused state is 5.x's.
+ * Backups of a private database, the fourth development-only feature, are tested elsewhere, and so is "startup
+ * refuses" through the runner's refused state. [CF-9]
  */
 
 /** The configuration's builders and the test modules, imported by absolute path as an operator's file imports them. */

@@ -9,10 +9,10 @@ import { PROCESS_BACKENDS, pairs, type ProcessDatabase } from "./process-backend
 import { core, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
- * A42 (RN-7; task 5.3): a module's revisions continue each other — the settings switch at the later revision's start,
- * and the module does not start again there — through the process, from its configuration: `m.entry({ start: 1,
- * config: { k: 1 } })` and `m.entry({ start: 5, config: { k: 2 } })`, the configuration history checked and recorded,
- * each revision's settings in the module's process context, and the graph's segments deciding who starts at a height.
+ * A module's revisions continue each other: the settings switch at the later revision's start, and the module does not
+ * start again there. Tested through the process, from its configuration: `m.entry({ start: 1, config: { k: 1 } })` and
+ * `m.entry({ start: 5, config: { k: 2 } })`, with the configuration history checked and recorded, each revision's
+ * settings in the module's process context, and the graph's segments deciding who starts at a height. [A42, RN-7]
  */
 
 /** One call `m` saw: the point, the height, and `k` from its block context (none for `on-start-height`). */
@@ -53,7 +53,7 @@ function moduleM(seen: Seen[]) {
   });
 }
 
-/** What one A42 run observed: every call of `m`, and `m.rows` (height, k). */
+/** What one run observed: every call of `m`, and `m.rows` (height, k). [A42] */
 interface A42Observation {
   readonly seen: readonly Seen[];
   readonly rows: readonly [number, unknown][];
@@ -61,7 +61,7 @@ interface A42Observation {
 
 const HEAD = 8;
 
-/** A42's oracle: every problem with what was observed, none when A42 holds. */
+/** The oracle: every problem with what was observed, none when the revisions continue each other. [A42] */
 function a42Problems(observed: A42Observation): string[] {
   const problems: string[] = [];
   const expected = (height: bigint): number => (height < 5n ? 1 : 2);
@@ -87,7 +87,7 @@ function a42Problems(observed: A42Observation): string[] {
   return problems;
 }
 
-/** A negative control's loop: it starts a module at every revision's start, continuing or not (CF-5 ignored). */
+/** A negative control's loop: it starts a module at every revision's start, continuing or not. [CF-5] */
 class StartsAtEveryRevision extends FinalizedLoop {
   protected override startingAt(run: HeightRun): EntryBoundary {
     const base = super.startingAt(run);
@@ -99,7 +99,7 @@ class StartsAtEveryRevision extends FinalizedLoop {
   }
 }
 
-/** Runs A42's two processes on `db` — to head 3, then restarted to head 8 — with `loop`, and observes them. */
+/** Runs the two processes on `db` — to head 3, then restarted to head 8 — with `loop`, and observes them. [A42] */
 async function a42Run(db: ProcessDatabase, loop?: new (input: LoopInput) => FinalizedLoop): Promise<A42Observation> {
   const seen: Seen[] = [];
   const m = moduleM(seen);
@@ -130,7 +130,7 @@ describe.each(PROCESS_BACKENDS)("A42: revisions continue each other (RN-7), on $
   it("A42: revisions at 1 (k = 1) and 5 (k = 2) give k = 1 at 1–4 and k = 2 from 5, without on-start-height at 5", async () => {
     const observed = await a42Run(await backend.database());
     expect(a42Problems(observed)).toEqual([]);
-    // The restart at cursor 3 re-delivered on-after-db-write for 3 (RN-11) with 3's settings, then went on at 4.
+    // The restart at cursor 3 delivered on-after-db-write for 3 again, with 3's settings, then went on at 4. [RN-11]
     const afterWrites = observed.seen.filter((call) => call.point === "on-after-db-write").map((call) => call.height);
     expect(afterWrites).toEqual([1n, 2n, 3n, 3n, 4n, 5n, 6n, 7n, 8n]);
   }, 180_000);

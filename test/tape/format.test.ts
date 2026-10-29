@@ -17,13 +17,13 @@ import {
 import { expectGoldenRoundTrip, GOLDEN_ID, GOLDEN_PATH, GOLDEN_RECORDS } from "./checks.js";
 
 /**
- * A68 `[CI]` (`openspec/changes/core-arch/acceptance.md` §9; TT-1): tapes round-trip through the reader and writer byte
- * for byte; a malformed line fails with `bad-tape-record` and its line number; the tape id is the SHA-256 of the file.
+ * Tapes round-trip through the reader and writer byte for byte; a malformed line fails with `bad-tape-record` and its
+ * line number; the tape id is the SHA-256 of the file. [A68 CI, TT-1; acceptance §9]
  *
- * A tape is read only in the one form the writer writes (each record's fields in TT-1's order, JSON without spaces,
- * strings and numbers as `JSON.stringify` writes them, a newline after every record), so every tape the reader accepts
- * is written back to the same bytes, and one tape has one id. Determinism: the property runs with a pinned, reported
- * fast-check seed.
+ * A tape is read only in the one form the writer writes (each record's fields in the tape format's order, JSON without
+ * spaces, strings and numbers as `JSON.stringify` writes them, a newline after every record), so every tape the reader
+ * accepts is written back to the same bytes, and one tape has one id. Determinism: the property runs with a pinned,
+ * reported fast-check seed. [TT-1]
  */
 
 const SEED = 20261025;
@@ -35,7 +35,7 @@ function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-/** Eleven valid lines, so that the line under test is line 12 (TT-1's scenario). */
+/** Eleven valid lines, so that the line under test is line 12, as in the tape format's scenario. [TT-1] */
 const ELEVEN = [
   '{"method":"chain_getFinalizedHead","params":[],"result":"0xaa"}',
   '{"subscribe":"s","method":"chain_subscribeFinalizedHeads","params":[]}',

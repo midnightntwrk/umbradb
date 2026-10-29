@@ -1,19 +1,19 @@
 /**
- * The `block` items `core-block-fetch` publishes for every block (`openspec/changes/core-arch/specs/chain-data/spec.md`
- * CD-2; CORE-ARCH §4.11; task 10.3), and how a source gives them ({@link BlockItemSource}): the node source from the
- * node (`./node-source.ts`), the in-memory source (`src/runner/in-memory-source.ts`) from its own blocks, for tests and
- * module authors.
+ * The `block` items `core-block-fetch` publishes for every block, and how a source gives them
+ * ({@link BlockItemSource}). The node source reads them from the node (`./node-source.ts`); the in-memory source
+ * (`src/runner/in-memory-source.ts`) builds them from its own blocks, for tests and module authors.
+ * [CD-2; CORE-ARCH §4.11]
  *
  * - `block-header` ({@link CoreBlockHeader}): the block's height, hash and parent hash, its state and extrinsics roots,
- *   its digest items as the node sent them, the `spec_version` of its `MNSV` digest (LG-1) and its own time in
- *   milliseconds (the `Timestamp::set` call, `./extrinsics.ts`) — what `core-block-commit` reads of it
- *   (`BlockHeaderItem`: `specVersion`, `timestampMs`) among them.
- * - `block-body` ({@link BlockBody}): the extrinsics as fetched, in body order, each decoded with the metadata of the
- *   runtime in the block's parent's state — its version, and an unsigned extrinsic's call by name (LG-4).
+ *   its digest items as the node sent them, the `spec_version` of its `MNSV` digest, and its own time in milliseconds
+ *   (from the `Timestamp::set` call, `./extrinsics.ts`). `core-block-commit` reads `specVersion` and `timestampMs` from
+ *   it (`BlockHeaderItem`). [LG-1]
+ * - `block-body` ({@link BlockBody}): the extrinsics as fetched, in body order. Each is decoded with the metadata of the
+ *   runtime in the parent block's state, giving its version and, for an unsigned extrinsic, its call by name. [LG-4]
  * - `runtime-metadata`: that runtime's `spec_version` and metadata, as `state_getMetadata` gave them
- *   (`RuntimeMetadataEntry`, `src/ledger/metadata.ts`: read at the parent's hash; block 0's at its own).
- * - `ledger-version`: the ledger the block's runtime maps to in the `ledger-table` item (LG-1, `selectLedgerVersion`),
- *   as text — `v8`, `v9` —, which `core-block-commit` stores.
+ *   (`RuntimeMetadataEntry`, `src/ledger/metadata.ts`). They are read at the parent's hash, and for block 0 at its own.
+ * - `ledger-version`: the ledger version the block's runtime maps to in the `ledger-table` item
+ *   (`selectLedgerVersion`), as text such as `v8` or `v9`. `core-block-commit` stores it. [LG-1]
  *
  * Pure types and one constant: no Node.js import.
  */
@@ -40,7 +40,7 @@ export interface CoreBlockHeader extends BlockHeaderItem {
 
 /** The `block-body` item (see the module comment). */
 export interface BlockBody {
-  /** The `spec_version` of the runtime whose metadata decoded the extrinsics: the parent's state's (LG-4). */
+  /** The `spec_version` of the runtime whose metadata decoded the extrinsics: the parent state's. [LG-4] */
   readonly specVersion: number;
   readonly extrinsics: readonly BodyExtrinsic[];
 }
@@ -55,7 +55,7 @@ export interface CoreBlockItems {
 
 /**
  * What `core-block-fetch` reads a block's items from: its block source (bound to its process context by the runner).
- * `table` is the `ledger-table` item (LG-1), when published.
+ * `table` is the `ledger-table` item, when published. [LG-1]
  */
 export interface BlockItemSource {
   blockItems(block: BlockRef, table: LedgerTable | undefined): Promise<CoreBlockItems>;

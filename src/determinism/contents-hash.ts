@@ -1,7 +1,7 @@
 /**
- * The contents hash of DT-3 (`openspec/changes/core-arch/specs/determinism/spec.md`): SHA-256 of one canonical CBOR
- * array holding, for each module schema and then each table in name order (byte order), the array
- * `[schema, table, [column names], [rows in primary-key order]]`, each row encoded as DT-1 encodes it.
+ * The contents hash: SHA-256 of one canonical CBOR array. For each module schema, and then each table, in name order
+ * (byte order), it holds the array `[schema, table, [column names], [rows in primary-key order]]`, each row in its
+ * canonical encoding (`encodeRow`). [DT-1, DT-3]
  *
  * Which tables count, how the catalog is read and why one handle reads one snapshot: `./module-tables.ts`. The array
  * is never built in memory: each table's row count is read first (the same snapshot), so the head of its row array
@@ -24,11 +24,12 @@ import {
 } from "./module-tables.js";
 
 /**
- * The contents hash (32 bytes) of the database `read` sees, as DT-3 defines it. The tables `options.optedOut` names —
- * the tables declared `deterministic: false`, the schema plan's `optedOut` (MD-1, owner decision Q76) — are recorded by
- * name only, `[schema, table, null, null]`: two databases that differ only in such a table's rows hash equal, and one
- * without the table hashes differently. Without the list every table is read, and the rules refuse such a table as any
- * other.
+ * The contents hash (32 bytes) of the database `read` sees. [DT-3]
+ *
+ * The tables that `options.optedOut` names (those declared `deterministic: false`, the schema plan's `optedOut`) are
+ * recorded by name only, as `[schema, table, null, null]`. So two databases that differ only in such a table's rows
+ * hash equal, and one without the table hashes differently. Without the list, every table is read, and the rules refuse
+ * such a table as any other. [MD-1, Q76]
  */
 export async function contentsHash(
   read: ConsistentRead,
@@ -60,7 +61,7 @@ export async function contentsHash(
         "row-count-changed",
         { schema: table.schema, table: table.name },
         null,
-        `counted ${count} rows, then read ${rows}: the handle did not read one snapshot (DB-2)`,
+        `counted ${count} rows, then read ${rows}: the handle did not read one snapshot`,
       );
     }
   }
@@ -68,10 +69,10 @@ export async function contentsHash(
 }
 
 /**
- * A row's encoding; a value DT-1 cannot encode fails naming the table, the column and its declared type, the row by
- * its primary key, what is wrong, and — for a number a stored value can hold (a `numeric` fraction or `NaN`, a `jsonb`
- * number outside the 64-bit integers) — why, and what to store instead (the `deterministic_postgresql` component's
- * `valueFailureBecause`).
+ * A row's canonical encoding. A value that cannot be encoded fails naming the table, the column and its declared type,
+ * the row by its primary key, and what is wrong. For a number a stored value can hold (a `numeric` fraction or `NaN`,
+ * a `jsonb` number outside the 64-bit integers), it also says why, and what to store instead (the
+ * `deterministic_postgresql` component's `valueFailureBecause`). [DT-1]
  */
 function encodeTableRow(table: ModuleTable, types: readonly ColumnType[], row: unknown[]): Uint8Array {
   try {

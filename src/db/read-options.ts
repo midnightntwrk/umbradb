@@ -1,7 +1,7 @@
 /**
- * The read option of DB-15 (`ReadOptions`, `./api.ts`; owner decision Q71), checked alike on both backends (DB-1):
- * `timeoutMs` bounds one read — a read for a module API request, by `apiReadTimeoutMs` (CF-4). The PostgreSQL backend
- * applies it (`./postgres.ts`); the PGlite backend checks it and sets nothing, as PGlite enforces neither timeout.
+ * The read option (`ReadOptions`, `./api.ts`), checked the same way on both backends. `timeoutMs` bounds one read; a
+ * read for a module API request is bounded by `apiReadTimeoutMs`. The PostgreSQL backend applies it (`./postgres.ts`);
+ * the PGlite backend checks it and sets nothing, as PGlite enforces neither timeout. [DB-15, DB-1, CF-4, Q71]
  */
 
 import type { ReadOptions } from "./api.js";

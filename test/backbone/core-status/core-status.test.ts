@@ -26,14 +26,22 @@ import { LOOP_BACKBONE } from "../../runner/loop-harness.js";
 import { loggingModule } from "../../runner/process-build.js";
 
 /**
- * The backbone part `core-status` (task 8.3; AE-1, AE-5, AE-6; CORE-ARCH §4.11, §4.18; Q68, Q70): its declaration — a
- * backbone part with no points and no items, after `core-health` in RN-3's order and in the command's build —, its
- * endpoint (the published status and the uptime at the request), what the runner's side publishes for it (the
- * instance, the node — with its best head, connection state and queue depth as the process reports them, task 8.3a —,
- * every part of the database with its digest rows, the last commit's time as RFC 3339 UTC text), and A140 for it:
- * `core-status`'s, from its own folder, its tests beside it here, mounted as the part gives it, and answered by a
- * refused process. A66 (its JSON schema) is `./status-schema.test.ts`, A67 `./secrets.test.ts`, A168 (the node's fields
- * through a core against a tape node) `./node-fields.test.ts`.
+ * The backbone part `core-status`. [CORE-ARCH §4.11, §4.18; Q70]
+ *
+ * This file tests:
+ * - its declaration: a backbone part with no points and no items, after `core-health` in the fixed backbone order and
+ *   in the command's build [RN-3];
+ * - its endpoint: the published status and the uptime at the request;
+ * - what the runner's side publishes for it: the instance; the node, with its best head, connection state and queue
+ *   depth as the process reports them; every part of the database with its digest rows; and the last commit's time as
+ *   RFC 3339 UTC text [AE-1, AE-5, AE-6, Q68];
+ * - that `/status` comes from this part, whose code and tests sit in its own folder, is mounted as the part gives it,
+ *   and is answered by a refused process [A140].
+ *
+ * Other files test:
+ * - its JSON schema: `./status-schema.test.ts` [A66];
+ * - its redaction of secrets: `./secrets.test.ts` [A67];
+ * - the node's fields through a core against a tape node: `./node-fields.test.ts` [A168].
  */
 
 /** `status()` of a process running at 3 with the finalized head 9. */
@@ -52,7 +60,7 @@ function status(facts: Partial<StatusFacts> = {}) {
   });
 }
 
-/** What `ProcessAdmin.opened` takes besides the parts and the database (`/config`'s, task 8.4). */
+/** What `ProcessAdmin.opened` takes besides the parts and the database (what `/config` uses). */
 const OPENED = { check: { entries: [], writes: [] }, history: [], genesisHash: new Uint8Array(32) };
 
 /** The facts of a core process before startup resolved its parts. */
@@ -153,7 +161,7 @@ describe("what /status shows besides status() (AE-5)", () => {
   it("on a private process: its instance id and the public cursor; no node", () => {
     const shown = snapshotOf(status({ head: 12n }), { ...FACTS, side: "private", instanceId: "wallet-a" });
     expect(shown.status).toMatchObject({ instance: { role: "private", id: "wallet-a" }, node: null, public: { cursor: "12", lockstep: null } });
-    // Whatever the process reports of a node, a private process has none to show (A168: its node fields are null).
+    // Whatever the process reports of a node, a private process has none to show: its node fields are null. [A168]
     const reported = { ...FACTS, side: "private" as const, node: { bestHead: 7n, connection: "connected" as const, queueDepth: 1 } };
     expect(snapshotOf(status(), reported).status.node).toBeNull();
   });
@@ -304,7 +312,7 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
       read: async <T>(body: (read: { query(sql: string): Promise<Record<string, unknown>[]> }) => Promise<T>): Promise<T> =>
         body({
           query: async (sql: string) => {
-            // The server's version (task 8.4's) is answered at once; the digest reads wait for the test.
+            // The server's version (for `/config`) is answered at once; the digest reads wait for the test.
             if (sql !== DIGESTS_SQL) return [{ version: "18.6" }];
             queries.push(sql);
             await new Promise<void>((resolve) => {
@@ -462,8 +470,8 @@ describe("A140 for /status: core-status's, from its own folder, its tests beside
   });
 
   it("a refused process answers /status: refused, its reason, the instance; its parts not yet known", async () => {
-    // Refused once the configuration is validated — PGlite without the development opt-in (CF-9) —, before the
-    // database opens; a refusal of the configuration itself would end the process instead, serving nothing (task 8.1b).
+    // Refused once the configuration is validated (PGlite without the development opt-in), before the database opens.
+    // A refusal of the configuration itself would end the process instead, serving nothing. [CF-9]
     const run = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     await expect(run.handle.started).rejects.toMatchObject({ code: "development-opt-in-required" });
     const body = await statusWhen(await run.origin(), (each) => each.state === "refused");
@@ -481,8 +489,8 @@ describe("A140 for /status: core-status's, from its own folder, its tests beside
   });
 
   it("a refused private process shows its role and instance, no node and the public side", async () => {
-    // A private `core` entry (CF-4: `instanceId`, no `node`) refused once validated — PGlite without the development
-    // opt-in —, before the database opens: a refusal of the configuration itself ends the process (task 8.1b).
+    // A private `core` entry (`instanceId`, no `node`) refused once validated (PGlite without the development opt-in),
+    // before the database opens. A refusal of the configuration itself ends the process. [CF-4]
     const { node: _node, ...settings } = adminCoreSettings({ kind: "pglite", memory: true }, {
       developmentOptIn: false,
       instanceId: "instance-1",

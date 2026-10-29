@@ -4,14 +4,16 @@ import { type WorkEvent, workModule } from "../runner/sigterm-module.js";
 import { chainDeclarations } from "./chain-build.js";
 
 /**
- * A process for A77's "a bootstrap killed before S commits is repeated on the next start" (task 10.2; IN-2), started by
- * `chain-process.test.ts` with `node --import tsx` and one JSON argument ({@link Job}); it reports each event as one
- * JSON line on stdout ({@link WorkerEvent}), and the test kills it with SIGKILL:
- * - `wait`: S is above the source's finalized head, so the process waits, `starting` with `waiting-for-node`, after
- *   the bootstrap's migrations and `core-chain`'s `on-start-db` committed; it reports `waiting`;
- * - `hold`: the head is at S, and module `w`'s `on-db-write` of S, inside block S's transaction, waits for ever after
- *   its first row (`sigterm-module.ts`); it reports `in-db-write`.
- * The build is the chain's (`chain-build.ts`) with `w`, as the test's restart builds it.
+ * A process for the check that a bootstrap killed before S commits is repeated on the next start. [IN-2, A77]
+ *
+ * `chain-process.test.ts` starts it with `node --import tsx` and one JSON argument ({@link Job}). It reports each event
+ * as one JSON line on stdout ({@link WorkerEvent}), and the test kills it with SIGKILL. The modes:
+ * - `wait`: S is above the source's finalized head, so the process waits (`starting` with `waiting-for-node`) after
+ *   the bootstrap's migrations and `core-chain`'s `on-start-db` have committed. It reports `waiting`.
+ * - `hold`: the head is at S. Module `w`'s `on-db-write` of S, inside block S's transaction, waits for ever after its
+ *   first row (`sigterm-module.ts`). It reports `in-db-write`.
+ *
+ * The build is the chain's (`chain-build.ts`) with `w`, the same build the test's restart uses.
  */
 
 export interface Job {

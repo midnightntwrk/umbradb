@@ -7,15 +7,17 @@ import { openBlockWrites } from "../../src/db/write-handles.js";
 import { BACKENDS, type TestDatabase } from "./backends.js";
 
 /**
- * The per-module roles of DB-6 and DB-7, and A15's database half (task 2.3), on both backends: A13 (a module's write into
- * another module's table is rejected by the database, with its negative control), A14 (a provider's `SECURITY DEFINER`
- * function, `EXECUTE` granted only to the modules that require its item), and A15's roles and shared-item schema.
+ * The per-module roles, on both backends. [DB-6, DB-7]
+ * - A module's write into another module's table is rejected by the database, with its negative control. [A13]
+ * - A provider's `SECURITY DEFINER` function has `EXECUTE` granted only to the modules that require its item. [A14]
+ * - The database half of the schema names: the roles and the shared item's schema. [A15]
  *
  * A callback is played here by one module's `on-db-write` in a block transaction of the database API, with the block
- * write handle it would get (`src/db/write-handles.ts`, task 2.6), under its module's role. A migration is played by a
+ * write handle it would get (`src/db/write-handles.ts`), under its module's role. A migration is played by a
  * transaction that sets the role with {@link setModuleRole} and runs DDL, as the migration runner (`src/db/migrate.ts`,
- * `migrate.test.ts`) does with its record and mark. "Processing halts" (A13) is the runner's (task 5.x: a callback's
- * error is the `callback-error` halt, RN-8).
+ * `migrate.test.ts`) does with its record and mark. Halting processing after a rejected write is the runner's job: a
+ * callback's error is the `callback-error` halt. [A13, RN-8]
+ *
  * Every database here is set up by a login that is a superuser (the test server's, PGlite's `postgres`);
  * `roles-login.test.ts` runs the same with a `CREATEROLE` login on PostgreSQL.
  */
@@ -73,8 +75,8 @@ describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend
   }
 
   /**
-   * A13's check: module `a` writes its own table, then `b`'s, in one transaction under its role — the database rejects
-   * the second write with a permission error, and the transaction (the block) rolls back: neither table changed.
+   * The check: module `a` writes its own table, then `b`'s, in one transaction under its role. The database rejects
+   * the second write with a permission error, and the transaction (the block) rolls back: neither table changed. [A13]
    */
   async function expectCrossSchemaWriteRejected(db: Database, plan: SchemaPlan): Promise<void> {
     const before = [await count(db, "a.t"), await count(db, "b.t")];
@@ -93,7 +95,7 @@ describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend
     expect([await count(db, "a.t"), await count(db, "b.t")]).toEqual(before);
   }
 
-  // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy (task 18.4).
+  // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy.
   const requiredId = backend.name.startsWith("PostgreSQL") ? "[[db.roles.cross-schema-write-rejected]] " : "";
   it(`${requiredId}A13: a module's write into another module's table is rejected by the database and the block rolls back`, async () => {
     const { db, plan } = await twoModules();
@@ -228,7 +230,7 @@ describe.each(BACKENDS)("roles and grants on $name (DB-6, DB-7, DB-8)", (backend
         `CREATE FUNCTION p.persist(p_key text, p_value bigint) RETURNS void
            LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, p, pg_temp
            AS $$ BEGIN INSERT INTO store (k, v) VALUES (p_key, p_value); END $$`,
-        // Negative control (task 0.1's finding): without pg_temp last, PostgreSQL searches pg_temp first.
+        // Negative control: without pg_temp last, PostgreSQL searches pg_temp first.
         `CREATE FUNCTION p.persist_unpinned(p_key text, p_value bigint) RETURNS void
            LANGUAGE plpgsql SECURITY DEFINER SET search_path = p
            AS $$ BEGIN INSERT INTO store (k, v) VALUES (p_key, p_value); END $$`,

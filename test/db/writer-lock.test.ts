@@ -25,16 +25,16 @@ import { spawnChild } from "../child-processes.js";
 import { connectionOfUrl } from "./connection.js";
 
 /**
- * A17 [FAULT] (DB-11): exactly one process writes each database. This file holds the halves that run in this process
- * (and the single-writer test, which also starts PGlite processes); the PGlite signal and race halves are in
+ * Exactly one process writes each database. This file holds the halves that run in this process (and the
+ * single-writer test, which also starts PGlite processes); the PGlite signal and race halves are in
  * `pglite-writer-processes.test.ts`, the committed negative controls in `writer-lock.negative-control.test.ts` and
- * there.
+ * there. [A17 FAULT, DB-11]
  *
- * PostgreSQL: the writer holds `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on its writer session, taken when
- * the session opens — at the writer's start, or before the first transaction — and taken again on every new session
- * after a lost one; a second writer refuses with `writer-lock-held`, and a writer that finds the lock taken when it
- * reconnects fails with `writer-lock-lost` for good. "Stays up, not ready" and "processing halts" are the runner's
- * (task 5.x): here the database API's errors are checked.
+ * PostgreSQL: the writer holds `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on its writer session. It takes
+ * the lock when the session opens (at the writer's start, or before the first transaction), and again on every new
+ * session after a lost one. A second writer refuses with `writer-lock-held`, and a writer that finds the lock taken
+ * when it reconnects fails with `writer-lock-lost` for good. Staying up but not ready, and halting processing, are the
+ * runner's job: here the database API's errors are checked.
  *
  * PGlite: `openPglite` takes the operating-system lock (`node:sqlite`, `BEGIN EXCLUSIVE` on
  * `<data directory>.lock.sqlite`) before PGlite opens, for the process's life; `memory://` takes none.

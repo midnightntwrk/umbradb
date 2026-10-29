@@ -1,41 +1,45 @@
 /**
- * The ledger worker, from the main thread (`openspec/changes/core-arch/design.md` §5.3; `specs/ledger/spec.md` LG-7,
- * LG-10; decision record Q36, Q49; task 12.3): {@link startLedgerWorker} starts a worker thread running the ledger
- * engine (`./engine.ts`, through `./entry.ts`) and gives a {@link LedgerHost}, whose every call is a message to the
- * thread answered by a message — plain data both ways, structured-cloned: transactions' bytes, block facts and
- * outcomes in, `ParsedTransaction`s, state keys, roots, summaries, outputs and node batches out. Ledger states, parsed
- * native objects and the packages stay in the thread. The main thread never waits on the worker: it awaits its answers,
- * and answers the worker's node requests (`./node-bridge.ts`) from the read handle the request was given. A request
- * given none — a parse at `on-parse`, which has no database handle, whose deploys' addresses serialize nodes a stored
- * state shares — is answered from the read of another request in flight, if one has a read (a node's bytes are its
- * key's, so any read of committed data serves), else from a read of the process's database ({@link
- * LedgerHost.useDatabase}) or, should a request with a read come first, from that one's: on PGlite, whose one queue
- * `core-ledger-state`'s `on-compute` read holds while its apply waits behind the parse in the worker, a read of the
- * database would wait for ever; the apply's read is open and answers instead.
+ * The ledger worker, seen from the main thread. {@link startLedgerWorker} starts a worker thread running the ledger
+ * engine (`./engine.ts`, through `./entry.ts`) and returns a {@link LedgerHost}. Each of its calls is a message to the
+ * thread, answered by a message. Both carry plain data, structured-cloned: transaction bytes, block facts and outcomes
+ * go in; `ParsedTransaction`s, state keys, roots, summaries, outputs and node batches come out. Ledger states, parsed
+ * native objects and the packages stay in the thread. [LG-7, LG-10, Q36, Q49; design §5.3]
  *
- * **A step's time** is not bounded: a ledger step may take minutes (the v8 → v9 conversion, a large state's load), and
- * nothing cuts a height off for being slow (RN-17, Q71). It is reported: {@link LedgerHost.activity} names the step in
- * progress — its kind, its block's height, how long it has run (from when it began: a request sent behind others waits
- * for them in the worker) —, plain data for the process's status, while the heartbeat and the admin endpoints keep
- * running on their own threads.
+ * The main thread never blocks on the worker: it awaits its answers, and answers the worker's node requests
+ * (`./node-bridge.ts`) from the read handle the request was given. Some requests are given none, such as a parse at
+ * `on-parse`, which has no database handle but whose deploys' addresses serialize nodes a stored state shares. Such a
+ * request is answered from the read of another request in flight, if one has a read: a node's bytes depend only on
+ * its key, so any read of committed data serves. Otherwise it is answered from a read of the process's database
+ * ({@link LedgerHost.useDatabase}), or from the read of a request that arrives first. This matters on PGlite, which has
+ * a single queue: `core-ledger-state`'s `on-compute` read holds it while its apply waits behind the parse in the
+ * worker, so a new read of the database would wait for ever; the apply's open read answers instead.
  *
- * **A failure of the thread** — it ends, an uncaught error, or the package trapping (a WebAssembly `RuntimeError`,
- * after which the module's memory is in no known state, so the thread is ended) — fails the request in progress and
- * every later one with one {@link LedgerWorkerFailure}, which {@link LedgerHost.failure} keeps: the module whose
- * callback awaited it fails, and processing halts with `callback-error` naming the module and the point (RN-8,
- * `design.md` §11). A failed request that is no trap (a block the engine refuses, a package that will not load) fails
- * that request only.
+ * **A step's time** is not bounded. A ledger step may take minutes (the v8 → v9 conversion, loading a large state),
+ * and nothing cuts a height off for being slow. It is reported instead: {@link LedgerHost.activity} names the step in
+ * progress, with its kind, its block's height and how long it has run (counted from when it began, since a request sent
+ * behind others waits for them in the worker). This is plain data for the process's status; the heartbeat and the
+ * admin endpoints keep running on their own threads. [RN-17, Q71]
  *
- * **The thread's entry** ({@link ledgerWorkerEntry}): beside a build, the compiled `entry.js`; from the TypeScript
- * sources (development, the tests), `entry.ts` through Node.js's type stripping, with a resolve hook mapping the
- * sources' `.js` imports to their `.ts` files, as the admin worker's (`src/admin/server.ts`) — {@link typeScriptEntry}
- * for any entry of TypeScript sources, a host's own. The worker imports its adapters from `../load.ts` unless
- * {@link LedgerWorkerOptions.loader} names a test package's loader, and runs the ledger tasks of the modules its entry
- * gives it (`./run.ts`; UmbraDB's entry, `./entry.ts`, also those of {@link LedgerWorkerOptions.modules}, task 12.6).
+ * **A failure of the thread** fails the request in progress and every later one with one {@link LedgerWorkerFailure},
+ * which {@link LedgerHost.failure} keeps. Such a failure is the thread ending, an uncaught error, or the package
+ * trapping (a WebAssembly `RuntimeError`, after which the module's memory is in no known state, so the thread is
+ * ended). The module whose callback awaited the request fails, and processing halts with `callback-error` naming the
+ * module and the point. A failed request that is not a trap (a block the engine refuses, a package that will not load)
+ * fails that request only. [RN-8; design §11]
  *
- * {@link inThreadLedger} is the same interface over an engine on the main thread: a negative control's (A101: ledger
- * work moved to the main thread) and the tests'. It cannot read stored nodes, which would block the thread that owns
- * the database.
+ * **The thread's entry** ({@link ledgerWorkerEntry}):
+ * - next to a build, the compiled `entry.js`;
+ * - from the TypeScript sources (development, the tests), `entry.ts` through Node.js's type stripping, with a resolve
+ *   hook that maps the sources' `.js` imports to their `.ts` files, as the admin worker does (`src/admin/server.ts`).
+ *   {@link typeScriptEntry} does this for any entry of TypeScript sources, a host's own included.
+ *
+ * The worker imports its adapters from `../load.ts` unless {@link LedgerWorkerOptions.loader} names a test package's
+ * loader. It runs the ledger tasks of the modules its entry gives it (`./run.ts`); UmbraDB's entry (`./entry.ts`)
+ * also adds those of {@link LedgerWorkerOptions.modules}.
+ *
+ * {@link inThreadLedger} is the same interface over an engine on the main thread, for the tests and for a negative
+ * control that moves ledger work to the main thread. It cannot read stored nodes, since that would block the thread
+ * that owns the database. [A101]
  */
 
 import { existsSync } from "node:fs";
@@ -79,42 +83,42 @@ export interface NodeDatabase {
 export interface LedgerHost {
   /** The database a request given no read has its stored nodes read from (see the module comment); none unless given. */
   useDatabase(database: NodeDatabase | null): void;
-  /** Block `block`'s transactions parsed once with `ledger` and kept for its apply (LG-7). */
+  /** Parses block `block`'s transactions once with `ledger` and keeps them for its apply. [LG-7] */
   parse(ledger: LedgerName, block: BlockId, transactions: readonly Uint8Array[]): Promise<readonly ParsedTransaction[]>;
-  /** The root of a genesis state (IN-7): it reads no stored node (at block 0 no node is stored yet). */
+  /** The root of a genesis state. It reads no stored node: at block 0 no node is stored yet. [IN-7] */
   genesisRoot(ledger: LedgerName, bytes: Uint8Array): Promise<Uint8Array>;
-  /** Block 0 (IN-7); stored nodes, if any are needed, read through `read`. */
+  /** Applies block 0; stored nodes, if any are needed, are read through `read`. [IN-7] */
   genesis(input: GenesisBlock, read?: NodeReader): Promise<AppliedState>;
-  /** A block after 0 (LG-8); stored nodes read through `read`. */
+  /** Applies a block after 0; stored nodes are read through `read`. [LG-8] */
   apply(input: ApplyBlock, read?: NodeReader): Promise<AppliedState>;
   /** `block` committed: its state becomes the committed one (false when it was not pending). */
   commit(block: BlockId): Promise<boolean>;
   /** Drops kept parses: of heights up to `upTo`, and of the blocks `hashes` names. */
   release(drop: { readonly upTo?: bigint; readonly hashes?: readonly Uint8Array[] }): Promise<number>;
   /**
-   * The state the database stores for a block, by its key, as the committed one — read through `read` unless the
-   * worker holds it already (LG-11; task 12.4: `core-ledger-state` asks for the state at h − 1 before each apply).
+   * Makes the state the database stores for a block, by its key, the committed one. It is read through `read` unless
+   * the worker holds it already; `core-ledger-state` asks for the state at h − 1 before each apply. [LG-11]
    */
   load(input: LoadState, read?: NodeReader): Promise<LoadedState>;
-  /** A retained state's root, the state loaded by its key aside through `read` (LG-12; task 12.4). */
+  /** A retained state's root: the state is loaded by its key, through `read`, beside the committed one. [LG-12] */
   retained(input: LoadState, read?: NodeReader): Promise<{ readonly stateRoot: Uint8Array }>;
   /**
-   * The nodes the sweep deletes, forgotten by the worker's packages (LG-14; task 12.5); rejects when one is in use —
-   * with an `EvictionRefused` (`./engine.ts`) once the worker freed what it can.
+   * Makes the worker's packages forget the nodes the sweep deletes. Rejects when one is still in use, with an
+   * `EvictionRefused` (`./engine.ts`), once the worker has freed what it can. [LG-14]
    */
   evict(keys: readonly Uint8Array[]): Promise<number>;
   /**
-   * Ends the worker thread and starts a new one (LG-14, owner decision Q144 B; task 12.5a): the new thread holds no
-   * state, so the next block's state at h − 1 is loaded from the database; the parses kept for blocks not released yet
-   * are sent to it again (a parse in flight is answered by it, and a ledger task's request in flight runs there again,
-   * task 12.6), and any other request in flight fails. Rejects for a worker that failed or is closed.
+   * Ends the worker thread and starts a new one. The new thread holds no state, so the next block's state at h − 1 is
+   * loaded from the database. The parses kept for blocks not yet released are sent to it again: a parse in flight is
+   * answered by the new thread, and a ledger task's request in flight runs there again. Any other request in flight
+   * fails. Rejects for a worker that failed or is closed. [LG-14, Q144 B]
    */
   restart(): Promise<void>;
   /** How many times {@link LedgerHost.restart} started a new thread. */
   readonly restarts: number;
   /**
-   * Block `input`'s ledger tasks of one module, by task name (LG-17; task 12.6: `../tasks.ts`); the state's stored nodes,
-   * if a `needsState` task reads any, through `read`.
+   * Runs one module's ledger tasks for block `input` and returns their results by task name (`../tasks.ts`). The
+   * state's stored nodes, if a `needsState` task reads any, are read through `read`. [LG-17]
    */
   tasks(input: TaskRun, read?: NodeReader): Promise<Readonly<Record<string, unknown>>>;
   /** A test package's loader's `probe()` (plain data), or null without one. */
@@ -133,7 +137,8 @@ export interface LedgerHost {
 export interface LedgerWorkerOptions {
   /**
    * A module the worker imports its adapters from in place of `src/ledger/load.ts`: one exporting
-   * `loadLedger(ledger, options, loaderData)` and, optionally, `probe()` — a test package's (A92, A101, A106).
+   * `loadLedger(ledger, options, loaderData)` and, optionally, `probe()`, as a test package's loader does. [A92, A101,
+   * A106]
    */
   readonly loader?: URL | string;
   /** Plain data given to the loader's `loadLedger`. */
@@ -144,7 +149,7 @@ export interface LedgerWorkerOptions {
   readonly entry?: URL;
   /**
    * A module whose `modules` export lists the host's user modules, which UmbraDB's entry (`./entry.ts`) imports in the
-   * thread for their ledger tasks (LG-17, MD-1): for the `umbradb` command, its configuration file (CF-1, Q106).
+   * thread for their ledger tasks. For the `umbradb` command it is the configuration file. [LG-17, MD-1, CF-1, Q106]
    */
   readonly modules?: URL | string;
 }
@@ -219,7 +224,7 @@ type ParseRequest = Extract<LedgerRequest, { readonly type: "parse" }>;
 const hexOf = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
 /**
- * The parses a worker keeps, as the main thread sent them (task 12.5a): each parse until a release drops it, as the
+ * The parses a worker keeps, as the main thread sent them: each parse until a release drops it, as the
  * engine keeps and drops them (`./engine.ts`'s `parse` and `release`, by the block's hash), so that a restarted worker
  * is sent them again.
  */
@@ -404,12 +409,12 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
       }
       for (const request of parsing.values()) post(request.request, request);
       // A ledger task's request in flight — another block's, run at its module's `on-parse` while this one computed —
-      // runs again there, on the parse sent again: a task keeps nothing between requests (task 12.6; one that needs the
-      // state fails there, as the new thread holds none).
+      // runs again there, on the parse sent again: a task keeps nothing between requests (one that needs the state
+      // fails there, as the new thread holds none).
       for (const request of inFlight) if (request.kind === "tasks") post(request.request, request);
       for (const request of inFlight) {
         if (request.kind !== "parse" && request.kind !== "tasks") {
-          request.reject(new Error(`the ledger worker was restarted while its ${request.kind} request ran (LG-14, Q144 B)`));
+          request.reject(new Error(`the ledger worker was restarted while its ${request.kind} request ran`));
         }
       }
       await old.worker.terminate();
@@ -446,7 +451,7 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
 export interface InThreadLedgerOptions {
   /** What loads an adapter: `loadLedgerPackage` unless given. */
   readonly load?: LedgerLoader;
-  /** The modules whose ledger tasks the engine runs (task 12.6); none unless given. */
+  /** The modules whose ledger tasks the engine runs; none unless given. */
   readonly modules?: readonly LedgerWorkerModule[];
   /** The engine's plain-data check (`EngineOptions.checkPlainData`); on unless a negative control turns it off. */
   readonly checkPlainData?: boolean;

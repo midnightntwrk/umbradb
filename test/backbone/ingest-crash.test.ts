@@ -18,12 +18,19 @@ import type { CrashEvent, CrashJob } from "./ingest-crash.worker.js";
 import { FENCE, fenceAt, genesisOf, ingest, PATIENCE_MS, until, watched, watcher } from "./ingest-harness.js";
 
 /**
- * A76 `[FAULT]` (task 10.3; IN-1): the database holds finalized blocks only. A real process — `ingest-crash.worker.ts`,
- * started as `umbradb run` starts one, over the node source and a tape node in this test — syncs to the finalized head
- * F = 3, queues 20 best blocks above it (4–23; `tipCap` 20, so the queue is full: `finality-stall`), and is killed with
- * SIGKILL; then no table holds a row of a block above F, and a restart, which queues the 20 again, writes none either.
- * The criterion names PostgreSQL; the test runs PGlite too, in the same test (the required id tags exactly one test).
- * The committed negative control is a source that writes each best block into a module's table.
+ * A fault test: the database holds finalized blocks only. [A76 FAULT, IN-1]
+ *
+ * A real process (`ingest-crash.worker.ts`) is started as `umbradb run` starts one, over the node source and a tape
+ * node in this test. It:
+ * 1. syncs to the finalized head F = 3;
+ * 2. queues 20 best blocks above it (4–23; with `tipCap` 20 the queue is full, so `finality-stall` shows);
+ * 3. is killed with SIGKILL.
+ *
+ * Then no table holds a row of a block above F, and a restart, which queues the 20 again, writes none either.
+ *
+ * The acceptance criterion names PostgreSQL; the test runs PGlite too, in the same test, because the required id tags
+ * exactly one test. The committed negative control is a source that writes each best block into a module's table.
+ * [A76 FAULT]
  */
 
 const WORKER = fileURLToPath(new URL("./ingest-crash.worker.ts", import.meta.url));
@@ -39,8 +46,8 @@ const best = branchOf(head, F + 20n, "tip");
 const bestRecords = (): TapeRecord[] => best.flatMap((block, index) => [newHead(block), ...content(block, RUNTIME, index === 0)]);
 
 /**
- * The killed process's tape: a new database synced to F, then the 20 best blocks — sent once F committed: the fence
- * module's call after F's commit lets them out (TT-3).
+ * The killed process's tape: a new database synced to F, then the 20 best blocks. The blocks are sent once F has
+ * committed: the fence module's call after F's commit lets them out. [TT-3]
  */
 const firstTape = (): TapeRecord[] => [
   ...opening(genesis, head),
@@ -50,8 +57,8 @@ const firstTape = (): TapeRecord[] => [
 ];
 
 /**
- * The restart's tape: startup's checks on a database with the cursor F, then the 20 best blocks again — once the loop
- * runs: the fence module's `on-after-db-write` of F, re-delivered at the restart (RN-11), lets them out.
+ * The restart's tape: startup's checks on a database with the cursor F, then the 20 best blocks again once the loop
+ * runs. The fence module's `on-after-db-write` of F, delivered again after the restart, lets them out. [RN-11]
  */
 const restartTape = (): TapeRecord[] => [
   ...blockRef(genesis),

@@ -6,7 +6,7 @@ import { checkedLedgers } from "../../browser/build.js";
 import { copyVendoredLedger, VENDORED_ROOT } from "../ledger/version-checks.js";
 
 /**
- * Task 17.5b (the mutation pass task 12.2b deferred): the browser build's reading of the vendored ledger packages
+ * The browser build's reading of the vendored ledger packages
  * (`checkedLedgers`, `browser/build.ts`) on its own — the manifest as the build records it, the `.wasm` files it lists,
  * a file's bytes once their SHA-256 is its line's, and the refusals: a file the manifest does not list, a version the
  * build does not carry, a changed file. The bundle itself is `build.test.ts`' and the Chrome tests'.

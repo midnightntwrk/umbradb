@@ -1,17 +1,21 @@
 /**
- * What `umbradb backup` and `umbradb restore` read from the configuration file (`openspec/changes/core-arch/specs/
- * backups/spec.md` BK-1, BK-3; `design.md` §9.1, §12; tasks 15.1, 15.2): as `umbradb run` does (CF-1), the file —
- * `--config`, or `umbradb.config.ts` in the working directory — is loaded, the command's build made with the user modules
- * it exports (`./build-modules.ts`, Q106 B) for the side it describes (`inferSide`), the configuration validated with
- * it, and the process's `core` revision taken (Q102): its `database` is the database the command works on, its
- * `developmentOptIn` the opt-in (CF-9, PP-12). A refusal of any of it is the configuration's own, with every finding.
+ * What `umbradb backup` and `umbradb restore` read from the configuration file. [BK-1, BK-3; design §9.1, §12]
  *
- * **The database** ({@link openCommandDatabase}): PostgreSQL through the database API with one read connection, which
- * makes no connection until it is used; PGlite only under the development opt-in (`openPglite` refuses without it),
- * from a directory relative to the working directory, taking its operating-system lock (`writer-lock-held` while a
- * process holds it, DB-11). A PGlite database in memory exists only inside its own process, so the commands refuse it
- * (`invalid-configuration`). Only a restore's target ({@link openRestoreTarget}) is created when missing,
- * with any missing parent directory (CF-4, owner decision Q163); `umbradb backup` creates nothing.
+ * As `umbradb run` does, the command loads the file (`--config`, or `umbradb.config.ts` in the working directory). It
+ * makes the command's build with the user modules the file exports (`./build-modules.ts`), for the side the file
+ * describes (`inferSide`), and validates the configuration with that build. It then takes the process's `core`
+ * revision: its `database` is the database the command works on, and its `developmentOptIn` the opt-in. A refusal of
+ * any of this is the configuration's own, with every finding. [CF-1, CF-9, PP-12, Q102, Q106 B]
+ *
+ * **The database** ({@link openCommandDatabase}). [DB-11, CF-4, Q163]
+ * - PostgreSQL is opened through the database API with one read connection, which makes no connection until it is
+ *   used.
+ * - PGlite is opened only under the development opt-in (`openPglite` refuses without it), from a directory relative to
+ *   the working directory, taking its operating-system lock (`writer-lock-held` while a process holds it).
+ * - A PGlite database in memory exists only inside its own process, so the commands refuse it
+ *   (`invalid-configuration`).
+ * - Only a restore's target ({@link openRestoreTarget}) is created when missing, with any missing parent directory;
+ *   `umbradb backup` creates nothing.
  */
 
 import { join, resolve } from "node:path";
@@ -45,7 +49,7 @@ export interface CommandConfig {
   readonly checked: CheckedConfig;
   readonly declarations: DeclarationSet<ModuleDeclaration>;
   readonly side: ProcessSide;
-  /** The process's `core` revision (Q102). */
+  /** The process's `core` revision. [Q102] */
   readonly core: CheckedEntry;
   /** Its `database` setting's parts. */
   readonly database: DatabaseParts;
@@ -103,7 +107,7 @@ export async function readCommandConfig(
   });
 }
 
-/** The committed height of a public or a private process's database: its cursor's (DB-2). */
+/** The committed height of a public or a private process's database: its cursor's. [DB-2] */
 export const commandCommittedHeight: CommittedHeight = async (read) => {
   const cursor = (await isPrivateDatabase(read)) ? await readPrivateCursor(read) : await readCursor(read);
   return cursor?.height ?? null;
@@ -146,10 +150,12 @@ export async function openCommandDatabase(
 }
 
 /**
- * Opens the target of `umbradb restore` as {@link openCommandDatabase} does, a PGlite directory that does not exist
- * created first with its missing parents under the opt-in (CF-4, owner decision Q163), which `log` is told, naming the
- * path as configured (owner decisions Q165 B, Q167 A): the restore opens a target with no database only once its checks
- * before loading passed (BK-3), so a refused restore creates nothing.
+ * Opens the target of `umbradb restore` as {@link openCommandDatabase} does. Under the opt-in, a PGlite directory that
+ * does not exist is created first, with its missing parents, and `log` is told, naming the path as configured.
+ * [CF-4, Q163, Q165 B, Q167 A]
+ *
+ * The restore opens a target with no database only once its checks before loading have passed, so a refused restore
+ * creates nothing. [BK-3]
  */
 export async function openRestoreTarget(
   target: CommandTarget,
@@ -163,7 +169,7 @@ export async function openRestoreTarget(
   return openCommandDatabase(target, config);
 }
 
-/** The tables the build declares `deterministic: false` (MD-1, Q76): every module of `declarations`, each table once. */
+/** The tables the build declares `deterministic: false`: every module of `declarations`, each table once. [MD-1, Q76] */
 export function declaredOptOuts(declarations: DeclarationSet<ModuleDeclaration>): { schema: string; table: string }[] {
   const out = new Map<string, { schema: string; table: string }>();
   for (const declaration of [...declarations.backbone, ...declarations.core, ...declarations.user]) {

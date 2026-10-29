@@ -14,10 +14,10 @@ import {
   taggedRootKey,
 } from "./node-format.js";
 
-// Task 0.2 of `openspec/changes/core-arch` (design.md §5.1-§5.3, specs/ledger LG-6, LG-11, LG-13, LG-14): the node-store
-// exports the vendored ledger packages add to the published ones, exercised on the built package the same way for every
-// ledger version. Expected keys come from the independent node-format implementation in node-format.ts and from the
-// packages' own published serialization (`serialize()`), never from the exports under test.
+// The node-store exports the vendored ledger packages add to the published ones, exercised on the built package the
+// same way for every ledger version. Expected keys come from the independent node-format implementation in
+// node-format.ts and from the packages' own published serialization (`serialize()`), never from the exports under test.
+// [LG-6, LG-11, LG-13, LG-14; design §5.1-§5.3]
 
 export interface NodeBatch {
   inserts: StoredNode[];

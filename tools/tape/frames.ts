@@ -1,14 +1,14 @@
 /**
- * The JSON-RPC 2.0 frames of the test tape (`openspec/changes/core-arch/specs/test-tape/spec.md` TT-2 to TT-4; tasks
- * 9.1, 9.2): how the tape node reads a request, and the very text it writes for an answer and a notification — in one
- * place, so the recording builder (`./builder.ts`) reads a client's requests exactly as the tape node will on replay,
- * and checks each frame a node sends against the text the tape node will send for its record.
+ * The JSON-RPC 2.0 frames of the test tape: how the tape node reads a request, and the very text it writes for an
+ * answer and a notification — in one place, so the recording builder (`./builder.ts`) reads a client's requests exactly
+ * as the tape node will on replay, and checks each frame a node sends against the text the tape node will send for its
+ * record. [TT-2 to TT-4]
  *
  * **Answers** are `{"jsonrpc":"2.0","id":<id>,"result":<value>}` (or `"error"`), **notifications**
  * `{"jsonrpc":"2.0","method":<name>,"params":{"subscription":<id>,"result":<value>}}`, each value in the tape's JSON
  * form (`./json.ts`) — the fields in the order a Substrate node (`jsonrpsee`) writes them. A notification carries
  * Substrate's name for its subscription: `chain_newHead` for `chain_subscribeNewHeads`, `chain_finalizedHead` for
- * `chain_subscribeFinalizedHeads` (TT-1 records no name; another subscription method is its own name).
+ * `chain_subscribeFinalizedHeads`. The tape format records no name; another subscription method is its own name. [TT-1]
  */
 
 import { type Json, jsonText, parseJsonText } from "./json.js";

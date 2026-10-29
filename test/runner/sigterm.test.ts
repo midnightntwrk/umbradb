@@ -15,17 +15,17 @@ import type { Job, WorkerEvent } from "./sigterm.worker.js";
 import { spawnChild } from "../child-processes.js";
 
 /**
- * A48 (task 5.3; RN-13) with a real process and a real signal: SIGTERM during `on-db-write` of h ends with h fully
- * present or fully absent, and a restart resumes from the cursor. The process is `sigterm.worker.ts`, started as
- * `umbradb run` starts one (`startProcess` with its configuration file and `terminationSignal`); module `w` holds its
- * block's transaction open until the SIGTERM has arrived, so the signal always comes during `on-db-write` of h.
+ * A real process and a real signal: SIGTERM during `on-db-write` of h ends with h fully present or fully absent, and a
+ * restart resumes from the cursor. The process is `sigterm.worker.ts`, started as `umbradb run` starts one
+ * (`startProcess` with its configuration file and `terminationSignal`). Module `w` holds its block's transaction open
+ * until the SIGTERM has arrived, so the signal always comes during `on-db-write` of h. [A48, RN-13]
  *
- * RN-13's "let a block whose transaction is open commit or roll back, and then exit" is checked from the database's
- * side too: on PostgreSQL no session of the process was abandoned (`pg_stat_database.sessions_abandoned`: a client that
+ * That an open block transaction commits or rolls back before the process exits is checked from the database's side
+ * too: on PostgreSQL no session of the process was abandoned (`pg_stat_database.sessions_abandoned`: a client that
  * exits without ending its session, its transaction rolled back by the server), on PGlite the data directory was shut
  * down (`global/pg_control`'s state 1, `DB_SHUTDOWNED`; 6, in production, after an exit without closing). A process
  * that exits at once on SIGTERM leaves the database atomic as well — the server or PGlite's recovery drops the open
- * transaction — but abandoned, which is what its negative control shows.
+ * transaction — but abandoned, which is what its negative control shows. [RN-13]
  */
 
 const WORKER = fileURLToPath(new URL("./sigterm.worker.ts", import.meta.url));
@@ -93,7 +93,7 @@ async function abandoned(db: ProcessDatabase): Promise<number> {
 /** PGlite's `pg_control` state: 1 when shut down, 6 in production (`DBState`, at byte 16). */
 const controlState = (directory: string): number => readFileSync(join(directory, "global", "pg_control")).readUInt32LE(16);
 
-/** What one A48 run showed. */
+/** What one run showed. [A48] */
 interface A48Observation {
   readonly events: Worker["events"];
   readonly exit: { readonly code: number | null; readonly signal: NodeJS.Signals | null; readonly timedOut: boolean };
@@ -157,7 +157,7 @@ async function a48Run(backend: ProcessBackend, mode: Job["mode"]): Promise<A48Ob
   }
 }
 
-/** A48's oracle: every problem with what was observed, none when A48 holds. */
+/** The oracle: every problem with what was observed, none when the SIGTERM ends the height atomically. [A48] */
 function a48Problems(observed: A48Observation): string[] {
   const problems: string[] = [];
   const { exit, events } = observed;

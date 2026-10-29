@@ -13,17 +13,21 @@ import {
 } from "../../src/private/messages.js";
 
 /**
- * A115 `[CI]`, its schemas (tasks 14.2, 14.2a; PP-4, `design.md` §8): every message type round-trips through the zod
- * schemas — written as the transport writes it and read back equal — and fails on a missing or a mistyped field, each
- * field of each type; an unknown `v` or `type` — `api` and `api-result` among them, which owner decision Q140 C removed
- * from the protocol —, and a text that is not JSON, are told apart from a message failing its schema (each closes the
- * connection: `./transport.test.ts`). Also the values' encoding, by type, and its inverse, on values as the database API
- * gives them (the round trip through a real core's read is `./transport.test.ts`'s).
+ * The message schemas. Every message type round-trips through the zod schemas: written as the transport writes it and
+ * read back equal. Each type fails on a missing or a mistyped field, for every field. [A115 CI, PP-4; design §8]
+ *
+ * These are told apart from a message failing its schema, and each closes the connection (`./transport.test.ts`):
+ * - an unknown `v` or `type`, including `api` and `api-result`, which were removed from the protocol; [Q140 C]
+ * - a text that is not JSON.
+ * [A115 CI, PP-4]
+ *
+ * Also tested: the values' encoding, by type, and its inverse, on values as the database API gives them. The round trip
+ * through a real core's read is tested in `./transport.test.ts`. [A115 CI]
  */
 
 const HASH = `0x${"ab".repeat(32)}`;
 const OTHER = `0x${"cd".repeat(32)}`;
-/** A core's configuration hash (RN-16, PP-4; task 14.1b). */
+/** A core's configuration hash. [RN-16, PP-4] */
 const CONFIG = `0x${"ef".repeat(32)}`;
 
 /** One valid message of each type, every optional field given where the schema has one. */
@@ -184,7 +188,7 @@ describe("A115: an unknown v or type, or a text that is no JSON object, is told 
     ['{"v":1}', "unknown-type"],
     ['{"v":1,"type":"toString"}', "unknown-type"],
     ['{"v":1,"type":"__proto__"}', "unknown-type"],
-    // Owner decision Q140 C: no call is made across the transport, so these are no message types.
+    // No call is made across the transport, so these are no message types. [Q140 C]
     ['{"v":1,"type":"api","id":"8","module":"stats","method":"totals","params":{"from":"1"}}', "unknown-type"],
     ['{"v":1,"type":"api-result","id":"8","error":"not-found"}', "unknown-type"],
     ['{"v":1,"type":"api-result","id":"8","result":{"total":"12"}}', "unknown-type"],

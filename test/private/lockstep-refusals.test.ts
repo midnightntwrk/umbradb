@@ -21,17 +21,18 @@ import {
 import { ReportRelay } from "./relays.js";
 
 /**
- * Lockstep's refusals and halts (task 14.3; PP-6, PP-7, Q24; `design.md` §11), through a core and private processes on
- * PostgreSQL 18.6 and PGlite 0.5.10:
- * - A118 `[CI]`: an instance that ran independently to 3 while the core went on to 10, then listed in
- *   `lockstepInstances`, says `hello` at 3 and is refused `lockstep-behind` (below the public cursor − 1); it halts with
- *   `lockstep-behind` at its first height, 4, by its own check (the public cursor 10 is past it), and the core keeps
- *   waiting before 11, `waiting-for-lockstep` naming it — connected, then not once it stops.
- * - A117 `[FAULT]`, its last two sentences: a `report` whose hash is not the public block's (a relay rewrites it) closes
- *   the instance's connection with `report-hash-mismatch`, the instance halts with that code and the core keeps waiting
- *   for it; a module declaring `needsLockstep` refuses to start with `needs-lockstep-not-listed` on an instance the
- *   core's `hello-ack` says is not lockstep, and on one with no `coreTransport`, before any migration — and runs on a
- *   listed one.
+ * Lockstep's refusals and halts, through a core and private processes on PostgreSQL 18.6 and PGlite 0.5.10:
+ * [PP-6, PP-7, Q24; design §11]
+ * - An instance that ran independently to 3 while the core went on to 10, then listed in `lockstepInstances`, says
+ *   `hello` at 3 and is refused `lockstep-behind` (below the public cursor − 1). It halts with `lockstep-behind` at its
+ *   first height, 4, by its own check (the public cursor 10 is past it), and the core keeps waiting before 11,
+ *   `waiting-for-lockstep` naming it — connected, then not once it stops. [A118 CI]
+ * - A `report` whose hash is not the public block's (a relay rewrites it) closes the instance's connection with
+ *   `report-hash-mismatch`; the instance halts with that code and the core keeps waiting for it. A module declaring
+ *   `needsLockstep` refuses to start with `needs-lockstep-not-listed` on an instance the core's `hello-ack` says is not
+ *   lockstep, and on one with no `coreTransport`, before any migration — and runs on a listed one.
+ *   [A117 FAULT, last two sentences]
+ *
  * The report check's negative control is `./transport-faults.test.ts`'s (a core comparing nothing).
  */
 
@@ -77,11 +78,11 @@ function names(condition: LockstepCondition | null, height: bigint, wanted: Lock
   return condition?.height === height && condition.instances.some((one) => json(one) === json(wanted));
 }
 
-// ── A118 ────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── A late instance listed for lockstep [A118 CI] ──────────────────────────────────────────────────────────────────
 
 const LATE = "late-1";
 
-/** What one A118 run saw. */
+/** What one late-instance run saw. [A118 CI] */
 interface A118Observation {
   readonly coreLines: readonly string[];
   readonly lines: readonly string[];
@@ -93,13 +94,13 @@ interface A118Observation {
   readonly afterStop: LockstepCondition | null;
 }
 
-/** A118's oracle: every problem with what was observed, none when A118 holds. */
+/** The late-instance oracle: every problem with what was observed, none when the test holds. [A118 CI] */
 function a118Problems(observed: A118Observation): string[] {
   const problems: string[] = [];
-  if (!observed.coreLines.includes(`transport: instance ${LATE} connected at 3; refused lockstep-behind: below the public cursor 10 − 1 (PP-7)`)) {
+  if (!observed.coreLines.includes(`transport: instance ${LATE} connected at 3; refused lockstep-behind: below the public cursor 10 − 1`)) {
     problems.push(`the core did not refuse ${LATE}'s hello at 3 with lockstep-behind: ${observed.coreLines.filter((l) => l.includes(LATE)).join(" | ")}`);
   }
-  if (!observed.lines.some((line) => line.endsWith("; refused lockstep-behind: this instance is behind the public cursor (PP-7)"))) {
+  if (!observed.lines.some((line) => line.endsWith("; refused lockstep-behind: this instance is behind the public cursor"))) {
     problems.push("the instance was not told lockstep-behind");
   }
   const { halted } = observed;
@@ -118,7 +119,7 @@ function a118Problems(observed: A118Observation): string[] {
   return problems;
 }
 
-/** Runs A118 on `backend` (see the module comment). */
+/** Runs the late-instance test on `backend` (see the module comment). [A118 CI] */
 async function a118Run(backend: PrivateBackend): Promise<A118Observation> {
   const publicDb = await backend.database("public");
   const privateDb = await backend.database("private");
@@ -194,7 +195,7 @@ interface MismatchObservation {
   readonly rows: readonly number[];
 }
 
-/** The oracle of A117's report hash check through the process: every problem, none when it holds. */
+/** The oracle of the report hash check through the process: every problem, none when it holds. [A117 FAULT] */
 function mismatchProblems(observed: MismatchObservation): string[] {
   const problems: string[] = [];
   const { halted } = observed;
@@ -205,7 +206,7 @@ function mismatchProblems(observed: MismatchObservation): string[] {
   if (json(observed.reported[0]) !== json({ v: 1, type: "report", height: "1", hash: truth })) {
     problems.push(`the instance did not report its block 1 truly: ${json(observed.reported)}`);
   }
-  const line = `transport: instance ${MISMATCHED} reported height 1 with hash ${otherHash(truth)}, and the public block there has hash ${truth}: report-hash-mismatch (PP-6)`;
+  const line = `transport: instance ${MISMATCHED} reported height 1 with hash ${otherHash(truth)}, and the public block there has hash ${truth}: report-hash-mismatch`;
   if (!observed.coreLines.includes(line)) problems.push(`the core did not log the mismatch: ${observed.coreLines.filter((l) => l.includes(MISMATCHED)).join(" | ")}`);
   if (!observed.lines.some((l) => l.startsWith(`transport: the core refused instance ${MISMATCHED} for good: report-hash-mismatch`))) {
     problems.push("the instance's transport did not stop for good");

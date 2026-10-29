@@ -11,12 +11,13 @@ import {
 import { toHex } from "./cbor-decoder.js";
 
 /**
- * A52 (DT-1): the canonical encoder against RFC 8949 Appendix A, plus the boundaries and column mappings of DT-1.
+ * The canonical encoder against RFC 8949 Appendix A, plus the encoder's boundaries and its column-type mappings.
+ * [A52, DT-1]
  *
  * Every expected byte string here is written by hand: the Appendix A ones copied from RFC 8949 Table 6
  * (https://www.rfc-editor.org/rfc/rfc8949.txt, read 2026-10-23), the others derived from the head rules of RFC 8949 §3
  * and §4.2.1 (arguments 0–23 in the initial byte; then 1, 2, 4 or 8 following bytes, the shortest that fits). None is
- * produced by the encoder under test.
+ * produced by the encoder under test. [A52]
  */
 
 const hexOf = (value: CanonicalValue): string => toHex(encodeCanonical(value));
@@ -41,8 +42,8 @@ function expectFailure(run: () => unknown, reason: CanonicalEncodingFailure, pat
 const range = (from: number, to: number): number[] => Array.from({ length: to - from + 1 }, (_, i) => from + i);
 
 describe("A52 — RFC 8949 Appendix A examples inside DT-1's subset give the RFC's bytes", () => {
-  // Table 6 rows whose value DT-1 can hold: integers within 64 bits, simple values false/true/null, byte strings,
-  // text strings, arrays, and maps with text keys (a jsonb object's keys are always text).
+  // Table 6 rows whose value the encoder can hold: integers within 64 bits, simple values false/true/null, byte
+  // strings, text strings, arrays, and maps with text keys (a jsonb object's keys are always text). [DT-1]
   const RFC_TABLE_6: readonly (readonly [string, CanonicalValue, string])[] = [
     ["0", 0, "00"],
     ["1", 1, "01"],
@@ -124,7 +125,8 @@ describe("A52 — RFC 8949 Appendix A examples inside DT-1's subset give the RFC
   });
 
   it("the integer-keyed map {1: 2, 3: 4} is outside the subset: JavaScript keys are text, encoded as text", () => {
-    // RFC: {1: 2, 3: 4} → a201020304 (integer keys). DT-1 maps come from jsonb objects, whose keys are text.
+    // RFC: {1: 2, 3: 4} → a201020304 (integer keys). The encoder's maps come from jsonb objects, whose keys are text.
+    // [DT-1]
     expect(hexOf({ 1: 2, 3: 4 })).toBe("a2613102613304");
   });
 });
@@ -401,8 +403,8 @@ describe("encodeRow — DT-1 column mappings", () => {
     expectFailure(() => encodeRow(["x"], ["varchar" as ColumnType]), "unsupported-column-type", "$[0]");
     expectFailure(() => encodeRow([[[1]]], ["integer[][]" as ColumnType]), "unsupported-column-type", "$[0]");
     expectFailure(() => encodeRow(["{}"], ["json" as ColumnType]), "unsupported-column-type", "$[0]");
-    // Task 1.3 (owner decision Q58): a refused type gets the code `design.md` §4's column-type table gives it, the
-    // same the contents hash and startup give; floating-point types are DT-6's `non-deterministic-column`.
+    // A refused type gets the code the column-type table gives it, the same code the contents hash and startup give.
+    // Floating-point types get `non-deterministic-column`. [DT-6, Q58; design §4]
     expectFailure(() => encodeRow([1.5], ["double precision" as ColumnType]), "non-deterministic-column", "$[0]");
   });
 
@@ -471,9 +473,9 @@ describe("encodeRow — DT-1 column mappings", () => {
 
   describe("timestamptz: the integer microseconds since 1970-01-01T00:00:00Z (task 2.2b, owner decision Q74; A145)", () => {
     const TZ = "timestamp with time zone" as ColumnType;
-    // Each value as the database API reads it (DB-2's RFC 3339 text), and its encoding: the microseconds were worked
-    // out from the calendar by hand (days since 1970, leap years, then hours, minutes, seconds and the fraction), not by
-    // the encoder, and written as CBOR heads by RFC 8949 §3's rules.
+    // Each value as the database API reads it (RFC 3339 text), and its encoding. The microseconds were worked out from
+    // the calendar by hand (days since 1970, leap years, then hours, minutes, seconds and the fraction), not by the
+    // encoder, and written as CBOR heads by RFC 8949 §3's rules. [DB-2]
     const VALUES: readonly (readonly [string, string])[] = [
       // In time order, as written here.
       ["0001-01-01T00:00:00Z", "3b00dcbffeff2bbfff"],
@@ -518,7 +520,8 @@ describe("encodeRow — DT-1 column mappings", () => {
       for (let i = 1; i < integers.length; i++) {
         expect((integers[i] as bigint) > (integers[i - 1] as bigint), VALUES[i]?.[0]).toBe(true);
       }
-      // Control: as text, a fraction sorts before its whole second ("." is 2e, "Z" 5a), so text order is not DT-2's.
+      // Control: as text, a fraction sorts before its whole second ("." is 2e, "Z" 5a), so text order is not the
+      // row order. [DT-2]
       expect([...VALUES.map(([text]) => text)].sort()).not.toEqual(VALUES.map(([text]) => text));
     });
 

@@ -7,9 +7,9 @@ import { workloadName } from "../../bench/core.js";
 import type { LatencyStats } from "../../bench/types.js";
 
 /**
- * The bench smoke's comparison (`bench/compare.ts`; task 17.3, design §13's non-gating benchmark job): the committed
- * baseline holds both backends' `runner.commitEmptyBlock`; a p99 more than ten times the baseline's is flagged, and a
- * missing or unreadable baseline is reported as no result — never as a pass.
+ * The bench smoke's comparison (`bench/compare.ts`), a benchmark job that never gates a build: the committed baseline
+ * holds both backends' `runner.commitEmptyBlock`; a p99 more than ten times the baseline's is flagged, and a missing or
+ * unreadable baseline is reported as no result, never as a pass. [design §13]
  */
 
 const stats = (p99: number): LatencyStats => ({ unit: "ms", samples: 1, min: p99, max: p99, mean: p99, sd: 0, cv: 0, p50: p99, p95: p99, p99 });

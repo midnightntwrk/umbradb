@@ -6,12 +6,11 @@ import { DETERMINISM_BACKENDS } from "../determinism/backends.js";
 import { calledNames, parseSource, REPOSITORY, typeScriptFiles } from "./source-scan.js";
 
 /**
- * A138's first half (task 2.2a, owner decision Q69): the suite `test/deterministic-postgresql/` runs every rule of
- * `design.md` §4's component table on PostgreSQL 18 and on PGlite. Some rows are built by later tasks; this file is
- * where the suite says, row by row, which of its files run the rules built so far and which task builds the rest. A
- * task that builds a row's part moves it from `pending` to `tests` here, with the suite files that run it; a part
- * left pending after its task is checked in `tasks.md` fails this test, and so does a row of the design that this
- * list does not mirror verbatim.
+ * The suite `test/deterministic-postgresql/` runs every rule of the design's `deterministic_postgresql` component
+ * table on PostgreSQL 18 and on PGlite. This file says, row by row, which suite files run the rules built so far, and
+ * which open task of `tasks.md` builds the rest. When a row's part is built, it moves from `pending` to `tests` here,
+ * with the suite files that run it. The test fails when a part is still pending after its task is checked in
+ * `tasks.md`, or when a row of the design is not mirrored verbatim in this list. [A138, Q69; design §4]
  */
 
 const MARKER = "**The `deterministic_postgresql` component (Q69).**";
@@ -56,7 +55,7 @@ const ROWS: readonly RowCoverage[] = [
   {
     rule: "`core_chain.jsonb_numbers_ok` and `core_chain.numeric_ok` and the `CHECK`s they back",
     requirement: "DT-1, DT-6",
-    // Task 7.1: the functions and their rules, the CHECK on every such column, the writes they refuse (A58).
+    // The functions and their rules, the CHECK on every such column, and the writes they refuse. [A58]
     tests: ["checks.test.ts"],
     pending: {},
   },
@@ -89,9 +88,9 @@ const ROWS: readonly RowCoverage[] = [
       "its unlogged tables are skipped by the refusals and the `CHECK`s; the contents hash records each such table as " +
       "`[schema, table, null, null]`; digests skip it; backups carry its rows and its sequences' positions",
     requirement: "MD-1, DT-3, DT-4, DT-6, BK-2",
-    // Task 3.1: the declaration, and the skip written once (`opt-out.ts`), which the refusals and the TRUNCATE guard use;
-    // task 7.1: the startup check, the CHECKs and change capture skip such tables, and the hash records them by name
-    // only (A147's core part); task 15.2: a backup carries its rows and its sequence's position (A147's backup part).
+    // - The declaration, and the skip written once (`opt-out.ts`) that the refusals and the TRUNCATE guard use.
+    // - The startup check, the CHECKs and change capture skip such tables; the hash records them by name only. [A147]
+    // - A backup carries such a table's rows and its sequence's position. [A147]
     tests: ["opt-out.test.ts", "opt-out-backup.test.ts"],
     pending: {},
   },
@@ -102,7 +101,7 @@ interface DesignTable {
   readonly rows: readonly (readonly [string, string, string])[];
 }
 
-/** §4's component table, found by its heading anywhere under `openspec/` (an archived change included), once. */
+/** The design's component table, found once by its heading anywhere under `openspec/`, archived changes included. */
 function readComponentTable(): DesignTable {
   const openspec = join(REPOSITORY, "openspec");
   const paths = (readdirSync(openspec, { recursive: true, encoding: "utf8" }) as string[])
@@ -208,7 +207,7 @@ describe("A138: the suite runs every rule of design.md §4's component table on 
         .map(([part, task]) => `${part}: task ${task} is no longer open; move the part to the row's tests`),
     );
     expect(done).toEqual([]);
-    // What A138 covers now, and what waits for which task (`tasks.md` 2.2a's done note says the same).
+    // What the suite covers now, and which parts still wait for a task: none. [A138]
     expect(Object.fromEntries(ROWS.flatMap((row) => Object.entries(row.pending)))).toEqual({});
   });
 });

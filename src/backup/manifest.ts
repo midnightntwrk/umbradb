@@ -1,17 +1,25 @@
 /**
- * A backup's manifest (`openspec/changes/core-arch/specs/backups/spec.md` BK-2; `design.md` §9.1; owner decisions Q83,
- * Q85): the first line of a backup file, an SQL comment holding one JSON object, so that the file stays plain SQL that
- * the tool wrote and a restore can check the backup before running any of it (BK-3).
+ * A backup's manifest: the first line of a backup file, an SQL comment holding one JSON object. So the file stays
+ * plain SQL that the tool wrote, and a restore can check the backup before running any of it.
+ * [BK-2, BK-3, Q83, Q85; design §9.1]
  *
- * **The line:** `-- umbradb-backup ` and the JSON on one line, then `\n`; the dump follows. **The fields** (format 1):
- * `format` (1); `genesisHash`, `start` (S), `height`, `blockHash` — the chain's identity (`core_chain.identity`) and the
- * committed height the dump holds, with its block's hash —; `stateRoot`, the ledger state root stored for that height
- * when `core-ledger-state` keeps one (`core_ledger_state.states`), else null; `history`, every `core_chain.config` row;
- * `migrations`, every `core_chain.migrations` row; `contentsHash` (DT-3), computed in the same snapshot as the dump;
- * `umbradb`, `postgres` and `tool`: the versions of UmbraDB, of the PostgreSQL server and of the tool that wrote the
- * dump. Heights are decimal text and hashes `0x`-prefixed lowercase hex; a history row's `data` is its data fields as
- * JSON, an integer outside ±(2^53 − 1) written exactly (read back with the `deterministic_postgresql` component's
- * lossless reader).
+ * **The line:** `-- umbradb-backup ` and the JSON on one line, then `\n`; the dump follows.
+ *
+ * **The fields** (format 1):
+ * - `format`: 1;
+ * - `genesisHash`, `start` (S), `height`, `blockHash`: the chain's identity (`core_chain.identity`), and the committed
+ *   height the dump holds with its block's hash;
+ * - `stateRoot`: the ledger state root stored for that height when `core-ledger-state` keeps one
+ *   (`core_ledger_state.states`), else null;
+ * - `history`: every `core_chain.config` row;
+ * - `migrations`: every `core_chain.migrations` row;
+ * - `contentsHash`: computed in the same snapshot as the dump [DT-3];
+ * - `umbradb`, `postgres` and `tool`: the versions of UmbraDB, of the PostgreSQL server and of the tool that wrote the
+ *   dump.
+ *
+ * Heights are decimal text and hashes `0x`-prefixed lowercase hex. A history row's `data` is its data fields as JSON;
+ * an integer outside ±(2^53 − 1) is written exactly, and read back with the `deterministic_postgresql` component's
+ * lossless reader.
  */
 
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
@@ -39,7 +47,7 @@ export interface ManifestHistoryRow {
 export interface ManifestMigration {
   readonly module: string;
   readonly migration: string;
-  /** SHA-256 of the migration's SQL, lowercase hex (DB-9). */
+  /** SHA-256 of the migration's SQL, lowercase hex. [DB-9] */
   readonly checksum: string;
   readonly position: number;
 }
@@ -77,11 +85,11 @@ export function manifestLine(manifest: Manifest): string {
   return `${MANIFEST_PREFIX}${json}\n`;
 }
 
-/** `backup-format-unknown` (BK-3), naming what is wrong with the file; nothing of it was run. */
+/** `backup-format-unknown`, naming what is wrong with the file; nothing of it was run. [BK-3] */
 export function formatUnknown(why: string, details: Readonly<Record<string, unknown>> = {}): UmbraError {
   return new UmbraError(
     "backup-format-unknown",
-    `the file is not a backup this build can restore: ${why}; nothing of it was run (BK-3). A backup is the file ` +
+    `the file is not a backup this build can restore: ${why}; nothing of it was run. A backup is the file ` +
       `\`umbradb backup\` writes: its first line is the manifest (format ${BACKUP_FORMAT}), then the dump`,
     details,
   );

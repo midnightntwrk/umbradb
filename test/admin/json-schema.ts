@@ -2,12 +2,13 @@ import { readFileSync } from "node:fs";
 import { Ajv2020, type ErrorObject } from "ajv/dist/2020.js";
 
 /**
- * The admin endpoints' JSON schemas (tasks 8.3, 8.4; A66): each body's schema is a JSON Schema draft 2020-12 file
- * committed with its part's tests (`test/backbone/core-status/status.schema.json`, `…/core-config/config.schema.json`),
- * checked by Ajv 8.18.0 (`ajv`, a pinned development dependency: the reference validator of the draft, in the tree
- * already as Stryker's) in strict mode — an unknown keyword, an ambiguous type or a misspelled one refuses the schema
- * itself, so a typo cannot quietly weaken it — with every error reported. Each schema is first checked against the
- * draft's meta-schema.
+ * The admin endpoints' JSON schemas. Each body's schema is a JSON Schema draft 2020-12 file committed with its part's
+ * tests (`test/backbone/core-status/status.schema.json`, `…/core-config/config.schema.json`). [A66]
+ *
+ * Each is checked by Ajv 8.18.0 (`ajv`, a pinned development dependency: the reference validator of the draft, already
+ * in the tree as Stryker's) in strict mode, with every error reported. In strict mode an unknown keyword, an ambiguous
+ * type or a misspelled one refuses the schema itself, so a typo cannot quietly weaken it. Each schema is first checked
+ * against the draft's meta-schema.
  */
 
 /** A schema file, parsed. */

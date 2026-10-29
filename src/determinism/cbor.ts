@@ -1,6 +1,6 @@
 /**
- * The canonical row encoding of DT-1 (`openspec/changes/core-arch/specs/determinism/spec.md`): RFC 8949 §4.2.1 core
- * deterministic encoding, written here for exactly the subset UmbraDB stores, with no CBOR dependency.
+ * The canonical row encoding: RFC 8949 §4.2.1 core deterministic encoding, written here for exactly the subset UmbraDB
+ * stores, with no CBOR dependency. [DT-1]
  *
  * The subset: integers within CBOR's 64-bit range (−2^64 to 2^64 − 1, major types 0 and 1), byte strings, text
  * strings, arrays, maps whose keys are text strings (a `jsonb` object), `false`, `true` and `null`. Every argument is
@@ -21,9 +21,9 @@ import {
 } from "../deterministic-postgresql/index.js";
 
 /**
- * The column types of DT-1 the encoder takes (and their arrays): the `deterministic_postgresql` component's
+ * The column types the encoder takes, and their arrays: the `deterministic_postgresql` component's
  * (`SCALAR_COLUMN_TYPES` of `src/deterministic-postgresql/column-rules.ts`), the types its rules allow in a module
- * table.
+ * table. [DT-1]
  */
 export type { ColumnType } from "../deterministic-postgresql/index.js";
 
@@ -55,9 +55,9 @@ export type CanonicalEncodingFailure =
   | "numeric-invalid"
   /** A `uuid` value that is not PostgreSQL's output of one: 32 lowercase hex digits in groups 8-4-4-4-12. */
   | "uuid-invalid"
-  /** A `timestamptz` value `infinity` or `-infinity`: it has no microseconds since 1970 (DT-1, owner decision Q74). */
+  /** A `timestamptz` value `infinity` or `-infinity`: it has no microseconds since 1970. [DT-1, Q74] */
   | "timestamptz-infinite"
-  /** A `timestamptz` value that is not the database API's RFC 3339 UTC text of a time from 0001 to 9999 (DB-2). */
+  /** A `timestamptz` value that is not the database API's RFC 3339 UTC text of a time from 0001 to 9999. [DB-2] */
   | "timestamptz-invalid"
   /** A text string holding a lone UTF-16 surrogate, which has no UTF-8 encoding. */
   | "lone-surrogate"
@@ -65,9 +65,9 @@ export type CanonicalEncodingFailure =
   | "unsupported-value"
   /** A row value whose JavaScript type does not match its column type. */
   | "type-mismatch"
-  /** A column type outside DT-1 (`design.md` §4's column-type table gives the reason). */
+  /** A column type the encoding does not cover; the column-type rules give the reason. [DT-1; design §4] */
   | "unsupported-column-type"
-  /** A floating-point column type, which DT-6 refuses with this code (`design.md` §4's column-type table). */
+  /** A floating-point column type, which the stored-data rules refuse with this code. [DT-6; design §4] */
   | "non-deterministic-column"
   /** A row whose number of values differs from its number of column types. */
   | "row-length"
@@ -76,8 +76,8 @@ export type CanonicalEncodingFailure =
 
 /**
  * An encoding failure: `reason` says why, `path` says where (`$` is the value, `$[2]["k"]` a column's nested key). It is
- * an `UmbraError` (`design.md` §12 exports `UmbraError`, not this class): its code is its `reason`, it is not retryable,
- * and its details hold the `path`.
+ * an `UmbraError` (the package exports `UmbraError`, not this class): its code is its `reason`, it is not retryable,
+ * and its details hold the `path`. [design §12]
  */
 export class CanonicalEncodingError extends UmbraError {
   override readonly name = "CanonicalEncodingError";
@@ -99,9 +99,9 @@ export function encodeCanonical(value: CanonicalValue): Uint8Array {
 }
 
 /**
- * Encodes a row as DT-1 defines it: a CBOR array of its column values in column order, each by its column type.
+ * Encodes a row canonically: a CBOR array of its column values in column order, each by its column type. [DT-1]
  *
- * The values are what the database API returns (DB-2):
+ * The values are what the database API returns [DB-2]:
  * - `smallint` and `integer` as `number`; `bigint` as `bigint` (a safe-integer `number` is accepted too); each within
  *   its PostgreSQL range;
  * - `numeric` as PostgreSQL's decimal text, which must be an integer — an optional `-` and digits — and is encoded as
@@ -111,17 +111,17 @@ export function encodeCanonical(value: CanonicalValue): Uint8Array {
  * - `uuid` as PostgreSQL prints it, which both drivers return unchanged: 32 lowercase hex digits in groups 8-4-4-4-12,
  *   encoded as the byte string of its 16 bytes; any other form (upper case, braces, no hyphens) cannot have come from
  *   a `uuid` column and fails;
- * - `timestamptz` (`timestamp with time zone`) as RFC 3339 UTC text (`2025-05-21T14:30:00.123456Z`, DB-2, owner
- *   decision Q68), encoded as the integer of its microseconds since 1970-01-01T00:00:00Z (owner decision Q74),
- *   negative before 1970; `infinity` and `-infinity` fail, and so does any other text;
+ * - `timestamptz` (`timestamp with time zone`) as RFC 3339 UTC text (`2025-05-21T14:30:00.123456Z`), encoded as the
+ *   integer of its microseconds since 1970-01-01T00:00:00Z, negative before 1970; `infinity` and `-infinity` fail,
+ *   and so does any other text [DB-2, Q68, Q74];
  * - `jsonb` as the value parsed without loss: integers within ±(2^53 − 1) as `number`, others as `bigint`; every
- *   number must be an integer within the signed 64-bit range of DT-6;
+ *   number must be an integer within the signed 64-bit range [DT-6];
  * - an array as a JavaScript array, nested for more dimensions, with `null` elements;
  * - `null` for NULL in any column.
  *
- * A column type outside DT-1 fails with the code and the reason of its row in `design.md` §4's column-type table, as
- * far as its name tells (`refusalOfTypeName` of `src/deterministic-postgresql/column-rules.ts`: without the catalog,
- * an enum or a domain reads as "any other type").
+ * A column type the encoding does not cover fails with the code and the reason the column-type rules give it, as far
+ * as its name tells (`refusalOfTypeName` of `src/deterministic-postgresql/column-rules.ts`: without the catalog, an
+ * enum or a domain reads as "any other type"). [DT-1; design §4]
  */
 export function encodeRow(values: readonly unknown[], types: readonly ColumnType[]): Uint8Array {
   if (values.length !== types.length) {
@@ -199,8 +199,8 @@ const NUMERIC_FRACTION = /^-?[0-9]+\.[0-9]+$/;
 /** PostgreSQL's output of a `uuid` (`uuid_out`): lowercase hex digits in groups of 8, 4, 4, 4 and 12. */
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /**
- * The database API's text of a `timestamptz` (DB-2): RFC 3339 in UTC, a four-digit year, and a fraction of up to six
- * digits only when the value has one (`src/deterministic-postgresql/mapping.ts`).
+ * The database API's text of a `timestamptz`: RFC 3339 in UTC, a four-digit year, and a fraction of up to six digits
+ * only when the value has one (`src/deterministic-postgresql/mapping.ts`). [DB-2]
  */
 const TIMESTAMPTZ_RFC3339 = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,6}))?Z$/;
 /** Year, month, day, hour, minute and second of {@link TIMESTAMPTZ_RFC3339}'s match. */
@@ -552,11 +552,13 @@ function encodeColumnScalar(
 }
 
 /**
- * The microseconds since 1970-01-01T00:00:00Z of a `timestamptz` as the database API reads it (DT-1, owner decision
- * Q74), in `bigint`: the years 0001 to 9999 span about ±2.5 × 10^17 microseconds, beyond 2^53, so a `number` would
- * round them (253402300799999999, the last microsecond of 9999, would become 253402300800000000). The calendar is the
- * proleptic Gregorian one PostgreSQL uses; the date must exist (no 29 February 2025, no hour 24, no leap second, which
- * PostgreSQL never prints). `infinity` and `-infinity` have no such number and fail; so does any other text.
+ * The microseconds since 1970-01-01T00:00:00Z of a `timestamptz` as the database API reads it, in `bigint`. The years
+ * 0001 to 9999 span about ±2.5 × 10^17 microseconds, beyond 2^53, so a `number` would round them (253402300799999999,
+ * the last microsecond of 9999, would become 253402300800000000). [DT-1, Q74]
+ *
+ * The calendar is the proleptic Gregorian one PostgreSQL uses. The date must exist: no 29 February 2025, no hour 24,
+ * no leap second (which PostgreSQL never prints). `infinity` and `-infinity` have no such number and fail; so does any
+ * other text.
  */
 function timestamptzMicroseconds(text: string, path: PathNode): bigint {
   if (text === "infinity" || text === "-infinity") {

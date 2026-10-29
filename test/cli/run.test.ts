@@ -20,21 +20,28 @@ import {
 } from "./run-fixtures.js";
 
 /**
- * A152 `[CI]`, its `umbradb run` half (task 4.4a; CF-1, LS-6, MD-1, owner decision Q106 B): `umbradb run` on a file that
- * imports the user module `stats`, exports `modules = [stats]` and lists `stats.entry({ … })` runs `stats` — every
- * height from S to the node's head commits a row of `stats` with its setting —, on PostgreSQL 18.6 and PGlite 0.5.10,
- * in this process (`runProcessCommand` with a signal source of the test's) and through the command itself in a child
- * process (the bundled `src/cli/main.ts`: Node.js's own type stripping, a real SIGTERM, the exit code). The process is
- * what the command builds: UmbraDB's backbone, the node source (`nodeSourceOf`) on the `core` entry's `node` — a tape
- * node serving a synthetic chain (`./run-fixtures.ts`) —, and the admin endpoints, served by default (Q128 B), here on
- * `127.0.0.1:0`. Also: a file listing a module that neither it exports nor UmbraDB ships is refused naming the module —
- * a refusal of the configuration itself, which the process logs, finding by finding, and which ends it: the command
- * exits 1 with no signal (owner decision Q137 B, task 8.1b; A157 is `test/admin/refused-configuration.test.ts`) —; a
- * halted process stays up until signalled and exits 1; SIGINT stops it as SIGTERM does; `run`'s arguments; and the
- * committed negative control, a run that ignores the file's modules.
+ * User modules from the configuration file `[CI]`, the `umbradb run` half. `umbradb run` on a file that imports the
+ * user module `stats`, exports `modules = [stats]` and lists `stats.entry({ … })` runs `stats`: every height from S to
+ * the node's head commits a row of `stats` with its setting. This runs on PostgreSQL 18.6 and PGlite 0.5.10, both in
+ * this process (`runProcessCommand` with the test's own signal source) and through the command itself in a child
+ * process (the bundled `src/cli/main.ts`: Node.js's own type stripping, a real SIGTERM, the exit code).
+ * [A152 CI, CF-1, LS-6, MD-1, Q106 B]
+ *
+ * The process is what the command builds: UmbraDB's backbone, the node source (`nodeSourceOf`) on the `core` entry's
+ * `node` (a tape node serving a synthetic chain, `./run-fixtures.ts`), and the admin endpoints, served by default and
+ * here on `127.0.0.1:0`. [Q128 B]
+ *
+ * Also covered:
+ * - a file listing a module that it does not export and UmbraDB does not ship is refused, naming the module. This is
+ *   a refusal of the configuration itself: the process logs it finding by finding and ends, and the command exits 1
+ *   with no signal (the admin side is `test/admin/refused-configuration.test.ts`) [Q137 B, A157];
+ * - a halted process stays up until signalled and exits 1;
+ * - SIGINT stops it as SIGTERM does;
+ * - `run`'s arguments;
+ * - the committed negative control, a run that ignores the file's modules.
  */
 
-/** What `run` says of an `--update-hash` that is not a configuration hash (task 14.1c). */
+/** What `run` says of an `--update-hash` that is not a configuration hash. [PP-14] */
 const UPDATE_HASH_FORM =
   "--update-hash takes the public configuration hash to accept, 0x and 64 lowercase hex digits, as a start that " +
   "stopped with public-config-changed names it";
@@ -180,7 +187,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     const file = write({ core: runCoreSettings(db.setting, "ws://127.0.0.1:9/node"), modules: null });
     const run = runInChild(project, ["--config", file]);
     try {
-      // A refusal of the configuration itself ends the process (Q137 B): no signal is sent, no admin listener opened.
+      // A refusal of the configuration itself ends the process: no signal is sent, no admin listener opened. [Q137 B]
       expect(await exitWithin(run, PATIENCE_MS)).toBe(EXIT.failed);
       expect(run.stderr()).toMatch(/^startup refused: invalid-configuration \(1 finding\); the process ends$/m);
       expect(run.stderr()).toMatch(
@@ -217,7 +224,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
 
   it("a file that cannot be loaded is refused by startup as itself, which logs why and ends: exit 1 unsignalled", async () => {
     // The tests' startProcess, which serves no admin endpoints (none opens here anyway: the refusal ends the process
-    // before any listener, task 8.1b, which A157's test checks with the runner's own).
+    // before any listener, which test/admin/refused-configuration.test.ts checks with the runner's own). [A157]
     const run = runHere(["--config", "no-such.config.ts"], { start: startWithoutAdmin });
     const result = await endedByItself(run);
     expect(result?.code).toBe(EXIT.failed);
@@ -240,7 +247,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
       },
     });
     const result = inProcess(["run"], `${project.dir}/types`, { run });
-    // Refused as a file that cannot be loaded, the process ends by itself (Q137 B): no signal is sent.
+    // Refused as a file that cannot be loaded, the process ends by itself: no signal is sent. [Q137 B]
     const ended = await Promise.race([result, sleep(PATIENCE_MS, null)]);
     if (ended === null) signals.emit("SIGTERM");
     expect(ended).not.toBeNull();
@@ -311,8 +318,8 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     run.signals.emit("SIGTERM");
     const result = await run.result;
     expect(result.code).toBe(EXIT.failed);
-    // The private source's own refusal (no public database to read: task 14.1's intake), after the validation passed
-    // with the private core schema — a public process would have refused the file for its missing node.
+    // The private source's own refusal (no public database to read from), after the validation passed with the
+    // private core schema. A public process would have refused the file for its missing node.
     expect(result.stderr).toMatch(/^startup refused: invalid-configuration: the private process's core entry has no publicDatabase/m);
     expect(result.stderr).not.toContain("umbradb run:");
   }, PATIENCE_MS * 2);
@@ -320,12 +327,12 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
   it.each([
     [["extra.config.ts"], "run takes no file of its own: umbradb run [--config <file>] [--update-hash=<hash>]"],
     [["--config"], "--config takes a value: the configuration file"],
-    // An empty value is none (task 17.5b).
+    // An empty value counts as no value.
     [["--config="], "--config takes a value: the configuration file"],
     [["--config", "a.config.ts", "--config", "b.config.ts"], "run takes --config once"],
     [["--confg", "a.config.ts"], "unknown option --confg of run"],
     [["--database", "postgres://u:pw-4-4a-RUN@h/db"], "unknown option --database of run"],
-    // Task 14.1c (PP-14, Q159): the hash to accept, in the form a stop names it, once.
+    // --update-hash: the hash to accept, in the form a stop names it, given once. [PP-14, Q159]
     [["--update-hash"], UPDATE_HASH_FORM],
     [["--update-hash="], UPDATE_HASH_FORM],
     [["--update-hash=0x12"], UPDATE_HASH_FORM],

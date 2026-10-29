@@ -6,22 +6,22 @@ import { afterAll, describe, expect, it } from "vitest";
 import { REPOSITORY } from "./in8.js";
 
 /**
- * A83 `[STATIC]` (`openspec/changes/core-arch/acceptance.md`; IN-8, CORE-ARCH FR-005): no source file imports the
- * official indexer's client or a wallet SDK, and nothing the package installs at run time is one.
+ * No source file imports the official indexer's client or a wallet SDK, and nothing the package installs at run time
+ * is one. [A83 STATIC, IN-8; CORE-ARCH FR-005]
  *
- * **What is forbidden** (task 10.1's list):
+ * **What is forbidden:**
  * - **A wallet SDK:** any package of the Midnight scopes (`@midnightntwrk/`, `@midnight-ntwrk/`) whose name holds
  *   `wallet` — the wallet SDK's packages (`@midnightntwrk/wallet-sdk`, `wallet-sdk-facade`, `wallet-sdk-hd`, … at the
  *   wallet release the indexer targets, 2.1.0-rc.4) and the older `@midnight-ntwrk/wallet*` packages.
  * - **The official indexer's client:** any package of those scopes whose name holds `indexer` — the wallet SDK's
  *   `@midnightntwrk/wallet-sdk-indexer-client` and midnight-js's `@midnight-ntwrk/midnight-js-indexer-public-data-provider`
- *   — and 0.9.5's own GraphQL client of the indexer, the module `indexer-client` (deleted by task 10.1), by its file
- *   name or by its class name `IndexerClient` (a copy under another name).
+ *   — and 0.9.5's own GraphQL client of the indexer, the module `indexer-client` (now deleted), by its file name or
+ *   by its class name `IndexerClient` (a copy under another name).
  * The ledger packages of those scopes (`@midnight-ntwrk/ledger-v8`, …) are the ledger, not a wallet SDK or an
- * indexer client, and stay allowed (LG-5, LG-6).
+ * indexer client, and stay allowed. [LG-5, LG-6]
  *
  * **Where:** every JavaScript and TypeScript file of the code that runs in the indexer — `src/` (the package), what is
- * left of 0.9.5's `chain-archive-sync/` until task 17.2 removes it, the vendored ledger builds (`vendor/`), and the
+ * left of 0.9.5's `chain-archive-sync/` until it is removed (OUTDATED), the vendored ledger builds (`vendor/`), and the
  * browser build and tools (`browser/`, `tools/`) once they exist; tests may use the wallet SDK as a development
  * dependency (0.9.5's live adapter does). And `package.json`'s run-time dependency lists and every package
  * `package-lock.json` installs without `--include=dev`.

@@ -21,13 +21,15 @@ import { loadLedgerPackage } from "../../src/ledger/load.js";
 import { LEDGER_RELEASES } from "../../src/ledger/releases.js";
 import { block, contractFixture, hex, NETWORK_ID, RAW } from "./adapter-fixtures.js";
 
-// Task 12.1 of `openspec/changes/core-arch` (LG-8, LG-15, LG-16, CC-2): the shared implementation of the adapters
-// (`src/ledger/adapter.ts`) on inputs the fixture blocks cannot give it — events shaped as the packages' declarations
-// give them (`vendor/ledger/<version>/pkg/ledger-v*.d.ts`, `EventDetails`) for the kinds no fixture block emits without
-// a wallet (zswap inputs, DUST events, parameter changes); a package that records what `apply` hands it (the block
-// context, the strictness, the times, the fullness the post-block update gets, the parameters a system transaction's
-// cost is taken with, what a transaction the chain reports failed is spared — task 12.1a), which a real package does
-// not show; and a cost the package cannot compute.
+// The shared implementation of the adapters (`src/ledger/adapter.ts`) on inputs the fixture blocks cannot give it:
+// - events shaped as the packages' declarations give them (`vendor/ledger/<version>/pkg/ledger-v*.d.ts`,
+//   `EventDetails`), for the kinds no fixture block emits without a wallet (zswap inputs, DUST events, parameter
+//   changes);
+// - a package that records what `apply` hands it, which a real package does not show: the block context, the
+//   strictness, the times, the fullness the post-block update gets, the parameters a system transaction's cost is taken
+//   with, and what a transaction the chain reports failed is spared;
+// - a cost the package cannot compute.
+// [LG-8, LG-15, LG-16, CC-2]
 
 const SOURCE = { logicalSegment: 1, physicalSegment: 2 };
 const SERIALIZED = Uint8Array.of(0x6d, 0x69);
@@ -536,7 +538,7 @@ describe("networkIdOf and the state's summary (task 12.3; IN-7, LG-16)", () => {
     const preview = adapter.emptyState("preview");
     expect(adapter.networkIdOf(preview)).toBe("preview");
     expect(adapter.networkIdOf(adapter.emptyState())).toBe(NETWORK_ID);
-    // The package's `stateTrees` passed on (task 12.1b); its values are the ledger's own (`state-trees.test.ts`).
+    // The package's `stateTrees` passed on; its values are the ledger's own (`state-trees.test.ts`).
     const summary = adapter.stateSummary(preview);
     expect(summary).toEqual(RAW.v9.stateTrees(preview as never));
     expect([summary.zswapFirstFree, summary.dustCommitmentFirstFree, summary.dustGenerationFirstFree]).toEqual([0n, 0n, 0n]);

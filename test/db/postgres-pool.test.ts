@@ -5,8 +5,10 @@ import { TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 import { type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
 /**
- * DB-5 on PostgreSQL: one writer connection for transactions, and a pool of read-only connections that see committed
- * data only. A12: a reader polling while a block transaction is open never sees a row of that block before its COMMIT.
+ * The PostgreSQL backend has one writer connection for transactions, and a pool of read-only connections that see
+ * committed data only. [DB-5]
+ *
+ * A reader polling while a block transaction is open never sees a row of that block before its COMMIT. [A12]
  */
 
 let server: PostgresTestServer;
@@ -132,8 +134,8 @@ describe("A12 (DB-5) — a reader never sees a block's rows before its COMMIT", 
 });
 
 describe("the database's parts (CF-4's `database`, owner decision Q167 A)", () => {
-  // Task 4.5 removed the refusal of a URL query parameter overriding a session setting: the parts carry no URL, so
-  // nothing but the backend's own `connection` option sets a startup parameter.
+  // The parts carry no URL, so no URL query parameter can override a session setting: only the backend's own
+  // `connection` option sets a startup parameter.
   it("refuses a read pool size that is not a positive integer", () => {
     for (const readConnections of [0, -1, 1.5, Number.NaN]) {
       let error: unknown;

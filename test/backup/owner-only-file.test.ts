@@ -7,9 +7,9 @@ import { BACKUP_FILE_MODE, writeBackup } from "../../src/backup/backup.js";
 import { openPglite } from "../../src/db/pglite.js";
 
 /**
- * Task 17.5b (the mutation pass task 15.1b deferred): the backup's owner-only file in this process, without changing the
- * umask (`file-mode.test.ts` sets one, which a worker thread cannot, so a mutation run cannot run it): a `chmod` the
- * file system refuses fails the backup with that error, the temporary file removed and nothing written.
+ * The backup's owner-only file in this process, without changing the umask (`file-mode.test.ts` sets one, which a
+ * worker thread cannot, so a mutation run cannot run it): a `chmod` the file system refuses fails the backup with that
+ * error, the temporary file removed and nothing written.
  */
 
 const root = mkdtempSync(join(tmpdir(), "umbradb-owner-only-"));

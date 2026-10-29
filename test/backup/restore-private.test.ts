@@ -27,18 +27,19 @@ import {
 } from "./restore-private.js";
 
 /**
- * A164 `[CI]` (task 15.2a; BK-3, BK-4, PP-2, PP-12, owner decision Q153; `design.md` §9.1), on PostgreSQL 18.6 and
- * PGlite 0.5.10, through `umbradb restore`'s own work in this process (`runRestore`) with a private process's
- * configuration file: a private process's backup, written under the development opt-in, restores into an empty private
- * database with BK-3's checks made against its public database — read as the private process reads it, on PostgreSQL
- * directly and on PGlite through the core's transport —, and the process continues from its height + 1 as one that
- * never stopped; one taken against another public database is refused with `private-binding-mismatch` and the binding's
- * `details.reason`, the target left empty; and every other check against the public database refuses before anything
- * is loaded. The setup: `./restore-private.ts`. The committed negative control (the restore without the binding's
- * check) is `./restore-private.negative-control.test.ts`.
+ * On PostgreSQL 18.6 and PGlite 0.5.10, through `umbradb restore`'s own work in this process (`runRestore`) with a
+ * private process's configuration file: a private process's backup, written under the development opt-in, restores into
+ * an empty private database with the restore's checks made against its public database — read as the private process
+ * reads it, on PostgreSQL directly and on PGlite through the core's transport —, and the process continues from its
+ * height + 1 as one that never stopped; one taken against another public database is refused with
+ * `private-binding-mismatch` and the binding's `details.reason`, the target left empty; and every other check against
+ * the public database refuses before anything is loaded. [A164 CI, BK-3, BK-4, PP-2, PP-12, Q153; design §9.1]
+ *
+ * The setup: `./restore-private.ts`. The committed negative control (the restore without the binding's check) is
+ * `./restore-private.negative-control.test.ts`.
  */
 
-/** Each test waits on purpose for processes to reach heights (task 0.5's notes): its own budget, for a loaded machine. */
+/** Each test waits on purpose for processes to reach heights: its own budget, for a loaded machine. */
 const TEST_TIMEOUT_MS = 900_000;
 
 /** Waits until `holds()`, read again every 20 ms; fails naming `what` after 60 s. */

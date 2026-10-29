@@ -31,21 +31,24 @@ import { LEDGER_CORE } from "./ledger-restart.js";
 import { cellValue } from "../ledger/adapter-fixtures.js";
 
 /**
- * The committed negative controls of task 13.1's criteria (`openspec/changes/core-arch/acceptance.md` A108–A111): each
- * runs the real modules with one rule replaced, through the criterion's own scenario and oracle
- * (`./contract-data-checks.ts`, `./contract-logs-handoff.ts`), and shows the oracle failing.
+ * The committed negative controls of the contract-data criteria. Each runs the real modules with one rule replaced,
+ * through the criterion's own scenario and oracle (`./contract-data-checks.ts`, `./contract-logs-handoff.ts`), and
+ * shows the oracle failing. [A108–A111]
  *
- * - A108: a `core-contract-states` writing one row per call, not per contract and block, fails "one row with the state
- *   after both": the second call's row is refused by the table's key, and processing halts.
- * - A109: a `core-contract-logs-full` taking every literal the transcripts log — a failed fallible segment's too —
- *   stores a log the ledger did not emit.
- * - A110: a `core-contract-logs-fast` that guesses (no log) instead of halting on a value read from state does not halt,
- *   and stores other rows than `-full`.
- * - A111: a handoff that skips h + 1 leaves a gap; one that repeats it is refused (`providers-overlap`), and one that
- *   starts `-fast` at h, the backup's cursor, too (`changes-past`).
+ * - A `core-contract-states` writing one row per call, not per contract and block, fails "one row with the state
+ *   after both": the second call's row is refused by the table's key, and processing halts. [A108]
+ * - A `core-contract-logs-full` taking every literal the transcripts log, a failed fallible segment's too, stores a
+ *   log the ledger did not emit. [A109]
+ * - A `core-contract-logs-fast` that guesses (no log) instead of halting on a value read from state does not halt,
+ *   and stores other rows than `-full`. [A110]
+ * - A handoff that skips h + 1 leaves a gap. One that repeats it is refused (`providers-overlap`), and so is one that
+ *   starts `-fast` at h, the backup's cursor (`changes-past`). [A111]
  */
 
-/** A108's control: one row per call or deploy of the block (`block-parsed`), with the keys the ledger state gave its contract. */
+/**
+ * The `core-contract-states` control: one row per call or deploy of the block (`block-parsed`), with the keys the ledger
+ * state gave its contract. [A108]
+ */
 function perCall(b: BlockContext): ContractStateRow[] {
   const keys = new Map(contractStatesOf(b).map((row) => [Buffer.from(row.address).toString("hex"), row]));
   return blockParsedItemOf(b, "core-contract-states").transactions.flatMap((transaction) =>
@@ -58,7 +61,10 @@ function perCall(b: BlockContext): ContractStateRow[] {
   );
 }
 
-/** A109's control: every literal each transaction not failed on chain logs, whatever its segments' results. */
+/**
+ * The `core-contract-logs-full` control: every literal each transaction not failed on chain logs, whatever its segments'
+ * results. [A109]
+ */
 async function everyLiteral(b: BlockContext): Promise<ContractLog[]> {
   const { ledger, transactions } = blockParsedItemOf(b, "core-contract-logs-full");
   const outcomes = txResultsItemOf(b);

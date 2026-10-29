@@ -1,19 +1,20 @@
 /**
- * The tape tools' command (tasks 9.2 and 0.3), run as `npx tsx tools/tape/main.ts <command> --node <ws-url> …`
+ * The tape tools' command, run as `npx tsx tools/tape/main.ts <command> --node <ws-url> …`
  * (`./main.ts`, outside the package like the rest of `tools/tape/`):
  *
  * - **`record`** starts the recording builder (`./builder.ts`) in front of the node, prints the URL to point the client
  *   at, and records until it is told to stop (Ctrl-C, or SIGTERM); then writes the tape to `--out` and prints its
  *   SHA-256. A frame it cannot record ends it at once (exit 1), writing nothing.
- * - **`check`** is A71's `[MANUAL]` half: the IN-8 tour of the node client recorded through the builder against the
- *   node and replayed through the tape node (`./replay-check.ts`); it writes the tape to `--out`, prints its SHA-256
- *   (for the pull request) and exits 0 when every frame of every connection was byte-identical, 1 otherwise.
- * - **`range`** records every IN-8 call of every height `--from`–`--to` and a live window of the head subscriptions
- *   (`./range.ts`, task 0.3, Q123), checks the tape complete (`./completeness.ts`) — writing nothing when it is not —,
- *   writes it to `--out` and prints its SHA-256, size, request rate and runtimes, and first the node version the node
- *   reports (`system_version`, asked on a connection of its own outside the builder, so it is not on the tape: it is
- *   not an IN-8 call). Options: `--concurrency` (requests in flight, 8), `--chunk` (heights a connection records, 500),
- *   `--live-seconds` (60).
+ * - **`check`** is the manual half of the record-and-replay check: a tour of every node call the client makes,
+ *   recorded through the builder against the node and replayed through the tape node (`./replay-check.ts`). It writes
+ *   the tape to `--out`, prints its SHA-256 (for the pull request) and exits 0 when every frame of every connection
+ *   was byte-identical, 1 otherwise [A71, IN-8].
+ * - **`range`** records every allowed node call of every height `--from`–`--to` and a live window of the head
+ *   subscriptions (`./range.ts`). It checks the tape complete (`./completeness.ts`), writing nothing when it is not,
+ *   then writes it to `--out` and prints its SHA-256, size, request rate and runtimes. First it prints the version the
+ *   node reports (`system_version`, asked on a connection of its own outside the builder, so it is not on the tape: it
+ *   is not one of the allowed node calls). Options: `--concurrency` (requests in flight, 8), `--chunk` (heights a
+ *   connection records, 500), `--live-seconds` (60) [IN-8, Q123].
  * - **`boundaries`** reads the network's genesis and runtime upgrades (`./boundaries.ts`) and writes the record the
  *   built-in ledger tables cite to `--out` (JSON: the node's answers, with the genesis, the head and each boundary);
  *   `--step` (blocks between samples of the runtime, 1,000), `--concurrency` (8).
@@ -48,12 +49,12 @@ export const USAGE = [
   "         records a client's session with the node through the recording builder until Ctrl-C, then writes the",
   "         tape and prints its SHA-256; point the client at the URL it prints",
   "       tsx tools/tape/main.ts check --node <ws-url> --out <file>",
-  "         A71's record-and-replay check: the node client's IN-8 tour recorded through the builder and replayed",
+  "         the record-and-replay check: a tour of the node client's calls recorded through the builder and replayed",
   "         through the tape node, every frame compared byte for byte; writes the tape and prints its SHA-256",
   "       tsx tools/tape/main.ts range --node <ws-url> --from <height> --to <height> --out <file>",
   "                                    [--concurrency <n>] [--chunk <heights>] [--live-seconds <s>]",
-  "         records every IN-8 call of every height of the range and a live window of the head subscriptions",
-  "         (task 0.3), checks the tape complete, writes it and prints its SHA-256",
+  "         records every node call the client makes for every height of the range and a live window of the head",
+  "         subscriptions, checks the tape complete, writes it and prints its SHA-256",
   "       tsx tools/tape/main.ts boundaries --node <ws-url> --out <file> [--step <blocks>] [--concurrency <n>]",
   "         reads the genesis and every runtime upgrade of the node's chain; writes the node's answers as JSON",
 ].join("\n");
@@ -177,14 +178,14 @@ async function check(node: string, out: string, io: TapeCommandIo): Promise<numb
   const received = result.recorded.reduce((total, frames) => total + frames.received.length, 0);
   io.out(
     `identical: ${result.recorded.length} connections, ${sent} frames sent and ${received} received, ` +
-      "byte for byte (A71)",
+      "byte for byte",
   );
   return 0;
 }
 
 /**
- * The version the node reports (`system_version`), asked on a connection of its own, outside any builder: it is no
- * IN-8 call and is not on the tape. Never throws: a node that does not say gives the reason.
+ * The version the node reports (`system_version`), asked on a connection of its own, outside any builder: it is not
+ * one of the allowed node calls and is not on the tape. Never throws: a node that does not say gives the reason. [IN-8]
  */
 export async function reportedVersion(node: string, timeoutMs = 30_000): Promise<{ version: string } | { reason: string }> {
   return new Promise((resolve) => {
@@ -246,7 +247,7 @@ async function range(args: Arguments, io: TapeCommandIo): Promise<number> {
     `runtimes (state spec_version from height): ${stats.runtimes.map((runtime) => `${runtime.height}: ${runtime.specVersion}`).join(", ")}; ` +
       `metadata at ${stats.metadataHeights.join(", ")}`,
   );
-  io.out(`complete: every IN-8 call of every height ${from}–${to} is on the tape (Q123)`);
+  io.out(`complete: every node call of every height ${from}–${to} is on the tape`);
   return 0;
 }
 
@@ -263,8 +264,8 @@ async function boundaries(args: Arguments, io: TapeCommandIo): Promise<number> {
   const recorded = new Date().toISOString().slice(0, 10);
   const record = {
     description:
-      `Answers of the node ${args.node} to the calls below, read by tools/tape/main.ts boundaries on ${recorded} ` +
-      "(task 0.3): block 0's hash, header and runtime version; and for each runtime upgrade, the block hashes of " +
+      `Answers of the node ${args.node} to the calls below, read by tools/tape/main.ts boundaries on ${recorded}` +
+      ": block 0's hash, header and runtime version; and for each runtime upgrade, the block hashes of " +
       "U - 1, U and F = U + 1, the headers of U and F (whose MNSV digests name the old and the new runtime) and the " +
       "runtime versions at U - 1 and U (the state's runtime before and after the upgrade). The upgrades were found by " +
       "reading state_getRuntimeVersion every step blocks up to the finalized head and bisecting each change.",

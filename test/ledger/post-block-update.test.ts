@@ -19,10 +19,10 @@ import {
   T0_DATE,
 } from "./post-block-update-checks.js";
 
-// Task 12.1a of `openspec/changes/core-arch` (A151; LG-5, LG-8, LG-15; owner decision Q113 A): the node's end-of-block
-// update in the vendored ledger packages (`postBlockUpdateExact`, `blockFullness`, `systemTransactionCost`, from
-// `vendor/ledger/v8/patches/0004-…` and `v9/patches/0006-…`) and in the adapters' `apply`, against the node's arithmetic
-// at the pinned revisions (`fixtures/post-block-update/`); and the chain outcomes `apply` takes.
+// The node's end-of-block update, in the vendored ledger packages (`postBlockUpdateExact`, `blockFullness`,
+// `systemTransactionCost`, from `vendor/ledger/v8/patches/0004-…` and `v9/patches/0006-…`) and in the adapters'
+// `apply`, against the node's arithmetic at the pinned revisions (`fixtures/post-block-update/`). Also the chain
+// outcomes `apply` takes. [A151, LG-5, LG-8, LG-15, Q113 A]
 
 const LONG = 120_000;
 const UPSTREAM = (ledger: Ledger): { commit: string; versionName: string } =>

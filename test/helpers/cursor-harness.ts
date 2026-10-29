@@ -15,15 +15,21 @@ import { declaration } from "../modules/declarations.js";
 import { Contexts } from "../runner/fixtures.js";
 
 /**
- * What the cursor-table helper's tests share (task 6.1; SH-1, A59): a database on each backend, opened with the
- * committed height of the cursor (`core-block-commit`'s `blocks`, `cursorHeight`) and started by the migration runner
- * with four parts in RN-3's order — `core-block-commit`; the test module `wallet-scan`, whose migrations are the
- * helper's table and an audit of its writes; the test module `token-scan`, which writes nothing of its own; and the
- * real `core-digest`, so that change capture runs on the helper's table as on any module table (DT-4) — and a block as
- * the runner writes one: one transaction of the database API, its `on-db-write` callbacks through the real block write
- * handles (`openBlockWrites`, DB-3), `core-block-commit`'s row first (CD-3), then one module's callback, then
- * `core-digest`'s. The height-versioned table's tests (task 6.2, `height-versioned-harness.ts`) start the same way with
- * their own modules, through {@link helperDatabase}.
+ * What the cursor-table helper's tests share. [SH-1, A59]
+ *
+ * A database on each backend, opened with the committed height of the cursor (`core-block-commit`'s `blocks`,
+ * `cursorHeight`). The migration runner starts it with these four parts, in the fixed backbone order: [RN-3]
+ * - `core-block-commit`;
+ * - the test module `wallet-scan`, whose migrations are the helper's table and an audit of its writes;
+ * - the test module `token-scan`, which writes nothing of its own;
+ * - the real `core-digest`, so that change capture runs on the helper's table as on any module table. [DT-4]
+ *
+ * A block, as the runner writes one: one transaction of the database API, with its `on-db-write` callbacks run through
+ * the real block write handles (`openBlockWrites`). `core-block-commit`'s row comes first, then one module's callback,
+ * then `core-digest`'s. [DB-3, CD-3]
+ *
+ * The height-versioned table's tests (`height-versioned-harness.ts`) start the same way with their own modules,
+ * through {@link helperDatabase}.
  */
 
 /** The cursor table of `wallet-scan`, in its own schema. */
@@ -32,7 +38,7 @@ export const CURSORS: CursorTable = cursorTable({ schema: "wallet_scan", table: 
 /**
  * The oracle of "through the module's handle": every insert or update of `wallet_scan.cursors` records, per key, the
  * role it ran under (`current_user` in a trigger is the role of the statement that fired it) and its transaction. A
- * transaction id is no function of the chain, so the audit's item is declared `deterministic: false` (MD-1, Q76).
+ * transaction id does not follow from the chain, so the audit's item is declared `deterministic: false`. [MD-1, Q76]
  */
 export const AUDIT_MIGRATION: Migration = {
   id: "002",
@@ -48,7 +54,9 @@ CREATE TRIGGER audit_write AFTER INSERT OR UPDATE ON wallet_scan.cursors
   FOR EACH ROW EXECUTE FUNCTION wallet_scan.audit_write();`,
 };
 
-/** `wallet-scan`: a module keeping per-key cursors in the helper's table (CORE-ARCH §4.11a's example). */
+/**
+ * `wallet-scan`: a module keeping per-key cursors in the helper's table, as in the spec's example. [CORE-ARCH §4.11a]
+ */
 export function walletScan(points: ModuleDeclaration["points"] = {}): ModuleDeclaration {
   return declaration("wallet-scan", {
     provides: [
@@ -68,23 +76,23 @@ export function walletScan(points: ModuleDeclaration["points"] = {}): ModuleDecl
   });
 }
 
-/** `token-scan`: another module, with nothing of its own to write; it reads `wallet-scan`'s tables (DB-6). */
+/** `token-scan`: another module, with nothing of its own to write; it reads `wallet-scan`'s tables. [DB-6] */
 export const TOKEN_SCAN: ModuleDeclaration = declaration("token-scan", { provides: [], migrations: [] });
 
-/** The role `wallet-scan` writes under (DB-6). */
+/** The role `wallet-scan` writes under. [DB-6] */
 export const WALLET_SCAN_ROLE = "umbradb_m_wallet_scan";
 
 /** Options of one block. */
 export interface BlockOptions {
   /** The part whose `on-db-write` runs `body` (default: the database's main module, `wallet-scan` for a cursor one). */
   readonly part?: string;
-  /** DB-3's report of a write handle used after its callback ended. */
+  /** Receives the error reported when a write handle is used after its callback ended. [DB-3] */
   readonly onClosedUse?: (error: UmbraError) => void;
 }
 
 /**
- * A started database of the storage helpers' tests (the cursor table's, task 6.1, and the height-versioned table's,
- * task 6.2), and blocks on it.
+ * A started database of the storage helpers' tests (the cursor table's and the height-versioned table's), and blocks
+ * on it.
  */
 export interface HelperDatabase {
   readonly db: Database;
@@ -118,7 +126,7 @@ export async function cursorDatabase(backend: TestBackend): Promise<CursorDataba
 
 /**
  * A database on `backend` started, as the runner starts one, with the parts `core-block-commit`, `modules` and the real
- * `core-digest`, in RN-3's order; its blocks run the first of `modules` unless told otherwise.
+ * `core-digest`, in the fixed backbone order; its blocks run the first of `modules` unless told otherwise. [RN-3]
  */
 export async function helperDatabase(
   backend: TestBackend,
@@ -152,7 +160,7 @@ export async function helperDatabase(
       const height = (committed ?? 0n) + 1n;
       const b: BlockContext = Object.freeze({
         ...inMemoryBlock(height),
-        // The block items core-block-commit's row needs (task 10.2), as core-block-fetch puts them.
+        // The block items core-block-commit's row needs, as core-block-fetch puts them.
         items: standInItems(height),
         settings: Object.freeze({}),
         active: () => true,

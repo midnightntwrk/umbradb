@@ -1,8 +1,7 @@
 /**
- * The backbone part `core-chain` (CORE-ARCH §4.11; `openspec/changes/core-arch/specs/chain-data/spec.md` CD-1,
- * `specs/ingest/spec.md` IN-2, IN-3; `design.md` §10): its declaration, the chain's identity, the startup checks and
- * its `process` items (`./core-chain.ts`, task 10.2), and its configuration history in `core_chain.config`
- * (`./history.ts`, task 4.3).
+ * The backbone part `core-chain`: its declaration, the chain's identity, the startup checks and its `process` items
+ * (`./core-chain.ts`), and its configuration history in `core_chain.config` (`./history.ts`).
+ * [CD-1, IN-2, IN-3; CORE-ARCH §4.11; design §10]
  */
 
 export * from "./core-chain.js";

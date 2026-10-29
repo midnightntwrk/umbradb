@@ -9,14 +9,18 @@ import { createdDirectory, cursorIn, PROCESS_BACKENDS, type ProcessDatabase } fr
 import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
- * The `refused` state (task 5.4; IN-12, AE-3, AE-4, AE-5; `design.md` §11; CORE-ARCH §4.17): a startup that refuses
- * leaves the process up — `closed` does not resolve until it is stopped — in `refused`, not ready, with its reason
- * (the refusal's code, and the module and point where there is one), its database closed and its writer lock released;
- * AE-3's scenario (a migration checksum that changed) on both backends, and the three startup failures §11 names no
- * code for (decision record Q115, shipped A): a failing `on-start-db` or `on-start-api` callback (`callback-error`,
- * with the point and the module) and a module API listener that cannot listen (`listen-failed`). A refusal before the
- * configuration is validated — of the configuration itself, or of the build's declarations before it — ends the process
- * instead (owner decision Q137 B, task 8.1b; A157 is `test/admin/refused-configuration.test.ts`).
+ * The `refused` state. A startup that refuses leaves the process up (`closed` does not resolve until it is stopped) in
+ * `refused`, not ready, with its reason (the refusal's code, and the module and point where there is one), its
+ * database closed and its writer lock released. [IN-12, AE-4, AE-5; design §11; CORE-ARCH §4.17]
+ *
+ * Tested on both backends:
+ * - a migration checksum that changed [AE-3];
+ * - the three startup failures the design names no code for: a failing `on-start-db` or `on-start-api` callback
+ *   (`callback-error`, with the point and the module), and a module API listener that cannot listen
+ *   (`listen-failed`) [Q115].
+ *
+ * A refusal before the configuration is validated (of the configuration itself, or of the build's declarations before
+ * it) ends the process instead; `test/admin/refused-configuration.test.ts` tests that. [Q137 B, A157]
  */
 
 /** Starts a build of `user` on `db` with `listen`, and waits for its startup to end; the handle and its log. */
@@ -170,11 +174,11 @@ describe("refused startups without a database", () => {
       head: null,
       lag: null,
       ended: await handle.ended,
-      // The refusal's details name the module (its id as declared): an allowlisted field (AE-6).
+      // The refusal's details name the module (its id as declared): an allowlisted field. [AE-6]
       reason: { code: "invalid-declaration", height: null, module: "Bad", point: null },
     });
     // Refused before the configuration was validated, as a refusal of the configuration itself: no admin address is
-    // known, so the process ends (task 8.1b) — `closed` resolves with no stop, the state stays refused.
+    // known, so the process ends — `closed` resolves with no stop, the state stays refused. [Q137 B]
     expect(await Promise.race([handle.closed.then(() => "closed"), sleep(30_000, "still up")])).toBe("closed");
     expect(lines).toEqual([
       "startup refused: invalid-declaration (1 finding); the process ends",

@@ -1,11 +1,14 @@
 /**
- * The configuration `npm run build:browser` bundles (`./configuration.ts`; `openspec/changes/core-arch/specs/browser/
- * spec.md` BR-1, BR-2; task 16.1): the core of the network the page's `network` parameter names (`preview` unless
- * given; with `custom`, the `genesis` parameter is its genesis hash), reading the chain from the page's `node`, from S,
- * with the core modules that may start mid-chain — `core-chain-events`, `core-block-parsed` (whose parses run in the
- * ledger worker) and `core-tx-results`; `core-ledger-state` needs history from genesis or a restored backup (LG-16,
- * BR-2), so it is not enabled. No user module and no private instance: a build with its own configuration module adds
- * them (`node browser/build.ts --configuration <module>`).
+ * The configuration `npm run build:browser` bundles (`./configuration.ts`). It runs the core of the network the page's
+ * `network` parameter names (`preview` unless given; with `custom`, the `genesis` parameter is its genesis hash),
+ * reading the chain from the page's `node`, from S. [BR-1, BR-2]
+ *
+ * It enables the core modules that may start mid-chain: `core-chain-events`, `core-block-parsed` (whose parses run in
+ * the ledger worker) and `core-tx-results`. `core-ledger-state` needs history from genesis or a restored backup, so it
+ * is not enabled. [LG-16, BR-2]
+ *
+ * There is no user module and no private instance: a build with its own configuration module adds them
+ * (`node browser/build.ts --configuration <module>`).
  */
 
 import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-block-parsed.js";

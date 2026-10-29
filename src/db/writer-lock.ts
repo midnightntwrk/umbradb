@@ -1,29 +1,31 @@
 /**
- * The writer lock (DB-11; `openspec/changes/core-arch/design.md` §4 "Writer lock", §11): exactly one process writes each
- * database, and the database API fails stop rather than risk a second writer (owner decision Q50).
+ * The writer lock: exactly one process writes each database, and the database API fails stop rather than risk a second
+ * writer. [DB-11, Q50; design §4, §11]
  *
- * **PostgreSQL** — refactored from 0.9.5's `src/postgres/transaction-lease.ts`, which held its lease as a session
- * advisory lock on a connection pinned for it (`sql.reserve()`), took it without waiting with `pg_try_advisory_lock`,
- * and knew that a connection's loss is the lock's loss. The writer holds `pg_try_advisory_lock(3,
- * hashtext('umbradb-writer'))` on its writer session (classes 1 and 2 were 0.9.5's), which is never recycled
- * (`./postgres.ts`: one connection of its own, `max_lifetime` off). The writer takes it whenever it opens a session,
- * before that session's first statement of any transaction: the first time when the writer starts
- * ({@link startWriter}) or, failing that, before its first transaction — so before any migration —, and again on every
- * new session after a lost one, before the next write. A session advisory lock lives as long as its session, so a
- * closed or lost writer session releases it; PostgreSQL scopes it to the database.
- * - The first time, another session holding it is `writer-lock-held` (a startup refusal, not retryable); nothing was
+ * **PostgreSQL.** This is refactored from 0.9.5's `src/postgres/transaction-lease.ts`. That file held its lease as a
+ * session advisory lock on a connection pinned for it (`sql.reserve()`), took it without waiting with
+ * `pg_try_advisory_lock`, and knew that losing the connection loses the lock. [DB-11]
+ *
+ * The writer holds `pg_try_advisory_lock(3, hashtext('umbradb-writer'))` on its writer session (classes 1 and 2 were
+ * 0.9.5's). That session is never recycled (`./postgres.ts`: one connection of its own, `max_lifetime` off). The writer
+ * takes the lock whenever it opens a session, before that session's first statement of any transaction: the first time
+ * when the writer starts ({@link startWriter}) or, failing that, before its first transaction (so before any
+ * migration), and again on every new session after a lost one, before the next write. A session advisory lock lives as
+ * long as its session, so a closed or lost writer session releases it; PostgreSQL scopes it to the database. [DB-11]
+ * - The first time, another session holding it is `writer-lock-held` (a startup refusal, not retryable). Nothing was
  *   written, and a later attempt starts afresh.
- * - On a new session after a lost one, another session holding it is `writer-lock-lost` (processing halts, task 5.x):
- *   another process may have written since, so this database never writes again — every later transaction and start
- *   fails the same way, even once the lock is free.
+ * - On a new session after a lost one, another session holding it is `writer-lock-lost`, and processing halts. Another
+ *   process may have written since, so this database never writes again: every later transaction and start fails the
+ *   same way, even once the lock is free.
+ *
  * 0.9.5's lease timeouts, abort signals, tokens and `withLease` have no counterpart: the lock is taken once and held.
  *
- * **PGlite** in Node.js takes an operating-system lock before PGlite opens (`./pglite-lock.ts`); `memory://` none.
+ * **PGlite** in Node.js takes an operating-system lock before PGlite opens (`./pglite-lock.ts`); `memory://` takes none.
  *
- * {@link startWriter} is the startup step (task 5.x: writer lock, then the durability probe, before the version check
- * and `startDatabase`): on PostgreSQL it opens the writer's session now, takes the lock and runs the durability probe
- * on it (`./durability-probe.ts`), and resolves with the probe's warnings; on PGlite the lock and the development
- * opt-in were checked when the database opened.
+ * {@link startWriter} is the startup step that runs the writer lock, then the durability probe, before the version check
+ * and `startDatabase`. On PostgreSQL it opens the writer's session now, takes the lock, runs the durability probe on it
+ * (`./durability-probe.ts`), and resolves with the probe's warnings. On PGlite the lock and the development opt-in were
+ * checked when the database opened.
  */
 
 import type { Row } from "../deterministic-postgresql/index.js";
@@ -67,7 +69,7 @@ export async function takeWriterLock(session: WriterSession, attempt: "first" | 
   if (attempt === "first") {
     throw new UmbraError(
       "writer-lock-held",
-      `${who} holds this database's writer lock: exactly one process writes each database (DB-11); stop the other ` +
+      `${who} holds this database's writer lock: exactly one process writes each database; stop the other ` +
         "process, or give this one another database",
       { backend: "postgresql", holder },
     );
@@ -75,7 +77,7 @@ export async function takeWriterLock(session: WriterSession, attempt: "first" | 
   throw new UmbraError(
     "writer-lock-lost",
     `the writer's connection was lost, and when it reconnected ${who} held this database's writer lock: another ` +
-      "process may have written since, so this process must not write to the database again (DB-11)",
+      "process may have written since, so this process must not write to the database again",
     { backend: "postgresql", holder },
   );
 }

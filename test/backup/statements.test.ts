@@ -3,10 +3,10 @@ import { checkStatements, statementsOf, StatementSplitter } from "../../src/back
 import { restoreArguments } from "../../src/cli/restore.js";
 
 /**
- * The statements of a backup's dump as a restore runs them (task 15.2; BK-3; `src/backup/statements.ts`): split as
- * PostgreSQL's lexer reads SQL — strings, escape strings, quoted identifiers, dollar-quoted bodies, line and nested block
- * comments —, `psql`'s `\restrict`/`\unrestrict` taken as `psql` takes them, and every other meta-command, a `COPY … FROM
- * stdin` and a file ending inside a statement refused (`backup-format-unknown`); and `restore`'s arguments.
+ * The statements of a backup's dump as a restore runs them (`src/backup/statements.ts`): split as PostgreSQL's lexer
+ * reads SQL — strings, escape strings, quoted identifiers, dollar-quoted bodies, line and nested block comments —,
+ * `psql`'s `\restrict`/`\unrestrict` taken as `psql` takes them, and every other meta-command, a `COPY … FROM stdin`
+ * and a file ending inside a statement refused (`backup-format-unknown`); and `restore`'s arguments. [BK-3]
  */
 
 /** The SQL of every statement of `text` (lines after a manifest). */

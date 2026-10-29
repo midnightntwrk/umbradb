@@ -16,14 +16,14 @@ import { ScriptedNode, type Script } from "./scripted-node.js";
 import { EVENTS_STORAGE as EVENTS, MAPPING_PREFIX, MAPPINGS_PREFIX, syntheticChain } from "./synthetic-chain.js";
 
 /**
- * The recording driver (`tools/tape/range.ts`; task 0.3, owner decision Q123): through the recording builder of task
- * 9.2, the node client of `src/node/` makes every IN-8 call for every height of a range — `chain_getBlockHash(h)`, then
- * `chain_getHeader`, `chain_getBlock`, `state_getRuntimeVersion`, `state_getStorage(System.Events)` and
- * `midnight_ledgerStateRoot` at its hash —, `state_getMetadata` at the range's first block and wherever the state's
- * runtime changes, block 0's `system_properties` and cNight registrations (IN-7), and then, for a live window, the
- * finalized head and both head subscriptions; in chunks of heights, each one connection (one session) recorded again
- * after a back-off when it fails, so the tape is one session that any client making any subset of those calls replays.
- * Every node here is a synthetic chain on the scripted node (`./synthetic-chain.ts`); no Midnight node.
+ * The recording driver (`tools/tape/range.ts`): through the recording builder, the node client of `src/node/` makes
+ * every allowed node call for every height of a range — `chain_getBlockHash(h)`, then `chain_getHeader`,
+ * `chain_getBlock`, `state_getRuntimeVersion`, `state_getStorage(System.Events)` and `midnight_ledgerStateRoot` at its
+ * hash —, `state_getMetadata` at the range's first block and wherever the state's runtime changes, block 0's
+ * `system_properties` and cNight registrations, and then, for a live window, the finalized head and both head
+ * subscriptions; in chunks of heights, each one connection (one session) recorded again after a back-off when it fails,
+ * so the tape is one session that any client making any subset of those calls replays. Every node here is a synthetic
+ * chain on the scripted node (`./synthetic-chain.ts`); no Midnight node. [Q123, IN-7, IN-8]
  */
 
 const quietConnect: ConnectSocket = (url, events, timers) =>

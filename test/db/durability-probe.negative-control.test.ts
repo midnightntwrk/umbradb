@@ -13,8 +13,8 @@ import { startContainer } from "../containers.js";
 import { connectionOfUrl } from "./connection.js";
 
 /**
- * A18's committed negative control (DB-12): a durability probe that ignores `fsync` must make A18's `fsync=off` check
- * (`durability-checks.ts`, run by `durability-probe.test.ts`) fail.
+ * The durability probe's committed negative control: a probe that ignores `fsync` must make the `fsync=off` check
+ * (`durability-checks.ts`, run by `durability-probe.test.ts`) fail. [A18, DB-12]
  *
  * `vi.mock` replaces `probeDurability` of `src/db/durability-probe.ts`, in this file's module graph only, with the real
  * probe's own steps minus its `fsync` check: `full_page_writes` with its override, the pooler check and the

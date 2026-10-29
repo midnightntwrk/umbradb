@@ -11,10 +11,11 @@ import {
 } from "../../src/ledger/worker/node-bridge.js";
 import { encodeChildren, hex } from "./node-format.js";
 
-// Task 12.3 of `openspec/changes/core-arch` (design.md §5.3; LG-11): the node-store bridge's two sides in one thread —
-// the worker's store, whose request this test answers at once inside `ask` (as the main thread would, the protocol
-// written out here from the layout), and the main thread's server, given a reader. `worker-host.test.ts` runs them in
-// two threads over a database.
+// The node-store bridge's two sides in one thread:
+// - the worker's store, whose request this test answers at once inside `ask`, as the main thread would (the protocol
+//   is written out here from the layout);
+// - the main thread's server, given a reader.
+// `worker-host.test.ts` runs them in two threads over a database. [LG-11; design §5.3]
 
 const { STATE, LENGTH, STATUS, HEADER_BYTES, KEY_BYTES, ASKED, ANSWERED, NODES, ERROR, IDLE } = BRIDGE_LAYOUT;
 const key = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);

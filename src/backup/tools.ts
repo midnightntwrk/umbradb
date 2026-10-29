@@ -1,15 +1,14 @@
 /**
- * The tools a backup runs (`openspec/changes/core-arch/specs/backups/spec.md` BK-1; `design.md` §9.1; owner decision
- * Q85: "the command fails if not installed, instead of a dependency"): neither is a dependency of UmbraDB, and each is
- * looked for only when a backup runs.
+ * The tools a backup runs. Neither is a dependency of UmbraDB: each is looked for only when a backup runs, and the
+ * backup fails if it is not installed. [BK-1, Q85; design §9.1]
  *
- * - **PostgreSQL:** the PostgreSQL 18 client's `pg_dump` — the file `UMBRADB_PG_DUMP` names, else the first `pg_dump`
- *   on `PATH` —, asked for its version (`pg_dump --version`); a tool that is missing, cannot be run or is of another
- *   major version than 18 (a newer one may write what 18 cannot restore; fix check NF-04) fails with
- *   `backup-tools-missing`, saying what to install.
- * - **PGlite:** `pg_dump` of `@electric-sql/pglite-tools`, an optional peer dependency imported only now; without it,
- *   `backup-tools-missing` with the command that installs the version made for this build's PGlite. Its `pg_dump`'s
- *   version is checked on the dump it writes (`./pglite-backup.ts`).
+ * - **PostgreSQL:** the PostgreSQL 18 client's `pg_dump`: the file `UMBRADB_PG_DUMP` names, else the first `pg_dump`
+ *   on `PATH`. It is asked for its version (`pg_dump --version`). A tool that is missing, cannot be run, or is of
+ *   another major version than 18 fails with `backup-tools-missing`, saying what to install. A newer one is refused
+ *   too, since it may write what 18 cannot restore. [NF-04]
+ * - **PGlite:** the `pg_dump` of `@electric-sql/pglite-tools`, an optional peer dependency imported only now. Without
+ *   it, the backup fails with `backup-tools-missing` and the command that installs the version made for this build's
+ *   PGlite. The version of its `pg_dump` is checked on the dump it writes (`./pglite-backup.ts`).
  */
 
 import { execFile } from "node:child_process";
@@ -41,7 +40,7 @@ function pgDumpMissing(found: string, details: Readonly<Record<string, unknown>>
   return new UmbraError(
     "backup-tools-missing",
     `a backup of a PostgreSQL database runs the PostgreSQL ${PG_DUMP_MAJOR} client's pg_dump, and ${found}: ` +
-      `${PG_DUMP_HINT} (BK-1); no file was written`,
+      `${PG_DUMP_HINT}; no file was written`,
     { tool: "pg_dump", needed: String(PG_DUMP_MAJOR), ...details },
   );
 }
@@ -123,7 +122,7 @@ export async function loadPgliteDump(module: string = PGLITE_TOOLS_MODULE): Prom
       "backup-tools-missing",
       `a backup of a PGlite database runs pg_dump of @electric-sql/pglite-tools, which could not be imported ` +
         `(${(error as Error).message}): install it with npm install @electric-sql/pglite-tools@` +
-        `${PGLITE_TOOLS_VERSION}, the version made for this build's PGlite (BK-1); no file was written`,
+        `${PGLITE_TOOLS_VERSION}, the version made for this build's PGlite; no file was written`,
       { tool: "pglite-tools", needed: PGLITE_TOOLS_VERSION, found: null },
       { cause: error },
     );
@@ -131,8 +130,8 @@ export async function loadPgliteDump(module: string = PGLITE_TOOLS_MODULE): Prom
   if (typeof loaded.pgDump !== "function") {
     throw new UmbraError(
       "backup-tools-missing",
-      `the module ${module} has no pgDump function: install @electric-sql/pglite-tools@${PGLITE_TOOLS_VERSION} ` +
-        "(BK-1); no file was written",
+      `the module ${module} has no pgDump function: install @electric-sql/pglite-tools@${PGLITE_TOOLS_VERSION}; ` +
+        "no file was written",
       { tool: "pglite-tools", needed: PGLITE_TOOLS_VERSION, found: module },
     );
   }

@@ -8,14 +8,14 @@ import { DETERMINISM_BACKENDS } from "./backends.js";
 import type { TestDatabase, TestServer } from "./postgres-database.js";
 
 /**
- * A55 (DT-3) on PostgreSQL 18 and on PGlite 0.5.10 (tasks 1.2 and 2.2; the cross-backend comparison is
- * `cross-backend.test.ts`).
+ * The contents hash, on PostgreSQL 18 and on PGlite 0.5.10. The comparison between the two backends is in
+ * `cross-backend.test.ts`. [A55]
  *
- * DT-3: the contents hash is SHA-256 of one canonical CBOR array holding, for each module schema and then each table
- * in name order (byte order), the array `[schema, table, [column names], [rows in primary-key order]]`.
+ * The contents hash is the SHA-256 of one canonical CBOR array. For each module schema, and then each table, in name
+ * order (byte order), it holds the array `[schema, table, [column names], [rows in primary-key order]]`. [DT-3]
  *
- * The expected hash of the fixed database below is not computed by the code under test: its CBOR bytes are written
- * out by hand from DT-3's structure and the RFC 8949 encoding rules (heads per §3, shortest form and map-key order per
+ * The expected hash of the fixed database below is not computed by the code under test. Its CBOR bytes are written
+ * out by hand from that structure and the RFC 8949 encoding rules (heads per §3, shortest form and map-key order per
  * §4.2.1), and only SHA-256 is computed here. The other tests are the negative controls: each changes exactly one
  * thing a wrong hash could ignore — a column, a row, which table or schema a row is in, a column's name — and shows
  * that the hash changes, then changes it back and shows that the hash returns.
@@ -58,8 +58,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
   describe("A55 (DT-3) — the contents hash of a fixed database equals a hash computed by hand", () => {
     // Created so that creation (OID) order differs from name order for the schemas and for the tables of each schema,
     // with a dropped column, a partitioned table, and objects that are not module tables (a table in the reserved
-    // `public` schema, a view, a materialized view, and a sequence in `public`: a sequence in a module schema refuses
-    // the hash, owner decision Q61, `column-refusals.test.ts`).
+    // `public` schema, a view, a materialized view, and a sequence in `public`). A sequence in a module schema refuses
+    // the hash, as `column-refusals.test.ts` shows. [Q61]
     const FIXED_DATABASE = `
       CREATE SCHEMA m_x;
       CREATE SCHEMA m0;
@@ -82,9 +82,10 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       INSERT INTO m0."B" VALUES ('\\x01', 1), ('\\x', 1), ('\\xff', -1);
     `;
 
-    // The canonical CBOR of DT-3's array for FIXED_DATABASE, item by item. Schemas by bytes: "m0" (6d 30) before "m_x"
-    // (6d 5f 78); tables: "B" (42) before "b" (62), "s" before "t"; the partitions, the view, the materialized view and
-    // `public` (its table and its sequence) are not module tables. Rows in primary-key order; values per DT-1.
+    // The canonical CBOR of the contents hash's array for FIXED_DATABASE, item by item. Schemas by bytes: "m0" (6d 30)
+    // before "m_x" (6d 5f 78); tables: "B" (42) before "b" (62), "s" before "t"; the partitions, the view, the
+    // materialized view and `public` (its table and its sequence) are not module tables. Rows are in primary-key order;
+    // values are encoded by the canonical encoder's rules. [DT-1, DT-3]
     const EXPECTED_CBOR: readonly (readonly [string, string])[] = [
       ["array(4): the four module tables", "84"],
 
@@ -144,10 +145,9 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       }
     }, 60_000);
 
-    // Task 1.3 (owner decision Q58): a `uuid` is the byte string of its 16 bytes and a `varchar` a text string (DT-1);
-    // rows are keyed by the uuid's bytes, then `false` before `true` (DT-2). The uuids are inserted in upper case and
-    // without hyphens, which PostgreSQL stores as the same 16 bytes. Arrays with NULL elements have their own oracle
-    // below (docs/issues/00006).
+    // A `uuid` is the byte string of its 16 bytes and a `varchar` a text string. Rows are keyed by the uuid's bytes,
+    // then `false` before `true`. The uuids are inserted in upper case and without hyphens, which PostgreSQL stores as
+    // the same 16 bytes. Arrays with NULL elements have their own oracle below. [DT-1, DT-2, Q58]
     it("covers varchar values and uuid and boolean keys, written out by hand", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA k;
@@ -180,11 +180,11 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       }
     }, 60_000);
 
-    // Task 2.2b (owner decision Q74; A145): a `timestamptz` is the CBOR integer of its microseconds since
-    // 1970-01-01T00:00:00Z, and rows are keyed by time. The integers are written out below from the dates by hand
-    // arithmetic, independently of the encoder; 253402300799999999 (9999-12-31 23:59:59.999999) is beyond 2^53, so a
-    // computation in `number` would give 253402300800000000 and a different hash. Paged one and two rows at a time,
-    // each next page starts after a key the API read as RFC 3339 text and sent back as a parameter.
+    // A `timestamptz` is the CBOR integer of its microseconds since 1970-01-01T00:00:00Z, and rows are keyed by time.
+    // The integers are written out below from the dates by hand arithmetic, independently of the encoder;
+    // 253402300799999999 (9999-12-31 23:59:59.999999) is beyond 2^53, so a computation in `number` would give
+    // 253402300800000000 and a different hash. Paged one and two rows at a time, each next page starts after a key the
+    // API read as RFC 3339 text and sent back as a parameter. [A145, Q74]
     it("covers timestamptz values and keys: microseconds since 1970 as integers, rows by time", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA k;
@@ -220,9 +220,9 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
   });
 
   describe("arrays with NULL elements (docs/issues/00006; DT-1, DB-2)", () => {
-    // DT-1 encodes an array's NULL element as null (f6), and the text 'NULL' as text(4). `postgres` 3.4.9's own array
-    // parser read both as the text "NULL" (issue 00006), so the two hashed equal; the database API parses arrays
-    // itself.
+    // The encoder writes an array's NULL element as null (f6), and the text 'NULL' as text(4). `postgres` 3.4.9's own
+    // array parser read both as the text "NULL", so the two hashed equal; the database API parses arrays itself.
+    // [DT-1]
     it("hashes a NULL element as null and the text 'NULL' as text, written out by hand", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA a;
@@ -337,7 +337,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       CREATE TABLE public.unrelated (k integer PRIMARY KEY);
       INSERT INTO public.unrelated VALUES (1), (2);
     `;
-    // Not partitioned at all: DT-3 holds names, columns and rows, not storage layout.
+    // Not partitioned at all: the hash covers names, columns and rows, not storage layout. [DT-3]
     const THIRD = `
       CREATE SCHEMA chain;
       CREATE SCHEMA tokens;
@@ -479,7 +479,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
     }, 60_000);
   });
 
-  // PostgreSQL only: on PGlite nothing commits while a read runs (DB-4), which A11 checks instead.
+  // PostgreSQL only: on PGlite nothing commits while a read runs, which `../db/pglite-no-outside-read.test.ts` checks
+  // instead. [DB-4, A11]
   if (!backend.singleQueue) {
     describe("DT-3 — the hash reads one consistent snapshot", () => {
       const SETUP = `
@@ -566,7 +567,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
     it("fails on a row DT-1 cannot encode, naming the table and the column", async () => {
       for (const [value, reason] of [
         ["1.5", "numeric-fraction"],
-        ["100.00", "numeric-fraction"], // Q57 (owner decision C): a zero fraction is a fraction
+        ["100.00", "numeric-fraction"], // A zero fraction is still a fraction. [Q57 C]
       ] as const) {
         const db = await freshDatabase(`
           CREATE SCHEMA m;
@@ -616,8 +617,9 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       expect((error.cause as CanonicalEncodingError).reason).toBe("not-integer");
     }, 60_000);
 
-    // Task 1.3: a refusal names the table, the column and its declared type, the row by its key, and says why and what
-    // to store instead (the numeric rows of `design.md` §4's column-type table; DT-6 and Q57 for jsonb numbers).
+    // A refusal names the table, the column and its declared type, and the row by its key. It says why, and what to
+    // store instead: the numeric rows of the column-type table, and for jsonb numbers the rule that they are
+    // integers. [DT-6, Q57 C; design §4]
     it("says where the value is and why a stored number must be an integer", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA m;
@@ -686,7 +688,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         INSERT INTO m.docs VALUES (1, '{"marker": 1}');
       `);
       const broken = new RangeError("a value that cannot be read");
-      // A handle whose row value throws when the encoder reads it: the hash must not dress that up as a DT-1 failure.
+      // A handle whose row value throws when the encoder reads it: the hash must not dress that up as an encoding
+      // failure. [DT-1]
       const poisoned = (read: ConsistentRead): ConsistentRead => ({
         query: async (sql, params) =>
           (await read.query(sql, params)).map((row) =>
@@ -722,8 +725,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
 });
 
 describe("the handle the contents hash needs", () => {
-  // CORE-ARCH §4.10's handles, as the database API defines them (`src/db/api.ts`, task 2.1): the hash must accept them
-  // unchanged.
+  // The module handles, as the database API defines them (`src/db/api.ts`): the hash must accept them unchanged.
+  // [CORE-ARCH §4.10]
   it("is the query of a read handle and nothing more", () => {
     expectTypeOf<ReadHandle>().toExtend<ConsistentRead>();
     expectTypeOf<BlockWriteHandle>().toExtend<ConsistentRead>();

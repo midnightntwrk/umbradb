@@ -7,7 +7,7 @@ import { POSTGRES_IMAGE } from "./environment.js";
 import type { Baseline } from "./types.js";
 
 /**
- * `npm run bench` (task 17.3): measures the core's benchmark (`./core.ts`, `runner.commitEmptyBlock` on PGlite and on
+ * `npm run bench`: measures the core's benchmark (`./core.ts`, `runner.commitEmptyBlock` on PGlite and on
  * PostgreSQL in Docker) and writes the baseline the bench smoke compares with (`bench/baseline.json`). Run it on a
  * quiet machine and commit the file when the core's commit path changes on purpose.
  */

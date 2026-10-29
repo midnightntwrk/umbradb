@@ -3,12 +3,17 @@ import { PROCESS_BACKENDS } from "./process-backends.js";
 import { a142Problems, HOLD_MS, holding, observe, quietProblems, type Seen, SLOW_HEIGHT, startSlow } from "./slow-block-harness.js";
 
 /**
- * A142 (task 5.5; RN-17, AE-3, AE-5, Q71) through the process on PostgreSQL 18 and PGlite 0.5.10: with `slowBlockMs`
- * 1000, a test module whose `on-compute` at height 2 awaits 3 s — the runner's published state (`status()`) and
- * `/status` (`core-status`, task 8.3) show `slow-block` with the height, `on-compute` and the module within 2 s; the
- * height commits once, with no retry; the condition is gone after the commit; with `slowBlockMs` 5000 it never
- * appears. The oracles are `./slow-block-harness.ts`'s; the cases RN-17 leaves to the design are
- * `./slow-block-cases.test.ts`, the committed negative controls `./slow-block.negative-control.test.ts`.
+ * A slow height, through the process on PostgreSQL 18 and PGlite 0.5.10. With `slowBlockMs` 1000 and a test module
+ * whose `on-compute` at height 2 awaits 3 s:
+ * - the runner's published state (`status()`) and `/status` (`core-status`) show `slow-block` with the height,
+ *   `on-compute` and the module within 2 s;
+ * - the height commits once, with no retry;
+ * - the condition is gone after the commit.
+ *
+ * With `slowBlockMs` 5000 it never appears. [A142, RN-17, AE-3, AE-5, Q71]
+ *
+ * The oracles are `./slow-block-harness.ts`'s. The cases the requirement leaves to the design are
+ * `./slow-block-cases.test.ts`, the committed negative controls `./slow-block.negative-control.test.ts`. [RN-17]
  *
  * Each test waits on purpose (the callback's 3 s, then 1.5 s after the commit): its budget is that plus Vitest's 60 s.
  */

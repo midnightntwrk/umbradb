@@ -9,13 +9,18 @@ import { type CliProject, cliProject, inProcess, lineOf } from "./cli-fixtures.j
 import { runCoreSettings, statsConfig, statsModule } from "./run-fixtures.js";
 
 /**
- * A152 `[CI]`, its `umbradb config check` half (task 4.4a; CF-1, CF-10, MD-1, owner decision Q106 B), through
- * `configCheck` and the command in this process: a configuration file that imports the user module `stats`, exports
- * `modules = [stats]` and lists `stats.entry({ … })` is checked against `stats`'s schema — a wrong setting reported with
- * its path —, and a file listing a module that neither it exports nor UmbraDB ships is refused, naming the module. Also
- * how the file's modules join the build (after UmbraDB's own, in the file's order; a module listed twice, one with an
- * id of UmbraDB's own, an element that is no declaration, a `modules` export that is no list) and the committed
- * negative control: a check that ignores the file's modules refuses `stats`'s entry. `./run.test.ts` has `umbradb run`.
+ * User modules from the configuration file `[CI]`, the `umbradb config check` half, through `configCheck` and the
+ * command in this process. A configuration file that imports the user module `stats`, exports `modules = [stats]` and
+ * lists `stats.entry({ … })` is checked against `stats`'s schema, and a wrong setting is reported with its path. A file
+ * listing a module that it does not export and UmbraDB does not ship is refused, naming the module.
+ * [A152 CI, CF-1, CF-10, MD-1, Q106 B]
+ *
+ * Also covered:
+ * - how the file's modules join the build: after UmbraDB's own, in the file's order; a module listed twice, one with
+ *   an id of UmbraDB's own, an element that is no declaration, a `modules` export that is no list;
+ * - the committed negative control: a check that ignores the file's modules refuses `stats`'s entry.
+ *
+ * `./run.test.ts` covers `umbradb run`.
  */
 
 // Each test runs the TypeScript compiler on a file (about a second alone, much more under the gate's load).
@@ -64,7 +69,7 @@ describe("A152: umbradb config check takes the user modules the file exports (CF
     const result = await check(file);
     expect(result.stderr).toBe("");
     expect(result.code).toBe(EXIT.ok);
-    expect(result.stdout).toContain("configuration (CF-1, CF-3): passed");
+    expect(result.stdout).toContain("configuration (evaluation, validation): passed");
     // The entry was validated with stats's schema: its default applied, its data field classified.
     const report = await configCheck({ file, cwd: project.dir });
     expect(report.passed).toBe(true);
@@ -75,7 +80,7 @@ describe("A152: umbradb config check takes the user modules the file exports (CF
     const result = await check(file);
     expect(result.code).toBe(EXIT.failed);
     expect(result.stdout).toMatch(
-      /^ {2}entries\[1\]\.config\.pollMs \(stats from 1\): Too small: expected number to be >=1 \(CF-3\) \[invalid-configuration settings-schema\]$/m,
+      /^ {2}entries\[1\]\.config\.pollMs \(stats from 1\): Too small: expected number to be >=1 \[invalid-configuration settings-schema\]$/m,
     );
     const typed = write({ statsConfig: '{ label: "s", pollMs: "fast" }' });
     const both = await check(typed);

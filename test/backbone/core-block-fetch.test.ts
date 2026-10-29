@@ -20,9 +20,9 @@ import {
 import { chainBackbone } from "./chain-build.js";
 
 /**
- * The backbone part `core-block-fetch` (task 10.3; CD-2, CORE-ARCH §4.11): its declaration, its `on-fetch` over the
- * block source the runner binds to its context, and the in-memory source's items (what module authors' builds with
- * UmbraDB's backbone get, `design.md` §3). Its node source is `node-source.test.ts`'s, the process's `ingest.test.ts`'s.
+ * The backbone part `core-block-fetch`: its declaration, its `on-fetch` over the block source the runner binds to its
+ * context, and the in-memory source's items (what module authors' builds with UmbraDB's backbone get). Its node source
+ * is tested in `node-source.test.ts`, the process in `ingest.test.ts`. [CD-2; CORE-ARCH §4.11; design §3]
  */
 
 const context = (items: ReadonlyMap<string, unknown> = new Map()): ProcessContext =>

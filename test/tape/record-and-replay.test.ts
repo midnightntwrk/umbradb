@@ -23,12 +23,14 @@ import { ManualTimers, until } from "../node/manual-timers.js";
 import { type Script, ScriptedNode, type Step } from "./scripted-node.js";
 
 /**
- * A71 `[CI]` through the node client of `src/node/` (`openspec/changes/core-arch/acceptance.md` §9; TT-4; task 9.2),
- * unchanged: `recordAndReplay` (`tools/tape/replay-check.ts`) runs a `NodeClient` session through the recording
- * builder against a scripted node, replays the tape it recorded through the tape node with a new client, and compares
- * every frame each connection sent and received. Its default session, the IN-8 tour, is what A71's `[MANUAL]` half runs
- * against a real Midnight node (`tools/tape/main.ts check`); here the scripted node answers it with the mainnet answers
- * task 10.1 recorded (`test/node/fixtures/mainnet-answers.json`).
+ * The record-and-replay check through the node client of `src/node/`, unchanged: `recordAndReplay`
+ * (`tools/tape/replay-check.ts`) runs a `NodeClient` session through the recording builder against a scripted node,
+ * replays the tape it recorded through the tape node with a new client, and compares every frame each connection sent
+ * and received. [A71 CI, TT-4; acceptance §9]
+ *
+ * Its default session, the node-call tour, is what the check's manual half runs against a real Midnight node
+ * (`tools/tape/main.ts check`). Here the scripted node answers it with the recorded mainnet answers
+ * (`test/node/fixtures/mainnet-answers.json`). [A71 CI, IN-8]
  */
 
 const TEST_TIMEOUT_MS = 60_000;
@@ -39,7 +41,7 @@ const quietConnect: ConnectSocket = (url, events, timers) =>
 /** The header the scripted node notifies: the recorded mainnet header. */
 const HEADER = recorded("chain_getHeader").result;
 
-/** Answers the IN-8 tour from the recorded mainnet answers; `extra` overrides a method. */
+/** Answers the node-call tour from the recorded mainnet answers; `extra` overrides a method. */
 function mainnetScript(extra: (request: { method: string; params: unknown }) => readonly Step[] | undefined = () =>
   undefined): Script {
   const subscriptions = new Map<string, number>();
@@ -93,7 +95,7 @@ describe("A71 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
       expect(result.recorded[0]?.sent).toHaveLength(12);
       expect(result.recorded[0]?.received).toHaveLength(15);
       expect(result.recorded[0]?.received).toEqual(node.sent[0]);
-      // The tour makes every call IN-8 allows, and no other.
+      // The tour makes every allowed node call, and no other. [IN-8]
       expect(new Set(methodsOf(result.records))).toEqual(new Set(in8Methods()));
       expect(outsideIn8(methodsOf(result.records))).toEqual([]);
       expect(result.id).toBe(tapeId(result.bytes));
@@ -235,7 +237,7 @@ describe("A71 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
       const client = new NodeClient({ url: node.url, connect: quietConnect });
       try {
         await expect(in8Tour(client, { headerTimeoutMs: 50 })).rejects.toThrow(
-          "the IN-8 tour waited 50 ms for 1 new head and 2 finalized heads, and received 1 and 0",
+          "the node-call tour waited 50 ms for 1 new head and 2 finalized heads, and received 1 and 0",
         );
       } finally {
         await client.close();
@@ -251,7 +253,7 @@ describe("A71 through the node client", { timeout: TEST_TIMEOUT_MS }, () => {
       const client = new NodeClient({ url: node.url, connect: quietConnect });
       try {
         await expect(in8Tour(client, { headerTimeoutMs: 50 })).rejects.toThrow(
-          "the IN-8 tour waited 50 ms for 1 new head and 2 finalized heads, and received 0 and 2",
+          "the node-call tour waited 50 ms for 1 new head and 2 finalized heads, and received 0 and 2",
         );
       } finally {
         await client.close();

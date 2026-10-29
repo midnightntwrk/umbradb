@@ -1,26 +1,35 @@
 /**
- * The public data a private process reads (`openspec/changes/core-arch/specs/private-processes/spec.md` PP-1–PP-5;
- * `design.md` §8; CORE-ARCH §4.14): a private process reads the public database — never the reverse (PP-1) — for its
- * binding (PP-2), the public cursor and each public block it processes (PP-3), and the reads its modules' `on-fetch`
- * make of public data at a height (decision record Q100); and it is woken when the public cursor may have moved.
+ * The public data a private process reads. A private process reads the public database, and the public side never
+ * reads a private one. It reads:
+ * - its binding to the public database;
+ * - the public cursor, and each public block it processes;
+ * - the public data its modules' `on-fetch` callbacks read at a height.
+ * It is also woken whenever the public cursor may have moved.
+ * [PP-1, PP-2, PP-3, PP-4, PP-5, Q100; CORE-ARCH §4.14; design §8]
  *
- * **Every read of public tables is here**, in one place: {@link readPublicIdentity} (`core_chain.identity`'s genesis
- * hash and S, through `core-chain`'s own `readIdentity`, task 10.2), {@link readPublicItems} (the public core's `table`
- * items with their heights, from `core_chain.config`'s `provides`; PP-13, task 14.1a), {@link readPublicBlock}
- * (`core_block_commit.blocks`' height, hash and parent hash, which its other columns, partitions and `hashes` table do
- * not change), and the public cursor, which is `core-block-commit`'s own `readCursor` — the blocks table's last row, as
- * the core reads it.
+ * **Every read of public tables is in this file:**
+ * - {@link readPublicIdentity}: `core_chain.identity`'s genesis hash and S, through `core-chain`'s own `readIdentity`.
+ * - {@link readPublicItems}: the public core's `table` items with their heights, from `core_chain.config`'s
+ *   `provides`. [PP-13]
+ * - {@link readPublicBlock}: the height, hash and parent hash in `core_block_commit.blocks`, which its other columns,
+ *   its partitions and the `hashes` table do not affect.
+ * - The public cursor: `core-block-commit`'s own `readCursor`, the last row of the blocks table, read the way the core
+ *   reads it.
  *
- * **Where the public data comes from** ({@link PublicDatabase}): on PostgreSQL directly — `publicDatabase`, the parts of
- * a login that may only read, opened by {@link openPublicDatabase} with reads only (one `REPEATABLE READ READ ONLY`
- * transaction each, its height the public cursor's, DB-2); when the public database is PGlite, which only the core can
- * open (DB-4), or when none is given, through the core's transport (`read` messages, PP-4; task 14.2,
- * `src/private/private-transport.ts`), at the `core` entry's `coreTransport`; a private process with neither is refused.
+ * **Where the public data comes from** ({@link PublicDatabase}):
+ * - On PostgreSQL, directly: `publicDatabase` holds the parts of a login that may only read. {@link openPublicDatabase}
+ *   opens it for reads only, each read one `REPEATABLE READ READ ONLY` transaction at the public cursor's height.
+ *   [DB-2]
+ * - Otherwise, through the core's transport (`read` messages, `src/private/private-transport.ts`), at the `core`
+ *   entry's `coreTransport`. This covers a PGlite public database, which only the core can open, and a missing
+ *   `publicDatabase`. [DB-4, PP-4]
+ * - A private process with neither is refused.
  *
- * **What wakes the private process** ({@link PublicWakes}): with `coreTransport`, the core's `committed` messages and
- * every (re)connection of its transport (PP-3: they only wake it; it reads the public cursor itself), and nothing else;
- * a private process without one (its public database PostgreSQL, read directly) reads the public cursor every
- * {@link PUBLIC_POLL_MS} instead ({@link pollingWakes}). {@link openPublicSide} makes both from the `core` revision.
+ * **What wakes the private process** ({@link PublicWakes}): with `coreTransport`, only the core's `committed` messages
+ * and every connection or reconnection of the transport. These only wake it; it then reads the public cursor itself. A
+ * private process without a transport (its public database is PostgreSQL, read directly) reads the public cursor every
+ * {@link PUBLIC_POLL_MS} instead ({@link pollingWakes}). {@link openPublicSide} builds both from the `core` revision.
+ * [PP-3]
  */
 
 import type { PostgresParts } from "../../config/database-parts.js";
@@ -42,16 +51,16 @@ import type { BlockRef } from "../../runner/block-source.js";
 /** The public database as a private process reads it (see the module comment). */
 export interface PublicDatabase {
   /**
-   * Runs `body` with one consistent read of the public database, at its committed height — the public cursor —, as
-   * `Database.read` does (DB-2); rejects with `body`'s error or the database's (`connection-lost` is retried).
+   * Runs `body` with one consistent read of the public database at its committed height (the public cursor), as
+   * `Database.read` does. Rejects with `body`'s error or the database's; `connection-lost` is retried. [DB-2]
    */
   read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T>;
   /** Closes what reading it opened. */
   close(): Promise<void>;
   /**
-   * How many connections to it were lost so far (a PostgreSQL public database read directly: its read pool's lost
-   * sessions); each is followed by a reconnection, at which a private process without a transport reads the public
-   * configuration history again (PP-14). None for a database that does not count them.
+   * How many connections to it have been lost so far: for a PostgreSQL public database read directly, its read pool's
+   * lost sessions. Each loss is followed by a reconnection, after which a private process without a transport reads the
+   * public configuration history again. Absent for a database that does not count them. [PP-14]
    */
   reconnections?(): number;
 }
@@ -59,13 +68,13 @@ export interface PublicDatabase {
 /** What wakes a private process's wait for the public cursor (see the module comment). */
 export interface PublicWakes {
   /**
-   * Resolves at the next wake-up after the call — a `committed` message, a (re)connection of the transport, or a poll's
-   * interval —, or rejects with `signal`'s reason once `signal` aborts (at once when it is aborted already).
+   * Resolves at the next wake-up after the call: a `committed` message, a connection or reconnection of the transport,
+   * or the end of a poll interval. Rejects with `signal`'s reason once `signal` aborts, at once if it already has.
    */
   next(signal: AbortSignal): Promise<void>;
 }
 
-/** The public database's chain identity (CORE-ARCH §4.11): its genesis hash and S. */
+/** The public database's chain identity: its genesis hash and S. [CORE-ARCH §4.11] */
 export interface PublicIdentity {
   readonly genesisHash: Uint8Array;
   readonly start: bigint;
@@ -86,8 +95,8 @@ async function present(read: Pick<ReadHandle, "query">, sql: string): Promise<bo
 }
 
 /**
- * The public database's chain identity — its genesis hash and S —, or null before its core first started (no
- * `core_chain.identity` row): `core-chain`'s `readIdentity`.
+ * The public database's chain identity (its genesis hash and S), read by `core-chain`'s `readIdentity`. Null before
+ * its core first started, when there is no `core_chain.identity` row.
  */
 export async function readPublicIdentity(read: Pick<ReadHandle, "query">): Promise<PublicIdentity | null> {
   const identity = await readIdentity(read);
@@ -95,9 +104,9 @@ export async function readPublicIdentity(read: Pick<ReadHandle, "query">): Promi
 }
 
 /**
- * The public core's `table` items with their heights (PP-13, task 14.1a; `design.md` §8): every row of its
- * `core_chain.config` — the revisions of its entries, with the `table` items each provides (`provides`) — as
- * `publicItemRanges` gives them, each from its revision's start to its last height by CF-5; none before the table exists.
+ * The public core's `table` items with their heights. Every row of its `core_chain.config` is a revision of one of its
+ * entries, with the `table` items it provides (`provides`); `publicItemRanges` turns them into items, each from its
+ * revision's start to the revision's last height. Empty before the table exists. [PP-13, CF-5; design §8]
  */
 export async function readPublicItems(read: Pick<ReadHandle, "query">): Promise<PublicItem[]> {
   if (!(await present(read, CONFIG_PRESENT_SQL))) return [];
@@ -115,14 +124,14 @@ export async function readPublicItems(read: Pick<ReadHandle, "query">): Promise<
 /** The public configuration as a private process reads it at startup: its `table` items and its configuration hash. */
 export interface PublicConfiguration {
   readonly items: PublicItem[];
-  /** `configHashOf` the rows of the public `core_chain.config` (RN-16, PP-14); null before the table exists. */
+  /** `configHashOf` the rows of the public `core_chain.config`; null before the table exists. [RN-16, PP-14] */
   readonly configHash: string | null;
 }
 
 /**
- * The public core's `table` items with their heights ({@link readPublicItems}' result) and its configuration hash — the
- * core's own, by the same rows and function (`readConfigHash`, RN-16) — from one statement of `read` (PP-13, PP-14;
- * tasks 14.1a, 14.1b).
+ * The public core's `table` items with their heights (as {@link readPublicItems} returns them) and its configuration
+ * hash, both from one statement of `read`. The hash is the same one the core computes (`readConfigHash`), from the
+ * same rows with the same function. [PP-13, PP-14, RN-16]
  */
 export async function readPublicConfiguration(read: Pick<ReadHandle, "query">): Promise<PublicConfiguration> {
   const rows = await readConfigRows(read);
@@ -156,11 +165,14 @@ const readsDirectly = (setting: unknown): setting is PostgresParts =>
   typeof setting === "object" && setting !== null && (setting as { kind?: unknown }).kind === "postgres";
 
 /**
- * The public database of `core`, a private process's `core` revision (Q102): its `publicDatabase`, PostgreSQL's parts,
- * opened for reads only — no writer, no lock; no connection until the first read —, counting the read sessions it lost
- * ({@link PublicDatabase.reconnections}, PP-14). Throws `invalid-configuration`
- * (`details.reason` `public-database-transport`, not retried) without one, or for a PGlite one, which is read through
- * the core's transport instead ({@link openPublicSide}, PP-4).
+ * The public database of `core`, a private process's `core` revision: its `publicDatabase` (PostgreSQL's parts),
+ * opened for reads only. There is no writer and no lock, and no connection is made before the first read. It counts the
+ * read sessions it lost ({@link PublicDatabase.reconnections}).
+ * [Q102, PP-14]
+ *
+ * Throws `invalid-configuration` (`details.reason` `public-database-transport`, not retried) when there is no
+ * `publicDatabase`, or when it is PGlite: that one is read through the core's transport instead
+ * ({@link openPublicSide}). [PP-4]
  */
 export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
   const setting = (core.settings as PlainObject).publicDatabase;
@@ -170,7 +182,7 @@ export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
       "invalid-configuration",
       `${found}: openPublicDatabase reads a PostgreSQL public database directly, through publicDatabase (a login ` +
         "that may only read); a PGlite public database, which only the core opens, or one not given, is read " +
-        "through the core's transport, at the core entry's coreTransport (PP-4)",
+        "through the core's transport, at the core entry's coreTransport",
       { reason: "public-database-transport" },
     );
   }
@@ -196,7 +208,9 @@ export interface PublicSideOptions {
   readonly position: () => TransportPosition;
   /** Where its transport's log lines go. */
   readonly log: (line: string) => void;
-  /** Whether its transport checks the core's `configHash` (PP-14); `check` unless given (the negative control's `ignore`). */
+  /**
+   * Whether its transport checks the core's `configHash`: `check` by default, `ignore` in a negative control. [PP-14]
+   */
   readonly configHash?: "check" | "ignore";
 }
 
@@ -209,11 +223,15 @@ export interface PublicSide {
 }
 
 /**
- * The public side of a private process from its `core` revision (see the module comment): a transport to the core when
- * it has `coreTransport` (with its `tls`, `instanceId` and `backoffCeilingMs`); its public database read directly when
- * `publicDatabase` is PostgreSQL's parts, else through that transport; its wake-ups the transport's, else a poll. Throws
- * `invalid-configuration` (`public-database-transport`) for a revision with neither a PostgreSQL `publicDatabase` nor a
- * `coreTransport`: it has no way to read public data. `given` replaces either part (the tests' direct reads and links).
+ * The public side of a private process, built from its `core` revision (see the module comment):
+ * - a transport to the core when the revision has `coreTransport` (with its `tls`, `instanceId` and
+ *   `backoffCeilingMs`);
+ * - its public database, read directly when `publicDatabase` is PostgreSQL's parts, otherwise through the transport;
+ * - its wake-ups: the transport's, otherwise a poll.
+ *
+ * Throws `invalid-configuration` (`public-database-transport`) for a revision with neither a PostgreSQL
+ * `publicDatabase` nor a `coreTransport`, since it then has no way to read public data. `given` replaces the public
+ * database or the wake-ups (tests use it for direct reads and links).
  */
 export function openPublicSide(
   core: CheckedEntry,
@@ -244,8 +262,8 @@ export function openPublicSide(
       "invalid-configuration",
       `the private process's core entry has ${which} and no coreTransport: a private process reads a PostgreSQL ` +
         "public database directly (publicDatabase, a login that may only read), or any public database through the " +
-        "core's transport (coreTransport, the core's listen.transport), which also wakes it at every public commit " +
-        "(PP-3, PP-4); give it one of them",
+        "core's transport (coreTransport, the core's listen.transport), which also wakes it at every public commit; " +
+        "give it one of them",
       { reason: "public-database-transport" },
     );
   }

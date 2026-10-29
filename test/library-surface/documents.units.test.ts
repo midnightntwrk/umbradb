@@ -5,10 +5,10 @@ import {
 } from "./documents.js";
 
 /**
- * Task 17.5b (the mutation pass tasks 17.4a and 17.4b deferred): `./documents.ts` on small texts — the fence and code
- * span rules of `markdownLinks`, reference definitions, angle brackets, `linkedPath`'s URL and anchor tests and the
- * root, `changelogDocumentProblems`' preamble bounds and names, `descriptionProblems`' sentence rule,
- * `agentsProblems`' rule names and common file names, `storageAlgebraProblems`' headings.
+ * `./documents.ts` on small texts — the fence and code span rules of `markdownLinks`, reference definitions, angle
+ * brackets, `linkedPath`'s URL and anchor tests and the root, `changelogDocumentProblems`' preamble bounds and names,
+ * `descriptionProblems`' sentence rule, `agentsProblems`' rule names and common file names, `storageAlgebraProblems`'
+ * headings.
  */
 
 const targets = (text: string) => markdownLinks(text).map(({ line, target }) => `${line} ${target}`);

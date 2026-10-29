@@ -32,11 +32,11 @@ import {
 } from "./transform-checks.js";
 
 /**
- * A71 `[CI]`, its transform half (`openspec/changes/core-arch/acceptance.md` §9; TT-4; task 9.2): each variant
- * transform produces the tape committed as its expected output — the delay transform setting `delayMs` on exactly the
- * selected calls —, each is a pure function from records to records whose output is a tape (`checkTape`), and each
- * refuses what it cannot do with `bad-transform` and a reason. The base of every committed output is A71's recorded
- * tape (24 lines, four sessions: lines 1–16, 17–22, 23, 24).
+ * The transform half of the record-and-replay criterion: each variant transform produces the tape committed as its
+ * expected output — the delay transform setting `delayMs` on exactly the selected calls —, each is a pure function from
+ * records to records whose output is a tape (`checkTape`), and each refuses what it cannot do with `bad-transform` and
+ * a reason. The base of every committed output is the recorded tape (24 lines, four sessions: lines 1–16, 17–22, 23,
+ * 24). [A71 CI, TT-4; acceptance §9]
  */
 
 /** What a transform throws, checked to be a `TransformError` with `reason`. */

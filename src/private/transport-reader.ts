@@ -1,10 +1,11 @@
 /**
- * The login of the process transport's reads on PostgreSQL (`openspec/changes/core-arch/specs/configuration/spec.md`
- * CF-4, `specs/private-processes/spec.md` PP-4; `design.md` §8 **Confined reads**; owner decision Q175 A; task 4.5): a
- * public process whose database is PostgreSQL and which has `listen.transport` runs the transport's reads — a private
- * process's `read`s and the checks of its `report`s — on a read pool of their own, logged in as `core.transportReader`
- * (`{ user, password }`; the host, port, name and `ssl` are `database`'s). Startup checks first, on that pool, that the
- * login cannot write, and refuses with `transport-reader-can-write`, naming the login and what it found, when it:
+ * The login of the process transport's reads on PostgreSQL. A public process whose database is PostgreSQL and which has
+ * `listen.transport` runs the transport's reads (a private process's `read`s and the checks of its `report`s) on a read
+ * pool of their own. That pool logs in as `core.transportReader` (`{ user, password }`); the host, port, name and `ssl`
+ * are `database`'s. [CF-4, PP-4, Q175 A; design §8]
+ *
+ * Startup first checks, on that pool, that the login cannot write. It refuses with `transport-reader-can-write`, naming
+ * the login and what it found, when the login:
  *
  * - is a superuser (nothing else is listed then: a superuser passes every check);
  * - holds `CREATEROLE`, `CREATEDB` or `BYPASSRLS`;
@@ -18,9 +19,9 @@
  *
  * A public schema is any schema of the database but `pg_catalog`, `information_schema` and those starting with `pg_`
  * (`pg_toast`, the temporary schemas). The check runs once the migrations of startup made the tables, before the
- * transport listens; a table made later by a migration is checked at the next start. What the login may still do — read,
- * call functions, take advisory locks, use temporary tables — task 14.2b's gate (`./read-gate.ts`) keeps confined on
- * both backends; it stays in front of this login.
+ * transport listens; a table made later by a migration is checked at the next start. What the login may still do (read,
+ * call functions, take advisory locks, use temporary tables) is confined on both backends by the read gate
+ * (`./read-gate.ts`), which stays in front of this login. [PP-4, A172]
  */
 
 import type { ReadHandle } from "../db/api.js";
@@ -115,7 +116,7 @@ export function refuseWritingReader(
     "transport-reader-can-write",
     `the transportReader login "${facts.user}" ${found.slice(0, LISTED).join(", ")}${more}: the transport's reads ` +
       "need a login that may only read — SELECT on the public tables and USAGE on their schemas, such as a member of " +
-      "pg_read_all_data and nothing more (CF-4, owner decision Q175)",
+      "pg_read_all_data and nothing more",
     { user: facts.user, found },
   );
 }

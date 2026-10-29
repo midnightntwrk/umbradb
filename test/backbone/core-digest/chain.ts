@@ -14,12 +14,14 @@ import {
 import { validateDeclarations } from "../../../src/modules/validation.js";
 
 /**
- * A chain for the digests' tests (task 7.1; DT-4, DT-5): the real `core-digest` declaration with a stand-in for
- * `core-block-commit` (task 10.2 builds the real one), and the test's modules, started through `schemaPlan` and
- * `startDatabase` and run through the block write handles — a block loop standing in for the runner's (task 5.2), as
- * task 3.2's A25 test does. The orders are RN-3's as the requirement graph gives them (`src/modules/graph.ts`, Q95):
- * at startup the backbone first, `core-digest` right after `core-block-commit`, then the modules; at `on-db-write`
- * `core-block-commit` first and `core-digest` last.
+ * A chain for the digests' tests: the real `core-digest` declaration, a stand-in for `core-block-commit`, and the
+ * test's modules. They are started through `schemaPlan` and `startDatabase` and run through the block write handles,
+ * with a block loop standing in for the runner's (as the requirement graph's tests do). [DT-4, DT-5, A25]
+ *
+ * The orders are the fixed backbone order as the requirement graph gives them (`src/modules/graph.ts`):
+ * - at startup, the backbone first (`core-digest` right after `core-block-commit`), then the modules;
+ * - at `on-db-write`, `core-block-commit` first and `core-digest` last.
+ * [RN-3, Q95]
  */
 
 /** One process context per test chain: the digests need no items, revisions or published items. */
@@ -27,7 +29,7 @@ export function processContext(): ProcessContext {
   return { items: new Map(), revisions: [], publish: () => undefined };
 }
 
-/** The block context of height `h` (CORE-ARCH §4.10): no items or settings are needed here. */
+/** The block context of height `h`: no items or settings are needed here. [CORE-ARCH §4.10] */
 export function blockAt(h: bigint): BlockContext {
   return {
     height: h,
@@ -85,9 +87,9 @@ export function testModule(id: string, rest: Partial<ModuleDeclaration> = {}): M
 export interface Chain {
   readonly db: Database;
   readonly plan: SchemaPlan;
-  /** Startup's order (DB-9, Q95). */
+  /** Startup's order. [DB-9, Q95] */
   readonly startup: readonly ModuleDeclaration[];
-  /** `on-db-write`'s order (RN-3): `core-digest` last. */
+  /** `on-db-write`'s order: `core-digest` last. [RN-3] */
   readonly writeOrder: readonly ModuleDeclaration[];
   /** The first height processed (S). */
   readonly start: bigint;
@@ -103,7 +105,7 @@ export interface ChainOptions {
   readonly plan?: (plan: SchemaPlan) => SchemaPlan;
 }
 
-/** Validates the parts, plans their schemas and starts the database with them (DB-9). */
+/** Validates the parts, plans their schemas and starts the database with them. [DB-9] */
 export async function startChain(
   db: Database,
   modules: readonly ModuleDeclaration[],
@@ -131,7 +133,7 @@ export async function startChain(
   };
 }
 
-/** Runs the block of the next height: one transaction, every part's `on-db-write` in order (RN-3, RN-4). */
+/** Runs the block of the next height: one transaction, every part's `on-db-write` in order. [RN-3, RN-4] */
 export async function runBlock(chain: Chain): Promise<bigint> {
   const h = chain.cursor === null ? chain.start : chain.cursor + 1n;
   const context = processContext();

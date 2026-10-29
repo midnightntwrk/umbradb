@@ -45,12 +45,15 @@ import {
 import { LOG_STATE, wrapper } from "./contract-data-checks.js";
 
 /**
- * Task 13.1's modules in parts (`openspec/changes/core-arch/specs/contract-data/spec.md` CC-1 to CC-3; `design.md` §10):
- * `core-contract-logs-fast`'s literal rule over a transcript's ops, its reading of a transaction's transcripts in the
- * ledger's emission order — held to the vendored v9 package's own apply on a transaction of two intents —, its rows and
- * halts per outcome, its ledger task (task 12.6, on ledger v8, v9 and v9-rc3); `-full`'s rows from `vm-logs`;
- * `core-contract-states`' rows from the `ledger-state` item's keys; the shared table's columns, design §10's. The process
- * tests are `contract-data.test.ts`.
+ * The contract-data modules, tested in parts. [CC-1, CC-2, CC-3; design §10]
+ * - `core-contract-logs-fast`: its literal rule over a transcript's ops; its reading of a transaction's transcripts in
+ *   the ledger's emission order, held to the vendored v9 package's own apply on a transaction of two intents; its rows
+ *   and halts per outcome; its ledger task, on ledger v8, v9 and v9-rc3.
+ * - `core-contract-logs-full`: its rows from `vm-logs`.
+ * - `core-contract-states`: its rows from the `ledger-state` item's keys.
+ * - The shared table's columns.
+ *
+ * The process tests are in `contract-data.test.ts`.
  */
 
 const op = (name: string, args?: Record<string, unknown>): unknown => (args === undefined ? name : { [name]: args });
@@ -119,7 +122,7 @@ function prototype(address: Uint8Array, guaranteed: v9.Op<v9.AlignedValue>[], fa
 }
 
 /**
- * One proof-erased transaction of two intents — segment 2 set before segment 1 —, each calling a contract with a
+ * One proof-erased transaction of two intents (segment 2 set before segment 1), each calling a contract with a
  * guaranteed and a fallible transcript that log.
  */
 function twoIntentCall(first: Uint8Array, second: Uint8Array): Uint8Array {
@@ -192,7 +195,7 @@ describe("core-contract-logs-fast's reading of a transaction's transcripts (CC-3
     ]);
     expect(sites![0]).toMatchObject({ segment: 1, fallible: false, call: 0, op: 1, address: contract.address, entryPoint: utf8("emit") });
     // The package's own natives: logSitesOf on a transaction the test deserialized; the intent and the call its getters
-    // gave freed at once (as the adapter frees them, task 12.5: no object the collector has not reached keeps a node).
+    // gave freed at once, as the adapter frees them (no object the collector has not reached keeps a node).
     const native = RAW.v9.Transaction.deserialize(...markersOf(bytes), bytes);
     type Freeable = { free(): void };
     const freed = [
@@ -393,7 +396,7 @@ describe("core-contract-states' rows (CC-1)", () => {
 });
 
 describe("the tables of design §10 (CC-1, CC-2)", () => {
-  /** The columns design §10's row of `table` gives (the key's, then the others'). */
+  /** The columns the design gives `table`'s row (the key's, then the others'). [design §10] */
   function designColumns(table: string): string[] {
     const design = readFileSync(new URL("../../openspec/changes/core-arch/design.md", import.meta.url), "utf8");
     const line = design.split("\n").find((l) => l.includes(`| \`${table}\` |`)) as string;

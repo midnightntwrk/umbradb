@@ -1,17 +1,17 @@
 /**
- * UmbraDB — the package's one entry point (`package.json` `exports` names only `"."`; `dist/index.js` and
- * `dist/index.d.ts` are built from this file): exactly the surface of `openspec/changes/core-arch/design.md` §12 (LS-1),
- * which `test/library-surface/surface.test.ts` pins. 0.9.5's parts are retired (LS-2) and TransactionHistory is kept in
- * `legacy/transaction-history/`, outside the build and the package (LS-3).
+ * UmbraDB: the package's one entry point. `package.json` `exports` names only `"."`, and `dist/index.js` and
+ * `dist/index.d.ts` are built from this file. It exports exactly the library's public surface, which
+ * `test/library-surface/surface.test.ts` pins. The parts of 0.9.5 are retired, and TransactionHistory is kept in
+ * `legacy/transaction-history/`, outside the build and the package. [LS-1, LS-2, LS-3; design §12]
  *
- * - **A configuration** (CF-1, CF-2): {@link defineConfig}, {@link coreEntry}, {@link versionEntry}, and the core
- *   modules' declarations, whose `entry` writes their entries (`CORE_BLOCK_PARSED.entry({ start, config: {} })`).
- * - **A module** (MD-1): {@link defineModule} and its types, the points ({@link POINTS}), the handles, the helpers of
- *   cursor and height-versioned tables (SH-1 to SH-3), the canonical encodings and the contents hash (DT-1 to DT-3),
- *   the module API's envelope helpers (RN-16), `hexBytes` for a settings schema and `retainedStatesOf` (LG-12).
+ * - **A configuration**: {@link defineConfig}, {@link coreEntry}, {@link versionEntry}, and the core modules'
+ *   declarations, whose `entry` writes their entries (`CORE_BLOCK_PARSED.entry({ start, config: {} })`). [CF-1, CF-2]
+ * - **A module**: {@link defineModule} and its types, the points ({@link POINTS}), the handles, the cursor-table and
+ *   height-versioned-table helpers, the canonical encodings and the contents hash, the module API's envelope helpers,
+ *   `hexBytes` for a settings schema, and `retainedStatesOf`. [MD-1, SH-1, SH-2, SH-3, DT-1, DT-2, DT-3, RN-16, LG-12]
  * - **A host program**: {@link startProcess} and its handle, the block-source interface and
- *   {@link InMemoryBlockSource} (RN-14), {@link runLedgerWorker} for its ledger worker's entry (MD-1, §5.5), the
- *   ledger package's types (LG-6) and {@link UmbraError} with its codes (§11).
+ *   {@link InMemoryBlockSource}, {@link runLedgerWorker} as the entry of the host's ledger worker, the ledger
+ *   package's types, and {@link UmbraError} with its error codes. [RN-14, MD-1, LG-6; design §5.5, §11]
  *
  * @packageDocumentation
  */

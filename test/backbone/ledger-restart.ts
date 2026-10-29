@@ -7,16 +7,20 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
 
 /**
- * A ledger process stopped and started again on a tape (task 12.4; LG-11, A102): the core modules of the ledger, the
- * records a restart at a cursor needs, and a ledger worker that reports its loads. Imports nothing of Vitest, so that a
- * worker process (`ledger-restart.worker.ts`) builds the same.
+ * A ledger process stopped and started again on a tape: the core modules of the ledger, the records a restart at a
+ * cursor needs, and a ledger worker that reports its loads. Imports nothing of Vitest, so that a worker process
+ * (`ledger-restart.worker.ts`) builds the same. [LG-11, A102]
  *
- * A tape replays to a client asking what was recorded (task 0.3's notes; TT-2: calls are answered by method and
- * params). A process that syncs from a tape's first block asks what the recording asked; one restarted at cursor c asks
- * besides: the header of c (startup's cursor-hash check, IN-3) and the runtime metadata at c's hash — the parent of the
- * first block it decodes (LG-4) — which a tape holds once per runtime only (decision record Q135 A). {@link restartAt}
- * adds both, the metadata record copied from the one of the runtime c's state has (the same bytes at every block of a
- * runtime): for task 0.3's recorded tapes as for the synthetic ones.
+ * A tape replays to a client what was recorded, answering calls by method and params. [TT-2]
+ *
+ * A process that syncs from a tape's first block asks what the recording asked. One restarted at cursor c also asks:
+ * - the header of c, for startup's cursor-hash check [IN-3];
+ * - the runtime metadata at c's hash, the parent of the first block it decodes. A tape holds it once per runtime
+ *   only. [LG-4, Q135 A]
+ *
+ * {@link restartAt} adds both, for the recorded tapes as for the synthetic ones. The metadata record is copied from the
+ * one of the runtime that c's state has, since a runtime's metadata is the same bytes at every one of its blocks.
+ * [Q135 A]
  */
 
 /** The ledger's core modules as the build enables them (`core-ledger-state` and what it requires). */
@@ -57,7 +61,7 @@ export function cappedAt(records: readonly TapeRecord[], height: bigint): TapeRe
 
 /**
  * The `state_getMetadata` record for `hash`, copied from the tape's record of the runtime the state at `hash` has
- * (decision record Q135 A; see the module comment): the runtime is `state_getRuntimeVersion`'s at `hash`.
+ * (see the module comment): the runtime is `state_getRuntimeVersion`'s at `hash`. [Q135 A]
  */
 export function metadataRecordAt(records: readonly TapeRecord[], hash: string): TapeRecord {
   const calls = records.filter(isCall);

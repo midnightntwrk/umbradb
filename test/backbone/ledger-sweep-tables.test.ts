@@ -14,11 +14,14 @@ import type { Database, ReadHandle } from "../../src/db/api.js";
 import { openPgliteOn, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
 
 /**
- * The sweep's tables (task 17.5b; LG-14, `design.md` §10, owner decision Q158 A): `sqlSweepTables`' reads and
- * `writeSweep`'s statements on `core_ledger_state`'s own tables (its two migrations, on an in-memory PGlite), each
- * read on its own — the process tests (`ledger-sweep-process.test.ts`) run them only inside a whole step — and the
- * refusals no step reaches: a missing sweep row, a column that is not bytes, the requests for no key, and a step that
- * writes neither marks nor a cleared set.
+ * The sweep's tables: `sqlSweepTables`' reads and `writeSweep`'s statements on `core_ledger_state`'s own tables (its
+ * two migrations, on an in-memory PGlite). Each read is tested on its own; the process tests
+ * (`ledger-sweep-process.test.ts`) run them only inside a whole step. Also tested are the refusals no step reaches:
+ * - a missing sweep row;
+ * - a column that is not bytes;
+ * - the requests for no key;
+ * - a step that writes neither marks nor a cleared set.
+ * [LG-14, Q158 A; design §10]
  */
 
 const key = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);

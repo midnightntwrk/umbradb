@@ -42,17 +42,23 @@ import {
 } from "./validate-fixtures.js";
 
 /**
- * A28 (CF-3, CF-6; task 4.2): every entry of the configuration is validated at startup — its shape (`{ id, start, stop?,
- * version, config }`, no unknown property, `stop ≥ start`, byte values as `0x`-prefixed lowercase hex), and the settings
- * of every revision whose version is this build's against the schema in this build (the `core` entry's of CF-4, a
- * module's own `configSchema`), with no unknown field, the declared defaults applied to absent fields and each field
- * classified by its kind; a revision whose version is not the build's (written with `versionEntry`) is not validated
- * against this build's schema. Each violation refuses with `invalid-configuration`, naming the entry (its position, id
- * and start) and the field. The validation is a pure function of the loaded data, the validated declarations and the
- * process's side; what needs the cursor — a scheduled `versionEntry` carrying a `config`, an earlier one without its
- * recorded `config` — is `entriesAtCursor`, called once the database is open; what needs the recorded history (equal to
- * its recorded row, recorded, re-recorded) is task 4.3's. "Startup refuses" is the runner's (task 5.x), which maps the
- * refusal to its refused state.
+ * Every entry of the configuration is validated at startup:
+ * - its shape: `{ id, start, stop?, version, config }`, no unknown property, `stop ≥ start`, byte values as
+ *   `0x`-prefixed lowercase hex;
+ * - the settings of every revision whose version is this build's, against the schema in this build (the `core`
+ *   entry's, or a module's own `configSchema`): no unknown field, the declared defaults applied to absent fields, and
+ *   each field classified by its kind. [CF-4]
+ *
+ * A revision whose version is not the build's (written with `versionEntry`) is not validated against this build's
+ * schema. Each violation refuses with `invalid-configuration`, naming the entry (its position, id and start) and the
+ * field. [A28, CF-3, CF-6]
+ *
+ * The validation is a pure function of the loaded data, the validated declarations and the process's side:
+ * - what needs the cursor (a scheduled `versionEntry` carrying a `config`, an earlier one without its recorded
+ *   `config`) is `entriesAtCursor`, called once the database is open;
+ * - what needs the recorded history (equal to its recorded row, recorded, re-recorded) is the history check's.
+ *
+ * The runner is what refuses startup: it maps the refusal to its refused state.
  *
  * The committed negative controls: the validation built without one rule of `CONFIG_RULES` (or `CURSOR_RULES`) loses
  * exactly that rule's findings, row by row; and zod's own parse, which strips unknown fields, accepts a misspelled
@@ -115,7 +121,7 @@ const withEntry = (entry: unknown) => ({ entries: [CORE, entry] });
 const HASH = `0x${"ab".repeat(32)}`;
 const UPPER_HASH = `0x${"AB".repeat(32)}`;
 
-/** A custom network's own ledger table (LG-3): every spec_version to v8. */
+/** A custom network's own ledger table: every spec_version to v8. [LG-3] */
 const CUSTOM_TABLE = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v8" }] };
 
 /** An earlier core version, with one ledger package, whose hash is `sha256`. */
@@ -133,7 +139,7 @@ const earlierCore = (sha256: string): CoreVersion => ({
 const core0 = at(0, "core", 0);
 const stats1 = at(1, "stats", 0);
 
-/** A private module (PP-1). */
+/** A private module. [PP-1] */
 const WALLET = defineModule({ ...declaration("wallet", { side: "private" }) });
 
 const A28: readonly Row[] = [
@@ -449,7 +455,7 @@ const A28: readonly Row[] = [
   {
     name: "bad hex in the genesis hash (A28)",
     rule: "settings-schema",
-    // With its own ledger table, which a custom network sets (LG-3), so that the hash alone is refused.
+    // With its own ledger table, which a custom network sets, so that only the hash is refused. [LG-3]
     config: () => withCore({ ...CORE_SETTINGS, network: "custom", genesisHash: UPPER_HASH, ledgerTable: CUSTOM_TABLE }),
     findings: [
       { path: "entries[0].config.genesisHash", entry: core0, field: "genesisHash", says: ["0x-prefixed lowercase hex"] },
@@ -472,7 +478,7 @@ const A28: readonly Row[] = [
   {
     name: "a custom network without its genesis hash",
     rule: "settings-schema",
-    // With its own ledger table, which a custom network sets (LG-3), so that the genesis rule alone refuses it.
+    // With its own ledger table, which a custom network sets, so that only the genesis rule refuses it. [LG-3]
     config: () => withCore({ ...CORE_SETTINGS, network: "custom", ledgerTable: CUSTOM_TABLE }),
     findings: [
       { path: "entries[0].config.genesisHash", entry: core0, field: "genesisHash", says: ["a custom network needs genesisHash"] },
@@ -691,7 +697,7 @@ describe("A28: entry-shape and schema violations each refuse, naming the entry a
       row.findings.forEach((expected, index) => matches(findings[index] as Finding, expected, row.rule));
       for (const finding of findings) expect(error.message).toContain(finding.message);
       expect(error.message).toContain(FILE);
-      expect(error.message).toContain("(CF-3)");
+      expect(error.message).not.toMatch(/\b(?!UTF-)(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
     });
   }
 
@@ -704,17 +710,17 @@ describe("A28: entry-shape and schema violations each refuse, naming the entry a
         entry: core0,
         field: "livenessTimeoutMs",
         message:
-          "entries[0].config.livenessTimeoutMs (core from 0): Invalid input: expected number, received string (CF-3)",
+          "entries[0].config.livenessTimeoutMs (core from 0): Invalid input: expected number, received string",
       },
     ]);
     expect(error.message).toBe(
-      `the configuration ${FILE} is refused (CF-3): entries[0].config.livenessTimeoutMs (core from 0): Invalid input: ` +
-        "expected number, received string (CF-3)",
+      `the configuration ${FILE} is refused: entries[0].config.livenessTimeoutMs (core from 0): Invalid input: ` +
+        "expected number, received string",
     );
   });
 
   it("reports every finding of a configuration at once, top level first, then by entry, each entry's in rule order", () => {
-    // CF-2's scenario: `databse` for `database`, which is then missing; and a second entry's own fault.
+    // `databse` for `database`, which is then missing; and a second entry's own fault. [CF-2]
     const config = {
       entries: [
         coreEntry({ start: 0, config: { network: "preprod", node: "ws://n:9944", databse: { kind: "pglite", memory: true } } as never }),
@@ -731,7 +737,7 @@ describe("A28: entry-shape and schema violations each refuse, naming the entry a
       ["entry-stop", "entries[1].stop"],
     ]);
     expect(error.message).toBe(
-      `the configuration ${FILE} is refused (CF-3): ${findings.map((found) => found.message).join("; ")}`,
+      `the configuration ${FILE} is refused: ${findings.map((found) => found.message).join("; ")}`,
     );
   });
 
@@ -741,7 +747,7 @@ describe("A28: entry-shape and schema violations each refuse, naming the entry a
       validateConfig({ ...input(withEntry(5)), config: { data: config.data } }),
     );
     expect(error.details.file).toBeNull();
-    expect(error.message.startsWith("the configuration is refused (CF-3): entries[1]")).toBe(true);
+    expect(error.message.startsWith("the configuration is refused: entries[1]")).toBe(true);
   });
 });
 
@@ -1053,7 +1059,8 @@ describe("CF-3, CF-4: the validated configuration", () => {
   });
 
   it("does not validate a revision whose version is not the build's against this build's schema (CF-3)", () => {
-    // CF-3's scenario "An upgrade that renames a setting": m 1.0.0 recorded { foo: 1 } from 1; the build carries 1.1.0.
+    // The scenario "An upgrade that renames a setting": m 1.0.0 recorded { foo: 1 } from 1; the build carries 1.1.0.
+    // [CF-3]
     const checked = validateConfig(
       input({
         entries: [
@@ -1131,9 +1138,9 @@ describe("A28: what needs the cursor (CF-3)", () => {
       { id: "stats", start: 50, version: "1.2.0", started: false, scheduled: false },
       { id: "stats", start: 100, version: "1.3.0", started: false, scheduled: true },
     ]);
-    // A scheduled revision is recorded with id, start, stop and version only: it has no settings (task 4.3 records it).
+    // A scheduled revision is recorded with id, start, stop and version only: it has no settings (the history check records it).
     expect(placed[3]).toMatchObject({ stop: null, settings: null, kinds: null, data: null });
-    // An earlier one is compared with its recorded row as written (task 4.3).
+    // An earlier one is compared with its recorded row as written, by the history check.
     expect(placed[1]).toMatchObject({ stop: 49, settings: { limit: 3 }, kinds: null });
     expect(Object.isFrozen(placed)).toBe(true);
     expect(Object.isFrozen(placed[0])).toBe(true);
@@ -1313,7 +1320,7 @@ describe("CF-4, AE-6: a refusal never carries a secret's value", () => {
     const entry = leaky.entry({ start: 0, config: { apiKey: `bad-${PASSWORD}`, feedUrl: "https://feed.example" } });
     const error = refusal(() => validateConfig(input(withEntry(entry))));
     const [finding] = findingsOf(error);
-    expect(finding?.message).toBe("entries[1].config.apiKey (leaky from 0): the key [redacted] is not a key (CF-3)");
+    expect(finding?.message).toBe("entries[1].config.apiKey (leaky from 0): the key [redacted] is not a key");
     expect(JSON.stringify({ message: error.message, details: error.details })).not.toContain(PASSWORD);
   });
 

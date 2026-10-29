@@ -1,14 +1,16 @@
 /**
- * The core module `core-tx-results` (`openspec/changes/core-arch/specs/chain-data/spec.md` CD-6; `design.md` §10;
- * CORE-ARCH §4.11; task 11.1): each transaction's outcome as the chain recorded it — `success`, `partial` or `failure`
- * — as the `block` item `tx-results` and one row per transaction in `core_tx_results.results`. Off by default; it may
- * start mid-chain. Which segments failed is not here: the chain's event for a partial success carries the transaction
- * hash only (decision record Q19), so segment results are `core-ledger-state`'s.
+ * The core module `core-tx-results`: each transaction's outcome as the chain recorded it (`success`, `partial` or
+ * `failure`), as the `block` item `tx-results` and as one row per transaction in `core_tx_results.results`. It is off
+ * by default and may start mid-chain. [CD-6; CORE-ARCH §4.11; design §10]
  *
- * **The outcome** of a transaction ({@link outcomeOf}) is read from the chain event that placed it in `block-parsed`
- * (its `eventIndex` into `chain-events`, `src/backbone/core-block-parsed/placement.ts`, matched to its extrinsic by the
- * event's phase), as the official indexer reads it (`midnight-indexer` `chain-indexer/src/infra/subxt_node/runtimes/
- * v2_1_0.rs`, `EventExt::outcome`, `SystemTransaction::transaction`):
+ * Which segments failed is not recorded here: the chain's event for a partial success carries only the transaction
+ * hash, so segment results come from `core-ledger-state`. [Q19]
+ *
+ * **The outcome** of a transaction ({@link outcomeOf}) is read from the chain event that placed it in `block-parsed`:
+ * its `eventIndex` into `chain-events` (`src/backbone/core-block-parsed/placement.ts`), matched to its extrinsic by the
+ * event's phase. It is read the way the official indexer reads it (`midnight-indexer`
+ * `chain-indexer/src/infra/subxt_node/runtimes/v2_1_0.rs`, `EventExt::outcome`, `SystemTransaction::transaction`):
+ * [CD-6]
  *
  * | Event | Outcome |
  * |---|---|
@@ -17,14 +19,15 @@
  * | `System::ExtrinsicFailed` | `failure` |
  * | `MidnightSystem::SystemTransactionApplied` | `success` |
  *
- * Block 0 has no events: every transaction of its body is `success`, as the official indexer takes the genesis
- * transactions (all applied, `genesis_transactions`). **The item** `tx-results` is the outcomes in transaction order —
- * `tx-results[i]` is `block-parsed.transactions[i]`'s —, a frozen array of `ChainOutcome` (`src/ledger/types.ts`):
- * exactly what the ledger's `apply` takes as `ApplyInput.outcomes` (task 12.1a), so `core-ledger-state` passes it as it
- * is (task 12.3).
+ * Block 0 has no events: every transaction of its body is `success`, just as the official indexer treats the genesis
+ * transactions as all applied (`genesis_transactions`).
  *
- * **At `on-db-write`** one row per transaction: `core_tx_results.results (height, tx_index) → outcome`, in one
- * statement; append-only, range-partitioned by height.
+ * **The item** `tx-results` holds the outcomes in transaction order: `tx-results[i]` belongs to
+ * `block-parsed.transactions[i]`. It is a frozen array of `ChainOutcome` (`src/ledger/types.ts`), exactly what the
+ * ledger's `apply` takes as `ApplyInput.outcomes`, so `core-ledger-state` passes it on unchanged.
+ *
+ * **At `on-db-write`** it writes one row per transaction, `core_tx_results.results (height, tx_index) → outcome`, in one
+ * statement. The table is append-only and range-partitioned by height.
  */
 
 import { z } from "zod";
@@ -55,7 +58,7 @@ export const OUTCOMES: Readonly<Record<string, ChainOutcome>> = Object.freeze({
   [`${MIDNIGHT_SYSTEM.pallet}::${MIDNIGHT_SYSTEM.applied}`]: "success",
 });
 
-/** `core-tx-results`' migrations (DB-9): applied once, recorded under `core-tx-results`; never changed. */
+/** `core-tx-results`' migrations: applied once, recorded under `core-tx-results`, never changed. [DB-9] */
 export const CORE_TX_RESULTS_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",
@@ -79,7 +82,7 @@ const INSERT_SQL = `INSERT INTO ${RESULTS_TABLE} (height, tx_index, outcome)
 export function outcomeOf(height: bigint, transaction: BlockTransaction, events: readonly ChainEvent[]): ChainOutcome {
   if (transaction.eventIndex === null) {
     if (height === 0n) return "success";
-    throw new Error(`block ${height}: transaction ${transaction.index} names no chain event, as only block 0's may (CD-6)`);
+    throw new Error(`block ${height}: transaction ${transaction.index} names no chain event, as only block 0's may`);
   }
   // `chain-events[i]` is the block's event i (core-chain-events numbers them by their place).
   const event = events[transaction.eventIndex];
@@ -87,7 +90,7 @@ export function outcomeOf(height: bigint, transaction: BlockTransaction, events:
   if (outcome === undefined) {
     throw new Error(
       `block ${height}: transaction ${transaction.index} names the chain event ${transaction.eventIndex}, ` +
-        `${event === undefined ? "which the block does not have" : `${event.pallet}::${event.name}, which gives no outcome`} (CD-6)`,
+        `${event === undefined ? "which the block does not have" : `${event.pallet}::${event.name}, which gives no outcome`}`,
     );
   }
   return outcome;
@@ -110,7 +113,7 @@ export function txResultsItemOf(b: BlockContext): readonly ChainOutcome[] {
   const results = b.items.get(TX_RESULTS_ITEM);
   if (!Array.isArray(results)) {
     throw new TypeError(
-      `the block at height ${b.height} has no tx-results item core-tx-results can write: it puts it at on-parse (CD-6)`,
+      `the block at height ${b.height} has no tx-results item core-tx-results can write: it puts it at on-parse`,
     );
   }
   return results as readonly ChainOutcome[];

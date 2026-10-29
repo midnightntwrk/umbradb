@@ -17,12 +17,13 @@ import { CORE_SETTINGS } from "./config-fixtures.js";
 import { input, leaky } from "./validate-fixtures.js";
 
 /**
- * A29's helper half (CF-4, AE-6; task 4.2): a `secret` field is never shown, logged or reported — it reads
- * `[redacted]` — and neither are credentials inside URLs. `/config`, `/status` and the logs are tasks 8.1–8.4 and 5.x;
- * here the redaction they will call is shown on what they will give it: a validated configuration's settings for
- * `/config`, and texts built from the setting — an error message, a log line, a library's printout — for the logs and
- * `/status`. No form of the password survives: as written in the URL, decoded, URL-encoded in upper or lower case,
- * form-encoded, as WHATWG URL serialization writes it, JSON-escaped.
+ * The redaction helper. A `secret` field is never shown, logged or reported: it reads `[redacted]`. Neither are
+ * credentials inside URLs. [A29, CF-4, AE-6]
+ *
+ * `/config`, `/status` and the logs are not tested here. This file tests the redaction they call, on what they give
+ * it: a validated configuration's settings for `/config`, and texts built from the setting (an error message, a log
+ * line, a library's printout) for the logs and `/status`. No form of the password survives: as written in the URL,
+ * decoded, URL-encoded in upper or lower case, form-encoded, as WHATWG URL serialization writes it, or JSON-escaped.
  *
  * The committed negative control: a redaction without one of its parts, encodings or patterns leaks exactly the texts
  * that need it.
@@ -34,7 +35,7 @@ const PASSWORD = 'pa ss/w@rd"%';
 /** The password as the URL writes it (`encodeURIComponent`). */
 const WRITTEN = "pa%20ss%2Fw%40rd%22%25";
 
-/** The database's parts (Q167 A): only its password is secret. */
+/** The database's parts: only its password is secret. [Q167 A] */
 const PARTS = { kind: "postgres", host: "db", port: 5432, user: "indexer", password: PASSWORD, name: "umbradb" } as const;
 
 /** The same database as a URL, as a log line or an error may write it. */
@@ -137,7 +138,7 @@ describe("A29 (helper): the password of the database URL appears nowhere", () =>
     expect(redact.text(`could not connect to ${DATABASE}: connect ECONNREFUSED`)).toBe(
       "could not connect to postgres://[redacted]@db:5432/umbradb: connect ECONNREFUSED",
     );
-    // The other parts are no secret (Q167 A): a log line naming the database shows them.
+    // The other parts are not secret: a log line naming the database shows them. [Q167 A]
     expect(redact.text("opened postgres indexer@db:5432/umbradb (ssl require)")).toBe(
       "opened postgres indexer@db:5432/umbradb (ssl require)",
     );
@@ -163,7 +164,7 @@ describe("AE-6: credentials inside URLs read [redacted], in any field and any te
     const redact = configRedactor(checked());
     expect(redact.text("feed refused feed-pass")).toBe("feed refused [redacted]");
     expect(redact.text("mirror refused old-pass")).toBe("mirror refused [redacted]");
-    // An earlier revision's data is recorded and shown (CF-3): only the credential in it is a secret.
+    // An earlier revision's data is recorded and shown: only the credential in it is a secret. [CF-3]
     expect(redact.text("mirror https://old:old-pass@mirror.example")).toBe("mirror https://[redacted]@mirror.example");
   });
 

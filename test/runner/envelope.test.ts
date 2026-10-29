@@ -14,12 +14,14 @@ import {
 import { BACKENDS } from "../db/backends.js";
 
 /**
- * The chain-data envelope of module API responses (task 5.2; RN-16, CORE-ARCH §4.20): a response states the view it
- * answers from (`finalized`), and the height and hash of the read's committed height — as the headers `X-Umbra-View`,
- * `X-Umbra-Height` and `X-Umbra-Hash` over HTTP, and in a GraphQL response's `extensions`, its `data` unchanged —; a
- * read before any height commits is refused with `no-committed-height`, HTTP 503. Heights are written as decimal
- * strings and hashes as `0x`-prefixed lowercase hex, as the process transport writes them (CORE-ARCH §4.14). Mounting
- * the handlers on `listen.api` and A75 through a registered handler are task 5.2a's.
+ * The chain-data envelope of module API responses. A response states the view it answers from (`finalized`), and the
+ * height and hash of the read's committed height: as the headers `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash`
+ * over HTTP, and in a GraphQL response's `extensions`, its `data` unchanged. A read before any height commits is
+ * refused with `no-committed-height`, HTTP 503. [RN-16; CORE-ARCH §4.20]
+ *
+ * Heights are written as decimal strings and hashes as `0x`-prefixed lowercase hex, as the process transport writes
+ * them. Mounting the handlers on `listen.api`, and the envelope through a registered handler, are tested in
+ * `api-server.test.ts`. [A75; CORE-ARCH §4.14]
  */
 
 const HASH = Uint8Array.from({ length: 32 }, (_, i) => i * 8);
@@ -60,7 +62,7 @@ describe("the chain-data envelope (RN-16)", () => {
     expect((refused as UmbraError).code).toBe("no-committed-height");
     expect((refused as UmbraError).retryable).toBe(false);
     expect((refused as UmbraError).message).toBe(
-      "no height has committed yet: chain data is answered once block S commits (RN-16)",
+      "no height has committed yet: chain data is answered once block S commits",
     );
     expect(asked).toEqual([]);
   });
@@ -136,7 +138,7 @@ describe("the chain-data envelope (RN-16)", () => {
       body: {
         error: {
           code: "no-committed-height",
-          message: "no height has committed yet: chain data is answered once block S commits (RN-16)",
+          message: "no height has committed yet: chain data is answered once block S commits",
         },
       },
     });

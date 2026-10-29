@@ -19,10 +19,13 @@ import {
 } from "./cbor-decoder.js";
 
 /**
- * A53 (DT-1), property tests. The oracle is `cbor-decoder.ts`, a decoder and RFC 8949 §4.2.1 checker written
- * independently of the encoder: for every generated value it checks that each argument is in its shortest form, that
- * no indefinite length appears, that every map's keys are in strictly ascending bytewise order of their encodings,
- * and that the decoded value equals the input.
+ * Property tests of the canonical encoder. The oracle is `cbor-decoder.ts`, a decoder and RFC 8949 §4.2.1 checker
+ * written independently of the encoder. For every generated value it checks that:
+ * - each argument is in its shortest form;
+ * - no indefinite length appears;
+ * - every map's keys are in strictly ascending bytewise order of their encodings;
+ * - the decoded value equals the input.
+ * [A53, DT-1]
  *
  * Determinism: every property runs with a pinned, reported fast-check seed.
  */

@@ -23,26 +23,32 @@ import { type RetentionSeen, retentionWatcher } from "./ledger-storage-checks.js
 import { type LedgerScenario, ledgerScenario } from "./ledger-tapes.js";
 
 /**
- * A103's long run (task 12.4's criterion; fitted to a loaded machine by task 12.5a, owner decision Q122;
- * `openspec/changes/core-arch/acceptance.md` A103, LG-12; BK-2, BK-4), shared by `ledger-window.test.ts`: v9's empty
- * blocks from genesis with `retainStates` 1,000 and the sweep off, synced through the real process on PGlite to
- * {@link BACKUP_AT}, backed up there by the process (`ProcessHandle.backup`, `pglite-tools`' `pg_dump`), then continued
- * to the head on that PGlite database (a restart, which loads the state at the cursor) and, from the same backup
- * restored with `umbradb restore`'s own code into an empty PostgreSQL database (BK-2: a PGlite backup restores on
- * PostgreSQL; BK-4: a restored database continues like one that never stopped), on PostgreSQL — so that PostgreSQL,
- * whose every block costs several statements through Docker's port proxy, processes the window's last blocks and its
- * loads at cursor 5,000 instead of 5,000 blocks. The configuration is the same throughout: the ledger's core modules
- * and a retention watcher loading the planned heights at 5,001's `on-compute`.
+ * The retention-window long run, shared by `ledger-window.test.ts`, sized to fit a loaded machine. v9's empty blocks
+ * from genesis, with `retainStates` 1,000 and the sweep off:
+ * - synced through the real process on PGlite to {@link BACKUP_AT}, and backed up there by the process
+ *   (`ProcessHandle.backup`, `pglite-tools`' `pg_dump`);
+ * - then continued to the head on that PGlite database (a restart, which loads the state at the cursor);
+ * - and continued to the head on PostgreSQL, from the same backup restored into an empty PostgreSQL database with
+ *   `umbradb restore`'s own code. A PGlite backup restores on PostgreSQL, and a restored database continues like one
+ *   that never stopped.
+ *
+ * On PostgreSQL every block costs several statements through Docker's port proxy, so this way it processes only the
+ * window's last blocks and its loads at cursor 5,000, not 5,000 blocks. The configuration is the same throughout: the
+ * ledger's core modules, and a retention watcher loading the planned heights at 5,001's `on-compute`.
+ * [A103, LG-12, BK-2, BK-4, Q122]
  */
 
 /** The heights of the run: the head, and the backup's. */
 export const HEAD = 5_001n;
 export const BACKUP_AT = 4_990n;
 
-/** The settings A103 runs with: `retainStates` 1,000; the sweep off (the window does not depend on it, task 12.5). */
+/** The run's settings: `retainStates` 1,000; the sweep off, since the window does not depend on it. [A103] */
 export const WINDOW_SETTINGS = Object.freeze({ retainStates: 1_000, sweep: "off" });
 
-/** At 5,001's `on-compute` the read is at the cursor 5,000: the loads A103 asks, and two more outside the window. */
+/**
+ * At 5,001's `on-compute` the read is at the cursor 5,000: the loads the window check asks for, and two more outside
+ * the window. [A103]
+ */
 export const WINDOW_PLAN: ReadonlyMap<bigint, readonly bigint[]> = new Map([[HEAD, [4_000n, 3_999n, 5_000n, 5_001n, 0n]]]);
 
 /** The scenario: v9's empty blocks from genesis to {@link HEAD}, roots only. */
@@ -86,7 +92,7 @@ export async function syncAndBackUp(db: ProcessDatabase, scenario: LedgerScenari
 
 /** Continues `db` from its cursor to {@link HEAD}; the status at the head and the process's log. */
 export async function continueToHead(db: ProcessDatabase, scenario: LedgerScenario, seen: RetentionSeen) {
-  // The tape with the cursor's header and metadata, which the restarted process reads (Q135 A, `./ledger-restart.ts`).
+  // The tape with the cursor's header and metadata, which the restarted process reads (`./ledger-restart.ts`). [Q135 A]
   const run = await ingest(db, restartAt(scenario.records, BACKUP_AT), runOptions(seen));
   try {
     await committed(run, HEAD, PATIENCE_MS * 2);
@@ -97,10 +103,12 @@ export async function continueToHead(db: ProcessDatabase, scenario: LedgerScenar
 }
 
 /**
- * Restores `backup` into the empty PostgreSQL database `target` with `umbradb restore`'s code (`restoreBackup`: BK-3's
- * checks against a tape node serving the scenario, the file's statements in one transaction, the contents hash and the
- * stored state root compared; the tape's finalized head at the backup's height), with the configuration and build
- * every run of {@link syncAndBackUp} had.
+ * Restores `backup` into the empty PostgreSQL database `target` with `umbradb restore`'s code (`restoreBackup`), with
+ * the configuration and build every run of {@link syncAndBackUp} had. `restoreBackup` runs:
+ * - the restore checks against a tape node serving the scenario, whose finalized head is at the backup's height;
+ * - the file's statements in one transaction;
+ * - a comparison of the contents hash and the stored state root.
+ * [BK-3]
  */
 export async function restoreOnPostgres(target: ProcessDatabase, backup: WindowBackup, scenario: LedgerScenario, seen: RetentionSeen): Promise<Restored> {
   const user: ModuleDeclaration[] = [watcher(watched()), retentionWatcher(seen, WINDOW_PLAN)];

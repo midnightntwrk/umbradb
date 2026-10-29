@@ -1,11 +1,13 @@
 /**
- * The `TRUNCATE` refusal of DB-14, applied (`openspec/changes/core-arch/design.md` §4, "`TRUNCATE`"): the
- * `deterministic_postgresql` component holds the trigger, its function, the migration mark and the rule of which tables
- * it guards (`../deterministic-postgresql/block-transactions.ts`); this file runs them in a transaction of the database
- * API. {@link guardTables} runs at every startup — in the bootstrap, before any migration, and again after each part
- * that applied a migration, before that part's `on-start-db` (`./migrate.ts`) — because a migration can add tables;
- * {@link markMigration} runs first in each migration's transaction, the only transactions in which `TRUNCATE` of a
- * guarded table is allowed (A73), and {@link stillMarked} tells the runner that the migration's SQL did not end it.
+ * The `TRUNCATE` refusal, applied. The `deterministic_postgresql` component holds the trigger, its function, the
+ * migration mark and the rule of which tables it guards (`../deterministic-postgresql/block-transactions.ts`); this file
+ * runs them in a transaction of the database API. [DB-14; design §4]
+ *
+ * - {@link guardTables} runs at every startup, because a migration can add tables: in the bootstrap, before any
+ *   migration, and again after each part that applied a migration, before that part's `on-start-db` (`./migrate.ts`).
+ * - {@link markMigration} runs first in each migration's transaction. Those are the only transactions in which
+ *   `TRUNCATE` of a guarded table is allowed. [A73]
+ * - {@link stillMarked} tells the runner that the migration's SQL did not end its transaction.
  */
 
 import {
@@ -33,7 +35,7 @@ export async function guardTables(tx: Transaction, plan: SchemaPlan): Promise<vo
   }
 }
 
-/** Marks the transaction as a migration's, so that `TRUNCATE` of a guarded table is allowed in it (A73). */
+/** Marks the transaction as a migration's, so that `TRUNCATE` of a guarded table is allowed in it. [A73] */
 export async function markMigration(tx: Transaction): Promise<void> {
   await tx.query(MARK_MIGRATION_SQL);
 }

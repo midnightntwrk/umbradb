@@ -9,8 +9,8 @@ import { startWriter } from "../../src/db/writer-lock.js";
 import { rejection, WRITER_LOCK_HOLDERS_SQL } from "./writer-lock-checks.js";
 
 /**
- * A18's checks (DB-12), shared by `durability-probe.test.ts` and its committed negative control
- * (`durability-probe.negative-control.test.ts`), which must make the first one fail.
+ * The durability probe's checks, shared by `durability-probe.test.ts` and its committed negative control
+ * (`durability-probe.negative-control.test.ts`), which must make the first one fail. [A18, DB-12]
  */
 
 const noHeight = async (): Promise<bigint | null> => null;

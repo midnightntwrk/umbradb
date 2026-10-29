@@ -10,10 +10,11 @@ import { toHex } from "../../src/node/decode.js";
 import type { TapeRecord } from "../../tools/tape/index.js";
 
 /**
- * The checks of A94, A96 and A97 (task 12.2) that both the tests and their committed negative controls
- * (`version.negative-control.test.ts`) run, so that a control shows the very check failing against a wrong selector,
- * a wrong metadata cache or a wrong identity check — and the real ones pass it in the same build. A96's check runs on
- * the synthetic devnet and on task 0.3's recorded devnet upgrade tape ({@link devnetUpgradeOf}).
+ * Checks of ledger version selection, runtime metadata and package identity. Both the tests and their committed
+ * negative controls (`version.negative-control.test.ts`) run them, so a control shows the very check failing against a
+ * wrong selector, a wrong metadata cache or a wrong identity check, while the real ones pass it in the same build.
+ * The metadata check runs on the synthetic devnet and on the recorded devnet upgrade tape ({@link devnetUpgradeOf}).
+ * [A94, A96, A97]
  */
 
 // ---- headers and digests -----------------------------------------------------------------------------------------
@@ -44,7 +45,7 @@ export function blockWith(height: number, digest: readonly Uint8Array[], hash: U
   return { height: BigInt(height), hash, digest };
 }
 
-/** A synthetic table: LG-3's rows, and a pin at 1,000 (spec_version 1_000_000). */
+/** A synthetic table: the built-in tables' rows, and a pin at 1,000 (spec_version 1_000_000). [LG-3] */
 export const SYNTHETIC_TABLE: LedgerTable = Object.freeze({
   rows: Object.freeze([
     Object.freeze({ specVersionMin: 22_000, specVersionMax: 22_999, ledger: "v8" as const }),
@@ -68,9 +69,12 @@ export function haltOf(run: () => unknown): UmbraError {
 /** A selection function: `selectLedgerVersion`, or a wrong one of the controls. */
 export type Select = (table: LedgerTable, block: VersionedBlock) => LedgerSelection;
 
-// ---- A94 ---------------------------------------------------------------------------------------------------------
+// ---- Ledger version selection [A94] ------------------------------------------------------------------------------
 
-/** A94: a block whose `spec_version` no row covers halts with `unknown-runtime` (LG-1's scenario: 3_000_000). */
+/**
+ * A block whose `spec_version` no row covers (the requirement's example: 3_000_000) halts with `unknown-runtime`.
+ * [A94, LG-1]
+ */
 export function expectUnknownRuntimeHalts(select: Select): void {
   const halt = haltOf(() => select(SYNTHETIC_TABLE, blockWith(7, [...OTHER_ITEMS, mnsvItem(3_000_000)])));
   expect(halt.code).toBe("unknown-runtime");
@@ -93,7 +97,7 @@ export function expectUnknownRuntimeHalts(select: Select): void {
   }
 }
 
-/** A94: a block with no `MNSV` digest, or with two, halts with `bad-version-digest`. */
+/** A block with no `MNSV` digest, or with two, halts with `bad-version-digest`. [A94] */
 export function expectBadVersionDigestHalts(select: Select): void {
   const missing = haltOf(() => select(SYNTHETIC_TABLE, blockWith(8, OTHER_ITEMS)));
   expect(missing.code).toBe("bad-version-digest");
@@ -105,7 +109,9 @@ export function expectBadVersionDigestHalts(select: Select): void {
   expect(none.details).toMatchObject({ reason: "missing", items: 0 });
 }
 
-/** A94: a block contradicting a pin halts with `pin-mismatch`; one agreeing with it, or at another height, passes. */
+/**
+ * A block contradicting a pin halts with `pin-mismatch`; one agreeing with it, or at another height, passes. [A94]
+ */
 export function expectPinsChecked(select: Select): void {
   const pinned = (hash: Uint8Array, specVersion: number) => blockWith(1_000, [mnsvItem(specVersion)], hash);
   expect(select(SYNTHETIC_TABLE, pinned(hashOf(1_000), 1_000_000))).toEqual({ specVersion: 1_000_000, ledger: "v8" });
@@ -129,7 +135,7 @@ export function expectPinsChecked(select: Select): void {
   expect(select(SYNTHETIC_TABLE, blockWith(1_001, [mnsvItem(2_000_000)]))).toEqual({ specVersion: 2_000_000, ledger: "v9" });
 }
 
-// ---- A96 ---------------------------------------------------------------------------------------------------------
+// ---- Runtime metadata [A96] --------------------------------------------------------------------------------------
 
 /** What a metadata cache does for the walk: `RuntimeMetadata`, or a wrong one of the controls. */
 export interface MetadataSelector {
@@ -155,7 +161,8 @@ const parentOf = (h: number): Uint8Array => (h === 0 ? new Uint8Array(32) : hash
 
 /**
  * The synthetic devnet's tape: per height, the block hash, the header (its digest the `MNSV` item of {@link mnsvOf},
- * or `digestOf`'s), and the runtime version and metadata at its state (TT-1's call records, answered by the tape node).
+ * or `digestOf`'s), and the runtime version and metadata at its state (the tape file's call records, answered by the
+ * tape node). [TT-1]
  */
 export function upgradeTape(digestOf: (h: number) => number = mnsvOf): TapeRecord[] {
   const records: TapeRecord[] = [];
@@ -194,9 +201,9 @@ export function upgradeTape(digestOf: (h: number) => number = mnsvOf): TapeRecor
 export type Walk = (from: number, metadata: MetadataSelector) => Promise<Map<number, RuntimeMetadataEntry>>;
 
 /**
- * A runtime upgrade a walk crosses (A96): the old runtime builds every block up to U, which enacts the new one; F =
- * U + 1 and every block after it to `last` are built by the new runtime; each runtime's metadata as its node answers
- * it.
+ * A runtime upgrade a walk crosses. The old runtime builds every block up to U, which enacts the new one. F = U + 1
+ * and every block after it to `last` are built by the new runtime. Each runtime's metadata is as its node answers it.
+ * [A96]
  */
 export interface UpgradeCase {
   readonly u: number;
@@ -216,10 +223,10 @@ export const SYNTHETIC_UPGRADE: UpgradeCase = Object.freeze({
 });
 
 /**
- * A96: U is decoded with the old metadata (its parent's runtime) and F with the new (U's), and the cache never holds
- * the new metadata under the old `spec_version` — from genesis, and from a cold cache at U (a restart at cursor U − 1,
- * where nothing older is cached to mask a wrong read). On the synthetic devnet unless `upgrade` names another (task
- * 0.3's devnet tape: {@link devnetUpgradeOf}).
+ * U is decoded with the old metadata (its parent's runtime) and F with the new (U's), and the cache never holds the
+ * new metadata under the old `spec_version`. This holds from genesis, and from a cold cache at U (a restart at cursor
+ * U − 1, where nothing older is cached to mask a wrong read). Runs on the synthetic devnet unless `upgrade` names
+ * another (the recorded devnet tape: {@link devnetUpgradeOf}). [A96]
  */
 export async function expectUpgradeDecoding(
   walk: Walk,
@@ -239,7 +246,7 @@ export async function expectUpgradeDecoding(
   }
 }
 
-// ---- task 0.3's devnet upgrade tape (A96 on real data) --------------------------------------------------------------
+// ---- The recorded devnet upgrade tape: runtime metadata on real data [A96] ---------------------------------------
 
 type CallRecord = Extract<TapeRecord, { readonly method: string; readonly result: unknown }>;
 
@@ -283,10 +290,12 @@ const bytesOf = (text: unknown): Uint8Array => {
 };
 
 /**
- * Task 0.3's devnet upgrade as an {@link UpgradeCase}: U and F as its manifest records them (U 102, MNSV 1_000_000; F
- * 103, MNSV 2_001_000), checked against the tape's own answers — U's state already runs the new runtime, U − 1's the
- * old —, `last` the tape's last height, and each runtime's metadata as the node answered it (`state_getMetadata` at
- * block 0 and at U: the tape holds it once per runtime, decision record Q135).
+ * The recorded devnet upgrade as an {@link UpgradeCase}:
+ * - U and F as the tape's manifest records them (U 102, MNSV 1_000_000; F 103, MNSV 2_001_000), checked against the
+ *   tape's own answers: U's state already runs the new runtime, U − 1's the old;
+ * - `last`, the tape's last height;
+ * - each runtime's metadata as the node answered it (`state_getMetadata` at block 0 and at U, since the tape holds it
+ *   once per runtime). [Q135]
  */
 export function devnetUpgradeOf(
   answers: TapeAnswers,
@@ -304,8 +313,8 @@ export function devnetUpgradeOf(
 
 /**
  * A node over a recorded tape's answers for the metadata cache: the runtime version at a hash as recorded, and the
- * metadata at any hash a runtime's own (the tape holds it once per runtime; the node answers the same bytes at every
- * block of a runtime, decision record Q135) — so a cache may read it at a hash the tape has no metadata record for.
+ * metadata at any hash as its runtime's own. The tape holds the metadata once per runtime, and the node answers the
+ * same bytes at every block of a runtime, so a cache may read it at a hash the tape has no metadata record for. [Q135]
  */
 export function tapeMetadataNode(answers: TapeAnswers, upgrade: UpgradeCase): MetadataNode {
   return new CountingNode(
@@ -336,12 +345,12 @@ export class CountingNode implements MetadataNode {
   }
 }
 
-// ---- A97 ---------------------------------------------------------------------------------------------------------
+// ---- Package identity [A97] --------------------------------------------------------------------------------------
 
 /** The repository's vendored ledger builds. */
 export const VENDORED_ROOT = fileURLToPath(new URL("../../vendor/ledger/", import.meta.url));
 
-/** Every vendored ledger version, in the core version's order (task 12.2a adds v9 as runtime 2.0 built it). */
+/** Every vendored ledger version, in the core version's order (including v9 as runtime 2.0 built it). */
 export const VENDORED_LEDGERS = ["v8", "v9-rc3", "v9"] as const;
 
 /** A copy of the vendored builds (each version's `SHA256SUMS` and `pkg/`) in a new temporary directory. */
@@ -366,9 +375,9 @@ export function packageFiles(root: string): string[] {
 }
 
 /**
- * A97: every file of every vendored package — and each version's `SHA256SUMS` — changed by one byte refuses startup
- * with `package-hash-mismatch` naming the version and the file; restored, the packages pass again. `verify` is the
- * startup check over the packages under `root`.
+ * Every file of every vendored package, and each version's `SHA256SUMS`, changed by one byte refuses startup with
+ * `package-hash-mismatch` naming the version and the file; restored, the packages pass again. `verify` is the startup
+ * check over the packages under `root`. [A97]
  */
 export function expectEveryPackageFileChecked(root: string, verify: (root: string) => void): void {
   verify(root);

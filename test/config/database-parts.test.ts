@@ -10,16 +10,21 @@ import { CORE_SETTINGS } from "./config-fixtures.js";
 import { input, PRIVATE_SETTINGS } from "./validate-fixtures.js";
 
 /**
- * A170's schema half and A177's `ssl` defaults (task 4.5; CF-4, CF-10; owner decisions Q167 A, Q175 A, Q182 B): the
- * `database` setting and a private process's `publicDatabase` are parts — PostgreSQL's `{ kind, host, port, user,
- * password, name, ssl }`, PGlite's `{ kind, path }` or `{ kind, memory: true }` —; a connection string in either is
- * refused by its schema with its path; `ssl` defaults to `disable` for a loopback host or a socket directory and to
- * `require` for another host; only `password` is secret, the other parts shown; `core.transportReader` is required on
- * PostgreSQL with `listen.transport` and refused on PGlite. The committed negative control is the last `describe`: a
- * `database` schema that also takes a URL (the setting before task 4.5) fails {@link connectionStringProblems}.
+ * The schema half of the database-as-parts tests, and the `ssl` defaults:
+ * - the `database` setting and a private process's `publicDatabase` are parts: PostgreSQL's `{ kind, host, port, user,
+ *   password, name, ssl }`, or PGlite's `{ kind, path }` or `{ kind, memory: true }`;
+ * - a connection string in either is refused by its schema, with its path; [A170, CF-4, Q167 A]
+ * - `ssl` defaults to `disable` for a loopback host or a socket directory, and to `require` for another host;
+ *   [A177, Q182 B]
+ * - only `password` is secret; the other parts are shown; [Q167 A]
+ * - `core.transportReader` is required on PostgreSQL with `listen.transport`, and refused on PGlite.
+ *   [A177, CF-10, Q175 A]
+ *
+ * The committed negative control is the last `describe`: a `database` schema that also takes a URL (as the setting
+ * did before it was split into parts) fails {@link connectionStringProblems}. [A170]
  */
 
-/** The connection strings the setting took before task 4.5, and others a hand may write. */
+/** The connection strings the setting took before it was split into parts, and others a hand may write. */
 const CONNECTION_STRINGS = [
   "postgres://umbradb:hunter2@db.internal:5432/indexer",
   "postgresql://db.internal/indexer?sslmode=require",
@@ -29,8 +34,9 @@ const CONNECTION_STRINGS = [
 ];
 
 /**
- * What is wrong with `schema` (a `database` setting's schema) as A170 wants it: each connection string it accepts, and
- * each refusal whose path is not the field's own or whose message does not say a connection string is refused.
+ * What is wrong with `schema` (a `database` setting's schema), for a setting given only as parts: each connection string
+ * it accepts, and each refusal whose path is not the field's own or whose message does not say a connection string is
+ * refused. [A170]
  */
 function connectionStringProblems(schema: z.ZodType): string[] {
   const problems: string[] = [];
@@ -172,7 +178,7 @@ describe("A177: core.transportReader is required on PostgreSQL with listen.trans
     expect(found.map((one) => one.path)).toEqual(["entries[0].config.transportReader"]);
     expect(found[0]?.message).toContain(
       "a PostgreSQL database with listen.transport needs transportReader { user, password }, a login that may only " +
-        "read, which the transport's reads run as (CF-4, owner decision Q175)",
+        "read, which the transport's reads run as",
     );
   });
 
@@ -187,7 +193,7 @@ describe("A177: core.transportReader is required on PostgreSQL with listen.trans
     expect(found.map((one) => one.path)).toEqual(["entries[0].config.transportReader"]);
     // The reader's password, "p", is redacted wherever it appears in the message: its words without a "p" are checked.
     expect(found[0]?.message).toContain("is refused on PGlite: its database has one session, the writer's, which the");
-    expect(found[0]?.message).toContain("reads share (CF-4, owner decision Q175)");
+    expect(found[0]?.message).toContain("reads share");
     expect(findings({ ...CORE_SETTINGS, ...pglite, ...transport })).toEqual([]);
   });
 

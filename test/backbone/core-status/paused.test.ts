@@ -8,17 +8,19 @@ import { type ProcessBackend, PROCESS_BACKENDS } from "../../runner/process-back
 import { a176Project, pauseRun, signalRun } from "./paused-harness.js";
 
 /**
- * A176 `[CI]` (task 8.3b; AE-3 as amended, AE-4; owner decision Q174 B), on PostgreSQL 18.6 and PGlite 0.5.10: `/status`
- * of a process paused by `pause()` lists one condition `{ code: "paused", since, by: "pause" }` — `since` the time the
- * loop paused, RFC 3339 UTC text (Q68), kept while paused —, valid against `./status.schema.json`, and none once
- * `resume()` let the loop run; on PGlite, a backup on SIGUSR2 lists `by: "signal"` from its pause until the backup is
- * written; `/health/ready` answers as an unpaused process with the same lag would — not ready while paused 30 behind,
- * ready while paused at the head. The runs and their checks are `./paused-harness.ts`'s; the committed negative
- * controls, a process that never publishes the pause and one that keeps it after the loop runs again, are
- * `./paused.negative-control.test.ts`.
+ * The paused condition on `/status`, on PostgreSQL 18.6 and PGlite 0.5.10. [A176 CI, AE-3, Q174 B]
+ * - A process paused by `pause()` lists one condition `{ code: "paused", since, by: "pause" }`, valid against
+ *   `./status.schema.json`. `since` is the time the loop paused, as RFC 3339 UTC text, kept while paused. [Q68]
+ * - It lists none once `resume()` let the loop run.
+ * - On PGlite, a backup on SIGUSR2 lists `by: "signal"` from its pause until the backup is written.
+ * - `/health/ready` answers as an unpaused process with the same lag would: not ready while paused 30 behind, ready
+ *   while paused at the head. [AE-4]
+ *
+ * The runs and their checks are in `./paused-harness.ts`. The committed negative controls, a process that never
+ * publishes the pause and one that keeps it after the loop runs again, are `./paused.negative-control.test.ts`.
  */
 
-/** How long a phase reads `/status` for what A176 expects once the process shows its precondition (a loaded machine). */
+/** How long a phase reads `/status` for what it expects once the process shows its precondition (a loaded machine). */
 const PHASE_PATIENCE_MS = 30_000;
 
 const PGLITE = PROCESS_BACKENDS[1] as ProcessBackend;

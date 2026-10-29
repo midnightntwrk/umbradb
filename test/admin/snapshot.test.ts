@@ -16,18 +16,20 @@ import { HeightFailure } from "../../src/runner/loop.js";
 import { statusOf, type ProcessStatus, type StatusFacts } from "../../src/runner/process.js";
 
 /**
- * The snapshot the runner publishes to the admin worker (task 8.1; AE-1, AE-3, AE-5, AE-6), and the helpers the
- * endpoints share: `status()` encoded for JSON — heights as decimal text, as JSON cannot hold a `bigint` (3.2's note
- * (d)) —, the reason as a sanitized error — its text built from the code and the reason's fields only, its details only
- * the allowlisted fields of the failure's own `UmbraError`, each text through the configuration's redaction (AE-6) —,
- * never `ended` (which holds the raw error); the settings as they may be shown (`/config`, 4.2's note (d)); the
- * redaction of a configuration not yet validated (what a process logs a refusal of its configuration through, task
- * 8.1b; Q127's admin address before the validation is gone with it, owner decision Q137 B).
+ * The snapshot the runner publishes to the admin worker, and the helpers the endpoints share: [AE-1, AE-3, AE-5]
+ * - `status()` encoded for JSON, with heights as decimal text, as JSON cannot hold a `bigint`;
+ * - the reason as a sanitized error: its text built from the code and the reason's fields only, its details only the
+ *   allowlisted fields of the failure's own `UmbraError`, each text through the configuration's redaction; never
+ *   `ended`, which holds the raw error; [AE-6]
+ * - the settings as they may be shown (`/config`);
+ * - the redaction of a configuration not yet validated, through which a process logs a refusal of its configuration.
+ *   Such a refusal no longer opens an admin listener on the `listen.admin` of the configuration as loaded.
+ *   [Q127, Q137 B]
  */
 
 const PASSWORD = "pw-8-1-SECRET";
 const DATABASE = `postgres://indexer:${PASSWORD}@db.example:5432/umbra`;
-/** The same database as the `database` setting's parts (CF-4, owner decision Q167 A). */
+/** The same database as the `database` setting's parts. [CF-4, Q167 A] */
 const DATABASE_PARTS = { kind: "postgres", host: "db.example", port: 5432, user: "indexer", password: PASSWORD, name: "umbra" } as const;
 
 /** `status()` from `facts` over a process that is `running` at 3. */
@@ -46,7 +48,7 @@ function status(facts: Partial<StatusFacts> = {}): ProcessStatus {
   });
 }
 
-/** What a snapshot of a core process holds besides `status()` before startup resolved its parts (task 8.3). */
+/** What a snapshot of a core process holds besides `status()` before startup resolved its parts. */
 const FACTS = {
   redactor: null,
   config: UNVALIDATED_CONFIG,
@@ -223,7 +225,7 @@ describe("sanitized errors (AE-6: texts from codes and allowlisted fields only)"
     const shown = sanitizedError(reasonOf(error), error, { text } as never);
     expect(shown.details).toEqual({
       reason: "invalid-entries",
-      // The database's password is a secret of the configuration (CF-4, Q167 A), and a URL's userinfo is redacted.
+      // The database's password is a secret of the configuration, and a URL's userinfo is redacted. [CF-4, Q167 A]
       findings: [
         { path: "entries[0].config.livenessTimeoutMs", message: `expected number (postgres://${REDACTED}@db.example:5432/umbra)` },
       ],

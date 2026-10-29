@@ -18,10 +18,10 @@ import {
 } from "./adapter-fixtures.js";
 import type { TestLoaderData } from "./fixtures/ledger-test-loader.js";
 
-// Task 12.3 of `openspec/changes/core-arch` (design.md §5.3; specs/ledger LG-7, LG-10, LG-11): the ledger worker — a
-// worker thread running the engine (`worker-engine.test.ts`) — and the node-store bridge, through which the worker
-// reads stored nodes synchronously from a database the main thread owns. What crosses is plain data; a crash of the
-// thread, or a trap of the package, fails every request from then on; a request's step is reported while it runs.
+// The ledger worker (a worker thread running the engine of `worker-engine.test.ts`) and the node-store bridge, through
+// which the worker reads stored nodes synchronously from a database the main thread owns. What crosses is plain data.
+// A crash of the thread, or a trap of the package, fails every request from then on. A request's step is reported
+// while it runs. [LG-7, LG-10, LG-11; design §5.3]
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);
@@ -231,7 +231,7 @@ describe("the ledger worker (design §5.3; LG-7, LG-10)", () => {
     expect(host.failure).toBeNull();
     await host.parse("v9", at(1n), [zswapOutputTransaction(RAW.v9)]);
     expect((await host.apply(applyBlock(1n, 1))).output.results.map((r) => r.outcome)).toEqual(["success"]);
-    // The state it holds is kept (task 12.4: nothing to read); any other one would have to be read, which it cannot.
+    // The state it holds is kept (nothing to read); any other one would have to be read, which it cannot.
     expect(await host.load({ ledger: "v9", ...at(0n), stateKey: zero.stateKey }, mapReader(new Map()))).toEqual({ stateRoot: zero.stateRoot, loaded: false });
     await expect(host.load({ ledger: "v9", ...at(0n), stateKey: new Uint8Array(32).fill(7) }, mapReader(new Map()))).rejects.toThrow(/main thread/);
     await expect(host.retained({ ledger: "v9", ...at(0n), stateKey: zero.stateKey }, mapReader(new Map()))).rejects.toThrow(/main thread/);
@@ -303,7 +303,7 @@ describe("the node-store bridge (design §5.3, LG-11): the worker reads stored n
     expect(host.failure).toBeNull();
     await expect(host.load({ ledger: "v9", ...at(1n), stateKey })).rejects.toThrow(/no read/);
     expect(host.failure).toBeNull();
-    // A stored root whose bytes were changed: the package checks every node against its key and aborts (LG-11).
+    // A stored root whose bytes were changed: the package checks every node against its key and aborts. [LG-11]
     const tampered = new Map(nodes.map((node) => [hex(node.key), node]));
     const root = tampered.get(hex(stateKey)) as StoredNode;
     const data = Uint8Array.from(root.data);

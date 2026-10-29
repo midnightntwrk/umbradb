@@ -7,11 +7,11 @@ import { type CliProject, cliProject, inProcess } from "./cli-fixtures.js";
 import { runCoreSettings, statsConfig, statsModule } from "./run-fixtures.js";
 
 /**
- * Task 12.6 (`openspec/changes/core-arch/specs/modules/spec.md` MD-1; `specs/ledger/spec.md` LG-17; `design.md` §5.5):
- * for the `umbradb` command the configuration file is the host program, which the ledger worker's entry imports as the
- * main thread does, so that the user modules it exports have their ledger tasks in the worker. `umbradb run` in this
- * process with a `start` of the test's that keeps what the command gives the runner: a public process's ledger worker,
- * which — started — runs the ledger task of a user module the file exports, and UmbraDB's core modules' tasks.
+ * For the `umbradb` command, the configuration file is the host program. The ledger worker's entry imports it as the
+ * main thread does, so the user modules it exports have their ledger tasks in the worker. The test runs `umbradb run`
+ * in this process with its own `start`, which keeps what the command gives the runner: a public process's ledger
+ * worker. Once started, the worker runs the ledger task of a user module the file exports, and UmbraDB's core modules'
+ * tasks. [MD-1, LG-17; design §5.5]
  */
 
 let project: CliProject;

@@ -1,27 +1,26 @@
 /**
- * DT-6 applied at startup (`openspec/changes/core-arch/specs/determinism/spec.md` DT-6, `design.md` §4 "Column types and
- * stored values" and "Migrations and setup"; owner decisions Q57, Q58, Q61, Q75, Q76): the refusal of module tables the
- * determinism rules refuse, and the `jsonb` and `numeric` `CHECK`s. The rules, their detection and their messages are
- * the `deterministic_postgresql` component's (`../deterministic-postgresql/column-rules.ts`, `catalog.ts`, `checks.ts`,
- * `opt-out.ts`, tasks 1.3, 1.4, 3.1); this file runs them in transactions of the database API, and the migration runner
- * (`./migrate.ts`) decides when:
+ * The determinism rules for module tables, applied at startup: the refusal of module tables the rules reject, and the
+ * `jsonb` and `numeric` `CHECK`s. The rules, their detection and their messages belong to the `deterministic_postgresql`
+ * component (`../deterministic-postgresql/column-rules.ts`, `catalog.ts`, `checks.ts`, `opt-out.ts`). This file runs
+ * them in transactions of the database API, and the migration runner (`./migrate.ts`) decides when:
+ * [DT-6, Q57, Q58, Q61, Q75, Q76; design §4]
  *
  * - **In each migration's transaction**, after its SQL and before its record, {@link refuseNonDeterministic} reads the
- *   tables and relations of the schemas the part writes and refuses with the first of their refusals — so a migration
- *   that creates a table the rules refuse rolls back like a migration that fails: nothing of it is applied or recorded,
- *   startup refuses with the rule's code, and the same build with the migration fixed starts, since a migration that
+ *   tables and relations of the schemas the part writes and rejects with the first of their refusals. So a migration
+ *   that creates a table the rules reject rolls back like a migration that fails: nothing of it is applied or recorded,
+ *   and startup fails with the rule's code. The same build with the migration fixed then starts, since a migration that
  *   was never recorded has no checksum to keep. Each migration leaves its part's tables deterministic.
- * - **After the part's pending migrations, before its `on-start-db`**, at every startup, the same check over the same
- *   schemas: a table no migration of this startup created — an operator's, or one whose item no longer declares
- *   `deterministic: false` — refuses startup too; then {@link attachIntegerChecks} gives each `jsonb`, `numeric` and
+ * - **After the part's pending migrations, before its `on-start-db`**, at every startup, the same check runs over the
+ *   same schemas. A table no migration of this startup created (an operator's, or one whose item no longer declares
+ *   `deterministic: false`) stops startup too. Then {@link attachIntegerChecks} gives each `jsonb`, `numeric` and
  *   array-of-either column of the part's tables its `CHECK`, and removes them from the tables declared
  *   `deterministic: false`. The functions they call are created first, in the bootstrap ({@link createCheckFunctions}).
  *
- * Which schemas are a part's: the schema its role writes (its own, or a shared item's, Q89) and its own. Every schema
- * of a plan is one of these for some module of it, so each is checked with the part that writes it, after that part's
- * migrations. UmbraDB's own parts (`core-chain`, `core-digest`) write reserved schemas no rule covers. A table the
- * rules skip — declared `deterministic: false`, with its partitions and the sequences its columns own (`optOut`) — is
- * neither refused nor given a `CHECK`.
+ * A part's schemas are the schema its role writes (its own, or a shared item's) and its own. Every schema of a plan is
+ * one of these for some module of it, so each is checked with the part that writes it, after that part's migrations.
+ * UmbraDB's own parts (`core-chain`, `core-digest`) write reserved schemas no rule covers. A table the rules skip
+ * (declared `deterministic: false`, with its partitions and the sequences its columns own: `optOut`) is neither
+ * rejected nor given a `CHECK`. [Q89]
  */
 
 import {
@@ -61,11 +60,14 @@ export async function createCheckFunctions(tx: Transaction): Promise<void> {
 }
 
 /**
- * Refuses, with the first refusal of the determinism rules (DT-6), the tables and relations of `schemas` that the rules
- * refuse and the plan's opt-out does not cover: the code is the rule's (`no-primary-key`, `unsupported-key-type`,
- * `unsupported-column-type`, `non-deterministic-column`, `non-deterministic-table`; `design.md` §11), the message the
- * contents hash's for the same table with the module `part` named first, and the details say where — and, inside a
- * migration's transaction, which migration. Not retryable.
+ * Rejects the tables and relations of `schemas` that the determinism rules reject and the plan's opt-out does not
+ * cover, with the first refusal found:
+ * - the code is the rule's (`no-primary-key`, `unsupported-key-type`, `unsupported-column-type`,
+ *   `non-deterministic-column`, `non-deterministic-table`) [design §11];
+ * - the message is the one the contents hash gives for the same table, with the module `part` named first;
+ * - the details say where and, inside a migration's transaction, which migration.
+ *
+ * Not retryable. [DT-6]
  */
 export async function refuseNonDeterministic(
   tx: Transaction,
@@ -97,9 +99,9 @@ export async function refuseNonDeterministic(
 
 /**
  * Gives every `jsonb`, `numeric`, `jsonb[]` and `numeric[]` column of the tables of `schemas` that are not opted out the
- * `CHECK` that backs DT-6 (`integerCheckStatements`), and drops the database API's `CHECK`s from the opted-out ones. Run
- * by the writer's login, which inherits every module role and so may alter their tables. Adding a `CHECK` checks the
- * rows the table holds.
+ * `CHECK` that backs the determinism rules (`integerCheckStatements`), and drops the database API's `CHECK`s from the
+ * opted-out ones. Run by the writer's login, which inherits every module role and so may alter their tables. Adding a
+ * `CHECK` checks the rows the table holds. [DT-6]
  */
 export async function attachIntegerChecks(tx: Transaction, plan: SchemaPlan, schemas: readonly string[]): Promise<void> {
   if (schemas.length === 0) return;

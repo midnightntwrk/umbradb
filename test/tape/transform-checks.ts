@@ -26,18 +26,18 @@ import { ManualTimers, until } from "../node/manual-timers.js";
 import { A71_TAPE_PATH } from "./builder-checks.js";
 
 /**
- * A71's transform checks (`openspec/changes/core-arch/acceptance.md` §9; TT-4; task 9.2), which the committed negative
- * controls (`transforms.negative-control.test.ts`) run against wrong transforms and `transforms.test.ts` against the
- * real ones: each variant transform, applied to A71's recorded tape, must give the tape committed as its expected
- * output (`fixtures/transforms/<name>.tape.jsonl`, each written by hand from the recorded tape by line edits, not by
- * the transforms); and a disconnect inserted into a session with a live subscription must replay through the node
- * client, which subscribes again after it reconnects.
+ * The transform checks, which the committed negative controls (`transforms.negative-control.test.ts`) run against wrong
+ * transforms and `transforms.test.ts` against the real ones: each variant transform, applied to the recorded tape, must
+ * give the tape committed as its expected output (`fixtures/transforms/<name>.tape.jsonl`, each written by hand from
+ * the recorded tape by line edits, not by the transforms); and a disconnect inserted into a session with a live
+ * subscription must replay through the node client, which subscribes again after it reconnects.
+ * [A71, TT-4; acceptance §9]
  */
 
 /** The committed expected outputs, and the fork tape the splice takes its notifications from. */
 export const TRANSFORMS = new URL("./fixtures/transforms/", import.meta.url);
 
-/** A71's recorded tape (`fixtures/a71-recorded.tape.jsonl`): the input of every variant. */
+/** The recorded tape (`fixtures/a71-recorded.tape.jsonl`): the input of every variant. [A71] */
 export function baseRecords(): readonly TapeRecord[] {
   return readTapeFile(fileURLToPath(A71_TAPE_PATH)).records;
 }
@@ -52,7 +52,7 @@ export function expectedText(name: string): string {
   return readFileSync(new URL(`${name}.tape.jsonl`, TRANSFORMS), "utf8");
 }
 
-/** Each variant transform as A71 applies it to the recorded tape, with its committed output's SHA-256. */
+/** Each variant transform as the checks apply it to the recorded tape, with its committed output's SHA-256. [A71] */
 export const VARIANTS: readonly {
   readonly name: string;
   readonly id: string;
@@ -108,7 +108,7 @@ export const VARIANTS: readonly {
   },
 ];
 
-/** A71: the variant `name` applied to the recorded tape gives its committed expected output, byte for byte. */
+/** The variant `name` applied to the recorded tape gives its committed expected output, byte for byte. [A71] */
 export function expectVariantOutput(name: string): void {
   const variant = VARIANTS.find((candidate) => candidate.name === name);
   if (variant === undefined) throw new Error(`no variant ${name}`);

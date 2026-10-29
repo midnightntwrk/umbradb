@@ -4,9 +4,9 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
 
 /**
- * Declarations for the tests of `src/modules/` (task 3.1; MD-1, MD-2): {@link declaration} builds a module that every
- * check accepts, with one `table` item in its own schema and one migration creating its table, so that a test changes
- * exactly the part it is about.
+ * Declarations for the tests of `src/modules/`: {@link declaration} builds a module that every check accepts, with one
+ * `table` item in its own schema and one migration creating its table, so that a test changes exactly the part it is
+ * about. [MD-1, MD-2]
  */
 
 /** A declaration every check accepts: module `id`, one table item `<id>-rows`, one setting of each kind. */

@@ -9,16 +9,21 @@ import { stateBytes, stateTreesProblems, TREES_ORACLE } from "./state-trees-chec
 import { STAGENET } from "./v9-rc3-checks.js";
 
 /**
- * A158 (`openspec/changes/core-arch/acceptance.md` §12; LG-5, LG-16; owner decision Q138 A; task 12.1b): for each
- * vendored ledger package, the patched export `stateTrees(state)` gives a state's zswap first free index and root and
- * its DUST commitment and generation trees' first free indexes and roots exactly as the ledger's Rust state gives them
- * (`zswap.first_free`, `zswap.coin_coms.rehash().root()`, `dust.utxo.commitments_first_free`,
- * `dust.utxo.commitments.rehash().root()`, `dust.generation.generating_tree_first_free`,
- * `dust.generation.generating_tree.rehash().root()`, as the official indexer reads them), checked against the values
- * `fixtures/state-trees/oracle/` writes for fixed states at the vendored commits; and the adapters' `stateSummary`
- * gives all six, none null, as plain data — also for a state loaded from its stored nodes in a fresh worker. The
- * stored rows (`core_ledger_state.states`, none null at every height) are `test/backbone/`'s (A107, A99's ranges);
- * the rebuilt packages' `SHA256SUMS` are `vendored-ledger-files.test.ts`'s and `package-identity.test.ts`'s.
+ * For each vendored ledger package, the patched export `stateTrees(state)` gives a state's tree values exactly as the
+ * ledger's Rust state gives them, as the official indexer reads them:
+ * - the zswap first free index and root (`zswap.first_free`, `zswap.coin_coms.rehash().root()`);
+ * - the DUST commitment tree's first free index and root (`dust.utxo.commitments_first_free`,
+ *   `dust.utxo.commitments.rehash().root()`);
+ * - the DUST generation tree's first free index and root (`dust.generation.generating_tree_first_free`,
+ *   `dust.generation.generating_tree.rehash().root()`).
+ *
+ * They are checked against the values `fixtures/state-trees/oracle/` writes for fixed states at the vendored commits.
+ * The adapters' `stateSummary` gives all six, none null, as plain data, also for a state loaded from its stored nodes
+ * in a fresh worker. [A158, LG-5, LG-16, Q138 A; acceptance §12]
+ *
+ * The stored rows (`core_ledger_state.states`, none null at every height) are tested in `test/backbone/`, over the
+ * recorded tape ranges from genesis. The rebuilt packages' `SHA256SUMS` are tested in `vendored-ledger-files.test.ts`
+ * and `package-identity.test.ts`. [A107, A99]
  */
 
 const LONG = 240_000;

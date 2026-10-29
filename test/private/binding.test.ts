@@ -22,18 +22,19 @@ import { builtInNetwork } from "../../src/ledger/networks.js";
 import { genesisHex, launchPrivate, type PrivateOptions, type PublicCore, startPublicCore } from "./builds.js";
 
 /**
- * A113 (PP-2; task 14.1): a private database is bound to one public database. Its first start records the public
- * database's genesis hash and S in `core_private_source.cursor`; every later start against a public database whose
- * genesis hash or S differs — or with a private S below the public S — is refused with `private-binding-mismatch`
- * (the process stays up, `refused`, the private database unchanged), and the database it is bound to still starts it.
- * Since owner decision Q136 B (task 10.2b) the configured network is compared first, so the start against another
- * network's public database is refused for its network (`details.reason` `network`) before PP-2's comparison with the
- * recorded binding, which still refuses it on its own (`genesis`) when that check is skipped.
+ * A private database is bound to one public database. Its first start records the public database's genesis hash and
+ * S in `core_private_source.cursor`. Every later start against a public database whose genesis hash or S differs — or
+ * with a private S below the public S — is refused with `private-binding-mismatch` (the process stays up, `refused`,
+ * the private database unchanged), and the database it is bound to still starts it. [A113, PP-2]
  *
- * A156 (PP-2, Q136 B; task 10.2b): a private process configured for one network, starting for the first time against
- * the public database of another, is refused with `private-binding-mismatch` (`details.reason` `network`, the
- * configured network's genesis hash and the public database's) before any migration — its database holds no table,
- * schema or binding afterwards —; configured for the public database's network it binds.
+ * The configured network is compared first, so the start against another network's public database is refused for its
+ * network (`details.reason` `network`) before the comparison with the recorded binding. That comparison still refuses
+ * it on its own (`genesis`) when the network check is skipped. [PP-2, Q136 B]
+ *
+ * A private process configured for one network, starting for the first time against the public database of another,
+ * is refused with `private-binding-mismatch` (`details.reason` `network`, the configured network's genesis hash and the
+ * public database's) before any migration: its database holds no table, schema or binding afterwards. Configured for
+ * the public database's network, it binds. [A156, PP-2, Q136 B]
  */
 
 /**
@@ -60,7 +61,7 @@ interface Binding {
   readonly chain: string | null;
 }
 
-/** What one A113 run saw. */
+/** What one binding run saw. [A113] */
 interface A113Observation {
   readonly first: Outcome;
   readonly bound: Binding | null;
@@ -92,7 +93,7 @@ function checkRefused(problems: string[], outcome: Outcome, what: string): void 
   }
 }
 
-/** A113's oracle: every problem with what was observed, none when A113 holds. */
+/** The binding oracle: every problem with what was observed, none when the binding holds. [A113] */
 function a113Problems(observed: A113Observation): string[] {
   const problems: string[] = [];
   const refused = (outcome: Outcome, what: string) => checkRefused(problems, outcome, what);
@@ -191,7 +192,7 @@ async function outcomeOf(options: PrivateOptions, reach = false, publicDb?: Test
   }
 }
 
-/** Runs A113's starts on `backend`; `intake` is a negative control's. */
+/** Runs the binding starts on `backend`; `intake` is a negative control's. [A113] */
 async function a113Run(backend: PrivateBackend, intake: Omit<PrivateIntakeOptions, "publicDatabase" | "wakes"> = {}) {
   const publicA = await backend.database("public");
   const publicB = await backend.database("public");
@@ -216,7 +217,7 @@ async function a113Run(backend: PrivateBackend, intake: Omit<PrivateIntakeOption
   return { ...observed, readersLeft: (await left(publicB)) + (await left(publicC)) };
 }
 
-/** The genesis hash a known network's built-in table records (task 12.2's table, never a constant), as `0x` hex. */
+/** The genesis hash a known network's built-in table records (read from the table, never a constant), as `0x` hex. */
 const builtInGenesis = (network: string): string => builtInNetwork(network)?.genesis?.hash as string;
 
 /** Preprod's genesis hash with one byte in its middle (the 17th of 32) changed: another network, nearly the same hash. */
@@ -248,7 +249,7 @@ async function createdIn(db: TestDatabase): Promise<Created> {
   }, privateCursorHeight);
 }
 
-/** What one A156 run saw, against the public database of a core whose genesis is preprod's. */
+/** What one network-check run saw, against the public database of a core whose genesis is preprod's. [A156] */
 interface A156Observation {
   /** A private process configured for mainnet, on a new private database. */
   readonly mainnet: Outcome;
@@ -267,7 +268,7 @@ interface A156Observation {
   readonly bound: Binding | null;
 }
 
-/** A156's oracle: every problem with what was observed, none when A156 holds. */
+/** The network-check oracle: every problem with what was observed, none when the check holds. [A156] */
 function a156Problems(observed: A156Observation): string[] {
   const problems: string[] = [];
   const preprod = builtInGenesis("preprod");
@@ -301,7 +302,7 @@ function a156Problems(observed: A156Observation): string[] {
   return problems;
 }
 
-/** Runs A156's starts on `backend`; `intake` is a negative control's. */
+/** Runs the network-check starts on `backend`; `intake` is a negative control's. [A156] */
 async function a156Run(
   backend: PrivateBackend,
   intake: Omit<PrivateIntakeOptions, "publicDatabase" | "wakes"> = {},
@@ -331,7 +332,7 @@ describe.each(PRIVATE_BACKENDS)("A113 a private database is bound to one public 
     async () => {
       const observed = await a113Run(backend);
       expect(a113Problems(observed)).toEqual([]);
-      // The configured network (A's) is compared first (Q136 B): another network's public database is refused for it.
+      // The configured network (A's) is compared first: another network's public database is refused for it. [Q136 B]
       const refusal = observed.otherGenesis as Exclude<Outcome, "started">;
       expect(refusal.code).toBe("private-binding-mismatch");
       expect(refusal.details).toEqual({ reason: "network", network: "custom", configured: A, public: B });
@@ -389,10 +390,10 @@ describe.each(PRIVATE_BACKENDS)("A113 a private database is bound to one public 
   it(
     "negative control: a private chain check that compares nothing — no configured network, no binding — fails A113",
     async () => {
-      // A binding check that compares nothing alone is no longer enough (Q136 B): the configured network's check
-      // refuses the other network's public database first, so both are skipped; and so is, since task 14.1c, the
-      // comparison of the public configuration hash the private database accepted (PP-14, Q159), which another public
-      // database's configuration fails too: every start is taken for a first one.
+      // A binding check that compares nothing alone is no longer enough: the configured network's check refuses the
+      // other network's public database first, so both are skipped. So is the comparison of the public configuration
+      // hash the private database accepted, which another public database's configuration fails too: every start is
+      // taken for a first one. [Q136 B, PP-14, Q159]
       const problems = a113Problems(
         await a113Run(backend, {
           binding: () => null,

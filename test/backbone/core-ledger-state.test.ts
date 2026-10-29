@@ -23,13 +23,12 @@ import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engi
 import type { LedgerHost } from "../../src/ledger/worker/host.js";
 import type { BlockContext, ProcessContext } from "../../src/modules/declaration.js";
 
-// Task 12.3 of `openspec/changes/core-arch` (specs/ledger LG-11, LG-15, LG-16; design.md §10): `core-ledger-state`'s
-// parts on their own — the binding, the checks before a block's apply, the root check's error, the writes of a block's
-// batch and rows — over a fake ledger worker and block source. The process tests (`ledger-state.test.ts`) run the real
-// ones.
+// `core-ledger-state`'s parts on their own, over a fake ledger worker and block source: the binding, the checks before
+// a block's apply, the root check's error, and the writes of a block's batch and rows. The process tests
+// (`ledger-state.test.ts`) run the real ones. [LG-11, LG-15, LG-16; design §10]
 
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
-/** A `config` item whose `core` revisions have the `retainStates` of each `[start, retainStates]` (task 12.4). */
+/** A `config` item whose `core` revisions have the `retainStates` of each `[start, retainStates]`. */
 const config = (...revisions: readonly (readonly [number, number])[]) => ({
   entries: revisions.map(([start, retainStates]) => ({ id: "core", start, settings: { retainStates } })),
 });
@@ -144,10 +143,10 @@ function reading(
         if (rest.state === null) return [];
         return [{ state_key: hash(0x30), state_root: STORED_ROOT, hash: hash(Number(params[0]) + 1), ledger_version: "v9", ...rest.state }];
       }
-      // The sweep's tables (task 12.5): its row idle, every set empty.
+      // The sweep's tables: its row idle, every set empty.
       if (sql.includes("FROM core_ledger_state.sweep")) return [{ cycle: 0n, phase: "idle", sweep_after: null }];
       if (/FROM core_ledger_state\.(root_counts|grey|marks|nodes)/.test(sql)) return [];
-      // Task 13.1: the contracts deployed below a block (CC-1's rows at F).
+      // The contracts deployed below a block, which are read at F (the first v9 block after v8 blocks). [CC-1]
       if (sql.includes("kind = 'contract-deploy'")) return (rest.deployed ?? []).map((address) => ({ contract_address: address }));
       if (sql.includes("height >= $1")) {
         const [from, to] = params as [bigint, bigint];
@@ -303,9 +302,9 @@ describe("core-ledger-state's parts (LG-11, LG-15, LG-16)", () => {
     // A stored state whose root is not what the worker loads, and a height with no stored state, fail the block.
     const { p: q } = bound(applied(3n).stateRoot, applied(3n));
     await expect(applyBlock(q, block(3n), reading([{ ms: 1n }], { state: { state_root: Uint8Array.of(9) } }))).rejects.toThrow(
-      /loaded for block 2 has the root 0x0030.*stores 0x09 for it \(LG-11\)/,
+      /loaded for block 2 has the root 0x0030.*stores 0x09 for it$/,
     );
-    await expect(applyBlock(q, block(3n), reading([{ ms: 1n }], { state: null }))).rejects.toThrow(/holds no state after block 2 \(LG-11\)/);
+    await expect(applyBlock(q, block(3n), reading([{ ms: 1n }], { state: null }))).rejects.toThrow(/holds no state after block 2$/);
     await expect(applyBlock(q, block(3n), reading([{ ms: 1n }], { state: { state_key: "no" } }))).rejects.toThrow(TypeError);
     // A negative control's rule: no load asked.
     const { p: r, asked: none } = bound(applied(3n).stateRoot, applied(3n));

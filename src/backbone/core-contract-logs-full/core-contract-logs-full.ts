@@ -1,15 +1,19 @@
 /**
- * The core module `core-contract-logs-full` (`openspec/changes/core-arch/specs/contract-data/spec.md` CC-2, CC-4;
- * `design.md` §10; CORE-ARCH §4.11; decision record Q19 option A, Q20, Q54; task 13.1): the MIP-0002 events of every
- * block exactly as the ledger emitted them while applying it — `core-ledger-state`'s `vm-logs`, the contract logs of
- * the applied segments only, so none of a fallible segment that failed —, as the shared item `contract-logs`
- * (`../contract-logs/`) and its table `contract_logs.logs`. Off by default; it cannot start mid-chain, as the ledger
- * state it needs cannot (LG-16). Ledger v8's adapter reports no logs (Q54), so no v8 block has a row.
+ * The core module `core-contract-logs-full`: the MIP-0002 events of every block, exactly as the ledger emitted them
+ * while applying it, as the shared item `contract-logs` (`../contract-logs/`) and its table `contract_logs.logs`. They
+ * come from `core-ledger-state`'s `vm-logs`: the contract logs of the applied segments only, so none from a fallible
+ * segment that failed. [CC-2, CC-4, Q19 A, Q20; CORE-ARCH §4.11]
+ *
+ * It is off by default. It cannot start mid-chain, because the ledger state it needs cannot. [LG-16]
+ *
+ * Ledger v8's adapter reports no logs, so no v8 block has a row. [Q54]
  *
  * **At `on-compute`** (after `core-ledger-state`'s, whose `vm-logs` it requires) it puts `contract-logs`: each `VmLog`
- * of the block as a {@link ContractLog} — its transaction, its number in the block, the contract, the entry point, the
- * logical segment, the version, the event type and the data, as the ledger gave them; the physical segment is not part
- * of the item or its table (`design.md` §10). **At `on-db-write`** it writes them, one row each, in one statement.
+ * of the block as a {@link ContractLog}, with its transaction, its number in the block, the contract, the entry point,
+ * the logical segment, the version, the event type and the data, as the ledger gave them. The physical segment is not
+ * part of the item or its table. [design §10]
+ *
+ * **At `on-db-write`** it writes them, one row each, in one statement.
  *
  * The declaration ({@link CORE_CONTRACT_LOGS_FULL}) is a constant over its rule; a negative control's build composes its
  * own with {@link coreContractLogsFull}, the logs taken another way.
@@ -33,13 +37,13 @@ import { VM_LOGS_ITEM } from "../core-ledger-state/core-ledger-state.js";
 /** The module's id. */
 export const CORE_CONTRACT_LOGS_FULL_ID = "core-contract-logs-full";
 
-/** The `vm-logs` item of `b` (`core-ledger-state`'s, LG-16); throws a `TypeError` when it has none. */
+/** The `vm-logs` item of `b` (from `core-ledger-state`); throws a `TypeError` when it has none. [LG-16] */
 export function vmLogsItemOf(b: BlockContext): readonly VmLog[] {
   const logs = b.items.get(VM_LOGS_ITEM);
   if (!Array.isArray(logs)) {
     throw new TypeError(
       `the block at height ${b.height} has no vm-logs item ${CORE_CONTRACT_LOGS_FULL_ID} can read: core-ledger-state puts ` +
-        "it at on-compute (LG-16)",
+        "it at on-compute",
     );
   }
   return logs as readonly VmLog[];
@@ -61,7 +65,7 @@ export function fullLogsOf(b: BlockContext): readonly ContractLog[] {
 
 /** The rule a negative control may replace (see the module comment). */
 export interface CoreContractLogsFullOptions {
-  /** CC-2: the block's logs; {@link fullLogsOf}, the ledger's `vm-logs`. */
+  /** The block's logs: by default {@link fullLogsOf}, the ledger's `vm-logs`. [CC-2] */
   readonly logsOf?: (b: BlockContext) => readonly ContractLog[] | Promise<readonly ContractLog[]>;
 }
 

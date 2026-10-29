@@ -5,18 +5,19 @@ import { startPglite } from "./pglite-database.js";
 import { startPostgres, type TestDatabase, type TestServer } from "./postgres-database.js";
 
 /**
- * A55's cross-backend comparison (DT-3, DB-1; tasks 1.2 and 2.2): the same rows, written by the same SQL into a
- * PostgreSQL 18 database and a PGlite 0.5.10 database (PostgreSQL 18.6 inside), give the same contents hash — and the
- * two hashes are compared with each other, not only each with an expectation. Also compared directly: A54's row
- * orders (DT-2) and A58's refusal messages (DT-6), which the per-backend suites (`module-tables.test.ts`,
- * `column-refusals.test.ts`) check against hand-written expectations on each backend.
+ * The cross-backend comparison of the contents hash. The same rows, written by the same SQL into a PostgreSQL 18
+ * database and a PGlite 0.5.10 database (PostgreSQL 18.6 inside), give the same contents hash. The two hashes are
+ * compared with each other, not only each with an expectation. [A55, DT-3, DB-1]
  *
- * The database holds every column type DT-1 encodes (and its array, with NULL elements), every key type DT-2 orders,
+ * Also compared directly: the row orders and the refusal messages. The per-backend suites (`module-tables.test.ts`,
+ * `column-refusals.test.ts`) check those against hand-written expectations on each backend. [A54, DT-2, A58, DT-6]
+ *
+ * The database holds every column type the encoder handles (and its array, with NULL elements), every primary-key type,
  * a composite key, a text key whose column collation (`und-x-icu`) orders differently from bytes, a partitioned table,
  * a dropped column, an empty table, schema and table names whose byte order differs from creation and locale order,
- * objects that are not module tables, and enough rows that every table larger than a page spans several. Since task
- * 2.2b (owner decision Q74) it holds `timestamptz` values, arrays and a `timestamptz` key column too, with fractions,
- * times before 1970 and values beyond 2^53 microseconds.
+ * objects that are not module tables, and enough rows that every table larger than a page spans several. It also
+ * holds `timestamptz` values, arrays and a `timestamptz` key column, with fractions, times before 1970 and values
+ * beyond 2^53 microseconds. [DT-1, DT-2, Q74]
  */
 
 const DATABASE = `
@@ -95,7 +96,7 @@ describe("A55 (DT-3) — the same rows give the same contents hash on PostgreSQL
       onPostgres.read((read) => moduleTables(read)),
       onPglite.read((read) => moduleTables(read)),
     ]);
-    // Not vacuous: the fixture's five module tables, in DT-3's order, the same on both.
+    // Not vacuous: the fixture's five module tables, in the contents hash's table order, the same on both. [DT-3]
     expect(tablesOnPglite).toEqual(tablesOnPostgres);
     expect(tablesOnPostgres.map((t) => `${t.schema}.${t.name}`)).toEqual([
       "M.ü",

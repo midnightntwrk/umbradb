@@ -1,9 +1,9 @@
 /**
- * Substrate's `twox128` storage hashing (task 0.3): the storage key prefix of a pallet's item is
- * `twox128(pallet) ‖ twox128(item)`, and `twox128(x)` is `xxh64(x, seed 0) ‖ xxh64(x, seed 1)`, each 64-bit hash
- * written little-endian (`sp-crypto-hashing`'s `twox_128`). The recording driver (`./range.ts`) names the storage it
- * reads at every height (`System.Events`) and at block 0 (the cNight registrations, IN-7) by these prefixes, so the
- * keys are computed, not copied. Short inputs only (pallet and item names): plain `bigint` arithmetic.
+ * Substrate's `twox128` storage hashing: the storage key prefix of a pallet's item is `twox128(pallet) ‖
+ * twox128(item)`, and `twox128(x)` is `xxh64(x, seed 0) ‖ xxh64(x, seed 1)`, each 64-bit hash written little-endian
+ * (`sp-crypto-hashing`'s `twox_128`). The recording driver (`./range.ts`) names the storage it reads at every height
+ * (`System.Events`) and at block 0 (the cNight registrations) by these prefixes, so the keys are computed, not copied.
+ * Short inputs only (pallet and item names): plain `bigint` arithmetic. [IN-7]
  */
 
 const MASK = (1n << 64n) - 1n;

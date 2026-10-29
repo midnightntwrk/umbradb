@@ -1,18 +1,17 @@
 /**
- * The ledger v9 adapters (`openspec/changes/core-arch/design.md` §5.1, §5.2; `specs/ledger/spec.md` LG-3, LG-6, LG-9;
- * `specs/contract-data/spec.md` CC-2, CC-3; tasks 12.1, 12.2a), through the shared implementation of `./adapter.ts`:
+ * The ledger v9 adapters, through the shared implementation of `./adapter.ts`: [LG-3, LG-6; design §5.1, §5.2]
  *
  * - **`v9`**: ledger-9.1.0.0-rc.5 (runtime 2.1 on), vendored in `vendor/ledger/v9` with the ledger team's v8 → v9 state
- *   translation; `convertFromV8` runs the translation on the stored v8 state (LG-9).
- * - **`v9-rc3`**: ledger-9.1.0.0-rc.3, v9 as runtime 2.0 built it (`midnight-node` 2.0.0-rc.4), vendored in
- *   `vendor/ledger/v9-rc3` (owner decision Q139 A, task 12.2a). The same adapter over the rc.3 package, whose API is
- *   the rc.5 one: what differs is the release, the package, and that it has no `convertFromV8` — the node that builds
- *   it carries no translation. Its states share rc.5's storage format: a state it stored loads in the rc.5 package with
- *   the same root, which is how a 2.0 → 2.1 upgrade carries it (the ledger worker's engine, A159).
+ *   translation; `convertFromV8` runs the translation on the stored v8 state. [LG-9]
+ * - **`v9-rc3`**: ledger-9.1.0.0-rc.3, the v9 that runtime 2.0 built (`midnight-node` 2.0.0-rc.4), vendored in
+ *   `vendor/ledger/v9-rc3`. It is the same adapter over the rc.3 package, whose API matches rc.5. Only the release and
+ *   the package differ, and it has no `convertFromV8`, since the node that builds it carries no translation. Its states
+ *   share rc.5's storage format: a state it stored loads in the rc.5 package with the same root, which is how a
+ *   2.0 → 2.1 upgrade carries it over (the ledger worker's engine). [Q139 A, A159]
  *
- * Both decode contract logs with the VM's own decoding (`decodeLogItem`, which the v9 patches export); `apply` reports
- * each contract log an applied segment emitted, its value in the ledger's serialization (`serializeStateValue`, the
- * input `decodeLogItem` takes).
+ * Both decode contract logs with the VM's own decoding (`decodeLogItem`, which the v9 patches export). `apply` reports
+ * each contract log an applied segment emitted, with its value in the ledger's serialization (`serializeStateValue`,
+ * the input `decodeLogItem` takes). [CC-2, CC-3]
  */
 
 import type * as V9Rc3Package from "../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js";

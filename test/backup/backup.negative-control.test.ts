@@ -15,12 +15,12 @@ import {
 } from "./backup-fixtures.js";
 
 /**
- * A124's committed negative control (task 15.1; BK-1): the same backup as `./backup.test.ts`'s "while blocks commit",
- * on PostgreSQL 18.6 and PGlite 0.5.10, but with the dump taken outside the manifest's snapshot (`BackupSeams`'
+ * The consistent backup's committed negative control: the same backup as `./backup.test.ts`'s "while blocks commit", on
+ * PostgreSQL 18.6 and PGlite 0.5.10, but with the dump taken outside the manifest's snapshot (`BackupSeams`'
  * `outsideSnapshot`: the manifest's facts read and their read ended, ten more blocks committed, then the dump in a
  * snapshot of its own). Loaded into a new database, its tables are at another height than its manifest, and its
- * contents hash is not the manifest's — what A124's test would see if the backup did not take both in one snapshot
- * (PostgreSQL) or one job (PGlite).
+ * contents hash is not the manifest's. That is what the consistent-backup test would see if the backup did not take
+ * both in one snapshot (PostgreSQL) or one job (PGlite). [A124, BK-1]
  */
 
 const TEST_TIMEOUT_MS = 900_000;

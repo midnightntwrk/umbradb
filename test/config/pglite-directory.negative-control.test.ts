@@ -5,12 +5,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { processOn, processProblems } from "./pglite-directory-fixtures.js";
 
 /**
- * The committed negative control of A166 (task 2.2c; CF-4, owner decision Q163 A): a build whose
- * `createPgliteDirectory` (`src/db/pglite-lock.ts`) creates nothing — the opening as it was before the owner's answer —
- * fails A166's first clause: `startProcess` on the PGlite path `<tmp>/a/b` with `<tmp>/a` missing refuses with `database-error`
+ * The committed negative control for creating the PGlite directory. A build whose `createPgliteDirectory`
+ * (`src/db/pglite-lock.ts`) creates nothing, as the opening worked before missing directories were created, fails the
+ * first check: `startProcess` on the PGlite path `<tmp>/a/b` with `<tmp>/a` missing refuses with `database-error`
  * (`open-failed`: the lock's file cannot sit beside a directory whose parent is missing), creates no directory and
- * commits nothing. The same build with the real `createPgliteDirectory` passes it (the oracle is
- * `./pglite-directory-fixtures.ts`'s).
+ * commits nothing. The same build with the real `createPgliteDirectory` passes. The oracle is in
+ * `./pglite-directory-fixtures.ts`. [A166, CF-4, Q163 A]
  */
 
 const control = vi.hoisted(() => ({ createsNothing: true }));

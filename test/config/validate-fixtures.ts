@@ -9,22 +9,25 @@ import { declaration } from "../modules/declarations.js";
 import { CORE_SETTINGS, prices, stats } from "./config-fixtures.js";
 
 /**
- * Modules, declarations and inputs for the tests of the schema validation (task 4.2; CF-3, CF-4): the validation takes
- * the loaded configuration's plain data, the build's validated declarations (`validateDeclarations`, as the runner
- * calls it first) and the process's side; the cursor comes later (`entriesAtCursor`), once the database is open.
+ * Modules, declarations and inputs for the tests of the schema validation. The validation takes the loaded
+ * configuration's plain data, the build's validated declarations (from `validateDeclarations`, which the runner calls
+ * first) and the process's side. The cursor comes later (`entriesAtCursor`), once the database is open. [CF-3, CF-4]
  */
 
 /** The file the inputs name, as `loadConfig` would give it. */
 export const FILE = "/srv/umbradb/umbradb.config.ts";
 
-/** Module `m` 1.1.0, whose schema has `bar` where 1.0.0 had `foo` (CF-3's scenario "An upgrade that renames a setting"). */
+/**
+ * Module `m` 1.1.0, whose schema has `bar` where 1.0.0 had `foo` (the scenario "An upgrade that renames a setting").
+ * [CF-3]
+ */
 export const renamed = defineModule({
   ...declaration("m"),
   version: "1.1.0",
   configSchema: z.object({ bar: z.number().int().meta({ kind: "data" }) }),
 });
 
-/** A module whose schema turns a number into a bigint: its output is not plain data (CF-1, CF-7). */
+/** A module whose schema turns a number into a bigint: its output is not plain data. [CF-1, CF-7] */
 export const bigints = defineModule({
   ...declaration("bigints"),
   configSchema: z.object({ big: z.coerce.bigint().meta({ kind: "data" }) }),

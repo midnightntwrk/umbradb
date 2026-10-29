@@ -7,11 +7,12 @@ import { ScriptedNode } from "./scripted-node.js";
 import { syntheticChain } from "./synthetic-chain.js";
 
 /**
- * The tape command's `range` and `boundaries` (`tools/tape/command.ts`; task 0.3): `range` records every IN-8 call of
+ * The tape command's `range` and `boundaries` (`tools/tape/command.ts`): `range` records every allowed node call of
  * every height of a range and a live window through the recording builder (`./range.ts`), checks the tape complete,
  * writes it and prints its SHA-256, size, request rate and the node version the node reports (`system_version`, read
  * outside the builder, so it is not on the tape); `boundaries` reads a network's genesis and runtime upgrades
  * (`./boundaries.ts`) and writes the record the built-in tables cite. Against synthetic chains on the scripted node.
+ * [IN-8]
  */
 
 let directory = "";
@@ -61,7 +62,7 @@ describe("tape command: range", () => {
         /requests in [\d.]+ s \([\d.]+ requests\/s, concurrency 2\); 3 chunks, 0 recorded again$/,
       );
       expect(run.lines).toContain("runtimes (state spec_version from height): 0: 22000, 6: 1000000; metadata at 0, 6");
-      expect(run.lines.at(-1)).toBe("complete: every IN-8 call of every height 0–9 is on the tape (Q123)");
+      expect(run.lines.at(-1)).toBe("complete: every node call of every height 0–9 is on the tape");
       expect(run.lines.some((line) => line.includes(node.url))).toBe(false);
     });
   });

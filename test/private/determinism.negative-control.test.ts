@@ -4,10 +4,11 @@ import { PRIVATE_BACKENDS, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.
 import { a146RefusalProblems, a146Refusals } from "./determinism-checks.js";
 
 /**
- * A146's negative control (task 14.1): a private plan without DT-6's check. The schema plan of every process in this
- * file is the real one, except that a private process's plan lists the tables of its private modules as opted out —
- * which is how a plan tells the database API not to check a table (`optedOut`, Q76) — so the private process's
- * startup checks none of them. A146's checks must then fail: the private process starts with the `serial` column.
+ * The determinism checks' negative control: a private plan without the startup check for non-deterministic tables.
+ * The schema plan of every process in this file is the real one, except that a private process's plan lists the tables
+ * of its private modules as opted out — which is how a plan tells the database API not to check a table (`optedOut`) —
+ * so the private process's startup checks none of them. The determinism checks must then fail: the private process
+ * starts with the `serial` column. [A146, DT-6, Q76]
  */
 vi.mock("../../src/modules/adapters.js", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../src/modules/adapters.js")>();

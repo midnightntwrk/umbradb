@@ -7,15 +7,18 @@ import { ALL_ZERO, SHOW_TIMEOUTS } from "../deterministic-postgresql/zero-timeou
 import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
 /**
- * The read option of DB-15 (task 2.7; A141's database half): a read for a module API request is bounded by
- * `apiReadTimeoutMs` (CF-4), which the API layer passes as `db.read(body, { timeoutMs })` (task 5.2a registers the
- * handlers and passes it). On PostgreSQL that one read runs with `statement_timeout` and
- * `idle_in_transaction_session_timeout` set to it (`SET LOCAL`, so they end with the read), and a read either ends fails
- * with `query-timeout`, not retryable: `statement_timeout` cancels the statement and leaves the connection usable;
- * `idle_in_transaction_session_timeout` ends the session, and the pool replaces it. On PGlite, which enforces neither
- * and hangs on the second (design §14), an API read sets neither and is not bounded.
+ * The database's read timeout option. A read for a module API request is bounded by `apiReadTimeoutMs`, which the API
+ * layer passes as `db.read(body, { timeoutMs })` when it registers the handlers. This file tests the database's half.
+ * [DB-15, A141, CF-4]
  *
- * A141's "within 2 s" is asserted as stated; every test has a timeout far above its work.
+ * - On PostgreSQL that one read runs with `statement_timeout` and `idle_in_transaction_session_timeout` set to it
+ *   (`SET LOCAL`, so they end with the read). A read that either one ends fails with `query-timeout`, not retryable.
+ *   `statement_timeout` cancels the statement and leaves the connection usable; `idle_in_transaction_session_timeout`
+ *   ends the session, and the pool replaces it.
+ * - PGlite enforces neither and hangs on the second, so on PGlite an API read sets neither and is not bounded.
+ *   [design §14]
+ *
+ * The "within 2 s" bound is asserted as stated; every test has a timeout far above its work. [A141]
  */
 
 const TEST_TIMEOUT = 60_000;
@@ -30,7 +33,10 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
   );
 }
 
-/** A141's error: `query-timeout`, not retryable, naming the read's timeout and the setting that ended the read. */
+/**
+ * The expected error: `query-timeout`, not retryable, naming the read's timeout and the setting that ended it.
+ * [A141]
+ */
 function expectQueryTimeout(
   error: unknown,
   setting: "statement_timeout" | "idle_in_transaction_session_timeout",
@@ -234,7 +240,7 @@ describe("A141 on PostgreSQL 18: a read for an API request is bounded by its tim
       );
       expect(error).toBeInstanceOf(UmbraError);
       expect(error).toMatchObject({ code: "database-error", retryable: false, details: { sqlstate: "57014" } });
-      // Negative control of A141's check: a read whose 57014 is reported as anything but query-timeout fails it.
+      // Negative control of the check: a read whose 57014 is reported as anything but query-timeout fails it. [A141]
       expect(() => expectQueryTimeout(error, "statement_timeout")).toThrow();
     }, TEST_TIMEOUT);
 

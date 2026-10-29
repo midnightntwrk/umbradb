@@ -3,7 +3,7 @@ import { UmbraError } from "../../src/db/errors.js";
 import { nodeClientClosed } from "../../src/runner/process.js";
 
 /**
- * Task 17.5b (the mutation pass task 5.3c deferred): `nodeClientClosed`, which maps a loop's failure after the stop
+ * Mutation-pass tests of `nodeClientClosed`, which maps a loop's failure after the stop
  * closed the node client to the stop: `handle-closed` of the node client itself or as a cause, eight levels deep at
  * most; nothing else.
  */

@@ -6,16 +6,18 @@ import { expectNoOutsideReads, outsideReads, runUnderReadLoad } from "./pglite-o
 import { type PgliteTestServer, startPgliteServer } from "./pglite-server.js";
 
 /**
- * A11's negative control (DB-4): a build of the PGlite backend whose reads bypass the queue must make A11's test fail.
+ * The negative control of the no-outside-read test: a build of the PGlite backend whose reads bypass the queue must
+ * make that test fail. [A11, DB-4]
  *
  * The build flag is `READS_BYPASS_QUEUE`, a constant of `src/db/pglite-build-flags.ts`, `false` in the source and so
  * in every build made from it. Nothing at run time can turn it on: it is a `const` export of an ES module (an importer
  * cannot assign it), no option, setting or environment variable reads it, and the module is not part of the package's
- * exported surface (`package.json` exports `"."` only; `design.md` §12 names no such export). Only a different build of
+ * exported surface (`package.json` exports `"."` only, and the design names no such export). Only a different build of
  * that module turns it on — which this file makes for itself: `vi.mock` replaces the module, in this test file's module
  * graph only, with one whose flag is `true`, so `src/db/pglite.ts` (imported through `./pglite-server.ts`) is built
  * with reads that run at once instead of waiting for their turn. Then the same instrumented run and the same
- * assertions as A11 (`pglite-no-outside-read.test.ts`) must fail, for the intended reason: reads inside block windows.
+ * assertions as `pglite-no-outside-read.test.ts` must fail, for the intended reason: reads inside block windows.
+ * [design §12]
  */
 
 vi.mock("../../src/db/pglite-build-flags.js", () => ({ READS_BYPASS_QUEUE: true }));
@@ -52,7 +54,7 @@ describe("A11 negative control — reads that bypass the queue", () => {
     // This file's build: the flag is on.
     expect(READS_BYPASS_QUEUE).toBe(true);
     const outcome = await runUnderReadLoad(await server.createDatabase());
-    // A11's own assertions fail on this build …
+    // The no-outside-read test's own assertions fail on this build …
     expect(() => expectNoOutsideReads(outcome)).toThrow();
     // … for the intended reason: reads' statements inside blocks' windows.
     const found = outsideReads(outcome.trace);

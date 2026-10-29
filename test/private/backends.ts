@@ -10,18 +10,21 @@ import { startPostgresServer, type PostgresTestServer } from "../db/postgres-ser
 import { connectionOfUrl } from "../db/connection.js";
 
 /**
- * Databases for the private processes' tests (task 14.1): each test gets a public database, for a core, and private
- * databases, each for one private process — on PostgreSQL 18 (one Testcontainers server; a private database runs in its
- * own instance in production, Q90, which changes nothing the tests look at, since every check is per database) or on
- * PGlite 0.5.10 (a data directory each, with the development opt-in).
+ * Databases for the private processes' tests: each test gets a public database, for a core, and private databases,
+ * each for one private process. They run on PostgreSQL 18 or on PGlite 0.5.10:
+ * - PostgreSQL: one Testcontainers server. In production a private database runs in its own instance, which changes
+ *   nothing the tests look at, since every check is per database. [Q90]
+ * - PGlite: a data directory each, with the development opt-in.
  *
  * On PostgreSQL the processes connect with logins of their own, as deployments do: the core as the server's login
  * (`test`), a private process to its own database as `umbradb_private`, and to the public database as `umbradb_reader`,
- * which may only read (`pg_read_all_data`); a core's transport reads as `umbradb_transport`, which may only read too
- * (CF-4, owner decision Q175 A). Every database records each session that logs in — its login and
- * application name — through a login event trigger (PostgreSQL 17+) into `public.session_log`, a table of the schema
- * `public`, which neither the determinism rules nor the contents hash read (DT-3): A112's view of which connections
- * reached which database, every one of them, not samples.
+ * which may only read (`pg_read_all_data`); a core's transport reads as `umbradb_transport`, which may only read too.
+ * [CF-4, Q175 A]
+ *
+ * Every database records each session that logs in — its login and application name — through a login event trigger
+ * (PostgreSQL 17+) into `public.session_log`. That table is in the schema `public`, which neither the determinism rules
+ * nor the contents hash read. It shows which connections reached which database: every one of them, not samples.
+ * [DT-3, A112]
  */
 
 /** The private process's login on PostgreSQL. */
@@ -31,9 +34,9 @@ export const PRIVATE_LOGIN = "umbradb_private";
 export const READER_LOGIN = "umbradb_reader";
 
 /**
- * The login a core reads the public database with for its transport (`core.transportReader`, CF-4, owner decision
- * Q175 A; task 4.5): `pg_read_all_data` only, as {@link READER_LOGIN}, but a login of its own, so that a test telling a
- * private process's direct reads from the core's sees them apart.
+ * The login a core reads the public database with for its transport (`core.transportReader`): `pg_read_all_data`
+ * only, as {@link READER_LOGIN}, but a login of its own, so that a test telling a private process's direct reads from
+ * the core's sees them apart. [CF-4, Q175 A]
  */
 export const TRANSPORT_LOGIN = "umbradb_transport";
 
@@ -45,11 +48,11 @@ export interface SessionSeen {
 
 /** One database of a test. */
 export interface TestDatabase {
-  /** The `database` setting of the process that owns it (CF-4): its parts. */
+  /** The `database` setting of the process that owns it: its parts. [CF-4] */
   readonly setting: DatabaseParts;
   /** PostgreSQL: the parts of the login that may only read it — a private process's `publicDatabase`. */
   readonly readerSetting?: DatabaseParts;
-  /** PostgreSQL: that login as a core's `transportReader` (CF-4, owner decision Q175 A). */
+  /** PostgreSQL: that login as a core's `transportReader`. [CF-4, Q175 A] */
   readonly transportReader?: { readonly user: string; readonly password: string };
   /** PostgreSQL: every session that logged in to the database, in order. */
   sessions?(): Promise<SessionSeen[]>;
@@ -211,15 +214,16 @@ function pgliteBackend(): PrivateBackend {
 export const PRIVATE_BACKENDS: readonly PrivateBackend[] = [postgresBackend(), pgliteBackend()];
 
 /**
- * How long a test of these files may take on a loaded machine: the longest, A116's, took 30 s on a quiet machine and
- * 342 s at a load average of about 77 (task 0.5, 2026-10-26), its wait for the private process ({@link
- * REACH_TIMEOUT_MS}) included.
+ * How long a test of these files may take on a loaded machine. The longest, the catch-up of an independent instance,
+ * took 30 s on a quiet machine and 342 s at a load average of about 77 (measured 2026-10-26), its wait for the private
+ * process ({@link REACH_TIMEOUT_MS}) included. [A116]
  */
 export const TEST_TIMEOUT_MS = 900_000;
 
 /**
- * How long a test waits for a private process to reach a height (`PrivateProcess.reach`): A116's catch-up of 10 heights
- * after its restart did not end within the former 180 s at a load average of about 77 (task 0.5, 2026-10-26).
+ * How long a test waits for a private process to reach a height (`PrivateProcess.reach`). The independent instance's
+ * catch-up of 10 heights after its restart did not end within the former 180 s at a load average of about 77
+ * (measured 2026-10-26). [A116]
  */
 export const REACH_TIMEOUT_MS = 600_000;
 

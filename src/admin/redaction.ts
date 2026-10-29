@@ -1,15 +1,15 @@
 /**
- * The redaction the admin endpoints share (`openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-6;
- * `specs/configuration/spec.md` CF-4; CORE-ARCH §4.18): every `secret` field, and every credential inside a URL, shows
- * as `[redacted]`. Built on task 4.2's redaction (`../config/redact.ts`, `configRedactor`), applied on the main thread
- * before a snapshot crosses to the admin worker, so the worker never holds a secret.
+ * The redaction the admin endpoints share: every `secret` field, and every credential inside a URL, shows as
+ * `[redacted]`. It is built on the configuration's redaction (`../config/redact.ts`, `configRedactor`) and applied on
+ * the main thread before a snapshot crosses to the admin worker, so the worker never holds a secret.
+ * [AE-6, CF-4; CORE-ARCH §4.18]
  *
- * - {@link shownSettings}: a revision's settings as `/config` may show them (4.2's note (d)) — a revision of the
- *   build's version by its schema's kinds; a `versionEntry`'s (whose kinds only its recorded row knows) every field
- *   redacted until the history has found it equal to its recorded row, then as data.
- * - {@link earlyRedactor}: before the configuration is validated, the redaction of its secrets as the validation reads
- *   them (`configSecrets`, task 4.4), or, with no configuration loaded, of URL credentials only — what a process logs a
- *   refusal of its configuration through (task 8.1b; such a process serves no admin endpoint, owner decision Q137 B).
+ * - {@link shownSettings}: a revision's settings as `/config` may show them. A revision of the build's version is
+ *   redacted by its schema's kinds. A `versionEntry`'s kinds are known only from its recorded row, so every one of its
+ *   fields is redacted until the history check finds it equal to that row; after that it shows as data. [AE-5, AE-6]
+ * - {@link earlyRedactor}: the redaction used before the configuration is validated. It redacts the configuration's
+ *   secrets as the validation reads them (`configSecrets`), or, with no configuration loaded, URL credentials only. A
+ *   process logs a refusal of its configuration through it; such a process serves no admin endpoint. [AE-6, Q137 B]
  */
 
 import type { PlainObject } from "../config/plain-data.js";
@@ -24,7 +24,7 @@ export interface RevisionSettings {
 
 /**
  * `revision`'s settings as they may be shown (see the module comment); `recorded` says, for a `versionEntry`, that the
- * history found it equal to its recorded row (task 4.3).
+ * history check found it equal to its recorded row.
  */
 export function shownSettings(redaction: Redactor, revision: RevisionSettings, recorded = false): PlainObject {
   if (revision.settings === null) return Object.freeze({});

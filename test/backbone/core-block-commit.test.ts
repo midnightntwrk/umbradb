@@ -34,17 +34,22 @@ import { BACKENDS, type TestBackend } from "../db/backends.js";
 import { STAND_IN_LEDGER, STAND_IN_SPEC_VERSION, standInHeader, standInItems } from "./block-fetch-stand-in.js";
 
 /**
- * `core-block-commit` (task 10.2; CD-3, IN-4, Q74; `design.md` §3, §10; CORE-ARCH §4.11): the `blocks` table — height,
- * hash, parent hash, spec version, ledger version and block time, range-partitioned by height as 0.9.5's
- * `chain_archive` store was (1,000,000 heights per partition, five of them and a default) — whose last row is the
- * cursor; the unpartitioned `hashes` table, whose primary key makes a repeated hash fail the block with
- * `duplicate-block-hash`; and the parent check, after it, which fails a block whose parent is not the block stored at
- * h − 1 with `parent-mismatch`. The block time is the node's milliseconds, converted to `timestamptz` exactly — by
- * PostgreSQL's integer interval input, never through a floating-point value — and read back as RFC 3339 text (DB-2).
+ * `core-block-commit`. It has:
+ * - the `blocks` table: height, hash, parent hash, spec version, ledger version and block time. It is range-partitioned
+ *   by height as 0.9.5's `chain_archive` store was (1,000,000 heights per partition, five of them and a default), and
+ *   its last row is the cursor;
+ * - the unpartitioned `hashes` table, whose primary key makes a repeated hash fail the block with
+ *   `duplicate-block-hash`;
+ * - the parent check, after it, which fails with `parent-mismatch` a block whose parent is not the block stored at
+ *   h − 1.
+ * [CD-3, IN-4, Q74; design §3, §10; CORE-ARCH §4.11]
+ *
+ * The block time is the node's milliseconds, converted to `timestamptz` exactly (by PostgreSQL's integer interval
+ * input, never through a floating-point value) and read back as RFC 3339 text. [DB-2]
  *
  * The blocks here are written as the finalized loop writes them: `core-block-commit`'s `on-db-write` through its block
  * write handle (`openBlockWrites`), one block transaction per block, with the block items the stand-in `core-block-fetch`
- * puts (`./block-fetch-stand-in.ts`). The same checks through the real process are `chain-process.test.ts`'s (A90).
+ * puts (`./block-fetch-stand-in.ts`). The same checks through the real process are in `chain-process.test.ts`. [A90]
  */
 
 const CONTEXT = { items: new Map(), revisions: [], publish: () => undefined };
@@ -123,7 +128,7 @@ describe("core-block-commit's declaration (CD-3, design §10)", () => {
     expect(CORE_BLOCK_COMMIT.id).toBe("core-block-commit");
     expect(CORE_BLOCK_COMMIT.version).toBe(UMBRADB_VERSION);
     expect(CORE_BLOCK_COMMIT.side).toBe("public");
-    // Every backbone part starts at S, a mid-chain start when S is above 0 (Q96).
+    // Every backbone part starts at S, a mid-chain start when S is above 0. [Q96]
     expect(CORE_BLOCK_COMMIT.startsMidChain).toBe(true);
     expect(typeof (CORE_BLOCK_COMMIT as { entry?: unknown }).entry).toBe("function");
     expect(Object.keys(CORE_BLOCK_COMMIT)).not.toContain("entry");
@@ -161,7 +166,7 @@ describe("core-block-commit's declaration (CD-3, design §10)", () => {
   });
 });
 
-/** The pinned SHA-256 of migration 001's text: changing the text changes every database's checksum (DB-9). */
+/** The pinned SHA-256 of migration 001's text: changing the text changes every database's checksum. [DB-9] */
 const MIGRATION_001_SHA256 = "709223680f3fa5cdc25fd580b8c9eab24cf3cef6cd3891618b54a9e16a85d3da";
 
 describe("the height partitions (0.9.5's chain_archive layout, kept)", () => {
@@ -548,7 +553,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
   }, 60_000);
 });
 
-/** A145's block times: the milliseconds, and the RFC 3339 text the database API reads back (DB-2). */
+/** The block times under test: the milliseconds, and the RFC 3339 text the database API reads back. [A145, DB-2] */
 const A145_TIMES: readonly { readonly ms: bigint; readonly text: string }[] = [
   { ms: 0n, text: "1970-01-01T00:00:00Z" },
   { ms: 1n, text: "1970-01-01T00:00:00.001Z" },

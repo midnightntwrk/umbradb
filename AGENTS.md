@@ -39,7 +39,14 @@ or better**. Each run records the exact model id it used, in the PR or `AUTONOMO
    SQL, or `any` escape hatch, in code or in a shipped document; split long output at file or function
    boundaries, never abbreviate.
    **Traceability.** Each new code unit cites the requirement or acceptance criterion it satisfies
-   (`DB-4`, `A11`); citing an id the spec does not have is a fabricated requirement.
+   (`DB-4`, `A11`); citing an id the spec does not have is a fabricated requirement. A comment's text
+   must explain the code on its own, using only terms from the codebase: no spec, plan, question or
+   task references inside the sentence. Citations go in square brackets at the end of the paragraph
+   or list item they support (`[MD-1, A20]`), so each paragraph carries its own and none are pooled
+   at the end of a multi-paragraph comment. A decided question keeps its chosen option and an
+   acceptance criterion its verification tag: `[Q137 B, A157 CI]`.
+   Runtime strings (error messages, type-level messages) carry no citations. A comment claim the
+   code no longer matches is marked `(OUTDATED)` right after it, for its owner to correct.
    Run `npm run typecheck` and `npm test`, and keep their output and a mapping from each acceptance
    criterion to the test that proves it for the PR.
 3. **Automated checks.** Every required CI job is green before stage-4 review starts: conformance

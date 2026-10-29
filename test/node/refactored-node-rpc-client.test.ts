@@ -7,10 +7,9 @@ import { outsideIn8 } from "./in8.js";
 import { ManualTimers, until } from "./manual-timers.js";
 
 /**
- * 0.9.5's `chain-archive-sync/node-rpc-client.test.ts` ("Fix 3"), refactored onto the node client of `src/node/`
- * (`openspec/changes/core-arch/design.md` §13, "Test files": refactored onto `src/node/`). The 0.9.5 client made one
- * HTTP POST per call; the node client speaks JSON-RPC over WebSocket. Each 0.9.5 test is kept where its assertion
- * still applies:
+ * 0.9.5's `chain-archive-sync/node-rpc-client.test.ts` ("Fix 3"), refactored onto the node client of `src/node/`.
+ * The 0.9.5 client made one HTTP POST per call; the node client speaks JSON-RPC over WebSocket. Each 0.9.5 test is
+ * kept where its assertion still applies. [design §13]
  *
  * 1. "a request that never resolves is aborted once the configured timeout elapses, instead of hanging forever" —
  *    kept, now exact: the call fails at its timeout, not a millisecond before, with a typed error (it bounded the
@@ -22,7 +21,7 @@ import { ManualTimers, until } from "./manual-timers.js";
  * 3. "an HTTP 200 response with a non-JSON body (e.g. a proxy's HTML error page) throws a typed NodeRpcParseError
  *    carrying the URL and method, not a bare SyntaxError" — over WebSocket a proxy's page answers the handshake: kept
  *    as a typed `node-error` (`handshake-refused`, status 200) naming the method; "carrying the URL" is now the
- *    opposite rule, since the node URL is a `secret` field (CF-4) that no error may show.
+ *    opposite rule, since the node URL is a `secret` field that no error may show. [CF-4]
  * 4. and 5. "getHeightOf throws a typed NodeRpcInvalidHeightError instead of silently returning NaN when header.number
  *    is malformed / missing entirely" — kept on the header the node client decodes (`header(hash).number`, a
  *    `bigint`): a typed `node-error` (`bad-answer`) holding the raw value, never NaN.

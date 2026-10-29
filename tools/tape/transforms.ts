@@ -1,11 +1,10 @@
 /**
- * The variant transforms (`openspec/changes/core-arch/specs/test-tape/spec.md` TT-4; acceptance A71; task 9.2): pure
- * functions from a tape's records to a new tape's records, which make rare situations of a recorded session on demand
- * — a subscription that goes quiet, jumps or repeats, a dropped connection, a slow answer, a pruned state, a best-chain
- * switch. Each checks its input as a tape (`checkTape`: `bad-tape-record` at the first bad record), refuses what it
- * cannot do with {@link TransformError} (`bad-transform` and a reason), changes no record it was given (records it
- * leaves alone are the same values in the output), and returns a frozen list checked as a tape again. They compose:
- * the output of one is the input of the next.
+ * The variant transforms: pure functions from a tape's records to a new tape's records, which make rare situations of a
+ * recorded session on demand — a subscription that goes quiet, jumps or repeats, a dropped connection, a slow answer, a
+ * pruned state, a best-chain switch. Each checks its input as a tape (`checkTape`: `bad-tape-record` at the first bad
+ * record), refuses what it cannot do with {@link TransformError} (`bad-transform` and a reason), changes no record it
+ * was given (records it leaves alone are the same values in the output), and returns a frozen list checked as a tape
+ * again. They compose: the output of one is the input of the next. [TT-4, A71]
  *
  * Lines count from 1 and sessions from 1, as the tape node serves them; a subscription is named by its session and its
  * id, compared as a JSON value (`./select.ts`); a subscription's notifications are counted from 1 in its session.
@@ -15,19 +14,19 @@
  * - {@link repeatNotification}: a notification sent again — `times` copies right after the `nth`.
  * - {@link insertDisconnect}: the node drops the connection after a record — `count` `disconnect`s after line `after`
  *   (more than one: an outage, each further connection dropped as it opens), the records after it moved to the next
- *   session, and a `subscribe` record there for each subscription live at the cut, in the order they were made and
- *   with their ids, because the node client makes each live subscription again when it reconnects. Occurrences are
- *   counted per session, so a call the client makes again in the new session needs a record there.
+ *   session, and a `subscribe` record there for each subscription live at the cut, in the order they were made and with
+ *   their ids, because the node client makes each live subscription again when it reconnects. Occurrences are counted
+ *   per session, so a call the client makes again in the new session needs a record there.
  * - {@link delayAnswers}: a slow answer — `delayMs` set on exactly the selected call records.
  * - {@link replaceWithError}: the selected calls answered with `error` instead.
  * - {@link stateUnavailable}: the selected calls answered as Substrate answers for a state it discarded,
  *   `{ code: 4003, message: "Client error: UnknownBlock: State already discarded for <block>" }`, which the node client
- *   reads as IN-9's `node-requirement`; the block is the call's last parameter, or `block`.
+ *   reads as a `node-requirement` error; the block is the call's last parameter, or `block` [IN-9].
  * - {@link spliceNotifications}: a best-chain switch — a range of a subscription's notifications replaced by a range of
  *   another tape's (a fork recorded on a devnet), one for one under the target's id; the source's surplus follows the
  *   last replaced one, the target's surplus is removed. The calls the client makes for the new branch's blocks are not
- *   notifications: they are records of their own, which belong after the notification that makes the client ask
- *   (before it, they would hold that notification back until they are answered).
+ *   notifications: they are records of their own, which belong after the notification that makes the client ask (before
+ *   it, they would hold that notification back until they are answered).
  */
 
 import { TransformError } from "./errors.js";

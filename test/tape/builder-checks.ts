@@ -7,11 +7,11 @@ import { RawClient } from "./raw-client.js";
 import { type Script, ScriptedNode, type Step } from "./scripted-node.js";
 
 /**
- * A71's record-and-replay check (`openspec/changes/core-arch/acceptance.md` §9; TT-4; task 9.2), which the committed
- * negative controls (`builder.negative-control.test.ts`) run against wrong builders and `builder.test.ts` against the
- * real one: a client session against the scripted JSON-RPC server (`scripted-node.ts`), recorded by the builder, then
- * the same session against the tape node serving that tape; the client must receive byte-identical answers and
- * notifications in the same order, connection by connection, and each connection must end the same way.
+ * The record-and-replay check, which the committed negative controls (`builder.negative-control.test.ts`) run against
+ * wrong builders and `builder.test.ts` against the real one: a client session against the scripted JSON-RPC server
+ * (`scripted-node.ts`), recorded by the builder, then the same session against the tape node serving that tape; the
+ * client must receive byte-identical answers and notifications in the same order, connection by connection, and each
+ * connection must end the same way. [A71, TT-4; acceptance §9]
  *
  * **The session** ({@link runA71Session}) covers what a recording meets: a request without `params` (recorded as `[]`),
  * numeric and string ids, an integer beyond 2^53 in an answer, one method and params answered differently twice, an
@@ -66,8 +66,8 @@ function droppedConnection(url: string): Promise<ConnectionFrames> {
 }
 
 /**
- * A71's client session against `url`. After each answer, `check(connection, texts)` sees what the connection has
- * received so far (the replay compares it with the recording, so a wrong tape fails at its first wrong frame).
+ * The check's client session against `url`. After each answer, `check(connection, texts)` sees what the connection has
+ * received so far (the replay compares it with the recording, so a wrong tape fails at its first wrong frame). [A71]
  */
 export async function runA71Session(
   url: string,
@@ -114,7 +114,7 @@ export async function runA71Session(
   return sessions;
 }
 
-/** The scripted node's answers to A71's session: by method and params, and by how often each was asked. */
+/** The scripted node's answers to the check's session: by method and params, and by how often each was asked. [A71] */
 export function a71Script(): Script {
   const asked = new Map<string, number>();
   return (request) => {
@@ -164,7 +164,9 @@ export function a71Script(): Script {
 /** `system_properties` with an integer beyond 2^53, which `JSON.stringify` cannot write. */
 const BIG_PROPERTIES = '{"ss58Format":42,"existentialDeposit":18446744073709551616}';
 
-/** A71's session recorded through a builder in front of the scripted node, whose third handshake is refused. */
+/**
+ * The check's session recorded through a builder in front of the scripted node, whose third handshake is refused. [A71]
+ */
 export interface Recorded {
   readonly records: readonly TapeRecord[];
   readonly frames: readonly ConnectionFrames[];
@@ -188,7 +190,9 @@ export async function recordA71(): Promise<Recorded> {
   }
 }
 
-/** A71's session against the tape node serving `records`, each frame compared with `recorded` as it arrives. */
+/**
+ * The check's session against the tape node serving `records`, each frame compared with `recorded` as it arrives. [A71]
+ */
 export function replayA71(
   records: readonly TapeRecord[],
   recorded: readonly ConnectionFrames[],
@@ -201,8 +205,8 @@ export function replayA71(
 }
 
 /**
- * A71's `[CI]` check: the session recorded by the builder and replayed by the tape node gives byte-identical answers
- * and notifications, in the same order, and the same ends of connections. Returns the recording.
+ * The CI check: the session recorded by the builder and replayed by the tape node gives byte-identical answers
+ * and notifications, in the same order, and the same ends of connections. Returns the recording. [A71]
  */
 export async function expectRecordReplayIdentical(): Promise<Recorded> {
   const recorded = await recordA71();

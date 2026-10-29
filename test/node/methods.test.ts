@@ -6,12 +6,16 @@ import { in8Methods, outsideIn8 } from "./in8.js";
 import { ManualTimers, turns } from "./manual-timers.js";
 
 /**
- * IN-8 ("Only these node calls"), the client's half of A83: the node client's method list is exactly the twelve
- * methods IN-8 names, read from the spec's own text, in its order; and its low-level `call` refuses any other method —
- * and the two subscription methods, which only `subscribeNewHeads` and `subscribeFinalizedHeads` send — before
- * anything reaches the node. The other suites check every request their fake nodes received against the same list
- * (`client.test.ts`, `refactored-node-rpc-client.test.ts`), so a client that sent any other method — an
- * `rpc_methods` probe on connecting, a `chain_unsubscribe…` on cancelling — fails there.
+ * Only the allowed node calls, checked on the client's side:
+ * - The node client's method list is exactly the twelve allowed methods, read from the ingest spec's own text
+ *   (`./in8.ts`), in their order.
+ * - Its low-level `call` refuses any other method before anything reaches the node. It also refuses the two
+ *   subscription methods, which only `subscribeNewHeads` and `subscribeFinalizedHeads` send.
+ * [IN-8, A83]
+ *
+ * The other suites check every request their fake nodes received against the same list (`client.test.ts`,
+ * `refactored-node-rpc-client.test.ts`). So a client that sent any other method fails there, for example an
+ * `rpc_methods` probe on connecting or a `chain_unsubscribe…` on cancelling. [IN-8]
  */
 
 const nodes: FakeNode[] = [];

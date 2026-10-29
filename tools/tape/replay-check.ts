@@ -1,10 +1,11 @@
 /**
- * A71's record-and-replay check through the node client (`openspec/changes/core-arch/acceptance.md` §9; TT-4's
- * scenario; task 9.2): a session of `src/node/`'s `NodeClient` run through the recording builder against a node, the
- * tape it recorded replayed by the tape node to a new client running the same session, and every frame each
- * connection sent and received compared byte for byte. Its default session, {@link in8Tour}, is what A71's
- * `[MANUAL]` half runs against a real Midnight node (`tsx tools/tape/main.ts check --node <url> --out <file>`,
- * `./command.ts`); the CI runs it against a scripted node (`test/tape/record-and-replay.test.ts`).
+ * The record-and-replay check through the node client. A session of `src/node/`'s `NodeClient` is run through the
+ * recording builder against a node. The tape it recorded is replayed by the tape node to a new client running the same
+ * session, and every frame each connection sent and received is compared byte for byte. [A71, TT-4]
+ *
+ * Its default session, {@link in8Tour}, is what the check's manual half runs against a real Midnight node
+ * (`tsx tools/tape/main.ts check --node <url> --out <file>`, `./command.ts`). The CI runs it against a scripted node
+ * (`test/tape/record-and-replay.test.ts`). [A71]
  */
 
 import {
@@ -59,11 +60,11 @@ const SYSTEM_PREFIX = Buffer.from("26aa394eea5630e07c48ae0c9558cef7", "hex");
 export const DEFAULT_HEADER_TIMEOUT_MS = 120_000;
 
 /**
- * The IN-8 tour: every call IN-8 allows, once, at the node's finalized head — `chain_getBlockHash(0)`,
+ * The node-call tour: every node call the client may make, once, at the node's finalized head (`chain_getBlockHash(0)`,
  * `chain_getFinalizedHead`, `chain_getHeader`, `chain_getBlock`, `state_getRuntimeVersion`, `state_getMetadata`,
  * `state_getStorage` (`System.Number`), `state_getKeysPaged` (three `System` keys), `midnight_ledgerStateRoot`,
- * `system_properties` —, each without retries (a node that fails fails the tour), then both head subscriptions until
- * one new head and two finalized heads have come (within `headerTimeoutMs`).
+ * `system_properties`), each without retries (a node that fails fails the tour). Then both head subscriptions, until
+ * one new head and two finalized heads have come (within `headerTimeoutMs`). [IN-8]
  */
 export async function in8Tour(
   client: NodeClient,
@@ -93,7 +94,7 @@ export async function in8Tour(
         () =>
           reject(
             new Error(
-              `the IN-8 tour waited ${timeoutMs} ms for 1 new head and 2 finalized heads, ` +
+              `the node-call tour waited ${timeoutMs} ms for 1 new head and 2 finalized heads, ` +
                 `and received ${newHeads} and ${finalized}`,
             ),
           ),
@@ -200,9 +201,9 @@ export function firstDifference(
 }
 
 /**
- * Records `session` (the IN-8 tour by default) through a builder in front of `node`, replays the tape through a tape
- * node, and compares the frames. Throws the builder's `cannot-record` error, or the recorded session's own error; a
- * replayed session that fails is a difference.
+ * Records `session` (the node-call tour by default) through a builder in front of `node`, replays the tape through a
+ * tape node, and compares the frames. Throws the builder's `cannot-record` error, or the recorded session's own error;
+ * a replayed session that fails is a difference.
  */
 export async function recordAndReplay(options: RecordAndReplayOptions): Promise<RecordAndReplayResult> {
   const session = options.session ?? ((client: NodeClient) => in8Tour(client));

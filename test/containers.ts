@@ -4,7 +4,7 @@ import { type GenericContainer, getContainerRuntimeClient } from "testcontainers
 import { guardContainers } from "./child-processes.js";
 
 /**
- * How every test starts a Testcontainers container (core-arch task 0.5, acceptance A153): {@link startContainer}.
+ * How every test starts a Testcontainers container: {@link startContainer}. [A153]
  *
  * **The start-up timeout.** Once Docker has started a container, Testcontainers 12.0.4 waits for Docker to report the
  * container's ports bound to the host, polling every 250 ms for at most 10 s — a value fixed in its code
@@ -12,15 +12,15 @@ import { guardContainers } from "./child-processes.js";
  * `withStartupTimeout` (the wait strategy's, 120 s for PostgreSQL) nor any setting reaches. On a loaded machine Docker
  * Desktop can take longer than that to answer, and the start fails with "Timed out after 10000ms while waiting for
  * container ports to be bound to the host" although the container is starting normally. The container is then left
- * running, unknown to the test. {@link startContainer} removes that container and starts another, up to
- * {@link START_ATTEMPTS} times; any other error, and the last attempt's, is the test's, its container removed too.
- * {@link startContainers} starts several at once and stops those that started when another fails.
+ * running, unknown to the test. {@link startContainer} removes that container and starts another, up to {@link
+ * START_ATTEMPTS} times; any other error, and the last attempt's, is the test's, its container removed too. {@link
+ * startContainers} starts several at once and stops those that started when another fails.
  *
  * **Labels.** Every container carries {@link LABEL_REPOSITORY} (this repository's directory) and {@link LABEL_PID} (the
- * test process that started it), so that a container left behind by a run can be told from another run's — A153's
- * check that no container outlives its run lists the containers of this repository whose process is gone — and so that
- * the test process's orphan watcher (`child-processes.ts`, `guardContainers`) removes them when that process ends, also
- * when it ends without its `afterAll` (Vitest's `--bail`, a run interrupted, the process killed).
+ * test process that started it), so that a container left behind by a run can be told from another run's — the check
+ * that no container outlives its run lists the containers of this repository whose process is gone — and so that the
+ * test process's orphan watcher (`child-processes.ts`, `guardContainers`) removes them when that process ends, also
+ * when it ends without its `afterAll` (Vitest's `--bail`, a run interrupted, the process killed). [A153]
  */
 
 const REPOSITORY = fileURLToPath(new URL("..", import.meta.url));

@@ -1,7 +1,7 @@
 /**
- * The messages between the main thread and the ledger worker (`openspec/changes/core-arch/design.md` §5.3; task 12.3):
- * plain data only — what Node.js's structured clone carries (objects, arrays, strings, numbers, booleans, `bigint`s,
- * `null`, `Uint8Array`s) —, never a ledger package's object (decision record Q49). Types only.
+ * The messages between the main thread and the ledger worker. They hold plain data only, the values Node.js's
+ * structured clone carries (objects, arrays, strings, numbers, booleans, `bigint`s, `null`, `Uint8Array`s), and never
+ * an object of a ledger package. Types only. [Q49; design §5.3]
  */
 
 import type { LedgerName } from "../types.js";

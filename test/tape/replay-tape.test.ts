@@ -5,11 +5,11 @@ import { ScriptedNode } from "./scripted-node.js";
 import { type SyntheticChain, syntheticChain } from "./synthetic-chain.js";
 
 /**
- * The replay of a whole tape (`tools/tape/replay-tape.ts`; task 0.3's acceptance "each tape replays against the tape
- * node"): the node client of `src/node/` sends every call record's call, as recorded, to a tape node serving the tape —
- * so every recorded spelling is one the client sends unchanged —, receives each answer the record holds (an error
- * record: that error), then makes both head subscriptions and receives every recorded notification in order; the tape
- * node answered every request from its record (none `not-on-tape`, `repeated` or a fault). Each difference is named.
+ * The replay of a whole tape (`tools/tape/replay-tape.ts`), which shows that each tape replays against the tape node:
+ * the node client of `src/node/` sends every call record's call, as recorded, to a tape node serving the tape — so
+ * every recorded spelling is one the client sends unchanged —, receives each answer the record holds (an error record:
+ * that error), then makes both head subscriptions and receives every recorded notification in order; the tape node
+ * answered every request from its record (none `not-on-tape`, `repeated` or a fault). Each difference is named.
  */
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
@@ -95,7 +95,7 @@ describe("replayTape", () => {
         connect: quietConnect,
       });
       expect(replay.differences).toEqual([
-        "line 1: system_version [] is not a call the node client makes (IN-8)",
+        "line 1: system_version [] is not a call the node client makes",
         `line 2: chain_getBlockHash [0] answered "${h0}", where the tape records the error {"code":-32000,"message":"gone"}`,
         `line 3: chain_getBlock ["${h0}"] failed: node-error: chain_getBlock: the node answered with an error: -32001 boom, where the tape records {"block":{}}`,
       ]);

@@ -11,21 +11,21 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
 export { REPOSITORY };
 
 /**
- * A project directory for the tests of the `umbradb` command (task 4.4; CF-10, LS-6), laid out as an operator's: a
+ * A project directory for the tests of the `umbradb` command, laid out as an operator's: a
  * `package.json` with `"type": "module"`, a `node_modules` (a link to the repository's, so `zod`, `typescript`, PGlite,
  * the PostgreSQL driver and `@types/node` resolve from it as from an installed package's dependencies), and the
  * configuration builders as an installed package would give them — `umbradb.mjs`, the builders bundled with esbuild
  * (their dependencies left as imports, `packages: "external"`), and `umbradb.d.mts`, declarations emitted from the
  * sources by the TypeScript compiler, so that the command's type check reads `.d.ts` files only, as it does for an
  * installed package (the sources themselves use parameter properties, which the type check's `erasableSyntaxOnly`
- * refuses in a configuration). Configuration files import the builders by absolute path (task 4.1's note: neither
- * Vitest's resolver nor the compiler reads a `file:` URL).
+ * refuses in a configuration). Configuration files import the builders by absolute path, because neither Vitest's
+ * resolver nor the compiler reads a `file:` URL. [CF-10, LS-6]
  *
  * With `cli`, also `umbradb-cli.mjs`: the command (`src/cli/main.ts`) bundled the same way, which a test runs with
  * Node.js itself in a child process — Node.js's own type stripping, real exit codes and streams —, and next to it
  * `worker.js`, the admin endpoints' worker thread (`src/admin/worker.ts`) bundled too: the admin server starts its
  * thread from `./worker.js` beside the module that starts it (`workerEntry`), which in the bundle is the command's file,
- * as `dist/admin/worker.js` is beside `dist/admin/server.js` in the package (task 4.4a: `umbradb run` serves them).
+ * as `dist/admin/worker.js` is beside `dist/admin/server.js` in the package (`umbradb run` serves the admin endpoints).
  */
 export interface CliProject {
   readonly dir: string;

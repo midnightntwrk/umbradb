@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { storagePrefix, twox128, xxh64 } from "../../tools/tape/index.js";
 
 /**
- * Substrate's `twox128` (`tools/tape/twox.ts`; task 0.3): checked against storage keys whose bytes are known — the
- * `System` pallet's `Number` and `Events` items (`test/node/fixtures/mainnet-answers.json` reads `System.Number` by
- * its key) — and against XXH64's own reference values, for inputs of every length class the algorithm branches on.
+ * Substrate's `twox128` (`tools/tape/twox.ts`): checked against storage keys whose bytes are known — the `System`
+ * pallet's `Number` and `Events` items (`test/node/fixtures/mainnet-answers.json` reads `System.Number` by its key) —
+ * and against XXH64's own reference values, for inputs of every length class the algorithm branches on.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");

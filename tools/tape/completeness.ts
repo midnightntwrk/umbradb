@@ -1,12 +1,12 @@
 /**
- * The completeness check of a recorded range tape (task 0.3's acceptance, "every IN-8 call of every height is on the
- * tape"; owner decision Q123): what the recording driver (`./range.ts`) records, checked record by record, so a tape
- * that any client making any subset of those calls replays is known to be one.
+ * The completeness check of a recorded range tape: every allowed node call of every height is on the tape. What the
+ * recording driver (`./range.ts`) records is checked record by record, so a tape that any client making any subset of
+ * those calls replays is known to be one. [Q123, IN-8]
  *
  * A tape of the range `from`–`to` is complete when:
- * - it is **one session** (no `disconnect`), with no `fault` record and no error answer — every client's one
- *   connection is served the first session (TT-3), and an error recorded where the node answers a value would be
- *   replayed as the answer —, and every call is one of IN-8's;
+ * - it is **one session** (no `disconnect`), with no `fault` record and no error answer, and every call is an allowed
+ *   node call. Every client's one connection is served the first session, and an error recorded where the node answers
+ *   a value would be replayed as the answer [TT-3, IN-8];
  * - for **every height h** it holds `chain_getBlockHash [h]` with a block hash H, and at H `chain_getHeader` (whose
  *   number is h and, above `from`, whose parent is the hash of h − 1), `chain_getBlock`, `state_getRuntimeVersion`
  *   (with a `specVersion`), `state_getStorage [System.Events, H]` and `midnight_ledgerStateRoot`;
@@ -73,7 +73,7 @@ export function completenessProblems(records: readonly TapeRecord[], range: Comp
       problems.push(`line ${line}: ${record.method} ${jsonText(record.params)} answered an error: ${jsonText(record.error)}`);
     } else {
       if (!(NODE_METHODS as readonly string[]).includes(record.method)) {
-        problems.push(`line ${line}: ${record.method} is not one of IN-8's methods`);
+        problems.push(`line ${line}: ${record.method} is not an allowed node call`);
       }
       const key = requestKey(record.method, record.params);
       if (!answers.has(key)) answers.set(key, record.result);

@@ -7,14 +7,18 @@ import { hello, rawClient } from "./raw-client.js";
 import { PUB, PUB_ENTRY, publicState, stateProblems } from "./read-confinement-checks.js";
 
 /**
- * A177 `[CI]` (task 4.5; CF-4, PP-4; owner decision Q175 A) on PostgreSQL 18.6: a core with `listen.transport` runs the
- * transport's reads on a pool of its own, logged in as `core.transportReader`. A login that holds only `SELECT` on the
- * public schemas (`pg_read_all_data`) serves a private process's reads: `current_user` in a read is it. A login that
- * could write — a superuser, one holding `CREATEROLE`, `CREATEDB` or `BYPASSRLS`, a member of the writer's login, one
- * holding `INSERT` on a public table — refuses startup with `transport-reader-can-write`, naming the login and what it
- * found. Without `transportReader` the start is refused with its path. With task 14.2b's gate turned off (the test
- * seam `transportReads: "unconfined"`), a `read` that writes is refused by the database itself (SQLSTATE 42501) and
- * the public database is unchanged. The committed negative control is `transport-reader.negative-control.test.ts`.
+ * The transport reader's login, on PostgreSQL 18.6. A core with `listen.transport` runs the transport's reads on a pool
+ * of its own, logged in as `core.transportReader`. [A177 CI, CF-4, PP-4, Q175 A]
+ * - A login that holds only `SELECT` on the public schemas (`pg_read_all_data`) serves a private process's reads:
+ *   `current_user` in a read is it.
+ * - A login that could write refuses startup with `transport-reader-can-write`, naming the login and what it found.
+ *   That is a superuser, one holding `CREATEROLE`, `CREATEDB` or `BYPASSRLS`, a member of the writer's login, or one
+ *   holding `INSERT` on a public table.
+ * - Without `transportReader` the start is refused with its path.
+ * - With the read gate turned off (the test seam `transportReads: "unconfined"`), a `read` that writes is refused by the
+ *   database itself (SQLSTATE 42501) and the public database is unchanged.
+ *
+ * The committed negative control is `transport-reader.negative-control.test.ts`.
  */
 
 const POSTGRES = PRIVATE_BACKENDS.find((backend) => backend.kind === "postgres");
@@ -40,7 +44,7 @@ const transportWith = (reader: Readonly<Record<string, unknown>> | undefined) =>
 
 const loginOf = (login: string) => ({ user: login, password: login });
 
-/** The core on `db` with `extra`, as A177's tests start it. */
+/** The core on `db` with `extra`, as these tests start it. [A177 CI] */
 function coreOptions(db: TestDatabase, extra: Readonly<Record<string, unknown>>, rest: Partial<PublicCoreOptions> = {}) {
   return { database: db.setting, head: 3n, modules: [PUB], entries: [PUB_ENTRY], extra, ...rest };
 }

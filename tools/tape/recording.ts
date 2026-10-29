@@ -1,32 +1,33 @@
 /**
- * What the recording builder records for one connection (`openspec/changes/core-arch/specs/test-tape/spec.md` TT-4;
- * acceptance A71; task 9.2): the session's records, from the frames the client and the node exchanged on it, placed
- * so that the tape node (`./node.ts`) replays them — no sockets here; `./builder.ts` carries the frames.
+ * What the recording builder records for one connection: the session's records, from the frames the client and the node
+ * exchanged on it, placed so that the tape node (`./node.ts`) replays them. There are no sockets here; `./builder.ts`
+ * carries the frames. [TT-4, A71]
  *
- * **Records** (the forms 9.1's note (a) gives): a **call** `{ method, params, result | error }` with the params the
- * client sent (absent: `[]`, as the tape node reads them); a **subscription** `{ subscribe: <the id the node
- * answered>, method, params }` for an answer to one of the head subscriptions (`isSubscribeMethod`, `./frames.ts`);
- * each **notification** `{ notify: id, result }` as it came; and, when the connection ended, each request still
- * waiting for its answer as a **`timeout` fault** `{ fault: "timeout", method, params }` — on replay the tape node then
- * answers nothing and drops the connection once that request comes, and the client sends it again on its next
- * connection, as it did when recorded. A recording holds no delay: `delayAnswers` adds them (`./transforms.ts`).
+ * **Records** (in the tape's record forms): a **call** `{ method, params, result | error }` with the params the client
+ * sent (absent: `[]`, as the tape node reads them); a **subscription** `{ subscribe: <the id the node answered>,
+ * method, params }` for an answer to one of the head subscriptions (`isSubscribeMethod`, `./frames.ts`); each
+ * **notification** `{ notify: id, result }` as it came; and, when the connection ended, each request still waiting for
+ * its answer as a **`timeout` fault** `{ fault: "timeout", method, params }` — on replay the tape node then answers
+ * nothing and drops the connection once that request comes, and the client sends it again on its next connection, as it
+ * did when recorded. A recording holds no delay: `delayAnswers` adds them (`./transforms.ts`).
  *
- * **Order.** Records are written in the order the node's frames came — so a notification is replayed after the
- * answers that came before it, as TT-3 sends it —, with one exception the tape's rule of answers by occurrence (TT-2)
- * needs: the answers to the requests of one method and params are written in the order of those requests. An answer
- * that comes before an earlier request of its pair is answered waits, and is written right after that earlier one's
- * record (or its fault). A notification of a subscription whose answer waits so cannot be placed (`out-of-order`).
+ * **Order.** Records are written in the order the node's frames came, so a notification is replayed after the answers
+ * that came before it, as the tape node sends it. There is one exception, which the tape's rule of answers by
+ * occurrence needs: the answers to the requests of one method and params are written in the order of those requests. An
+ * answer that comes before an earlier request of its pair is answered waits, and is written right after that earlier
+ * one's record (or its fault). A notification of a subscription whose answer waits so cannot be placed
+ * (`out-of-order`). [TT-2, TT-3]
  *
- * **Byte for byte.** Each answer and notification from the node must be the very text the tape node will write for
- * its record (`./frames.ts`: the tape's JSON form, the fields in `jsonrpsee`'s order); any other spelling is refused
+ * **Byte for byte.** Each answer and notification from the node must be the very text the tape node will write for its
+ * record (`./frames.ts`: the tape's JSON form, the fields in `jsonrpsee`'s order); any other spelling is refused
  * (`not-replayable`) instead of being recorded into a tape whose replay would differ from the session.
  *
- * **Refusals** throw {@link RecordingError} (`cannot-record`) with the frame and the reason: a client frame that is
- * not a request the tape node answers (`bad-request`) or reuses an id still waiting (`duplicate-id`); a node frame
- * that is not a JSON-RPC 2.0 answer or notification (`not-json-rpc`), answers no waiting request
- * (`unknown-answer`), notifies a subscription not made on the connection (`unknown-subscription`) or under another
- * name than the tape node uses (`notification-method`), gives a record the tape cannot hold (`bad-record`), or is
- * spelled otherwise (`not-replayable`).
+ * **Refusals** throw {@link RecordingError} (`cannot-record`) with the frame and the reason: a client frame that is not
+ * a request the tape node answers (`bad-request`) or reuses an id still waiting (`duplicate-id`); a node frame that is
+ * not a JSON-RPC 2.0 answer or notification (`not-json-rpc`), answers no waiting request (`unknown-answer`), notifies a
+ * subscription not made on the connection (`unknown-subscription`) or under another name than the tape node uses
+ * (`notification-method`), gives a record the tape cannot hold (`bad-record`), or is spelled otherwise
+ * (`not-replayable`).
  */
 
 import { RecordingError, type RecordingProblem, TapeError } from "./errors.js";

@@ -9,10 +9,13 @@ import { entry } from "../modules/graph-fixtures.js";
 import { InMemoryBlockSource, loopInput, RUNNER_BACKENDS, type Started, startWith } from "./loop-harness.js";
 
 /**
- * Task 17.5b (the mutation pass task 5.5a deferred): a height's own window at the loop level on PGlite — the event
- * that ends it says whether the height committed and how long the window was open, a window of a failed height ends
- * not completed; no timer at all when `slowBlockMs` is off; an observer without `slow`, or none, is not called. And
- * `LoopPauses.idle` leaves the loop no longer between heights once its wait ends (task 15.1a's pass).
+ * Tests for the mutation pass over a height's own window at the loop level on PGlite:
+ * - the event that ends it says whether the height committed and how long the window was open;
+ * - a window of a failed height ends not completed;
+ * - no timer at all when `slowBlockMs` is off;
+ * - an observer without `slow`, or none, is not called.
+ *
+ * And, for the pause's mutation pass: `LoopPauses.idle` leaves the loop no longer between heights once its wait ends.
  *
  * The holds wait on purpose (up to 900 ms): each test's budget is that plus Vitest's.
  */

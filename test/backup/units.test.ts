@@ -18,10 +18,9 @@ import { writeScript } from "./backup-fixtures.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * The parts of task 15.1's backup that need no running process (BK-1, BK-2; `src/backup/`, `src/cli/backup.ts`): the
- * manifest's line and its reading, `pg_dump`'s version, the command's arguments and its refusals before a database is
- * read, a backup of a database with nothing committed, and the backup at stop's refusal to overwrite a file that is no
- * backup.
+ * The parts of the backup that need no running process (`src/backup/`, `src/cli/backup.ts`): the manifest's line and
+ * its reading, `pg_dump`'s version, the command's arguments and its refusals before a database is read, a backup of a
+ * database with nothing committed, and the backup at stop's refusal to overwrite a file that is no backup. [BK-1, BK-2]
  */
 
 const HASH = `0x${"ab".repeat(32)}`;
@@ -345,10 +344,10 @@ describe("pglite-tools' pg_dump of another major version", () => {
         code: "backup-tools-missing",
         message:
           "pg_dump of @electric-sql/pglite-tools is of PostgreSQL 17.2, not 18: install the version made for this " +
-          "build's PGlite (BK-1); no file was written",
+          "build's PGlite; no file was written",
         details: { tool: "pglite-tools", version: "17.2" },
       });
-      // A version it cannot read is no version of 18 either (task 17.5b).
+      // A version it cannot read is no version of 18 either.
       const unread = join(tools, "pg_dump-unread.mjs");
       writeFileSync(unread, 'export async function pgDump() { return new Blob(["--\\n-- Dumped by pg_dump version beta\\n"]); }\n');
       await expect(writeBackup(input, { pgliteTools: unread })).rejects.toMatchObject({
@@ -356,7 +355,7 @@ describe("pglite-tools' pg_dump of another major version", () => {
         details: { version: "beta" },
       });
       // pgliteBackupText itself refuses a private database without the opt-in, before it reads anything (the browser's
-      // worker calls it without writeBackup; task 17.5b).
+      // worker calls it without writeBackup).
       await expect(
         pgliteBackupText({ db, optedOut: [], side: "private", developmentOptIn: false }, async () => {
           throw new Error("no dump expected");
@@ -406,7 +405,7 @@ describe("a restore's empty target and its refusals before reading the file (BK-
       ].join("\n"),
     );
     const outcome = await runRestore({ file: join(dir, "none.backup"), config: file, cwd: project.dir });
-    // Neither a PostgreSQL publicDatabase nor coreTransport (task 15.2a; Q153's interim refusal is gone).
+    // Neither a PostgreSQL publicDatabase nor coreTransport (the earlier interim refusal is gone). [Q153]
     expect(outcome).toMatchObject({
       restored: false,
       error: { code: "invalid-configuration", details: { reason: "public-database-transport" } },

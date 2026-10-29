@@ -3,10 +3,12 @@ import { A11_BLOCKS, expectNoOutsideReads, runUnderReadLoad } from "./pglite-out
 import { type PgliteTestServer, startPgliteServer } from "./pglite-server.js";
 
 /**
- * A11 [CI] (DB-4): on PGlite, under a constant read load, zero outside reads run between any block's `BEGIN` and its
- * `COMMIT`, over 200 blocks — the database API runs every read and every transaction as one job of one queue, and a
- * block transaction is one exclusive job. The instrumented run and its assertions are `pglite-outside-reads.ts`'s; its
- * negative control (the build that lets reads bypass the queue) is `pglite-no-outside-read.negative-control.test.ts`.
+ * On PGlite, under a constant read load, zero outside reads run between any block's `BEGIN` and its `COMMIT`, over 200
+ * blocks. The database API runs every read and every transaction as one job of one queue, and a block transaction is
+ * one exclusive job. [A11 CI, DB-4]
+ *
+ * The instrumented run and its assertions are in `pglite-outside-reads.ts`. The negative control (the build that lets
+ * reads bypass the queue) is `pglite-no-outside-read.negative-control.test.ts`.
  */
 
 let server: PgliteTestServer;

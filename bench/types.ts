@@ -1,12 +1,12 @@
 /**
- * The benchmarks' statistic block (`./stats.ts`). Core-arch task 17.2 retired the 0.9.5 baseline's schema that lived
- * here — its harness version, workload set, GC curve, HOT ratio, bloat and environment blocks — with the workloads and
- * the baseline (`openspec/changes/core-arch/design.md` §13); task 17.3 added the core's baseline ({@link Baseline}).
+ * The benchmarks' statistic block (`./stats.ts`). The 0.9.5 baseline's schema that lived here (its harness version,
+ * workload set, GC curve, HOT ratio, bloat and environment blocks) was retired with the workloads and the baseline.
+ * The core's baseline is {@link Baseline}. [design §13]
  */
 
 /** Per-workload latency distribution. `cv` (coefficient of variation = sd/mean) is what a future
- *  CV-aware regression gate keys off (`design.md` §5: a benchmark at CV≈2.66% gives ~45% false
- *  positives against a naive 2% gate — the calibrated gate is deferred post-1.0.0). */
+ *  CV-aware regression gate keys off: a benchmark at CV≈2.66% gives ~45% false positives against a
+ *  naive 2% gate, so the calibrated gate is deferred past 1.0.0. [perf-baseline design §5] */
 export interface LatencyStats {
   unit: "ms";
   samples: number;

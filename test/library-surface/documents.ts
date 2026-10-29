@@ -1,9 +1,8 @@
 /**
- * Tasks 17.4a and 17.4b (`openspec/changes/core-arch/tasks.md` 17.4a, 17.4b; A171 `[STATIC]`, owner decisions Q169,
- * Q170 C, Q171 A): 0.9.5's documents are deleted, not marked ("It will still be available in the git history"), and
- * nothing left points at them.
+ * The document cleanup: 0.9.5's documents are deleted, not marked ("It will still be available in the git history"),
+ * and nothing left points at them. [A171 STATIC, Q169, Q170 C, Q171 A]
  *
- * - **The documents tasks 17.4a and 17.4b list as 0.9.5's** ({@link RETIRED_DOCUMENTS}) are not in the tree
+ * - **The documents listed as 0.9.5's** ({@link RETIRED_DOCUMENTS}) are not in the tree
  *   ({@link retiredDocumentProblems}).
  * - **`CHANGELOG.md`** has no preamble naming one of them and no planned `1.0.0` entry, heading or link reference
  *   ({@link changelogDocumentProblems}).
@@ -13,9 +12,9 @@
  *   link reference definition of every `.md` file whose target is a path (not a URL or an anchor) names a file or a
  *   directory of the tree, resolved from the linking file's directory (`/…` from the root), its `#fragment` and
  *   `?query` left out. Fenced code blocks and code spans hold no links.
- * - **`AGENTS.md`** holds the rules of the 1.0.0 guideline still in force ({@link ENGINEERING_RULES}, owner decision
- *   Q170 C), names no deleted document and nothing of 0.9.5's program ({@link agentsProblems}).
- * - **`Formal/STORAGE_ALGEBRA.md`** states W1 and T5 and no retired law ({@link storageAlgebraProblems}, Q171 A).
+ * - **`AGENTS.md`** holds the rules of the 1.0.0 guideline still in force ({@link ENGINEERING_RULES}), names no deleted
+ *   document and nothing of 0.9.5's program ({@link agentsProblems}) [Q170 C].
+ * - **`Formal/STORAGE_ALGEBRA.md`** states W1 and T5 and no retired law ({@link storageAlgebraProblems}) [Q171 A].
  *
  * Pure functions over repository-relative paths and file texts; `./documents.test.ts` gives them the tree (git's
  * tracked and untracked files, ignored ones left out).
@@ -25,9 +24,9 @@ import path from "node:path";
 import { RETIRED_EXPORTS } from "./retirement.js";
 
 /**
- * The documents task 17.4a classified as 0.9.5's and deleted (Q169): they described a removed 0.9.5 part, its
- * contracts or the 1.0.0 release planned on the 0.9.5 surface as current. The classification of every other document
- * is in the task's record.
+ * The first group of documents classified as 0.9.5's and deleted: they described a removed 0.9.5 part, its contracts or
+ * the 1.0.0 release planned on the 0.9.5 surface as current. The classification of every other document is recorded
+ * with the cleanup. [Q169]
  */
 export const RETIRED_DOCUMENTS_17_4A: readonly string[] = [
   "docs/STABILITY.md",
@@ -44,12 +43,12 @@ export const RETIRED_DOCUMENTS_17_4A: readonly string[] = [
 ];
 
 /**
- * The documents task 17.4b deleted: the 1.0.0 program's guideline and lessons log (Q170 C; the guideline's rules still
- * in force moved into `AGENTS.md` first), and 0.9.5's design, formal, performance and research records (Q171 A) —
+ * The second group of deleted documents: the 1.0.0 program's guideline and lessons log (the guideline's rules still in
+ * force moved into `AGENTS.md` first) [Q170 C], and 0.9.5's design, formal, performance and research records [Q171 A]:
  * every file of `design/`, `Formal/*.md` but `Formal/STORAGE_ALGEBRA.md`, `Performance/`, `docs/research/` but
  * `indexer-parallelism-roadmap.md` and `midnight-node-peer-flapping.md`, and `docs/superpowers/`.
- * `docs/THREAT_MODEL.md` (Q172 A) is deleted by the task too but is not listed: task 17.4c writes 0.10.0's threat model
- * at the same path.
+ *
+ * `docs/THREAT_MODEL.md` was deleted too but is not listed: 0.10.0's threat model is written at the same path. [Q172 A]
  */
 export const RETIRED_DOCUMENTS_17_4B: readonly string[] = [
   "docs/v1-implementation-guideline.md",
@@ -85,7 +84,7 @@ export const RETIRED_DOCUMENTS_17_4B: readonly string[] = [
   "docs/superpowers/plans/2026-07-21-storage-algebra-lean-m3b-checkpoint-c1.md",
 ];
 
-/** Every document tasks 17.4a and 17.4b deleted as 0.9.5's. */
+/** Every document deleted as 0.9.5's, both groups. */
 export const RETIRED_DOCUMENTS: readonly string[] = [...RETIRED_DOCUMENTS_17_4A, ...RETIRED_DOCUMENTS_17_4B];
 
 /** The task that deleted a document of {@link RETIRED_DOCUMENTS}. */
@@ -173,8 +172,8 @@ function treePaths(tree: readonly string[]): Set<string> {
 }
 
 /**
- * A171's broken links: each link of `files` (the tree's Markdown files) whose target is a path naming no file or
- * directory of `tree`, as `file:line: …`.
+ * The broken links: each link of `files` (the tree's Markdown files) whose target is a path naming no file or
+ * directory of `tree`, as `file:line: …`. [A171 STATIC]
  */
 export function linkProblems(files: readonly TextFile[], tree: readonly string[]): string[] {
   const paths = treePaths(tree);
@@ -199,9 +198,10 @@ export function retiredDocumentProblems(tree: readonly string[]): string[] {
 }
 
 /**
- * A171's problems with `CHANGELOG.md`: a preamble (the text before the first `## ` heading) naming a retired document
- * — by its path, or for task 17.4a's by its file name too (17.4b's include names as common as `README.md`) — and a
- * planned `1.0.0` entry: a `## [1.0.0]` heading, or a link reference defined for `1.0.0` or naming `v1.0.0`.
+ * The problems with `CHANGELOG.md`: a preamble (the text before the first `## ` heading) naming a retired document, and
+ * a planned `1.0.0` entry: a `## [1.0.0]` heading, or a link reference defined for `1.0.0` or naming `v1.0.0`. A
+ * document is matched by its path, or for the first group ({@link RETIRED_DOCUMENTS_17_4A}) by its file name too; the
+ * second group includes names as common as `README.md`. [A171 STATIC]
  */
 export function changelogDocumentProblems(changelog: string): string[] {
   const lines = changelog.split("\n");
@@ -225,7 +225,9 @@ export function changelogDocumentProblems(changelog: string): string[] {
   return problems;
 }
 
-/** A171's problems with `package.json`'s `description`: one sentence about the indexer, nothing of 0.9.5's store. */
+/**
+ * The problems with `package.json`'s `description`: one sentence about the indexer, nothing of 0.9.5's store. [A171 STATIC]
+ */
 export function descriptionProblems(description: unknown): string[] {
   if (typeof description !== "string" || description.trim() === "") {
     return ["package.json has no description (A171)"];
@@ -241,16 +243,16 @@ export function descriptionProblems(description: unknown): string[] {
   return problems;
 }
 
-/** A rule of the 1.0.0 guideline still in force (Q170 C): the owner's name for it, and its lead in `AGENTS.md`. */
+/** A rule of the 1.0.0 guideline still in force: the owner's name for it, and its lead in `AGENTS.md`. [Q170 C] */
 export interface EngineeringRule {
   readonly rule: string;
   readonly lead: string;
 }
 
 /**
- * The 18 rules of `docs/v1-implementation-guideline.md` the owner confirmed as still in force (Q170 C, 2026-10-28), in
- * the owner's order, each with the bold lead its restatement for 0.10.0 opens with in `AGENTS.md` — in the stage or
- * section that already carried part of it, or under "Engineering rules".
+ * The 18 rules of `docs/v1-implementation-guideline.md` the owner confirmed as still in force (2026-10-28), in the
+ * owner's order, each with the bold lead its restatement for 0.10.0 opens with in `AGENTS.md` — in the stage or
+ * section that already carried part of it, or under "Engineering rules". [Q170 C]
  */
 export const ENGINEERING_RULES: readonly EngineeringRule[] = [
   { rule: "acceptance criteria are the contract", lead: "**Acceptance criteria are the contract.**" },
@@ -276,7 +278,7 @@ export const ENGINEERING_RULES: readonly EngineeringRule[] = [
 /**
  * What marks a sentence as 0.9.5's program rather than 0.10.0's: the versions it was written for, its source and test
  * paths, its test database's name and its gate's live variable. `AGENTS.md` names none of them, nor in backticks a name
- * of 0.9.5's retired exports (A5's {@link RETIRED_EXPORTS}).
+ * of 0.9.5's retired exports ({@link RETIRED_EXPORTS}). [A5]
  */
 export const AGENTS_0_9_5_MARKERS: readonly string[] = [
   "0.9.5",
@@ -293,9 +295,9 @@ export const AGENTS_0_9_5_MARKERS: readonly string[] = [
 const COMMON_NAMES = new Set(["README.md", "CHANGELOG.md", "DESIGN.md", "design.md", "proposal.md", "tasks.md"]);
 
 /**
- * A171's problems with `AGENTS.md` (Q170 C): a rule of {@link ENGINEERING_RULES} whose lead is missing or appears more
+ * The problems with `AGENTS.md`: a rule of {@link ENGINEERING_RULES} whose lead is missing or appears more
  * than once; a line naming a retired document, by its path or by its file name unless that is a common one; a line
- * naming a marker of {@link AGENTS_0_9_5_MARKERS} or, in backticks, a retired export.
+ * naming a marker of {@link AGENTS_0_9_5_MARKERS} or, in backticks, a retired export. [A171 STATIC, Q170 C]
  */
 export function agentsProblems(agents: string): string[] {
   const problems: string[] = [];
@@ -325,14 +327,14 @@ export function agentsProblems(agents: string): string[] {
 }
 
 /**
- * The laws and property tests of `Formal/STORAGE_ALGEBRA.md` retired with 0.9.5's parts (design §13; Q171 A): T1–T4,
- * C1, C2 (C2a, C2b), L1, and P1–P8, P10, P11. W1 and its property test P9, and T5, stay.
+ * The laws and property tests of `Formal/STORAGE_ALGEBRA.md` retired with 0.9.5's parts: T1–T4, C1, C2 (C2a, C2b),
+ * L1, and P1–P8, P10, P11. W1 and its property test P9, and T5, stay. [Q171 A; design §13]
  */
 const RETIRED_LAW = /\b(T[1-4]|C1|C2[ab]?|L1|P(?:[1-8]|1[01]))\b/g;
 
 /**
- * A171's problems with `Formal/STORAGE_ALGEBRA.md` (Q171 A): no heading naming W1 or none naming T5, and every line
- * naming a retired law or property test.
+ * The problems with `Formal/STORAGE_ALGEBRA.md`: no heading naming W1 or none naming T5, and every line naming a
+ * retired law or property test. [A171 STATIC, Q171 A]
  */
 export function storageAlgebraProblems(text: string): string[] {
   const problems: string[] = [];

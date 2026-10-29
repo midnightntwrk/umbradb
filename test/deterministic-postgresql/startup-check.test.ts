@@ -8,17 +8,19 @@ import { ModuleContentsError } from "../../src/determinism/module-tables.js";
 import { BACKENDS } from "../db/backends.js";
 
 /**
- * A58's startup half and A145's startup part (DT-6, owner decisions Q58, Q61, Q74, Q75; task 7.1), on both backends: a
- * module's migration that creates a table the determinism rules refuse refuses startup, with the code, the module, the
- * table or sequence, the column and its declared type, and the message the contents hash gives for the same table —
- * the module named in front (the `deterministic_postgresql` component's `databaseRefusals` and `refusalMessage`, task
- * 1.4's detection). The check runs in the migration's own transaction, after its SQL and before its record, so a refused
- * migration rolls back like a failing one: nothing of it is applied or recorded, the module's `on-start-db` does not
- * run, and the same build with the migration fixed starts. Tables of earlier startups are checked again at every
- * startup, after the module's pending migrations and before its `on-start-db`.
+ * The startup check of the determinism rules, on both backends. A module's migration that creates a table the rules
+ * refuse makes startup fail, with the code, the module, the table or sequence, the column and its declared type. The
+ * message is the one the contents hash gives for the same table, with the module named in front (the
+ * `deterministic_postgresql` component's `databaseRefusals` and `refusalMessage`).
+ * [A58, A145, DT-6, Q58, Q61, Q74, Q75]
  *
- * Every expected code, place and phrase is written by hand from DT-6, A58 and `design.md` §4; the message is also
- * compared with the contents hash's for the same table, created outside the API.
+ * The check runs in the migration's own transaction, after its SQL and before its record. So a refused migration rolls
+ * back like a failing one: nothing of it is applied or recorded, the module's `on-start-db` does not run, and the same
+ * build with the migration fixed starts. Tables of earlier startups are checked again at every startup, after the
+ * module's pending migrations and before its `on-start-db`. [A58, A145]
+ *
+ * Every expected code, place and phrase is written by hand from the determinism rules; the message is also compared
+ * with the contents hash's for the same table, created outside the API. [DT-6, A58; design §4]
  */
 
 const MODULE: SchemaModule = {
@@ -262,7 +264,7 @@ describe.each(BACKENDS)("A58: startup refuses what the contents hash refuses, on
       expect(error.message.startsWith(`${c.code}: module "m", ${name}${column}: `), error.message).toBe(true);
       for (const phrase of c.says) expect(error.message).toContain(phrase);
       expect(error.message).toContain(" Instead, ");
-      // The same message as the contents hash's for the same table, the module named in front (DT-6).
+      // The same message as the contents hash's for the same table, with the module named in front. [DT-6]
       const hash = await hashRefusal(c.sql);
       expect(hash.reason).toBe(c.code);
       expect(error.message).toBe(hash.message.replace(`${c.code}: `, `${c.code}: module "m", `));

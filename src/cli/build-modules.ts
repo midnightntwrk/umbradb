@@ -1,26 +1,27 @@
 /**
- * The modules the `umbradb` command's build carries (`openspec/changes/core-arch/specs/modules/spec.md` MD-1,
- * `specs/configuration/spec.md` CF-1, `specs/library-surface/spec.md` LS-6; CORE-ARCH §4.10: "the host program (the
- * CLI, a test, the browser build) imports the modules it ships"; owner decision Q106 B, task 4.4a): UmbraDB's own — its
- * backbone parts and core modules — and the user modules the configuration file exports (`export const modules =
- * [stats]`, `src/config/load.ts`'s `LoadedConfig.modules`). For the command the configuration file is MD-1's host
- * program: it imports the modules it ships, and nothing is loaded by name at run time.
+ * The modules the `umbradb` command's build carries: UmbraDB's own (its backbone parts and core modules), and the user
+ * modules the configuration file exports (`export const modules = [stats]`, `src/config/load.ts`'s
+ * `LoadedConfig.modules`). For the command, the configuration file is the host program: it imports the modules it
+ * ships, and nothing is loaded by name at run time. [MD-1, CF-1, LS-6, Q106 B; CORE-ARCH §4.10]
  *
- * **How the file's modules join the build** ({@link commandBuild}): they are the build's user modules, in the order the
- * file lists them, after UmbraDB's own backbone parts and core modules; they are validated with them, as every host's
- * user modules are (MD-2, `validateDeclarations`), so a fault names the user module by its position — a list element
- * that is no declaration (`invalid-declaration`), a module listed twice or with the id of another (`duplicate-id`), and
- * a user module with an id of UmbraDB's own (`core`, `core-…`: `reserved-prefix`, which user modules are refused). The
- * command never drops or merges a listed module: what the file lists is what runs.
+ * **How the file's modules join the build** ({@link commandBuild}). They are the build's user modules, in the order
+ * the file lists them, after UmbraDB's own backbone parts and core modules. They are validated with them, as every
+ * host's user modules are (`validateDeclarations`), so a fault names the user module by its position: [MD-2]
+ * - a list element that is no declaration (`invalid-declaration`);
+ * - a module listed twice, or with the id of another (`duplicate-id`);
+ * - a user module with an id of UmbraDB's own (`core`, `core-…`: `reserved-prefix`, which user modules are refused).
  *
- * **The backbone by side.** A public (core) process's: `core-chain` (task 10.2), `core-block-fetch` (the node source and
- * the block items, task 10.3), `core-block-commit` (tasks 5.2, 10.2), `core-digest` (task 7.1) and the admin parts
- * `core-health`, `core-status`, `core-config` (tasks 8.2–8.4); its core modules — off unless a configuration enables
- * them — `core-chain-events`, `core-block-parsed` and `core-tx-results` (task 11.1), `core-ledger-state` (task 12.3),
- * and `core-contract-states`, `core-contract-logs-full` and the development-only `core-contract-logs-fast` (task 13.1),
- * in the decision record's table of core modules' order. A private process's (PP-1, task 14.1): `core-chain`, then the private backbone of one private start
- * (`src/backbone/private.ts`: `core-private-source` from its intake, `core-digest`), then the admin
- * parts; no core module (they are public).
+ * The command never drops or merges a listed module: what the file lists is what runs.
+ *
+ * **The backbone by side.**
+ * - A public (core) process's backbone: `core-chain`, `core-block-fetch` (the node source and the block items),
+ *   `core-block-commit`, `core-digest`, and the admin parts `core-health`, `core-status`, `core-config`.
+ * - A public process's core modules, each off unless a configuration enables it, in the fixed order of the core
+ *   modules: `core-chain-events`, `core-block-parsed`, `core-tx-results`, `core-ledger-state`, `core-contract-states`,
+ *   `core-contract-logs-full` and the development-only `core-contract-logs-fast`.
+ * - A private process's backbone: `core-chain`, then the private backbone of one private start
+ *   (`src/backbone/private.ts`: `core-private-source` from its intake, `core-digest`), then the admin parts. It has no
+ *   core module, since those are public. [PP-1]
  */
 
 import { CORE_BLOCK_COMMIT } from "../backbone/core-block-commit/core-block-commit.js";
@@ -43,7 +44,7 @@ import type { ProcessSide } from "../config/core-settings.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
 
-/** The admin endpoints' parts, on either side (AE-1; tasks 8.2–8.4). */
+/** The admin endpoints' parts, on either side. [AE-1] */
 const ADMIN_PARTS: readonly ModuleDeclaration[] = Object.freeze([CORE_HEALTH, CORE_STATUS, CORE_CONFIG]);
 
 /** A public (core) process's backbone parts (see the module comment). */
@@ -55,7 +56,7 @@ export const PUBLIC_BACKBONE: readonly ModuleDeclaration[] = Object.freeze([
   ...ADMIN_PARTS,
 ]);
 
-/** The core modules the command's build ships, each off unless a configuration enables it (tasks 11.1, 12.3, 13.1). */
+/** The core modules the command's build ships, each off unless a configuration enables it. */
 export const CORE_MODULES: readonly ModuleDeclaration[] = Object.freeze([
   CORE_CHAIN_EVENTS,
   CORE_BLOCK_PARSED,
@@ -76,7 +77,7 @@ export interface CommandBuildOptions {
 
 /**
  * The command's build for a process of `options.side`, with `user` — the configuration file's `modules` — as its user
- * modules, not validated (the runner validates it at startup, MD-2): see the module comment.
+ * modules, not validated (the runner validates it at startup); see the module comment. [MD-2]
  */
 export function commandBuild(user: readonly unknown[] = [], options: CommandBuildOptions = {}): DeclarationSet {
   if (options.side === "private") {
@@ -87,8 +88,9 @@ export function commandBuild(user: readonly unknown[] = [], options: CommandBuil
 }
 
 /**
- * The declarations of the command's build, validated (MD-2): its backbone parts and core modules, and `user` as its user
- * modules (the configuration file's, CF-1; none unless given). Throws the first fault, an `UmbraError` naming the module.
+ * The declarations of the command's build, validated: its backbone parts and core modules, and `user` as its user
+ * modules (the configuration file's; none unless given). Throws the first fault, an `UmbraError` naming the module.
+ * [MD-2, CF-1]
  */
 export function buildDeclarations(
   user: readonly unknown[] = [],

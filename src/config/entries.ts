@@ -1,22 +1,25 @@
 /**
- * The configuration's builders and types (`openspec/changes/core-arch/specs/configuration/spec.md` CF-1, CF-2, CF-4;
- * `design.md` §7, §12; CORE-ARCH §4.12): a process's configuration is one flat list of entries, one per revision of the
- * core or of a module, each `{ id, start, stop?, version, config }` (heights as numbers: the file is plain data, CF-1).
- * The configuration file default-exports `defineConfig({ entries: [ … ] })`, and writes each entry with a builder that
- * fills its identity and version from the build, so neither can be mistyped (decision records Q43, Q44):
+ * The configuration's builders and types. A process's configuration is one flat list of entries, one per revision of
+ * the core or of a module. Each entry is `{ id, start, stop?, version, config }`, with heights as numbers, since the
+ * file is plain data. [CF-1, CF-2, CF-4; CORE-ARCH §4.12; design §7, §12]
  *
- * - {@link coreEntry} — the id `core` and the build's core version (`./build.ts`), its `config` typed as CF-4's table;
+ * The configuration file default-exports `defineConfig({ entries: [ … ] })`. It writes each entry with a builder that
+ * fills the entry's identity and version from the build, so neither can be mistyped [Q43, Q44]:
+ *
+ * - {@link coreEntry}: fills the id `core` and the build's core version (`./build.ts`); its `config` is typed as the
+ *   core settings table [CF-4];
  * - a module's `entry`, which `defineModule` gives every declaration (`../modules/declaration.ts`, built here by
- *   {@link moduleEntryBuilder}) — its id and version from the declaration, its `config` typed by the module's settings
- *   schema (`z.input` of its `configSchema`, so fields with defaults may be left out);
- * - {@link versionEntry} — for a revision whose version this build does not carry: an earlier one, already in the
- *   history, with the `config` recorded for it, or a later one being scheduled, without one (CF-3).
+ *   {@link moduleEntryBuilder}): fills the id and version from the declaration; its `config` is typed by the module's
+ *   settings schema (`z.input` of its `configSchema`, so fields with defaults may be left out) [CF-2];
+ * - {@link versionEntry}: for a revision whose version this build does not carry. That is either an earlier revision,
+ *   already in the history, with the `config` recorded for it, or a later one being scheduled, without a `config`
+ *   [CF-3].
  *
- * The builders return plain data: they copy the fields given into a new entry, leave out each of its own fields that is
- * absent or `undefined` (which is not plain data), and pass the `config` object itself through. They check nothing
- * else: types are gone at run time, so the loader checks the plain data (`./load.ts`) and startup validates every entry
- * (`./validate.ts`) — which is why a property a builder does not know, given without types, is passed through to be refused
- * there, while the identity and version are always the build's.
+ * The builders return plain data. They copy the given fields into a new entry, leave out each of the entry's own
+ * fields that is absent or `undefined` (which is not plain data), and pass the `config` object itself through. They
+ * check nothing else: types are gone at run time, so the loader checks the plain data (`./load.ts`) and startup
+ * validates every entry (`./validate.ts`). That is why a property a builder does not know, given without types, is
+ * passed through to be rejected there, while the identity and version always come from the build. [CF-1]
  */
 
 import type { DatabasePartsInput, TransportReader } from "./database-parts.js";
@@ -25,32 +28,32 @@ import type { ModuleDeclaration } from "../modules/declaration.js";
 import { buildCoreVersion, type CoreVersion, type LedgerName } from "./build.js";
 import type { PlainObject } from "./plain-data.js";
 
-/** The id of the core's own entries (CF-2); no module may have it (MD-2, `../modules/validation.ts`). */
+/** The id of the core's own entries. No module may have it (`../modules/validation.ts`). [CF-2, MD-2] */
 export const CORE_ENTRY_ID = "core";
 
 /** A network the core knows, or `custom` (then `genesisHash` is required, `./core-settings.ts`). */
 export type Network = "mainnet" | "preprod" | "preview" | "stagenet" | "custom";
 
-/** A row of the ledger version table (LG-1): `spec_version` from `specVersionMin` to `specVersionMax` → `ledger`. */
+/** A row of the ledger version table: `spec_version` from `specVersionMin` to `specVersionMax` → `ledger`. [LG-1] */
 export type LedgerTableRow = {
   readonly specVersionMin: number;
   readonly specVersionMax: number;
   readonly ledger: LedgerName;
 };
 
-/** A pin of the ledger version table (LG-2): the first block of a runtime, its hash and its `MNSV` version. */
+/** A pin of the ledger version table: the first block of a runtime, its hash and its `MNSV` version. [LG-2] */
 export type LedgerPin = { readonly height: number; readonly hash: string; readonly specVersion: number };
 
-/** The `core` entry's `ledgerTable` (LG-1 to LG-3): rows and pins added to or replacing the built-in table (12.2). */
+/** The `core` entry's `ledgerTable`: rows and pins added to, or replacing, the built-in table. [LG-1, LG-2, LG-3] */
 export type LedgerTable = { readonly rows?: readonly LedgerTableRow[]; readonly pins?: readonly LedgerPin[] };
 
-/** Where each ledger version's packages come from (LG-5); `vendored` when absent. */
+/** Where each ledger version's packages come from; `vendored` when absent. [LG-5] */
 export type LedgerSources = { readonly [ledger in LedgerName]?: "vendored" | "released" };
 
-/** The process's listeners, each a `host:port` address (RN-15, AE-1, PP-3). */
+/** The process's listeners, each a `host:port` address. [RN-15, AE-1, PP-3] */
 export type Listen = { readonly api?: string; readonly admin?: string; readonly transport?: string };
 
-/** Opt-in mutual TLS (PP-11): this process's certificate and key, and the roots it trusts, as PEM text. */
+/** Opt-in mutual TLS: this process's certificate and key, and the roots it trusts, as PEM text. [PP-11] */
 export type TlsSettings = {
   readonly certificate: string;
   readonly key: string;
@@ -58,8 +61,8 @@ export type TlsSettings = {
 };
 
 /**
- * The `core` entry's fields every process has (CF-4). Each field's kind, default and validation are the schemas'
- * (`./core-settings.ts`), whose input types `test/config/core-settings.test.ts` holds equal to these.
+ * The `core` entry's fields that every process has. Each field's kind, default and validation come from the schemas
+ * (`./core-settings.ts`); `test/config/core-settings.test.ts` checks that their input types equal these. [CF-4]
  */
 export type CoreSettingsBase = {
   readonly network: Network;
@@ -68,45 +71,45 @@ export type CoreSettingsBase = {
   readonly ledgerSources?: LedgerSources;
   readonly sweep?: "on" | "off";
   readonly retainStates?: number;
-  /** The database's parts, never a connection string (CF-4, owner decision Q167). */
+  /** The database's parts, never a connection string. [CF-4, Q167] */
   readonly database: DatabasePartsInput;
   readonly listen?: Listen;
   readonly tipCap?: number;
   readonly prefetchWindow?: number;
   readonly backoffCeilingMs?: number;
-  /** A file path (BK-1). */
+  /** A file path. [BK-1] */
   readonly backupAtStop?: string;
-  /** A file path: SIGUSR2 writes a backup there at the loop's next pause (BK-1, owner decision Q152 B). */
+  /** A file path: SIGUSR2 writes a backup there at the loop's next pause. [BK-1, Q152 B] */
   readonly backupOnSignal?: string;
   readonly tls?: TlsSettings;
   readonly livenessTimeoutMs?: number;
-  /** A whole number from 1 to 2,147,483,647 (DB-15, `./core-settings.ts`). */
+  /** A whole number from 1 to 2,147,483,647 (`./core-settings.ts`). [DB-15] */
   readonly apiReadTimeoutMs?: number;
   readonly slowBlockMs?: number;
   readonly followingThreshold?: number;
   readonly readinessLag?: number;
-  /** The durability probe's override (DB-12), passed to `openPostgres`. */
+  /** The durability probe's override, passed to `openPostgres`. [DB-12] */
   readonly fullPageWritesOffAllowed?: boolean;
   readonly developmentOptIn?: boolean;
 };
 
-/** The public (core) process's `core` entry (CF-4): `node` and `lockstepInstances`, none of a private one's fields. */
+/** The public (core) process's `core` entry: `node` and `lockstepInstances`, none of a private one's fields. [CF-4] */
 export type PublicCoreSettings = CoreSettingsBase & {
   /** The node's WebSocket URL. */
   readonly node: string;
   /** Instance ids. */
   readonly lockstepInstances?: readonly string[];
-  /** The login of the transport's reads; required with a PostgreSQL database and `listen.transport` (Q175 A). */
+  /** The login the transport reads with; required with a PostgreSQL database and `listen.transport`. [Q175 A] */
   readonly transportReader?: TransportReader;
   readonly instanceId?: never;
   readonly publicDatabase?: never;
   readonly coreTransport?: never;
 };
 
-/** A private process's `core` entry (CF-4): instead of `node` and `lockstepInstances`, its own three fields. */
+/** A private process's `core` entry: instead of `node` and `lockstepInstances`, its own three fields. [CF-4] */
 export type PrivateCoreSettings = CoreSettingsBase & {
   readonly instanceId: string;
-  /** The public database's parts: a login that may only read (CF-4, Q167). */
+  /** The public database's parts: a login that may only read. [CF-4, Q167] */
   readonly publicDatabase?: DatabasePartsInput;
   /** The core's transport address. */
   readonly coreTransport?: string;
@@ -115,13 +118,13 @@ export type PrivateCoreSettings = CoreSettingsBase & {
   readonly transportReader?: never;
 };
 
-/** The `core` entry's `config` (CF-4). */
+/** The `core` entry's `config`. [CF-4] */
 export type CoreSettings = PublicCoreSettings | PrivateCoreSettings;
 
 /** Any entry's `config`, as the configuration holds it. */
 export type EntryConfig = { readonly [field: string]: unknown };
 
-/** An entry (CF-3; §12's `Entry`): one revision of the core or of a module. */
+/** An entry: one revision of the core or of a module. [CF-3; design §12] */
 export type Entry = {
   /** `core`, or a module's id. */
   readonly id: string;
@@ -130,11 +133,11 @@ export type Entry = {
   readonly stop?: number;
   /** A module's semver version, or for `core` the core version. */
   readonly version: string | CoreVersion;
-  /** Required, except for a scheduled `versionEntry` (CF-3). */
+  /** Required, except for a scheduled `versionEntry`. [CF-3] */
   readonly config?: EntryConfig;
 };
 
-/** A process's configuration (§12's `UmbraConfig`): the configuration file's default export. */
+/** A process's configuration: the configuration file's default export. [design §12] */
 export type UmbraConfig = { readonly entries: readonly Entry[] };
 
 /** The heights every builder takes. */
@@ -163,7 +166,7 @@ export type ModuleEntry<D extends ModuleDeclaration> = EntryHeights & {
   readonly config: ModuleSettings<D>;
 };
 
-/** A module's `entry` builder (CF-2): fills the id and the version from the declaration. */
+/** A module's `entry` builder: fills the id and the version from the declaration. [CF-2] */
 export type EntryBuilder<D extends ModuleDeclaration> = (entry: ModuleEntryInput<D>) => ModuleEntry<D>;
 
 /** The version a `versionEntry` names: the core version for `core`, a semver version for a module. */
@@ -173,7 +176,7 @@ export type VersionOf<I extends string> = I extends typeof CORE_ENTRY_ID ? CoreV
 export type VersionEntryInput<I extends string> = EntryHeights & {
   readonly id: I;
   readonly version: VersionOf<I>;
-  /** The data recorded for an earlier revision; absent for a scheduled one (CF-3). Typed loosely, as plain data. */
+  /** The data recorded for an earlier revision; absent for a scheduled one. Typed loosely, as plain data. [CF-3] */
   readonly config?: PlainObject;
 };
 
@@ -184,16 +187,17 @@ export type VersionEntry<I extends string> = EntryHeights & {
   readonly config?: PlainObject;
 };
 
-/** The configuration a file default-exports (CF-1): returns `config` itself. */
+/** The configuration a file default-exports: returns `config` itself. [CF-1] */
 export function defineConfig(config: UmbraConfig): UmbraConfig {
   return config;
 }
 
 /**
- * A new entry: whatever `given` holds besides the builder's own fields (so that startup refuses what a builder does
- * not know, `./validate.ts`), then `id`, `start`, `stop`, `version` and `config`, each left out when it is `undefined` (an
- * absent `stop`, a scheduled revision's `config`, or a field missing from a call made without types, which startup
- * then names as missing) — the id and the version as the builder gives them, whatever `given` says.
+ * Builds a new entry. It starts with whatever `given` holds besides the builder's own fields, so that startup rejects
+ * what a builder does not know (`./validate.ts`). Then come `id`, `start`, `stop`, `version` and `config`, each left
+ * out when it is `undefined`: an absent `stop`, a scheduled revision's `config`, or a field missing from a call made
+ * without types (which startup then reports as missing). The id and the version are the builder's, whatever `given`
+ * says.
  */
 function entryOf(id: unknown, version: unknown, given: object): Record<string, unknown> {
   const { id: _id, start, stop, version: _version, config, ...rest } = given as Record<string, unknown>;
@@ -201,23 +205,23 @@ function entryOf(id: unknown, version: unknown, given: object): Record<string, u
   return { ...rest, ...Object.fromEntries(own) };
 }
 
-/** The `core` entry of one revision of the core (CF-2): fills the id `core` and the build's core version. */
+/** The `core` entry of one revision of the core: fills the id `core` and the build's core version. [CF-2] */
 export function coreEntry(entry: CoreEntryInput): CoreEntry {
   return entryOf(CORE_ENTRY_ID, buildCoreVersion(), entry) as CoreEntry;
 }
 
 /**
- * An entry for a revision whose version this build does not carry (CF-2, CF-3): an earlier revision already in the
- * history, with its recorded `config` (compared with the record, task 4.3), or a later one being scheduled, without one
- * (only its id, start, stop and version are recorded). For `core`, `version` is a core version.
+ * An entry for a revision whose version this build does not carry. It is either an earlier revision already in the
+ * history, with its recorded `config` (compared with the record), or a later one being scheduled, without a `config`
+ * (only its id, start, stop and version are recorded). For `core`, `version` is a core version. [CF-2, CF-3]
  */
 export function versionEntry<const I extends string>(entry: VersionEntryInput<I>): VersionEntry<I> {
   return entryOf(entry.id, entry.version, entry) as VersionEntry<I>;
 }
 
 /**
- * The `entry` builder of `declaration` (CF-2), which `defineModule` adds to it: each entry's id and version are the
- * declaration's, read when the entry is built.
+ * The `entry` builder of `declaration`, which `defineModule` adds to it. Each entry's id and version are the
+ * declaration's, read when the entry is built. [CF-2]
  */
 export function moduleEntryBuilder<D extends ModuleDeclaration>(declaration: D): EntryBuilder<D> {
   return (entry) => entryOf(declaration.id, declaration.version, entry) as ModuleEntry<D>;

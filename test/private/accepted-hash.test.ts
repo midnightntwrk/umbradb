@@ -3,15 +3,19 @@ import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, TEST_TIMEOUT_M
 import { a165Problems, a165Run } from "./accepted-hash-checks.js";
 
 /**
- * A165 `[CI]` (task 14.1c; PP-14, owner decision Q159), on PostgreSQL 18.6 and PGlite 0.5.10, with a transport and —
- * on PostgreSQL, whose public database a private process may read directly — without one: a private process's first
- * start records the public configuration hash it finds; after the core restarts with a changed configuration, the
- * private process's start stops with `public-config-changed`, its message naming the new hash and `--update-hash`;
- * started with `updateHash` (`umbradb run --update-hash`) set to that hash it runs its full checks, records it and
- * continues; set to another value it stops; a core changing its configuration between the private process's read of the
- * public history and its first `hello-ack` (PostgreSQL), or between that `hello-ack` and its first read through the
- * core (PGlite, where the history is read through the core), stops it too. The run and the oracle are
- * `./accepted-hash-checks.ts`'s; the committed negative controls are `./accepted-hash.negative-control.test.ts`'s.
+ * The accepted public configuration hash, on PostgreSQL 18.6 and PGlite 0.5.10, with a transport and — on PostgreSQL,
+ * whose public database a private process may read directly — without one:
+ * - a private process's first start records the public configuration hash it finds;
+ * - after the core restarts with a changed configuration, the private process's start stops with
+ *   `public-config-changed`, its message naming the new hash and `--update-hash`;
+ * - started with `updateHash` (`umbradb run --update-hash`) set to that hash, it runs its full checks, records it and
+ *   continues; set to another value, it stops;
+ * - a core changing its configuration between the private process's read of the public history and its first
+ *   `hello-ack` (PostgreSQL), or between that `hello-ack` and its first read through the core (PGlite, where the
+ *   history is read through the core), stops it too.
+ *
+ * The run and the oracle are `./accepted-hash-checks.ts`'s; the committed negative controls are
+ * `./accepted-hash.negative-control.test.ts`'s. [A165 CI, PP-14, Q159]
  */
 
 /** The cases: each backend with a transport, and PostgreSQL without one. */

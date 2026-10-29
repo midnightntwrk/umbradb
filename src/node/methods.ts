@@ -1,11 +1,11 @@
 /**
- * The node methods the indexer may call (`openspec/changes/core-arch/specs/ingest/spec.md` IN-8, "Only these node
- * calls"): the node client sends these and nothing else — no `rpc_methods` probe, no `system_chain`, and no
- * `chain_unsubscribe…` call either: a subscription is cancelled on the client's side, and closing the connection ends
- * every subscription on the node (`./client.ts`). `test/node/methods.test.ts` binds this list to IN-8's text.
+ * The node methods the indexer may call. The node client sends these and nothing else: no `rpc_methods` probe, no
+ * `system_chain`, and no `chain_unsubscribe…` call. A subscription is cancelled on the client's side, and closing the
+ * connection ends every subscription on the node (`./client.ts`). `test/node/methods.test.ts` binds this list to the
+ * spec's list of node calls. [IN-8]
  */
 
-/** IN-8's methods, in the order IN-8 names them. */
+/** The allowed node methods, in the order the spec names them. [IN-8] */
 export const NODE_METHODS = Object.freeze([
   "chain_subscribeNewHeads",
   "chain_subscribeFinalizedHeads",
@@ -21,16 +21,16 @@ export const NODE_METHODS = Object.freeze([
   "system_properties",
 ] as const);
 
-/** A method of IN-8. */
+/** An allowed node method. [IN-8] */
 export type NodeMethod = (typeof NODE_METHODS)[number];
 
 /** The two head subscriptions, which only the client's `subscribe…` methods send. */
 export type SubscribeMethod = "chain_subscribeNewHeads" | "chain_subscribeFinalizedHeads";
 
-/** A method of IN-8 that is a plain call: one request, one answer. */
+/** An allowed node method that is a plain call: one request, one answer. */
 export type NodeCallMethod = Exclude<NodeMethod, SubscribeMethod>;
 
-/** Whether `method` is a plain call of IN-8 (a subscription method is not). */
+/** Whether `method` is an allowed plain call (a subscription method is not). */
 export function isNodeCallMethod(method: unknown): method is NodeCallMethod {
   return (
     (NODE_METHODS as readonly unknown[]).includes(method) &&

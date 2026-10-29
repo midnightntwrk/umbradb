@@ -1,9 +1,9 @@
 /**
- * The admin listener (`openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-1, AE-2; `design.md` §1; CORE-ARCH
- * §4.18): `node:http` answering the admin route table (`./routes.ts`) from the latest snapshot the runner sent and the
- * heartbeat's shared memory. It runs in a worker thread of its own (`./worker.ts`, started by `./server.ts`), so a
- * callback that blocks the main thread, or a block that holds the database, delays no answer: it reads nothing but the
- * snapshot it holds and the last tick (`../runner/heartbeat.ts`), never the database.
+ * The admin listener: `node:http` answering the admin route table (`./routes.ts`) from the latest snapshot the runner
+ * sent and the heartbeat's shared memory. It runs in a worker thread of its own (`./worker.ts`, started by
+ * `./server.ts`), so a callback that blocks the main thread, or a block that holds the database, delays no answer. It
+ * reads nothing but the snapshot it holds and the last tick (`../runner/heartbeat.ts`), never the database.
+ * [AE-1, AE-2; CORE-ARCH §4.18; design §1]
  *
  * **Messages** ({@link ToAdmin}, {@link FromAdmin}) over its channel — the worker's `parentPort`: `snapshot` replaces
  * the snapshot it answers from (one reference, swapped in one assignment on this thread: a request reads it once, so no

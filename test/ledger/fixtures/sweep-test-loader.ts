@@ -1,17 +1,19 @@
-// The test package of task 12.5's sweep tests (`openspec/changes/core-arch` A105, LG-14; `src/ledger/worker/`): a
-// loader the ledger worker imports in place of `src/ledger/load.ts` (`startLedgerWorker({ loader })`), whose adapter
+// The test package of the sweep tests (`src/ledger/worker/`): a loader the ledger worker imports in place of `src/ledger/load.ts` (`startLedgerWorker({ loader })`), whose adapter
 // is no ledger: its state after each height is the DAG of `./sweep-fixture.ts`, and it keeps nodes as the vendored
 // packages do — a flush takes every node reachable from a key whose root count rose that it has not stored yet and
 // counts it stored; `evict` forgets that it stored a node, so a node needed again after the sweep deleted it is flushed
-// again (LG-14). Without `evict` a node the database lost would never be written again: the oracle then finds a held
-// key reaching a node that is not stored. Blocks carry no transactions; roots are the fixture's (`rootOf`).
+// again. Without `evict` a node the database lost would never be written again: the oracle then finds a held key
+// reaching a node that is not stored. Blocks carry no transactions; roots are the fixture's (`rootOf`). [A105, LG-14]
 //
-// Task 12.5a (A160, LG-14, owner decision Q144 B): a state the thread did not make itself — a new worker thread's, after
-// the main thread restarted it — is loaded from the node store (the database, through the bridge): every node of it
-// read, checked against the fixture and counted stored; and by `loaderData` ({@link RefusalData}) the package of the
-// first threads refuses every eviction it is asked for after applying one height, as a package does whose live object
-// still holds a swept node after the worker freed what it can. What every thread did is counted in memory the threads
-// share ({@link COUNTERS}), so the test reads it across a restart.
+// Across a worker restart:
+// - a state the thread did not make itself (a new worker thread's, after the main thread restarted it) is loaded from
+//   the node store (the database, through the bridge): every node of it read, checked against the fixture and counted
+//   stored;
+// - by `loaderData` ({@link RefusalData}), the package of the first threads refuses every eviction it is asked for
+//   after applying one height, as a package does whose live object still holds a swept node after the worker freed
+//   what it can.
+// What every thread did is counted in memory the threads share ({@link COUNTERS}), so the test reads it across a
+// restart. [A160, LG-14, Q144 B]
 // Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
 import type { LedgerName, LedgerPackage, LedgerPackageOptions, NodeBatch, StateHandle } from "../../../src/ledger/types.js";
@@ -90,7 +92,7 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
     load(key, store) {
       const height = roots.get(hex(key));
       if (height !== undefined) return state(height);
-      // A state this thread did not make: read from the node store, every node of it, each the fixture's (A160).
+      // A state this thread did not make: read from the node store, every node of it, each the fixture's. [A160]
       const root = store.get(key);
       const named = root === null ? null : /^state (\d+)$/.exec(Buffer.from(root.data).toString("utf8"));
       if (named === null || named === undefined) throw new Error(`the sweep test package finds no state ${hex(key)} in the node store`);
@@ -114,7 +116,7 @@ export async function loadLedger(ledger: LedgerName, _options: LedgerPackageOpti
       };
     },
     stateRoot: (handle) => rootOf(heightOf(handle)),
-    // LG-16's six values, none null (task 12.1b): this package's states hold no trees, so empty ones' values.
+    // The six state tree values, none null: this package's states hold no trees, so empty ones' values. [LG-16]
     stateSummary: () => ({
       zswapFirstFree: 0n,
       zswapRoot: Uint8Array.of(0),

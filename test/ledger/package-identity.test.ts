@@ -17,14 +17,15 @@ import { LEDGER_RELEASES } from "../../src/ledger/releases.js";
 import { copyVendoredLedger, expectEveryPackageFileChecked, VENDORED_LEDGERS, VENDORED_ROOT } from "./version-checks.js";
 
 /**
- * A97 (`openspec/changes/core-arch/acceptance.md` §12; LG-5; task 12.2): each ledger package the build carries is
- * identified in the core version (CF-2) by its name, its version and its SHA-256 — the SHA-256 of the package's
- * `SHA256SUMS` manifest, which lists every file of the package with its own SHA-256, as `npm run vendor:ledger`
- * records it — and startup refuses with `package-hash-mismatch` when a package's files are not the recorded ones: a
- * file changed by one byte, a file missing, or the manifest itself changed. A97's other clause, CI rebuilding every
- * vendored package from its pinned source and patches and getting the recorded SHA-256, is task 0.2's job
- * `.github/workflows/vendored-ledger.yml` (`npm run vendor:ledger`, which compares each rebuilt file with
- * `SHA256SUMS`); the manifest's SHA-256 is held equal to the recorded identity here.
+ * Each ledger package the build carries is identified in the core version by its name, its version and its SHA-256.
+ * That SHA-256 is the hash of the package's `SHA256SUMS` manifest, which lists every file of the package with its own
+ * SHA-256, as `npm run vendor:ledger` records it. Startup refuses with `package-hash-mismatch` when a package's files
+ * are not the recorded ones: a file changed by one byte, a file missing, or the manifest itself changed.
+ * [A97, LG-5, CF-2; acceptance §12]
+ *
+ * CI also rebuilds every vendored package from its pinned source and patches and checks it gets the recorded SHA-256:
+ * that is `.github/workflows/vendored-ledger.yml` (`npm run vendor:ledger`, which compares each rebuilt file with
+ * `SHA256SUMS`). Here, the manifest's SHA-256 is held equal to the recorded identity. [A97]
  */
 
 const sha256 = (bytes: Uint8Array): string => `0x${createHash("sha256").update(bytes).digest("hex")}`;
@@ -36,7 +37,7 @@ describe("the core version's ledgers (CF-2, LG-5)", () => {
         versionName: string;
         package: { name: string; version: string };
       };
-    // Task 12.2a (A159): v9 as runtime 2.0 built it (rc.3) is a package of its own, between v8 and v9 (rc.5).
+    // v9 as runtime 2.0 built it (rc.3) is a package of its own, between v8 and v9 (rc.5). [A159]
     expect(VENDORED_LEDGERS).toEqual(["v8", "v9-rc3", "v9"]);
     const ledgers = VENDORED_LEDGERS.map((ledger) => ({
       ledger,

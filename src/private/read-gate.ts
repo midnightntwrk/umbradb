@@ -1,14 +1,16 @@
 /**
- * The core's gate on the statements of a transport `read` (`openspec/changes/core-arch/specs/private-processes/spec.md`
- * PP-4; `design.md` §8, **Confined reads**; task 14.2b, the threat model draft's gap 1; acceptance A172). A private
- * process sends SQL text the core runs on the public database, in one read (`Database.read`): a `REPEATABLE READ READ
- * ONLY` transaction, in which the database itself refuses every write. What the read-only transaction cannot stop is a
- * statement that leaves it — `COMMIT`, `ROLLBACK` — after which the next statement runs with the core's own login,
- * which may write; a statement that changes the session (`SET`, `RESET`, `SET ROLE`, `LISTEN`, `PREPARE`), which on
- * PostgreSQL outlives the read on a pooled connection and on PGlite reaches the writer's one session; and a function
- * that acts outside the transaction (`pg_advisory_lock` holds its lock past the read's end, `pg_terminate_backend` ends
- * another session, `set_config` changes a setting or the role, `query_to_xml` runs SQL given as text, around this
- * gate).
+ * The core's gate on the statements of a transport `read`. A private process sends SQL text that the core runs on the
+ * public database in one read (`Database.read`): a `REPEATABLE READ READ ONLY` transaction, in which the database
+ * itself refuses every write. [PP-4, A172; design §8]
+ *
+ * What the read-only transaction cannot stop:
+ * - a statement that leaves it (`COMMIT`, `ROLLBACK`), after which the next statement runs with the core's own login,
+ *   which may write;
+ * - a statement that changes the session (`SET`, `RESET`, `SET ROLE`, `LISTEN`, `PREPARE`), which on PostgreSQL
+ *   outlives the read on a pooled connection, and on PGlite reaches the writer's one session;
+ * - a function that acts outside the transaction: `pg_advisory_lock` holds its lock past the read's end,
+ *   `pg_terminate_backend` ends another session, `set_config` changes a setting or the role, and `query_to_xml` runs
+ *   SQL given as text, around this gate.
  *
  * So, before the core runs any statement of a `read`, each must be **one read**:
  * - **Its command is a read**: its first word, after any opening parentheses, is `SELECT`, `WITH`, `VALUES` or `TABLE`.
@@ -37,12 +39,12 @@
  * number followed by a letter is read as two tokens, so a name after it is still seen (PostgreSQL 15 and later refuse
  * such a text as trailing junk). The gate parses nothing beyond tokens.
  *
- * **Why a gate and not only the database** (`design.md` §8): on PGlite the read runs on the engine's one session, under
- * its superuser — the writer's session —, so no role or login the database could refuse a write by exists apart from
- * the read-only transaction; on PostgreSQL the read pool logs in as the writer's login, and a role entered with `SET
- * ROLE` is left with `RESET ROLE` or `set_config('role', …)`: a login that may only read needs a setting of its own
- * (raised as task 14.2b's question). Either way the database refuses the write; the gate keeps every statement inside
- * the read-only transaction the database refuses it in.
+ * **Why a gate and not only the database.** On PGlite the read runs on the engine's one session (the writer's), under
+ * its superuser, so apart from the read-only transaction there is no role or login by which the database could refuse a
+ * write. On PostgreSQL the read pool logs in as the writer's login (OUTDATED), and a role entered with `SET ROLE` is left with
+ * `RESET ROLE` or `set_config('role', …)`: a login that may only read needs a setting of its own
+ * (`core.transportReader`, `./transport-reader.ts`). Either way the database refuses the write; the gate keeps every
+ * statement inside the read-only transaction in which the database refuses it. [PP-4; design §8]
  */
 
 /** Why the core refuses a statement of a `read` (`read-result.refused.reason`), in the order the gate checks them. */

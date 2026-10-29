@@ -1,38 +1,46 @@
 /**
- * Change capture for the per-block digests (DT-4; `openspec/changes/core-arch/design.md` §4 "Change capture for
- * digests"; owner decisions Q76, Q84, Q86): on every module table not declared `deterministic: false`, a row trigger
- * records, on the first touch of a primary key in a transaction, the row as it was (or that there was none) in a shadow
- * table, `core_digest_shadow.t_<first 32 hex digits of SHA-256(schema.table)>`; at the end of the block `core-digest`
- * reads each touched key's row as it was and as it is ({@link takeChanges}), and the digests are computed from them
- * (`src/determinism/digest.ts`, `src/backbone/core-digest/`). Every statement that writes a row fires the trigger —
- * a module's own, a helper trigger's, a provider function's, a cascade's — and `TRUNCATE`, which fires none, is refused
- * in blocks (DB-14), so no change escapes.
+ * Change capture for the per-block digests. On every module table not declared `deterministic: false`, a row trigger
+ * records, on the first touch of a primary key in a transaction, the row as it was (or that there was none). It writes
+ * it to a shadow table, `core_digest_shadow.t_<first 32 hex digits of SHA-256(schema.table)>`. At the end of the
+ * block `core-digest` reads each touched key's row as it was and as it is ({@link takeChanges}), and the digests are
+ * computed from them (`src/determinism/digest.ts`, `src/backbone/core-digest/`). [DT-4, Q76, Q84, Q86; design §4]
  *
- * **The trigger.** `AFTER INSERT OR UPDATE OR DELETE … FOR EACH ROW` (named {@link CAPTURE_TRIGGER}) on each module
- * table — on a partitioned table, which PostgreSQL clones onto every partition, those created later included — calling
- * a function of the table's own, `core_digest_shadow.f_<same digits>()`, written for its columns: it stores the old row
- * of an update or a delete, and for an insert, or an update that changed the key, the new key as absent before, each
- * only if the key has no row of this transaction in the shadow table yet (a row of another transaction, left by a
- * crash or written outside a block, is replaced). It is `SECURITY DEFINER`, owned by the writer's login, with
- * `search_path = pg_catalog, pg_temp`, so the module role a callback runs under needs no privilege on the shadow table
- * (task 2.6's note). Each shadow row carries the transaction's id (`pg_current_xact_id()`), which is how
+ * Every statement that writes a row fires the trigger: a module's own, a helper trigger's, a provider function's, a
+ * cascade's. `TRUNCATE`, which fires none, is rejected in blocks, so no change escapes. [DB-14]
+ *
+ * **The trigger.** `AFTER INSERT OR UPDATE OR DELETE … FOR EACH ROW` (named {@link CAPTURE_TRIGGER}) is set on each
+ * module table. On a partitioned table, PostgreSQL clones it onto every partition, those created later included. It
+ * calls a function of the table's own, `core_digest_shadow.f_<same digits>()`, written for its columns. The function
+ * stores:
+ * - the old row of an update or a delete;
+ * - for an insert, or an update that changed the key, the new key as absent before.
+ *
+ * Each is stored only if the key has no row of this transaction in the shadow table yet; a row of another transaction
+ * (left by a crash or written outside a block) is replaced. The function is `SECURITY DEFINER`, owned by the writer's
+ * login, with `search_path = pg_catalog, pg_temp`, so the module role a callback runs under needs no privilege on the
+ * shadow table. Each shadow row carries the transaction's id (`pg_current_xact_id()`), which is how
  * {@link takeChanges} reads only this block's touches.
  *
- * **What is captured.** Writes in a block, and nothing a migration writes: the function returns at once in a
- * transaction carrying the migration mark (`MIGRATION_MARKED_CONDITION` of the component), so a migration's rows are no
+ * **What is captured.** Writes in a block, and nothing a migration writes. The function returns at once in a
+ * transaction carrying the migration mark (the component's `MIGRATION_MARKED_CONDITION`), so a migration's rows are no
  * block's changes, and a migration may change the table's columns before its function is rewritten. A part's
  * `on-start-db` writes are captured into the shadow tables, and {@link finishCapture} empties them when startup ends,
- * before any block, so every shadow table is empty whenever no block is open. The contents hash (DT-3) leaves the
- * shadow schema out (owner decision Q101), so the layout of the shadow tables may change in a release without changing
- * it.
+ * before any block, so every shadow table is empty whenever no block is open. The contents hash leaves the shadow
+ * schema out, so the layout of the shadow tables may change in a release without changing the hash. [DT-3, Q101]
  *
- * **When.** The shadow schema is `core-digest`'s (its migrations create it, Q95); until it exists nothing is captured.
- * After each part's migrations and DT-6's check, before its `on-start-db`, {@link captureTables} makes the capture of
- * the part's tables match the tables as they are now — a table a migration added gets it, one whose columns changed gets
- * its shadow table and function written again (each shadow table's comment holds a fingerprint of the definitions), one
- * declared `deterministic: false` loses its trigger — and {@link finishCapture} drops the shadow tables and functions no
- * table uses any more. The tables are those of the `TRUNCATE` guard: every table of the plan's schemas, a partition
- * with its partitioned table (`TRUNCATE_GUARD_TABLES_SQL`), the opt-out decided by the component's `optOut`.
+ * **When.** The shadow schema belongs to `core-digest` (its migrations create it); until it exists nothing is
+ * captured. [Q95]
+ *
+ * After each part's migrations and the determinism check, before its `on-start-db`, {@link captureTables} makes the
+ * capture of the part's tables match the tables as they are now:
+ * - a table a migration added gets it;
+ * - a table whose columns changed gets its shadow table and function written again (each shadow table's comment holds
+ *   a fingerprint of the definitions);
+ * - a table declared `deterministic: false` loses its trigger.
+ *
+ * Then {@link finishCapture} drops the shadow tables and functions no table uses any more. The tables are those of the
+ * `TRUNCATE` guard: every table of the plan's schemas, a partition with its partitioned table
+ * (`TRUNCATE_GUARD_TABLES_SQL`), with the opt-out decided by the component's `optOut`. [DT-6]
  */
 
 import { createHash } from "node:crypto";
@@ -57,7 +65,10 @@ export const SHADOW_SCHEMA = "core_digest_shadow";
 /** The name of the capture trigger on each module table. */
 export const CAPTURE_TRIGGER = "umbradb_capture_changes";
 
-/** The first 32 hex digits of SHA-256 of `schema.table` (schema names hold no dot, DB-8): what names a table's shadow. */
+/**
+ * The first 32 hex digits of SHA-256 of `schema.table` (schema names hold no dot): what names a table's shadow.
+ * [DB-8]
+ */
 export function shadowDigits(schema: string, table: string): string {
   return createHash("sha256").update(`${schema}.${table}`, "utf8").digest("hex").slice(0, 32);
 }
@@ -72,7 +83,10 @@ export function captureFunctionName(schema: string, table: string): string {
   return `f_${shadowDigits(schema, table)}`;
 }
 
-/** A column of a captured table: its name, its DT-1 type, and how its copy in the shadow table is declared. */
+/**
+ * A column of a captured table: its name, its type in the canonical row encoding, and how its copy in the shadow table
+ * is declared. [DT-1]
+ */
 export interface CaptureColumn {
   readonly name: string;
   /** `format_type(atttypid, NULL)`: the type the row encoding takes (`bigint`, `text[]`, …). */
@@ -102,8 +116,8 @@ export async function captureReady(tx: ConsistentRead): Promise<boolean> {
 /**
  * Makes the capture of the tables of `schemas` match them (see the module comment): creates or rewrites each table's
  * shadow table, function and trigger where they are missing, disabled or written for other columns, and drops the
- * trigger of each table declared `deterministic: false`. Run by the writer's login, after DT-6's check of the same
- * tables (a table reaching it has a primary key). A no-op for a table whose capture is current.
+ * trigger of each table declared `deterministic: false`. Run by the writer's login, after the determinism check of the
+ * same tables (so a table reaching it has a primary key). A no-op for a table whose capture is current. [DT-6]
  */
 export async function captureTables(tx: Transaction, plan: SchemaPlan, schemas: readonly string[]): Promise<void> {
   if (schemas.length === 0) return;
@@ -132,9 +146,9 @@ export async function captureTables(tx: Transaction, plan: SchemaPlan, schemas: 
 
 /**
  * At the end of startup, before any block: drops the shadow tables and functions no module table of the plan uses any
- * more (a table dropped or renamed, or declared `deterministic: false`), and empties the others — the rows a part's
- * `on-start-db` wrote are no block's changes, and the shadow tables are empty whenever no block is open (`design.md`
- * §4). A no-op before `core-digest`'s migrations created the shadow schema.
+ * more (a table dropped or renamed, or declared `deterministic: false`), and empties the others: the rows a part's
+ * `on-start-db` wrote are no block's changes, and the shadow tables are empty whenever no block is open. A no-op before
+ * `core-digest`'s migrations created the shadow schema. [design §4]
  */
 export async function finishCapture(tx: Transaction, plan: SchemaPlan): Promise<void> {
   if (!(await captureReady(tx))) return;
@@ -161,8 +175,9 @@ export async function finishCapture(tx: Transaction, plan: SchemaPlan): Promise<
 }
 
 /**
- * The module tables whose changes are captured — those carrying the capture trigger, which startup attached — in DT-3's
- * order (by schema, then name, as bytes), with their columns and key: what `core-digest` digests at each height.
+ * The module tables whose changes are captured (those carrying the capture trigger, which startup attached), with their
+ * columns and key: what `core-digest` digests at each height. They are in the contents hash's order: by schema, then
+ * name, as bytes. [DT-3]
  */
 export async function capturedTables(read: ConsistentRead): Promise<CapturedTable[]> {
   const rows = await read.query(CAPTURED_SQL);
@@ -175,9 +190,10 @@ export async function capturedTables(read: ConsistentRead): Promise<CapturedTabl
 }
 
 /**
- * The keys of `table` this transaction touched, in DT-2's order of the key, each with its row as it was before the
- * transaction first touched it and as it is now (null where there is no row), as DT-1's values; and the table's shadow
- * rows deleted, this transaction's and any other's. `core-digest` calls it last in the block (DT-4, DT-5).
+ * The keys of `table` this transaction touched, in primary-key order. Each comes with its row as it was before the
+ * transaction first touched it and as it is now (null where there is no row), as canonical row-encoding values. The
+ * table's shadow rows are deleted, this transaction's and any other's. `core-digest` calls it last in the block.
+ * [DT-1, DT-2, DT-4, DT-5]
  */
 export async function takeChanges(read: ConsistentRead, table: CapturedTable): Promise<TouchedRow[]> {
   const shadow = `${SHADOW_SCHEMA}.${quoteIdentifier(shadowTableName(table.schema, table.name))}`;
@@ -205,8 +221,8 @@ ORDER BY ${order.join(", ")}`,
 // ── internals ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * The columns of the tables (not the partitions) of the schemas `$1`, in column order: name, DT-1 type, declared type
- * with the collation when it is not the type's own, and the position in the primary key.
+ * The columns of the tables (not the partitions) of the schemas `$1`, in column order: name, type in the canonical row
+ * encoding, declared type with the collation when it is not the type's own, and the position in the primary key. [DT-1]
  */
 const COLUMNS_SQL = `SELECT n.nspname::text AS schema, c.relname::text AS "table", c.relkind = 'p' AS partitioned,
        a.attnum::integer AS number, a.attname::text AS name, pg_catalog.format_type(a.atttypid, NULL) AS type,
@@ -277,8 +293,8 @@ async function captureState(tx: ConsistentRead, schemas: readonly string[]): Pro
 }
 
 /**
- * The tables (not the partitions) of `schemas` with their columns and keys — the tables the `TRUNCATE` guard lists,
- * partitions left to their partitioned table, read by name in DT-3's order.
+ * The tables (not the partitions) of `schemas` with their columns and keys: the tables the `TRUNCATE` guard lists, with
+ * partitions left to their partitioned table, sorted by name in the contents hash's order. [DT-3]
  */
 async function describeTables(read: ConsistentRead, schemas: readonly string[]): Promise<CapturedTable[]> {
   const listed = (await read.query(TRUNCATE_GUARD_TABLES_SQL, [schemas])) as unknown as GuardTableRow[];
@@ -321,7 +337,7 @@ async function describeTables(read: ConsistentRead, schemas: readonly string[]):
 /** The statements that create a table's capture, and the fingerprint its shadow table's comment holds. */
 function captureDefinitions(table: CapturedTable): { readonly statements: string[]; readonly fingerprint: string } {
   if (table.key.length === 0) {
-    throw new Error(`change capture: ${table.schema}.${table.name} has no primary key (DT-6's check runs first)`);
+    throw new Error(`change capture: ${table.schema}.${table.name} has no primary key (the determinism check runs first)`);
   }
   const shadow = `${SHADOW_SCHEMA}.${quoteIdentifier(shadowTableName(table.schema, table.name))}`;
   const fn = `${SHADOW_SCHEMA}.${quoteIdentifier(captureFunctionName(table.schema, table.name))}`;

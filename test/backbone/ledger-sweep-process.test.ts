@@ -17,15 +17,20 @@ import {
 } from "./sweep-tapes.js";
 
 /**
- * A105 `[DIFF]` (task 12.5; `openspec/changes/core-arch/acceptance.md` A105, LG-14): `core-ledger-state`'s
- * fixed-budget mark-and-sweep through the real process, on PostgreSQL 18 and PGlite 0.5.10, with K = 50, over task
- * 12.5's DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`: wide trees, a new root every block, a marking round larger
- * than the budget) served by a test package in the ledger worker (`sweep-test-loader.ts`, which stores nodes as the
- * vendored packages do and honours evictions): after every block the sweep's row, its grey set, its marks and the stored
- * nodes are the reference model's (`./sweep-model.ts`) — on both backends, which are then equal —; the nodes of subtree
- * 0's first version, deleted by the sweep while its second version stood, are needed again at the fixture's REVERT and
- * inserted again (LG-14's "Reused content after a deletion"); with `sweep: off` nothing is deleted. The committed
- * negative control (insertion order) is `ledger-sweep.negative-control.test.ts`.
+ * `core-ledger-state`'s fixed-budget mark-and-sweep through the real process, on PostgreSQL 18 and PGlite 0.5.10, with
+ * K = 50. [A105 DIFF, LG-14]
+ *
+ * The input is the sweep DAG fixture (`test/ledger/fixtures/sweep-fixture.ts`): wide trees, a new root every block, a
+ * marking round larger than the budget. A test package in the ledger worker serves it (`sweep-test-loader.ts`, which
+ * stores nodes as the vendored packages do and honours evictions). Checked:
+ * - after every block, the sweep's row, its grey set, its marks and the stored nodes are the reference model's
+ *   (`./sweep-model.ts`), on both backends, which are therefore equal;
+ * - the nodes of subtree 0's first version, deleted by the sweep while its second version stood, are needed again at
+ *   the fixture's REVERT and inserted again (reused content after a deletion);
+ * - with `sweep: off` nothing is deleted.
+ * [A105 DIFF, LG-14]
+ *
+ * The committed negative control (insertion order) is `ledger-sweep.negative-control.test.ts`.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -62,7 +67,8 @@ describe("A105 (LG-14): the fixed-budget mark-and-sweep, against its reference m
 
   it("[[ledger.sweep-cross-backend-identical]] A105: K = 50 over wide trees and interleaved new roots, the grey, marked and stored sets are the reference model's after every block, on PostgreSQL and on PGlite", async () => {
     const model = modelOfFixture();
-    // The fixture is what A105 asks: one marking round does not fit in the budget, cycles complete, nodes are deleted.
+    // The fixture has what the test needs: one marking round does not fit in the budget, cycles complete, nodes are
+    // deleted. [A105 DIFF]
     expect((model[0]?.grey.length ?? 0) + (model[0]?.marks.length ?? 0)).toBeGreaterThan(50);
     expect(model.at(-1)?.cycle).toBeGreaterThanOrEqual(4n);
     const runs: Map<bigint, TableSnapshot>[] = [];

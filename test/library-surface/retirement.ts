@@ -1,13 +1,13 @@
 /**
- * A5 `[STATIC]` (LS-5, task 17.2): the retirement list of `openspec/changes/core-arch/design.md` §13 ("Quality gates:
- * what moves and what is retired"), transcribed, and the checks that compare the tree with it — the required-test
- * manifest, `stryker.conf.json` `mutate`, the coverage floors of `vitest.config.ts` and the file list of `Formal/Lean`
- * (A5's four), and the rest of §13's rows: the retired files, the scripts, the barrel's names, the Quint change.
+ * The design's retirement list ("Quality gates: what moves and what is retired"), transcribed, and the checks that
+ * compare the tree with it. The four main lists are the required-test manifest, `stryker.conf.json` `mutate`, the
+ * coverage floors of `vitest.config.ts` and the file list of `Formal/Lean`. The list's other rows are the retired
+ * files, the scripts, the barrel's names and the Quint change. [A5 STATIC, LS-5; design §13]
  *
  * Every check takes plain data and returns one sentence per problem, empty when there is none, so
  * `./retirement.test.ts` runs the same checks on the real tree and on its negative controls. {@link SECTION_13_TERMS}
- * holds §13's own words for each list below; the test checks that §13 still says them, so the transcription cannot
- * drift from the document unseen.
+ * holds the retirement list's own words for each list below; the test checks that the design still says them, so the
+ * transcription cannot drift from the document unseen.
  */
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -18,8 +18,9 @@
 export const LEAN_ROOT = "Formal/Lean";
 
 /**
- * The file list of `Formal/Lean` once §13 is applied, `.lake/` (Lake's build output, ignored by git) left out: the
- * Watermarks model and laws (W1, the cursor table's law, SH-1), `APISmoke`, the trust audit, and the project's files.
+ * The file list of `Formal/Lean` once the retirement list is applied, `.lake/` (Lake's build output, ignored by git)
+ * left out: the Watermarks model and laws (W1, the cursor table's law), `APISmoke`, the trust audit, and the project's
+ * files. [SH-1; design §13]
  */
 export const LEAN_FILES: readonly string[] = [
   "Formal/Lean/UmbraDBFormal.lean",
@@ -39,9 +40,9 @@ export const LEAN_FILES: readonly string[] = [
 ];
 
 /**
- * §13's retired Lean modules: TemporalKV (T1–T5 and retention) and Checkpoint (C1) with their `UmbraDBFormalTest`
+ * The retired Lean modules: TemporalKV (T1–T5 and retention) and Checkpoint (C1) with their `UmbraDBFormalTest`
  * counterparts, and the two aggregators that only import them (`Checkpoint.lean`, `TemporalKV/Retention.lean`, which
- * lies under the first prefix). A path is retired when it is one of these or lies below one ending in `/`.
+ * lies under the first prefix). A path is retired when it is one of these or lies below one ending in `/`. [design §13]
  */
 export const RETIRED_LEAN: readonly string[] = [
   "Formal/Lean/UmbraDBFormal/TemporalKV/",
@@ -62,7 +63,10 @@ export const TRUST_IMPORTS: readonly string[] = [
   "UmbraDBFormalTest.Watermarks.Laws",
 ];
 
-/** `APISmoke`'s lemmas: §13 retires the three checkpoint-union lemmas and keeps the other two. */
+/**
+ * `APISmoke`'s lemmas: the retirement list retires the three checkpoint-union lemmas and keeps the other two.
+ * [design §13]
+ */
 export const RETIRED_LEMMAS: readonly string[] = ["checkpoint_union_comm", "checkpoint_union_assoc", "checkpoint_union_idem"];
 export const KEPT_LEMMAS: readonly string[] = ["watermark_overwrite", "adjacent_Ico_disjoint"];
 
@@ -82,8 +86,9 @@ export function leanTheorems(source: string): string[] {
 }
 
 /**
- * The file list of `Formal/Lean` against §13: a retired module still there, a kept file missing, a file §13 does not
- * list, the aggregators' imports, `APISmoke`'s lemmas. `read` gives a file's text by its repository path.
+ * The file list of `Formal/Lean` against the retirement list: a retired module still there, a kept file missing, a file
+ * the list does not name, the aggregators' imports, `APISmoke`'s lemmas. `read` gives a file's text by its repository
+ * path. [design §13]
  */
 export function leanProblems(files: readonly string[], read: (path: string) => string): string[] {
   const problems: string[] = [];
@@ -121,7 +126,7 @@ export function leanProblems(files: readonly string[], read: (path: string) => s
 // Required test ids (`test/integration/required-tests.manifest.json`)
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** Ids 1–4 (`crash-harness.smoke.*`), kept; task 18.1 retargets them to a crash worker that drives the runner. */
+/** Ids 1–4 (`crash-harness.smoke.*`), kept; their crash worker is to be retargeted to drive the runner. */
 export const KEPT_REQUIRED_IDS: readonly string[] = [
   "crash-harness.smoke.spawn-sigkill-container-survives",
   "crash-harness.smoke.pg-terminate-backend-drops-and-recovers",
@@ -157,7 +162,10 @@ export const RETIRED_REQUIRED_IDS: readonly string[] = [
 /** The deferred id, retired with the 0.9.5 save it was deferred for. */
 export const RETIRED_DEFERRED_IDS: readonly string[] = ["crash.pg-kill-save.no-duplicate-with-idempotency-key"];
 
-/** The ids of `acceptance.md` §17 ("Required test ids added to the manifest"), read from its table. */
+/**
+ * The ids of the required-test table ("Required test ids added to the manifest"), read from `acceptance.md`.
+ * [acceptance §17]
+ */
 export function acceptanceIds(acceptance: string): string[] {
   const start = acceptance.indexOf("## 17. Required test ids added to the manifest");
   if (start < 0) return [];
@@ -172,9 +180,9 @@ export interface ManifestShape {
 }
 
 /**
- * The manifest against §13: ids 1–4 kept, ids 5–25 and the deferred id gone, nothing else but `acceptance.md` §17's
- * ids (`added`), and the pinned count equal to the list. `pending` names the added ids that may still be absent: task
- * 18.4 adds them all and passes none, and from then on the comparison is exact.
+ * The manifest against the retirement list: ids 1–4 kept, ids 5–25 and the deferred id gone, nothing else but the
+ * required-test table's ids (`added`), and the pinned count equal to the list. `pending` names the added ids that may
+ * still be absent; once none is pending, the comparison is exact. [design §13; acceptance §17]
  */
 export function manifestProblems(
   manifest: ManifestShape,
@@ -221,11 +229,14 @@ export function manifestProblems(
 // ---------------------------------------------------------------------------------------------------------------------
 
 /**
- * §13's mutation targets at the paths the build gave them (Q157): §13 named `src/runner/order.ts` (the order within
- * a point, RN-3: `src/runner/dispatch.ts`), `src/ledger/sweep.ts` (LG-14's step: `src/backbone/core-ledger-state/
- * sweep.ts`, task 12.5) and `src/backbone/block-fetch-queue.ts` (the best-block queue and the finalized prefetch, IN-5
- * and IN-6: `src/backbone/core-block-fetch/node-source.ts`, task 10.3). Each with the fast tests that kill its mutants;
- * `vitest.mutation.config.ts` runs exactly their union, and Stryker runs, per target, those that import it.
+ * The retirement list's mutation targets, at the paths the build gave them. The list named: [Q157; design §13]
+ * - `src/runner/order.ts`, the order within a point, now `src/runner/dispatch.ts` [RN-3];
+ * - `src/ledger/sweep.ts`, the ledger state's sweep step, now `src/backbone/core-ledger-state/sweep.ts` [LG-14];
+ * - `src/backbone/block-fetch-queue.ts`, the best-block queue and the finalized prefetch, now
+ *   `src/backbone/core-block-fetch/node-source.ts` [IN-5, IN-6].
+ *
+ * Each comes with the fast tests that kill its mutants; `vitest.mutation.config.ts` runs exactly their union, and
+ * Stryker runs, per target, those that import it.
  */
 export const MUTATION_TARGETS: Readonly<Record<string, readonly string[]>> = {
   "src/modules/graph.ts": ["test/modules/graph.test.ts", "test/modules/graph-public-items.test.ts"],
@@ -245,7 +256,7 @@ export const MUTATION_TARGETS: Readonly<Record<string, readonly string[]>> = {
   "src/backbone/core-block-fetch/node-source.ts": ["test/backbone/node-source.test.ts"],
 };
 
-/** The five 0.9.5 adapters §13 retires as targets. */
+/** The five 0.9.5 adapters the retirement list retires as targets. [design §13] */
 export const RETIRED_MUTATION_TARGETS: readonly string[] = [
   "src/postgres/save-and-advance.ts",
   "src/postgres/checkpoint-store.ts",
@@ -254,10 +265,10 @@ export const RETIRED_MUTATION_TARGETS: readonly string[] = [
   "src/postgres/temporal-kv.ts",
 ];
 
-/** The break threshold §13 keeps. */
+/** The break threshold the retirement list keeps. [design §13] */
 export const MUTATION_BREAK = 65;
 
-/** `stryker.conf.json`'s `mutate` and break, and the mutation run's tests, against §13. */
+/** `stryker.conf.json`'s `mutate` and break, and the mutation run's tests, against the retirement list. [design §13] */
 export function mutationProblems(mutate: readonly string[], include: readonly string[], breakAt: number): string[] {
   const problems: string[] = [];
   const targets = Object.keys(MUTATION_TARGETS);
@@ -288,7 +299,10 @@ export interface Floor {
   readonly branches: number;
 }
 
-/** The five 0.9.5 floors §13 retires, and the three it keeps at moved paths (their old keys go with the files). */
+/**
+ * The five 0.9.5 floors the retirement list retires, and the three it keeps at moved paths (their old keys go with the
+ * files). [design §13]
+ */
 export const RETIRED_FLOORS: readonly string[] = [
   "**/postgres/checkpoint-store.ts",
   "**/postgres/save-and-advance.ts",
@@ -301,10 +315,11 @@ export const RETIRED_FLOORS: readonly string[] = [
 ];
 
 /**
- * The floors §13 keeps at their moved paths and adds, each at least the figure given: `durability-probe`, `migrate`,
- * `errors` (the database API's and the `deterministic_postgresql` component's, which holds `UmbraError` since Q79),
- * the 95/90 directories, the sweep (`src/ledger/sweep*` in §13; as built, `src/backbone/core-ledger-state/sweep.ts`,
- * Q157) and the test tape. §13's default for `src/**` (90/85) is {@link DEFAULT_SRC_FLOOR}, one glob per directory.
+ * The floors the retirement list keeps at their moved paths and adds, each at least the figure given:
+ * `durability-probe`, `migrate`, `errors` (the database API's and the `deterministic_postgresql` component's, which
+ * holds `UmbraError`), the 95/90 directories, the sweep (`src/ledger/sweep*` in the list; as built,
+ * `src/backbone/core-ledger-state/sweep.ts`) and the test tape. The list's default for `src/**` (90/85) is
+ * {@link DEFAULT_SRC_FLOOR}, one glob per directory. [Q79, Q157; design §13]
  */
 export const REQUIRED_FLOORS: Readonly<Record<string, Floor>> = {
   "**/src/db/durability-probe.ts": { lines: 97, branches: 92 },
@@ -319,12 +334,12 @@ export const REQUIRED_FLOORS: Readonly<Record<string, Floor>> = {
 };
 
 /**
- * §13's floors not yet in `vitest.config.ts`, each with the reason; a pending floor may be absent, never weaker. Empty:
- * the last one, the sweep's 95/90 (Q158 A), was applied by task 17.5b.
+ * The retirement list's floors not yet in `vitest.config.ts`, each with the reason; a pending floor may be absent,
+ * never weaker. Empty: the last one, the sweep's 95/90, has been applied. [Q158 A; design §13]
  */
 export const PENDING_FLOORS: readonly string[] = [];
 
-/** §13's default floor for every file of `src/`. */
+/** The retirement list's default floor for every file of `src/`. [design §13] */
 export const DEFAULT_SRC_FLOOR: Floor = { lines: 90, branches: 85 };
 
 /** The coverage exclusions of the 0.9.5 chain archive (`vitest.config.ts`), removed with it. */
@@ -336,9 +351,9 @@ export const RETIRED_COVERAGE_EXCLUDES: readonly string[] = [
 ];
 
 /**
- * The coverage floors against §13. `thresholds` is `vitest.config.ts`'s `coverage.thresholds` (its glob keys hold
- * `{ lines, branches }`); `srcEntries` the names directly in `src/` (directories end with `/`), every one of which but
- * the barrel must fall under a floor of at least §13's default.
+ * The coverage floors against the retirement list. `thresholds` is `vitest.config.ts`'s `coverage.thresholds` (its glob
+ * keys hold `{ lines, branches }`); `srcEntries` the names directly in `src/` (directories end with `/`), every one of
+ * which but the barrel must fall under a floor of at least the list's default. [design §13]
  */
 export function floorProblems(
   thresholds: Readonly<Record<string, unknown>>,
@@ -385,12 +400,13 @@ export function floorProblems(
 // ---------------------------------------------------------------------------------------------------------------------
 
 /**
- * Every path §13 (and task 17.2's text) retires; a path ending in `/` is a whole directory. The 0.9.5 source —
+ * Every path the retirement list retires; a path ending in `/` is a whole directory. The 0.9.5 source —
  * TemporalKV, CheckpointStore, Watermarks, the transaction/lease layer, `saveAndAdvance`, WalletStateEnvelope, the
  * `chain_archive` store with its rollover and partitions, and the plumbing the new core refactored into `src/db/`
  * (client, migration runner and lineage, durability probe, errors, abort helper) — and `chain-archive-sync/`; their
  * tests (the "Test files" row; the 0.9.5 API pins of the "Public API pins" row); the benchmarks' workloads and
  * baseline with the harness and smoke guard that only drive them (the TransactionHistory workload included).
+ * [design §13]
  */
 export const RETIRED_PATHS: readonly string[] = [
   "src/postgres/",
@@ -446,8 +462,9 @@ export const RETIRED_PATHS: readonly string[] = [
   "test/api-surface/withtx-methods.test.ts",
   "test/api-surface/chain-archive-routing.test.ts",
   // The benchmarks: the TemporalKV, Watermarks, CheckpointStore (with its GC curve) and Lease workloads, their baseline,
-  // and the TransactionHistory workload moved by task 17.1. The harness and the smoke guard that ran them were removed
-  // too; task 17.3 wrote new ones at the same paths, for the core (`bench/core.ts`; §13 keeps the non-gating job).
+  // and the moved TransactionHistory workload. The harness and the smoke guard that ran them were removed too; new ones
+  // at the same paths run the core (`bench/core.ts`), since the retirement list keeps the job that never gates a build.
+  // [design §13]
   "bench/workloads/",
   "bench/baseline.1.0.0-perf-baseline.1.json",
   "legacy/transaction-history/bench/",
@@ -458,14 +475,14 @@ export function retiredPath(path: string): boolean {
   return RETIRED_PATHS.some((retired) => (retired.endsWith("/") ? path.startsWith(retired) : path === retired));
 }
 
-/** The files of `files` (repository paths) that §13 retires. */
+/** The files of `files` (repository paths) that the retirement list retires. [design §13] */
 export function retiredFileProblems(files: readonly string[]): string[] {
   return files.filter(retiredPath).map((file) => `${file} is retired by design.md §13 but still in the tree`);
 }
 
 /**
- * `package.json`'s scripts: `archive:sync` gone (§13's Scripts row); `test:live` gone and legacy's TypeScript program out
- * of `typecheck` (owner decision Q112 B, task 17.2).
+ * `package.json`'s scripts: `archive:sync` gone (the retirement list's Scripts row); `test:live` gone and legacy's
+ * TypeScript program out of `typecheck`. [Q112 B; design §13]
  */
 export function scriptProblems(scripts: Readonly<Record<string, string>>): string[] {
   const problems: string[] = [];
@@ -478,8 +495,9 @@ export function scriptProblems(scripts: Readonly<Record<string, string>>): strin
 }
 
 /**
- * 0.9.5's public names (`src/index.ts` at `a75ed95`, less TransactionHistory's, which task 17.1 removed): the 35 values
- * and the types. `Migration` is left out: design §12 exports a type of that name (a module's migration).
+ * 0.9.5's public names (`src/index.ts` at `a75ed95`, less TransactionHistory's, which was removed earlier): the 35
+ * values and the types. `Migration` is left out: the new surface exports a type of that name (a module's migration).
+ * [design §12]
  */
 export const RETIRED_EXPORTS: readonly string[] = [
   "createClient", "DEFAULT_SCHEMA", "runMigrations", "MigrationLockTimeoutError",
@@ -510,7 +528,9 @@ export function exportProblems(where: string, names: readonly string[]): string[
     .map((name) => `${where} still exports ${name}, a 0.9.5 name retired with its part (design.md §13, LS-2)`);
 }
 
-/** The Quint change's proposal: §13 sets its status to Archived, its laws being retired. */
+/**
+ * The Quint change's proposal: the retirement list sets its status to Archived, its laws being retired. [design §13]
+ */
 export const QUINT_PROPOSAL = "openspec/changes/v1.1.0-quint-model-checking/proposal.md";
 
 export function quintProblems(proposal: string): string[] {
@@ -524,17 +544,17 @@ export function quintProblems(proposal: string): string[] {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// §13's own words
+// The retirement list's own words [design §13]
 // ---------------------------------------------------------------------------------------------------------------------
 
-/** The text of `design.md` §13. */
+/** The text of the retirement list: `design.md`'s section "13. Quality gates". */
 export function section13(design: string): string {
   const start = design.indexOf("## 13. Quality gates");
   const end = design.indexOf("\n## 14.", start);
   return start < 0 ? "" : design.slice(start, end < 0 ? undefined : end);
 }
 
-/** The words §13 uses for each list above: the transcription is checked against them. */
+/** The words the retirement list uses for each list above: the transcription is checked against them. */
 export const SECTION_13_TERMS: readonly string[] = [
   "`UmbraDBFormal/TemporalKV/**`",
   "`UmbraDBFormal/Checkpoint/**`",
@@ -563,7 +583,7 @@ export const SECTION_13_TERMS: readonly string[] = [
   "The 36-symbol pins, the error-catalog and retryability tables of 0.9.5",
 ];
 
-/** One problem for each term §13 no longer says. */
+/** One problem for each term the retirement list no longer says. */
 export function sectionProblems(section: string): string[] {
   return SECTION_13_TERMS.filter((term) => !section.includes(term)).map(
     (term) => `design.md §13 no longer says ${term}: the transcription in retirement.ts is out of date`,

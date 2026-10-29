@@ -13,8 +13,8 @@ import {
 } from "../../src/deterministic-postgresql/index.js";
 
 /**
- * The database API's result mapping and parameter texts (DB-2), without a database: PostgreSQL's text output as it
- * arrives from either backend, mapped by the column's type OID. `results.test.ts` checks the same against PostgreSQL.
+ * The database API's result mapping and parameter texts, without a database: PostgreSQL's text output as it arrives
+ * from either backend, mapped by the column's type OID. `results.test.ts` checks the same against PostgreSQL. [DB-2]
  */
 
 const SEED = 20261023;
@@ -101,8 +101,8 @@ describe("lossless JSON (DB-2)", () => {
   // Node.js 24.9.0's JSON.parse (V8 13.6.233.10) can read such a key as a backslash once an earlier JSON.parse in the
   // process has read the key "\\": two different documents would read back equal, and so would their contents
   // hashes. Whether it does depends on the strings the process already holds, so this test cannot make it happen on
-  // demand; A7's seeded differential round trip (`../db/differential.test.ts`) did, on both backends, and is its
-  // reproduction.
+  // demand. The seeded differential round trip (`../db/differential.test.ts`) did, on both backends, and is its
+  // reproduction. [A7]
   it("reads an object key that is one escape sequence as its character, also after the key \"\\\\\" was read", () => {
     const keys = (text: string): string[] => Object.keys(parseJsonLossless(text) as object);
     expect(keys('{"\\\\": 1}')).toEqual(["\\"]);
@@ -333,7 +333,7 @@ describe("the result mapping by type (DB-2; design.md §4's column-type table)",
 
     it("refuses what it cannot read as unreadable output: years outside 0001–9999, BC, an offset other than +00", () => {
       const unreadable: readonly (readonly [string, string])[] = [
-        // Q81: PostgreSQL's range reaches 4714 BC and 294276 AD; the mapping reads years 0001–9999 only.
+        // PostgreSQL's range reaches 4714 BC and 294276 AD; the mapping reads years 0001–9999 only. [Q81]
         ["timestamp with time zone", "10000-01-01 00:00:00+00"],
         ["timestamp with time zone", "294276-12-31 23:59:59.999999+00"],
         ["timestamp with time zone", "0044-03-15 12:00:00+00 BC"],
@@ -376,7 +376,7 @@ describe("the result mapping by type (DB-2; design.md §4's column-type table)",
 
     it("returns text, never a JavaScript Date, which keeps milliseconds only (negative control)", () => {
       for (const [text] of TIMESTAMPTZ) expect(typeof mapValue(oid("timestamp with time zone"), text)).toBe("string");
-      // The mapping task 2.1 shipped, `new Date(text)`, fails the microsecond case above: a Date cannot hold it.
+      // An earlier `Date`-based mapping, `new Date(text)`, fails the microsecond case above: a Date cannot hold it.
       expect(new Date("2025-05-21 14:30:00.123456+00").toISOString()).toBe("2025-05-21T14:30:00.123Z");
     });
   });

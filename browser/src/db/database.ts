@@ -1,11 +1,12 @@
 /**
- * Opening the database a configuration names, in the browser build, in place of `src/config/database.ts`
- * (`openspec/changes/core-arch/specs/browser/spec.md` BR-1; `specs/configuration/spec.md` CF-4, CF-9; `design.md`
- * §7, §9.2; task 16.1): the browser runs PGlite only — PostgreSQL needs a network connection a page cannot make —, in
- * memory (`{ kind: "pglite", memory: true }`, the default) or in the origin's private file system (`{ kind: "pglite",
- * path: <name> }`, OPFS, PGlite's `opfs-ahp://` storage), under its Web Lock (`./web-lock.ts`). The opening itself is the database API's own
- * (`openPglite`, `src/db/pglite.ts`): the development opt-in is checked first (`development-opt-in-required`), the lock
- * taken, then the engine started with the pinned start parameters.
+ * Opening the database a configuration names, in the browser build, in place of `src/config/database.ts`. The browser
+ * runs PGlite only, since PostgreSQL needs a network connection a page cannot make. It runs in memory
+ * (`{ kind: "pglite", memory: true }`, the default) or in the origin's private file system
+ * (`{ kind: "pglite", path: <name> }`, OPFS, PGlite's `opfs-ahp://` storage), under its Web Lock (`./web-lock.ts`).
+ * [BR-1, CF-4, CF-9; design §7, §9.2]
+ *
+ * The opening itself is the database API's own (`openPglite`, `src/db/pglite.ts`): the development opt-in is checked
+ * first (`development-opt-in-required`), the lock taken, then the engine started with the pinned start parameters.
  */
 
 import type { CommittedHeight, Database } from "../../../src/db/api.js";

@@ -6,10 +6,14 @@ import { MARKER } from "./time-values.worker.js";
 import { spawnChild } from "../child-processes.js";
 
 /**
- * A139 [DIFF] (DB-2, owner decisions Q68 and Q81): on both backends, in processes whose time zone is `UTC`,
- * `America/New_York` and `Asia/Tokyo`, a `timestamptz` reads as RFC 3339 UTC text (`2025-05-21T14:30:00Z`, the fraction
- * only when there is one), a `timestamp` as the same text without `Z`, a `date` as `2025-05-21`, `infinity` and
- * `-infinity` as those words, arrays of them element by element with `NULL` as `null` — identical in every process.
+ * Date and time values read the same in every time zone, on both backends. In processes whose time zone is `UTC`,
+ * `America/New_York` and `Asia/Tokyo`, every process reads:
+ * - a `timestamptz` as RFC 3339 UTC text (`2025-05-21T14:30:00Z`, with a fraction only when there is one);
+ * - a `timestamp` as the same text without `Z`;
+ * - a `date` as `2025-05-21`;
+ * - `infinity` and `-infinity` as those words;
+ * - arrays of them element by element, with `NULL` as `null`.
+ * [A139 DIFF, DB-2, Q68, Q81]
  *
  * Each process is a child started with `node --import tsx` and its own `TZ` (`time-values.worker.ts`). On PostgreSQL
  * it opens the test database of this file through the API; on PGlite it creates its engine itself, in its own time
@@ -17,7 +21,7 @@ import { spawnChild } from "../child-processes.js";
  * other, and with what this process reads.
  *
  * Committed controls: each child reports its time zone and its clock's offset, which differ, so the processes did run
- * in three zones; and each also applies the mapping task 2.1 shipped (`new Date(text)`) to the same values' text,
+ * in three zones; and each also applies an earlier `Date`-based mapping (`new Date(text)`) to the same values' text,
  * which gives a different instant for the `timestamp` in each zone and drops the microseconds, so this test fails a
  * `Date`-based mapping.
  */
@@ -44,7 +48,7 @@ const SETUP = `
 
 const QUERY = "SELECT *, tz::text AS tz_text, ts::text AS ts_text FROM m.times ORDER BY k";
 
-/** What every process must read, written out by hand from DB-2 and A139. */
+/** What every process must read, written out by hand from the time-value rules. [DB-2, A139 DIFF] */
 const EXPECTED = [
   {
     k: 1,

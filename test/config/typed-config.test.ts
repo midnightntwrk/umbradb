@@ -6,12 +6,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { REPOSITORY } from "./config-fixtures.js";
 
 /**
- * A27 `[STATIC]` and CF-2's scenario, on a configuration file as an operator writes one (task 4.1): the TypeScript
- * compiler, run with `noEmit` and the repository's compiler options, reports each fault at its line — a misspelled
- * `core` field (CF-2's own `databse`), a wrong field type (CF-3's `livenessTimeoutMs: "30000"`), and a module's `entry`
- * given another module's settings — and nothing else; the same file with the faults corrected compiles without a
- * diagnostic. `./builders.test.ts` holds the same cases as `@ts-expect-error` lines, checked by `npm run typecheck`.
- * (`umbradb config check`, task 4.4, runs the compiler this way.)
+ * Static type checks (`[STATIC]`) of a configuration file written as an operator writes one. The TypeScript compiler,
+ * run with `noEmit` and the repository's compiler options, reports each fault at its line, and nothing else:
+ * - a misspelled `core` field (`databse`);
+ * - a wrong field type (`livenessTimeoutMs: "30000"`);
+ * - a module's `entry` given another module's settings.
+ *
+ * The same file with the faults corrected compiles without a diagnostic. `./builders.test.ts` holds the same cases as
+ * `@ts-expect-error` lines, checked by `npm run typecheck`. `umbradb config check` runs the compiler the same way.
+ * [A27 STATIC, CF-2, CF-3]
  */
 
 /** The builders and the fixture modules, imported by absolute path (the compiler does not resolve a `file:` URL). */

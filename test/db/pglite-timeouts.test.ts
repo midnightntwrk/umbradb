@@ -18,17 +18,17 @@ import type { Job, WorkerEvent } from "./pglite-timeouts.worker.js";
 import { spawnChild } from "../child-processes.js";
 
 /**
- * DB-15 on PGlite 0.5.10, where a timeout that fires hangs the engine — the whole process, synchronously (design §14,
- * `electric-sql/pglite#1058`; probe 2026-10-25) — so each case runs in a process of its own (`pglite-timeouts.worker.ts`)
- * that this file kills if the statement after 2 s idle in a transaction has not answered {@link HANG_MS} after it was
- * sent; a statement that answers does so in milliseconds.
+ * The zero session timeouts on PGlite 0.5.10. There, a timeout that fires hangs the engine: the whole process,
+ * synchronously (`electric-sql/pglite#1058`; seen in a probe on 2026-10-25). So each case runs in a process of its own
+ * (`pglite-timeouts.worker.ts`), which this file kills if the statement after 2 s idle in a transaction has not
+ * answered {@link HANG_MS} after it was sent. A statement that answers does so in milliseconds. [DB-15; design §14]
  *
- * - The zero timeouts, A141's PGlite half under a configuration file setting every timeout to 1 s: an engine started
- *   with the backend's start parameters (`PGLITE_START_PARAMS`) reports 0 and answers; the same engine started without
- *   their zero timeouts — the negative control of "a writer without the zeros" — reports 1 s and hangs.
- * - The read option: an API read with `timeoutMs` reports both timeouts at 0 and answers after idling past it (A141:
- *   "on PGlite an API read sets neither timeout"); a read that sets them, as a PGlite backend applying the option would,
- *   fails that check — it reports 1 s and hangs — the committed negative control of the check.
+ * - The zero timeouts, on PGlite, under a configuration file setting every timeout to 1 s: an engine started with the
+ *   backend's start parameters (`PGLITE_START_PARAMS`) reports 0 and answers. The same engine started without their
+ *   zero timeouts (the negative control of "a writer without the zeros") reports 1 s and hangs. [A141]
+ * - The read option: an API read with `timeoutMs` reports both timeouts at 0 and answers after idling past it, since on
+ *   PGlite an API read sets neither timeout. A read that sets them, as a PGlite backend applying the option would,
+ *   fails that check: it reports 1 s and hangs. That is the committed negative control of the check. [A141]
  */
 
 const WORKER = fileURLToPath(new URL("./pglite-timeouts.worker.ts", import.meta.url));
@@ -90,7 +90,7 @@ function settings(run: Run): unknown {
   return run.events.find((event) => event.event === "settings")?.settings;
 }
 
-/** A141's PGlite check: every timeout 0 where the work runs, and the statement after 2 s idle answered. */
+/** The PGlite timeout check: every timeout 0 where the work runs, and the statement after 2 s idle answered. [A141] */
 function expectNeverCutOffNorHung(run: Run): void {
   expect(run.events.filter((event) => event.event === "failed"), run.stderr.slice(-2_000)).toEqual([]);
   expect(settings(run)).toEqual(ALL_ZERO);
@@ -98,7 +98,7 @@ function expectNeverCutOffNorHung(run: Run): void {
   expect(run.events.map((event) => event.event)).toEqual(["settings", "sent", "answered"]);
 }
 
-/** A data directory whose configuration file (`postgresql.auto.conf`) sets every timeout to 1 s (A141). */
+/** A data directory whose configuration file (`postgresql.auto.conf`) sets every timeout to 1 s. [A141] */
 async function hostileDirectory(): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), "umbradb-pglite-timeouts-"));
   directories.push(root);

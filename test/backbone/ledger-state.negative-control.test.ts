@@ -12,15 +12,17 @@ import { a99Problems, a106Problems } from "./ledger-checks.js";
 import { type LedgerScenario, ledgerScenario, recordedGenesis } from "./ledger-tapes.js";
 
 /**
- * The committed negative controls of task 12.3 (`openspec/changes/core-arch/acceptance.md` A82, A99, A106; LG-15, IN-7,
- * task 12.1a's outcomes), each a `core-ledger-state` built from the module's own parts with one rule broken, run
- * through the process on PostgreSQL 18 and PGlite 0.5.10 on its criterion's scenario, and failing that criterion's
- * oracle — while the real module, on the same scenario, passes it:
- * - a root check that compares nothing passes A106's package with a wrong root, so A106's oracle fails;
- * - a module that ignores the chain's outcomes replays a transaction the chain failed, so a range with one halts with
- *   `root-mismatch` and A99's oracle fails;
- * - block 0 taken in the wrong case of IN-7 — applied to a genesis state that holds it already, or a genesis state taken
- *   as it is that does not — gives another root than the node's: a halt at 0, and A82's root fails.
+ * The committed negative controls of `core-ledger-state`. Each builds a `core-ledger-state` from the module's own parts
+ * with one rule broken, and runs it through the process on PostgreSQL 18 and PGlite 0.5.10 on its criterion's
+ * scenario. Each fails that criterion's oracle, while the real module passes it on the same scenario.
+ * [A82, A99, A106; LG-15, IN-7]
+ * - A root check that compares nothing lets the package with a wrong root through, so the root-mismatch oracle fails.
+ *   [A106]
+ * - A module that ignores the chain's outcomes replays a transaction the chain failed, so a range with one halts with
+ *   `root-mismatch` and the every-root-checked oracle fails. [A99]
+ * - Block 0 taken in the wrong case gives another root than the node's: applied to a genesis state that already holds
+ *   it, or a genesis state taken as it is when it does not. That is a halt at 0, and the block-0 root check fails.
+ *   [A82, IN-7]
  */
 
 const LOADER = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url);

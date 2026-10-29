@@ -1,27 +1,28 @@
 /**
- * The pause of the finalized loop between heights (`openspec/changes/core-arch/specs/backups/spec.md` BK-1 as amended;
- * owner decision Q152 B; task 15.1a; `design.md` §9.1): `ProcessHandle.pause()` and `resume()`, and the backup a
- * running process writes on SIGUSR2 (`backupOnSignal`, CF-4), hold the loop while they need it still
- * (`./process.ts`).
+ * The pause of the finalized loop between heights. `ProcessHandle.pause()` and `resume()`, and the backup a running
+ * process writes on SIGUSR2 (`backupOnSignal`), hold the loop still while they need it (`./process.ts`).
+ * [BK-1, CF-4, Q152 B; design §9.1]
  *
- * **Holds.** Anyone who needs the loop paused takes a hold ({@link LoopPauses.hold}) and releases it when done; the loop
- * pauses at its next point between heights while at least one hold is kept, and goes on once the last is released, so
- * a backup on signal taken while a host program paused the loop does not resume it. A hold's `reached` resolves once the
- * loop is paused for it — or once it is released, if that comes first.
+ * **Holds.** Anyone who needs the loop paused takes a hold ({@link LoopPauses.hold}) and releases it when done. The
+ * loop pauses at its next point between heights while at least one hold is kept, and goes on once the last one is
+ * released. So a backup on signal, taken while a host program paused the loop, does not resume it. A hold's `reached`
+ * resolves once the loop is paused for it, or once it is released, if that comes first.
  *
- * **The loop's side** ({@link LoopPause}, `LoopInput.pause`): the loop calls {@link LoopPauses.between} at each point
- * between two heights — no transaction open, every read of the height before ended (`./loop.ts`) — and runs its wait for
- * the head through {@link LoopPauses.idle}, which counts as between heights: a hold asked for while the loop waits is
- * reached at once, and when the wait ends the loop's next step is a point between heights, where it stays. A pause ends
- * when the loop's signal aborts (a stop while paused ends the process, RN-13): the loop then ends with its signal,
- * whatever holds are kept.
+ * **The loop's side** ({@link LoopPause}, `LoopInput.pause`). The loop calls {@link LoopPauses.between} at each point
+ * between two heights: no transaction is open, and every read of the height before has ended (`./loop.ts`). It runs
+ * its wait for the head through {@link LoopPauses.idle}, which counts as between heights: a hold asked for while the
+ * loop waits is reached at once, and when the wait ends, the loop's next step is a point between heights, where it
+ * stays. A pause ends when the loop's signal aborts, since a stop while paused ends the process; the loop then ends
+ * with its signal, whatever holds are kept. [RN-13]
  *
- * **What `/status` shows** (AE-3 as amended, owner decision Q174 B; task 8.3b): {@link LoopPauses.pausedAt} gives, while
- * the loop is paused — a hold kept and the loop between heights —, the time it paused and who holds it, which the
- * process lists as the condition `paused` (`./process.ts`). The time is the moment the loop paused, kept while a hold is
- * kept: the loop's step from its wait for the head to its next point between heights does not end the pause. `by` is
- * `pause` while a hold of `ProcessHandle.pause()` is kept — only `resume()` lifts it —, else `signal` (a backup on
- * SIGUSR2). Each change of what it gives is told once to `onChange` (the process publishes it to the admin endpoints).
+ * **What `/status` shows.** While the loop is paused (a hold is kept and the loop is between heights),
+ * {@link LoopPauses.pausedAt} gives the time it paused and who holds it; the process lists this as the condition
+ * `paused` (`./process.ts`). [AE-3, Q174 B]
+ * - The time is the moment the loop paused, and it is kept while a hold is kept: the loop's step from its wait for the
+ *   head to its next point between heights does not end the pause.
+ * - `by` is `pause` while a hold of `ProcessHandle.pause()` is kept (only `resume()` lifts it), and `signal` otherwise
+ *   (a backup on SIGUSR2).
+ * - Each change of what it gives is told once to `onChange`; the process publishes it to the admin endpoints.
  */
 
 /** Who holds the loop: `ProcessHandle.pause()` (`pause`), or a backup on SIGUSR2 (`signal`). */

@@ -16,11 +16,11 @@ import { copyVendoredLedger, VENDORED_LEDGERS } from "../ledger/version-checks.j
 import { TEST_CONFIGURATION } from "./browser-harness.js";
 
 /**
- * The browser build itself, statically (task 16.1; `design.md` §9.2): what `npm run build:browser` writes, that the
+ * The browser build itself, statically: what `npm run build:browser` writes, that the
  * workers bundle UmbraDB's own modules and only the replacements `browser/build.ts` names, that every replacement
  * gives what `src/` imports from the module it replaces, that a built-in module of Node.js no replacement covers fails
  * the build by name, the rewrite of the vendored ledger packages' Node.js entries, and the check of every vendored
- * package file the build bundles against its recorded SHA-256 (task 12.2b).
+ * package file the build bundles against its recorded SHA-256. [design §9.2]
  */
 
 const directories: string[] = [];
@@ -136,7 +136,7 @@ describe("the browser build (task 16.1)", () => {
       "src/private/private-transport.ts",
       "src/admin/process-admin.ts",
       "src/cli/build-modules.ts",
-      // The page's backup and restore (BK-5): the same backup text and restore as the commands', and pglite-tools.
+      // The page's backup and restore: the same backup text and restore as the commands', and pglite-tools. [BK-5]
       "src/backup/pglite-backup.ts",
       "src/backup/restore.ts",
       "src/backup/text.ts",

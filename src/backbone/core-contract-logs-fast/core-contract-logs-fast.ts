@@ -1,28 +1,31 @@
 /**
- * The core module `core-contract-logs-fast` (`openspec/changes/core-arch/specs/contract-data/spec.md` CC-3, CC-4;
- * `design.md` §10, §11; CORE-ARCH §4.11; decision record Q19 option D, Q20, Q21, Q54; task 13.1): the MIP-0002 events
- * of every block read from its transcripts without the ledger state, as the shared item `contract-logs`
- * (`../contract-logs/`) and its table `contract_logs.logs` — exactly the rows `core-contract-logs-full` would store, or a
- * halt. Development only (MD-5: the development opt-in); it may start mid-chain, as nothing it reads depends on an
- * earlier block.
+ * The core module `core-contract-logs-fast`: the MIP-0002 events of every block, read from its transcripts without the
+ * ledger state, as the shared item `contract-logs` (`../contract-logs/`) and its table `contract_logs.logs`. It stores
+ * exactly the rows `core-contract-logs-full` would store, or else halts. It runs only when development modules are
+ * explicitly enabled, and it may start mid-chain, since nothing it reads depends on an earlier block.
+ * [CC-3, CC-4, MD-5, Q19 D, Q20; CORE-ARCH §4.11; design §10]
  *
- * **Its ledger task** (`./task.ts`, LG-17; task 12.6) reads, in the ledger worker on the block's one parse, each
- * transaction's `log` sites in the ledger's emission order (`./transcripts.ts`; none on ledger v8, Q54): the module's
- * `block` item `contract-log-sites`, put at its `on-parse` before its own callback runs (`src/ledger/tasks.ts`).
- * **At `on-parse`** (after `core-block-parsed`'s, whose item it requires) it takes those sites and each transaction's
- * chain outcome from the event that placed it (`chain-events`, as `core-tx-results` reads it: `outcomeOf`).
- * Then, per transaction ({@link fastLogsFrom}):
- * - a chain failure: no log (the ledger never ran it; `-full` has none);
- * - a full success: each literal's log (`decodeLogItem`'s; an oversized one is none), numbered in the block from 0 in
- *   the order the ledger emits them — and a halt on any other log (`not-a-literal`, `conditional`);
- * - a partial success with any log: a halt (`partial-transaction`): the chain's `TxPartialSuccess` does not say which
- *   fallible segments failed (Q19), so neither which logs the ledger kept nor how the block's later logs are numbered.
+ * **Its ledger task** (`./task.ts`) runs in the ledger worker on the block's one parse. It reads each transaction's
+ * `log` sites, in the ledger's emission order (`./transcripts.ts`); there are none on ledger v8. The result is the
+ * module's `block` item `contract-log-sites`, put before the module's own `on-parse` callback runs
+ * (`src/ledger/tasks.ts`). [LG-17, Q54]
  *
- * The halt is `fast-log-unsupported` (`design.md` §11, "Processing halts"; Q21 A): an `UmbraError` naming the height, the
- * transaction (its index and hash), the segment, the call, the op and why ({@link unsureLogError}); the runner halts
- * processing at that height with the code, `on-parse` and this module (RN-8), before the block's transaction — a
- * queued best block's failure is dropped and met again at finality. Its logical segment is the ledger's for every
- * contract log: 0 ({@link LOGICAL_SEGMENT}).
+ * **At `on-parse`** (after `core-block-parsed`'s, whose item it requires) it takes those sites, and each transaction's
+ * chain outcome from the event that placed it (`chain-events`, read as `core-tx-results` reads it: `outcomeOf`). Then,
+ * for each transaction ({@link fastLogsFrom}):
+ * - a chain failure: no log, since the ledger never ran it and `-full` has none;
+ * - a full success: each literal's log (from `decodeLogItem`; an oversized one gives none), numbered in the block from 0
+ *   in the order the ledger emits them, and a halt on any other log (`not-a-literal`, `conditional`);
+ * - a partial success with any log: a halt (`partial-transaction`). The chain's `TxPartialSuccess` does not say which
+ *   fallible segments failed, so neither which logs the ledger kept nor how the block's later logs are numbered is
+ *   known. [Q19 D]
+ *
+ * The halt is `fast-log-unsupported`: an `UmbraError` naming the height, the transaction (its index and hash), the
+ * segment, the call, the op and the reason ({@link unsureLogError}). The runner halts processing at that height with
+ * the code, `on-parse` and this module, before the block's transaction. For a queued best block, the failure drops the
+ * block, and it is met again at finality. [CC-3, RN-8, Q21 A; design §11]
+ *
+ * The logical segment of every contract log is 0 in the ledger ({@link LOGICAL_SEGMENT}).
  *
  * **At `on-db-write`** it writes the item's logs, one row each, in one statement.
  *
@@ -97,7 +100,7 @@ export function unsureLogError(unsure: UnsureLog): UmbraError {
     `core-contract-logs-fast cannot read log op ${site.op} of call ${site.call} (contract ${hex(site.address)}) in the ` +
       `${site.fallible ? "fallible" : "guaranteed"} transcript of segment ${site.segment} of transaction ` +
       `${transaction.index} (${hex(transaction.hash)}) at height ${height} exactly: ${WHY[reason]}. ` +
-      "core-contract-logs-full, from the full apply, stores every log (CC-3, Q21)",
+      "core-contract-logs-full, from the full apply, stores every log",
     {
       height,
       transaction: transaction.index,
@@ -166,7 +169,7 @@ export function fastLogsFrom(
 export interface CoreContractLogsFastOptions {
   /** Where the transcripts are read: the module's ledger task (its `contract-log-sites` item) unless given. */
   readonly reader?: FastLogReader;
-  /** CC-3: what a log it cannot read exactly does; the halt (`fast-log-unsupported`). */
+  /** What happens to a log it cannot read exactly: by default the halt (`fast-log-unsupported`). [CC-3] */
   readonly onUnsure?: (unsure: UnsureLog) => void;
 }
 
@@ -174,7 +177,7 @@ export interface CoreContractLogsFastOptions {
 async function sitesOf(b: BlockContext, transactions: readonly BlockTransaction[], ledger: string, reader?: FastLogReader): Promise<readonly (readonly LogSite[])[]> {
   if (reader === undefined) {
     const sites = b.items.get(CONTRACT_LOG_SITES_ITEM) as readonly (readonly LogSite[])[] | undefined;
-    if (sites === undefined) throw new Error(`block ${b.height}: ${CORE_CONTRACT_LOGS_FAST_ID} has no ${CONTRACT_LOG_SITES_ITEM} item, its ledger task's (LG-17)`);
+    if (sites === undefined) throw new Error(`block ${b.height}: ${CORE_CONTRACT_LOGS_FAST_ID} has no ${CONTRACT_LOG_SITES_ITEM} item, its ledger task's`);
     return sites;
   }
   const calling = transactions.filter((transaction) => transaction.segments.some((segment) => segment.calls.length > 0));

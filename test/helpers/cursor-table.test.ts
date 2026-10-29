@@ -23,16 +23,16 @@ import {
 } from "./cursor-harness.js";
 
 /**
- * The cursor-table helper (task 6.1; SH-1; `design.md` §1, §10, §12; CORE-ARCH §4.11a; owner decisions Q27, Q30),
- * refactored from 0.9.5's Watermarks: a library function a module calls to get its table's migration and the read and
- * write functions over the handles its callbacks are given — never a module of its own, never a connection or a
- * transaction of its own. Its property, A59 (P9 retargeted), is `cursor-table.property.test.ts`.
+ * The cursor-table helper, refactored from 0.9.5's Watermarks. It is a library function a module calls to get its
+ * table's migration, and the read and write functions over the handles its callbacks are given. It is never a module
+ * of its own, and never has a connection or a transaction of its own. Its property (0.9.5's P9, moved onto the helper)
+ * is in `cursor-table.property.test.ts`. [SH-1, A59, Q27, Q30; CORE-ARCH §4.11a; design §1, §10, §12]
  *
- * The cases of 0.9.5's `test/postgres/watermarks.test.ts` that still apply are here, retargeted (that file stays, on
- * `PgWatermarks`, until task 17.2 retires the class): the table as its migration makes it (fillfactor 90, no index but
- * the key), a missing key reading as nothing, the last of several writes, other keys untouched, scalar roots, a write
- * seen before the commit and gone after a rollback, and large integers — now exact as `bigint`, where 0.9.5 asked for
- * decimal strings because its driver's `JSON.parse` rounded them.
+ * The cases of 0.9.5's `test/postgres/watermarks.test.ts` that still apply are here, retargeted. That file stays, on
+ * `PgWatermarks`, until the class is retired (OUTDATED). The cases: the table as its migration makes it (fillfactor
+ * 90, no index but the key), a missing key reading as nothing, the last of several writes, other keys untouched,
+ * scalar roots, a write seen before the commit and gone after a rollback, and large integers. Those are now exact as
+ * `bigint`, where 0.9.5 asked for decimal strings because its driver's `JSON.parse` rounded them.
  */
 
 const CREATE_SQL =
@@ -53,8 +53,8 @@ describe("the cursor-table helper itself (SH-1; design §12's cursorTable)", () 
   it("gives the migration that creates its table, with the id the module gives it; its SQL is fixed", () => {
     expect(CURSORS.migration("001")).toEqual({ id: "001", sql: CREATE_SQL });
     expect(CURSORS.migration("014")).toEqual({ id: "014", sql: CREATE_SQL });
-    // The SQL is part of the checksum of the module's migration (DB-9): another text in a later build would make every
-    // database that applied it refuse to start (`migration-checksum-changed`). This pins the bytes.
+    // The SQL is part of the checksum of the module's migration: another text in a later build would make every
+    // database that applied it refuse to start (`migration-checksum-changed`). This pins the bytes. [DB-9]
     expect(migrationChecksum(CREATE_SQL)).toBe("07497a4875b7ef5a9145d3bc9a367678332d355fa71269b4c89ce0c6fa6a5d53");
     // Names are quoted, so a reserved word is a name like any other.
     expect(cursorTable({ schema: "order", table: "select" }).migration("001").sql).toBe(
@@ -161,7 +161,8 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     }));
     expect(shape.table).toEqual([{ owner: WALLET_SCAN_ROLE, options: ["fillfactor=90"], kind: "r", persistence: "p" }]);
     expect(shape.columns).toEqual([
-      // No collation of its own: DT-2's byte order is applied by the component where rows are read in key order.
+      // No collation of its own: the byte order of rows is applied by the component where rows are read in key order.
+      // [DT-2]
       { name: "key", type: "text", not_null: true, collation: "default", has_default: false },
       { name: "value", type: "jsonb", not_null: true, collation: null, has_default: false },
     ]);
@@ -311,7 +312,7 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
       : "negative control: a helper writing on a connection of its own fails that check",
     async () => {
       if (backend.singleQueue) {
-        // PGlite has one connection; a transaction asked for inside the block's job is refused at once (DB-4, Q73).
+        // PGlite has one connection; a transaction asked for inside the block's job is refused at once. [DB-4, Q73]
         const problems = await problemsOf(database, ownTransaction(database), "oracle/own-transaction");
         expect(problems).toHaveLength(1);
         expect(problems[0]).toMatch(/^the block failed: db\.transaction\(\) was called inside a running read/);
@@ -416,7 +417,8 @@ describe.each(BACKENDS)("the cursor table on $name (SH-1)", { timeout: 120_000 }
     const byBytes = [...keys].sort((x, y) => Buffer.compare(Buffer.from(x, "utf8"), Buffer.from(y, "utf8")));
     expect(byBytes).toEqual(["", "B", "a", "a\u00a0", "b", "e\u0301", "\u00e9"]);
     expect(rows).toEqual(byBytes.map((key) => [key, { index: keys.indexOf(key) }]));
-    // Each row is encodable as DT-1 says; the contents hash encoded every row of the database, this table's too.
+    // Each row is encodable by the canonical encoder; the contents hash encoded every row of the database, this
+    // table's too. [DT-1]
     for (const row of rows) expect(encodeRow(row, ["text", "jsonb"]).length).toBeGreaterThan(0);
     expect(hash).toHaveLength(32);
   });
@@ -455,10 +457,11 @@ type Writes = Pick<CursorTable, "write">;
 const SELECT_VALUE = "SELECT value FROM wallet_scan.cursors WHERE key = $1";
 
 /**
- * The check of "written only through the module's block write handle" (SH-1, DB-3, DB-6): what it found wrong, empty
- * when `writes` wrote `key` in the block's own transaction under the module's role. A block writes `key`; through the
+ * The check of "written only through the module's block write handle": what it found wrong, empty when `writes` wrote
+ * `key` in the block's own transaction under the module's role. A block writes `key`; through the
  * same handle, the row must be there, and the audit trigger (`cursor-harness.ts`) must have recorded the module's role
  * and the block's transaction. A second block writes `key` again and then fails: afterwards the first value must stand.
+ * [SH-1, DB-3, DB-6]
  */
 async function problemsOf(database: CursorDatabase, writes: Writes, key: string): Promise<string[]> {
   const problems: string[] = [];

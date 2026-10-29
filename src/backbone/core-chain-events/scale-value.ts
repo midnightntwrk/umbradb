@@ -1,9 +1,10 @@
 /**
  * SCALE values read with a runtime's type registry (`scale-info`'s portable registry, `src/backbone/core-block-fetch/
- * metadata.ts`; task 11.1): what `core-chain-events` decodes a block's chain events with (CD-4), and
- * `core-block-parsed` a ledger transaction's call arguments (CD-5). Every type the registry can define is read —
- * composites, variants, sequences, arrays, tuples, primitives, compacts and bit sequences — exactly as
- * `parity-scale-codec` encodes it, and the value is plain data:
+ * metadata.ts`). `core-chain-events` decodes a block's chain events with them, and `core-block-parsed` a ledger
+ * transaction's call arguments. [CD-4, CD-5]
+ *
+ * Every type the registry can define is read (composites, variants, sequences, arrays, tuples, primitives, compacts and
+ * bit sequences) exactly as `parity-scale-codec` encodes it, and the value is plain data:
  *
  * | Type | Value |
  * |---|---|
@@ -22,9 +23,13 @@
  * field (a newtype, such as `H256` or `TxApplied(TxAppliedDetails)`); otherwise an array (none: `[]`). The value is
  * determined by the type and the bytes, so two readers with one registry give one value.
  *
- * {@link canonicalJson} writes a value as JSON for a `jsonb` column (`core_chain_events.events.fields`, `design.md`
- * §10): keys sorted, no space, a `bigint` as its decimal text (a JSON string: integers of 64 bits and wider may be
- * outside the signed 64-bit range the determinism `CHECK` allows a JSON number, Q57), bytes as `0x` lowercase hex.
+ * {@link canonicalJson} writes a value as JSON for a `jsonb` column (`core_chain_events.events.fields`):
+ * - keys sorted, with no spaces;
+ * - a `bigint` as its decimal text, in a JSON string, because integers of 64 bits and wider may fall outside the signed
+ *   64-bit range that the determinism `CHECK` allows for a JSON number [Q57];
+ * - bytes as `0x` lowercase hex.
+ *
+ * [design §10]
  *
  * A value is read exactly or not at all: bytes that end too soon, a variant index the type does not have, a `bool`
  * other than 0 or 1, a `char` that is no Unicode scalar value, a string that is not UTF-8, a compact larger than its

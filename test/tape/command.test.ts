@@ -16,11 +16,13 @@ import { type Script, ScriptedNode } from "./scripted-node.js";
 import { spawnChild } from "../child-processes.js";
 
 /**
- * The tape tools' command (`tools/tape/main.ts`, its logic in `tools/tape/command.ts`; task 9.2): `record` starts the
- * recording builder in front of a node until it is told to stop (Ctrl-C), then writes the tape and prints its SHA-256
- * — how the owner records the real tapes of task 0.3 —; `check` is A71's `[MANUAL]` half, the IN-8 tour of the node
- * client recorded through the builder and replayed through the tape node, every frame compared. Run here against the
- * scripted node, in this process and once as a process of its own (Ctrl-C as SIGINT).
+ * The tape tools' command (`tools/tape/main.ts`, its logic in `tools/tape/command.ts`):
+ * - `record` starts the recording builder in front of a node until it is told to stop (Ctrl-C), then writes the tape
+ *   and prints its SHA-256. This is how the owner records the real tapes.
+ * - `check` is the manual half of the record-and-replay check: the node client's tour of every node call, recorded
+ *   through the builder and replayed through the tape node, every frame compared [A71, IN-8].
+ *
+ * Run here against the scripted node, in this process and once as a process of its own (Ctrl-C as SIGINT).
  */
 
 const TEST_TIMEOUT_MS = 60_000;
@@ -160,7 +162,7 @@ describe("the tape command", { timeout: TEST_TIMEOUT_MS }, () => {
     expect(readFileSync(out)).toEqual(Buffer.from(result.bytes));
     expect(run.lines).toEqual([
       `${result.id}  ${out}`,
-      "identical: 2 connections, 3 frames sent and 4 received, byte for byte (A71)",
+      "identical: 2 connections, 3 frames sent and 4 received, byte for byte",
     ]);
   });
 
@@ -206,7 +208,7 @@ describe("the tape command", { timeout: TEST_TIMEOUT_MS }, () => {
       const tape = readTapeFile(out);
       expect(run.lines).toEqual([
         `${tape.id}  ${out}`,
-        "identical: 1 connections, 12 frames sent and 15 received, byte for byte (A71)",
+        "identical: 1 connections, 12 frames sent and 15 received, byte for byte",
       ]);
     });
   });

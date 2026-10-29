@@ -1,8 +1,8 @@
 /**
- * The configuration loader in the browser build, in place of `src/config/load.ts` (`openspec/changes/core-arch/specs/
- * configuration/spec.md` CF-1; `design.md` §7, §9.2; task 4.1's note (g); task 16.1): a page reads no file. It bundles
- * its configuration (`browser/src/config.ts`, or a test's) and hands it to the process as data, which startup holds
- * to CF-1's plain data as it holds a file's export (`plainData`); so `loadConfig` is never called there, and refuses.
+ * The configuration loader in the browser build, in place of `src/config/load.ts`. A page reads no file: it bundles its
+ * configuration (`browser/src/config.ts`, or a test's) and hands it to the process as data. Startup requires that data
+ * to be plain, as it does a file's export (`plainData`). So `loadConfig` is never called there, and refuses.
+ * [CF-1; design §7, §9.2]
  */
 
 import { UmbraError } from "../../../src/db/errors.js";

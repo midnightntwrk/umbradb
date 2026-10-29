@@ -7,13 +7,18 @@ import { statusOf } from "../../src/runner/process.js";
 import { schemaFile, validatorOf } from "../admin/json-schema.js";
 
 /**
- * The core's view of its lockstep instances and its wait before each block's transaction (task 14.3; PP-6, PP-7, Q24;
- * `design.md` §8): `src/private/lockstep.ts`'s `Lockstep`, which the core's transport tells of each listed instance's
- * `hello`, `report` and close, and which the finalized loop awaits before `BEGIN` of h (`LoopInput.lockstep`). A listed
- * instance holds h while it is not connected — not seen since the core started included —, refused (`lockstep-behind`,
- * `report-hash-mismatch`) or its committed height below h − 1; the wait raises `waiting-for-lockstep` naming the
- * instances that hold it, which `/status` shows (its JSON schema, `test/backbone/core-status/status.schema.json`).
- * The process's own wait is `./lockstep-wait.test.ts`'s, the loop's `test/runner/lockstep-wait.test.ts`'s.
+ * The core's view of its lockstep instances and its wait before each block's transaction. This is
+ * `src/private/lockstep.ts`'s `Lockstep`: the core's transport tells it of each listed instance's `hello`, `report` and
+ * close, and the finalized loop awaits it before `BEGIN` of h (`LoopInput.lockstep`). [PP-6, PP-7; design §8]
+ *
+ * A listed instance holds h while it is:
+ * - not connected, including not seen since the core started; [Q24]
+ * - refused (`lockstep-behind`, `report-hash-mismatch`);
+ * - or at a committed height below h − 1.
+ *
+ * The wait raises `waiting-for-lockstep` naming the instances that hold it, which `/status` shows (its JSON schema,
+ * `test/backbone/core-status/status.schema.json`). The process's own wait is tested in `./lockstep-wait.test.ts`, the
+ * loop's in `test/runner/lockstep-wait.test.ts`.
  */
 
 const never = new AbortController().signal;

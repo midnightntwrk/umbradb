@@ -1,9 +1,9 @@
 import ts from "typescript";
 
 /**
- * A1 `[STATIC]` (LS-1, task 17.3): the package's one entry point, `"."` (`src/index.ts`, built to `dist/index.js` and
- * `dist/index.d.ts`), exports exactly the surface of `openspec/changes/core-arch/design.md` §12 — its **Values** and its
- * **Types**, read from §12's own text, so the pin cannot drift from the document unseen.
+ * The package's one entry point, `"."` (`src/index.ts`, built to `dist/index.js` and `dist/index.d.ts`), exports
+ * exactly the design's exported surface: its **Values** and its **Types**, read from the design's own text
+ * (`design.md`), so the pin cannot drift from the document unseen. [A1 STATIC, LS-1; design §12]
  *
  * Every check takes plain data and returns one sentence per problem, naming the export, empty when there is none, so
  * `./surface.test.ts` runs the same checks on the real barrel and on its negative controls.
@@ -15,7 +15,7 @@ export interface Surface {
   readonly types: readonly string[];
 }
 
-/** The text of `design.md` §12. */
+/** The text of the exported surface: `design.md`'s section "12. Exported surface and command". */
 export function section12(design: string): string {
   const start = design.indexOf("## 12. Exported surface and command");
   const end = design.indexOf("\n## 13.", start);
@@ -29,7 +29,7 @@ function identifiersIn(text: string): string[] {
   return [...text.matchAll(/`([^`]+)`/g)].map((match) => match[1] as string).filter((span) => IDENTIFIER.test(span));
 }
 
-/** The paragraph of §12 that starts with `**<label>:**`, up to the next bold label or the section's end. */
+/** The surface's paragraph that starts with `**<label>:**`, up to the next bold label or the section's end. */
 function paragraph(section: string, label: string): string {
   const start = section.indexOf(`**${label}:**`);
   if (start < 0) return "";
@@ -37,7 +37,7 @@ function paragraph(section: string, label: string): string {
   return section.slice(start, next < 0 ? undefined : next);
 }
 
-/** §12's surface: the identifiers of its **Values** and **Types** paragraphs, sorted, each once. */
+/** The design's surface: the identifiers of its **Values** and **Types** paragraphs, sorted, each once. [design §12] */
 export function section12Surface(design: string): Surface {
   const section = section12(design);
   const sorted = (names: string[]) => [...new Set(names)].sort();
@@ -80,8 +80,9 @@ export function surfaceOf(file: string): Surface {
 }
 
 /**
- * Every difference between the exports `found` of `where` and §12's `expected`, one sentence each naming the export:
- * a name §12 does not list, a name §12 lists that is missing, and a name exported as the other kind.
+ * Every difference between the exports `found` of `where` and the design's `expected`, one sentence each naming the
+ * export: a name the design does not list, a name it lists that is missing, and a name exported as the other kind.
+ * [design §12]
  */
 export function surfaceProblems(where: string, found: Surface, expected: Surface): string[] {
   const problems: string[] = [];
@@ -118,8 +119,8 @@ export function runtimeValues(namespace: object): string[] {
 }
 
 /**
- * The core modules' declarations §12 exports (task 17.3 settles their names: the declarations' own constants), with the
- * id each declares: a configuration file writes their entries with `<name>.entry({ start, config: {} })`.
+ * The core modules' declarations the surface exports (their names are the declarations' own constants), with the id
+ * each declares: a configuration file writes their entries with `<name>.entry({ start, config: {} })`. [design §12]
  */
 export const CORE_MODULE_EXPORTS: Readonly<Record<string, string>> = Object.freeze({
   CORE_CHAIN_EVENTS: "core-chain-events",

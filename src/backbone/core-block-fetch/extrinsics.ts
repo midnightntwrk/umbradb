@@ -1,23 +1,27 @@
 /**
- * A block's extrinsics, decoded with the runtime metadata of its parent's state (CD-2, LG-4; task 10.3), as far as
- * `core-block-fetch` needs: each extrinsic's version and, for an unsigned ("bare") one, its call — the pallet and the
- * call by name, from their index bytes, and its encoded arguments — and the block's own time from its `Timestamp::set`
- * inherent, as the official indexer reads it (`chain-indexer/src/infra/subxt_node/runtimes.rs`, `CallExt::timestamp`).
+ * A block's extrinsics, decoded with the runtime metadata of its parent's state, as far as `core-block-fetch` needs:
+ * - each extrinsic's version;
+ * - for an unsigned ("bare") extrinsic, its call: the pallet and the call by name, from their index bytes, and its
+ *   encoded arguments;
+ * - the block's own time, from its `Timestamp::set` inherent, read as the official indexer reads it
+ *   (`chain-indexer/src/infra/subxt_node/runtimes.rs`, `CallExt::timestamp`).
+ *
+ * [CD-2, LG-4]
  *
  * **The format** (`sp_runtime::generic::UncheckedExtrinsic`): a compact length, then the version byte — `0x04` an
  * unsigned extrinsic of version 4, `0x84` a signed one, `0x05` a bare extrinsic of version 5, `0x45` a general one
  * (transaction extensions) — then, for the unsigned and bare kinds, the call: the pallet's index, the call's index
  * within the pallet's call enum, the call's arguments. A signed or general extrinsic's call follows its signature or
  * extensions, whose lengths only the full type registry gives; `core-block-fetch` leaves those calls to the modules that
- * decode them (`core-block-parsed`, task 11.1): their `call` is null. Inherents — `Timestamp::set` among them — are
+ * decode them (`core-block-parsed`), and their `call` is null. Inherents — `Timestamp::set` among them — are
  * always unsigned. Midnight blocks hold both versions (block 3,174,332 on mainnet: `0x05` inherents and `0x04` ledger
  * transactions, `test/node/fixtures/mainnet-answers.json`).
  *
- * **The block's time** (`block-header`'s `timestampMs`, the blocks table's `block_time`, Q74): the one `Timestamp::set`
- * call's argument, a `Compact<u64>` of milliseconds. Every block but block 0 has exactly one (Substrate's timestamp
- * pallet fails a block without it); block 0, built from the chain's genesis, may have none, and is then given 0, as the
- * official indexer does (`timestamp.unwrap_or(0)`, `chain-indexer/src/infra/subxt_node.rs`). Anything else throws: a
- * block is decoded exactly or not at all. Pure: no Node.js import.
+ * **The block's time** (`block-header`'s `timestampMs`, the blocks table's `block_time`) is the argument of the one
+ * `Timestamp::set` call, a `Compact<u64>` of milliseconds. Every block but block 0 has exactly one, because Substrate's
+ * timestamp pallet fails a block without it. Block 0 is built from the chain's genesis and may have none; it is then
+ * given 0, as the official indexer does (`timestamp.unwrap_or(0)`, `chain-indexer/src/infra/subxt_node.rs`). Anything
+ * else throws: a block is decoded exactly or not at all. Pure: no Node.js import. [Q74]
  */
 
 import type { MetadataPallet, MetadataVariant, RuntimeMetadataView, TypeDef } from "./metadata.js";
@@ -72,14 +76,14 @@ function callOf(metadata: RuntimeMetadataView, r: ScaleReader, height: bigint, i
   if (pallet === undefined) {
     throw new Error(
       `${where} calls the pallet with index ${palletIndex}, which the runtime metadata of its parent's state does not ` +
-        "have: the block cannot be decoded with that runtime (LG-4)",
+        "have: the block cannot be decoded with that runtime",
     );
   }
   const variant = callVariants(metadata, pallet).find((candidate) => candidate.index === callIndex);
   if (variant === undefined) {
     throw new Error(
       `${where} calls ${pallet.name}'s call with index ${callIndex}, which the runtime metadata of its parent's state ` +
-        "does not have: the block cannot be decoded with that runtime (LG-4)",
+        "does not have: the block cannot be decoded with that runtime",
     );
   }
   return Object.freeze({ pallet: pallet.name, palletIndex, call: variant.name, callIndex, args: r.rest() });
@@ -129,7 +133,7 @@ export function blockTimeOf(metadata: RuntimeMetadataView, body: readonly BodyEx
   if (sets.length !== 1) {
     throw new Error(
       `block ${height} has ${sets.length === 0 ? "no" : sets.length} Timestamp::set calls, where every block but block 0 ` +
-        "has exactly one: its time cannot be read (Q74)",
+        "has exactly one: its time cannot be read",
     );
   }
   const call = (sets[0] as BodyExtrinsic).call as ExtrinsicCall;

@@ -14,12 +14,16 @@ import { PROCESS_BACKENDS } from "../../runner/process-backends.js";
 import { entryOf, loggingModule } from "../../runner/process-build.js";
 
 /**
- * A66 for `/config` (task 8.4; AE-5): every `/config` body validates against the JSON schema committed here,
- * `./config.schema.json` (draft 2020-12, checked by Ajv 8.18.0 in strict mode: `test/admin/json-schema.ts`), through
- * the process on PostgreSQL 18 and PGlite: refused before the validation (the build only), refused after it (the
- * configuration, no database facts yet), running (everything: the entries placed, the history as `core_chain.config`
- * holds it, the parts with their declarations, the chain's identity with its anchor once block S committed, the
- * database's backend, version and writer lock), and a recorded `versionEntry` shown as data.
+ * Every `/config` body validates against the JSON schema committed here, `./config.schema.json` (draft 2020-12,
+ * checked by Ajv 8.18.0 in strict mode: `test/admin/json-schema.ts`). The bodies come from the process on PostgreSQL 18
+ * and PGlite:
+ * - refused before the validation: the build only;
+ * - refused after it: the configuration, no database facts yet;
+ * - running: everything. That is the entries placed, the history as `core_chain.config` holds it, the parts with their
+ *   declarations, the chain's identity with its anchor once block S committed, and the database's backend, version and
+ *   writer lock;
+ * - a recorded `versionEntry`, shown as data.
+ * [A66, AE-5]
  *
  * Committed negative controls: a body without any one of its required fields, with a field the schema does not have, or
  * with a value of the wrong form fails the schema.
@@ -138,8 +142,8 @@ describe.each(PROCESS_BACKENDS)("A66: /config through the process validates on $
   afterAll(() => backend.stop(), 60_000);
 
   it("A66: refused before the database opens, refused after it, and running with everything the process knows", async () => {
-    // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in,
-    // CF-9); a refusal of the configuration itself ends the process and serves no /config (task 8.1b, Q137 B).
+    // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in).
+    // A refusal of the configuration itself ends the process and serves no /config. [CF-9, Q137 B]
     const early = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     expect(await valid(early, (b) => b.state === "refused")).toMatchObject({
       core: { settings: { database: { kind: "pglite", memory: true } } },

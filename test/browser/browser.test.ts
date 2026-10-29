@@ -43,14 +43,13 @@ import {
 } from "./tapes.js";
 
 /**
- * The browser build in headless Chrome (task 16.1; `openspec/changes/core-arch/specs/browser/spec.md` BR-1 to BR-4,
- * `specs/backups/spec.md` BK-5; acceptance A129–A132). One page build with the tests' configuration
- * (`./fixtures/configuration.ts`) is served for the file; each test starts Chrome on a profile of its own
+ * The browser build in headless Chrome. One page build with the tests' configuration (`./fixtures/configuration.ts`) is
+ * served for the file; each test starts Chrome on a profile of its own
  * (`./chrome.ts`: the machine's Chrome over the DevTools protocol, no test dependency) and a tape node serving the
  * browser tapes (`./tapes.ts`); everything is read through the page's own calls (`window.umbradb`: the admin endpoints'
  * `/status`, the contents hash, reads of the workers' databases; the page's backup and restore as the user makes them).
  * A machine without Chrome fails these tests, naming `UMBRADB_CHROME`; none is skipped. The committed negative controls
- * are `./browser.negative-control.test.ts`.
+ * are `./browser.negative-control.test.ts`. [BR-1 to BR-4, BK-5, A129–A132]
  */
 
 const chain = browserChain();
@@ -82,8 +81,9 @@ beforeAll(async () => {
 }, BROWSER_TEST_TIMEOUT_MS);
 
 afterAll(async () => {
-  // Each Chrome is closed with bounded waits, then killed (`./chrome.ts`; issue 00041); one that fails to end does not
-  // keep the others, the nodes or the page's server open: its failure is reported once everything else is closed.
+  // Each Chrome is closed with bounded waits, then killed (`./chrome.ts`); one that fails to end does not keep the
+  // others, the nodes or the page's server open: its failure is reported once everything else is closed.
+  // [docs/issues/00041]
   const failures: unknown[] = [];
   for (const browser of browsers.splice(0)) await browser.close().catch((error: unknown) => failures.push(error));
   for (const node of nodes.splice(0)) await node.close();
@@ -104,9 +104,9 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
       const p1 = await statusWhen(tab, "p1", (s) => s.cursor === "9" && s.state === "following", "following at 9");
       expect([...syncedProblems("the core", core, 9n), ...syncedProblems("p1", p1, 9n)]).toEqual([]);
 
-      // Three workers besides the page: the core's, the private instance's and the ledger worker (BR-1).
+      // Three workers besides the page: the core's, the private instance's and the ledger worker. [BR-1]
       expect(tab.workers.map((url) => new URL(url).pathname).sort()).toEqual(["/core-worker.js", "/ledger-worker.js", "/private-worker.js"]);
-      // The ledger worker parsed every transaction of the blocks it was given (heights 4 and 6; CD-5, LG-7).
+      // The ledger worker parsed every transaction of the blocks it was given (heights 4 and 6). [CD-5, LG-7]
       const parsed = await readOf(tab, "core", "SELECT height, count(*)::int AS n FROM core_block_parsed.transactions GROUP BY height ORDER BY height");
       expect(parsed.rows).toEqual([
         { height: "4", n: 2 },
@@ -114,7 +114,7 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
       ]);
       const results = await readOf(tab, "core", "SELECT count(*)::int AS n FROM core_tx_results.results WHERE outcome = 'success'");
       expect(results.rows).toEqual([{ n: 5 }]);
-      // The admin endpoints, as calls on each worker's channel (BR-3): live while the worker's heartbeat ticks, ready.
+      // The admin endpoints, as calls on each worker's channel: live while the worker's heartbeat ticks, ready. [BR-3]
       for (const who of ["core", "p1"]) {
         const live = await call<{ status: number; body: { live: boolean; heartbeatAgeMs: number } }>(tab, who, "admin", "/health/live");
         expect(live).toMatchObject({ status: 200, body: { live: true, livenessTimeoutMs: 30_000 } });
@@ -124,18 +124,18 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
         expect(await call(tab, who, "admin", "/health/ready")).toMatchObject({ status: 200, body: { ready: true } });
         expect(await call(tab, who, "admin", "/metrics")).toMatchObject({ status: 404 });
       }
-      // PGlite under the development opt-in, which the browser build sets (BR-1, CF-9; the configuration does not).
+      // PGlite under the development opt-in, which the browser build sets (the configuration does not). [BR-1, CF-9]
       for (const who of ["core", "p1"]) {
         const config = (await tab.evaluate<{ body: { core: { settings: Record<string, unknown> } } }>(
           `window.umbradb.${who === "core" ? "core" : "instances.p1"}.call("admin", "/config")`,
         )).body;
         expect(config.core.settings.developmentOptIn).toBe(true);
-        // CF-4, Q167 A: the parts are shown; PGlite in memory has no password.
+        // The database setting's parts are shown; PGlite in memory has no password. [CF-4, Q167 A]
         expect(config.core.settings.database).toEqual({ kind: "pglite", memory: true });
         const version = await readOf(tab, who, "SELECT version() AS v");
         expect(String(version.rows[0]?.v)).toMatch(/^PostgreSQL 18\.\d+ .*emscripten/i);
       }
-      // The lockstep instance read each public block through the core's transport (PP-4, PP-6) and stored its hash.
+      // The lockstep instance read each public block through the core's transport and stored its hash. [PP-4, PP-6]
       expect(p1.public).toMatchObject({ cursor: "9", lockstep: true });
       const shadow = await readOf(tab, "p1", "SELECT height, public_hash FROM shadow.rows ORDER BY height");
       expect(shadow.rows).toEqual(chain.blocks.slice(3, 10).map((block) => ({ height: `${block.height}`, public_hash: block.hex })));
@@ -152,7 +152,7 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
       expect((await call<{ status: number }>(tab, "core", "api", { method: "GET", path: "/probe/2" }))?.status).toBe(404);
       await expect(call(tab, "core", "subscribe", "s1", "nothing")).rejects.toThrow(/no subscription is named nothing/);
 
-      // A131: nothing but the page's own files and the node (BR-3).
+      // The page reached nothing but its own files and the node. [A131 CI, BR-3]
       expect(networkProblems(tab.requests, { origin: bench.server.origin, node: node.url, files: bench.build.files })).toEqual([]);
     },
     BROWSER_TEST_TIMEOUT_MS,

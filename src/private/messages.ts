@@ -1,10 +1,9 @@
 /**
- * The process transport's messages (`openspec/changes/core-arch/specs/private-processes/spec.md` PP-4; `design.md` §8;
- * CORE-ARCH §4.14; tasks 14.2, 14.2a): one JSON object per message, `{ "v": 1, "type", … }`, validated against these
- * zod schemas on both ends — the core's server (`./core-transport.ts`) and a private process's client
- * (`./private-transport.ts`) — and no other message: a private process uses this connection and its reads of public
- * data, and nothing calls a module across it (owner decision Q140 C), so an `api` or `api-result` message, which
- * task 14.2 carried, is an unknown `type`.
+ * The process transport's messages. Each message is one JSON object, `{ "v": 1, "type", … }`, validated against these
+ * zod schemas on both ends: the core's server (`./core-transport.ts`) and a private process's client
+ * (`./private-transport.ts`). There are no other messages. A private process uses this connection for its reads of
+ * public data, and nothing calls a module across it, so an `api` or `api-result` message is an unknown `type`.
+ * [PP-4, Q140 C; design §8; CORE-ARCH §4.14]
  *
  * | Type | Direction | Fields (`H` a height as decimal text, `X` `0x`-prefixed lowercase hex) |
  * |---|---|---|
@@ -13,42 +12,43 @@
  * | `committed` | core → private | `height: H`, `hash: X`, `configHash: X` |
  * | `report` | private → core | `height: H`, `hash: X` |
  * | `read` | private → core | `id`, `statements`: `[{ sql, params: Value[] }]`, run as one consistent read |
- * | `read-result` | core → private | `id`, `height: H` or null (before the first commit), `configHash: X`, and `results` — per statement `{ columns: [{ name, type }], rows: Value[][] }` — or `error`, a code — `read-refused` with `refused: { statement, reason, name }`, the statement the core refused (task 14.2b) |
+ * | `read-result` | core → private | `id`, `height: H` or null (before the first commit), `configHash: X`, and `results` — per statement `{ columns: [{ name, type }], rows: Value[][] }` — or `error`, a code — `read-refused` with `refused: { statement, reason, name }`, the statement the core refused |
  *
- * **`refused`** (task 14.2b, A172; `./read-gate.ts`): a `read` whose statement is not one read — transaction or session
- * control, a second statement, a function or catalog the core refuses — is answered `error: read-refused` and nothing
- * of it runs; `refused` names the statement: `statement`, its index in `statements` (from 0), `reason` (`command`,
- * `function`, `statements` or `unreadable`) and `name` (its first word, `COMMIT`, or the function, `pg_advisory_lock`;
- * null when none). It is there exactly when the error is `read-refused`.
+ * **`refused`** (`./read-gate.ts`). A `read` with a statement that is not one read (transaction or session control, a
+ * second statement, a function or catalog the core refuses) is answered `error: read-refused`, and nothing of it runs.
+ * `refused` names the statement:
+ * - `statement`: its index in `statements`, from 0;
+ * - `reason`: `command`, `function`, `statements` or `unreadable`;
+ * - `name`: its first word (`COMMIT`) or the function (`pg_advisory_lock`), or null when there is none.
  *
- * **`configHash`** (PP-4, PP-14, RN-16; owner decision Q147, task 14.1b): the core's configuration hash, 32 bytes, on
- * each of its three messages — which a private process compares with the one its first `hello-ack` gave
- * (`./private-transport.ts`).
+ * `refused` is present exactly when the error is `read-refused`. [PP-4, A172]
+ *
+ * **`configHash`**: the core's configuration hash, 32 bytes, on each of the core's three messages. A private process
+ * compares it with the one its first `hello-ack` gave (`./private-transport.ts`). [PP-4, PP-14, RN-16, Q147]
  *
  * **Strict.** Every object is a strict object — a field it does not have fails its schema as a missing or mistyped one
  * does — and a message is `v: 1` with one of these `type`s; {@link parseMessage} tells the three failures apart
  * (`unknown-version`, `unknown-type`, `invalid-message`, besides `not-json`), and the transport closes the connection on
- * any of them (PP-4). Hashes (`hello`'s, `hello-ack`'s `genesis`, `committed`'s, `report`'s, each `configHash`) are 32 bytes; ids are text
- * of 1 to 128 characters, unique per connection for its requests.
+ * any of them. Hashes (`hello`'s, `hello-ack`'s `genesis`, `committed`'s, `report`'s, each `configHash`) are 32 bytes;
+ * ids are text of 1 to 128 characters, unique per connection for its requests. [PP-4]
  *
  * **Values** ({@link encodeValue}, {@link decodeValue}). A value in a row or a parameter is `null`, a boolean, a string
  * or JSON: `bigint` and `numeric` as decimal text, `bytea` as `X`, `json` and `jsonb` as their JSON value, the other
- * types as the database API maps them (DB-2: `smallint`, `integer`, `oid` and finite floats as numbers, a float's
- * `NaN` or infinity as its text; dates and times as their RFC 3339 or ISO text; `text`, `uuid` and the rest as text),
+ * types as the database API maps them (`smallint`, `integer`, `oid` and finite floats as numbers, a float's `NaN` or
+ * infinity as its text; dates and times as their RFC 3339 or ISO text; `text`, `uuid` and the rest as text),
  * an array as a JSON array of its elements so written. Each statement's `columns` give every column's PostgreSQL type
  * name (`format_type(oid, NULL)`, `bigint[]` for an array), which says how to read each value back: the private side
  * gives a `bigint` column's values as `bigint`s, a `bytea` column's as `Uint8Array`s, a `json`/`jsonb` column's as the
  * JSON value — an integer outside ±(2^53 − 1) inside it a `bigint`, as the database API gives it —, a float's text as
  * its number, and every other value as written; so a value decodes back to the value the core read. The wire's JSON
  * keeps every integer exactly: it is written with `bigint`s as JSON numbers ({@link messageText}) and read with the
- * component's lossless reader (`parseJsonLossless`).
+ * component's lossless reader (`parseJsonLossless`). [DB-2]
  *
  * **Parameters** carry no types (the schema's `params: Value[]`), and the database API sends every parameter as untyped
- * text, which PostgreSQL types from the statement (DB-2): so the core reads a parameter that is a string of `0x` and
+ * text, which PostgreSQL types from the statement. So the core reads a parameter that is a string of `0x` and
  * lowercase hex pairs as bytes ({@link decodeParameter}) — a `bytea` parameter written as `X` —, every other string as
  * text, numbers, booleans and null as themselves, a JSON array as an array (its elements read the same way) and a JSON
- * object as JSON. A text parameter that is itself such hex is therefore sent as bytes (decision record question
- * Q141).
+ * object as JSON. A text parameter that is itself such hex is therefore sent as bytes. [DB-2, Q141]
  */
 
 import { z } from "zod";
@@ -117,7 +117,7 @@ export const HELLO_ACK = z.strictObject({
 /** `committed` (core → private): sent after each public commit. */
 export const COMMITTED = z.strictObject({ ...base("committed"), height: height(), hash: hash(), configHash: hash() });
 
-/** `report` (lockstep private → core): sent after each private commit (task 14.3). */
+/** `report` (lockstep private → core): sent after each private commit. */
 export const REPORT = z.strictObject({ ...base("report"), height: height(), hash: hash() });
 
 /** One statement of a `read`. */
@@ -132,7 +132,7 @@ const COLUMN = z.strictObject({ name: z.string(), type: z.string().min(1) });
 /** One statement's result: its columns and rows, each row a value per column. */
 const RESULT = z.strictObject({ columns: z.array(COLUMN), rows: z.array(z.array(value())) });
 
-/** The error of a `read` the core refused (task 14.2b; `./read-gate.ts`): `read-result.refused` names the statement. */
+/** The error of a `read` the core refused (`./read-gate.ts`): `read-result.refused` names the statement. */
 export const READ_REFUSED = "read-refused";
 
 /** `read-result.refused`: the statement the core refused — its index in `statements` —, why, and what it names. */
@@ -176,7 +176,7 @@ export const MESSAGE_SCHEMAS = Object.freeze({
 /** A message type. */
 export type MessageType = keyof typeof MESSAGE_SCHEMAS;
 
-/** The message types, in design §8's order. */
+/** The message types, in the order of the module comment's table. [design §8] */
 export const MESSAGE_TYPES = Object.freeze(Object.keys(MESSAGE_SCHEMAS) as MessageType[]);
 
 export type Hello = z.infer<typeof HELLO>;

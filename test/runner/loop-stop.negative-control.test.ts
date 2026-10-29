@@ -4,10 +4,11 @@ import { a169Problems, a169Run, blockScenario, ignoringSource, PATIENCE_MS } fro
 import { STOP_LIMIT_MS } from "./startup-stop-harness.js";
 
 /**
- * A169's committed negative control (task 5.3c; RN-13, issue 00042): a loop whose node calls ignore the stop — its
- * block source, the node source, on a node client of its own that the stop does not reach (`ignoringSource`), as every
- * node call of the loop did before task 5.3c — fails A169's oracle while it waits for h + 1's block: the process does
- * not close within 5 s, processing has not ended, a node client stays open, and it keeps connecting after the stop.
+ * The committed negative control for a stop while the loop waits on an unreachable node. A loop whose node calls
+ * ignore the stop fails the oracle while it waits for h + 1's block: the process does not close within 5 s, processing
+ * has not ended, a node client stays open, and it keeps connecting after the stop. Its block source, the node source,
+ * runs on a node client of its own that the stop does not reach (`ignoringSource`), as every node call of the loop did
+ * before the loop honoured stops. [A169, RN-13]
  */
 
 describe("negative control (A169): a loop whose node calls ignore the stop", () => {

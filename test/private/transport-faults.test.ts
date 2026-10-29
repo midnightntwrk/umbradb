@@ -15,20 +15,30 @@ import { launchPublicCore } from "./builds.js";
 import { endedWithin, hello, rawClient } from "./raw-client.js";
 
 /**
- * The process transport's faults and limits (tasks 14.2, 14.3; PP-4, PP-5, PP-6, PP-7, IN-10): what closes a connection
- * on the core's side — too many reads at once, a reader too slow, a peer that does not answer pings, a frame that is no
- * WebSocket frame, a `report` whose hash is not the public block's —, a result too large, a report checked and counted,
- * a listed instance behind the public cursor refused `lockstep-behind`, a listener that cannot listen; and on a private
- * process's side, against a stand-in core, every reply of the core it closes on, retries after (a refused `hello`, a
- * lost connection, no pong, an HTTP answer), the reads while it is connecting, connected, waiting and closed, its
- * `connection()` and `report()`, and the core's `report-hash-mismatch`, which refuses it for good. The limits are the
- * tests' smaller ones (`limits`), the code the process runs. Committed negative control: a core whose report check
- * compares nothing fails the report oracle.
+ * The process transport's faults and limits. [PP-4, PP-5, PP-6, PP-7, IN-10]
+ *
+ * On the core's side:
+ * - what closes a connection: too many reads at once, a reader too slow, a peer that does not answer pings, a frame
+ *   that is no WebSocket frame, a `report` whose hash is not the public block's;
+ * - a result too large;
+ * - a report checked and counted;
+ * - a listed instance behind the public cursor, refused `lockstep-behind`;
+ * - a listener that cannot listen.
+ *
+ * On a private process's side, against a stand-in core:
+ * - every reply of the core it closes on;
+ * - retries after a refused `hello`, a lost connection, no pong, or an HTTP answer;
+ * - the reads while it is connecting, connected, waiting and closed;
+ * - its `connection()` and `report()`;
+ * - the core's `report-hash-mismatch`, which refuses it for good.
+ *
+ * The limits are the tests' smaller ones (`limits`); the code is the one the process runs. Committed negative control:
+ * a core whose report check compares nothing fails the report oracle.
  */
 
 const quiet = () => undefined;
 
-/** The stand-in cores' configuration hash (RN-16, PP-4; task 14.1b), and another, as a core restarted with a changed one. */
+/** The stand-in cores' configuration hash, and another, as a core restarted with a changed one. [RN-16, PP-4] */
 const CONFIG = `0x${"c1".repeat(32)}`;
 const CHANGED = `0x${"c2".repeat(32)}`;
 
@@ -314,10 +324,10 @@ describe("the core's side: limits and faults", () => {
 });
 
 /**
- * The oracle of PP-6's report check against the transport at `url` whose bookkeeping is `lockstep` (listing `good`, `bad`
- * and `ahead`, each saying `hello` at 8; the public cursor 9, blocks 1–9): every problem, none when a report with the
- * public block's hash counts, and one with another hash, or at a height with no public block, closes its connection
- * (1008, `report-hash-mismatch`) and leaves the instance held, refused, at its earlier height.
+ * The oracle of the report check against the transport at `url` whose bookkeeping is `lockstep` (listing `good`, `bad`
+ * and `ahead`, each saying `hello` at 8; the public cursor 9, blocks 1–9): every problem. There is none when a report
+ * with the public block's hash counts, and one with another hash, or at a height with no public block, closes its
+ * connection (1008, `report-hash-mismatch`) and leaves the instance held, refused, at its earlier height. [PP-6]
  */
 export async function reportProblems(url: string, lockstep: Lockstep): Promise<string[]> {
   const problems: string[] = [];
@@ -378,9 +388,9 @@ describe("the core's side: lockstep (task 14.3; PP-6, PP-7)", () => {
       { instance: "late", connected: true, height: 7n, refused: "lockstep-behind" },
       { instance: "ontime", connected: true, height: 8n, refused: null },
     ]);
-    // The transport's own view (PP-9) keeps the refused instance at its hello too.
+    // The transport's own view keeps the refused instance at its hello too. [PP-9]
     expect(transport.instances().find((one) => one.instance === "late")).toEqual({ instance: "late", lockstep: true, height: 7n, hash: null });
-    expect(lines).toContain("transport: instance late connected at 7; refused lockstep-behind: below the public cursor 9 − 1 (PP-7)");
+    expect(lines).toContain("transport: instance late connected at 7; refused lockstep-behind: below the public cursor 9 − 1");
     for (const client of [late.client, ontime.client, free.client]) client.close();
     await until(() => lockstep.instances().every((one) => !one.connected), "the closes seen");
     expect(lockstep.instances()[0]).toEqual({ instance: "late", connected: false, height: 7n, refused: "lockstep-behind" });
@@ -403,11 +413,11 @@ describe("the core's side: lockstep (task 14.3; PP-6, PP-7)", () => {
     expect(await reportProblems(url, lockstep)).toEqual([]);
     expect(lines).toContain(
       `transport: instance bad reported height 9 with hash ${hexOf(new Uint8Array(32).fill(0xee))}, and the public block ` +
-        `there has hash ${hexOf(blockHash(9n))}: report-hash-mismatch (PP-6)`,
+        `there has hash ${hexOf(blockHash(9n))}: report-hash-mismatch`,
     );
     expect(lines).toContain(
       `transport: instance ahead reported height 10 with hash ${hexOf(blockHash(10n))}, and the public database has no ` +
-        "block there: report-hash-mismatch (PP-6)",
+        "block there: report-hash-mismatch",
     );
   });
 
@@ -744,9 +754,9 @@ describe("a private process's side against a stand-in core", () => {
     try {
       expect(transport.lockstep).toBe(false);
       expect(await transport.connection()).toMatchObject({ lockstep: true, refused: "lockstep-behind" });
-      // Refused lockstep-behind, it stays connected (PP-7: the core keeps waiting for it, and it halts by its own check).
+      // Refused lockstep-behind, it stays connected: the core keeps waiting for it, and it halts by its own check. [PP-7]
       expect([transport.state, transport.lockstep, core.connections()]).toEqual(["connected", true, 1]);
-      expect(lines).toContain(`transport: connected to the core at ${core.address}; refused lockstep-behind: this instance is behind the public cursor (PP-7)`);
+      expect(lines).toContain(`transport: connected to the core at ${core.address}; refused lockstep-behind: this instance is behind the public cursor`);
       // The same ack while connected.
       expect(await transport.connection()).toBe(transport.ack);
       for (const socket of core.sockets) socket.terminate();
@@ -811,7 +821,7 @@ describe("a private process's side against a stand-in core", () => {
       await sleep(500);
       expect(core.connections()).toBe(1);
       expect(lines).toContain(
-        "transport: the core refused instance p-1 for good: report-hash-mismatch (its report's hash is not the public block's, PP-6)",
+        "transport: the core refused instance p-1 for good: report-hash-mismatch (its report's hash is not the public block's)",
       );
     } finally {
       await transport.close();
@@ -871,7 +881,7 @@ describe("a private process's side against a stand-in core", () => {
         expect(core.connections()).toBe(made);
         await until(() => core.sockets.size === 0, "the connection closed");
         expect(lines.join("\n")).toContain(
-          `transport: the core's configuration hash is now ${CHANGED}, not ${CONFIG} as when this instance started: public-config-changed (PP-14)`,
+          `transport: the core's configuration hash is now ${CHANGED}, not ${CONFIG} as when this instance started: public-config-changed`,
         );
       } finally {
         await transport.close();

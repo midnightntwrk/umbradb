@@ -4,10 +4,10 @@ import { type CrashEvent, crashModule } from "./crash-module.js";
 import { startProcess, testBuild } from "./process-build.js";
 
 /**
- * A process for A44's and A46's crash tests (task 5.4; RN-9, RN-11), started by `crash.test.ts` with `node --import tsx`
- * and one JSON argument ({@link CrashJob}): the process as `umbradb run` starts it — `startProcess` with the
- * configuration file — over the test build with module `c` (`crash-module.ts`), which holds for ever at the job's point
- * and height. It reports each event as one JSON line on stdout; the test kills it with SIGKILL once `c` holds.
+ * A process for the crash tests, started by `crash.test.ts` with `node --import tsx` and one JSON argument
+ * ({@link CrashJob}): the process as `umbradb run` starts it (`startProcess` with the configuration file) over the test
+ * build with module `c` (`crash-module.ts`), which holds for ever at the job's point and height. It reports each event
+ * as one JSON line on stdout; the test kills it with SIGKILL once `c` holds. [A44, A46, RN-9, RN-11]
  *
  * Like `sigterm.worker.ts`, it exits by itself once its parent is no longer the test's (Vitest's bail, a test's timeout),
  * since `c` would otherwise hold it up for ever.

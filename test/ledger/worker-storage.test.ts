@@ -17,13 +17,19 @@ import { runInFreshInstance } from "./fresh-instance.js";
 import { rebuildTagged } from "./stored-values.js";
 import { STAGENET } from "./v9-rc3-checks.js";
 
-// Task 12.4 of `openspec/changes/core-arch` (design.md §5.3, §5.4; specs/ledger LG-9, LG-11, LG-12, LG-13): what the
-// ledger worker's engine does with stored states — the keys a block persists and releases, the state at h − 1 loaded
-// from the store, the v8 → v9 conversion before the first v9 block, the contracts' keys, a retained state loaded aside —
-// run here in the test's thread over the real adapters and a store over a map that holds each committed block's nodes,
-// as the database does. Oracles: the reference replay of task 12.1 and the vendored packages' own exports, the
-// conversion run in a fresh instance of the v9 package (`./fresh-instance.ts`), and the stored values rebuilt from
-// their nodes without the packages (`./stored-values.ts`).
+// What the ledger worker's engine does with stored states:
+// - the keys a block persists and releases;
+// - the state at h − 1 loaded from the store;
+// - the v8 → v9 conversion before the first v9 block;
+// - the contracts' keys;
+// - a retained state loaded aside.
+//
+// Run here in the test's thread over the real adapters and a store over a map that holds each committed block's nodes,
+// as the database does. [LG-9, LG-11, LG-12, LG-13; design §5.3, §5.4]
+//
+// Oracles: the reference replay and the vendored packages' own exports, the conversion run in a fresh instance of the
+// v9 package (`./fresh-instance.ts`), and the stored values rebuilt from their nodes without the packages
+// (`./stored-values.ts`).
 
 const LONG = 240_000;
 const V9_PACKAGE = new URL("../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js", import.meta.url).href;
@@ -103,7 +109,7 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
     // Two released at once: a revision that lowers the window releases every state leaving it in its first block.
     const two = await step(engine, nodes, input(2n, 0, { release: [zero.stateKey, one.stateKey] }));
     expect(rows(two)).toEqual([`${hex(two.stateKey)} 1`, `${hex(zero.stateKey)} -1`, `${hex(one.stateKey)} -1`].sort());
-    // Without a list, the state before the block (task 12.3's behaviour, retainStates 0).
+    // Without a list, the state before the block (the behaviour with retainStates 0).
     const three = await step(engine, nodes, input(3n, 0));
     expect(rows(three)).toEqual([`${hex(three.stateKey)} 1`, `${hex(two.stateKey)} -1`].sort());
   });
@@ -181,7 +187,7 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
   it("refuses a block of a ledger it cannot convert the state to, naming both", { timeout: LONG }, async () => {
     const { engine } = await started("v9");
     await expect(engine.apply(input(1n, 0, { ledger: "v8" }))).rejects.toThrow(/block 1 is a v8 block on a v9 state.*v8 → v9/);
-    // Task 12.2a: no way back from rc.5 to rc.3, and no conversion from v8 to rc.3 (the node that builds rc.3 has none).
+    // No way back from rc.5 to rc.3, and no conversion from v8 to rc.3 (the node that builds rc.3 has none).
     await expect(engine.apply(input(1n, 0, { ledger: "v9-rc3" }))).rejects.toThrow(/block 1 is a v9-rc3 block on a v9 state.*v9-rc3 → v9/);
     const { engine: v8 } = await started("v8");
     await expect(v8.apply(input(1n, 0, { ledger: "v9-rc3" }))).rejects.toThrow(/block 1 is a v9-rc3 block on a v8 state/);
@@ -254,7 +260,7 @@ describe("the ledger worker's stored states (task 12.4; LG-9, LG-11, LG-12, LG-1
     const contract = await contractFixture(RAW.v9);
     const absent = hash(0xab);
     const one = await step(engine, nodes, input(1n, 1, { contracts: [contract.address, absent] }), [contract.deploy]);
-    // The keys are the contract's state's and its zswap state's, as the packages serialize them (task 0.2's route).
+    // The keys are the contract's state's and its zswap state's, as the packages serialize them.
     const reference = referenceReplay(RAW.v9, RAW.v9.LedgerState.blank(NETWORK_ID), { ...input(1n, 1), transactions: [contract.deploy] }).state;
     const state = reference.index(hex(contract.address));
     expect(state).toBeDefined();

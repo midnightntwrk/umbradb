@@ -4,12 +4,15 @@ import type { AppliedState, ApplyBlock, BlockId } from "../../src/ledger/worker/
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { callTransaction, cellValue, contractFixture, hex, NETWORK_ID, RAW, T0 } from "./adapter-fixtures.js";
 
-// Task 12.5 of `openspec/changes/core-arch` (design.md §5.4; specs/ledger LG-14): the ledger worker's side of the sweep,
-// in a real worker thread — its own instance of the v9 package, which nothing of this thread's (the transactions built
-// here, their builders' objects) can hold — over a map of the nodes written so far: the nodes the sweep deletes evicted
-// from the package, so that a node needed again is flushed again; a kept parse's native objects freed when the parse is
-// dropped, and freed at once when a kept transaction holds a node the sweep deletes (the eviction then tried again); a
-// node of a state the engine holds refused. The test package's loader records what the package was asked.
+// The ledger worker's side of the sweep, in a real worker thread over a map of the nodes written so far. The thread has
+// its own instance of the v9 package, which nothing of this thread's (the transactions built here, their builders'
+// objects) can hold. Checked:
+// - the nodes the sweep deletes are evicted from the package, so a node needed again is flushed again;
+// - a kept parse's native objects are freed when the parse is dropped, and freed at once when a kept transaction holds
+//   a node the sweep deletes (the eviction is then tried again);
+// - evicting a node of a state the engine holds is refused.
+//
+// The test package's loader records what the package was asked. [LG-14; design §5.4]
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);

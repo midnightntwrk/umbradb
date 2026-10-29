@@ -1,13 +1,13 @@
 /**
- * What crosses from the ledger worker to the main thread (`openspec/changes/core-arch/specs/ledger/spec.md` LG-7,
- * LG-17; `design.md` §5.1, §5.5; decision record Q49; task 12.6): plain data — what `./worker/protocol.ts` lists, the
- * values Node.js's and the browser's structured clone carry as they are: `undefined`, `null`, booleans, numbers,
- * `bigint`s, strings, arrays, plain objects (whose prototype is `Object.prototype` or `null`) and `Uint8Array`s —, never
- * a ledger package's object. A WebAssembly-backed object (a wasm-bindgen class instance: a pointer into the package's
- * memory, `__wbg_ptr`, behind a class prototype) does not fail a structured clone: the clone is a plain object holding
- * the pointer, which is meaningless outside the thread that made it. So {@link plainDataProblem} first walks the value
- * and refuses anything else by what it is and where, then makes the structured-clone round trip and requires the copy to
- * be the same value.
+ * What crosses from the ledger worker to the main thread: plain data, never a ledger package's object. Plain data is
+ * what `./worker/protocol.ts` lists, the values that Node.js's and the browser's structured clone carry unchanged:
+ * `undefined`, `null`, booleans, numbers, `bigint`s, strings, arrays, plain objects (whose prototype is
+ * `Object.prototype` or `null`) and `Uint8Array`s. [LG-7, LG-17, Q49; design §5.1, §5.5]
+ *
+ * A WebAssembly-backed object (a wasm-bindgen class instance: a pointer into the package's memory, `__wbg_ptr`, behind
+ * a class prototype) does not fail a structured clone. The clone is a plain object holding the pointer, which means
+ * nothing outside the thread that made it. So {@link plainDataProblem} first walks the value and rejects anything else,
+ * saying what it is and where. Then it makes the structured-clone round trip and requires the copy to be the same value.
  */
 
 /** A value's place in a result, as a problem names it: `$`, `$.calls[2].address`, `$[0]`. */

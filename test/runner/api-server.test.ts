@@ -50,19 +50,25 @@ import {
 } from "./process-harness.js";
 
 /**
- * The module API on `listen.api` (tasks 5.2a, 5.2b; RN-15, RN-16; A75): HTTP handlers registered in `on-start-api`
- * answer on the listener with a read handle at the latest committed height, and the client gets each answer as the
- * module wrote it — status, headers and body: the core adds no envelope header and no `extensions` and tells no GraphQL
- * response apart (owner decisions Q104, Q105) —; a module that states the view, height and hash it read does so with
- * the envelope's helpers (`X-Umbra-View`, `X-Umbra-Height`, `X-Umbra-Hash`; a GraphQL response's `extensions`), and the
- * view's `no-committed-height` before block S commits, uncaught, is answered 503; but for one header: every HTTP answer
- * on the listener — a handler's, the module API's own errors, the answers Node.js and `ws` write themselves, the
- * subscription's upgrade — carries `X-Umbra-Version` with the build's version, once, a module's own header of that
- * name replaced (owner decision Q131, task 5.2c); subscriptions on WebSocket at the
- * same listener, notified from the module's `on-after-db-write` through `emit` with exactly the values it emitted; two
- * modules registering one route or subscription name refuse startup with `duplicate-api-route` before anything listens.
- * Over a database on both backends, through the runner's startup and loop; the server's own behaviour (the WebSocket
- * protocol, limits, slow subscribers, closing) without one.
+ * The module API on `listen.api`. [RN-15, RN-16, A75]
+ *
+ * - HTTP handlers registered in `on-start-api` answer on the listener with a read handle at the latest committed
+ *   height.
+ * - The client gets each answer as the module wrote it (status, headers and body). The core adds no envelope header
+ *   and no `extensions`, and does not treat GraphQL responses specially. [Q104 A, Q105]
+ * - A module that states the view, height and hash it read does so with the envelope's helpers (`X-Umbra-View`,
+ *   `X-Umbra-Height`, `X-Umbra-Hash`; a GraphQL response's `extensions`). The view's `no-committed-height` before block
+ *   S commits, if uncaught, is answered 503.
+ * - One header is the exception: every HTTP answer on the listener carries `X-Umbra-Version` with the build's version,
+ *   once, replacing a module's own header of that name. This covers a handler's answer, the module API's own errors,
+ *   the answers Node.js and `ws` write themselves, and the subscription's upgrade. [Q131]
+ * - Subscriptions on WebSocket at the same listener are notified from the module's `on-after-db-write` through `emit`,
+ *   with exactly the values it emitted.
+ * - Two modules registering one route or subscription name refuse startup with `duplicate-api-route` before anything
+ *   listens.
+ *
+ * Tested over a database on both backends, through the runner's startup and loop; the server's own behaviour (the
+ * WebSocket protocol, limits, slow subscribers, closing) is tested without one.
  */
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex")}`;
@@ -143,7 +149,7 @@ async function listening(port: number): Promise<boolean> {
 /** Whether `name` is `X-Umbra-Version`'s, in any letter case. */
 const isVersion = (name: string): boolean => name.toLowerCase() === "x-umbra-version";
 
-/** Whether `name` is `X-Umbra-Config-Hash`'s, in any letter case (RN-16, Q147; task 14.1b). */
+/** Whether `name` is `X-Umbra-Config-Hash`'s, in any letter case. [RN-16, Q147] */
 const isConfigHash = (name: string): boolean => name.toLowerCase() === "x-umbra-config-hash";
 
 /** The values of the `X-Umbra-Config-Hash` lines among raw headers, each line one value. */
@@ -207,7 +213,7 @@ const RAW = Object.freeze({
     "Content-Type": "application/x-chain-api",
     "Cache-Control": "no-store",
     "X-Umbra-Height": "the module's own",
-    // The core's header (Q131), in another letter case: replaced by the build's version, never sent beside it.
+    // The core's header, in another letter case: replaced by the build's version, never sent beside it. [Q131]
     "x-Umbra-version": "9",
   }),
   body: Uint8Array.of(0, 1, 2, 0x7f, 0x80, 0xfe, 0xff),
@@ -217,10 +223,14 @@ const RAW = Object.freeze({
 const TRANSPORT_HEADERS = new Set(["date", "connection", "keep-alive", "content-length", "transfer-encoding"]);
 
 /**
- * The module `chain-api` of A75: its rows; routes that state their view with the envelope's helpers (`GET /height`,
- * `GET /rows/:height`, `POST /graphql`) and routes that do not (`POST /plain`, a GraphQL response's shape, and `GET
- * /raw`, its own status, headers and bytes); routes whose handlers fail (`GET /fails`: 500, `GET /timeout`: a read's
- * `query-timeout`, 504); a subscription notified from its `on-after-db-write`.
+ * The module `chain-api`:
+ * - its rows;
+ * - routes that state their view with the envelope's helpers (`GET /height`, `GET /rows/:height`, `POST /graphql`);
+ * - routes that do not (`POST /plain`, a GraphQL response's shape, and `GET /raw`, its own status, headers and bytes);
+ * - routes whose handlers fail (`GET /fails`: 500, `GET /timeout`: a read's `query-timeout`, 504);
+ * - a subscription notified from its `on-after-db-write`.
+ *
+ * [A75]
  */
 function chainApi() {
   const calls: string[] = [];
@@ -309,10 +319,11 @@ const registering = (id: string, register: (api: ApiRegistry) => void): ModuleDe
 const ok = async () => ({ status: 200, body: null });
 
 /**
- * A75's helper oracle over a process serving `chain-api` at committed height `height` with `hash`: the problems found
- * on the routes whose handlers call the envelope's helpers — `GET /height`, `GET /rows/1`, `GET /rows/999` (a
- * handler's 404) and `POST /graphql` — none when each response carries the view, height and hash of the read: the
- * headers on the first three, the GraphQL one's in its `extensions` (and no header), its `data` unchanged.
+ * The helper oracle over a process serving `chain-api` at committed height `height` with `hash`. It returns the
+ * problems found on the routes whose handlers call the envelope's helpers: `GET /height`, `GET /rows/1`, `GET
+ * /rows/999` (a handler's 404) and `POST /graphql`. There are none when each response carries the view, height and
+ * hash of the read: as headers on the first three, and for GraphQL in its `extensions` (with no header) and with its
+ * `data` unchanged. [A75]
  */
 async function helperProblems(url: string, height: bigint, hash: Uint8Array): Promise<string[]> {
   const problems: string[] = [];
@@ -337,7 +348,7 @@ async function helperProblems(url: string, height: bigint, hash: Uint8Array): Pr
   check("GET /rows/999", missing, ((await missing.json()) as { read?: unknown }).read);
   const graphql = await fetch(`${url}/graphql`, { method: "POST", body: JSON.stringify({ query: "{ x }" }) });
   const body = (await graphql.json()) as { data?: { echo?: unknown; read?: unknown }; extensions?: unknown };
-  // The GraphQL module states its view in the body's extensions only (RN-16's scenario): no header.
+  // The GraphQL module states its view in the body's extensions only: no header. [RN-16]
   check("POST /graphql", graphql, body.data?.read, null);
   if (JSON.stringify(body.data) !== JSON.stringify({ echo: "{ x }", read: String(height) })) {
     problems.push(`POST /graphql: data ${JSON.stringify(body.data)}`);
@@ -349,13 +360,19 @@ async function helperProblems(url: string, height: bigint, hash: Uint8Array): Pr
 }
 
 /**
- * A75's "the core leaves a module's answer as the module wrote it" (RN-16's scenario, Q104, Q105) over a process
- * serving `chain-api` whose reads see `height` (null before block S): the problems found on the routes whose handlers
- * call no helper — `GET /raw` (its own status, headers, an `X-Umbra-Height` of its own among them, and bytes) and `POST
- * /plain` (a GraphQL response's shape, written as JSON) — none when the client gets each exactly as written but for
- * the core's `X-Umbra-Version` (Q131): the status, the module's headers with their values and no others but HTTP's own
- * (and, for a body the module gave as an object, the JSON type its encoding writes), the build's version in place of
- * the module's own header of that name, and the body byte for byte.
+ * The oracle for "the core leaves a module's answer as the module wrote it", over a process serving `chain-api` whose
+ * reads see `height` (null before block S). It returns the problems found on the routes whose handlers call no helper:
+ * `GET /raw` (its own status, headers, an `X-Umbra-Height` of its own among them, and bytes) and `POST /plain` (a
+ * GraphQL response's shape, written as JSON). [A75, RN-16, Q104 A, Q105]
+ *
+ * There are none when the client gets each exactly as written, except for the core's `X-Umbra-Version`:
+ * - the status;
+ * - the module's headers with their values, and no others but HTTP's own (and, for a body the module gave as an
+ *   object, the JSON type its encoding writes);
+ * - the build's version in place of the module's own header of that name;
+ * - the body, byte for byte.
+ *
+ * [Q131]
  */
 async function untouchedProblems(url: string, height: bigint | null): Promise<string[]> {
   const problems: string[] = [];
@@ -393,11 +410,14 @@ async function untouchedProblems(url: string, height: bigint | null): Promise<st
 }
 
 /**
- * RN-16's "every answer names its build" and A75's `X-Umbra-Version` (Q131) over a listener serving `chain-api`, block
- * S committed (`committed`) or not: the problems found on its answers — the handlers' (`GET /raw`'s with the module's
- * own `x-Umbra-version`, a handler's 404), the module API's own errors (404, 405, 400 for a path and for a body, 500,
- * 503 before S, 504) and the subscription's upgrade (101) — none when each has the status asked for and exactly one
- * `X-Umbra-Version` line, the build's version. (A WebSocket message or close after the upgrade has no headers.)
+ * The oracle for "every answer names its build" (`X-Umbra-Version`), over a listener serving `chain-api` with block S
+ * committed (`committed`) or not. It returns the problems found on its answers:
+ * - the handlers' (`GET /raw`'s with the module's own `x-Umbra-version`, a handler's 404);
+ * - the module API's own errors (404, 405, 400 for a path and for a body, 500, 503 before S, 504);
+ * - the subscription's upgrade (101).
+ *
+ * There are none when each has the status asked for and exactly one `X-Umbra-Version` line, the build's version. (A
+ * WebSocket message or close after the upgrade has no headers.) [RN-16, A75, Q131]
  */
 async function versionProblems(url: string, ws: string, committed: boolean, configHash?: string): Promise<string[]> {
   const query = JSON.stringify({ query: "{ x }" });
@@ -426,7 +446,7 @@ async function versionProblems(url: string, ws: string, committed: boolean, conf
     if (versions.length !== 1 || versions[0] !== UMBRADB_VERSION) {
       problems.push(`${what} (${status}): X-Umbra-Version ${JSON.stringify(versions)}`);
     }
-    // RN-16's configuration hash (Q147, task 14.1b): once, the process's, on a listener given one.
+    // The configuration hash: once, the process's, on a listener given one. [RN-16, Q147]
     const hashes = configHashesOf(rawHeaders);
     if (configHash !== undefined && (hashes.length !== 1 || hashes[0] !== configHash)) {
       problems.push(`${what} (${status}): X-Umbra-Config-Hash ${JSON.stringify(hashes)}`);
@@ -448,7 +468,7 @@ async function versionProblems(url: string, ws: string, committed: boolean, conf
   return problems;
 }
 
-/** A75's duplicate oracle: the problems found when two modules register `GET /same`, or the subscription `same`. */
+/** The duplicate oracle: the problems found when two modules register `GET /same`, or the subscription `same`. [A75] */
 async function duplicateProblems(db: () => Promise<Database>, routes: () => ApiRoutes = () => new ApiRoutes()): Promise<string[]> {
   const problems: string[] = [];
   for (const kind of ["http", "subscription"] as const) {
@@ -489,14 +509,14 @@ class AcceptsDuplicates extends ApiRoutes {
   }
 }
 
-/** A negative control: task 5.2a's module API, which put the envelope's headers on every answer (`answerChainData`). */
+/** A negative control: an earlier module API, which put the envelope's headers on every answer (`answerChainData`). */
 class AddsHeaders extends ModuleApi {
   protected override handle(route: HttpRoute, req: Parameters<HttpHandler>[0], read: ReadHandle): Promise<ChainDataAnswer> {
     return answerChainData(read, () => super.handle(route, req, read));
   }
 }
 
-/** Task 5.2a's GraphQL rule (Q105's option A): an object whose keys are only `data`, `errors`, `extensions`. */
+/** The earlier module API's GraphQL rule: an object whose keys are only `data`, `errors`, `extensions`. [Q105] */
 const graphQLShaped = (body: unknown): body is object =>
   typeof body === "object" &&
   body !== null &&
@@ -505,7 +525,7 @@ const graphQLShaped = (body: unknown): body is object =>
   Object.keys(body).every((key) => ["data", "errors", "extensions"].includes(key)) &&
   ("data" in body || "errors" in body);
 
-/** A negative control: task 5.2a's module API, which put the view in the `extensions` of a GraphQL-shaped body. */
+/** A negative control: an earlier module API, which put the view in the `extensions` of a GraphQL-shaped body. */
 class AddsExtensions extends ModuleApi {
   protected override async handle(
     route: HttpRoute,
@@ -519,8 +539,8 @@ class AddsExtensions extends ModuleApi {
 }
 
 /**
- * A negative control (Q131): a module API that sets the build's version on the handlers' answers only — a module's own
- * header of that name replaced —, served by Node.js's own response, so the module API's errors go without it.
+ * A negative control: a module API that sets the build's version on the handlers' answers only (replacing a module's
+ * own header of that name), served by Node.js's own response, so the module API's errors go without it. [Q131]
  */
 class VersionsAnswersOnly extends ModuleApi {
   protected override async handle(
@@ -535,8 +555,8 @@ class VersionsAnswersOnly extends ModuleApi {
 }
 
 /**
- * A negative control (Q131): answers given the build's version beside, not in place of, a header of that name in
- * another letter case — a module's `x-Umbra-version` then sent too. (Only `writeHead`'s object form, the module API's.)
+ * A negative control: answers given the build's version beside, not in place of, a header of that name in another
+ * letter case, so a module's `x-Umbra-version` is sent too. (Only `writeHead`'s object form, the module API's.) [Q131]
  */
 class AppendsVersion<Request extends IncomingMessage = IncomingMessage> extends ServerResponse<Request> {
   override writeHead(
@@ -576,7 +596,7 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     expect(await before.json()).toEqual({
       error: {
         code: "no-committed-height",
-        message: "no height has committed yet: chain data is answered once block S commits (RN-16)",
+        message: "no height has committed yet: chain data is answered once block S commits",
       },
     });
     expect(api.calls).toEqual(["height"]);
@@ -614,7 +634,7 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     expect(await versionProblems(process.url, process.ws, false)).toEqual([]);
     await runLoop(process, new InMemoryBlockSource({ head: 2n }), 2n);
     expect(await versionProblems(process.url, process.ws, true)).toEqual([]);
-    // RN-16's scenario: the module's own X-Umbra-Version (9) replaced, its body and every other header its own.
+    // The module's own X-Umbra-Version (9) is replaced; its body and every other header are its own. [RN-16]
     const raw = await exchange(process.url, "GET", "/raw");
     expect(versionsOf(raw.rawHeaders)).toEqual([UMBRADB_VERSION]);
     expect(hex(raw.body)).toBe(hex(RAW.body));
@@ -654,7 +674,7 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
       expect(await versionProblems(answersOnly.url, answersOnly.ws, true)).toEqual(errors(false));
       expect(await versionProblems(appends.url, appends.ws, true)).toEqual([twice]);
       expect(await versionProblems(real.url, real.ws, true)).toEqual([]);
-      // The one A75 oracle that reads the version through fetch sees the module's beside the build's as one value.
+      // The one oracle that reads the version through fetch sees the module's beside the build's as one value. [A75]
       expect(await untouchedProblems(appends.url, 1n)).toEqual([`GET /raw: X-Umbra-Version 9, ${UMBRADB_VERSION}`]);
     } finally {
       for (const server of listeners) await server.close();
@@ -668,7 +688,7 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     const routes = await registerModuleApis(sealed);
     const options = { db, timeoutMs: 30_000 };
     const hashed = await listenModuleApi(new ModuleApi(routes, options), "127.0.0.1:0", { configHash: CONFIG_HASH });
-    // Negative control: task 5.2c's listener, given no configuration hash, fails the oracle on every answer.
+    // Negative control: a listener given no configuration hash fails the oracle on every answer.
     const unhashed = await listenModuleApi(new ModuleApi(routes, options), "127.0.0.1:0");
     try {
       const at = (server: ModuleApiServer) => ({ url: `http://127.0.0.1:${server.port}`, ws: `ws://127.0.0.1:${server.port}` });
@@ -678,7 +698,7 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
       expect(missing.every((problem) => problem.endsWith("X-Umbra-Config-Hash []"))).toBe(true);
       await runLoop({ db, ...sealed }, new InMemoryBlockSource({ head: 1n }), 1n);
       expect(await versionProblems(at(hashed).url, at(hashed).ws, true, CONFIG_HASH)).toEqual([]);
-      // The handlers' answers are otherwise as the modules wrote them (A75's oracle, which skips the core's headers).
+      // The handlers' answers are otherwise as the modules wrote them (the oracle skips the core's headers). [A75]
       expect(await untouchedProblems(at(hashed).url, 1n)).toEqual([]);
     } finally {
       await hashed.close();
@@ -703,7 +723,7 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
 
     const source = new InMemoryBlockSource({ head: 2n });
     await runLoop(process, source, 2n);
-    // Each value exactly as the module emitted it (toEqual: no member added, Q104 A), in the protocol's `next`.
+    // Each value exactly as the module emitted it (toEqual: no member added), in the protocol's `next`. [Q104 A]
     const notified = (height: number, id: string) => ({
       type: "next",
       id,
@@ -726,7 +746,7 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     await third.until(1);
     source.finalize(3n);
     await runLoop(process, source, 3n);
-    // The loop run again at cursor 2 re-delivers 2's on-after-db-write first (RN-11; task 5.3), then goes on at 3.
+    // The loop run again at cursor 2 delivers 2's on-after-db-write again first, then goes on at 3. [RN-11]
     expect((await third.until(3)).slice(1)).toEqual([notified(2, "c"), notified(3, "c")]);
     expect(first.messages).toHaveLength(5);
     await first.close();
@@ -792,7 +812,7 @@ describe.each(RUNNER_BACKENDS)("A75: module APIs on listen.api on $name (RN-15, 
     await runLoop(process, new InMemoryBlockSource({ head: 2n }), 2n);
     const height = (h: number): string[] =>
       ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"].map((p) => `${p}@${h}`);
-    // The recorder's entry starts at 1: on-start-height between on-parse and on-compute there (RN-1, RN-9; task 5.3).
+    // The recorder's entry starts at 1: on-start-height runs between on-parse and on-compute there. [RN-1, RN-9]
     const [fetch1, parse1, ...rest1] = height(1);
     expect(seen.map((c) => (c.height === undefined ? c.point : `${c.point}@${c.height}`))).toEqual([
       "on-start-db",
@@ -878,7 +898,7 @@ describe("the module API server without a database", () => {
       expect(() => parseAddress(bad), bad).toThrow(TypeError);
     }
     expect(() => parseAddress(8080 as unknown as string)).toThrow(
-      "expected an address host:port, its port from 0 to 65535 (CF-4), not 8080",
+      "expected an address host:port, its port from 0 to 65535, not 8080",
     );
     // Only a string is an address, not an object that prints as one.
     expect(() => parseAddress({ toString: () => "host:1" } as unknown as string)).toThrow(TypeError);

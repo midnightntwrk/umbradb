@@ -21,14 +21,18 @@ import { declaration, userModules } from "../modules/declarations.js";
 import { CORE_SETTINGS, prices, REPOSITORY, stats } from "./config-fixtures.js";
 
 /**
- * CF-2 and A27 (task 4.1): the builders fill each entry's identity and version from the build — `coreEntry` the id
- * `core` and the core version (the UmbraDB version and the ledger packages the build carries), a module's `entry` its
- * id and version from the imported declaration (`defineModule` gives every declaration one), and `versionEntry` takes
- * a version the build does not carry — and return plain data. A27 `[STATIC]`: a misspelled `core` field, a wrong field
- * type and a module `entry` given another module's settings are type errors, shown by `// @ts-expect-error` lines that
- * `tsc --noEmit` (`npm run typecheck`) fails as unused if the error is gone, as A20's are; the committed negative
- * control is a builder typed loosely, which accepts each of them. `./typed-config.test.ts` compiles a configuration
- * file with the TypeScript compiler and checks each error's position and words.
+ * The builders fill each entry's identity and version from the build, and return plain data: [CF-2]
+ * - `coreEntry` sets the id `core` and the core version (the UmbraDB version and the ledger packages the build
+ *   carries);
+ * - a module's `entry` sets its id and version from the imported declaration (`defineModule` gives every declaration
+ *   one);
+ * - `versionEntry` takes a version the build does not carry.
+ *
+ * Static checks (`[STATIC]`): a misspelled `core` field, a wrong field type and a module `entry` given another
+ * module's settings are type errors. They are shown by `// @ts-expect-error` lines, which `tsc --noEmit`
+ * (`npm run typecheck`) fails as unused if the error is gone, like the module declaration's type checks. The committed
+ * negative control is a builder typed loosely, which accepts each of them. `./typed-config.test.ts` compiles a
+ * configuration file with the TypeScript compiler and checks each error's position and words. [A27 STATIC, A20]
  */
 
 /** The `config` an entry builder takes. */
@@ -55,7 +59,7 @@ describe("A27: a misspelled core field is a type error (CF-2)", () => {
         config: {
           network: "preprod",
           node: "ws://127.0.0.1:9944",
-          // @ts-expect-error A27: `databse` is not a field of the core entry (the field is `database`; CF-2's scenario).
+          // @ts-expect-error `databse` is not a field of the core entry (the field is `database`). [A27 STATIC, CF-2]
           databse: "postgres://indexer@db/umbradb",
         },
       });
@@ -64,7 +68,7 @@ describe("A27: a misspelled core field is a type error (CF-2)", () => {
         start: 0,
         config: {
           ...CORE_SETTINGS,
-          // @ts-expect-error A27: `retainState` is not a field of the core entry (the field is `retainStates`).
+          // @ts-expect-error `retainState` is not a field of the core entry (the field is `retainStates`). [A27 STATIC]
           retainState: 1000,
         },
       });
@@ -92,7 +96,7 @@ describe("A27: a wrong field type is a type error (CF-2, CF-3's scenario)", () =
         start: 0,
         config: {
           ...CORE_SETTINGS,
-          // @ts-expect-error A27: `livenessTimeoutMs` is an integer, not the string "30000".
+          // @ts-expect-error `livenessTimeoutMs` is an integer, not the string "30000". [A27 STATIC]
           livenessTimeoutMs: "30000",
         },
       });
@@ -101,7 +105,7 @@ describe("A27: a wrong field type is a type error (CF-2, CF-3's scenario)", () =
         start: 0,
         config: {
           ...CORE_SETTINGS,
-          // @ts-expect-error A27: `developmentOptIn` is a boolean.
+          // @ts-expect-error `developmentOptIn` is a boolean. [A27 STATIC]
           developmentOptIn: "true",
         },
       });
@@ -110,7 +114,7 @@ describe("A27: a wrong field type is a type error (CF-2, CF-3's scenario)", () =
         start: 0,
         config: {
           ...CORE_SETTINGS,
-          // @ts-expect-error A27: `network` is one of the five networks.
+          // @ts-expect-error `network` is one of the five networks. [A27 STATIC]
           network: "mainnet-beta",
         },
       });
@@ -126,7 +130,7 @@ describe("A27: a wrong field type is a type error (CF-2, CF-3's scenario)", () =
       stats.entry({
         start: 0,
         config: {
-          // @ts-expect-error A27: `pollMs` is a number in stats's schema.
+          // @ts-expect-error `pollMs` is a number in stats's schema. [A27 STATIC]
           pollMs: "1000",
         },
       });
@@ -141,12 +145,12 @@ describe("A27: a module entry given another module's settings is a type error (C
         start: 0,
         config: {
           pollMs: 1000,
-          // @ts-expect-error A27: `feedUrl` is prices's setting, not stats's.
+          // @ts-expect-error `feedUrl` is prices's setting, not stats's. [A27 STATIC]
           feedUrl: "https://feed.example",
         },
       });
     const settings: PricesSettings = { feedUrl: "https://feed.example" };
-    // @ts-expect-error A27: prices's settings lack stats's `pollMs`.
+    // @ts-expect-error prices's settings lack stats's `pollMs`. [A27 STATIC]
     const built = () => stats.entry({ start: 0, config: settings });
     expectTypeOf(written).toBeFunction();
     expectTypeOf(built).toBeFunction();
@@ -159,8 +163,8 @@ describe("A27: a module entry given another module's settings is a type error (C
     expectTypeOf<Accepts<typeof prices.entry, PricesSettings>>().toEqualTypeOf<true>();
     expectTypeOf<StatsSettings>().toEqualTypeOf<{ limit?: number | undefined; pollMs: number; token?: string | undefined }>();
     const entry = stats.entry({ start: 0, config: { pollMs: 1000 } });
-    // defineModule infers a declaration's id as a string (task 3.1: a `const` type parameter, which would keep the
-    // literal, also makes its lists read-only); the value is the declaration's, below.
+    // defineModule infers a declaration's id as a string: a `const` type parameter, which would keep the literal,
+    // would also make its lists read-only. The value is the declaration's, below.
     expectTypeOf(entry.id).toEqualTypeOf<string>();
     expectTypeOf(entry.config).toEqualTypeOf<StatsSettings>();
   });
@@ -185,13 +189,13 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
     const mixedPublic = () =>
       coreEntry({
         start: 0,
-        // @ts-expect-error CF-4: `instanceId` is a private process's field, and this entry has the public one's `node`.
+        // @ts-expect-error `instanceId` is a private process's field, and this entry has the public one's `node`. [CF-4]
         config: { ...CORE_SETTINGS, instanceId: "wallet-1" },
       });
     const mixedPrivate = () =>
       coreEntry({
         start: 0,
-        // @ts-expect-error CF-4: `lockstepInstances` is the public core's, and this entry has a private `instanceId`.
+        // @ts-expect-error `lockstepInstances` is the public core's, and this entry has a private `instanceId`. [CF-4]
         config: { network: "preprod", database: { kind: "pglite", memory: true }, instanceId: "wallet-1", lockstepInstances: [] },
       });
     expectTypeOf(mixedPublic).toBeFunction();
@@ -212,7 +216,7 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
     expectTypeOf<Accepts<typeof coreEntry, Private & { node: string }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Private & { lockstepInstances: string[] }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Private & { transportReader: { user: string } }>>().toEqualTypeOf<false>();
-    // Q167 A: a connection string is no database setting.
+    // A connection string is no database setting. [Q167 A]
     expectTypeOf<Accepts<typeof coreEntry, { network: "preprod"; database: string; node: string }>>().toEqualTypeOf<false>();
     // The negative control: the loose builder accepts each of them.
     expectTypeOf<Accepts<typeof loose, Minimal>>().toEqualTypeOf<true>();
@@ -312,7 +316,7 @@ describe("CF-2: the build's core version", () => {
     expect(UMBRADB_VERSION).toBe(manifest.version);
     expect(buildCoreVersion()).toEqual({
       umbradb: manifest.version,
-      // In release order: v8, v9 as runtime 2.0 built it (rc.3, task 12.2a), v9 (rc.5).
+      // In release order: v8, v9 as runtime 2.0 built it (rc.3), v9 (rc.5).
       ledgers: (["v8", "v9-rc3", "v9"] as const).map((ledger) => ({
         ledger,
         versionName: LEDGER_RELEASES[ledger].versionName,
@@ -354,13 +358,13 @@ describe("CF-2: versionEntry takes a version this build does not carry", () => {
     const entry = versionEntry({ id: "core", start: 0, version, config: { network: "preprod" } });
     expect(entry).toEqual({ id: "core", start: 0, version, config: { network: "preprod" } });
     expectTypeOf(entry.version).toEqualTypeOf<CoreVersion>();
-    // @ts-expect-error CF-2: the core's version is a core version, { umbradb, ledgers }, not a semver string.
+    // @ts-expect-error the core's version is a core version, { umbradb, ledgers }, not a semver string. [CF-2]
     const semver = () => versionEntry({ id: "core", start: 0, version: "0.9.4" });
     expectTypeOf(semver).toBeFunction();
   });
 
   it("types its config as plain data, loosely: any field, but no function", () => {
-    // @ts-expect-error CF-1: a function is not plain data.
+    // @ts-expect-error a function is not plain data. [CF-1]
     const fn = () => versionEntry({ id: "stats", start: 1, version: "1.0.0", config: { onError: () => 0 } });
     expectTypeOf(fn).toBeFunction();
   });
@@ -432,7 +436,7 @@ describe("CF-1, CF-2: defineConfig", () => {
   });
 
   it("rejects an unknown property beside entries", () => {
-    // @ts-expect-error CF-1: a configuration is { entries }.
+    // @ts-expect-error a configuration is { entries }. [CF-1]
     const extra = () => defineConfig({ entries: [], modules: [] });
     expectTypeOf(extra).toBeFunction();
   });

@@ -3,9 +3,11 @@ import { startHashDecision } from "../../src/backbone/core-private-source/core-p
 import { publicConfigChanged } from "../../src/private/private-transport.js";
 
 /**
- * Task 17.5b (the mutation pass task 14.1c deferred): the text of PP-14's stops (Q159) — `startHashDecision`'s two
- * forms, with and without a hash given that is not the one found, with and without one recorded —, its reasons, and
- * `publicConfigChanged`'s two ways of learning the new hash, with and without one.
+ * The text of the stops a changed public configuration hash causes, checked word for word:
+ * - `startHashDecision`'s two forms: with and without a given hash that is not the one found, and with and without
+ *   one recorded;
+ * - its reasons;
+ * - `publicConfigChanged`'s two ways of learning the new hash, with and without one. [PP-14, Q159]
  */
 
 const h = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -17,8 +19,8 @@ describe("PP-14's stop messages (task 17.5b)", () => {
     expect(moved.reason).toBe("refused");
     expect(moved.refusal?.message).toBe(
       `the core at coreTransport sends the configuration hash ${C}, and the public configuration history this start ` +
-        `read hashes to ${B} (PP-14): the core's configuration changed during this start, or coreTransport and ` +
-        "publicDatabase are not one core's (decision record Q149), so the public table items checked are not the " +
+        `read hashes to ${B}: the core's configuration changed during this start, or coreTransport and ` +
+        "publicDatabase are not one core's, so the public table items checked are not the " +
         `core's. Start the private process again once both give one hash — with --update-hash=${C}, to accept the ` +
         `core's, in place of ${A}, the one it accepted. The --update-hash given, ${B}, is not that hash, so nothing ` +
         "was accepted.",
@@ -32,8 +34,8 @@ describe("PP-14's stop messages (task 17.5b)", () => {
     const stop = startHashDecision({ recorded: A, history: B, core: null, given: null });
     expect(stop.reason).toBe("refused");
     expect(stop.refusal?.message).toBe(
-      `the public core's configuration hash is ${B}, and this private process last ran on ${A}, the one it accepted ` +
-        "(PP-14): the public configuration changed since, so the public table items its modules read may no longer " +
+      `the public core's configuration hash is ${B}, and this private process last ran on ${A}, the one it accepted` +
+        ": the public configuration changed since, so the public table items its modules read may no longer " +
         `be what it checked. To accept ${B}, start it with --update-hash=${B} (startProcess's updateHash): the start ` +
         "then runs its full checks of the public side and records the new hash",
     );
@@ -49,12 +51,12 @@ describe("PP-14's stop messages (task 17.5b)", () => {
 
   it("says how the running process learned the new hash, and how to accept it", () => {
     const tail =
-      ", and it was " + `${A} when this private process started (PP-14): the public core restarted with another ` +
-      "configuration, so the public table items this process checked at its startup (PP-13) may no longer be what it " +
+      ", and it was " + `${A} when this private process started: the public core restarted with another ` +
+      "configuration, so the public table items this process checked at its startup may no longer be what it " +
       "reads, and it halts before it processes another height; ";
     expect(publicConfigChanged(A, B, "transport").message).toBe(
       `a message of the core at coreTransport carries the configuration hash ${B}${tail}to accept ${B}, start it again ` +
-        `with --update-hash=${B}: the start checks the public side again and records it (a start without it stops, Q159)`,
+        `with --update-hash=${B}: the start checks the public side again and records it (a start without it stops)`,
     );
     expect(publicConfigChanged(A, null, "public-database").message).toBe(
       "the public configuration history, read again at a reconnection to the public database, hashes to null" +

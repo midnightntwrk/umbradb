@@ -17,12 +17,15 @@ import { type ModelBatch, type ModelSnapshot, SweepModel } from "./sweep-model.j
 import { stateNodes } from "../ledger/fixtures/sweep-fixture.js";
 
 /**
- * LG-14's step on its own (task 12.5; `openspec/changes/core-arch/specs/ledger/spec.md` LG-14, acceptance A105):
- * `sweepStep` over tables kept in memory here — what the database holds at h − 1 —, its writes applied as the
- * database applies them, against the reference model of `./sweep-model.ts` after every block: on task 12.5's DAG
- * fixture with K = 50, on hand-made cases, and on random histories (fast-check, seed 20261027: random DAGs, missing
- * nodes, rising and falling root counts, budgets from 1, `sweep` turned off and on). The process tests
- * (`ledger-sweep-process.test.ts`) run the SQL tables on PostgreSQL and PGlite.
+ * The mark-and-sweep step on its own. `sweepStep` runs over tables kept in memory here (what the database holds at
+ * h − 1), and its writes are applied as the database applies them. After every block it is checked against the
+ * reference model of `./sweep-model.ts`:
+ * - on the sweep DAG fixture, with K = 50;
+ * - on hand-made cases;
+ * - on random histories (fast-check, seed 20261027): random DAGs, missing nodes, rising and falling root counts,
+ *   budgets from 1, `sweep` turned off and on.
+ *
+ * The process tests (`ledger-sweep-process.test.ts`) run the SQL tables on PostgreSQL and PGlite. [LG-14, A105]
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -124,7 +127,7 @@ async function compare(blocks: readonly Block[], budget: number, picker: GreyPic
 
 const bigints = (_key: string, value: unknown): unknown => (typeof value === "bigint" ? `${value}` : value);
 
-/** The fixture's blocks (task 12.5's DAG, `retainStates` 0), each batch what a package storing exactly the model's nodes flushes. */
+/** The fixture's blocks (the sweep DAG, `retainStates` 0), each batch what a package storing exactly the model's nodes flushes. */
 function fixtureBlocks(last: number, on: (h: number) => boolean = () => true): Block[] {
   const stored = new Set<string>();
   const blocks: Block[] = [];
@@ -149,7 +152,7 @@ describe("LG-14's fixed-budget mark-and-sweep step (task 12.5)", () => {
   it("is the reference model's after every block of task 12.5's DAG fixture, K = 50: wide trees, a new root every block", async () => {
     const run = await compare(fixtureBlocks(100), 50);
     expect(run.differs).toBeNull();
-    // The fixture is what A105 asks of it: a marking round larger than the budget, cycles that complete, deletions.
+    // The fixture has what the test needs: a marking round larger than the budget, cycles that complete, deletions. [A105]
     expect(run.steps.some((step) => step.greyInserted.length > 50)).toBe(true);
     expect(run.expected.cycle).toBeGreaterThanOrEqual(4n);
     expect(run.steps.reduce((n, step) => n + step.deleted.length, 0)).toBeGreaterThan(500);

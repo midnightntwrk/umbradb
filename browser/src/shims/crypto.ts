@@ -1,8 +1,8 @@
 /**
- * `node:crypto` in the browser build (`openspec/changes/core-arch/design.md` §9.2; task 16.1): `createHash("sha256")`
- * only — the one hash UmbraDB's sources take from it — synchronous and incremental like Node.js's, over `./sha256.ts`.
- * `update` takes bytes or text (UTF-8 unless an encoding is named), `digest()` gives a `Buffer` and `digest("hex")`
- * text. Any other algorithm, or any other export, fails the build or the call, never silently.
+ * `node:crypto` in the browser build: `createHash("sha256")` only, the one hash UmbraDB's sources take from it.
+ * It is synchronous and incremental like Node.js's, over `./sha256.ts`. `update` takes bytes or text (UTF-8 unless an
+ * encoding is named), `digest()` gives a `Buffer` and `digest("hex")` text. Any other algorithm, or any other export,
+ * fails the build or the call, never silently. [design §9.2]
  */
 
 import { Buffer } from "./buffer.js";

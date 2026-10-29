@@ -19,12 +19,12 @@ import {
 } from "./restore-private.js";
 
 /**
- * The committed negative control of task 15.2a's restore of a private process's backup (BK-3, PP-2, PP-12; A164), on
- * PostgreSQL 18.6 and PGlite 0.5.10: the restore with the comparison of the binding the backup records taken away
- * (`RestoreSeams.skip.binding`) — what A164's test would see without it. A private process's backup taken against one
- * public database (S 1), restored against another of the same chain (S 2), commits: the restored database is bound to
- * the first, and the private process then started on it against the second refuses at startup with
- * `private-binding-mismatch` (`start`), where the guarded restore refused it and left the target empty.
+ * The committed negative control of the restore of a private process's backup, on PostgreSQL 18.6 and PGlite 0.5.10:
+ * the restore with the comparison of the binding the backup records taken away (`RestoreSeams.skip.binding`), which is
+ * what the private restore test would see without it. A private process's backup taken against one public database (S
+ * 1), restored against another of the same chain (S 2), commits: the restored database is bound to the first, and the
+ * private process then started on it against the second refuses at startup with `private-binding-mismatch` (`start`),
+ * where the guarded restore refused it and left the target empty. [A164, BK-3, PP-2, PP-12]
  */
 
 const TEST_TIMEOUT_MS = 900_000;

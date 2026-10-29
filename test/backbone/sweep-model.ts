@@ -1,25 +1,30 @@
 import { childRefKeys } from "../../src/ledger/node-refs.js";
 
 /**
- * The reference model of LG-14's fixed-budget mark-and-sweep (task 12.5; `openspec/changes/core-arch/specs/ledger/spec.md`
- * LG-14, acceptance A105): an independent in-memory implementation in the tests, written from the requirement's text
- * and design §5.4 — plain sets of hex keys and sorted arrays, no database, nothing of `src/` but the child-list reader
- * (`childRefKeys`, which task 12.3 checks against task 0.2's independent node format) —, against which the
- * implementation's tables are compared after every block.
+ * The reference model of the fixed-budget mark-and-sweep: an independent in-memory implementation in the tests,
+ * written from the requirement's text and the design. The implementation's tables are compared against it after every
+ * block. It uses plain sets of hex keys and sorted arrays, no database, and nothing of `src/` but the child-list reader
+ * (`childRefKeys`, which other tests check against an independent reading of the node format).
+ * [LG-14, A105; design §5.4]
  *
- * Each block's batch is applied first (its nodes inserted, an existing key left as it is; its root counts changed by
- * their signed deltas, a count reaching 0 gone); then, unless `sweep` is off at the block, the step, in LG-14's order:
- * (1) when no cycle runs (`idle`), the cycle number rises, every key with a positive root count *before the block's
- * batch* becomes grey and the phase becomes `mark`; (2) every key whose root count rose in the block and is neither
- * marked nor grey becomes grey; (3) while budget remains and the grey set is not empty, the smallest grey keys in byte
- * order, as many as the budget left (fixed at the round's start), are visited one by one — removed from the grey set,
- * marked, one unit spent, and each key its stored node references that is neither marked nor grey made grey (a key
- * with no stored node is marked and adds nothing); (4) only when the grey set is empty and budget remains, the phase is
- * `sweep`: the stored nodes after the sweep position are scanned in key order, as many as the budget left, one unit
- * each, an unmarked one deleted, and the position moved to the last one scanned; (5) when the scan gave fewer nodes than
- * the budget it had, it passed the last node: the marks and the position are cleared and the phase is `idle`. The first
- * block whose `sweep` is off after one with it on clears the grey set, the marks and the position and makes the phase
- * `idle` (the cycle number kept); while it is off nothing else changes and nothing is deleted.
+ * Each block's batch is applied first: its nodes are inserted (an existing key is left as it is), and its root counts
+ * change by their signed deltas (a count reaching 0 is gone). Then, unless `sweep` is off at the block, the step runs,
+ * in this order: [LG-14]
+ * 1. When no cycle runs (`idle`): the cycle number rises, every key with a positive root count *before the block's
+ *    batch* becomes grey, and the phase becomes `mark`.
+ * 2. Every key whose root count rose in the block and is neither marked nor grey becomes grey.
+ * 3. While budget remains and the grey set is not empty, the smallest grey keys in byte order, as many as the budget
+ *    left (fixed at the round's start), are visited one by one. Each is removed from the grey set and marked, and one
+ *    unit is spent; each key its stored node references that is neither marked nor grey is made grey. A key with no
+ *    stored node is marked and adds nothing.
+ * 4. Only when the grey set is empty and budget remains, the phase is `sweep`. The stored nodes after the sweep
+ *    position are scanned in key order, as many as the budget left, one unit each. An unmarked one is deleted, and the
+ *    position moves to the last one scanned.
+ * 5. When the scan gave fewer nodes than the budget it had, it passed the last node: the marks and the position are
+ *    cleared and the phase is `idle`.
+ *
+ * The first block whose `sweep` is off after one with it on clears the grey set, the marks and the position, and makes
+ * the phase `idle` (the cycle number is kept). While it is off nothing else changes and nothing is deleted.
  *
  * Byte order of 32-byte keys is the order of their lowercase hex.
  */

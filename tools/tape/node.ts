@@ -1,25 +1,25 @@
 /**
- * The tape node (`openspec/changes/core-arch/specs/test-tape/spec.md` TT-2, TT-3; acceptance A69, A70; task 9.1): a
- * WebSocket JSON-RPC 2.0 server, on the loopback interface at a random free port of at least 10000, that serves a tape
- * in place of the Midnight node, so the node client of `src/node/` talks to it unchanged.
+ * The tape node: a WebSocket JSON-RPC 2.0 server, on the loopback interface at a random free port of at least 10000,
+ * that serves a tape in place of the Midnight node, so the node client of `src/node/` talks to it unchanged.
+ * [TT-2, TT-3, A69, A70]
  *
  * **Sessions.** The k-th connection it accepts is served the tape's k-th session (`./session.ts`); a connection beyond
  * the last is served an empty one, where every call is `not-on-tape`. Connections are independent: two open at once are
  * served two sessions. A process that connects again after a `disconnect` gets the next session; a test that wants the
  * tape served again from its start starts another tape node.
  *
- * **Calls** are answered by occurrence (TT-2; `./rules.ts`): the k-th request of a method and params pair in a session
- * gets the pair's k-th record, then the last call record again. A call record answers its `result` or `error` after
- * its `delayMs` (at once without one), measured on the node's clock: a timer that fires early is set again for the time
+ * **Calls** are answered by occurrence (`./rules.ts`): the k-th request of a method and params pair in a session gets
+ * the pair's k-th record, then the last call record again. A call record answers its `result` or `error` after its
+ * `delayMs` (at once without one), measured on the node's clock: a timer that fires early is set again for the time
  * left, so an answer never leaves sooner than its delay, also when the event loop's clock lags under load. A
  * subscription record answers its id; a `fault: "timeout"` record answers nothing; a `fault: "error"` record answers
- * the JSON-RPC error `{ code, message: "tape fault: <method>" }` (code −32603 without one). A request no record
- * answers gets `{ code: −32090, message: "not-on-tape: <method>", data: { method, params, session } }`.
+ * the JSON-RPC error `{ code, message: "tape fault: <method>" }` (code −32603 without one). A request no record answers
+ * gets `{ code: −32090, message: "not-on-tape: <method>", data: { method, params, session } }`. [TT-2]
  *
- * **Notifications** are sent in file order, each once every record before it in its session is done (TT-3), right after
- * the answer that let it through, as Substrate's notification of its subscription: `chain_newHead` for
- * `chain_subscribeNewHeads`, `chain_finalizedHead` for `chain_subscribeFinalizedHeads` (TT-1 does not record the name;
- * a subscription of another method is notified under the subscription method's own name).
+ * **Notifications** are sent in file order, each once every record before it in its session is done, right after the
+ * answer that let it through. Each is sent as Substrate's notification of its subscription: `chain_newHead` for
+ * `chain_subscribeNewHeads`, `chain_finalizedHead` for `chain_subscribeFinalizedHeads`. The tape format does not record
+ * the name; a subscription of another method is notified under the subscription method's own name. [TT-1, TT-3]
  *
  * **A `disconnect`**, reached last in its session, drops the connection without a close frame (the client sees 1006, as
  * when a node goes away) once every frame sent before it has been written out; requests that arrive meanwhile are not
@@ -27,10 +27,10 @@
  * connection fails, and the client backs off between them.
  *
  * **The call log** ({@link TapeNode.calls}) holds every request received, in order, with its session, occurrence, the
- * line of the record that answered it and what happened; A83 checks a sync's methods against IN-8 by it, and A81 and
- * A84 count calls in it. Frames that are not JSON-RPC 2.0 requests (a batch among them) are answered with JSON-RPC's
- * own errors (−32700, −32600) and logged too. Pings are answered by `ws`, so the node client's heartbeat keeps the
- * connection.
+ * line of the record that answered it and what happened. Tests check a sync's methods against the allowed node calls by
+ * it, and count calls in it. Frames that are not JSON-RPC 2.0 requests (a batch among them) are answered with
+ * JSON-RPC's own errors (−32700, −32600) and logged too. Pings are answered by `ws`, so the node client's heartbeat
+ * keeps the connection. [A81, A83, A84, IN-8]
  */
 
 import { createServer, type Server } from "node:http";

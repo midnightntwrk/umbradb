@@ -24,27 +24,31 @@ import {
 import { committed, halted, type Ingest, ingest, PATIENCE_MS } from "./ingest-harness.js";
 
 /**
- * The node's errors through the real process and the node source (task 10.4; IN-9, IN-10; A84, A85's node clauses), on
- * PostgreSQL 18 and PGlite 0.5.10, against a tape node serving synthetic tapes in the node's answer shapes:
+ * The node's errors through the real process and the node source, on PostgreSQL 18 and PGlite 0.5.10, against a tape
+ * node serving synthetic tapes in the node's answer shapes. [IN-9, IN-10, A84, A85]
  *
- * - A84 (IN-9): a "state unavailable" answer — Substrate's `State already discarded`, a pruned node's — for a finalized
- *   height halts processing with `node-requirement` and that height, the call asked once (the tape node's call log):
- *   for the height's events (`state_getStorage` of `System::Events`, `core-chain-events`), for the state its runtime is
- *   read at (`state_getRuntimeVersion` at the parent, `core-block-fetch`), and for a block the node does not have
- *   (`chain_getBlockHash` answering `null`); with the committed negative control, a client that asks again.
- * - A85 (IN-10): the node's connection dropped for 2 minutes — the tape's sessions dropped one after another as they
- *   open — makes the process retry with the node client's back-off reaching `backoffCeilingMs` (30 s, the default) and
- *   report `node-retrying` (the client's retries, which the process logs and shows), then go on with no height skipped
- *   or repeated; the two minutes are on the client's clock, which runs 100 times faster here ({@link FAST}), so the
- *   test waits about 1.2 s; with the committed negative control, a process whose client does not report its retries.
- *   During startup the same retries show `node-retrying` at no height. An error on a queued best block drops it
- *   without a retry, the block fetched again at finality.
+ * - A "state unavailable" answer for a finalized height (Substrate's `State already discarded`, from a pruned node)
+ *   halts processing with `node-requirement` and that height. The call is asked once (per the tape node's call log).
+ *   This holds for:
+ *   - the height's events (`state_getStorage` of `System::Events`, `core-chain-events`);
+ *   - the state its runtime is read at (`state_getRuntimeVersion` at the parent, `core-block-fetch`);
+ *   - a block the node does not have (`chain_getBlockHash` answering `null`).
+ *
+ *   The committed negative control is a client that asks again. [A84, IN-9]
+ * - The node's connection is dropped for 2 minutes: the tape's sessions are dropped one after another as they open.
+ *   The process retries with the node client's back-off, reaching `backoffCeilingMs` (30 s, the default). It reports
+ *   `node-retrying` (the client's retries, which the process logs and shows), then goes on with no height skipped or
+ *   repeated. The two minutes are on the client's clock, which runs 100 times faster here ({@link FAST}), so the test
+ *   waits about 1.2 s. The committed negative control is a process whose client does not report its retries.
+ *   [A85, IN-10]
+ * - During startup the same retries show `node-retrying` at no height. [A85, IN-10]
+ * - An error on a queued best block drops it without a retry; the block is fetched again at finality. [IN-10]
  */
 
 /** Substrate's answer for a state the node pruned (`substrate/client/db/src/lib.rs`, the node client's `rpcFailure`). */
 const discarded = (block: ChainBlock) => ({ code: 4003, message: `Client error: UnknownBlock: State already discarded for ${block.hex}` });
 
-/** How an A84 run went: the status once halted, the calls of the failing request, what was stored, the log. */
+/** How a state-unavailable run went: the status once halted, the failing request's calls, what was stored, the log. */
 interface A84Observation {
   readonly status: unknown;
   readonly asked: number;
@@ -53,7 +57,10 @@ interface A84Observation {
   readonly lines: readonly string[];
 }
 
-/** A84's oracle: halted with `node-requirement` at `height` (`module`, `point`), the request asked once, nothing of it kept. */
+/**
+ * The state-unavailable oracle: halted with `node-requirement` at `height` (`module`, `point`), the request asked once,
+ * nothing of it kept. [A84]
+ */
 function a84Problems(
   observed: A84Observation,
   expected: { readonly height: bigint; readonly module: string | null; readonly point: string | null },
@@ -71,7 +78,7 @@ function a84Problems(
   return problems;
 }
 
-/** A client over `client` that asks again once when the node answers `node-requirement` (A84's negative control). */
+/** A client over `client` that asks again once when the node answers `node-requirement` (a negative control). [A84] */
 function askingAgain(client: NodeClient): NodeClient {
   const again =
     <A extends unknown[], R>(call: (...args: A) => Promise<R>) =>
@@ -214,9 +221,10 @@ describe.each(PROCESS_BACKENDS)("the node's errors through the process on $name"
 });
 
 /**
- * The node client's clock in A85's outages: SPEED times the real one, so IN-10's two minutes of back-off take about
- * 1.2 s. Only the client's own timers run on it — its back-off, its reconnects and each try's timeout, the timeout
- * multiplied by SPEED so that a try still waits 30 real seconds —; the transport's heartbeat keeps the real clock.
+ * The node client's clock in the outage tests: SPEED times the real one, so the two minutes of back-off take about
+ * 1.2 s. Only the client's own timers run on it: its back-off, its reconnects and each try's timeout. The timeout is
+ * multiplied by SPEED, so that a try still waits 30 real seconds. The transport's heartbeat keeps the real clock.
+ * [A85, IN-10]
  */
 const SPEED = 100;
 const FAST: NodeTimers = Object.freeze({
@@ -250,10 +258,13 @@ function retriesIn(lines: readonly string[]): LoggedRetry[] {
 /** The connections refused after the first drop: with it, eight failures, so the back-off reaches its 30 s ceiling. */
 const REFUSED_SESSIONS = 7;
 
-/** IN-10's back-off for those eight failures, with the default `backoffCeilingMs` (30 s): 121 s in all. */
+/** The client's back-off for those eight failures, with the default `backoffCeilingMs` (30 s): 121 s in all. [IN-10] */
 const OUTAGE_BACKOFF = [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000];
 
-/** A85's 2-minute tape over `chain` (0–20): 1–10, a drop, {@link REFUSED_SESSIONS} sessions dropped at once, 11–20. */
+/**
+ * The 2-minute outage tape over `chain` (0–20): 1–10, a drop, {@link REFUSED_SESSIONS} sessions dropped at once,
+ * 11–20. [A85]
+ */
 function outageTape(chain: readonly ChainBlock[]): TapeRecord[] {
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
   const heights = (from: number, to: number): number[] => Array.from({ length: to - from + 1 }, (_, i) => from + i);
@@ -295,7 +306,7 @@ function sampledClient(samples: RetrySample[], status: { current?: () => Process
     });
 }
 
-/** What A85's outage run observed. */
+/** What the outage run observed. [A85] */
 interface OutageObservation {
   /** The status after each of the client's retries. */
   readonly samples: readonly RetrySample[];
@@ -307,7 +318,7 @@ interface OutageObservation {
   readonly blocks: readonly number[];
 }
 
-/** A85's oracle for the outage (IN-10's scenario "A flapping node"). */
+/** The oracle for the outage, the scenario of a flapping node. [A85, IN-10] */
 function outageProblems(observed: OutageObservation): string[] {
   const problems: string[] = [];
   const text = (value: unknown) => JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? `${v}` : v));

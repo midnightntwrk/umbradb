@@ -14,8 +14,8 @@ import {
 } from "./writer-lock-checks.js";
 
 /**
- * A17's committed negative controls on PostgreSQL (DB-11): two wrong writer locks, each of which must make A17's own
- * checks (`writer-lock-checks.ts`, run by `writer-lock.test.ts`) fail.
+ * The committed negative controls of the writer lock on PostgreSQL: two wrong writer locks, each of which must make
+ * the writer lock checks (`writer-lock-checks.ts`, run by `writer-lock.test.ts`) fail. [A17, DB-11]
  *
  * - **A lock released when its statement ends instead of with the session:** `pg_try_advisory_xact_lock`, taken in
  *   autocommit on the writer's session, is released as soon as its statement's own transaction ends, so the writer

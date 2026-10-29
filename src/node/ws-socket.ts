@@ -1,10 +1,10 @@
 /**
- * The node client's WebSocket transport in Node.js, over `ws` (8.22.0, pinned by task 0.1), and its heartbeat.
+ * The node client's WebSocket transport in Node.js, over `ws` (pinned at 8.22.0), and its heartbeat.
  *
  * **Failures.** A handshake the server answers with an HTTP status instead of 101 is reported with that status (`ws`'s
- * `unexpected-response`), so the client can retry 429 and 5xx and halt on the rest (IN-10); a connection that could
- * not be made is reported with the system's error code only (`ECONNREFUSED`, `ENOTFOUND`, …) — never `ws`'s message,
- * which may name the host — since the node's URL is a `secret` field (CF-4).
+ * `unexpected-response`), so the client can retry 429 and 5xx and halt on the rest. A connection that could not be
+ * made is reported with the system's error code only (`ECONNREFUSED`, `ENOTFOUND`, …), never with `ws`'s message,
+ * which may name the host, since the node's URL is a `secret` field. [IN-10, CF-4]
  *
  * **Heartbeat.** A connection the node stops answering on (a cut cable, a NAT that forgot it) can stay open for a long
  * time without an error, and a subscription on it then just goes quiet. So every `heartbeatMs` (30 s by default) the

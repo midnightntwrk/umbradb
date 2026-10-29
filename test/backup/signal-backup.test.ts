@@ -27,19 +27,20 @@ import { chain, restoreRun } from "./restore-fixtures.js";
 import type { SignalEvent, SignalJob } from "./signal-backup.worker.js";
 
 /**
- * A163 `[CI]` with a real signal (task 15.1a; BK-1's scenario "A backup of a running PGlite process", CF-4's
- * `backupOnSignal`, RN-13; owner decision Q152 B): a process of its own on PGlite (`./signal-backup.worker.ts`, started
- * as `umbradb run` starts one, its chain finalizing a block every 20 ms) receives SIGUSR2 from the test while blocks
- * commit, writes a backup at its next pause, goes on from the next height, and ends on SIGTERM; the file restores with
- * `umbradb restore` like any other, every check of BK-3 passing. Then the command itself: `umbradb run` (the bundled
- * command, a tape node's chain) on PGlite given SIGUSR2 from outside writes the backup, keeps running, and exits 0 on
- * SIGTERM — the way to back up a running PGlite indexer from a shell.
+ * The pause backup with a real signal: a process of its own on PGlite (`./signal-backup.worker.ts`, started as `umbradb
+ * run` starts one, its chain finalizing a block every 20 ms) receives SIGUSR2 from the test while blocks commit, writes
+ * a backup at its next pause, goes on from the next height, and ends on SIGTERM; the file restores with `umbradb
+ * restore` like any other, every restore check passing. [A163 CI, BK-1, BK-3, CF-4, RN-13, Q152 B]
+ *
+ * Then the command itself: `umbradb run` (the bundled command, a tape node's chain) on PGlite given SIGUSR2 from
+ * outside writes the backup, keeps running, and exits 0 on SIGTERM — the way to back up a running PGlite indexer from a
+ * shell.
  */
 
 const WORKER = fileURLToPath(new URL("./signal-backup.worker.ts", import.meta.url));
 const REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));
 
-/** Each test waits on purpose for processes (task 0.5's notes): its own budget, for a loaded machine. */
+/** Each test waits on purpose for processes: its own budget, for a loaded machine. */
 const TEST_TIMEOUT_MS = 900_000;
 
 const PGLITE = BACKUP_BACKENDS[1] as BackupBackend;

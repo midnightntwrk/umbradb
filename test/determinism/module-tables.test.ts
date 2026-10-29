@@ -11,14 +11,17 @@ import { DETERMINISM_BACKENDS } from "./backends.js";
 import type { TestDatabase, TestServer } from "./postgres-database.js";
 
 /**
- * A54 (DT-2) and the table list of DT-3, on PostgreSQL 18 and on PGlite 0.5.10 (tasks 1.2, 1.3 and 2.2; the two
- * backends' row orders are also compared directly in `cross-backend.test.ts`).
+ * The row order and the contents hash's table list, on PostgreSQL 18 and on PGlite 0.5.10. The two backends' row
+ * orders are also compared directly in `cross-backend.test.ts`. [A54]
  *
- * DT-2: rows are ordered by their primary-key columns in order, integers numerically, `boolean` with `false` first, and
- * `bytea`, `text`, `varchar(n)` and `uuid` by their bytes (`COLLATE "C"` for `text` and `varchar`; `varchar`, `uuid`
- * and `boolean` since owner decision Q58; `timestamptz` by time since Q74). DT-3: the module schemas (every schema but
- * `pg_*`, `information_schema`, `public` and `core_digest_shadow`, owner decisions Q75 and Q101; A150 is
- * `shadow-schema.test.ts`), then each table, in name order (byte order).
+ * Row order: rows are ordered by their primary-key columns in order. Integers sort numerically, `boolean` with `false`
+ * first, `timestamptz` by time, and `bytea`, `text`, `varchar(n)` and `uuid` by their bytes (`COLLATE "C"` for `text`
+ * and `varchar`). [DT-2, Q58, Q74]
+ *
+ * Table list: the module schemas, then each table, in name order (byte order). The module schemas are every schema but
+ * `pg_*`, `information_schema`, `public` and `core_digest_shadow`; `shadow-schema.test.ts` covers the last one.
+ * [DT-3, Q75, Q101, A150]
+ *
  * Every expected order below is written out by hand from those rules (UTF-8 bytes of each text; unsigned bytes, a
  * prefix first; integers by value; `false` before `true`), never computed by the code under test. Rows are inserted
  * in shuffled order and every listing is repeated with page sizes 1, 2, 3 and the default, so a paging error cannot
@@ -97,7 +100,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
   describe("A54 (DT-2) — rows in primary-key order", () => {
     // Expected order by UTF-8 bytes: "" | 42 "B" | 5a "Z" | 61 "a" | 61 20 62 "a b" | 61 61 "aa" | 62 "b" |
     // c3 a9 "é" | ef bd a1 U+FF61 | f0 9f 98 80 U+1F600. JavaScript's UTF-16 comparison puts U+1F600 (d83d de00)
-    // before U+FF61, and a locale puts "a" before "B": neither is DT-2's order.
+    // before U+FF61, and a locale puts "a" before "B": neither is the row order. [DT-2]
     const TEXT_KEYS = ["", "B", "Z", "a", "a b", "aa", "b", "é", "\u{FF61}", "\u{1F600}"];
 
     it("orders text keys by their bytes — \"B\" < \"a\" < \"b\" — whatever the column's collation", async () => {
@@ -168,8 +171,9 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
     }, 60_000);
 
     it("orders timestamptz keys by time: before 1970 first, a fraction after its whole second (DT-2, Q74; A145)", async () => {
-      // Written out by hand in time order, as RFC 3339 text (DB-2): the order of their microseconds since 1970, which
-      // DT-1 encodes, from -62135596800000000 (0001-01-01) to 253402300799999999 (9999-12-31 23:59:59.999999).
+      // Written out by hand in time order, as RFC 3339 text: the order of their microseconds since 1970, which the
+      // encoder writes, from -62135596800000000 (0001-01-01) to 253402300799999999 (9999-12-31 23:59:59.999999).
+      // [DB-2, DT-1]
       const times = [
         "0001-01-01T00:00:00Z",
         "1969-12-31T23:59:59.5Z",
@@ -286,8 +290,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       expect(await db.read((read) => countRows(read, parent))).toBe(2);
     }, 60_000);
 
-    // Task 1.3 (owner decision Q58): varchar, uuid and boolean keys. Expected orders are written out by hand from DT-2:
-    // varchar like text (UTF-8 bytes, COLLATE "C"), uuid by its 16 bytes, boolean false first.
+    // varchar, uuid and boolean keys. Expected orders are written out by hand from the row-order rules: varchar like
+    // text (UTF-8 bytes, COLLATE "C"), uuid by its 16 bytes, boolean false first. [DT-2, Q58]
     it("orders varchar keys by their bytes like text — \"B\" < \"a\" < \"b\" — whatever the column's collation", async () => {
       const values = shuffled(TEXT_KEYS)
         .map((k) => `(${sqlText(k)})`)
@@ -431,8 +435,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       ]);
     }, 60_000);
 
-    // A sequence is no table; in a module schema it refuses the list (owner decision Q61, `column-refusals.test.ts`),
-    // so the one here is in the reserved `public` schema.
+    // A sequence is no table. In a module schema it refuses the list (see `column-refusals.test.ts`), so the one here
+    // is in the reserved `public` schema. [Q61]
     it("leaves out PostgreSQL's own schemas, the reserved public schema, partitions, views and sequences", async () => {
       const db = await freshDatabase(`
         CREATE SCHEMA m;
@@ -462,7 +466,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         ALTER TABLE m.t DROP COLUMN gone;
       `);
       const [t] = await db.read((read) => moduleTables(read));
-      // The declared type (format_type with the type modifier) is kept for refusal messages (task 1.3).
+      // The declared type (format_type with the type modifier) is kept for refusal messages.
       expect(t).toEqual({
         schema: "m",
         name: "t",
@@ -533,8 +537,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       });
     }, 60_000);
 
-    // `boolean` keys are allowed since owner decision Q58 (DT-2); the refusals' messages are
-    // `column-refusals.test.ts`'s.
+    // `boolean` keys are allowed. The refusals' messages are checked in `column-refusals.test.ts`. [DT-2, Q58]
     it("refuses a primary-key column whose type DT-2 does not order", async () => {
       for (const type of ["numeric", "jsonb", "bigint[]"]) {
         await expectRefusal(
@@ -545,8 +548,8 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       }
     }, 60_000);
 
-    // `varchar` and `uuid` are DT-1 types since owner decision Q58; floating-point columns are refused with
-    // `non-deterministic-column`, DT-6's code for them (`design.md` §4's column-type table).
+    // `varchar` and `uuid` are types the encoder handles. Floating-point columns are refused with
+    // `non-deterministic-column`, the code the column-type table gives them. [DT-1, DT-6, Q58; design §4]
     it("refuses a column whose type DT-1 does not encode", async () => {
       for (const type of ["timestamp without time zone", "date", "interval", "json", "character(4)", "numeric(38,2)"]) {
         await expectRefusal(
@@ -564,7 +567,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
       }
     }, 60_000);
 
-    // Owner decision Q61: a sequence or an unlogged table in a module schema refuses the list, and with it the hash.
+    // A sequence or an unlogged table in a module schema refuses the list, and with it the hash. [Q61]
     it("refuses a module schema holding a sequence or an unlogged table", async () => {
       const sequence = await freshDatabase(`
         CREATE SCHEMA m; CREATE TABLE m.t (k integer PRIMARY KEY); CREATE SEQUENCE m.q;

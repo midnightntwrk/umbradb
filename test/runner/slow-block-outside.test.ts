@@ -19,18 +19,25 @@ import {
 } from "./slow-block-harness.js";
 
 /**
- * A161 (task 5.5a; RN-17 as amended by the owner's decision Q145 B, AE-3, AE-5) through the process on PostgreSQL 18
- * and PGlite 0.5.10: the runner times, each as a window of its own, the callbacks it awaits outside a height's
- * processing — `on-after-db-write` and `on-stop-height` after each commit (one window, from the commit to the end of
- * `on-stop-height`), each `on-finalized`, and RN-11's re-delivery at a run's start —, each raising the same
- * `slow-block` with the height (which may have committed), the point and the module, cleared when its window ends;
- * nothing is cancelled or retried. With `slowBlockMs` 1000, module `slow`'s `on-after-db-write` at height 2 awaiting
- * 3 s, and likewise its `on-finalized` announcing height 2 as the head: `/status` (and `status()`) show `slow-block`
- * with height 2, that point and `slow` within 2 s, and the condition is gone once that callback ends (the oracle
- * `a161Problems`, `./slow-block-harness.ts`). Also here, through the process: RN-11's re-delivery at a restart, and a
- * failure in a window after the commit (a halt clears it). A142 is unchanged (`./slow-block.test.ts`); the windows'
- * settled cases at the loop level are `./slow-block-windows.test.ts`, the committed negative controls
- * `./slow-block-outside.negative-control.test.ts`.
+ * Slow activity outside a height's processing, through the process on PostgreSQL 18 and PGlite 0.5.10. The runner
+ * times each of these as a window of its own:
+ * - `on-after-db-write` and `on-stop-height` after each commit (one window, from the commit to the end of
+ *   `on-stop-height`);
+ * - each `on-finalized`;
+ * - the callbacks delivered again at a run's start [RN-11].
+ *
+ * Each raises the same `slow-block` with the height (which may have committed), the point and the module, cleared when
+ * its window ends; nothing is cancelled or retried. [A161, RN-17, Q145 B, AE-3, AE-5]
+ *
+ * With `slowBlockMs` 1000, module `slow`'s `on-after-db-write` at height 2 awaits 3 s, and likewise its `on-finalized`
+ * announcing height 2 as the head. `/status` (and `status()`) show `slow-block` with height 2, that point and `slow`
+ * within 2 s, and the condition is gone once that callback ends (the oracle `a161Problems`, `./slow-block-harness.ts`).
+ * Also tested here, through the process: the callbacks delivered again at a restart, and a failure in a window after
+ * the commit (a halt clears it). [A161, RN-11]
+ *
+ * The slow height's own test is unchanged (`./slow-block.test.ts`). The windows' settled cases at the loop level are
+ * `./slow-block-windows.test.ts`, the committed negative controls `./slow-block-outside.negative-control.test.ts`.
+ * [A142]
  *
  * Each test waits on purpose (the callback's 3 s, then 1.5 s after it): its budget is that plus Vitest's 60 s.
  */
@@ -71,7 +78,8 @@ describe.each(PROCESS_BACKENDS)("A161: slow-block outside a height's processing 
     async () => {
       const db = await backend.database();
       // The first process commits heights 1 and 2, its on-after-db-write at 2 fast; the second, on the same database,
-      // re-delivers height 2's on-after-db-write (RN-11), which awaits 3 s, and processes nothing else (the head is 2).
+      // delivers height 2's on-after-db-write again, which awaits 3 s, and processes nothing else (the head is 2).
+      // [RN-11]
       const quick: Seen = { calls: [] };
       const first = startSlow(db, { slowBlockMs: 1_000, user: [holding("slow", quick, { point: "on-after-db-write", ms: 0 })] });
       try {
@@ -137,7 +145,7 @@ describe.each(PROCESS_BACKENDS)("A161: slow-block outside a height's processing 
         const body = await statusWhen(await run.origin(), (shown) => shown.state === "halted");
         expect(bodySlowOf(body, null)).toBeUndefined();
         // The window after height 2's commit, and the halt: a height's own processing, if a loaded machine made it slow,
-        // logs lines of its own, which this case does not hold (issue 00043).
+        // logs lines of its own, which this case does not hold.
         const lines = run.lines.filter(
           (line) => (line.startsWith("slow block: ") && line.includes("after its commit")) || line.startsWith("processing halted"),
         );

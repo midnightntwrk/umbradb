@@ -22,27 +22,29 @@ import { coreSettings, startProcess } from "../runner/process-build.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * What the backups' tests share (tasks 15.1, 15.2; BK-1 to BK-4, PP-12; `design.md` §9.1).
+ * What the backups' tests share. [BK-1 to BK-4, PP-12; design §9.1]
  *
- * **The chain and the build.** A process over an in-memory block source (`InMemoryBlockSource`, its blocks committing as
- * fast as the database takes them) with the `umbradb` command's build — UmbraDB's backbone with the real `core-digest`
- * — and one user module, `ticker`, from a configuration file of a command project (`../cli/cli-fixtures.ts`), so that
- * `umbradb backup` reads the same file and build: at every height `ticker` appends a row to `ticker.rows`, updates the
- * one row of `ticker.tally` (the height and a running total) and appends a row to `ticker.log`, a table declared
- * `deterministic: false` with a `serial` key and a `now()` time (Q76), which a backup carries and the contents hash
- * records by name only. Every table of a database at height h is then a function of h. Its migration also makes a
- * routine and an enum in its schema, whose owners and privileges a restore gives back (A125).
+ * **The chain and the build.** A process over an in-memory block source (`InMemoryBlockSource`, its blocks committing
+ * as fast as the database takes them) with the `umbradb` command's build — UmbraDB's backbone with the real
+ * `core-digest` — and one user module, `ticker`, from a configuration file of a command project
+ * (`../cli/cli-fixtures.ts`), so that `umbradb backup` reads the same file and build: at every height `ticker` appends
+ * a row to `ticker.rows`, updates the one row of `ticker.tally` (the height and a running total) and appends a row to
+ * `ticker.log`, a table declared `deterministic: false` with a `serial` key and a `now()` time, which a backup carries
+ * and the contents hash records by name only. Every table of a database at height h is then a function of h. Its
+ * migration also makes a routine and an enum in its schema, whose owners and privileges a restore gives back.
+ * [Q76, A125]
  *
  * **The tools.** `pg_dump` 18 is never assumed on the machine: the PostgreSQL server's container runs the pinned image
- * (`test/postgres-image.ts`), whose PostgreSQL 18.6 client the backup runs through a wrapper named by
- * `UMBRADB_PG_DUMP` ({@link BackupBackend.env}): a script that runs `docker exec -i` of that container's `pg_dump` with
- * the arguments it was given, the `--dbname` URL's host and port turned into the container's own (`127.0.0.1:5432`),
- * the password passed on in `PGPASSWORD` as the backup gives it. `pglite-tools` is the exact development dependency
- * (0.4.10, PGlite 0.5.10's).
+ * (`test/postgres-image.ts`), whose PostgreSQL 18.6 client the backup runs through a wrapper named by `UMBRADB_PG_DUMP`
+ * ({@link BackupBackend.env}): a script that runs `docker exec -i` of that container's `pg_dump` with the arguments it
+ * was given, the `--dbname` URL's host and port turned into the container's own (`127.0.0.1:5432`), the password passed
+ * on in `PGPASSWORD` as the backup gives it. `pglite-tools` is the exact development dependency (0.4.10, PGlite
+ * 0.5.10's).
  *
- * **Loading a dump without the restore** ({@link BackupBackend.load}, task 15.1's own view of a backup): the file into a
- * new database by PostgreSQL's own `psql` in the same container (`-v ON_ERROR_STOP=1`), or by PGlite's `exec` on a new
- * engine started with the backend's start parameters, the `psql` meta-commands (`\restrict`, `\unrestrict`) left out.
+ * **Loading a dump without the restore** ({@link BackupBackend.load}, the backup tests' own view of a backup): the file
+ * into a new database by PostgreSQL's own `psql` in the same container (`-v ON_ERROR_STOP=1`), or by PGlite's `exec` on
+ * a new engine started with the backend's start parameters, the `psql` meta-commands (`\restrict`, `\unrestrict`) left
+ * out.
  */
 
 /** How long a process may take to reach a height on a loaded machine. */
@@ -266,7 +268,7 @@ function pgliteText(file: string): string {
 function pgDumpWrapper(container: string): string {
   return [
     "#!/bin/sh",
-    // The backup gives the connection as libpq's environment (task 4.5); inside the container the server is local.
+    // The backup gives the connection as libpq's environment; inside the container the server is local.
     `exec docker exec -i -e PGHOST=127.0.0.1 -e PGPORT=5432 -e PGUSER -e PGDATABASE -e PGPASSWORD -e PGSSLMODE -e PGAPPNAME ${container} pg_dump "$@"`,
     "",
   ].join("\n");
@@ -424,11 +426,11 @@ const acl = (column: string) =>
   `coalesce((SELECT string_agg(item::text, ',' ORDER BY item::text COLLATE "C") FROM unnest(${column}) AS item), '')`;
 
 /**
- * The owners and privileges of a database's schemas, relations, routines, enums, domains, ranges and default privileges,
- * one line each (A125:
- * "compared in the catalogs"): PostgreSQL's own schemas left out; each ACL's items sorted, since the order in which
- * grants were made — migrations under default privileges, or a restore's grants after it — changes no privilege. The
- * login's name is in them (an owner, a grantor), so two databases compare on one backend.
+ * The owners and privileges of a database's schemas, relations, routines, enums, domains, ranges and default
+ * privileges, one line each, for comparing them in the catalogs: PostgreSQL's own schemas left out; each ACL's items
+ * sorted, since the order in which grants were made — migrations under default privileges, or a restore's grants after
+ * it — changes no privilege. The login's name is in them (an owner, a grantor), so two databases compare on one
+ * backend. [A125]
  */
 export const CATALOG_SQL = `SELECT kind, schema, name, owner, acl FROM (
   SELECT 'schema' AS kind, n.nspname::text AS schema, '' AS name, pg_get_userbyid(n.nspowner)::text AS owner,

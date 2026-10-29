@@ -1,8 +1,8 @@
 /**
- * The pack smoke's node (`./pack-install.mjs`, core-arch task 17.3; design §13 "the pack smoke … syncs a tape on
- * PostgreSQL in Docker"): a tape node (`tools/tape/`, outside the package) serving the browser tests' synthetic chain
- * (`test/browser/tapes.ts`) — blocks 0 to 9 of runtime 2.0, real ledger v9 transactions at heights 4 (two regular ones)
- * and 6 (two regular ones and a system one) — as one session of a process on a new database from S = 3 to 9.
+ * The pack smoke's node (`./pack-install.mjs`, which syncs a tape on PostgreSQL in Docker): a tape node (`tools/tape/`,
+ * outside the package) serving the browser tests' synthetic chain (`test/browser/tapes.ts`) — blocks 0 to 9 of runtime
+ * 2.0, real ledger v9 transactions at heights 4 (two regular ones) and 6 (two regular ones and a system one) — as one
+ * session of a process on a new database from S = 3 to 9. [design §13]
  *
  * Run from the repository's root with `npx tsx test/smoke/tape-node.ts`: it prints one JSON line — the node's URL, the
  * chain's genesis hash (the `custom` network's `genesisHash`), S, the last height and how many transactions the chain

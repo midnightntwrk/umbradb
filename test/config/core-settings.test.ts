@@ -20,33 +20,35 @@ import { validateDeclarations } from "../../src/modules/validation.js";
 import { declaration } from "../modules/declarations.js";
 
 /**
- * CF-4's table (task 4.2): the `core` entry's settings as zod schemas — one for a public (core) process, one for a
- * private process — each field with its kind on its outermost schema (`schema.shape[field].meta().kind`, as a module's
- * settings, design §7) and its default. The table below is CF-4's, written out; the schemas must say the same. The
- * types the builders take (`CoreSettings`, `src/config/entries.ts`, task 4.1) are held equal to the schemas' input
- * types, so the two cannot drift apart.
+ * The table of `core` settings. The `core` entry's settings are zod schemas: one for a public (core) process, one for
+ * a private process. Each field has its kind on its outermost schema (`schema.shape[field].meta().kind`, as in a
+ * module's settings) and its default. The table below is the specified table written out; the schemas must say the
+ * same. [CF-4; design §7]
+ *
+ * The types the builders take (`CoreSettings`, `src/config/entries.ts`) are held equal to the schemas' input types,
+ * so the two cannot drift apart. [CF-2]
  */
 
 /** What a field is when the configuration leaves it out: its default, required, or absent. */
 type Absent = { readonly default: unknown } | "required" | "absent";
 
-/** CF-4's table: each field's kind and what it is when left out. */
+/** The specified table: each field's kind and what it is when left out. [CF-4] */
 const BASE: Readonly<Record<string, readonly [string, Absent]>> = {
   network: ["data", "required"],
   genesisHash: ["data", "absent"],
-  // The network's built-in table (task 12.2); the required settings below name preprod.
+  // The network's built-in ledger table; the required settings below name preprod.
   ledgerTable: ["data", { default: builtInLedgerTable("preprod") }],
   ledgerSources: ["data", { default: { v8: "vendored", "v9-rc3": "vendored", v9: "vendored", v10: "vendored" } }],
   sweep: ["data", { default: "on" }],
   retainStates: ["data", { default: 0 }],
-  // Operational, its `password` part secret (owner decision Q167 A; `src/config/redact.ts`).
+  // Operational, with its `password` part secret (`src/config/redact.ts`). [Q167 A]
   database: ["operational", "required"],
   listen: ["operational", { default: { admin: "0.0.0.0:8081" } }],
   tipCap: ["operational", { default: 600 }],
   prefetchWindow: ["operational", { default: 64 }],
   backoffCeilingMs: ["operational", { default: 30_000 }],
   backupAtStop: ["operational", "absent"],
-  // SIGUSR2 writes a backup there (BK-1, owner decision Q152 B; task 15.1a).
+  // SIGUSR2 writes a backup there. [BK-1, Q152 B]
   backupOnSignal: ["operational", "absent"],
   tls: ["secret", "absent"],
   livenessTimeoutMs: ["operational", { default: 30_000 }],
@@ -62,7 +64,7 @@ const PUBLIC: Readonly<Record<string, readonly [string, Absent]>> = {
   ...BASE,
   node: ["secret", "required"],
   lockstepInstances: ["operational", { default: [] }],
-  // Its `password` part secret (owner decision Q175 A); required with a PostgreSQL database and listen.transport.
+  // Its `password` part is secret; required with a PostgreSQL database and listen.transport. [Q175 A]
   transportReader: ["operational", "absent"],
 };
 
@@ -223,7 +225,7 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
       [PUBLIC_CORE_SCHEMA, REQUIRED_PUBLIC],
       [PRIVATE_CORE_SCHEMA, REQUIRED_PRIVATE],
     ] as const) {
-      // A custom network also sets its own ledger table (LG-3, task 12.2): given here, so the genesis rule alone speaks.
+      // A custom network also sets its own ledger table: given here, so only the genesis rule reports. [LG-3]
       const ledgerTable = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v8" }] };
       const paths = (settings: Record<string, unknown>) =>
         (schema.safeParse({ ...required, ...settings }).error?.issues ?? []).map((issue) => issue.path);
@@ -281,7 +283,7 @@ type DeepReadonly<T> = T extends readonly (infer E)[]
     ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
     : T;
 
-/** The fields one side's type declares `never`, to refuse the other side's (task 4.1). */
+/** The fields one side's type declares `never`, to refuse the other side's. */
 type PrivateOnly = "instanceId" | "publicDatabase" | "coreTransport";
 type PublicOnly = "node" | "lockstepInstances" | "transportReader";
 

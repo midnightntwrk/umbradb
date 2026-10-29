@@ -44,20 +44,21 @@ import {
 } from "./file-modes.js";
 
 /**
- * A174 `[CI]` (task 15.1b; BK-1, the threat model draft's gap 7; `design.md` §9.1): with a umask of `000`, every backup
- * file UmbraDB writes on Node.js — `ProcessHandle.backup`, at stop (`backupAtStop`), on SIGUSR2 (`backupOnSignal`),
- * `umbradb backup` in this process and as a process of its own whose umask a shell set — has mode `0600` from creation
- * (its temporary file included) to after its rename, on PostgreSQL 18.6, where `pg_dump`'s output fills it, and PGlite
- * 0.5.10, where the process writes the dump itself; an earlier file at the path, open to all, is replaced, not written
- * into. Seen from outside the code that writes the files: `./file-modes.ts` (each file's mode at its creation, at each
- * open and rename, every millisecond between them, while `pg_dump` runs, and at the end). Also: a file system that
- * refuses to set the mode fails the backup, leaving no file. The committed negative control is
+ * With a umask of `000`, every backup file UmbraDB writes on Node.js — `ProcessHandle.backup`, at stop
+ * (`backupAtStop`), on SIGUSR2 (`backupOnSignal`), `umbradb backup` in this process and as a process of its own whose
+ * umask a shell set — has mode `0600` from creation (its temporary file included) to after its rename, on PostgreSQL
+ * 18.6, where `pg_dump`'s output fills it, and PGlite 0.5.10, where the process writes the dump itself; an earlier file
+ * at the path, open to all, is replaced, not written into. [A174 CI, BK-1; design §9.1; threat model gap 7]
+ *
+ * Seen from outside the code that writes the files: `./file-modes.ts` (each file's mode at its creation, at each open
+ * and rename, every millisecond between them, while `pg_dump` runs, and at the end). Also: a file system that refuses
+ * to set the mode fails the backup, leaving no file. The committed negative control is
  * `./file-mode.negative-control.test.ts`.
  *
  * This test process's umask is `000` from `beforeAll` to `afterAll` (Vitest's `forks` pool: a process of its own).
  */
 
-/** Each test waits on purpose for processes and databases (task 0.5's notes): its own budget, for a loaded machine. */
+/** Each test waits on purpose for processes and databases: its own budget, for a loaded machine. */
 const TEST_TIMEOUT_MS = 900_000;
 
 /** The in-memory chain's head: far above the heights backed up, so blocks keep committing meanwhile. */
@@ -114,7 +115,9 @@ function placeFor(backend: BackupBackend, name: string): Place {
   return { dir, out, env: { PATH: String(process.env.PATH), UMBRADB_PG_DUMP: pgDump.path }, pgDump };
 }
 
-/** A174's oracle for the backup at `place` given what this process's observer saw (and its `pg_dump`'s). */
+/**
+ * The file-mode oracle for the backup at `place` given what this process's observer saw (and its `pg_dump`'s). [A174 CI]
+ */
 function problemsAt(place: Place, observations: readonly ModeObservation[]): string[] {
   const all = [...observations, ...(place.pgDump?.observations() ?? [])];
   return modeProblems(place.out, all, { whileDumping: place.pgDump !== null });

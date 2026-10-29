@@ -33,25 +33,25 @@ import { heldNodeProblems } from "./ledger-storage-checks.js";
 import { cappedAt, LEDGER_CORE } from "./ledger-restart.js";
 
 /**
- * Task 13.1's modules through the real process (`openspec/changes/core-arch/acceptance.md` A108, A109, A110;
- * `specs/contract-data/spec.md` CC-1 to CC-3), on PostgreSQL 18 and PGlite 0.5.10: `startProcess` with UmbraDB's
- * backbone over the node source against a tape node serving the synthetic scenarios of `./contract-data-checks.ts`
- * (real ledger transactions deploying fixture contracts and calling them with the transcripts the scenario writes), the
- * ledger in its worker thread for `core-ledger-state`, and each scenario's expectations written from its own
- * specification.
+ * The contract-data modules through the real process, on PostgreSQL 18 and PGlite 0.5.10. `startProcess` runs with
+ * UmbraDB's backbone over the node source, against a tape node serving the synthetic scenarios of
+ * `./contract-data-checks.ts`: real ledger transactions deploying fixture contracts and calling them with the
+ * transcripts the scenario writes. The ledger runs in its worker thread for `core-ledger-state`. Each scenario's
+ * expectations are written from its own specification. [A108, A109, A110, CC-1, CC-2, CC-3]
  *
- * - A108 (CC-1): two calls of one contract in one block give one `core_contract_states` row, with the state after both;
- *   at the v8 → v9 upgrade's F every contract gets a row with its converted keys; every key loads from the stored nodes.
- * - A109 (CC-2): `core-contract-logs-full` stores the logs of applied segments — a successful fallible segment's too —
- *   and none of a fallible segment that failed; none on ledger v8 (Q54).
- * - A110 (CC-3): a range of literal logs — well-formed wrappers, malformed ones (version-0 `Misc` logs), oversized ones
- *   (none), a successful fallible segment's, a chain-failed transaction's (none) — gives identical `contract_logs.logs`
- *   with `-full` and `-fast`, on both backends; a log of a value read from the contract's state, and any log of a
- *   partially successful transaction, make `-fast` halt with `fast-log-unsupported` at that height, naming the
- *   transaction, while `-full` stores them.
+ * - Two calls of one contract in one block give one `core_contract_states` row, with the state after both. At the
+ *   v8 → v9 upgrade's F every contract gets a row with its converted keys. Every key loads from the stored nodes.
+ *   [A108, CC-1]
+ * - `core-contract-logs-full` stores the logs of applied segments, a successful fallible segment's too, and none of a
+ *   fallible segment that failed. It stores none on ledger v8. [A109, CC-2, Q54]
+ * - A range of literal logs gives identical `contract_logs.logs` with `-full` and `-fast`, on both backends. The range
+ *   holds well-formed wrappers, malformed ones (stored as version-0 `Misc` logs), oversized ones (stored as none), a
+ *   successful fallible segment's, and a chain-failed transaction's (none). A log of a value read from the contract's
+ *   state, and any log of a partially successful transaction, make `-fast` halt with `fast-log-unsupported` at that
+ *   height, naming the transaction, while `-full` stores them. [A110, CC-3]
  *
- * On task 0.3's recorded devnet (`UMBRADB_TAPES`; skipped by name without it): every contract deployed, called or
- * maintained has its row at that height, every contract deployed on v8 its row at F (103), and `-fast` stores what
+ * On the recorded devnet tape (`UMBRADB_TAPES`; skipped by name without it): every contract deployed, called or
+ * maintained has its row at that height, every contract deployed on v8 has its row at F (103), and `-fast` stores what
  * `-full` stores over the whole range.
  */
 
@@ -221,7 +221,7 @@ describe("contract data on task 0.3's recorded devnet (CC-1 to CC-3; skipped by 
         const expected = new Map<bigint, string[]>([...touched].map(([height, set]) => [height, [...set].sort()]));
         expected.set(103n, v8.sort());
         expect(new Map([...rows].map(([height, list]) => [height, list.map((row) => row.address)]))).toEqual(expected);
-        // Each key is held (LG-13) and every node a held key reaches is stored.
+        // Each key is held and every node a held key reaches is stored. [LG-13]
         const counts = new Map((await db.query("SELECT encode(node_key, 'hex') AS k, count FROM core_ledger_state.root_counts")).map((r) => [r.k as string, Number(r.count)]));
         for (const list of rows.values()) {
           for (const row of list) {
@@ -246,7 +246,7 @@ describe("contract data on task 0.3's recorded devnet (CC-1 to CC-3; skipped by 
   );
 });
 
-// The three modules are core modules of the build, in the decision record's order (task 13.1).
+// The three modules are core modules of the build, in their recorded order.
 describe("core-contract-states, core-contract-logs-full and core-contract-logs-fast as declared (CC-1 to CC-4)", () => {
   it("declare CORE-ARCH §4.11's requirements, items, mid-chain starts and the development-only -fast; both log providers share contract-logs with the same table and migrations", () => {
     expect([CORE_CONTRACT_STATES, CORE_CONTRACT_LOGS_FULL, CORE_CONTRACT_LOGS_FAST].map((m) => [m.id, m.requires, m.startsMidChain, m.developmentOnly === true])).toEqual([
@@ -259,7 +259,7 @@ describe("core-contract-states, core-contract-logs-full and core-contract-logs-f
     ]);
     const item = { name: "contract-logs", lifetimes: ["block", "table"], table: { schema: "contract_logs", tables: ["logs"], kind: "append-only" } };
     expect(CORE_CONTRACT_LOGS_FULL.provides).toEqual([item]);
-    // Task 12.6: -fast's ledger task gives its block item contract-log-sites (CC-3: "in a ledger task").
+    // -fast's ledger task gives its block item contract-log-sites ("in a ledger task"). [CC-3]
     expect(CORE_CONTRACT_LOGS_FAST.provides).toEqual([item, { name: "contract-log-sites", lifetimes: ["block"] }]);
     expect(CORE_CONTRACT_LOGS_FAST.ledgerTasks?.map((task) => [task.name, task.needsState])).toEqual([["contract-log-sites", false]]);
     expect(CORE_CONTRACT_LOGS_FAST.migrations).toEqual(CORE_CONTRACT_LOGS_FULL.migrations);

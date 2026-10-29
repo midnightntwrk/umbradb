@@ -1,12 +1,19 @@
 /**
- * Configuration (`openspec/changes/core-arch/specs/configuration/spec.md`, `design.md` §1, §7): the build's core version
- * (`./build.ts`), the builders `defineConfig`, `coreEntry`, `versionEntry` and the module `entry` builder, with the
- * configuration's types (`./entries.ts`), the plain-data check (`./plain-data.ts`), the loader (`./load.ts`), the
- * `core` entry's settings schemas (`./core-settings.ts`), the schema validation with its kinds and defaults
- * (`./validate.ts`), the secret redaction (`./redact.ts`), the configuration history with the version check
- * (`./history.ts`; its table is `core-chain`'s, `src/backbone/core-chain/`), the process's `core` revision
- * (`./process.ts`, decision record Q102) and opening the database it names (`./database.ts`). `umbradb config check`
- * (task 4.4) comes next.
+ * Configuration:
+ * - the build's core version (`./build.ts`);
+ * - the builders `defineConfig`, `coreEntry`, `versionEntry` and the module `entry` builder, with the configuration's
+ *   types (`./entries.ts`);
+ * - the plain-data check (`./plain-data.ts`);
+ * - the loader (`./load.ts`);
+ * - the `core` entry's settings schemas (`./core-settings.ts`);
+ * - the schema validation, with its kinds and defaults (`./validate.ts`);
+ * - the secret redaction (`./redact.ts`);
+ * - the configuration history with the version check (`./history.ts`; its table belongs to `core-chain`,
+ *   `src/backbone/core-chain/`);
+ * - the process's `core` revision (`./process.ts`) [Q102];
+ * - opening the database it names (`./database.ts`).
+ *
+ * `umbradb config check` builds on these. [design §1, §7]
  */
 
 export * from "./build.js";

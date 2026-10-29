@@ -19,20 +19,22 @@ import { a91UpgradeScenario, a92Scenario, a93Scenario, type Scenario, U } from "
 import { committed, halted, ingest, PATIENCE_MS } from "./ingest-harness.js";
 
 /**
- * The negative controls of task 11.1's criteria (A91–A93), each run through its criterion's own oracle
- * (`./chain-data-checks.ts`) on the scenario the criterion's test passes (`./chain-data.test.ts`), on PostgreSQL 18 and
- * PGlite 0.5.10, each a core module of the real build with one step done wrong:
+ * The negative controls of the chain-data criteria, on PostgreSQL 18 and PGlite 0.5.10. Each runs through its
+ * criterion's own oracle (`./chain-data-checks.ts`) on the scenario the criterion's test passes
+ * (`./chain-data.test.ts`). Each is a core module of the real build with one step done wrong:
  *
- * - A91: `core-chain-events` decoding a block's events with the metadata of the block's own state — at U the new
- *   runtime's, whose `CodeUpdated` has a hash the old one's has not — halts at U, where the real one stores them.
- * - A92: `core-block-parsed` parsing each transaction twice (a second parse of a copy, which the adapter cannot know
- *   for the same) is caught by the counted parses; one placing the regular transactions before the system ones (the
- *   body's order) by the stored order.
- * - A93: outcomes matched to the block's Midnight transactions by their place among the events rather than by their
- *   phase: a failed remark's `ExtrinsicFailed` becomes B's, and B's `TxPartialSuccess` C's. Since task 12.3,
+ * - `core-chain-events` decodes a block's events with the metadata of the block's own state. At U that is the new
+ *   runtime's, whose `CodeUpdated` has a hash the old one's has not, so it halts at U, where the real module stores
+ *   the events. [A91]
+ * - `core-block-parsed` parses each transaction twice (a second parse of a copy, which the adapter cannot recognise as
+ *   the same); the counted parses catch it. Another one places the regular transactions before the system ones (the
+ *   body's order); the stored order catches it. [A92]
+ * - Outcomes are matched to the block's Midnight transactions by their place among the events rather than by their
+ *   phase: a failed remark's `ExtrinsicFailed` becomes B's, and B's `TxPartialSuccess` becomes C's.
  *   `core-block-parsed` also checks each transaction's ledger hash against the one its placing event carries, which
- *   refuses that placement at `on-parse` (C's hash is not B's): the control turns the check off to show that A93's own
- *   oracle catches the wrong outcomes, and a second run with the check on shows the check halting the block.
+ *   refuses that placement at `on-parse` (C's hash is not B's). So the control turns the check off, to show that the
+ *   outcomes oracle catches the wrong outcomes; a second run with the check on shows the check halting the block.
+ *   [A93]
  */
 
 /** Decodes with the block's own state's metadata (`state_getMetadata` at its hash) instead of `runtime-metadata`. */

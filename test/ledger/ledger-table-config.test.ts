@@ -13,16 +13,19 @@ import { NETWORK_ID, RAW, systemTransaction, unprovenDeploy, zswapOutputTransact
 import { blockWith, hashOf, mnsvItem, OTHER_ITEMS } from "./version-checks.js";
 
 /**
- * The `core` entry's `ledgerTable` (CF-4, LG-1 to LG-3; task 12.2): its default is the built-in table of the network
- * (`src/ledger/networks.json`), and a configured table adds to or replaces parts of it — a configured row maps the
- * spec_versions it covers, the built-in rows the rest; a configured pin replaces the built-in pin at its height and adds
- * one elsewhere. A network not in the file (`custom`) sets its own rows. The validation (task 4.2's, through the `core`
- * schema) refuses what LG-1 and LG-2 forbid, each with its path, and gives the table in effect as the revision's
- * setting, so the history records it as a data field (CF-7: every default applied).
+ * The `core` entry's `ledgerTable`. Its default is the built-in table of the network (`src/ledger/networks.json`), and
+ * a configured table adds to or replaces parts of it:
+ * - a configured row maps the spec_versions it covers, the built-in rows the rest;
+ * - a configured pin replaces the built-in pin at its height and adds one elsewhere.
+ * A network not in the file (`custom`) sets its own rows. [CF-4, LG-1, LG-2, LG-3]
  *
- * A95 `[CI]`'s synthetic half: a configuration table "every `spec_version` → v8" selects v8 for every block of a
- * synthetic devnet, whose transactions the v8 adapter it selects parses. The real half — every block of task 0.3's
- * devnet tape — waits for that tape.
+ * The configuration's validation, through the `core` schema, refuses the tables the ledger table rules forbid, each
+ * with its path. It gives the table in effect as the revision's setting, so the history records it as a data field
+ * with every default applied. [LG-1, LG-2, CF-7]
+ *
+ * The synthetic half of the configured-table check: a configuration table "every `spec_version` → v8" selects v8 for
+ * every block of a synthetic devnet, whose transactions the v8 adapter it selects parses. The real half, every block of
+ * the recorded devnet tape, waits for that tape (OUTDATED). [A95 CI]
  */
 
 const BUILT_IN_MAINNET = builtInLedgerTable("mainnet") as LedgerTable;
@@ -207,7 +210,8 @@ describe("adding and replacing rows and pins (LG-3)", () => {
   it("gives the configuration's table in effect as the revision's setting", () => {
     const pin = { height: 5, hash: H(5), specVersion: 1_000_000 };
     const entry = coreSettingsOf(withCore({ network: "mainnet", ledgerTable: { pins: [pin] } }));
-    // The pins in effect in height order: the configured one at 5, then mainnet's built-in pins (task 0.3's boundaries).
+    // The pins in effect in height order: the configured one at 5, then mainnet's built-in pins (the recorded
+    // boundaries).
     const inEffect = [...BUILT_IN_MAINNET.pins, pin].sort((a, b) => a.height - b.height);
     expect(inEffect[0]).toBe(pin);
     expect(entry.data?.ledgerTable).toEqual({ rows: BUILT_IN_MAINNET.rows, pins: inEffect });
@@ -322,7 +326,7 @@ describe("LG-1 and LG-2's rules on a configured table, each finding with its pat
         pins: [{ height: 3, hash: H(3), specVersion: U32_MAX }],
       },
     });
-    // The configured pin at 3, before the network's built-in pins (task 0.3's boundaries).
+    // The configured pin at 3, before the network's built-in pins (the recorded boundaries).
     expect(coreSettingsOf(config).data?.ledgerTable).toMatchObject({
       pins: [{ height: 3, specVersion: U32_MAX }, ...BUILT_IN_PREPROD.pins],
     });

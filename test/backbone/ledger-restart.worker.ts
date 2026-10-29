@@ -5,12 +5,15 @@ import { watched, watcher } from "./ingest-harness.js";
 import { LEDGER_CORE } from "./ledger-restart.js";
 
 /**
- * A process for A102's restart test (task 12.4; LG-11), started by `ledger-storage.test.ts` with `node --import tsx`
- * and one JSON argument ({@link RestartJob}): the process as `umbradb run` starts it — `startProcess` with the
- * configuration file and the node source (`nodeSourceOf`) over the tape node the test serves, the ledger in its worker
- * thread — and the build `ingest-harness.ts`'s `ingest` makes with the ledger's core modules, as the test's restart
- * builds it. It reports `at` (one JSON line on stdout) once its cursor is the tape's finalized head, and the test kills
- * it with SIGKILL. It exits by itself once its parent is no longer the test's (Vitest's bail, a test's timeout).
+ * A process for the ledger restart test, started by `ledger-storage.test.ts` with `node --import tsx` and one JSON
+ * argument ({@link RestartJob}). [A102, LG-11]
+ * - It is the process as `umbradb run` starts it: `startProcess` with the configuration file and the node source
+ *   (`nodeSourceOf`) over the tape node the test serves, with the ledger in its worker thread.
+ * - Its build is the one `ingest-harness.ts`'s `ingest` makes with the ledger's core modules, as the test's restart
+ *   builds it.
+ * - It reports `at` (one JSON line on stdout) once its cursor is the tape's finalized head, and the test kills it with
+ *   SIGKILL.
+ * - It exits by itself once its parent is no longer the test (Vitest's bail, a test's timeout).
  */
 
 export interface RestartJob {

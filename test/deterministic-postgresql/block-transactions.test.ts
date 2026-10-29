@@ -13,17 +13,17 @@ import {
 import { BACKENDS } from "../db/backends.js";
 
 /**
- * A73 (DB-14; task 2.3), on both backends: block transactions change rows only. `TRUNCATE` fires no row trigger, so it
- * would escape digest capture (DT-4) without an error; the `deterministic_postgresql` component's `BEFORE TRUNCATE`
- * trigger (`src/deterministic-postgresql/block-transactions.ts`), which the database API attaches to every module table
- * not declared `deterministic: false` (`src/db/truncate-guard.ts`), refuses it with `truncate-not-allowed` — in a block,
- * in `on-start-db`, anywhere — except in a transaction the migration runner marked as a migration.
+ * Block transactions change rows only, on both backends. `TRUNCATE` fires no row trigger, so it would escape digest
+ * capture without an error. The `deterministic_postgresql` component's `BEFORE TRUNCATE` trigger
+ * (`src/deterministic-postgresql/block-transactions.ts`), which the database API attaches to every module table not
+ * declared `deterministic: false` (`src/db/truncate-guard.ts`), refuses it with `truncate-not-allowed`: in a block, in
+ * `on-start-db`, anywhere, except in a transaction the migration runner marked as a migration. [A73, DB-14, DT-4]
  *
  * A block is played by module `a`'s `on-db-write` in a block transaction of the database API, through the block write
- * handle it would get (`src/db/write-handles.ts`, task 2.6), which never carries the migration mark. A migration runs
- * through the migration runner (`src/db/migrate.ts`, task 2.4), which marks each migration's transaction with
- * {@link markMigration}; the mark's own rules are also shown on transactions that set it directly. "The block rolls
- * back" is shown here; the halt is the runner's (task 5.x).
+ * handle it would get (`src/db/write-handles.ts`), which never carries the migration mark. A migration runs through
+ * the migration runner (`src/db/migrate.ts`), which marks each migration's transaction with {@link markMigration}; the
+ * mark's own rules are also shown on transactions that set it directly. "The block rolls back" is shown here; halting
+ * is the runner's job.
  */
 
 const MODULE: SchemaModule = {
@@ -96,7 +96,7 @@ describe.each(BACKENDS)("A73: TRUNCATE in a block transaction is refused, on $na
     expect(refused.message).toContain("DELETE");
   }
 
-  // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy (task 18.4).
+  // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy.
   const requiredId = backend.name.startsWith("PostgreSQL") ? "[[db.block.truncate-refused]] " : "";
   it(`${requiredId}A73: TRUNCATE of a module's own table in a block fails with truncate-not-allowed and the block rolls back`, async () => {
     const { db, plan } = await guarded();

@@ -9,12 +9,12 @@ import { guardPid, spawnChild } from "./child-processes.js";
 import type { ParentJob } from "./child-processes.parent.js";
 
 /**
- * The orphan guard of every test child process (`child-processes.ts`; core-arch task 0.5, A153, `docs/issues/00015`,
- * `00022`): children are orphaned on purpose — a parent process starts one and is killed — and every process the parent
- * had started must end, whether the child runs (and ignores SIGTERM, as A48's worker does until its block ends), is
- * stopped, has its event loop blocked, or the signal reached the parent's whole process group. The committed negative
- * control starts the same children with plain `spawn`: each is still running once the same time has passed. And no test
- * starts a child process without the guard.
+ * The orphan guard of every test child process (`child-processes.ts`): children are orphaned on purpose — a parent
+ * process starts one and is killed — and every process the parent had started must end, whether the child runs (and
+ * ignores SIGTERM, as the SIGTERM-during-write test's worker does until its block ends), is stopped, has its event loop
+ * blocked, or the signal reached the parent's whole process group. The committed negative control starts the same
+ * children with plain `spawn`: each is still running once the same time has passed. And no test starts a child process
+ * without the guard. [A153, A48; docs/issues/00015, docs/issues/00022]
  */
 
 const PARENT = fileURLToPath(new URL("./child-processes.parent.ts", import.meta.url));

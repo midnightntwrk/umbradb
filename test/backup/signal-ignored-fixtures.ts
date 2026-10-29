@@ -11,12 +11,13 @@ import { adminPortIn, type RunningCommand, runCoreSettings } from "../cli/run-fi
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * What A175's tests share (task 15.1c; BK-1 as amended, owner decision Q173 C): a chain whose heights keep committing
- * for minutes, a configuration of `umbradb run` without `backupOnSignal`, the command's stand-in for the negative control
- * (`./signal-ignored.worker.ts`), and A175's two oracles:
+ * What the ignored-signal tests share: a chain whose heights keep committing for minutes, a configuration of `umbradb
+ * run` without `backupOnSignal`, the command's stand-in for the negative control (`./signal-ignored.worker.ts`), and
+ * two oracles: [A175, BK-1, Q173 C]
  *
- * - {@link sigusr2Ignored}: SIGUSR2 sent to a running `umbradb run` while blocks commit is logged as ignored in one line
- *   naming the signal and `backupOnSignal`; no file is written; heights keep committing; SIGTERM then ends it with exit 0.
+ * - {@link sigusr2Ignored}: SIGUSR2 sent to a running `umbradb run` while blocks commit is logged as ignored in one
+ *   line naming the signal and `backupOnSignal`; no file is written; heights keep committing; SIGTERM then ends it with
+ *   exit 0.
  * - {@link listenerProblems}: a process a host program starts with `startProcess` without `backupOnSignal` leaves
  *   `process.listenerCount("SIGUSR2")` as it was while it starts, runs and closes.
  *
@@ -56,7 +57,7 @@ export function pacedNode(): Promise<TapeNode> {
 /**
  * Writes `umbradb run`'s configuration file `name` in `project`: the `core` entry alone, on `database`, reading the
  * paced chain from `node`, its admin listener on a free loopback port, `extra` added (none sets `backupOnSignal` in
- * A175's tests); returns its absolute path.
+ * these tests); returns its absolute path. [A175]
  */
 export function writeRunConfig(
   project: CliProject,
@@ -139,7 +140,7 @@ export const signalLines = (log: string): string[] => log.split("\n").filter((li
 
 /**
  * Every file and directory under `dir` (relative), the database `skip` left out: the directory, what is under it, and
- * PGlite's writer lock beside it (`<skip>.lock.sqlite` and its journal, DB-11).
+ * PGlite's writer lock beside it (`<skip>.lock.sqlite` and its journal). [DB-11]
  */
 function namesUnder(dir: string, skip: string): string[] {
   return readdirSync(dir, { recursive: true, encoding: "utf8" })
@@ -151,11 +152,11 @@ function namesUnder(dir: string, skip: string): string[] {
 }
 
 /**
- * A175's oracle for `umbradb run` (see the module comment): `run` is a running command on the paced chain whose working
+ * The oracle for `umbradb run` (see the module comment): `run` is a running command on the paced chain whose working
  * directory is `cwd`, its database the directory `database` under it. Once at least height 3 has committed it is sent
  * SIGUSR2; then it must log exactly one line naming SIGUSR2 and `backupOnSignal`, still be running, commit at least
  * three more heights, have written nothing in `cwd` outside its database, and exit 0 on SIGTERM. Throws naming the
- * first part that fails; the command is ended either way.
+ * first part that fails; the command is ended either way. [A175]
  */
 export async function sigusr2Ignored(run: RunningCommand, cwd: string, database: string, patienceMs: number): Promise<void> {
   try {
@@ -217,10 +218,10 @@ export interface ListenedRun {
 }
 
 /**
- * A175's oracle for a host program's process (see the module comment): `process.listenerCount("SIGUSR2")` before
+ * The oracle for a host program's process (see the module comment): `process.listenerCount("SIGUSR2")` before
  * `run` starts, once it runs and once it has closed; while it runs `whileRunning` more than before (0 for a process
  * without `backupOnSignal`, 1 with it), once closed as many as before. Resolves with every difference found, none when
- * it holds.
+ * it holds. [A175]
  */
 export async function listenerProblems(run: ListenedRun, whileRunning = 0): Promise<string[]> {
   const before = process.listenerCount("SIGUSR2");

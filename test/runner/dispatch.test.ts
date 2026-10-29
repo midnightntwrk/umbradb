@@ -32,14 +32,17 @@ import {
 import { ARGUMENTS, Contexts, Recorder, recording, runOf, yields } from "./fixtures.js";
 
 /**
- * The runner's point dispatch (task 5.1; RN-3, RN-9, RN-10, `design.md` §2): given a resolved range, a point and how
- * to call one part, the dispatch calls the parts registered at the point in RN-3's order — in series, each awaited
- * before the next, or, at `on-fetch`, `on-parse` and `on-compute`, the backbone parts in series and then the other
- * modules in Kahn waves restricted to the modules registered at the point, a module waiting for every registered
- * module on a requirement path from it (through modules that do not register the point too). Each callback is called
- * as a method of its declaration's `points`, with its module's process context first. A failing callback ends the
- * point: in a wave the others are awaited, nothing of the next wave starts, and the first failure in the point's order
- * is thrown as a `CallbackFailure` naming the point and the module. A38's property test is `order.property.test.ts`.
+ * The runner's point dispatch. Given a resolved range, a point and how to call one part, the dispatch calls the parts
+ * registered at the point in the range's order:
+ * - in series, each awaited before the next;
+ * - or, at `on-fetch`, `on-parse` and `on-compute`, the backbone parts in series and then the other modules in Kahn
+ *   waves restricted to the modules registered at the point. A module waits for every registered module on a
+ *   requirement path from it (through modules that do not register the point too). [RN-3, RN-9, RN-10; design §2]
+ *
+ * Each callback is called as a method of its declaration's `points`, with its module's process context first. A
+ * failing callback ends the point: in a wave the others are awaited, nothing of the next wave starts, and the first
+ * failure in the point's order is thrown as a `CallbackFailure` naming the point and the module. The order's property
+ * test is `order.property.test.ts`. [A38]
  */
 
 const ids = (parts: readonly ModuleDeclaration[]): string[] => parts.map((part) => part.id);
@@ -84,7 +87,7 @@ async function rejection(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe("design.md §2: which points run in series and which in parallel where the graph allows", () => {
-  /** The `| point | When | Handle | Runs |` rows of design.md §2's table. */
+  /** The `| point | When | Handle | Runs |` rows of the design's points table. [design §2] */
   function designRuns(): Map<string, string> {
     const path = fileURLToPath(new URL("../../openspec/changes/core-arch/design.md", import.meta.url));
     const text = readFileSync(path, "utf8");
@@ -434,7 +437,7 @@ describe("RN-3 parallel where the graph allows: the Kahn waves of the modules re
     expect(() => scheduleAt(atCursor, "on-compute")).toThrow(
       /c requires the item x, which no single part provides at heights 10–20/,
     );
-    // RN-11's re-delivery there is in series and needs no provider.
+    // The callbacks delivered again there after a restart run in series and need no provider. [RN-11]
     expect(waveIds(scheduleAt(atCursor, "on-after-db-write"))).toEqual([["p1"], ["p2"], ["c"]]);
     expect(waveIds(scheduleAt(graph.rangeAt(21n) as ResolvedRange, "on-compute"))).toEqual([["p3"], ["c"]]);
     expect(recorder.events).toEqual([]);

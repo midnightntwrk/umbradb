@@ -6,8 +6,8 @@ import { bigCell, cell, contractAddress, makeV8State, makeV9State, V9_PACKAGE_PA
 import { decodeChildren, free, hex, refsOf, storedNodeKey, taggedRootKey } from "./node-format.js";
 import { describeNodeStoreExports, nodesOf } from "./node-store-suite.js";
 
-// Task 0.2 of `openspec/changes/core-arch` (design.md §5.2, specs/ledger LG-9, specs/contract-data CC-3): the vendored
-// ledger v9 package (ledger-9.1.0.0-rc.5 with the patches in vendor/ledger/v9/patches), exercised on the built package.
+// The vendored ledger v9 package (ledger-9.1.0.0-rc.5 with the patches in vendor/ledger/v9/patches), exercised on the
+// built package. [LG-9, CC-3; design §5.2]
 
 describeNodeStoreExports("vendored ledger v9", {
   packagePath: V9_PACKAGE_PATH,

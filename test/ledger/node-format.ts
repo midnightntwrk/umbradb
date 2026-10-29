@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 
-// Task 0.2 of `openspec/changes/core-arch` (design.md §5.1-§5.3): an independent implementation of the ledger's node
-// format, written from the upstream sources rather than from the vendored packages, so that the tests of the vendored
-// packages have an oracle of their own:
+// An independent implementation of the ledger's node format, written from the upstream sources rather than from the
+// vendored packages, so that the tests of the vendored packages have an oracle of their own. [design §5.1-§5.3]
 //
+// The format:
 // - a node's key is SHA-256 over the payload length as a 4-byte little-endian integer, the payload, and each child's
 //   key (`midnight-ledger` `storage-core/src/arena.rs` `hash`);
 // - a child is `ArenaKey::Ref(key)` (discriminant 0, then the 32-byte key) or `ArenaKey::Direct(node)` (discriminant 1,

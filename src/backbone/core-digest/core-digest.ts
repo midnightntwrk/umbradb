@@ -1,26 +1,33 @@
 /**
- * The backbone part `core-digest` (`openspec/changes/core-arch/specs/determinism/spec.md` DT-4, DT-5; `design.md` §4
- * "Change capture for digests", §6, §10; CORE-ARCH §4.11 and §4.13; owner decisions Q84, Q86, Q95): one digest per
- * module table, chained at every height that changes the table, and a checkpoint of every table's digest at each height
- * h with h mod 14,400 = 0, so that two instances fed the same chain can compare, table by table, which table differs
- * and in which 14,400-height window it began to.
+ * The backbone part `core-digest`. It keeps one digest per module table, chained at every height that changes the
+ * table, and a checkpoint of every table's digest at each height h with h mod 14,400 = 0. Two instances fed the same
+ * chain can then compare table by table: which table differs, and in which 14,400-height window it began to.
+ * [DT-4, DT-5, Q84, Q86; CORE-ARCH §4.11, §4.13; design §4 "Change capture for digests", §6]
  *
- * **Its tables** (`design.md` §10), created by its migration as the writer's login (`core_digest` is a reserved schema,
- * one of UmbraDB's own parts', DB-8): `core_digest.tables (schema, table) → (height, digest)`, a table's row set in the
- * block that changes it, kept as it is otherwise; and `core_digest.checkpoints (height, schema, table) → digest`. The
- * migration also creates `core_digest_shadow`, the schema of the shadow tables change capture writes
+ * **Its tables**, created by its migration as the writer's login (`core_digest` is a reserved schema, one of UmbraDB's
+ * own parts'): [DB-8; design §10]
+ * - `core_digest.tables (schema, table) → (height, digest)`: a table's row is set in the block that changes it, and
+ *   kept as it is otherwise;
+ * - `core_digest.checkpoints (height, schema, table) → digest`.
+ *
+ * The migration also creates `core_digest_shadow`, the schema of the shadow tables that change capture writes
  * (`src/db/change-capture.ts`). Every module role may read `core_digest` (the database API grants it, as it does
- * `core_chain`): a module that requires `digest-tables` or `digest-checkpoints` reads them in its `on-db-write`, which
- * runs before `core-digest`'s, so it sees h − 1's digests.
+ * `core_chain`). A module that requires `digest-tables` or `digest-checkpoints` reads them in its `on-db-write`, which
+ * runs before `core-digest`'s, so it sees the digests of h − 1.
  *
- * **Its `on-db-write`**, last of the block (RN-3; the runner calls it through `writes.write("core-digest", …)`, which runs
- * it as the login): for each table whose changes are captured, in DT-3's order, the keys the block touched with their
- * rows before and after ({@link takeChanges}, which also empties the shadow table), its changes and new digest
- * (`src/determinism/digest.ts`), its row of `core_digest.tables` set when it changed; then, at a checkpoint height, a
- * copy of every row of `core_digest.tables` into `core_digest.checkpoints`. Inside the block transaction, so the digests
- * commit with the block. It has no `on-start-db`: what startup must do for the digests must follow every module's
- * migrations, which come after `core-digest`'s (Q95), so the database API does it (`src/db/migrate.ts`: change capture
- * after each part, the shadow tables emptied when startup ends).
+ * **Its `on-db-write`** runs last in the block. The runner calls it through `writes.write("core-digest", …)`, which
+ * runs it as the login. For each table whose changes are captured, in the fixed table order: [RN-3, DT-3]
+ * - it takes the keys the block touched, with their rows before and after ({@link takeChanges}, which also empties the
+ *   shadow table);
+ * - it computes the table's changes and new digest (`src/determinism/digest.ts`);
+ * - it sets the table's row of `core_digest.tables` when the table changed.
+ *
+ * Then, at a checkpoint height, it copies every row of `core_digest.tables` into `core_digest.checkpoints`. All of this
+ * runs inside the block transaction, so the digests commit with the block.
+ *
+ * It has no `on-start-db`. What startup must do for the digests must follow every module's migrations, which come after
+ * `core-digest`'s, so the database API does it (`src/db/migrate.ts`: change capture after each part, and the shadow
+ * tables emptied when startup ends). [Q95]
  */
 
 import { z } from "zod";
@@ -32,8 +39,8 @@ import { defineModule } from "../../modules/declaration.js";
 import { CHECKPOINT_INTERVAL } from "./build-flags.js";
 
 /**
- * `core-digest`'s migrations (DB-9): applied once, in order, recorded under `core-digest`; never changed (each checksum
- * is fixed by the databases that applied it).
+ * `core-digest`'s migrations: applied once, in order, and recorded under `core-digest`. They never change, since each
+ * checksum is fixed by the databases that applied it. [DB-9]
  */
 export const CORE_DIGEST_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
@@ -66,8 +73,8 @@ const CHECKPOINT_SQL = `INSERT INTO core_digest.checkpoints (height, "schema", "
   SELECT $1::bigint, "schema", "table", digest FROM core_digest.tables`;
 
 /**
- * `core-digest`'s work for the block at `height` (DT-4, DT-5; see the module comment), on the block's write handle,
- * after every other part's `on-db-write`.
+ * `core-digest`'s work for the block at `height` (see the module comment), on the block's write handle, after every
+ * other part's `on-db-write`. [DT-4, DT-5]
  */
 export async function digestBlock(w: BlockWriteHandle, height: bigint): Promise<void> {
   const tables = await capturedTables(w);
@@ -89,9 +96,9 @@ export async function digestBlock(w: BlockWriteHandle, height: bigint): Promise<
 }
 
 /**
- * `core-digest`, the backbone part (CORE-ARCH §4.11): it requires `blocks` (`core-block-commit`'s) and provides
- * `digest-tables` and `digest-checkpoints`, its two tables. Its version is the build's (`UMBRADB_VERSION`), as every
- * backbone part's and core module's is.
+ * `core-digest`, the backbone part. It requires `blocks` (from `core-block-commit`) and provides `digest-tables` and
+ * `digest-checkpoints`, its two tables. Its version is the build's (`UMBRADB_VERSION`), like every backbone part's and
+ * core module's. [CORE-ARCH §4.11]
  */
 export const CORE_DIGEST = defineModule({
   id: "core-digest",
@@ -110,7 +117,7 @@ export const CORE_DIGEST = defineModule({
       table: { schema: "core_digest", tables: ["checkpoints"], kind: "append-only" },
     },
   ],
-  // Every backbone part starts at S, which is a mid-chain start when S is above genesis (task 3.2's note (e), Q96).
+  // Every backbone part starts at S, which is a mid-chain start when S is above genesis. [Q96]
   startsMidChain: true,
   configSchema: z.object({}),
   migrations: CORE_DIGEST_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),

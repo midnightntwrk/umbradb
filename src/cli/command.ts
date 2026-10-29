@@ -1,28 +1,33 @@
 /**
- * The `umbradb` command (`openspec/changes/core-arch/specs/library-surface/spec.md` LS-6, `design.md` §12): its
- * commands, their arguments, the usage and the exit statuses. `./main.ts` is the package's `bin` entry, which runs
- * {@link runMain} on the process.
+ * The `umbradb` command: its commands, their arguments, the usage and the exit statuses. `./main.ts` is the package's
+ * `bin` entry, which runs {@link runMain} on the process. [LS-6; design §12]
  *
- * - `umbradb config check <file> [--database]` checks a configuration file (CF-10, `./config-check.ts`); with
- *   `--database`, against the history of the database the file configures (owner decision Q167 A).
+ * - `umbradb config check <file> [--database]` checks a configuration file (`./config-check.ts`); with `--database`,
+ *   also against the history of the database the file configures [CF-10, Q167 A].
  * - `umbradb run [--config <file>] [--update-hash=<hash>]` starts the process of the configuration file, with the user
- *   modules it exports, until SIGTERM or SIGINT stops it (`./run.ts`, task 4.4a; Q106 B); it exits 1 when startup
- *   refused or processing halted, else 0. `--update-hash`, a configuration hash (`0x` and 64 lowercase hex digits, as a
- *   start that stopped with `public-config-changed` names it), is the public configuration hash a private process
- *   accepts at this start (PP-14, owner decision Q159; task 14.1c).
- * - `umbradb backup --out <file> [--config <file>]` writes a backup of the configuration file's database (`./backup.ts`,
- *   task 15.1; BK-1): exit 0 once written, 1 when refused (nothing written).
+ *   modules it exports, until SIGTERM or SIGINT stops it (`./run.ts`). It exits 1 when startup refused or processing
+ *   halted, else 0 [Q106 B].
+ * - `--update-hash` takes a configuration hash (`0x` and 64 lowercase hex digits, as a start that stopped with
+ *   `public-config-changed` names it): the public configuration hash a private process accepts at this start
+ *   [PP-14, Q159].
+ * - `umbradb backup --out <file> [--config <file>]` writes a backup of the configuration file's database
+ *   (`./backup.ts`): exit 0 once written, 1 when refused (nothing written) [BK-1].
  * - `umbradb restore <file> [--config <file>]` restores a backup into the configuration file's database, which must be
- *   empty (`./restore.ts`, task 15.2; BK-3): exit 0 once committed, 1 when refused (nothing committed).
- * - {@link EXIT}`.unavailable` (3) is the status of a command a build does not provide; every command of design §12
- *   is built now (tasks 4.4, 4.4a, 15.1, 15.2), so none exits with it.
- * - Anything else — no argument, an unknown command (0.9.5's chain-archive sync is no command of this one), a wrong
- *   argument of `config check` or `run` — prints the usage on stderr, after one line saying what was wrong, and exits 2;
- *   `--help` or `-h` as the only argument prints it on stdout and exits 0.
+ *   empty (`./restore.ts`): exit 0 once committed, 1 when refused (nothing committed) [BK-3].
+ * - {@link EXIT}`.unavailable` (3) is the status of a command a build does not provide. Every command of the command
+ *   line is built now, so none exits with it [design §12].
+ * - Anything else (no argument, an unknown command, a wrong argument of `config check` or `run`) prints the usage on
+ *   stderr, after one line saying what was wrong, and exits 2. 0.9.5's chain-archive sync is not a command of this
+ *   one. `--help` or `-h` as the only argument prints the usage on stdout and exits 0.
  *
- * Arguments are parsed with Node.js's `util.parseArgs` (no dependency). Any argument a message repeats passes through the redaction's patterns (a URL's credentials hidden): an operator may
- * paste a URL in the wrong place. The exit statuses: 0 every check passed (or the usage was asked for); 1 a check
- * failed or could not be completed; 2 the usage; 3 a command this build does not provide yet.
+ * Arguments are parsed with Node.js's `util.parseArgs` (no dependency). Any argument a message repeats passes through
+ * the redaction's patterns (a URL's credentials hidden), since an operator may paste a URL in the wrong place.
+ *
+ * The exit statuses:
+ * - 0: every check passed (or the usage was asked for);
+ * - 1: a check failed or could not be completed;
+ * - 2: the usage;
+ * - 3: a command this build does not provide yet.
  */
 
 import { parseArgs } from "node:util";
@@ -36,7 +41,7 @@ import { type RunSeams, runFailed, runProcess } from "./run.js";
 /** The exit statuses. */
 export const EXIT = Object.freeze({ ok: 0, failed: 1, usage: 2, unavailable: 3 } as const);
 
-/** The usage (LS-6; the commands in `design.md` §12's form). */
+/** The usage, with the commands in their documented form. [LS-6; design §12] */
 export const USAGE = `Usage: umbradb <command> [options]
 
 Commands:
@@ -97,7 +102,7 @@ function checkArguments(args: readonly string[]): { readonly file: string; reado
     if (token.kind === "positional") files.push(token.value);
     else if (token.kind === "option") {
       if (token.name !== "database") return `unknown option ${token.rawName} of config check`;
-      // Q167 A: the database is the file's own; `--database=<value>` is the earlier form, refused.
+      // The database is the file's own; `--database=<value>` is the earlier form, refused. [Q167 A]
       if (token.inlineValue === true) return "--database takes no value: it reads the database the file configures";
       databases += 1;
     }
@@ -108,9 +113,9 @@ function checkArguments(args: readonly string[]): { readonly file: string; reado
 }
 
 /**
- * `umbradb config …`: `config check` (CF-10), running `check` (`configCheck` unless given: a test's failing check). A
- * check that cannot be completed — an error it does not report as a finding — is printed on stderr, its message
- * redacted, with exit status 1.
+ * `umbradb config …`: `config check`, running `check` (`configCheck` unless given: a test's failing check). A check
+ * that cannot be completed (an error it does not report as a finding) is printed on stderr, its message redacted, with
+ * exit status 1. [CF-10]
  */
 export function configCommand(check: typeof configCheck = configCheck): CommandHandler {
   return async (args, io) => {
@@ -132,7 +137,7 @@ export function configCommand(check: typeof configCheck = configCheck): CommandH
   };
 }
 
-/** A public configuration hash as a start that stopped with `public-config-changed` names it (PP-14, Q159). */
+/** A public configuration hash, as a start that stopped with `public-config-changed` names it. [PP-14, Q159] */
 const CONFIG_HASH = /^0x[0-9a-f]{64}$/;
 
 /**
@@ -240,7 +245,7 @@ export function restoreCommand(seams: RestoreCommandSeams = {}): CommandHandler 
   };
 }
 
-/** The commands, by name (LS-6). */
+/** The commands, by name. [LS-6] */
 export const COMMANDS: Readonly<Record<string, CommandHandler>> = Object.freeze({
   run: runProcessCommand(),
   config: configCommand(),

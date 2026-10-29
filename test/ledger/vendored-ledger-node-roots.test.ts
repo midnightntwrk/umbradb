@@ -8,11 +8,12 @@ import { runInFreshInstance, type StoredNode } from "./fresh-instance.js";
 import { V8_PACKAGE_PATH, V9_PACKAGE_PATH, V9_RC3_PACKAGE_PATH } from "./ledger-states.js";
 import { free, hex, storedNodeKey } from "./node-format.js";
 
-// Task 0.2 of `openspec/changes/core-arch` (design.md §5.1, specs/ledger LG-11, LG-15): the vendored packages' state root
-// against the value the node itself reports. fixtures/genesis/ holds the genesis ledger states of mainnet and preview
-// (ledger v8), of a local undeployed dev chain (ledger v9) and of stagenet (ledger v9 as runtime 2.0 built it, rc.3;
-// task 12.2a), each as its node returned it in `system_properties.genesis_state`, with the node's
-// `midnight_ledgerStateRoot` at block 0 (node-roots.json records where and when each value was read).
+// The vendored packages' state root against the value the node itself reports. [LG-11, LG-15; design §5.1]
+//
+// fixtures/genesis/ holds the genesis ledger states of mainnet and preview (ledger v8), of a local undeployed dev chain
+// (ledger v9) and of stagenet (ledger v9 as runtime 2.0 built it, rc.3). Each is as its node returned it in
+// `system_properties.genesis_state`, with the node's `midnight_ledgerStateRoot` at block 0 (node-roots.json records
+// where and when each value was read).
 
 interface NodeRoot {
   file: string;

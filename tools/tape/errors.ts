@@ -1,17 +1,16 @@
 /**
- * The test tape's errors (TT-1 to TT-4; tasks 9.1, 9.2). None is an `UmbraError` code: the tape is test tooling, not
- * part of the package (`openspec/changes/core-arch/design.md` §1: `tools/tape/`, unexported), and `ERROR_CODES` is the
- * vocabulary of the exported `ErrorCode` (§12), which §11's refusals and halts draw on; none is a refusal or a halt of
- * the indexer.
+ * The test tape's errors. None is an `UmbraError` code: the tape is test tooling, not part of the package
+ * (`tools/tape/` is unexported), and `ERROR_CODES` is the vocabulary of the exported `ErrorCode`, which the indexer's
+ * refusals and halts draw on. None of these is a refusal or a halt of the indexer. [TT-1 to TT-4; design §1, §11, §12]
  *
  * - **`bad-tape-record`** ({@link TapeError}): a tape the reader cannot read, or records the writer or the tape node
  *   cannot take, with the line it is at (counting from 1) and why (`reason`).
  * - **`not-on-tape`**: the tape node's JSON-RPC error for a call no record answers ({@link NOT_ON_TAPE_RPC_CODE}). The
  *   node client (`src/node/`) reads it as a `node-error` (`reason: rpc-error`), which it never retries; it halts the
- *   part that made the call (IN-9 and RN-8), so a test whose indexer calls something its tape lacks fails at once,
- *   naming the method, instead of hanging on retries.
+ *   part that made the call, so a test whose indexer calls something its tape lacks fails at once, naming the method,
+ *   instead of hanging on retries [IN-9, RN-8].
  * - **`cannot-record`** ({@link RecordingError}): a frame the recording builder cannot record so that the tape node
- *   replays it byte for byte (TT-4), with the session, the side it came from and why (`reason`); the recording is void.
+ *   replays it byte for byte, with the session, the side it came from and why (`reason`); the recording is void [TT-4].
  * - **`bad-transform`** ({@link TransformError}): a variant transform asked for what the tape lacks or cannot hold.
  */
 

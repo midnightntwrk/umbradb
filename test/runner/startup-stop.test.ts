@@ -18,20 +18,21 @@ import {
 } from "./startup-stop-harness.js";
 
 /**
- * A167 `[CI]` (task 5.3b; RN-13 as amended, IN-10): with the node unreachable — a closed port — and startup retrying
- * it, SIGTERM, and likewise `ProcessHandle.stop()`, ends the process within 5 s: `stopping`, then `ended` of kind
- * `signal`, the node client closed, no connection attempt after the stop, no second signal; `umbradb run` exits 0. On
- * PostgreSQL 18.6 and PGlite 0.5.10, each a new database that startup opened before it asked the node for block 0
- * (`core-chain`'s `checkChain`, IN-3): in this process (`startup-stop-harness.ts`), and through the bundled command in
- * a child process with a real SIGTERM. Also a private process whose startup waits for its public side — a core
- * transport that never answers — ends at its stop. The committed negative control is
- * `startup-stop.negative-control.test.ts`.
+ * `[CI]` With the node unreachable (a closed port) and startup retrying it, SIGTERM, and likewise
+ * `ProcessHandle.stop()`, ends the process within 5 s: `stopping`, then `ended` of kind `signal`, the node client
+ * closed, no connection attempt after the stop, no second signal; `umbradb run` exits 0. [A167 CI, RN-13, IN-10]
+ *
+ * On PostgreSQL 18.6 and PGlite 0.5.10, each a new database that startup opened before it asked the node for block 0
+ * (`core-chain`'s `checkChain`): in this process (`startup-stop-harness.ts`), and through the bundled command in a
+ * child process with a real SIGTERM. Also a private process whose startup waits for its public side (a core transport
+ * that never answers) ends at its stop. The committed negative control is `startup-stop.negative-control.test.ts`.
+ * [IN-3]
  */
 
 /** No problem on either backend. */
 const NONE = Object.fromEntries(PROCESS_BACKENDS.map((backend) => [backend.name, []]));
 
-/** Each run: the startup until it retries, the bound, the watch, and the clean-up; a loaded machine (task 0.5). */
+/** Each run: the startup until it retries, the bound, the watch, and the clean-up; a loaded machine. */
 const RUN_TIMEOUT_MS = 2 * PATIENCE_MS + 120_000;
 
 describe("A167: a stop during startup with the node unreachable ends the process (RN-13, task 5.3b)", () => {

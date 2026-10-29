@@ -9,9 +9,9 @@ import type { CliProject } from "../cli/cli-fixtures.js";
 import { type BackupBackend, type BackupDatabase, pathOf, startTicker, writeTickerConfig } from "./backup-fixtures.js";
 
 /**
- * What the restores' tests share (task 15.2; BK-3, BK-4): a backup of a ticker database written by its stop
- * (`backupAtStop`), `umbradb restore` run in this process with the chain an in-memory one standing in for the node
- * (`RestoreCommandSeams.source`), a new target with its configuration file, and BK-3's "empty".
+ * What the restores' tests share: a backup of a ticker database written by its stop (`backupAtStop`), `umbradb restore`
+ * run in this process with the chain an in-memory one standing in for the node (`RestoreCommandSeams.source`), a new
+ * target with its configuration file, and the restore's test of an empty target. [BK-3, BK-4]
  */
 
 /** The chain the restores check against: the in-memory chain up to `head`, with `blocks` in place of its own. */
@@ -67,7 +67,7 @@ export async function restoreTarget(
   return { db, config: writeTickerConfig(project, { database: db.setting, ...options }) };
 }
 
-/** Whether `db` holds nothing (BK-3's empty target); a PGlite directory not created yet is empty too. */
+/** Whether `db` holds nothing (the restore's empty target); a PGlite directory not created yet is empty too. [BK-3] */
 export async function emptied(backend: BackupBackend, db: BackupDatabase): Promise<boolean> {
   if (backend.kind === "pglite" && !existsSync(join(pathOf(db.setting), "PG_VERSION"))) return true;
   return db.read((read) => isEmptyDatabase(read), async () => null);

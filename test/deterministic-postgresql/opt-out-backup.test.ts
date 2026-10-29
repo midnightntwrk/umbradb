@@ -8,11 +8,12 @@ import { BACKUP_BACKENDS, type BackupBackend, startTicker, tickerModule, writeTi
 import { backupAt, chain, restoreRun, restoreTarget } from "../backup/restore-fixtures.js";
 
 /**
- * A147's backup part (MD-1, BK-2; owner decision Q76; task 15.2), the last part of `design.md` §4's component-table row
- * of the opt-out (`./component-table.test.ts`), on PostgreSQL 18.6 and PGlite 0.5.10 — the backups' backends
- * (`../backup/backup-fixtures.ts`: `pg_dump` from the pinned image, `pglite-tools`): a table declared `deterministic:
- * false`, with a `serial` key and a `now()` time (`ticker.log`), travels in a backup with its rows and its sequence's
- * position; restored and continued, its rows are the backup's and the next `serial` values follow the restored ones.
+ * The backup part of the opt-out: the last part of the opt-out row of the component table
+ * (`./component-table.test.ts`). It runs on the backups' backends, PostgreSQL 18.6 and PGlite 0.5.10
+ * (`../backup/backup-fixtures.ts`: `pg_dump` from the pinned image, `pglite-tools`). A table declared
+ * `deterministic: false`, with a `serial` key and a `now()` time (`ticker.log`), travels in a backup with its rows and
+ * its sequence's position. Once restored and continued, its rows are the backup's, and the next `serial` values follow
+ * the restored ones. [A147, MD-1, BK-2, Q76; design §4]
  */
 
 const TEST_TIMEOUT_MS = 900_000;

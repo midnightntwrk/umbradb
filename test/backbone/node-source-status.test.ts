@@ -8,12 +8,14 @@ import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
 import { branchOf, type ChainBlock, chainOf, finalizedHead, headRead, hex, newHead, subscriptions } from "./fetch-fixtures.js";
 
 /**
- * What the node source reports of the node for `/status` (task 8.3a; `openspec/changes/core-arch/specs/admin-endpoints/
- * spec.md` AE-5, acceptance A168), on its own against a tape node: {@link NodeBlockSource.nodeView} — the best head the
- * node announced last (each new-heads notification's height, whether the queue takes the block or not, also before the
- * loop runs: a lower one after a higher one is the best head then) and the best-block queue's length (IN-6), as blocks
- * are queued, while the queue is full at `tipCap`, when the loop takes one at finality, and when a run ends. The process
- * and `/status` itself are `./core-status/node-fields.test.ts`'s.
+ * What the node source reports of the node for `/status`, tested on its own against a tape node. The report is
+ * {@link NodeBlockSource.nodeView}:
+ * - the best head the node announced last: each new-heads notification's height, whether the queue takes the block or
+ *   not, also before the loop runs; a lower one after a higher one is then the best head [AE-5, A168];
+ * - the best-block queue's length, as blocks are queued, while the queue is full at `tipCap`, when the loop takes one
+ *   at finality, and when a run ends [IN-6, AE-5, A168].
+ *
+ * The process and `/status` itself are tested in `./core-status/node-fields.test.ts`.
  */
 
 const quiet: ConnectSocket = (url, events, timers) => connectWebSocket(url, events, timers, { heartbeatMs: 3_600_000 });
@@ -53,7 +55,7 @@ async function until(check: () => boolean, what: string): Promise<void> {
   }
 }
 
-/** Call records the test makes through the client itself, so that the notifications after each wait for it (TT-3). */
+/** Call records the test makes through the client itself, so that the notifications after each wait for it. [TT-3] */
 const fence = (n: number): TapeRecord => ({ method: "chain_getBlockHash", params: [999_990 + n], result: hex(new Uint8Array(32).fill(n)) });
 const pass = (client: NodeClient, n: number) => client.blockHash(BigInt(999_990 + n));
 

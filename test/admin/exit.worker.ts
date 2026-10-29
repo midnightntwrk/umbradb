@@ -5,14 +5,16 @@ import { testBuild } from "../runner/process-build.js";
 import { adminCore, adminSource } from "./admin-harness.js";
 
 /**
- * A process for `lifecycle.test.ts` (task 8.1; AE-1, AE-3, RN-13), started with `node --import tsx` and its arguments —
- * the `database` setting's parts as JSON (CF-4, Q167 A) and the mode: `run` (it processes to the head and waits),
- * `refuse` (its configuration is invalid, which ends the process: task 8.1b) or `taken` (its `listen.admin`, the third
- * argument, is a port another listener holds) —, as `umbradb run` starts one: `startProcess` with its admin endpoints
- * (on `127.0.0.1:0` but in `taken`) and its signal from `terminationSignal`. It reports, as JSON lines on stdout, the
- * admin listener's port, how processing ended, and its state once closed; then it lets Node.js end by itself, so a
- * worker thread, a timer or a listener the admin endpoints left would keep it alive. Its own guard ends it when its
- * parent is no longer the test's (an orphan, after a test that died).
+ * A process for `lifecycle.test.ts`, started with `node --import tsx` and these arguments:
+ * - the `database` setting's parts as JSON; [CF-4, Q167 A]
+ * - the mode: `run` (it processes to the head and waits), `refuse` (its configuration is invalid, which ends the
+ *   process) or `taken` (its `listen.admin`, the third argument, is a port another listener holds).
+ *
+ * It starts as `umbradb run` starts one: `startProcess` with its admin endpoints (on `127.0.0.1:0`, except in `taken`)
+ * and its signal from `terminationSignal`. It reports, as JSON lines on stdout, the admin listener's port, how
+ * processing ended, and its state once closed. Then it lets Node.js end by itself, so a worker thread, a timer or a
+ * listener the admin endpoints left would keep it alive. Its own guard ends it when its parent is no longer the test's
+ * (an orphan, after a test that died). [AE-1, AE-3, RN-13]
  */
 
 const [databaseJson, mode, address] = process.argv.slice(2) as [string, "run" | "refuse" | "taken", string | undefined];

@@ -5,13 +5,16 @@ import type { Server as NetServer } from "node:net";
 import { WebSocket, WebSocketServer } from "ws";
 
 /**
- * A scripted Midnight node for the node client's tests (task 10.1): a JSON-RPC 2.0 server over WebSocket (`ws`, on
- * the loopback interface, a random free port at or above 10000) that records every request it receives, answers each
- * method with a handler the test sets — by default the real answers of `fixtures/mainnet-answers.json` — runs
- * Substrate-style head subscriptions (`chain_newHead`, `chain_finalizedHead` notifications), and can refuse the
- * WebSocket handshake with an HTTP status, stay silent, drop every connection, send frames that are not JSON-RPC, and
- * stop answering pings. Every request any fake node received in this process is also kept in
- * {@link RECEIVED_BY_ANY_NODE}, for the suites' check that the client used only the methods of IN-8.
+ * A scripted Midnight node for the node client's tests: a JSON-RPC 2.0 server over WebSocket (`ws`, on the loopback
+ * interface, a random free port at or above 10000). It:
+ * - records every request it receives;
+ * - answers each method with a handler the test sets, by default the real answers of `fixtures/mainnet-answers.json`;
+ * - runs Substrate-style head subscriptions (`chain_newHead`, `chain_finalizedHead` notifications);
+ * - can refuse the WebSocket handshake with an HTTP status, stay silent, drop every connection, send frames that are
+ *   not JSON-RPC, and stop answering pings.
+ *
+ * Every request any fake node received in this process is also kept in {@link RECEIVED_BY_ANY_NODE}, for the suites'
+ * check that the client used only the allowed node methods. [IN-8]
  */
 
 /** One request a fake node received. */

@@ -14,20 +14,24 @@ import { MIGRATION_MARK } from "../../src/deterministic-postgresql/index.js";
 import { askedLater, BACKENDS, settlesWithin } from "./backends.js";
 
 /**
- * The write handles of DB-3 and their closing (task 2.6; A10), on both backends. A block write handle is what one
- * part's `on-db-write` gets inside the block transaction, under the part's role (DB-6; a shared item's provider under
- * the item's, Q89; UmbraDB's own parts as the writer's login); a schema write handle is what its `on-start-db` gets, in
- * a transaction of its own (`src/db/migrate.ts` runs it after the part's migrations). Each closes when its callback
- * returns or throws: every later use — from a stored reference, from a timer, while the block transaction is still
- * open or after it ended — fails at once with `handle-closed`, never reaches the database, never runs under the role
- * of the part that runs now, and is reported to the runner (`onClosedUse`), which turns it into the `callback-error`
- * halt (RN-8): that half of A10, "which halts processing", is the runner's (task 5.x).
+ * The write handles and their closing, on both backends. [DB-3, A10]
  *
- * The runner's loop over the parts (RN-3's order, task 3.2/5.x) is played here by the test calling
- * {@link BlockWrites.write} once per part inside one transaction of the database API, as the runner will.
+ * - A block write handle is what one part's `on-db-write` gets inside the block transaction. It runs under the part's
+ *   role; a shared item's provider runs under the item's role, and UmbraDB's own parts as the writer's login.
+ *   [DB-6, Q89]
+ * - A schema write handle is what a part's `on-start-db` gets, in a transaction of its own (`src/db/migrate.ts` runs
+ *   it after the part's migrations).
+ *
+ * Each handle closes when its callback returns or throws. Every later use (from a stored reference, from a timer,
+ * while the block transaction is still open or after it ended) fails at once with `handle-closed`. It never reaches
+ * the database, never runs under the role of the part that runs now, and is reported to the runner (`onClosedUse`),
+ * which turns it into the `callback-error` halt. Halting processing is the runner's job, not tested here. [A10, RN-8]
+ *
+ * The runner's loop over the parts, in their fixed order, is played here by the test calling
+ * {@link BlockWrites.write} once per part inside one transaction of the database API, as the runner will. [RN-3]
  */
 
-/** The parts: two modules, a provider of a shared `table` item (Q89), each with one table. */
+/** The parts: two modules and a provider of a shared `table` item, each with one table. [Q89] */
 const MODULES: readonly (SchemaModule & MigrationPart)[] = [
   tablePart("a", "a"),
   tablePart("b", "b"),
@@ -69,7 +73,7 @@ function outcome(run: Promise<unknown>): Promise<unknown> {
   );
 }
 
-/** A10's error: `handle-closed`, not retryable, naming the handle, the part and the point. */
+/** The expected error: `handle-closed`, not retryable, naming the handle, the part and the point. [A10] */
 function expectWriteHandleClosed(
   error: unknown,
   handle: "block-write" | "schema-write",
@@ -104,9 +108,9 @@ function block<T>(
 }
 
 /**
- * A10's check while the block transaction is still open: `a`'s block write handle, kept, is used in `b`'s callback to
- * write `b`'s table — which `b`'s role, active now, may write. It must fail at once with `handle-closed`, and nothing it
- * asked for may land; `b`'s own write through its own handle must.
+ * The check while the block transaction is still open: `a`'s block write handle, kept, is used in `b`'s callback to
+ * write `b`'s table, which `b`'s role, active now, may write. It must fail at once with `handle-closed`, and nothing it
+ * asked for may land; `b`'s own write through its own handle must. [A10]
  */
 async function expectClosedInNextCallback(db: Database, plan: SchemaPlan, open: BlockOpener): Promise<void> {
   let kept: BlockWriteHandle | undefined;
@@ -166,8 +170,8 @@ async function expectOwnRoles(db: Database, plan: SchemaPlan, login: string, ope
 }
 
 /**
- * Negative control: a block whose write handles forward to the transaction and never close — roles set and reset as
- * the real one does. A10's check must fail on it.
+ * Negative control: a block whose write handles forward to the transaction and never close, with roles set and reset
+ * as the real one does. The handle-closed check must fail on it. [A10]
  */
 const staysOpen: BlockOpener = (tx, plan, options) => ({
   async write(part, callback) {
@@ -417,7 +421,7 @@ describe.each(BACKENDS)("write handles and their closing on $name (DB-3, A10)", 
 
     it("leaves no role on the writer's session after an on-start-db that selected one itself", async () => {
       const { db, plan, login } = await setUp();
-      // A mistake (Q46): a session-level SET ROLE would outlive the transaction on the writer's one session.
+      // A mistake: a session-level SET ROLE would outlive the transaction on the writer's one session. [Q46]
       await runOnStartDb(db, plan, "a", NO_HANDLES, (w) => w.execute("SET ROLE umbradb_m_b").then(() => undefined));
       expect(await db.transaction((tx) => tx.query("SELECT current_user AS role"))).toEqual([{ role: login }]);
     });
@@ -469,7 +473,7 @@ describe.each(BACKENDS)("write handles and their closing on $name (DB-3, A10)", 
       const { db, plan, login } = await setUp();
       const seen: unknown[] = [];
       await block(db, plan, async (writes) => {
-        // A mistake (modules are trusted, Q46: nothing stops it); the next callback must not inherit it.
+        // A mistake (modules are trusted, so nothing stops it); the next callback must not inherit it. [Q46]
         await writes.write("a", (w) => w.execute("SET ROLE umbradb_m_b"));
         for (const part of ["core-digest", "a"]) {
           await writes.write(part, async (w) => {
@@ -490,7 +494,8 @@ describe.each(BACKENDS)("write handles and their closing on $name (DB-3, A10)", 
     it("ends a part's role with the block transaction (SET LOCAL), also after a callback that threw in a block that committed anyway", async () => {
       const { db, plan, login } = await setUp();
       const own = new Error("the callback's own");
-      // The runner rolls such a block back (RN-8); a body that commits it must still not leave a's role on the session.
+      // The runner rolls such a block back; a body that commits it must still not leave a's role on the session.
+      // [RN-8]
       await block(db, plan, async (writes) => {
         await expect(
           writes.write("a", async () => {
@@ -569,7 +574,7 @@ describe.each(BACKENDS)("write handles and their closing on $name (DB-3, A10)", 
       const inside = await block(db, plan, async (writes) => {
         await writes.write("a", (w) => w.execute(INSERT_A, [2]));
         return writes.write("b", async (w) => {
-          // PGlite: a read from elsewhere waits for the block (DB-4), so it is asked for only on PostgreSQL.
+          // PGlite: a read from elsewhere waits for the block, so it is asked for only on PostgreSQL. [DB-4]
           if (!backend.singleQueue) outside = await db.read((read) => read.query("SELECT k FROM a.t ORDER BY k"));
           return w.query("SELECT k, who FROM a.t ORDER BY k");
         });

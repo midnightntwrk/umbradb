@@ -1,6 +1,6 @@
-// A module declaration written in JavaScript, built without TypeScript's types (A20, MD-1): the declaration of
+// A module declaration written in JavaScript, built without TypeScript's types: the declaration of
 // `test/modules/declarations.test.ts`'s type test, with its callback under the unknown point name `on-fetched` (the
-// point is `on-fetch`). Nothing checks it before startup, which must refuse it with `unknown-point`.
+// point is `on-fetch`). Nothing checks it before startup, which must refuse it with `unknown-point`. [A20, MD-1]
 import { z } from "zod";
 
 export default {

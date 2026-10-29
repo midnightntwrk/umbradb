@@ -12,21 +12,24 @@ import { createdDirectory, cursorIn, pairs, PROCESS_BACKENDS, type ProcessDataba
 import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
- * What the process retries instead of halting (task 5.4; IN-10, RN-8's "an error other than a lost connection",
- * DB-11, DB-13; CORE-ARCH §4.6): a lost database connection (`connection-lost`) and an unreachable node
- * (`node-unreachable`), the two retryable codes, wherever they come from — a callback's statement, the block
- * transaction, the loop's cursor read, startup's steps after the database opened. The process raises the condition
- * `database-retrying` or `node-retrying` (with the attempts and the height), waits IN-10's back-off (1 s doubling up to
- * the process revision's `backoffCeilingMs`) and runs again — a height whose transaction was lost after its
- * `on-compute` began is processed again from `on-compute`, its items from before it kept (task 10.4, IN-10;
- * `recovery.test.ts`), any other failure runs the loop again from the cursor, which it re-delivers (RN-11) —; the
- * condition clears once a height commits or the loop finds nothing to process.
- * A stop ends the wait at once. A writer that finds its lock taken when it reconnects halts for good
- * (`writer-lock-lost`, DB-11). The terminated connections are PostgreSQL's; PGlite has none to lose.
+ * What the process retries instead of halting: a lost database connection (`connection-lost`) and an unreachable node
+ * (`node-unreachable`), the two retryable codes. They are retried wherever they come from: a callback's statement, the
+ * block transaction, the loop's cursor read, startup's steps after the database opened. Any other error halts.
+ * [IN-10, RN-8, DB-11, DB-13; CORE-ARCH §4.6]
+ *
+ * The process raises the condition `database-retrying` or `node-retrying` (with the attempts and the height), waits
+ * the back-off (1 s, doubling up to the process revision's `backoffCeilingMs`) and runs again:
+ * - a height whose transaction was lost after its `on-compute` began is processed again from `on-compute`, keeping its
+ *   items from before it (`recovery.test.ts`) [IN-10];
+ * - any other failure runs the loop again from the cursor, whose callbacks it delivers again [RN-11].
+ *
+ * The condition clears once a height commits or the loop finds nothing to process. A stop ends the wait at once. A
+ * writer that finds its lock taken when it reconnects halts for good (`writer-lock-lost`). The terminated connections
+ * are PostgreSQL's; PGlite has none to lose. [DB-11]
  */
 
 const HEAD = 5n;
-/** The back-off ceiling the retries run with here: 20 ms, so no test waits IN-10's seconds. */
+/** The back-off ceiling the retries run with here: 20 ms, so no test waits the back-off's seconds. [IN-10] */
 const CEILING = 20;
 
 /** A block source over `source` whose methods may fail first (`fail` decides per call, by method and height). */
@@ -42,7 +45,7 @@ function flakySource(
     },
     finalizedHead: () => source.finalizedHead(),
     waitForHead: (above, signal) => source.waitForHead(above, signal),
-    // core-block-fetch's items, as the source gives them (task 10.3).
+    // core-block-fetch's items, as the source gives them.
     blockItems: (block: BlockRef) => source.blockItems(block),
     block: async (height) => {
       const error = fail("block", height);
@@ -140,7 +143,7 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     expect(started.lines[3]).toMatch(retryLine("processing", "node-retrying", 2));
     expect(started.lines[0]).toContain("the node did not answer for block 3");
     expect(started.lines[2]).toContain("the node did not answer for block 5");
-    // Each height written once; the cursor's on-after-db-write re-delivered at each retry (RN-11).
+    // Each height written once; the cursor's on-after-db-write delivered again at each retry. [RN-11]
     expect(log).toEqual([
       "w on-db-write@1",
       "w on-after-db-write@1",
@@ -392,8 +395,8 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
 
   if (backend.kind === "postgres") {
     it("the writer's connection terminated during on-db-write of h: retried with database-retrying, h committed once, complete", async () => {
-      // Since task 10.4 (IN-10) the retry processes h again from on-compute: the cursor's on-after-db-write, which ran
-      // before h began, is not delivered again.
+      // The retry processes h again from on-compute: the cursor's on-after-db-write, which ran before h began, is not
+      // delivered again. [IN-10]
       const db = await backend.database();
       const log: string[] = [];
       const reached = signal();

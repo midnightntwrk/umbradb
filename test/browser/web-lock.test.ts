@@ -2,9 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { acquirePgliteLock, WEB_LOCK_PREFIX } from "../../browser/src/db/web-lock.js";
 
 /**
- * The browser's PGlite writer lock (task 16.1; BR-1, DB-11; `browser/src/db/web-lock.ts`) over Node.js's own Web
- * Locks (`navigator.locks`, Node.js 24), which behave as a browser's within one agent: held for the holder's life,
- * `ifAvailable` answering at once. Chrome runs the same code in `browser.test.ts` (A129's second tab).
+ * The browser's PGlite writer lock (`browser/src/db/web-lock.ts`) over Node.js's own Web Locks (`navigator.locks`,
+ * Node.js 24), which behave as a browser's within one agent: held for the holder's life, `ifAvailable` answering at
+ * once. Chrome runs the same code in `browser.test.ts` (the second-tab check). [BR-1, DB-11, A129]
  */
 
 const scope = globalThis as { __UMBRADB_BROWSER_CONTROL__?: string };

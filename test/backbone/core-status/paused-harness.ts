@@ -17,16 +17,19 @@ import { coreSettings, startProcess } from "../../runner/process-build.js";
 import type { DatabaseParts } from "../../../src/config/database-parts.js";
 
 /**
- * A176 (task 8.3b; `openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-3 as amended, AE-4; owner decision
- * Q174 B): `/status`, read over HTTP from a running process's admin endpoints, lists the condition `paused` — `since`,
- * the time the loop paused, as RFC 3339 UTC text (Q68), and `by` — while the finalized loop is paused, and none once it
- * runs again; `/health/ready` answers as an unpaused process with the same lag would (AE-4). Shared by `paused.test.ts`
- * and its negative control's file; imports nothing of Vitest.
+ * `/status`, read over HTTP from a running process's admin endpoints, lists the condition `paused` while the finalized
+ * loop is paused, and none once it runs again. The condition carries `since`, the time the loop paused as RFC 3339 UTC
+ * text, and `by`. [A176, AE-3, Q174 B, Q68]
  *
- * **The process** is A163's (`test/backup/pause-fixtures.ts`: the `umbradb` command's build with modules `ticker` and
- * `recorder`, whose hooks act from inside a height), plus a module `keeper` that keeps the core's `db` item, on the
- * in-memory chain with every block known at once, its admin endpoints on `127.0.0.1:0` through a starter a negative
- * control may wrap; `readinessLag` 5, `followingThreshold` 3 (CF-4's default).
+ * `/health/ready` answers as an unpaused process with the same lag would. [AE-4]
+ *
+ * Shared by `paused.test.ts` and its negative control's file; imports nothing of Vitest.
+ *
+ * **The process** is the pause tests' process (`test/backup/pause-fixtures.ts`: the `umbradb` command's build with
+ * modules `ticker` and `recorder`, whose hooks act from inside a height), plus a module `keeper` that keeps the core's
+ * `db` item. It runs on the in-memory chain with every block known at once, its admin endpoints on `127.0.0.1:0`
+ * through a starter a negative control may wrap, with `readinessLag` 5 and `followingThreshold` 3 (the default).
+ * [A163, CF-4]
  *
  * **The run of `pause()`** ({@link pauseRun}, PostgreSQL 18.6 and PGlite 0.5.10), each phase entered once the process
  * itself shows its precondition, then `/status` read until it shows the phase's body or the patience ran out:
@@ -46,18 +49,18 @@ import type { DatabaseParts } from "../../../src/config/database-parts.js";
  * read ends and the backup is written, `paused` by `signal`, `since` after the signal, `following`, ready; once written
  * no condition, and none when the loop ran on to 15.
  *
- * Every `/status` body read is checked against `./status.schema.json` (A66). The problems found are returned as text,
- * one per phase and check; a passing run has none.
+ * Every `/status` body read is checked against `./status.schema.json`. The problems found are returned as text, one
+ * per phase and check; a passing run has none. [A66]
  */
 
 const STATUS_SCHEMA = validatorOf(schemaFile(new URL("./status.schema.json", import.meta.url)));
 
-/** The readiness lag of A176's processes: 30 behind is not ready, 0 is. */
+/** The readiness lag of these processes: 30 behind is not ready, 0 is. */
 const READINESS_LAG = 5n;
 /** How long a phase waits before it reads `/status` again, to see that the pause's time stays. */
 const STILL_MS = 300;
 
-/** What a test project gives the runs: the command's project with A176's three modules. */
+/** What a test project gives the runs: the command's project with the three modules `ticker`, `recorder`, `keeper`. */
 export async function a176Project(): Promise<CliProject> {
   const project = await cliProject();
   project.write("ticker.ts", tickerModule(project.builders));
@@ -98,7 +101,7 @@ function keeperModule(builders: string): string {
 
 let files = 0;
 
-/** Writes a configuration file of A176's process on `database`, with `extra` `core` settings; its absolute path. */
+/** Writes a configuration file of the process on `database`, with `extra` `core` settings; its absolute path. */
 function writeConfig(project: CliProject, database: DatabaseParts, extra: Readonly<Record<string, unknown>> = {}): string {
   files += 1;
   const core = JSON.stringify(
@@ -125,7 +128,7 @@ function writeConfig(project: CliProject, database: DatabaseParts, extra: Readon
   );
 }
 
-/** A running process of A176. */
+/** A running process of these tests. */
 interface Running {
   readonly handle: ProcessHandle;
   readonly source: InMemoryBlockSource;
@@ -134,7 +137,7 @@ interface Running {
   origin(): Promise<string>;
 }
 
-/** Starts A176's process of `file` on the chain at `head`; its admin endpoints through `wrap(startAdminServer)`. */
+/** Starts the process of `file` on the chain at `head`; its admin endpoints through `wrap(startAdminServer)`. */
 async function start(
   file: string,
   head: bigint,
@@ -208,7 +211,7 @@ async function within<T>(promise: Promise<T>, message: string): Promise<T> {
   }
 }
 
-/** A `/status` body as A176 reads it. */
+/** A `/status` body as these tests read it. */
 type Body = {
   readonly state: string;
   readonly ready: boolean;
@@ -226,7 +229,7 @@ interface Read {
 /** The condition `paused` of `body`, if listed. */
 const pausedOf = (body: Body): Record<string, unknown> | undefined => body.conditions.find((each) => each.code === "paused");
 
-/** What A176 expects of a phase that shows a pause. */
+/** What a phase that shows a pause expects. */
 interface PausedExpectation {
   readonly by: "pause" | "signal";
   /** The wall-clock bounds of the moment the loop paused. */
@@ -288,7 +291,7 @@ class Reader {
   }
 }
 
-/** AE-4 for a running process: ready unless the lag exceeds the readiness lag. */
+/** Readiness of a running process: ready unless the lag exceeds the readiness lag. [AE-4] */
 function readinessProblems({ body, readyStatus }: Read): string[] {
   const expected = body.lag !== null && BigInt(body.lag) <= READINESS_LAG;
   const problems: string[] = [];
@@ -299,7 +302,7 @@ function readinessProblems({ body, readyStatus }: Read): string[] {
   return problems;
 }
 
-/** A176's checks of a body that shows a pause. */
+/** The checks of a body that shows a pause. [A176] */
 function pausedProblems(expectation: PausedExpectation): (read: Read) => string[] {
   return (read) => {
     const { body } = read;
@@ -319,7 +322,7 @@ function pausedProblems(expectation: PausedExpectation): (read: Read) => string[
   };
 }
 
-/** A176's checks of a body of a running loop: no condition, `state`, readiness as AE-4 says. */
+/** The checks of a body of a running loop: no condition, `state`, and readiness by the lag. [A176, AE-4] */
 function runningProblems(state: string): (read: Read) => string[] {
   return (read) => {
     const problems: string[] = [];
@@ -344,15 +347,15 @@ function samePause(first: Read | undefined): (read: Read) => string[] {
   };
 }
 
-/** Options of A176's runs. */
+/** Options of the runs. */
 export interface A176Options {
-  /** How long each phase reads `/status` for what A176 expects, once the process shows its precondition. */
+  /** How long each phase reads `/status` for what it expects, once the process shows its precondition. */
   readonly patienceMs: number;
   /** Wraps the admin server's start: a negative control's publication. */
   readonly wrap?: (start: AdminStarter) => AdminStarter;
 }
 
-/** A176's run of `pause()` and `resume()` on `db` (see the module comment): the problems found, none when it passes. */
+/** The run of `pause()` and `resume()` on `db` (see the module comment): the problems found, none when it passes. */
 export async function pauseRun(project: CliProject, db: ProcessDatabase, options: A176Options): Promise<string[]> {
   const wrap = options.wrap ?? ((given) => given);
   let asked = 0;
@@ -415,7 +418,7 @@ export async function pauseRun(project: CliProject, db: ProcessDatabase, options
   }
 }
 
-/** A176's run of SIGUSR2 on `db`, a PGlite database (see the module comment): the problems found. */
+/** The run of SIGUSR2 on `db`, a PGlite database (see the module comment): the problems found. */
 export async function signalRun(project: CliProject, db: ProcessDatabase, out: string, options: A176Options): Promise<string[]> {
   const wrap = options.wrap ?? ((given) => given);
   const signals = new EventEmitter();
@@ -501,7 +504,7 @@ const withConditions = (snapshot: AdminSnapshot, conditions: AdminSnapshot["stat
   status: { ...snapshot.status, conditions },
 });
 
-/** A negative control's publication: a process that never publishes the pause (what `/status` showed before 8.3b). */
+/** A negative control's publication: a process that never publishes the pause (as `/status` was before it listed one). */
 export function withoutPause(): (start: AdminStarter) => AdminStarter {
   return publishing((snapshot) =>
     withConditions(

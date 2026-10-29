@@ -16,13 +16,15 @@ import { PATIENCE_MS } from "./browser-harness.js";
 import { coreConfiguration } from "./fixtures/configuration.js";
 
 /**
- * A132's Node.js run (task 16.1; BR-4): the same tape and the same configuration as the page's, in Node.js on PGlite.
- * As the page does with a new database (BR-2), it first asks the node's finalized head on a connection of its own and
+ * The Node.js run of the equality check: the same tape and the same configuration as the page's, in Node.js on PGlite.
+ * [A132, BR-4]
+ *
+ * As the page does with a new database, it first asks the node's finalized head on a connection of its own and
  * takes it as S; then it runs the process the page's core worker runs — the command's build with the configuration's
  * user modules (`commandBuild`), the configuration's data for that run (`coreConfiguration`, the module the page
  * bundles) with the development opt-in, the node's block source (`nodeSourceOf`) and a ledger worker thread — on a
  * PGlite database in a temporary directory, until its cursor is `to`; then stops it, opens the directory and reads its
- * contents hash (DT-3), with the tables its build declares `deterministic: false` named (none here).
+ * contents hash, with the tables its build declares `deterministic: false` named (none here). [BR-2, DT-3]
  */
 
 /** What a Node.js run gave: S, the height its contents hash was read at, and the hash (`0x` hex). */

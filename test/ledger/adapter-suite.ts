@@ -36,17 +36,19 @@ import {
 import { AdapterWorkerHost, type LoadedState, type Replayed } from "./adapter-worker-host.js";
 import { decodeChildren, refsOf, storedNodeKey } from "./node-format.js";
 
-// Task 12.1 of `openspec/changes/core-arch` (A98; LG-6, LG-7, LG-8, CC-2, owner decisions Q49, Q54, Q55): the one
-// adapter test suite, run against the v8 adapter (`adapter-v8.test.ts`) and the v9 adapter (`adapter-v9.test.ts`).
-// Version-specific clauses are parameters: `logs` is "none" for v8 (Q54) and "decoded" for v9. Expected values come
-// from the recorded vendor files, the node's own state roots (`fixtures/genesis/node-roots.json`), the independent node
-// format (`node-format.ts`), the packages' own functions, and a reference replay with the published API
-// (`adapter-fixtures.ts`), never from the adapter under test.
+// The one adapter test suite, run against the v8 adapter (`adapter-v8.test.ts`) and the v9 adapter
+// (`adapter-v9.test.ts`). [A98; LG-6, LG-7, LG-8, CC-2, Q49, Q55]
+//
+// Version-specific clauses are parameters: `logs` is "none" for v8 and "decoded" for v9. [Q54]
+//
+// Expected values come from the recorded vendor files, the node's own state roots (`fixtures/genesis/node-roots.json`),
+// the independent node format (`node-format.ts`), the packages' own functions, and a reference replay with the
+// published API (`adapter-fixtures.ts`), never from the adapter under test.
 
 export interface AdapterSubject {
   ledger: Ledger;
   load(): Promise<LedgerPackage>;
-  /** Q54: whether `apply` reports contract logs. */
+  /** Whether `apply` reports contract logs. [Q54] */
   logs: "none" | "decoded";
 }
 
@@ -432,9 +434,9 @@ export function describeLedgerPackage(subject: AdapterSubject): void {
     }, async () => {
       const failing = block([zswapOutputTransaction(raw), failingSystemTransaction(subject.ledger)]);
       expect(() => adapter.apply(adapter.emptyState(), failing)).toThrow(/system transaction 1 of block 1 failed/);
-      // 20 deploys write more than the block limit of 50,000 bytes: the node clamps the fullness to the limits (task
-      // 12.1a, owner decision Q113 A; task 12.1's adapter threw here). `post-block-update.test.ts` holds the fee prices
-      // against the node's arithmetic.
+      // 20 deploys write more than the block limit of 50,000 bytes: the node clamps the fullness to the limits, and
+      // so does the adapter (an earlier adapter threw here). `post-block-update.test.ts` holds the fee prices against
+      // the node's arithmetic. [Q113 A]
       const deploys = await Promise.all(
         Array.from({ length: 20 }, () => contractFixture(raw).then((fixture) => fixture.deploy)),
       );

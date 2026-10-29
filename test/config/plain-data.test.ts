@@ -17,13 +17,17 @@ import { UmbraError } from "../../src/db/errors.js";
 import { CORE_SETTINGS, REPOSITORY } from "./config-fixtures.js";
 
 /**
- * A26 (CF-1; task 4.1): the configuration file is evaluated to plain data — objects, arrays, strings, booleans, `null`
- * and integers from 0 to 2^53 − 1 — and anything else in it refuses startup with `not-plain-data`, naming its path
- * inside the configuration (`entries[1].config.onError`). The table's seven values are A26's: a function, a class
- * instance, `undefined`, a bigint, 1.5, −1 and 2^53, each in a configuration file written as an operator writes one
- * and loaded by the loader startup calls (`loadConfig`); the runner's refused state is task 5.x's. The plain-data check
- * refuses the other values that are not data as well (a symbol, an array's hole, a getter, …), each by a rule of its
- * own, and the committed negative control shows that a check without one rule fails exactly that rule's rows.
+ * The configuration file is evaluated to plain data: objects, arrays, strings, booleans, `null` and integers from 0
+ * to 2^53 − 1. Anything else in it refuses startup with `not-plain-data`, naming its path inside the configuration
+ * (`entries[1].config.onError`). [A26, CF-1]
+ *
+ * The `A26` table holds the seven specified values: a function, a class instance, `undefined`, a bigint, 1.5, −1 and
+ * 2^53. Each sits in a configuration file written as an operator writes one, and is loaded by the loader startup calls
+ * (`loadConfig`); the runner's refused state is tested elsewhere. [A26]
+ *
+ * The plain-data check also refuses the other values that are not data (a symbol, an array's hole, a getter, …), each
+ * by a rule of its own. The committed negative control shows that a check without one rule fails exactly that rule's
+ * rows.
  */
 
 /** The refusal `run` throws, or undefined when it returns. */
@@ -70,7 +74,7 @@ interface Row {
   readonly rule: string;
   readonly path: string;
   readonly found: string;
-  /** For A26's rows: the `entries` of a configuration file that holds the value. */
+  /** For the `A26` rows: the `entries` of a configuration file that holds the value. */
   readonly entries?: string;
   /** For the other rows: the value, built here. */
   readonly build?: () => unknown;
@@ -303,7 +307,7 @@ const OTHERS: readonly Row[] = [
 ];
 
 let directory = "";
-/** Each A26 row's configuration file, by row name. */
+/** Each `A26` row's configuration file, by row name. */
 const files = new Map<string, string>();
 
 beforeAll(() => {
@@ -353,7 +357,7 @@ describe("A26: each value that is not plain data refuses startup with not-plain-
       expect(error.message).toContain(file);
       expect(error.message).toContain(`the configuration's value at ${row.path} is ${row.found}`);
       expect(error.message).toContain(
-        "a configuration holds objects, arrays, strings, booleans, null and integers from 0 to 2^53 - 1 (CF-1)",
+        "a configuration holds objects, arrays, strings, booleans, null and integers from 0 to 2^53 - 1;",
       );
     });
   }

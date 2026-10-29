@@ -3,8 +3,8 @@ import { REPOSITORY } from "../config/config-fixtures.js";
 import { spawnChild } from "../child-processes.js";
 
 /**
- * The checks of `npm run web`'s server (task 17.3a): the headers a cross-origin isolated page needs, and `node
- * browser/serve.ts` run in a child process.
+ * The checks of `npm run web`'s server: the headers a cross-origin isolated page needs, and `node browser/serve.ts` run
+ * in a child process.
  */
 
 export { REPOSITORY };

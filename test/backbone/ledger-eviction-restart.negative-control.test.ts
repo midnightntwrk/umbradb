@@ -5,16 +5,18 @@ import { refusalHalt, refusalHeight, runFixture } from "./eviction-restart.js";
 import { PATIENCE_MS } from "./ingest-harness.js";
 
 /**
- * A160's committed negative controls (task 12.5a; `openspec/changes/core-arch/acceptance.md` A160, LG-14, owner
- * decision Q144 B), on PostgreSQL 18 and PGlite 0.5.10, over the run of `ledger-eviction-restart.test.ts` with the
- * package refusing h's eviction in its first thread only:
+ * The committed negative controls of the eviction restart, on PostgreSQL 18 and PGlite 0.5.10. They use the run of
+ * `ledger-eviction-restart.test.ts` with the package refusing h's eviction in its first thread only.
+ * [A160, LG-14, Q144 B]
  *
- * - **Task 12.5's behaviour** (`restartOnRefusedEviction: false`): the refusal fails block h at once — A160's "the
- *   process does not halt" fails.
+ * - **No restart** (`restartOnRefusedEviction: false`): the refusal fails block h at once, so the check that the
+ *   process does not halt fails. [A160]
  * - **A retry without the state at h − 1** (`loadParent: false`: the new thread is not given the stored state at h − 1
- *   before h's apply): the new thread holds no state and refuses h — A160's "no halt" and "the state at h − 1 loaded
- *   from the database" fail. A retry applying h on any other state could not store another root: LG-15's root check
- *   halts it first (`root-mismatch`).
+ *   before h is applied): the new thread holds no state and refuses h. The checks for no halt and for the state at
+ *   h − 1 loaded from the database fail. [A160]
+ *
+ * A retry applying h on any other state could not store another root: the root check halts it first
+ * (`root-mismatch`). [LG-15]
  */
 
 describe.each(PROCESS_BACKENDS)("A160's negative controls on $name", (backend) => {

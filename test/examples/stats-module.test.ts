@@ -16,10 +16,10 @@ import {
 } from "./example-checks.js";
 
 /**
- * Task 17.3a's acceptance (owner decisions Q160 A, Q161 A): the module guide's example, `examples/stats-module/`,
- * type-checks against `src/index.ts`, and `umbradb config check` passes on its configuration file; the guide's and the
- * README's code import only the package's surface, and the guide's walk-through (§2) is the example's code.
- * `./stats-module.negative-control.test.ts` shows each check failing on a changed copy.
+ * The module guide's example, `examples/stats-module/`, type-checks against `src/index.ts`, and `umbradb config check`
+ * passes on its configuration file. The guide's and the README's code import only the package's surface, and the
+ * guide's walk-through (its section 2) is the example's code. `./stats-module.negative-control.test.ts` shows each
+ * check failing on a changed copy. [Q160 A, Q161 A]
  */
 
 const read = (file: string): string => readFileSync(join(REPOSITORY, file), "utf8");

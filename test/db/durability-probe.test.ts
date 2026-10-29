@@ -26,22 +26,30 @@ import { startContainers } from "../containers.js";
 import { connectionOfUrl } from "./connection.js";
 
 /**
- * The durability probe at its new path (`src/db/durability-probe.ts`, moved from 0.9.5's
- * `src/postgres/durability-probe.ts` unchanged in behaviour, `design.md` §4 and §13), and A18 [CI] (DB-12, CF-9):
- * on PostgreSQL 18 startup refuses with `fsync=off`, with a detected transaction pooler, and with
- * `full_page_writes=off` unless `fullPageWritesOffAllowed` is set; on PGlite, startup refuses without the development
- * opt-in.
+ * The durability probe at its new path, `src/db/durability-probe.ts`. It moved from 0.9.5's
+ * `src/postgres/durability-probe.ts` with its behaviour unchanged. [design §4, §13]
  *
- * 0.9.5's cases are all here, against the database API: the pure classifiers exhaustively, with no server (B1–B3, B6);
- * the live servers — one per setting, started with `-c` — through the writer's start, which takes the writer lock and
- * then runs the probe on the writer's session before any write (B1–B5, the concurrent sentinel holder). What changed:
- * each refusal is an `UmbraError` with its §11 code (`durability-fsync-off`, `durability-full-page-writes-off`,
- * `durability-pooler`) instead of 0.9.5's two classes, the override is `fullPageWritesOffAllowed` (CF-4), and the
- * probe runs at the writer's start instead of inside 0.9.5's `runMigrations`. "Startup refuses" (the refused state)
- * is the runner's (task 5.x); here the writer's start, its transactions and `startDatabase` refuse.
+ * On PostgreSQL 18, startup refuses with `fsync=off`, with a detected transaction pooler, and with
+ * `full_page_writes=off` unless `fullPageWritesOffAllowed` is set. On PGlite, startup refuses without the development
+ * opt-in. [A18 CI, DB-12, CF-9]
  *
- * PostgreSQL 18 images turn data checksums on by default (task 0.4); a server started with `full_page_writes=off` still
- * starts and reports `off`, so the probe's cases are unchanged.
+ * 0.9.5's cases are all here, against the database API:
+ * - the pure classifiers, exhaustively, with no server (B1–B3, B6);
+ * - the live servers, one per setting, started with `-c`, through the writer's start. The writer's start takes the
+ *   writer lock and then runs the probe on the writer's session before any write (B1–B5, the concurrent sentinel
+ *   holder).
+ *
+ * What changed from 0.9.5:
+ * - each refusal is an `UmbraError` with its own error code (`durability-fsync-off`, `durability-full-page-writes-off`,
+ *   `durability-pooler`) instead of 0.9.5's two classes; [design §11]
+ * - the override is `fullPageWritesOffAllowed`; [CF-4]
+ * - the probe runs at the writer's start instead of inside 0.9.5's `runMigrations`.
+ *
+ * "Startup refuses" (the refused state) belongs to the runner; here the writer's start, its transactions and
+ * `startDatabase` refuse.
+ *
+ * PostgreSQL 18 images turn data checksums on by default. A server started with `full_page_writes=off` still starts and
+ * reports `off`, so the probe's cases are unchanged.
  */
 
 const noHeight = async (): Promise<bigint | null> => null;

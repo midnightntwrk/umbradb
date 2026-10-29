@@ -4,12 +4,15 @@ import { PATIENCE_MS } from "../ingest-harness.js";
 import { a168Problems, a168Run, withoutNodeFields } from "./node-fields-harness.js";
 
 /**
- * A168's committed negative control (task 8.3a), on PostgreSQL 18.6 and PGlite 0.5.10: the same run as
- * `./node-fields.test.ts`'s, with every snapshot the runner publishes carrying the node's best head, connection and
- * queue depth as null — what `/status` showed before this task (`withoutNodeFields`) —, fails A168's oracle in exactly
- * those fields in every phase, and nothing else: each body still validates (null is the schema's "no value yet"), and
- * the retries, the cursor, the head, the state and `finality-stall` still show. Each phase reads `/status` for a shorter
- * time than the test's: every phase is expected to run out of it.
+ * The committed negative control for the node fields, on PostgreSQL 18.6 and PGlite 0.5.10. [A168]
+ *
+ * It is the same run as `./node-fields.test.ts`'s, but every snapshot the runner publishes carries the node's best
+ * head, connection and queue depth as null (`withoutNodeFields`), as `/status` showed them before the process reported
+ * them. The oracle then fails in exactly those fields in every phase, and nothing else:
+ * - each body still validates (null is the schema's "no value yet");
+ * - the retries, the cursor, the head, the state and `finality-stall` still show.
+ *
+ * Each phase reads `/status` for a shorter time than the test's: every phase is expected to run out of it.
  */
 
 /** How long a phase reads `/status` here: each one runs out of it. */

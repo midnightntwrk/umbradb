@@ -16,13 +16,15 @@ import { core, entryOf, loggingModule, startProcess, testBuild } from "./process
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * A43 (task 5.4; RN-8) through the process from its configuration, on PostgreSQL 18 and PGlite: a thrown error in each
- * of `on-fetch`, `on-parse`, `on-start-height`, `on-compute`, the first and the last `on-db-write` callback leaves no
- * row of h, the cursor h − 1, and the state `halted` with h, the module and the point; an error in `on-after-db-write`
- * (and, RN-8's other point after the commit, `on-stop-height`) halts with h committed. The process stays up: its module
- * API keeps answering at the cursor until it is stopped. Then the halts' other codes of `design.md` §11 through the
- * process: the cause's own code where §11 names one, `callback-error` for a misuse, `unexpected-cursor` for the loop's
- * cursor check, `database-error` for any other failure.
+ * Callback failures halt processing, tested through the process from its configuration, on PostgreSQL 18 and PGlite.
+ * A thrown error in each of `on-fetch`, `on-parse`, `on-start-height`, `on-compute`, the first and the last
+ * `on-db-write` callback leaves no row of h, the cursor h − 1, and the state `halted` with h, the module and the point.
+ * An error in `on-after-db-write` (or in `on-stop-height`, the other point after the commit) halts with h committed.
+ * The process stays up: its module API keeps answering at the cursor until it is stopped. [A43, RN-8]
+ *
+ * Then the other halt codes of the design's refusals and halts, through the process: the cause's own code where the
+ * design names one, `callback-error` for a misuse, `unexpected-cursor` for the loop's cursor check, `database-error`
+ * for any other failure. [design §11]
  *
  * The build: `a-first`, `early` (1–5), `late` (from 5), `m-mid` and `z-last`, each writing one row per height in its
  * `on-db-write` and logging every point, in that order — so at `on-db-write` `core-block-commit` is the first callback
@@ -45,7 +47,7 @@ const POINTS: readonly PointName[] = [
 ];
 const TABLES = ["a_first", "early", "late", "m_mid", "z_last"] as const;
 
-/** One row of A43's table: the point and the module whose callback throws at H, and whether H committed first. */
+/** One row of the table: the point and the module whose callback throws at H, and whether H committed first. [A43] */
 interface A43Case {
   readonly name: string;
   readonly point: PointName;
@@ -86,12 +88,12 @@ function failingAt(
   return { ...declaration, points: points as ModuleDeclaration["points"] };
 }
 
-/** A43's modules, logging to `log`. */
+/** The callback-failure build's modules, logging to `log`. [A43] */
 function a43Modules(log: string[]): ModuleDeclaration[] {
   const reader = loggingModule("reader", log, [], {
     points: {
       async "on-start-api"(_p, api) {
-        // The module states its height itself, with the envelope's helpers (RN-16; task 5.2b).
+        // The module states its height itself, with the envelope's helpers. [RN-16]
         api.http("GET", "/height", async (_request, read) => ({
           status: 200,
           headers: chainDataHeaders(await readChainDataView(read)),
@@ -103,7 +105,7 @@ function a43Modules(log: string[]): ModuleDeclaration[] {
   return [...["a-first", "early", "late", "m-mid", "z-last"].map((id) => loggingModule(id, log, POINTS)), reader];
 }
 
-/** A43's configuration on `database`. */
+/** The callback-failure build's configuration on `database`. [A43] */
 function a43Entries(database: DatabaseParts, user: readonly ModuleDeclaration[]) {
   const of = (id: string) => user.find((part) => part.id === id) as ModuleDeclaration;
   return [
@@ -120,7 +122,7 @@ function a43Entries(database: DatabaseParts, user: readonly ModuleDeclaration[])
 /** How a run ended: processing's end, the source waiting at the head, or nothing within the patience. */
 type Outcome = ProcessingEnd | "waiting" | "timeout";
 
-/** What one A43 run showed. */
+/** What one callback-failure run showed. [A43] */
 interface A43Observation {
   readonly outcome: Outcome;
   readonly status: ProcessStatus;
@@ -134,7 +136,7 @@ interface A43Observation {
   readonly rows: Readonly<Record<string, { readonly at: number; readonly above: number }>>;
 }
 
-/** Runs A43's build on `db` with `failing` failing at H, until processing ends (or the patience runs out). */
+/** Runs the callback-failure build on `db` with `failing` failing at H, until processing ends or patience runs out. */
 async function a43Run(
   db: ProcessDatabase,
   failing: A43Case,
@@ -201,7 +203,7 @@ const showOutcome = (outcome: Outcome): string =>
       : `nowhere within ${PATIENCE_MS} ms of the failure`
     : outcome.kind;
 
-/** A43's oracle for one row of its table: every problem with what was observed, none when A43 holds. */
+/** The oracle for one row of the table: every problem with what was observed, none when it halted as required. [A43] */
 function a43Problems(failing: A43Case, observed: A43Observation): string[] {
   const problems: string[] = [];
   const { status } = observed;
@@ -406,7 +408,7 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
         cursor: (read) => source.cursor(read),
         finalizedHead: () => source.finalizedHead(),
         waitForHead: (above, signal) => source.waitForHead(above, signal),
-        // core-block-fetch's items, as the source gives them (task 10.3).
+        // core-block-fetch's items, as the source gives them.
         blockItems: (block: BlockRef) => source.blockItems(block),
         // The source answers height 3 with the block of height 4: core-block-commit writes the cursor row at 4.
         block: async (height): Promise<BlockRef> => (height === 3n ? inMemoryBlock(4n) : source.block(height)),
@@ -427,7 +429,7 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
         cursor: (read) => source.cursor(read),
         finalizedHead: () => source.finalizedHead(),
         waitForHead: (above, signal) => source.waitForHead(above, signal),
-        // core-block-fetch's items, as the source gives them (task 10.3).
+        // core-block-fetch's items, as the source gives them.
         blockItems: (block: BlockRef) => source.blockItems(block),
         block: async (height) => {
           if (height === 6n) throw new Error("the source lost block 6");

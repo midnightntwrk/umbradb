@@ -17,17 +17,20 @@ import {
 import { BACKENDS } from "../db/backends.js";
 
 /**
- * A58's write half (DT-6, owner decision Q57; task 7.1), on both backends: the database API adds to every `jsonb` and
- * `numeric` column of a module table not declared `deterministic: false`, and to every array of either, a `CHECK`
- * backed by `core_chain.jsonb_numbers_ok` or `core_chain.numeric_ok` (`src/deterministic-postgresql/checks.ts`,
- * `design.md` §4): a JSON number must be an integer within the signed 64-bit range written without a fraction (`1.0`
- * refused: its `jsonpath` `.string()` is `"1.0"`), and a `numeric` must have no fraction and be neither `NaN` nor an
- * infinity, while NULL stays allowed. A module writing a refused value in `on-db-write` fails the block, which rolls
- * back. The block is played by module `m`'s `on-db-write` through the real block write handle (`src/db/write-handles.ts`);
- * the halt is the runner's (task 5.x).
+ * The write checks of the determinism rules, on both backends. The database API adds a `CHECK` to every `jsonb` and
+ * `numeric` column of a module table not declared `deterministic: false`, and to every array of either. The `CHECK` is
+ * backed by `core_chain.jsonb_numbers_ok` or `core_chain.numeric_ok` (`src/deterministic-postgresql/checks.ts`):
+ * - a JSON number must be an integer within the signed 64-bit range, written without a fraction (`1.0` is refused:
+ *   its `jsonpath` `.string()` is `"1.0"`);
+ * - a `numeric` must have no fraction and be neither `NaN` nor an infinity;
+ * - NULL stays allowed.
+ * [A58, DT-6, Q57; design §4]
  *
- * Every case and its verdict is written by hand from DT-6, A58 and Q57; the committed negative controls build the two
- * functions without one rule each and show that exactly that rule's cases change verdict.
+ * A module writing a refused value in `on-db-write` fails the block, which rolls back. The block is played by module
+ * `m`'s `on-db-write` through the real block write handle (`src/db/write-handles.ts`); halting is the runner's job.
+ *
+ * Every case and its verdict is written by hand from the rules; the committed negative controls build the two
+ * functions without one rule each and show that exactly that rule's cases change verdict. [DT-6, A58, Q57]
  */
 
 const MODULE: SchemaModule = {
@@ -48,7 +51,7 @@ const TABLES = `
   CREATE TABLE m.p_low PARTITION OF m.p FOR VALUES FROM (0) TO (1000);
   CREATE TABLE m.free (k bigint PRIMARY KEY, j jsonb, n numeric);`;
 
-/** A value written to one column, and whether DT-6 lets it be stored. */
+/** A value written to one column, and whether the determinism rules let it be stored. [DT-6] */
 interface Case {
   readonly column: "j" | "aj" | "n" | "an" | "n0";
   /** The value as SQL text, cast to the column's type. */
@@ -61,7 +64,7 @@ interface Case {
 }
 
 const CASES: readonly Case[] = [
-  // jsonb (Q57): integers within 64 bits, written without a fraction.
+  // jsonb: integers within 64 bits, written without a fraction. [Q57]
   { column: "j", value: '{"x": 1.5}', stored: false, rule: "integer-text" },
   { column: "j", value: '{"x": 1.0}', stored: false, rule: "integer-text" },
   { column: "j", value: '{"x": 100.00}', stored: false, rule: "integer-text" },
@@ -98,7 +101,7 @@ const CASES: readonly Case[] = [
   { column: "an", value: "{1,2}", stored: true },
   { column: "an", value: "{{1,2},{3,4}}", stored: true },
   { column: "an", value: "{1,NULL}", stored: true, rule: "null-allowed" },
-  // numeric(38,0): PostgreSQL rounds on write, so what is stored is an integer (DT-6 allows the declared scale 0).
+  // numeric(38,0): PostgreSQL rounds on write, so what is stored is an integer; the declared scale 0 is allowed. [DT-6]
   { column: "n0", value: "1.5", stored: true, readsBack: "2" },
 ];
 

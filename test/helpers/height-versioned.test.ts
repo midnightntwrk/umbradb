@@ -30,19 +30,25 @@ import {
 } from "./height-versioned-harness.js";
 
 /**
- * The height-versioned-table helper (task 6.2; SH-2, SH-3; `design.md` §1, §10, §12; CORE-ARCH §4.11a; owner decisions
- * Q27, Q30), refactored from 0.9.5's TemporalKV with block heights for its wall-clock times: a library function a
- * module calls to get its tables' migration and the read, write and delete functions over the handles its callbacks
- * are given — never a module of its own, never a connection or a transaction of its own. Its property, A60, is
- * `height-versioned.property.test.ts`; A61 (SH-3) is here, with its committed negative control (the `lenient` table of
- * `height-versioned-harness.ts`, which lets a second change of a key in one block through). That the cursor table does
- * not share SH-3 is `cursor-table.test.ts`' "does not share SH-3", unchanged.
+ * The height-versioned-table helper, refactored from 0.9.5's TemporalKV with block heights in place of its wall-clock
+ * times. It is a library function a module calls to get its tables' migration, and the read, write and delete
+ * functions over the handles its callbacks are given. It is never a module of its own, and never has a connection or a
+ * transaction of its own. [SH-2, SH-3, Q27, Q30; CORE-ARCH §4.11a; design §1, §10, §12]
  *
- * The cases of 0.9.5's `test/postgres/temporal-kv.test.ts` that still apply are here, retargeted (that file stays, on
- * `PgTemporalKV`, until task 17.2 retires the class with it): a value read as of a version's start and within it, and
- * nothing before the key existed (`getAt`); a second write of a key in one transaction refused at the trigger (now one
- * block, SH-3); writes of a rolled-back block gone (`opts.tx`); history versions that neither overlap nor gap (P5, now
- * A60). Its CAS (`expectedVersion`), version-number addressing, `listKeys`, transaction handles, schema threading,
+ * Its property is in `height-versioned.property.test.ts`. [A60]
+ *
+ * The one-change-per-block check is here, with its committed negative control: the `lenient` table of
+ * `height-versioned-harness.ts`, which lets a second change of a key in one block through. That the cursor table does
+ * not share this rule is checked, unchanged, by the test "does not share SH-3" in `cursor-table.test.ts`. [A61, SH-3]
+ *
+ * The cases of 0.9.5's `test/postgres/temporal-kv.test.ts` that still apply are here, retargeted. That file stays, on
+ * `PgTemporalKV`, until the class is retired with it (OUTDATED). The cases:
+ * - a value read as of a version's start and within it, and nothing before the key existed (`getAt`);
+ * - a second write of a key in one transaction refused at the trigger (now one block); [SH-3]
+ * - writes of a rolled-back block gone (`opts.tx`);
+ * - history versions that neither overlap nor gap (0.9.5's property P5, now the height-versioned property). [A60]
+ *
+ * That file's CAS (`expectedVersion`), version-number addressing, `listKeys`, transaction handles, schema threading,
  * abort signals and validation cases test the 0.9.5 API, which the helper does not have.
  */
 
@@ -154,8 +160,8 @@ describe("the height-versioned-table helper itself (SH-2; design §12's heightVe
     const sql = expectedSql("token_metadata", "metadata");
     expect(METADATA.migration("001")).toEqual({ id: "001", sql });
     expect(METADATA.migration("014")).toEqual({ id: "014", sql });
-    // The SQL is part of the checksum of the module's migration (DB-9): another text in a later build would make every
-    // database that applied it refuse to start (`migration-checksum-changed`). This pins the bytes.
+    // The SQL is part of the checksum of the module's migration: another text in a later build would make every
+    // database that applied it refuse to start (`migration-checksum-changed`). This pins the bytes. [DB-9]
     expect(migrationChecksum(sql)).toBe("5288b37b8d2f15758ab36123ff19160f114aba2dfb93083896fcbe688cce6106");
     // Names are quoted, so a reserved word is a name like any other.
     expect(heightVersionedTable({ schema: "order", table: "select" }).migration("001").sql).toBe(
@@ -261,10 +267,10 @@ async function stateOf(database: HelperDatabase, key: string): Promise<{ version
 }
 
 /**
- * A61's check (SH-3): what it found wrong with `table`, empty when a second change of `key` in one block failed that
- * write and the block. Block 1 writes `key` = 1. Block 2 writes 2, then 3: the second write must be refused with
- * SQLSTATE 23505 and the block must fail; afterwards `key` must still be 1 from block 1, with no version of block 2,
- * and the committed height must not have moved.
+ * The one-change-per-block check: what it found wrong with `table`, empty when a second change of `key` in one block
+ * failed that write and the block. Block 1 writes `key` = 1. Block 2 writes 2, then 3: the second write must be
+ * refused with SQLSTATE 23505 and the block must fail. Afterwards `key` must still be 1 from block 1, with no version
+ * of block 2, and the committed height must not have moved. [A61, SH-3]
  */
 async function secondChangeProblems(
   database: HelperDatabase,
@@ -373,7 +379,8 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
     const table = (options: string[] | null) => [{ owner: TOKEN_METADATA_ROLE, options, kind: "r", persistence: "p" }];
     expect(shape.current.table).toEqual(table(["fillfactor=90"]));
     expect(shape.history.table).toEqual(table(null));
-    // No collation of their own: DT-2's byte order is applied by the component where rows are read in key order.
+    // No collation of their own: the byte order of rows is applied by the component where rows are read in key order.
+    // [DT-2]
     const column = (name: string, type: string, collation: string | null = null) => ({
       name,
       type,
@@ -527,7 +534,7 @@ describe.each(BACKENDS)("the height-versioned table on $name (SH-2, SH-3)", { ti
       version(Number(from), null, { a: 1, b: [2, "x"], c: null }),
     ]);
     expect(await writer()).toEqual(before);
-    // Nothing changed, so no table of the module has a new digest at this height (DT-4).
+    // Nothing changed, so no table of the module has a new digest at this height. [DT-4]
     expect(await digest()).toEqual(digests);
     // A different value closes the version: an array's order counts.
     await database.block(async (w, b) => {

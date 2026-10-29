@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { plainDataProblem } from "../../src/ledger/plain-data.js";
 import { NETWORK_ID, RAW } from "./adapter-fixtures.js";
 
-// Task 12.6 of `openspec/changes/core-arch` (specs/ledger LG-7, LG-17; design.md §5.5; Q49): what may leave the ledger
-// worker — plain data a structured clone carries as it is —, and what may not: a ledger package's object above all,
-// which a structured clone copies as a plain object holding a pointer into the package's memory.
+// What may leave the ledger worker: plain data that a structured clone carries unchanged. And what may not: above all
+// a ledger package's object, which a structured clone copies as a plain object holding a pointer into the package's
+// memory. [LG-7, LG-17, Q49; design §5.5]
 
 describe("plain data (task 12.6; LG-17)", () => {
   it("accepts the protocol's plain data, nested, shared, frozen", () => {

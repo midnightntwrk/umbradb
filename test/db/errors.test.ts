@@ -7,9 +7,9 @@ import { classifyDriverError } from "../../src/db/postgres.js";
 import { TRUNCATE_NOT_ALLOWED_SQLSTATE } from "../../src/deterministic-postgresql/index.js";
 
 /**
- * `UmbraError { code, retryable, details }` (`design.md` §4, §12), keeping 0.9.5's split between retryable and
- * not-retryable errors (`design/design-interfaces.md` §1.1): DB-13 makes a lost connection the one retryable database
- * error, and IN-10 an unreachable node the one retryable node error (task 10.1).
+ * `UmbraError { code, retryable, details }`, keeping 0.9.5's split between retryable and not-retryable errors. A lost
+ * connection is the one retryable database error, and an unreachable node the one retryable node error.
+ * [DB-13, IN-10; design §4, §12; design-interfaces §1.1]
  */
 
 describe("UmbraError", () => {

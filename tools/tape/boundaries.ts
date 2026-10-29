@@ -1,22 +1,22 @@
 /**
- * The boundary reader (task 0.3; `openspec/changes/core-arch/specs/ledger/spec.md` LG-1 to LG-3; task 12.2's note (a)):
- * the data the built-in ledger version tables (`src/ledger/networks.json`) take from a network's node — its genesis and
- * every runtime upgrade from genesis to the finalized head — and the record of the node's answers they cite.
+ * The boundary reader: the data the built-in ledger version tables (`src/ledger/networks.json`) take from a network's
+ * node (its genesis and every runtime upgrade from genesis to the finalized head), and the record of the node's answers
+ * they cite. [LG-1 to LG-3]
  *
  * **Genesis:** the hash of block 0 (`chain_getBlockHash [0]`) and its runtime: the `MNSV` digest of block 0's header,
  * which must name the `spec_version` `state_getRuntimeVersion` reports at block 0.
  *
  * **Upgrades:** `state_getRuntimeVersion` is read at every `step`-th block and at the finalized head; each change
  * between two samples is bisected to every block U whose state's runtime is not its parent's — the block that enacts
- * the upgrade (`set_code`) — and F = U + 1, the first block the new runtime built (LG-1's terms). U's header must carry
- * the old runtime's `MNSV`, F's the new one's: each boundary is `u { height, hash, specVersion }` and `f { … }` with
- * their `MNSV` versions, as `networks.json` lists them. Two upgrades between two samples are both found; an upgrade
- * undone before the next sample (A → B → A within `step` blocks) is not seen.
+ * the upgrade (`set_code`) — and F = U + 1, the first block the new runtime built. U's header must carry the old
+ * runtime's `MNSV`, F's the new one's: each boundary is `u { height, hash, specVersion }` and `f { … }` with their
+ * `MNSV` versions, as `networks.json` lists them. Two upgrades between two samples are both found; an upgrade undone
+ * before the next sample (A → B → A within `step` blocks) is not seen. [LG-1]
  *
  * **The record** (`calls`): the node's answers, as it sent them, to `chain_getBlockHash`, `chain_getHeader` and
  * `state_getRuntimeVersion` at block 0, and for each boundary to `chain_getBlockHash` at U − 1, U and F,
- * `chain_getHeader` at U and F and `state_getRuntimeVersion` at U − 1 and U — the form of
- * `test/node/fixtures/mainnet-answers.json`, which `test/ledger/networks.test.ts` reads (A94's last clause, A95).
+ * `chain_getHeader` at U and F and `state_getRuntimeVersion` at U − 1 and U. It has the form of
+ * `test/node/fixtures/mainnet-answers.json`, which `test/ledger/networks.test.ts` reads. [A94, A95]
  *
  * Read directly with the node client (no tape is recorded), with its retries, at most `concurrency` requests at once.
  */

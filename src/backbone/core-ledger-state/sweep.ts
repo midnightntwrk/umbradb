@@ -1,52 +1,58 @@
 /**
- * LG-14's fixed-budget mark-and-sweep (`openspec/changes/core-arch/specs/ledger/spec.md` LG-14; `design.md` §5.4, §10;
- * CORE-ARCH §4.9; decision record Q31 C; task 12.5): the ledger's `gc-v1` (`midnight-ledger`
- * `storage-core/src/gc.rs`) run over `core_ledger_state`'s tables, its wall-clock budget replaced by a fixed budget of
- * {@link SWEEP_BUDGET} node units per block, its grey and mark sets tables, its rounds taking keys in byte order, so that
- * every machine deletes the same nodes at the same block.
+ * The fixed-budget mark-and-sweep that deletes stored ledger nodes no live state reaches. It is the ledger's `gc-v1`
+ * (`midnight-ledger` `storage-core/src/gc.rs`) run over `core_ledger_state`'s tables, with three changes so that every
+ * machine deletes the same nodes at the same block:
+ * - the wall-clock budget is replaced by a fixed budget of {@link SWEEP_BUDGET} node units per block;
+ * - the grey and mark sets are tables;
+ * - each round takes keys in byte order.
+ * [LG-14, Q31 C; CORE-ARCH §4.9; design §5.4, §10]
  *
- * **One block's step** ({@link sweepStep}) is computed in `core-ledger-state`'s `on-compute` from the tables as committed
- * at h − 1 ({@link SweepTables}, read through on-compute's read) and the block's own batch (its inserted nodes and root
- * count changes, held in memory over the tables), and written in its `on-db-write` ({@link writeSweep}), after the
- * batch. In LG-14's order: (1) when no cycle runs (`idle`), the cycle number rises, every key with a positive root
- * count becomes grey and the phase becomes `mark` — the counts as committed at h − 1, before the block's batch: the
- * state after h − 1 is still alive in the ledger worker while block h is computed, so it must be marked in a cycle
- * that starts at h (the package refuses to forget a node a live object holds; issue 00019); (2) every key whose count
- * rose in the block and is neither marked nor grey becomes grey; (3) while budget remains and the grey set is not
- * empty, the smallest grey keys in byte order, as many as the budget left (fixed at the round's start), are visited one
- * by one: removed from the grey set, marked, one unit spent, and each key its stored node references
- * (`../../ledger/node-refs.ts`) that is neither marked nor grey made grey; a key with no stored node is marked and adds
- * nothing; (4) only when the grey set is empty and budget remains, the phase is `sweep`: the stored nodes after the
- * sweep position (`sweep_after`) are scanned in key order, as many as the budget left, one unit each, each unmarked
- * one deleted, the position moved to the last one scanned; (5) a scan that gave fewer nodes than the budget it had
- * passed the last node: the marks and the position are cleared and the phase is `idle`; the rest of the budget is
- * unused, and the next block starts a new cycle. "Stored" is what the tables hold at h − 1 with the block's inserted
- * nodes: the step sees the database as the block leaves it, before its deletions.
+ * **One block's step** ({@link sweepStep}) is computed in `core-ledger-state`'s `on-compute`, from the tables as
+ * committed at h − 1 ({@link SweepTables}, read through on-compute's read) and the block's own batch (its inserted nodes
+ * and root count changes, held in memory over the tables). It is written in the block's `on-db-write`
+ * ({@link writeSweep}), after the batch. The step runs in this order: [LG-14]
+ * 1. When no cycle runs (`idle`), the cycle number rises, every key with a positive root count becomes grey, and the
+ *    phase becomes `mark`. These are the counts as committed at h − 1, before the block's batch: the state after h − 1
+ *    is still alive in the ledger worker while block h is computed, so it must be marked in a cycle that starts at h.
+ *    (The package refuses to forget a node that a live object holds.) [`docs/issues/00019`]
+ * 2. Every key whose count rose in the block, and that is neither marked nor grey, becomes grey.
+ * 3. While budget remains and the grey set is not empty, the smallest grey keys in byte order, as many as the budget
+ *    left at the round's start, are visited one by one. Each is removed from the grey set, marked, and costs one unit;
+ *    each key its stored node references (`../../ledger/node-refs.ts`) that is neither marked nor grey becomes grey. A
+ *    key with no stored node is marked and adds nothing.
+ * 4. Only when the grey set is empty and budget remains, the phase is `sweep`. The stored nodes after the sweep
+ *    position (`sweep_after`) are scanned in key order, as many as the budget left, one unit each. Each unmarked one is
+ *    deleted, and the position moves to the last one scanned.
+ * 5. A scan that returned fewer nodes than its budget has passed the last node. The marks and the position are cleared
+ *    and the phase becomes `idle`; the rest of the budget is unused, and the next block starts a new cycle.
  *
- * **`sweep: off`** (development only, CF-9): no step, nothing deleted. The first block whose revision has it off after
- * one with it on clears the grey set, the marks and the position and makes the phase `idle` ({@link sweepReset}), so
- * that the sweep turned on again starts a new cycle: the roots that rose while it was off were never made grey, and a
- * cycle begun before could delete their nodes.
+ * "Stored" means what the tables hold at h − 1 plus the block's inserted nodes: the step sees the database as the block
+ * leaves it, before its deletions.
  *
- * **Deleted nodes** are evicted from the ledger worker's caches (`LedgerHost.evict`, in `on-compute`, before the
- * block's transaction: a node forgotten and still stored is merely written again, a node deleted and not forgotten would
- * never be written again), so a later block that needs one again inserts it (LG-14's "Reused content after a
- * deletion"; `layout-v2` writes every created node).
+ * **`sweep: off`** (development only): no step runs and nothing is deleted. The first block whose revision has it off,
+ * after one with it on, clears the grey set, the marks and the position and sets the phase to `idle`
+ * ({@link sweepReset}). So when the sweep is turned on again it starts a new cycle: the roots that rose while it was off
+ * were never made grey, and a cycle begun earlier could delete their nodes. [CF-9]
  *
- * {@link GreyPicker} is the seam a negative control replaces (insertion order instead of byte order, A105).
+ * **Deleted nodes** are evicted from the ledger worker's caches (`LedgerHost.evict`), in `on-compute`, before the
+ * block's transaction. A node forgotten but still stored is merely written again; a node deleted but not forgotten would
+ * never be written again. So a later block that needs a deleted node again inserts it (`layout-v2` writes every created
+ * node). [LG-14]
+ *
+ * {@link GreyPicker} is the seam a negative control replaces, using insertion order instead of byte order. [A105]
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { childRefKeys } from "../../ledger/node-refs.js";
 import type { NodeBatch } from "../../ledger/types.js";
 
-/** K: the node units each block's step may spend (a constant of the UmbraDB version, LG-14). */
+/** K: the node units each block's step may spend, a constant of the UmbraDB version. [LG-14] */
 export const SWEEP_BUDGET = 10_000;
 
 /** The sweep's phase (`core_ledger_state.sweep.phase`). */
 export type SweepPhase = "idle" | "mark" | "sweep";
 
-/** The sweep's row (`core_ledger_state.sweep`, design §10). */
+/** The sweep's row (`core_ledger_state.sweep`). [design §10] */
 export interface SweepState {
   /** The cycles started so far. */
   readonly cycle: bigint;
@@ -89,7 +95,7 @@ export interface GreyView {
  */
 export type GreyPicker = (grey: GreyView, count: number) => Promise<readonly Uint8Array[]>;
 
-/** LG-14's: the smallest grey keys in byte order. */
+/** The default picker: the smallest grey keys in byte order. [LG-14] */
 export const BYTE_ORDER: GreyPicker = (grey, count) => grey.smallest(count);
 
 /** What one block's step writes (see {@link writeSweep}). */
@@ -152,7 +158,7 @@ export async function sweepStep(
   const isGrey = (k: string): boolean => added.has(k) || (tableGrey.get(k) === true && !removed.has(k));
   const isMarked = (k: string): boolean => marked.has(k) || tableMarks.get(k) === true;
   // A key of `removed` was visited in this block, so it is marked: a key that is neither grey nor marked is not grey in
-  // the table either (task 17.5b removed the branch that took it out of `removed`, which no key reaches).
+  // the table either. So no branch takes a key back out of `removed`: no key would reach it.
   const makeGrey = (key: Uint8Array): void => {
     const k = hexOf(key);
     if (isGrey(k) || isMarked(k)) return;
@@ -268,7 +274,7 @@ export function sweepReset(state: SweepState): SweepWrites {
   });
 }
 
-/** Its tables (`design.md` §10). */
+/** Its tables. [design §10] */
 export const SWEEP_TABLE = "core_ledger_state.sweep";
 export const GREY_TABLE = "core_ledger_state.grey";
 export const MARKS_TABLE = "core_ledger_state.marks";

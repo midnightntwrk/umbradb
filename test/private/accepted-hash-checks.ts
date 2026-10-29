@@ -9,18 +9,18 @@ import { pub } from "./config-hash-checks.js";
 import { HoldingRelay } from "./relays.js";
 
 /**
- * A165 (task 14.1c; PP-14, owner decision Q159): a private process keeps the public configuration hash it accepted in
- * its private database; each start compares it with the core's first `hello-ack`'s and with the hash of the public
- * history it read, and stops with `public-config-changed` on a difference, naming the new hash and `--update-hash`;
- * started with `updateHash` (`umbradb run --update-hash`) set to the new hash it runs its full checks, records it and
- * continues. Shared by `accepted-hash.test.ts` and its negative controls' file; imports nothing of Vitest.
+ * A private process keeps the public configuration hash it accepted in its private database. Each start compares it
+ * with the hash in the core's first `hello-ack` and with the hash of the public history it read. On a difference it
+ * stops with `public-config-changed`, naming the new hash and `--update-hash`. Started with `updateHash`
+ * (`umbradb run --update-hash`) set to the new hash, it runs its full checks, records the hash and continues. Shared by
+ * `accepted-hash.test.ts` and its negative controls' file; imports nothing of Vitest. [A165, PP-14, Q159]
  *
  * **The run** ({@link a165Run}): a public core with the public module `pub` (`./config-hash-checks.ts`: a data setting
  * `level`, a route `GET /level`), whose revision from 30 has `level` 1, then 2, then 3 — each a change of a data field
- * above the core's cursor, so another configuration hash, read from `X-Umbra-Config-Hash` (RN-16) at each start —, its
+ * above the core's cursor, so another configuration hash, read from `X-Umbra-Config-Hash` at each start —, its
  * module API on a free port and, with a transport, its `listen.transport` behind a {@link HoldingRelay} that follows
  * its restarts; and a private process `acceptor` with `coreTransport` (the relay), or without one (PostgreSQL only: its
- * public database read directly), on one private database, started again and again — each start an "attempt":
+ * public database read directly), on one private database, started again and again — each start an "attempt". [RN-16]
  * 1. `first` — the core at 5 with `level` 1 (hash H1): the private process's first start runs to 5 and records H1;
  * 2. the core restarted with `level` 2 (H2) at 8; `changed` — a start without `updateHash` stops, before any height,
  *    with `public-config-changed`, its message naming H2 and `--update-hash=H2`; H1 stays recorded;
@@ -29,9 +29,9 @@ import { HoldingRelay } from "./relays.js";
  *    provides: the full checks run (the graph refuses with `item-no-provider`), and nothing is recorded;
  * 5. `accepted` — `updateHash` H2: it runs to 8 and records H2;
  * 6. the core taken to 10; `again` — a start without `updateHash` runs to 10, H2 being the one recorded;
- * 7. `twin` — a private process on a new private database runs to 10: its contents hash (DT-3, with the process's
- *    tables declared `deterministic: false`) is the accepting one's, so where the hash is kept leaves the digests and
- *    the contents alone (Q75);
+ * 7. `twin` — a private process on a new private database runs to 10: its contents hash (with the process's tables
+ *    declared `deterministic: false`) is the accepting one's, so where the hash is kept leaves the digests and the
+ *    contents alone; [DT-3, Q75]
  * 8. with a transport, `race` — the relay holds the start's `hello` (PostgreSQL: after its read of the public history)
  *    or its first `read` (PGlite: after its first `hello-ack`), the core is restarted meanwhile with `level` 3 (H3)
  *    at 10, then the relay lets it through: the start stops with `public-config-changed` naming H3, and H2 stays.
@@ -44,7 +44,7 @@ const pubEntries = (level: number) => [
   { id: "pub", start: 30, version: "1.0.0", config: { level } },
 ];
 
-/** A private module requiring the public `table` item `pub-rows`, which no public module provides (PP-13). */
+/** A private module requiring the public `table` item `pub-rows`, which no public module provides. [PP-13] */
 const NEEDY: ModuleDeclaration = {
   id: "needy",
   version: "1.0.0",
@@ -57,7 +57,7 @@ const NEEDY: ModuleDeclaration = {
   points: {},
 };
 
-/** The private process's tables declared `deterministic: false`: the accepted hash's (`design.md` §8, §10). */
+/** The private process's tables declared `deterministic: false`: the accepted hash's. [design §8, §10] */
 export const ACCEPTED_OPTED_OUT = Object.freeze([Object.freeze({ schema: "core_private_source", table: "accepted_config" })]);
 
 /** What one start of the private process did. */
@@ -117,7 +117,7 @@ export async function storedHash(db: TestDatabase): Promise<string | null> {
 /** The private cursor's height `db` holds. */
 const cursorOf = (db: TestDatabase): Promise<bigint | null> => db.read((read) => privateCursorHeight(read), privateCursorHeight);
 
-/** The contents hash of the private database `db` at its cursor, its opted-out tables by name only (DT-3). */
+/** The contents hash of the private database `db` at its cursor, its opted-out tables by name only. [DT-3] */
 const contentsOf = async (db: TestDatabase): Promise<string> =>
   hexOf(await db.read((read) => contentsHash(read, { optedOut: ACCEPTED_OPTED_OUT }), privateCursorHeight));
 
@@ -130,7 +130,7 @@ async function until(check: () => boolean, what: string, ms = 300_000): Promise<
   }
 }
 
-/** The `X-Umbra-Config-Hash` of a started core's module API (RN-16). */
+/** The `X-Umbra-Config-Hash` of a started core's module API. [RN-16] */
 async function headerHash(api: { readonly host: string; readonly port: number } | null): Promise<string | null> {
   if (api === null) throw new Error("the core has no module API listener");
   const response = await fetch(`http://${api.host}:${api.port}/level`);
@@ -138,7 +138,7 @@ async function headerHash(api: { readonly host: string; readonly port: number } 
   return response.headers.get("x-umbra-config-hash");
 }
 
-/** Runs A165's scenario (see the module comment) on `backend`. */
+/** Runs the accepted-hash scenario (see the module comment) on `backend`. [A165] */
 export async function a165Run(backend: PrivateBackend, options: A165Options): Promise<A165Run> {
   const postgres = backend.kind === "postgres";
   if (!options.transport && !postgres) throw new Error("a private process without a transport reads a PostgreSQL public database");
@@ -287,7 +287,7 @@ function runProblems(what: string, attempt: Attempt | undefined, stored: string 
 /** A configuration hash's form: `0x` and 64 lowercase hex digits. */
 const HASH = /^0x[0-9a-f]{64}$/;
 
-/** A165's oracle: every problem with `run`, none when A165 holds (see the module comment). */
+/** The accepted-hash oracle: every problem with `run`, none when the scenario holds (see the module comment). [A165] */
 export function a165Problems(run: A165Run): string[] {
   const { h1, h2, h3 } = run.hashes;
   const problems: string[] = [];

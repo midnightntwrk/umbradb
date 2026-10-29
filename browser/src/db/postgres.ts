@@ -1,10 +1,10 @@
 /**
- * The PostgreSQL backend in the browser build, in place of `src/db/postgres.ts` (`openspec/changes/core-arch/design.md`
- * §9.2; task 16.1): a page cannot open a connection to a PostgreSQL server, so the browser runs PGlite only
- * (`./database.ts`). The one caller left in the bundle is a private process's `publicDatabase` read directly
- * (`src/backbone/core-private-source/public-database.ts`), and a core's transport reader (`src/runner/process.ts`),
- * which needs a PostgreSQL database; in the browser a private instance reads public data through
- * the core's transport (`coreTransport`), and a PostgreSQL `publicDatabase` refuses here.
+ * The PostgreSQL backend in the browser build, in place of `src/db/postgres.ts`: a page cannot open a connection to a
+ * PostgreSQL server, so the browser runs PGlite only (`./database.ts`). The one caller left in the bundle is a private
+ * process's `publicDatabase` read directly (`src/backbone/core-private-source/public-database.ts`), and a core's
+ * transport reader (`src/runner/process.ts`), which needs a PostgreSQL database; in the browser a private instance
+ * reads public data through the core's transport (`coreTransport`), and a PostgreSQL `publicDatabase` refuses here.
+ * [design §9.2]
  */
 
 import type { SslMode } from "../../../src/config/database-parts.js";

@@ -36,8 +36,9 @@ import type { Job, WorkerEvent } from "./chain-bootstrap.worker.js";
 import { genesisOf, ingest } from "./ingest-harness.js";
 
 /**
- * The known networks whose built-in genesis a test hides (A78's Q117 case): task 0.3 recorded every network's, so a
- * build without one is planted here, through task 12.2's table as `core-chain` reads it (`builtInNetwork`).
+ * The known networks whose built-in genesis hash a test hides. Every network's genesis hash is recorded, so a build
+ * without one is planted here, through the built-in network table as `core-chain` reads it (`builtInNetwork`).
+ * [A78, Q117]
  */
 const unrecorded = vi.hoisted(() => new Set<string>());
 vi.mock("../../src/ledger/networks.js", async (importOriginal) => {
@@ -52,33 +53,37 @@ vi.mock("../../src/ledger/networks.js", async (importOriginal) => {
 });
 
 /**
- * The chain's identity, bootstrap and startup checks, and the blocks table, through the real process (task 10.2):
- * `startProcess` with UmbraDB's backbone parts — `core-chain`, `core-block-fetch` (task 10.3: the in-memory source's
- * block items), `core-block-commit`, `core-digest` (`./chain-build.ts`) — over an in-memory block source, on PostgreSQL
- * 18 and PGlite 0.5.10, each process opening its database from the configuration's `database` setting.
+ * The chain's identity, bootstrap and startup checks, and the blocks table, through the real process. The tests run
+ * `startProcess` with UmbraDB's backbone parts (`./chain-build.ts`) over an in-memory block source, on PostgreSQL 18 and
+ * PGlite 0.5.10. The parts are `core-chain`, `core-block-fetch` (with the in-memory source's block items),
+ * `core-block-commit` and `core-digest`. Each process opens its database from the configuration's `database` setting.
  *
- * - A77 (IN-2): with S above the source's finalized head the process stays `starting` with `waiting-for-node`, its
- *   bootstrap done, and commits S once the head reaches it, the anchor recorded in S's transaction; a bootstrap killed
- *   before S commits — a real process killed with SIGKILL while it waits, or inside block S's transaction — is repeated
- *   by the next start without error.
- * - A78 (IN-3, as amended by decision records Q117 and Q120; task 10.2a): a node whose genesis hash is not the
- *   configured network's — on an empty database too — or not the stored one refuses startup with `genesis-mismatch`, a
- *   known network whose built-in table records no genesis hash refuses (planted: every network has one since task 0.3),
- *   one whose finalized hash at the cursor differs refuses with `cursor-hash-mismatch`, all before any migration; one
- *   whose head is below the cursor makes the process wait with `waiting-for-node`. With task 0.3's preprod tape, the
- *   real node's genesis against a mainnet and a preprod configuration (skipped without `UMBRADB_TAPES`).
- * - A88 (CD-1): after block S commits on an empty database, `core_chain.identity` holds the genesis hash, S and the
- *   anchor hash.
- * - A90 (CD-3): one `blocks` and one `hashes` row per height, the cursor the last `blocks` row; a block in another height
- *   partition whose parent links to the cursor but whose hash repeats an earlier block's fails with
- *   `duplicate-block-hash`, not `parent-mismatch`, and processing halts; the same block with a fresh hash commits.
- * - A145's block-time part: the node's milliseconds are stored in `block_time` exactly.
- * - A144: a module that requires `db` gets the read-only item `core-chain` publishes.
+ * - With S above the source's finalized head, the process stays `starting` with `waiting-for-node`, its bootstrap
+ *   done. It commits S once the head reaches it, and records the anchor in S's transaction. A bootstrap killed before
+ *   S commits is repeated by the next start without error: a real process killed with SIGKILL while it waits, or
+ *   inside block S's transaction. [IN-2, A77]
+ * - Startup refuses, before any migration:
+ *   - with `genesis-mismatch`, for a node whose genesis hash is not the configured network's (on an empty database
+ *     too) or not the stored one;
+ *   - for a known network whose built-in table records no genesis hash (planted, since every network has one);
+ *   - with `cursor-hash-mismatch`, for a node whose finalized hash at the cursor differs.
  *
- * The node is the block source here (the in-memory one): its block 0 is the genesis block, its finalized head and the
- * finalized block at a height are what the startup checks ask (`checkChain`); task 10.3's node source answers them from
- * the node. "Refuses" is today `started` rejecting with the code and `ended` being `refused`, the database closed and
- * unchanged; the `refused` state, with the process staying up, is task 5.4's.
+ *   A node whose head is below the cursor makes the process wait with `waiting-for-node`. With the recorded preprod
+ *   tape, the real node's genesis is checked against a mainnet and a preprod configuration (skipped without
+ *   `UMBRADB_TAPES`). [IN-3, Q117, Q120, A78]
+ * - After block S commits on an empty database, `core_chain.identity` holds the genesis hash, S and the anchor hash.
+ *   [CD-1, A88]
+ * - There is one `blocks` and one `hashes` row per height, and the cursor is the last `blocks` row. Take a block in
+ *   another height partition whose parent links to the cursor but whose hash repeats an earlier block's: it fails with
+ *   `duplicate-block-hash`, not `parent-mismatch`, and processing halts. The same block with a fresh hash commits.
+ *   [CD-3, A90]
+ * - The node's milliseconds are stored in `block_time` exactly (the block-time part of the criterion). [A145]
+ * - A module that requires `db` gets the read-only item `core-chain` publishes. [A144]
+ *
+ * The node is the block source here (the in-memory one). Its block 0 is the genesis block. The startup checks
+ * (`checkChain`) ask for its finalized head and for the finalized block at a height; the node source answers them from
+ * the node. "Refuses" means `started` rejects with the code and `ended` is `refused`, with the database closed and
+ * unchanged; the status is then the `refused` state, and the process stays up until stopped.
  */
 
 const PATIENCE_MS = 120_000;
@@ -194,9 +199,9 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  // ── A77 / A88 ────────────────────────────────────────────────────────────────────────────────────────────────────
+  // ── the bootstrap and the chain's identity [A77, A88] ────────────────────────────────────────────────────────────
 
-  /** What A77 observed: the state while waiting, then the identity after S committed. */
+  /** What the bootstrap test observed: the state while waiting, then the identity after S committed. [A77] */
   interface A77Observation {
     readonly waiting: { readonly state: string; readonly ready: boolean; readonly condition: unknown; readonly cursor: unknown };
     readonly bootstrapped: { readonly migrations: number; readonly identity: unknown };
@@ -236,7 +241,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     return { waiting, bootstrapped, after: await identityOf(db, start), cursor, conditionsAfter };
   }
 
-  /** A77's (and A88's) oracle: the problems found, none when the bootstrap behaved as IN-2 and CD-1 say. */
+  /** The bootstrap's oracle: the problems found, none when the bootstrap behaved as required. [IN-2, CD-1, A77, A88] */
   function a77Problems(observed: A77Observation): string[] {
     const problems: string[] = [];
     const { waiting } = observed;
@@ -285,7 +290,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       const db = await backend.database();
       const genesis: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0x5a), parentHash: new Uint8Array(32) };
       const source = new InMemoryBlockSource({ head: start, blocks: [genesis] });
-      // The tests' custom network with this chain's genesis (task 10.2a: the node's genesis is the configured one's).
+      // The tests' custom network with this chain's genesis, since the node's genesis must be the configured network's.
       const handle = chainProcess(db, start, source, { settings: { genesisHash: hex(genesis.hash) } });
       try {
         expect(await settle(handle, source, start)).toBe("waiting");
@@ -338,7 +343,8 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     });
     expect(await refusalOf(handle)).toBe(gone);
     expect(await handle.ended).toEqual({ kind: "refused", error: gone });
-    // Task 5.4's state: refused with §11's general code (a source's failure is no code of §11's), not ready.
+    // The refused state: refused with the general refusal code (a source's failure has no code of its own among the
+    // refusal codes), not ready. [design §11]
     expect(handle.status()).toMatchObject({
       state: "refused",
       ready: false,
@@ -372,8 +378,8 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     const source = new Flaky({ head: 3n });
     const handle = chainProcess(db, 5n, source);
     try {
-      // The first wait fails: startup is retried after IN-10's back-off (task 5.4) and waits again, still starting, the
-      // retry's condition raised until startup completes.
+      // The first wait fails: startup is retried after the node back-off and waits again, still starting. The retry's
+      // condition stays raised until startup completes. [IN-10]
       await source.waiting(4n);
       const { state, conditions } = handle.status();
       expect(state).toBe("starting");
@@ -442,7 +448,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     }, PATIENCE_MS * 3);
   }
 
-  // ── A78 ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // ── the startup checks [A78] ─────────────────────────────────────────────────────────────────────────────────────
 
   /** A module whose second build adds a migration: a refusal before any migration leaves it unapplied. */
   const growing = (migrations: number): ModuleDeclaration => ({
@@ -470,7 +476,10 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     return db;
   }
 
-  /** How a start A78 expects to refuse went: what `started` rejected with, the state, and whether it changed anything. */
+  /**
+   * How a start expected to refuse went: what `started` rejected with, the state, and whether it changed anything.
+   * [A78]
+   */
   interface A78Refusal {
     /** `{ code, details }` of the refusal, or "accepted". */
     readonly refused: unknown;
@@ -480,13 +489,13 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     readonly asked: number;
   }
 
-  /** What A78 observed for each case: the refusal's code and details, or how the start waited. */
+  /** What the startup checks observed for each case: the refusal's code and details, or how the start waited. [A78] */
   interface A78Observation {
-    /** On an empty database, the tests' custom network, a node of another genesis (Q120). */
+    /** On an empty database, the tests' custom network, a node of another genesis. [Q120] */
     readonly emptyCustom: A78Refusal;
-    /** On an empty database, a mainnet configuration, a preprod node (IN-3's scenario, the built-in hashes). */
+    /** On an empty database, a mainnet configuration, a preprod node (the required scenario, built-in hashes). [IN-3] */
     readonly emptyKnown: A78Refusal;
-    /** On an empty database, a known network whose built-in table records no genesis hash (planted: Q117). */
+    /** On an empty database, a known network whose built-in table records no genesis hash (planted). [Q117] */
     readonly notRecorded: A78Refusal;
     /** On a database with a cursor, a node of another genesis than the configured network's. */
     readonly configured: A78Refusal;
@@ -526,7 +535,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
 
   /** A block 0 of another chain than the tests' network's. */
   const OTHER: BlockRef = { height: 0n, hash: new Uint8Array(32).fill(0xee), parentHash: new Uint8Array(32) };
-  /** The genesis hash a known network's built-in table records, as bytes (task 12.2's table, never a constant). */
+  /** The genesis hash a known network's built-in table records, as bytes (read from the table, never a constant). */
   const builtInGenesis = (network: string): Uint8Array =>
     new Uint8Array(Buffer.from((builtInNetwork(network)?.genesis?.hash as string).slice(2), "hex"));
 
@@ -552,7 +561,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       try {
         refused = refusal(await refusalOf(handle));
         expect((await handle.ended).kind).toBe("refused");
-        // Task 5.4's state: refused, not ready, the refusal's reason; the process stays up until stopped.
+        // The refused state: refused, not ready, the refusal's reason; the process stays up until stopped.
         const { state, ready, reason } = handle.status();
         status = { state, ready, reason };
       } catch {
@@ -599,7 +608,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     return { emptyCustom, emptyKnown, notRecorded, configured, stored, cursorHash, below };
   }
 
-  /** A78's oracle (as amended by Q117, Q120): the problems found, none when startup behaved as IN-3 says. */
+  /** The startup checks' oracle: the problems found, none when startup behaved as required. [IN-3, Q117, Q120, A78] */
   function a78Problems(observed: A78Observation): string[] {
     const problems: string[] = [];
     const text = (value: unknown) => JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? `${v}` : v));
@@ -651,7 +660,8 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       if (!seen.unchanged) problems.push(`${what}: the refusal changed the database`);
       if (text(seen.status) !== refusedWith(expected.code)) problems.push(`${what}: left ${text(seen.status)}`);
     }
-    // Q117's refusal needs no node: the build has nothing to compare the node's genesis with.
+    // The refusal of a known network with no recorded genesis hash needs no node: the build has nothing to compare
+    // the node's genesis with. [Q117]
     if (observed.notRecorded.refused !== "accepted" && observed.notRecorded.asked !== 0) {
       problems.push(`a known network whose built-in table records no genesis hash: the node was asked ${observed.notRecorded.asked} times`);
     }
@@ -745,7 +755,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     async (found) => {
       const { records } = found.read();
       const answered = genesisOf(records) as string;
-      // The real node's genesis is what task 0.3 recorded as preprod's in the built-in table.
+      // The real node's genesis is the one recorded as preprod's in the built-in table.
       expect(answered).toBe(builtInNetwork("preprod")?.genesis?.hash);
       const mainnet = await ingest(await backend.database(), records, { start: 1n, settings: { network: "mainnet" } });
       try {
@@ -770,14 +780,17 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     { timeoutMs: PATIENCE_MS * 2 },
   );
 
-  // ── A90 ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // ── the blocks table [A90] ───────────────────────────────────────────────────────────────────────────────────────
 
   /** S just below the first partition boundary, so heights S…1,000,002 span the partitions p0 and p1. */
   const S90 = 999_998n;
 
-  /** What A90 observed: the halt, the rows before it, and the rows after the restart with a fresh hash. */
+  /**
+   * What the blocks table test observed: the halt, the rows before it, and the rows after the restart with a fresh hash.
+   * [A90]
+   */
   interface A90Observation {
-    /** The halt as `status()` gives it once processing failed: the state and the reason (task 5.4's `reasonOf`). */
+    /** The halt as `status()` gives it once processing failed: the state and the reason (`reasonOf`). */
     readonly halt: {
       readonly state: unknown;
       readonly height: unknown;
@@ -907,7 +920,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
     ]);
   }, PATIENCE_MS * 4);
 
-  // ── A145 (block time), A144 (the db item through the real part) ─────────────────────────────────────────────────
+  // ── block time, and the db item through the real part [A145, A144] ──────────────────────────────────────────────
 
   it("A145: the node's block time in milliseconds is stored in core_block_commit.blocks.block_time exactly; A144: a module requiring db gets read only", async () => {
     const db = await backend.database();
@@ -920,7 +933,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       "9999-12-31T23:59:59.999Z",
     ];
     const seen: Seen = { blocks: new Map() };
-    // Each block's own items, which the real core-block-fetch puts from the source (task 10.3).
+    // Each block's own items, which the real core-block-fetch puts from the source.
     const source = new InMemoryBlockSource({
       head: 5n,
       items: (b) => ({

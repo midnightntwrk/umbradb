@@ -3,9 +3,9 @@ import { findingText, refusalFindings } from "../../src/config/findings.js";
 import { UmbraError } from "../../src/db/errors.js";
 
 /**
- * A configuration refusal's findings (task 8.1b, moved from `umbradb config check`'s; CF-1, CF-3, CF-10): what
- * `config check` reports and what a process logs when its configuration is refused, alike — each finding's code, where
- * it is and what is wrong, and its text.
+ * A configuration refusal's findings, moved here from `umbradb config check`. What `config check` reports and what a
+ * process logs when its configuration is refused are the same: each finding's code, where it is, what is wrong, and
+ * its text. [CF-1, CF-3, CF-10]
  */
 
 describe("refusalFindings", () => {

@@ -6,10 +6,10 @@ import { RESULT_TYPES } from "../../src/deterministic-postgresql/index.js";
 import { BACKENDS } from "../db/backends.js";
 
 /**
- * A9 (DB-2): query results map `bigint` → `bigint`, `bytea` → `Uint8Array`, `numeric` → decimal string, `jsonb` →
- * parsed JSON without loss; and the rest of the mapping (`src/deterministic-postgresql/mapping.ts`), arrays included
- * — the NULL-element cases of docs/issues/00006 — and the pinned session settings, against a real server, on every
- * backend of `../db/backends.ts`.
+ * Query results map `bigint` → `bigint`, `bytea` → `Uint8Array`, `numeric` → decimal string, and `jsonb` → parsed
+ * JSON without loss. The rest of the mapping (`src/deterministic-postgresql/mapping.ts`), arrays with NULL elements
+ * included, and the pinned session settings are checked too, against a real server, on every backend of
+ * `../db/backends.ts`. [A9, DB-2]
  */
 
 const SEED = 20261023;
@@ -116,7 +116,7 @@ for (const backend of BACKENDS) {
         range: "[1,3)",
         ip: "192.168.0.1",
       });
-      // DB-2 (Q68): text in UTC with `Z`, the fraction only when there is one, never a JavaScript Date.
+      // Text in UTC with `Z`, the fraction only when there is one, never a JavaScript Date. [DB-2, Q68]
       expect(row.now).toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z$/);
     });
 
@@ -271,7 +271,7 @@ for (const backend of BACKENDS) {
         ints: [1, null, -3],
         texts: ['a"b', "c\\d", "NULL", "", " ", "{,}"],
         flag: true,
-        // A Date parameter is sent as its ISO text (task 2.1) and reads back as RFC 3339 text (DB-2, Q68).
+        // A Date parameter is sent as its ISO text and reads back as RFC 3339 text. [DB-2, Q68]
         at: "2026-10-23T10:00:00.123Z",
         amount: "-12.50",
         nothing: null,

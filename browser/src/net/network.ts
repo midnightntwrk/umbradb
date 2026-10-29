@@ -1,10 +1,9 @@
 /**
- * The page's message network, as a worker sees it (`openspec/changes/core-arch/specs/browser/spec.md` BR-1, BR-3;
- * `specs/private-processes/spec.md` PP-4; `design.md` §8, §9.2; task 16.1): the process transport between the core
- * worker and each private worker runs over `postMessage`, through `MessagePort`s the page hands out
- * (`./broker.ts`). A worker that listens (the core's `listen.transport`) names its address; a worker that connects (a
- * private process's `coreTransport`) asks the page for that address and gets one end of a new `MessageChannel`, whose
- * other end goes to the listener. Nothing of it leaves the page: no network request is made.
+ * The page's message network, as a worker sees it. The process transport between the core worker and each private
+ * worker runs over `postMessage`, through `MessagePort`s the page hands out (`./broker.ts`). A worker that listens (the
+ * core's `listen.transport`) names its address. A worker that connects (a private process's `coreTransport`) asks the
+ * page for that address and gets one end of a new `MessageChannel`, whose other end goes to the listener. Nothing of it
+ * leaves the page: no network request is made. [BR-1, BR-3, PP-4; design §8, §9.2]
  *
  * `./ws.ts` and `./http.ts` build `ws`'s and `node:http`'s small surface that `src/private/` uses on top of it, so the
  * transport's own code — its six messages, `hello` first, reads, `report`, lockstep, closes with their codes — runs in

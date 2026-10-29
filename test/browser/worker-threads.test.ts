@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 /**
- * The browser's `node:worker_threads` (task 16.1; `browser/src/shims/worker-threads-*.ts`), over stand-ins for a Web
+ * The browser's `node:worker_threads` (`browser/src/shims/worker-threads-*.ts`), over stand-ins for a Web
  * Worker and a worker's global scope set on this test process's global: the host's `Worker` sends `workerData` first,
  * gives each message to its listeners, reports an error once and then `exit`; the worker's side takes `workerData`
  * from the first message before the entry runs, and holds every later message until `parentPort.on("message")`.

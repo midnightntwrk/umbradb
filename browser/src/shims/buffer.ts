@@ -1,11 +1,11 @@
 /**
- * The part of Node.js's `Buffer` that UmbraDB's sources use, for the browser build (`openspec/changes/core-arch/
- * design.md` §9.2; task 16.1): `Buffer.from` of text (UTF-8, hex, latin1, base64), of bytes and of an `ArrayBuffer`
- * view, `toString` in those encodings, `equals`, `Buffer.byteLength`, `Buffer.alloc`, `Buffer.concat`,
- * `Buffer.isBuffer` and `Buffer.compare`. The build gives it only to the files of `src/` that name `Buffer` (an import
- * added as each is bundled), never to a dependency: PGlite tests for a global `Buffer` to choose Node.js's paths.
- * Anything else of Node.js's `Buffer` is absent, so a new use fails at once rather than differing quietly.
- * `test/browser/shims.test.ts` holds each operation equal to Node.js's on random inputs.
+ * The part of Node.js's `Buffer` that UmbraDB's sources use, for the browser build: `Buffer.from` of text (UTF-8, hex,
+ * latin1, base64), of bytes and of an `ArrayBuffer` view, `toString` in those encodings, `equals`, `Buffer.byteLength`,
+ * `Buffer.alloc`, `Buffer.concat`, `Buffer.isBuffer` and `Buffer.compare`. The build gives it only to the files of
+ * `src/` that name `Buffer` (an import added as each is bundled), never to a dependency: PGlite tests for a global
+ * `Buffer` to choose Node.js's paths. Anything else of Node.js's `Buffer` is absent, so a new use fails at once rather
+ * than differing quietly. `test/browser/shims.test.ts` holds each operation equal to Node.js's on random inputs.
+ * [design §9.2]
  */
 
 /** The encodings this `Buffer` reads and writes (Node.js's names). */

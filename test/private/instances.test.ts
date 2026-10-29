@@ -4,10 +4,10 @@ import { Lockstep } from "../../src/private/lockstep.js";
 import type { InstanceView } from "../../src/private/core-transport.js";
 
 /**
- * The core's view of its private instances for `/status` (task 14.4; PP-9, AE-5): from its lockstep bookkeeping (every
- * listed instance, connected or not, its height as the core learned it) and its transport (every connected instance),
- * each instance once — listed ones in the list's order, then the others by id — with exactly its id, connection,
- * lockstep flag and synced height, nothing else of what the transport knows (the hash of its last block).
+ * The core's view of its private instances for `/status`, built from its lockstep bookkeeping (every listed instance,
+ * connected or not, its height as the core learned it) and its transport (every connected instance). Each instance
+ * appears once — listed ones in the list's order, then the others by id — with exactly its id, connection, lockstep
+ * flag and synced height, nothing else of what the transport knows (the hash of its last block). [PP-9, AE-5]
  */
 
 const view = (instance: string, height: bigint, lockstep = false): InstanceView =>

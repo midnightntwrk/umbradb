@@ -1,6 +1,6 @@
 /**
- * The tape node's port (task 9.1): a random free port at or above 10000 on the loopback interface, as the workspace's
- * tests use (the machine is shared, so a fixed port may be taken).
+ * The tape node's port: a random free port at or above 10000 on the loopback interface, as the workspace's tests use
+ * (the machine is shared, so a fixed port may be taken).
  */
 
 import { randomInt } from "node:crypto";

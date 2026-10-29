@@ -3,12 +3,12 @@ import { pageHandler } from "../../browser/serve.js";
 import { listenOnRandomPort } from "../../tools/tape/port.js";
 
 /**
- * The static server of the browser build's tests (task 16.1): serves a build's directory on `127.0.0.1` at a random
- * free port of at least 10000 with `npm run web`'s handler (`browser/serve.ts`, task 17.3a): every answer with the
+ * The static server of the browser build's tests: serves a build's directory on `127.0.0.1` at a random free port of at
+ * least 10000 with `npm run web`'s handler (`browser/serve.ts`): every answer with the
  * headers that make the page cross-origin isolated (`Cross-Origin-Opener-Policy: same-origin`,
- * `Cross-Origin-Embedder-Policy: require-corp`), which the node-store bridge's `SharedArrayBuffer` needs (LG-10), and
+ * `Cross-Origin-Embedder-Policy: require-corp`), which the node-store bridge's `SharedArrayBuffer` needs, and
  * `Cross-Origin-Resource-Policy: same-origin`. A path outside the directory, or no file, is 404. Every request is
- * recorded ({@link PageServer.requests}).
+ * recorded ({@link PageServer.requests}). [LG-10]
  */
 
 export interface PageServer {

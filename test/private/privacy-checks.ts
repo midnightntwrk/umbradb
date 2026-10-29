@@ -5,10 +5,9 @@ import type { PrivateBackend } from "./backends.js";
 import { adminOrigin, launchPrivate, launchPublicCore, type PrivateProcess, type PublicCore } from "./builds.js";
 
 /**
- * A120 (task 14.4, its key half withdrawn by task 14.4a — owner decision Q154: keys are a module's, not the core's —;
- * PP-9, AE-5): the core's `/status` shows of each private instance only its id, whether it is connected, whether it is
- * lockstep and its synced height. Shared by `privacy.test.ts` and its negative control's file; imports nothing of
- * Vitest.
+ * What the core's `/status` shows of each private instance: only its id, whether it is connected, whether it is
+ * lockstep, and its synced height. Keys are not checked here: they belong to a module, not the core. Shared by
+ * `privacy.test.ts` and its negative control's file; imports nothing of Vitest. [A120, PP-9, AE-5, Q154]
  *
  * **The run** ({@link instancesRun}): a public core — its transport and admin endpoints on free ports, the instance
  * `keeper` in `lockstepInstances` (unless the run is independent) — and two private instances connected to its
@@ -48,7 +47,7 @@ export async function originOf(lines: readonly string[], what: string): Promise<
   }
 }
 
-/** Runs A120's scenario (see the module comment) on `backend` and reads each process's `/status`. */
+/** Runs the scenario (see the module comment) on `backend` and reads each process's `/status`. [A120] */
 export async function instancesRun(backend: PrivateBackend, options: InstancesOptions): Promise<InstancesRun> {
   const { head, lockstep } = options;
   const publicDb = await backend.database("public");
@@ -125,13 +124,15 @@ export async function instancesRun(backend: PrivateBackend, options: InstancesOp
   }
 }
 
-/** The four fields `/status` shows of an instance on the core (PP-9). */
+/** The four fields `/status` shows of an instance on the core. [PP-9] */
 const INSTANCE_FIELDS = ["connected", "height", "id", "lockstep"];
 
 /**
- * A120's oracle: every problem, none when every process reached the head and the core's `/status` shows each instance
- * with exactly its id, connection, lockstep flag and synced height — `keeper` lockstep at the head, `other` connected
- * and independent — and each instance its public cursor and lockstep flag, and no instances of its own.
+ * The oracle: every problem. There is none when every process reached the head and:
+ * - the core's `/status` shows each instance with exactly its id, connection, lockstep flag and synced height
+ *   (`keeper` lockstep at the head, `other` connected and independent);
+ * - each instance's `/status` shows its public cursor and lockstep flag, and no instances of its own.
+ * [A120]
  */
 export function instancesProblems(run: InstancesRun): string[] {
   const problems: string[] = [];

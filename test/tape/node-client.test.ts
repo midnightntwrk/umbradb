@@ -14,13 +14,14 @@ import { ManualTimers, until } from "../node/manual-timers.js";
 import { manualClock } from "./checks.js";
 
 /**
- * A69 and A70 `[CI]` (`openspec/changes/core-arch/acceptance.md` §9; TT-1 to TT-3) through the node client of
- * `src/node/` (task 10.1), unchanged, so that the tape node and the client cannot drift apart: answers by occurrence,
- * `not-on-tape` read as a `node-error` that is never retried, `delayMs`, headers delivered after the calls recorded
- * before them, a `disconnect` followed by the client's reconnect and new subscription, and both kinds of `fault`. The
- * client's clock is moved by hand (`ManualTimers`, shared with the tape node where a delay is checked), and its
- * WebSocket transport is the real one with its heartbeat moved out of the way (the transport's own tests cover it).
- * Last, every request the tape nodes of this file received is checked to be one of IN-8's methods.
+ * The tape node's rules through the node client of `src/node/`, unchanged, so that the tape node and the client cannot
+ * drift apart: answers by occurrence, `not-on-tape` read as a `node-error` that is never retried, `delayMs`, headers
+ * delivered after the calls recorded before them, a `disconnect` followed by the client's reconnect and new
+ * subscription, and both kinds of `fault`. The client's clock is moved by hand (`ManualTimers`, shared with the tape
+ * node where a delay is checked), and its WebSocket transport is the real one with its heartbeat moved out of the way
+ * (the transport's own tests cover it). [A69, A70 CI, TT-1 to TT-3; acceptance §9]
+ *
+ * Last, every request the tape nodes of this file received is checked to be one of the allowed node calls. [IN-8]
  */
 
 const HOUR = 3_600_000;
@@ -64,7 +65,8 @@ async function withClient(
 }
 
 afterAll(() => {
-  // The client sends only IN-8's methods, so a tape node never sees another (A83's [CI] half, for these sessions).
+  // The client sends only the allowed node calls, so a tape node never sees another (the CI half of the sync's check,
+  // for these sessions). [IN-8, A83]
   expect(received.length).toBeGreaterThan(20);
   expect(outsideIn8(received.map((call) => call.method as string))).toEqual([]);
 });

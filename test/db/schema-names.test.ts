@@ -11,11 +11,16 @@ import {
 } from "../../src/db/roles.js";
 
 /**
- * A15's names and refusals (DB-8, MD-2; task 2.3), decided before anything reaches a database: schemas are named after
- * module ids (`-` → `_`), a shared item gets one schema named after it, ids and item names match DB-8's pattern within 40
- * bytes, and schema names never collide with each other or with a reserved schema. "Startup refuses" is the runner's
- * (tasks 3.1, 3.2, 5.x), which calls {@link planSchemas} with the real declarations; here the plan is given them
- * directly. The database half (the roles and schemas created, two 40-byte ids as two roles) is `roles.test.ts`.
+ * The schema names and their refusals, decided before anything reaches a database:
+ * - schemas are named after module ids (`-` → `_`);
+ * - a shared item gets one schema named after it;
+ * - ids and item names match the name pattern of `src/db/roles.ts`, within 40 bytes;
+ * - schema names never collide with each other or with a reserved schema.
+ * [A15, DB-8, MD-2]
+ *
+ * Refusing at startup is the runner's job: it calls {@link planSchemas} with the real declarations; here the plan is
+ * given them directly. The database half (the roles and schemas created, two 40-byte ids as two roles) is in
+ * `roles.test.ts`.
  */
 
 /** A module with the given id and, unless `provides` says otherwise, one table item in its own schema. */
@@ -342,7 +347,7 @@ describe("DB-8: the items of UmbraDB's own parts share the one namespace (task 3
       first: "module config",
       second: "item config (provided by x, core-chain)",
     });
-    // Alone, the two providers collide with no schema: two providers of one item are the graph's to refuse (MD-6).
+    // Alone, the two providers collide with no schema: two providers of one item are the graph's to refuse. [MD-6]
     expect(() => planSchemas([module("x", { provides: [{ name: "config" }] })], [coreChain])).not.toThrow();
   });
 

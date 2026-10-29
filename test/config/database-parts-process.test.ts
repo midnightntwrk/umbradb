@@ -4,17 +4,21 @@ import { ask, startWithAdmin } from "../admin/admin-harness.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 
 /**
- * A170's process half (task 4.5; CF-4; owner decision Q167 A), on PostgreSQL 18.6 and PGlite 0.5.10: a process whose
- * `database` is given as parts starts and commits; `/config` shows its host, port, user, name and `ssl` (PostgreSQL) or
- * its `path` (PGlite), and the password only as `[redacted]`; the log names the database the same way (`database:
- * postgres <user>@<host>:<port>/<name> (ssl disable)`, `database: pglite <path>`) and never the password. On
- * PostgreSQL the process logs in as a login of its own whose password is distinctive, so that a password anywhere in
- * `/config`'s body or the log is found. The schema half (a connection string refused with its path, the parts'
- * defaults) is `./database-parts.test.ts`; `config check --database` reading the configured database is A35's
- * `../cli/config-check-database.test.ts`.
+ * The process half of the database-as-parts tests, on PostgreSQL 18.6 and PGlite 0.5.10:
+ * - a process whose `database` is given as parts starts and commits;
+ * - `/config` shows its host, port, user, name and `ssl` (PostgreSQL) or its `path` (PGlite), and the password only as
+ *   `[redacted]`;
+ * - the log names the database the same way (`database: postgres <user>@<host>:<port>/<name> (ssl disable)`,
+ *   `database: pglite <path>`) and never the password. [A170, CF-4, Q167 A]
+ *
+ * On PostgreSQL the process logs in as its own login with a distinctive password, so a password anywhere in
+ * `/config`'s body or the log is found.
+ *
+ * The schema half (a connection string refused with its path, the parts' defaults) is in `./database-parts.test.ts`.
+ * `config check --database` reading the configured database is in `../cli/config-check-database.test.ts`. [A35]
  */
 
-/** The PostgreSQL login of the process: a superuser (the writer's privileges, Q90) with a distinctive password. */
+/** The PostgreSQL login of the process: a superuser (the writer's privileges) with a distinctive password. [Q90] */
 const LOGIN = "a170_writer";
 const PASSWORD = "pw-a170-process";
 

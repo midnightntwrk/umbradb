@@ -1,22 +1,27 @@
 /**
- * The core module `core-chain-events` (`openspec/changes/core-arch/specs/chain-data/spec.md` CD-4; `design.md` §10;
- * CORE-ARCH §4.11; task 11.1): every chain event of every block, as the `block` item `chain-events` and as one row per
- * event in `core_chain_events.events`. Off by default; it runs where the configuration enables it, and may start
- * mid-chain (it needs nothing of earlier blocks).
+ * The core module `core-chain-events`: every chain event of every block, as the `block` item `chain-events` and as one
+ * row per event in `core_chain_events.events`. It is off by default and runs where the configuration enables it. It
+ * may start mid-chain, since it needs nothing from earlier blocks. [CD-4; CORE-ARCH §4.11; design §10]
  *
- * **At `on-fetch`** it asks the block source the runner bound to its process context ({@link bindCoreChainEvents}) for
- * the block's `System::Events` bytes — the node source reads them with `state_getStorage` at the block's hash (IN-8),
- * a queued best block's without retries (IN-10), `src/backbone/core-block-fetch/events.ts` — and decodes them with the
- * `runtime-metadata` item, the metadata of the runtime in the block's parent's state (LG-4): at a runtime upgrade's
- * enactment block U, the old runtime's, which executed U and wrote its events (`./events.ts`). It puts the decoded
- * events as `chain-events` ({@link ChainEvent}, in their order), so `core-block-parsed` and `core-tx-results` read them
- * at `on-parse` (RN-5). A block without an `Events` value (block 0) has none, and its metadata is not read.
+ * **At `on-fetch`** it asks the block source that the runner bound to its process context ({@link bindCoreChainEvents})
+ * for the block's `System::Events` bytes. The node source reads them with `state_getStorage` at the block's hash, and
+ * for a queued best block without retries (`src/backbone/core-block-fetch/events.ts`). [IN-8, IN-10]
  *
- * **At `on-db-write`** it writes one row per event (`design.md` §10): `core_chain_events.events (height, event_index)
- * → phase, extrinsic_index, pallet, name, bytes, fields`, the phase as `initialization`, `apply-extrinsic` or
- * `finalization`, the extrinsic index under `apply-extrinsic` only (a `CHECK`), the record's SCALE bytes and its fields
- * as canonical JSON (`./scale-value.ts`), in one statement per block; the table is append-only and range-partitioned by
- * height (`../height-partitions.ts`).
+ * It decodes them with the `runtime-metadata` item: the metadata of the runtime in the parent block's state. At the
+ * block U that enacts a runtime upgrade, that is the old runtime's, which executed U and wrote its events
+ * (`./events.ts`). [LG-4]
+ *
+ * It puts the decoded events as `chain-events` ({@link ChainEvent}, in their order), so `core-block-parsed` and
+ * `core-tx-results` can read them at `on-parse`. A block without an `Events` value (block 0) has none, and its metadata
+ * is not read. [RN-5]
+ *
+ * **At `on-db-write`** it writes one row per event, `core_chain_events.events (height, event_index) → phase,
+ * extrinsic_index, pallet, name, bytes, fields`, in one statement per block:
+ * - the phase as `initialization`, `apply-extrinsic` or `finalization`;
+ * - the extrinsic index under `apply-extrinsic` only (enforced by a `CHECK`);
+ * - the record's SCALE bytes, and its fields as canonical JSON (`./scale-value.ts`).
+ *
+ * The table is append-only and range-partitioned by height (`../height-partitions.ts`). [design §10]
  *
  * The declaration ({@link CORE_CHAIN_EVENTS}) is a constant, as `core-block-fetch`'s: the source is found through the
  * process context (a `WeakMap`), so one build's declarations serve every process.
@@ -45,7 +50,7 @@ export const EVENTS_TABLE = "core_chain_events.events";
 /** The largest extrinsic index the `integer` column holds: 2^31 − 1 (a phase's index is a `u32`). */
 const MAX_EXTRINSIC_INDEX = 2_147_483_647;
 
-/** `core-chain-events`' migrations (DB-9): applied once, recorded under `core-chain-events`; never changed. */
+/** `core-chain-events`' migrations: applied once, recorded under `core-chain-events`, never changed. [DB-9] */
 export const CORE_CHAIN_EVENTS_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",
@@ -117,13 +122,13 @@ export function runtimeMetadataOf(b: BlockContext, module: string): RuntimeMetad
   if (!(metadata?.metadata instanceof Uint8Array)) {
     throw new TypeError(
       `the block at height ${b.height} has no runtime-metadata item ${module} can read: core-block-fetch puts the ` +
-        "metadata of the runtime in the block's parent's state at on-fetch (CD-2, LG-4)",
+        "metadata of the runtime in the block's parent's state at on-fetch",
     );
   }
   return metadata as RuntimeMetadataEntry;
 }
 
-/** Block `b`'s chain events: its `System::Events` from `source`, decoded with its `runtime-metadata` (CD-4). */
+/** Block `b`'s chain events: its `System::Events` from `source`, decoded with its `runtime-metadata`. [CD-4] */
 export async function chainEventsOf(source: BlockEventSource, b: BlockContext): Promise<readonly ChainEvent[]> {
   const bytes = await source.blockEvents({ height: b.height, hash: b.hash, parentHash: b.parentHash });
   if (bytes === null) return Object.freeze([]);
@@ -141,7 +146,7 @@ export function chainEventsItemOf(b: BlockContext, module: string): readonly Cha
   const events = b.items.get(CHAIN_EVENTS_ITEM);
   if (!Array.isArray(events)) {
     throw new TypeError(
-      `the block at height ${b.height} has no chain-events item ${module} can read: core-chain-events puts it at on-fetch (CD-4)`,
+      `the block at height ${b.height} has no chain-events item ${module} can read: core-chain-events puts it at on-fetch`,
     );
   }
   return events as readonly ChainEvent[];

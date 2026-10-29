@@ -9,11 +9,12 @@ import {
 } from "../../src/backbone/core-ledger-state/retention.js";
 
 /**
- * LG-12's window (task 12.4; `openspec/changes/core-arch/specs/ledger/spec.md` LG-12, acceptance A103): the states
- * alive after block h are the latest and the `retainStates` before it, where a revision that raises the setting fills
- * the window from its start and one that lowers it releases the states leaving the window in its first block. The
- * oracle is the rule run one block at a time — a set of alive heights, each block adding its own and releasing every
- * one below h − R(h) — against which the implementation's closed form is checked by hand-computed cases and by
+ * The retention window: the states alive after block h are the latest and the `retainStates` before it. A revision
+ * that raises the setting fills the window from its start; one that lowers it releases the states leaving the window
+ * in its first block. [LG-12, A103]
+ *
+ * The oracle is the rule run one block at a time: a set of alive heights, where each block adds its own and releases
+ * every one below h − R(h). The implementation's closed form is checked against it by hand-computed cases, and by
  * fast-check (seed 20261026) over random revision histories.
  */
 
@@ -48,7 +49,7 @@ describe("LG-12's retention window (task 12.4)", () => {
     expect(retainedFrom(history([0, 0]), 7n)).toBe(7n);
     expect(retainedFrom(history([0, 1_000]), 999n)).toBe(0n);
     expect(retainedFrom(history([0, 1_000]), 5_000n)).toBe(4_000n);
-    // A103: retainStates 1,000 at cursor 5,000 — 4,000 is the oldest state loadable, 3,999 is not.
+    // retainStates 1,000 at cursor 5,000: 4,000 is the oldest state loadable, 3,999 is not. [A103]
     expect(retentionWindow(history([0, 1_000]), 5_000n)).toEqual({ from: 4_000n, to: 5_000n });
     expect(retentionWindow(history([0, 1_000]), null)).toBeNull();
   });

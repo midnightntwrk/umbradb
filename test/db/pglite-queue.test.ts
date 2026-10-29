@@ -11,11 +11,12 @@ import { askedLater, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from "./backends.
 import { type PgliteTestDatabase, type PgliteTestServer, startPgliteServer } from "./pglite-server.js";
 
 /**
- * The PGlite backend's own behaviour (task 2.2; DB-2, DB-4, DB-13, Q65, Q73), beyond what the backend-neutral suites
- * check on both backends: every read and every transaction is one job of one queue, run one at a time in the order
- * asked for; a call from inside a running job is refused (Q73) instead of waiting forever; closing lets nothing more
- * reach the engine; a failure of the engine itself is reported and stops all later work; and the engine must run with
- * the pinned session settings, which win over a hostile configuration.
+ * The PGlite backend's own behaviour, beyond what the backend-neutral suites check on both backends:
+ * - every read and every transaction is one job of one queue, run one at a time in the order asked for; [DB-4]
+ * - a call from inside a running job is refused instead of waiting forever; [Q73]
+ * - closing lets nothing more reach the engine;
+ * - a failure of the engine itself is reported and stops all later work; [DB-13]
+ * - the engine must run with the pinned session settings, which win over a hostile configuration. [DB-2, Q65]
  */
 
 let server: PgliteTestServer;
@@ -472,7 +473,8 @@ describe("opening (DB-1, Q65)", () => {
   }, 60_000);
 
   it("refuses an engine started without the zero timeouts, naming the first that differs (DB-15)", async () => {
-    // `lock_timeout` above 0 is one PGlite does not hang on (task 2.7's probe), so the engine stays usable to close.
+    // PGlite does not hang on a `lock_timeout` above 0 (an earlier probe showed this), so the engine stays usable to
+    // close.
     const engine = await PGlite.create("memory://", {
       startParams: [
         ...PGlite.defaultStartParams,

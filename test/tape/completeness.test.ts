@@ -11,15 +11,15 @@ import { ScriptedNode } from "./scripted-node.js";
 import { type SyntheticChain, syntheticChain } from "./synthetic-chain.js";
 
 /**
- * The completeness check (`tools/tape/completeness.ts`; task 0.3's acceptance "every IN-8 call of every height is on
- * the tape", owner decision Q123): a tape of the range `from`–`to` is complete when it is one session without faults or
- * error answers and holds, for every height h of the range, `chain_getBlockHash [h]` and, at its hash, `chain_getHeader`
- * (the block's number h, its parent the hash of h − 1), `chain_getBlock`, `state_getRuntimeVersion`,
- * `state_getStorage [System.Events]` and `midnight_ledgerStateRoot`; `state_getMetadata` at the range's first block and
- * wherever the state's runtime changes; for block 0, `system_properties` and every page of both registration prefixes
- * with each key's value; and the live window: the finalized head with its header, and both head subscriptions with a
- * notification each. Each problem is named — the height, the call and its params — so a test failing on one says
- * what is missing.
+ * The completeness check (`tools/tape/completeness.ts`), which shows that every allowed node call of every height is on
+ * the tape: a tape of the range `from`–`to` is complete when it is one session without faults or error answers and
+ * holds, for every height h of the range, `chain_getBlockHash [h]` and, at its hash, `chain_getHeader` (the block's
+ * number h, its parent the hash of h − 1), `chain_getBlock`, `state_getRuntimeVersion`, `state_getStorage
+ * [System.Events]` and `midnight_ledgerStateRoot`; `state_getMetadata` at the range's first block and wherever the
+ * state's runtime changes; for block 0, `system_properties` and every page of both registration prefixes with each
+ * key's value; and the live window: the finalized head with its header, and both head subscriptions with a notification
+ * each. Each problem is named — the height, the call and its params — so a test failing on one says what is missing.
+ * [Q123, IN-8]
  */
 
 const quietConnect: ConnectSocket = (url, events, timers) =>
@@ -181,7 +181,7 @@ describe("completenessProblems", () => {
     const [mappings] = REGISTRATION_PREFIXES;
     const h0 = chain.hashes[0];
     const extra: TapeRecord[] = [{ method: "system_version", params: [], result: "x" }, ...records];
-    expect(completenessProblems(extra, RANGE)).toEqual(["line 1: system_version is not one of IN-8's methods"]);
+    expect(completenessProblems(extra, RANGE)).toEqual(["line 1: system_version is not an allowed node call"]);
     const notList = records.map((record) =>
       isCall(record, "state_getKeysPaged", [mappings, 2, null, h0]) ? ({ ...record, result: "0x00" } as TapeRecord) : record,
     );

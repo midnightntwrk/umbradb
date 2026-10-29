@@ -15,12 +15,12 @@ import { Heartbeat } from "../../src/runner/heartbeat.js";
 import { ask, ENDPOINTS, newHold, startProber, statusSnapshot, timingProblems } from "./admin-harness.js";
 
 /**
- * The admin listener without a process (task 8.1; AE-1, AE-2): `serveAdmin` — `node:http` answering the route table
- * from the latest snapshot it was sent and the heartbeat's shared memory — and `startAdminServer`, which runs it in a
- * worker thread of its own: the messages between them (the snapshot in, `listening`, `listen-failed` and `closed` out),
- * the headers, a stale heartbeat, closing (the worker exits: no thread left), a listener that cannot listen (an error
- * the runner's reason calls `listen-failed`), the worker's entry from the sources and from a build, and a worker that
- * fails after it listened.
+ * The admin listener without a process: `serveAdmin` (`node:http` answering the route table from the latest snapshot
+ * it was sent and the heartbeat's shared memory) and `startAdminServer`, which runs it in a worker thread of its own.
+ * Covered: the messages between them (the snapshot in, `listening`, `listen-failed` and `closed` out), the headers, a
+ * stale heartbeat, closing (the worker exits: no thread left), a listener that cannot listen (an error the runner's
+ * reason calls `listen-failed`), the worker's entry from the sources and from a build, and a worker that fails after
+ * it listened. [AE-1, AE-2]
  */
 
 /** A snapshot of a process in `state`, ready or not. */

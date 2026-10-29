@@ -6,12 +6,12 @@ import { handoff, handoffProblems, handoffScenario } from "./contract-logs-hando
 import { PATIENCE_MS } from "./ingest-harness.js";
 
 /**
- * A111 `[CI]` (task 13.1; `openspec/changes/core-arch/specs/contract-data/spec.md` CC-4; BK-1, BK-3, MD-6), on
- * PostgreSQL 18 and PGlite 0.5.10: `core-contract-logs-full` stopping at h, a backup at h, and the restored database
- * continuing with `core-contract-logs-fast` from h + 1 — the restore and startup accept it, and `contract_logs.logs`
- * continues without a gap or a repeat. The run, the backup, the restore and the continuation:
- * `./contract-logs-handoff.ts`; its negative controls (a switch that skips h + 1, one that repeats it):
- * `contract-data.negative-control.test.ts`.
+ * `[CI]`, on PostgreSQL 18 and PGlite 0.5.10: `core-contract-logs-full` stops at h, a backup is taken at h, and the
+ * restored database continues with `core-contract-logs-fast` from h + 1. The restore and startup accept it, and
+ * `contract_logs.logs` continues without a gap or a repeat. [A111 CI, CC-4, BK-1, BK-3, MD-6]
+ *
+ * The run, the backup, the restore and the continuation are in `./contract-logs-handoff.ts`. Its negative controls (a
+ * switch that skips h + 1, one that repeats it) are in `contract-data.negative-control.test.ts`.
  */
 
 describe.each(BACKUP_BACKENDS)("the contract-logs handoff from -full to -fast through a backup on $name (CC-4)", (backend: BackupBackend) => {

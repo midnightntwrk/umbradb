@@ -17,15 +17,16 @@ import { CORE_CHAIN } from "../modules/graph-fixtures.js";
 import { LOOP_BACKBONE } from "./loop-harness.js";
 
 /**
- * What the tests of process items and module APIs share (task 5.2a; MD-7, RN-1, RN-15, RN-16, DB-15): a startup as the
- * runner assembles it — the declarations validated, the cursor read, the graph resolved from it, the schema plan, one
- * process context per module (`ProcessContexts`), `startDatabase` with each part's `on-start-db` in its publishing
- * window, the contexts sealed (`process-item-missing`), `on-start-api` and the module API on `listen.api`
- * (`startModuleApi`) — then the finalized loop with the same contexts, until it waits for the in-memory source's head.
+ * What the tests of process items and module APIs share: a startup as the runner assembles it, then the finalized loop
+ * with the same contexts, until it waits for the in-memory source's head. The startup is: the declarations validated,
+ * the cursor read, the graph resolved from it, the schema plan, one process context per module (`ProcessContexts`),
+ * `startDatabase` with each part's `on-start-db` in its publishing window, the contexts sealed
+ * (`process-item-missing`), `on-start-api` and the module API on `listen.api` (`startModuleApi`).
+ * [MD-7, RN-1, RN-15, RN-16, DB-15]
  *
  * The test backbone is `loop-harness.ts`'s with a `core-chain` that publishes its four process items in its
- * `on-start-db`, as the real part will (task 10.2): `config`, `node-client` and `ledger-table` as stand-ins, and `db` as
- * the read-only database over the database (CD-1, Q73).
+ * `on-start-db`, as the real part does: `config`, `node-client` and `ledger-table` as stand-ins, and `db` as the
+ * read-only database over the database. [CD-1, Q73]
  */
 
 /** The stand-ins `core-chain` publishes for `config`, `node-client` and `ledger-table`. */
@@ -91,7 +92,7 @@ export interface SealedStart {
   readonly contexts: ProcessContexts;
 }
 
-/** Validation, the cursor, the graph, the plan, the contexts, `startDatabase` and the seal (MD-7). */
+/** Validation, the cursor, the graph, the plan, the contexts, `startDatabase` and the seal. [MD-7] */
 export async function startThroughSeal(
   db: Database,
   user: readonly ModuleDeclaration[],

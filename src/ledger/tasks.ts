@@ -1,25 +1,29 @@
 /**
- * Ledger tasks, from the main thread (`openspec/changes/core-arch/specs/ledger/spec.md` LG-7, LG-17; `design.md` §5.5;
- * decision record Q49; task 12.6): what makes a module's declared `ledgerTasks` run in the ledger worker each block and
- * become the module's `block` items. A task's function cannot cross to the worker, so the worker has it from its entry
- * (`./worker/run.ts`'s `runLedgerWorker`, which the host's entry calls with the modules it ships, MD-1); the main thread
- * names it: the module's id and the task's name, the block, its ledger and how many transactions `block-parsed` holds.
+ * Ledger tasks, from the main thread: what makes a module's declared `ledgerTasks` run in the ledger worker for each
+ * block and become the module's `block` items. A task's function cannot cross to the worker, so the worker gets it
+ * from its entry (`./worker/run.ts`'s `runLedgerWorker`, which the host's entry calls with the modules it ships). The
+ * main thread only names the task: the module's id, the task's name, the block, its ledger and how many transactions
+ * `block-parsed` holds. [LG-7, LG-17, MD-1, Q49; design §5.5]
  *
- * **When.** {@link withLedgerTasks} gives a module with tasks the points that run them, around its own callbacks: a
- * task without `needsState` runs at the module's `on-parse` — after `core-block-parsed`'s, whose item the module
- * requires (MD-2's check of `ledgerTasks`), so the worker keeps the block's parse —, a queued best block's included,
- * so its item is published before `on-compute` and kept when a height is processed again from `on-compute` (IN-10); a
- * task with `needsState` runs at the module's `on-compute` — after `core-ledger-state`'s, whose item `ledger-state` the
- * module requires —, on the state before the block, which the worker holds as committed until the block's
- * `on-after-db-write` (a restarted process's worker has loaded it at `core-ledger-state`'s `on-compute`). Each result is
- * put as the module's `block` item named as the task, before the module's own callback at that point runs, which sees it
- * in its block context's items.
+ * **When.** {@link withLedgerTasks} gives a module with tasks the points that run them, around its own callbacks:
  *
- * **Failures.** A task that throws, or returns anything but structured-cloneable plain data (`./plain-data.ts`: a
- * WebAssembly-backed object among others), fails its request with a `LedgerTaskFailed` naming the module, the task, the
- * height and why; the callback fails, and processing halts with `callback-error` naming the module and the point (RN-8;
- * a queued best block's failure drops it, met again at finality). A trap in a task ends the worker, as an apply's does.
- * A module whose tasks the worker's entry does not give fails alike, naming its entry.
+ * - A task without `needsState` runs at the module's `on-parse`. That is after `core-block-parsed`'s `on-parse`, whose
+ *   item the module must require (declaration validation checks this for `ledgerTasks`), so the worker still holds the
+ *   block's parse. It also runs for a queued best block, so its item is published before `on-compute` and kept when a
+ *   height is processed again from `on-compute`. [MD-2, IN-10]
+ * - A task with `needsState` runs at the module's `on-compute`, after `core-ledger-state`'s, whose item `ledger-state`
+ *   the module requires. It runs on the state before the block, which the worker holds as committed until the block's
+ *   `on-after-db-write` (after a restart, the worker loads it at `core-ledger-state`'s `on-compute`). [LG-17]
+ *
+ * Each result is put as the module's `block` item named after the task, before the module's own callback at that point
+ * runs; that callback sees it among its block context's items.
+ *
+ * **Failures.** A task fails its request with a `LedgerTaskFailed` naming the module, the task, the height and why when
+ * it throws, or when it returns anything but structured-cloneable plain data (`./plain-data.ts`; a WebAssembly-backed
+ * object, for example). The callback then fails, and processing halts with `callback-error` naming the module and the
+ * point; a queued best block that fails is dropped instead, and met again at finality. A trap in a task ends the
+ * worker, as a trap in an apply does. A module whose tasks the worker's entry does not provide fails the same way,
+ * naming its entry. [RN-8]
  */
 
 import type { ReadHandle } from "../db/api.js";
@@ -28,10 +32,10 @@ import type { DeclarationSet } from "../modules/validation.js";
 import type { LedgerName, LedgerTask } from "./types.js";
 import type { LedgerHost } from "./worker/host.js";
 
-/** The item every ledger task's block comes from: `core-block-parsed`'s (CD-5). */
+/** The item every ledger task's block comes from: `core-block-parsed`'s. [CD-5] */
 export const TASKS_BLOCK_ITEM = "block-parsed";
 
-/** The item a module with a `needsState` task requires: `core-ledger-state`'s (LG-17). */
+/** The item a module with a `needsState` task requires: `core-ledger-state`'s. [LG-17] */
 export const TASKS_STATE_ITEM = "ledger-state";
 
 const BOUND = new WeakMap<ProcessContext, LedgerHost>();
@@ -51,7 +55,7 @@ function boundHost(p: ProcessContext, module: string): LedgerHost {
   if (host === undefined) {
     throw new Error(
       `${module} declares ledger tasks and ran with a process context the runner did not bind to a ledger worker ` +
-        "(bindLedgerTasks): its tasks run in the worker (LG-17)",
+        "(bindLedgerTasks): its tasks run in the worker",
     );
   }
   return host;
@@ -74,7 +78,7 @@ async function resultsOf(
 ): Promise<[string, unknown][]> {
   const parsed = b.items.get(TASKS_BLOCK_ITEM) as { readonly ledger: string; readonly transactions: readonly unknown[] } | undefined;
   if (parsed === undefined) {
-    throw new Error(`${module}'s ledger tasks run on ${TASKS_BLOCK_ITEM}, which block ${b.height} does not have (LG-17)`);
+    throw new Error(`${module}'s ledger tasks run on ${TASKS_BLOCK_ITEM}, which block ${b.height} does not have`);
   }
   const results = await boundHost(p, module).tasks(
     {

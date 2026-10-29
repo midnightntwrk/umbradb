@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /**
- * Test certificates for the process transport's mutual TLS (task 14.2; PP-11, A121), made when a test runs with the
- * `openssl` command (as task 0.1's probe `test/dependencies/ws-mutual-tls.test.ts` makes its own) in a temporary
- * directory removed afterwards, so no key is ever committed: a CA the core trusts, the core's server certificate (for
- * `127.0.0.1`), a client certificate that CA issued, and a stranger's, issued by another CA. Each as PEM text, as the
- * `tls` setting takes them (CF-4: `certificate`, `key`, `trustedRoots`). Imports nothing of Vitest.
+ * Test certificates for the process transport's mutual TLS. They are made when a test runs, with the `openssl` command
+ * (as the probe `test/dependencies/ws-mutual-tls.test.ts` makes its own), in a temporary directory removed afterwards,
+ * so no key is ever committed: a CA the core trusts, the core's server certificate (for `127.0.0.1`), a client
+ * certificate that CA issued, and a stranger's, issued by another CA. Each is PEM text, as the `tls` setting takes them
+ * (`certificate`, `key`, `trustedRoots`). Imports nothing of Vitest. [PP-11, A121, CF-4]
  */
 
 /** One certificate and its key, PEM text. */

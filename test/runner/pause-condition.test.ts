@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import { LoopPauses, type LoopPaused } from "../../src/runner/pause.js";
 
 /**
- * What the pause tells `/status` (task 8.3b; AE-3 as amended, owner decision Q174 B; `src/runner/pause.ts`): while the
- * loop is paused — a hold kept and the loop between heights —, {@link LoopPauses.pausedAt} gives the time it paused and
- * who holds it (`pause` for `ProcessHandle.pause()`, `signal` for a backup on SIGUSR2), else null; the time is the
- * moment the loop paused, kept while any hold is kept, the loop's step from its wait for the head to the pause between
- * heights included; `pause` is shown while a `pause` hold is kept, since only `resume()` lifts it. Each change of what
- * it gives is told once (`onChange`, which publishes to the admin endpoints), and nothing else is.
+ * What the pause tells `/status` (`src/runner/pause.ts`). While the loop is paused (a hold kept and the loop between
+ * heights), {@link LoopPauses.pausedAt} gives the time it paused and who holds it (`pause` for `ProcessHandle.pause()`,
+ * `signal` for a backup on SIGUSR2), else null. [AE-3, Q174 B]
+ * - The time is the moment the loop paused, kept while any hold is kept, including the loop's step from its wait for
+ *   the head to the pause between heights.
+ * - `pause` is shown while a `pause` hold is kept, since only `resume()` lifts it.
+ * - Each change of what it gives is told once (`onChange`, which publishes to the admin endpoints), and nothing else
+ *   is.
  */
 
 /** A clock the test moves. */

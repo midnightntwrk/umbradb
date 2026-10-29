@@ -28,20 +28,26 @@ import { cursorIn, PROCESS_BACKENDS, type ProcessDatabase } from "./process-back
 import { core, coreSettings, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
- * The process (task 5.3): `startProcess` assembles the runner's startup — the declarations validated, the configuration
- * loaded and validated, the `core` entry's operational fields from its latest revision of the build's version (Q102),
- * the database opened and its writer started, the cursor and the history read and checked, the graph, the schema plan,
- * the process contexts, the migrations and `on-start-db`, the seal, `on-start-api` and the module API — then runs the
- * finalized loop, and publishes its state. A149 (CF-3, CF-4, Q102) through it on both backends, the state and its
- * readiness, the refusals' clean-up, the logs' redaction and SIGTERM's signal.
+ * The process: `startProcess` assembles the runner's startup, then runs the finalized loop and publishes its state.
+ * Startup is, in order:
+ * - the declarations validated;
+ * - the configuration loaded and validated, with the `core` entry's operational fields taken from its latest revision
+ *   of the build's version [Q102];
+ * - the database opened and its writer started;
+ * - the cursor and the history read and checked;
+ * - the graph, the schema plan, the process contexts, the migrations and `on-start-db`;
+ * - the seal, `on-start-api` and the module API.
+ *
+ * Tested through it on both backends: the operational fields from the latest `core` revision, the state and its
+ * readiness, the refusals' clean-up, the logs' redaction and SIGTERM's signal. [A149, CF-3, CF-4, Q102]
  */
 
 const N1 = "ws://127.0.0.1:9/n1";
 const N2 = "ws://127.0.0.1:9/n2";
 
-// ── A149 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── the core entry's operational fields from its latest revision [A149] ─────────────────────────────────────────────
 
-/** What one A149 startup showed. */
+/** What one startup with two `core` revisions showed. [A149] */
 interface A149Startup {
   readonly refused?: unknown;
   /** The `core` revision the block source was made from: its node. */
@@ -53,7 +59,7 @@ interface A149Startup {
   readonly processCoreStart?: number;
 }
 
-/** What A149's two startups showed, and the two databases afterwards. */
+/** What the two startups showed, and the two databases afterwards. [A149] */
 interface A149Observation {
   readonly runs: readonly A149Startup[];
   readonly later: { readonly setting: DatabaseParts; readonly cursor: number | null };
@@ -66,7 +72,10 @@ async function touched(db: ProcessDatabase): Promise<boolean> {
   return (await cursorIn(db)) !== null || (await db.query("SELECT 1 FROM pg_namespace WHERE nspname = 'core_chain'")).length > 0;
 }
 
-/** A149's configuration: `core` from 1 on `earlier` (N1, no opt-in, `retainStates` 0), from 50 on `later` (N2, opt-in, 4). */
+/**
+ * The two-revision configuration: `core` from 1 on `earlier` (N1, no opt-in, `retainStates` 0), from 50 on `later` (N2,
+ * opt-in, 4). [A149]
+ */
 function a149Entries(earlier: DatabaseParts, later: DatabaseParts, devtool: ModuleDeclaration, extra: Record<string, unknown> = {}) {
   return [
     core(earlier, 1, { extra: { node: N1, developmentOptIn: false, retainStates: 0, ...extra } }),
@@ -75,7 +84,9 @@ function a149Entries(earlier: DatabaseParts, later: DatabaseParts, devtool: Modu
   ];
 }
 
-/** A149's two startups — to head 5 on a new database, then to head 8 at cursor 5 — with `processCore` (a control's). */
+/**
+ * The two startups (to head 5 on a new database, then to head 8 at cursor 5) with `processCore` (a control's). [A149]
+ */
 async function a149Run(
   earlier: ProcessDatabase,
   later: ProcessDatabase,
@@ -115,7 +126,7 @@ async function a149Run(
   };
 }
 
-/** A149's oracle: every problem with what was observed, none when A149 holds. */
+/** The oracle: every problem with what was observed, none when the latest revision's fields were used. [A149] */
 function a149Problems(observed: A149Observation): string[] {
   const problems: string[] = [];
   observed.runs.forEach((run, index) => {
@@ -186,7 +197,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
     it("negative control: a process taking the first core revision's operational fields fails A149", async () => {
       const problems = a149Problems(await a149Run(await backend.database(), await backend.database(), firstCoreRevision));
       if (backend.kind === "pglite") {
-        // The first revision has no opt-in, so PGlite refuses to open its database (CF-9).
+        // The first revision has no opt-in, so PGlite refuses to open its database. [CF-9]
         expect(problems).toEqual([
           "startup 1 refused (development-opt-in-required)",
           "startup 2 refused (development-opt-in-required)",
@@ -231,7 +242,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
       }
     }, 180_000);
 
-    // PostgreSQL only: PGlite has no durability probe (DB-12), and enforces no read timeout (DB-15).
+    // PostgreSQL only: PGlite has no durability probe, and enforces no read timeout. [DB-12, DB-15]
     if (backend.kind === "postgres") {
       it("bounds a module API request's read by the process revision's apiReadTimeoutMs (DB-15, Q102)", async () => {
         const db = await backend.database();
@@ -360,7 +371,7 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
       expect(await cursorIn(db)).toBe(2);
     }, 180_000);
 
-    // CF-4, owner decision Q167 A: only the database's password is secret (a PGlite path has none, and is shown).
+    // Only the database's password is secret (a PGlite path has none, and is shown). [CF-4, Q167 A]
     it.runIf(backend.kind === "postgres")(
       "logs through the configuration's redaction: a module API error naming the database's password shows it as [redacted]",
       async () => {
@@ -722,7 +733,7 @@ describe("startProcess without a database", () => {
       source: new InMemoryBlockSource({ head: 1n }),
       log: (line) => lines.push(line),
     });
-    // A failing on-start-db names its point and module (task 5.4), its cause the value thrown.
+    // A failing on-start-db names its point and module, its cause the value thrown.
     await expect(handle.started).rejects.toMatchObject({
       name: "CallbackFailure",
       point: "on-start-db",

@@ -16,12 +16,16 @@ import { startPglite } from "../determinism/pglite-database.js";
 import { startPostgres, type TestDatabase, type TestServer } from "../determinism/postgres-database.js";
 
 /**
- * A138 (task 2.2a, owner decision Q69): the component's rules give the same results on PostgreSQL 18 and on PGlite
- * 0.5.10 — read side by side from one fixture on each backend, through the database API's read handles, and compared
- * with each other: the catalog facts the rules read, every refusal with its message (one case of every refused row of
- * `design.md` §4's column-type table and of every refusal of its paragraph), DT-2's byte order of text keys, and the
- * pinned session settings with the texts they make PostgreSQL print. Each case's own message is checked against the
- * design's words in `column-rules.test.ts` and `column-refusals.test.ts`; here the two backends must agree byte for byte.
+ * The component's rules give the same results on PostgreSQL 18 and on PGlite 0.5.10. Each is read side by side from
+ * one fixture on each backend, through the database API's read handles, and the two are compared:
+ * - the catalog facts the rules read;
+ * - every refusal with its message: one case for every refused row of the design's column-type table, and for every
+ *   refusal in the paragraph under it; [design §4]
+ * - the byte order of text keys; [DT-2]
+ * - the pinned session settings, with the texts they make PostgreSQL print.
+ *
+ * Each case's own message is checked against the design's words in `column-rules.test.ts` and
+ * `column-refusals.test.ts`; here the two backends must agree byte for byte. [A138, Q69]
  */
 
 const FIXTURE = `
@@ -153,8 +157,8 @@ describe("A138: the component's rules give the same results on PostgreSQL 18 and
   });
 
   it("lists schemas and tables by the bytes of their names, a partitioned table once, on both", async () => {
-    // Written after the mutation pass of task 2.2a: the fixture above has only lower-case names and no partition, so
-    // a catalog read in locale order, or one listing partitions, passed the suite.
+    // Mutation testing showed the need: the fixture above has only lower-case names and no partition, so a catalog
+    // read in locale order, or one listing partitions, passed the suite.
     const lists: string[][] = [];
     for (const backend of BOTH) {
       const db = await (backend.server as TestServer).create();
@@ -199,7 +203,7 @@ describe("A138: the component's rules give the same results on PostgreSQL 18 and
   it("orders timestamptz keys by time with the key's ORDER BY term on both: the order of their encoded integers", async () => {
     const sql = `SELECT k FROM m.time_keys ORDER BY ${keyOrderTerm("k", "timestamp with time zone")}`;
     const [postgres, pglite] = await onBoth((read) => read.query(sql));
-    // By time (Q74): before 1970 first, a fraction after its whole second, 16:30:00.5+02 as 14:30:00.5Z.
+    // By time: before 1970 first, a fraction after its whole second, 16:30:00.5+02 as 14:30:00.5Z. [Q74]
     expect(postgres.map((row) => row.k)).toEqual([
       "0001-01-01T00:00:00Z",
       "1969-12-31T23:59:59.5Z",
@@ -210,7 +214,7 @@ describe("A138: the component's rules give the same results on PostgreSQL 18 and
       "9999-12-31T23:59:59.999999Z",
     ]);
     expect(pglite).toEqual(postgres);
-    // DT-1's integers of the same values, read back from their CBOR heads, increase in that order.
+    // The integer encodings of the same values, read back from their CBOR heads, increase in that order. [DT-1]
     const integers = postgres.map((row) => {
       const bytes = encodeRow([row.k], ["timestamp with time zone"]).subarray(1);
       const head = bytes[0] as number;

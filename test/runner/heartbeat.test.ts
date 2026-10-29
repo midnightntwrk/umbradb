@@ -3,11 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { Heartbeat, HEARTBEAT_INTERVAL_MS, lastTick, tickAgeMs } from "../../src/runner/heartbeat.js";
 
 /**
- * The runner's heartbeat (task 8.1; AE-2; CORE-ARCH §4.18): the main thread ticks every second, writing the tick's time
- * — `process.hrtime.bigint()`, a monotonic clock every thread of the process shares — into one 64-bit slot of a
- * `SharedArrayBuffer` with one atomic store, which the admin worker reads with one atomic load (no torn read), so the
- * worker can tell how long ago the main thread last ran its event loop without asking it. A callback that awaits leaves
- * the ticks running; one that blocks the main thread stops them (A62, A63).
+ * The runner's heartbeat. The main thread ticks every second, writing the tick's time (`process.hrtime.bigint()`, a
+ * monotonic clock every thread of the process shares) into one 64-bit slot of a `SharedArrayBuffer` with one atomic
+ * store. The admin worker reads it with one atomic load (no torn read), so it can tell how long ago the main thread
+ * last ran its event loop without asking it. A callback that awaits leaves the ticks running; one that blocks the main
+ * thread stops them. [AE-2, A62, A63; CORE-ARCH §4.18]
  */
 
 afterEach(() => {

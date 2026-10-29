@@ -15,11 +15,11 @@ import { V8_PACKAGE_PATH, V9_PACKAGE_PATH } from "./ledger-states.js";
 import { TapeAnswers } from "./version-checks.js";
 
 /**
- * Task 0.3's recorded devnet upgrade tape (`devnet-v8-v9-0-235`: runtime 1_000_000 on ledger v8 until U = 102 enacts
+ * The recorded devnet upgrade tape (`devnet-v8-v9-0-235`: runtime 1_000_000 on ledger v8 until U = 102 enacts
  * 2_001_000 on ledger v9; F = 103) replayed through the process on PGlite with the ledger's core modules, for two
- * acceptance items that need a real upgrade; each test is skipped by name when the tape is absent.
+ * checks that need a real upgrade; each test is skipped by name when the tape is absent.
  *
- * - **Task 0.2's second item** — "the conversion's root matches the node's at F": the v8 state at U as the process
+ * - **The conversion's root matches the node's at F**: the v8 state at U as the process
  *   stored it, loaded in a fresh instance of the vendored v8 package, has the node's root at U; the vendored v9
  *   package's `convertFromV8` run on it in a fresh instance (twice: the same state), with F applied to the result by
  *   the reference replay (`./adapter-fixtures.ts`, written from the official indexer's algorithm, not the adapters),
@@ -28,11 +28,11 @@ import { TapeAnswers } from "./version-checks.js";
  *   through the worker's engine or the adapters. The node reports no root between the conversion and F, so the
  *   converted state alone is compared with none: its root, and the root after an F without its transactions, are
  *   checked to differ from the node's at F, so that only the conversion followed by F's transactions matches.
- * - **A95's `[CI]` half on a real devnet** (LG-3's "An undeployed network"): the configuration's table "every
+ * - **A configured table on a real devnet**, a network with no built-in table: the configuration's table "every
  *   `spec_version` → v8" selects v8 for every block of the devnet, and the process parses and applies every block its
- *   v8 runtime built (0 to U) with v8, each root the node's; at F, the first block runtime 2.1 built on ledger v9, the
+ *   v8 runtime built (0 to U) with v8, each root the node's. At F, the first block runtime 2.1 built on ledger v9, the
  *   v8 parse of its v9 transactions fails and the process halts there (`callback-error` at `core-block-parsed`'s
- *   `on-parse`): the configured table, not the chain, decides the ledger of every block.
+ *   `on-parse`): the configured table, not the chain, decides the ledger of every block. [A95 CI, LG-3]
  */
 
 const TAPE = "devnet-v8-v9-0-235";
@@ -47,7 +47,7 @@ interface Side {
   readonly specVersion: number;
 }
 
-/** The devnet's U and F as task 0.3's manifest records them. */
+/** The devnet's U and F as the tape's manifest records them. */
 function boundaryOf(found: FoundTape): { readonly u: Side; readonly f: Side } {
   const boundary = (found.tape.notes as { readonly boundaries: readonly { readonly u: Side; readonly f: Side }[] }).boundaries[0];
   expect(boundary).toMatchObject({ u: { height: 102, specVersion: 1_000_000 }, f: { height: 103, specVersion: 2_001_000 } });
@@ -156,14 +156,14 @@ describe("task 0.3's devnet upgrade tape through the process (task 0.2's convers
         found,
         f.height,
         {
-          // The devnet's own table (a custom network's, task 0.3's note (c)): runtime 1.0 → v8, 2.x → v9.
+          // The devnet's own table, as a custom network sets it: runtime 1.0 → v8, 2.x → v9.
           ledgerTable: {
             rows: [
               { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
               { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
             ],
           },
-          // The state at U stays in the window at cursor F, so the sweep keeps its nodes (LG-12).
+          // The state at U stays in the window at cursor F, so the sweep keeps its nodes. [LG-12]
           retainStates: 1,
         },
         asked,
@@ -247,7 +247,8 @@ describe("task 0.3's devnet upgrade tape through the process (task 0.2's convers
       const { u, f } = boundaryOf(found);
       const answers = new TapeAnswers(found.read().records);
       const everyV8 = { specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v8" as const };
-      // The selection: v8 for every block of the devnet, runtime 1.0's and 2.1's alike (rows alone choose, LG-2).
+      // The selection: v8 for every block of the devnet, runtime 1.0's and 2.1's alike, since the rows alone choose.
+      // [LG-2]
       const table: LedgerTable = { rows: [everyV8], pins: [] };
       const versions = new Map<number, number>();
       for (let h = 0; h <= found.tape.to; h++) {

@@ -4,16 +4,16 @@ import { PROCESS_BACKENDS } from "./process-backends.js";
 import { a161Problems, AFTER_COMMIT_MS, HOLD_MS, holding, observe, type OutsidePoint, type Seen, SLOW_HEIGHT, startSlow } from "./slow-block-harness.js";
 
 /**
- * A161's committed negative controls (task 5.5a; RN-17 as amended by Q145 B): wrong watchdogs, each a loop of the
- * process (`ProcessInput.loop`), each failing A161's own oracle (`./slow-block-harness.ts`, `a161Problems`) through
- * the process on PostgreSQL 18 and PGlite 0.5.10 —
- * - one that never times the points after a commit (task 5.5's watchdog: RN-17 before Q145) fails "shown" for
- *   `on-after-db-write`;
- * - one that never times `on-finalized` fails "shown" for it;
- * - one that does not clear the condition when the point ends (it keeps the last slow activity outside a height's
+ * The committed negative controls for slow activity outside a height's processing: wrong watchdogs, each a loop of the
+ * process (`ProcessInput.loop`). Each fails that case's own oracle (`./slow-block-harness.ts`, `a161Problems`) through
+ * the process on PostgreSQL 18 and PGlite 0.5.10. [A161, RN-17, Q145 B]
+ * - One that never times the points after a commit (the earlier watchdog) fails "shown" for `on-after-db-write`.
+ * - One that never times `on-finalized` fails "shown" for it.
+ * - One that does not clear the condition when the point ends (it keeps the last slow activity outside a height's
  *   processing) fails "gone once that callback ends".
- * Height 2's own processing, which these watchdogs still time, can pass `slowBlockMs` 1000 on a loaded machine; the
- * oracle does not count that `slow-block` as A161's (issue 00043), so a control fails for its own reason only.
+ *
+ * Height 2's own processing, which these watchdogs still time, can pass `slowBlockMs` 1000 on a loaded machine. The
+ * oracle does not count that `slow-block` as the outside activity's, so a control fails for its own reason only.
  */
 
 const BUDGET_MS = 2 * HOLD_MS + AFTER_COMMIT_MS + 60_000;
@@ -28,9 +28,9 @@ function untimed(skipped: SlowWindow): new (input: LoopInput) => FinalizedLoop {
 }
 
 /**
- * A watchdog that does not clear A161's windows: it keeps giving the last slow activity it gave outside a height's
- * processing. A height's own window, which a loaded machine can make slow (issue 00043), it gives only while open, as
- * the real one does — kept, it would replace A161's activity in what the control shows.
+ * A watchdog that does not clear the windows outside a height's processing: it keeps giving the last slow activity it
+ * gave there. A height's own window, which a loaded machine can make slow, it gives only while open, as the real one
+ * does. If it were kept, it would replace the outside activity in what the control shows. [A161]
  */
 class NeverClears extends FinalizedLoop {
   #last: HeightActivity | null = null;
@@ -46,7 +46,7 @@ describe.each(PROCESS_BACKENDS)("A161's negative controls on $name", (backend) =
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  /** A161's case for `point` run with `loop`: its problems. */
+  /** The outside-activity case for `point` run with `loop`: its problems. [A161] */
   async function problemsOf(loop: new (input: LoopInput) => FinalizedLoop, point: OutsidePoint): Promise<string[]> {
     const seen: Seen = { calls: [] };
     const run = startSlow(await backend.database(), { slowBlockMs: 1_000, user: [holding("slow", seen, { point })], loop });

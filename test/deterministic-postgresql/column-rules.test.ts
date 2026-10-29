@@ -38,16 +38,16 @@ import {
 } from "../../src/deterministic-postgresql/index.js";
 
 /**
- * Tasks 1.3 and 1.4 (owner decisions Q58 to Q61): the column-type rules of DT-1, DT-2 and DT-6, and DT-6's
- * non-deterministic columns and tables, without a database.
+ * The column-type rules, and the refused non-deterministic columns and tables, without a database.
+ * [DT-1, DT-2, DT-6, Q58, Q59, Q60, Q61]
  *
  * The rules take a plain, catalog-shaped description of a column (`format_type(atttypid, NULL)`, `format_type(atttypid,
  * atttypmod)`, `atttypmod`, `pg_type.typtype` of the type and of an array's element, whether the column is in the
  * primary key, `attidentity`, and what in its default is not immutable) and of a relation (`relkind`,
- * `relpersistence`), so the contents hash and task 7.1's migration-time check read the same facts and give the same
+ * `relpersistence`), so the contents hash and the migration-time startup check read the same facts and give the same
  * verdicts. The descriptions and expression trees below are written or copied by hand from what PostgreSQL 17.11
  * reports for each declaration (checked 2026-10-23; `column-refusals.test.ts` reads them from a real catalog). The last
- * section keeps the rules in step with `design.md` §4, their single source.
+ * section keeps the rules in step with the design's column-type table, their single source. [design §4]
  */
 
 function column(type: string, options: Partial<ColumnFacts> = {}): ColumnFacts {
@@ -152,7 +152,7 @@ describe("DT-1 values: the types a module table may store", () => {
     expect(verdictOf(column("real"))).toEqual(["floating-point", "non-deterministic-column"]);
     expect(verdictOf(column("double precision"))).toEqual(["floating-point", "non-deterministic-column"]);
     expect(verdictOf(column("real[]"))).toEqual(["floating-point", "non-deterministic-column"]);
-    // Q60: 0.1 + 0.2 = 0.3 holds in real; 0.1 + 0.6 does not give 0.7 there.
+    // 0.1 + 0.2 = 0.3 holds in real; 0.1 + 0.6 does not give 0.7 there. [Q60]
     expect(becauseOf(column("double precision")).reason).toContain("0.1 + 0.2");
     expect(becauseOf(column("real")).reason).toContain("0.1 + 0.6");
     expect(becauseOf(column("real")).reason).not.toContain("0.1 + 0.2");
@@ -170,8 +170,8 @@ describe("DT-1 values: the types a module table may store", () => {
   });
 
   it("refuses timestamp, date, time, timetz and interval, each with its own reason, and says to use timestamptz", () => {
-    // Each reason names its type as the design row does (Q59), and none cites the drivers' Date any more (Q74): the
-    // mapping reads every date and time value as text (DB-2, Q68).
+    // Each reason names its type as the design row does, and none cites the drivers' Date any more: the mapping
+    // reads every date and time value as text. [Q59, Q74, DB-2, Q68]
     const cases: readonly (readonly [string, readonly string[], readonly string[]])[] = [
       [
         "timestamp without time zone",
@@ -190,11 +190,11 @@ describe("DT-1 values: the types a module table may store", () => {
       for (const text of [...absent, "JavaScript Date", "drivers", "DateStyle", "milliseconds"]) {
         expect(reason, type).not.toContain(text);
       }
-      // DT-6's scenario and A145: "use timestamptz, written with Z" (Q74); no message cites the core's old column.
+      // The alternative is "use timestamptz, written with Z"; no message cites the core's old column. [DT-6, A145, Q74]
       expect(alternative, type).toMatch(/^use timestamptz, written with Z\b/);
       expect(`${reason} ${alternative}`, type).not.toContain("block_timestamp_ms");
     }
-    // Q87 (owner decision B): a time of day and a length of time are no instants; bigint microseconds hold them.
+    // A time of day and a length of time are no instants; bigint microseconds hold them. [Q87 B]
     expect(becauseOf(column("time without time zone")).alternative).toContain("bigint microseconds since midnight");
     expect(becauseOf(column("time with time zone")).alternative).toContain("bigint microseconds since midnight");
     expect(becauseOf(column("interval")).alternative).toContain("for a length of time, store bigint microseconds");
@@ -244,7 +244,7 @@ describe("DT-1 values: the types a module table may store", () => {
     for (const type of ["inet", "cidr", "bit", "bit varying", "xml", "point", "tsvector", '"char"', "name", "oid"]) {
       expect(verdictOf(column(type)), type).toEqual(["other", "unsupported-column-type"]);
     }
-    // oidvector has an element type but no "[]" in format_type's name: it is not one of DT-1's arrays.
+    // oidvector has an element type but no "[]" in format_type's name: it is not one of the allowed arrays. [DT-1]
     expect(verdictOf(column("oidvector"))).toEqual(["other", "unsupported-column-type"]);
     // An array described without its element's kind is not taken for an array of an allowed type.
     expect(verdictOf(column("integer[]", { elementKind: null }))).toEqual(["other", "unsupported-column-type"]);
@@ -467,7 +467,7 @@ describe("why a stored number cannot be hashed (DT-1, DT-6, Q57)", () => {
   });
 });
 
-// ── task 1.4: defaults that are not immutable (DT-6, owner decision Q61) ────────────────────────────────────────────
+// ── Defaults that are not immutable [DT-6, Q61] ─────────────────────────────────────────────────────────────────────
 
 /**
  * Default expression trees exactly as PostgreSQL 17.11 stores them (`pg_attrdef.adbin::text`, copied 2026-10-23 from
@@ -1030,7 +1030,7 @@ describe("DT-6 (Q61, Q75): sequences and unlogged tables refuse their module sch
   });
 });
 
-// ── design.md §4's column-type table: the single source of every reason and alternative ─────────────────────────────
+// ── The design's column-type table: the single source of every reason and alternative [design §4] ───────────────────
 
 /**
  * The table is found by its heading paragraph anywhere under `openspec/`, not by the change's folder, so it is still
@@ -1127,7 +1127,7 @@ function designDifferences(rules: readonly TypeRule[], table: DesignTable): stri
 /**
  * Where the paragraph's refusals and the table-level rules disagree. Each sentence of the paragraph that refuses
  * something ("… is refused with `code`") belongs to at least one rule, kept verbatim in its `design`; the sequence and
- * the unlogged table share one sentence (Q61), each with its own message.
+ * the unlogged table share one sentence, each with its own message. [Q61]
  */
 function proseDifferences(rules: Readonly<Record<string, TableRule>>, table: DesignTable): string[] {
   const out: string[] = [];

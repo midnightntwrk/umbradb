@@ -9,17 +9,21 @@ import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, type TestDatab
 import { launchPrivate, type PrivateOptions, type PublicCore, startPublicCore } from "./builds.js";
 
 /**
- * A155 (PP-13, owner decision Q126 B; task 14.1a): a private module may require the public core's `table` items. On
- * PostgreSQL 18.6 and PGlite 0.5.10, a private module `reader` requiring `pub-rows` — the `table` item of the public
- * core's module `pub` — and `blocks` — the public backbone's (`core-block-commit`) — starts when the public core
- * provides both at every height it runs, and reads `pub.rows` at each of them through its read of public data; it is
- * refused with `item-no-provider` naming `pub-rows` against a public core that does not enable `pub`, and with
- * `item-not-available` when `pub` starts above the reader's start or stops below the heights it runs. A private module
- * requiring a public `block` item (`block-header`) is refused (`item-no-provider`): only `table` items are recorded.
+ * A private module may require the public core's `table` items. On PostgreSQL 18.6 and PGlite 0.5.10, a private module
+ * `reader` requires `pub-rows` (the `table` item of the public core's module `pub`) and `blocks` (the public backbone's,
+ * `core-block-commit`). [A155, PP-13, Q126 B]
+ * - It starts when the public core provides both at every height it runs, and reads `pub.rows` at each of them through
+ *   its read of public data.
+ * - It is refused with `item-no-provider` naming `pub-rows` against a public core that does not enable `pub`.
+ * - It is refused with `item-not-available` when `pub` starts above the reader's start or stops below the heights it
+ *   runs.
+ * - A private module requiring a public `block` item (`block-header`) is refused (`item-no-provider`): only `table`
+ *   items are recorded.
+ * [A155, PP-13]
  *
  * The public core records each revision's `table` items in `core_chain.config.provides`, which the private process
- * reads at startup (`design.md` §8, §10). The committed negative controls replace the intake's view of the public items:
- * with none, the provided case is refused; with every one provided at every height, the not-available cases start.
+ * reads at startup. The committed negative controls replace the intake's view of the public items: with none, the
+ * provided case is refused; with every one provided at every height, the not-available cases start. [design §8, §10]
  */
 
 /** The public core's module `pub`: its `table` item `pub-rows`, `pub.rows` holding every height it ran. */
@@ -79,7 +83,7 @@ function umbraIn(error: unknown): UmbraError | undefined {
   return undefined;
 }
 
-/** What one A155 run saw. */
+/** What one run saw. [A155] */
 interface A155Observation {
   /** `pub` from 1 (S): `reader` from 1. */
   readonly provided: Outcome;
@@ -94,7 +98,7 @@ interface A155Observation {
   readonly stopped: Outcome;
 }
 
-/** A155's oracle: every problem with what was observed, none when A155 holds. */
+/** The oracle: every problem with what was observed, none when all the cases above hold. [A155] */
 function a155Problems(observed: A155Observation): string[] {
   const problems: string[] = [];
   const started = (outcome: Outcome, what: string) => {
@@ -187,7 +191,7 @@ async function withCore<T>(
   }
 }
 
-/** Runs A155's starts on `backend`; `intake` is a negative control's. */
+/** Runs the starts above on `backend`; `intake` is a negative control's. [A155] */
 async function a155Run(
   backend: PrivateBackend,
   intake: Omit<PrivateIntakeOptions, "publicDatabase" | "wakes"> = {},

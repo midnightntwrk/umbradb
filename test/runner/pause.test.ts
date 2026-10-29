@@ -8,14 +8,17 @@ import { entry } from "../modules/graph-fixtures.js";
 import { cursorOf, InMemoryBlockSource, loopInput, RUNNER_BACKENDS, startWith } from "./loop-harness.js";
 
 /**
- * The pause of the finalized loop between heights (task 15.1a; BK-1 as amended, owner decision Q152 B;
- * `src/runner/pause.ts`, `src/runner/loop.ts`): the holds of {@link LoopPauses} on their own, then the loop itself on
- * PostgreSQL 18.6 and PGlite 0.5.10 — a hold asked for anywhere in a height (at `on-fetch`, at `on-compute`, inside the
- * block transaction) is reached only once that height committed and its points after the commit ended, with no
- * transaction open on the database; one asked for while the loop waits for the head is reached at once, and the loop then
- * starts nothing though the head rose; released, it goes on from the next height, every height's points once; a stop
- * while paused ends the run. A163's process-level half (a running process, `ProcessHandle.pause()`/`resume()`, the
- * backup on SIGUSR2) is `test/backup/pause.test.ts`.
+ * The pause of the finalized loop between heights (`src/runner/pause.ts`, `src/runner/loop.ts`): the holds of
+ * {@link LoopPauses} on their own, then the loop itself on PostgreSQL 18.6 and PGlite 0.5.10. [BK-1, Q152 B]
+ * - A hold asked for anywhere in a height (at `on-fetch`, at `on-compute`, inside the block transaction) is reached only
+ *   once that height committed and its points after the commit ended, with no transaction open on the database.
+ * - One asked for while the loop waits for the head is reached at once, and the loop then starts nothing though the
+ *   head rose.
+ * - Released, the loop goes on from the next height, every height's points once.
+ * - A stop while paused ends the run.
+ *
+ * The process-level half (a running process, `ProcessHandle.pause()`/`resume()`, the backup on SIGUSR2) is
+ * `test/backup/pause.test.ts`. [A163]
  */
 
 /** A few turns of the event loop, for a promise that would settle to settle. */

@@ -1,12 +1,17 @@
 import { PGlite, type Transaction } from "@electric-sql/pglite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// Task 0.1 of `openspec/changes/core-arch` (design.md §4 and §14): characterization tests of the pinned
-// `@electric-sql/pglite` 0.5.10. They turn the stage-1 probe into tests of the database features the PGlite
-// backend relies on — per-module roles under `SET LOCAL ROLE` (DB-6), provider functions (DB-7), PL/pgSQL row
-// triggers (DT-4), the `TRUNCATE` refusal (DB-14), the `jsonb` number check (DT-6) and the advisory-lock functions
-// (DB-11). They test PGlite itself, not UmbraDB code: a failure here means the pinned dependency no longer behaves
-// as the design assumes.
+// Characterization tests of the pinned `@electric-sql/pglite` 0.5.10. They turn the stage-1 probe into tests of the
+// database features the PGlite backend relies on:
+// - per-module roles under `SET LOCAL ROLE` [DB-6];
+// - provider functions [DB-7];
+// - PL/pgSQL row triggers [DT-4];
+// - the `TRUNCATE` refusal [DB-14];
+// - the `jsonb` number check [DT-6];
+// - the advisory-lock functions [DB-11].
+//
+// They test PGlite itself, not UmbraDB code: a failure here means the pinned dependency no longer behaves as the
+// design assumes. [design §4, §14]
 
 const INSUFFICIENT_PRIVILEGE = "42501";
 const CHECK_VIOLATION = "23514";
@@ -40,9 +45,9 @@ async function count(table: string): Promise<number> {
 
 beforeAll(async () => {
   db = await PGlite.create();
-  // Two module roles and an unrelated third, each owning (or not) a schema, with the grants of design.md §4:
-  // `USAGE` on the other module schemas, `SELECT` on their tables through default privileges, and `EXECUTE` on
-  // functions revoked from `PUBLIC` as a default privilege of each module role.
+  // Two module roles and an unrelated third, each owning (or not) a schema, with the design's grants: `USAGE` on the
+  // other module schemas, `SELECT` on their tables through default privileges, and `EXECUTE` on functions revoked
+  // from `PUBLIC` as a default privilege of each module role. [design §4]
   await db.exec(`
     CREATE ROLE umbradb_m_a NOLOGIN;
     CREATE ROLE umbradb_m_b NOLOGIN;

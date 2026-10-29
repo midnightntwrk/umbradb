@@ -4,8 +4,8 @@ import { basename, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * A174's observer and oracle (task 15.1b; BK-1, the threat model draft's gap 7; `design.md` §9.1): the modes of a
- * backup's files, seen from outside the code that writes them, from each file's creation to after its rename.
+ * The file-mode observer and oracle: the modes of a backup's files, seen from outside the code that writes them, from
+ * each file's creation to after its rename. [A174, BK-1; design §9.1; threat model gap 7]
  *
  * - **At creation, and at each open and rename** ({@link watchFileModes}): Node.js's own functions that create, open or
  *   rename a file — `open`, `openSync`, `writeFile`, `writeFileSync`, `appendFile`, `appendFileSync`, `copyFile`,
@@ -29,7 +29,7 @@ import { fileURLToPath } from "node:url";
  * of `000`, under which a file Node.js creates with its default mode is `0666`.
  */
 
-/** The mode A174 requires of a backup file and of its temporary file. */
+/** The mode required of a backup file and of its temporary file. [A174] */
 export const OWNER_ONLY = 0o600;
 
 /** One look at a file of a watched directory. */
@@ -285,8 +285,9 @@ export interface ModeOracleOptions {
 }
 
 /**
- * A174's oracle for the backup file `out` (see the module comment) given what was seen of its directory: the problems
- * found, none when the backup file was `0600` from its creation — its temporary file included — to after its rename.
+ * The file-mode oracle for the backup file `out` (see the module comment) given what was seen of its directory: the
+ * problems found, none when the backup file was `0600` from its creation — its temporary file included — to after its
+ * rename. [A174]
  */
 export function modeProblems(
   out: string,

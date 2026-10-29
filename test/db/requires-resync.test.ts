@@ -9,14 +9,15 @@ import { planSchemas, type SchemaModule, type SchemaMigration } from "../../src/
 import { BACKENDS } from "./backends.js";
 
 /**
- * A72 (DB-10; task 2.4), on both backends: a module version declaring `requiresResync: true` is accepted only while no
- * committed height of the database is covered by a revision of that module with another version; otherwise startup
- * refuses with `requires-resync`, naming the module and the version, before any migration runs. It is accepted on an
- * empty database, and still accepted after that database committed blocks and restarted.
+ * On both backends, a module version declaring `requiresResync: true` is accepted only while no committed height of
+ * the database is covered by a revision of that module with another version. Otherwise startup refuses with
+ * `requires-resync`, naming the module and the version, before any migration runs. It is accepted on an empty
+ * database, and still accepted after that database committed blocks and restarted. [A72 DOC, DB-10]
  *
- * Which versions cover committed heights is the runner's input `committedVersions`: task 4.3 reads it from the
- * configuration history (`core_chain.config`) and the cursor (tasks 5.2, 10.2), which do not exist yet, so each test
- * gives it as that history would: empty for an empty database, the module's versions once blocks committed.
+ * Which versions cover committed heights is the runner's input `committedVersions`, read from the configuration
+ * history (`core_chain.config`) and the cursor, which do not exist yet (OUTDATED). So each test gives it as that
+ * history would: empty for an empty database, the module's versions once blocks committed.
+ *
  * `[DOC]`: the module guide states the additive-only rule for upgrade migrations and when to declare `requiresResync`.
  */
 
@@ -126,7 +127,7 @@ describe.each(BACKENDS)("A72: a version that requires a resync, on $name (DB-10)
 
 describe("A72 [DOC]: the module guide", () => {
   const guide = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "docs", "module-guide.md"), "utf8");
-  // A section's text with its line breaks and indentation as single spaces, so a phrase may wrap (task 17.3a).
+  // A section's text with its line breaks and indentation as single spaces, so a phrase may wrap.
   const section = (heading: string): string => {
     const start = guide.indexOf(`\n## ${heading}\n`);
     expect(start, heading).toBeGreaterThan(-1);
@@ -152,7 +153,7 @@ describe("A72 [DOC]: the module guide", () => {
     for (const text of facts) {
       expect(migrationsSection, text).toContain(text);
     }
-    // Task 17.3a's rewrite moved TRUNCATE to the table rules and provider functions to "Providing items".
+    // The guide states TRUNCATE in the table rules and provider functions in "Providing items".
     expect(section("4. Deterministic PostgreSQL"), "TRUNCATE").toContain("`TRUNCATE` only in a migration");
     const providing = section("13. Providing items to other modules");
     for (const text of ["SECURITY DEFINER", "SET search_path = pg_catalog"]) expect(providing, text).toContain(text);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * The required conformance gate (v1.0.0-recovery-testing, Task 7 — `design.md` §0/§1.1).
+ * The required conformance gate. [v1.0.0-recovery-testing design §0, §1.1]
  *
  * One command, two guarantees:
  *   1. `vitest run` with the coverage gate (thresholds in `vitest.config.ts`) — the crash, soak

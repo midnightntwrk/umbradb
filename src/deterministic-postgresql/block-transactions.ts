@@ -1,23 +1,24 @@
 /**
- * Rows-only block transactions (`openspec/changes/core-arch/design.md` §4, "`TRUNCATE`"; DB-14): a module's
- * `on-db-write` changes rows only — `INSERT`, `UPDATE`, `DELETE` — and schemas change only in migrations. `TRUNCATE`
- * fires no row trigger, so the rows it removed would escape digest capture (DT-4) without an error; this component's
- * `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger refuses it with `truncate-not-allowed`. The database API attaches it
- * to every module table not declared `deterministic: false` (Q75, Q76, Q84; `src/db/truncate-guard.ts`), and each
- * backend reports the refusal as an `UmbraError` with that code (`src/db/errors.ts`). DDL in a block is a module error
- * the system does not check (Q46).
+ * Rows-only block transactions. A module's `on-db-write` changes rows only (`INSERT`, `UPDATE`, `DELETE`); schemas
+ * change only in migrations. `TRUNCATE` fires no row trigger, so the rows it removes would silently escape the
+ * per-block digests' change capture. This component's `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger refuses it with
+ * `truncate-not-allowed`. [DB-14, DT-4; design §4]
  *
- * **A block from a migration (A73).** The trigger refuses unless the transaction carries the migration mark: the
- * setting {@link MIGRATION_MARK} equal to the transaction's own id, which the migration runner sets first in each
- * migration's transaction ({@link MARK_MIGRATION_SQL}, transaction-local). It fails closed: a block, an `on-start-db`
- * setup or any other transaction the runner did not mark is refused. No mark reaches a transaction by accident — a
- * transaction-local setting ends with its transaction, and a mark left on the session (`set_config(…, false)`, or a
- * plain `SET`) names an earlier transaction, so it allows nothing in the next one, even on PGlite's one session or the
- * writer's. Modules are trusted (Q46): only one that sets the mark on purpose escapes the trigger.
+ * The database API attaches the trigger to every module table not declared `deterministic: false`
+ * (`src/db/truncate-guard.ts`), and each backend reports the refusal as an `UmbraError` with that code
+ * (`src/db/errors.ts`). DDL in a block is a module error the system does not check. [Q46, Q75, Q76, Q84]
  *
- * The function lives in `core_chain`, the schema the database API creates first (DB-9); it reads only one setting and
- * the transaction's id, with a fixed `search_path`. A trigger function's `EXECUTE` is checked when the trigger is created, never when
- * it fires (checked on PostgreSQL 18.6, 2026-10-24).
+ * **A block from a migration.** The trigger refuses unless the transaction carries the migration mark: the setting
+ * {@link MIGRATION_MARK} equal to the transaction's own id. The migration runner sets it, transaction-local, first in
+ * each migration's transaction ({@link MARK_MIGRATION_SQL}). It fails closed: a block, an `on-start-db` setup or any
+ * other transaction the runner did not mark is refused. No mark reaches a transaction by accident: a transaction-local
+ * setting ends with its transaction, and a mark left on the session (`set_config(…, false)`, or a plain `SET`) names an
+ * earlier transaction, so it allows nothing in the next one, even on PGlite's single session or the writer's. Modules
+ * are trusted: only one that sets the mark on purpose escapes the trigger. [A73, Q46]
+ *
+ * The function lives in `core_chain`, the schema the database API creates first. It reads only one setting and the
+ * transaction's id, with a fixed `search_path`. A trigger function's `EXECUTE` is checked when the trigger is created,
+ * never when it fires (checked on PostgreSQL 18.6, 2026-10-24). [DB-9]
  */
 
 import { quoteIdentifier } from "./column-rules.js";
@@ -41,8 +42,8 @@ export const MARK_MIGRATION_SQL = `SELECT set_config('${MIGRATION_MARK}', pg_cur
 /**
  * The condition, true exactly in a transaction that carries its own migration mark, for SQL that must tell a
  * migration's transaction from any other: {@link MIGRATION_MARKED_SQL}, and the change-capture triggers of the digests
- * (`src/db/change-capture.ts`), which record nothing in a migration (DT-4: a migration's writes are no block's changes).
- * Its functions are `pg_catalog`'s, written qualified, so it means the same under any `search_path`.
+ * (`src/db/change-capture.ts`), which record nothing in a migration because a migration's writes are no block's
+ * changes. Its functions are `pg_catalog`'s, written qualified, so it means the same under any `search_path`. [DT-4]
  */
 export const MIGRATION_MARKED_CONDITION =
   `pg_catalog.current_setting('${MIGRATION_MARK}', true) IS NOT DISTINCT FROM pg_catalog.pg_current_xact_id()::text`;
@@ -72,7 +73,7 @@ BEGIN
     ERRCODE = '${TRUNCATE_NOT_ALLOWED_SQLSTATE}',
     MESSAGE = format(
       'TRUNCATE of %s.%s is refused outside a migration (truncate-not-allowed): a block changes rows only, and '
-      'TRUNCATE fires no row trigger, so the rows it removes would escape the per-block digests (DT-4, DB-14); '
+      'TRUNCATE fires no row trigger, so the rows it removes would escape the per-block digests; '
       'delete them with DELETE, or change the table in a migration',
       quote_ident(TG_TABLE_SCHEMA), quote_ident(TG_TABLE_NAME)),
     SCHEMA = TG_TABLE_SCHEMA,
@@ -106,10 +107,11 @@ export interface GuardTableRow {
 
 /**
  * The statements that make the trigger guard exactly the listed tables that are not opted out: created on each one
- * that lacks it, dropped from each one that has it but is now declared `deterministic: false` (DB-14 covers only the
- * tables not declared so). A partition counts as opted out when its partition tree's root is (`./opt-out.ts`):
- * `TRUNCATE` of a partitioned table fires the triggers of its partitions too, while a statement trigger on the
- * partitioned table is not copied to its partitions, so each partition of a guarded tree carries its own.
+ * that lacks it, and dropped from each one that has it but is now declared `deterministic: false` (the guard covers
+ * only tables not declared so). A partition counts as opted out when the root of its partition tree is
+ * (`./opt-out.ts`). `TRUNCATE` of a partitioned table fires the triggers of its partitions too, but a statement trigger
+ * on the partitioned table is not copied to its partitions, so each partition of a guarded tree carries its own.
+ * [DB-14]
  */
 export function truncateGuardStatements(tables: readonly GuardTableRow[], optedOut: readonly TableName[]): string[] {
   const out = optOut(optedOut);

@@ -3,10 +3,11 @@ import { PROCESS_BACKENDS } from "./process-backends.js";
 import { a167Problems, a167Run, ignoringWait, PATIENCE_MS, STOP_LIMIT_MS } from "./startup-stop-harness.js";
 
 /**
- * A167's committed negative control (task 5.3b; RN-13): a startup whose wait for the node ignores the stop —
- * `core-chain`'s checks against the node asked through a node client of the startup's own, which the stop does not
- * reach (`ignoringWait`), as every startup's wait did before task 5.3b — fails A167's oracle: the process does not
- * close within 5 s, processing has not ended, a node client stays open, and it keeps connecting after the stop.
+ * The committed negative control for a stop while startup retries an unreachable node. A startup whose wait for the
+ * node ignores the stop fails the oracle: the process does not close within 5 s, processing has not ended, a node
+ * client stays open, and it keeps connecting after the stop. Its `core-chain` checks against the node are asked through
+ * a node client of the startup's own, which the stop does not reach (`ignoringWait`), as every startup's wait did
+ * before startup honoured stops. [A167, RN-13]
  */
 
 describe("negative control (A167): a startup whose wait for the node ignores the stop", () => {

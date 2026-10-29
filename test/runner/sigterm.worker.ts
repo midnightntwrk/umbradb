@@ -4,10 +4,10 @@ import { startProcess, testBuild } from "./process-build.js";
 import { type WorkEvent, workModule } from "./sigterm-module.js";
 
 /**
- * A process for A48 (task 5.3; RN-13), started by `sigterm.test.ts` with `node --import tsx` and one JSON argument
- * ({@link Job}); it reports each event as one JSON line on stdout ({@link WorkerEvent}).
+ * A process for the SIGTERM-in-transaction test, started by `sigterm.test.ts` with `node --import tsx` and one JSON
+ * argument ({@link Job}); it reports each event as one JSON line on stdout ({@link WorkerEvent}). [A48, RN-13]
  *
- * `runner`: the process as `umbradb run` starts it (task 4.4) — `startProcess` with the configuration file, its signal
+ * `runner`: the process as `umbradb run` starts it — `startProcess` with the configuration file, its signal
  * from {@link terminationSignal} — over the test build with module `w` (`sigterm-module.ts`), whose `on-db-write` at
  * height `at` waits for the SIGTERM inside its block's transaction. Once the process has stopped and closed, the worker
  * reports `closed` and lets Node.js end the process by itself: anything the runner left open would keep it alive.
@@ -41,7 +41,7 @@ const hold = new Promise<void>((resolve) => {
   process.once("SIGTERM", () => resolve());
 });
 const termination = job.mode === "runner" ? terminationSignal() : undefined;
-// The in-memory source holds nothing open while the loop waits: the heartbeat (task 8.x) and a node source would. The
+// The in-memory source holds nothing open while the loop waits: the heartbeat and a node source would. The
 // same interval ends a worker whose test died without stopping it (Vitest's bail, a test's timeout): `w` would hold its
 // block open for ever. Orphaned, its parent is no longer the test's.
 const parent = process.ppid;

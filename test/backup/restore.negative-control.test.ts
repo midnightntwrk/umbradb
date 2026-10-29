@@ -10,8 +10,9 @@ import { backupAt, chain, codeIn, emptied, restoreRun, restoreTarget } from "./r
 import { disagreeingNode, ledgerBackup, ledgerChain, restoreLedger } from "./restore-ledger.js";
 
 /**
- * The committed negative controls of task 15.2's restore (BK-3; A126, A127), on PostgreSQL 18.6 and PGlite 0.5.10, each
- * the restore with one of its guarantees taken away (`RestoreSeams`) — what A126's and A127's tests would see without it:
+ * The committed negative controls of the restore, on PostgreSQL 18.6 and PGlite 0.5.10. Each is the restore with one of
+ * its guarantees taken away (`RestoreSeams`), which is what the refusal and killed-restore tests would see without it:
+ * [BK-3, A126, A127]
  * - without the contents hash's check, a backup with a changed value in a row the hash covers commits, its contents
  *   hash not the manifest's;
  * - without the state root's check, a backup whose stored root is not the node's commits;

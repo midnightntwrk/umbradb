@@ -29,16 +29,25 @@ import { core, startProcess, testBuild } from "../runner/process-build.js";
 import { committedIn, processOn, processProblems, rowsIn, S } from "./pglite-directory-fixtures.js";
 
 /**
- * A166 `[CI]` (task 2.2c; CF-4, CF-9, CF-10, BK-1, BK-3; `design.md` §7; owner decision Q163 A): under the development
- * opt-in, a PGlite directory whose parent is missing is created with that parent by what writes the database — the
- * runner's `startProcess` and `umbradb run` (here in this process, and as the command itself in a child process with
- * CF-4's relative path `data/preview`), and `umbradb restore` into its target —, each then committing (block S; the
- * backup's height), while the read-only uses — `umbradb config check --database` and `umbradb backup` — create no
- * directory. Also, at `openConfiguredDatabase`: nothing is created without the opt-in (CF-9: PGlite refuses before
- * anything is created), a restore refused before loading creates nothing, `file://` paths are created as bare ones, a
- * path through a file is refused (`database-error`, `open-failed`, not naming the path) creating nothing, and
- * PGlite in memory and the browser's file systems create nothing. The committed negative control (a build that never
- * creates the parents) is `./pglite-directory.negative-control.test.ts`.
+ * Creating a missing PGlite directory (`[CI]`). Under the development opt-in, a PGlite directory whose parent is
+ * missing is created, with that parent, by whatever writes the database, and each then commits:
+ * - the runner's `startProcess` and `umbradb run`, here in this process and as the command itself in a child process
+ *   with the relative path `data/preview` (commits block S);
+ * - `umbradb restore` into its target (commits the backup's height).
+ *
+ * The read-only uses, `umbradb config check --database` and `umbradb backup`, create no directory.
+ * [A166 CI, CF-4, BK-1; design §7; Q163 A]
+ *
+ * Also, at `openConfiguredDatabase`:
+ * - nothing is created without the opt-in, since PGlite refuses before anything is created; [CF-9]
+ * - a restore refused before loading creates nothing; [BK-3]
+ * - `file://` paths are created as bare ones;
+ * - a path through a file is refused (`database-error`, `open-failed`, not naming the path) and creates nothing;
+ *   [CF-10]
+ * - PGlite in memory and the browser's file systems create nothing.
+ *
+ * The committed negative control (a build that never creates the parents) is
+ * `./pglite-directory.negative-control.test.ts`.
  */
 
 /** How long a process may take to commit and stop, or a backup's process to reach its height, on a loaded machine. */
@@ -127,7 +136,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
       signals.emit("SIGTERM");
       const { code, stderr } = await result;
       expect(stderr).not.toMatch(/startup refused|processing halted/);
-      // Q165 B with Q167 A: the log names the directory created, as configured.
+      // The log names the directory created, as configured. [Q165 B, Q167 A]
       expect(stderr).toContain(`created a new PGlite data directory ${directory} (and 2 missing parent directories)`);
       expect(code).toBe(EXIT.ok);
     } finally {
@@ -181,7 +190,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
     async () => {
       const { file } = await backupAt(project, PGLITE, BACKUP_HEIGHT, join(tmp, "ticker.backup"));
 
-      // Refused before loading (BK-3: the file is no backup): the target, not created yet, is left as it was.
+      // Refused before loading, since the file is no backup: the target, not created yet, is left as it was. [BK-3]
       const garbage = join(tmp, "garbage.backup");
       writeFileSync(garbage, "-- not a manifest\nSELECT 1;\n");
       const refusedTarget = join(tmp, "x", "y");
@@ -297,7 +306,7 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
     expect(error.code).toBe("database-error");
     expect(error.details).toEqual({ reason: "open-failed" });
     expect(error.message).not.toContain(tmp);
-    // The directory's own refusal, with the file system's error as its cause, not the lock's after it (task 17.5b).
+    // The directory's own refusal, with the file system's error as its cause, not the lock's after it.
     expect(error.message).toBe(
       "the PGlite data directory cannot be created: it, or one of its missing parent directories, cannot be made",
     );

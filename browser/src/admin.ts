@@ -1,13 +1,13 @@
 /**
- * The admin endpoints in the browser build (`openspec/changes/core-arch/specs/browser/spec.md` BR-3; `specs/
- * admin-endpoints/spec.md` AE-1 to AE-6; `design.md` §9.2; task 8.1's note (f); task 16.1): calls on the process
- * worker's message channel, answered by the same backbone parts' endpoints as in Node.js (`answerAdmin` over
- * `ADMIN_ROUTES`: `/health/live`, `/health/ready`, `/status`, `/config`) from the snapshot the process publishes and
- * the age of its heartbeat's last tick. The process gets {@link messageAdmin} as its admin starter
- * (`ProcessInput.admin`), so the runner's own side of them (`ProcessAdmin`: the heartbeat, the snapshots, the
- * redaction) runs unchanged; the "listener" is the channel. Before the process's `core` revision is known, and after a
- * refusal of the configuration itself ended the process (Q137 B), nothing answers, as no listener exists in Node.js
- * then.
+ * The admin endpoints in the browser build: calls on the process worker's message channel. They are answered by the
+ * same backbone parts' endpoints as in Node.js (`answerAdmin` over `ADMIN_ROUTES`: `/health/live`, `/health/ready`,
+ * `/status`, `/config`), from the snapshot the process publishes and the age of its heartbeat's last tick.
+ * [BR-3, AE-1 to AE-6; design §9.2]
+ *
+ * The process gets {@link messageAdmin} as its admin starter (`ProcessInput.admin`), so the runner's own side of them
+ * (`ProcessAdmin`: the heartbeat, the snapshots, the redaction) runs unchanged; the "listener" is the channel. Before
+ * the process's `core` revision is known, and after a refusal of the configuration itself ended the process, nothing
+ * answers, just as no listener exists in Node.js then. [Q137 B]
  */
 
 import { ADMIN_ROUTES, answerAdmin } from "../../src/admin/routes.js";

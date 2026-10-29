@@ -12,13 +12,15 @@ import { carriedLoadProblems, STAGENET, stagenetReplay } from "./v9-rc3-checks.j
 import { blockWith, mnsvItem } from "./version-checks.js";
 
 /**
- * A159 (`openspec/changes/core-arch/acceptance.md` §12; LG-3, LG-5; owner decision Q139 A; task 12.2a): the vendored
- * builds include v9 at `crate-ledger-9.1.0.0-rc.3` — the ledger `midnight-node` 2.0.0-rc.4 builds, runtime 2.0's — as a
- * package of its own (`vendor/ledger/v9-rc3`, the ledger version `v9-rc3`), reproducible by `npm run vendor:ledger`
- * (`vendored-ledger-files.test.ts` holds the committed package to its `SHA256SUMS`; the CI job rebuilds it) and
- * identified in the core version; the built-in tables map `spec_version` 2,000,000–2,000,999 to it and 2,001,000 on to
- * rc.5; a state stored by the rc.3 package loads in the rc.5 package with the same root, so a 2.0 → 2.1 upgrade carries
- * it. The oracle is stagenet's node (`./v9-rc3-checks.ts`): the rc.3 package replays its first blocks with the node's
+ * The vendored builds include v9 at `crate-ledger-9.1.0.0-rc.3`, the ledger `midnight-node` 2.0.0-rc.4 builds for
+ * runtime 2.0, as a package of its own (`vendor/ledger/v9-rc3`, the ledger version `v9-rc3`):
+ * - it is reproducible by `npm run vendor:ledger` (`vendored-ledger-files.test.ts` holds the committed package to its
+ *   `SHA256SUMS`; the CI job rebuilds it) and identified in the core version;
+ * - the built-in tables map `spec_version` 2,000,000–2,000,999 to it and 2,001,000 on to rc.5;
+ * - a state stored by the rc.3 package loads in the rc.5 package with the same root, so a 2.0 → 2.1 upgrade carries it.
+ * [A159, LG-3, LG-5, Q139 A; acceptance §12]
+ *
+ * The oracle is stagenet's node (`./v9-rc3-checks.ts`): the rc.3 package replays its first blocks with the node's
  * roots, which the rc.5 package does not (the committed control, `ledger-v9-rc3.negative-control.test.ts`).
  */
 

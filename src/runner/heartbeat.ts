@@ -1,8 +1,8 @@
 /**
- * The runner's heartbeat (`openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-2; `design.md` §1; CORE-ARCH
- * §4.18): the main thread ticks every second, independently of the work — a callback that awaits I/O leaves the ticks
- * running, one that blocks the main thread with computation stops them —, and `GET /health/live` answers 200 while the
- * last tick is within the liveness timeout (`livenessTimeoutMs`, CF-4) and 503 otherwise.
+ * The runner's heartbeat. The main thread ticks every second, independently of the work: a callback that awaits I/O
+ * leaves the ticks running, while one that blocks the main thread with computation stops them. `GET /health/live`
+ * answers 200 while the last tick is within the liveness timeout (`livenessTimeoutMs`), and 503 otherwise.
+ * [AE-2, CF-4; design §1; CORE-ARCH §4.18]
  *
  * **Where the tick goes:** one 64-bit slot of a `SharedArrayBuffer` ({@link Heartbeat.buffer}), the tick's time as
  * `process.hrtime.bigint()` in nanoseconds — a monotonic clock that every thread of the process reads alike, so a wall
@@ -14,7 +14,7 @@
  * refused or halted, has nothing else that would), until {@link Heartbeat.stop}.
  */
 
-/** How often the main thread ticks (AE-2: every second). */
+/** How often the main thread ticks: every second. [AE-2] */
 export const HEARTBEAT_INTERVAL_MS = 1_000;
 
 /** The bytes of a heartbeat buffer: one 64-bit slot. */

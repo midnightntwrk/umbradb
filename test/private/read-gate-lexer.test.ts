@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { readRefusal, REFUSED_FUNCTIONS } from "../../src/private/read-gate.js";
 
 /**
- * Task 17.5b (the mutation pass task 14.2b deferred): the gate's lexer on texts where reading a construct one
- * character too long or too short would hide a refused name or show one that is inside a literal — whitespace,
- * identifiers with digits, `_` and characters beyond ASCII, doubled quotes, line and nested block comments, quoted
- * names, numbers and exponents, `U&` strings, `E` and `N` strings in either case, dollar quotes, quoted semicolons and
- * parentheses — and the list of refused functions as written.
+ * Mutation tests of the read gate's lexer, plus the list of refused functions as written. Each text is one where
+ * reading a construct one character too long or too short would hide a refused name, or show one that is inside a
+ * literal. The constructs: whitespace, identifiers with digits, `_` and characters beyond ASCII, doubled quotes, line
+ * and nested block comments, quoted names, numbers and exponents, `U&` strings, `E` and `N` strings in either case,
+ * dollar quotes, quoted semicolons and parentheses.
  */
 
 const fn = (name: string) => ({ reason: "function", name });

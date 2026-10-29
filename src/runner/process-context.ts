@@ -1,27 +1,30 @@
 /**
- * The process contexts (`openspec/changes/core-arch/specs/modules/spec.md` MD-7; `specs/runner/spec.md` RN-1, RN-4;
- * `design.md` §6; CORE-ARCH §4.10's `ProcessContext`): what every callback of a module gets first — the `process` items
- * it may read, its revisions, and `publish` for the `process` items it provides.
+ * The process contexts: what every callback of a module gets first. A context holds the `process` items the module
+ * may read, its revisions, and `publish` for the `process` items it provides.
+ * [MD-7, RN-1, RN-4; design §6; CORE-ARCH §4.10]
  *
- * **One context per module** ({@link ProcessContexts.of}), the same object in its `on-start-db` — run by the migration
- * runner through {@link ProcessContexts.startDbPart} — and at every point the runner calls afterwards (`on-start-api`,
- * the finalized loop's points, start and stop), so a module sees one context for the whole process.
+ * **One context per module** ({@link ProcessContexts.of}). It is the same object in the module's `on-start-db` (run by
+ * the migration runner through {@link ProcessContexts.startDbPart}) and at every point the runner calls afterwards
+ * (`on-start-api`, the finalized loop's points, start and stop). So a module sees one context for the whole process.
  *
- * **Publishing (MD-7).** A module publishes an item from its own `on-start-db` only — the context knows which module's
- * `on-start-db` is running, as the migration runner runs them one at a time —, only an item it declares with the
- * `process` lifetime, and once: one value per item for the whole process, so a second publish of an item by its module
- * or by another of its providers is refused too. Any other call is refused: it throws at the call, and the refusal
- * also fails the callback when the module catches it — `on-start-db` here; `on-start-api` in `registerModuleApis`
- * (`./module-api.ts`); the loop's points through {@link ProcessContexts.watch} (the loop's misuses, `./loop.ts`). A
- * publish made after the module's `on-start-db` ended (a timer) fails the startup at the seal, or the loop when it runs.
+ * **Publishing.** A module may publish an item only from its own `on-start-db`, only an item it declares with the
+ * `process` lifetime, and only once. The context knows which module's `on-start-db` is running, since the migration
+ * runner runs them one at a time. There is one value per item for the whole process, so a second publish of an item,
+ * by its module or by another of its providers, is refused too. [MD-7]
  *
- * **Reading.** A context's `items` is a read-only view: from `on-start-api` on — once {@link ProcessContexts.seal} ran,
- * after every `on-start-db` — the published items the module requires or provides, in publication order; empty before
- * (MD-7: "visible … from `on-start-api` on"), so no `on-start-db` depends on the order of its providers' setups.
+ * Any other call is refused: it throws at the call, and the refusal also fails the callback when the module catches
+ * it. This happens in `on-start-db` here; in `on-start-api` in `registerModuleApis` (`./module-api.ts`); and at the
+ * loop's points through {@link ProcessContexts.watch} (the loop's misuses, `./loop.ts`). A publish made after the
+ * module's `on-start-db` ended (from a timer) fails the startup at the seal, or fails the loop when it runs. [MD-7]
  *
- * **`process-item-missing`.** The seal refuses startup when an item that a module of this process requires — a part
- * active in a range the process may run, the cursor's included (RN-11 re-delivers there), not one whose revisions all
- * ended below it — and that some part declares with the `process` lifetime was not published.
+ * **Reading.** A context's `items` is a read-only view. From `on-start-api` on (once {@link ProcessContexts.seal} has
+ * run, after every `on-start-db`), it holds the published items the module requires or provides, in publication
+ * order. Before that it is empty, so no `on-start-db` depends on the order of its providers' setups. [MD-7]
+ *
+ * **`process-item-missing`.** The seal refuses startup when an item is required by a module of this process, some part
+ * declares it with the `process` lifetime, and it was not published. A module of this process is a part active in a
+ * range the process may run, including the cursor's (since the callbacks are delivered there again after a restart),
+ * but not one whose revisions all ended below it. [RN-11]
  */
 
 import { UmbraError } from "../db/errors.js";
@@ -46,7 +49,7 @@ export interface MisuseReports {
 export interface ProcessContextsInput {
   /** The database's resolved graph: its `modules` (every part, in startup order) and the `ranges` the process may run. */
   readonly graph: Pick<ResolvedGraph, "modules" | "ranges">;
-  /** Each module's revisions, in start order (task 4.3 gives them); none when not given. */
+  /** Each module's revisions, in start order; none when not given. */
   readonly revisionsOf?: (id: string) => readonly Revision[];
 }
 
@@ -56,7 +59,7 @@ export interface PublishRefusal {
   readonly message: string;
 }
 
-const RULE = "a process item is published once, from its provider's on-start-db (MD-7)";
+const RULE = "a process item is published once, from its provider's on-start-db";
 
 /** Whether `part` declares `item` with the `process` lifetime. */
 const providesProcessItem = (part: ModuleDeclaration, item: string): boolean =>
@@ -189,9 +192,9 @@ export class ProcessContexts implements MisuseReports {
   }
 
   /**
-   * Ends the publishing, once every part's `on-start-db` has run (MD-7): throws the first refused publish, if any, then
+   * Ends the publishing, once every part's `on-start-db` has run. Throws the first refused publish, if any, then
    * `process-item-missing` for the first item a module of this process requires that was not published (in startup
-   * order, then the module's `requires` order); otherwise the items become visible. Throws when called twice.
+   * order, then the module's `requires` order); otherwise the items become visible. Throws when called twice. [MD-7]
    */
   seal(): void {
     if (this.#sealed) throw new Error("ProcessContexts: the contexts are sealed once, after every on-start-db");
@@ -216,7 +219,7 @@ export class ProcessContexts implements MisuseReports {
       throw new UmbraError(
         "process-item-missing",
         `the process item ${item}, which ${names(modules)} ${modules.length === 1 ? "requires" : "require"}, was not ` +
-          `published by the on-start-db of its provider${by.length === 1 ? "" : "s"} ${names(by)} (MD-7)`,
+          `published by the on-start-db of its provider${by.length === 1 ? "" : "s"} ${names(by)}`,
         { item, modules, providers: by },
       );
     }
@@ -257,7 +260,7 @@ export class ProcessContexts implements MisuseReports {
         reason: "not-declared",
         message:
           `${part.id} published the item ${String(item)}, which it does not declare with the process lifetime: a ` +
-          "module publishes only the process items it declares (MD-7)",
+          "module publishes only the process items it declares",
       };
     }
     const earlier = this.#published.get(item);

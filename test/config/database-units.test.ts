@@ -5,10 +5,12 @@ import { REDACTED, redactor, secretStrings } from "../../src/config/redact.js";
 import { refuseWritingReader, type TransportReaderFacts } from "../../src/private/transport-reader.js";
 
 /**
- * Task 17.5b (the mutation pass task 4.5 deferred): `pg_dump`'s environment (each of libpq's connection variables of
- * the caller's replaced or dropped, the password and the system's roots only when they apply), the memory database and
- * an IPv6 host as the log names them, a `password` part next to a null one, and the transport reader's refusal listing
- * ten of its findings.
+ * Unit cases for the database configuration, found by a mutation pass:
+ * - `pg_dump`'s environment: each of the caller's libpq connection variables is replaced or dropped, and the password
+ *   and the system's roots are set only when they apply;
+ * - the memory database and an IPv6 host, as the log names them;
+ * - a `password` part next to a null one;
+ * - the transport reader's refusal listing ten of its findings.
  */
 
 const LIBPQ = ["PGHOST", "PGHOSTADDR", "PGPORT", "PGUSER", "PGDATABASE", "PGPASSWORD", "PGPASSFILE", "PGSERVICE",
@@ -80,7 +82,7 @@ describe("the transport reader's refusal (task 17.5b)", () => {
   };
   const tail =
     ": the transport's reads need a login that may only read — SELECT on the public tables and USAGE on their schemas, " +
-    "such as a member of pg_read_all_data and nothing more (CF-4, owner decision Q175)";
+    "such as a member of pg_read_all_data and nothing more";
 
   it("lists ten findings and counts the rest", () => {
     expect(message(0)).toBe("none");

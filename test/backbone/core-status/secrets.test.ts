@@ -9,12 +9,16 @@ import { entryOf, loggingModule } from "../../runner/process-build.js";
 import type { DatabaseParts } from "../../../src/config/database-parts.js";
 
 /**
- * A67 (task 8.3; AE-6): a halt caused by an error whose message contains a secret shows the error code, height, module
- * and point, and the secret appears nowhere in the response — through the process on PostgreSQL 18 and PGlite. The
- * secret (`test/admin/secrets.ts`) is a real secret of the configuration, in each of its six forms: the `node` URL's
- * password (a secret field, CF-4), a user module's `secret` setting, and on PostgreSQL the `database` parts' password (a
- * login role of the test's own). The callback that halts throws a message holding every form; the full bodies of the
- * four endpoints and every captured log line are searched for each, and the halt's log line shows the redaction.
+ * A halt caused by an error whose message contains a secret shows the error code, height, module and point, and the
+ * secret appears nowhere in the response. The test runs the process on PostgreSQL 18 and PGlite. [A67, AE-6]
+ *
+ * The secret (`test/admin/secrets.ts`), in each of its six forms, is a real secret of the configuration:
+ * - the `node` URL's password, a secret field [CF-4];
+ * - a user module's `secret` setting;
+ * - on PostgreSQL, the `database` parts' password (a login role of the test's own).
+ *
+ * The callback that halts throws a message holding every form. The full bodies of the four endpoints and every
+ * captured log line are searched for each form, and the halt's log line shows the redaction.
  *
  * Committed negative control: a `/status` that adds the exception's own message (as an endpoint built from raw
  * exception messages would) shows the secret, and the same search finds it: every form, the decoded one JSON-escaped.

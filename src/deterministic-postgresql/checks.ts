@@ -1,28 +1,29 @@
 /**
- * The `jsonb` and `numeric` `CHECK`s of DT-6 (`openspec/changes/core-arch/design.md` §4, the component table's fifth
- * row; owner decisions Q57, Q58): stored numbers are integers, so that two databases whose contents hashes are equal
- * also answer queries alike. DT-1 encodes a `numeric` as its integer text and fails on a fraction, and encodes `jsonb`
- * parsed, where `1.0` and `1` are the same number; these `CHECK`s refuse, when the row is written, what the encoding
- * would fail on or would hide:
+ * The `jsonb` and `numeric` `CHECK`s: stored numbers are integers, so two databases whose contents hashes are equal
+ * also answer queries alike. The value encoding writes a `numeric` as its integer text and fails on a fraction, and
+ * writes `jsonb` parsed, where `1.0` and `1` are the same number. These `CHECK`s refuse, when the row is written, what
+ * the encoding would fail on or would hide. [DT-1, DT-6, Q57, Q58; design §4]
  *
- * - **`core_chain.jsonb_numbers_ok(jsonb)`** is false when the document holds, at any depth, a JSON number whose text
- *   (`jsonpath` `.string()`) is not `-?[0-9]+` — a fraction, an exponent PostgreSQL did not resolve into an integer,
- *   or a zero fraction such as `1.0`, whose text keeps its scale (Q57) — or that is outside the signed 64-bit range
- *   DT-1 encodes ({@link INTEGER_RULES}). PostgreSQL stores `1e2` as `100`, which passes.
- * - **`core_chain.numeric_ok(numeric)`** is `c IS NULL OR coalesce(scale(c) = 0, false)`: a value with a fraction
- *   (`100.00` included) is refused, and so are `NaN`, `Infinity` and `-Infinity`, whose `scale()` is NULL — a `CHECK`
- *   passes on NULL, so that NULL must become false — while a NULL value stays allowed (checked on PGlite 0.5.10 and
- *   PostgreSQL 18.6, `design.md` §4).
+ * - **`core_chain.jsonb_numbers_ok(jsonb)`** is false when the document holds, at any depth, a JSON number that is
+ *   either outside the signed 64-bit range the encoding supports ({@link INTEGER_RULES}), or whose text (`jsonpath`
+ *   `.string()`) is not `-?[0-9]+`: a fraction, an exponent PostgreSQL did not resolve into an integer, or a zero
+ *   fraction such as `1.0`, whose text keeps its scale. PostgreSQL stores `1e2` as `100`, which passes. [DT-1, Q57]
+ * - **`core_chain.numeric_ok(numeric)`** is `c IS NULL OR coalesce(scale(c) = 0, false)`. A value with a fraction
+ *   (`100.00` included) is refused, and so are `NaN`, `Infinity` and `-Infinity`, whose `scale()` is NULL: a `CHECK`
+ *   passes on NULL, so that NULL must become false. A NULL value stays allowed (checked on PGlite 0.5.10 and
+ *   PostgreSQL 18.6). [design §4]
  * - **Their array forms**, `jsonb_numbers_ok(jsonb[])` and `numeric_ok(numeric[])`, apply the same rule to every
  *   element, in any number of dimensions; a NULL element is allowed, as a NULL value is.
  *
- * The functions are SQL functions with a standard body (`RETURN …`), which PostgreSQL parses when they are created and
- * binds to the objects they name, so no `search_path` reaches them; they are immutable and, created by the writer's
- * login in `core_chain` at every startup, keep `EXECUTE` for every role (the module roles' revocation applies only to
- * the routines a module role creates). The database API adds one `CHECK` per such column of every module table not
- * declared `deterministic: false` (`./opt-out.ts`), named {@link integerCheckName}, and drops the ones of a table that
- * became opted out (`src/db/module-rules.ts` applies {@link integerCheckStatements}). A `CHECK` on a partitioned table
- * holds on its partitions too.
+ * The functions are SQL functions with a standard body (`RETURN …`). PostgreSQL parses such a body when the function
+ * is created and binds it to the objects it names, so no `search_path` reaches it. The functions are immutable. The
+ * writer's login creates them in `core_chain` at every startup, so they keep `EXECUTE` for every role (the module
+ * roles' revocation applies only to routines a module role creates).
+ *
+ * The database API adds one `CHECK` per such column of every module table not declared `deterministic: false`
+ * (`./opt-out.ts`), named {@link integerCheckName}, and drops those of a table that became opted out
+ * (`src/db/module-rules.ts` applies {@link integerCheckStatements}). A `CHECK` on a partitioned table holds on its
+ * partitions too.
  */
 
 import { createHash } from "node:crypto";
@@ -48,38 +49,40 @@ export interface IntegerRules {
   readonly numeric: readonly IntegerRule[];
 }
 
-/** DT-1's 64-bit range of the integers a `jsonb` document may hold (`src/determinism/cbor.ts` encodes no wider one). */
+/**
+ * The signed 64-bit range of the integers a `jsonb` document may hold (`src/determinism/cbor.ts` encodes no wider one).
+ * [DT-1]
+ */
 const INT64_MIN = "-9223372036854775808";
 const INT64_MAX = "9223372036854775807";
 
 /**
  * The rules, in the order the functions apply them. `jsonb`: a JSON number is refused when any condition holds.
  * `numeric`: `null-allowed` makes `c IS NULL OR …`, `not-a-number` the `coalesce(…, false)` that refuses `NaN` and the
- * infinities, `no-fraction` the `scale(c) = 0` — together `c IS NULL OR coalesce(scale(c) = 0, false)`, as `design.md`
- * §4 writes it.
+ * infinities, `no-fraction` the `scale(c) = 0`: together `c IS NULL OR coalesce(scale(c) = 0, false)`. [design §4]
  */
 export const INTEGER_RULES: IntegerRules = {
   jsonb: [
     {
       id: "integer-text",
-      refuses: "a number whose text has a fraction or an exponent, a zero fraction such as 1.0 included (Q57)",
+      refuses: "a number whose text has a fraction or an exponent, a zero fraction such as 1.0 included",
       condition: '!(@.string() like_regex "^-?[0-9]+$")',
     },
     {
       id: "at-least-int64-min",
-      refuses: `an integer below ${INT64_MIN}, which DT-1 cannot encode`,
+      refuses: `an integer below ${INT64_MIN}, which the value encoding cannot encode`,
       condition: `@ < ${INT64_MIN}`,
     },
     {
       id: "at-most-int64-max",
-      refuses: `an integer above ${INT64_MAX}, which DT-1 cannot encode`,
+      refuses: `an integer above ${INT64_MAX}, which the value encoding cannot encode`,
       condition: `@ > ${INT64_MAX}`,
     },
   ],
   numeric: [
     { id: "null-allowed", refuses: "nothing: a NULL value is allowed, while a CHECK on NULL would refuse it" },
     { id: "not-a-number", refuses: "NaN, Infinity and -Infinity, whose scale() is NULL" },
-    { id: "no-fraction", refuses: "a value with a fraction, 100.00 included (Q57)" },
+    { id: "no-fraction", refuses: "a value with a fraction, 100.00 included" },
   ],
 };
 
@@ -176,9 +179,9 @@ export interface IntegerCheckRow {
 
 /**
  * The statements that give exactly the listed tables that are not opted out one `CHECK` per column of a type of
- * {@link CHECKED_TYPES} — added where it is missing — and drop the database API's `CHECK`s from the tables declared
- * `deterministic: false` (DT-6, Q76). `tables` are module tables as `catalogTables` describes them (partitioned tables
- * whole, so their partitions inherit the `CHECK`); `existing` are the `CHECK`s {@link INTEGER_CHECKS_SQL} lists.
+ * {@link CHECKED_TYPES}, added where it is missing, and that drop the database API's `CHECK`s from the tables declared
+ * `deterministic: false`. `tables` are module tables as `catalogTables` describes them (partitioned tables whole, so
+ * their partitions inherit the `CHECK`); `existing` are the `CHECK`s {@link INTEGER_CHECKS_SQL} lists. [DT-6, Q76]
  */
 export function integerCheckStatements(
   tables: readonly CatalogTable[],

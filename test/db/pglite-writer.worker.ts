@@ -5,9 +5,9 @@ import { UmbraError } from "../../src/db/errors.js";
 import { acquirePgliteLock, pgliteLockFile } from "../../src/db/pglite-lock.js";
 
 /**
- * A PGlite writer in a process of its own, for A17's process tests (DB-11): `pglite-writer-processes.test.ts` and the
+ * A PGlite writer in a process of its own, for the writer-lock process tests: `pglite-writer-processes.test.ts` and the
  * single-writer test of `writer-lock.test.ts`. Started with `node --import tsx` and one JSON argument ({@link Job});
- * it reports each event as one JSON line on stdout ({@link WorkerEvent}).
+ * it reports each event as one JSON line on stdout ({@link WorkerEvent}). [A17, DB-11]
  *
  * - `write`: opens the data directory through the database API (`openPglite`, with the development opt-in), creates
  *   the test schema if it is absent, reads its cursor — the highest committed height of `t.blocks` — reports `opened`
@@ -21,7 +21,7 @@ import { acquirePgliteLock, pgliteLockFile } from "../../src/db/pglite-lock.js";
  * `lockKind: "statement-scoped"` is for the negative controls only: instead of the API's lock, the process takes a
  * lock that is released when its statement ends — `BEGIN EXCLUSIVE` and `COMMIT` on the same lock file, which a second
  * process waiting for it would also pass — and then opens PGlite on the engine seam (`openPgliteOn`), which takes no
- * lock. A17's checks must fail with it.
+ * lock. The writer-lock checks must fail with it. [A17]
  */
 
 export interface Job {
@@ -65,7 +65,7 @@ function statementScopedLock(dataDir: string): void {
 }
 
 async function open(job: Job): Promise<{ db: Database; lockMs: number }> {
-  // Loaded here, not above, so that a `lock` process starts quickly (A17's races start many of them).
+  // Loaded here, not above, so that a `lock` process starts quickly (the writer-lock races start many of them).
   const { PGlite } = await import("@electric-sql/pglite");
   const { openPglite, openPgliteOn, PGLITE_START_PARAMS } = await import("../../src/db/pglite.js");
   if (job.lockKind === "statement-scoped") {

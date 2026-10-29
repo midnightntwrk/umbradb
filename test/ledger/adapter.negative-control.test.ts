@@ -6,14 +6,15 @@ import { expectNoV8Logs, expectRecordedRelease, expectSmallStateReloadsByKey } f
 import { AdapterWorkerHost } from "./adapter-worker-host.js";
 
 /**
- * The committed negative controls of A98's clauses (task 12.1): wrong adapters, each of which must make the check the
+ * The committed negative controls of the adapter checks: wrong adapters, each of which must make the check the
  * adapter test suite runs (`adapter-checks.ts`) fail; the real adapters pass the same checks in this file's build.
+ * [A98]
  *
- * - **A v8 adapter whose `decodeLogItem` returns a value** fails Q54's clause (its fast-check property finds an input);
- *   so does **a v8 adapter whose `apply` reports a log**.
+ * - **A v8 adapter whose `decodeLogItem` returns a value** fails the check that v8 reports no contract logs (its
+ *   fast-check property finds an input); so does **a v8 adapter whose `apply` reports a log**. [Q54]
  * - **A `stateKey` derived from `stateRoot`** (the 32 bytes after `stateRoot`'s first byte, which is a key only for a
- *   state above the embedding limit) fails Q55's reload of a state under the limit: the fresh instance has no node
- *   under that key.
+ *   state above the embedding limit) fails the reload of a state under the limit: the fresh instance has no node
+ *   under that key. [Q55]
  * - **An adapter reporting another package's identity** (the v8 adapter with the v9 package's `rawPackages()`, and with
  *   its `versionName` too) fails the check that `versionName` and `rawPackages()` are the recorded ones.
  */

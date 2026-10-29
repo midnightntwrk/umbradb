@@ -6,16 +6,19 @@ import { type PublicCore, startPublicCore } from "./builds.js";
 import { confinementProblems, PUB, PUB_ENTRY, publicState, stateProblems } from "./read-confinement-checks.js";
 
 /**
- * A172 `[FAULT]` through a running core (task 14.2b; PP-4, `design.md` §8 **Confined reads**; the threat model draft's
- * gap 1), on PostgreSQL 18.6 and PGlite 0.5.10: the core process listens on its `listen.transport` and a raw client
- * sends `read`s whose statements try to leave the read — `COMMIT` then `INSERT`, `ROLLBACK`, `BEGIN`, `SET TRANSACTION
- * READ WRITE`, `SET` and `RESET` of a setting or the role, `set_config`, `DO`, `nextval`, `pg_advisory_lock`, `COPY`,
- * `LISTEN`, two statements in one —: each is answered `read-result` `error: read-refused` with `refused` naming the
- * statement, nothing of it runs, the next `read` on the same connection is answered, and the public database's contents
- * hash, row counts and sequences are unchanged, no advisory lock left held. Reads whose write the database itself
- * refuses (the read-only transaction) are answered `database-error`. A private process's own client gets the refusal as
- * an `UmbraError` `read-refused` naming the statement. The committed negative control is
- * `read-confinement.negative-control.test.ts`.
+ * Confined reads through a running core, on PostgreSQL 18.6 and PGlite 0.5.10. The core process listens on its
+ * `listen.transport`, and a raw client sends `read`s whose statements try to leave the read: `COMMIT` then `INSERT`,
+ * `ROLLBACK`, `BEGIN`, `SET TRANSACTION READ WRITE`, `SET` and `RESET` of a setting or the role, `set_config`, `DO`,
+ * `nextval`, `pg_advisory_lock`, `COPY`, `LISTEN`, and two statements in one. [A172 FAULT, PP-4; design §8; threat model
+ * draft, gap 1]
+ * - Each is answered `read-result` `error: read-refused`, with `refused` naming the statement, and nothing of it runs.
+ * - The next `read` on the same connection is answered.
+ * - The public database's contents hash, row counts and sequences are unchanged, and no advisory lock is left held.
+ * - Reads whose write the database itself refuses (the read-only transaction) are answered `database-error`.
+ * - A private process's own client gets the refusal as an `UmbraError` `read-refused` naming the statement.
+ * [A172 FAULT, PP-4]
+ *
+ * The committed negative control is `read-confinement.negative-control.test.ts`.
  */
 
 /** The core's `listen.transport`: a free port of the loopback interface. */

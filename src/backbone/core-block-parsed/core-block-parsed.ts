@@ -1,29 +1,34 @@
 /**
- * The core module `core-block-parsed` (`openspec/changes/core-arch/specs/chain-data/spec.md` CD-5; `design.md` §10;
- * CORE-ARCH §4.11; decision record Q4, Q49; task 11.1): every block's Midnight transactions, parsed once with the
- * ledger package of the block's ledger version, as the `block` item `block-parsed` and one row per transaction in
- * `core_block_parsed.transactions`. Off by default; it may start mid-chain (each block's transactions are its own).
+ * The core module `core-block-parsed`. It parses every block's Midnight transactions once, with the ledger package of
+ * the block's ledger version, and provides them as the `block` item `block-parsed` and as one row per transaction in
+ * `core_block_parsed.transactions`. It is off by default, and it may start mid-chain, since each block's transactions
+ * are its own. [CD-5, Q4, Q49; CORE-ARCH §4.11; design §10]
  *
- * **At `on-parse`** ({@link coreBlockParsedOnParse}) it places the block's transactions in the order the ledger applied
- * them — the order of their chain events, each matched to its extrinsic by its phase; block 0's in body order —
- * (`./placement.ts`, from `block-body`, `chain-events` and, for the call arguments, `runtime-metadata`), has them
- * parsed once (`./parser.ts`: in the process's ledger worker, which keeps the parse for the block's apply, task 12.3)
- * with the ledger of `ledger-version`,
- * checks each parse names the kind the chain gave it (a regular transaction's bytes that the ledger reads as a system
- * transaction, or the reverse, refuse the block) and the hash its chain event carries, where it carries one
- * ({@link chainHashOf}: a ledger hash other than the chain's refuses the block; task 12.3), and puts `block-parsed` ({@link BlockParsed}): the ledger version
- * and, per transaction, the ledger's plain data (`ParsedTransaction`: its index, hash, kind, size, bytes and segments,
- * Q49) with where the chain put it (its phase, extrinsic index and event index), frozen. A block without a transaction
- * loads no ledger package.
+ * **At `on-parse`** ({@link coreBlockParsedOnParse}) it:
+ * - places the block's transactions in the order the ledger applied them (`./placement.ts`, from `block-body`,
+ *   `chain-events` and, for the call arguments, `runtime-metadata`): the order of their chain events, each matched to
+ *   its extrinsic by its phase, and block 0's in body order;
+ * - has them parsed once with the ledger of `ledger-version` (`./parser.ts`), in the process's ledger worker, which
+ *   keeps the parse for the block's apply;
+ * - checks that each parse has the kind the chain gave it: a regular transaction's bytes that the ledger reads as a
+ *   system transaction, or the reverse, refuse the block;
+ * - checks that each parse has the hash its chain event carries, where the event carries one ({@link chainHashOf}): a
+ *   ledger hash other than the chain's refuses the block;
+ * - puts `block-parsed` ({@link BlockParsed}), frozen: the ledger version and, per transaction, the ledger's plain data
+ *   (`ParsedTransaction`: its index, hash, kind, size, bytes and segments) with where the chain put it (its phase,
+ *   extrinsic index and event index). [Q49]
  *
- * **At `on-db-write`** one row per transaction (`design.md` §10): `core_block_parsed.transactions (height, tx_index) →
- * tx_hash, kind, size`, in one statement; append-only, range-partitioned by height.
+ * A block without a transaction loads no ledger package.
  *
- * **The worker's parses** are released once their block committed (`on-after-db-write`) and when a queued best block is
- * dropped (`on-rollback`): the worker keeps no block it will not apply (task 12.3).
+ * **At `on-db-write`** it writes one row per transaction in one statement:
+ * `core_block_parsed.transactions (height, tx_index) → tx_hash, kind, size`, append-only and range-partitioned by
+ * height. [design §10]
  *
- * The declaration ({@link CORE_BLOCK_PARSED}) is a constant: the ledger worker is found through the process context,
- * which the runner binds to the process's worker ({@link bindLedgerParser}); a test's or a negative control's build
+ * **The worker's parses** are released once their block has committed (`on-after-db-write`), and when a queued best
+ * block is dropped (`on-rollback`), so the worker keeps no block it will not apply.
+ *
+ * The declaration ({@link CORE_BLOCK_PARSED}) is a constant. It finds the ledger worker through the process context,
+ * which the runner binds to the process's worker ({@link bindLedgerParser}). A test's or a negative control's build
  * composes its own from {@link coreBlockParsedOnParse} with another parser, placement or chain-hash reading.
  */
 
@@ -64,7 +69,7 @@ export interface BlockTransaction extends ParsedTransaction {
 export interface BlockParsed {
   /** The ledger version that parsed them (`ledger-version`). */
   readonly ledger: string;
-  /** In application order (CD-5): `transactions[i].index` is `i`. */
+  /** In application order: `transactions[i].index` is `i`. [CD-5] */
   readonly transactions: readonly BlockTransaction[];
 }
 
@@ -79,7 +84,7 @@ export interface BlockParsedOptions {
   readonly chainHash?: (event: ChainEvent | undefined) => Uint8Array | null;
 }
 
-/** `core-block-parsed`'s migrations (DB-9): applied once, recorded under `core-block-parsed`; never changed. */
+/** `core-block-parsed`'s migrations: applied once and recorded under `core-block-parsed`; they never change. [DB-9] */
 export const CORE_BLOCK_PARSED_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",
@@ -105,8 +110,8 @@ const PARSER = inThreadParser();
 const BOUND = new WeakMap<ProcessContext, LedgerHost>();
 
 /**
- * Binds `core-block-parsed` to its process context `context` with the process's ledger worker, before the loop runs
- * (task 12.3). Throws when `context` is bound already.
+ * Binds `core-block-parsed` to its process context `context` with the process's ledger worker, before the loop runs.
+ * Throws when `context` is bound already.
  */
 export function bindLedgerParser(context: ProcessContext, host: LedgerHost): void {
   if (BOUND.has(context)) throw new Error("bindLedgerParser: core-block-parsed is bound once per process context");
@@ -119,7 +124,7 @@ export function boundLedgerParser(p: ProcessContext): LedgerHost {
   if (host === undefined) {
     throw new Error(
       "core-block-parsed ran with a process context the runner did not bind to a ledger worker (bindLedgerParser): it " +
-        "parses in the worker (CD-5), never on the main thread",
+        "parses in the worker, never on the main thread",
     );
   }
   return host;
@@ -151,7 +156,7 @@ function blockBodyOf(b: BlockContext): BlockBody {
   if (!Array.isArray(body?.extrinsics)) {
     throw new TypeError(
       `the block at height ${b.height} has no block-body item core-block-parsed can read: core-block-fetch puts it at ` +
-        "on-fetch (CD-2)",
+        "on-fetch",
     );
   }
   return body as BlockBody;
@@ -177,14 +182,14 @@ export async function blockParsedOf(b: BlockContext, options: BlockParsedOptions
     if (plain.kind !== transaction.kind) {
       throw new Error(
         `block ${b.height}: transaction ${index} is ${transaction.kind === "regular" ? "a regular" : "a system"} ` +
-          `transaction on the chain, and the ledger ${ledger} reads its bytes as ${plain.kind === "regular" ? "a regular" : "a system"} one (CD-5)`,
+          `transaction on the chain, and the ledger ${ledger} reads its bytes as ${plain.kind === "regular" ? "a regular" : "a system"} one`,
       );
     }
     const chainHash = transaction.eventIndex === null ? null : (options.chainHash ?? chainHashOf)(events[transaction.eventIndex]);
     if (chainHash !== null && !sameBytes(chainHash, plain.hash)) {
       throw new Error(
         `block ${b.height}: transaction ${index}'s hash is ${hexOf(plain.hash)} to the ledger ${ledger}, and its chain ` +
-          `event ${transaction.eventIndex} carries ${hexOf(chainHash)} (CD-5)`,
+          `event ${transaction.eventIndex} carries ${hexOf(chainHash)}`,
       );
     }
     return Object.freeze({
@@ -208,7 +213,7 @@ export function blockParsedItemOf(b: BlockContext, module: string): BlockParsed 
   const parsed = b.items.get(BLOCK_PARSED_ITEM) as Partial<BlockParsed> | undefined;
   if (!Array.isArray(parsed?.transactions)) {
     throw new TypeError(
-      `the block at height ${b.height} has no block-parsed item ${module} can read: core-block-parsed puts it at on-parse (CD-5)`,
+      `the block at height ${b.height} has no block-parsed item ${module} can read: core-block-parsed puts it at on-parse`,
     );
   }
   return parsed as BlockParsed;

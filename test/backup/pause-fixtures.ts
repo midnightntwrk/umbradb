@@ -11,9 +11,9 @@ import { type BackupBackend, hashOf, PATIENCE_MS } from "./backup-fixtures.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * What A163's tests share (task 15.1a; BK-1 as amended, owner decision Q152 B; `design.md` §9.1): a running process on
- * PGlite, paused and resumed between heights (`ProcessHandle.pause()`, `resume()`), and its backup on SIGUSR2
- * (`backupOnSignal`, CF-4).
+ * What the pause tests share: a running process on PGlite, paused and resumed between heights
+ * (`ProcessHandle.pause()`, `resume()`), and its backup on SIGUSR2 (`backupOnSignal`).
+ * [A163, BK-1, CF-4, Q152 B; design §9.1]
  *
  * **The build** is the backups' (`./backup-fixtures.ts`: the `umbradb` command's build, module `ticker`) with a second
  * user module, `recorder`, from a module file of the command project, so that `umbradb restore` reads the same file
@@ -109,7 +109,7 @@ export function recorderModule(builders: string): string {
   ].join("\n");
 }
 
-/** What a configuration file of A163's tests holds. */
+/** What a configuration file of the pause tests holds. [A163] */
 export interface PausableConfig {
   /** The `database` setting. */
   readonly database: DatabaseParts;
@@ -155,7 +155,7 @@ export function writePausableConfig(project: CliProject, options: PausableConfig
 /** The loop of a process, by its class: the real one, or a negative control's. */
 export type LoopClass = new (input: LoopInput) => FinalizedLoop;
 
-/** A running process of A163's tests. */
+/** A running process of the pause tests. [A163] */
 export interface Pausable {
   readonly handle: ProcessHandle;
   readonly source: InMemoryBlockSource;
@@ -254,11 +254,11 @@ export const heightPoints = (points: readonly string[]): string[] => points.filt
 const heightOf = (point: string): bigint => BigInt(point.slice(point.indexOf("@") + 1));
 
 /**
- * A163's "paused between heights" (BK-1): once `paused` — `handle.pause()` asked for while the loop processed height
+ * "Paused between heights": once `paused` — `handle.pause()` asked for while the loop processed height
  * `at` — resolved, the loop is between two heights — the last point recorded is a height's `on-after-db-write` (its
  * points after the commit, their reads, ended), that height is the cursor, and it is `at`: the next pause after the
  * request; no block transaction is open — and, held, it starts nothing for {@link PAUSED_MS} though heights wait above
- * the cursor. Resolves with the cursor.
+ * the cursor. Resolves with the cursor. [A163, BK-1]
  */
 export async function pausedBetweenHeights(run: Pausable, paused: Promise<void>, at: bigint): Promise<bigint> {
   await within(paused, PATIENCE_MS, "pause() did not resolve");
@@ -277,8 +277,8 @@ export async function pausedBetweenHeights(run: Pausable, paused: Promise<void>,
 }
 
 /**
- * A163's "resumed": after `handle.resume()`, the loop goes on from the cursor's next height and reaches `cursor + 3`
- * within `patienceMs`.
+ * "Resumed": after `handle.resume()`, the loop goes on from the cursor's next height and reaches `cursor + 3` within
+ * `patienceMs`. [A163]
  */
 export async function goesOn(run: Pausable, cursor: bigint, patienceMs: number = PATIENCE_MS): Promise<void> {
   run.handle.resume();
@@ -286,8 +286,8 @@ export async function goesOn(run: Pausable, cursor: bigint, patienceMs: number =
 }
 
 /**
- * A163's "loses and repeats no height": every height from `from` to `to` has its points once, in order — `on-fetch`,
- * `on-parse`, `on-compute`, `on-db-write`, `on-after-db-write` —, and nothing else ran.
+ * "Loses and repeats no height": every height from `from` to `to` has its points once, in order — `on-fetch`,
+ * `on-parse`, `on-compute`, `on-db-write`, `on-after-db-write` —, and nothing else ran. [A163]
  */
 export function eachHeightOnce(points: readonly string[], from: bigint, to: bigint): void {
   const expected: string[] = [];
@@ -300,8 +300,8 @@ export function eachHeightOnce(points: readonly string[], from: bigint, to: bigi
 }
 
 /**
- * RN-13 while paused: once the pause `paused` resolved, a stop ends the process — `closed` within `patienceMs` —, its
- * processing ended by the signal, the cursor where it was.
+ * A stop while paused: once the pause `paused` resolved, a stop ends the process — `closed` within `patienceMs` —, its
+ * processing ended by the signal, the cursor where it was. [RN-13]
  */
 export async function stopEndsWhilePaused(run: Pausable, paused: Promise<void>, patienceMs: number = PATIENCE_MS): Promise<void> {
   await within(paused, PATIENCE_MS, "pause() did not resolve");
@@ -321,10 +321,10 @@ export interface BackupOnSignal {
 }
 
 /**
- * A163's "SIGUSR2 writes a backup at its next pause" in `run`'s timeline, for the file `out`: the signal's line, then
+ * "SIGUSR2 writes a backup at its next pause" in `run`'s timeline, for the file `out`: the signal's line, then
  * the loop paused between heights (`backup on signal: processing paused at height h`, the last point before it h's
  * `on-after-db-write`), then the backup of h written (`backup on signal written to <out>: height h, …`) with no point
- * run in between; with `goesOn`, the next height's `on-fetch` the first point after it.
+ * run in between; with `goesOn`, the next height's `on-fetch` the first point after it. [A163]
  */
 export function backupAtPause(run: Pausable, out: string, goesOnAfter = true): BackupOnSignal {
   const entries = run.timeline();
@@ -343,7 +343,7 @@ export function backupAtPause(run: Pausable, out: string, goesOnAfter = true): B
   return { height, contentsHash: (entries[written] as string).slice(writtenPrefix.length) };
 }
 
-/** The contents hash of a new process of A163's build stopped at `height` on `backend` without a pause. */
+/** The contents hash of a new process of the pause tests' build stopped at `height` on `backend` without a pause. */
 export async function hashUnpausedAt(project: CliProject, backend: BackupBackend, height: bigint): Promise<string> {
   const db = await backend.database();
   const run = await startPausable(writePausableConfig(project, { database: db.setting, stop: Number(height) }), {

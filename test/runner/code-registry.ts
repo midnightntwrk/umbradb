@@ -5,15 +5,16 @@ import ts from "typescript";
 import { POINTS } from "../../src/modules/declaration.js";
 
 /**
- * The refusal and halt registry (task 10.4; IN-12, A87 `[STATIC]`; `openspec/changes/core-arch/design.md` §11): for
- * every refusal and halt code §11 lists, the tests that trigger it and check its code, or — for a code whose task has
- * not run yet — the task that will add them.
+ * The refusal and halt registry. For every refusal and halt code the design's "Refusals and halts" section lists, it
+ * names the tests that trigger it and check its code, or, for a code whose task has not run yet, the task that will
+ * add them. [IN-12, A87 STATIC; design §11]
  *
- * **§11's codes** ({@link section11Codes}) are the backticked words of its three paragraphs — the startup refusals
- * ("**Startup refuses**"), the backup and restore refusals ("**Backup and restore refuse**") and the processing halts
- * ("**Processing halts**") —, less the state each paragraph names (`(state \`refused\``, `(state \`halted\``) and the
+ * **The section's codes** ({@link section11Codes}) are the backticked words of its three paragraphs: the startup
+ * refusals ("**Startup refuses**"), the backup and restore refusals ("**Backup and restore refuse**") and the
+ * processing halts ("**Processing halts**"), less the state each paragraph names (`(state \`refused\``, `(state \`halted\``) and the
  * point names (`on-start-db`, `on-start-api`: where `callback-error` happens, not codes). A code may be in two lists
  * (`callback-error` refuses at startup and halts processing): each list's entry is its own, keyed `<list>:<code>`.
+ * [design §11]
  *
  * **A registered test** ({@link REGISTRY}) is named by its file (from the repository's root) and its title, as written
  * in its `it(…)`, `test(…)` or `tapeTest(…)` call; {@link registryProblems} checks, from the files' text, that the test
@@ -22,10 +23,11 @@ import { POINTS } from "../../src/modules/declaration.js";
  *
  * **Pending codes** ({@link PENDING}) are the codes whose tasks have not run yet, each with that task; a pending code
  * whose task `tasks.md` checks done is a problem (its task must register its test), and so is one not in the list as it
- * stood when task 10.4 made it (the test's baseline): a new §11 code comes with its test. So the list only shrinks.
+ * stood when the registry was made (the test's baseline): a new code in the section comes with its test. So the list
+ * only shrinks.
  */
 
-/** The three lists of §11. */
+/** The three lists of the design's refusals and halts. [design §11] */
 export type CodeList = "refusal" | "backup" | "halt";
 
 /** A test that triggers a code and checks it: its file, from the repository's root, and its title. */
@@ -34,7 +36,7 @@ export interface CodeTest {
   readonly test: string;
 }
 
-/** §11's codes, by list (see the module comment). */
+/** The section's codes, by list (see the module comment). [design §11] */
 export type Section11 = Readonly<Record<CodeList, readonly string[]>>;
 
 const PARAGRAPHS: readonly (readonly [CodeList, string, string])[] = [
@@ -43,7 +45,10 @@ const PARAGRAPHS: readonly (readonly [CodeList, string, string])[] = [
   ["halt", "**Processing halts**", "**The test tape's errors"],
 ];
 
-/** §11's refusal and halt codes in `design` (the text of `design.md`); throws when a paragraph's heading moved. */
+/**
+ * The refusal and halt codes of the "Refusals and halts" section in `design` (the text of `design.md`); throws when a
+ * paragraph's heading moved. [design §11]
+ */
 export function section11Codes(design: string): Section11 {
   const from = design.indexOf("## 11. Refusals and halts");
   const to = design.indexOf("## 12. ");
@@ -142,7 +147,7 @@ const RUNNER = "test/runner";
 
 /**
  * The tests that trigger each code and check it, by `<list>:<code>` (see the module comment). A task that adds a code
- * to §11 adds it here with its test.
+ * to the design's refusals and halts adds it here with its test. [design §11]
  */
 export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.freeze({
   // ── startup refusals ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -592,7 +597,7 @@ export interface RegistryInput {
   readonly codes: Section11;
   readonly registry: Readonly<Record<string, readonly CodeTest[]>>;
   readonly pending: Readonly<Record<string, string>>;
-  /** The pending codes as task 10.4 left them: no other code may be pending. */
+  /** The pending codes as they stood when the registry was made: no other code may be pending. */
   readonly baseline: readonly string[];
   /** `tasks.md`'s tasks ({@link tasksDone}). */
   readonly tasks: ReadonlyMap<string, boolean>;
@@ -600,7 +605,10 @@ export interface RegistryInput {
   readonly read: (file: string) => string | null;
 }
 
-/** Every problem of the registry against §11 (see the module comment), none when each code has its test or its task. */
+/**
+ * Every problem of the registry against the design's refusals and halts (see the module comment), none when each code
+ * has its test or its task. [design §11]
+ */
 export function registryProblems(input: RegistryInput): string[] {
   const problems: string[] = [];
   const listed = new Set(Object.entries(input.codes).flatMap(([list, codes]) => codes.map((code) => `${list}:${code}`)));

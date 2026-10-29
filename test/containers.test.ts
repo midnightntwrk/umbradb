@@ -13,9 +13,9 @@ import { LABEL_ATTEMPT, LABEL_PID, LABEL_REPOSITORY, START_ATTEMPTS, startContai
 import { POSTGRES_IMAGE } from "./postgres-image.js";
 
 /**
- * How every test starts a container (`containers.ts`; core-arch task 0.5, A153): a start that Testcontainers gave up on
- * after its fixed 10 s wait for the ports is tried again, its container removed; every container carries the labels
- * that tell whose it is; and every test that starts one starts it this way.
+ * How every test starts a container (`containers.ts`): a start that Testcontainers gave up on after its fixed 10 s wait
+ * for the ports is tried again, its container removed; every container carries the labels that tell whose it is; and
+ * every test that starts one starts it this way. [A153]
  */
 
 const REPOSITORY = fileURLToPath(new URL("..", import.meta.url));
@@ -207,7 +207,7 @@ interface SourceFile {
 const CONSTRUCTED = /new\s+(?:PostgreSqlContainer|GenericContainer)\s*\(/g;
 /** One started directly: a construction whose chain ends in `.start()`. */
 const STARTED_DIRECTLY = /new\s+(?:PostgreSqlContainer|GenericContainer)\s*\([^)]*\)(?:\s*\.with\w+\((?:[^()]|\([^()]*\))*\))*\s*\.start\(\)/g;
-/** This file and the A148 test plant constructions in their negative controls. */
+/** This file and the image-pin test plant constructions in their negative controls. [A148] */
 const PLANTERS = new Set(["test/containers.test.ts", "test/dependencies/postgres-image.test.ts"]);
 
 /** Every way the files start a container other than with `startContainer`. */

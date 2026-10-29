@@ -11,13 +11,17 @@ import { UmbraError } from "../../src/db/errors.js";
 import { CORE_SETTINGS, REPOSITORY } from "./config-fixtures.js";
 
 /**
- * The configuration loader (CF-1, `design.md` §7; task 4.1): one TypeScript file, `umbradb.config.ts` in the working
- * directory or the path given (`--config`, task 4.4), imported — on Node.js 24 through its built-in type stripping —
- * and its default export taken, checked to be plain data and returned as a frozen copy: what is validated, compared,
- * recorded and shown is the evaluated data, never the source text. A file that cannot be read or evaluated, or has no
- * default export, refuses startup with `invalid-configuration` naming the file and the reason; a value that is not
- * plain data, with `not-plain-data` (A26, `./plain-data.test.ts`). "Startup refuses" is the runner's (task 5.x), which
- * calls the loader first; here the loader is called directly.
+ * The configuration loader. It imports one TypeScript file: `umbradb.config.ts` in the working directory, or the path
+ * given with `--config`. On Node.js 24 the import goes through the built-in type stripping. The loader takes the
+ * default export, checks it is plain data and returns a frozen copy. What is validated, compared, recorded and shown
+ * is the evaluated data, never the source text. [CF-1; design §7]
+ *
+ * Refusals:
+ * - a file that cannot be read or evaluated, or has no default export, refuses startup with `invalid-configuration`,
+ *   naming the file and the reason;
+ * - a value that is not plain data refuses with `not-plain-data` (`./plain-data.test.ts`). [A26]
+ *
+ * The runner is what refuses startup: it calls the loader first. Here the loader is called directly.
  *
  * Under Vitest a dynamic `import()` goes through Vitest's own TypeScript transform, which also accepts syntax Node.js
  * refuses (an `enum`). The last suite therefore bundles the loader with esbuild and runs it in a plain Node.js process,
@@ -145,7 +149,7 @@ describe("CF-1: a file that cannot be loaded refuses startup with invalid-config
     expect(error.details).toEqual({ file, reason: "file-not-found" });
     expect(error.message).toContain(`no configuration file at ${file}`);
     expect(error.message).toContain("--config");
-    expect(error.message).toContain("(CF-1)");
+    expect(error.message).not.toMatch(/\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
   });
 
   it("a directory at the path", async () => {
@@ -177,7 +181,7 @@ describe("CF-1: a file that cannot be loaded refuses startup with invalid-config
     const file = write("throws-text.config.ts", 'throw "no node configured";\nexport default {};\n');
     const error = await refusal(() => loadConfig({ file }));
     expect(error.details).toEqual({ file, reason: "load-failed", errorCode: null });
-    expect(error.message).toContain("could not be loaded: no node configured (CF-1)");
+    expect(error.message).toMatch(/could not be loaded: no node configured$/);
   });
 
   it("an import the file makes that does not resolve is a load failure, not a missing file", async () => {

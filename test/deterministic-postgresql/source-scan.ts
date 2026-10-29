@@ -4,14 +4,15 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 /**
- * Reading the repository's TypeScript sources for A138's tests over the sources (`boundary.test.ts`,
- * `component-table.test.ts`): parsed with the TypeScript compiler, so imports, declarations, string literals and code
- * are found as the compiler sees them, never by a regular expression over text that may be a comment or a string.
+ * Reads the repository's TypeScript sources for the tests over the sources (`boundary.test.ts`,
+ * `component-table.test.ts`). Files are parsed with the TypeScript compiler, so imports, declarations, string literals
+ * and code are found as the compiler sees them, never by a regular expression over text that may be a comment or a
+ * string. [A138]
  */
 
 export const REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));
 export const SRC = join(REPOSITORY, "src");
-/** The `deterministic_postgresql` component (`design.md` §1, §4; owner decision Q69). */
+/** The `deterministic_postgresql` component's source directory. [Q69; design §1, §4] */
 export const COMPONENT = join(SRC, "deterministic-postgresql");
 
 /** The `.ts` files under `dir`, as absolute paths in sorted order; none when `dir` does not exist. */
@@ -104,9 +105,9 @@ export function resolveSpecifier(
 }
 
 /**
- * A138's boundary for one file of the component: every module it names that leads into `src/` outside the component
- * (or into the package itself, whose exports are `src/`), and every module named by something other than a string, which
- * cannot be checked. Empty when the file keeps the boundary.
+ * The boundary breaks of one file of the component: every module it names that leads into `src/` outside the component
+ * (or into the package itself, whose exports are `src/`), and every module named by something other than a string,
+ * which cannot be checked. Empty when the file keeps the boundary. [A138]
  */
 export function boundaryViolations(file: string, source: ts.SourceFile = parseSource(file)): string[] {
   const where = relative(REPOSITORY, file);

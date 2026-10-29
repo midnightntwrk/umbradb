@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { firstRegularAtParentTime, parentTimestampMs } from "../../src/ledger/replay.js";
 
-// Task 12.3 of `openspec/changes/core-arch` (specs/ledger LG-8): which blocks accept their first regular transaction at
-// the parent's time + 12 s — by the runtime that built the block, its `MNSV` `spec_version` — and the parent time a
-// block is applied with. The table is LG-8's, written out here from the official indexer's ranges
-// (`midnight-indexer` `indexer-common/src/domain/protocol_version.rs`, `chain-indexer/src/domain/ledger_state.rs`
-// `node_skews_first_regular_tblock`, `should_bump_first_regular_tblock`), not from the code under test.
+// Which blocks accept their first regular transaction at the parent's time + 12 s, decided by the runtime that built
+// the block (its `MNSV` `spec_version`), and the parent time a block is applied with. The table is the requirement's,
+// written out here from the official indexer's ranges (`midnight-indexer`
+// `indexer-common/src/domain/protocol_version.rs`, `chain-indexer/src/domain/ledger_state.rs`
+// `node_skews_first_regular_tblock`, `should_bump_first_regular_tblock`), not from the code under test. [LG-8]
 
 describe("LG-8's replay rules", () => {
   it("bumps the first regular transaction for runtimes 0.22, 1.0 below 1.0.300 and 2.0, never at block 0", () => {

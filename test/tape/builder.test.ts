@@ -25,11 +25,10 @@ import { RawClient } from "./raw-client.js";
 import { type Script, ScriptedNode, type Step } from "./scripted-node.js";
 
 /**
- * A71 `[CI]` (`openspec/changes/core-arch/acceptance.md` §9; TT-4; task 9.2): the recording builder — a WebSocket
- * proxy a client connects to, forwarding to a node and recording the session as a tape — and its rules: what it
- * records for each frame, the order it records in, how a connection's end is recorded, how it starts and stops, and
- * what it refuses. The record-and-replay check itself is `builder-checks.ts`'s; `record-and-replay.test.ts` runs it
- * through the node client of `src/node/`.
+ * The recording builder — a WebSocket proxy a client connects to, forwarding to a node and recording the session as a
+ * tape — and its rules: what it records for each frame, the order it records in, how a connection's end is recorded,
+ * how it starts and stops, and what it refuses. The record-and-replay check itself is `builder-checks.ts`'s;
+ * `record-and-replay.test.ts` runs it through the node client of `src/node/`. [A71 CI, TT-4; acceptance §9]
  */
 
 const TEST_TIMEOUT_MS = 60_000;

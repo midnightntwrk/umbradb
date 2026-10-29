@@ -1,9 +1,9 @@
 /**
- * IN-10's back-off (`openspec/changes/core-arch/specs/ingest/spec.md`): a failure that is retried — a node connection
- * error, a timeout, HTTP 429 or a 5xx status — is tried again after "exponential back-off from 1 s doubling up to
- * `backoffCeilingMs` (default 30 s) without limit". The node client waits {@link backoffDelay} before each new
- * connection attempt (counting the failed connections since the node last answered on one) and before each new try of a
- * call (counting that call's failed tries).
+ * The node client's back-off. A retried failure (a node connection error, a timeout, HTTP 429 or a 5xx status) is
+ * tried again after an exponential back-off: 1 s, doubling up to `backoffCeilingMs` (30 s by default), without limit.
+ * The node client waits {@link backoffDelay} before each new connection attempt, counting the failed connections since
+ * the node last answered on one. It also waits before each new try of a call, counting that call's failed tries.
+ * [IN-10]
  */
 
 /** The first delay: 1 s. */

@@ -1,31 +1,37 @@
 /**
- * The configuration loader (`openspec/changes/core-arch/specs/configuration/spec.md` CF-1, `design.md` §7; CORE-ARCH
- * §4.12): a process loads one TypeScript file at startup — `umbradb.config.ts` in the working directory, or the path
- * given with `--config` (task 4.4) — by importing it, on Node.js ≥ 24 through Node.js's built-in type stripping, so the
- * file holds erasable TypeScript only (no `enum`, `namespace` or parameter property); and takes its default export,
- * built with `defineConfig({ entries: [ … ] })` (`./entries.ts`), checked to be plain data (`./plain-data.ts`). It
- * returns that data as a deeply frozen copy: what startup validates (`./validate.ts`), compares with the history and records
- * (task 4.3), and shows, is the evaluated data, never the source text or the module's live export.
+ * The configuration loader. At startup, a process loads one TypeScript file: `umbradb.config.ts` in the working
+ * directory, or the path given with `--config`. It imports the file, on Node.js 24 or later through Node.js's built-in
+ * type stripping, so the file holds erasable TypeScript only (no `enum`, `namespace` or parameter property). It takes
+ * the default export, built with `defineConfig({ entries: [ … ] })` (`./entries.ts`), and checks it is plain data
+ * (`./plain-data.ts`). It returns that data as a deeply frozen copy: what startup validates (`./validate.ts`), compares
+ * with the history, records and shows is the evaluated data, never the source text or the module's live export.
+ * [CF-1; CORE-ARCH §4.12; design §7]
  *
- * **The file's user modules** (CF-1, owner decision Q106 B, task 4.4a): the file may also export `modules`, the
- * declarations of the host's user modules it imports (`export const modules = [stats]`). They are code, not data — a
- * declaration holds its callbacks —, so they are returned as the file gives them, in its order, as
- * {@link LoadedConfig.modules} (a frozen list of the same declarations, none copied or checked here: the runner and
- * `umbradb config check` validate them as user modules, MD-2, which names a fault by its position in the list). The
- * `umbradb` command takes them as its build's user modules (`src/cli/build-modules.ts`): the file is then MD-1's host
+ * **The file's user modules.** The file may also export `modules`, the declarations of the host's user modules it
+ * imports (`export const modules = [stats]`). They are code, not data, since a declaration holds its callbacks. So they
+ * are returned as {@link LoadedConfig.modules} as the file gives them, in its order: a frozen list of the same
+ * declarations, none copied or checked here. The runner and `umbradb config check` validate them as user modules, and
+ * name a fault by its position in the list. [CF-1, MD-2, Q106 B]
+ *
+ * The `umbradb` command takes them as its build's user modules (`src/cli/build-modules.ts`): the file is then the host
  * program, and no module is loaded by name. Without the export the list is empty; an export that is not a list refuses
  * startup (`modules-not-a-list`). A program that calls `startProcess` itself gives its own declarations and may pass
- * these.
+ * these. [MD-1, Q106 B]
  *
  * A `.ts` file is an ES module when the nearest `package.json` says `"type": "module"`, or when Node.js detects ES
  * module syntax in it, as for a `.js` file (a `.mts` file always is). The file may import module packages and read
- * environment variables (for secrets); it is code, as trusted as the build (decision record Q44).
+ * environment variables (for secrets); it is code, as trusted as the build. [Q44]
  *
- * Every failure refuses startup with an `UmbraError` (not retryable) that names the file: `invalid-configuration` with
- * `details.reason` — `file-not-found` (no file at the path), `load-failed` (importing or evaluating it threw; the error
- * is the cause, its `code` in `details.errorCode`), `no-default-export`, `modules-not-a-list` (a `modules` export that is
- * not an array) — or `not-plain-data` with the path inside the configuration. The runner (task 5.x) maps both to its refused state; `umbradb config check` (task 4.4) prints them.
- * The browser build bundles its configuration into the page and calls `plainData` on it instead (task 16.1).
+ * Every failure refuses startup with an `UmbraError` (not retryable) that names the file. It is either
+ * `invalid-configuration`, with one of these `details.reason`s:
+ * - `file-not-found`: no file at the path;
+ * - `load-failed`: importing or evaluating it threw; the error is the cause, and its `code` is in `details.errorCode`;
+ * - `no-default-export`;
+ * - `modules-not-a-list`: a `modules` export that is not an array;
+ *
+ * or `not-plain-data`, with the path inside the configuration. The runner maps both to its refused state, and
+ * `umbradb config check` prints them. The browser build bundles its configuration into the page and calls `plainData`
+ * on it instead. [CF-1]
  */
 
 import { stat } from "node:fs/promises";
@@ -34,12 +40,12 @@ import { pathToFileURL } from "node:url";
 import { UmbraError } from "../db/errors.js";
 import { type PlainData, plainData } from "./plain-data.js";
 
-/** The file a process loads when none is given, in its working directory (CF-1). */
+/** The file a process loads when none is given, in its working directory. [CF-1] */
 export const DEFAULT_CONFIG_FILE = "umbradb.config.ts";
 
 /** Where the configuration file is. */
 export interface LoadOptions {
-  /** The file, absolute or relative to `cwd`; {@link DEFAULT_CONFIG_FILE} when absent (`--config`, task 4.4). */
+  /** The file (`--config`), absolute or relative to `cwd`; {@link DEFAULT_CONFIG_FILE} when absent. */
   readonly file?: string;
   /** The working directory; `process.cwd()` when absent. */
   readonly cwd?: string;
@@ -50,13 +56,13 @@ export interface LoadedConfig {
   readonly file: string;
   readonly data: PlainData;
   /**
-   * The file's `modules` export (CF-1, Q106): its user modules' declarations as it gives them, in its order, not
-   * validated here; empty without the export.
+   * The file's `modules` export: its user modules' declarations as it gives them, in its order, not validated here;
+   * empty without the export. [CF-1, Q106 B]
    */
   readonly modules: readonly unknown[];
 }
 
-/** The name of the configuration file's export of its user modules (CF-1, Q106). */
+/** The name of the configuration file's export of its user modules. [CF-1, Q106 B] */
 export const MODULES_EXPORT = "modules";
 
 /** Node.js's codes for TypeScript that type stripping cannot erase, or cannot read. */
@@ -81,7 +87,7 @@ async function isFile(file: string): Promise<boolean> {
   }
 }
 
-/** Loads the configuration file (CF-1): see the module comment. */
+/** Loads the configuration file: see the module comment. [CF-1] */
 export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfig> {
   const file = resolve(options.cwd ?? process.cwd(), options.file ?? DEFAULT_CONFIG_FILE);
   if (!(await isFile(file))) {
@@ -89,7 +95,7 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
       file,
       "file-not-found",
       `no configuration file at ${file}: a process loads ${DEFAULT_CONFIG_FILE} from its working directory, or the ` +
-        "file given with --config (CF-1)",
+        "file given with --config",
     );
   }
   let module: Record<string, unknown>;
@@ -105,7 +111,7 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
       file,
       "load-failed",
       `the configuration file ${file} could not be loaded: ${(error as Error | null)?.message ?? String(error)}` +
-        `${syntax} (CF-1)`,
+        syntax,
       { errorCode: typeof errorCode === "string" ? errorCode : null },
       error,
     );
@@ -115,7 +121,7 @@ export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfi
       file,
       "no-default-export",
       `the configuration file ${file} has no default export: it exports its configuration as ` +
-        "export default defineConfig({ entries: [ … ] }) (CF-1)",
+        "export default defineConfig({ entries: [ … ] })",
     );
   }
   const data = plainData(module.default, file);
@@ -132,7 +138,7 @@ function modulesOf(module: Record<string, unknown>, file: string): readonly unkn
       file,
       "modules-not-a-list",
       `the configuration file ${file} exports modules as ${found}: its modules export is the list of the user modules ` +
-        "it imports, as export const modules = [stats] (CF-1)",
+        "it imports, as export const modules = [stats]",
       { found },
     );
   }

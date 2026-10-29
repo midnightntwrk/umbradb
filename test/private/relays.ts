@@ -4,12 +4,13 @@ import { type RawData, WebSocket, WebSocketServer } from "ws";
 import { type Message, messageText, parseMessage, type Report } from "../../src/private/messages.js";
 
 /**
- * Go-betweens of a private process and the core's transport for the tests of tasks 14.3 and 14.1c (PP-6, PP-14): a TCP
- * proxy whose target can change ({@link RetargetProxy}: a restarted core listens on another free port, and the private
- * process's `coreTransport` stays the proxy's), a WebSocket relay that can rewrite the reports a private process sends
- * ({@link ReportRelay}: a `report` whose hash is not the public block's, without changing the private process), and a
- * WebSocket relay that holds a private process's messages until the test releases them ({@link HoldingRelay}). Imports
- * nothing of Vitest.
+ * Go-betweens of a private process and the core's transport, for the lockstep and core-restart tests. Imports nothing
+ * of Vitest. [PP-6, PP-14]
+ * - {@link RetargetProxy}: a TCP proxy whose target can change. A restarted core listens on another free port, and the
+ *   private process's `coreTransport` stays the proxy's.
+ * - {@link ReportRelay}: a WebSocket relay that can rewrite the reports a private process sends, giving a `report`
+ *   whose hash is not the public block's without changing the private process.
+ * - {@link HoldingRelay}: a WebSocket relay that holds a private process's messages until the test releases them.
  */
 
 /** `host:port` split. */
@@ -158,9 +159,9 @@ function typeOf(text: string): string | null {
 /**
  * A WebSocket relay to the core's transport whose target can change ({@link retarget}, as a restarted core listens on
  * another free port), and which holds a private process's messages from the first of a held type on ({@link hold}:
- * `hello`, or `read`) until {@link release} — task 14.1c's core restarted between a private start's read of the public
- * history and its first `hello-ack` (PostgreSQL, `hello` held), or between that `hello-ack` and its first read through
- * the core (PGlite, `read` held). Each connection a private process makes gets a connection of its own to the target,
+ * `hello`, or `read`) until {@link release}. This lets a test restart the core between a private start's read of the
+ * public history and its first `hello-ack` (PostgreSQL, `hello` held), or between that `hello-ack` and its first read
+ * through the core (PGlite, `read` held). Each connection a private process makes gets a connection of its own to the target,
  * made when its first message is passed on (none while the target is null: the private process's connection is then
  * ended); the core's messages and each close are passed back.
  */

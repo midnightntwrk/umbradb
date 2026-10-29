@@ -25,20 +25,20 @@ import {
 import { historyInput, historyRows, migrationRows, rejection, startup, storedRows } from "./history-startup.js";
 
 /**
- * The configuration history in `core_chain.config` (tasks 4.3, 4.3a; CF-5 to CF-8, A28's history half, A30, A31, A33), on
- * both backends, through a startup standing in for the runner's (`./history-startup.ts`): the history read and checked
- * before any migration, then `startDatabase` with `core-chain` first — its migration `001` creates the table, its
- * `on-start-db` compares again and records, in one transaction. The pure rules are `./history.test.ts`'s; here the rows,
- * the transactions and what the database holds after each startup.
+ * The configuration history in `core_chain.config`, on both backends, through a startup standing in for the
+ * runner's (`./history-startup.ts`). The history is read and checked before any migration. Then `startDatabase` runs
+ * with `core-chain` first: its migration `001` creates the table, and its `on-start-db` compares again and records, in
+ * one transaction. The pure rules are tested in `./history.test.ts`; this file tests the rows, the transactions and
+ * what the database holds after each startup. [CF-5, CF-6, CF-7, CF-8, A28, A30, A31, A33]
  *
- * "Startup refuses" through the runner's refused state, "processing continues" after the core's stop is raised, and the
- * cursor read from the `blocks` table are tasks 5.x and 10.2's: here the cursor is given, as task 2.4's A72 test gave
- * the history.
+ * Tested elsewhere: "startup refuses" through the runner's refused state, "processing continues" after the core's stop
+ * is raised, and the cursor read from the `blocks` table. Here the cursor is given. [A72]
  *
- * The committed negative controls: A33's — the version check run after the migrations instead of before: the refusal
- * still comes, but a `core_chain.migrations` row was added, which A33 forbids —, and A30's (Q103 B, task 4.3a) — the
- * delete of an omitted row above the cursor committed outside the transaction that records: a failure between the
- * delete and the insert then leaves a history no configuration was accepted with.
+ * The committed negative controls:
+ * - the version check run after the migrations instead of before: the refusal still comes, but a
+ *   `core_chain.migrations` row was added, which must not happen; [A33]
+ * - the delete of an omitted row above the cursor committed outside the transaction that records: a failure between
+ *   the delete and the insert then leaves a history no configuration was accepted with. [A30, Q103 B]
  */
 
 /** `m` 1.0.0's revision from `start`. */
@@ -48,10 +48,10 @@ function m(start: number, config: Record<string, unknown> = {}, stop?: number) {
 
 const M_DEFAULTS = { limit: 10, mode: "full" } as const;
 
-/** `m`'s table item for a build whose `m` 1.0.0 names its table item otherwise (task 14.1a's test of `provides`). */
+/** `m`'s table item for a build whose `m` 1.0.0 names its table item otherwise (for the test of `provides`). */
 const M_ALL = { name: "m-all", lifetimes: ["table" as const], table: { schema: "m", tables: ["rows"], kind: "append-only" as const } };
 
-/** Each row's `provides` (PP-13), as `<id>@<start> <items…>`, in key order. */
+/** Each row's `provides`, as `<id>@<start> <items…>`, in key order. [PP-13] */
 async function providesRows(db: Database): Promise<string[]> {
   const rows = await db.read((read) =>
     read.query(`SELECT entry_id, start, provides FROM core_chain.config ORDER BY entry_id COLLATE "C", start`),
@@ -143,7 +143,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
         read.query("SELECT pg_get_userbyid(relowner) = current_user AS login FROM pg_class WHERE oid = 'core_chain.config'::regclass"),
       );
       expect(owner).toEqual({ login: true });
-      // Every module role reads it (DB-6, task 2.4's default privileges on core_chain); none writes it.
+      // Every module role reads it (through the default privileges on core_chain); none writes it. [DB-6]
       for (const { role } of schemaPlan(started.graph.modules).schemas) {
         const [privileges] = await db.read((read) =>
           read.query(
@@ -201,8 +201,8 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       expect(await providesRows(db)).toEqual(["core@0 blocks", "m@0 m-rows", "m@50 m-rows", "m@90 m-rows"]);
       // One transaction wrote them all, with the rest of each row: core-chain's on-start-db.
       expect(new Set((await storedRows(db)).map((row) => row.xmin)).size).toBe(1);
-      // A build whose m 1.0.0 declares another table item: the revisions above the cursor (40) take it, those at or
-      // below it keep theirs (CF-6) — the core's, from 0, too —; an unchanged restart then writes nothing.
+      // A build whose m 1.0.0 declares another table item: the revisions above the cursor (40) take it, and those at
+      // or below it keep theirs, the core's from 0 too. An unchanged restart then writes nothing. [CF-6]
       const other = moduleM("1.0.0", { provides: [M_ALL] });
       const restart = { entries, user: [other], cursor: 40n, backbone: [CORE_BLOCK_COMMIT] } as const;
       await startup(db, restart);
@@ -316,7 +316,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
         "m@10 1.0.0",
         "m@30 1.0.0",
       ]);
-      // A private process reads the same hash from the public database (PP-14: its check without a transport).
+      // A private process reads the same hash from the public database (its check without a transport). [PP-14]
       expect((await db.read((read) => readPublicConfiguration(read))).configHash).toBe(first);
       await startup(db, {
         entries: [core(0, { tipCap: 6, node: "wss://u:other-secret@node" }), m(10, { pollMs: 6, token: "secret-4-3" }), m(30, { limit: 4 })],
@@ -340,7 +340,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       for (const entries of [[core(0, {}, 20), m(0)], [CORE, m(0)]]) {
         const started = await startup(db, { entries, user: [M_1_0], cursor: 10n });
         expect(await storedRows(db)).toEqual(before);
-        // Nothing the startup gives the runner ends at 10: the graph runs on past it (the runner's stop is task 5.3's).
+        // Nothing the startup gives the runner ends at 10: the graph runs on past it (the runner's stop is tested elsewhere).
         expect(started.graph.rangeAt(11n)?.order.map((part) => part.id)).toContain("m");
         expect(started.graph.ranges.at(-1)?.range.to).toBeNull();
       }
@@ -491,7 +491,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
         data: null,
         data_hash: null,
       });
-      // One carrying a config is refused (task 4.2's rule), nothing recorded.
+      // One carrying a config is refused by the configuration validation, and nothing is recorded.
       const before = await storedRows(db);
       const scheduled = await rejection(
         startup(db, {
@@ -502,7 +502,7 @@ describe.each(BACKENDS)("the configuration history in core_chain.config, on $nam
       );
       expect((scheduled as UmbraError).code).toBe("invalid-configuration");
       expect(await storedRows(db)).toEqual(before);
-      // The 1.0.0 build stopped at 49 (RN-12); the 1.1.0 build starts with 1.0.0's revision written as recorded.
+      // The 1.0.0 build stopped at 49; the 1.1.0 build starts with 1.0.0's revision written as recorded. [RN-12]
       const old = versionEntry({ id: "m", start: 1, version: "1.0.0", config: { foo: 1 } });
       const started = await startup(db, { entries: [CORE, old, M_BAR.entry({ start: 50, stop: 80, config: { bar: 1 } })], user: [M_BAR], cursor: 49n });
       expect(started.applied).toEqual([{ module: "m", migration: "002", position: 2 }]);

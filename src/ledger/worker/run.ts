@@ -1,20 +1,25 @@
 /**
- * The ledger worker thread's main (`openspec/changes/core-arch/design.md` §5.3, §5.5; `specs/ledger/spec.md` LG-10,
- * LG-17; `specs/modules/spec.md` MD-1; tasks 12.3, 12.6): {@link runLedgerWorker}, which the host program's ledger worker
- * entry calls with the modules it ships — on the main thread and in this entry alike (MD-1) — so that the worker has
- * their ledger tasks: functions cannot cross between threads. UmbraDB's own entry (`./entry.ts`) is one: UmbraDB's core
- * modules' tasks (`src/backbone/ledger-tasks.ts`), and the user modules of a module the host names
- * (`LedgerWorkerOptions.modules`: for the `umbradb` command its configuration file, the host program, CF-1, Q106); a
- * program that starts processes itself may give `startLedgerWorker` an entry of its own (`LedgerWorkerOptions.entry`)
- * calling `runLedgerWorker([...CORE_LEDGER_TASK_MODULES, ...its modules])`, and the browser build runs UmbraDB's entry
- * in its ledger worker's bundle (§9.2).
+ * The ledger worker thread's main function, {@link runLedgerWorker}. The host program's ledger worker entry calls it
+ * with the modules the program ships, the same modules as on the main thread, so the worker has their ledger tasks:
+ * functions cannot cross between threads. [LG-10, LG-17, MD-1; design §5.3, §5.5]
  *
- * It runs the engine (`./engine.ts`) over the adapters `../load.ts` loads — or a test package's loader
- * (`workerData.loader`) — and the worker's side of the node-store bridge (`./node-bridge.ts`), answering the main
- * thread's requests one at a time, in the order they came (`./host.ts`). A package that traps (a WebAssembly
- * `RuntimeError`) — in a request's work or in a ledger task — leaves its module in no known state: the answer says so
- * (`fatal`), nothing runs after it, and the host ends the thread. Runs only as a thread of its own (out of coverage; what
- * it runs, the engine and the bridge, is covered on the main thread too).
+ * Entries that call it:
+ * - UmbraDB's own entry (`./entry.ts`): the tasks of UmbraDB's core modules (`src/backbone/ledger-tasks.ts`), plus the
+ *   user modules of a module the host names (`LedgerWorkerOptions.modules`; for the `umbradb` command, its
+ *   configuration file, which is the host program). [CF-1, Q106]
+ * - An entry of a program that starts processes itself, given to `startLedgerWorker` as `LedgerWorkerOptions.entry`,
+ *   which calls `runLedgerWorker([...CORE_LEDGER_TASK_MODULES, ...its modules])`.
+ * - The browser build, which runs UmbraDB's entry in its ledger worker's bundle. [design §9.2]
+ *
+ * It runs the engine (`./engine.ts`) over the adapters `../load.ts` loads, or over a test package's loader
+ * (`workerData.loader`), together with the worker's side of the node-store bridge (`./node-bridge.ts`). It answers the
+ * main thread's requests one at a time, in the order they came (`./host.ts`).
+ *
+ * A package that traps (a WebAssembly `RuntimeError`), in a request's work or in a ledger task, leaves its module in no
+ * known state. The answer says so (`fatal`), nothing runs after it, and the host ends the thread.
+ *
+ * It runs only as a thread of its own, so it is out of coverage; what it runs, the engine and the bridge, is covered on
+ * the main thread too.
  */
 
 import { parentPort, workerData } from "node:worker_threads";

@@ -5,11 +5,15 @@ import { launchPublicCore } from "./builds.js";
 import { instancesProblems, instancesRun, originOf } from "./privacy-checks.js";
 
 /**
- * A120 `[CI]` (task 14.4; PP-9, AE-5; its key half withdrawn by owner decision Q154, task 14.4a), on PostgreSQL 18.6 and
- * PGlite 0.5.10: the core's `/status` shows of each private instance only its id, connection, lockstep flag and synced
- * height — a lockstep instance at the head, an independent one connected —, each instance its public cursor and its
- * lockstep flag; and a listed instance the core never saw, not connected, lockstep, with no height. The committed
- * negative control, a core whose `/status` shows more of an instance, is `./privacy.negative-control.test.ts`'s.
+ * What the core's `/status` shows of a private instance, on PostgreSQL 18.6 and PGlite 0.5.10. Keys are not checked
+ * here: they belong to a module, not the core. [A120 CI, PP-9, AE-5, Q154]
+ * - The core shows each private instance with only its id, connection, lockstep flag and synced height: a lockstep
+ *   instance at the head, an independent one connected. [A120 CI, PP-9]
+ * - Each instance shows its public cursor and its lockstep flag. [A120 CI]
+ * - A listed instance the core never saw shows as not connected, lockstep, with no height. [PP-9, Q24]
+ *
+ * The committed negative control, a core whose `/status` shows more of an instance, is in
+ * `./privacy.negative-control.test.ts`.
  */
 
 describe.each(PRIVATE_BACKENDS)("A120: what the core's /status shows of a private instance on $name (PP-9)", (backend) => {

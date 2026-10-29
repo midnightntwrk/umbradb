@@ -28,9 +28,11 @@ import {
 import { compact } from "./fetch-fixtures.js";
 
 /**
- * Task 11.1's decoding (CD-4): the metadata's storage entries, the values read with a type registry and their canonical
- * JSON, and a block's chain events — every phase, topics, the records' bytes, an upgrade block's events against the old
- * and the new runtime, and every refusal. The process-level criteria (A91–A93) are `chain-data.test.ts`'s.
+ * The decoding of chain events. The tests cover the metadata's storage entries, the values read with a type registry
+ * and their canonical JSON, and a block's chain events: every phase, topics, the records' bytes, an upgrade block's
+ * events against the old and the new runtime, and every refusal. [CD-4]
+ *
+ * The process-level criteria are tested in `chain-data.test.ts`. [A91, A92, A93]
  */
 
 const bytesOf = (...values: number[]): Uint8Array => Uint8Array.from(values);

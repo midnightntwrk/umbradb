@@ -12,9 +12,9 @@ import { ev, SYSTEM_EVENTS_STORAGE, eventsRead, eventsValue } from "./events-fix
 import { type ChainBlock, chainOf, headRead, hex, newHead, subscriptions } from "./fetch-fixtures.js";
 
 /**
- * Where a block's chain events come from (task 11.1; CD-4, IN-8, IN-10): the node source reads `System::Events` with
- * `state_getStorage` at the block's own hash — a finalized height's with the client's retries, a queued best block's
- * without (IN-10) — and the in-memory source gives none.
+ * Where a block's chain events come from. The node source reads `System::Events` with `state_getStorage` at the
+ * block's own hash: for a finalized height with the client's retries, for a queued best block without them. The
+ * in-memory source gives none. [CD-4, IN-8, IN-10]
  */
 
 const quiet: ConnectSocket = (url, events, timers) => connectWebSocket(url, events, timers, { heartbeatMs: 3_600_000 });

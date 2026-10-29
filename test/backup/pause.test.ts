@@ -34,18 +34,18 @@ import {
 import { chain, restoreRun } from "./restore-fixtures.js";
 
 /**
- * A163 `[CI]` (task 15.1a; BK-1 as amended, CF-4's `backupOnSignal`, RN-13; owner decision Q152 B; `design.md` §9.1), on
- * PGlite 0.5.10 with a running process (`./pause-fixtures.ts`: the backups' build with a recorder of every point):
+ * On PGlite 0.5.10 with a running process (`./pause-fixtures.ts`: the backups' build with a recorder of every point):
+ * [A163 CI, BK-1, CF-4, RN-13, Q152 B; design §9.1]
  * - paused (`ProcessHandle.pause()`) while it processes a height, it pauses once that height committed and its later
  *   points ended, no block transaction open, and starts nothing while paused; resumed, it goes on from the next height;
  *   three pauses on the way to the core's stop at 60 lose and repeat no height — every height's points once, and the
  *   committed heights and the contents hash those of an unpaused run to 60;
  * - paused while it waits for the head, at once, and nothing starts when the head rises; a stop while paused ends the
- *   process (RN-13); `pause()` after processing ended resolves at once;
+ *   process; `pause()` after processing ended resolves at once [RN-13];
  * - with `backupOnSignal`, a SIGUSR2 that arrives while height 20 is processed writes a backup of 20 at the next pause,
  *   nothing running while it is written, and the process goes on from 21; the file restores with `umbradb restore` like
- *   any other, every check of BK-3 passing, its contents hash an unpaused run's at 20; a second SIGUSR2 meanwhile adds
- *   none; the listener is gone once the process closed;
+ *   any other, every restore check passing, its contents hash an unpaused run's at 20; a second SIGUSR2 meanwhile adds
+ *   none; the listener is gone once the process closed [BK-3];
  * - SIGUSR2 on a process stopped at the core's stop writes a backup of that height, and none again while the file is one
  *   of that height; while stopping, or with a stop before the pause, none; before any height committed the backup is
  *   refused (`no-committed-height`) and the process goes on; a process whose startup refused writes none.
@@ -53,7 +53,7 @@ import { chain, restoreRun } from "./restore-fixtures.js";
  * `test/runner/pause.test.ts`; the committed negative controls `./pause.negative-control.test.ts`.
  */
 
-/** Each test waits on purpose for processes to reach heights (task 0.5's notes): its own budget, for a loaded machine. */
+/** Each test waits on purpose for processes to reach heights: its own budget, for a loaded machine. */
 const TEST_TIMEOUT_MS = 900_000;
 
 const PGLITE = BACKUP_BACKENDS[1] as BackupBackend;
@@ -215,7 +215,7 @@ describe("A163: SIGUSR2 writes a backup at the next pause (backupOnSignal, BK-1,
       eachHeightOnce(run.points(), 1n, head);
       const manifest = manifestOf(out);
       expect(manifest).toMatchObject({ height: "20", contentsHash, tool: { name: "pglite-tools" } });
-      // Restored like any other backup: every check of BK-3 passes, and it holds height 20.
+      // Restored like any other backup: every restore check passes, and it holds height 20. [BK-3]
       const target = await PGLITE.database();
       const restored = await restoreRun(project, out, writePausableConfig(project, { database: target.setting }), chain(head));
       expect(restored.stderr).toBe("");

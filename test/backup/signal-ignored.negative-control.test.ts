@@ -16,15 +16,16 @@ import {
 } from "./signal-ignored-fixtures.js";
 
 /**
- * A175's negative controls (task 15.1c; BK-1, owner decision Q173 C), each failing an oracle of
- * `./signal-ignored-fixtures.ts` that `./signal-ignored.test.ts` passes:
+ * The ignored-signal tests' negative controls, each failing an oracle of `./signal-ignored-fixtures.ts` that
+ * `./signal-ignored.test.ts` passes: [A175, BK-1, Q173 C]
  *
  * - **A command that does not listen** — `runProcess` (`./signal-ignored.worker.ts`, the command's stand-in) whose
- *   SIGUSR2 reaches no listener, as task 15.1a shipped it without `backupOnSignal` — fails `sigusr2Ignored`: Node.js's
- *   default ends it at the signal. The same stand-in with the command's own signals passes, so the failure is the
- *   missing listener, not the stand-in.
- * - **A host program's process that listens anyway** — `startProcess` given the command's relay of SIGUSR2 (Q173's
- *   option B: every process listens) — fails `listenerProblems`: one SIGUSR2 listener more while it runs.
+ *   SIGUSR2 reaches no listener, as the command once shipped without `backupOnSignal` — fails `sigusr2Ignored`:
+ *   Node.js's default ends it at the signal. The same stand-in with the command's own signals passes, so the failure is
+ *   the missing listener, not the stand-in.
+ * - **A host program's process that listens anyway** — `startProcess` given the command's relay of SIGUSR2 (the
+ *   rejected option where every process listens) — fails `listenerProblems`: one SIGUSR2 listener more while it runs
+ *   [Q173 C].
  */
 
 const TEST_TIMEOUT_MS = 900_000;
@@ -48,7 +49,7 @@ afterAll(async () => {
   project?.remove();
 }, 120_000);
 
-/** A175's oracle applied to the command's stand-in with `signals`. */
+/** The command oracle applied to the command's stand-in with `signals`. [A175] */
 async function standIn(signals: WorkerSignals): Promise<void> {
   const node = await pacedNode();
   const cwd = join(dir, signals);

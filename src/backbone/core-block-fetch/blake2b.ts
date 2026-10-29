@@ -1,6 +1,6 @@
 /**
  * BLAKE2b-256 (RFC 7693, unkeyed, a 32-byte digest): the hash of a Substrate block header, which the Midnight node's
- * head notifications carry without its hash (task 10.1's note (c); `./header.ts`). Node.js's `crypto` offers BLAKE2b
+ * head notifications carry without its hash (`./header.ts`). Node.js's `crypto` offers BLAKE2b
  * only with a 64-byte digest (`blake2b512`), and a shorter BLAKE2b digest is not a prefix of it (the digest length is
  * hashed in), so the compression function is written out here. Checked against RFC 7693's and Python's `hashlib`
  * vectors and a real mainnet header (`test/backbone/block-fetch-scale.test.ts`). Pure: no Node.js import.

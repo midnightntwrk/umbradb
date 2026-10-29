@@ -1,42 +1,52 @@
 /**
- * Schema validation of the configuration (`openspec/changes/core-arch/specs/configuration/spec.md` CF-3, CF-4, CF-5;
- * `design.md` §7; CORE-ARCH §4.12): every entry of the loaded configuration (`./load.ts`, the plain data CF-1 allows)
- * is validated at startup, because types are gone at run time — its shape, and the settings of every revision whose
- * version is this build's against the schema in this build, with the declared defaults applied and each field
- * classified by its kind (`data`, `operational`, `secret`). Any violation refuses with `invalid-configuration`, naming
- * the entry and the field.
+ * Schema validation of the configuration. Types are gone at run time, so every entry of the loaded configuration
+ * (`./load.ts`, already checked to be plain data) is validated at startup: its shape, and the settings of every
+ * revision whose version is this build's, against the schema in this build. The declared defaults are applied and each
+ * field is classified by its kind (`data`, `operational`, `secret`). Any violation refuses with
+ * `invalid-configuration`, naming the entry and the field. [CF-1, CF-3, CF-4; CORE-ARCH §4.12; design §7]
  *
- * **Two steps, because the database is opened in between.** {@link validateConfig} needs only the loaded data, the
- * build's validated declarations (`validateDeclarations`, `../modules/validation.ts`) and the process's side; it gives
- * the `core` entry's settings that open the database (`database`, `developmentOptIn`, `fullPageWritesOffAllowed`).
- * {@link entriesAtCursor} then takes the database's cursor (null on a new database) and completes CF-3's checks of the
- * revisions whose version is not the build's (`versionEntry`): one starting above the cursor is scheduled and carries
- * no `config`; one starting at or below it carries the `config` recorded for it. Comparing those with the recorded
- * history, recording and re-recording are `core-chain`'s (task 4.3); `umbradb config check` without a database runs the
- * first step only (CF-10, task 4.4).
+ * **Two steps, because the database is opened in between.**
+ * - {@link validateConfig} needs only the loaded data, the build's validated declarations (`validateDeclarations`,
+ *   `../modules/validation.ts`) and the process's side. It gives the `core` entry's settings that open the database
+ *   (`database`, `developmentOptIn`, `fullPageWritesOffAllowed`).
+ * - {@link entriesAtCursor} then takes the database's cursor (null on a new database) and finishes checking the
+ *   revisions whose version is not the build's (`versionEntry`). One starting above the cursor is scheduled and
+ *   carries no `config`; one starting at or below it carries the `config` recorded for it. [CF-3]
  *
- * **The checks** are rules ({@link CONFIG_RULES}, {@link CURSOR_RULES}), each finding its own violations independently,
- * so that every violation of a configuration is reported at once, top-level ones first, then by entry, each entry's in
- * the rules' order. A path is written as the plain-data check writes it (`entries[1].config.pollMs`), and an entry is
- * named by its position, id and start (CF-5's identity). The shape (CF-3): the default export is `{ entries }` and
- * nothing else; each entry is `{ id, start, stop?, version, config }` with no other property — the builders pass a
- * property they do not know through (`./entries.ts`) to be refused here —, its id `core` or a module of the build
- * (never a backbone part's, which runs with the core) of the process's side (PP-1: a private process runs private
- * modules, the core public ones), its start and stop heights with `stop ≥ start`, its version a
- * semver string for a module and a core version for `core` (`CORE_VERSION_SCHEMA`), its `config` an object, required
- * for a revision of the build's version; `(id, start)` once; at least one `core` entry, whose earliest start is S; and
- * no string or key holding a lone UTF-16 surrogate (which has no UTF-8 form, so the history could not record or hash it,
- * CF-7: refused here with its path rather than later by the canonical encoding).
+ * Comparing those with the recorded history, recording and re-recording belong to `core-chain`. `umbradb config check`
+ * without a database runs the first step only. [CF-10]
  *
- * **The settings** of a revision of the build's version (CF-3, CF-4): no field the schema does not declare — zod 4's
- * `z.object` strips an unknown key, so a misspelled setting would be silently dropped (CF-2's "startup refuses it as
- * well"); the key check against `schema.shape` covers every schema, strict or not, and a field of the other side's
- * `core` entry is named as such —, then the schema's own `safeParse` on the declared fields (duck-typed, never
- * `instanceof`, so a module bundling its own zod 4 copy works), each issue a finding at its path, its message passed
- * through the redaction (a module's custom message may repeat the value it refuses); and the parsed settings must
- * still be plain data (a schema that coerces into a bigint or a `Date` cannot be recorded, CF-7). The `core` entry's
- * schema is CF-4's for the process's side (`./core-settings.ts`); a module's is its declaration's `configSchema`, whose
- * every field carries a kind (MD-2, `field-no-kind`).
+ * **The checks** are rules ({@link CONFIG_RULES}, {@link CURSOR_RULES}), each finding its own violations independently.
+ * So every violation of a configuration is reported at once: top-level ones first, then by entry, each entry's in the
+ * rules' order. A path is written as the plain-data check writes it (`entries[1].config.pollMs`), and an entry is named
+ * by its position, id and start, which together identify it. [CF-5]
+ *
+ * The shape: [CF-3]
+ * - the default export is `{ entries }` and nothing else;
+ * - each entry is `{ id, start, stop?, version, config }` with no other property (the builders pass a property they do
+ *   not know through, `./entries.ts`, so it is refused here);
+ * - its id is `core` or a module of the build of the process's side, never a backbone part, which runs with the core. A
+ *   private process runs private modules, the core public ones [PP-1];
+ * - its start and stop are heights, with `stop ≥ start`;
+ * - its version is a semver string for a module, and a core version for `core` (`CORE_VERSION_SCHEMA`);
+ * - its `config` is an object, required for a revision of the build's version;
+ * - each `(id, start)` appears once [CF-5];
+ * - there is at least one `core` entry, whose earliest start is S;
+ * - no string or key holds a lone UTF-16 surrogate. It has no UTF-8 form, so the history could not record or hash it;
+ *   it is refused here, with its path, rather than later by the canonical encoding [CF-7].
+ *
+ * **The settings** of a revision of the build's version: [CF-3, CF-4]
+ * - No field the schema does not declare. zod 4's `z.object` strips an unknown key, so a misspelled setting would be
+ *   silently dropped instead of refused. The key check against `schema.shape` covers every schema, strict or not, and
+ *   a field of the other side's `core` entry is named as such. [CF-2]
+ * - Then the schema's own `safeParse` on the declared fields. It is duck-typed, never `instanceof`, so a module that
+ *   bundles its own copy of zod 4 works. Each issue is a finding at its path, its message passed through the redaction,
+ *   since a module's custom message may repeat the value it refuses.
+ * - The parsed settings must still be plain data: a schema that coerces into a bigint or a `Date` cannot be recorded.
+ *   [CF-7]
+ *
+ * The `core` entry's schema is the core settings schema for the process's side (`./core-settings.ts`). A module's is
+ * its declaration's `configSchema`, whose every field carries a kind (`field-no-kind`). [CF-4, MD-2]
  *
  * No message holds a setting's value: findings name paths, fields and types, and every message built from a schema's
  * issue or error is redacted with the secrets of the configuration (`./redact.ts`).
@@ -57,7 +67,7 @@ export interface ConfigInput {
   readonly config: { readonly file?: string | undefined; readonly data: PlainData };
   /** The build's declarations, validated (`validateDeclarations`): entries name its core and user modules. */
   readonly declarations: DeclarationSet<ModuleDeclaration>;
-  /** Whether this is the public (core) process or a private one: which `core` schema applies (CF-4). */
+  /** Whether this is the public (core) process or a private one, which decides the `core` schema. [CF-4] */
   readonly side: ProcessSide;
 }
 
@@ -82,7 +92,7 @@ export interface Finding {
   readonly message: string;
 }
 
-/** Each settings field's kind (CF-4). */
+/** Each settings field's kind. [CF-4] */
 export type FieldKinds = Readonly<Record<string, FieldKind>>;
 
 /** A zod 4 issue, as the validation reads it. */
@@ -149,23 +159,25 @@ export interface CheckedEntry {
   readonly index: number;
   readonly id: string;
   readonly start: number;
-  /** As written; null when absent (the effective stop, CF-5, is task 4.3's). */
+  /** As written; null when absent. The effective stop is worked out by the configuration history. [CF-5] */
   readonly stop: number | null;
   /** A module's semver version, or for `core` the core version. */
   readonly version: string | CoreVersion;
-  /** True when the version is this build's: its settings were validated against this build's schema (CF-3). */
+  /** True when the version is this build's: its settings were validated against this build's schema. [CF-3] */
   readonly buildVersion: boolean;
   /**
-   * The build's version: the parsed settings, every default applied (CF-3). Otherwise the `config` as written — never
-   * validated against this build's schema — or null when it has none (a scheduled `versionEntry`).
+   * For the build's version: the parsed settings, every default applied. Otherwise the `config` as written (never
+   * validated against this build's schema), or null when it has none (a scheduled `versionEntry`). [CF-3]
    */
   readonly settings: PlainObject | null;
   /**
-   * The build's version: every field of its schema with its kind (CF-4). Otherwise null: the data recorded for the
-   * revision is the only source of its fields' kinds (CF-3).
+   * For the build's version: every field of its schema with its kind. Otherwise null: the data recorded for the
+   * revision is the only source of its fields' kinds. [CF-3, CF-4]
    */
   readonly kinds: FieldKinds | null;
-  /** The build's version: the settings of kind `data` only — what the history records (CF-4, CF-7). Otherwise null. */
+  /**
+   * For the build's version: the settings of kind `data` only, which the history records. Otherwise null. [CF-4, CF-7]
+   */
   readonly data: PlainObject | null;
 }
 
@@ -174,7 +186,7 @@ export interface CheckedConfig {
   /** The file it was loaded from, or null. */
   readonly file: string | null;
   readonly side: ProcessSide;
-  /** S: the database's start height, the earliest start of a `core` entry (CF-2). */
+  /** S: the database's start height, the earliest start of a `core` entry. [CF-2] */
   readonly start: number;
   /** Every revision, in the file's order. */
   readonly entries: readonly CheckedEntry[];
@@ -182,7 +194,7 @@ export interface CheckedConfig {
 
 /** A revision placed against the database's cursor. */
 export interface PlacedEntry extends CheckedEntry {
-  /** It starts at or below the cursor: compared with its recorded row (CF-6, task 4.3). */
+  /** It starts at or below the cursor, so it is compared with its recorded row. [CF-6] */
   readonly started: boolean;
   /** It starts above the cursor and its version is not the build's: only id, start, stop and version are recorded. */
   readonly scheduled: boolean;
@@ -194,7 +206,7 @@ export interface CursorRule {
   check(config: CheckedConfig, cursor: bigint | null): readonly Finding[];
 }
 
-/** An entry's properties (CF-3). */
+/** An entry's properties. [CF-3] */
 const ENTRY_PROPERTIES = ["id", "start", "stop", "version", "config"];
 
 /** A lone UTF-16 surrogate: in a `u` expression a well-formed pair is one code point (as `src/determinism/cbor.ts`). */
@@ -226,9 +238,9 @@ function declaredKind(schema: SettingsSchema, field: string): FieldKind | undefi
 }
 
 /**
- * Every field of `schema` with its kind (CF-4), read as `schema.shape[field].meta().kind` (design §7). Throws an `Error`
- * for a field without one: the declarations the validation takes are validated, which refuses such a schema
- * (`field-no-kind`, MD-2).
+ * Every field of `schema` with its kind, read as `schema.shape[field].meta().kind`. Throws an `Error` for a field
+ * without one: the validation takes validated declarations only, and declaration validation already refuses such a
+ * schema (`field-no-kind`). [CF-4, MD-2; design §7]
  */
 export function fieldKinds(schema: { readonly shape: Readonly<Record<string, unknown>> }): FieldKinds {
   const kinds: Record<string, FieldKind> = {};
@@ -237,7 +249,7 @@ export function fieldKinds(schema: { readonly shape: Readonly<Record<string, unk
     if (kind === undefined) {
       throw new Error(
         `fieldKinds: the setting ${field} has no kind; validateDeclarations refuses a module whose setting has none ` +
-          "(field-no-kind, MD-2), and the validation takes validated declarations only",
+          "(field-no-kind), and the validation takes validated declarations only",
       );
     }
     kinds[field] = kind;
@@ -320,7 +332,7 @@ function viewsOf(input: ConfigInput): {
 /**
  * The secret strings of the configuration as the validation reads them before it checks anything — every string of a
  * `secret` setting or of one of no known kind (fail closed), and the URL passwords of the others — for a caller that
- * shows text built from the configuration before, or without, its validation (`umbradb config check`, task 4.4: the
+ * shows text built from the configuration before, or without, its validation (such as `umbradb config check` with the
  * compiler's messages, which may quote a literal). Never throws.
  */
 export function configSecrets(input: ConfigInput): string[] {
@@ -367,7 +379,7 @@ function issueFindings(
 ): Finding[] {
   return issues.flatMap((issue) => {
     const at = issue.path.reduce<string>((path, key) => pathOf(path, key as string | number | symbol), base);
-    const detail = `${redact(issue.message)} (CF-3)`;
+    const detail = redact(issue.message);
     if (issue.code === "unrecognized_keys" && issue.keys !== undefined) {
       return issue.keys.map((key) => finding(rule, pathOf(at, key), view, field([...issue.path, key]), detail));
     }
@@ -403,7 +415,7 @@ function editDistance(a: string, b: string): number {
   return previous[b.length] as number;
 }
 
-/** The fields of a `core` entry of the other side's process, which this side's has not (CF-4). */
+/** The fields of a `core` entry of the other side's process, which this side's has not. [CF-4] */
 function otherSideOnly(side: ProcessSide): readonly string[] {
   const own = coreSettingsSchema(side).shape;
   const other = coreSettingsSchema(side === "public" ? "private" : "public").shape;
@@ -414,7 +426,7 @@ function otherSideOnly(side: ProcessSide): readonly string[] {
 const schemaOf = (view: EntryView): string =>
   view.core ? "the core entry's settings schema" : `the settings schema of ${view.ref.id} ${String(view.object?.version)}`;
 
-/** The configuration's checks, in the order their findings are reported within one entry (CF-3, CF-5, CF-7). */
+/** The configuration's checks, in the order their findings are reported within one entry. [CF-3, CF-5, CF-7] */
 export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
   {
     name: "top-level",
@@ -428,7 +440,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
             "",
             null,
             null,
-            `the default export is ${described(data)}, where a configuration is { entries: [ … ] }: ${export_} (CF-1)`,
+            `the default export is ${described(data)}, where a configuration is { entries: [ … ] }: ${export_}`,
           ),
         ];
       }
@@ -440,8 +452,8 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
             pathOf("", key),
             null,
             null,
-            `the configuration has the property ${key}, where a configuration is { entries: [ … ] } and nothing else ` +
-              "(CF-1, CF-3); remove it",
+            `the configuration has the property ${key}, where a configuration is { entries: [ … ] } and nothing else; ` +
+              "remove it",
           ),
         );
       if (!Array.isArray(data.entries)) {
@@ -452,8 +464,8 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
             null,
             null,
             data.entries === undefined
-              ? `the configuration has no list of entries: ${export_} (CF-1)`
-              : `the configuration's entries is ${described(data.entries)}, where it is a list of entries: ${export_} (CF-1)`,
+              ? `the configuration has no list of entries: ${export_}`
+              : `the configuration's entries is ${described(data.entries)}, where it is a list of entries: ${export_}`,
           ),
         );
       }
@@ -472,7 +484,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
             view,
             null,
             `the entry is ${described(view.value)}, where an entry is an object { id, start, stop?, version, config }, ` +
-              "as coreEntry, a module's entry or versionEntry builds it (CF-3)",
+              "as coreEntry, a module's entry or versionEntry builds it",
           ),
         ),
   },
@@ -489,7 +501,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
               view,
               key,
               `the entry has the property ${key}, which an entry does not have: its properties are id, start, stop, ` +
-                "version and config (CF-3); remove it, or correct its name",
+                "version and config; remove it, or correct its name",
             ),
           ),
       ),
@@ -500,12 +512,12 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
       objects(context).flatMap((view) => {
         const { id } = view.object;
         const at = (detail: string) => [finding("entry-id", `${view.path}.id`, view, "id", detail)];
-        if (id === undefined) return at("the entry has no id: an entry's id is core or the id of a module (CF-3)");
-        if (typeof id !== "string") return at(`the entry's id is ${described(id)}, where it is core or a module's id (CF-3)`);
+        if (id === undefined) return at("the entry has no id: an entry's id is core or the id of a module");
+        if (typeof id !== "string") return at(`the entry's id is ${described(id)}, where it is core or a module's id`);
         if (id === CORE_ENTRY_ID || context.modules.has(id)) return [];
         if (context.backbone.has(id)) {
           return at(
-            `${id} is a backbone part, which runs with the core entry and has no entry of its own (CF-3, design §6); ` +
+            `${id} is a backbone part, which runs with the core entry and has no entry of its own; ` +
               "remove this entry",
           );
         }
@@ -513,13 +525,12 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
         return at(
           `this build has no module ${id}: an entry's id is core or the id of one of the build's modules ` +
             `(${ids.length === 0 ? "it has none" : ids.join(", ")}) — UmbraDB's own, or a user module the host ` +
-            "program gives, which for the umbradb command is one the configuration file exports in its modules list " +
-            "(CF-1, CF-3)",
+            "program gives, which for the umbradb command is one the configuration file exports in its modules list",
         );
       }),
   },
   {
-    // A process runs the modules of its side only (PP-1, MD-1; task 14.1).
+    // A process runs the modules of its side only. [PP-1, MD-1]
     name: "entry-side",
     check: (context) =>
       objects(context).flatMap((view) => {
@@ -533,7 +544,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
             view,
             "id",
             `${module.id} is a ${module.side} module, and this configuration is a ${context.side} process's, which ` +
-              `runs ${context.side} modules only (PP-1, MD-1): enable it in a ${module.side} process's configuration, ` +
+              `runs ${context.side} modules only: enable it in a ${module.side} process's configuration, ` +
               "or remove this entry",
           ),
         ];
@@ -547,8 +558,8 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
         if (isHeight(start)) return [];
         const detail =
           start === undefined
-            ? "the entry has no start: the first height its revision covers (CF-3)"
-            : `the entry's start is ${described(start)}, where it is a height, an integer from 0 (CF-3)`;
+            ? "the entry has no start: the first height its revision covers"
+            : `the entry's start is ${described(start)}, where it is a height, an integer from 0`;
         return [finding("entry-start", `${view.path}.start`, view, "start", detail)];
       }),
   },
@@ -559,11 +570,11 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
         const { start, stop } = view.object;
         if (stop === undefined) return [];
         const at = (detail: string) => [finding("entry-stop", `${view.path}.stop`, view, "stop", detail)];
-        if (!isHeight(stop)) return at(`the entry's stop is ${described(stop)}, where it is a height, an integer from 0 (CF-3)`);
+        if (!isHeight(stop)) return at(`the entry's stop is ${described(stop)}, where it is a height, an integer from 0`);
         if (!isHeight(start) || stop >= start) return [];
         return at(
           `the entry stops at ${stop}, before its start ${start}: its stop is the last height it covers, at or after ` +
-            "its start (CF-3)",
+            "its start",
         );
       }),
   },
@@ -574,7 +585,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
         const { version } = view.object;
         const base = `${view.path}.version`;
         if (version === undefined) {
-          return [finding("entry-version", base, view, "version", "the entry has no version (CF-3): its builder fills it")];
+          return [finding("entry-version", base, view, "version", "the entry has no version: its builder fills it")];
         }
         if (view.core) {
           if (!isObject(version)) {
@@ -585,7 +596,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
                 view,
                 "version",
                 `the core's version is ${described(version)}, where it is a core version { umbradb, ledgers }, as ` +
-                  "coreEntry fills it from the build (CF-2, CF-3)",
+                  "coreEntry fills it from the build",
               ),
             ];
           }
@@ -600,7 +611,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
             base,
             view,
             "version",
-            `the entry's version is ${shown}, where a module's version is a semver version such as "1.0.0" (CF-3)`,
+            `the entry's version is ${shown}, where a module's version is a semver version such as "1.0.0"`,
           ),
         ];
       }),
@@ -618,11 +629,11 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
             : `${view.ref.id} ${String(view.object.version)}, the version this build carries`;
           return at(
             `the entry has no config: a revision of ${version} is validated against this build's schema, so it needs ` +
-              "its config (CF-3); only a versionEntry scheduled above the cursor has none",
+              "its config; only a versionEntry scheduled above the cursor has none",
           );
         }
         if (isObject(config)) return [];
-        return at(`the entry's config is ${described(config)}, where it is an object of settings (CF-3)`);
+        return at(`the entry's config is ${described(config)}, where it is an object of settings`);
       }),
   },
   {
@@ -645,7 +656,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
             view,
             null,
             `${id} from ${start} is also entries[${earlier}]: the configuration identifies an entry by its id and start, ` +
-              "so each appears once (CF-5); remove one, or give it another start",
+              "so each appears once; remove one, or give it another start",
           ),
         ];
       });
@@ -663,7 +674,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
               null,
               null,
               "the configuration has no core entry: it needs coreEntry({ start, config }), whose start is the " +
-                "database's start height S (CF-2, CF-4)",
+                "database's start height S",
             ),
           ],
   },
@@ -686,7 +697,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
             view,
             field,
             `the ${what} holds a lone UTF-16 surrogate, which has no UTF-8 form: the history records and hashes the ` +
-              "configuration as UTF-8 (CF-7); write it without one",
+              "configuration as UTF-8; write it without one",
           ),
         );
       };
@@ -723,7 +734,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
                 view,
                 key,
                 `${view.owner} has no setting ${key}: ${key} is a ${theirs} process's setting, and this process is ` +
-                  `${context.side} (CF-4); remove it`,
+                  `${context.side}; remove it`,
               );
             }
             const guess = closest(key, known);
@@ -733,7 +744,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
               view,
               key,
               `${view.owner} has no setting ${key}${guess === undefined ? "" : ` (did you mean ${guess}?)`}: its ` +
-                `settings are ${known.join(", ")} (CF-2, CF-3); remove it, or correct its name`,
+                `settings are ${known.join(", ")}; remove it, or correct its name`,
             );
           });
       }),
@@ -754,7 +765,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
               base,
               view,
               null,
-              `${schemaOf(view)} threw: ${context.redact(text)} (CF-3); a settings schema refuses a value with an ` +
+              `${schemaOf(view)} threw: ${context.redact(text)}; a settings schema refuses a value with an ` +
                 "issue, and parses synchronously",
             ),
           ];
@@ -779,8 +790,7 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
         const base = `${view.path}.config`;
         const detail =
           `${schemaOf(view)} gives a value here that is not plain data: settings are recorded, compared and shown as ` +
-          "plain data (CF-1, CF-7), so a schema must not turn a setting into another type, such as a bigint or a Date " +
-          "(CF-3)";
+          "plain data, so a schema must not turn a setting into another type, such as a bigint or a Date";
         // A zod object schema's output is an object (the declarations are validated: `configSchema` is one).
         return Object.entries(result.data).flatMap(([field, value]) => {
           try {
@@ -799,7 +809,7 @@ function refusal(file: string | null, findings: readonly Finding[]): UmbraError 
   const where = file === null ? "the configuration" : `the configuration ${file}`;
   return new UmbraError(
     "invalid-configuration",
-    `${where} is refused (CF-3): ${findings.map((found) => found.message).join("; ")}`,
+    `${where} is refused: ${findings.map((found) => found.message).join("; ")}`,
     { file, reason: "invalid-entries", findings: Object.freeze([...findings]) },
   );
 }
@@ -841,9 +851,9 @@ function checkedEntry(view: EntryView): CheckedEntry {
 }
 
 /**
- * Validates the configuration (CF-3, CF-4): see the module comment. Throws `invalid-configuration` (not retryable)
- * with `details { file, reason: "invalid-entries", findings }` when any rule finds a violation; returns every revision,
- * frozen, with its settings, kinds and data fields when its version is the build's.
+ * Validates the configuration: see the module comment. Throws `invalid-configuration` (not retryable) with
+ * `details { file, reason: "invalid-entries", findings }` when any rule finds a violation. Returns every revision,
+ * frozen, with its settings, kinds and data fields when its version is the build's. [CF-3, CF-4]
  */
 export function validateConfig(input: ConfigInput): CheckedConfig {
   const context = contextOf(input);
@@ -875,7 +885,7 @@ const startedAt = (entry: CheckedEntry, cursor: bigint | null): boolean => curso
 const cursorText = (cursor: bigint | null): string =>
   cursor === null ? "the cursor (a new database, which has committed nothing)" : `the cursor ${cursor}`;
 
-/** CF-3's checks of the revisions whose version is not the build's, once the cursor is known. */
+/** The checks of the revisions whose version is not the build's, once the cursor is known. [CF-3] */
 export const CURSOR_RULES: readonly CursorRule[] = Object.freeze([
   {
     name: "scheduled-config",
@@ -890,7 +900,7 @@ export const CURSOR_RULES: readonly CursorRule[] = Object.freeze([
             "config",
             `${revisionText(entry)} is a version this build does not carry, and the revision starts ` +
               `above ${cursorText(cursor)}: it is scheduled, so only its id, start, stop and version are recorded, and ` +
-              "the build that carries its version writes its config (CF-3); remove config from this versionEntry",
+              "the build that carries its version writes its config; remove config from this versionEntry",
           ),
         ),
   },
@@ -907,7 +917,7 @@ export const CURSOR_RULES: readonly CursorRule[] = Object.freeze([
             "config",
             `${revisionText(entry)} is a version this build does not carry, and the revision starts ` +
               `at or below ${cursorText(cursor)}: its config must be the data recorded for it, which the history ` +
-              "compares it with (CF-3, CF-6); write it as versionEntry({ id, start, version, config }) with that data",
+              "compares it with; write it as versionEntry({ id, start, version, config }) with that data",
           ),
         ),
   },
@@ -923,11 +933,14 @@ export function cursorFindings(
 }
 
 /**
- * CF-3's checks of the `versionEntry` revisions against the database's `cursor` — the last committed height, or null
- * on a new database: throws `invalid-configuration` (as {@link validateConfig}) for a scheduled one carrying a
- * `config` or an earlier one without its recorded `config`; returns every revision placed against the cursor —
- * `started` (to compare with its recorded row, task 4.3) or not, `scheduled` when it is not the build's version and
- * starts above the cursor (recorded with id, start, stop and version only).
+ * Checks the `versionEntry` revisions against the database's `cursor`: the last committed height, or null on a new
+ * database. Throws `invalid-configuration` (as {@link validateConfig} does) for a scheduled one that carries a `config`,
+ * or an earlier one without its recorded `config`. [CF-3]
+ *
+ * Returns every revision placed against the cursor:
+ * - `started` when it starts at or below the cursor, so it is compared with its recorded row [CF-6];
+ * - `scheduled` when it is not the build's version and starts above the cursor, so only its id, start, stop and version
+ *   are recorded.
  */
 export function entriesAtCursor(config: CheckedConfig, cursor: bigint | null): readonly PlacedEntry[] {
   const findings = cursorFindings(config, cursor);

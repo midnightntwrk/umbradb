@@ -9,16 +9,17 @@ import {
 } from "./checks.js";
 
 /**
- * The committed negative controls of A68, A69 and A70 (task 9.1): wrong tape tools, each of which must make the checks
- * `format.test.ts` and `node.test.ts` run (`checks.ts`) fail.
+ * The committed negative controls of the tape checks: wrong tape tools, each of which must make the checks
+ * `format.test.ts` and `node.test.ts` run (`checks.ts`) fail. [A68, A69, A70]
  *
  * - **A writer that orders a record's fields otherwise** (alphabetically): the committed tape is not what it writes,
- *   so A68's byte-for-byte round trip fails.
- * - **A tape node that answers by first match** instead of by occurrence: four calls get A, A, A, A, not A, B, C, C.
+ *   so the byte-for-byte round trip fails [A68].
+ * - **A tape node that answers by first match** instead of by occurrence: four calls get A, A, A, A, not A, B, C, C
+ *   [A69].
  * - **A tape node that ignores `delayMs`**, and **one that delays the next record too** (a delay carried on to the
- *   answers after it, as a node answering from one queue would): A69's delay check fails either way.
+ *   answers after it, as a node answering from one queue would): the delay check fails either way [A69].
  * - **A tape node that delivers a notification before the calls recorded ahead of it** have been answered (it lets
- *   its walk through the session pass call records not yet answered): A70's check fails.
+ *   its walk through the session pass call records not yet answered): the notification order check fails [A70].
  *
  * `vi.mock` replaces the rule functions of `tools/tape/rules.ts` and the line writer of `tools/tape/records.ts`
  * (`recordLine`, which the reader and writer of `tools/tape/tape.ts` call) in this file's module graph only; with

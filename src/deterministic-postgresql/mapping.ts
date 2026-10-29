@@ -1,12 +1,11 @@
 /**
- * The database API's result mapping and parameter texts (DB-2, `openspec/changes/core-arch/design.md` §4), a rule of
- * the `deterministic_postgresql` component, the same on every backend: each backend hands over PostgreSQL's text output
- * of a value with the column's type OID, and this module maps it. No driver parser is involved — `postgres` 3.4.9's
- * array parser reads an unquoted `NULL` element as the text "NULL" (docs/issues/00006), and the two backends' drivers
- * differ in other details.
+ * The database API's result mapping and parameter texts, a rule of the `deterministic_postgresql` component that is the
+ * same on every backend. Each backend hands over PostgreSQL's text output of a value with the column's type OID, and
+ * this module maps it. No driver parser is involved: `postgres` 3.4.9's array parser reads an unquoted `NULL` element
+ * as the text "NULL", and the two backends' drivers differ in other details. [DB-2; design §4]
  *
- * Results, by type (the types `design.md` §4's column-type table names, with `oid`, `name` and `"char"` for catalog
- * queries); every type the table below does not name, and an array of one, is returned as its text:
+ * Results, by type (the column types the determinism rules know, plus `oid`, `name` and `"char"` for catalog
+ * queries). Every type the table below does not name, and an array of one, is returned as its text: [design §4]
  *
  * | Type | Value |
  * |---|---|
@@ -28,14 +27,16 @@
  * shortest exact form. Output the mapping cannot read (`bytea` in escape form after a session changed `bytea_output`,
  * say) is refused, never guessed.
  *
- * **Date and time values (DB-2, owner decisions Q68 and Q81)** are rewritten as text, never parsed through a
- * JavaScript `Date`, whose parse of a text without a time zone follows the process's time zone (`2025-05-21 14:30:00`
- * is 14:30Z under `TZ=UTC`, 18:30Z in New York) and which keeps milliseconds only: PostgreSQL's ISO text
- * `2025-05-21 14:30:00.123456+00` becomes `2025-05-21T14:30:00.123456Z` by moving its characters, so the result is the
- * same in every process. The mapping reads exactly the form PostgreSQL prints under the pinned settings, a four-digit
- * year and the offset `+00`; anything else — a year above 9999 (`10000-01-01 00:00:00+00`), a BC date
- * (`0044-03-15 12:00:00+00 BC`), another offset after a session changed `TimeZone` — is output it cannot read, refused
- * like any other (Q81: no other rule). The fraction is kept as PostgreSQL prints it, without trailing zeros (`.12`).
+ * **Date and time values** are rewritten as text, never parsed through a JavaScript `Date`. A `Date` parses a text
+ * without a time zone in the process's time zone (`2025-05-21 14:30:00` is 14:30Z under `TZ=UTC`, 18:30Z in New York)
+ * and keeps milliseconds only. Instead, PostgreSQL's ISO text `2025-05-21 14:30:00.123456+00` becomes
+ * `2025-05-21T14:30:00.123456Z` by moving its characters, so the result is the same in every process. The fraction is
+ * kept as PostgreSQL prints it, without trailing zeros (`.12`). [DB-2, Q68, Q81]
+ *
+ * The mapping reads exactly the form PostgreSQL prints under the pinned settings: a four-digit year and the offset
+ * `+00`. Anything else is output it cannot read, refused like any other, with no special rule: a year above 9999
+ * (`10000-01-01 00:00:00+00`), a BC date (`0044-03-15 12:00:00+00 BC`), or another offset after a session changed
+ * `TimeZone`. [Q81]
  *
  * Parameters are sent as text with no type, so PostgreSQL types each from the statement as it types an untyped
  * literal (write `$1::bigint` where the statement does not say); {@link parameterText} gives each JavaScript value's
@@ -135,7 +136,7 @@ function parseDateText(text: string): string {
 }
 
 /**
- * JSON parsed without loss (DB-2), by a reader of RFC 8259's grammar written here, not `JSON.parse`:
+ * JSON parsed without loss, by a reader of RFC 8259's grammar written here, not `JSON.parse`: [DB-2]
  * - an integer written as digits outside ±(2^53 − 1) becomes a `bigint`; every other number is what `JSON.parse`
  *   makes of it (the `Number` of its text: `-0`, fractions, exponents, `1e400` as `Infinity`);
  * - strings, objects and arrays as `JSON.parse` builds them: every escape, each `\uXXXX` one UTF-16 code unit; a key
@@ -145,13 +146,14 @@ function parseDateText(text: string): string {
  *
  * Not `JSON.parse`, because Node.js 24.9.0's (V8 13.6.233.10) can read an object key that is one escape sequence
  * (`"\t"`, `"\n"`, `"\u00e9"`, …) as a backslash once an earlier `JSON.parse` in the process has read the key `"\\"`
- * — whether it does depends on the strings the process already holds — so two different documents would read back
- * equal, and so would their contents hashes (found by task 2.2's differential round trip; the decision record's Q78).
+ * (whether it does depends on the strings the process already holds). Two different documents would then read back
+ * equal, and so would their contents hashes; a differential round-trip test found this. [Q78]
+ *
  * It is a V8 bug in Node.js 24 (reproduced on 24.9.0, not on 24.2.0; reported upstream on 24.13.1–24.21.0) and Node.js
  * 26 (reported on 26.3.0–26.10.0): https://github.com/nodejs/node/issues/63785, fixed in V8 by
  * commit 93cd21e (https://github.com/v8/v8/commit/93cd21e8254b65c15ff131b2dcadf19beadb559d); the Node.js backport is
  * https://github.com/nodejs/node/pull/66542. Once every Node.js version UmbraDB supports carries the fix, this reader
- * may be replaced by `JSON.parse` with a source-text reviver (`docs/issues/00007`).
+ * may be replaced by `JSON.parse` with a source-text reviver.
  */
 export function parseJsonLossless(text: string): unknown {
   let at = 0;
@@ -335,9 +337,9 @@ export function mapValue(typeOid: number, text: string | null): unknown {
 
 /**
  * The key under which {@link mapRows} keeps a result's columns on the rows it returns: a non-enumerable property of the
- * array, so the rows are what they were for every reader, and a reader that needs the columns' types — the process
- * transport's `read-result`, which names each column's type (task 14.2, `src/private/core-transport.ts`) — reads them
- * with {@link resultColumns}.
+ * array, so the rows are what they were for every other reader. A reader that needs the columns' types reads them with
+ * {@link resultColumns}: the process transport's `read-result`, which names each column's type
+ * (`src/private/core-transport.ts`).
  */
 export const RESULT_COLUMNS: unique symbol = Symbol("umbradb.resultColumns");
 

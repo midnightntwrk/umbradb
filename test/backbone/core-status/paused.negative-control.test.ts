@@ -8,10 +8,10 @@ import { type ProcessBackend, PROCESS_BACKENDS } from "../../runner/process-back
 import { a176Project, keepingPause, pauseRun, signalRun, withoutPause } from "./paused-harness.js";
 
 /**
- * A176's committed negative controls (task 8.3b), on PostgreSQL 18.6 and PGlite 0.5.10 (SIGUSR2 on PGlite): the same
- * runs as `./paused.test.ts`'s, with the snapshots the runner publishes changed on their way to the admin worker, each
- * failing A176 in exactly the phases it should and nothing else:
- * - **never publishes the pause** (`withoutPause`, what `/status` showed before this task): the phases that wait for
+ * The committed negative controls for the paused condition, on PostgreSQL 18.6 and PGlite 0.5.10 (SIGUSR2 on PGlite).
+ * They are the same runs as `./paused.test.ts`'s, with the snapshots the runner publishes changed on their way to the
+ * admin worker. Each fails in exactly the phases it should and nothing else: [A176]
+ * - **never publishes the pause** (`withoutPause`, as `/status` was before it listed one): the phases that wait for
  *   `paused` never see it, and the reads meant to show the same pause later find none; every other phase passes;
  * - **keeps the pause after the loop runs again** (`keepingPause`): the phases after each `resume()` and after the
  *   backup was written never see the loop without `paused`, and the bodies read there list it with the cursor past the

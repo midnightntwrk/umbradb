@@ -7,12 +7,13 @@ import { committed, halted, ingest, PATIENCE_MS } from "./ingest-harness.js";
 import { modelOfFixture, SWEEP_LOADER, sweepCore, sweepTape, sweepWatcher, type TableSnapshot, tablesByHeight } from "./sweep-tapes.js";
 
 /**
- * A160's runs (task 12.5a; `openspec/changes/core-arch/acceptance.md` A160, LG-14, owner decision Q144 B), shared by
- * `ledger-eviction-restart.test.ts` and its negative controls: task 12.5's DAG fixture through the real process
- * (`./sweep-tapes.ts`: K = 50, a new root every block, nodes deleted from block {@link refusalHeight} on), its test
- * package (`test/ledger/fixtures/sweep-test-loader.ts`) refusing every eviction after applying block h in the first
- * `threads` worker threads — a live object the worker cannot free holding a swept node —, the threads' counters read
- * from memory they share with this one. Imports nothing of Vitest.
+ * The eviction-restart runs, shared by `ledger-eviction-restart.test.ts` and its negative controls. Imports nothing of
+ * Vitest. [A160, LG-14, Q144 B]
+ * - The sweep's DAG fixture runs through the real process (`./sweep-tapes.ts`: K = 50, a new root every block, nodes
+ *   deleted from block {@link refusalHeight} on).
+ * - Its test package (`test/ledger/fixtures/sweep-test-loader.ts`) refuses every eviction after applying block h in
+ *   the first `threads` worker threads, as if a live object the worker cannot free held a swept node.
+ * - The threads' counters are read from memory they share with this thread.
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
@@ -106,7 +107,7 @@ export function tableDifferences(got: ReadonlyMap<bigint, TableSnapshot>, expect
   return problems;
 }
 
-/** A halt's reason as A160 asks it: `callback-error` at `height`, in `core-ledger-state`'s `on-compute`. */
+/** The expected halt reason: `callback-error` at `height`, in `core-ledger-state`'s `on-compute`. [A160] */
 export const refusalHalt = (height: bigint) => ({
   state: "halted",
   cursor: height - 1n,

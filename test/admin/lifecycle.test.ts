@@ -33,13 +33,15 @@ import {
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * The admin endpoints' life with the process (task 8.1; AE-1, AE-3, IN-12, RN-13): `startProcess({ admin: true })`
- * serves them on the configuration's `listen.admin` from the moment its `core` revision is known — before the database
- * opens, so every later refusal answers there — until `stop()` has closed the database, then ends its worker thread and
- * its heartbeat, so nothing of it keeps Node.js alive; a listener that cannot listen refuses startup (`listen-failed`,
- * before the database opens); a startup refused by its configuration itself opens no admin listener and ends the
- * process (owner decision Q137 B, task 8.1b: `./refused-configuration.test.ts`, A157; here, a real process that ends
- * by itself). `ProcessAdmin` itself: what it publishes and when, its log lines, and closing at every step.
+ * The admin endpoints' life with the process:
+ * - `startProcess({ admin: true })` serves them on the configuration's `listen.admin` from the moment its `core`
+ *   revision is known until `stop()` has closed the database. That is before the database opens, so every later
+ *   refusal answers there. It then ends its worker thread and its heartbeat, so nothing of it keeps Node.js alive.
+ *   [AE-1, AE-3, IN-12, RN-13]
+ * - A listener that cannot listen refuses startup (`listen-failed`), before the database opens.
+ * - A startup refused by its configuration itself opens no admin listener and ends the process. Here that is a real
+ *   process that ends by itself; `./refused-configuration.test.ts` tests the rest. [Q137 B, A157]
+ * - `ProcessAdmin` itself: what it publishes and when, its log lines, and closing at every step.
  */
 
 const WORKER = fileURLToPath(new URL("./exit.worker.ts", import.meta.url));
@@ -82,7 +84,7 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints' life with the process on $
         settings: { network: "custom", genesisHash: ADMIN_GENESIS, database: shownDatabase(db.setting), node: "[redacted]" },
       },
     });
-    // CF-4, Q167 A: the parts are shown, the password never.
+    // The parts are shown, the password never. [CF-4, Q167 A]
     const { password } = db.setting as { password?: string };
     if (password !== undefined) expect(config.text).not.toContain(`"${password}"`);
     await handle.stop();

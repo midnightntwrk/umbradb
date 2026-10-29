@@ -7,11 +7,11 @@ import { PortSocket } from "../../browser/src/net/socket.js";
 import { WebSocket, WebSocketServer } from "../../browser/src/net/ws.js";
 
 /**
- * The page's message network, which carries the process transport between the browser's workers (task 16.1;
- * `browser/src/net/`), in one Node.js process over Node.js's own `MessageChannel`: the broker hands each connection a
- * channel, and the sockets on it do what `src/private/` needs of `ws` — text both ways, a ping answered by a pong, a
- * close whose code and reason both sides see (PP-6's `report-hash-mismatch` is one), `terminate` as 1006, a refused
- * connection, an address in use. Chrome runs the same code in `browser.test.ts` (A129).
+ * The page's message network, which carries the process transport between the browser's workers (`browser/src/net/`),
+ * in one Node.js process over Node.js's own `MessageChannel`: the broker hands each connection a channel, and the
+ * sockets on it do what `src/private/` needs of `ws` — text both ways, a ping answered by a pong, a close whose code
+ * and reason both sides see (the lockstep `report-hash-mismatch` close is one), `terminate` as 1006, a refused
+ * connection, an address in use. Chrome runs the same code in `browser.test.ts`. [PP-6, A129]
  */
 
 /** The next event `name` of `emitter`, with its arguments. */

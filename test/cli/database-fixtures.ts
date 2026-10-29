@@ -11,18 +11,23 @@ import { startup } from "../config/history-startup.js";
 import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer } from "../db/postgres-server.js";
 
 /**
- * Databases for the `--database` half of A35 (CF-10, task 4.4), on PostgreSQL 18 (the repository's one image through
- * Testcontainers, `../db/postgres-server.ts`) and PGlite 0.5.10 (a data directory on disk, which another process — the
- * command in a child process — can open): each holds a configuration history recorded by a startup standing in for the
- * runner's (`../config/history-startup.ts`, with `core-block-commit`, whose `core_block_commit.blocks` holds the cursor)
- * and committed blocks up to a cursor, as a process leaves its database. A {@link Snapshot} is what A35 compares before
- * and after a check: every table's row count, and the rows of `core_chain.migrations` and `core_chain.config` with the
- * transaction that wrote each (`xmin`), each list sorted. Everything here reads and writes outside the command; the PGlite databases are
- * opened through `openPgliteOn`, which takes no operating-system lock, so the command — in this process or another —
- * takes it as it would on a real database.
+ * Databases for the `--database` tests of `umbradb config check`. They run on PostgreSQL 18 (the repository's one
+ * image through Testcontainers, `../db/postgres-server.ts`) and on PGlite 0.5.10 (a data directory on disk, which
+ * another process, such as the command in a child process, can open). Each holds:
+ * - a configuration history recorded by a startup standing in for the runner's (`../config/history-startup.ts`, with
+ *   `core-block-commit`, whose `core_block_commit.blocks` holds the cursor);
+ * - committed blocks up to a cursor, as a process leaves its database.
+ * [A35, CF-10]
+ *
+ * A {@link Snapshot} is what the tests compare before and after a check: every table's row count, and the rows of
+ * `core_chain.migrations` and `core_chain.config` with the transaction that wrote each (`xmin`), each list sorted.
+ * [A35]
+ *
+ * Everything here reads and writes outside the command. The PGlite databases are opened through `openPgliteOn`, which
+ * takes no operating-system lock, so the command (in this process or another) takes it as it would on a real database.
  */
 
-/** A35's "unchanged": every table and its row count, and the rows of the two `core_chain` tables with their `xmin`. */
+/** "Unchanged": every table and its row count, and the rows of the two `core_chain` tables with their `xmin`. [A35] */
 export interface Snapshot {
   /** Whether a database exists there at all (a PGlite directory may not). */
   readonly exists: boolean;
@@ -33,7 +38,7 @@ export interface Snapshot {
 
 /** A database the command checks. */
 export interface CheckTarget {
-  /** The database's parts, as a configuration file's `database` names it (Q167 A: `--database` takes no value). */
+  /** The database's parts, as a configuration file's `database` names it (`--database` takes no value). [Q167 A] */
   readonly database: DatabaseParts;
   /** Records the history of `entries` on a new database (cursor null), then commits blocks 0 to `cursor` (none: null). */
   setup(entries: readonly unknown[], cursor: bigint | null): Promise<void>;
@@ -60,8 +65,8 @@ const TABLES_SQL = `SELECT quote_ident(n.nspname) || '.' || quote_ident(c.relnam
 const rowsSql = (table: string) => `SELECT row_to_json(t)::text || ' xmin ' || t.xmin::text AS row FROM ${table} t`;
 
 /**
- * Commits the blocks 0 to `cursor` into `core_block_commit.blocks` (hash and parent hash from the height; the spec
- * version, ledger version and block time of task 10.2's columns fixed).
+ * Commits the blocks 0 to `cursor` into `core_block_commit.blocks` (hash and parent hash from the height; the
+ * `spec_version`, `ledger_version` and `block_time` columns fixed).
  */
 const blocksSql = (cursor: bigint) =>
   `INSERT INTO core_block_commit.blocks (height, hash, parent_hash, spec_version, ledger_version, block_time)

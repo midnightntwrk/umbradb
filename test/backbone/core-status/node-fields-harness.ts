@@ -14,27 +14,31 @@ import { branchOf, type ChainBlock, chainOf, content, finalized, finalizedHead, 
 import { FENCE, type Ingest, ingest, until } from "../ingest-harness.js";
 
 /**
- * A168 (task 8.3a; `openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-5): what a core's `/status` shows of
- * its node — the connection's state, the best head the node announced last, the best-block queue's depth — read over
- * HTTP from the process's admin endpoints while a real process runs over the node source against a tape node, and on a
- * private process, which has no node. Shared by `node-fields.test.ts` and its negative control's file; imports nothing
- * of Vitest.
+ * What a core's `/status` shows of its node: the connection's state, the best head the node announced last, and the
+ * best-block queue's depth. They are read over HTTP from the process's admin endpoints, while a real process runs over
+ * the node source against a tape node, and on a private process, which has no node. Shared by `node-fields.test.ts`
+ * and its negative control's file; imports nothing of Vitest. [A168, AE-5]
  *
  * **The core's run** ({@link a168Run}): `ingest()` (the process with UmbraDB's backbone and `core-block-fetch`'s node
  * source, as `umbradb run` makes it) from S = 100, the node's finalized head, with `tipCap` 2 and `backoffCeilingMs`
  * 1 s, its admin endpoints on a free port, and a module `hold` whose `on-compute` at 101 waits for the test. The
- * process's node client connects through a connector whose first connection waits until the test lets it open. The
- * tape ({@link a168Tape}): the opening and block 100; best blocks 101 and 102 (queued: the queue is then full), 103
- * (announced, not queued: `finality-stall`) and 102′ of another branch (announced last, not queued); then, after a
- * call the test makes itself ({@link FENCE}), 101 finalized, which the loop takes from the queue. The phases, each
- * entered once the process itself shows its precondition (`status()`, the connector, the gate), then `/status` read
- * until it shows what A168 expects or the patience ran out:
+ * process's node client connects through a connector whose first connection waits until the test lets it open.
+ *
+ * **The tape** ({@link a168Tape}):
+ * - the opening and block 100;
+ * - best blocks 101 and 102, queued (the queue is then full);
+ * - 103, announced and not queued (`finality-stall`);
+ * - 102′ of another branch, announced last and not queued;
+ * - then, after a call the test makes itself ({@link FENCE}), 101 finalized, which the loop takes from the queue.
+ *
+ * **The phases.** Each is entered once the process itself shows its precondition (`status()`, the connector, the
+ * gate); then `/status` is read until it shows what the phase expects or the patience runs out:
  * 1. before the first connection: `connecting` (the queue empty, no best head, no retry);
  * 2. connected, the queue full: `connected`, best head 102 (the one announced last, not the highest), depth 2;
  * 3. 101 taken from the queue, its `on-compute` held: depth 1;
  * 4. the tape node closed — the node gone —: `retrying`, `retries` at least 1, then counting past what it showed;
  * 5. after `stop()`, `on-compute` still held: `stopping`, `closed`.
- * Every body read is checked against `./status.schema.json` (A66 with the three fields).
+ * Every body read, with its three node fields, is checked against `./status.schema.json`. [A66]
  *
  * **The private run** ({@link privateRun}): a public core over the in-memory chain to 3 and a private process reading
  * its public database directly, with its admin endpoints: once it is at 3, `/status` shows `node` null — the three
@@ -57,7 +61,7 @@ const BRANCH_B = branchOf(HEAD, 102n, "b");
 const a = (height: number): ChainBlock => BRANCH_A[height - 101] as ChainBlock;
 const b = (height: number): ChainBlock => BRANCH_B[height - 101] as ChainBlock;
 
-/** A168's tape (see the module comment). */
+/** The tape node's recording for the core's run (see the module comment). */
 export function a168Tape(): TapeRecord[] {
   return [
     ...opening(CHAIN[0] as ChainBlock, HEAD),
@@ -127,7 +131,7 @@ function holding(height: bigint): { readonly module: ModuleDeclaration; reached:
       id: "hold",
       version: "1.0.0",
       side: "public",
-      // MD-2: every module requires an item; the block's header places it after core-block-fetch.
+      // Every module requires an item; the block's header places it after core-block-fetch. [MD-2]
       requires: ["block-header"],
       provides: [],
       startsMidChain: true,
@@ -164,7 +168,7 @@ function mismatches(body: unknown, expected: Readonly<Record<string, Expected>>)
   return found;
 }
 
-/** One phase as `/status` showed it: the fields that differed from what A168 expects (none once it showed them). */
+/** One phase as `/status` showed it: the fields that differed from what the phase expects (none once it showed them). */
 export interface A168Phase {
   readonly name: string;
   readonly mismatches: readonly string[];
@@ -173,13 +177,13 @@ export interface A168Phase {
 /** What a run read. */
 export interface A168Observation {
   readonly phases: readonly A168Phase[];
-  /** Every schema problem of a body read (A66), once each. */
+  /** Every schema problem of a body read, once each. [A66] */
   readonly schema: readonly string[];
   /** How many bodies were read. */
   readonly bodies: number;
 }
 
-/** A168's oracle: every problem, none when each phase showed what A168 expects and every body validated. */
+/** The oracle: every problem, none when each phase showed what it expects and every body validated. [A168] */
 export function a168Problems(observed: A168Observation): string[] {
   return [
     ...observed.phases.flatMap((phase) => phase.mismatches.map((mismatch) => `${phase.name}: ${mismatch}`)),
@@ -249,13 +253,13 @@ function attempts(run: Ingest): number {
 
 /** Options of {@link a168Run}. */
 export interface A168RunOptions {
-  /** How long each phase reads `/status` for what A168 expects, once the process shows its precondition. */
+  /** How long each phase reads `/status` for what it expects, once the process shows its precondition. */
   readonly patienceMs: number;
   /** Wraps the admin server's start: a negative control's publication. */
   readonly wrap?: (start: AdminStarter) => AdminStarter;
 }
 
-/** A168's run of a core on `db` (see the module comment). */
+/** The core's run on `db` (see the module comment). [A168] */
 export async function a168Run(db: ProcessDatabase, options: A168RunOptions): Promise<A168Observation> {
   const connector = new GatedConnector();
   let client: NodeClient | undefined;
@@ -340,7 +344,7 @@ export async function a168Run(db: ProcessDatabase, options: A168RunOptions): Pro
   return (reader as StatusReader).observation();
 }
 
-/** A168's private half on `backend` (see the module comment). */
+/** The private run on `backend` (see the module comment). [A168] */
 export async function privateRun(backend: ProcessBackend, patienceMs: number): Promise<A168Observation> {
   const core = await startPublicCore({ database: (await backend.database()).setting, head: 3n });
   const lines: string[] = [];
@@ -366,8 +370,8 @@ export async function privateRun(backend: ProcessBackend, patienceMs: number): P
 }
 
 /**
- * The negative control's publication (A168's): every snapshot the runner publishes with the node's three fields null —
- * what 8.3 showed before this task —, the rest as published.
+ * The negative control's publication: every snapshot the runner publishes with the node's three fields null, as
+ * `/status` showed them before the process reported them; the rest as published. [A168]
  */
 export function withoutNodeFields(start: AdminStarter): AdminStarter {
   const strip = (snapshot: AdminSnapshot): AdminSnapshot =>

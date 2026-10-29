@@ -14,10 +14,14 @@ import { chainDeclarations } from "./chain-build.js";
 import { hex } from "./fetch-fixtures.js";
 
 /**
- * Runs the real process over the node source against a tape node (task 10.3): `startProcess` with UmbraDB's backbone —
- * `core-chain`, the real `core-block-fetch` and its node source (what `umbradb run` passes: `nodeSourceOf`),
- * `core-block-commit`, `core-digest` — and a watching module, its `core` entry's `node` the tape node's URL. Imports
- * nothing of Vitest, so that a worker process (`ingest-crash.worker.ts`) runs the same build.
+ * Runs the real process over the node source against a tape node. It calls `startProcess` with UmbraDB's backbone and a
+ * watching module, and sets the `core` entry's `node` to the tape node's URL. The backbone is:
+ * - `core-chain`;
+ * - the real `core-block-fetch` and its node source (`nodeSourceOf`, what `umbradb run` passes);
+ * - `core-block-commit`;
+ * - `core-digest`.
+ *
+ * It imports nothing of Vitest, so that a worker process (`ingest-crash.worker.ts`) runs the same build.
  */
 
 /** What the watching module saw, in order. */
@@ -40,7 +44,7 @@ export function watched(): Watched {
 
 const short = (hash: Uint8Array): string => hex(hash).slice(0, 10);
 
-/** The watching module `watch` (see the module comment): requires `block-body` and `runtime-metadata` (CD-2). */
+/** The watching module `watch` (see the module comment): requires `block-body` and `runtime-metadata`. [CD-2] */
 export function watcher(seen: Watched): ModuleDeclaration {
   return {
     id: "watch",
@@ -80,7 +84,7 @@ export function watcher(seen: Watched): ModuleDeclaration {
   };
 }
 
-/** A call record a test module makes after a commit (`fenceAt`): the notifications after it wait for it (TT-3). */
+/** A call record a test module makes after a commit (`fenceAt`): the notifications after it wait for it. [TT-3] */
 export const FENCE: TapeRecord = { method: "chain_getBlockHash", params: [999_999], result: hex(new Uint8Array(32).fill(9)) };
 
 /** A module whose `on-after-db-write` at `height` makes the {@link FENCE} call through the `node-client` item. */
@@ -134,11 +138,11 @@ export interface IngestOptions {
   readonly start: bigint;
   /** More `core` settings (`prefetchWindow`, `tipCap`, …). */
   readonly settings?: Readonly<Record<string, unknown>>;
-  /** The core's stop (CF-4): the last height processed (a recorded tape's range end, task 12.3). */
+  /** The core's stop: the last height processed (for example a recorded tape's range end). [CF-4] */
   readonly stop?: bigint;
   /**
-   * Later revisions of the `core` entry (CF-5; task 12.4's `retainStates` and `sweep` changes): each from its `start`
-   * with the first revision's settings and its own on top.
+   * Later revisions of the `core` entry (for example `retainStates` and `sweep` changes): each from its `start`, with
+   * the first revision's settings and its own on top. [CF-5]
    */
   readonly revisions?: readonly { readonly start: bigint; readonly settings: Readonly<Record<string, unknown>> }[];
   /** The node source's class (a negative control's), or a factory wrapping the process's client (an instrument). */
@@ -148,15 +152,15 @@ export interface IngestOptions {
   readonly nodeClient?: (options: NodeClientOptions) => NodeClient;
   /** More user modules. */
   readonly user?: readonly ModuleDeclaration[];
-  /** Core modules of the build, each enabled from S (task 11.1's) unless {@link startOf} says otherwise. */
+  /** Core modules of the build, each enabled from S unless {@link startOf} says otherwise. */
   readonly core?: readonly ModuleDeclaration[];
-  /** The start of each core module's entry (task 12.3's mid-chain refusal); S unless given. */
+  /** The start of each core module's entry (for example to test the mid-chain refusal); S unless given. */
   readonly startOf?: (id: string) => number;
-  /** The stop of each core module's entry (task 13.1's handoff of `contract-logs`, CC-4); none unless given. */
+  /** The stop of each core module's entry (for example the handoff of `contract-logs`); none unless given. [CC-4] */
   readonly stopOf?: (id: string) => number | undefined;
-  /** The process's ledger worker (task 12.3: a test package's, a negative control's); `startLedgerWorker` unless given. */
+  /** The process's ledger worker (a test package's, a negative control's); `startLedgerWorker` unless given. */
   readonly ledgerWorker?: () => LedgerHost;
-  /** The admin endpoints (task 8.1), as `startProcess` takes them; none unless given. */
+  /** The admin endpoints, as `startProcess` takes them; none unless given. */
   readonly admin?: AdminStarter;
 }
 
@@ -171,8 +175,8 @@ export interface Ingest {
 }
 
 /**
- * The genesis hash `records` answer — the result of `chain_getBlockHash [0]`, which `core-chain`'s startup check asks
- * (IN-2, IN-3) — as `0x` hex; undefined when the tape has none.
+ * The genesis hash `records` answer, as `0x` hex; undefined when the tape has none. It is the result of
+ * `chain_getBlockHash [0]`, which `core-chain`'s startup check asks. [IN-2, IN-3]
  */
 export function genesisOf(records: readonly TapeRecord[]): string | undefined {
   const record = records.find(
@@ -186,7 +190,7 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
   const node = await TapeNode.start({ records });
   const seen = watched();
   const user = [watcher(seen), ...(options.user ?? [])];
-  // The tests' custom network has the tape's genesis (task 10.2a: the node's genesis must be the configured network's).
+  // The tests' custom network has the tape's genesis, since the node's genesis must be the configured network's.
   const network = options.settings?.network;
   const genesisHash = genesisOf(records);
   const genesis = (network === undefined || network === "custom") && genesisHash !== undefined ? { genesisHash } : {};
@@ -215,7 +219,7 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
     },
     log: (line) => lines.push(line),
     ...(options.ledgerWorker === undefined ? {} : { ledgerWorker: options.ledgerWorker }),
-    // Explicitly, so that no test of this harness serves the endpoints on their default address (task 8.1a, Q128 B).
+    // Explicitly, so that no test of this harness serves the endpoints on their default address. [Q128 B]
     admin: options.admin ?? false,
     ...(options.nodeClient === undefined ? {} : { nodeClient: options.nodeClient }),
   });

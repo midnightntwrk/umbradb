@@ -5,12 +5,16 @@ import { type PublicCore, startPublicCore } from "./builds.js";
 import { confinementProblems, PUB, PUB_ENTRY } from "./read-confinement-checks.js";
 
 /**
- * A172's committed negative control (task 14.2b; PP-4): the read path before task 14.2b — a core transport that runs
- * every statement of a `read` as sent (`reads: "unconfined"`), in the read-only transaction of `Database.read` and
- * nothing more — over a running core's public database, on PostgreSQL 18.6 and PGlite 0.5.10, fails A172's oracle: a
- * `COMMIT` ends the read and the `INSERT` after it writes `pub.rows`, a `nextval` after a `COMMIT` moves `pub.log`'s
- * sequence, `pg_advisory_lock` leaves its lock held, and the escapes are answered as reads, not refused. The core is
- * stopped afterwards: its public database is the control's own.
+ * The committed negative control for confined reads: the unconfined read path fails the confinement oracle. Its core
+ * transport runs every statement of a `read` as sent (`reads: "unconfined"`), in the read-only transaction of
+ * `Database.read` and nothing more, over a running core's public database, on PostgreSQL 18.6 and PGlite 0.5.10.
+ * [A172, PP-4]
+ * - A `COMMIT` ends the read and the `INSERT` after it writes `pub.rows`.
+ * - A `nextval` after a `COMMIT` moves `pub.log`'s sequence.
+ * - `pg_advisory_lock` leaves its lock held.
+ * - The escapes are answered as reads, not refused.
+ *
+ * The core is stopped afterwards: its public database is the control's own.
  */
 
 describe.each(PRIVATE_BACKENDS)("A172's negative control on $name: the read path before task 14.2b", (backend: PrivateBackend) => {

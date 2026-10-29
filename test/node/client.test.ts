@@ -21,15 +21,20 @@ import { outsideIn8 } from "./in8.js";
 import { ManualTimers, turns, until } from "./manual-timers.js";
 
 /**
- * The node client (task 10.1; `openspec/changes/core-arch/design.md` §1 `src/node/`, §3; specs/ingest IN-8, IN-9,
- * IN-10): JSON-RPC 2.0 over WebSocket against a scripted node on the loopback interface (`./fake-node.ts`, a random
- * free port at or above 10000), with the client's clock moved by hand (`./manual-timers.ts`) so that back-off delays,
- * timeouts and the heartbeat are checked to the millisecond. Covered: each IN-8 call with its parameters and its typed
- * answer, against the real answers of a mainnet node (`fixtures/mainnet-answers.json`); the two head subscriptions,
- * cancelled locally and re-established after a reconnect; reconnecting with IN-10's back-off (1 s doubling up to
- * `backoffCeilingMs`, without limit); per-call and connect timeouts; which failures are retried and which halt; the
- * node URL kept out of every error (a `secret` field, CF-4); `close()` and abort signals; and the WebSocket
- * transport's heartbeat. After the suite, every request the fake nodes received is checked against IN-8's methods.
+ * The node client (`src/node/`): JSON-RPC 2.0 over WebSocket against a scripted node on the loopback interface
+ * (`./fake-node.ts`, a random free port at or above 10000). The client's clock is moved by hand (`./manual-timers.ts`),
+ * so back-off delays, timeouts and the heartbeat are checked to the millisecond. [IN-8, IN-9, IN-10; design §1, §3]
+ *
+ * Covered:
+ * - each allowed node call with its parameters and its typed answer, against the real answers of a mainnet node
+ *   (`fixtures/mainnet-answers.json`); [IN-8]
+ * - the two head subscriptions, cancelled locally and re-established after a reconnect;
+ * - reconnecting with back-off (1 s, doubling up to `backoffCeilingMs`, with no limit on attempts); [IN-10]
+ * - per-call and connect timeouts; which failures are retried and which halt; [IN-9, IN-10]
+ * - the node URL kept out of every error, as it is a `secret` field; [CF-4]
+ * - `close()` and abort signals, and the WebSocket transport's heartbeat.
+ *
+ * After the suite, every request the fake nodes received is checked against the allowed methods. [IN-8]
  */
 
 const HOUR = 3_600_000;
@@ -48,7 +53,8 @@ afterEach(async () => {
 });
 
 afterAll(() => {
-  // IN-8 over whatever ran of the suite: nothing but its methods ever reached a node (the last test checks it too).
+  // Over whatever ran of the suite, nothing but the allowed methods ever reached a node (the last test checks it too).
+  // [IN-8]
   expect(outsideIn8(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);
 });
 
@@ -117,7 +123,7 @@ describe("calls: the IN-8 methods with their parameters, and their answers typed
     const c = client(node.url());
 
     expect(hex(await c.finalizedHead())).toBe(MAINNET_BLOCK);
-    // The genesis hash, recorded independently by task 0.2 (node-roots.json).
+    // The genesis hash, recorded independently (node-roots.json).
     expect(hex(await c.blockHash(0n))).toBe(node0.block0);
     expect(hex(await c.blockHash(3_174_332n))).toBe(MAINNET_BLOCK);
 
@@ -1405,7 +1411,7 @@ describe("races and the default clock", () => {
 describe("IN-8 over the suite", () => {
   it("sent the fake nodes nothing but IN-8's methods, in every test above (run last)", () => {
     expect(outsideIn8(RECEIVED_BY_ANY_NODE.map((request) => request.method))).toEqual([]);
-    // Not vacuous: the tests above sent every method of IN-8, over many requests.
+    // Not vacuous: the tests above sent every allowed method, over many requests. [IN-8]
     expect(new Set(RECEIVED_BY_ANY_NODE.map((request) => request.method)).size).toBe(12);
     expect(RECEIVED_BY_ANY_NODE.length).toBeGreaterThan(100);
   });

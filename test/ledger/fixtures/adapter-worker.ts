@@ -1,7 +1,7 @@
 // A worker thread with fresh instances of the ledger adapters (test/ledger/adapter-worker-host.ts bundles this file
 // with esbuild and runs it): nothing the test's own instances hold in memory is visible here, so a state must load
 // from the nodes the request carries, and every result reaches the test by structured clone, as the ledger worker's
-// results reach the main thread (task 12.1; LG-7, Q49).
+// results reach the main thread. [LG-7, Q49]
 import { parentPort, workerData } from "node:worker_threads";
 import { loadLedgerPackage } from "../../../src/ledger/load.js";
 import type { ApplyInput, LedgerPackage, StoredNode } from "../../../src/ledger/types.js";

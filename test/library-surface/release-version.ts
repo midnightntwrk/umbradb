@@ -1,6 +1,5 @@
 /**
- * Task 17.4 (`openspec/changes/core-arch/tasks.md` 17.4; A4, `specs/library-surface/spec.md` LS-4), with task 17.4a's
- * notice (A4 as amended): the release's version, its breaking-change line, and the build's version named in one place.
+ * The release's version, its breaking-change line, and the build's version named in one place. [A4, LS-4, Q169]
  *
  * - **The version.** `package.json`'s `version` is `0.10.0`; the code names it once, as `UMBRADB_VERSION` in
  *   `src/config/build.ts` (a constant: the browser build reads no file; `test/config/builders.test.ts` holds it equal
@@ -14,10 +13,10 @@
  *   declaration and has no `version` of its own keeps that declaration's (`PRIVATE_CORE_DIGEST`).
  *   The scan must find a declaration for every id of the command's build, so a part written in a form it does not read
  *   fails here rather than going unchecked.
- * - **The notice** (A4 as amended by owner decision Q169): `CHANGELOG.md`'s `0.10.0` section opens with
+ * - **The notice**: `CHANGELOG.md`'s `0.10.0` section opens with
  *   `### Breaking changes` and one short line under it — a new architecture, nothing of 0.9.5's API or databases
  *   carried over; the section names no 0.9.5 export (no per-export list, no migration notes: pre-release, breaking
- *   changes need no notices) ({@link changelogProblems}).
+ *   changes need no notices) ({@link changelogProblems}) [A4, Q169].
  *
  * Pure functions over repository-relative paths and file texts; `./release-version.test.ts` gives them the tree.
  */
@@ -25,7 +24,7 @@
 import path from "node:path";
 import ts from "typescript";
 
-/** The release this change makes (LS-4). */
+/** The release this change makes. [LS-4] */
 export const RELEASE_VERSION = "0.10.0";
 
 /** The file that names the build's version, and the name it exports. */
@@ -252,16 +251,16 @@ function section(changelog: string, version: string): string[] | null {
 /** The heading the notice opens the section with. */
 export const NOTICE_HEADING = "### Breaking changes";
 
-/** What A4 has the notice's line say, as words it holds (any letter case). */
+/** What the notice's line must say, as words it holds (any letter case). [A4] */
 export const NOTICE_TERMS: readonly string[] = ["new architecture", "nothing of 0.9.5", "api", "database"];
 
 /** One short line: within the 120 columns the repository's Markdown keeps to. */
 export const NOTICE_MAX_LENGTH = 120;
 
 /**
- * A4's problems with `CHANGELOG.md`: its `version` section must open with {@link NOTICE_HEADING} and one line under it
+ * The problems with `CHANGELOG.md`: its `version` section must open with {@link NOTICE_HEADING} and one line under it
  * (up to the next `### ` heading), not a list item, at most {@link NOTICE_MAX_LENGTH} characters, holding
- * {@link NOTICE_TERMS}; and nowhere in the section may a name of `retired` (0.9.5's exports) appear in backticks.
+ * {@link NOTICE_TERMS}; and nowhere in the section may a name of `retired` (0.9.5's exports) appear in backticks. [A4]
  */
 export function changelogProblems(changelog: string, version: string, retired: readonly string[]): string[] {
   const lines = section(changelog, version);

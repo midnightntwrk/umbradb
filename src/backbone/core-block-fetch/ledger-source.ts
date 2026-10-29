@@ -1,10 +1,12 @@
 /**
- * What `core-ledger-state` asks the node, through the block source the runner binds it to
- * (`openspec/changes/core-arch/specs/ingest/spec.md` IN-7, IN-8; `specs/ledger/spec.md` LG-15; task 12.3): the ledger
- * state root after a finalized block (`midnight_ledgerStateRoot` at its hash), which every state root it computes is
- * compared with, and the genesis state (`system_properties.genesis_state`), block 0's ledger state. Both are IN-8's
- * methods. The node source gives them (`./node-source.ts`); the in-memory source, which has no node, does not, and
- * `core-ledger-state` is not bound to it. Pure: no Node.js import.
+ * What `core-ledger-state` asks the node, through the block source the runner binds it to:
+ * - the ledger state root after a finalized block (`midnight_ledgerStateRoot` at its hash), which every state root it
+ *   computes is compared with [LG-15];
+ * - the genesis state (`system_properties.genesis_state`), which is block 0's ledger state [IN-7].
+ *
+ * Both are among the node calls the system is allowed to make. The node source gives them (`./node-source.ts`). The
+ * in-memory source has no node, so it does not, and `core-ledger-state` is not bound to it. Pure: no Node.js import.
+ * [IN-8]
  */
 
 import type { BlockRef } from "../../runner/block-source.js";
@@ -32,7 +34,7 @@ export function genesisStateOf(properties: Readonly<Record<string, unknown>>): U
   const digits = typeof value === "string" ? (value.startsWith("0x") ? value.slice(2) : value) : null;
   if (digits === null || digits.length === 0 || digits.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(digits)) {
     throw new Error(
-      `the node's system_properties has no genesis_state as hex (IN-7): ${value === undefined ? "none" : JSON.stringify(value).slice(0, 80)}`,
+      `the node's system_properties has no genesis_state as hex: ${value === undefined ? "none" : JSON.stringify(value).slice(0, 80)}`,
     );
   }
   const bytes = new Uint8Array(digits.length / 2);

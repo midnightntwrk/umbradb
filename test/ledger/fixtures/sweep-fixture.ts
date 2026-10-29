@@ -1,13 +1,13 @@
-// The DAG fixture of task 12.5's sweep tests (`openspec/changes/core-arch` A105, LG-14): the ledger state after each
+// The DAG fixture of the sweep tests: the ledger state after each
 // height h, as nodes in the node's `layout-v2` format — a node's key is SHA-256 of its payload's length (u32,
 // little-endian), its payload and its children's keys; its child list is a SCALE `Vec` of `ArenaKey::Ref` children
 // (the byte 0, then the 32-byte key) — built so that one marking round does not fit in a budget of 50: a root with
 // {@link WIDTH} subtrees (wide), each a node over {@link LEAVES} leaves; the subtrees change version at interleaved
 // heights, so every block brings a new root and new subtrees (interleaved new roots). Subtree 0 goes back at
 // {@link REVERT} to the version it had before {@link CHANGE}: its nodes, deleted by the sweep in between, are needed
-// again (LG-14's "Reused content after a deletion"). Shared by the test package the ledger worker loads
-// (`sweep-test-loader.ts`) and the tests' reference model (`test/backbone/sweep-model.ts`). Erasable TypeScript only:
-// the worker runs it through Node.js's type stripping.
+// again (content reused after a deletion). [A105, LG-14]
+// Shared by the test package the ledger worker loads (`sweep-test-loader.ts`) and the tests' reference model
+// (`test/backbone/sweep-model.ts`). Erasable TypeScript only: the worker runs it through Node.js's type stripping.
 
 import { createHash } from "node:crypto";
 

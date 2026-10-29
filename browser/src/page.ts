@@ -1,31 +1,34 @@
 /**
- * The page of the browser build (`openspec/changes/core-arch/specs/browser/spec.md` BR-1 to BR-4; `specs/backups/
- * spec.md` BK-5; `design.md` §9.2; task 16.1): a static page that runs the core and its modules in the browser, for
- * showing the product and testing modules — a development setup.
+ * The page of the browser build: a static page that runs the core and its modules in the browser, for showing the
+ * product and testing modules. It is a development setup. [BR-1, BR-2, BR-3, BR-4, BK-5; design §9.2]
  *
- * **What it starts.** The core worker (`core-worker.js`), then one private worker (`private-worker.js`) for each
- * private instance the bundled configuration has, once the core has chosen S; every worker joins the page's message
+ * **What it starts.** The core worker (`core-worker.js`), then, once the core has chosen S, one private worker
+ * (`private-worker.js`) for each private instance the bundled configuration has. Every worker joins the page's message
  * network (`./net/broker.ts`), over which the private instances reach the core's transport. Each worker owns its
- * database, through its Web Lock (BR-1).
+ * database, through its Web Lock. [BR-1]
  *
- * **Its address's parameters.** `node` — the node's WebSocket URL, which must allow the page's origin (BR-3); `storage`
- * — `memory` (the default: a new database at each load) or a name, the database's in the origin's private file system
- * (OPFS), which survives a reload; any other parameter is the configuration's to read (`./configuration.ts`).
+ * **Its address's parameters.**
+ * - `node`: the node's WebSocket URL, which must allow the page's origin [BR-3].
+ * - `storage`: `memory` (the default: a new database at each load), or a name: the database's, in the origin's private
+ *   file system (OPFS), which survives a reload.
+ * - Any other parameter is the configuration's to read (`./configuration.ts`).
  *
- * **S (BR-2).** For an OPFS database the page keeps the S it was created with in the origin's `localStorage`
- * (`umbradb-start:<name>`), so a reload, or a second tab, runs it with the same configuration; a database it has no S
- * for is new, and the core worker chooses S as the node's finalized head at that moment.
+ * **S.** For an OPFS database the page keeps the S it was created with in the origin's `localStorage`
+ * (`umbradb-start:<name>`), so a reload, or a second tab, runs it with the same configuration. A database it has no S
+ * for is new, and the core worker chooses S as the node's finalized head at that moment. [BR-2]
  *
- * **What it reaches** (BR-3): its own origin, for its files, the node, through the core worker's WebSocket, and a backup
- * file the user picks; the admin endpoints and the module API are calls on the workers' channels.
+ * **What it reaches:** its own origin, for its files; the node, through the core worker's WebSocket; and a backup file
+ * the user picks. The admin endpoints and the module API are calls on the workers' channels. [BR-3]
  *
- * **Backup and restore (BK-5).** "Back up" asks the core worker for a backup of its database (`umbradb backup`'s on
- * PGlite: the manifest and `pglite-tools`' dump, taken while commits wait) and saves it as a file
- * (`umbradb-<storage>-<height>.backup`). A backup is restored into a new OPFS database: with the `restore` parameter
- * the page does not start the core; the file the user then picks is restored by the core worker with every check of
- * BK-3 (`umbradb restore`'s; the configured node's genesis and blocks), a refused one leaving the database empty and
- * the page waiting for another file. Once one is restored the page keeps the backup's S for the database and starts
- * the core, which resumes from the backup's height + 1 (BK-4).
+ * **Backup and restore.** "Back up" asks the core worker for a backup of its database and saves it as a file
+ * (`umbradb-<storage>-<height>.backup`). The backup is the one `umbradb backup` takes on PGlite: the manifest and
+ * `pglite-tools`' dump, taken while commits wait. [BK-5]
+ *
+ * A backup is restored into a new OPFS database. With the `restore` parameter the page does not start the core. The
+ * core worker restores the file the user then picks with every check `umbradb restore` makes (the configured node's
+ * genesis and blocks); a refused file leaves the database empty and the page waiting for another file. Once one is
+ * restored, the page keeps the backup's S for the database and starts the core, which resumes from the backup's
+ * height + 1. [BK-3, BK-4, BK-5]
  *
  * **`window.umbradb`** is the page's state and its calls, for whoever drives it (the tests, a console): `ready`
  * (resolves once every worker is started), `start` (S), `core` and `instances` (each with `call`, its `log` and its
@@ -58,7 +61,7 @@ export interface SavedBackup {
   readonly bytes: number;
 }
 
-/** What a restore of a picked file did: restored, or refused with BK-3's code and the worker's message and details. */
+/** What a restore of a picked file did: restored, or refused with the restore's code, message and details. [BK-3] */
 export type RestoreRecord =
   | {
       readonly file: string;
@@ -266,7 +269,7 @@ state.ready.catch((error: unknown) => errors.push(String(error)));
 if (!restoreMode) beginCore(run);
 
 if (__UMBRADB_BROWSER_CONTROL__ === "foreign-request" && params.foreign !== undefined) {
-  // The negative control of A131: a page that reaches something beside the node.
+  // The negative control for what the page reaches: a page that reaches something beside the node. [A131]
   void fetch(params.foreign, { mode: "no-cors" }).catch(() => undefined);
 }
 
@@ -320,7 +323,7 @@ setInterval(() => void render(), 1_000);
 const where = element("where");
 if (where !== null) where.textContent = `storage ${storage}`;
 
-// ── Backup and restore (BK-5) ────────────────────────────────────────────────────────────────────────────────────────
+// ── Backup and restore [BK-5] ────────────────────────────────────────────────────────────────────────────────────────
 
 const backupButton = element("backup") as HTMLButtonElement | null;
 const restoreInput = element("restore-file") as HTMLInputElement | null;

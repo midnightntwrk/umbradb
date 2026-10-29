@@ -1,12 +1,12 @@
 /**
- * SCALE, Substrate's encoding (`parity-scale-codec`), as far as `core-block-fetch` reads and writes it (task 10.3): the
+ * SCALE, Substrate's encoding (`parity-scale-codec`), as far as `core-block-fetch` reads and writes it: the
  * compact integers, length-prefixed byte strings, UTF-8 strings, options and vectors of a block header, an extrinsic and
  * the runtime metadata (`./metadata.ts`, `./extrinsics.ts`, `./header.ts`).
  *
  * A {@link ScaleReader} reads one value from start to end and throws a {@link ScaleError} — naming what it read, at
  * which byte, and why — for bytes that end too soon, a compact integer too large for what is read, a string that is not
- * UTF-8, or an option tag other than 0 or 1: a value is read exactly or not at all, never guessed (as the node client's
- * answers, task 10.1). Pure: no Node.js import.
+ * UTF-8, or an option tag other than 0 or 1. A value is read exactly or not at all, never guessed, just as the node
+ * client reads the node's answers. Pure: no Node.js import.
  */
 
 /** Bytes that are not the SCALE value read. */

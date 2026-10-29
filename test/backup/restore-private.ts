@@ -15,8 +15,8 @@ import { type BackupBackend, type BackupDatabase, PATIENCE_MS } from "./backup-f
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * What the restores of a private process's backup share (task 15.2a; BK-3, BK-4, PP-2, PP-12, owner decision Q153;
- * A164), on PostgreSQL 18.6 and PGlite 0.5.10.
+ * What the restores of a private process's backup share, on PostgreSQL 18.6 and PGlite 0.5.10.
+ * [A164, BK-3, BK-4, PP-2, PP-12, Q153]
  *
  * **The public side** is a public core of `../private/builds.ts` (`startPublicCore`: the in-memory chain, the custom
  * network {@link genesisHex}(0xa1) unless another is given), on a database of the backend. A private process reads it
@@ -207,7 +207,7 @@ export async function restorePrivate(
 
 /**
  * The contents hash of a private database as `0x` hex, as its process and its backup's manifest compute it: no table of
- * `pm` is declared `deterministic: false`; the private backbone's `core_private_source.accepted_config` is (task 14.1c).
+ * `pm` is declared `deterministic: false`; the private backbone's `core_private_source.accepted_config` is.
  */
 export async function privateHashOf(db: BackupDatabase): Promise<string> {
   const optedOut = [{ schema: "core_private_source", table: "accepted_config" }];
@@ -249,8 +249,9 @@ export interface PrivateBackup {
 
 /**
  * A private process's backup at {@link BACKUP_HEIGHT} on `backend`, written into `file` by the process itself under
- * the development opt-in its `core` entry sets (PP-12): a public core from S 1 to the height, the private process from
+ * the development opt-in its `core` entry sets: a public core from S 1 to the height, the private process from
  * {@link PRIVATE_START} to it, its `backup`, then its stop. The public core keeps running (the caller stops it).
+ * [PP-12]
  */
 export async function privateBackup(project: CliProject, backend: BackupBackend, file: string): Promise<PrivateBackup> {
   const bound = await startPublicSide(backend, { head: BACKUP_HEIGHT });

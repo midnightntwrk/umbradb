@@ -11,28 +11,35 @@ import { PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, settle, startProcess, testBuild } from "./process-build.js";
 
 /**
- * Recovery after a lost database connection (task 10.4; IN-10, IN-11; A85's database clause, A86), through the process
- * on PostgreSQL 18. PGlite runs inside the process: it has no connection to lose, so neither can happen there (its
- * held heights after a retryable failure are `held-height.test.ts`'s, on both backends).
+ * Recovery after a lost database connection, through the process on PostgreSQL 18. PGlite runs inside the process: it
+ * has no connection to lose, so neither case can happen there. Its held heights after a retryable failure are tested
+ * in `held-height.test.ts`, on both backends. [IN-10, IN-11, A85, A86]
  *
- * - A85: the writer's backend terminated during `on-db-write` of h (`pg_terminate_backend`) is retried with
- *   `database-retrying`; the block transaction is gone, so h is processed again from `on-compute`: the items a module
- *   published in `on-parse` at h are still visible to its `on-compute` on the retry, and the block is not fetched or
- *   parsed again (`on-fetch` and `on-parse` once at h), nor is the cursor's `on-after-db-write` delivered again. "The
- *   ledger state is reloaded at the cursor, and h's root matches the node's" waits for task 12.3's
- *   `core-ledger-state` (and 12.4's reload).
- * - A86: the writer's backend terminated during the `COMMIT` of h (a proxy between the process and the server holds the
- *   `COMMIT` or its answer while `pg_terminate_backend` ends the backend, `./commit-proxy.ts`): when the server
- *   committed h, the cursor is h after reconnecting, h is not processed again and `on-after-db-write` fires for h; when
- *   it did not, h is processed again from `on-compute`; when the cursor is neither (another writer moved it while the
- *   process was away), processing halts with `unexpected-cursor` at h.
- * With the committed negative controls: a loop that drops the held height (h fetched and parsed again), and two that
- * read an uncertain `COMMIT` the wrong way (as lost when it landed, as landed when it did not).
+ * - The writer's backend is terminated during `on-db-write` of h (`pg_terminate_backend`) and retried with
+ *   `database-retrying`. The block transaction is gone, so h is processed again from `on-compute`:
+ *   - the items a module published in `on-parse` at h are still visible to its `on-compute` on the retry;
+ *   - the block is not fetched or parsed again (`on-fetch` and `on-parse` run once at h);
+ *   - the cursor's `on-after-db-write` is not delivered again.
+ *
+ *   The clause "the ledger state is reloaded at the cursor, and h's root matches the node's" is not checked here: it
+ *   waits for `core-ledger-state` and its reload. [A85]
+ * - The writer's backend is terminated during the `COMMIT` of h. A proxy between the process and the server holds the
+ *   `COMMIT` or its answer while `pg_terminate_backend` ends the backend (`./commit-proxy.ts`).
+ *   - When the server committed h, the cursor is h after reconnecting, h is not processed again, and
+ *     `on-after-db-write` fires for h.
+ *   - When it did not, h is processed again from `on-compute`.
+ *   - When the cursor is neither (another writer moved it while the process was away), processing halts with
+ *     `unexpected-cursor` at h.
+ *
+ *   [A86]
+ *
+ * Negative controls are committed with it: a loop that drops the held height (h is fetched and parsed again), and two
+ * that read an uncertain `COMMIT` the wrong way (as lost when it landed, as landed when it did not).
  */
 
 const HEAD = 5n;
 const H = 3n;
-/** The back-off ceiling the retries run with here: 20 ms, so no test waits IN-10's seconds. */
+/** The back-off ceiling the retries run with here: 20 ms, so no test waits the default back-off's seconds. [IN-10] */
 const CEILING = 20;
 /**
  * A recovery run starts a database and a process and processes five heights: 3 to 9 s on PostgreSQL in Docker at load
@@ -114,8 +121,8 @@ interface RecoveryObservation {
 }
 
 /**
- * The faults of the runs: the writer terminated in `on-db-write` (A85), or at the `COMMIT` before or after the server
- * committed (A86), or before it with another writer's change meanwhile (A86's third case).
+ * The faults of the runs: the writer terminated in `on-db-write`; at the `COMMIT`, before or after the server
+ * committed; or at the `COMMIT` before the server committed, with another writer's change meanwhile. [A85, A86]
  */
 type Fault = "terminated" | CommitFault | "neither";
 
@@ -172,7 +179,7 @@ async function recoveryRun(fault: Fault, loop?: new (input: LoopInput) => Finali
   };
 }
 
-/** Deletes the blocks above `height` from outside the process: another writer's change (A86's third case). */
+/** Deletes the blocks above `height` from outside the process: another writer's change. [A86] */
 async function rewindTo(db: ProcessDatabase, height: bigint): Promise<void> {
   await db.query(`DELETE FROM core_block_commit.hashes WHERE height > ${height}`);
   await db.query(`DELETE FROM core_block_commit.blocks WHERE height > ${height}`);
@@ -216,9 +223,9 @@ const parsesBefore = (observed: RecoveryObservation): number =>
   observed.seen.calls.slice(0, observed.seen.calls.indexOf(`on-parse@${H}`)).filter((call) => call.startsWith("on-parse@")).length;
 
 /**
- * A85's database clause and A86's "not committed" case (IN-10's "lost before COMMIT", IN-11's h − 1): h processed again
- * from `on-compute`, its `on-parse` item still visible, the block not fetched or parsed again, the retry running under
- * `database-retrying` at h.
+ * A connection lost during `on-db-write`, or during a `COMMIT` the server did not commit (the cursor still h − 1): h
+ * is processed again from `on-compute`, its `on-parse` item still visible, and the block is not fetched or parsed
+ * again; the retry runs under `database-retrying` at h. [A85, A86, IN-10, IN-11]
  */
 function processedAgainProblems(observed: RecoveryObservation, fault: string): string[] {
   const problems = committedProblems(observed, fault);
@@ -243,7 +250,10 @@ function processedAgainProblems(observed: RecoveryObservation, fault: string): s
   return problems;
 }
 
-/** A86's "committed" case: the cursor h after reconnecting, h not processed again, `on-after-db-write` for h. */
+/**
+ * A `COMMIT` the server committed: the cursor is h after reconnecting, h is not processed again, and
+ * `on-after-db-write` fires for h. [A86]
+ */
 function landedProblems(observed: RecoveryObservation): string[] {
   const problems = committedProblems(observed, "after");
   for (const point of ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"]) {
@@ -255,7 +265,10 @@ function landedProblems(observed: RecoveryObservation): string[] {
   return problems;
 }
 
-/** A86's third case: halted with `unexpected-cursor` at h, the database left as the other writer left it. */
+/**
+ * A cursor another writer moved: processing halts with `unexpected-cursor` at h, and the database is left as the other
+ * writer left it. [A86]
+ */
 function neitherProblems(observed: RecoveryObservation): string[] {
   const problems: string[] = [];
   if (text(observed.faults) !== text(["before"])) problems.push(`the faults made: ${text(observed.faults)}`);
@@ -271,14 +284,14 @@ function neitherProblems(observed: RecoveryObservation): string[] {
   return problems;
 }
 
-/** A loop that drops a height held for a retry: it is fetched and parsed again from its start (A85's control). */
+/** A loop that drops a height held for a retry: it is fetched and parsed again from its start. [A85] */
 class DropsHeld extends FinalizedLoop {
   protected override held(_held: HeldHeight): HeldHeight | undefined {
     return undefined;
   }
 }
 
-/** A loop that reads every uncertain `COMMIT` as lost: h processed again when it had landed (A86's control). */
+/** A loop that reads every uncertain `COMMIT` as lost: h is processed again when it had landed. [A86] */
 class AlwaysLost extends FinalizedLoop {
   protected override commitOutcome(held: HeldHeight, cursor: BlockRef | null): CommitOutcome {
     const outcome = super.commitOutcome(held, cursor);
@@ -286,7 +299,7 @@ class AlwaysLost extends FinalizedLoop {
   }
 }
 
-/** A loop that reads every uncertain `COMMIT` as landed: h never processed again when it had not (A86's control). */
+/** A loop that reads every uncertain `COMMIT` as landed: h is never processed again when it had not. [A86] */
 class AlwaysLanded extends FinalizedLoop {
   protected override commitOutcome(held: HeldHeight, cursor: BlockRef | null): CommitOutcome {
     return held.uncertain ? "committed" : super.commitOutcome(held, cursor);
@@ -319,7 +332,7 @@ describe("recovery after a lost database connection (IN-10, IN-11) on PostgreSQL
     const asLanded = processedAgainProblems(await recoveryRun("before", AlwaysLanded), "before");
     expect(asLanded).toContain(`on-compute ran 1 times at ${H}, not 2`);
     expect(asLanded).toContain("rec.rows holds 1,2,4,5");
-    // Heights 4 and 5 committed above the missing 3 (issue 00028-parent-check-passes-a-gap).
+    // Heights 4 and 5 committed above the missing 3.
     expect(asLanded).toContain("the blocks table holds 1,2,4,5");
   }, 2 * RUN_MS);
 });

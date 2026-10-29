@@ -1,56 +1,64 @@
 /**
- * The requirement graph per height range (`openspec/changes/core-arch/specs/modules/spec.md` MD-3, MD-4, MD-5, MD-6;
- * `specs/runner/spec.md` RN-3; `design.md` §6, §11; decision record Q95–Q97): at startup, after declaration validation
- * (`./validation.ts`), the runner resolves which part provides each required item at each height, refuses a graph MD-3
- * to MD-6 do not allow, and orders the parts for each point.
+ * The requirement graph, resolved per height range. At startup, after declaration validation (`./validation.ts`), the
+ * runner works out which part provides each required item at each height, rejects graphs that are not allowed, and
+ * orders the parts for each point. [MD-3, MD-4, MD-5, MD-6, RN-3; design §6, §11]
  *
- * **The input** ({@link GraphInput}) is what the configuration says of the build's validated declarations: S, the
- * height range of every revision of every module entry, and the development opt-in; and the database's cursor, its last
- * committed height (null on a new database). Backbone parts run with the core: from S, with no stop — the core's `stop`
- * is operational (CF-4) and ends processing for every part, so it bounds no item's availability. A module is *enabled*
- * when it has an entry; the build's other modules take no part.
+ * **Input** ({@link GraphInput}). From the configuration: the start height S, the height range of every revision of
+ * every module entry, and the development opt-in. From the database: the cursor, its last committed height (null on a
+ * new database). Backbone parts run with the core, from S with no stop: the core's `stop` is an operational setting
+ * that ends processing for every part, so it does not limit when any item is available. A module is *enabled* when it
+ * has an entry; the build's other modules take no part. [CF-4]
  *
- * **Ranges.** Heights are split at S, at every revision's start and after every revision's stop; each
- * {@link HeightRange} is closed, `from` to `to` (`to` null: no end), as entries are (`start ≤ h ≤ stop`, RN-7), so
- * within a range the active parts do not change. Two providers are *adjacent* when one's last height + 1 is the other's
- * first, and *overlap* when they share a height (MD-6). A module's revisions continue each other when one's stop + 1 is
- * the next's start (CF-5: no mid-chain start); after a gap, the next revision starts the module again.
+ * **Ranges.** Heights are split at S, at every revision's start and just after every revision's stop, so the active
+ * parts do not change within a {@link HeightRange}. A range is closed, `from` to `to` (`to` null means no end), just as
+ * an entry covers `start ≤ h ≤ stop`. Two providers are *adjacent* when one's last height + 1 is the other's first,
+ * and *overlap* when they share a height. A module's revisions continue each other when one's stop + 1 is the next's
+ * start; after a gap, the next revision starts the module again. [RN-7, MD-6, CF-5]
  *
- * **Refusals** ({@link GRAPH_RULES}, in order; each names its range, module and item, the range merged over
- * consecutive ranges with the same fault): a development-only module without the opt-in (MD-5,
- * `development-opt-in-required`); two providers of one item at a common height (MD-3, MD-6, `providers-overlap`); a
- * required item no enabled module provides (`item-no-provider`), or none at heights where its module runs
- * (`item-not-available`: "a module's [start, stop] is not covered by the availability of every item it requires");
- * a cycle in a range's graph, or one only the union of the ranges has, which leaves startup no order (`graph-cycle`,
- * Q95); a module that starts above 0 (genesis) — at an S above 0 too (Q96) — without promising it can, or whose
- * provider there, not active at the height before, does not (`cannot-start-mid-chain`, MD-4, Q98).
+ * **Refusals** ({@link GRAPH_RULES}, in this order). Each names its range, module and item; consecutive ranges with
+ * the same fault are reported as one range.
+ * - `development-opt-in-required`: a development-only module without the development opt-in [MD-5].
+ * - `providers-overlap`: two providers of one item at a common height [MD-3, MD-6].
+ * - `item-no-provider`: a required item that no enabled module provides [MD-3].
+ * - `item-not-available`: a required item that is not provided at every height where the requiring module runs
+ *   [MD-3].
+ * - `graph-cycle`: a cycle in one range's graph, or in the union of all ranges' graphs; either leaves startup with no
+ *   order [MD-3, Q95].
+ * - `cannot-start-mid-chain`: a module that starts above height 0 (an S above 0 included) without declaring
+ *   `startsMidChain`, or that requires an item from a provider which starts at the same height and does not declare it
+ *   [MD-4, Q96, Q98].
  *
- * **What is checked (Q97)** is what this build will run, as a build carries one version of each module (Q43): every
- * range that holds a height above the cursor, whole; the range that ends at the cursor only for a cycle, since RN-11
- * re-delivers the cursor's `on-after-db-write` and `on-stop-height` there in RN-3's order; the starts above the cursor;
- * the development-only modules active at the cursor or later. On a new database that is everything from S. A fault only
- * heights at or below the cursor have was judged by the builds that processed them — but Q95's union of every range's
- * requirements, past ranges included, orders startup, so a cycle in it is refused wherever it lies.
+ * **What is checked** is what this build will run, since a build carries one version of each module [Q43, Q97]:
+ * - every range that holds a height above the cursor, in full;
+ * - the range that ends at the cursor, for cycles only: after a restart the runner delivers the cursor's
+ *   `on-after-db-write` and `on-stop-height` again there, in the range's order [RN-11];
+ * - module starts above the cursor;
+ * - development-only modules active at the cursor or later.
  *
- * **Order (RN-3).** In each range: the backbone parts present in the fixed order {@link BACKBONE_ORDER}, then the other
- * active modules by Kahn's algorithm, the ready module whose id is smallest in UTF-8 bytes ({@link utf8Order}) first;
- * at `on-db-write` `core-digest` runs last. Startup — each part's migrations and `on-start-db` (DB-9) — runs every part
- * of the database in one order: the backbone, then Kahn over the union of every range's requirements (Q95).
+ * On a new database that is everything from S. A fault confined to heights at or below the cursor was already accepted
+ * by the builds that processed those heights. The exception is the union graph: startup orders every part by the union
+ * of all ranges' requirements, past ranges included, so a cycle in it is refused wherever it lies. [Q95, Q97]
  *
- * **A private process's public items** (PP-13, owner decision Q126 B, task 14.1a; `design.md` §8): its input may carry
- * the public core's `table` items with their heights ({@link PublicItem}, read from the public database's
- * configuration history). In each range a public item active at the range's first height counts as provided for MD-3's
- * coverage (`item-no-provider` when neither a part of this build nor a public module provides it at any height,
- * `item-not-available` when they do only at other heights), and the ranges are split at the public items' starts and
- * after their stops as at entries'. A public item named like an item of this build's backbone is the backbone's — the
- * private backbone's `core-chain` and `core-digest` provide `chain-identity` and the digests over its own database — and
- * is not counted; a module providing an item a public module provides at a common height is `providers-overlap`
- * (MD-6). Public providers are not parts: they take no part in the order, the segments, `providerOf`, the cycles or
- * MD-4 (the public core judged its own starts). Without public items (a public process) nothing of this applies.
+ * **Order.** In each range: the backbone parts present, in the fixed order {@link BACKBONE_ORDER}; then the other
+ * active modules by Kahn's algorithm, picking among the ready modules the one whose id is smallest in UTF-8 bytes
+ * ({@link utf8Order}). At `on-db-write`, `core-digest` runs last. Startup (each part's migrations and `on-start-db`)
+ * runs every part of the database in a single order: the backbone, then Kahn's algorithm over the union of all ranges'
+ * requirements. [RN-3, DB-9, Q95]
  *
- * Pure: no database, no runner. The caller's own errors — an entry for a module the build does not have, revisions of
- * one module that overlap, a backbone part this order has no place for, a public item that stops before it starts —
- * are thrown as `Error`s, not refused.
+ * **Public items in a private process.** A private process's input may include the public core's `table` items with
+ * their heights ({@link PublicItem}), read from the public database's configuration history. In each range, a public
+ * item active at the range's first height counts as provided: `item-no-provider` applies when neither this build nor a
+ * public module provides the item at any height, and `item-not-available` when they provide it only at other heights.
+ * Ranges are also split at public items' starts and just after their stops. A public item with the same name as an
+ * item of this build's backbone is not counted, since the backbone provides it (the private `core-chain` and
+ * `core-digest` provide `chain-identity` and the digests of the private database). A module that provides an item a
+ * public module also provides at a common height is `providers-overlap`. Public providers are not parts: they get no
+ * place in the order, the segments, `providerOf`, the cycle checks or the mid-chain check (the public core checked its
+ * own starts). A public process has no public items, so none of this applies there. [PP-13, MD-6, Q126 B; design §8]
+ *
+ * Pure: no database and no runner. The caller's own mistakes (an entry for a module the build does not have,
+ * overlapping revisions of one module, a backbone part missing from the fixed order, a public item that stops before
+ * it starts) throw a plain `Error` rather than a refusal.
  */
 
 import { type ErrorCode, UmbraError } from "../db/errors.js";
@@ -58,9 +66,9 @@ import type { ModuleDeclaration } from "./declaration.js";
 import type { DeclarationOrigin, DeclarationSet } from "./validation.js";
 
 /**
- * The backbone parts' fixed order (RN-3; CORE-ARCH §4.2, §4.11): the core process's, then the private process's, then
- * `core-digest` — before every module at startup, so its tables exist while modules migrate (Q95), and last at
- * `on-db-write` — then the admin endpoints' parts, which have no points (Q70).
+ * The backbone parts' fixed order: the core process's parts, then the private process's, then `core-digest`, then the
+ * admin endpoints' parts, which have no points. `core-digest` runs before every module at startup, so its tables exist
+ * while modules migrate, and last at `on-db-write`. [RN-3, Q70, Q95; CORE-ARCH §4.2, §4.11]
  */
 export const BACKBONE_ORDER: readonly string[] = Object.freeze([
   "core-chain",
@@ -73,7 +81,7 @@ export const BACKBONE_ORDER: readonly string[] = Object.freeze([
   "core-config",
 ]);
 
-/** The backbone part that runs last at `on-db-write` (RN-3). */
+/** The backbone part that runs last at `on-db-write`. [RN-3] */
 const LAST_AT_DB_WRITE = "core-digest";
 
 /** Heights `from` to `to`, both included; `to` null for no end. */
@@ -82,7 +90,7 @@ export interface HeightRange {
   readonly to: bigint | null;
 }
 
-/** One revision of a module entry: its id, start and effective last height (null for none) (CF-5, RN-7). */
+/** One revision of a module entry: its id, start, and effective last height (null for none). [CF-5, RN-7] */
 export interface EntryRange {
   readonly id: string;
   readonly start: bigint;
@@ -90,9 +98,9 @@ export interface EntryRange {
 }
 
 /**
- * A `table` item of the public core at a private process (PP-13): its name, the public entry providing it — a public
- * module's id, or `core` for the public backbone's —, and its heights, `start` to its last height `stop` (CF-5's
- * effective stop; null for none), as the public database's configuration history records them (task 14.1a).
+ * A `table` item of the public core, as a private process sees it: its name, the public entry that provides it (a
+ * public module's id, or `core` for the public backbone), and its heights from `start` to its effective last height
+ * `stop` (null for none), as the public database's configuration history records them. [PP-13, CF-5]
  */
 export interface PublicItem {
   readonly item: string;
@@ -107,18 +115,18 @@ export interface GraphInput {
   readonly declarations: DeclarationSet<ModuleDeclaration>;
   /** S: the database's start height, the first `core` entry's start. */
   readonly start: bigint;
-  /** Every revision of every module entry — never the `core` entry's — with its effective stop (task 4.3). */
+  /** Every revision of every module entry, with its effective stop. The `core` entry's revisions are not included. */
   readonly entries: readonly EntryRange[];
-  /** The `core` entry's `developmentOptIn` (CF-4, CF-9). */
+  /** The `core` entry's `developmentOptIn`. [CF-4, CF-9] */
   readonly developmentOptIn: boolean;
   /**
-   * The database's cursor — the last committed height, read from the `blocks` table after the database is opened — or
-   * null on a new database, which has committed nothing (Q97). The first commit is at S, so a cursor is at least S.
+   * The database's cursor: the last committed height, read from the `blocks` table after the database is opened, or
+   * null on a new database, which has committed nothing. The first commit is at S, so a cursor is at least S. [Q97]
    */
   readonly cursor: bigint | null;
   /**
-   * A private process's public `table` items (PP-13; see the module comment), counted as provided where they run; none
-   * for a public process (absent).
+   * A private process's public `table` items, counted as provided at the heights where they run (see the module
+   * comment). Absent for a public process. [PP-13]
    */
   readonly publicItems?: readonly PublicItem[];
 }
@@ -126,20 +134,21 @@ export interface GraphInput {
 /** What runs in one range. */
 export interface ResolvedRange {
   readonly range: HeightRange;
-  /** The parts active in the range, in RN-3's order at every point but `on-db-write`. */
+  /** The parts active in the range, in the order used at every point except `on-db-write`. [RN-3] */
   readonly order: readonly ModuleDeclaration[];
   /** The same parts in `on-db-write`'s order: `core-digest` last. */
   readonly writeOrder: readonly ModuleDeclaration[];
   /**
-   * Each item exactly one active part provides, and that part's id. In a range that ends at the cursor, whose
-   * providers are not checked (Q97), an item several parts provide is left out: nothing there reads a provider's
-   * `block` items, as RN-11's re-delivery has none; in every later range `providers-overlap` refuses such an item.
+   * Each item that exactly one active part provides, mapped to that part's id. In a range that ends at the cursor,
+   * providers are not checked, so an item that several parts provide is left out; nothing there reads a provider's
+   * `block` items, because the callbacks delivered again after a restart carry none. In every later range,
+   * `providers-overlap` refuses such an item. [RN-11, Q97]
    */
   readonly providerOf: ReadonlyMap<string, string>;
   /**
-   * A private process's public items in the range (PP-13, task 14.1a): the items a public module provides at the range's
-   * heights and no part does. A part requiring one waits for no part: the public core committed it before the private
-   * process reads its height. Absent on a public process.
+   * A private process's public items in the range: the items a public module provides at the range's heights and no
+   * part of this build does. A part that requires one waits for no other part, because the public core committed the
+   * item before the private process reads that height. Absent on a public process. [PP-13]
    */
   readonly publicItems?: ReadonlySet<string>;
 }
@@ -149,19 +158,21 @@ export interface ResolvedGraph {
   /** S. */
   readonly start: bigint;
   /**
-   * Every part of the database — the backbone and every enabled module, whose revisions may all have ended (DB-9 keeps
-   * every module whose migrations ran) — in startup order (Q95): `startDatabase`'s parts and the schema plan's modules.
+   * Every part of the database, in startup order: the backbone and every enabled module, even one whose revisions have
+   * all ended, since a module whose migrations ran is kept. These are `startDatabase`'s parts and the schema plan's
+   * modules. [DB-9, Q95]
    */
   readonly modules: readonly ModuleDeclaration[];
   /** Where each part of `modules` is active: its revisions merged where they continue each other, from S. */
   readonly segments: ReadonlyMap<string, readonly HeightRange[]>;
   /**
-   * The ranges this process may run, in height order: the one holding the cursor — RN-11 re-delivers there — and every
-   * later one (on a new database, every range from S); the last has no end. The ranges that end below the cursor are
-   * left out: nothing runs there again, and startup does not check them (Q97).
+   * The ranges this process may run, in height order: the one holding the cursor (where callbacks are delivered again
+   * after a restart) and every later one; on a new database, every range from S. The last range has no end. Ranges
+   * that end below the cursor are left out, because nothing runs there again and startup does not check them.
+   * [RN-11, Q97]
    */
   readonly ranges: readonly ResolvedRange[];
-  /** The range of `ranges` holding `height`; undefined below the first of them (below S, or below the cursor's). */
+  /** The range of `ranges` that holds `height`; undefined below the first one (below S, or the cursor's range). */
   rangeAt(height: bigint): ResolvedRange | undefined;
 }
 
@@ -173,9 +184,11 @@ export interface GraphPart {
 }
 
 /**
- * What startup checks in a range (Q97): `whole` — it holds a height above the cursor (on a new database, every range),
- * so every rule applies; `cycle` — it ends at the cursor, where RN-11 re-delivers the cursor's `on-after-db-write` and
- * `on-stop-height` in RN-3's order, so only that its graph has no cycle; `none` — it ends below the cursor.
+ * What startup checks in a range [Q97]:
+ * - `whole`: the range holds a height above the cursor (on a new database, every range does), so every rule applies;
+ * - `cycle`: the range ends at the cursor, where the cursor's `on-after-db-write` and `on-stop-height` are delivered
+ *   again after a restart, in the range's order, so only the absence of a cycle is checked [RN-3, RN-11];
+ * - `none`: the range ends below the cursor.
  */
 export type RangeCheck = "whole" | "cycle" | "none";
 
@@ -188,7 +201,7 @@ export interface RangeFacts {
   readonly active: readonly GraphPart[];
   /** Each item, and the active parts that provide it. */
   readonly providers: ReadonlyMap<string, readonly GraphPart[]>;
-  /** Each public item active at the range's first height, and its public providers there, by UTF-8 id (PP-13). */
+  /** Each public item active at the range's first height, with its public providers there by UTF-8 id. [PP-13] */
   readonly publicProviders: ReadonlyMap<string, readonly string[]>;
 }
 
@@ -202,15 +215,15 @@ export interface GraphFacts {
   readonly parts: readonly GraphPart[];
   /** Every declaration of the build, enabled or not. */
   readonly built: readonly ModuleDeclaration[];
-  /** The ranges from S on, every one: those ending below the cursor too, for Q95's union. */
+  /** Every range from S on, including those ending below the cursor, which the union graph needs. [Q95] */
   readonly ranges: readonly RangeFacts[];
-  /** Whether the input carried public items (a private process, PP-13). */
+  /** Whether the input carried public items, which makes this a private process. [PP-13] */
   readonly hasPublic: boolean;
-  /** The public items counted (those named like a backbone item left out), at every height, below S too. */
+  /** The public items that count (not those named like a backbone item), at every height, below S too. */
   readonly publicItems: readonly PublicItem[];
 }
 
-/** One refusal cause of MD-3 to MD-6, checked over the whole graph. */
+/** One graph rule, checked over the whole graph. [MD-3, MD-4, MD-5, MD-6] */
 export interface GraphRule {
   readonly code: ErrorCode;
   /** The first refusal of this cause, or undefined. */
@@ -221,7 +234,7 @@ export interface GraphRule {
 
 const encoder = new TextEncoder();
 
-/** Compares two ids by their UTF-8 bytes (RN-3): neither the locale nor the order they were given in decides. */
+/** Compares two ids by their UTF-8 bytes, so neither the locale nor the input order affects the result. [RN-3] */
 export function utf8Order(a: string, b: string): number {
   const x = encoder.encode(a);
   const y = encoder.encode(b);
@@ -270,7 +283,7 @@ function segmentsOf(id: string, revisions: readonly EntryRange[], start: bigint)
     if (revision.stop !== null && revision.stop < revision.start) {
       throw new Error(
         `resolveGraph: the revision of ${id} stops at ${revision.stop}, before its start ${revision.start}; the ` +
-          "configuration refuses such an entry before the graph is resolved (CF-3)",
+          "configuration refuses such an entry before the graph is resolved",
       );
     }
   }
@@ -281,7 +294,7 @@ function segmentsOf(id: string, revisions: readonly EntryRange[], start: bigint)
     if (previous !== undefined && (previous.stop === null || previous.stop >= revision.start)) {
       throw new Error(
         `resolveGraph: the revisions of ${id} overlap (from ${previous.start} and from ${revision.start}); an earlier ` +
-          "revision stops at the next one's start − 1, which the configuration gives as its stop (CF-5)",
+          "revision stops at the next one's start − 1, which the configuration gives as its stop",
       );
     }
     previous = revision;
@@ -300,20 +313,20 @@ function factsOf(input: GraphInput): GraphFacts {
   if (cursor !== null && typeof cursor !== "bigint") {
     throw new Error(
       `resolveGraph: the cursor ${String(cursor)} is neither null (a new database) nor a height (a bigint): the ` +
-        "runner passes the blocks table's last committed height, read after opening the database (Q97)",
+        "runner passes the blocks table's last committed height, read after opening the database",
     );
   }
   if (cursor !== null && cursor < start) {
     throw new Error(
       `resolveGraph: the cursor ${cursor} is below S (${start}): the first commit is at S, so the last committed ` +
-        "height is at least S, and a database that has committed nothing has the cursor null (Q97)",
+        "height is at least S, and a database that has committed nothing has the cursor null",
     );
   }
   const backbone = declarations.backbone.map((declaration) => {
     const place = BACKBONE_ORDER.indexOf(declaration.id);
     if (place < 0) {
       throw new Error(
-        `resolveGraph: the backbone part ${declaration.id} has no place in RN-3's fixed order of the backbone ` +
+        `resolveGraph: the backbone part ${declaration.id} has no place in the backbone's fixed order ` +
           `(${BACKBONE_ORDER.join(", ")})`,
       );
     }
@@ -332,7 +345,7 @@ function factsOf(input: GraphInput): GraphFacts {
         : "a module this build does not have";
       throw new Error(
         `resolveGraph: the configuration has an entry for ${entry.id}, ${what}; the configuration refuses it before ` +
-          "the graph is resolved (CF-3)",
+          "the graph is resolved",
       );
     }
     revisions.set(entry.id, [...(revisions.get(entry.id) ?? []), entry]);
@@ -391,8 +404,9 @@ function factsOf(input: GraphInput): GraphFacts {
 }
 
 /**
- * The public items `input` carries that count (PP-13): every one but those named like an item of the build's backbone,
- * which is the backbone's own (see the module comment); throws for one that stops before it starts (the caller's).
+ * The public items of `input` that count: all except those named like an item of the build's backbone, which the
+ * backbone provides itself (see the module comment). Throws for a public item that stops before it starts, which is
+ * the caller's mistake. [PP-13]
  */
 function publicItemsOf(input: GraphInput): readonly PublicItem[] {
   const own = new Set(input.declarations.backbone.flatMap((part) => part.provides.map((item) => item.name)));
@@ -400,14 +414,14 @@ function publicItemsOf(input: GraphInput): readonly PublicItem[] {
     if (found.stop !== null && found.stop < found.start) {
       throw new Error(
         `resolveGraph: the public item ${found.item} of ${found.provider} stops at ${found.stop}, before its start ` +
-          `${found.start}; a public database's configuration history refuses such a revision (CF-3)`,
+          `${found.start}; a public database's configuration history refuses such a revision`,
       );
     }
   }
   return (input.publicItems ?? []).filter((found) => !own.has(found.item));
 }
 
-/** The public modules that provide `item` at any height (PP-13), by UTF-8 id. */
+/** The public modules that provide `item` at any height, sorted by UTF-8 id. [PP-13] */
 const publicProvidersOf = (facts: GraphFacts, item: string): string[] =>
   sorted(new Set(facts.publicItems.filter((found) => found.item === item).map((found) => found.provider)));
 
@@ -449,15 +463,16 @@ function spans<T>(facts: GraphFacts, faultsIn: (range: RangeFacts) => readonly T
 const byId = (parts: readonly GraphPart[]): GraphPart[] =>
   [...parts].sort((a, b) => utf8Order(a.declaration.id, b.declaration.id));
 
-// ── MD-5 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── development-only modules ────────────────────────────────────────────────────────────────────────────────────────
 
-/** Whether `segment` holds the cursor or a later height (on a new database, any): MD-5's "at the cursor or above". */
+/** Whether `segment` holds the cursor or a later height; on a new database, any segment does. [MD-5] */
 const atCursorOrLater = (segment: HeightRange, cursor: bigint | null): boolean =>
   cursor === null || segment.to === null || segment.to >= cursor;
 
 /**
- * MD-5: a development-only module active at the cursor or later (on a new database, at any height from S), without the
- * development opt-in. The cursor itself counts: RN-11 re-delivers its callbacks there (Q97).
+ * A development-only module may not be active at the cursor or later (on a new database, at any height from S) without
+ * the development opt-in. The cursor itself counts, because its callbacks are delivered again after a restart.
+ * [MD-5, RN-11, Q97]
  */
 const developmentOnly: GraphRule = {
   code: "development-opt-in-required",
@@ -472,18 +487,18 @@ const developmentOnly: GraphRule = {
     return new UmbraError(
       "development-opt-in-required",
       `module ${id} is development-only (developmentOnly: true) and the core entry does not set developmentOptIn: ` +
-        "true: development-only modules run only under the development opt-in (MD-5, CF-9); set developmentOptIn: " +
-        "true in the core entry for development, or enable the module at no height this process runs (Q97)",
+        "true: development-only modules run only under the development opt-in; set developmentOptIn: " +
+        "true in the core entry for development, or enable the module at no height this process runs",
       { feature: "development-only-module", module: id },
     );
   },
 };
 
-// ── MD-3, MD-6: providers ───────────────────────────────────────────────────────────────────────────────────────────
+// ── providers ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * MD-3, MD-6: two parts that provide one item at a common height — on a private process, a part and a public module
- * too (PP-13).
+ * Two parts may not provide the same item at a common height. In a private process, this also applies to a part and
+ * a public module. [MD-3, MD-6, PP-13]
  */
 const providersOverlap: GraphRule = {
   code: "providers-overlap",
@@ -508,9 +523,9 @@ const providersOverlap: GraphRule = {
     return new UmbraError(
       "providers-overlap",
       `${lead} ${count === 2 ? "both" : "all"} provide the item ${item} at heights ${span(first.range)}: at each height ` +
-        "an item has at most one active provider (MD-3, MD-6); end one's entry before the other's starts — for a " +
+        "an item has at most one active provider; end one's entry before the other's starts — for a " +
         "handoff, stop one at h − 1 and start the other at h" +
-        (publicModules.length === 0 ? "" : "; a private module's item may not take the name of a public one (PP-13)"),
+        (publicModules.length === 0 ? "" : "; a private module's item may not take the name of a public one"),
       { item, modules, ...(facts.hasPublic ? { publicModules } : {}), range: first.range },
     );
   },
@@ -530,7 +545,7 @@ const enabledProviders = (facts: GraphFacts, item: string): string[] =>
       .map(({ declaration }) => declaration.id),
   );
 
-/** MD-3's two coverage causes: no enabled provider at all (`none`), or none where the module runs. */
+/** Why a required item is not covered: no enabled provider at all (`none`), or none where the module runs. [MD-3] */
 function missing(facts: GraphFacts, none: boolean): Spanned<Missing> | undefined {
   const [first] = spans(
     facts,
@@ -547,7 +562,7 @@ function missing(facts: GraphFacts, none: boolean): Spanned<Missing> | undefined
   return first;
 }
 
-/** MD-3: a required item no enabled module provides. */
+/** Every required item must have an enabled provider. [MD-3] */
 const itemNoProvider: GraphRule = {
   code: "item-no-provider",
   check: (facts) => {
@@ -567,20 +582,20 @@ const itemNoProvider: GraphRule = {
           : `modules ${listed(notEnabled)} of the build provide it but have no entry in the configuration; add an ` +
             "entry for one of them";
     const publicCore = facts.hasPublic
-      ? ", nor does any module of the public core (PP-13: a private module may require the public core's table items, " +
+      ? ", nor does any module of the public core (a private module may require the public core's table items, " +
         "as its configuration history records them, and no block or process item of it)"
       : "";
     const publicFix = facts.hasPublic ? "; or enable a module that provides it in the public core" : "";
     return new UmbraError(
       "item-no-provider",
       `module ${module} requires the item ${item} at heights ${span(found.range)}, and no enabled module provides it` +
-        `${publicCore} (MD-3): ${fix}${publicFix}`,
+        `${publicCore}: ${fix}${publicFix}`,
       { module, item, range: found.range, notEnabled },
     );
   },
 };
 
-/** MD-3: a required item that its enabled providers do not provide where the module runs. */
+/** A required item must be provided at every height where the requiring module runs. [MD-3] */
 const itemNotAvailable: GraphRule = {
   code: "item-not-available",
   check: (facts) => {
@@ -597,14 +612,14 @@ const itemNotAvailable: GraphRule = {
       "item-not-available",
       `module ${module} requires the item ${item} at heights ${span(found.range)}, where no module provides it ` +
         `(provided by ${by.join(" and ")} at other heights): an item is available only from its provider's start to ` +
-        `its provider's stop, so a module's heights must lie within its providers' (MD-3); start ${module} later, ` +
+        `its provider's stop, so a module's heights must lie within its providers'; start ${module} later, ` +
         "stop it earlier, or give a provider an entry that covers those heights",
       { module, item, range: found.range, providers, ...(facts.hasPublic ? { publicProviders } : {}) },
     );
   },
 };
 
-// ── MD-3: cycles ────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── cycles ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** A requirement: `module` requires `item` from `provider`. */
 interface Edge {
@@ -682,8 +697,9 @@ const requirementWords = (edges: readonly Edge[]): string[] =>
   edges.map(({ module, item, provider }) => `${module} requires ${item} from ${provider}`);
 
 /**
- * MD-3, Q95: a cycle in the graph of a range that holds the cursor or a later height (Q97), or one that only the union
- * of every range's requirements has — past ranges included, as startup orders every part of the database by it.
+ * No cycle may exist in the graph of a range that holds the cursor or a later height, nor in the union of all ranges'
+ * requirements. The union includes past ranges, because startup orders every part of the database by it.
+ * [MD-3, Q95, Q97]
  */
 const graphCycle: GraphRule = {
   code: "graph-cycle",
@@ -713,7 +729,7 @@ const graphCycle: GraphRule = {
       return new UmbraError(
         "graph-cycle",
         `${lead} — ${requirementWords(cycle).join(", ")} — and a module runs only after the providers of the items it ` +
-          "requires, so no order exists (MD-3, RN-3); move one of the items to a module outside the cycle, or drop " +
+          "requires, so no order exists; move one of the items to a module outside the cycle, or drop " +
           "one requirement",
         { modules, items, range: first.range },
       );
@@ -722,7 +738,7 @@ const graphCycle: GraphRule = {
   },
 };
 
-/** Q95: a cycle of the union of the ranges' requirements among the modules (the backbone runs first), if any. */
+/** A cycle among the modules in the union of all ranges' requirements, if any; the backbone runs first. [Q95] */
 function unionCycle(facts: GraphFacts): UmbraError | undefined {
   const edges = unionEdges(facts);
   const modules = facts.parts.filter((part) => part.origin !== "backbone").map((part) => part.declaration.id);
@@ -741,8 +757,8 @@ function unionCycle(facts: GraphFacts): UmbraError | undefined {
     "graph-cycle",
     `the modules ${listed(cycle.map((edge) => edge.module))} require one another's items in a cycle across height ` +
       `ranges — ${words.join(", ")} — and while each range has an order, startup runs every module's migrations and ` +
-      "on-start-db once, in one order that puts each provider before the modules requiring it, and none exists " +
-      "(MD-3, DB-9, RN-3, Q95); move one of the items to a module outside the cycle, or drop one requirement",
+      "on-start-db once, in one order that puts each provider before the modules requiring it, and none exists; " +
+      "move one of the items to a module outside the cycle, or drop one requirement",
     {
       modules: cycle.map((edge) => edge.module),
       items: cycle.map((edge) => edge.item),
@@ -753,8 +769,8 @@ function unionCycle(facts: GraphFacts): UmbraError | undefined {
 }
 
 /**
- * Every range's requirements, each once: the union graph of Q95. Its users run Kahn's algorithm over the modules only,
- * which ignores a requirement of or on a backbone part (the backbone runs first).
+ * The union graph: every range's requirements, each once. Its users run Kahn's algorithm over the modules only, which
+ * ignores any requirement of or on a backbone part, since the backbone runs first. [Q95]
  */
 function unionEdges(facts: GraphFacts): Edge[] {
   const seen = new Set<string>();
@@ -781,9 +797,9 @@ function edgeSpan(facts: GraphFacts, edge: Edge): HeightRange {
   return (first as Spanned<Edge>).range;
 }
 
-// ── MD-4 ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── mid-chain starts ────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A mid-chain start that MD-4 does not allow. */
+/** A mid-chain start that is not allowed. [MD-4] */
 interface MidChain {
   readonly module: string;
   readonly start: bigint;
@@ -793,10 +809,10 @@ interface MidChain {
 }
 
 /**
- * MD-4: each start above 0 (genesis) — a start at an S above 0 included (Q96) — and above the cursor (Q97) of a module
- * that does not declare `startsMidChain: true`, or that requires an item from a provider not active at the height
- * before (Q98) that does not. Starts are segment starts: a revision continuing the one before does not start the
- * module.
+ * Rejects each module start above height 0 (genesis) and above the cursor, including a start at an S above 0, when the
+ * module does not declare `startsMidChain: true`, or when it requires an item from a provider that was not active at
+ * the height before and does not declare it either. Only segment starts count: a revision that continues the one
+ * before does not start the module again. [MD-4, Q96, Q97, Q98]
  */
 const cannotStartMidChain: GraphRule = {
   code: "cannot-start-mid-chain",
@@ -813,8 +829,8 @@ const cannotStartMidChain: GraphRule = {
         const at = facts.ranges.find((range) => contains(range.range, segment.from)) as RangeFacts;
         const before = segment.from - 1n;
         for (const item of declaration.requires) {
-          // A provider active at h − 1 has run without a gap and holds its data from h on (Q98). Segments start at S,
-          // so at a start at S none is: the database holds no height before S.
+          // A provider active at h − 1 has run without a gap, so it holds its data from h on. Segments start at S, so
+          // at a start at S no provider qualifies: the database holds no height before S. [Q98]
           const slow = byId(at.providers.get(item) ?? []).find(
             (part) => !part.declaration.startsMidChain && !part.segments.some((other) => contains(other, before)),
           );
@@ -825,9 +841,9 @@ const cannotStartMidChain: GraphRule = {
         }
       }
     }
-    // The earliest start first; at one start, a refusal naming a provider before a module's own, so that a module and
-    // the provider starting with it are named together (MD-4: "the module and, for a provider, the provider and the
-    // item") whatever their ids — the provider's own start is refused at the same height; then the smallest id.
+    // Earliest start first. At the same start, a refusal that names a provider comes before a module's own, so a
+    // module and the provider that starts with it are reported together whatever their ids (the provider's own start
+    // is refused at the same height). Then the smallest id. [MD-4]
     const named = (fault: MidChain): number => (fault.provider === undefined ? 1 : 0);
     found.sort((a, b) => byHeight(a.start, b.start) || named(a) - named(b) || utf8Order(a.module, b.module));
     const [first] = found;
@@ -837,21 +853,21 @@ const cannotStartMidChain: GraphRule = {
     const message =
       first.provider === undefined
         ? `${lead} but does not declare startsMidChain: true: a start above 0 is a mid-chain start, at S too, and a ` +
-          "module that needs the chain's history from genesis cannot start there (MD-4, Q96); start it at 0 on a " +
+          "module that needs the chain's history from genesis cannot start there; start it at 0 on a " +
           "database synced from genesis, restore a backup holding its data, or use a module that can start mid-chain"
         : `${lead} and requires the item ${first.item} from ${first.provider}, which ` +
           (atS === ""
             ? `is not active at ${first.start - 1n}`
             : "starts with it — the database holds no height before S —") +
           " and does not declare startsMidChain: true: a provider that has not run up to the height before a " +
-          "module's start starts with it, and must promise a mid-chain start too (MD-4, Q98); run the provider from " +
+          "module's start starts with it, and must promise a mid-chain start too; run the provider from " +
           "0 on a database synced from genesis or from a backup holding its data, or use a provider that can start " +
           "mid-chain";
     return new UmbraError("cannot-start-mid-chain", message, { ...first });
   },
 };
 
-/** MD-3 to MD-6's causes, in the order they are checked. */
+/** The graph rules, in the order they are checked. [MD-3, MD-4, MD-5, MD-6] */
 export const GRAPH_RULES: readonly GraphRule[] = Object.freeze([
   developmentOnly,
   providersOverlap,
@@ -863,7 +879,7 @@ export const GRAPH_RULES: readonly GraphRule[] = Object.freeze([
 
 // ── order ───────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Throws when a backbone part requires an item that a later part, or a module, provides: RN-3 has no order for it. */
+/** Throws when a backbone part requires an item from a later part or a module, which the fixed order forbids. [RN-3] */
 function checkBackbone(range: RangeFacts): void {
   const backbone = range.active.filter((part) => part.origin === "backbone").map((part) => part.declaration.id);
   backbone.forEach((id, place) => {
@@ -874,7 +890,7 @@ function checkBackbone(range: RangeFacts): void {
         throw new Error(
           `resolveGraph: the backbone part ${id} requires the item ${item}, which ${provider.declaration.id} provides ` +
             `at heights ${span(range.range)}; a backbone part may require only the items of the backbone parts before ` +
-            `it in RN-3's fixed order (${BACKBONE_ORDER.join(", ")})`,
+            `it in the backbone's fixed order (${BACKBONE_ORDER.join(", ")})`,
         );
       }
     }
@@ -909,8 +925,8 @@ function ordered(
 
 /** One range's orders and providers, and — on a private process (`hasPublic`) — its public items. */
 function resolvedRange(range: RangeFacts, compare: (a: string, b: string) => number, hasPublic: boolean): ResolvedRange {
-  // In a range that ends at the cursor a module may provide a backbone part's item (providers are not checked there,
-  // Q97); the backbone's own requirements are the same in every range, and the last range is always checked whole.
+  // In a range that ends at the cursor, providers are not checked, so a module may provide a backbone part's item.
+  // The backbone's own requirements are the same in every range, and the last range is always checked in full. [Q97]
   if (whole(range)) checkBackbone(range);
   const order = ordered(range.active, edgesOf(range), compare, `at heights ${span(range.range)}`);
   const last = order.filter((declaration) => declaration.id === LAST_AT_DB_WRITE);
@@ -958,9 +974,9 @@ export function resolveWith(
 }
 
 /**
- * Resolves the requirement graph of one database at startup (MD-3 to MD-6, RN-3): see the module comment. Throws an
- * `UmbraError` (not retryable) naming the range, the module and the item; returns the order and providers of each range
- * from the one holding the cursor on, and the database's modules in startup order.
+ * Resolves one database's requirement graph at startup, as the module comment describes. Throws a non-retryable
+ * `UmbraError` naming the range, the module and the item. Returns the order and providers of each range from the one
+ * holding the cursor on, and the database's modules in startup order. [MD-3, MD-4, MD-5, MD-6, RN-3]
  */
 export function resolveGraph(input: GraphInput): ResolvedGraph {
   return resolveWith(input);

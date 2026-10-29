@@ -10,11 +10,12 @@ import {
 } from "./determinism-checks.js";
 
 /**
- * A146 (DT-3, DT-6, PP-1, Q75; task 14.1): a private process runs the determinism rules of the core — DT-6's startup
- * refusals on its private plan, and DT-3's contents hash of its private database. The checks are in
- * `determinism-checks.ts`; the negative control, a private plan without DT-6's check, in
- * `determinism.negative-control.test.ts`. Also A147's private part (task 7.1 left it to this task): a table declared
- * `deterministic: false` on a private process, as on the core.
+ * A private process runs the determinism rules of the core: the startup refusals of non-deterministic tables on its
+ * private plan, and the contents hash of its private database. The checks are in `determinism-checks.ts`; the negative
+ * control, a private plan without the startup check, in `determinism.negative-control.test.ts`.
+ * [A146, DT-3, DT-6, PP-1, Q75]
+ *
+ * Also a table declared `deterministic: false` on a private process, as on the core. [A147]
  */
 describe.each(PRIVATE_BACKENDS)("A146 one set of determinism rules on a private process ($name)", (backend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);

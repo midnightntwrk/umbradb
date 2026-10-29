@@ -10,12 +10,11 @@ import {
 } from "./threat-model.js";
 
 /**
- * Task 17.4c (`tasks.md` 17.4c; A178 `[STATIC]`, owner decisions Q181 A, Q177 A–Q180 A): `docs/THREAT_MODEL.md`
- * describes 0.10.0 — no 0.9.5 part named, the draft's ten boundaries and the owner's three areas each a heading, its
- * known gaps naming the tasks and issues, every `path:line` it cites naming a file of the tree with at least that many
- * lines — and `README.md` and `SECURITY.md` link it. The checks are `./threat-model.ts`'s, on the tree as git lists it
- * (tracked and untracked files that exist, ignored ones left out). Committed negative controls below: a missing area,
- * a cited line past a file's end, a 0.9.5 term and a missing link each fail.
+ * `docs/THREAT_MODEL.md` describes 0.10.0 — no 0.9.5 part named, the draft's ten boundaries and the owner's three areas
+ * each a heading, its known gaps naming the tasks and issues, every `path:line` it cites naming a file of the tree with
+ * at least that many lines — and `README.md` and `SECURITY.md` link it. The checks are `./threat-model.ts`'s, on the
+ * tree as git lists it (tracked and untracked files that exist, ignored ones left out). Committed negative controls
+ * below: a missing area, a cited line past a file's end, a 0.9.5 term and a missing link each fail. [A178 STATIC, Q177–Q181]
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));

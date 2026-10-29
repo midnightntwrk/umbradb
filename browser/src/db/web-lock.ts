@@ -1,10 +1,9 @@
 /**
- * The PGlite writer lock in the browser build, in place of `src/db/pglite-lock.ts` (`openspec/changes/core-arch/specs/
- * browser/spec.md` BR-1; `specs/database-api/spec.md` DB-11; `design.md` §4, §9.2; owner decision Q50; task 16.1):
- * one worker owns each database, through a Web Locks lock named after it, taken before PGlite opens it and held for
- * the worker's life — the browser releases it when the worker ends (a reload, a closed tab, a crash), never while it
- * lives, as the operating system does the Node.js lock (`node:sqlite`'s exclusive transaction). A second tab, or a
- * second worker, on the same database refuses with `writer-lock-held` and never opens it.
+ * The PGlite writer lock in the browser build, in place of `src/db/pglite-lock.ts`. One worker owns each database,
+ * through a Web Locks lock named after it, taken before PGlite opens it and held for the worker's life. The browser
+ * releases it when the worker ends (a reload, a closed tab, a crash), never while it lives, as the operating system
+ * does for the Node.js lock (`node:sqlite`'s exclusive transaction). A second tab, or a second worker, on the same
+ * database refuses with `writer-lock-held` and never opens it. [BR-1, DB-11, Q50; design §4, §9.2]
  *
  * - `memory://` (and an empty location) is kept in memory, per worker: no lock.
  * - `opfs-ahp://<name>` is a database in the origin's private file system (OPFS): the lock `umbradb-database:<name>`,
@@ -14,8 +13,8 @@
  * As in Node.js, the same worker opens a database it closed again with the lock it holds, and a second opening while
  * the first is open is `writer-lock-held` (`holder: "this process"`).
  *
- * **The negative control** (task 16.1, A129): a build made with the control `ignore-web-lock` (`browser/build.ts`)
- * takes no lock at all, so a second tab opens a second writer.
+ * **The negative control:** a build made with the control `ignore-web-lock` (`browser/build.ts`) takes no lock at all,
+ * so a second tab opens a second writer. [A129]
  */
 
 import { UmbraError } from "../../../src/db/errors.js";
@@ -52,7 +51,7 @@ function lockHeld(holder: "this process" | "another process"): UmbraError {
       : "another tab or worker holds the PGlite database's Web Lock (which the browser releases when that worker ends)";
   return new UmbraError(
     "writer-lock-held",
-    `${what}: exactly one worker writes each database (DB-11, BR-1); close the other tab, or give this one another ` +
+    `${what}: exactly one worker writes each database; close the other tab, or give this one another ` +
       "database",
     { backend: "pglite", holder },
   );

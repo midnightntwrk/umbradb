@@ -5,13 +5,13 @@ import { terminationSignal } from "../../src/runner/process.js";
 import { startProcess } from "../runner/process-build.js";
 
 /**
- * A running process for A163's real signal (task 15.1a; BK-1, Q152 B), started by `signal-backup.test.ts` with `node
- * --import tsx` and one JSON argument ({@link SignalJob}): `startProcess` (the tests' own, which serves no admin
- * endpoints) as `umbradb run` starts it — the configuration file and its modules, SIGTERM through `terminationSignal`,
- * SIGUSR2 from this process itself (no `backupSignals` given) — over an in-memory chain that finalizes one block every
- * `feedMs` once startup completed, as a node does, so that blocks keep committing. It reports each event as one JSON
- * line on stdout ({@link SignalEvent}): its log lines, each new cursor, and `closed` once the process has stopped and
- * closed; then it lets Node.js end by itself. It exits on its own once its parent is no longer the test's.
+ * A running process for the pause backup's real signal, started by `signal-backup.test.ts` with `node --import tsx` and
+ * one JSON argument ({@link SignalJob}): `startProcess` (the tests' own, which serves no admin endpoints) as `umbradb
+ * run` starts it — the configuration file and its modules, SIGTERM through `terminationSignal`, SIGUSR2 from this
+ * process itself (no `backupSignals` given) — over an in-memory chain that finalizes one block every `feedMs` once
+ * startup completed, as a node does, so that blocks keep committing. It reports each event as one JSON line on stdout
+ * ({@link SignalEvent}): its log lines, each new cursor, and `closed` once the process has stopped and closed; then it
+ * lets Node.js end by itself. It exits on its own once its parent is no longer the test's. [A163, BK-1, Q152 B]
  */
 
 export interface SignalJob {

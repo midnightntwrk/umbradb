@@ -1,35 +1,39 @@
 /**
- * The ledger version table and each block's ledger version (`openspec/changes/core-arch/specs/ledger/spec.md` LG-1,
- * LG-2, LG-3; `design.md` §5, §11; CORE-ARCH §4.8; task 12.2).
+ * The ledger version table, and the ledger version of each block. [LG-1, LG-2, LG-3; CORE-ARCH §4.8; design §5, §11]
  *
- * **Selection (LG-1, LG-2).** A block's ledger version is the row covering the `spec_version` of its `MNSV` digest:
- * the one `DigestItem::Consensus(*b"MNSV", spec_version.encode())` the node's version pallet deposits in every block,
- * block 0 included (`midnight-node` `pallets/version/src/lib.rs`), read as the node reads it — a Consensus item only, a
- * PreRuntime or Seal item with that engine is not it. {@link selectLedgerVersion} checks, in this order: exactly one
- * well-formed `MNSV` item (`bad-version-digest`: `missing`, `several` or `malformed`); every pin at the block's height
- * (`pin-mismatch`, naming what differs, the hash or the `spec_version`); exactly one row covering the version
- * (`unknown-runtime`, `details.rows` the number of rows that cover it: 0, or 2 and more in a table the configuration's
- * rules did not check). Each is a typed `UmbraError` the finalized loop turns into the halt of `design.md` §11 (task
- * 5.4), never retryable. Rows alone choose the ledger; pins only check. The node's `midnight_ledgerVersion` is not
- * read.
+ * **Selection.** A block's ledger version is the row covering the `spec_version` of its `MNSV` digest. That is the
+ * single `DigestItem::Consensus(*b"MNSV", spec_version.encode())` the node's version pallet deposits in every block,
+ * block 0 included (`midnight-node` `pallets/version/src/lib.rs`). It is read as the node reads it: only a Consensus
+ * item counts, not a PreRuntime or Seal item with that engine. [LG-1, LG-2]
  *
- * **The table in effect (LG-3).** The `core` entry's `ledgerTable` adds to or replaces parts of the network's built-in
- * table (`./networks.json`): a configured row maps the `spec_version`s it covers, and the built-in rows map the rest —
- * cut around the configured rows where they overlap them — so a configured row never leaves a version the built-in
- * rows covered unmapped; a configured pin replaces the built-in pin at its height, and adds one at any other. A network
- * with no built-in table (`custom`) has only its configured rows and pins. The rows are ordered by `specVersionMin`,
- * the pins by height. The `core` schema gives this table in effect as the revision's `ledgerTable`
- * (`../config/core-settings.ts`), so the history records it (CF-7: every default applied), and checks
- * {@link ledgerTableIssues}' rules on a configured table first.
+ * {@link selectLedgerVersion} checks, in this order:
+ * - exactly one well-formed `MNSV` item, else `bad-version-digest` (`missing`, `several` or `malformed`);
+ * - every pin at the block's height, else `pin-mismatch`, naming what differs (the hash or the `spec_version`);
+ * - exactly one row covering the version, else `unknown-runtime`, with `details.rows` the number of covering rows (0,
+ *   or 2 or more in a table the configuration's rules did not check).
  *
- * Pure: no Node.js import, so the browser build (task 16.1) uses it as it is.
+ * Each is a typed `UmbraError` that the finalized loop turns into a halt; none is retryable. Rows alone choose the
+ * ledger; pins only check. The node's `midnight_ledgerVersion` is not read. [design §11]
+ *
+ * **The table in effect.** The `core` entry's `ledgerTable` adds to, or replaces parts of, the network's built-in
+ * table (`./networks.json`):
+ * - a configured row maps the `spec_version`s it covers, and the built-in rows map the rest, cut around the configured
+ *   rows where they overlap; so a configured row never leaves unmapped a version the built-in rows covered;
+ * - a configured pin replaces the built-in pin at its height, or adds one at any other height;
+ * - a network with no built-in table (`custom`) has only its configured rows and pins.
+ *
+ * The rows are ordered by `specVersionMin`, the pins by height. The `core` schema (`../config/core-settings.ts`) first
+ * checks {@link ledgerTableIssues}' rules on a configured table, then gives this table in effect as the revision's
+ * `ledgerTable`, so the configuration history records it with every default applied. [LG-3, CF-7]
+ *
+ * Pure: no Node.js import, so the browser build uses it as it is.
  */
 
 import { UmbraError } from "../db/errors.js";
 import type { LedgerName } from "./types.js";
 import { LEDGER_RELEASES } from "./releases.js";
 
-/** The largest `spec_version`: a runtime's version is a `u32` (LG-1's inclusive bounds). */
+/** The largest `spec_version`, since a runtime's version is a `u32`; row bounds are inclusive. [LG-1] */
 export const U32_MAX = 4_294_967_295;
 
 /** A row of the ledger version table: the `spec_version`s from `specVersionMin` to `specVersionMax`, both included. */
@@ -39,20 +43,22 @@ export interface LedgerRow {
   readonly ledger: LedgerName;
 }
 
-/** A pin: the block at `height` has the hash `hash` (`0x` hex) and carries `specVersion` in its `MNSV` digest (LG-2). */
+/**
+ * A pin: the block at `height` has the hash `hash` (`0x` hex) and carries `specVersion` in its `MNSV` digest. [LG-2]
+ */
 export interface LedgerPin {
   readonly height: number;
   readonly hash: string;
   readonly specVersion: number;
 }
 
-/** A ledger version table: its rows and its pins (LG-1, LG-2); the `ledger-table` process item is one. */
+/** A ledger version table: its rows and its pins; the `ledger-table` process item is one. [LG-1, LG-2] */
 export interface LedgerTable {
   readonly rows: readonly LedgerRow[];
   readonly pins: readonly LedgerPin[];
 }
 
-/** The `core` entry's `ledgerTable` as configured (CF-4): rows and pins added to, or replacing, the built-in ones. */
+/** The `core` entry's `ledgerTable` as configured: rows and pins added to, or replacing, the built-in ones. [CF-4] */
 export interface ConfiguredLedgerTable {
   readonly rows?: readonly LedgerRow[] | undefined;
   readonly pins?: readonly LedgerPin[] | undefined;
@@ -97,9 +103,9 @@ function blockNamed(block: VersionedBlock): string {
 }
 
 /**
- * The `spec_version` of `block`'s `MNSV` digest (LG-1). Throws `bad-version-digest` when the block has no `MNSV`
- * item (`reason: "missing"`), more than one (`"several"`, well formed or not), or one that is not a 4-byte `u32`
- * payload (`"malformed"`, with the item).
+ * The `spec_version` of `block`'s `MNSV` digest. Throws `bad-version-digest` when the block has no `MNSV` item
+ * (`reason: "missing"`), more than one (`"several"`, well formed or not), or one that is not a 4-byte `u32` payload
+ * (`"malformed"`, with the item). [LG-1]
  */
 export function mnsvSpecVersion(block: VersionedBlock): number {
   const items = block.digest.filter(isMnsvItem);
@@ -109,7 +115,7 @@ export function mnsvSpecVersion(block: VersionedBlock): number {
     throw new UmbraError(
       "bad-version-digest",
       `${blockNamed(block)} has ${items.length === 0 ? "no" : items.length} MNSV version digest${items.length === 0 ? "" : "s"}, ` +
-        "where every block carries exactly one, naming the runtime that built it (LG-1)",
+        "where every block carries exactly one, naming the runtime that built it",
       { ...where, reason, items: items.length },
     );
   }
@@ -117,7 +123,7 @@ export function mnsvSpecVersion(block: VersionedBlock): number {
   if (item.length !== MNSV_LENGTH || item[5] !== 0x10) {
     throw new UmbraError(
       "bad-version-digest",
-      `${blockNamed(block)} has an MNSV version digest that is not a 4-byte spec_version: ${hexOf(item)} (LG-1)`,
+      `${blockNamed(block)} has an MNSV version digest that is not a 4-byte spec_version: ${hexOf(item)}`,
       { ...where, reason: "malformed", items: 1, item: hexOf(item) },
     );
   }
@@ -125,8 +131,8 @@ export function mnsvSpecVersion(block: VersionedBlock): number {
 }
 
 /**
- * Checks `block` against every pin at its height (LG-2): each must name its hash and `specVersion`. Throws
- * `pin-mismatch` naming the pin and what differs (`differs`: `hash`, `specVersion` or both).
+ * Checks `block` against every pin at its height: each must name its hash and `specVersion`. Throws `pin-mismatch`
+ * naming the pin and what differs (`differs`: `hash`, `specVersion` or both). [LG-2]
  */
 export function checkPins(pins: readonly LedgerPin[], block: VersionedBlock, specVersion: number): void {
   const hash = hexOf(block.hash);
@@ -137,15 +143,15 @@ export function checkPins(pins: readonly LedgerPin[], block: VersionedBlock, spe
     throw new UmbraError(
       "pin-mismatch",
       `${blockNamed(block)} with spec_version ${specVersion} contradicts the ledger table's pin of height ${pin.height}, ` +
-        `the hash ${pin.hash} with spec_version ${pin.specVersion} (LG-2): this is not the chain the table was made for`,
+        `the hash ${pin.hash} with spec_version ${pin.specVersion}: this is not the chain the table was made for`,
       { height: block.height, hash, specVersion, pin: { height: pin.height, hash: pin.hash, specVersion: pin.specVersion }, differs },
     );
   }
 }
 
 /**
- * The ledger of the one row covering `specVersion` (LG-1). Throws `unknown-runtime` when no row covers it, or more
- * than one does (`details.rows` how many).
+ * The ledger of the single row covering `specVersion`. Throws `unknown-runtime` when no row covers it, or more than one
+ * does (`details.rows` says how many). [LG-1]
  */
 export function ledgerOfSpecVersion(rows: readonly LedgerRow[], block: VersionedBlock, specVersion: number): LedgerName {
   const covering = rows.filter((row) => row.specVersionMin <= specVersion && specVersion <= row.specVersionMax);
@@ -154,16 +160,16 @@ export function ledgerOfSpecVersion(rows: readonly LedgerRow[], block: Versioned
       "unknown-runtime",
       covering.length === 0
         ? `${blockNamed(block)} was built by a runtime with spec_version ${specVersion}, which no row of the ledger ` +
-            "table maps to a ledger version (LG-1): this build does not know that runtime"
+            "table maps to a ledger version: this build does not know that runtime"
         : `${blockNamed(block)} has spec_version ${specVersion}, which ${covering.length === 2 ? "two rows" : `${covering.length} rows`} ` +
-            "of the ledger table cover (LG-1): a spec_version matches one row",
+            "of the ledger table cover: a spec_version matches one row",
       { height: block.height, hash: hexOf(block.hash), specVersion, rows: covering.length },
     );
   }
   return (covering[0] as LedgerRow).ledger;
 }
 
-/** `block`'s ledger version in `table` (LG-1, LG-2): see the module comment. */
+/** `block`'s ledger version in `table`: see the module comment. [LG-1, LG-2] */
 export function selectLedgerVersion(table: LedgerTable, block: VersionedBlock): LedgerSelection {
   const specVersion = mnsvSpecVersion(block);
   checkPins(table.pins, block, specVersion);
@@ -197,9 +203,9 @@ const freezePin = (pin: LedgerPin): LedgerPin =>
   Object.freeze({ height: pin.height, hash: pin.hash, specVersion: pin.specVersion });
 
 /**
- * The table in effect (LG-3): `configured` over `builtIn` — see the module comment — frozen. Total: a configured row
- * that is not well formed (bounds the wrong way round or above {@link U32_MAX}) is left out, since the configuration's
- * rules refuse it anyway.
+ * The table in effect, frozen: `configured` laid over `builtIn` (see the module comment). It never throws: a configured
+ * row that is not well formed (bounds the wrong way round, or above {@link U32_MAX}) is left out, since the
+ * configuration's rules reject it anyway. [LG-3]
  */
 export function effectiveLedgerTable(builtIn: LedgerTable | null, configured: ConfiguredLedgerTable | undefined): LedgerTable {
   const own = (configured?.rows ?? []).filter(wellFormed).sort((a, b) => a.specVersionMin - b.specVersionMin);
@@ -223,18 +229,24 @@ const covers = (row: LedgerRow, specVersion: number): boolean =>
   row.specVersionMin <= specVersion && specVersion <= row.specVersionMax;
 
 /**
- * LG-1 to LG-3's rules on the `core` entry's configured `ledgerTable` (its shape is the schema's), for a network whose
- * built-in table is `builtIn` (null when the file has none): every `spec_version` at most {@link U32_MAX}; a row's
- * bounds the smaller first; a row's ledger one this build carries; no `spec_version` in two configured rows; one pin a
- * height; each pin's `spec_version` covered by a row of the table in effect (else its block would halt); and a network
- * without a built-in table sets its own rows. Each issue's path is inside `ledgerTable`.
+ * The rules on the `core` entry's configured `ledgerTable` (the schema checks its shape), for a network whose built-in
+ * table is `builtIn` (null when the file has none). Each issue's path is inside `ledgerTable`. The rules:
+ * - every `spec_version` is at most {@link U32_MAX};
+ * - a row's bounds come the smaller first;
+ * - a row's ledger is one this build carries [LG-5, LG-6];
+ * - no `spec_version` is in two configured rows;
+ * - there is at most one pin per height;
+ * - each pin's `spec_version` is covered by a row of the table in effect, or its block would halt;
+ * - a network without a built-in table sets its own rows.
+ *
+ * [LG-1, LG-2, LG-3]
  */
 export function ledgerTableIssues(builtIn: LedgerTable | null, configured: ConfiguredLedgerTable | undefined): LedgerTableIssue[] {
   const issues: LedgerTableIssue[] = [];
   const rows = configured?.rows ?? [];
   const pins = configured?.pins ?? [];
   const above = (value: number) =>
-    `${value} is above ${U32_MAX}, the largest spec_version: a runtime's version is a u32 (LG-1)`;
+    `${value} is above ${U32_MAX}, the largest spec_version: a runtime's version is a u32`;
   rows.forEach((row, index) => {
     if (row.specVersionMin > U32_MAX) issues.push({ path: ["rows", index, "specVersionMin"], message: above(row.specVersionMin) });
     if (row.specVersionMax > U32_MAX) issues.push({ path: ["rows", index, "specVersionMax"], message: above(row.specVersionMax) });
@@ -243,13 +255,13 @@ export function ledgerTableIssues(builtIn: LedgerTable | null, configured: Confi
         path: ["rows", index],
         message:
           `specVersionMin ${row.specVersionMin} is above specVersionMax ${row.specVersionMax}: a row's bounds are inclusive, ` +
-          "the smaller first (LG-1)",
+          "the smaller first",
       });
     }
     if (!CARRIED_LEDGERS.includes(row.ledger)) {
       issues.push({
         path: ["rows", index, "ledger"],
-        message: `this build carries no ledger ${row.ledger} adapter (it carries ${CARRIED_LEDGERS.join(", ")}; LG-5, LG-6)`,
+        message: `this build carries no ledger ${row.ledger} adapter (it carries ${CARRIED_LEDGERS.join(", ")})`,
       });
     }
     const earlier = rows.findIndex(
@@ -260,7 +272,7 @@ export function ledgerTableIssues(builtIn: LedgerTable | null, configured: Confi
       const first = Math.max(row.specVersionMin, (rows[earlier] as LedgerRow).specVersionMin);
       issues.push({
         path: ["rows", index],
-        message: `this row covers spec_version ${first}, which rows[${earlier}] covers too: a spec_version matches one row (LG-1)`,
+        message: `this row covers spec_version ${first}, which rows[${earlier}] covers too: a spec_version matches one row`,
       });
     }
   });
@@ -274,7 +286,7 @@ export function ledgerTableIssues(builtIn: LedgerTable | null, configured: Confi
     if (earlier !== -1) {
       issues.push({
         path: ["pins", index, "height"],
-        message: `pins[${earlier}] and pins[${index}] both name height ${pin.height}: one pin a height (LG-2)`,
+        message: `pins[${earlier}] and pins[${index}] both name height ${pin.height}: one pin a height`,
       });
     }
     if (!effective.rows.some((row) => covers(row, pin.specVersion))) {
@@ -282,7 +294,7 @@ export function ledgerTableIssues(builtIn: LedgerTable | null, configured: Confi
         path: ["pins", index, "specVersion"],
         message:
           `no row covers spec_version ${pin.specVersion}: the block at height ${pin.height} would halt with ` +
-          "unknown-runtime (LG-1, LG-2); add a row for it",
+          "unknown-runtime; add a row for it",
       });
     }
   });
@@ -291,7 +303,7 @@ export function ledgerTableIssues(builtIn: LedgerTable | null, configured: Confi
       path: configured === undefined ? [] : ["rows"],
       message:
         "a custom network sets its own ledger table: the built-in tables cover mainnet, preprod, preview and stagenet " +
-        "only (LG-3); give ledgerTable.rows, at least one row mapping its runtimes' spec_versions to ledger versions",
+        "only; give ledgerTable.rows, at least one row mapping its runtimes' spec_versions to ledger versions",
     });
   }
   return issues;

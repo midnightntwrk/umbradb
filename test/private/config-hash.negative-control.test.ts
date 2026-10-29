@@ -6,12 +6,14 @@ import { PRIVATE_BACKENDS, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.
 import { a162Problems, a162Run } from "./config-hash-checks.js";
 
 /**
- * A162's committed negative controls (task 14.1b; PP-14, RN-16), each through A162's own run and oracle:
+ * The configuration-hash scenario's committed negative controls, each through the scenario's own run and oracle:
  * - **a private process that ignores `configHash`** (`PrivateIntakeOptions.configHash: "ignore"`) keeps processing after
  *   the core's configuration changed — with a transport on both backends, without one on PostgreSQL —, so the oracle
  *   finds it at 16, not halted;
  * - **a configuration hash over the secrets that shows them**: a core whose hash is its node URL's password as hex (in
  *   the hash's form, `0x` and 64 digits): the header changes when only that password changes, and holds it.
+ *
+ * [A162, PP-14, RN-16]
  */
 
 /** A configuration hash of the core's secrets (a negative control's `ProcessInput.configHash`): the node's password as hex. */

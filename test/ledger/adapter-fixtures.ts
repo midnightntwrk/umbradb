@@ -6,20 +6,20 @@ import * as v9rc3 from "../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_f
 import type { ApplyInput } from "../../src/ledger/types.js";
 import { free } from "./node-format.js";
 
-// Task 12.1 of `openspec/changes/core-arch` (A98): blocks for the adapter test suite, built with the vendored packages'
-// published API — never through the adapters under test — so that no network and no node is needed.
+// Blocks for the adapter test suite, built with the vendored packages' published API, never through the adapters
+// under test, so that no network and no node is needed. [A98]
 //
 // - A deploy is proven with a proving provider that returns empty proofs and then bound, as a chain transaction is
 //   (`(signature, proof, pedersen-schnorr)`), so it has the ledger's own transaction hash; with proof checks off
-//   (LG-15) the ledger never looks at the proofs. Its one operation, `emit`, carries the verifier key in
-//   `fixtures/verifier-key/` (a deploy needs one).
+//   the ledger never looks at the proofs. Its one operation, `emit`, carries the verifier key in
+//   `fixtures/verifier-key/` (a deploy needs one). [LG-15]
 // - A contract call is proof-erased (`(signature, (), pedersen)`), as `midnight-ledger`'s own integration tests apply
 //   calls without a prover (`integration-tests/src/test/utils/log-contract.ts`): proving a call would need its circuit.
 // - The system transaction is `DistributeReserve(1000000000000000)`: for v8 the bytes 0.9.5's replay decoder test
-//   decodes (`design/full-chain-storage-design.md` §3.2's captured devnet sample), for v9 (both packages) the same
-//   payload under v9's tag.
+//   decodes (the captured devnet sample in `design/full-chain-storage-design.md`), for v9 (both packages) the same
+//   payload under v9's tag. [full-chain-storage-design §3.2]
 
-/** The vendored ledger packages: v8, v9 (rc.5) and v9 as runtime 2.0 built it (rc.3, task 12.2a). */
+/** The vendored ledger packages: v8, v9 (rc.5) and v9 as runtime 2.0 built it (rc.3). */
 export type Ledger = "v8" | "v9" | "v9-rc3";
 
 /**
@@ -170,7 +170,7 @@ export function cellValue(bytes: Uint8Array, length: number = bytes.length): v9.
   return { tag: "cell", content: atom(bytes, length) };
 }
 
-/** A MIP-0002 log value: `[version (4 bytes), event type (1 byte), data]` (CC-3). */
+/** A MIP-0002 log value: `[version (4 bytes), event type (1 byte), data]`. [CC-3] */
 export function wrappedLog(version: number, eventType: number, data: v9.EncodedStateValue): v9.EncodedStateValue {
   return {
     tag: "array",
@@ -270,7 +270,7 @@ export function markersOf(bytes: Uint8Array): ["signature", "proof" | "no-proof"
 
 /**
  * The reference replay of one block with the packages' own API — the published one and the patches'
- * `systemTransactionCost` and `postBlockUpdateExact` (task 12.1a), never the adapters — written from the official
+ * `systemTransactionCost` and `postBlockUpdateExact`, never the adapters — written from the official
  * indexer's algorithm (`midnight-indexer` `chain-indexer/src/domain/ledger_state.rs` `apply_transactions`,
  * `failed_regular_transaction`; `indexer-common/src/domain/ledger/ledger_state.rs` `apply_regular_transaction`,
  * `apply_system_transaction`, `finalize_apply_transactions`) and the node's (`midnight-node` 2.1.0-rc.4

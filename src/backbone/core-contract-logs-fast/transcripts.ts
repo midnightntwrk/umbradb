@@ -1,15 +1,19 @@
 /**
- * What `core-contract-logs-fast` reads in a transaction's transcripts (`openspec/changes/core-arch/specs/contract-data/
- * spec.md` CC-3; CORE-ARCH §4.11; decision record Q19 option D, Q21; task 13.1): each `log` operation of each contract
- * call, in the order the ledger would run them, with the value it logs when the transcript itself fixes it — or why it
- * does not. Plain data out (Q49); the native transaction and the package in.
+ * What `core-contract-logs-fast` reads in a transaction's transcripts: each `log` operation of each contract call, in
+ * the order the ledger would run them, with the value it logs when the transcript itself fixes it, or else the reason
+ * it does not. The native transaction and the package go in; plain data comes out.
+ * [CC-3, Q19 D, Q21, Q49; CORE-ARCH §4.11]
  *
  * **The order** is the ledger's (`midnight-ledger` 9.1.0.0-rc.5 `ledger/src/semantics.rs`: `apply_section` and
- * `apply_fallible`): first the guaranteed section — every intent in segment order, each intent's actions in order, a
- * call's guaranteed transcript —, then each fallible segment in order — that segment's intent, its actions in order, a
- * call's fallible transcript; within a transcript, its program's ops in order. A site carries its intent's segment (the
- * event's physical segment), whether it is in the fallible section, the call's place among the intent's actions and the
- * `log` op's place in the program.
+ * `apply_fallible`):
+ * - first the guaranteed section: every intent in segment order, each intent's actions in order, and for a call its
+ *   guaranteed transcript;
+ * - then each fallible segment in order: that segment's intent, its actions in order, and for a call its fallible
+ *   transcript;
+ * - within a transcript, its program's ops in order.
+ *
+ * A site carries its intent's segment (the event's physical segment), whether it is in the fallible section, the call's
+ * place among the intent's actions and the `log` op's place in the program.
  *
  * **The literal rule** ({@link literalAt}): the value a `log` at op i takes is a literal when op i − 1 is a `push` (its
  * `value`, `storage` either way: the VM logs the value it pushed, `onchain-vm/src/vm.rs`'s `Push` and `Log`) and no
@@ -21,10 +25,10 @@
  * the VM decodes it, with the package's own `decodeLogItem` over its tagged serialization (`serializeStateValue`): a
  * malformed wrapper is a version-0 `Misc` log of the whole value, and data over the emitted-log bound is no log (null).
  *
- * The function takes what a ledger task takes (`design.md` §5.5, LG-17: the native parsed object and `rawPackages()`):
- * the module's ledger task (`./task.ts`, task 12.6) runs it in the ledger worker on the block's one parse. It reads with
- * the v9 package the block's ledger has — rc.5's, or rc.3's on runtime 2.0 blocks (`v9-rc3`, task 12.2a: the same API, a
- * module of its own) —, the one `rawPackages()` holds.
+ * The function takes what a ledger task takes: the native parsed object and `rawPackages()`. The module's ledger task
+ * (`./task.ts`) runs it in the ledger worker on the block's one parse. It reads with the v9 package of the block's
+ * ledger, the one `rawPackages()` holds: rc.5's, or rc.3's on runtime 2.0 blocks (`v9-rc3`, with the same API in a
+ * module of its own). [LG-17; design §5.5]
  */
 
 import type { LogItem } from "../../ledger/types.js";
@@ -53,7 +57,7 @@ export interface LogSite {
 /** The vendored v9 package's name in `rawPackages()` (`src/ledger/releases.ts`). */
 export const V9_PACKAGE = "@umbradb/vendored-ledger-v9";
 
-/** The vendored v9 packages' names in `rawPackages()`: rc.5's, and rc.3's for runtime 2.0 blocks (task 12.2a). */
+/** The vendored v9 packages' names in `rawPackages()`: rc.5's, and rc.3's for runtime 2.0 blocks. */
 export const V9_PACKAGES: readonly string[] = Object.freeze([V9_PACKAGE, "@umbradb/vendored-ledger-v9-rc3"]);
 
 /** What of the v9 package the reading uses. */
@@ -90,7 +94,7 @@ export function literalAt(program: Program, at: number): { readonly value: unkno
   return { value: before.args.value };
 }
 
-/** Frees an object a getter of the package gave (a plain value has no `free`), as the adapter does (task 12.5). */
+/** Frees an object a getter of the package gave (a plain value has no `free`), as `src/ledger/adapter.ts` does. */
 function freeGot(object: unknown): void {
   (object as { free?: () => void } | null)?.free?.();
 }
@@ -116,7 +120,7 @@ function decoded(raw: V9Raw, value: unknown): LogItem | null {
 export function logSitesOf(transaction: unknown, packages: Readonly<Record<string, unknown>>): LogSite[] {
   const name = V9_PACKAGES.find((candidate) => packages[candidate] !== undefined);
   if (name === undefined) {
-    throw new TypeError(`the packages hold no ${V9_PACKAGES.join(" or ")}: only ledger v9 has MIP-0002 logs (Q54)`);
+    throw new TypeError(`the packages hold no ${V9_PACKAGES.join(" or ")}: only ledger v9 has MIP-0002 logs`);
   }
   const raw = packages[name] as V9Raw;
   const intents = (transaction as { readonly intents?: ReadonlyMap<number, unknown> }).intents;

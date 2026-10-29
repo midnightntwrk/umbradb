@@ -3,13 +3,15 @@ import type { ApplyInput, ChainOutcome, LedgerPackage, StateHandle, StoredNode }
 import { fromHex, hex } from "./adapter-fixtures.js";
 import { runInFreshInstance } from "./fresh-instance.js";
 
-// Task 12.2a of `openspec/changes/core-arch` (A159, A99; LG-3, LG-5; owner decision Q139 A): the clauses the tests of
-// ledger v9 as runtime 2.0 built it (`ledger-v9-rc3.test.ts`) run against the real packages and its committed negative
-// controls (`ledger-v9-rc3.negative-control.test.ts`) run against the wrong ones. The oracle is stagenet's node: its
-// genesis state and the roots it reported after blocks 0 to 3, and blocks 1 to 3 as `core-ledger-state` hands them to
-// the ledger worker, each with one `CNightGeneratesDustUpdate` system transaction (DUST generation, whose rules
-// ledger-9.1.0.0-rc.3 → rc.5 changed: task 0.2, question Q139), all extracted from task 0.3's tape stagenet-0-10000
-// (`fixtures/stagenet/blocks.json`). Each check returns a line per problem, none when it holds.
+// Checks for ledger v9 as runtime 2.0 built it (rc.3). The tests (`ledger-v9-rc3.test.ts`) run them against the real
+// packages, and the committed negative controls (`ledger-v9-rc3.negative-control.test.ts`) against wrong ones.
+// [A159, A99, LG-3, LG-5]
+//
+// The oracle is stagenet's node: its genesis state and the roots it reported after blocks 0 to 3, and blocks 1 to 3 as
+// `core-ledger-state` hands them to the ledger worker. Each of these blocks has one `CNightGeneratesDustUpdate` system
+// transaction (DUST generation, whose rules changed from ledger-9.1.0.0-rc.3 to rc.5). All of it is extracted from the
+// recorded tape stagenet-0-10000 (`fixtures/stagenet/blocks.json`). Each check returns a line per problem, none when it
+// holds. [Q139 A]
 
 interface StagenetBlockJson {
   height: number;
@@ -65,8 +67,8 @@ export interface StagenetReplay {
 }
 
 /**
- * A99 at the adapter: stagenet's genesis state (block 0's, whose root is the node's) and blocks 1 to 3 applied with
- * `adapter`, each root held to the node's.
+ * State roots at the adapter: stagenet's genesis state (block 0's, whose root is the node's) and blocks 1 to 3 applied
+ * with `adapter`, each root held to the node's. [A99]
  */
 export function stagenetReplay(adapter: LedgerPackage): StagenetReplay {
   const problems: string[] = [];
@@ -100,10 +102,10 @@ function flushInto(adapter: LedgerPackage): StoredNode[] {
 }
 
 /**
- * A159: the state `from` holds after stagenet's block 3 — persisted and flushed, the nodes a database holds — loaded by
+ * The state `from` holds after stagenet's block 3 is persisted and flushed (the nodes a database holds), then loaded by
  * its key in a fresh instance of the package at `packagePath` (a worker of its own, which holds nothing of this
- * thread's), has the state's own root, the node's, and the same serialization: a 2.0 → 2.1 upgrade, whose first rc.5
- * block applies on the state rc.3 stored, carries it.
+ * thread's). It has the state's own root, which is the node's, and the same serialization. So a 2.0 → 2.1 upgrade,
+ * whose first rc.5 block applies on the state rc.3 stored, carries it. [A159]
  */
 export async function carriedLoadProblems(from: LedgerPackage, packagePath: string): Promise<string[]> {
   const replay = stagenetReplay(from);

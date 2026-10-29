@@ -28,16 +28,23 @@ import {
 } from "./graph-fixtures.js";
 
 /**
- * The requirement graph per height range (tasks 3.2 and 3.2a; MD-3, MD-4, MD-5, MD-6, RN-3; decision record Q95–Q98),
- * without a database: `resolveGraph` takes the validated declarations, S, every module entry's height ranges, the
- * development opt-in and the cursor (null on a new database), and either refuses — naming the range, the module and the
- * item — or returns the order and providers of each range from the one holding the cursor on, and the database's
- * modules in startup order. Startup checks what this build will run (Q97): every range holding a height above the
- * cursor, the range ending at the cursor for a cycle only, the starts above the cursor, the development-only modules
- * active at the cursor or later; a start above 0 (genesis) is a mid-chain start, at an S above 0 too (Q96), and a
- * provider active at the height before a module's start need not promise it (Q98). The outputs fed to `planSchemas` and
- * `startDatabase` on both backends, and A25's continuous table, are `graph-database.test.ts`. "Startup refuses" through
- * the runner's refusal state is task 5.x's.
+ * The requirement graph per height range, without a database. `resolveGraph` takes the validated declarations, S,
+ * every module entry's height ranges, the development opt-in and the cursor (null on a new database). It either
+ * refuses, naming the range, the module and the item, or returns the order and providers of each range from the one
+ * holding the cursor on, and the database's modules in startup order. [MD-3, MD-4, MD-5, MD-6, RN-3, Q95]
+ *
+ * Startup checks what this build will run:
+ * - every range holding a height above the cursor;
+ * - the range ending at the cursor, for cycles only;
+ * - the starts above the cursor;
+ * - the development-only modules active at the cursor or later. [Q97]
+ *
+ * A start above 0 (genesis) is a mid-chain start, at an S above 0 too. A provider active at the height before a
+ * module's start need not declare that it can start mid-chain. [Q96, Q98]
+ *
+ * The outputs fed to `planSchemas` and `startDatabase` on both backends, and the continuous shared table, are tested
+ * in `graph-database.test.ts`. Refusing at startup through the runner's refusal state is tested with the runner.
+ * [A25]
  */
 
 /** The error `run` throws; fails the test if it returns or throws anything but an `UmbraError`. */
@@ -58,7 +65,7 @@ function module(id: string, requires: readonly string[], provides: readonly stri
   return declaration(id, { requires: [...requires], provides: provides.map(blockItem), migrations: [], ...rest });
 }
 
-/** A provider of the shared `table` item `contract-logs` (CORE-ARCH §4.11's two contract-logs modules). */
+/** A provider of the shared `table` item `contract-logs`, like the two contract-logs modules. [CORE-ARCH §4.11] */
 function logsProvider(id: string): ModuleDeclaration {
   return declaration(id, {
     provides: [
@@ -72,7 +79,7 @@ function logsProvider(id: string): ModuleDeclaration {
   });
 }
 
-/** One refusal of MD-3–MD-6: its input, and the code, details and words it must give. */
+/** One graph refusal: its input, and the code, details and words it must give. [MD-3, MD-4, MD-5, MD-6] */
 interface RefusalCase {
   readonly name: string;
   readonly input: () => GraphInput;
@@ -83,7 +90,10 @@ interface RefusalCase {
 
 const PRICES = provider("p", ["prices"]);
 
-/** A22's table (MD-3), with MD-4's, MD-5's and MD-6's refusals beside it (A23, A24, A25). */
+/**
+ * The table of missing-provider and cycle refusals, with the mid-chain, development opt-in and overlap refusals beside
+ * it. [A22, MD-3, A23, MD-4, A24, MD-5, A25, MD-6]
+ */
 const CASES: readonly RefusalCase[] = [
   {
     name: "A22 missing provider: nothing enabled provides a required item",
@@ -273,7 +283,7 @@ const CASES: readonly RefusalCase[] = [
   },
   {
     name: "A23 a backbone part with startsMidChain false at S above genesis, like any declaration (Q96)",
-    // core-digest requires blocks from core-block-commit, which starts with it at S: named with it (Q98).
+    // core-digest requires blocks from core-block-commit, which starts with it at S: named with it. [Q98]
     input: () => graphInput([], [], { backbone: backboneWithout("core-block-commit") }),
     code: "cannot-start-mid-chain",
     details: { module: "core-digest", start: 1n, range: range(1, null), item: "blocks", provider: "core-block-commit" },
@@ -296,7 +306,8 @@ const CASES: readonly RefusalCase[] = [
   },
   {
     name: "A23 a module whose provider cannot start mid-chain and starts with it, not active before (Q98)",
-    // Q98: the provider is asked because it is not active at 19; its own start at 20 is refused too, named after m's.
+    // The provider is asked because it is not active at 19; its own start at 20 is refused too, named after m's.
+    // [Q98]
     input: () =>
       graphInput(
         [provider("p", ["prices"], { startsMidChain: false }), consumer("m", ["prices"])],
@@ -320,7 +331,7 @@ const CASES: readonly RefusalCase[] = [
   },
   {
     name: "A23 a module with startsMidChain false starting again after a gap between its revisions",
-    // Q96: from genesis (S = 0), so that only the start after the gap is mid-chain.
+    // From genesis (S = 0), so that only the start after the gap is mid-chain. [Q96]
     input: () =>
       graphInput([consumer("m", ["block-header"], { startsMidChain: false })], [entry("m", 0, 30), entry("m", 50)], {
         start: 0n,
@@ -467,8 +478,9 @@ const TX_RESULTS = provider("core-tx-results", ["tx-results"]);
 const BLOCK_HEADER_TOO = provider("x", ["block-header"], { requires: ["node-client"] });
 
 /**
- * MD-3's scenario "An upgrade adds a requirement": `m` ran from 500 without requiring `tx-results`; the build's `m`
- * requires it, provided by `core-tx-results` from 10,000, where `m`'s new revision starts; the cursor is 9,999.
+ * The scenario "An upgrade adds a requirement": `m` ran from 500 without requiring `tx-results`. The build's `m`
+ * requires it, provided by `core-tx-results` from 10,000, where `m`'s new revision starts. The cursor is 9,999.
+ * [MD-3]
  */
 function upgradeAddsRequirement(cursor: bigint | null): GraphInput {
   return graphInput(
@@ -478,7 +490,9 @@ function upgradeAddsRequirement(cursor: bigint | null): GraphInput {
   );
 }
 
-/** A22's, A23's and A24's "not refused": faults that only heights at or below the cursor have (Q97). */
+/**
+ * The faults that are not refused: those confined to heights at or below the cursor. [A22, A23, A24, Q97]
+ */
 const PAST_FAULTS: readonly PastFaultCase[] = [
   {
     name: "A22 missing provider only in the range that ends at the cursor",
@@ -589,8 +603,8 @@ describe("Q97: a fault only at or below the cursor was judged by the builds that
   });
 
   it("refuses a cycle only in ranges ending below the cursor through the union's check (Q95; Q99)", () => {
-    // RN-3's startup order runs every part of the database, past ones included, over the union of every range's
-    // requirements: a cycle there leaves it no order, wherever the cycle lies.
+    // The startup order runs every part of the database, past ones included, over the union of every range's
+    // requirements: a cycle there leaves it no order, wherever the cycle lies. [RN-3]
     const error = refusal(() =>
       resolveGraph(
         graphInput(
@@ -650,8 +664,8 @@ describe("Q97: the result from the range holding the cursor on", () => {
   });
 
   it("orders, in the range ending at the cursor, a module providing a backbone part's item, with no provider for it", () => {
-    // Providers are not checked there (Q97), so the backbone's own check does not run there either: x overlaps
-    // core-block-fetch at 1–50, which core-block-commit requires; the backbone still runs first.
+    // Providers are not checked there, so the backbone's own check does not run there either: x overlaps
+    // core-block-fetch at 1–50, which core-block-commit requires; the backbone still runs first. [Q97]
     const graph = resolveGraph(
       graphInput([BLOCK_HEADER_TOO, consumer("c", ["block-header"])], [entry("x", 1, 50), entry("c", 1)], {
         cursor: 50n,
@@ -699,7 +713,8 @@ describe("the refusals' other shapes", () => {
   });
 
   it("names a cycle across ranges from its smallest id, each requirement with its range, and the whole span", () => {
-    // As A22's cross-range case with other names, all of it ending at 29: c1 needs x, a2 needs y, b3 needs z.
+    // Like the cross-range cycle case in the refusal table, with other names, all of it ending at 29: c1 needs x,
+    // a2 needs y, b3 needs z. [A22]
     const error = refusal(() =>
       resolveGraph(
         graphInput(
@@ -841,7 +856,7 @@ describe("A23: modules start mid-chain only when they and their providers promis
   });
 
   it("accepts a module with startsMidChain: false, and its provider, from 0: genesis is never mid-chain (Q96)", () => {
-    // Q96 changed this test: under 3.2's shipped A it started at S = 1, which is now a mid-chain start (refused above).
+    // An earlier version of this test started at S = 1, which is now a mid-chain start (refused above). [Q96]
     const graph = resolveGraph(
       graphInput(
         [provider("p", ["prices"], { startsMidChain: false }), consumer("m", ["prices"], { startsMidChain: false })],
@@ -854,7 +869,7 @@ describe("A23: modules start mid-chain only when they and their providers promis
   });
 
   it("accepts a later revision of a module that cannot start mid-chain: it continues, it does not start (CF-5)", () => {
-    // Q96: from genesis (S = 0); under 3.2's shipped A this ran at S = 1.
+    // From genesis (S = 0); an earlier version of this test ran at S = 1. [Q96]
     const graph = resolveGraph(
       graphInput(
         [consumer("m", ["block-header"], { startsMidChain: false })],
@@ -866,7 +881,8 @@ describe("A23: modules start mid-chain only when they and their providers promis
   });
 
   it("counts a start below S from S, where nothing below S runs", () => {
-    // Q96: a start at S = 10 is a mid-chain start, so the module here can start mid-chain (the refusal is A23's table).
+    // A start at S = 10 is a mid-chain start, so the module here can start mid-chain (the refusal is in the refusal
+    // table). [Q96, A23]
     const graph = resolveGraph(graphInput([consumer("m", ["block-header"])], [entry("m", 0)], { start: 10n }));
     expect(graph.segments.get("m")).toEqual([range(10, null)]);
     expect(graph.ranges.map((r) => r.range)).toEqual([range(10, null)]);
@@ -888,8 +904,8 @@ describe("A23: modules start mid-chain only when they and their providers promis
   });
 
   it("asks the provider active at the module's start, not one that provided the item before it", () => {
-    // slow (not mid-chain) provides prices from 0 to 19; p takes over at 20, where m starts. Q96: from genesis (S = 0),
-    // where 3.2's shipped A had S = 1.
+    // slow (not mid-chain) provides prices from 0 to 19; p takes over at 20, where m starts. From genesis (S = 0),
+    // where an earlier version of this test had S = 1. [Q96]
     const handoff = (startsMidChain: boolean) =>
       graphInput(
         [
@@ -903,7 +919,7 @@ describe("A23: modules start mid-chain only when they and their providers promis
     const graph = resolveGraph(handoff(true));
     expect(graph.rangeAt(19n)?.providerOf.get("prices")).toBe("slow");
     expect(graph.rangeAt(20n)?.providerOf.get("prices")).toBe("p");
-    // p is not active at 19, so it must promise a mid-chain start (Q98).
+    // p is not active at 19, so it must declare that it can start mid-chain. [Q98]
     expect(refusal(() => resolveGraph(handoff(false))).details).toEqual({
       module: "m",
       start: 20n,
@@ -1012,7 +1028,7 @@ describe("A25: shared items have at most one active provider per height (MD-6)",
       "reader",
       "core-digest",
     ]);
-    // Both providers are modules of the database: their migrations are the item's, recorded once (DB-8).
+    // Both providers are modules of the database: their migrations are the item's, recorded once. [DB-8]
     expect(ids(graph.modules)).toEqual([...BACKBONE_ORDER.slice(0, 3), "core-digest", "logs-fast", "logs-full", "reader"]);
   });
 
@@ -1060,7 +1076,7 @@ describe("RN-3: backbone first, then Kahn's algorithm by UTF-8 id, core-digest l
     const graph = resolveGraph(graphInput(USER, ENTRIES));
     expect(orders(graph).order).toEqual(EXPECTED);
     expect(orders(graph).writeOrder).toEqual([...EXPECTED.filter((id) => id !== "core-digest"), "core-digest"]);
-    // The startup order is the same here: one range, every module active in it (Q95).
+    // The startup order is the same here: one range, every module active in it. [Q95]
     expect(ids(graph.modules)).toEqual(EXPECTED);
   });
 
@@ -1134,7 +1150,8 @@ describe("the ranges: split at every start and stop + 1, closed, from S", () => 
   });
 
   it("leaves out heights below S: a revision ending below S is active nowhere, one crossing S counts from S", () => {
-    // Q96: m starts at S = 10, a mid-chain start, so it declares startsMidChain: true (under 3.2's A it did not).
+    // m starts at S = 10, a mid-chain start, so it declares startsMidChain: true (an earlier version of this test did
+    // not). [Q96]
     const graph = resolveGraph(
       graphInput(
         [consumer("gone", ["block-header"]), consumer("m", ["block-header"])],
@@ -1297,7 +1314,7 @@ describe("what the resolution takes as given: the caller's errors are thrown, no
     expect(thrown(graphInput([m], [entry("m", 1, 50), entry("m", 50)])).message).toMatch(/revisions of m overlap/);
     expect(thrown(graphInput([m], [entry("m", 20), entry("m", 1, 30)])).message).toMatch(/revisions of m overlap/);
     expect(thrown(graphInput([m], [entry("m", 10, 9)])).message).toMatch(/revision of m stops at 9, before its start 10/);
-    // Two revisions with one start: an entry is identified by (id, start) (CF-5).
+    // Two revisions with one start: an entry is identified by (id, start). [CF-5]
     expect(thrown(graphInput([m], [entry("m", 5, 9), entry("m", 5)])).message).toMatch(/revisions of m overlap/);
     // Given out of order, revisions that do not overlap are accepted: they are sorted by start.
     expect(() => resolveGraph(graphInput([m], [entry("m", 20), entry("m", 1, 19)]))).not.toThrow();

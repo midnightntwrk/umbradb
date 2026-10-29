@@ -9,14 +9,14 @@ import { startContainer } from "../containers.js";
 
 /**
  * The crash harness's fault primitives, for the kept required ids 1–4 (`crash-harness.smoke.*`,
- * `test/integration/crash/crash-harness.smoke.test.ts`; `openspec/changes/core-arch/design.md` §13): one shared
- * PostgreSQL container per test file, a crash worker spawned as a real process and SIGKILLed, `pg_terminate_backend` of
- * a chosen backend, and the suite watchdog that bounds every operation.
+ * `test/integration/crash/crash-harness.smoke.test.ts`): one shared PostgreSQL container per test file, a crash worker
+ * spawned as a real process and SIGKILLed, `pg_terminate_backend` of a chosen backend, and the suite watchdog that
+ * bounds every operation. [design §13]
  *
- * Core-arch task 17.2 retired the 0.9.5 parts this file used to set up (its client, migration runner and the crash
+ * The retirement of the 0.9.5 parts removed what this file used to set up (its client, migration runner and the crash
  * worker's checkpoint, watermark, key-value and lease operations) with the required ids 5–25 that drove them: the
  * connections here are plain `postgres` ones, no schema is migrated, and the worker only holds a transaction open
- * (`crash-worker.ts`). Task 18.1 retargets the worker to drive the runner, keeping ids 1–4.
+ * (`crash-worker.ts`). The worker is to be retargeted to drive the runner, keeping ids 1–4. [design §13]
  */
 
 export type Sql = postgres.Sql;

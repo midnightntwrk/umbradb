@@ -12,11 +12,13 @@ import {
 import { concatBytes, fromHex } from "./cbor-decoder.js";
 
 /**
- * DT-4's changes and DT-5's chained digest, as pure functions (task 7.1; `src/determinism/digest.ts`): a table's
- * `changes at h` is the canonical CBOR array of one change per primary key the block wrote — `["insert", new row]`,
- * `["delete", old row]` or `["update", new row]` — in primary-key order, nothing for a key that ends as it began; its
- * digest at h is `SHA-256(previous ‖ CBOR(h) ‖ changes at h)`, with 32 zero bytes before its first change; checkpoints
- * fall at every height h with h mod the build's interval = 0.
+ * A table's changes and its chained digest, as pure functions (`src/determinism/digest.ts`):
+ * - a table's `changes at h` is the canonical CBOR array of one change per primary key the block wrote, in
+ *   primary-key order: `["insert", new row]`, `["delete", old row]` or `["update", new row]`, and nothing for a key
+ *   that ends as it began; [DT-4]
+ * - its digest at h is `SHA-256(previous ‖ CBOR(h) ‖ changes at h)`, with 32 zero bytes before its first change;
+ *   [DT-5]
+ * - checkpoints fall at every height h with h mod the build's interval = 0. [DT-5]
  *
  * Every expected byte below is written by hand from RFC 8949 (a 1-element array is `0x81`, a text of 6 bytes `0x66`, the
  * integer 7 `0x07`, 24 `0x18 0x18`, 14,400 `0x19 0x38 0x40`), and every expected digest is computed here with
@@ -31,7 +33,7 @@ const sha256 = (...parts: Uint8Array[]): Uint8Array => new Uint8Array(createHash
 const INSERT = hex("66 696e73657274");
 const DELETE = hex("66 64656c657465");
 const UPDATE = hex("66 757064617465");
-/** The row `[1, "a"]` and `[1, "b"]`, `[2, "b"]` as DT-1 encodes them under `bigint, text`. */
+/** The row `[1, "a"]` and `[1, "b"]`, `[2, "b"]` as the canonical encoder writes them under `bigint, text`. [DT-1] */
 const ROW_1A = hex("82 01 6161");
 const ROW_1B = hex("82 01 6162");
 const ROW_2B = hex("82 02 6162");
@@ -83,7 +85,7 @@ describe("DT-4: a table's changes at a height", () => {
   });
 
   it("compares rows by their canonical encoding: equal values written differently are no change", () => {
-    // A safe integer as a number or a bigint, and jsonb keys in another order, encode the same (DT-1).
+    // A safe integer as a number or a bigint, and jsonb keys in another order, encode the same. [DT-1]
     expect(tableChanges(TYPES, [{ before: [1, "a"], after: [1n, "a"] }]).count).toBe(0);
     const doc = ["bigint", "jsonb"] as const;
     expect(tableChanges(doc, [{ before: [1n, { b: 1, a: 2 }], after: [1n, { a: 2, b: 1 }] }]).count).toBe(0);

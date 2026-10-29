@@ -17,16 +17,17 @@ import { DETERMINISM_BACKENDS } from "../determinism/backends.js";
 import type { TestDatabase, TestServer } from "../determinism/postgres-database.js";
 
 /**
- * Tasks 1.3 and 1.4 on PostgreSQL (Testcontainers; 17 until task 0.4, 18 since) and, since task 2.2, on PGlite 0.5.10:
- * the column-type rules and DT-6's non-deterministic columns and tables read from a real catalog, and the
- * contents-hash half of A58 — the hash refuses what startup will refuse (DT-6), with the same codes and the same
- * messages (owner decisions Q58 and Q61), in every schema it hashes (Q75). The startup half is task 7.1's, which calls the same
- * `tableRefusals`, `databaseRefusals` and `refusalMessage` with the module's id.
+ * The column-type rules and the refused non-deterministic columns and tables, read from a real catalog on PostgreSQL 18
+ * (Testcontainers) and on PGlite 0.5.10. Also the contents-hash side of the refusals: the hash refuses what startup
+ * refuses, with the same codes and the same messages, in every schema it hashes. [DT-6, A58, Q58, Q61, Q75]
  *
- * Every expected code, location and phrase below is written by hand from `design.md` §4 and DT-6; the code under test
+ * The startup check (`startup-check.test.ts`) calls the same `tableRefusals`, `databaseRefusals` and `refusalMessage`
+ * with the module's id. [A58]
+ *
+ * Every expected code, location and phrase below is written by hand from the determinism rules; the code under test
  * is only compared with them, and the defaults it calls immutable or not are compared with PostgreSQL's own check (a
  * stored generated column must be immutable). The last section checks, through the same driver the hash reads with,
- * that the mechanisms the messages name are real.
+ * that the mechanisms the messages name are real. [DT-6; design §4]
  */
 
 /** The backend's server while its suite runs: each backend's `describe` below starts and stops it. */
@@ -460,7 +461,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         for (const phrase of c.says) expect(error.message).toContain(phrase);
         expect(error.message).toContain(" Instead, ");
 
-        // The same message task 7.1's startup check will give: the shared rules over the same catalog facts.
+        // The same message the startup check gives: the shared rules over the same catalog facts. [A58]
         const facts = await catalogTable(db, "m", "t");
         const [first] = tableRefusals(facts);
         expect(first?.code).toBe(c.code);
@@ -803,7 +804,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         for (const phrase of c.saysNot ?? []) expect(error.message).not.toContain(phrase);
         expect(error.message).toContain(" Instead, ");
 
-        // The same message task 7.1's startup check will give: the shared rules over the same catalog facts.
+        // The same message the startup check gives: the shared rules over the same catalog facts. [A58]
         const [first] = await db.read(async (read) =>
           databaseRefusals(await catalogTables(read), await catalogRelations(read)),
         );
@@ -821,7 +822,7 @@ describe.each(DETERMINISM_BACKENDS)("on $name", (backend) => {
         CREATE SCHEMA m;
         CREATE TABLE m.t (id serial PRIMARY KEY, at timestamp DEFAULT now());
       `);
-      // `at` is a `timestamp` (refused as a type, then for its default); a `timestamptz` is allowed since Q74.
+      // `at` is a `timestamp` (refused as a type, then for its default); a `timestamptz` is allowed. [Q74]
       const refusals = await db.read(async (read) =>
         databaseRefusals(await catalogTables(read), await catalogRelations(read)),
       );

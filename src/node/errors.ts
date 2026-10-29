@@ -1,24 +1,26 @@
 /**
- * The node client's errors (task 10.1): each an `UmbraError` whose code says what IN-9 and IN-10 do with it.
+ * The node client's errors: each an `UmbraError` whose code says whether the failure is retried or halts the process.
+ * [IN-9, IN-10]
  *
- * - **`node-unreachable`, retryable** (IN-10 retries it with back-off): the connection could not be made
+ * - **`node-unreachable`, retryable** (retried with back-off): the connection could not be made
  *   (`reason: connect-failed`, `cause`: the system's code), was refused with HTTP 429 or a 5xx status (`http-status`,
- *   `status`) or was lost (`connection-closed`, `closeCode`); a call or a connection attempt got no answer within its
- *   timeout (`timeout`, `connect-timeout`, `timeoutMs`); the node's own rate limit (`rate-limited`).
- * - **`node-requirement`, not retryable** (IN-9's halt): the node has no block it must serve — a `null` block hash,
- *   header or block (`block-unavailable`, with `height` or `block`) — or says the state at a block is gone, as a pruned
- *   node does (`state-unavailable`).
- * - **`node-error`, not retryable** (a halt at a finalized height, RN-8): any other JSON-RPC error answer
- *   (`rpc-error`); a handshake refused with another status (`handshake-refused`, `status`); an answer, an error or a
- *   frame of the wrong shape (`bad-answer`, with `path`, what it `found`, and a short `value`); a method outside IN-8
- *   (`method-not-allowed`).
+ *   `status`), or was lost (`connection-closed`, `closeCode`); a call or a connection attempt got no answer within its
+ *   timeout (`timeout`, `connect-timeout`, `timeoutMs`); or the node applied its own rate limit (`rate-limited`).
+ *   [IN-10]
+ * - **`node-requirement`, not retryable** (the process halts, since the node cannot serve what the indexer needs): the
+ *   node has no block it must serve (a `null` block hash, header or block: `block-unavailable`, with `height` or
+ *   `block`), or says the state at a block is gone, as a pruned node does (`state-unavailable`). [IN-9]
+ * - **`node-error`, not retryable** (a halt at a finalized height): any other JSON-RPC error answer (`rpc-error`); a
+ *   handshake refused with another status (`handshake-refused`, `status`); an answer, an error or a frame of the wrong
+ *   shape (`bad-answer`, with `path`, what it `found`, and a short `value`); or a method outside the allowed node calls
+ *   (`method-not-allowed`). [RN-8, IN-8]
  *
- * Every error also names the IN-8 `method` it failed in (`null` for a connection attempt no call is waiting on), and a
+ * Every error also names the node `method` it failed in (`null` for a connection attempt no call is waiting on), and a
  * JSON-RPC error's `rpcCode` and `rpcMessage`. None names the node's URL, its host or its port: the URL is a `secret`
- * field (CF-4), and a system error's text may hold the host, so only its code is kept.
+ * field, and a system error's text may hold the host, so only its code is kept. [IN-8, CF-4]
  *
- * Over WebSocket an HTTP status exists only for the handshake, so IN-10's "HTTP 429" is read there, and in the open
- * connection as the node's own rate-limit answer: Substrate's RPC server answers a call over its rate limit with
+ * Over WebSocket an HTTP status exists only for the handshake, so a rate limit ("HTTP 429") is read there, and in the
+ * open connection as the node's own rate-limit answer: Substrate's RPC server answers a call over its rate limit with
  * `{ code: -32999, message: "RPC rate limit exceeded" }` (`polkadot-sdk` stable2606,
  * `substrate/client/rpc-servers/src/middleware/mod.rs:151`). A pruned state is answered `4003 "Client error:
  * UnknownBlock: State already discarded for 0x…"` (`substrate/client/db/src/lib.rs:2833`, through
@@ -95,7 +97,7 @@ export function rpcFailure(method: NodeMethod, error: unknown): UmbraError {
     return new UmbraError(
       "node-requirement",
       `${method}: the node no longer has the state at this block (${error.message}); the indexer needs a node that ` +
-        "keeps the state of every block from the start height (--state-pruning archive) (IN-9)",
+        "keeps the state of every block from the start height (--state-pruning archive)",
       { method, reason: "state-unavailable", ...rpc },
     );
   }
@@ -106,13 +108,13 @@ export function rpcFailure(method: NodeMethod, error: unknown): UmbraError {
   });
 }
 
-/** A block the node must serve but does not have (IN-9). */
+/** A block the node must serve but does not have. [IN-9] */
 export function blockUnavailable(method: NodeMethod, where: { height: bigint } | { block: string }): UmbraError {
   const which = "height" in where ? `at height ${where.height}` : where.block;
   return new UmbraError(
     "node-requirement",
     `${method}: the node has no block ${which}; the indexer needs a node that serves every block from the start ` +
-      "height (IN-9)",
+      "height",
     { method, reason: "block-unavailable", ...where },
   );
 }
@@ -167,11 +169,14 @@ export function connectionFailure(
   }
 }
 
-/** A call to a method outside IN-8 (or a subscription method through `call`), refused before it is sent. */
+/**
+ * A call to a method outside the allowed node calls (or a subscription method through `call`), refused before it is
+ * sent. [IN-8]
+ */
 export function methodNotAllowed(method: unknown): UmbraError {
   return new UmbraError(
     "node-error",
-    `${String(method)} is not a node call the indexer makes: it calls only the methods of IN-8, and subscribes ` +
+    `${String(method)} is not a node call the indexer makes: it calls only its allowed node methods, and subscribes ` +
       "through subscribeNewHeads and subscribeFinalizedHeads",
     { method, reason: "method-not-allowed" },
   );

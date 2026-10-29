@@ -10,10 +10,10 @@ import type { Job, WorkerEvent } from "./pglite-writer.worker.js";
 import { spawnChild } from "../child-processes.js";
 
 /**
- * The parent side of A17's process tests (DB-11): PGlite writers in processes of their own (`pglite-writer.worker.ts`,
- * started with `node --import tsx`), their events, signals, and a read-back of what was written. Each test works in a
- * temporary directory of its own ({@link workDirectory}), deleted by {@link cleanUp} with every process still alive
- * killed first.
+ * The parent side of the PGlite writer-lock process tests: PGlite writers in processes of their own
+ * (`pglite-writer.worker.ts`, started with `node --import tsx`), their events, signals, and a read-back of what was
+ * written. Each test works in a temporary directory of its own ({@link workDirectory}), deleted by {@link cleanUp}
+ * with every process still alive killed first. [A17, DB-11]
  */
 
 const WORKER = fileURLToPath(new URL("./pglite-writer.worker.ts", import.meta.url));

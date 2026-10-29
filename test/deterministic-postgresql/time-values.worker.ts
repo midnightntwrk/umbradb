@@ -6,20 +6,20 @@ import { openPostgres } from "../../src/db/postgres.js";
 import { connectionOfUrl } from "../db/connection.js";
 
 /**
- * A139's child process (`time-values.test.ts`): started with `node --import tsx` and a time zone in `TZ`, it opens one
- * backend through the database API — PostgreSQL by the URL of the parent's test database, or a PGlite engine of its
- * own, created in this process's time zone with the backend's pinned start parameters and the parent's setup SQL — runs
- * the parent's query and prints, on one line after {@link MARKER}, what it read:
+ * The child process of `time-values.test.ts`. It is started with `node --import tsx` and a time zone in `TZ`, and opens
+ * one backend through the database API: PostgreSQL by the URL of the parent's test database, or its own PGlite engine,
+ * created in this process's time zone with the backend's pinned start parameters and the parent's setup SQL. It runs
+ * the parent's query and prints what it read on one line after {@link MARKER}:
  *
  * - `rows`: the API's mapped rows, every value tagged with its JavaScript type where JSON would hide it (a `Date`, a
  *   `bigint`), so the parent compares the values the API gave, not their JSON text;
- * - `dateMapping`: the control, the mapping task 2.1 shipped (`new Date(text).toISOString()`), applied here to the same
+ * - `dateMapping`: the control, an earlier `Date`-based mapping (`new Date(text).toISOString()`), applied to the same
  *   values' PostgreSQL text (the query's `…_text` columns), so the parent sees that such a mapping does depend on the
  *   process's time zone;
  * - `timeZone` and `offsetMinutes`: what this process's clock is set to (`Intl` and the offset of 2025-05-21 14:30
  *   local time), so the parent knows the time zone took effect.
  *
- * The job is the first argument, as JSON: `{ backend, url?, setup?, sql, textColumns }`.
+ * The job is the first argument, as JSON: `{ backend, url?, setup?, sql, textColumns }`. [A139]
  */
 
 export const MARKER = "TIME-VALUES-RESULT ";

@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import { backupSignalRelay } from "../../src/cli/run.js";
 
 /**
- * `umbradb run`'s relay of SIGUSR2 (task 15.1c; BK-1 as amended, owner decision Q173 C; `src/cli/run.ts`): the command
- * listens for SIGUSR2 from its start to its end and hands the process a source of its own; a signal goes to the
- * process's listener when it has one (`backupOnSignal` set), and is otherwise logged as ignored, in one line naming
- * `backupOnSignal` that says why — startup has not settled yet, `backupOnSignal` is not set, or the process has closed.
- * A175 with the real command and signal is `test/backup/signal-ignored.test.ts`.
+ * `umbradb run`'s relay of SIGUSR2 (`src/cli/run.ts`). The command listens for SIGUSR2 from its start to its end and
+ * hands the process a signal source of its own. A signal goes to the process's listener when it has one
+ * (`backupOnSignal` set). Otherwise it is logged as ignored, in one line naming `backupOnSignal` that says why: startup
+ * has not settled yet, `backupOnSignal` is not set, or the process has closed. [BK-1, Q173 C]
+ *
+ * The same check with the real command and signal is `test/backup/signal-ignored.test.ts`. [A175]
  */
 
 function relayOf() {

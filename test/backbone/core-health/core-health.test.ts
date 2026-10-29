@@ -17,11 +17,12 @@ import { ask, startWithAdmin, statusSnapshot, statusWhen } from "../../admin/adm
 import { LOOP_BACKBONE } from "../../runner/loop-harness.js";
 
 /**
- * The backbone part `core-health` (task 8.2; AE-1, AE-2, AE-4; CORE-ARCH §4.11, §4.18; Q70): its declaration — a
- * backbone part with no points that requires and provides no item, in RN-3's fixed order after `core-digest` and in
- * the command's build —, its two endpoints' answers as functions of the published snapshot, and A140 for them: they
- * are `core-health`'s, from its own folder under `src/backbone/`, with its tests beside it here, and the admin route
- * table mounts them as the part gives them.
+ * The backbone part `core-health`. These tests cover:
+ * - its declaration: a backbone part with no points that requires and provides no item, placed after `core-digest`
+ *   in the fixed backbone order and included in the command's build [AE-1, RN-3; CORE-ARCH §4.11];
+ * - its two endpoints' answers, as functions of the published snapshot [AE-2, AE-4, Q70; CORE-ARCH §4.18];
+ * - where the endpoints live: they are `core-health`'s, from its own folder under `src/backbone/`, with its tests
+ *   beside it here, and the admin route table mounts them as the part gives them [A140].
  */
 
 /** A snapshot of a process in `state` at lag `lag`, its readiness lag `readinessLag`, liveness timeout `liveness`. */
@@ -149,8 +150,8 @@ describe("A140 for /health/live and /health/ready: core-health's, from its own f
   });
 
   it("a refused process answers both: live 200 while it ticks, ready 503 with the state refused", async () => {
-    // Refused once the configuration is validated — PGlite without the development opt-in (CF-9) —, so no database is
-    // opened; a refusal of the configuration itself would end the process instead, serving nothing (task 8.1b).
+    // Refused after the configuration is validated (PGlite without the development opt-in), so no database is opened.
+    // A refusal of the configuration itself would end the process instead, serving nothing. [CF-9]
     const run = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     await expect(run.handle.started).rejects.toMatchObject({ code: "development-opt-in-required" });
     const origin = await run.origin();

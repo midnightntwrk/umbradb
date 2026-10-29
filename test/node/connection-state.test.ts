@@ -3,12 +3,14 @@ import { type ConnectSocket, NodeClient, type NodeClientOptions, type NodeSocket
 import { ManualTimers, turns } from "./manual-timers.js";
 
 /**
- * The node connection's state as `/status` shows it (task 8.3a; `openspec/changes/core-arch/specs/admin-endpoints/
- * spec.md` AE-5, acceptance A168): {@link NodeClient.connection} is `connecting` before the first connection opened
- * (the client unused, or its first attempt pending), `connected` while a connection is open, `retrying` from a failed
- * or lost connection until the next one opens (its back-off and each attempt), and `closed` once the client is closed;
+ * The node connection's state as `/status` shows it. {@link NodeClient.connection} is:
+ * - `connecting` before the first connection opened (the client unused, or its first attempt pending);
+ * - `connected` while a connection is open;
+ * - `retrying` from a failed or lost connection until the next one opens (its back-off and each attempt);
+ * - `closed` once the client is closed.
+ *
  * `onConnectionChange` is told each change once, in order, and nothing else. The sockets are driven by hand and the
- * back-off runs on a clock moved by hand (`./manual-timers.ts`): no network.
+ * back-off runs on a clock moved by hand (`./manual-timers.ts`): no network. [AE-5, A168]
  */
 
 /** One socket the client asked for, driven by the test. */

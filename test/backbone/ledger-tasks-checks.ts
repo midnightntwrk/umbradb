@@ -15,13 +15,15 @@ import { committed, halted, ingest, type IngestOptions, PATIENCE_MS } from "./in
 import { LEDGER_CORE } from "./ledger-restart.js";
 
 /**
- * A137's runs (task 12.6; `openspec/changes/core-arch/acceptance.md` A137, LG-7, LG-17), shared by `ledger-tasks.test.ts`
- * and its negative controls: a contract scenario through the real process (`./contract-data-checks.ts`: a fixture
- * contract deployed, then called with literal logs — what its transcripts push), the test modules of
- * `test/ledger/fixtures/task-modules.ts` with their ledger tasks in the worker — UmbraDB's entry importing that file as a
- * configuration file's modules (`LedgerWorkerOptions.modules`) and the test loader counting the package's
- * deserializations there —, and this thread's v9 package counting its own while the process runs. Imports nothing of
- * Vitest.
+ * The ledger-task runs, shared by `ledger-tasks.test.ts` and its negative controls. Each run has:
+ * - a contract scenario through the real process (`./contract-data-checks.ts`): a fixture contract is deployed, then
+ *   called with literal logs, which are what its transcripts push;
+ * - the test modules of `test/ledger/fixtures/task-modules.ts`, with their ledger tasks in the worker. UmbraDB's entry
+ *   imports that file as a configuration file's modules (`LedgerWorkerOptions.modules`), and the test loader counts the
+ *   package's deserializations there;
+ * - this thread's v9 package, counting its own deserializations while the process runs.
+ *
+ * Imports nothing of Vitest. [A137, LG-7, LG-17]
  */
 
 /** The test modules' file, which the worker imports for their tasks (its `modules` export). */
@@ -96,8 +98,8 @@ export function roundTripProblem(value: unknown): string | null {
 
 /**
  * A user module running after every other at `on-compute` (it requires the items of the last ones), recording every
- * block item it sees that does not come back the same from a structured clone (A137's "no main-thread callback receives
- * a native ledger object").
+ * block item it sees that does not come back the same from a structured clone: no main-thread callback may receive a
+ * native ledger object. [A137]
  */
 export function plainWatchModule(seen: TaskSeen, requires: readonly string[]): ModuleDeclaration {
   return {

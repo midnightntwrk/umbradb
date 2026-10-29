@@ -10,16 +10,16 @@ import { PARSE_CORE, plainWatchModule, runTasks, tasksScenario, transactionsOf }
 import { mainThreadLogReader } from "./main-thread-log-reader.js";
 
 /**
- * A137's committed negative controls (task 12.6; `openspec/changes/core-arch/acceptance.md` A137, LG-7, LG-17; CC-3),
- * on PostgreSQL 18 and PGlite 0.5.10, over the runs of `ledger-tasks.test.ts`:
+ * The ledger-task tests' committed negative controls, on PostgreSQL 18 and PGlite 0.5.10, over the runs of
+ * `ledger-tasks.test.ts`: [LG-7, LG-17, CC-3]
  *
  * - **No plain-data check** (`checkPlainData: false`, on the main thread's engine, where no thread boundary copies a
- *   result): a task's WebAssembly-backed object is no longer refused — A137's "fails the block with `callback-error`"
- *   fails — and reaches the module's callback, where A137's oracle (a structured-clone round trip of each block item)
- *   catches it.
- * - **`-fast` reading on the main thread again** (task 13.1's reading, a second parse: its `reader` seam given
- *   `./main-thread-log-reader.ts`): each calling transaction is parsed twice — A137's "the package's parse function runs
- *   once per transaction" fails.
+ *   result). A task's WebAssembly-backed object is no longer refused, so the check that it fails the block with
+ *   `callback-error` fails. The object reaches the module's callback, where the oracle (a structured-clone round trip
+ *   of each block item) catches it. [A137]
+ * - **`-fast` reading on the main thread again**, a second parse (its `reader` seam given
+ *   `./main-thread-log-reader.ts`). Each calling transaction is parsed twice, so the check that the package's parse
+ *   function runs once per transaction fails. [A137]
  */
 
 describe.each(PROCESS_BACKENDS)("A137's negative controls on $name", (backend: ProcessBackend) => {
@@ -36,7 +36,7 @@ describe.each(PROCESS_BACKENDS)("A137's negative controls on $name", (backend: P
     });
     // No halt: the block with the native object is committed …
     expect(run.status).toMatchObject({ cursor: expected.scenario.head, reason: null });
-    // … and a main-thread callback got it: A137's oracle finds it.
+    // … and a main-thread callback got it: the structured-clone oracle finds it. [A137]
     expect(seen.notPlain.filter((problem) => problem.startsWith(`${FAULT_AT} leaked-object:`))).toHaveLength(1);
     expect(seen.notPlain.join("\n")).toMatch(/LedgerState/);
   }, PATIENCE_MS * 2);

@@ -28,17 +28,18 @@ import {
 } from "./version-checks.js";
 
 /**
- * The committed negative controls of A94, A96 and A97 (task 12.2): wrong implementations, each of which must make the
- * check the tests run (`version-checks.ts`) fail; the real ones pass the same checks in this file's build.
+ * The committed negative controls of the version selection, runtime metadata and package identity checks: wrong
+ * implementations, each of which must make the check the tests run (`version-checks.ts`) fail. The real ones pass the
+ * same checks in this file's build. [A94, A96, A97]
  *
- * - **A selector that ignores pins** (the digest and the rows only) passes a block contradicting a pin, and fails A94's
- *   pin clause — while passing its other two, which do not depend on pins.
+ * - **A selector that ignores pins** (the digest and the rows only) passes a block contradicting a pin, and fails the
+ *   pin check, while passing the other two selection checks, which do not depend on pins. [A94]
  * - **A metadata cache keyed by the block's own `spec_version` and read at the block's own state** (instead of the
  *   parent's runtime, read at the parent's state) decodes U with the new metadata and stores it under the old
- *   `spec_version`, and fails A96's synthetic case — and the same check on task 0.3's devnet upgrade tape (skipped by
- *   name without the tape).
+ *   `spec_version`. It fails the synthetic metadata case, and the same check on the recorded devnet upgrade tape
+ *   (skipped by name without the tape). [A96]
  * - **An identity check that skips one package file** (the last line of each manifest) accepts that file changed by one
- *   byte, and fails A97.
+ *   byte, and fails the package identity check. [A97]
  */
 
 /** The assertion error a check fails with; fails the test if the check passes or fails otherwise. */

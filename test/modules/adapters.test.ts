@@ -10,17 +10,19 @@ import { BACKENDS } from "../db/backends.js";
 import { declaration, userModules } from "./declarations.js";
 
 /**
- * The adapters from validated declarations to the database API's inputs (task 3.1; MD-1, DB-6, DB-8, DB-9, DB-10):
- * {@link schemaModule} gives `planSchemas` (task 2.3) what it reads of a declaration — id, requirements, items with
- * their tables and `deterministic` flag, migrations — and {@link schemaModules} leaves out UmbraDB's own parts whose
- * schemas are reserved (`OWN_PARTS`: `core-chain`, `core-digest`); {@link migrationPart} gives `startDatabase` (task
- * 2.4) the part's id, version, `requiresResync`, migrations and its `on-start-db` callback, called with the module's
- * process context and the schema write handle (task 2.6). Each is checked against the real function it feeds, on both
- * backends. Resolving the graph and the order (task 3.2) and the runner's own startup (task 5.x) are not built here: the
- * parts are given in the order written.
+ * The adapters from validated declarations to the database API's inputs:
+ * - {@link schemaModule} gives `planSchemas` what it reads of a declaration: id, requirements, items with their tables
+ *   and `deterministic` flag, and migrations.
+ * - {@link schemaModules} leaves out UmbraDB's own parts, whose schemas are reserved (`OWN_PARTS`: `core-chain`,
+ *   `core-digest`).
+ * - {@link migrationPart} gives `startDatabase` the part's id, version, `requiresResync`, migrations and its
+ *   `on-start-db` callback, called with the module's process context and the schema write handle.
+ *
+ * Each is checked against the real function it feeds, on both backends. Resolving the graph and the order, and the
+ * runner's own startup, are not exercised here: the parts are given in the order written. [MD-1, DB-6, DB-8, DB-9, DB-10]
  */
 
-/** A process context for one module: what the runner (task 5.2a) will build. */
+/** A process context for one module, as the runner builds it. */
 function context(revisions: ProcessContext["revisions"] = []): ProcessContext & { published: [string, unknown][] } {
   const published: [string, unknown][] = [];
   return {
@@ -31,7 +33,7 @@ function context(revisions: ProcessContext["revisions"] = []): ProcessContext & 
   };
 }
 
-/** Two providers of the shared table item `contract-logs` and a consumer, as CORE-ARCH §4.11 declares them. */
+/** Two providers of the shared table item `contract-logs` and a consumer. [CORE-ARCH §4.11] */
 function contractLogs(id: string): ModuleDeclaration {
   return declaration(id, {
     requires: ["vm-logs"],
@@ -123,7 +125,7 @@ describe("schemaModule: what planSchemas reads of a declaration (DB-8, MD-1)", (
       "core-chain-events",
       "keys",
     ]);
-    // Given to the plan, an own part would be refused: its schema is reserved (DB-8).
+    // Given to the plan, an own part would be refused: its schema is reserved. [DB-8]
     expect(() => planSchemas([schemaModule(backbone[0] as ModuleDeclaration)])).toThrowError(
       /reserved schema core_chain/,
     );

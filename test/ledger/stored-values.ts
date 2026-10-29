@@ -1,8 +1,8 @@
 import { type Child, childKey, decodeChildren, encodeChildren, hex, nodeKey, untag } from "./node-format.js";
 
-// Task 12.4 of `openspec/changes/core-arch` (LG-11, LG-13; A100, A104): a stored value's nodes and its tagged
-// serialization, each made from the other without the vendored packages, written from the upstream sources — the
-// independent route by which the tests take a value out of `core_ledger_state.nodes` and put one in.
+// A stored value's nodes and its tagged serialization, each made from the other without the vendored packages, written
+// from the upstream sources. This is the independent route by which the tests take a value out of
+// `core_ledger_state.nodes` and put one in. [LG-11, LG-13, A100, A104]
 //
 // - A tagged serialization of a stored value is `midnight:<tag>:` and its `TopoSortedNodes` (`./node-format.ts`); the
 //   package deserializes it only in the arena's normal form (`midnight-ledger` `storage-core/src/arena.rs`

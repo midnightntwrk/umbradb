@@ -1,20 +1,20 @@
 /**
- * The tape reader and writer (`openspec/changes/core-arch/specs/test-tape/spec.md` TT-1; acceptance A68; task 9.1).
+ * The tape reader and writer. [TT-1, A68]
  *
- * **The file.** JSON lines: one record per line in recorded order (`./records.ts`), each line ended by a newline
- * (`\n`, the last one too), in UTF-8; an empty file is a tape with no records. **A tape is identified by the SHA-256 of
- * its bytes** ({@link tapeId}: lowercase hex), which every test that uses a tape names.
+ * **The file.** JSON lines: one record per line in recorded order (`./records.ts`), each line ended by a newline (`\n`,
+ * the last one too), in UTF-8; an empty file is a tape with no records. **A tape is identified by the SHA-256 of its
+ * bytes** ({@link tapeId}: lowercase hex), which every test that uses a tape names.
  *
- * **One form.** The writer writes each record in one form — its fields in TT-1's order, JSON with no spaces, strings
- * and numbers as `JSON.stringify` writes them (`./json.ts`) — and the reader reads a line only if it is in that form
+ * **One form.** The writer writes each record in one form: its fields in the tape format's order, JSON with no spaces,
+ * strings and numbers as `JSON.stringify` writes them (`./json.ts`). The reader reads a line only if it is in that form
  * (`not-canonical` otherwise, naming the line the writer would write). So every tape the reader accepts round-trips
  * through the reader and writer byte for byte, and one tape has one id: the same records written with other spaces or
  * key orders are not a second spelling of the tape under another id. Tapes are made by the writer (the recording
- * builder, the variant transforms and the tests all write records through it), so the form costs a hand-edited tape
- * no more than the fix the error message gives.
+ * builder, the variant transforms and the tests all write records through it), so the form costs a hand-edited tape no
+ * more than the fix the error message gives. [TT-1]
  *
- * **Errors.** A line that is not one of TT-1's records fails with `bad-tape-record` and its line number
- * ({@link TapeError}), at the first such line; so do records given to the writer.
+ * **Errors.** A line that is not one of the tape format's records fails with `bad-tape-record` and its line number
+ * ({@link TapeError}), at the first such line; so do records given to the writer. [TT-1]
  */
 
 import { createHash } from "node:crypto";
@@ -97,7 +97,10 @@ export function readTapeFile(path: string): Tape {
   return readTape(readFileSync(path));
 }
 
-/** The text of the tape holding `records`; throws `bad-tape-record` at the first record that is not one of TT-1's. */
+/**
+ * The text of the tape holding `records`; throws `bad-tape-record` at the first record that is not a tape record.
+ * [TT-1]
+ */
 export function tapeText(records: readonly TapeRecord[]): string {
   const check = sessionCheck();
   const lines = records.map((record, index) => {

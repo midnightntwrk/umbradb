@@ -1,11 +1,12 @@
 import type { PublicWakes } from "../../src/backbone/core-private-source/index.js";
 
 /**
- * The tests' stand-in for the core's process transport (task 14.2), as far as a private process's block intake sees it
- * (PP-3, PP-4): a link that is connected or dropped, carrying the core's `committed` messages. While connected each
- * message wakes the private source's wait for the public cursor; while dropped every message is lost; and connecting
- * again wakes it, as PP-3's "after every reconnect" says. It is the private source's only wake-up in A114, so whatever
- * the private process does after a drop it does because of the reconnect, not a timer.
+ * The tests' stand-in for the core's process transport, as far as a private process's block intake sees it: a link
+ * that is connected or dropped, carrying the core's `committed` messages. While connected, each message wakes the
+ * private source's wait for the public cursor; while dropped, every message is lost; and connecting again wakes it,
+ * since the source must check again after every reconnect. It is the private source's only wake-up in the
+ * dropped-transport test, so whatever the private process does after a drop it does because of the reconnect, not a
+ * timer. [PP-3, PP-4, A114]
  */
 export class TestLink implements PublicWakes {
   #connected = true;
@@ -55,7 +56,7 @@ export class TestLink implements PublicWakes {
     this.#connected = false;
   }
 
-  /** The transport connects again, which wakes the private source (PP-3). */
+  /** The transport connects again, which wakes the private source. [PP-3] */
   connect(): void {
     this.#connected = true;
     this.#wake();

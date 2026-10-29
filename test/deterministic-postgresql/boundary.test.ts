@@ -27,18 +27,21 @@ import {
 } from "./source-scan.js";
 
 /**
- * A138's test over the sources (task 2.2a, owner decision Q69): `src/deterministic-postgresql/` imports nothing else
- * of `src/`, so the component is tested alone; and the pinned session settings, the column-type rules and the result
- * mapping are defined in it and nowhere else of `src/` — `src/db/` and `src/determinism/` take every rule from it and
- * repeat none (`design.md` §4, "The `deterministic_postgresql` component").
+ * The test over the sources. `src/deterministic-postgresql/` imports nothing else of `src/`, so the component is tested
+ * alone. The pinned session settings, the column-type rules and the result mapping are defined in it and nowhere else
+ * of `src/`: `src/db/` and `src/determinism/` take every rule from it and repeat none. [A138, Q69; design §4]
  *
  * "Defined nowhere else" is checked four ways, each over the compiler's parse of every `.ts` file of `src/` outside the
- * component: no file declares a name the component exports; no file writes a pinned setting with its value (as an
- * array pair, a property or SQL text), nor DT-2's `COLLATE "C"`; no file defines a function or a value the component
- * defines, under whatever
- * name (the same parameters and body, or the same initial value, as the compiler prints them without comments, 80
- * characters or more); and no file holds a string of the component's of 30 characters or more (a reason, an
- * alternative, a design cell, a message, a catalog query). Each check is shown catching a copy (the fixtures below).
+ * component:
+ * - no file declares a name the component exports;
+ * - no file writes a pinned setting with its value (as an array pair, a property or SQL text), nor the key order's
+ *   `COLLATE "C"`; [DT-2]
+ * - no file defines a function or a value the component defines, under whatever name (the same parameters and body,
+ *   or the same initial value, as the compiler prints them without comments, 80 characters or more);
+ * - no file holds a string of the component's of 30 characters or more (a reason, an alternative, a design cell, a
+ *   message, a catalog query).
+ *
+ * Each check is shown catching a copy (the fixtures below).
  */
 
 const COMPONENT_FILES = typeScriptFiles(COMPONENT);
@@ -51,7 +54,7 @@ const MINIMUM_TEXT = 30;
 
 const where = (file: string, line: number): string => `${relative(REPOSITORY, file)}:${line}`;
 
-/** Where the rules A138 names are defined: each name declared and exported by that file of the component. */
+/** Where the component's rules are defined: each name declared and exported by that file of the component. [A138] */
 const DEFINITIONS: Readonly<Record<string, readonly string[]>> = {
   "settings.ts": ["PINNED_SETTINGS", "ZERO_TIMEOUTS", "SESSION_SETTINGS"],
   "column-rules.ts": [
@@ -128,7 +131,7 @@ function settingsElsewhere(files: readonly string[]): string[] {
   );
 }
 
-/** Every string of a file that writes `COLLATE "C"`, the collation of DT-2's key order (`keyOrderTerm`). */
+/** Every string of a file that writes `COLLATE "C"`, the collation of the text-key order (`keyOrderTerm`). [DT-2] */
 function collationsWritten(file: string, text?: string): string[] {
   return stringLiterals(parseSource(file, text))
     .filter((literal) => /COLLATE\s+"C"/i.test(literal.text))
@@ -173,13 +176,13 @@ function componentCode(): Map<string, string> {
 }
 
 /**
- * The component's strings of 30 characters or more, except its error codes and the names of its session settings:
- * `ERROR_CODES` is the database API's vocabulary (decision record Q79 put `UmbraError` and its codes here), which every
- * module that refuses or fails with a code names — `durability-full-page-writes-off` (DB-12) is the first code that
- * long; and a setting's name is PostgreSQL's, which code outside the component names too — `src/db/postgres.ts` sets
- * two of the timeouts for a bounded read, and 0.9.5's client refuses them in a URL — while a setting written with the
- * component's value is what {@link settingsElsewhere} checks (`idle_in_transaction_session_timeout`, task 2.7, is the
- * first name that long).
+ * The component's strings of 30 characters or more, except its error codes and the names of its session settings.
+ * - `ERROR_CODES` is the database API's vocabulary (`UmbraError` and its codes live in the component), which every
+ *   module that refuses or fails with a code names. `durability-full-page-writes-off` is the first code that long.
+ *   [Q79, DB-12]
+ * - A setting's name is PostgreSQL's, which code outside the component names too: `src/db/postgres.ts` sets two of the
+ *   timeouts for a bounded read, and 0.9.5's client refuses them in a URL. A setting written with the component's
+ *   value is what {@link settingsElsewhere} checks. `idle_in_transaction_session_timeout` is the first name that long.
  */
 function componentTexts(): string[] {
   const vocabulary: ReadonlySet<string> = new Set([...ERROR_CODES, ...SESSION_SETTINGS.map(([name]) => name)]);
@@ -257,7 +260,7 @@ describe("A138: the pinned settings, the column-type rules and the result mappin
       "idle_session_timeout",
     ]);
     expect(SESSION_SETTINGS).toEqual([...PINNED_SETTINGS, ...ZERO_TIMEOUTS]);
-    expect(COLUMN_TYPE_RULES).toHaveLength(17); // the date-and-time row split in two (task 2.2b, Q74)
+    expect(COLUMN_TYPE_RULES).toHaveLength(17); // the date-and-time row split in two [Q74]
     expect(Object.keys(TABLE_RULES)).toHaveLength(5);
     expect(RESULT_TYPES).toHaveLength(24);
   });

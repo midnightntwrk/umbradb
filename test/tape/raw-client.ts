@@ -1,9 +1,9 @@
 import { WebSocket } from "ws";
 
 /**
- * A bare JSON-RPC client for the tape node's tests (task 9.1): one WebSocket, every frame the tape node sends kept in
- * arrival order, as text and parsed, so a test can check the exact frames — the ids, the notifications and their order
- * — that the node client (`src/node/`) reads for it in `node-client.test.ts`.
+ * A bare JSON-RPC client for the tape node's tests: one WebSocket, every frame the tape node sends kept in arrival
+ * order, as text and parsed, so a test can check the exact frames — the ids, the notifications and their order — that
+ * the node client (`src/node/`) reads for it in `node-client.test.ts`.
  *
  * **Barriers instead of waiting.** The tape node reads a connection's frames in order and sends every answer that is
  * not delayed while it reads the request, with the notifications that answer lets through right after it. So once the

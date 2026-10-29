@@ -6,13 +6,16 @@ import { declaration } from "./declarations.js";
 import { CORE_CHAIN, CORE_DIGEST, consumer, entry, graphInput, range } from "./graph-fixtures.js";
 
 /**
- * A private process's requirement graph with the public core's `table` items (PP-13, owner decision Q126 B, task
- * 14.1a; MD-3, MD-6): the public items, as the public database's configuration history records them, count as
- * provided at the heights their public providers run; a private module requiring one that no public module provides
- * is refused with `item-no-provider`, one provided only at other heights with `item-not-available`. A public item
- * named like the private backbone's own is the private backbone's; a private module providing a public item's name at
- * a common height is refused (`providers-overlap`, question Q146). Public providers take no part in the order,
- * the cycles or MD-4. The process-level criterion (A155) is `test/private/public-items.test.ts`.
+ * A private process's requirement graph with the public core's `table` items. The public items, as the public
+ * database's configuration history records them, count as provided at the heights their public providers run:
+ * - a private module requiring one that no public module provides is refused with `item-no-provider`;
+ * - one provided only at other heights is refused with `item-not-available`;
+ * - a public item named like an item of the private backbone is the private backbone's;
+ * - a private module providing a public item's name at a common height is refused with `providers-overlap` [Q146].
+ * [PP-13, Q126 B, MD-3, MD-6]
+ *
+ * Public providers take no part in the order, the cycle checks or the mid-chain start check. The process-level
+ * acceptance test is `test/private/public-items.test.ts`. [MD-4, A155]
  */
 
 /** A `table` item `name` of a part, in a schema named after it. */
@@ -97,7 +100,7 @@ describe("PP-13: a private module may require the public core's table items", ()
     });
     expect(late.message).toContain("at heights 1–4, where no module provides it");
     expect(late.message).toContain("core-ledger-state of the public core");
-    // A public module that stops: its stop (CF-5's last height) bounds the item.
+    // A public module that stops: its stop (the revision's last height) bounds the item. [CF-5]
     const stopped = refusalOf(privateInput([wallet()], [entry("wallet", 1)], ledger(1, 7)));
     expect(stopped.details).toMatchObject({ item: "ledger-events", range: range(8, null) });
     // Within the public provider's heights, it starts.
@@ -193,8 +196,8 @@ describe("PP-13: a private module may require the public core's table items", ()
       ["blocks", "ledger-events", "ledger-state", "segment-results"],
       ["blocks"],
     ]);
-    // In the range that ends at the cursor (providers unchecked there, Q97) an item a part provides is the part's,
-    // never a public item, though the public core provides it too.
+    // In the range that ends at the cursor (providers are not checked there) an item a part provides is the part's,
+    // never a public item, though the public core provides it too. [Q97]
     const mine = declaration("mine", { side: "private", requires: ["private-cursor"], provides: [tableItem("ledger-events", "mine")] });
     const atCursor = resolveGraph(privateInput([mine, wallet()], [entry("mine", 1, 4), entry("wallet", 1)], ledger(1), { cursor: 4n }));
     expect(atCursor.rangeAt(4n)?.providerOf.get("ledger-events")).toBe("mine");
@@ -202,7 +205,8 @@ describe("PP-13: a private module may require the public core's table items", ()
     expect(atCursor.rangeAt(5n)?.publicItems?.has("ledger-events")).toBe(true);
     // A public process's ranges have none.
     expect(resolveGraph(graphInput([], [])).ranges[0]?.publicItems).toBeUndefined();
-    // MD-4: a public provider starting with the module is the public core's to judge; its startsMidChain is not known.
+    // Mid-chain start: a public provider starting with the module is the public core's to judge; its startsMidChain is
+    // not known. [MD-4]
     expect(() => resolveGraph(privateInput([wallet()], [entry("wallet", 5)], ledger(5)))).not.toThrow();
   });
 

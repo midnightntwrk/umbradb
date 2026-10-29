@@ -13,27 +13,31 @@ import { genesisHex, launchPublicCore, type PublicCore, startPublicCore } from "
 import { endedWithin, hello, rawClient, type RawClient } from "./raw-client.js";
 
 /**
- * A115 `[CI]` through a running core (tasks 14.2, 14.2a; PP-4, `design.md` §8), on PostgreSQL 18.6 and PGlite 0.5.10:
- * the core process listens on its `listen.transport` (`127.0.0.1:0`) and a raw client (`./raw-client.ts`) speaks to it
- * — `hello` is answered with `hello-ack` (the genesis, S, the public cursor, the lockstep flag), every commit is
- * announced with `committed`, a `read-result` carries its request's `id`, the height read (`null` on an empty public
- * database) and, per statement, the columns' names and types with the rows, a `bigint`, `numeric`, `bytea` and `jsonb`
- * value each decoding back to the value the core read; an unknown `v` or `type` — an `api` or `api-result` message among
- * them (owner decision Q140 C: the protocol has neither) —, a message failing its schema, and the other faults close
- * the connection; a second `hello` with a connected id is refused with `duplicate-instance`. With the committed negative
- * controls: a decoder that drops a `bigint`'s precision or a `bytea`'s bytes, a core that accepts a second `hello` of a
- * connected id, and a transport that still answers `api` (task 14.2's) each fail their oracle.
- * Every one of the core's `hello-ack`, `committed` and `read-result` carries its configuration hash, `configHash`, the
- * same one (task 14.1b; PP-4, RN-16).
+ * The message protocol through a running core, on PostgreSQL 18.6 and PGlite 0.5.10. The core process listens on its
+ * `listen.transport` (`127.0.0.1:0`) and a raw client (`./raw-client.ts`) speaks to it. [A115 CI, PP-4; design §8]
+ * - `hello` is answered with `hello-ack` (the genesis, S, the public cursor, the lockstep flag).
+ * - Every commit is announced with `committed`.
+ * - A `read-result` carries its request's `id`, the height read (`null` on an empty public database) and, per
+ *   statement, the columns' names and types with the rows. A `bigint`, `numeric`, `bytea` and `jsonb` value each
+ *   decode back to the value the core read.
+ * - An unknown `v` or `type`, a message failing its schema, and the other faults close the connection. The unknown
+ *   types include `api` and `api-result`, which the protocol does not have. [Q140 C]
+ * - A second `hello` with a connected id is refused with `duplicate-instance`.
+ * - Every one of the core's `hello-ack`, `committed` and `read-result` carries the same configuration hash,
+ *   `configHash`. [PP-4, RN-16]
+ *
+ * Committed negative controls, each failing its oracle: a decoder that drops a `bigint`'s precision or a `bytea`'s
+ * bytes, a core that accepts a second `hello` of a connected id, and a transport that still answers `api` as the
+ * earlier protocol did. [A115 CI]
  */
 
-/** A configuration hash's form (PP-4: 32 bytes as `0x` and lowercase hex). */
+/** A configuration hash's form: 32 bytes as `0x` and lowercase hex. [PP-4] */
 const CONFIG_HASH = /^0x[0-9a-f]{64}$/;
 
 /** The core's `listen.transport`: a free port of the loopback interface. */
 const TRANSPORT = { listen: { transport: "127.0.0.1:0" } };
 
-/** A statement whose columns are of the four types A115 names, and two more. */
+/** A statement whose columns are of the four types the protocol test names, and two more. [A115 CI] */
 const TYPED_SQL =
   "SELECT 9223372036854775807::bigint AS b, 12345678901234567890.123456789::numeric AS n, '\\x00ff10'::bytea AS y, " +
   `'{"big": 123456789012345678901, "s": "x", "l": [1, null], "neg": -9007199254740993}'::jsonb AS j, ` +
@@ -47,8 +51,9 @@ function rowsOf(result: NonNullable<ReadResult["results"]>[number], decode: type
 }
 
 /**
- * A115's oracle for a `read-result`'s values: every problem with `answer` (the core's answer to a `read` of
- * {@link TYPED_SQL}) read back with `decode`, against `direct`, what the core reads itself. None when A115 holds.
+ * The oracle for a `read-result`'s values: every problem with `answer` (the core's answer to a `read` of
+ * {@link TYPED_SQL}) read back with `decode`, against `direct`, what the core reads itself. None when each value
+ * decodes back to what the core read. [A115 CI]
  */
 export function valueProblems(answer: Message, direct: readonly Record<string, unknown>[], decode: typeof decodeValue): string[] {
   if (answer.type !== "read-result" || answer.results === undefined) return [`the answer is no read-result with results: ${answer.type}`];
@@ -101,9 +106,9 @@ async function greeted(address: string, instance: string): Promise<{ client: Raw
 }
 
 /**
- * The oracle of PP-4's duplicate rule against the transport at `address`: every problem, none when a second `hello` of
- * a connected id is refused with `duplicate-instance`, its connection closed, the first one kept, and the id accepted
- * again once the first closed.
+ * The oracle of the duplicate-instance rule against the transport at `address`: every problem. There is none when a
+ * second `hello` of a connected id is refused with `duplicate-instance`, its connection closed, the first one kept, and
+ * the id accepted again once the first closed. [PP-4]
  */
 export async function duplicateProblems(address: string): Promise<string[]> {
   const problems: string[] = [];
@@ -137,13 +142,13 @@ export async function duplicateProblems(address: string): Promise<string[]> {
   return problems;
 }
 
-/** An `api` message as task 14.2's protocol had it (owner decision Q140 C removed the type). */
+/** An `api` message as the earlier protocol had it, before the type was removed. [Q140 C] */
 const API_TEXT = '{"v":1,"type":"api","id":"a-1","module":"stats","method":"totals","params":{"from":"1"}}';
 
 /**
- * A115's oracle for an `api` message (Q140 C: an unknown `type`) against the transport at `address`: every problem, none
- * when a greeted connection that sends one is closed (1008, `unknown-type`) without an answer, and the core keeps
- * serving others.
+ * The oracle for an `api` message, now an unknown `type`, against the transport at `address`: every problem. There
+ * is none when a greeted connection that sends one is closed (1008, `unknown-type`) without an answer, and the core
+ * keeps serving others. [A115 CI, Q140 C]
  */
 export async function apiProblems(address: string): Promise<string[]> {
   const problems: string[] = [];
@@ -174,7 +179,7 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
   let configHash: string | undefined;
   beforeAll(async () => {
     const db = await backend.database("public");
-    // No instance listed: a core listing one waits for it before every height (task 14.3, PP-6).
+    // No instance listed: a core listing one waits for it before every height. [PP-6]
     core = await startPublicCore({ database: db.setting, head: 3n, extra: TRANSPORT });
     address = core.transport();
   }, START_TIMEOUT_MS);
@@ -402,7 +407,7 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
 
 describe("A115 negative control (committed): a transport that still answers api fails the oracle", () => {
   it("task 14.2's answer to an api message (api-result not-found, the connection kept) is seen", async () => {
-    // A stand-in of task 14.2's core: hello answered, every api answered not-found with its id, the connection kept.
+    // A stand-in of the earlier protocol's core: hello answered, every api answered not-found with its id, the connection kept.
     const server = createServer();
     const wss = new WebSocketServer({ server });
     wss.on("connection", (socket) => {
@@ -437,7 +442,7 @@ describe.each(PRIVATE_BACKENDS)("A115: a read of an empty public database on $na
 
   it("before the first commit a read-result's height is null, and hello-ack's cursor null", async () => {
     const db = await backend.database("public");
-    // S is 5 and the node's head 2: the core waits for the node (IN-2) with nothing committed, its transport listening.
+    // S is 5 and the node's head 2: the core waits for the node with nothing committed, its transport listening. [IN-2]
     const core = launchPublicCore({ database: db.setting, head: 2n, start: 5, extra: TRANSPORT });
     try {
       const address = await core.transportWithin(START_TIMEOUT_MS);

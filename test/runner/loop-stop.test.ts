@@ -15,14 +15,17 @@ import {
 import { NodeWatch, type StopBy } from "./startup-stop-harness.js";
 
 /**
- * A169 `[CI]` (task 5.3c; RN-13's scenario "SIGTERM while the loop waits on an unreachable node"; issue 00042): a tape
- * node answers up to height h and then refuses connections; SIGTERM — and likewise `ProcessHandle.stop()` — while the
- * running loop waits for h + 1's block, and, with `core-ledger-state`, while its `on-compute` at h + 1 awaits the state
- * root, ends the process within 5 s: `ended` of kind `signal`, no connection attempt after the stop, nothing of h + 1
- * stored; a restart against a node that answers again processes h + 1. On PostgreSQL 18.6 and PGlite 0.5.10, each run
- * on a new database (`loop-stop-harness.ts`: what is observed, and the oracle `a169Problems`). The committed negative
- * control is `loop-stop.negative-control.test.ts`. Also (A48 unchanged, RN-13: "let a block whose transaction is open
- * commit or roll back"): a stop while a block transaction is open closes the node client only once it has committed.
+ * `[CI]` SIGTERM while the loop waits on an unreachable node. A tape node answers up to height h and then refuses
+ * connections. SIGTERM, and likewise `ProcessHandle.stop()`, ends the process within 5 s while the running loop waits
+ * for h + 1's block, and, with `core-ledger-state`, while its `on-compute` at h + 1 awaits the state root. It ends with
+ * `ended` of kind `signal`, no connection attempt after the stop, and nothing of h + 1 stored; a restart against a node
+ * that answers again processes h + 1. [A169 CI, RN-13]
+ *
+ * On PostgreSQL 18.6 and PGlite 0.5.10, each run on a new database (`loop-stop-harness.ts`: what is observed, and the
+ * oracle `a169Problems`). The committed negative control is `loop-stop.negative-control.test.ts`.
+ *
+ * Also, with the SIGTERM-in-transaction case unchanged: a stop while a block transaction is open closes the node client
+ * only once it has committed, since an open block transaction is let commit or roll back first. [A48, RN-13]
  */
 
 /** No problem on either backend. */
@@ -86,7 +89,7 @@ async function openTransactionProblems(backend: ProcessBackend): Promise<string[
   return problems;
 }
 
-/** A169 on both backends for `scenario`, stopped `by`: each run's problems, its restart's included. */
+/** The case on both backends for `scenario`, stopped `by`: each run's problems, its restart's included. [A169 CI] */
 async function a169(scenario: LoopStopScenario, by: StopBy): Promise<Record<string, string[]>> {
   const found: Record<string, string[]> = {};
   for (const backend of PROCESS_BACKENDS) {

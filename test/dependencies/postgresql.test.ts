@@ -2,13 +2,19 @@ import postgres, { type Sql, type TransactionSql } from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startPostgresServer, type PostgresTestServer } from "../db/postgres-server.js";
 
-// Task 0.4 of `openspec/changes/core-arch` (owner decision Q82, acceptance A148; design.md §14): the PostgreSQL facts the
-// design relies on, re-checked on the pinned PostgreSQL 18 image (`test/postgres-image.ts`). They were checked on
-// PostgreSQL 17 before Q82, and `pglite.test.ts` checks the same on PGlite 0.5.10 (PostgreSQL 18.6): per-module roles
-// under `SET LOCAL ROLE` (DB-6), provider functions (DB-7), PL/pgSQL row triggers (DT-4), the `TRUNCATE` refusal
-// (DB-14), the `jsonb` number check and `.string()` keeping a number's scale (DT-6, Q57), `REPEATABLE READ READ ONLY`
-// reads (DB-2) and advisory locks (DB-11). They test PostgreSQL itself, not UmbraDB code: a failure here means the pinned
-// image no longer behaves as the design assumes.
+// The PostgreSQL facts the design relies on, re-checked on the pinned PostgreSQL 18 image (`test/postgres-image.ts`).
+// They were checked on PostgreSQL 17 before the image was pinned, and `pglite.test.ts` checks the same on PGlite
+// 0.5.10 (PostgreSQL 18.6): [Q82, A148; design §14]
+// - per-module roles under `SET LOCAL ROLE` [DB-6];
+// - provider functions [DB-7];
+// - PL/pgSQL row triggers [DT-4];
+// - the `TRUNCATE` refusal [DB-14];
+// - the `jsonb` number check and `.string()` keeping a number's scale [DT-6, Q57];
+// - `REPEATABLE READ READ ONLY` reads [DB-2];
+// - advisory locks [DB-11].
+//
+// They test PostgreSQL itself, not UmbraDB code: a failure here means the pinned image no longer behaves as the design
+// assumes.
 
 const INSUFFICIENT_PRIVILEGE = "42501";
 const CHECK_VIOLATION = "23514";
@@ -49,7 +55,7 @@ beforeAll(async () => {
   const database = await server.createDatabase();
   sql = database.admin;
   other = postgres(database.url, { max: 1, onnotice: () => undefined });
-  // The same roles, schemas and grants as `pglite.test.ts` (design.md §4).
+  // The same roles, schemas and grants as `pglite.test.ts`. [design §4]
   await database.exec(`
     CREATE ROLE umbradb_m_a NOLOGIN;
     CREATE ROLE umbradb_m_b NOLOGIN;

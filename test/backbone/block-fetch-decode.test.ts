@@ -20,12 +20,15 @@ import {
 } from "./fetch-fixtures.js";
 
 /**
- * What `core-block-fetch` decodes a block with (task 10.3; CD-2, LG-4, IN-6): BLAKE2b-256 and a header's hash, SCALE,
- * the runtime metadata V14, the extrinsics and the block's time. The oracles are independent of the code: RFC 7693's and
- * Python's `hashlib` vectors for BLAKE2b, and the real mainnet block 3,174,332 the node gave on 2026-10-25
- * (`test/node/fixtures/mainnet-answers.json`) — its header hashes to the hash `chain_getBlockHash` answered for it, and
- * its seven extrinsics decode, with the indices of the runtime that built it, to the calls the Midnight node's own
- * metadata names there and to the time of the recording day.
+ * What `core-block-fetch` decodes a block with: BLAKE2b-256 and a header's hash, SCALE, the runtime metadata V14, the
+ * extrinsics and the block's time. [CD-2, LG-4, IN-6]
+ *
+ * The oracles are independent of the code:
+ * - RFC 7693's and Python's `hashlib` vectors for BLAKE2b;
+ * - the real mainnet block 3,174,332 the node gave on 2026-10-25 (`test/node/fixtures/mainnet-answers.json`). Its
+ *   header hashes to the hash `chain_getBlockHash` answered for it. Its seven extrinsics decode, with the indices of
+ *   the runtime that built it, to the calls the Midnight node's own metadata names there and to the time of the
+ *   recording day.
  */
 
 const MAINNET = JSON.parse(
@@ -186,7 +189,7 @@ describe("the runtime metadata V14 (state_getMetadata's answer)", () => {
     const plain = [0, ...compact(1)];
     const map = (hashers: number[]) => [1, ...compact(hashers.length), ...hashers, ...compact(1), ...compact(1)];
     const view = readRuntimeMetadata(build(storage([entry(0, plain), entry(1, map([0, 6]))])));
-    // Task 11.1 reads the entries (core-chain-events finds System::Events' type there); each is read whole.
+    // The entries are read (core-chain-events finds System::Events' type there); each is read whole.
     expect(view.pallets).toEqual([
       {
         name: "Pool",

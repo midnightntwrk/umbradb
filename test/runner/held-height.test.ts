@@ -19,19 +19,19 @@ import { entry } from "../modules/graph-fixtures.js";
 import { cursorOf, heightsIn, InMemoryBlockSource, loopInput, RUNNER_BACKENDS, type Started, startWith } from "./loop-harness.js";
 
 /**
- * A height held for a retry of its loop (task 10.4; IN-10, IN-11; `src/runner/loop.ts`), on PostgreSQL 18 and PGlite
- * 0.5.10: the loop fails at h with a retryable failure (`connection-lost`, `node-unreachable`), and the process runs it
- * again on the same `FinalizedLoop` (task 5.4) — here the test does, after the first run rejected.
+ * A height held for a retry of its loop (`src/runner/loop.ts`), on PostgreSQL 18 and PGlite 0.5.10. The loop fails at
+ * h with a retryable failure (`connection-lost`, `node-unreachable`), and the process runs it again on the same
+ * `FinalizedLoop`; here the test does, after the first run rejected. [IN-10, IN-11]
  *
  * - A failure once `on-compute` began, in the block transaction too: h is processed again from `on-compute`, the
  *   `block` items of `on-fetch` and `on-parse` kept, those of the failed `on-compute` dropped; nothing is fetched or
- *   parsed again, `on-start-height` does not fire again, and the cursor's `on-after-db-write` is not re-delivered.
+ *   parsed again, `on-start-height` does not fire again, and the cursor's `on-after-db-write` is not delivered again.
  * - A failure in `on-start-height`: h resumes there, its items kept.
  * - A lost `COMMIT` (a database whose block transaction fails after its body ended: after the commit landed, or with the
  *   transaction rolled back — both backends, where a real connection cannot be lost on PGlite): the next run reads the
- *   cursor first, inside a transaction on the writer (whose new session takes the writer lock again first, DB-11);
- *   h with the block's hash — `on-after-db-write` fires for h and the loop goes on; h − 1 — h again from `on-compute`;
- *   anything else halts with `unexpected-cursor` at h (IN-11). A failure of that read keeps the height held.
+ *   cursor first, inside a transaction on the writer (whose new session takes the writer lock again first). At h with
+ *   the block's hash, `on-after-db-write` fires for h and the loop goes on; at h − 1, h runs again from `on-compute`;
+ *   anything else halts with `unexpected-cursor` at h. A failure of that read keeps the height held. [DB-11, IN-11]
  * - `commitOutcome`'s table over every cursor.
  * A failure before `on-parse` ended holds nothing: the loop runs again from the cursor (`retries.test.ts`).
  */
@@ -127,7 +127,7 @@ function modules(seen: Seen, faults: Faults, arm: () => void = () => undefined):
 /** Why a commit was lost: after it landed, or with the transaction rolled back. */
 type LostCommit = "landed" | "lost";
 
-/** The error a lost `COMMIT` gives (DB-13). */
+/** The error a lost `COMMIT` gives. [DB-13] */
 const lostCommit = (): UmbraError =>
   new UmbraError("connection-lost", "the connection was lost during the COMMIT (the test's database)");
 
@@ -206,7 +206,8 @@ describe.each(RUNNER_BACKENDS)("a height held for a retry (IN-10, IN-11) on $nam
     return { db, seen, started, source: new InMemoryBlockSource({ head: HEAD }) };
   }
 
-  /** IN-10's "processed again from on-compute": every height once, H's points before on-compute once, its later ones twice. */
+  /** "Processed again from on-compute": every height once, H's points before on-compute once, its later ones twice.
+   *  [IN-10] */
   function fromComputeProblems(seen: Seen): string[] {
     const problems: string[] = [];
     const times = (call: string, expected: number) => {

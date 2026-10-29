@@ -6,13 +6,14 @@ import { errorOf, inThreadLedger, type LedgerHost, LedgerWorkerFailure, startLed
 import { hex, NETWORK_ID, RAW, T0, zswapOutputTransaction } from "./adapter-fixtures.js";
 import type { TestLoaderData } from "./fixtures/ledger-test-loader.js";
 
-// Task 12.5a of `openspec/changes/core-arch` (design.md §5.3, §5.4; specs/ledger LG-14; owner decision Q144 B): the
-// ledger worker restarted — its thread ended and a new one started (`LedgerHost.restart`) — when the package still
-// refuses an eviction after the worker freed what it can (`EvictionRefused`). The new thread holds no state (the next
-// block's state at h − 1 is loaded from the database through the bridge), is sent the parses kept for blocks not
-// released yet again (a parse in flight answered by it), and fails any other request in flight; the main thread's
-// engine (`inThreadLedger`) restarts alike. In real threads over the real v9 package, with the test loader recording
-// what each thread parsed.
+// The ledger worker is restarted (its thread ended and a new one started, `LedgerHost.restart`) when the package still
+// refuses an eviction after the worker freed what it can (`EvictionRefused`). The new thread:
+// - holds no state: the next block's state at h − 1 is loaded from the database through the bridge;
+// - is sent again the parses kept for blocks not released yet, and answers a parse that was in flight;
+// - fails any other request that was in flight.
+//
+// The main thread's engine (`inThreadLedger`) restarts the same way. Runs in real threads over the real v9 package,
+// with the test loader recording what each thread parsed. [LG-14, Q144 B; design §5.3, §5.4]
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);

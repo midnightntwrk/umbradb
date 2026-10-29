@@ -2,10 +2,11 @@ import type { DatabaseParts, PostgresParts } from "../../src/config/database-par
 import type { ProcessDatabase } from "../runner/process-backends.js";
 
 /**
- * A secret for the admin endpoints' redaction tests (tasks 8.3, 8.4; AE-6, A29, A67): a password with every character
- * URL encodings treat differently, and every form a text may hold it in, written out by hand — not computed by the code
- * under test — as `test/config/redact.test.ts` writes its own: decoded, as a URL writes it (`encodeURIComponent`), in
- * lower-case hex, form-encoded (`+` for a space), WHATWG's userinfo encoding (which leaves `%` alone) and JSON-escaped.
+ * A secret for the admin endpoints' redaction tests: a password with every character URL encodings treat differently.
+ * Every form a text may hold it in is written out by hand, not computed by the code under test, as
+ * `test/config/redact.test.ts` writes its own: decoded, as a URL writes it (`encodeURIComponent`), in lower-case hex,
+ * form-encoded (`+` for a space), WHATWG's userinfo encoding (which leaves `%` alone) and JSON-escaped.
+ * [AE-6, A29, A67]
  */
 
 /** The password. */
@@ -27,7 +28,7 @@ export const SECRET_FORMS: readonly string[] = [
 /** A text holding {@link SECRET} in each of its forms, as a careless error message would. */
 export const SECRET_TEXT = `failed: ${SECRET_FORMS.map((form, index) => `form ${index} <${form}>`).join(", ")}`;
 
-/** A node URL whose password is {@link SECRET} (the `core` entry's `node`, a secret field, CF-4). */
+/** A node URL whose password is {@link SECRET} (the `core` entry's `node`, a secret field). [CF-4] */
 export const SECRET_NODE = `ws://node-user:${SECRET_WRITTEN}@127.0.0.1:9/node`;
 
 /** Where each form of {@link SECRET} appears in `texts` (by name): none when nothing leaked. */
@@ -40,9 +41,9 @@ export function secretProblems(texts: Readonly<Record<string, string>>): string[
 let roles = 0;
 
 /**
- * `db`'s `database` setting with {@link SECRET} as its password (CF-4, owner decision Q167 A: the `password` part is
- * secret, redacted wherever it appears): on PostgreSQL a login role of its own, a superuser as the tests' own user is,
- * whose password is the secret; PGlite's setting is a directory and has no password, so it is returned as it is.
+ * `db`'s `database` setting with {@link SECRET} as its password. The `password` part is secret and redacted wherever it
+ * appears. On PostgreSQL this is a login role of its own, a superuser as the tests' own user is, whose password is the
+ * secret. PGlite's setting is a directory and has no password, so it is returned as it is. [CF-4, Q167 A]
  */
 export async function secretDatabase(db: ProcessDatabase): Promise<DatabaseParts> {
   if (db.admin === undefined) return db.setting;

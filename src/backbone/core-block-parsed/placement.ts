@@ -1,38 +1,42 @@
 /**
- * Which Midnight transactions a block holds, and in what order the ledger applied them
- * (`openspec/changes/core-arch/specs/chain-data/spec.md` CD-5; task 11.1) — before any is parsed: from the block's body
- * (`block-body`, CD-2) and its chain events (`chain-events`, CD-4).
+ * Which Midnight transactions a block holds, and in what order the ledger applied them, found before any is parsed:
+ * from the block's body (`block-body`) and its chain events (`chain-events`). [CD-5, CD-2, CD-4]
  *
- * **The pinned node** (`midnight-node` 2.1.0-rc.4): a regular transaction is the argument `midnight_tx: Vec<u8>` of an
- * unsigned extrinsic calling `Midnight::send_mn_transaction` (`pallets/midnight/src/lib.rs`, call index 0, validated by
- * `ValidateUnsigned`; a signed or general extrinsic may carry governance calls only, `runtime/src/check_call_filter.rs`
- * `CheckCallFilter`). Its dispatch deposits `Midnight::TxApplied(TxAppliedDetails { tx_hash })` when the ledger applied
- * every segment and `Midnight::TxPartialSuccess` when not; a dispatch that fails leaves none of its events (every call
- * is transactional) and `frame_system` then records `System::ExtrinsicFailed { dispatch_error, dispatch_info }` under
- * the same phase, `ApplyExtrinsic(i)`. A system transaction is never in the body after block 0: it is built by the
- * runtime (a cNight observation inherent, the bridge, a governance motion dispatching
- * `MidnightSystem::send_mn_system_transaction` as Root) and applied with
- * `MidnightSystem::SystemTransactionApplied(SystemTransactionApplied { hash, serialized_system_transaction })`
- * (`pallets/midnight-system/src/lib.rs`, `apply_and_emit`), the event being the only place its bytes are. (The pallet
- * `CNightObservation` has an event of the same name carrying a hash only; it is not a transaction.)
+ * **The pinned node** (`midnight-node` 2.1.0-rc.4):
+ * - A regular transaction is the argument `midnight_tx: Vec<u8>` of an unsigned extrinsic calling
+ *   `Midnight::send_mn_transaction` (`pallets/midnight/src/lib.rs`, call index 0, validated by `ValidateUnsigned`). A
+ *   signed or general extrinsic may carry governance calls only (`runtime/src/check_call_filter.rs`,
+ *   `CheckCallFilter`).
+ * - Its dispatch deposits `Midnight::TxApplied(TxAppliedDetails { tx_hash })` when the ledger applied every segment,
+ *   and `Midnight::TxPartialSuccess` when not. A dispatch that fails leaves none of its events (every call is
+ *   transactional); `frame_system` then records `System::ExtrinsicFailed { dispatch_error, dispatch_info }` under the
+ *   same phase, `ApplyExtrinsic(i)`.
+ * - A system transaction is never in the body after block 0. The runtime builds it (a cNight observation inherent, the
+ *   bridge, or a governance motion dispatching `MidnightSystem::send_mn_system_transaction` as Root) and applies it
+ *   with `MidnightSystem::SystemTransactionApplied(SystemTransactionApplied { hash, serialized_system_transaction })`
+ *   (`pallets/midnight-system/src/lib.rs`, `apply_and_emit`). That event is the only place its bytes are. (The pallet
+ *   `CNightObservation` has an event of the same name carrying only a hash; it is not a transaction.)
  *
- * **The order** (CD-5) is the order of the transactions' chain events, as the official indexer reads it
- * (`midnight-indexer` `chain-indexer/src/infra/subxt_node/runtimes.rs`, `transactions`), each event matched to its
- * extrinsic by its phase — never by its place among the events:
+ * **The order** is the order of the transactions' chain events, as the official indexer reads it (`midnight-indexer`
+ * `chain-indexer/src/infra/subxt_node/runtimes.rs`, `transactions`). Each event is matched to its extrinsic by its
+ * phase, never by its place among the events: [CD-5]
  * - `MidnightSystem::SystemTransactionApplied` is a system transaction, with the event's phase as the chain stamped it;
  * - `Midnight::TxApplied`, `Midnight::TxPartialSuccess` or `System::ExtrinsicFailed` under `ApplyExtrinsic(i)` is the
- *   regular transaction of extrinsic `i`, if `i` carries one; an `ExtrinsicFailed` of any other extrinsic is not a
- *   transaction's (a failed inherent or governance call), nor is a top-level `MidnightSystem` extrinsic (Root only, so
- *   in an executed block it failed).
- * - **Block 0** has no events (Substrate emits none at genesis): every `Midnight` and `MidnightSystem` extrinsic of its
- *   body is a transaction, regular or system, in body order, under `ApplyExtrinsic(i)` (IN-7; the official indexer's
- *   `genesis_transactions`).
+ *   regular transaction of extrinsic `i`, if `i` carries one. An `ExtrinsicFailed` of any other extrinsic belongs to no
+ *   transaction (it is a failed inherent or governance call), and neither does a top-level `MidnightSystem` extrinsic
+ *   (Root only, so in an executed block it failed);
+ * - **Block 0** has no events (Substrate emits none at genesis). Every `Midnight` and `MidnightSystem` extrinsic of its
+ *   body is a transaction, regular or system, in body order, under `ApplyExtrinsic(i)`, as in the official indexer's
+ *   `genesis_transactions`. [IN-7]
  *
- * **Anything else refuses the block** (it throws), where the official indexer logs a divergence and goes on: a regular
- * transaction with no outcome event or with two, `TxApplied` or `TxPartialSuccess` under a phase whose extrinsic
- * carries no regular transaction (or carries one this decoder cannot see: a signed or general extrinsic, whose call is
- * not decoded, `src/backbone/core-block-fetch/extrinsics.ts`), and a call or event whose fields are not the bytes these
- * rules read. A block is placed exactly or not at all (decision record question Q132). Pure: no Node.js import.
+ * **Anything else refuses the block** (it throws), where the official indexer logs a divergence and goes on:
+ * - a regular transaction with no outcome event, or with two;
+ * - `TxApplied` or `TxPartialSuccess` under a phase whose extrinsic carries no regular transaction, or carries one this
+ *   decoder cannot see (a signed or general extrinsic, whose call is not decoded,
+ *   `src/backbone/core-block-fetch/extrinsics.ts`);
+ * - a call or event whose fields are not the bytes these rules read.
+ *
+ * A block is placed exactly or not at all. The module is pure: it has no Node.js import. [Q132]
  */
 
 import type { BlockBody } from "../core-block-fetch/items.js";
@@ -58,7 +62,7 @@ export const SYSTEM = Object.freeze({ pallet: "System", failed: "ExtrinsicFailed
 
 /** A transaction of a block, placed (see the module comment); not yet parsed. */
 export interface ChainTransaction {
-  /** Its place in the order the ledger applied the block's transactions, from 0 (CD-5). */
+  /** Its place in the order the ledger applied the block's transactions, from 0. [CD-5] */
   readonly index: number;
   readonly kind: "regular" | "system";
   /** The transaction as the chain carries it: the ledger's tagged serialization. */
@@ -73,7 +77,7 @@ export interface ChainTransaction {
 
 /** A refusal of block `height` (see the module comment). */
 function refuse(height: bigint, why: string): Error {
-  return new Error(`block ${height}: ${why}, so its transactions cannot be placed (CD-5)`);
+  return new Error(`block ${height}: ${why}, so its transactions cannot be placed`);
 }
 
 /** Whether `event` is `pallet`'s event `name`. */

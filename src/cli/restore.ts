@@ -1,28 +1,29 @@
 /**
- * `umbradb restore <file> [--config <file>]` (`openspec/changes/core-arch/specs/backups/spec.md` BK-3, BK-4;
- * `design.md` §9.1, §12; owner decisions Q83, Q85, Q153; tasks 15.2, 15.2a): restores a backup into the database the
- * configuration file names (`./configured.ts`), which must be empty, through `src/backup/restore.ts` (`restoreBackup`):
- * the checks before loading, the file's SQL in one transaction on the writer connection, the owners and grants, the
- * contents hash and the ledger state root checked before the commit. A PGlite directory not there yet is created, with
- * any missing parent directory, once the checks before loading passed (`openRestoreTarget`; CF-4, owner decision Q163).
+ * `umbradb restore <file> [--config <file>]`: restores a backup into the database the configuration file names
+ * (`./configured.ts`), which must be empty, through `src/backup/restore.ts` (`restoreBackup`). This covers the checks
+ * before loading, the file's SQL in one transaction on the writer connection, the owners and grants, and the contents
+ * hash and the ledger state root, checked before the commit. [BK-3, BK-4, Q83, Q85; design §9.1, §12]
  *
- * - **The configuration file** — `--config`, or `umbradb.config.ts` in the working directory, as for `umbradb run` —
- *   gives the database and the opt-in (its process's `core` revision, Q102), the history the backup's must equal up to
- *   its height and the build that must carry its versions and migrations (CF-1: the command's build with the file's
- *   user modules).
+ * A PGlite directory that is not there yet is created, with any missing parent directory, once the checks before
+ * loading have passed (`openRestoreTarget`). [CF-4, Q163]
+ *
+ * - **The configuration file** (`--config`, or `umbradb.config.ts` in the working directory, as for `umbradb run`)
+ *   gives the database and the opt-in (from its process's `core` revision); the history, which the backup's must equal
+ *   up to its height; and the build, which must carry the backup's versions and migrations (the command's build with
+ *   the file's user modules). [CF-1, Q102]
  * - **The chain** the checks read is the configuration's node (`core-block-fetch`'s node source on one node client, as
  *   `umbradb run` reads it): its genesis hash, its finalized block at the backup's height and, with `core-ledger-state`
- *   in the history, its ledger state root there. The node client retries an unreachable node as a process does
- *   (IN-10), each retry on stderr; Ctrl-C ends the command.
- * - **A private process's configuration** (its `core` entry has no `node`, CF-4; PP-12, owner decision Q153, task
- *   15.2a): its chain is its public database, read as the private process reads it (`openPublicSide` of
- *   `core-private-source`): a PostgreSQL `publicDatabase` directly, with reads only, else through the core's transport
- *   at `coreTransport`, whose `hello` gives an empty private database's position, S − 1 with no hash (PP-4); the
- *   transport's lines go to stderr. The restore checks the backup's binding and block against it
- *   (`src/backup/restore.ts`).
- * - **Refusals** (exit 1, nothing committed: the target as it was) are BK-3's codes, the configuration's own and the
- *   database's failures; a wrong argument prints the usage (exit 2). Every text passes through the redaction of the
- *   file's secrets (the database and node URLs among them) and any URL's credentials.
+ *   in the history, its ledger state root there. The node client retries an unreachable node as a process does, each
+ *   retry on stderr; Ctrl-C ends the command. [IN-10]
+ * - **A private process's configuration** (its `core` entry has no `node`): its chain is its public database, read as
+ *   the private process reads it (`openPublicSide` of `core-private-source`). A PostgreSQL `publicDatabase` is read
+ *   directly, with reads only; otherwise the chain is read through the core's transport at `coreTransport`, whose
+ *   `hello` gives an empty private database's position, S − 1 with no hash. The transport's lines go to stderr. The
+ *   restore checks the backup's binding and block against it (`src/backup/restore.ts`). [CF-4, PP-4, PP-12, Q153]
+ * - **Refusals** (exit 1, nothing committed, the target left as it was): the restore's own refusal codes, the
+ *   configuration's own and the database's failures. A wrong argument prints the usage (exit 2). Every text passes
+ *   through the redaction of the file's secrets (the database and node URLs among them) and of any URL's credentials.
+ *   [BK-3]
  */
 
 import { resolve } from "node:path";
@@ -83,7 +84,7 @@ export interface RestoreCommandOptions {
   readonly cwd: string;
   /** Where the node client's retries are told. */
   readonly log?: (line: string) => void;
-  /** Where what the restore did besides restoring is told: a PGlite directory it created (Q165 B, Q167 A). */
+  /** Where what the restore did besides restoring is told: a PGlite directory it created. [Q165 B, Q167 A] */
   readonly say?: (line: string) => void;
 }
 
@@ -108,7 +109,7 @@ function chainOf(config: CommandConfig, seams: RestoreCommandSeams, log: (line: 
     if (seams.publicDatabase !== undefined) {
       return { chain: { publicDatabase: seams.publicDatabase(config) }, close: async () => undefined };
     }
-    // The target is empty: its position is a private database's before its first commit (PP-4).
+    // The target is empty: its position is a private database's before its first commit. [PP-4]
     const start = BigInt(config.checked.start);
     const side = openPublicSide(config.core, { position: () => ({ height: start - 1n, hash: null }), log });
     return {

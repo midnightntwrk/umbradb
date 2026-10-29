@@ -5,11 +5,14 @@ import { declaration } from "../modules/declarations.js";
 import { blockItem } from "../modules/graph-fixtures.js";
 
 /**
- * The block items of one height and the revision a block context's settings come from (task 5.2; RN-5, RN-7): a
- * callback's puts are buffered and published when it completes — dropped when it fails —, so a callback sees only the
- * items of callbacks that completed before it started; only the module that declares an item with the `block`
- * lifetime may put it, once per block; a put refused inside a callback fails the callback even when the module catches
- * the refusal, and one from a sink kept past its callback is reported. The loop's own tests are `loop.test.ts`.
+ * The block items of one height, and the revision a block context's settings come from:
+ * - a callback's puts are buffered and published when it completes (dropped when it fails), so a callback sees only
+ *   the items of callbacks that completed before it started;
+ * - only the module that declares an item with the `block` lifetime may put it, once per block;
+ * - a put refused inside a callback fails the callback even when the module catches the refusal, and one from a sink
+ *   kept past its callback is reported.
+ *
+ * The loop's own tests are `loop.test.ts`. [RN-5, RN-7]
  */
 
 const P = declaration("p", { provides: [blockItem("x"), blockItem("y"), { name: "t", lifetimes: ["table"] }] });
@@ -96,7 +99,7 @@ describe("BlockItems: one height's block items (RN-5)", () => {
     const undeclared = await outcome(items.collect(Q, "on-fetch", async (sink) => sink.put("x", 1)));
     expect(String(undeclared)).toBe(
       "Error: q put the item x, which it does not declare with the block lifetime, at height 3: a module puts only " +
-        "the block items it declares (RN-5)",
+        "the block items it declares",
     );
     const tableOnly = await outcome(items.collect(P, "on-fetch", async (sink) => sink.put("t", 1)));
     expect(String(tableOnly)).toMatch(/^Error: p put the item t, which it does not declare with the block lifetime/);
@@ -111,11 +114,11 @@ describe("BlockItems: one height's block items (RN-5)", () => {
         sink.put("x", 2);
       }),
     );
-    expect(String(twice)).toBe("Error: p put the item x twice at height 4: an item is put at most once per block (RN-5)");
+    expect(String(twice)).toBe("Error: p put the item x twice at height 4: an item is put at most once per block");
     expect(items.visible().size).toBe(0);
     await items.collect(P, "on-fetch", async (sink) => sink.put("x", 1));
     const again = await outcome(items.collect(P, "on-parse", async (sink) => sink.put("x", 2)));
-    expect(String(again)).toBe("Error: p put the item x twice at height 4: an item is put at most once per block (RN-5)");
+    expect(String(again)).toBe("Error: p put the item x twice at height 4: an item is put at most once per block");
     expect(items.visible().get("x")).toBe(1);
   });
 
@@ -161,11 +164,11 @@ describe("BlockItems: one height's block items (RN-5)", () => {
       kept = sink;
     });
     expect(() => kept?.put("x", 1)).toThrow(
-      "p put the item x after its on-parse callback at height 7 ended: a sink is valid only while its callback runs (RN-5)",
+      "p put the item x after its on-parse callback at height 7 ended: a sink is valid only while its callback runs",
     );
     expect(late).toEqual([
       [
-        "p put the item x after its on-parse callback at height 7 ended: a sink is valid only while its callback runs (RN-5)",
+        "p put the item x after its on-parse callback at height 7 ended: a sink is valid only while its callback runs",
         "p",
         "on-parse",
       ],
@@ -222,11 +225,11 @@ describe("revisionAt: the calling module's revision covering a height (RN-7)", (
   });
 
   it("is the last revision starting at or before h whose stop, if any, is at or after h", () => {
-    // Revisions without a stop continue to the next one's start (CF-5): at 5 the second takes over.
+    // Revisions without a stop continue to the next one's start: at 5 the second takes over. [CF-5]
     const revisions = [revision(1, null, 1), revision(5, 9, 2), revision(12, null, 3)];
     const at = (h: number) => revisionAt(revisions, BigInt(h))?.settings.k;
     expect([0, 1, 4, 5, 9, 12, 100].map(at)).toEqual([undefined, 1, 1, 2, 2, 3, 3]);
-    // With effective stops (task 4.3's), a height in a gap has none: the module does not run there (RN-7).
+    // With effective stops, a height in a gap has none: the module does not run there. [RN-7]
     const effective = [revision(1, 4, 1), revision(5, 9, 2), revision(12, null, 3)];
     expect([4, 5, 10, 11, 12].map((h) => revisionAt(effective, BigInt(h))?.settings.k)).toEqual([1, 2, undefined, undefined, 3]);
   });

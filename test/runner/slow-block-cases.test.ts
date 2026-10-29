@@ -31,15 +31,17 @@ import {
 } from "./slow-block-harness.js";
 
 /**
- * What RN-17 leaves to the design, settled by task 5.5 and tested here through the process on PostgreSQL 18 and PGlite
- * 0.5.10 (A142 itself is `./slow-block.test.ts`):
+ * The slow-block details the requirement leaves to the design, tested here through the process on PostgreSQL 18 and
+ * PGlite 0.5.10. The slow height's own acceptance test is `./slow-block.test.ts`. [RN-17, A142]
+ *
+ * The details:
  * - **the module** at a point in waves is the first whose callback runs, in the point's order; once it ended, the next;
  * - **no callback running:** in the block transaction — the loop's cursor check before the `COMMIT`, the wait for its
  *   `BEGIN` — the point is `on-db-write` and the module null;
  * - **a height that commits in time** is never reported: its timer ends with its window;
  * - **a halt** clears the condition, and logs that the slow height stopped without committing;
- * - **a held height's retry** (IN-10, task 10.4) is a run of its own: its window opens where it resumes, so neither the
- *   earlier attempt nor the back-off counts;
+ * - **a held height's retry** is a run of its own: its window opens where it resumes, so neither the earlier attempt
+ *   nor the back-off counts [IN-10];
  * - **a height the source prepares ahead** (its `on-fetch` and `on-parse` in the source's queue, as the node source
  *   runs them): its window opens when the loop asks for it if its `on-parse` runs then — the point and module the
  *   queue's —, and the queue's work for it while the heights before it ran is not its time;
@@ -48,7 +50,7 @@ import {
  *   read after the commit shows the condition.
  *
  * A height's processing that no case holds — on PostgreSQL its `on-db-write` and `COMMIT` — can pass `slowBlockMs` on
- * a loaded machine and is then reported, correctly (issues 00035, 00040). So the cases look at height 2 only; where a
+ * a loaded machine and is then reported, correctly. So the cases look at height 2 only; where a
  * case says it is never reported, it checks that it is not reported before its own window can have run `slowBlockMs`
  * (the node's fetch, the queue's earlier work), or never after its commit (a height that commits in time), or leaves
  * its reads and commit 2.7 s (a held height's retry).
@@ -192,7 +194,7 @@ function neverShown(observed: Observed, lines: readonly string[]): string[] {
  * Every `slow-block` problem of a run that must not report height 2 before `from` + `slowBlockMs` − `slack`, the earliest
  * moment its own window can have run `slowBlockMs` — in `status()`, in `/status`, in the log —; and it committed. That
  * window holds no callback of the case, but on a loaded machine its own processing (on PostgreSQL its `on-db-write` and
- * `COMMIT`) can pass `slowBlockMs` and raise a correct `slow-block`, never earlier than that (issue 00040).
+ * `COMMIT`) can pass `slowBlockMs` and raise a correct `slow-block`, never earlier than that.
  */
 function earlyProblems(observed: Observed, run: SlowRun, from: number, slowBlockMs: number, slack: number): string[] {
   const problems: string[] = [];
@@ -213,7 +215,7 @@ function earlyProblems(observed: Observed, run: SlowRun, from: number, slowBlock
  * for a height's own processing ({@link HEIGHT_POINTS}) at or below its cursor, and each log line raising a height's
  * own `slow-block` is followed by the one saying it committed after at least `slowBlockMs` (less 2 ms of timer slack).
  * A height a loaded machine took longer than `slowBlockMs` to process is reported while it runs, and its commit clears
- * it (issue 00040).
+ * it.
  */
 function afterCommitProblems(observed: Observed, lines: readonly string[], slowBlockMs: number): string[] {
   const problems: string[] = [];
@@ -366,8 +368,7 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
       const seen: Seen = { calls: [] };
       // Three attempts fail after 800 ms (node-unreachable: retried), with back-offs of 1, 2 and 4 s; the fourth
       // commits. Counted from the first attempt, or through the last back-off alone, height 2 would pass slowBlockMs
-      // 3500; each run is 800 ms with its reads, and the last its commit: 2.7 s is left for those on a loaded machine
-      // (issue 00040).
+      // 3500; each run is 800 ms with its reads, and the last its commit: 2.7 s is left for those on a loaded machine.
       const unreachable = () => new UmbraError("node-unreachable", "the test's node did not answer");
       const flaky = holding("slow", seen, { ms: 800, calls: (call) => (call < 4 ? { then: unreachable() } : {}) });
       const run = startSlow(await backend.database(), { slowBlockMs: 3_500, user: [flaky], extra: { backoffCeilingMs: 4_000 } });
@@ -432,7 +433,7 @@ describe.each(PROCESS_BACKENDS)("slow-block's settled cases on $name", (backend)
         const shown = shownOf(observed);
         expect(shown[0]).toMatchObject({ height: SLOW_HEIGHT, point: "on-parse", module: "p" });
         // The window opens just before the ask (the loop opens it, then asks the source), and a Node.js timer may fire up
-        // to a millisecond early: the bound sits between the ask's 1.5 s and the queue's start's 0.6 s (issue 00035).
+        // to a millisecond early: the bound sits between the ask's 1.5 s and the queue's start's 0.6 s.
         expect(shown[0]!.at - asked).toBeGreaterThan(1_000);
         expect(goneProblems(observed)).toEqual([]);
       } finally {

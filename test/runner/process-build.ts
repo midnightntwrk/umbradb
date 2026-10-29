@@ -18,25 +18,27 @@ import { LOOP_BACKBONE } from "./loop-harness.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * A build for the process's tests (task 5.3; RN-7, RN-9–RN-13, CF-3, CF-4, Q102): the test backbone of
- * `loop-harness.ts` — the real `core-block-commit`, a stand-in for `core-digest` — with the real `core-block-fetch`
- * (task 10.3: the runner binds it to the process's block source, whose items it puts) and the real `core-chain` (task
- * 10.2), which the runner binds to its process context: its migrations create `core_chain.config`
- * and `core_chain.identity`, its `on-start-db` records the configuration history (CF-6, with `options.history` — a
- * negative control's `recordedData` — when given) and the identity and publishes its four process items, its
- * `on-db-write` records the anchor at S. The build adds to it the recording of its start and stop notifications, and of
- * its settings at each height, which are the `core` entry's (Q102: operational fields from the process's revision, data
- * fields from the revision covering the height).
+ * A build for the process's tests. It is the test backbone of `loop-harness.ts` (the real `core-block-commit`, a
+ * stand-in for `core-digest`) with two real parts added:
+ * - `core-block-fetch`, which the runner binds to the process's block source, whose items it puts;
+ * - `core-chain`, which the runner binds to its process context. Its migrations create `core_chain.config` and
+ *   `core_chain.identity`. Its `on-start-db` records the configuration history (with `options.history`, a negative
+ *   control's `recordedData`, when given) and the identity, and publishes its four process items. Its `on-db-write`
+ *   records the anchor at S. [CF-6]
+ *
+ * The build also records its start and stop notifications, and its settings at each height. These are the `core`
+ * entry's: operational fields from the process's revision, data fields from the revision covering the height.
+ * [RN-7, RN-9–RN-13, CF-3, CF-4, Q102]
  *
  * Imports nothing of Vitest, so that a worker process (`sigterm.worker.ts`) builds the same declarations.
  */
 
 /**
  * The runner's `startProcess` for the tests that start a process: without the admin endpoints unless the test asks
- * for them with `admin`. The runner serves them by default (AE-1; owner decision Q128 B, task 8.1a) on `listen.admin`,
- * CF-4's `0.0.0.0:8081` unless configured, and test processes run in parallel on a shared machine: each opts out here,
- * or asks for them and listens on a port of its own (`127.0.0.1:0`, as `test/admin/admin-harness.ts` does). A test
- * outside `test/admin/` that takes the runner's own fails `test/admin/test-processes.test.ts`.
+ * for them with `admin`. The runner serves them by default on `listen.admin`, which is `0.0.0.0:8081` unless
+ * configured, and test processes run in parallel on a shared machine. So each opts out here, or asks for them and
+ * listens on a port of its own (`127.0.0.1:0`, as `test/admin/admin-harness.ts` does). A test outside `test/admin/`
+ * that takes the runner's own fails `test/admin/test-processes.test.ts`. [AE-1, CF-4, Q128 B]
  */
 export function startProcess(input: ProcessInput): ProcessHandle {
   return startRunnerProcess({ ...input, admin: input.admin ?? false });
@@ -102,13 +104,16 @@ export function testBuild(user: readonly ModuleDeclaration[], options: TestBuild
 }
 
 /**
- * The tests' network (task 10.2a; IN-3, decision records Q117, Q120): `custom`, its genesis hash the in-memory chain's
- * block 0 ({@link inMemoryBlock}), so the configured genesis and the chain's agree, and its own ledger table:
- * LG-3's rows for runtimes 0.22 and 1.0 (v8), as the built-in tables hold them, so such a block's ledger is what it
- * was on `preprod`, and every runtime 2.x on v9 (rc.5), the release the tests' synthetic v9 transactions are built
- * and checked with. The built-in tables map runtime 2.0 to `v9-rc3` since task 12.2a (owner decision Q139 A), whose
- * package is tested on stagenet's own blocks (`test/ledger/ledger-v9-rc3.test.ts`, and the stagenet tape in
- * `test/backbone/ledger-state.test.ts`).
+ * The tests' network: `custom`, with the in-memory chain's block 0 as its genesis hash ({@link inMemoryBlock}), so the
+ * configured genesis and the chain's agree. [IN-3, Q117, Q120]
+ *
+ * It has its own ledger table:
+ * - runtimes 0.22 and 1.0 on v8, as the built-in tables hold them, so such a block's ledger is what it was on
+ *   `preprod` [LG-3];
+ * - every runtime 2.x on v9 (rc.5), the release the tests' synthetic v9 transactions are built and checked with.
+ *
+ * The built-in tables map runtime 2.0 to `v9-rc3` instead, whose package is tested on stagenet's own blocks
+ * (`test/ledger/ledger-v9-rc3.test.ts`, and the stagenet tape in `test/backbone/ledger-state.test.ts`). [Q139 A]
  */
 export const TEST_GENESIS = `0x${Buffer.from(inMemoryBlock(0n).hash).toString("hex")}`;
 const TEST_NETWORK = Object.freeze({

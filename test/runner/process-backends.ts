@@ -9,15 +9,14 @@ import { TAKE_WRITER_LOCK_SQL, WRITER_LOCK_HOLDER_SQL } from "../../src/db/write
 import { startPostgresServer, type PostgresTestServer } from "../db/postgres-server.js";
 
 /**
- * Databases for the process's tests (task 5.3): the process opens its database itself, from the `core` entry's
- * `database` setting (CF-4, Q102), so each test gets a setting — the parts of a PostgreSQL 18 database on a
- * Testcontainers server, or a PGlite `path` in a temporary directory — and a way to look at the database from outside
- * the process.
+ * Databases for the process's tests. The process opens its database itself, from the `core` entry's `database`
+ * setting, so each test gets a setting (the parts of a PostgreSQL 18 database on a Testcontainers server, or a PGlite
+ * `path` in a temporary directory) and a way to look at the database from outside the process. [CF-4, Q102]
  */
 
 /** One empty database, by its `database` setting. */
 export interface ProcessDatabase {
-  /** The `database` setting's parts (CF-4, owner decision Q167 A). */
+  /** The `database` setting's parts. [CF-4, Q167 A] */
   readonly setting: DatabaseParts;
   /**
    * Runs one statement outside the process and returns its rows: on PostgreSQL through a plain driver connection, at
@@ -27,7 +26,7 @@ export interface ProcessDatabase {
   /** PostgreSQL only: the plain driver connection. */
   readonly admin?: Sql;
   /**
-   * PostgreSQL only (task 5.4's retries): terminates the backend holding the process's writer lock — its writer session
+   * PostgreSQL only, for the retry tests: terminates the backend holding the process's writer lock — its writer session
    * — with `pg_terminate_backend`, and waits until PostgreSQL no longer lists it; resolves with its pid.
    */
   terminateWriter?(): Promise<number>;
@@ -133,9 +132,9 @@ export async function cursorIn(db: ProcessDatabase): Promise<number | null> {
 }
 
 /**
- * Whether `line` is one of the lines a process logs as it opens its database (CF-4, owner decisions Q165 B, Q167 A; task
- * 4.5): the PGlite directory it created — a new PGlite database of these tests is a directory the process creates — and
- * `database: <the database's parts>`. Tests that count the other lines it logs leave these out.
+ * Whether `line` is one of the lines a process logs as it opens its database: the PGlite directory it created (a new
+ * PGlite database of these tests is a directory the process creates) and `database: <the database's parts>`. Tests
+ * that count the other lines it logs leave these out. [CF-4, Q165 B, Q167 A]
  */
 export const createdDirectory = (line: string): boolean =>
   line.startsWith("created a new PGlite data directory ") || line.startsWith("database: ");

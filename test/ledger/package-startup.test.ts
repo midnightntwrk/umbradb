@@ -20,13 +20,14 @@ import {
 import { copyVendoredLedger } from "./version-checks.js";
 
 /**
- * A173 (`openspec/changes/core-arch/acceptance.md` §12; LG-5, `design.md` §5.2; task 12.2b, the threat model draft's
- * gap 3): the vendored ledger packages are checked against their recorded SHA-256 before any of them is imported. The
- * process checks every version the build carries at startup, before it starts its ledger worker and before block S
- * (`src/runner/process.ts`, `checkLedgerPackages`), and refuses `ledgerSources: released`; the ledger worker checks a
- * version's package before it imports it (`src/ledger/load.ts`, `checkLedgerPackage`). Each thread hashes a version's
- * files once. On PGlite: the criterion is about startup, not stored data. The checks are `./package-startup-checks.ts`;
- * the negative control, a startup that never calls the check, is `package-startup.negative-control.test.ts`.
+ * The vendored ledger packages are checked against their recorded SHA-256 before any of them is imported:
+ * - The process checks every version the build carries at startup, before it starts its ledger worker and before
+ *   block S (`src/runner/process.ts`, `checkLedgerPackages`), and refuses `ledgerSources: released`.
+ * - The ledger worker checks a version's package before it imports it (`src/ledger/load.ts`, `checkLedgerPackage`).
+ *
+ * Each thread hashes a version's files once. Runs on PGlite only, since this is about startup, not stored data. The
+ * checks are `./package-startup-checks.ts`; the negative control, a startup that never calls the check, is
+ * `package-startup.negative-control.test.ts`. [A173, LG-5; acceptance §12; design §5.2]
  */
 
 const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;

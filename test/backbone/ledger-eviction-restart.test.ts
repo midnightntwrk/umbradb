@@ -7,13 +7,15 @@ import { heldNodeProblems } from "./ledger-storage-checks.js";
 import { modelOfFixture, modelProblems } from "./sweep-tapes.js";
 
 /**
- * A160 `[FAULT]` (task 12.5a; `openspec/changes/core-arch/acceptance.md` A160, LG-14, owner decision Q144 B): a test
- * package that refuses one eviction at block h — every try, so after the worker freed what it can — makes the worker
- * thread end and a new one start, which loads the state at h − 1 from the database and applies h again: the process
- * does not halt, and its stored rows and state roots equal an uninterrupted run's; a package that refuses again on that
- * retry fails the block with `callback-error`; on PostgreSQL 18 and PGlite 0.5.10. Over task 12.5's DAG fixture through
- * the real process (`./eviction-restart.ts`), h its first block whose sweep step deletes nodes. The committed negative
- * controls (task 12.5's halt; a retry without the state at h − 1) are `ledger-eviction-restart.negative-control.test.ts`.
+ * `[FAULT]` A refused eviction restarts the ledger worker, on PostgreSQL 18 and PGlite 0.5.10. [A160 FAULT, LG-14, Q144 B]
+ * - A test package refuses one eviction at block h, on every try, so also after the worker freed what it can. The
+ *   worker thread ends and a new one starts, which loads the state at h − 1 from the database and applies h again.
+ *   The process does not halt, and its stored rows and state roots equal an uninterrupted run's.
+ * - A package that refuses again on that retry fails the block with `callback-error`.
+ *
+ * The runs use the sweep's DAG fixture through the real process (`./eviction-restart.ts`); h is its first block whose
+ * sweep step deletes nodes. The committed negative controls (a halt without a restart; a retry without the state at
+ * h − 1) are in `ledger-eviction-restart.negative-control.test.ts`. [A160 FAULT]
  */
 
 describe.each(PROCESS_BACKENDS)("A160 (LG-14, Q144 B): a refused eviction restarts the ledger worker, on $name", (backend) => {
@@ -26,7 +28,7 @@ describe.each(PROCESS_BACKENDS)("A160 (LG-14, Q144 B): a refused eviction restar
     expect(uninterrupted.status).toMatchObject({ cursor: BigInt(LAST), reason: null });
     expect(uninterrupted.counters).toMatchObject({ threads: 1, refusals: 0, storeLoads: 0 });
     expect(uninterrupted.restarts).toBe(0);
-    // The uninterrupted run is A105's: its tables after every block the reference model's.
+    // The uninterrupted run matches the sweep's reference model: its tables after every block are the model's. [A105]
     expect(modelProblems(uninterrupted.tables, modelOfFixture())).toEqual([]);
 
     const db = await backend.database();

@@ -1,32 +1,35 @@
 /**
- * The backbone part `core-block-commit` (`openspec/changes/core-arch/specs/chain-data/spec.md` CD-3,
- * `specs/ingest/spec.md` IN-4, `specs/runner/spec.md` RN-6, RN-14; `design.md` §3, §10; CORE-ARCH §4.5, §4.11; decision
- * record Q74): the blocks table, `core_block_commit.blocks`, one row per committed block, written by the part's
- * `on-db-write` first among the parts that write in every block (RN-3), inside the block's one transaction (RN-6). The
- * table's last row is the cursor (the blocks table's, not the cursor-table helper of SH-1, `src/helpers/`): the block
- * sources read it through the read they are given ({@link readCursor}), and so does the database API's committed
- * height ({@link cursorHeight}, DB-2), so a read's height and its snapshot are one.
+ * The backbone part `core-block-commit`. It owns the blocks table, `core_block_commit.blocks`, with one row per
+ * committed block. The part's `on-db-write` writes it first among the parts that write in every block, inside the block's one
+ * transaction. [CD-3, IN-4, RN-3, RN-6, RN-14; CORE-ARCH §4.5, §4.11; design §3]
  *
- * **The tables** (`design.md` §10), created by its migration `001` under the part's role:
- * - `core_block_commit.blocks (height) → hash, parent_hash, spec_version, ledger_version, block_time`, range-partitioned
- *   by height as 0.9.5's `chain_archive` store was (`../height-partitions.ts`); hashes are 32 bytes (`CHECK`s).
- *   `block_time` is the block's own time, a `timestamptz` converted exactly from the node's milliseconds (Q74): by
- *   PostgreSQL's integer interval input (`'<ms> milliseconds'`), never through a floating-point value — `to_timestamp`,
- *   and `bigint * interval`, which multiplies by a `double precision`, both round far from 1970 (checked on PostgreSQL
- *   18.6 and PGlite 0.5.10: 253402300799999 ms becomes `…59.999008Z`) —, read back as RFC 3339 text (DB-2).
- * - `core_block_commit.hashes (hash) → height`, not partitioned: PostgreSQL cannot enforce a unique hash on the
- *   height-partitioned `blocks` (a unique index there must hold the partition key), so this table's primary key does,
- *   across every partition (CD-3).
+ * The table's last row is the cursor. (This is the blocks table, not the cursor-table helper in `src/helpers/`.) The
+ * block sources read it through the read they are given ({@link readCursor}), and so does the database API's committed
+ * height ({@link cursorHeight}), so a read's height and its snapshot always agree. [DB-2, SH-1]
  *
- * **Per block** ({@link commitBlock}), in this order: the block's row ({@link writeBlockRow}, the cursor first, CD-3),
- * from the block context and the `block` items `block-header` (its spec version and time) and `ledger-version`, which
- * `core-block-fetch` puts at `on-fetch` (CD-2; task 10.3) — refused before anything is sent when the items are missing
- * or unreadable; then its hash's row ({@link writeHashRow}), whose primary-key violation fails the block with
- * `duplicate-block-hash`; then the parent check ({@link checkParent}, IN-4): a block whose parent hash is not the hash of
- * the block stored at h − 1 fails with `parent-mismatch` — the anchor, block S, has no stored parent and is not checked.
- * The duplicate comes first, so an earlier block delivered again — its hash repeated, its parent not the cursor — is
- * named for what it is. Both are halts (`design.md` §11): the part's `on-db-write` rejects with the `UmbraError`, the
- * block rolls back and the loop stops at h.
+ * **The tables**, created by its migration `001` under the part's role: [design §10]
+ * - `core_block_commit.blocks (height) → hash, parent_hash, spec_version, ledger_version, block_time`,
+ *   range-partitioned by height as 0.9.5's `chain_archive` store was (`../height-partitions.ts`); hashes are 32 bytes
+ *   (`CHECK`s). `block_time` is the block's own time, a `timestamptz` converted exactly from the node's milliseconds
+ *   and read back as RFC 3339 text. The conversion uses PostgreSQL's integer interval input (`'<ms> milliseconds'`),
+ *   never a floating-point value: `to_timestamp`, and `bigint * interval` (which multiplies by a `double precision`),
+ *   both round far from 1970. On PostgreSQL 18.6 and PGlite 0.5.10, 253402300799999 ms becomes `…59.999008Z` that way.
+ *   [Q74, DB-2]
+ * - `core_block_commit.hashes (hash) → height`, not partitioned. PostgreSQL cannot enforce a unique hash on the
+ *   height-partitioned `blocks` table (a unique index there must include the partition key), so this table's primary
+ *   key enforces it across every partition. [CD-3]
+ *
+ * **Per block** ({@link commitBlock}), in this order:
+ * 1. the block's row ({@link writeBlockRow}, so the cursor comes first), from the block context and the `block` items
+ *    `block-header` (its spec version and time) and `ledger-version`, which `core-block-fetch` puts at `on-fetch`. It
+ *    is refused before anything is sent when the items are missing or unreadable. [CD-2, CD-3]
+ * 2. its hash's row ({@link writeHashRow}); a primary-key violation fails the block with `duplicate-block-hash`.
+ * 3. the parent check ({@link checkParent}): a block whose parent hash is not the hash of the block stored at h − 1
+ *    fails with `parent-mismatch`. The anchor, block S, has no stored parent and is not checked. [IN-4]
+ *
+ * The duplicate check comes first, so an earlier block delivered again (its hash repeated, its parent not the cursor)
+ * is named for what it is. Both failures are halts: the part's `on-db-write` rejects with the `UmbraError`, the block
+ * rolls back and the loop stops at h. [design §11]
  */
 
 import { z } from "zod";
@@ -40,12 +43,12 @@ import { heightPartitionsSql } from "../height-partitions.js";
 /** The blocks table, whose last row is the cursor. */
 export const BLOCKS_TABLE = "core_block_commit.blocks";
 
-/** The hashes table: one row per block hash, its primary key the hash (CD-3). */
+/** The hashes table: one row per block hash, with the hash as its primary key. [CD-3] */
 export const HASHES_TABLE = "core_block_commit.hashes";
 
 /**
- * The blocks table's former name, which task 6.1's note retires (the cursor-table helper, `cursorTable`, is another
- * thing): `src/runner/loop.ts` still imports it.
+ * The blocks table's former name, being retired (the cursor-table helper, `cursorTable`, is a different thing).
+ * `src/runner/loop.ts` still imports it.
  * @deprecated Use {@link BLOCKS_TABLE}.
  */
 export const CURSOR_TABLE = BLOCKS_TABLE;
@@ -54,8 +57,8 @@ export const CURSOR_TABLE = BLOCKS_TABLE;
 const HASHES_PRIMARY_KEY = "hashes_pkey";
 
 /**
- * The latest block time stored, in milliseconds since 1970: 9999-12-31T23:59:59.999Z — the database API reads a
- * `timestamptz` in years 0001 to 9999 only (DB-2, decision record Q81), so a later one could not be read back.
+ * The latest block time stored, in milliseconds since 1970: 9999-12-31T23:59:59.999Z. The database API reads a
+ * `timestamptz` in years 0001 to 9999 only, so a later one could not be read back. [DB-2, Q81]
  */
 export const MAX_BLOCK_TIME_MS = 253_402_300_799_999n;
 
@@ -63,16 +66,17 @@ export const MAX_BLOCK_TIME_MS = 253_402_300_799_999n;
 const MAX_SPEC_VERSION = 2_147_483_647;
 
 /**
- * What `core-block-commit` reads of the `block` item `block-header` (CD-2; `core-block-fetch` puts it at `on-fetch`,
- * task 10.3, and may give it more fields): the spec version of the runtime that built the block (its `MNSV` digest,
- * CORE-ARCH §4.8), and the block's own time in milliseconds since 1970 (the node's `Timestamp::set`, a `u64`).
+ * What `core-block-commit` reads of the `block` item `block-header`, which `core-block-fetch` puts at `on-fetch`
+ * and may give more fields: [CD-2]
+ * - the spec version of the runtime that built the block (its `MNSV` digest) [CORE-ARCH §4.8];
+ * - the block's own time in milliseconds since 1970 (the node's `Timestamp::set`, a `u64`).
  */
 export interface BlockHeaderItem {
   readonly specVersion: number;
   readonly timestampMs: bigint;
 }
 
-/** `core-block-commit`'s migrations (DB-9): applied once, recorded under `core-block-commit`; never changed. */
+/** `core-block-commit`'s migrations: applied once and recorded under `core-block-commit`; they never change. [DB-9] */
 export const CORE_BLOCK_COMMIT_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",
@@ -120,7 +124,7 @@ export function blockHeaderOf(b: BlockContext): BlockHeaderItem {
   if (typeof header !== "object" || header === null) {
     throw new TypeError(
       `the block at height ${b.height} has no block-header item core-block-commit can read: core-block-fetch puts one ` +
-        "at on-fetch, with the block's specVersion and timestampMs (CD-2, CD-3)",
+        "at on-fetch, with the block's specVersion and timestampMs",
     );
   }
   const { specVersion, timestampMs } = header as Partial<Record<keyof BlockHeaderItem, unknown>>;
@@ -134,7 +138,7 @@ export function blockHeaderOf(b: BlockContext): BlockHeaderItem {
     throw new TypeError(
       `the block-header item of the block at height ${b.height} has the time ${String(timestampMs)}: a block's own ` +
         `time is a bigint of milliseconds since 1970-01-01T00:00:00Z, from 0 to ${MAX_BLOCK_TIME_MS} ` +
-        "(9999-12-31T23:59:59.999Z, the latest time the database API reads back, Q81)",
+        "(9999-12-31T23:59:59.999Z, the latest time the database API reads back)",
     );
   }
   return { specVersion, timestampMs };
@@ -146,16 +150,16 @@ export function ledgerVersionOf(b: BlockContext): string {
   if (typeof ledger !== "string" || ledger === "") {
     throw new TypeError(
       `the block at height ${b.height} has no ledger-version item core-block-commit can read: core-block-fetch puts ` +
-        "the block's ledger version, a non-empty text such as v9, at on-fetch (CD-2, CD-3)",
+        "the block's ledger version, a non-empty text such as v9, at on-fetch",
     );
   }
   return ledger;
 }
 
 /**
- * The block's row of the blocks table (CD-3): its height, hash and parent hash from the block context, its spec version,
- * ledger version and time from the block items (see {@link blockHeaderOf}, {@link ledgerVersionOf}: refused before
- * anything is sent), the time converted exactly (see the module comment).
+ * Writes the block's row of the blocks table. Its height, hash and parent hash come from the block context; its spec
+ * version, ledger version and time come from the block items (see {@link blockHeaderOf} and {@link ledgerVersionOf},
+ * which refuse before anything is sent). The time is converted exactly (see the module comment). [CD-3]
  */
 export async function writeBlockRow(w: Pick<BlockWriteHandle, "execute">, b: BlockContext): Promise<void> {
   const { specVersion, timestampMs } = blockHeaderOf(b);
@@ -164,8 +168,9 @@ export async function writeBlockRow(w: Pick<BlockWriteHandle, "execute">, b: Blo
 }
 
 /**
- * The block's row of the hashes table (CD-3): a hash another block has already fails the block with
- * `duplicate-block-hash` (the height, the hash), raised from the table's primary-key violation, its cause.
+ * Writes the block's row of the hashes table. A hash another block already has fails the block with
+ * `duplicate-block-hash` (with the height and the hash), raised from the table's primary-key violation as its cause.
+ * [CD-3]
  */
 export async function writeHashRow(w: Pick<BlockWriteHandle, "execute">, b: BlockContext): Promise<void> {
   try {
@@ -177,7 +182,7 @@ export async function writeHashRow(w: Pick<BlockWriteHandle, "execute">, b: Bloc
       "duplicate-block-hash",
       `the block at height ${b.height} has the hash ${hex(b.hash)}, which an earlier block already has: a chain never ` +
         `repeats a block's hash, so the block source gave a wrong block, and ${HASHES_TABLE}'s primary key refused it ` +
-        `(CD-3); processing halts at ${b.height}`,
+        `; processing halts at ${b.height}`,
       { height: b.height, hash: hex(b.hash) },
       { cause: error },
     );
@@ -185,9 +190,10 @@ export async function writeHashRow(w: Pick<BlockWriteHandle, "execute">, b: Bloc
 }
 
 /**
- * IN-4's parent check: the block's parent hash must be the hash of the block stored at h − 1 — the cursor, for the block
- * the loop processes — or the block fails with `parent-mismatch` (the height, both hashes). With no block stored at
- * h − 1 there is nothing to compare: the anchor, block S, whose parent the database never holds.
+ * The parent check. The block's parent hash must be the hash of the block stored at h − 1 (the cursor, for the block
+ * the loop processes), or the block fails with `parent-mismatch` (with the height and both hashes). With no block
+ * stored at h − 1 there is nothing to compare: that is the anchor, block S, whose parent the database never holds.
+ * [IN-4]
  */
 export async function checkParent(w: Pick<BlockWriteHandle, "query">, b: BlockContext): Promise<void> {
   const [parent] = await w.query(PARENT_SQL, [b.height - 1n]);
@@ -197,7 +203,7 @@ export async function checkParent(w: Pick<BlockWriteHandle, "query">, b: BlockCo
   throw new UmbraError(
     "parent-mismatch",
     `the block at height ${b.height} names the parent ${hex(b.parentHash)}, but the block at height ${b.height - 1n} ` +
-      `is ${hex(stored)}: the block does not extend the database's chain (IN-4); processing halts at ${b.height}`,
+      `is ${hex(stored)}: the block does not extend the database's chain; processing halts at ${b.height}`,
     { height: b.height, parentHash: hex(b.parentHash), stored: hex(stored) },
   );
 }
@@ -210,9 +216,9 @@ export async function commitBlock(w: Pick<BlockWriteHandle, "query" | "execute">
 }
 
 /**
- * `core-block-commit` (see the module comment): a backbone part — it runs with the core, from S, a mid-chain start
- * whenever S is above 0 (Q96) — that requires the `block` items `block-header` and `ledger-version` (`core-block-fetch`'s)
- * and provides the `table` item `blocks`, its two tables, in its own schema.
+ * `core-block-commit` (see the module comment). It is a backbone part: it runs with the core from S, which is a
+ * mid-chain start whenever S is above 0. It requires the `block` items `block-header` and `ledger-version` (from
+ * `core-block-fetch`) and provides the `table` item `blocks`: its two tables, in its own schema. [Q96]
  */
 export const CORE_BLOCK_COMMIT = defineModule({
   id: "core-block-commit",
@@ -252,5 +258,5 @@ export async function readCursor(read: Pick<ReadHandle, "query">): Promise<Block
   });
 }
 
-/** The database API's committed height (DB-2): the cursor's height, read through the read's own handle. */
+/** The database API's committed height: the cursor's height, read through the read's own handle. [DB-2] */
 export const cursorHeight: CommittedHeight = async (read) => (await readCursor(read))?.height ?? null;

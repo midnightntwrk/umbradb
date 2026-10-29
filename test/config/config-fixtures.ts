@@ -4,10 +4,13 @@ import { z } from "zod";
 import { defineModule } from "../../src/modules/declaration.js";
 
 /**
- * Modules and settings for the tests of `src/config/` (task 4.1; CF-1, CF-2): two user modules declared as a module
- * package declares them — with `defineModule` on a literal, so that each `entry` builder is typed by its own settings
- * schema — and a `core` entry's settings every check accepts. The configuration files the tests write import this file
- * by its absolute path, as an operator's file imports a module package.
+ * Modules and settings for the tests of `src/config/`:
+ * - two user modules, declared the way a module package declares them: with `defineModule` on a literal, so each
+ *   `entry` builder is typed by its own settings schema;
+ * - a `core` entry's settings that every check accepts.
+ *
+ * The configuration files the tests write import this file by its absolute path, as an operator's file imports a
+ * module package. [CF-1, CF-2]
  */
 
 /** The repository's root directory. */

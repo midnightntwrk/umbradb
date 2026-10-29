@@ -26,31 +26,30 @@ import { committed, FENCE, fenceAt, halted, ingest, PATIENCE_MS, slow, until } f
 import { a79Tape, upgradeTape } from "./ingest-tapes.js";
 
 /**
- * Ingest through the real process and the node source (task 10.3; `openspec/changes/core-arch/acceptance.md` A79, A80,
- * A81, A83, A89; IN-4 to IN-8, CD-2), on PostgreSQL 18 and PGlite 0.5.10, against a tape node serving synthetic tapes in
- * the node's own answer shapes (`./fetch-fixtures.ts`; task 0.3's real tapes replace them, 18.2). Each process is
- * `startProcess` with UmbraDB's backbone and the real `core-block-fetch` over `nodeSourceOf` — what `umbradb run`
- * passes — and the watching module of `./ingest-harness.ts`.
+ * Ingest through the real process and the node source, on PostgreSQL 18 and PGlite 0.5.10. A tape node serves synthetic
+ * tapes in the node's own answer shapes (`./fetch-fixtures.ts`); the recorded real tapes replace them. Each process is
+ * `startProcess` with UmbraDB's backbone, the real `core-block-fetch` over `nodeSourceOf` (what `umbradb run` passes)
+ * and the watching module of `./ingest-harness.ts`. [IN-4, IN-5, IN-6, IN-7, IN-8, CD-2]
  *
- * - A79 (IN-4): finalized notifications 10, 13, 13, 12, a disconnect, then 20 — heights 11–20 commit once each in order;
- *   a block whose parent differs from the cursor halts with `parent-mismatch`; a notification at or below the cursor with
- *   another hash halts with `finality-conflict`.
- * - A80 (IN-5) and A83 (IN-8): a catch-up of 1,000 heights (on PGlite; 200 on PostgreSQL) with `prefetchWindow` 64
- *   never fetches a height more than 64 above the cursor and commits one per height in order; the tape node received
- *   only IN-8's methods.
- * - A81 (IN-6): 101–103 queued, then 101′–104′: `on-rollback` once naming 101–103, 101′ used at finality without being
- *   fetched again; with `tipCap` 5 and finality stalled, the sixth best block is not queued and `finality-stall` shows in
- *   `status()` (what `/status` serves, tasks 8.1–8.3).
- * - A89 (CD-2, LG-4): at an upgrade, a module requiring `block-body` reads at U the extrinsics decoded with the metadata of
- *   U's parent's state — the old runtime's —, at F the new one's.
- * - IN-7's fetch path: block 0's runtime and metadata at its own state, its time 0 without `Timestamp::set`.
+ * - Finalized notifications 10, 13, 13, 12, a disconnect, then 20: heights 11–20 commit once each in order. A block
+ *   whose parent differs from the cursor halts with `parent-mismatch`. A notification at or below the cursor with
+ *   another hash halts with `finality-conflict`. [A79, IN-4]
+ * - A catch-up of 1,000 heights (on PGlite; 200 on PostgreSQL) with `prefetchWindow` 64 never fetches a height more
+ *   than 64 above the cursor, and commits one per height in order. The tape node received only the allowed node
+ *   methods. [A80, IN-5, A83, IN-8]
+ * - 101–103 queued, then 101′–104′: `on-rollback` fires once naming 101–103, and 101′ is used at finality without being
+ *   fetched again. With `tipCap` 5 and finality stalled, the sixth best block is not queued and `finality-stall` shows
+ *   in `status()` (what `/status` serves). [A81, IN-6]
+ * - At an upgrade, a module requiring `block-body` reads at U the extrinsics decoded with the metadata of U's parent's
+ *   state (the old runtime's), and at F with the new one's. [A89, CD-2, LG-4]
+ * - Block 0's fetch path: its runtime and metadata at its own state, and its time 0 without `Timestamp::set`. [IN-7]
  */
 
 describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend: ProcessBackend) => {
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  // ── A79 ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // ── Finalized notifications [A79] ──────────────────────────────────────────────────────────────────────────────
 
   const chain = chainOf(20n);
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
@@ -125,11 +124,11 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     }
   }, PATIENCE_MS * 2);
 
-  // ── A80, A83 ───────────────────────────────────────────────────────────────────────────────────────────────────
+  // ── The prefetch window and the node methods [A80, A83] ────────────────────────────────────────────────────────
 
-  // A80's catch-up of 1,000 heights runs on PGlite; on PostgreSQL one of 200 (three windows and more): the window is the
-  // node source's alone, the same over either backend, and 1,000 one-transaction heights on PostgreSQL in Docker did not
-  // commit within 960 s under the conformance gate's load (777 had, 2026-10-26).
+  // The catch-up of 1,000 heights runs on PGlite; on PostgreSQL it is 200 heights (more than three windows). The window
+  // is the node source's alone, the same over either backend. 1,000 one-transaction heights on PostgreSQL in Docker did
+  // not commit within 960 s under the conformance gate's load (777 had, 2026-10-26). [A80]
   const catchUp = backend.kind === "pglite" ? 1_000 : 200;
   it(`A80, A83: a catch-up of ${catchUp.toLocaleString("en-US")} heights with prefetchWindow 64 fetches nothing more than 64 above the cursor, commits one per height in order, and asks the node only IN-8's methods`, async () => {
     const db = await backend.database();
@@ -140,7 +139,8 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     ];
     const fetches: FetchSeen[] = [];
     let status: (() => bigint | null) | undefined;
-    // The process's own node client, its block-hash calls watched: each a height's fetch beginning (IN-4, IN-5).
+    // The process's own node client, its block-hash calls watched: each marks the start of a height's fetch.
+    // [IN-4, IN-5]
     const watch = (client: NodeClient): NodeClient =>
       new Proxy(client, {
         get(target, property) {
@@ -163,7 +163,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     } finally {
       await run.close();
     }
-    // Height 0 is startup's genesis read (IN-2), not the prefetch's.
+    // Height 0 is startup's genesis read, not the prefetch's. [IN-2]
     const prefetched = fetches.filter((fetch) => fetch.height > 0n);
     expect(prefetched).toHaveLength(catchUp);
     // Fetched ahead of the cursor up to the window, never beyond it.
@@ -184,7 +184,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     );
   }, PATIENCE_MS * 5);
 
-  // ── A81 ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // ── Best blocks [A81] ──────────────────────────────────────────────────────────────────────────────────────────
 
   const head = chainOf(100n);
   const b100 = head[100] as ChainBlock;
@@ -237,7 +237,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
         cursor: 100n,
         conditions: [{ code: "finality-stall", tipCap: 5, height: 106n }],
       });
-      // As the admin endpoints publish it (task 8.1's snapshot): the height as decimal text.
+      // As the admin endpoints publish it in their snapshot: the height as decimal text.
       const published = snapshotOf(run.handle.status(), {
         livenessTimeoutMs: 1,
         readinessLag: null,
@@ -259,7 +259,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     }
   }, PATIENCE_MS * 2);
 
-  // ── A89 ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  // ── A runtime upgrade [A89] ────────────────────────────────────────────────────────────────────────────────────
 
   it("A89: a module requiring block-body reads at U the extrinsics decoded with the metadata of U's parent's state", async () => {
     const db = await backend.database();
@@ -285,7 +285,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
     );
   }, PATIENCE_MS * 2);
 
-  // ── IN-7: block 0's fetch path ─────────────────────────────────────────────────────────────────────────────────
+  // ── Block 0's fetch path [IN-7] ────────────────────────────────────────────────────────────────────────────────
 
   it.each([
     ["without Timestamp::set, at the time 0", null, "1970-01-01T00:00:00.000"],
@@ -315,7 +315,7 @@ describe.each(PROCESS_BACKENDS)("ingest over the node source on $name", (backend
       "SELECT encode(genesis_hash, 'hex') AS g, start_height::int AS s, encode(anchor_hash, 'hex') AS a FROM core_chain.identity",
     );
     expect(identity).toEqual({ g: g.hex.slice(2), s: 0, a: g.hex.slice(2) });
-    // Block 0's runtime and metadata at block 0 itself (LG-4's contentStateOf); block 1's runtime there too.
+    // Block 0's runtime and metadata at block 0 itself (`contentStateOf`); block 1's runtime there too. [LG-4]
     expect(run.node.calls.filter((c) => c.method === "state_getMetadata").map((c) => c.params)).toEqual([[g.hex]]);
     const runtimes = run.node.calls.filter((c) => c.method === "state_getRuntimeVersion").map((c) => JSON.stringify(c.params));
     expect(runtimes.sort()).toEqual([[g.hex], [g.hex], [hex((genesis[1] as ChainBlock).hash)]].map((p) => JSON.stringify(p)).sort());

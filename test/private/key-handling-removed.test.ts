@@ -3,10 +3,10 @@ import { describe, expect, it } from "vitest";
 import { described, keyLeftovers, scannedFiles } from "./key-handling-checks.js";
 
 /**
- * Task 14.4a `[STATIC]` (owner decision Q154 A2; `openspec/changes/core-arch/tasks.md` 14.4a): key handling has left
- * the core — no file of the removed parts exists, and no name of them is left in the code, the tests, the module guide
- * or the change's design (`./key-handling-checks.ts` says what is read and looked for). The committed negative control,
- * a key part left in place, is `./key-handling-removed.negative-control.test.ts`'s.
+ * `[STATIC]` Key handling has left the core: no file of the removed parts exists, and no name of them is left in the
+ * code, the tests, the module guide or the change's design (`./key-handling-checks.ts` says what is read and looked
+ * for). The committed negative control, a key part left in place, is
+ * `./key-handling-removed.negative-control.test.ts`'s. [Q154 A2]
  */
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));

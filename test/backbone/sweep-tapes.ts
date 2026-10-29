@@ -13,11 +13,15 @@ import { type ChainBlock, chainOf, opening } from "./fetch-fixtures.js";
 import { type ModelSnapshot, SweepModel } from "./sweep-model.js";
 
 /**
- * Task 12.5's process fixture (A105, LG-14): a tape whose ledger is the test package of
- * `test/ledger/fixtures/sweep-test-loader.ts` — the DAG of `sweep-fixture.ts` at each height, its roots on the tape as
- * the node's —, the ledger's core modules with `core-ledger-state`'s budget K = 50, a module recording the sweep's
- * tables at every cursor, and the reference model's account of the same blocks (`./sweep-model.ts`), the batches being
- * what a package storing exactly the model's nodes flushes, `retainStates` 0. Imports nothing of Vitest.
+ * The sweep's process fixture, with `retainStates` 0:
+ * - a tape whose ledger is the test package of `test/ledger/fixtures/sweep-test-loader.ts`: the DAG of
+ *   `sweep-fixture.ts` at each height, with its roots on the tape as the node's;
+ * - the ledger's core modules, with `core-ledger-state`'s budget K = 50;
+ * - a module recording the sweep's tables at every cursor;
+ * - the reference model's account of the same blocks (`./sweep-model.ts`), each batch being what a package storing
+ *   exactly the model's nodes flushes.
+ *
+ * Imports nothing of Vitest. [A105, LG-14]
  */
 
 /** The test package's loader, which the ledger worker imports. */

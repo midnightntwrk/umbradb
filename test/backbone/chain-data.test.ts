@@ -25,31 +25,32 @@ import { type ChainBlock, chainOf, content, finalizedHead, hex, ledgerTransactio
 import { committed, ingest, PATIENCE_MS } from "./ingest-harness.js";
 
 /**
- * Chain data through the real process (task 11.1; `openspec/changes/core-arch/acceptance.md` A91, A92, A93; CD-4 to
- * CD-6), on PostgreSQL 18 and PGlite 0.5.10: `startProcess` with UmbraDB's backbone over the node source — what
- * `umbradb run` passes — and the core modules `core-chain-events`, `core-block-parsed` and `core-tx-results` enabled from
- * S, against a tape node serving synthetic tapes in the node's answer shapes (`./chain-data-tapes.ts`; task 0.3's real
- * tapes replace them).
+ * Chain data through the real process, on PostgreSQL 18 and PGlite 0.5.10. The test runs `startProcess` with UmbraDB's
+ * backbone over the node source (what `umbradb run` passes) and the core modules `core-chain-events`,
+ * `core-block-parsed` and `core-tx-results` enabled from S. A tape node serves synthetic tapes in the node's answer
+ * shapes (`./chain-data-tapes.ts`); the real recorded tapes (`test/tape/real/`) replace them. [CD-4, CD-5, CD-6]
  *
- * - A91 (CD-4): every event of blocks 1–6 stored, byte for byte, with its phase, extrinsic index, pallet, name and
- *   fields; at a synthetic upgrade, U's events — the old runtime's, whose `CodeUpdated` the new runtime's metadata
- *   reads otherwise — decoded with the metadata of U's parent's state, F's with the new.
- * - A92 (CD-5): a system transaction between two regular ones stored 0, 1, 2 in that order; block 0's transactions in
- *   body order; each parsed once, in the ledger worker (task 12.3) — the vendored v9 package's `Transaction.deserialize`
- *   and `SystemTransaction.deserialize` counted there while the process runs, by the test packages' loader
- *   (`test/ledger/fixtures/ledger-test-loader.ts`), which the worker imports.
- * - A93 (CD-6): `TxApplied`, `TxPartialSuccess` and `ExtrinsicFailed` (and `SystemTransactionApplied`) give
- *   `success`, `partial`, `failure` (and `success`), matched to their extrinsics by phase; the `tx-results` item is the
- *   form `ApplyInput.outcomes` takes (task 12.3).
- * Every call the tape node received is one of IN-8's (A83's check).
+ * - Every event of blocks 1–6 is stored, byte for byte, with its phase, extrinsic index, pallet, name and fields. At a
+ *   synthetic upgrade, U's events are decoded with the metadata of U's parent's state, and F's with the new runtime's.
+ *   U's events are the old runtime's, whose `CodeUpdated` the new runtime's metadata would read differently.
+ *   [CD-4, A91]
+ * - A system transaction between two regular ones is stored as 0, 1, 2, in that order; block 0's transactions are in
+ *   body order. Each is parsed once, in the ledger worker. The test packages' loader
+ *   (`test/ledger/fixtures/ledger-test-loader.ts`), which the worker imports, counts the vendored v9 package's
+ *   `Transaction.deserialize` and `SystemTransaction.deserialize` there while the process runs. [CD-5, A92]
+ * - `TxApplied`, `TxPartialSuccess` and `ExtrinsicFailed` (and `SystemTransactionApplied`) give `success`, `partial`,
+ *   `failure` (and `success`), matched to their extrinsics by phase. The `tx-results` item has the form
+ *   `ApplyInput.outcomes` takes. [CD-6, A93]
+ *
+ * Every call the tape node received is one of the allowed node calls. [IN-8, A83]
  */
 
 const CORE = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED, CORE_TX_RESULTS];
 
-/** The test packages' loader, which the ledger worker imports: it counts the package's native parses (task 12.3). */
+/** The test packages' loader, which the ledger worker imports: it counts the package's native parses. */
 const COUNTING = new URL("../ledger/fixtures/ledger-test-loader.ts", import.meta.url);
 
-/** Every call the tape node received is one of IN-8's, and none went unanswered (A83). */
+/** Every call the tape node received is one of the allowed node calls, and none went unanswered. [IN-8, A83] */
 function in8Problems(calls: readonly { readonly method: unknown; readonly outcome?: unknown }[]): string[] {
   const outside = outsideIn8(calls.map((call) => call.method as string));
   const unanswered = calls.filter((call) => call.outcome === "not-on-tape" || call.outcome === "invalid-request");
@@ -60,10 +61,9 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  /** Runs `scenario` to its head with the core modules and the items watcher, and returns what it saw. */
   /**
-   * Runs `scenario` to its head with the core modules and the items watcher, and returns what it saw — with the bytes
-   * of every native parse the ledger package made in the ledger worker, where `core-block-parsed` parses (task 12.3).
+   * Runs `scenario` to its head with the core modules and the items watcher, and returns what it saw. That includes the
+   * bytes of every native parse the ledger package made in the ledger worker, where `core-block-parsed` parses.
    */
   async function run(scenario: Scenario, items: Parameters<typeof itemsWatcher>[1] = ["chain-events", "block-parsed", "tx-results"]) {
     const db = await backend.database();
@@ -194,9 +194,9 @@ describe.each(PROCESS_BACKENDS)("chain data through the process on $name", (back
     const scenario = a93Scenario();
     const { db, seen, deserialized } = await run(scenario);
     expect(await a93Problems(db, scenario)).toEqual([]);
-    // A failed transaction is parsed too (block-parsed lists it; the ledger's apply skips it, task 12.1a).
+    // A failed transaction is parsed too: block-parsed lists it, and the ledger's apply skips it.
     expect(await a92Problems(db, scenario, deserialized)).toEqual([]);
-    // tx-results is ApplyInput.outcomes' form: one ChainOutcome per transaction, in block-parsed's order (task 12.3).
+    // tx-results is ApplyInput.outcomes' form: one ChainOutcome per transaction, in block-parsed's order.
     expect(seen.results.get(1n)).toEqual(["success", "partial", "failure", "success"]);
     expect(Object.isFrozen(seen.results.get(1n))).toBe(true);
     expect(seen.parsed.get(1n)?.transactions.map((t) => t.kind)).toEqual(["regular", "regular", "regular", "system"]);

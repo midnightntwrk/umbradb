@@ -20,12 +20,13 @@ import { validateDeclarations } from "../../src/modules/validation.js";
 import { declaration, userModules } from "./declarations.js";
 
 /**
- * A20 (MD-1; task 3.1): a module is a declaration the host imports, and its callbacks are keyed by point name. A
- * declaration with an unknown point name is a type error, and the same declaration built without types is refused at
- * startup with `unknown-point` — so declaration validation (`src/modules/validation.ts`) refuses what the types forbid,
- * whether the module was written in TypeScript, in JavaScript, or built at run time. "Startup refuses" is the runner's
- * (task 5.x), which validates the declarations it is given before anything else; here the validation is called
- * directly.
+ * A module is a declaration the host imports, and its callbacks are keyed by point name. A declaration with an unknown
+ * point name is a type error, and the same declaration built without types is refused at startup with
+ * `unknown-point`. So declaration validation (`src/modules/validation.ts`) refuses what the types forbid, whether the
+ * module was written in TypeScript, in JavaScript, or built at run time. [A20, MD-1]
+ *
+ * Refusing at startup is the runner's job: it validates the declarations it is given before anything else. Here the
+ * validation is called directly.
  */
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -33,7 +34,7 @@ const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 /** The declaration written in JavaScript, imported by URL so that the compiler gives it no type at all. */
 const UNTYPED = new URL("./fixtures/untyped-module.mjs", import.meta.url).href;
 
-/** The point names of `design.md` §2's table, in its order. */
+/** The point names of the design's table of points, in its order. [design §2] */
 function designPoints(): string[] {
   const design = readFileSync(join(REPOSITORY, "openspec", "changes", "core-arch", "design.md"), "utf8");
   const start = design.indexOf("\n## 2. Points\n");
@@ -57,8 +58,8 @@ function refusal(run: () => unknown): UmbraError {
 }
 
 /**
- * The type-level form of A20's check: true when the declaration type `D` is accepted by the definer `F` (a function
- * whose parameter type may depend on `D`, as `defineModule`'s does).
+ * The type-level form of the unknown-point check: true when the declaration type `D` is accepted by the definer `F` (a
+ * function whose parameter type may depend on `D`, as `defineModule`'s does). [A20]
  */
 type Accepts<F extends (declaration: never) => unknown, D> = [D] extends [Parameters<F>[0]] ? true : false;
 
@@ -106,8 +107,8 @@ describe("A20: the points (MD-1, design.md §2)", () => {
         },
       }),
     );
-    // The read handles RN-4 and design.md §2 give these points (decision record Q100, option A): `on-finalized` at
-    // the cursor, `on-start-height` at h − 1, `on-stop-height` at h.
+    // The read handles these points get: `on-finalized` at the cursor, `on-start-height` at h − 1, `on-stop-height`
+    // at h. [RN-4, Q100 A; design §2]
     type Rest<P extends PointName> = PointCallbacks[P] extends (p: ProcessContext, ...rest: infer R) => Promise<void>
       ? R
       : never;
@@ -123,7 +124,7 @@ describe("A20: an unknown point name is a type error (MD-1)", () => {
     const alone = () =>
       defineModule({
         ...declaration("fetch-stats"),
-        // @ts-expect-error A20: `on-fetched` is not a point (the point is `on-fetch`).
+        // @ts-expect-error `on-fetched` is not a point (the point is `on-fetch`). [A20]
         points: { "on-fetched": async () => {} },
       });
     const beside = () =>
@@ -131,12 +132,12 @@ describe("A20: an unknown point name is a type error (MD-1)", () => {
         ...declaration("fetch-stats"),
         points: {
           "on-fetch": async () => {},
-          // @ts-expect-error A20: `on-fetched` is not a point, even beside one that is.
+          // @ts-expect-error `on-fetched` is not a point, even beside one that is. [A20]
           "on-fetched": async () => {},
         },
       });
     const built = { ...declaration("fetch-stats"), points: { "on-fetch": async () => {}, "on-fetched": async () => {} } };
-    // @ts-expect-error A20: a declaration built first and passed later is checked the same way.
+    // @ts-expect-error a declaration built first and passed later is checked the same way. [A20]
     const later = () => defineModule(built);
     expectTypeOf(alone).toBeFunction();
     expectTypeOf(beside).toBeFunction();
@@ -146,7 +147,7 @@ describe("A20: an unknown point name is a type error (MD-1)", () => {
   it("a ModuleDeclaration written as a literal rejects an unknown point name too", () => {
     const literal = (): ModuleDeclaration => ({
       ...declaration("fetch-stats"),
-      // @ts-expect-error A20: `on-fetched` is not a point.
+      // @ts-expect-error `on-fetched` is not a point. [A20]
       points: { "on-fetched": async () => {} },
     });
     expectTypeOf(literal).toBeFunction();
@@ -177,7 +178,7 @@ describe("A20: the same declaration built without types is refused at startup wi
   it("refuses the declaration the type test rejects, built anyway", () => {
     const built = defineModule({
       ...declaration("fetch-stats"),
-      // @ts-expect-error A20: built without types — the compiler's verdict is ignored here, as JavaScript would.
+      // @ts-expect-error built without types: the compiler's verdict is ignored here, as JavaScript would. [A20]
       points: { "on-fetched": async () => {} },
     });
     const error = refusal(() => validateDeclarations(userModules([built])));
@@ -216,7 +217,7 @@ describe("A20: the same declaration built without types is refused at startup wi
 
 describe("[DOC] the module guide's section on tables declared deterministic: false (MD-1, Q76)", () => {
   const guide = readFileSync(join(REPOSITORY, "docs", "module-guide.md"), "utf8");
-  // A subsection of "Deterministic PostgreSQL" since task 17.3a's rewrite, up to the next heading of either level.
+  // A subsection of "Deterministic PostgreSQL", up to the next heading of either level.
   const heading = "\n### 4.3 Data that is not a function of the chain: `deterministic: false`\n";
   const start = guide.indexOf(heading);
   const end = guide.slice(start + 1).search(/\n##+ /);
@@ -258,7 +259,7 @@ describe("[DOC] the module guide's section on tables declared deterministic: fal
   });
 });
 
-/** Not a test of UmbraDB: the zod behaviour the field-kind rule relies on (task 0.1's probe, design.md §7). */
+/** Not a test of UmbraDB: the zod behaviour the field-kind rule relies on. [design §7] */
 describe("the zod 4 behaviour a settings field's kind is read through", () => {
   it("reads the kind from the field's outermost schema only", () => {
     expect(z.number().default(1).meta({ kind: "data" }).meta()).toEqual({ kind: "data" });

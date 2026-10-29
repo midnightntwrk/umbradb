@@ -5,10 +5,10 @@ import { type Ledger, NETWORK_ID } from "./adapter-fixtures.js";
 import { stateTreesProblems } from "./state-trees-checks.js";
 
 /**
- * The committed negative control of task 12.1b (A158; LG-16; owner decision Q138 A): an export that reads a tree's root
- * from the wrong tree — the DUST commitment tree's root taken from the zswap commitment tree — fails A158's check
- * (`./state-trees-checks.ts`) against the ledger's own values, on every vendored version; the real adapter passes the
- * same check here. (The DUST generation tree's root taken from the DUST commitment tree fails it too.)
+ * The committed negative control of the state-trees check: an export that reads a tree's root from the wrong tree
+ * (the DUST commitment tree's root taken from the zswap commitment tree) fails the check of `./state-trees-checks.ts`
+ * against the ledger's own values, on every vendored version. The real adapter passes the same check here. (The DUST
+ * generation tree's root taken from the DUST commitment tree fails it too.) [A158, LG-16, Q138 A]
  */
 
 const LONG = 240_000;

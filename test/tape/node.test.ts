@@ -25,12 +25,12 @@ import {
 import { BARRIER_METHOD, RawClient } from "./raw-client.js";
 
 /**
- * A69 and A70 `[CI]` (`openspec/changes/core-arch/acceptance.md` §9; TT-1 to TT-3) over a bare WebSocket client, so
- * that the exact frames are checked: the tape node answers calls by occurrence and repeats the last answer, answers an
- * unrecorded call `not-on-tape`, delays a call record's answer by its `delayMs` and no other; delivers notifications in
- * file order once the calls before them are answered; drops the connection at a `disconnect` and serves the next
- * session to the next connection; and times out or fails the next matching call at a `fault`. `node-client.test.ts`
- * runs the same rules through the node client of `src/node/`.
+ * The tape node's rules over a bare WebSocket client, so that the exact frames are checked: the tape node answers calls
+ * by occurrence and repeats the last answer, answers an unrecorded call `not-on-tape`, delays a call record's answer by
+ * its `delayMs` and no other; delivers notifications in file order once the calls before them are answered; drops the
+ * connection at a `disconnect` and serves the next session to the next connection; and times out or fails the next
+ * matching call at a `fault`. `node-client.test.ts` runs the same rules through the node client of `src/node/`.
+ * [A69, A70 CI, TT-1 to TT-3; acceptance §9]
  *
  * No test waits for a length of time to see that something did not happen: a barrier (`raw-client.ts`) or the clock
  * moved by hand (`ManualTimers`, which the tape node takes as its clock) shows it. One test checks the delay on the

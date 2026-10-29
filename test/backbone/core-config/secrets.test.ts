@@ -8,14 +8,18 @@ import { loggingModule } from "../../runner/process-build.js";
 import type { DatabaseParts } from "../../../src/config/database-parts.js";
 
 /**
- * A29 (task 8.4; CF-4, AE-6): with a password in `database`, the password appears in neither `/config`, `/status` nor
- * the captured logs — through the process on PostgreSQL 18, whose `database` parts hold a password (a PGlite setting is
- * a directory and has none): a login role of the test's own whose password is `test/admin/secrets.ts`'s secret, every
- * character URL encodings treat differently. `/config` shows the other parts and the password as `[redacted]` (CF-4,
- * owner decision Q167 A). To give the logs a line that would carry it, a callback at height 2 throws an error holding
- * the `database` parts as JSON (as a careless message may) and the password in each of its six forms;
- * the process halts and logs it through the configuration's redaction. The full bodies of the four endpoints and every
- * captured line are searched for each form.
+ * With a password in `database`, the password appears in neither `/config`, `/status` nor the captured logs.
+ * [A29, CF-4, AE-6]
+ *
+ * The test runs the process on PostgreSQL 18, whose `database` parts hold a password (a PGlite setting is a directory
+ * and has none). It uses a login role of its own whose password is `test/admin/secrets.ts`'s secret, made of every
+ * character that URL encodings treat differently. `/config` shows the other parts and the password as `[redacted]`.
+ * [CF-4, Q167 A]
+ *
+ * To give the logs a line that would carry the password, a callback at height 2 throws an error holding the `database`
+ * parts as JSON (as a careless message may) and the password in each of its six forms. The process halts and logs it
+ * through the configuration's redaction. The full bodies of the four endpoints and every captured line are searched
+ * for each form.
  *
  * Committed negative control: a `/config` that shows the process revision's settings without the redaction shows the
  * password, and the same search finds it.

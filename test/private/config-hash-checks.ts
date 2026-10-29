@@ -7,9 +7,9 @@ import { RetargetProxy } from "./relays.js";
 import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
 
 /**
- * A162 (task 14.1b; PP-14, RN-16, PP-4, owner decision Q147): a private process halts when the public core restarts
- * with a data field of its configuration changed, and only then; the configuration hash is on every module API answer
- * and holds no secret. Shared by `config-hash.test.ts` and its negative controls' file; imports nothing of Vitest.
+ * A private process halts when the public core restarts with a data field of its configuration changed, and only
+ * then. The configuration hash is on every module API answer and holds no secret. Shared by `config-hash.test.ts` and
+ * its negative controls' file; imports nothing of Vitest. [A162, PP-14, RN-16, PP-4, Q147]
  *
  * **The run** ({@link a162Run}): a public core with the public module `pub` (a data setting `level`, a route `GET
  * /level`), its module API on a free port and, for a private process with a transport, its `listen.transport` behind a
@@ -20,9 +20,9 @@ import type { DatabaseParts, PostgresParts } from "../../src/config/database-par
  * PostgreSQL the password of the core's own login (`ALTER ROLE`) in `database` —, head 11; (3) with a data field
  * changed — `level` of `pub`'s revision from 30 —, at head 11 at first. Without a transport, after each
  * restart every session of the private process's public login is ended (`pg_terminate_backend`), so that it connects to
- * its public database again — when it reads the public configuration history again (PP-14). After (3) the core is taken
- * to 16 and the run waits until the private process has ended or reached 16. Each restart's answers of the core's module
- * API (`GET /level` and a 404) and one of the private process's are read for `X-Umbra-Config-Hash`.
+ * its public database again — when it reads the public configuration history again. After (3) the core is taken to 16
+ * and the run waits until the private process has ended or reached 16. Each restart's answers of the core's module API
+ * (`GET /level` and a 404) and one of the private process's are read for `X-Umbra-Config-Hash`. [PP-14]
  */
 
 /** The public module `pub` (see the module comment). */
@@ -46,7 +46,7 @@ export function pub(): ModuleDeclaration {
 
 /**
  * `pub`'s entries: `level` 0 from 1, and `level` 1 from 30 — or, with a changed configuration, `level` 2 from 30: the
- * same revisions, one data field changed above the cursor (CF-6 allows no other change there).
+ * same revisions, one data field changed above the cursor (no other change is allowed there). [CF-6]
  */
 const pubEntries = (changed: boolean) => [
   { id: "pub", start: 1, version: "1.0.0", config: { level: 0 } },
@@ -141,7 +141,7 @@ const originOf = (api: { readonly host: string; readonly port: number } | null):
   return `http://${api.host}:${api.port}`;
 };
 
-/** Runs A162's scenario (see the module comment) on `backend`. */
+/** Runs the configuration-hash scenario (see the module comment) on `backend`. [A162] */
 export async function a162Run(backend: PrivateBackend, options: A162Options): Promise<A162Run> {
   const withPrivate = options.private ?? true;
   const postgres = backend.kind === "postgres";
@@ -262,11 +262,15 @@ const HASH = /^0x[0-9a-f]{64}$/;
 const formsOf = (text: string): readonly string[] => [text, Buffer.from(text, "utf8").toString("hex")];
 
 /**
- * A162's oracle: every problem with `run`, none when A162 holds — every module API answer read carries one
- * `X-Umbra-Config-Hash` of the hash's form beside `X-Umbra-Version`, the same on every answer of one start, holding no
- * secret in any form searched; the same after a restart with the same configuration and after one with only secrets
- * changed, another after a data field changed; the private process went on to 8 and 11 and then halted with
- * `public-config-changed`, still at 11 — no other height processed — while the core reached 16.
+ * The configuration-hash oracle: every problem with `run`, none when the scenario holds. It holds when:
+ * - every module API answer read carries one `X-Umbra-Config-Hash` of the hash's form beside `X-Umbra-Version`, the
+ *   same on every answer of one start, holding no secret in any form searched;
+ * - the hash is the same after a restart with the same configuration and after one with only secrets changed, and
+ *   another after a data field changed;
+ * - the private process went on to 8 and 11 and then halted with `public-config-changed`, still at 11 — no other
+ *   height processed — while the core reached 16.
+ *
+ * [A162]
  */
 export function a162Problems(run: A162Run): string[] {
   const problems: string[] = [];

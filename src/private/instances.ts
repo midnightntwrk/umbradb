@@ -1,22 +1,24 @@
 /**
- * The core's view of its private instances for `/status` (`openspec/changes/core-arch/specs/private-processes/spec.md`
- * PP-9; `specs/admin-endpoints/spec.md` AE-5; `design.md` §8; task 14.4): "each instance's id, connection, lockstep flag
- * and synced height, and nothing else from it".
+ * The core's view of its private instances for `/status`: each instance's id, connection, lockstep flag and synced
+ * height, and nothing else from it. [PP-9, AE-5; design §8]
  *
- * Built from the two views the core has (task 14.3): its lockstep bookkeeping (`./lockstep.ts`'s `instances()`: every
- * instance its `core` revision lists in `lockstepInstances`, connected or not, with the committed height it last learned
- * — its `hello`'s, then each report whose hash it checked — and null for one not seen since the core started) and its
- * transport (`./core-transport.ts`'s `instances()`: every instance connected now, with its `hello`'s height or its last
- * report's). A listed instance is shown from the bookkeeping — a refused one too, with its height then —, every other
- * connected one from the transport, as not lockstep, at its `hello`'s height: an independent instance sends no report
- * (PP-4: `report` is a lockstep instance's), so the core learns no later height of it. Listed instances come first, in
- * the list's order, then the others by id. Plain TypeScript: no Node.js module.
+ * It is built from the two views the core has:
+ * - its lockstep bookkeeping (`./lockstep.ts`'s `instances()`): every instance its `core` revision lists in
+ *   `lockstepInstances`, connected or not, with the committed height the core last learned (from its `hello`, then from
+ *   each report whose hash it checked), or null for one not seen since the core started;
+ * - its transport (`./core-transport.ts`'s `instances()`): every instance connected now, with the height of its `hello`
+ *   or of its last report.
+ *
+ * A listed instance is shown from the bookkeeping, a refused one too, with the height it had then. Every other
+ * connected instance is shown from the transport, as not lockstep, at its `hello`'s height: only a lockstep instance
+ * sends reports, so the core learns no later height of an independent one. Listed instances come first, in the list's
+ * order, then the others by id. Plain TypeScript: no Node.js module. [PP-4, PP-9]
  */
 
 import type { InstanceView } from "./core-transport.js";
 import type { LockstepInstance } from "./lockstep.js";
 
-/** One private instance as `/status` shows it on the core (PP-9). */
+/** One private instance as `/status` shows it on the core. [PP-9] */
 export interface PrivateInstance {
   readonly id: string;
   /** Whether a connection past its `hello` holds its id now. */

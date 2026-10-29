@@ -1,5 +1,5 @@
 /**
- * A WebSocket over a `MessagePort` of the page's message network (`./network.ts`; task 16.1): the part of `ws`'s
+ * A WebSocket over a `MessagePort` of the page's message network (`./network.ts`): the part of `ws`'s
  * `WebSocket` that `src/private/` uses, on either side of the process transport — text messages (given to listeners as
  * a `Buffer`, as `ws` gives them), pings answered by pongs, a close with its code and reason seen by both sides, and
  * `terminate`, which both sides see as 1006 (no close frame). A port's messages arrive whole and in order, so nothing

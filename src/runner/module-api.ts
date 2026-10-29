@@ -1,50 +1,57 @@
 /**
- * The module API (`openspec/changes/core-arch/specs/runner/spec.md` RN-1, RN-15, RN-16; `specs/database-api/spec.md`
- * DB-15; `design.md` §2; CORE-ARCH §4.10's `ApiRegistry`, §4.20): what modules register in `on-start-api`, and how a
- * request and a subscription are answered — without any transport, so the browser build (task 16.x) can carry the same
- * requests over `postMessage`; Node.js's HTTP and WebSocket listener on `listen.api` is `./api-server.ts`.
+ * The module API: what modules register in `on-start-api`, and how a request and a subscription are answered. It has
+ * no transport of its own, so the browser build can carry the same requests over `postMessage`; Node.js's HTTP and
+ * WebSocket listener on `listen.api` is `./api-server.ts`. [RN-1, RN-15, RN-16, DB-15; design §2; CORE-ARCH §4.10's
+ * `ApiRegistry`, §4.20]
  *
- * **Registration (RN-15).** {@link registerModuleApis} runs `on-start-api` once, at startup, after the process contexts
- * are sealed (MD-7), for the parts this process may run — those active in a range of the graph's `ranges`, the
- * cursor's included; a part whose revisions all ended below it runs no point in this process and serves no API — in
- * the startup order (Q95), in series, each callback with its module's process context and a registry of its own,
- * closed when the callback ends ({@link ApiRoutes.open}). A malformed registration throws at the call; once every
- * `on-start-api` has run, two registrations of one method and path — parameters' names aside — or of one subscription
- * name refuse startup with `duplicate-api-route`, naming the route and both modules, before anything listens.
+ * **Registration.** {@link registerModuleApis} runs `on-start-api` once, at startup, after the process contexts are
+ * sealed. It runs for the parts this process may run: those active in a range of the graph's `ranges`, the cursor's
+ * included. A part whose revisions all ended below the cursor runs no point in this process and serves no API. The
+ * callbacks run in the startup order, in series, each with its module's process context and a registry of its own,
+ * closed when the callback ends ({@link ApiRoutes.open}). A malformed registration throws at the call. Once every
+ * `on-start-api` has run, two registrations of one method and path (parameters' names aside), or of one subscription
+ * name, refuse startup with `duplicate-api-route`, naming the route and both modules, before anything listens.
+ * [RN-15, MD-7, Q95]
  *
  * **Paths.** `/` or `/` and segments, each a literal of `A–Z a–z 0–9 - . _ ~ ! $ & ' ( ) * + , ; = @` or a parameter
- * `:name`; a request's segments are percent-decoded before they are compared, and a literal segment wins over a
+ * `:name`. A request's segments are percent-decoded before they are compared, and a literal segment wins over a
  * parameter, leftmost first. A handler's `params` holds the query's parameters (the first value of each) and the path's
  * (which win a name both have), in an object without a prototype.
  *
- * **A request** ({@link ModuleApi.answer}) gets one read of the latest committed height, bounded by `apiReadTimeoutMs`
- * (`db.read(…, { timeoutMs })`, DB-15: on PostgreSQL only), and the handler runs inside it — so on PGlite a `db.read`
- * from a handler fails with `nested-call` rather than waiting (Q73). **The answer is the module's** (RN-16; owner
- * decisions Q104, Q105; task 5.2b): the module API adds no header and no `extensions` to it, tells no GraphQL response
- * apart, and calls the handler before block S commits too — only its HTTP listener sets `X-Umbra-Version`, the build's
- * version, on every answer it sends (`./api-server.ts`; owner decision Q131, task 5.2c), not here, so another transport
- * (the browser's, task 16.x) carries the answer as the handler gave it. A module that states the view, height and hash
- * it read does so itself with the envelope's helpers (`./envelope.ts`: `readChainDataView`, `chainDataHeaders`,
- * `withViewExtensions`, `answerChainData`); before block S commits `readChainDataView` fails with
- * `no-committed-height`, answered 503 when the handler does not catch it. A POST's body is read as JSON by the
- * component's own reader (integers beyond ±(2^53 − 1) as `bigint`, Q78); a GET's body is ignored.
+ * **A request** ({@link ModuleApi.answer}) gets one read of the latest committed height, and the handler runs inside it.
+ * The read is bounded by `apiReadTimeoutMs` (`db.read(…, { timeoutMs })`, on PostgreSQL only). So on PGlite a
+ * `db.read` from a handler fails with `nested-call` rather than waiting. [DB-15, Q73]
  *
- * **Bodies.** An answer's body is written as JSON — a `bigint` as decimal text and bytes as `0x`-prefixed lowercase hex,
- * as the envelope writes heights and hashes — with `Content-Type: application/json; charset=utf-8`, unless the handler
- * gave a `Content-Type` and its body is text or bytes, which are sent as they are; an `undefined` body is empty.
+ * **The answer is the module's.** The module API adds no header and no `extensions` to it, treats a GraphQL response
+ * like any other, and calls the handler before block S commits too. Only its HTTP listener sets `X-Umbra-Version`, the
+ * build's version, on every answer it sends (`./api-server.ts`), not here; so another transport (the browser's) carries
+ * the answer as the handler gave it. A module that states the view, height and hash it read does so itself with the
+ * envelope's helpers (`./envelope.ts`: `readChainDataView`, `chainDataHeaders`, `withViewExtensions`,
+ * `answerChainData`). Before block S commits, `readChainDataView` fails with `no-committed-height`, answered 503 when
+ * the handler does not catch it. [RN-16, Q104, Q105, Q131]
  *
- * **Errors** are `{ "error": { "code", "message" } }` with the status of {@link API_ERROR_STATUS}: a path no route has
- * (404 `not-found`), a method it lacks (405 `method-not-allowed`, with `Allow`), a path or body that cannot be read (400
- * `invalid-request`), a body over the listener's limit (413 `request-too-large`), the read's timeout (504
- * `query-timeout`, its message the database API's), a `no-committed-height` the handler did not catch (503
- * `no-committed-height`, its message the envelope's); anything else — a
- * handler that throws or answers what is no answer, a database error — 500 `internal-error` with a fixed message,
- * so no exception text (which may hold a credential, AE-6) reaches a client; the error itself goes to `onError`.
+ * A POST's body is read as JSON by the component's own reader, which returns integers beyond ±(2^53 − 1) as `bigint`; a
+ * GET's body is ignored. [Q78]
  *
- * **Subscriptions** ({@link ModuleApi.subscribe}): the module's handler gets the subscriber's arguments and an `emit`,
- * and returns its unsubscribe; the module notifies its subscribers from its own `on-after-db-write` (RN-15) — nothing
- * here checks where `emit` is called from (modules are trusted, Q46). `emit` never waits: it hands the value to the
- * transport, which writes it or drops a subscriber that fell behind; after the unsubscribe it does nothing.
+ * **Bodies.** An answer's body is written as JSON, with `Content-Type: application/json; charset=utf-8`: a `bigint` as
+ * decimal text and bytes as `0x`-prefixed lowercase hex, as the envelope writes heights and hashes. If the handler gave
+ * a `Content-Type` and its body is text or bytes, the body is sent as it is. An `undefined` body is empty.
+ *
+ * **Errors** are `{ "error": { "code", "message" } }` with the status of {@link API_ERROR_STATUS}:
+ * - a path no route has: 404 `not-found`;
+ * - a method the path lacks: 405 `method-not-allowed`, with `Allow`;
+ * - a path or body that cannot be read: 400 `invalid-request`;
+ * - a body over the listener's limit: 413 `request-too-large`;
+ * - the read's timeout: 504 `query-timeout`, with the database API's message;
+ * - a `no-committed-height` the handler did not catch: 503 `no-committed-height`, with the envelope's message;
+ * - anything else (a handler that throws or answers what is no answer, a database error): 500 `internal-error` with a
+ *   fixed message, so no exception text, which may hold a credential, reaches a client. The error itself goes to
+ *   `onError`. [AE-6]
+ *
+ * **Subscriptions** ({@link ModuleApi.subscribe}). The module's handler gets the subscriber's arguments and an `emit`,
+ * and returns its unsubscribe. The module notifies its subscribers from its own `on-after-db-write`; nothing here checks
+ * where `emit` is called from, since modules are trusted. `emit` never waits: it hands the value to the transport,
+ * which writes it or drops a subscriber that fell behind. After the unsubscribe it does nothing. [RN-15, Q46]
  */
 
 import type { ReadHandle, ReadOptions } from "../db/api.js";
@@ -56,7 +63,7 @@ import { runSchedule, seriesOf } from "./dispatch.js";
 import type { ChainDataAnswer } from "./envelope.js";
 import type { ProcessContexts } from "./process-context.js";
 
-/** A route's method (CORE-ARCH §4.10). */
+/** A route's method. [CORE-ARCH §4.10] */
 export type HttpMethod = "GET" | "POST";
 
 /** A module's HTTP handler. */
@@ -142,7 +149,7 @@ export interface ApiResponse {
 export interface ModuleApiOptions {
   /** The database (or its read-only item): each request is one of its reads. */
   readonly db: { read<T>(body: (read: ReadHandle) => Promise<T>, options?: ReadOptions): Promise<T> };
-  /** `apiReadTimeoutMs` (CF-4): each request's read is bounded by it (DB-15). */
+  /** `apiReadTimeoutMs`: each request's read is bounded by it. [CF-4, DB-15] */
   readonly timeoutMs: number;
   /** Told of every failure answered 500, with the route: the runner logs it (redacted). */
   readonly onError?: (error: unknown, where: { readonly module: string; readonly route: string }) => void;
@@ -188,8 +195,8 @@ export function apiErrorResponse(code: ApiErrorCode, message: string, headers: R
 
 /** The segments of `path`, registered by `module` with `method`; throws a `TypeError` for a path that is none. */
 function parsePath(module: string, method: HttpMethod, path: unknown): PathSegment[] {
-  if (typeof path !== "string") throw new TypeError(`${module} registered ${method} with a path that is not a string (RN-15)`);
-  const refuse = (why: string) => new TypeError(`${module} registered ${method} ${path}, ${why} (RN-15)`);
+  if (typeof path !== "string") throw new TypeError(`${module} registered ${method} with a path that is not a string`);
+  const refuse = (why: string) => new TypeError(`${module} registered ${method} ${path}, ${why}`);
   if (!path.startsWith("/")) throw refuse(`which is not a path: ${PATH_RULE}`);
   if (path === "/") return [];
   const names = new Set<string>();
@@ -237,17 +244,17 @@ export class ApiRoutes {
     const after = (what: string) =>
       new Error(
         `${module} registered ${what} after its on-start-api callback ended: modules register their API once, at ` +
-          "startup (RN-15)",
+          "startup",
       );
     const registry: ApiRegistry = Object.freeze({
       http: (method: HttpMethod, path: string, handler: HttpHandler): void => {
         if (!open) throw after(`${String(method)} ${String(path)}`);
         if (method !== "GET" && method !== "POST") {
-          throw new TypeError(`${module} registered the method ${String(method)}, which is neither GET nor POST (RN-15)`);
+          throw new TypeError(`${module} registered the method ${String(method)}, which is neither GET nor POST`);
         }
         const segments = parsePath(module, method, path);
         if (typeof handler !== "function") {
-          throw new TypeError(`${module} registered ${method} ${path} with a handler that is not a function (RN-15)`);
+          throw new TypeError(`${module} registered ${method} ${path} with a handler that is not a function`);
         }
         this.#registrations.push({
           kind: "http",
@@ -257,10 +264,10 @@ export class ApiRoutes {
       subscription: (name: string, handler: SubscriptionHandler): void => {
         if (!open) throw after(`the subscription ${String(name)}`);
         if (typeof name !== "string" || name === "") {
-          throw new TypeError(`${module} registered a subscription whose name is not a non-empty string (RN-15)`);
+          throw new TypeError(`${module} registered a subscription whose name is not a non-empty string`);
         }
         if (typeof handler !== "function") {
-          throw new TypeError(`${module} registered the subscription ${name} with a handler that is not a function (RN-15)`);
+          throw new TypeError(`${module} registered the subscription ${name} with a handler that is not a function`);
         }
         this.#registrations.push({ kind: "subscription", route: Object.freeze({ module, name, handler }) });
       },
@@ -292,7 +299,7 @@ export class ApiRoutes {
       const what = first.kind === "http" ? shown : `the subscription ${shown}`;
       const who = modules[0] === modules[1] ? `${modules[0]} registers ${what} twice` : `${modules[0]} and ${modules[1]} both register ${what}`;
       const rule = first.kind === "http" ? "a route is registered once" : "a subscription name is registered once";
-      throw new UmbraError("duplicate-api-route", `${who}: ${rule} (RN-15)`, {
+      throw new UmbraError("duplicate-api-route", `${who}: ${rule}`, {
         kind: first.kind,
         route: shown,
         modules,
@@ -370,7 +377,7 @@ export class ModuleApi {
       return this.#encode(answered);
     } catch (error) {
       if (error instanceof UmbraError && error.code === "query-timeout") return apiErrorResponse("query-timeout", error.message);
-      // The view of a read before block S (`readChainDataView`), which the handler did not catch (RN-16).
+      // The view of a read before block S (`readChainDataView`), which the handler did not catch. [RN-16]
       if (error instanceof UmbraError && error.code === "no-committed-height") {
         return apiErrorResponse("no-committed-height", error.message);
       }
@@ -429,8 +436,8 @@ export class ModuleApi {
 
   /**
    * `route`'s handler called with `req` and `read`, its answer checked and returned as the handler wrote it: the module
-   * API adds nothing to it (RN-16, Q104, Q105; the listener's `X-Umbra-Version` is set where it sends, Q131). Protected
-   * for the negative controls, which add the envelope back or set the version here.
+   * API adds nothing to it. The listener's `X-Umbra-Version` is set where it sends. Protected for the negative
+   * controls, which add the envelope back or set the version here. [RN-16, Q104, Q105, Q131]
    */
   protected async handle(route: HttpRoute, req: Parameters<HttpHandler>[0], read: ReadHandle): Promise<ChainDataAnswer> {
     const answer: unknown = await route.handler(req, read);
@@ -473,20 +480,24 @@ export class ModuleApi {
 export interface ApiStartup {
   /** The database's resolved graph: `modules` in startup order, and the `ranges` this process may run. */
   readonly graph: Pick<ResolvedGraph, "modules" | "ranges">;
-  /** The process contexts, sealed (MD-7). */
+  /** The process contexts, sealed. [MD-7] */
   readonly contexts: ProcessContexts;
 }
 
 /**
- * Runs `on-start-api` (RN-1, RN-15; see the module comment) into `routes`, then refuses duplicates; resolves with
- * `routes`. Rejects with the dispatch's `CallbackFailure` (point `on-start-api`, the module) for a callback that fails —
- * a malformed registration included, and a refused `publish` of the module, caught or not —, with the first refused
- * `publish` of the process made meanwhile, or with `duplicate-api-route`.
+ * Runs `on-start-api` (see the module comment) into `routes`, then refuses duplicates; resolves with `routes`.
+ * [RN-1, RN-15]
+ *
+ * Rejects with:
+ * - the dispatch's `CallbackFailure` (point `on-start-api`, the module) for a callback that fails, a malformed
+ *   registration included, and a refused `publish` of the module, caught or not;
+ * - the first refused `publish` of the process made meanwhile;
+ * - or `duplicate-api-route`.
  */
 export async function registerModuleApis(startup: ApiStartup, routes: ApiRoutes = new ApiRoutes()): Promise<ApiRoutes> {
   const { graph, contexts } = startup;
   if (!contexts.sealed) {
-    throw new Error("registerModuleApis: on-start-api runs once the process contexts are sealed (MD-7: after every on-start-db)");
+    throw new Error("registerModuleApis: on-start-api runs once the process contexts are sealed, after every on-start-db");
   }
   const running = new Set(graph.ranges.flatMap((range) => range.order.map((part) => part.id)));
   await runSchedule(

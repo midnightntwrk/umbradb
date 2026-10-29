@@ -26,16 +26,18 @@ import { PROCESS_BACKENDS } from "../../runner/process-backends.js";
 import { entryOf, loggingModule } from "../../runner/process-build.js";
 
 /**
- * A66 for `/status` (task 8.3; AE-5): every `/status` body validates against the JSON schema committed here,
- * `./status.schema.json` (draft 2020-12, checked by Ajv 8.18.0 in strict mode: `test/admin/json-schema.ts`), and its
- * `cursor` is `null` before block S commits. The bodies are read through the process on PostgreSQL 18 and PGlite in
- * every state the runner has and with the conditions it raises; the parts' digest rows shown are the database's own
- * `core_digest.tables` (DT-5), the last commit's time is RFC 3339 UTC text from the wall clock (Q68), the uptime grows.
+ * Every `/status` body validates against the JSON schema committed here, `./status.schema.json` (draft 2020-12, checked
+ * by Ajv 8.18.0 in strict mode: `test/admin/json-schema.ts`), and its `cursor` is `null` before block S commits.
+ * [A66, AE-5]
  *
- * Committed negative controls: a body without any one of its required fields, with a field the schema does not have, or
- * with a value of the wrong form (a height as a number, another state, a time in PostgreSQL's own text, an upper-case
- * digest, a condition no task raises, an unknown detail, a node connection state outside AE-5's four, a negative queue
- * depth) fails the schema.
+ * The bodies are read through the process on PostgreSQL 18 and PGlite, in every state the runner has and with the
+ * conditions it raises. The parts' digest rows shown are the database's own `core_digest.tables`. The last commit's
+ * time is RFC 3339 UTC text from the wall clock. The uptime grows. [DT-5, Q68]
+ *
+ * Committed negative controls: a body fails the schema when it lacks any one of its required fields, has a field the
+ * schema does not have, or has a value of the wrong form. Wrong forms tested: a height as a number, another state, a
+ * time in PostgreSQL's own text, an upper-case digest, a condition the runner never raises, an unknown detail, a node
+ * connection state outside the four allowed ones, a negative queue depth. [AE-5]
  */
 
 const STATUS_SCHEMA = validatorOf(schemaFile(new URL("./status.schema.json", import.meta.url)));
@@ -96,7 +98,7 @@ describe("A66: /status's JSON schema", () => {
     }
     expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, bestHead: null, connection: null, queueDepth: null } })).toEqual([]);
     expect(STATUS_SCHEMA.problems({ ...body(), node: { ...node, bestHead: "0", connection: "connecting", queueDepth: 0 } })).toEqual([]);
-    // A private process has no node (A168: the three are null with it).
+    // A private process has no node: the three node fields are null with it. [A168]
     expect(STATUS_SCHEMA.problems({ ...body(), node: null })).toEqual([]);
   });
 
@@ -122,7 +124,8 @@ describe("A66: /status's JSON schema", () => {
     const spec = readFileSync(new URL("../../../openspec/changes/core-arch/specs/admin-endpoints/spec.md", import.meta.url), "utf8");
     const requirement = spec.slice(spec.indexOf("### Requirement: AE-3"), spec.indexOf("#### Scenario", spec.indexOf("### Requirement: AE-3")));
     const listed = requirement.slice(requirement.indexOf("conditions —"), requirement.indexOf("A refused or halted"));
-    // The backticked words of AE-3's list of conditions, less `paused`'s fields (`since`, `by`) and their values.
+    // The backticked words of the spec's list of conditions, less `paused`'s fields (`since`, `by`) and their values.
+    // [AE-3]
     const named = [...listed.matchAll(/`([a-z][a-z-]*)`/g)].map((match) => match[1] as string).filter((word) => !["since", "by", "pause", "signal"].includes(word));
     expect([...codes].sort()).toEqual([...new Set(named)].sort());
     expect(codes).toContain("paused");
@@ -219,7 +222,7 @@ function unreachable(healed: () => boolean): BlockSource & BlockItemSource {
     cursor: (read) => source.cursor(read),
     finalizedHead: () => source.finalizedHead(),
     waitForHead: (above, signal) => source.waitForHead(above, signal),
-    // core-block-fetch's items, as the source gives them (task 10.3).
+    // core-block-fetch's items, as the source gives them.
     blockItems: (block: BlockRef) => source.blockItems(block),
     block: async (height) => {
       if (height === 2n && !healed()) throw new UmbraError("node-unreachable", "the test's node-unreachable");
@@ -266,7 +269,7 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
 
   it("A66: following — the parts with the database's own digest rows, the last commit's time, the uptime growing", async () => {
     const before = Date.now();
-    // The build's own core-digest (the test backbone's is a stand-in without DT-5's table).
+    // The build's own core-digest (the test backbone's is a stand-in without the `core_digest.tables` table). [DT-5]
     const run = startWithAdmin({
       database: (await backend.database()).setting,
       user: [writing("m")],
@@ -280,10 +283,10 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
       (b) => b.cursor === "4" && (b as any).modules?.find((part: { id: string }) => part.id === "m")?.tables[0]?.height === "4",
     );
     const after = Date.now();
-    // A core with no transport and no lockstep list: no private instance (task 14.4).
+    // A core with no transport and no lockstep list: no private instance.
     expect(shown).toMatchObject({ state: "following", instance: { role: "core", id: null }, public: null, ledger: null, privateInstances: [] });
-    // The in-memory source keeps no best-block queue and hears no best head; the process's node client, which it never
-    // uses, has not connected (A168's `connecting` before the first connection; task 8.3a).
+    // The in-memory source keeps no best-block queue and hears no best head. The process's node client, which it never
+    // uses, has not connected: it shows `connecting`, as before the first connection. [A168]
     expect(shown.node).toEqual({ finalizedHead: "4", bestHead: null, connection: "connecting", retries: 0, queueDepth: null, tipCap: 600, finalityStall: false });
     const committed = Date.parse(shown.lastCommitAt);
     expect(committed).toBeGreaterThanOrEqual(before);
@@ -383,8 +386,8 @@ describe.each(PROCESS_BACKENDS)("A66: /status through the process validates in e
     });
     await halted.handle.stop();
 
-    // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in,
-    // CF-9); a refusal of the configuration itself ends the process and serves no /status (task 8.1b, Q137 B).
+    // Refused once the configuration is validated, before the database opens (PGlite without the development opt-in).
+    // A refusal of the configuration itself ends the process and serves no /status. [CF-9, Q137 B]
     const unopened = startWithAdmin({ database: { kind: "pglite", memory: true }, extra: { developmentOptIn: false } });
     const early = await valid(unopened, (b) => b.state === "refused");
     expect(early.reason).toMatchObject({ code: "development-opt-in-required", height: null, module: null, point: null });

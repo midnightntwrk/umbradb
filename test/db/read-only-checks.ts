@@ -1,9 +1,9 @@
 import type { Database } from "../../src/db/api.js";
 
 /**
- * A144's runtime check of the `db` item (task 2.8; CD-1, Q73), shared by the database API's tests
- * (`read-only-database.test.ts`) and `core-chain`'s, which publishes the item (task 10.2): what a module finds on it by
- * ordinary use, none of which may lead to a write, a transaction, a close or the database itself.
+ * The runtime check of the `db` item, shared by the database API's tests (`read-only-database.test.ts`) and the tests
+ * of `core-chain`, which publishes the item. It covers what a module finds on the item by ordinary use; none of it may
+ * lead to a write, a transaction, a close or the database itself. [A144, CD-1, Q73]
  */
 
 /** Names a database offers besides `read`, or a write path would take; none may be found on the `db` item. */
@@ -27,9 +27,9 @@ function namesOf(value: object): Set<PropertyKey> {
 }
 
 /**
- * A144's runtime check: what a module finds on the `db` item by ordinary use — `Object.keys`, `in`, a property read,
- * the values its properties, its prototypes and its `read` function hold. Empty when the item offers `read` only:
- * nothing named `transaction`, `close` or a write, nothing else the `Database` itself offers, and no path to it.
+ * The runtime check: what a module finds on the `db` item by ordinary use (`Object.keys`, `in`, a property read, the
+ * values its properties, its prototypes and its `read` function hold). Empty when the item offers `read` only: nothing
+ * named `transaction`, `close` or a write, nothing else the `Database` itself offers, and no path to it. [A144]
  */
 export function readOnlyProblems(candidate: object, db: Database): string[] {
   const problems: string[] = [];

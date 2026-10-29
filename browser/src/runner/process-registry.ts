@@ -1,8 +1,8 @@
 /**
- * What a browser process worker reads its process through once startup has completed (`browser/src/process-worker.ts`;
- * task 16.1): the database the process opened and handed its module API (`./api.ts`), the tables its schema plan
- * declares `deterministic: false` (for the contents hash, DT-3), and its module API when `listen.api` is set. One
- * process runs per worker, so there is at most one; it is gone once the process stops.
+ * What a browser process worker reads its process through once startup has completed (`browser/src/process-worker.ts`):
+ * the database the process opened and handed its module API (`./api.ts`), the tables its schema plan declares
+ * `deterministic: false` (for the contents hash), and its module API when `listen.api` is set. One process runs per
+ * worker, so there is at most one; it is gone once the process stops. [DT-3]
  */
 
 import type { ModuleApi, ModuleApiOptions } from "../../../src/runner/module-api.js";

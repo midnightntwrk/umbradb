@@ -1,25 +1,25 @@
 /**
- * The backbone part `core-health`'s admin endpoints (`openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-1,
- * AE-2, AE-4; CORE-ARCH §4.18; decision record Q70): `GET /health/live` and `GET /health/ready`, functions of the
- * snapshot the runner publishes and of the heartbeat's age, which the admin worker runs (`../../admin/`). They read
- * nothing else — no database, nothing of the main thread —, and import nothing at run time but `./readiness.ts`, so
- * the worker runs them, and so can the browser build's.
+ * The backbone part `core-health`'s admin endpoints: `GET /health/live` and `GET /health/ready`, functions of the
+ * snapshot the runner publishes and of the heartbeat's age, run by the admin worker (`../../admin/`). They read nothing
+ * else (no database, nothing of the main thread) and import nothing at run time but `./readiness.ts`, so the worker
+ * can run them, and so can the browser build. [AE-1, AE-2, AE-4, Q70; CORE-ARCH §4.18]
  *
- * - `/health/live` (AE-2): 200 while the runner's last heartbeat tick is within the liveness timeout, in every state —
- *   a refused or halted process stays live, since a restart would meet the same condition —; 503 once the main thread
- *   has not ticked for longer (stuck by definition: computation blocks it, awaiting does not). The body says so, with
- *   the tick's age in whole milliseconds and the timeout: `{ "live": true, "heartbeatAgeMs": 412, "livenessTimeoutMs":
- *   30000 }`.
- * - `/health/ready` (AE-4): 200 or 503 as {@link readinessOf} decides — AE-4's order: not while `starting`, `refused`,
- *   `halted` or `stopping`; always while `stopped`; otherwise within the readiness lag, if one is set — from the
- *   published state and lag and the process revision's `readinessLag`; the body shows what it decided from:
- *   `{ "ready": false, "state": "syncing", "lag": "500", "readinessLag": 10 }` (the lag as decimal text, as `/status`).
+ * - `/health/live` answers 200 while the runner's last heartbeat tick is within the liveness timeout, in every state.
+ *   A refused or halted process stays live, since a restart would meet the same condition. It answers 503 once the
+ *   main thread has not ticked for longer: it is then stuck by definition, since computation blocks it and awaiting
+ *   does not. The body says so, with the tick's age in whole milliseconds and the timeout:
+ *   `{ "live": true, "heartbeatAgeMs": 412, "livenessTimeoutMs": 30000 }`. [AE-2]
+ * - `/health/ready` answers 200 or 503 as {@link readinessOf} decides, from the published state and lag and the process
+ *   revision's `readinessLag`: never ready while `starting`, `refused`, `halted` or `stopping`; always ready while
+ *   `stopped`; otherwise ready within the readiness lag, if one is set. The body shows what it decided from:
+ *   `{ "ready": false, "state": "syncing", "lag": "500", "readinessLag": 10 }` (the lag as decimal text, as in
+ *   `/status`). [AE-4]
  */
 
 import type { AdminEndpoint, AdminPart } from "../../admin/types.js";
 import { readinessOf } from "./readiness.js";
 
-/** `GET /health/live` (AE-2). */
+/** `GET /health/live`. [AE-2] */
 const LIVE: AdminEndpoint = {
   path: "/health/live",
   answer: ({ snapshot, beatAgeMs }) => {
@@ -31,7 +31,7 @@ const LIVE: AdminEndpoint = {
   },
 };
 
-/** `GET /health/ready` (AE-4). */
+/** `GET /health/ready`. [AE-4] */
 const READY: AdminEndpoint = {
   path: "/health/ready",
   answer: ({ snapshot }) => {

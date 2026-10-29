@@ -5,11 +5,14 @@ import { loadLedgerPackage } from "../../src/ledger/load.js";
 import type { LedgerName, LedgerPackage, LedgerPackageOptions } from "../../src/ledger/types.js";
 
 /**
- * `core-contract-logs-fast`'s reading in the calling thread, as task 13.1 shipped it before task 12.6 made it the
- * module's ledger task (`src/backbone/core-contract-logs-fast/task.ts`): the adapter of the block's ledger loaded here
- * once (again after a failed load), each calling transaction deserialized here a second time and its native objects
- * freed once read; none on ledger v8 (Q54). For the tests: reading a transaction's sites on this thread, and the
- * negative control of task 12.6's parse count (a second parse on the main thread).
+ * `core-contract-logs-fast`'s reading in the calling thread, as the module did it before its reading moved into its
+ * ledger task (`src/backbone/core-contract-logs-fast/task.ts`):
+ * - the adapter of the block's ledger is loaded here once (and again after a failed load);
+ * - each calling transaction is deserialized here a second time, and its native objects are freed once read;
+ * - a ledger without logs (v8) reads none. [Q54]
+ *
+ * The tests use it to read a transaction's sites on this thread, and as the negative control of the ledger task's
+ * parse count (a second parse on the main thread).
  */
 
 /** What loads an adapter: `loadLedgerPackage`, or a test's. */

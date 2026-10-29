@@ -13,21 +13,21 @@ import {
 } from "./legacy.js";
 
 /**
- * A3 `[STATIC]` (LS-3, task 17.1): "The packed tarball contains no file under `legacy/`; the TypeScript build and the
- * conformance run include no file from `legacy/`; `legacy/transaction-history/` holds the source and its tests."
+ * The packed tarball contains no file under `legacy/`; the TypeScript build and the conformance run include no file
+ * from `legacy/`; `legacy/transaction-history/` holds the source and its tests. [A3 STATIC, LS-3]
  *
  * Each list is the real one: the tarball's from `npm pack --dry-run --json` (npm's own rules over `package.json`
  * `files`), the build's from the TypeScript program of `tsconfig.build.json` (every file the compiler reads, the
- * imported ones included), the conformance run's from `vitest list` with the repository's configuration (what
- * `npm run test:conformance` runs), and the coverage and mutation configurations as they are written.
+ * imported ones included), the conformance run's from `vitest list` with the repository's configuration (what `npm run
+ * test:conformance` runs), and the coverage and mutation configurations as they are written.
  *
- * Legacy's own TypeScript program and Vitest configuration are kept but no longer run (task 17.2, owner decision
- * Q112 B); the controls below still read them, as lists of what a build or a run of the folder would include.
+ * Legacy's own TypeScript program and Vitest configuration are kept but no longer run; the controls below still read
+ * them, as lists of what a build or a run of the folder would include. [Q112 B]
  *
  * The tarball check here is about `legacy/`; whether a TransactionHistory file is in a tarball built from the tree is
  * the build program's check here (a clean build emits nothing of a source it does not read) and the pack smoke test's
- * on the real tarball (`test/smoke/pack-install.mjs`, after a clean build): this run builds nothing, and a `dist/`
- * left over from an earlier build is not the tree's.
+ * on the real tarball (`test/smoke/pack-install.mjs`, after a clean build): this run builds nothing, and a `dist/` left
+ * over from an earlier build is not the tree's.
  */
 
 // Each test starts the TypeScript compiler on a whole program, npm or Vitest (a second or two alone); under the full
@@ -103,7 +103,7 @@ interface VitestConfig {
 /**
  * A Vitest configuration file's export, as Vitest reads it. Imported by a computed specifier, so that the configuration
  * files stay outside the repository's TypeScript program, which has never included them (`vitest.config.ts` does not
- * type-check as it is: `docs/issues/00017-vitest-config-not-type-checked.md`).
+ * type-check as it is). [docs/issues/00017-vitest-config-not-type-checked.md]
  */
 async function vitestConfig(file: string): Promise<VitestConfig> {
   return ((await import(pathToFileURL(path.join(ROOT, file)).href)) as { default: VitestConfig }).default;
@@ -115,7 +115,7 @@ describe("A3: TransactionHistory is kept outside the build, the package and the 
     const found = filesBelow(LEGACY_ROOT);
     expect(inventoryProblems(found)).toEqual([]); // and nothing else, so the inventory is exact
     expect(found).toHaveLength(MOVED.length + ADDED.length);
-    // The inventory is the source and its tests (task 17.2 retired the benchmark workload), not an empty list.
+    // The inventory is the source and its tests (the benchmark workload was retired), not an empty list.
     expect(MOVED_SOURCE.length).toBeGreaterThan(0);
     expect(MOVED_TESTS.filter((file) => file.endsWith(".test.ts")).length).toBeGreaterThan(0);
   });

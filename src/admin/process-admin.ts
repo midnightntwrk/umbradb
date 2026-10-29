@@ -1,27 +1,30 @@
 /**
- * The runner's side of the admin endpoints (`openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-1–AE-3,
- * AE-6; `design.md` §1; CORE-ARCH §4.18): what a process (`../runner/process.ts`, `startProcess` with `admin`) runs on
- * its main thread for them — the heartbeat, the publication of `status()`, and the admin listener's life.
+ * The runner's side of the admin endpoints: what a process (`../runner/process.ts`, `startProcess` with `admin`) runs
+ * on its main thread for them. That is the heartbeat, the publication of `status()`, and the admin listener's life.
+ * [AE-1, AE-2, AE-3, AE-6; CORE-ARCH §4.18; design §1]
  *
- * - **From `startProcess` on:** the heartbeat ticks every second (`../runner/heartbeat.ts`), and each tick publishes the
- *   snapshot of `status()` (`./snapshot.ts`) when it changed; so does every step the runner tells — startup's end,
- *   processing's end, the stop's start ({@link ProcessAdmin.follow}, {@link ProcessAdmin.publish}).
- * - **The listener** starts as soon as the configuration gives its address: {@link ProcessAdmin.serve}, once the
- *   process's `core` revision is known (Q102) and before the database opens, on its `listen.admin` (CF-4's default
- *   `0.0.0.0:8081`), its liveness timeout, its readiness lag and its redaction; a listener that cannot listen refuses
- *   startup (Node.js's error, the runner's `listen-failed`, Q115). Never before: a startup refused before that — by
- *   the configuration itself, which gives no validated address — ends the process with no listener, the refusal in its
- *   log only (owner decision Q137 B, task 8.1b; Q127's address before the validation went with it).
- * - **What `/status` shows besides `status()`** (AE-5): the process's side and `instanceId`, its revision's `tipCap`,
- *   its private side as the process gives it at each snapshot ({@link ProcessAdminOptions.privateSide}: the core's
- *   private instances, a private process's lockstep flag; task 14.4), the core's node as the process reports it at each
- *   snapshot ({@link ProcessAdminOptions.node}: the best head announced last, the connection's state, the queue's
- *   depth; task 8.3a), the wall-clock time of the last commit ({@link ProcessAdmin.committed}, which the loop's commit
- *   observer calls), and, once startup has resolved the graph and migrated the database ({@link ProcessAdmin.opened}),
- *   every part of the database with its revisions and its tables' rows of `core_digest.tables` (DT-5), which it reads
- *   from the process's database on the main thread — at most one read at a time, at a publication after a commit — so
- *   the worker still reads none.
- * - **At `stop()`**, after the database closed, or when a refusal of the configuration ended the process:
+ * - **From `startProcess` on:** the heartbeat ticks every second (`../runner/heartbeat.ts`), and each tick publishes
+ *   the snapshot of `status()` (`./snapshot.ts`) when it has changed. So does every step the runner reports: startup's
+ *   end, processing's end, and the start of the stop ({@link ProcessAdmin.follow}, {@link ProcessAdmin.publish}).
+ * - **The listener** starts as soon as the configuration gives its address. {@link ProcessAdmin.serve} runs once the
+ *   process's `core` revision is known and before the database opens. It listens on `listen.admin` (by default
+ *   `0.0.0.0:8081`), with that revision's liveness timeout, readiness lag and redaction. A listener that cannot listen
+ *   refuses startup (with Node.js's error, as the runner's `listen-failed`). [AE-1, AE-2, CF-4, Q102, Q115]
+ * - **Never before that:** a startup refused earlier, by the configuration itself, has no validated address. It ends
+ *   the process with no listener, and the refusal appears in its log only. An earlier design, which listened on an
+ *   address read before validation, was dropped for this. [AE-1, Q127, Q137 B]
+ * - **What `/status` shows besides `status()`**:
+ *   - the process's side and `instanceId`, and its revision's `tipCap`;
+ *   - its private side as the process gives it at each snapshot ({@link ProcessAdminOptions.privateSide}: the core's
+ *     private instances, or a private process's lockstep flag);
+ *   - the core's node as the process reports it at each snapshot ({@link ProcessAdminOptions.node}: the best head
+ *     announced last, the connection's state, the queue's depth);
+ *   - the wall-clock time of the last commit ({@link ProcessAdmin.committed}, which the loop's commit observer calls);
+ *   - once startup has resolved the graph and migrated the database ({@link ProcessAdmin.opened}), every part of the
+ *     database with its revisions and its tables' rows of `core_digest.tables`. The main thread reads these from the
+ *     process's database, at most one read at a time, at a publication after a commit, so the worker still reads
+ *     nothing. [AE-5, PP-9, DT-5]
+ * - **At `stop()`**, after the database has closed, or when a refusal of the configuration ended the process:
  *   {@link ProcessAdmin.close} ends the heartbeat and the listener's thread. Nothing of it is left to keep Node.js
  *   alive.
  */
@@ -59,16 +62,16 @@ export interface ProcessAdminOptions {
   readonly log: (line: string) => void;
   /** How the listener starts: {@link startAdminServer} (its worker thread) unless given (the negative controls'). */
   readonly start?: AdminStarter;
-  /** The process's side (CF-4), the instance role `/status` shows: public (the core) unless given. */
+  /** The process's side, the instance role `/status` shows: public (the core) unless given. [CF-4, AE-5] */
   readonly side?: ProcessSide;
   /**
-   * The process's private side now (PP-9, AE-5; task 14.4), asked at each snapshot: on the core its private instances,
-   * on a private process whether it runs in lockstep; none unless given.
+   * The process's private side now, asked at each snapshot: on the core its private instances, on a private process
+   * whether it runs in lockstep; none unless given. [PP-9, AE-5]
    */
   readonly privateSide?: () => PrivateSideFacts;
   /**
-   * The process's node besides `status()` (AE-5; task 8.3a), asked at each snapshot: the best head the node announced
-   * last, its connection's state, the best-block queue's length; the three null unless given.
+   * The process's node besides `status()`, asked at each snapshot: the best head the node announced last, its
+   * connection's state, the best-block queue's length; the three null unless given. [AE-5]
    */
   readonly node?: () => NodeFacts;
 }
@@ -91,7 +94,7 @@ export interface OpenedFacts {
   readonly revisionsOf: (id: string) => readonly Revision[];
   /** The process's database, from which `core_digest.tables`, the anchor and the server's version are read. */
   readonly db: Pick<Database, "read">;
-  /** The history check: the revisions placed against the cursor, and the rows `core-chain` records (task 4.3). */
+  /** The history check: the revisions placed against the cursor, and the rows `core-chain` records. */
   readonly check: Pick<HistoryCheck, "entries" | "writes">;
   /** `core_chain.config` as startup read it, before `core-chain` recorded the check's rows. */
   readonly history: readonly HistoryRow[];
@@ -100,8 +103,8 @@ export interface OpenedFacts {
 }
 
 /**
- * `core_chain.config` once `core-chain`'s `on-start-db` recorded the history check's rows (CF-7): the rows read, each
- * one a write gives (`id`, `start`) replaced by it, the new ones after them.
+ * `core_chain.config` once `core-chain`'s `on-start-db` has recorded the history check's rows: the rows read, each one
+ * that a write gives (`id`, `start`) replaced by it, and the new ones after them. [CF-7]
  */
 export function recordedHistory(read: readonly HistoryRow[], writes: readonly HistoryRow[]): readonly HistoryRow[] {
   const key = (row: HistoryRow) => `${row.id}\u0000${row.start}`;
@@ -111,16 +114,16 @@ export function recordedHistory(read: readonly HistoryRow[], writes: readonly Hi
   return Object.freeze([...kept, ...writes.filter((row) => !known.has(key(row)))]);
 }
 
-/** DT-5's digest rows: one per module table that has changed. */
+/** The digest rows: one per module table that has changed. [DT-5] */
 export const DIGESTS_SQL = 'SELECT "schema", "table", height, digest FROM core_digest.tables';
 
-/** The server's version, which `/config` shows (AE-5). */
+/** The server's version, which `/config` shows. [AE-5] */
 export const VERSION_SQL = "SELECT current_setting('server_version') AS version";
 
 /**
- * Whether the process holds its writer lock, as it knows it (DB-11): from startup's writer start on (`opened`), not
- * while a lost database connection is retried (the writer takes the lock again on its new session), never once it was
- * lost to another process (`writer-lock-lost`).
+ * Whether the process holds its writer lock, as it knows it. It does from startup's writer start on (`opened`), but not
+ * while a lost database connection is retried (the writer takes the lock again on its new session), and never once it
+ * was lost to another process (`writer-lock-lost`). [DB-11]
  */
 export function writerLockHeld(opened: boolean, status: Pick<ProcessStatus, "conditions" | "reason">): boolean {
   return (
@@ -258,9 +261,9 @@ export class ProcessAdmin {
   /**
    * Reads from the process's database, when no read runs, what may have changed: once the server's version, and after
    * a commit `core_chain.identity` while its anchor is not recorded and `core_digest.tables` (with `core-digest`); then
-   * publishes. Each is a read of its own, so one that fails (the database closing at the stop, a build without DT-5's
-   * table) leaves what it reads as last read, until the next commit — the version is not asked again — and the others
-   * are still read.
+   * publishes. Each is a read of its own, so one that fails (the database closing at the stop, a build without the
+   * digest table) leaves what it reads as last read, until the next commit (the version is not asked again), and the
+   * others are still read.
    */
   #readFacts(): void {
     const db = this.#db;

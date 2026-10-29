@@ -9,13 +9,17 @@ import { startContainer } from "../containers.js";
 import { POSTGRES_IMAGE } from "../postgres-image.js";
 
 /**
- * A PostgreSQL 18.6 server that serves TLS only, for `ssl`'s tests (task 4.5; CF-4, owner decisions Q182 B, Q183 A):
- * the repository's one image through Testcontainers (its `withSSL`, which hands the key to the server's user), with a
- * server certificate issued by a CA made when the test runs — the `openssl` command in a temporary directory, removed
- * once the server started, as `test/private/certificates.ts` makes the transport's: no key is ever committed. The
- * certificate names `DNS:localhost` only (not `127.0.0.1`), so a connection to the IP address fails `verify-full`'s
- * host name check. Its `pg_hba.conf` admits TCP connections over TLS only (`hostnossl … reject`), so a client that
- * sends no TLS request is refused (SQLSTATE 28000).
+ * A PostgreSQL 18.6 server that serves TLS only, for the tests of the `ssl` setting. [CF-4, Q182 B, Q183 A]
+ *
+ * - It runs the repository's one image through Testcontainers (its `withSSL`, which hands the key to the server's
+ *   user).
+ * - Its certificate is issued by a CA made when the test runs, with the `openssl` command in a temporary directory
+ *   that is removed once the server has started. This is how `test/private/certificates.ts` makes the transport's
+ *   certificates: no key is ever committed.
+ * - The certificate names `DNS:localhost` only (not `127.0.0.1`), so a connection to the IP address fails the host
+ *   name check of `verify-full`.
+ * - Its `pg_hba.conf` admits TCP connections over TLS only (`hostnossl … reject`), so a client that sends no TLS
+ *   request is refused (SQLSTATE 28000).
  */
 
 /** The server's `pg_hba.conf`: the socket for the image's own setup, TCP over TLS only. */

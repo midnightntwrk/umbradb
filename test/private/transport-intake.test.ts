@@ -9,13 +9,17 @@ import { launchPrivate, type PrivateSeen, startPublicCore } from "./builds.js";
 import { endedWithin, rawClient } from "./raw-client.js";
 
 /**
- * Block intake over the real process transport (task 14.2; PP-3, PP-4, PP-5; A114 `[FAULT]` with the transport itself,
- * not task 14.1's stand-in `./link.ts`): a private process with `coreTransport` is woken by the core's `committed`
- * messages and by every (re)connection only — no poll (14.1's 1 s poll is the wake-up only without a transport) —, and
- * on PGlite reads its public database through the core (`read` messages), on PostgreSQL directly (`publicDatabase`).
- * A proxy between the two (`TransportProxy`) drops the transport: every connection closed and every new one refused
- * while the public cursor advances 50 heights, the `committed` messages of those heights going nowhere; once it lets
- * connections through again, the private process reconnects (IN-10's back-off) and processes the 50 heights in order.
+ * Block intake over the real process transport, with the transport itself rather than the stand-in `./link.ts`.
+ * [A114 FAULT, PP-3, PP-4, PP-5]
+ * - A private process with `coreTransport` is woken only by the core's `committed` messages and by every
+ *   (re)connection, with no poll. The 1 s poll is the wake-up only without a transport.
+ * - On PGlite it reads its public database through the core (`read` messages); on PostgreSQL directly
+ *   (`publicDatabase`).
+ *
+ * A proxy between the two (`TransportProxy`) drops the transport: it closes every connection and refuses every new one
+ * while the public cursor advances 50 heights, so the `committed` messages of those heights go nowhere. Once it lets
+ * connections through again, the private process reconnects with its back-off and processes the 50 heights in order.
+ * [A114 FAULT, IN-10]
  */
 
 /** A TCP proxy to `target` that can drop every connection and refuse new ones (see the module comment). */
@@ -137,7 +141,7 @@ describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name (PP-
       await core.stop();
     }
     // Each hello gave the private cursor: S − 1 before the first commit — a private process with coreTransport connects
-    // at startup's chain check, which waits for its hello-ack to learn whether it is lockstep (task 14.3) —; then the
+    // at startup's chain check, which waits for its hello-ack to learn whether it is lockstep —; then the
     // height it had reached.
     const connects = core.lines.filter((line) => line.startsWith("transport: instance instance-1 connected at "));
     expect(connects[0]).toBe("transport: instance instance-1 connected at 0");

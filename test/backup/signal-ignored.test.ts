@@ -9,17 +9,18 @@ import { type Pausable, recorderModule, startPausable, writePausableConfig } fro
 import { listenerProblems, pacedNode, sigusr2Ignored, writeRunConfig } from "./signal-ignored-fixtures.js";
 
 /**
- * A175 `[CI]` (task 15.1c; BK-1 as amended, its scenario "SIGUSR2 to `umbradb run` without `backupOnSignal`"; owner
- * decision Q173 C): `umbradb run` — the bundled command, in a child process — on PGlite without `backupOnSignal`, sent
- * SIGUSR2 from outside while blocks commit (a tape node's chain answered slowly, so heights keep committing), logs one
- * line naming the signal and `backupOnSignal`, writes no file, keeps committing heights and exits 0 on SIGTERM
- * (`./signal-ignored-fixtures.ts`'s `sigusr2Ignored`). A process a host program starts with `startProcess` without
- * `backupOnSignal` adds no SIGUSR2 listener while it starts, runs or closes (`listenerProblems`), so Node.js's default or
- * the host's own handler applies; with `backupOnSignal` it adds one while it runs (task 15.1a), which shows the count
- * sees the process's listener. The negative controls are `./signal-ignored.negative-control.test.ts`.
+ * `umbradb run` — the bundled command, in a child process — on PGlite without `backupOnSignal`, sent SIGUSR2 from
+ * outside while blocks commit (a tape node's chain answered slowly, so heights keep committing), logs one line naming
+ * the signal and `backupOnSignal`, writes no file, keeps committing heights and exits 0 on SIGTERM
+ * (`./signal-ignored-fixtures.ts`'s `sigusr2Ignored`). [A175 CI, BK-1, Q173 C]
+ *
+ * A process a host program starts with `startProcess` without `backupOnSignal` adds no SIGUSR2 listener while it
+ * starts, runs or closes (`listenerProblems`), so Node.js's default or the host's own handler applies; with
+ * `backupOnSignal` it adds one while it runs, which shows the count sees the process's listener. The negative controls
+ * are `./signal-ignored.negative-control.test.ts`.
  */
 
-/** Each test waits on purpose for processes (task 0.5's notes): its own budget, for a loaded machine. */
+/** Each test waits on purpose for processes: its own budget, for a loaded machine. */
 const TEST_TIMEOUT_MS = 900_000;
 
 const PGLITE = BACKUP_BACKENDS[1] as BackupBackend;

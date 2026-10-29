@@ -12,17 +12,25 @@ import { launchPrivate, launchPublicCore, type PrivateProcess, type PrivateSeen,
 import { RetargetProxy } from "./relays.js";
 
 /**
- * A117 `[FAULT]`, the core's wait (task 14.3; PP-6, Q24; required test id `private.lockstep-waits-no-transaction`), on
- * PostgreSQL 18.6 and PGlite 0.5.10: a core listing a private instance in `lockstepInstances` waits before `BEGIN` of
- * each height h until the instance has committed h − 1 — with no transaction open (PostgreSQL's `pg_stat_activity`;
- * on PGlite, its one queue free: a read of the core's database is answered meanwhile) and the condition
- * `waiting-for-lockstep` naming the instance —, both while the instance was never seen since the core started and once
- * it is stopped; it resumes when the instance is back and reports, each on-fetch read of the instance at its block's
- * height exactly; and a core restarted while the instance is at the public cursor does not deadlock (it learns the
- * instance's height from its `hello`). Committed negative controls: a core that opens its block transaction before it
- * waits, and one that skips an instance not seen since its start, each fail the oracle. The report's hash check, the
- * behind-instance refusal and `needsLockstep` are `./lockstep-refusals.test.ts`'s, Q142's reread
- * `./lockstep-reads.test.ts`'s, the loop's own wait `test/runner/lockstep-wait.test.ts`'s.
+ * The core's wait for a lockstep instance, on PostgreSQL 18.6 and PGlite 0.5.10. A core listing a private instance in
+ * `lockstepInstances` waits before `BEGIN` of each height h until the instance has committed h − 1. While it waits:
+ * - no transaction is open (PostgreSQL's `pg_stat_activity`; on PGlite, its one queue is free, so a read of the core's
+ *   database is answered meanwhile);
+ * - the condition `waiting-for-lockstep` names the instance.
+ * [A117 FAULT, PP-6; required test id `private.lockstep-waits-no-transaction`]
+ *
+ * This holds both while the instance was never seen since the core started and once it is stopped. [Q24]
+ *
+ * The core resumes when the instance is back and reports, and each on-fetch read of the instance is at its block's
+ * height exactly. A core restarted while the instance is at the public cursor does not deadlock: it learns the
+ * instance's height from its `hello`. [A117 FAULT, PP-6]
+ *
+ * Committed negative controls: a core that opens its block transaction before it waits, and one that skips an instance
+ * not seen since its start, each fail the oracle. [A117 FAULT]
+ *
+ * Tested elsewhere: the report's hash check, the behind-instance refusal and `needsLockstep` in
+ * `./lockstep-refusals.test.ts`; the reread of public data in `./lockstep-reads.test.ts`; the loop's own wait in
+ * `test/runner/lockstep-wait.test.ts`. [Q142]
  */
 
 const LISTED = "lockstep-1";
@@ -104,7 +112,7 @@ interface ExpectedWait {
 const shown = (instances: readonly LockstepInstance[]): string =>
   instances.map((one) => `${one.instance} (connected ${one.connected}, at ${one.height}, refused ${one.refused})`).join(", ") || "none";
 
-/** A117's oracle for one wait (see the module comment): every problem, none when it holds. */
+/** The oracle for one wait (see the module comment): every problem, none when it holds. [A117 FAULT] */
 export function waitProblems(samples: readonly WaitSample[], expected: ExpectedWait): string[] {
   const problems: string[] = [];
   if (samples.length === 0) problems.push("no look at the core while it waited");
@@ -172,7 +180,7 @@ async function firstWait(backend: PrivateBackend, loop?: new (input: LoopInput) 
 /** The wait expected of a core at S = 1 listing {@link LISTED}, never seen. */
 const UNSEEN: ExpectedWait = { cursor: null, height: 1n, instance: LISTED, connected: false, heights: [null] };
 
-/** A117's run on `backend` (see the module comment): every problem found. */
+/** The wait scenario run on `backend` (see the module comment): every problem found. [A117 FAULT] */
 async function a117Problems(backend: PrivateBackend): Promise<string[]> {
   const publicDb = await backend.database("public");
   const privateDb = await backend.database("private");
@@ -194,7 +202,7 @@ async function a117Problems(backend: PrivateBackend): Promise<string[]> {
   try {
     proxy.retarget(await core.transportWithin(START_TIMEOUT_MS));
     await core.handle.started;
-    // Not seen since the core started: it waits at S (Q24).
+    // Not seen since the core started: it waits at S. [Q24]
     problems.push(...waitProblems(await sampleWait(core, publicDb, backend, 3n), UNSEEN));
     // In lockstep: each height commits once the instance committed the one before (its hello, then its reports).
     instance = launch();
@@ -226,7 +234,7 @@ async function a117Problems(backend: PrivateBackend): Promise<string[]> {
   const rows = await rowsIn(privateDb);
   const wanted = Array.from({ length: 8 }, (_, i) => [i + 1, Buffer.from(inMemoryBlock(BigInt(i + 1)).hash).toString("hex")]);
   if (JSON.stringify(rows) !== JSON.stringify(wanted)) problems.push(`the instance's rows are ${JSON.stringify(rows)}, not 1–8 with the public hashes`);
-  // Lockstep: each on-fetch read of public data at its block's height exactly, never above (PP-6).
+  // Lockstep: each on-fetch read of public data at its block's height exactly, never above. [PP-6]
   for (const call of seen.filter((one) => one.point === "on-fetch")) {
     if (call.readHeight !== call.height) problems.push(`on-fetch at ${call.height} read public data at ${call.readHeight}`);
   }
@@ -237,7 +245,7 @@ describe.each(PRIVATE_BACKENDS)("A117: the core waits for a lockstep instance on
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
-  // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy (task 18.4).
+  // The required id names one test (the gate refuses an id two tests carry): the PostgreSQL 18 copy.
   const requiredId = backend.kind === "postgres" ? "[[private.lockstep-waits-no-transaction]] " : "";
   it(
     `${requiredId}A117: a stopped lockstep instance makes the core wait before BEGIN with no ` +

@@ -13,23 +13,23 @@ import {
 } from "../../../browser/src/configuration.js";
 
 /**
- * The configuration the browser build's tests bundle into their page (task 16.1; A129–A132), and that the Node.js run
- * of A132 takes too: one module for both, so "the same configuration" is the same code. Imports nothing of Node.js or
- * Vitest (the page bundles it).
+ * The configuration the browser build's tests bundle into their page, and that the Node.js run of the equality check
+ * takes too: one module for both, so "the same configuration" is the same code. Imports nothing of Node.js or Vitest
+ * (the page bundles it). [A129–A132]
  *
- * Neither process's `core` entry sets the development opt-in: the browser build sets it on every `core` entry (BR-1),
- * and A132's Node.js run does what the build does (`withDevelopmentOptIn`).
+ * Neither process's `core` entry sets the development opt-in: the browser build sets it on every `core` entry, and the
+ * Node.js run does what the build does (`withDevelopmentOptIn`). [BR-1, A132]
  *
  * **The core** reads the tests' `custom` network (the tape's genesis hash, the page's `genesis` parameter; every
  * `spec_version` is ledger v9's) from the page's `node`, from S, with the core modules the page's `modules` parameter
  * lists (comma-separated; `core-chain-events,core-block-parsed,core-tx-results` unless given — `core-block-parsed`'s
  * parses run in the ledger worker) and the user module `probe`, which writes, at each height, the block's hash and a
  * `jsonb` document with integers beyond 2^53 (what the JSON reader must read without loss for equal contents hashes:
- * A132's negative control reads it with `JSON.parse`), and a `double precision` third of it in a table declared
- * `deterministic: false` (Q76: the contents hash names it only, so both runs must pass the schema plan's list), and
- * whose module API answers `GET /probe/:height` with that document. With `api=1` the module API answers on the core worker's channel (`listen.api`); with `private=1` the core
- * listens for private instances on the page's network (`listen.transport` `core:1`), and with `lockstep=1` it lists the
- * private instance `p1` as lockstep.
+ * the equality check's negative control reads it with `JSON.parse`), and a `double precision` third of it in a table
+ * declared `deterministic: false` (the contents hash names it only, so both runs must pass the schema plan's list), and
+ * whose module API answers `GET /probe/:height` with that document. With `api=1` the module API answers on the core
+ * worker's channel (`listen.api`); with `private=1` the core listens for private instances on the page's network
+ * (`listen.transport` `core:1`), and with `lockstep=1` it lists the private instance `p1` as lockstep. [A132, Q76]
  *
  * **The private instance `p1`** (with `private=1`) reads public data through the core's transport (`coreTransport`
  * `core:1`), from S, with the private module `shadow`, which stores each public block's hash as the core committed it.
@@ -38,7 +38,7 @@ import {
 /** The page's parameter values the configuration reads (each text). */
 const param = (run: BrowserRun, name: string): string | undefined => run.params[name];
 
-/** Every `spec_version` is ledger v9's (LG-3: a `custom` network gives its own rows). */
+/** Every `spec_version` is ledger v9's (a `custom` network gives its own rows). [LG-3] */
 const LEDGER_TABLE = { rows: [{ specVersionMin: 0, specVersionMax: 4_294_967_295, ledger: "v9" }] };
 
 /** The core modules a run may enable. */

@@ -10,13 +10,12 @@ import {
 } from "./documents.js";
 
 /**
- * Tasks 17.4a and 17.4b (`tasks.md` 17.4a, 17.4b; A171 `[STATIC]`, owner decisions Q169, Q170 C, Q171 A): 0.9.5's
- * documents are gone from the tree, `CHANGELOG.md` has no preamble naming them and no planned `1.0.0` entry,
- * `package.json`'s `description` describes the indexer, no Markdown link in the tree points at a missing file,
- * `AGENTS.md` holds the 1.0.0 guideline's rules still in force and names nothing deleted, and
+ * The document cleanup: 0.9.5's documents are gone from the tree, `CHANGELOG.md` has no preamble naming them and no
+ * planned `1.0.0` entry, `package.json`'s `description` describes the indexer, no Markdown link in the tree points at a
+ * missing file, `AGENTS.md` holds the 1.0.0 guideline's rules still in force and names nothing deleted, and
  * `Formal/STORAGE_ALGEBRA.md` states W1 and T5 and no retired law. The checks are `./documents.ts`'s, on the tree as
  * git lists it (tracked and untracked files that exist, ignored ones left out). Each has committed negative controls
- * below; the last ones put back what tasks 17.4a and 17.4b removed.
+ * below; the last ones put back what the cleanup removed. [A171 STATIC, Q169, Q170 C, Q171 A]
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));

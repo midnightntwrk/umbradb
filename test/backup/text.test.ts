@@ -7,10 +7,10 @@ import { dumpLines } from "../../src/backup/restore.js";
 import { blobText, firstLineOf, linesAfterFirst } from "../../src/backup/text.js";
 
 /**
- * A backup's text as the browser page's restore reads it (task 16.1's A131 half; BK-5; `src/backup/text.ts`): a picked
- * file's `Blob` gives the same first line and the same lines after it as the file on disk does through `node:fs`
- * (`firstLine`, `dumpLines`), and the line splitting both share keeps a carriage return, gives a last line without a
- * feed, and joins lines and multi-byte characters split across reads.
+ * A backup's text as the browser page's restore reads it (`src/backup/text.ts`): a picked file's `Blob` gives the same
+ * first line and the same lines after it as the file on disk does through `node:fs` (`firstLine`, `dumpLines`), and the
+ * line splitting both share keeps a carriage return, gives a last line without a feed, and joins lines and multi-byte
+ * characters split across reads. [A131, BK-5]
  */
 
 const dir = mkdtempSync(join(tmpdir(), "umbradb-backup-text-"));

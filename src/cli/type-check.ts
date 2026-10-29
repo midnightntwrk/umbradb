@@ -1,27 +1,33 @@
 /**
- * The type check of `umbradb config check` (`openspec/changes/core-arch/specs/configuration/spec.md` CF-10, `design.md`
- * §7; decision record Q44): the configuration file and every local TypeScript file it imports are checked by the
- * TypeScript compiler with `noEmit` — the compiler the package depends on (`typescript`, a runtime dependency, loaded
- * only when a file is checked) — and each diagnostic is a finding at `file:line:column`.
+ * The type check of `umbradb config check`. The configuration file and every local TypeScript file it imports are
+ * checked by the TypeScript compiler with `noEmit`, and each diagnostic is a finding at `file:line:column`. The
+ * compiler is the one the package depends on (`typescript`, a runtime dependency, loaded only when a file is checked).
+ * [CF-10, Q44; design §7]
  *
- * **The compiler options** ({@link configCompilerOptions}) are fixed, not the operator's `tsconfig.json`, and say how
- * the process loads the file (CF-1): Node.js ≥ 24 imports it as an ES module through its type stripping, so the
- * options are those of a Node.js module (`module` and `moduleResolution` `NodeNext`, `allowImportingTsExtensions`, as
- * Node.js runs `import "./x.ts"`), `erasableSyntaxOnly` (the compiler refuses an `enum`, a `namespace` or a parameter
- * property, which type stripping cannot erase), `verbatimModuleSyntax` (an import used only as a type must say
- * `import type`, since type stripping removes only those), `strict`, and `skipLibCheck` (a package's declaration files
- * are its own). The types in scope are what the file's directory sees, as for `tsc` run there: the program's current
- * directory is the file's, so `node_modules/@types` (for `process.env`, `@types/node`) is looked up from it.
+ * **The compiler options** ({@link configCompilerOptions}) are fixed, not the operator's `tsconfig.json`, and match
+ * how the process loads the file: Node.js ≥ 24 imports it as an ES module through its type stripping. [CF-1]
+ * - `module` and `moduleResolution` `NodeNext`, and `allowImportingTsExtensions`: the options of a Node.js module, as
+ *   Node.js runs `import "./x.ts"`.
+ * - `erasableSyntaxOnly`: the compiler refuses an `enum`, a `namespace` or a parameter property, which type stripping
+ *   cannot erase.
+ * - `verbatimModuleSyntax`: an import used only as a type must say `import type`, since type stripping removes only
+ *   those.
+ * - `strict`, and `skipLibCheck` (a package's declaration files are its own).
+ *
+ * The types in scope are what the file's directory sees, as for `tsc` run there: the program's current directory is
+ * the file's, so `node_modules/@types` (for `process.env`, `@types/node`) is looked up from it.
  *
  * **ES module or CommonJS.** The compiler decides a `.ts` file's format from the nearest `package.json`: `"type":
- * "module"` an ES module, otherwise CommonJS. Node.js does the same for `"module"` and `"commonjs"`, but where the
- * nearest `package.json` has no `type` (or there is none) it detects the format from the syntax, and a configuration —
- * which has `export default` — loads as an ES module. So such a file, outside `node_modules`, is given to the compiler
- * as an ES module; without that the compiler would refuse its imports (TS1295, TS1479) though the process loads it.
+ * "module"` means an ES module, anything else CommonJS. Node.js does the same for `"module"` and `"commonjs"`. But where
+ * the nearest `package.json` has no `type` (or there is none), Node.js detects the format from the syntax, and a
+ * configuration, which has `export default`, loads as an ES module. So such a file, outside `node_modules`, is given to
+ * the compiler as an ES module; otherwise the compiler would refuse its imports (TS1295, TS1479) though the process
+ * loads it.
  *
- * Diagnostics of files from packages (`node_modules`) are left out; every other file's are findings — a local
- * declaration file's syntax too, its types being unchecked (`skipLibCheck`) —, in the compiler's order (by file, then
- * position), with the global ones — of no file, such as a broken `@types` package in scope — first, at `(compiler)`.
+ * Diagnostics of files from packages (`node_modules`) are left out. Every other file's diagnostics are findings,
+ * including a local declaration file's syntax (its types are unchecked, `skipLibCheck`). They come in the compiler's
+ * order (by file, then position), with the global ones (of no file, such as a broken `@types` package in scope) first,
+ * at `(compiler)`.
  */
 
 import { readFileSync, statSync } from "node:fs";
@@ -95,7 +101,7 @@ function packageType(directory: string, cache: Map<string, string | null>): stri
 /**
  * Whether Node.js loads `fileName` as an ES module where the compiler reads it as CommonJS (see the module comment).
  * Files under `node_modules` are no exception: Node.js strips no types there, so whatever the compiler reads them as,
- * the loader refuses such a file (CF-1's `load-failed`).
+ * the loader refuses such a file with `load-failed`. [CF-1]
  */
 function detectedAsModule(fileName: string, cache: Map<string, string | null>): boolean {
   if (!fileName.endsWith(".ts") || fileName.endsWith(".d.ts")) return false;

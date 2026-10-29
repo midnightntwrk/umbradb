@@ -4,16 +4,18 @@ import type { NodeHeader } from "../../src/node/decode.js";
 import type { Json, TapeRecord } from "../../tools/tape/index.js";
 
 /**
- * Synthetic chains and tapes for `core-block-fetch`'s tests (task 10.3): blocks, metadata and node answers in the shapes
- * a Midnight node gives them — the header and block JSON of `chain_getHeader` and `chain_getBlock`
- * (`test/node/fixtures/mainnet-answers.json`), the runtime version of `state_getRuntimeVersion`, metadata V14 as
- * `state_getMetadata` answers it —, and the tape records (TT-1) a tape node serves them with (`tools/tape/`). No real
- * node: task 0.3's real tapes replace these (task 18.2).
+ * Synthetic chains and tapes for `core-block-fetch`'s tests:
+ * - blocks, metadata and node answers in the shapes a Midnight node gives them: the header and block JSON of
+ *   `chain_getHeader` and `chain_getBlock` (`test/node/fixtures/mainnet-answers.json`), the runtime version of
+ *   `state_getRuntimeVersion`, and metadata V14 as `state_getMetadata` answers it;
+ * - the tape records a tape node serves them with (`tools/tape/`) [TT-1].
+ *
+ * No real node is involved: the recorded real tapes replace these.
  *
  * **The metadata** is real-format V14 (`frame-metadata`'s `RuntimeMetadataPrefixed` over `scale-info`'s portable
- * registry) with only the pallets a test names; {@link MAINNET_PALLETS} gives the indices and calls of the runtime that
- * built mainnet block 3,174,332 (read from the Midnight node's own metadata files, task 10.3's probe: `Timestamp` 1 with
- * `set` 0, `Midnight` 5 with `send_mn_transaction` 0, `CNightObservation` 13, `FederatedAuthorityObservation` 45).
+ * registry) with only the pallets a test names. {@link MAINNET_PALLETS} gives the indices and calls of the runtime that
+ * built mainnet block 3,174,332, read from the Midnight node's own metadata files: `Timestamp` 1 with `set` 0,
+ * `Midnight` 5 with `send_mn_transaction` 0, `CNightObservation` 13, `FederatedAuthorityObservation` 45.
  *
  * **A block** has the real header items of a mainnet header (an Aura pre-runtime item) and the `MNSV` item of its
  * runtime, its body a `Timestamp::set` inherent (version 5, bare) and the ledger transactions given (version 4,

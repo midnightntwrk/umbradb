@@ -11,11 +11,13 @@ import { callTransaction, cellValue, contractFixture, hex, NETWORK_ID, RAW, T0, 
 import type { TestLoaderData } from "./fixtures/ledger-test-loader.js";
 import { CALL_ARGS_TASK, type CallArgsItem, callArgsModule, FAULT_AT, NATIVE_LEAK_TASK, STATE_BEFORE_TASK, THROWING_TASK } from "./fixtures/task-modules.js";
 
-// Task 12.6 of `openspec/changes/core-arch` (specs/ledger LG-7, LG-17; design.md §5.5; Q49): ledger tasks — a module's
-// functions the ledger worker runs for each block with the native parsed objects of the block's one parse,
-// `rawPackages()` and, when declared, the state before the block — in the engine (`LedgerEngine.tasks`), in a worker
-// thread started from UmbraDB's entry (the host's modules named by `modules`) or a host's own (`runLedgerWorker`), and
-// on the main thread (`withLedgerTasks`: the points that run them and put their results as the module's items).
+// Ledger tasks: a module's functions the ledger worker runs for each block, with the native parsed objects of the
+// block's one parse, `rawPackages()` and, when declared, the state before the block. They are tested:
+// - in the engine (`LedgerEngine.tasks`);
+// - in a worker thread started from UmbraDB's entry (the host's modules named by `modules`) or from a host's own
+//   (`runLedgerWorker`);
+// - on the main thread (`withLedgerTasks`: the points that run them and put their results as the module's items).
+// [LG-7, LG-17, Q49; design §5.5]
 
 const LONG = 240_000;
 const LOADER = new URL("./fixtures/ledger-test-loader.ts", import.meta.url);
@@ -136,10 +138,10 @@ describe("ledger tasks in the engine (task 12.6; LG-17)", () => {
     expect(leaked.name).toBe(LEDGER_TASK_FAILED);
     expect(leaked.message).toBe(
       "the ledger task leaked-object of native-leak at block 3 returned an object of the class LedgerState at $.state: a task " +
-        "returns structured-cloneable plain data, never a ledger package's object (Q49) (LG-17)",
+        "returns structured-cloneable plain data, never a ledger package's object",
     );
     const thrown = await failed(run(FAULT_AT, 1, "task-throws", ["thrown-result"]));
-    expect(thrown.message).toBe("the ledger task thrown-result of task-throws at block 3 threw: the throwing task gives up at 3 (LG-17)");
+    expect(thrown.message).toBe("the ledger task thrown-result of task-throws at block 3 threw: the throwing task gives up at 3");
     expect((await failed(run(FAULT_AT, 1, "unknown-module", ["x"]))).message).toMatch(/^the ledger task x of unknown-module at block 3 is not one the ledger worker has/);
     expect((await failed(run(FAULT_AT, 1, "call-args", ["other"]))).name).toBe(LEDGER_TASK_FAILED);
     // A block whose parse the worker does not keep, or of another size, is refused before any task runs.
@@ -163,7 +165,7 @@ describe("ledger tasks in the engine (task 12.6; LG-17)", () => {
       load: async () => ({ ledger: "v9", parseTransaction: () => ({ index: 0, hash: new Uint8Array(32), kind: "regular", size: 1, bytes: Uint8Array.of(1), segments: [{ segment: 1, calls: [{ address: new Date(0) }], deploys: [] }] }) }) as unknown as LedgerPackage,
     });
     await expect(native.parse("v9", at(1n), [Uint8Array.of(1)])).rejects.toThrow(
-      "the v9 adapter parsed block 1 into an object of the class Date at $[0].segments[0].calls[0].address, not plain data (LG-7)",
+      "the v9 adapter parsed block 1 into an object of the class Date at $[0].segments[0].calls[0].address, not plain data",
     );
   });
 });

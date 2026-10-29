@@ -32,13 +32,16 @@ import {
 } from "./process-harness.js";
 
 /**
- * Process items (task 5.2a; MD-7, CORE-ARCH §4.10's `ProcessContext`): one process context per module, the same object
- * in its `on-start-db` (through `startDatabase`) and at every point; `publish` only from the module's own `on-start-db`,
- * once per item, only an item the module declares with the `process` lifetime — any other call fails the callback,
- * even when the module catches the refusal; the items visible in `items` to the modules requiring them (and to their
- * providers) from `on-start-api` on; and `process-item-missing` when every `on-start-db` has run and an item a module
- * of the process requires was not published. A74 runs through the runner's startup and loop on both backends; the
- * rules themselves are also tested without a database.
+ * Process items and the `ProcessContext`:
+ * - one process context per module, the same object in its `on-start-db` (through `startDatabase`) and at every point;
+ * - `publish` only from the module's own `on-start-db`, once per item, only an item the module declares with the
+ *   `process` lifetime; any other call fails the callback, even when the module catches the refusal;
+ * - the items visible in `items` to the modules requiring them (and to their providers) from `on-start-api` on;
+ * - `process-item-missing` when every `on-start-db` has run and an item a module of the process requires was not
+ *   published. [MD-7; CORE-ARCH §4.10]
+ *
+ * The acceptance case runs through the runner's startup and loop on both backends; the rules themselves are also
+ * tested without a database. [A74]
  */
 
 const CLIENT: ItemDeclaration = { name: "client", lifetimes: ["process"] };
@@ -201,7 +204,7 @@ describe("process contexts (MD-7), without a database", () => {
       expect(error).toBeInstanceOf(Error);
       expect((error as Error).message).toBe(
         "provider published the process item client twice: a process item is published once, from its provider's " +
-          "on-start-db (MD-7)",
+          "on-start-db",
       );
       expect(contexts.refusalOf("provider")).toBe(error);
       expect(contexts.refusalOf("consumer")).toBeUndefined();
@@ -224,7 +227,7 @@ describe("process contexts (MD-7), without a database", () => {
     const error = await rejection(setUp(contexts, graph));
     expect((error as Error).message).toBe(
       "provider published the process item client, which other published already: a process item is published once, " +
-        "from its provider's on-start-db (MD-7)",
+        "from its provider's on-start-db",
     );
   });
 
@@ -250,7 +253,7 @@ describe("process contexts (MD-7), without a database", () => {
       const error = await rejection(setUp(contexts, graph));
       expect((error as Error).message).toBe(
         `lone published the item ${item}, which it does not declare with the process lifetime: a module publishes ` +
-          "only the process items it declares (MD-7)",
+          "only the process items it declares",
       );
     }
   });
@@ -274,7 +277,7 @@ describe("process contexts (MD-7), without a database", () => {
     const error = await rejection(setUp(contexts, graph));
     expect((error as Error).message).toBe(
       "provider published the process item late outside its on-start-db callback: a process item is published once, " +
-        "from its provider's on-start-db (MD-7)",
+        "from its provider's on-start-db",
     );
     // The refusal is the provider's, which called publish; the consumer's callback failed with it.
     expect(contexts.refusalOf("provider")).toBe(error);
@@ -285,7 +288,7 @@ describe("process contexts (MD-7), without a database", () => {
     sealed.seal();
     expect((thrown(() => sealed.of("provider").publish("late", 1)) as Error).message).toBe(
       "provider published the process item late after startup's on-start-db callbacks ran: a process item is " +
-        "published once, from its provider's on-start-db (MD-7)",
+        "published once, from its provider's on-start-db",
     );
   });
 
@@ -318,7 +321,7 @@ describe("process contexts (MD-7), without a database", () => {
     expect((error as UmbraError).details).toEqual({ item: "client", modules: ["also", "consumer"], providers: ["provider"] });
     expect((error as UmbraError).message).toBe(
       "the process item client, which also and consumer require, was not published by the on-start-db of its " +
-        "provider provider (MD-7)",
+        "provider provider",
     );
     expect(contexts.sealed).toBe(false);
   });
@@ -347,7 +350,7 @@ describe("process contexts (MD-7), without a database", () => {
     expect(missing.details).toEqual({ item: "client", modules: ["consumer"], providers: ["provider", "twin"] });
     expect(missing.message).toBe(
       "the process item client, which consumer requires, was not published by the on-start-db of its providers " +
-        "provider and twin (MD-7)",
+        "provider and twin",
     );
   });
 
@@ -453,7 +456,7 @@ describe("process contexts (MD-7), without a database", () => {
   });
 });
 
-// ── A74 through the runner's startup and loop, on both backends ──────────────────────────────────────────────────
+// ── process items through the runner's startup and loop, on both backends [A74] ───────────────────────────────────
 
 /** A recorder of what `consumer` sees of `client`, by point, and the contexts it was given. */
 function watching(): { readonly seen: [string, unknown][]; readonly contexts: Set<ProcessContext>; readonly module: ModuleDeclaration } {
@@ -509,8 +512,8 @@ function latePublisher(point: "on-compute" | "on-after-db-write" | "on-start-api
 }
 
 /**
- * A74's oracle (MD-7), through the runner's startup and loop on `backend`, for contexts of class `Contexts`: the
- * problems found — none for the real contexts.
+ * The process items' oracle, through the runner's startup and loop on `backend`, for contexts of class `Contexts`: the
+ * problems found, none for the real contexts. [A74, MD-7]
  */
 async function a74Problems(
   database: () => Promise<{ readonly db: Database }>,

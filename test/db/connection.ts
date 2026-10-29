@@ -2,10 +2,12 @@ import type { PostgresParts } from "../../src/config/database-parts.js";
 import type { PostgresConnection } from "../../src/db/postgres.js";
 
 /**
- * The tests' PostgreSQL servers as the `database` setting's parts (task 4.5; CF-4, owner decision Q167 A): a
- * Testcontainers server hands out a URL (`getConnectionUri()`), which the tests' own plain driver connections still
- * use, while the database API and the configuration take parts. The test servers serve no TLS, so `ssl` is `disable`
- * whatever the host (a remote Docker host's name would otherwise default to `require`, Q182 B).
+ * The tests' PostgreSQL servers as the `database` setting's parts. A Testcontainers server hands out a URL
+ * (`getConnectionUri()`), which the tests' own plain driver connections still use, while the database API and the
+ * configuration take parts. [CF-4, Q167 A]
+ *
+ * The test servers serve no TLS, so `ssl` is `disable` whatever the host; a remote Docker host's name would otherwise
+ * default to `require`. [Q182 B]
  */
 
 /** The parts of the PostgreSQL URL `url` (`postgres://user:password@host:port/name`), `ssl` `disable`. */

@@ -22,11 +22,14 @@ import {
 } from "./admin-harness.js";
 
 /**
- * A62 (task 8.1; AE-1, Q70) through the process on both backends: the four endpoints answer on the admin listener —
- * a worker thread of its own, answering from the snapshot the runner publishes, never reading the database — and every
- * other method and path answers 404, a module's own route among them (it answers on the module API listener only);
- * while a callback runs a 10 s synchronous loop on the main thread, and while a block transaction holds the database
- * for 5 s (on PGlite, its one queue), each endpoint answers within 1 s.
+ * The admin endpoints through the process, on both backends:
+ * - The four endpoints answer on the admin listener: a worker thread of its own, answering from the snapshot the runner
+ *   publishes, never reading the database.
+ * - Every other method and path answers 404, a module's own route among them (it answers on the module API listener
+ *   only). [Q70]
+ * - While a callback runs a 10 s synchronous loop on the main thread, and while a block transaction holds the database
+ *   for 5 s (on PGlite, its one queue), each endpoint answers within 1 s.
+ * [A62, AE-1]
  *
  * **How the time is measured, so that load cannot fake a pass or a failure:** the prober (`prober.mjs`) is a worker
  * thread of the test's own, so neither hold delays it; it requests the four endpoints in turn every 150 ms and times
@@ -44,7 +47,7 @@ import {
  * module's path fails the 404 case.
  */
 
-/** The statuses each endpoint may answer during A62's holds: live and ready, the process up and processing. */
+/** The statuses each endpoint may answer during the holds: live and ready, the process up and processing. [A62] */
 const DURING: Readonly<Record<string, readonly number[]>> = {
   "/health/live": [200],
   "/health/ready": [200, 503],
@@ -74,7 +77,7 @@ function busy(hold: Hold, ms: number): ModuleDeclaration {
         hold.start = process.hrtime.bigint();
         const until = hold.start + BigInt(ms) * 1_000_000n;
         while (process.hrtime.bigint() < until) {
-          // A callback that blocks the main thread (AE-2's scenario): nothing else of this thread runs meanwhile.
+          // A callback that blocks the main thread: nothing else of this thread runs meanwhile. [AE-2]
         }
         hold.end = process.hrtime.bigint();
       },
@@ -235,7 +238,7 @@ describe.each(PROCESS_BACKENDS)("A62: the admin endpoints on $name", (backend) =
       id: "m",
       endpoints: [{ path: "/m/rows", answer: () => ({ status: 200, body: { height: null } }) }],
     };
-    // The guard refuses it: only backbone parts provide admin endpoints (Q70).
+    // The guard refuses it: only backbone parts provide admin endpoints. [Q70]
     expect(() => adminRoutes([...ADMIN_PARTS, leaking])).toThrow(/m is not a backbone part/);
     // A route table built past the guard serves it, and the oracle sees it.
     const routes = new Map([...adminRoutes(ADMIN_PARTS), ["/m/rows", leaking.endpoints[0] as AdminPart["endpoints"][number]]]);

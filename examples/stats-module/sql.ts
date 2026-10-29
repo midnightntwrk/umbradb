@@ -1,11 +1,12 @@
 /**
  * The SQL of `stats-module` (`./stats-module.ts`): its migrations, the statements it writes with, and the queries its
- * API serves. Every name is written with its schema: UmbraDB sets no `search_path` (`docs/module-guide.md` §2.2).
+ * API serves. Every name is written with its schema: UmbraDB sets no `search_path`.
+ * [docs/module-guide.md §2.2]
  */
 
 import type { BlockWriteHandle, Migration, ReadHandle } from "umbradb";
 
-/** The module's table, created once and changed only by a new migration at the end (§2.2). */
+/** The module's table, created once and changed only by a new migration at the end. [docs/module-guide.md §2.2] */
 export const migrations: Migration[] = [
   {
     id: "001",

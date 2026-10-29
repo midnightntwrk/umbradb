@@ -1,9 +1,13 @@
 /**
- * The `umbradb` command (`openspec/changes/core-arch/specs/library-surface/spec.md` LS-6, `design.md` §1, §12): its
- * commands and usage (`./command.ts`), `config check` (`./config-check.ts`, CF-10) with its type check
- * (`./type-check.ts`) and its read-only database read (`./database.ts`), and the modules the command's build carries
- * (`./build-modules.ts`). The `bin` entry is `./main.ts`. None of it is `design.md` §12's exported surface (task 17.3
- * decides; a host program with user modules would call `configCheck` with its declarations).
+ * The `umbradb` command. [LS-6; design §1, §12]
+ * - Its commands and usage: `./command.ts`.
+ * - `config check`: `./config-check.ts`, with its type check (`./type-check.ts`) and its read-only database read
+ *   (`./database.ts`) [CF-10].
+ * - The modules the command's build carries: `./build-modules.ts`.
+ * - The `bin` entry: `./main.ts`.
+ *
+ * None of it is part of the package's exported surface; a host program with user modules would call `configCheck` with
+ * its declarations. [design §12]
  */
 
 export * from "./build-modules.js";

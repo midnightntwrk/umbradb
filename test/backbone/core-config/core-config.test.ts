@@ -31,12 +31,20 @@ import { entryOf, loggingModule } from "../../runner/process-build.js";
 import { TEST_LEDGER_TABLE } from "../../private/builds.js";
 
 /**
- * The backbone part `core-config` (task 8.4; AE-1, AE-5, AE-6; CORE-ARCH §4.11, §4.18; Q70, Q102): its declaration — a
- * backbone part with no points and no items, after `core-status` in RN-3's order and in the command's build —, its
- * endpoint (the published configuration), what the runner's side builds for it (`configOf`: the process's `core`
- * revision, the entries in effect, the configuration history as recorded, the parts with their declarations without
- * callbacks, the chain identity, the ledger table with the build's package identities, the database, the build), and
- * A140 for it. A66 (its JSON schema) is `./config-schema.test.ts`, A29 `./secrets.test.ts`.
+ * The backbone part `core-config`. [CORE-ARCH §4.11, §4.18; Q70, Q102]
+ *
+ * This file tests:
+ * - its declaration: a backbone part with no points and no items, after `core-status` in the fixed backbone order and
+ *   in the command's build [RN-3];
+ * - its endpoint, the published configuration;
+ * - what the runner's side builds for it (`configOf`): the process's `core` revision, the entries in effect, the
+ *   configuration history as recorded, the parts with their declarations without callbacks, the chain identity, the
+ *   ledger table with the build's package identities, the database, and the build [AE-1, AE-5, AE-6];
+ * - that the admin route table takes `/config` from this part, whose code and tests sit in its own folder [A140].
+ *
+ * Other files test:
+ * - its JSON schema: `./config-schema.test.ts` [A66];
+ * - its redaction of secrets: `./secrets.test.ts` [A29].
  */
 
 /** A password in the `database` parts and in a module's URL setting: neither may be shown. */
@@ -54,7 +62,7 @@ const DATABASE = {
 /** The parts of a PostgreSQL database no server answers (port 9), with the password. */
 const UNREACHABLE = { ...DATABASE, host: "127.0.0.1", port: 9, name: "umbradb", ssl: "disable" } as const;
 
-/** `DATABASE` as `/config` shows it (CF-4, Q167 A): every part but the password. */
+/** `DATABASE` as `/config` shows it: every part but the password. [CF-4, Q167 A] */
 const DATABASE_SHOWN = { ...DATABASE, password: "[redacted]" };
 
 /** Module `m`: a `data` setting `mode`, a `secret` one `apiKey`, a `data` URL `feed`, one table; `version` given. */
@@ -146,7 +154,7 @@ describe("configOf: what /config shows (AE-5), every secret redacted (AE-6)", ()
     expect(shown.chain).toEqual({ network: "custom", genesisHash: ADMIN_GENESIS, start: "1", anchorHash: null });
     expect(shown.ledger).toEqual({ table: { rows: TEST_LEDGER_TABLE.rows, pins: [] }, packages: buildCoreVersion().ledgers });
     expect(shown.database).toEqual({ backend: "postgres", version: null, writerLock: false });
-    // The build's version and no commit (AE-5 as amended by Q134 D): a running build does not know its commit.
+    // The build's version and no commit: a running build does not know its commit. [AE-5, Q134 D]
     expect(shown.build).toEqual({ umbradb: UMBRADB_VERSION });
     expect(JSON.stringify(shown)).not.toContain(PASSWORD);
     expect(configOf({ redactor: configRedactor(config), checked: config, core: config.entries[0] as never, opened: null }, true).database?.writerLock).toBe(true);
@@ -363,8 +371,8 @@ describe("A140 for /config: core-config's, from its own folder, its tests beside
   });
 
   it("a configuration refused by its validation serves no /config (the process ends); one past the validation answers with its configuration redacted", async () => {
-    // A refusal of the configuration itself ends the process before any admin listener opens (task 8.1b, Q137 B):
-    // nothing is asked of the admin starter, and the process closes by itself.
+    // A refusal of the configuration itself ends the process before any admin listener opens: nothing is asked of the
+    // admin starter, and the process closes by itself. [Q137 B]
     const early = startWithAdmin({ database: UNREACHABLE, extra: { tipCap: "many" } });
     await expect(early.handle.started).rejects.toMatchObject({ code: "invalid-configuration" });
     await early.handle.closed;

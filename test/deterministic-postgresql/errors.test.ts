@@ -10,12 +10,15 @@ import {
 } from "../../src/deterministic-postgresql/index.js";
 
 /**
- * The errors the component's rules throw (task 2.2a, decision record Q79): `UmbraError`, defined in the component, with
- * the code and the details DB-2 and DB-13 give them — output the mapping cannot read is `database-error` with `reason:
- * unreadable-result` and the type it was read as; a value the parameter texts cannot send is `invalid-parameter` with
- * its index; neither is retryable. Written after the mutation pass of task 2.2a found that no test asserted the code of
- * unreadable output, and that the suite did not check the class's own rules (`../db/errors.test.ts` did, through
- * `src/db/errors.ts`'s re-export).
+ * The errors the component's rules throw: `UmbraError`, defined in the component, with its code and details.
+ * - Output the mapping cannot read is `database-error` with `reason: unreadable-result` and the type it was read as.
+ *   [DB-2, DB-13]
+ * - A value the parameter texts cannot send is `invalid-parameter` with its index. [DB-2, DB-13]
+ * - Neither is retryable. [DB-13]
+ *
+ * Mutation testing found that no test asserted the code of unreadable output, and that this suite did not check the
+ * class's own rules (`../db/errors.test.ts` did, through `src/db/errors.ts`'s re-export); these tests close both gaps.
+ * [Q79]
  */
 
 const oid = (name: string): number => (RESULT_TYPES.find((type) => type.name === name) as { oid: number }).oid;

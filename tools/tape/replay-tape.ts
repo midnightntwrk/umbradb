@@ -1,8 +1,8 @@
 /**
- * The replay of a whole tape through the node client (task 0.3's acceptance, "each tape replays against the tape
- * node"): `src/node/`'s `NodeClient` sends every call record's call as recorded — so each recorded spelling is one the
- * client sends unchanged — to a tape node serving the tape (or to `url`), and must receive the record's answer (for an
- * error record, that error's code and message); then it makes both head subscriptions and must receive every recorded
+ * The replay of a whole tape through the node client, which shows that each tape replays against the tape node:
+ * `src/node/`'s `NodeClient` sends every call record's call as recorded — so each recorded spelling is one the client
+ * sends unchanged — to a tape node serving the tape (or to `url`), and must receive the record's answer (for an error
+ * record, that error's code and message); then it makes both head subscriptions and must receive every recorded
  * notification of each, in order. Against a tape node, every request must have been answered from its record: none
  * `not-on-tape`, `repeated` or a fault. Each difference is a sentence naming the record's line.
  */
@@ -82,7 +82,7 @@ export async function replayTape(options: ReplayTapeOptions): Promise<TapeReplay
         calls += 1;
         const where = `line ${line}: ${record.method} ${shown(record.params)}`;
         if (!isNodeCallMethod(record.method)) {
-          differences.push({ line, text: `${where} is not a call the node client makes (IN-8)` });
+          differences.push({ line, text: `${where} is not a call the node client makes` });
           continue;
         }
         try {

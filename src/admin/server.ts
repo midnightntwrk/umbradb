@@ -1,10 +1,10 @@
 /**
- * The admin listener in a worker thread of its own (`openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-1;
- * `design.md` §1; CORE-ARCH §4.18): {@link startAdminServer} starts the thread (`./worker.ts`, which runs
- * `./serve.ts`) on `listen.admin` — parsed by the module API listener's `parseAddress`, the one thing the two listeners
- * share (task 5.2a) — with the heartbeat's shared memory and the first snapshot, and resolves once it listens.
- * {@link AdminServer.publish} sends it each new snapshot; {@link AdminServer.close} ends its listener, then its thread,
- * so nothing of it outlives the process's `stop()`: a thread cannot outlive its process in any case.
+ * The admin listener in a worker thread of its own. {@link startAdminServer} starts the thread (`./worker.ts`, which
+ * runs `./serve.ts`) on `listen.admin`, with the heartbeat's shared memory and the first snapshot, and resolves once it
+ * listens. The address is parsed by the module API listener's `parseAddress`, the one thing the two listeners share.
+ * {@link AdminServer.publish} sends the thread each new snapshot. {@link AdminServer.close} ends its listener, then
+ * its thread, so nothing of it outlives the process's `stop()` (a thread cannot outlive its process in any case).
+ * [AE-1; CORE-ARCH §4.18; design §1]
  *
  * **The thread's entry** ({@link workerEntry}): beside a build, the compiled `worker.js`; from the TypeScript sources
  * (development, the tests), `worker.ts` through Node.js's type stripping, with a resolve hook that maps the sources'
@@ -22,7 +22,7 @@ export const ADMIN_CLOSE_TIMEOUT_MS = 2_000;
 
 /** What starting an admin listener takes. */
 export interface AdminStartOptions {
-  /** `listen.admin` (CF-4): `host:port`. */
+  /** `listen.admin`: `host:port`. [CF-4] */
   readonly address: string;
   /** The heartbeat's shared memory (`../runner/heartbeat.ts`). */
   readonly beat: SharedArrayBuffer;

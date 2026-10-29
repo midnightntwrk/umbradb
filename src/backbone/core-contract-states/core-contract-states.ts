@@ -1,25 +1,28 @@
 /**
- * The core module `core-contract-states` (`openspec/changes/core-arch/specs/contract-data/spec.md` CC-1,
- * `specs/ledger/spec.md` LG-13; `design.md` §5.4, §10; CORE-ARCH §4.11; decision record Q23, Q37, Q143; task 13.1): for
- * every contract a block touched, one row of `core_contract_states.states` keyed by `(contract_address, height)` with the
- * key of the contract's state after the block and the key of its zswap state (its filtered view of the shielded
- * commitment tree), both persisted and never released (LG-13), so each loads from the stored nodes long after the
- * ledger states holding it were released and swept. Off by default; it cannot start mid-chain, as the ledger state it
- * reads cannot (LG-16).
+ * The core module `core-contract-states`. For every contract a block touched it stores one row of
+ * `core_contract_states.states`, keyed by `(contract_address, height)`, with two keys: the key of the contract's state
+ * after the block, and the key of its zswap state (its filtered view of the shielded commitment tree). Both are
+ * persisted and never released, so each loads from the stored nodes long after the ledger states that held it were
+ * released and swept. [CC-1, LG-13, Q23, Q37; CORE-ARCH §4.11; design §5.4, §10]
  *
- * **Which contracts, and their keys** come from `core-ledger-state` (Q143, option A as task 12.4 shipped it): while
- * this module is active at h, `core-ledger-state`'s `on-compute` has the ledger worker persist, in the block's own
- * batch, the keys of every contract the block touched — those its transactions call or deploy, those its chain events
- * name maintained, and at the v8 → v9 upgrade's F every contract the converted state holds (task 13.1) — each once, in
- * byte order, computed on the state after the block, so all actions on one contract in one block share one row with
- * the state after all of them (CC-1); the `ledger-state` item carries them (`contracts`). A contract the state does not
- * hold — a deploy that did not apply — has no keys and no row.
+ * It is off by default, and it cannot start mid-chain, because the ledger state it reads cannot. [LG-16]
+ *
+ * **Which contracts, and their keys,** come from `core-ledger-state`. While this module is active at h,
+ * `core-ledger-state`'s `on-compute` has the ledger worker persist, in the block's own batch, the keys of every contract
+ * the block touched: [CC-1, Q143 A]
+ * - those its transactions call or deploy;
+ * - those its chain events name as maintained;
+ * - at the v8 → v9 conversion block F, every contract the converted state holds.
+ *
+ * Each contract appears once, in byte order, with its keys taken from the state after the block. So all actions on one
+ * contract in one block share one row, holding the state after all of them. The `ledger-state` item carries them
+ * (`contracts`). A contract the state does not hold (a deploy that did not apply) has no keys and no row. [CC-1]
  *
  * **At `on-compute`** it puts the `block` item `contract-states` (the rows, frozen); **at `on-db-write`** it writes them
  * in one statement. The table is append-only and range-partitioned by height.
  *
- * The declaration ({@link CORE_CONTRACT_STATES}) is a constant over its rule; a negative control's build composes its
- * own with {@link coreContractStates}.
+ * The declaration ({@link CORE_CONTRACT_STATES}) is a constant built over its rule. A negative control's build composes
+ * its own with {@link coreContractStates}.
  */
 
 import { z } from "zod";
@@ -38,7 +41,7 @@ export const CONTRACT_STATES_ITEM = "contract-states";
 /** Its table: one row per contract and block. */
 export const STATES_TABLE = "core_contract_states.states";
 
-/** `core-contract-states`' migrations (DB-9): applied once, recorded under `core-contract-states`; never changed. */
+/** `core-contract-states`' migrations: applied once, recorded under `core-contract-states`, never changed. [DB-9] */
 export const CONTRACT_STATES_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",
@@ -53,7 +56,7 @@ ${heightPartitionsSql(STATES_TABLE)}`,
   },
 ]);
 
-/** A row of `core_contract_states.states` (CC-1): a contract's keys after the block. */
+/** A row of `core_contract_states.states`: a contract's keys after the block. [CC-1] */
 export interface ContractStateRow {
   readonly address: Uint8Array;
   readonly stateKey: Uint8Array;
@@ -68,13 +71,13 @@ export function contractStatesOf(b: BlockContext): ContractStateRow[] {
   if (!Array.isArray(item?.contracts)) {
     throw new TypeError(
       `the block at height ${b.height} has no ledger-state item ${CORE_CONTRACT_STATES_ID} can read: core-ledger-state ` +
-        "puts it at on-compute (LG-16)",
+        "puts it at on-compute",
     );
   }
   return (item.contracts as readonly ContractKeys[]).flatMap(({ address, stateKey, zswapStateKey }) => {
     if (stateKey === null && zswapStateKey === null) return [];
     if (stateKey === null || zswapStateKey === null) {
-      throw new Error(`block ${b.height}: contract ${hex(address)} has one of its keys and not the other (LG-13)`);
+      throw new Error(`block ${b.height}: contract ${hex(address)} has one of its keys and not the other`);
     }
     return [{ address, stateKey, zswapStateKey }];
   });
@@ -84,7 +87,7 @@ export function contractStatesOf(b: BlockContext): ContractStateRow[] {
 export function contractStatesItemOf(b: BlockContext): readonly ContractStateRow[] {
   const rows = b.items.get(CONTRACT_STATES_ITEM);
   if (!Array.isArray(rows)) {
-    throw new TypeError(`the block at height ${b.height} has no contract-states item: ${CORE_CONTRACT_STATES_ID} puts it at on-compute (CC-1)`);
+    throw new TypeError(`the block at height ${b.height} has no contract-states item: ${CORE_CONTRACT_STATES_ID} puts it at on-compute`);
   }
   return rows as readonly ContractStateRow[];
 }
@@ -101,7 +104,7 @@ export async function writeStateRows(w: Pick<BlockWriteHandle, "execute">, heigh
 
 /** The rule a negative control may replace (see the module comment). */
 export interface CoreContractStatesOptions {
-  /** CC-1: the block's rows; {@link contractStatesOf}, one per contract the block touched. */
+  /** The block's rows: {@link contractStatesOf}, one per contract the block touched. [CC-1] */
   readonly rowsOf?: (b: BlockContext) => readonly ContractStateRow[];
 }
 

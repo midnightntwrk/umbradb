@@ -5,10 +5,11 @@ import { PRIVATE_BACKENDS, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.
 import { instancesProblems, instancesRun } from "./privacy-checks.js";
 
 /**
- * A120's committed negative control (task 14.4a, PP-9), on PostgreSQL 18.6 and PGlite 0.5.10, through A120's own run
- * and oracle over 5 blocks, `keeper` independent: the core's admin endpoints are served from snapshots that show of each
- * private instance one field more than the four PP-9 allows — the hash of its last `hello` or report, which the core's
- * transport knows —, and the oracle finds it in the core's `/status`.
+ * The committed negative control for what `/status` shows of a private instance, on PostgreSQL 18.6 and PGlite 0.5.10.
+ * It uses the same run and oracle (`./privacy-checks.ts`) over 5 blocks, with `keeper` independent. The core's admin
+ * endpoints are served from snapshots that show one field more of each private instance than the four allowed: the
+ * hash of its last `hello` or report, which the core's transport knows. The oracle finds it in the core's `/status`.
+ * [A120, PP-9]
  */
 
 /** An admin starter whose snapshots add `hash` to each private instance the core's `/status` shows. */

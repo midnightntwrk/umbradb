@@ -1,14 +1,17 @@
 /**
- * A vendored ledger package's WebAssembly in the browser build (`openspec/changes/core-arch/specs/ledger/spec.md`
- * LG-5; `design.md` §5.2, §9.2; task 12.1's note (f), task 12.2's note (f); task 16.1): the package's Node.js entry
+ * A vendored ledger package's WebAssembly in the browser build. The package's Node.js entry
  * (`vendor/ledger/<version>/pkg/*_fs.js`) reads its `.wasm` beside it with `readFileSync` and instantiates it
- * synchronously; in the browser that entry is bundled with these lines instead (`browser/build.ts`'s
- * `browserLedgerEntry`): the `.wasm`, copied beside the ledger worker as `ledger/<version>/<file>`, is read with a
- * synchronous request — a dedicated worker may make one —, its SHA-256 checked against the line of the package's
- * `SHA256SUMS` the build read (`package-hash-mismatch` otherwise, as 12.2's identity check refuses a changed package,
- * A97), and instantiated synchronously, as in Node.js. Synchronous, so the entry keeps no top-level `await`: the
- * package's snippets import the entry back (`#self`), and a module cycle holding a top-level `await` would wait on
- * itself once bundled. Only the ledger worker loads it, when a block first needs that version.
+ * synchronously. In the browser that entry is bundled with these lines instead (`browser/build.ts`'s
+ * `browserLedgerEntry`). [LG-5; design §5.2, §9.2]
+ *
+ * The `.wasm` is copied beside the ledger worker as `ledger/<version>/<file>` and read with a synchronous request,
+ * which a dedicated worker may make. Its SHA-256 is checked against the line of the package's `SHA256SUMS` that the
+ * build read; otherwise it fails with `package-hash-mismatch`, just as the ledger identity check refuses a changed
+ * package. It is then instantiated synchronously, as in Node.js. [A97]
+ *
+ * It is synchronous so the entry keeps no top-level `await`: the package's snippets import the entry back (`#self`),
+ * and a module cycle holding a top-level `await` would wait on itself once bundled. Only the ledger worker loads it,
+ * when a block first needs that version.
  */
 
 import { UmbraError } from "../../../src/db/errors.js";

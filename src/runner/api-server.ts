@@ -1,27 +1,30 @@
 /**
- * The module API listener (`openspec/changes/core-arch/specs/runner/spec.md` RN-15, RN-16; `design.md` §2; CORE-ARCH
- * §4.10, §4.20): `node:http` on `listen.api` (CF-4) carrying the module API of `./module-api.ts` — the HTTP routes as
- * HTTP, the subscriptions on WebSocket (`ws`) at the same listener, on any path. It runs on the main thread, beside the
- * runner, since every request reads the database and runs a module's handler; the admin endpoints have their own
- * listener in a worker thread of their own (AE-1, task 8.1), which shares nothing with this one but
- * {@link parseAddress}.
+ * The module API listener: `node:http` on `listen.api`, carrying the module API of `./module-api.ts`. HTTP routes are
+ * served as HTTP; subscriptions run on WebSocket (`ws`) at the same listener, on any path. It runs on the main thread,
+ * beside the runner, since every request reads the database and runs a module's handler. The admin endpoints have their
+ * own listener in a worker thread of their own, which shares nothing with this one but {@link parseAddress}.
+ * [RN-15, RN-16, CF-4, AE-1; design §2; CORE-ARCH §4.10, §4.20]
  *
  * **HTTP.** A request's body is read up to {@link ModuleApiServerOptions.maxBodyBytes} (413 `request-too-large` past
  * it) as UTF-8 (400 `invalid-request` otherwise) and passed with the URL's path and query to `ModuleApi.answer`.
  *
- * **Every HTTP answer names its build** (RN-16; owner decision Q131; task 5.2c): the listener sets
- * {@link VERSION_HEADER} to the build's version (`UMBRADB_VERSION`) on every answer it gives — a handler's, the module
- * API's own errors (400, 404, 405, 413, 500, 503, 504), the answers Node.js writes itself (400 to a request without
- * `Host`, 417 to an `Expect` it does not meet, 400, 408, 413 or 431 to bytes it cannot read as a request) and, for the
- * subscriptions, the upgrade's `101 Switching Protocols` and `ws`'s refusals of an upgrade it cannot complete (400,
- * 405) — once, replacing a header of that name an answer gives in any letter case, and changes nothing else of the
- * answer. A `100 Continue` is an interim answer, before the request's own; a WebSocket message or close after the
- * upgrade has no headers.
+ * **Every HTTP answer names its build.** The listener sets {@link VERSION_HEADER} to the build's version
+ * (`UMBRADB_VERSION`) on every answer it gives:
+ * - a handler's answer;
+ * - the module API's own errors (400, 404, 405, 413, 500, 503, 504);
+ * - the answers Node.js writes itself (400 to a request without `Host`, 417 to an `Expect` it does not meet, 400, 408,
+ *   413 or 431 to bytes it cannot read as a request);
+ * - for the subscriptions, the upgrade's `101 Switching Protocols` and `ws`'s refusals of an upgrade it cannot complete
+ *   (400, 405).
  *
- * **And its configuration** (RN-16; owner decision Q147; task 14.1b): given the process's configuration hash, the
- * listener sets {@link CONFIG_HASH_HEADER} to it on each of those answers alike, beside the version, replacing a header
- * of that name in any letter case. The process computes the hash once at startup (`./process.ts`), so it changes only
- * with a restart under another configuration; a private process compares the core's (PP-14).
+ * The header is set once, replacing a header of that name in any letter case; nothing else of the answer changes. A
+ * `100 Continue` is an interim answer, before the request's own; a WebSocket message or close after the upgrade has no
+ * headers. [RN-16, Q131]
+ *
+ * **And its configuration.** Given the process's configuration hash, the listener sets {@link CONFIG_HASH_HEADER} to it
+ * on each of those answers alike, beside the version, replacing a header of that name in any letter case. The process
+ * computes the hash once at startup (`./process.ts`), so it changes only with a restart under another configuration. A
+ * private process compares it with the core's. [RN-16, PP-14, Q147]
  *
  * **WebSocket subscriptions.** Each message is a JSON text of at most
  * {@link ModuleApiServerOptions.maxMessageBytes}: `{ "type": "subscribe", "id", "name", "args"? }` — `id` a string of 1
@@ -31,10 +34,10 @@
  * "code", "message" } }` (the module API's codes). Values are written as the module API writes JSON (`encodeJson`):
  * a value it cannot write throws at the module's `emit`. A connection's end unsubscribes its subscriptions.
  *
- * **Slow subscribers never hold the loop** (RN-15's notifications come from `on-after-db-write`): `emit` hands the text
- * to the socket and returns. A subscriber whose connection still holds more than
- * {@link MAX_BUFFERED_BYTES} unsent when a value comes is disconnected (the socket destroyed) and
- * its subscriptions unsubscribed, after the module's `emit` returned; values for a closed subscriber are dropped.
+ * **Slow subscribers never hold the loop.** Subscription values are emitted from `on-after-db-write`, so `emit` hands the
+ * text to the socket and returns. A subscriber whose connection still holds more than {@link MAX_BUFFERED_BYTES} unsent
+ * when a value comes is disconnected (the socket destroyed) and its subscriptions unsubscribed, after the module's
+ * `emit` returned. Values for a closed subscriber are dropped. [RN-15]
  *
  * **Closing** stops accepting connections, closes every WebSocket connection (1001, going away; its end unsubscribes
  * its subscriptions), ends every HTTP connection, and resolves when the listener has closed. A request in flight keeps its
@@ -84,20 +87,20 @@ export interface ModuleApiServerOptions {
    * default; another (Node.js's own `ServerResponse`) only for a negative control.
    */
   readonly response?: typeof ServerResponse;
-  /** The process's configuration hash (RN-16, Q147; task 14.1b), set as {@link CONFIG_HASH_HEADER}; none unless given. */
+  /** The process's configuration hash, set as {@link CONFIG_HASH_HEADER}; none unless given. [RN-16, Q147] */
   readonly configHash?: string;
 }
 
 /**
  * The header the core sets on every HTTP answer on `listen.api` (see the module comment): the build's version. The
- * `X-Umbra-` prefix holds the headers every module shares (RN-16): this one is the core's; the envelope's helpers write
- * `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` (`./envelope.ts`) for a module that calls them.
+ * `X-Umbra-` prefix holds the headers every module shares. This one is the core's; the envelope's helpers write
+ * `X-Umbra-View`, `X-Umbra-Height` and `X-Umbra-Hash` (`./envelope.ts`) for a module that calls them. [RN-16]
  */
 export const VERSION_HEADER = "X-Umbra-Version";
 
 /**
  * The header the core sets on every HTTP answer on `listen.api` beside {@link VERSION_HEADER}: the process's
- * configuration hash (RN-16, PP-14, owner decision Q147; task 14.1b), computed once at startup.
+ * configuration hash, computed once at startup. [RN-16, PP-14, Q147]
  */
 export const CONFIG_HASH_HEADER = "X-Umbra-Config-Hash";
 
@@ -148,7 +151,7 @@ export function coreHeadersResponse(configHash?: string): typeof ServerResponse 
   };
 }
 
-/** {@link coreHeadersResponse} without a configuration hash: the build's version alone (task 5.2c's). */
+/** {@link coreHeadersResponse} without a configuration hash: the build's version alone. */
 export const VersionedResponse: typeof ServerResponse = coreHeadersResponse();
 
 /** The head of an HTTP/1.1 answer with `status` and `headers`, as a connection's bytes. */
@@ -205,15 +208,18 @@ export interface ModuleApiServer {
   close(): Promise<void>;
 }
 
-/** `host:port`, as CF-4 writes addresses: a host name or IPv4 address, or a bracketed IPv6 address; the port. */
+/**
+ * `host:port`, as the configuration writes addresses: a host name or IPv4 address, or a bracketed IPv6 address; the
+ * port. [CF-4]
+ */
 const ADDRESS = /^(?:\[([0-9A-Fa-f:.]+)\]|([^\s:/[\]@]+)):(\d{1,5})$/;
 
-/** `address` (`host:port`, CF-4) as a host and a port; throws a `TypeError` for anything else. */
+/** `address` (`host:port`) as a host and a port; throws a `TypeError` for anything else. [CF-4] */
 export function parseAddress(address: string): { readonly host: string; readonly port: number } {
   const match = typeof address === "string" ? ADDRESS.exec(address) : null;
   const port = Number(match?.[3]);
   if (match === null || port > 65_535) {
-    throw new TypeError(`expected an address host:port, its port from 0 to 65535 (CF-4), not ${JSON.stringify(address)}`);
+    throw new TypeError(`expected an address host:port, its port from 0 to 65535, not ${JSON.stringify(address)}`);
   }
   return { host: (match[1] ?? match[2]) as string, port };
 }
@@ -448,14 +454,14 @@ export async function listenModuleApi(
 export interface ModuleApiStart extends ApiStartup {
   /** The database each request reads (the core's, or its read-only item). */
   readonly db: ModuleApiOptions["db"];
-  /** `listen.api` (CF-4): none, no listener — `on-start-api` and its checks still run. */
+  /** `listen.api`: none, no listener — `on-start-api` and its checks still run. [CF-4] */
   readonly address?: string;
-  /** `apiReadTimeoutMs` (CF-4, DB-15). */
+  /** `apiReadTimeoutMs`. [CF-4, DB-15] */
   readonly apiReadTimeoutMs: number;
   readonly onError?: ModuleApiOptions["onError"];
   /** The routes to register into (a negative control's); new ones by default. */
   readonly routes?: ApiRoutes;
-  /** The process's configuration hash (RN-16, Q147), on every answer of the listener; none unless given. */
+  /** The process's configuration hash, on every answer of the listener; none unless given. [RN-16, Q147] */
   readonly configHash?: string;
 }
 
@@ -469,9 +475,9 @@ export interface StartedModuleApi {
 }
 
 /**
- * The startup's module API steps (RN-1, RN-15): `on-start-api` and the duplicate check (`registerModuleApis`), then
- * the listener on `listen.api`, if one is configured — so a refused startup listens nowhere. Rejects with the first
- * failure of either.
+ * The startup's module API steps: `on-start-api` and the duplicate check (`registerModuleApis`), then the listener on
+ * `listen.api`, if one is configured, so a refused startup listens nowhere. Rejects with the first failure of either.
+ * [RN-1, RN-15]
  */
 export async function startModuleApi(input: ModuleApiStart): Promise<StartedModuleApi> {
   const routes = await registerModuleApis(input, input.routes);

@@ -1,8 +1,8 @@
 /**
  * The node client's transport (`./client.ts`): a WebSocket carrying JSON-RPC text frames, behind a small interface so
- * the client does not depend on one WebSocket implementation — Node.js gets `ws` (`./ws-socket.ts`, the default), the
- * browser build (task 16.1) its own WebSocket, and tests a socket they drive by hand — and a clock the client and the
- * transport schedule their timers on, which tests move by hand.
+ * that the client does not depend on one WebSocket implementation. Node.js gets `ws` (`./ws-socket.ts`, the default),
+ * the browser build its own WebSocket, and tests a socket they drive by hand. It also gives a clock that the client and
+ * the transport schedule their timers on, which tests move by hand.
  */
 
 /** How a socket ended: it never opened (a network error, or a handshake answered with an HTTP status), or it closed. */

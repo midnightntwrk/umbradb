@@ -21,18 +21,24 @@ import {
 import { cappedAt, LEDGER_CORE, restartAt } from "./ledger-restart.js";
 
 /**
- * A111's run (task 13.1; `openspec/changes/core-arch/specs/contract-data/spec.md` CC-4; BK-1, BK-3, MD-6), shared by
- * `contract-logs-handoff.test.ts` and its negative controls: the ledger's core modules and `core-contract-logs-full`
- * from 0, `-full`'s entry stopping at h, synced to h over a tape capped there (`./ledger-restart.ts`), backed up there by
- * the process (`ProcessHandle.backup`); the backup restored (`../backup/restore-ledger.ts`, the restore's own checks)
- * into an empty database with the configuration it was taken with; and the restored database run to the scenario's
- * head with the configuration that continues it — `-full` from 0 to h, `core-contract-logs-fast` from `fastFrom`.
+ * The logs-provider handoff run, shared by `contract-logs-handoff.test.ts` and its negative controls:
+ * 1. The ledger's core modules and `core-contract-logs-full` run from 0, `-full`'s entry stopping at h. They sync to h
+ *    over a tape capped there (`./ledger-restart.ts`), and the process backs up there (`ProcessHandle.backup`).
+ * 2. The backup is restored (`../backup/restore-ledger.ts`, with the restore's own checks) into an empty database, with
+ *    the configuration it was taken with.
+ * 3. The restored database runs to the scenario's head with the configuration that continues it: `-full` from 0 to h,
+ *    `core-contract-logs-fast` from `fastFrom`.
+ *
+ * [A111, CC-4, BK-1, BK-3, MD-6]
  */
 
 /** The build of the run after the restore: the ledger's core modules and both providers of `contract-logs`. */
 export const HANDOFF_CORE: readonly ModuleDeclaration[] = Object.freeze([...LEDGER_CORE, CORE_CONTRACT_LOGS_FULL, CORE_CONTRACT_LOGS_FAST]);
 
-/** A111's scenario: a contract deployed at 1, then literal logs at every height from 2 to 5, a fallible one's at 4. */
+/**
+ * The handoff scenario: a contract deployed at 1, then literal logs at every height from 2 to 5, a fallible one's at 4.
+ * [A111]
+ */
 export async function handoffScenario(): Promise<ContractScenario> {
   const [contract] = await contractsFor("v9", 1);
   const call = (byte: number, rest: object = {}) => ({ kind: "call" as const, contract: contract!, logs: [cellValue(Uint8Array.of(byte))], ...rest });
@@ -58,7 +64,7 @@ export interface Handoff {
 
 /**
  * Where the handoff switches: the backup is taken at `h`; `-full`'s entry stops at `fullTo` (h unless given) and
- * `-fast`'s starts at `fastFrom` (h + 1 for A111).
+ * `-fast`'s starts at `fastFrom` (h + 1 for the handoff as specified). [A111]
  */
 export interface HandoffAt {
   readonly h: bigint;
@@ -74,7 +80,7 @@ function stopOf(at: HandoffAt): (id: string) => number | undefined {
   return (id) => (id === CORE_CONTRACT_LOGS_FULL_ID ? Number(at.fullTo ?? at.h) : undefined);
 }
 
-/** A111's run on `backend` (see the module comment). */
+/** The handoff run on `backend` (see the module comment). [A111] */
 export async function handoff(backend: BackupBackend, expected: ContractScenario, at: HandoffAt): Promise<Handoff> {
   const { records, head } = expected.scenario;
   const source = await backend.database();
@@ -89,7 +95,7 @@ export async function handoff(backend: BackupBackend, expected: ContractScenario
   const stops = stopOf(at);
   try {
     // Restored with the configuration the backup was taken with (a restore with -fast's later entry already in it is
-    // refused: issue 00033-restore-future-module), against the tape with its finalized head at h.
+    // refused), against the tape with its finalized head at h.
     await restoreLedger(backend, target, backup, cappedAt(records, at.h), {}, undefined, {
       core: [...LEDGER_CORE, CORE_CONTRACT_LOGS_FULL],
       entry: (module) => entryOf(module, 0, {}, stops(module.id)),
@@ -97,14 +103,15 @@ export async function handoff(backend: BackupBackend, expected: ContractScenario
   } catch (refused) {
     return { manifest: backup.manifest, target, ran: null, refused };
   }
-  // The tape with the cursor's header and metadata, which the restarted process reads (Q135 A, `./ledger-restart.ts`).
+  // The tape with the cursor's header and metadata, which the restarted process reads (`./ledger-restart.ts`). [Q135 A]
   const ran = await runRange(target as unknown as ProcessDatabase, restartAt(records, at.h), head, { core: HANDOFF_CORE, startOf: starts, stopOf: stops });
   return { manifest: backup.manifest, target, ran, refused: null };
 }
 
 /**
- * A111's oracle (CC-4): the restore and the startup after it accepted the handoff, the run reached the head, and
- * `contract_logs.logs` holds exactly the scenario's rows from 0 to the head — each height's once, none missing.
+ * The handoff's oracle: the restore and the startup after it accepted the handoff, the run reached the head, and
+ * `contract_logs.logs` holds exactly the scenario's rows from 0 to the head, each height's once, none missing.
+ * [A111, CC-4]
  */
 export async function handoffProblems(result: Handoff, expected: ContractScenario): Promise<string[]> {
   if (result.refused !== null) {

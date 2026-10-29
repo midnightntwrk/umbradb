@@ -7,13 +7,14 @@ import { freePort } from "../runner/process-harness.js";
 import { startProcess, testBuild } from "../runner/process-build.js";
 
 /**
- * The tests' processes and the admin endpoints' default (task 8.1a; owner decision Q128 B): the runner's `startProcess`
- * serves the admin endpoints unless its caller passes `admin: false`, on `listen.admin` — CF-4's `0.0.0.0:8081` unless
- * configured —, so a test process that leaves them on collides with every other test process on a shared machine.
+ * The tests' processes and the admin endpoints' default. The runner's `startProcess` serves the admin endpoints unless
+ * its caller passes `admin: false`. It serves them on `listen.admin`, which is `0.0.0.0:8081` unless configured, so a
+ * test process that leaves them on collides with every other test process on a shared machine. [Q128 B, CF-4]
+ *
  * Outside `test/admin/`, whose tests are about the endpoints and say how each of their processes serves them, a test
  * starts a process through `test/runner/process-build.ts`'s `startProcess`, which opts out unless the test asks for
- * them; this fails on any file under `test/` that takes the runner's own instead (a named or renamed import, a
- * namespace import that calls it, a dynamic import or a re-export of `src/runner/process.ts` or `src/runner/index.ts`).
+ * them. This fails on any file under `test/` that takes the runner's own instead: a named or renamed import, a
+ * namespace import that calls it, a dynamic import or a re-export of `src/runner/process.ts` or `src/runner/index.ts`.
  */
 
 const REPOSITORY = fileURLToPath(new URL("../..", import.meta.url));

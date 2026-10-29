@@ -3,15 +3,18 @@ import { PRIVATE_BACKENDS, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.
 import { a162Problems, a162Run } from "./config-hash-checks.js";
 
 /**
- * A162 `[CI]` (task 14.1b; PP-14, RN-16, PP-4, owner decision Q147), on PostgreSQL 18.6 and PGlite 0.5.10: a private
- * process running against a core that restarts with a data field of its configuration changed halts with
- * `public-config-changed` at its next message from the core, before it processes another height; a core restarted
- * with the same configuration, or with only its secrets changed, changes nothing; every module API answer carries
- * `X-Umbra-Config-Hash`, which holds no secret (a password in `database` on PostgreSQL, the node URL's on both) and does
- * not change with one; and on PostgreSQL a private process without a transport, reading the public configuration
- * history again at a reconnection to its public database, halts alike (a PGlite public database is read only through
- * the core's transport, so there is no such process on PGlite). The run and the oracle are `./config-hash-checks.ts`'s;
- * the committed negative controls are `./config-hash.negative-control.test.ts`'s.
+ * A changed public configuration halts a private process, on PostgreSQL 18.6 and PGlite 0.5.10:
+ * - a private process running against a core that restarts with a data field of its configuration changed halts with
+ *   `public-config-changed` at its next message from the core, before it processes another height;
+ * - a core restarted with the same configuration, or with only its secrets changed, changes nothing;
+ * - every module API answer carries `X-Umbra-Config-Hash`, which holds no secret (a password in `database` on
+ *   PostgreSQL, the node URL's on both) and does not change with one;
+ * - on PostgreSQL a private process without a transport, reading the public configuration history again at a
+ *   reconnection to its public database, halts alike (a PGlite public database is read only through the core's
+ *   transport, so there is no such process on PGlite).
+ *
+ * The run and the oracle are `./config-hash-checks.ts`'s; the committed negative controls are
+ * `./config-hash.negative-control.test.ts`'s. [A162 CI, PP-14, RN-16, PP-4, Q147]
  */
 
 describe.each(PRIVATE_BACKENDS)("A162: a changed public configuration halts a private process on $name (PP-14, RN-16)", (backend) => {

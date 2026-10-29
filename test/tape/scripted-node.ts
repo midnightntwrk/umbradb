@@ -3,17 +3,17 @@ import { type WebSocket, WebSocketServer } from "ws";
 import { closeServer, listenOnRandomPort } from "../node/fake-node.js";
 
 /**
- * A71's scripted JSON-RPC server (`openspec/changes/core-arch/acceptance.md` §9; TT-4; task 9.2): a WebSocket JSON-RPC
- * 2.0 server on the loopback interface, at a random free port of at least 10000, that stands in for a Midnight node
- * behind the recording builder. Each request is answered by the test's script with steps sent in order, in the same
- * turn: an answer, notifications, a raw frame, or dropping the connection (once the frames before it are written out,
- * without a close frame, as a node going away). A request no step answers stays unanswered.
+ * The record-and-replay check's scripted JSON-RPC server: a WebSocket JSON-RPC 2.0 server on the loopback interface, at
+ * a random free port of at least 10000, that stands in for a Midnight node behind the recording builder. Each request
+ * is answered by the test's script with steps sent in order, in the same turn: an answer, notifications, a raw frame,
+ * or dropping the connection (once the frames before it are written out, without a close frame, as a node going away).
+ * A request no step answers stays unanswered. [A71, TT-4]
  *
  * **Its frames are written by `JSON.stringify`**, not by the tape tools: `{"jsonrpc":"2.0","id":…,"result":…}` (or
  * `"error"`) and `{"jsonrpc":"2.0","method":…,"params":{"subscription":…,"result":…}}` — the spelling a Substrate node
- * (`jsonrpsee`) writes and the tape node writes too (9.1's note (a)), so the bytes a client receives through the
- * builder can be compared with those the tape node sends on replay, without the tape tools being the oracle of
- * their own output. A frame `JSON.stringify` cannot write (an integer beyond 2^53) is a `raw` step.
+ * (`jsonrpsee`) writes and the tape node writes too, so the bytes a client receives through the builder can be compared
+ * with those the tape node sends on replay, without the tape tools being the oracle of their own output. A frame
+ * `JSON.stringify` cannot write (an integer beyond 2^53) is a `raw` step.
  */
 
 /** A request the scripted node received. */

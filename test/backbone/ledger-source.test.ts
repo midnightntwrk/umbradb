@@ -8,9 +8,9 @@ import { outsideIn8 } from "../node/in8.js";
 import { chainOf, hex } from "./fetch-fixtures.js";
 
 /**
- * What `core-ledger-state` asks the node, through the block source it is bound to (task 12.3; IN-7, IN-8, LG-15): the
- * ledger state root after a block (`midnight_ledgerStateRoot` at its hash) and the genesis state
- * (`system_properties.genesis_state`, hex as the node writes it); the in-memory source gives neither.
+ * What `core-ledger-state` asks the node, through the block source it is bound to: the ledger state root after a block
+ * (`midnight_ledgerStateRoot` at its hash) and the genesis state (`system_properties.genesis_state`, hex as the node
+ * writes it). The in-memory source gives neither. [IN-7, IN-8, LG-15]
  */
 
 const quiet: ConnectSocket = (url, events, timers) => connectWebSocket(url, events, timers, { heartbeatMs: 3_600_000 });

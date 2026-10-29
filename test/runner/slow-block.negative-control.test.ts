@@ -7,9 +7,9 @@ import { PROCESS_BACKENDS } from "./process-backends.js";
 import { a142Problems, HOLD_MS, holding, observe, quietProblems, type Seen, SLOW_HEIGHT, startSlow } from "./slow-block-harness.js";
 
 /**
- * A142's committed negative controls (task 5.5; RN-17, Q71): wrong watchdogs, each a loop of the process
- * (`ProcessInput.loop`), each failing A142's own oracle (`./slow-block-harness.ts`) through the process on PostgreSQL
- * 18 and PGlite 0.5.10 —
+ * The slow height's committed negative controls: wrong watchdogs, each a loop of the process (`ProcessInput.loop`).
+ * Each fails the slow height's own oracle (`./slow-block-harness.ts`) through the process on PostgreSQL 18 and PGlite
+ * 0.5.10. [A142, RN-17, Q71]
  * - one that never clears the condition fails "the condition is gone after the commit";
  * - one that retries the slow height (a retryable failure once its `on-compute` has run `slowBlockMs`) and one that
  *   cancels it (a plain failure then: a halt) fail "the height commits once, with no retry";
@@ -74,7 +74,7 @@ describe.each(PROCESS_BACKENDS)("A142's negative controls on $name", (backend) =
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  /** A142's 1000 case run with `loop`: its problems. */
+  /** The slow height's 1000 case run with `loop`: its problems. [A142] */
   async function problemsOf(loop: new (input: LoopInput) => FinalizedLoop, slowBlockMs = 1_000): Promise<string[]> {
     const seen: Seen = { calls: [] };
     const run = startSlow(await backend.database(), { slowBlockMs, user: [holding("slow", seen)], loop, extra: { backoffCeilingMs: 50 } });

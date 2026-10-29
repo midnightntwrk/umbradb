@@ -1,5 +1,5 @@
 /**
- * The page's side of its message network (`./network.ts`; task 16.1): each worker the page starts joins it through a
+ * The page's side of its message network (`./network.ts`): each worker the page starts joins it through a
  * port of its own ({@link NetworkBroker.join}); the broker remembers which worker listens at each address and, for each
  * connection asked for, makes a `MessageChannel` and gives one end to the listener (`accept`) and the other to the
  * worker that asked (`connected`), or answers `refused` when nothing listens there. The connections' messages then go

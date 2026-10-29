@@ -1,7 +1,7 @@
 /**
- * `node:https` in the browser build (task 16.1): the process transport's mutual TLS (PP-11, the `core` entry's `tls`)
- * has no place on the page's message network, which never leaves the page (`./network.ts`). A core configured with
- * `tls` fails to start its transport, and startup refuses.
+ * `node:https` in the browser build: the process transport's mutual TLS (the `core` entry's `tls`) has no place on the
+ * page's message network, which never leaves the page (`./network.ts`). A core configured with `tls` fails to start its
+ * transport, and startup refuses. [PP-11]
  */
 
 export type ServerOptions = Readonly<Record<string, unknown>>;

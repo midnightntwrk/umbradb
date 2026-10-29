@@ -2,13 +2,18 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 /**
- * Task 14.4a's static check (owner decision Q154 A2: keys, and private items in general, are a module's, not the
- * core's; `openspec/changes/core-arch/tasks.md` 14.4a): nothing of the key handling task 14.4 built is left in the
- * repository's code, its module guide or the change's design — the private backbone part `core-key-registry` (its
- * folder, its table `core_key_registry.keys`, its item `admitted-keys`), the point `on-key` (`POINTS`, `PointCallbacks`,
- * `PendingKey`, the loop's `keys` and `keyPoint`), the private `core` entry's `testKeys` and the configuration rule
- * `test-keys`, a declaration's `keyKinds` and `validateKey`, the code `test-key-conflict`, and the tests of A119, A123
- * and A120's key half with the required id `private.no-key-bytes-public`. Imports nothing of Vitest.
+ * The static check that key handling has left the core: keys, and private items in general, are a module's, not the
+ * core's. Nothing of the removed key handling is left in the repository's code, its module guide or the change's
+ * design:
+ * - the private backbone part `core-key-registry` (its folder, its table `core_key_registry.keys`, its item
+ *   `admitted-keys`);
+ * - the point `on-key` (`POINTS`, `PointCallbacks`, `PendingKey`, the loop's `keys` and `keyPoint`);
+ * - the private `core` entry's `testKeys` and the configuration rule `test-keys`;
+ * - a declaration's `keyKinds` and `validateKey`, and the code `test-key-conflict`;
+ * - the removed key tests, and the key half of the `/status` test with the required id `private.no-key-bytes-public`.
+ *   [A119, A120, A123]
+ *
+ * Imports nothing of Vitest. [Q154 A2]
  *
  * **What is read** ({@link SCANNED}): every file under `src/`, `browser/` and `test/` — but this check's own files,
  * which name what they look for —, `docs/module-guide.md` and `openspec/changes/core-arch/design.md`. Comments count:
@@ -49,11 +54,11 @@ export const REMOVED_NAMES: readonly RemovedName[] = Object.freeze([
   { name: "admitted-keys", pattern: /\badmitted[-_]keys\b/gi },
   { name: "AdmittedKey", pattern: /\bAdmittedKeys?\b/g },
   { name: "arrived_height", pattern: /\barrived_?height\b/gi },
-  // A120's key half's required id.
+  // The required id of the `/status` test's key half. [A120]
   { name: "private.no-key-bytes-public", pattern: /no-key-bytes-public/g },
 ]);
 
-/** The files and folders that must not exist: the part's folder and the removed tests (A119, A123, A120's key half). */
+/** The files and folders that must not exist: the part's folder and the removed key tests. [A119, A120, A123] */
 export const REMOVED_PATHS: readonly string[] = Object.freeze([
   "src/backbone/core-key-registry",
   "test/backbone/core-key-registry.test.ts",
@@ -66,7 +71,7 @@ export const REMOVED_PATHS: readonly string[] = Object.freeze([
 
 /**
  * Names a file outside the change uses for something else, by its path from the root: 0.9.5's `TemporalKV` adapter has
- * a private method `validateKey` checking its own namespace, scope and key (task 17.2 retires the file with 0.9.5).
+ * a private method `validateKey` checking its own namespace, scope and key (the file is retired together with 0.9.5).
  */
 export const UNRELATED: readonly { readonly file: string; readonly name: string }[] = Object.freeze([
   { file: "src/postgres/temporal-kv.ts", name: "validateKey" },

@@ -31,20 +31,21 @@ import {
 import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
 
 /**
- * A124 `[CI]` and A122 `[CI]` (task 15.1; BK-1, BK-2, PP-12; `design.md` §9.1; owner decisions Q83, Q85), on PostgreSQL
- * 18.6 and PGlite 0.5.10: a backup written while blocks commit — by the running process (`ProcessHandle.backup`) on both,
- * and by `umbradb backup` from beside it on PostgreSQL — holds every table at its manifest's height, and loaded into a
- * new database its contents hash equals the manifest's and that of an instance stopped at that height; `backupAtStop`
- * writes one backup for the core's stop, and none at a restart at the stop while one of that height is there; without
- * the tool the command fails with `backup-tools-missing`, naming what to install, and writes no file; a private
- * database is refused with `private-backup-refused` without the development opt-in, and backed up with it. The chain,
- * the build, the tools and the loading: `./backup-fixtures.ts`. The committed negative control (a dump outside the
- * manifest's snapshot) is `./backup.negative-control.test.ts`.
+ * On PostgreSQL 18.6 and PGlite 0.5.10: a backup written while blocks commit — by the running process
+ * (`ProcessHandle.backup`) on both, and by `umbradb backup` from beside it on PostgreSQL — holds every table at its
+ * manifest's height, and loaded into a new database its contents hash equals the manifest's and that of an instance
+ * stopped at that height; `backupAtStop` writes one backup for the core's stop, and none at a restart at the stop while
+ * one of that height is there; without the tool the command fails with `backup-tools-missing`, naming what to install,
+ * and writes no file; a private database is refused with `private-backup-refused` without the development opt-in, and
+ * backed up with it. [A124 CI, A122 CI, BK-1, BK-2, PP-12, Q83, Q85; design §9.1]
+ *
+ * The chain, the build, the tools and the loading: `./backup-fixtures.ts`. The committed negative control (a dump
+ * outside the manifest's snapshot) is `./backup.negative-control.test.ts`.
  */
 
 /**
- * Each test waits on purpose for processes to reach heights and for databases to load (task 0.5's notes): its own
- * budget, for a loaded machine.
+ * Each test waits on purpose for processes to reach heights and for databases to load: its own budget, for a loaded
+ * machine.
  */
 const TEST_TIMEOUT_MS = 900_000;
 
@@ -161,7 +162,7 @@ describe.each(BACKUP_BACKENDS)("backups on $name (BK-1, BK-2)", (backend) => {
       const loaded = await backend.load(out);
       expect(await tableHeights(loaded)).toEqual(heightsAt(manifest.height));
       expect(await hashOf(loaded)).toBe(manifest.contentsHash);
-      // The table declared deterministic: false travels with its rows and its sequence's position (BK-2). A sequence
+      // The table declared deterministic: false travels with its rows and its sequence's position [BK-2]. A sequence
       // is not transactional: PostgreSQL's pg_dump reads its position as it is when it reads it, not as of the
       // snapshot, so beside commits it can be ahead of the rows — never behind them, so a value is never given twice.
       // On PGlite nothing commits during the job.
@@ -204,7 +205,7 @@ describe.each(BACKUP_BACKENDS)("backups on $name (BK-1, BK-2)", (backend) => {
     expect(statSync(out).mtimeMs).toBe(written);
     expect(second.lines).toContain(`backup at stop: ${out} holds a backup of height 12 already, so none was written`);
 
-    // Without it, the restart at the stop writes it (CORE-ARCH §4.15).
+    // Without it, the restart at the stop writes it. [CORE-ARCH §4.15]
     rmSync(out);
     const third = await startTicker(config, 30n);
     try {

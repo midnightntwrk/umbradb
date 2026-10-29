@@ -17,14 +17,19 @@ import {
 import type { Decoded } from "./ingest-checks.js";
 
 /**
- * The tapes task 10.3's criteria and their negative controls share (`ingest.test.ts`, `ingest.negative-control.test.ts`):
- * synthetic, in the node's answer shapes (`./fetch-fixtures.ts`).
+ * The tapes that the ingest tests and their negative controls share (`ingest.test.ts`,
+ * `ingest.negative-control.test.ts`). They are synthetic, in the node's answer shapes (`./fetch-fixtures.ts`).
  */
 
 /**
- * A79's tape over `chain` (blocks 0–20): heads 10 (read and notified), 13, 13, 12; a disconnect; the head read again
- * after the reconnect (16 — 14 to 16 finalized meanwhile, their notifications lost), then 20. The notification of 20
- * goes out only once 14–16 were asked, so a source that does not read the head again never gets it.
+ * The reconnect tape over `chain` (blocks 0–20), in order:
+ * - heads 10 (read and notified), 13, 13, 12;
+ * - a disconnect;
+ * - the head read again after the reconnect: 16 (14 to 16 were finalized meanwhile, and their notifications lost);
+ * - then 20.
+ *
+ * The notification of 20 goes out only once 14–16 were asked, so a source that does not read the head again never gets
+ * it. [A79]
  */
 export function a79Tape(chain: readonly ChainBlock[]): TapeRecord[] {
   const at = (height: number): ChainBlock => chain[height] as ChainBlock;
@@ -51,11 +56,14 @@ export function a79Tape(chain: readonly ChainBlock[]): TapeRecord[] {
 }
 
 /**
- * A89's synthetic devnet upgrade: runtime 1_000_000 (v8 on preprod) builds blocks 1 to U = 3, whose `set_code` puts
- * 2_000_000 (v9) in U's own state; F = 4 is the first block it builds. The new runtime moved the timestamp pallet from
- * index 1 to 2 and put `Preimage` at 1, so U's `Timestamp::set` (pallet 1) reads as the timestamp only with the old
- * metadata. The tape answers the parent's-state reads the source makes, and the own-state reads a wrong source would
- * make, so that a control fails exactly at U.
+ * A synthetic devnet runtime upgrade. Runtime 1_000_000 (v8 on preprod) builds blocks 1 to U = 3. U's `set_code` puts
+ * 2_000_000 (v9) in U's own state, and F = 4 is the first block the new runtime builds.
+ *
+ * The new runtime moved the timestamp pallet from index 1 to 2 and put `Preimage` at 1. So U's `Timestamp::set`
+ * (pallet 1) reads as the timestamp only with the old metadata.
+ *
+ * The tape answers the parent's-state reads the source makes, and also the own-state reads a wrong source would make,
+ * so that a control fails exactly at U. [A89]
  */
 export function upgradeTape(): { records: TapeRecord[]; upgrade: ChainBlock[]; expected: Decoded[] } {
   const OLD: Runtime = { specVersion: 1_000_000, metadata: metadataOf(MAINNET_PALLETS) };

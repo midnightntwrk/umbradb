@@ -8,10 +8,10 @@ import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer
 import { connectionOfUrl } from "./connection.js";
 
 /**
- * A19 [FAULT] (DB-13): terminating the writer's backend mid-transaction yields `connection-lost` with `retryable:
- * true`; a constraint violation yields a not-retryable error. Every other database error is not retryable either. The
- * faults are real: `pg_terminate_backend` from another connection, a server that refuses connections, a wrong
- * password.
+ * Terminating the writer's backend mid-transaction yields `connection-lost` with `retryable: true`; a constraint
+ * violation yields an error that is not retryable, and so does every other database error. The faults are real:
+ * `pg_terminate_backend` from another connection, a server that refuses connections, a wrong password.
+ * [A19 FAULT, DB-13]
  */
 
 let server: PostgresTestServer;

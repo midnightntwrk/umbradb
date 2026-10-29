@@ -1,14 +1,15 @@
 /**
- * The backbone part `core-config` (`openspec/changes/core-arch/specs/admin-endpoints/spec.md` AE-1, AE-5, AE-6;
- * `specs/runner/spec.md` RN-2, RN-3; CORE-ARCH §4.11, §4.18; decision record Q70): it provides `GET /config`
- * (`./endpoints.ts`), which the admin worker runs on the snapshot the runner publishes, and has no point, requires no
- * item and provides none (CORE-ARCH §4.11: "None; as above"). Its declaration ({@link CORE_CONFIG}) makes it a part of
- * the build like every backbone part, as `core-health`'s and `core-status`'s do: validated as one (MD-2), last in
- * RN-3's fixed order, in the command's build (`../../cli/build-modules.ts`); the database gets its empty schema and
- * role (DB-6, DB-8), and nothing runs under it.
+ * The backbone part `core-config`. It provides `GET /config` (`./endpoints.ts`), which the admin worker runs on the
+ * snapshot the runner publishes. It has no point, requires no item and provides none.
+ * [AE-1, AE-5, AE-6, Q70; CORE-ARCH §4.11, §4.18]
  *
- * The admin route table mounts the endpoint whatever the build carries (AE-1), so this declaration is what the build
- * and the graph know of the part, not what serves it.
+ * Its declaration ({@link CORE_CONFIG}) makes it a part of the build like every backbone part, as `core-health`'s and
+ * `core-status`'s do. It is validated as one, placed last in the fixed backbone order, and included in the command's
+ * build (`../../cli/build-modules.ts`). The database gets its empty schema and role, and nothing runs under it.
+ * [RN-2, RN-3, MD-2, DB-6, DB-8]
+ *
+ * The admin route table mounts the endpoint whatever the build carries, so this declaration is what the build and the
+ * graph know of the part, not what serves it. [AE-1]
  */
 
 import { z } from "zod";
@@ -23,7 +24,7 @@ export const CORE_CONFIG = Object.freeze(
     side: "public",
     requires: [],
     provides: [],
-    // Every backbone part starts at S, which is a mid-chain start when S is above genesis (task 3.2's note (e), Q96).
+    // Every backbone part starts at S, which is a mid-chain start when S is above genesis. [Q96]
     startsMidChain: true,
     configSchema: z.object({}),
     migrations: [],

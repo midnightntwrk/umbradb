@@ -5,8 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isolationProblems, REPOSITORY, type Served, serveCommand } from "./serve-checks.js";
 
 /**
- * `npm run web`'s server (task 17.3a): `node browser/serve.ts` serves a browser build on 127.0.0.1 with the two headers
- * that make the page cross-origin isolated (COOP `same-origin`, COEP `require-corp`), which the ledger worker's
+ * `npm run web`'s server: `node browser/serve.ts` serves a browser build on 127.0.0.1 with the two headers that make
+ * the page cross-origin isolated (COOP `same-origin`, COEP `require-corp`), which the ledger worker's
  * `SharedArrayBuffer` needs; nothing outside the directory. `./serve.negative-control.test.ts` shows the header check
  * failing on a server without them.
  */

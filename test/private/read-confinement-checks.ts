@@ -7,17 +7,21 @@ import { hexOf, type Message, type ReadResult } from "../../src/private/messages
 import { endedWithin, hello, rawClient, type RawClient } from "./raw-client.js";
 
 /**
- * A172 `[FAULT]` (task 14.2b; PP-4, the threat model draft's gap 1): a private process's `read` whose statements try to
- * leave the read changes nothing in the public database — its contents hash, its row counts and its sequences —, is
- * answered with an error naming the refused statement, and the transport stays up for the next `read`. Shared by
- * `read-confinement.test.ts` (through a running core, on PostgreSQL 18.6 and PGlite 0.5.10) and its committed negative
- * control (`read-confinement.negative-control.test.ts`: the read path before task 14.2b, every statement run as sent);
- * imports nothing of Vitest.
+ * Confined reads. A private process's `read` whose statements try to leave the read:
+ * - changes nothing in the public database (its contents hash, its row counts and its sequences);
+ * - is answered with an error naming the refused statement;
+ * - leaves the transport up for the next `read`.
+ * [A172 FAULT, PP-4; threat model draft, gap 1]
+ *
+ * Shared by `read-confinement.test.ts` (through a running core, on PostgreSQL 18.6 and PGlite 0.5.10) and its committed
+ * negative control (`read-confinement.negative-control.test.ts`: the unconfined read path, every statement run as
+ * sent); imports nothing of Vitest.
  *
  * **The public database** holds the core's module {@link PUB}: `pub.rows`, a row per height, and `pub.log`, declared
  * `deterministic: false`, whose `serial` key is the sequence `pub.log_id_seq` — the row counts and the sequence a write
- * that escaped would change. {@link publicState} reads what A172 compares, through the core's `db` item: the contents
- * hash (DT-3), every table's row count, every sequence's last value, and the advisory locks held besides the writer's.
+ * that escaped would change. {@link publicState} reads what is compared, through the core's `db` item: the contents
+ * hash, every table's row count, every sequence's last value, and the advisory locks held besides the writer's.
+ * [A172 FAULT, DT-3]
  *
  * **The escapes** ({@link ESCAPES}): one `read` each, through a raw client of the core's transport, with the statement
  * the core must refuse and how it names it (`read-result.refused`). Each is followed, on the same connection, by a
@@ -63,9 +67,9 @@ export const PUB_ENTRY = Object.freeze({ id: "pub", start: 1, version: "1.0.0", 
 /** The tables `pub` declares `deterministic: false` (the contents hash names them only). */
 export const PUB_OPTED_OUT = Object.freeze([Object.freeze({ schema: "pub", table: "log" })]);
 
-/** What A172 compares before and after the escapes. */
+/** What is compared before and after the escapes. [A172 FAULT] */
 export interface PublicState {
-  /** The contents hash (DT-3), as `0x` hex. */
+  /** The contents hash, as `0x` hex. [DT-3] */
   readonly hash: string;
   /** Each table's row count, by `schema.table` (the test backend's own `public.session_log` left out). */
   readonly rows: Readonly<Record<string, string>>;
@@ -90,7 +94,7 @@ const ADVISORY_SQL =
   "WHERE locktype = 'advisory' AND database = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()) " +
   "AND NOT (classid = 3 AND objsubid = 2 AND objid = (hashtext('umbradb-writer'))::oid) ORDER BY 1";
 
-/** The public database's state A172 compares, in one read through the core's `db` item. */
+/** The public database's state that is compared, in one read through the core's `db` item. [A172 FAULT] */
 export async function publicState(db: ReadOnlyDatabase): Promise<PublicState> {
   return db.read(async (read) => {
     const hash = hexOf(await contentsHash(read, { optedOut: PUB_OPTED_OUT }));
@@ -125,7 +129,7 @@ const insert = (offset: number): string => `INSERT INTO pub.rows (height) VALUES
 const command = (statement: number, name: string): Refused => ({ statement, reason: "command", name });
 const fn = (statement: number, name: string): Refused => ({ statement, reason: "function", name });
 
-/** A172's escapes, in its order (see the module comment). */
+/** The escapes, in order (see the module comment). [A172 FAULT] */
 export const ESCAPES: readonly Escape[] = [
   { name: "COMMIT, then an INSERT", statements: ["COMMIT", insert(0)], refused: command(0, "COMMIT") },
   {
@@ -233,10 +237,14 @@ export function stateProblems(before: PublicState, after: PublicState): string[]
 }
 
 /**
- * A172's oracle against the core's transport at `address` over the public database `db`: every problem, none when
- * each escape is answered `read-refused` naming its statement, each read the database refuses is answered
- * `database-error`, a plain read on the same connection is answered after each, the connection stays open, and the
- * public database's state is unchanged.
+ * The oracle against the core's transport at `address` over the public database `db`: every problem. There is none
+ * when:
+ * - each escape is answered `read-refused` naming its statement;
+ * - each read the database refuses is answered `database-error`;
+ * - a plain read on the same connection is answered after each;
+ * - the connection stays open;
+ * - the public database's state is unchanged.
+ * [A172 FAULT]
  */
 export async function confinementProblems(address: string, db: ReadOnlyDatabase): Promise<string[]> {
   const problems: string[] = [];

@@ -6,10 +6,15 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
 
 /**
- * The build of the chain's tests (tasks 10.2, 10.3; IN-2, IN-3, CD-1, CD-3): UmbraDB's real backbone parts —
- * `core-chain`, `core-block-fetch` (whose `on-fetch` puts the items its block source gives: the in-memory source's
- * here, a block's own given by the source's `items` option), `core-block-commit` and `core-digest` —, in RN-3's order,
- * and the test's user modules. A negative control replaces one part.
+ * The build used by the chain's tests: UmbraDB's real backbone parts in the fixed backbone order, then the test's
+ * user modules. The backbone parts are:
+ * - `core-chain`;
+ * - `core-block-fetch`, whose `on-fetch` puts the items its block source gives (here the in-memory source's; a block's
+ *   own items are given by the source's `items` option);
+ * - `core-block-commit`;
+ * - `core-digest`.
+ *
+ * A negative control replaces one part. [IN-2, IN-3, CD-1, CD-3, RN-3]
  *
  * Imports nothing of Vitest, so that a worker process (`chain-bootstrap.worker.ts`) builds the same declarations, with
  * the same migration checksums, as the test that restarts after it.
@@ -21,7 +26,7 @@ export interface ChainBuildOptions {
   readonly chain?: ModuleDeclaration;
   /** A `core-block-commit` in place of the real one (a negative control's). */
   readonly commit?: ModuleDeclaration;
-  /** The build's core modules (task 11.1's `core-chain-events`, `core-block-parsed`, `core-tx-results`); none unless given. */
+  /** The build's core modules (`core-chain-events`, `core-block-parsed`, `core-tx-results`); none unless given. */
   readonly core?: readonly ModuleDeclaration[];
 }
 

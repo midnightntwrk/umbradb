@@ -1,11 +1,16 @@
 /**
- * What a backup's manifest records of its database (`openspec/changes/core-arch/specs/backups/spec.md` BK-2;
- * `design.md` §9.1), read through one read handle — the snapshot the dump is taken in (BK-1) —: the committed height
- * and its block's hash (the cursor: `core-block-commit`'s, or a private process's own, `core_private_source.cursor`),
- * the chain's identity (`core_chain.identity`), every `core_chain.config` and `core_chain.migrations` row, the ledger
- * state root stored for that height when `core_ledger_state.states` exists, the server's version, whether the database
- * is a private process's (PP-12: it holds `core_private_source.cursor`), and the contents hash (DT-3) with the tables
- * declared `deterministic: false` recorded by name only (Q76).
+ * What a backup's manifest records of its database. It is read through one read handle, the snapshot the dump is
+ * taken in. [BK-1, BK-2; design §9.1]
+ *
+ * The facts:
+ * - the committed height and its block's hash, from the cursor: `core-block-commit`'s, or a private process's own
+ *   `core_private_source.cursor`;
+ * - the chain's identity (`core_chain.identity`);
+ * - every `core_chain.config` and `core_chain.migrations` row;
+ * - the ledger state root stored for that height, when `core_ledger_state.states` exists;
+ * - the server's version;
+ * - whether the database is a private process's, which is the case when it holds `core_private_source.cursor` [PP-12];
+ * - the contents hash, which records the tables declared `deterministic: false` by name only [DT-3, Q76].
  */
 
 import { readCursor } from "../backbone/core-block-commit/core-block-commit.js";
@@ -41,12 +46,12 @@ async function present(read: Pick<ReadHandle, "query">, name: string): Promise<b
 
 /** What {@link readBackupFacts} reads: the manifest's fields of the database, and whether it is private. */
 export interface BackupFacts {
-  /** True for a private process's database (PP-12). */
+  /** True for a private process's database. [PP-12] */
   readonly private: boolean;
   readonly manifest: Omit<Manifest, "format" | "umbradb" | "tool">;
 }
 
-/** Whether the database `read` sees is a private process's (PP-12: it holds `core_private_source.cursor`). */
+/** Whether the database `read` sees is a private process's: one that holds `core_private_source.cursor`. [PP-12] */
 export async function isPrivateDatabase(read: Pick<ReadHandle, "query">): Promise<boolean> {
   const [row] = await read.query(PRIVATE_SQL);
   return row?.private === true;
@@ -67,7 +72,7 @@ export async function readBackupFacts(
     throw new UmbraError(
       "no-committed-height",
       "the database has no committed height yet, and a backup holds one: back it up once its first block (S) has " +
-        "committed (BK-1)",
+        "committed",
     );
   }
   const history: ManifestHistoryRow[] = !(await present(read, "core_chain.config"))

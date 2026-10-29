@@ -1,26 +1,32 @@
 /**
- * The shared item `contract-logs` (`openspec/changes/core-arch/specs/contract-data/spec.md` CC-2 to CC-4,
- * `specs/database/spec.md` DB-8, `specs/modules/spec.md` MD-6; `design.md` §10; CORE-ARCH §4.7, §4.11; decision record
- * Q19, Q20, Q21, Q89; task 13.1): the MIP-0002 events of a block — the contract logs of the applied segments, as the
- * ledger emits them — that its two providers give alike, `core-contract-logs-full` (from the full apply's `vm-logs`)
- * and the development-only `core-contract-logs-fast` (from the transcripts, without state, or a halt). At most one of
- * them is active at a height (MD-6); one may stop at a height and the other start at the next (CC-4), a database
- * restored from a backup taken with `-full` and continued with `-fast` among them, with no schema change.
+ * The shared item `contract-logs`: the MIP-0002 events of a block, that is, the contract logs of the applied segments,
+ * as the ledger emits them. Its two providers give it alike:
+ * - `core-contract-logs-full`, from the full apply's `vm-logs`;
+ * - the development-only `core-contract-logs-fast`, from the transcripts, without state, or else a halt.
  *
- * **The item is shared** (DB-8, Q89): both providers declare it in its own schema, `contract_logs` (the item's name with
- * `-` → `_`), with the same `table` declaration and the same migrations ({@link CONTRACT_LOGS_MIGRATIONS}), which the
- * database API records under the item's name and runs once, under the item's role `umbradb_i_contract_logs`, under
- * which the provider active at each height writes. Both providers take their declaration of it from here
- * ({@link contractLogsItem}), so they cannot differ (`shared-item-migrations-differ` otherwise).
+ * [CC-2, CC-3, Q19, Q20, Q21; CORE-ARCH §4.7, §4.11]
  *
- * **The `block` item** is a frozen array of {@link ContractLog}, in emission order — the order the ledger emitted the
- * logs, `index` numbering them in the block from 0 —, put by `-full` at `on-compute` and by `-fast` at `on-parse`; a
- * module requiring `contract-logs` reads it from `on-compute` on, whichever provider is active.
+ * At most one of them is active at a height. One may stop at a height and the other start at the next, with no schema
+ * change; for example, a database restored from a backup taken with `-full` may be continued with `-fast`.
+ * [MD-6, CC-4]
  *
- * **The table** `contract_logs.logs` (`design.md` §10): one row per log, keyed by `(height, tx_index, log_index)` —
- * `log_index` the log's number in the block —, with the contract's address, the entry point, the logical segment, the
- * log's version and event type, and its data in the ledger's tagged serialization; append-only, range-partitioned by
- * height. Ledger v8 has no MIP-0002 events (owner decision Q54): no v8 block has a row.
+ * **The item is shared.** Both providers declare it in its own schema, `contract_logs` (the item's name with `-`
+ * replaced by `_`), with the same `table` declaration and the same migrations ({@link CONTRACT_LOGS_MIGRATIONS}). The
+ * database API records them under the item's name and runs them once, under the item's role
+ * `umbradb_i_contract_logs`; the provider active at each height writes under that role. Both providers take their
+ * declaration from here ({@link contractLogsItem}), so they cannot differ (which would be
+ * `shared-item-migrations-differ`). [DB-8, Q89]
+ *
+ * **The `block` item** is a frozen array of {@link ContractLog} in emission order: the order the ledger emitted the
+ * logs, with `index` numbering them in the block from 0. `-full` puts it at `on-compute` and `-fast` at `on-parse`, so a
+ * module requiring `contract-logs` can read it from `on-compute` on, whichever provider is active.
+ *
+ * **The table** `contract_logs.logs` has one row per log, keyed by `(height, tx_index, log_index)`, where `log_index` is
+ * the log's number in the block. Each row holds the contract's address, the entry point, the logical segment, the log's
+ * version and event type, and its data in the ledger's tagged serialization. The table is append-only and
+ * range-partitioned by height. [design §10]
+ *
+ * Ledger v8 has no MIP-0002 events, so no v8 block has a row. [Q54]
  */
 
 import type { BlockWriteHandle } from "../../db/api.js";
@@ -28,16 +34,16 @@ import type { LogEventType } from "../../ledger/types.js";
 import type { BlockContext, ItemDeclaration } from "../../modules/declaration.js";
 import { heightPartitionsSql } from "../height-partitions.js";
 
-/** The item both providers give (Q20). */
+/** The item both providers give. [Q20] */
 export const CONTRACT_LOGS_ITEM = "contract-logs";
 
-/** Its schema: the item's name with `-` → `_` (a shared item's, DB-8, Q89). */
+/** Its schema: the item's name with `-` replaced by `_`, as for every shared item. [DB-8, Q89] */
 export const CONTRACT_LOGS_SCHEMA = "contract_logs";
 
 /** Its table: one row per log. */
 export const LOGS_TABLE = "contract_logs.logs";
 
-/** The event types of a MIP-0002 log, as the ledger names them (`specs/contract-data/spec.md`'s list). */
+/** The event types of a MIP-0002 log, as the ledger names them. [CC-2] */
 export const LOG_EVENT_TYPES: readonly LogEventType[] = Object.freeze([
   "ShieldedSpend",
   "ShieldedReceive",
@@ -55,8 +61,8 @@ export const LOG_EVENT_TYPES: readonly LogEventType[] = Object.freeze([
 const types = LOG_EVENT_TYPES.map((type) => `'${type}'`).join(", ");
 
 /**
- * The item's migrations (DB-9), the same for both providers (DB-8: recorded under the item's name, run once): applied
- * once, never changed.
+ * The item's migrations, the same for both providers. They are recorded under the item's name, applied once and never
+ * changed. [DB-8, DB-9]
  */
 export const CONTRACT_LOGS_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
@@ -79,7 +85,7 @@ ${heightPartitionsSql(LOGS_TABLE)}`,
 
 /** A MIP-0002 event of a block: a contract log of an applied segment, as both providers give it. */
 export interface ContractLog {
-  /** The index of its transaction in the block (`block-parsed`'s order, CD-5). */
+  /** The index of its transaction in the block, in `block-parsed`'s order. [CD-5] */
   readonly transaction: number;
   /** Its number in the block, in emission order, from 0. */
   readonly index: number;
@@ -124,7 +130,7 @@ export function contractLogsItemOf(b: BlockContext, module: string): readonly Co
   if (!Array.isArray(logs)) {
     throw new TypeError(
       `the block at height ${b.height} has no contract-logs item ${module} can read: its provider puts it before ` +
-        "on-db-write (core-contract-logs-full at on-compute, core-contract-logs-fast at on-parse; CC-2, CC-3)",
+        "on-db-write (core-contract-logs-full at on-compute, core-contract-logs-fast at on-parse)",
     );
   }
   return logs as readonly ContractLog[];

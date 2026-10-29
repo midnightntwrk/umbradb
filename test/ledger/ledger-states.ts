@@ -4,8 +4,7 @@ import * as v8 from "../../vendor/ledger/v8/pkg/midnight_ledger_wasm_fs.js";
 import * as v9 from "../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js";
 import { free, hex } from "./node-format.js";
 
-// Task 0.2 of `openspec/changes/core-arch`: small ledger states built with the vendored packages' published API, for
-// the tests of their node-store exports.
+// Small ledger states built with the vendored packages' published API, for the tests of their node-store exports.
 
 export const V8_PACKAGE_PATH = fileURLToPath(
   new URL("../../vendor/ledger/v8/pkg/midnight_ledger_wasm_fs.js", import.meta.url),
@@ -13,7 +12,7 @@ export const V8_PACKAGE_PATH = fileURLToPath(
 export const V9_PACKAGE_PATH = fileURLToPath(
   new URL("../../vendor/ledger/v9/pkg/midnight_ledger_wasm_v9_fs.js", import.meta.url),
 );
-/** Ledger v9 as runtime 2.0 built it (`crate-ledger-9.1.0.0-rc.3`, task 12.2a). */
+/** Ledger v9 as runtime 2.0 built it (`crate-ledger-9.1.0.0-rc.3`). */
 export const V9_RC3_PACKAGE_PATH = fileURLToPath(
   new URL("../../vendor/ledger/v9-rc3/pkg/midnight_ledger_wasm_v9_fs.js", import.meta.url),
 );

@@ -16,13 +16,15 @@ import {
 } from "./retirement.js";
 
 /**
- * A5 `[STATIC]` (LS-5, task 17.2): "A test compares the required-test manifest, `stryker.conf.json` `mutate`, the
- * coverage floors of `vitest.config.ts` and the file list of `Formal/Lean` with the lists in `design.md` §13 and fails on
- * any difference." Each list is read from the tree as the gates read it — the manifest's JSON, Stryker's JSON, the
- * Vitest configurations as Vitest loads them, the files below `Formal/Lean` — and compared with §13's lists, transcribed
- * in `./retirement.ts` and checked against §13's own words. The other rows of §13 are checked the same way: no retired
- * file is left in the tree (git's list), `package.json`'s scripts, the names `src/index.ts` exports (the TypeScript
- * checker's list, types included), the Quint change's status.
+ * The required-test manifest, `stryker.conf.json` `mutate`, the coverage floors of `vitest.config.ts` and the file list
+ * of `Formal/Lean` are compared with the design's retirement list, and any difference fails. Each list is read from the
+ * tree as the gates read it (the manifest's JSON, Stryker's JSON, the Vitest configurations as Vitest loads them, the
+ * files below `Formal/Lean`). It is compared with the retirement list's lists, transcribed in `./retirement.ts` and
+ * checked against the list's own words. [A5 STATIC, LS-5; design §13]
+ *
+ * The retirement list's other rows are checked the same way: no retired file is left in the tree (git's list),
+ * `package.json`'s scripts, the names `src/index.ts` exports (the TypeScript checker's list, types included), the
+ * Quint change's status. [design §13]
  *
  * The negative controls below run each check on a list holding one retired item, or lacking one kept item, and see it
  * fail with the item named; the one on the barrel compiles a module that still exports a retired name.
@@ -86,7 +88,7 @@ interface VitestConfig {
   };
 }
 
-/** A Vitest configuration's export, imported by a computed specifier as Vitest loads it (issue 00017). */
+/** A Vitest configuration's export, imported by a computed specifier as Vitest loads it. [docs/issues/00017] */
 async function vitestConfig(file: string): Promise<VitestConfig> {
   return ((await import(pathToFileURL(path.join(ROOT, file)).href)) as { default: VitestConfig }).default;
 }
@@ -94,9 +96,9 @@ async function vitestConfig(file: string): Promise<VitestConfig> {
 const manifest = JSON.parse(read("test/integration/required-tests.manifest.json")) as RequiredTestsManifest;
 const added = acceptanceIds(read("openspec/changes/core-arch/acceptance.md"));
 /**
- * `acceptance.md` §17's ids that may still be absent from the manifest: the four the crash runs bring after 0.10.0
- * (owner decision Q191). Task 18.4 added the other 18 (pinned count 4 + 18 = 22, A120's key-half id withdrawn by Q154);
- * once the crash runs empty this list, the comparison is exact (4 + 22 = 26).
+ * The required-test table's ids that may still be absent from the manifest: the four the crash runs bring after 0.10.0.
+ * The other 18 have been added (pinned count 4 + 18 = 22, the key-handling id withdrawn). Once
+ * the crash runs empty this list, the comparison is exact (4 + 22 = 26). [Q191, A120, Q154; acceptance §17]
  */
 const PENDING_CRASH_RUNS: readonly string[] = [
   "runner.crash-sweep.contents-hash-equal",
@@ -113,7 +115,7 @@ describe("A5: the gates match design.md §13's retirement list (LS-5)", () => {
   });
 
   it("the required-test manifest: ids 1–4 kept, ids 5–25 and the deferred id retired, the count pinned to the list", () => {
-    expect(added).toHaveLength(22); // acceptance.md §17's table, read (Q154 withdrew one)
+    expect(added).toHaveLength(22); // the required-test table, read (one id withdrawn) [Q154; acceptance §17]
     for (const id of PENDING_CRASH_RUNS) expect(added).toContain(id);
     expect(manifestProblems(manifest, added, PENDING_CRASH_RUNS, EXPECTED_REQUIRED_COUNT, EXPECTED_DEFERRED_COUNT))
       .toEqual([]);
@@ -135,7 +137,7 @@ describe("A5: the gates match design.md §13's retirement list (LS-5)", () => {
       .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name));
     expect(srcEntries).toContain("db/");
     expect(floorProblems(coverage!.thresholds!, coverage!.exclude ?? [], srcEntries, PENDING_FLOORS)).toEqual([]);
-    // No §13 floor is pending (task 17.5b, Q158 A): the sweep's 95/90 is held like the others.
+    // No floor of the retirement list is pending: the sweep's 95/90 is held like the others. [Q158 A; design §13]
     expect(PENDING_FLOORS).toEqual([]);
   });
 
@@ -193,7 +195,8 @@ describe("A5's negative controls: a list that differs from design.md §13 fails,
       "EXPECTED_REQUIRED_COUNT is 25 but the manifest requires 4 ids",
       "EXPECTED_DEFERRED_COUNT is 1 but the manifest defers 0 ids",
     ]);
-    // With no pending id (after the crash runs), every §17 id is required; with them all, the list is exact.
+    // With no pending id (after the crash runs), every id of the required-test table is required; with them all, the
+    // list is exact. [acceptance §17]
     expect(manifestProblems(manifestOf(kept), added, [], 4, 0)).toHaveLength(added.length);
     expect(manifestProblems(manifestOf([...kept, ...added]), added, [], 26, 0)).toEqual([]);
     // The 0.9.5 manifest (ids 1–25, the deferred id) fails on every retired id.
@@ -239,7 +242,7 @@ describe("A5's negative controls: a list that differs from design.md §13 fails,
       "vitest.config.ts has no floor **/src/newdir/** (design.md §13's default for src/**)",
       "src/loose.ts lies under no floor of design.md §13 (only directories have one)",
     ]);
-    // A pending floor (Q158) may be absent, but not weaker; once nothing is pending, its absence fails.
+    // A pending floor may be absent, but not weaker; once nothing is pending, its absence fails. [Q158 A]
     const sweep = "**/src/backbone/core-ledger-state/sweep.ts";
     const { [sweep]: _sweep, ...withoutSweep } = thresholds;
     expect(floorProblems(withoutSweep, [], dirs, [sweep])).toEqual([]);

@@ -1,8 +1,7 @@
 /**
- * The statements of a backup's dump (`openspec/changes/core-arch/specs/backups/spec.md` BK-3; `design.md` §9.1; task
- * 15.2): a restore runs the file's SQL itself, statement by statement, in one transaction — no `psql` —, so it splits
- * the plain SQL `pg_dump` wrote as PostgreSQL's lexer reads it, and handles what the tool writes for `psql` alone as
- * `psql` would.
+ * The statements of a backup's dump. A restore runs the file's SQL itself, statement by statement, in one transaction,
+ * without `psql`. So it splits the plain SQL that `pg_dump` wrote as PostgreSQL's lexer reads it, and handles what the
+ * tool writes for `psql` alone as `psql` would. [BK-3; design §9.1]
  *
  * **Statements** end at a `;` outside a string, an identifier, a dollar-quoted body and a comment: `'…'` (a doubled
  * quote inside), `E'…'` (with backslash escapes), `"…"` (a doubled quote inside), `$tag$…$tag$`, `-- …` to the end of
@@ -247,7 +246,10 @@ export async function* statementsOf(
   splitter.end();
 }
 
-/** Reads every piece of `lines` without running any (BK-3's check before loading); resolves with the statement count. */
+/**
+ * Reads every piece of `lines` without running any (the restore's check before loading); resolves with the statement
+ * count. [BK-3]
+ */
 export async function checkStatements(lines: AsyncIterable<string>, firstLine = 2): Promise<number> {
   let count = 0;
   for await (const _statement of statementsOf(lines, firstLine)) count += 1;

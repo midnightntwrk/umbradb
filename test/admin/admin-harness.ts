@@ -23,14 +23,19 @@ import { coreSettings, entryOf, testBuild, type TestBuildOptions } from "../runn
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * The admin endpoints' tests (task 8.1; AE-1–AE-3, AE-6; A62, A64): a process started with its admin endpoints on
- * `listen.admin` (`127.0.0.1:0`, a port the system gives, checked to be ≥ 10000), requests to them, the prober that
- * times their answers off the main thread, the oracles of A62 and A64, and the admin servers of the negative controls.
+ * Helpers for the admin endpoints' tests:
+ * - a process started with its admin endpoints on `listen.admin` (`127.0.0.1:0`, a port the system gives, checked to
+ *   be ≥ 10000), and requests to them;
+ * - the prober that times their answers off the main thread;
+ * - the oracle for answer times and routes; [A62]
+ * - the oracle for the endpoints in each process state; [A64]
+ * - the admin servers of the negative controls.
+ * [AE-1–AE-3, AE-6]
  */
 
 /**
- * The test network: `custom`, with its own ledger table (task 12.2) and its genesis hash the in-memory chain's block 0
- * ({@link adminSource}), so the configured genesis and the chain's agree (task 14.1's helpers, `test/private/builds.ts`).
+ * The test network: `custom`, with its own ledger table and its genesis hash the in-memory chain's block 0
+ * ({@link adminSource}), so the configured genesis and the chain's agree (as the helpers of `test/private/builds.ts`).
  */
 export const ADMIN_GENESIS = genesisHex(0x81);
 
@@ -45,8 +50,7 @@ export function adminCoreSettings(database: DatabaseParts, extra: Readonly<Recor
 }
 
 /**
- * How `/config` shows the `database` setting `database` (CF-4, owner decision Q167 A): its parts, the password as
- * `[redacted]`.
+ * How `/config` shows the `database` setting `database`: its parts, the password as `[redacted]`. [CF-4, Q167 A]
  */
 export function shownDatabase(database: DatabaseParts): Record<string, unknown> {
   return "password" in database && database.password !== undefined ? { ...database, password: "[redacted]" } : { ...database };
@@ -67,7 +71,7 @@ export function adminCore(
 
 /**
  * A user module that keeps the core's `db` item (the process's database, read-only) from its `on-start-api` on: how a
- * test reads the process's database from outside its callbacks (task 10.2 removed the runner's `onChecked`).
+ * test reads the process's database from outside its callbacks (the runner has no `onChecked` hook).
  */
 export function dbKeeper(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaration {
   return {
@@ -90,13 +94,13 @@ export function dbKeeper(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaratio
 /**
  * The backbone parts of the admin endpoints that have a declaration, which the tests' build carries beside the test
  * backbone (`testBuild`), as the command's build does (`src/cli/build-modules.ts`): `core-health`, `core-status` and
- * `core-config` (tasks 8.2–8.4).
+ * `core-config`.
  */
 export const ADMIN_BACKBONE = [CORE_HEALTH, CORE_STATUS, CORE_CONFIG] as const;
 
 /**
- * A published status for the endpoints' unit tests: a public process `following` at 3, ready, `given` over it; what
- * nothing has reported yet null (AE-5).
+ * A published status for the endpoints' unit tests: a public process `following` at 3, ready, `given` over it. What
+ * nothing has reported yet is null. [AE-5]
  */
 export function statusSnapshot(given: Partial<StatusSnapshot> = {}): StatusSnapshot {
   return {
@@ -118,12 +122,12 @@ export function statusSnapshot(given: Partial<StatusSnapshot> = {}): StatusSnaps
   };
 }
 
-/** A whole snapshot for the endpoints' unit tests: {@link statusSnapshot}'s, CF-4's defaults, `given` over it. */
+/** A whole snapshot for the endpoints' unit tests: {@link statusSnapshot}'s, the default settings, `given` over it. [CF-4] */
 export function adminSnapshot(given: Partial<AdminSnapshot> = {}): AdminSnapshot {
   return { livenessTimeoutMs: 30_000, readinessLag: null, startedNs: "0", status: statusSnapshot(), config: UNVALIDATED_CONFIG, ...given };
 }
 
-/** The four endpoints (AE-1). */
+/** The four endpoints. [AE-1] */
 export const ENDPOINTS = ["/health/live", "/health/ready", "/status", "/config"] as const;
 
 /** One answer of the admin listener (or the module API's). */
@@ -351,7 +355,7 @@ export function gate(): Gate {
   };
 }
 
-// ── A62's timing: the prober ─────────────────────────────────────────────────────────────────────────────────────
+// ── Answer timing: the prober [A62] ──────────────────────────────────────────────────────────────────────────────
 
 /** One request the prober made. */
 export interface ProbeRecord {
@@ -362,7 +366,7 @@ export interface ProbeRecord {
   readonly sent: string;
   /** How long its answer took, from the request. */
   readonly ms: number;
-  /** The answer's body as text, when the prober was asked for bodies (task 5.5). */
+  /** The answer's body as text, when the prober was asked for bodies. */
   readonly body?: string;
 }
 
@@ -373,8 +377,8 @@ export interface Prober {
 }
 
 /**
- * Starts the prober on `origin`'s `paths`, every `intervalMs` — keeping each answer's body with `bodies` (task 5.5) —;
- * resolves once it runs.
+ * Starts the prober on `origin`'s `paths`, every `intervalMs`, keeping each answer's body with `bodies`. Resolves once
+ * it runs.
  */
 export async function startProber(
   origin: string,
@@ -417,15 +421,15 @@ export interface Hold {
 /** A new hold, not yet started. */
 export const newHold = (): Hold => ({ start: 0n, end: 0n });
 
-/** How many requests of each path A62 wants during a hold, so that "each answers within 1 s" is not vacuous. */
+/** How many requests of each path a hold must see, so that "each answers within 1 s" is not vacuous. [A62] */
 export const PROBES_DURING_HOLD = 4;
-/** A62's bound on an answer's time. */
+/** The bound on an answer's time. [A62] */
 export const ANSWER_MS = 1_000;
 
 /**
- * A62's timing oracle: for each of `paths`, the requests sent during `hold` — from its start to 1 s before its end, so
- * that a request sent near its end could not be answered after it ended anyway — number at least
- * {@link PROBES_DURING_HOLD}, and each was answered, with a status of `expected`, within {@link ANSWER_MS}.
+ * The timing oracle. For each of `paths`, it counts the requests sent during `hold`, from its start to 1 s before its
+ * end (so that a request sent near its end could not be answered after it ended anyway). There must be at least
+ * {@link PROBES_DURING_HOLD}, and each must be answered, with a status of `expected`, within {@link ANSWER_MS}. [A62]
  */
 export function timingProblems(
   records: readonly ProbeRecord[],
@@ -449,9 +453,9 @@ export function timingProblems(
   return problems;
 }
 
-// ── A62's routes ─────────────────────────────────────────────────────────────────────────────────────────────────
+// ── Routes [A62] ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** Requests that are none of the four endpoints (AE-1: "Any other method or path SHALL answer 404"). */
+/** Requests that are none of the four endpoints; any other method or path answers 404. [AE-1] */
 export const OTHER_REQUESTS: readonly (readonly [method: string, path: string])[] = [
   ["GET", "/"],
   ["GET", "/health"],
@@ -479,9 +483,12 @@ export const OTHER_REQUESTS: readonly (readonly [method: string, path: string])[
 ];
 
 /**
- * A62's route oracle over the admin listener's answers: each of the four endpoints answered (`GET`; `/status?…` is
- * `/status`) with JSON — the health endpoints 200 or 503, `/status` and `/config` 200 —, and every other request in
- * `others` (the module's own paths among them) 404, `not-found`, with JSON unless it is a `HEAD`.
+ * The route oracle over the admin listener's answers:
+ * - each of the four endpoints answered (`GET`; `/status?…` is `/status`) with JSON: the health endpoints 200 or 503,
+ *   `/status` and `/config` 200;
+ * - every other request in `others` (the module's own paths among them) answered 404, `not-found`, with JSON unless it
+ *   is a `HEAD`.
+ * [A62]
  */
 export function routeProblems(endpoints: readonly Answered[], others: readonly Answered[]): string[] {
   const problems: string[] = [];
@@ -505,9 +512,9 @@ export function routeProblems(endpoints: readonly Answered[], others: readonly A
   return problems;
 }
 
-// ── A64's oracle ─────────────────────────────────────────────────────────────────────────────────────────────────
+// ── Endpoints in each state [A64] ────────────────────────────────────────────────────────────────────────────────
 
-/** What A64 expects of the four endpoints in a state. */
+/** What the four endpoints must answer in a state. [A64] */
 export interface Expected {
   readonly state: string;
   readonly ready: boolean;
@@ -516,9 +523,12 @@ export interface Expected {
 }
 
 /**
- * A64's oracle: in the state `expected`, `/health/live` answers 200 (AE-3: a refused or halted process stays up and
- * live), `/health/ready` 200 when ready and 503 otherwise, `/status` 200 with the state and readiness, and its reason
- * with the fields expected (or none), and `/config` 200.
+ * The endpoint-state oracle. In the state `expected`:
+ * - `/health/live` answers 200, as a refused or halted process stays up and live; [AE-3]
+ * - `/health/ready` answers 200 when ready and 503 otherwise;
+ * - `/status` answers 200 with the state and readiness, and its reason with the fields expected (or none);
+ * - `/config` answers 200.
+ * [A64]
  */
 export function stateProblems(seen: Observation, expected: Expected): string[] {
   const problems: string[] = [];
@@ -550,8 +560,9 @@ export function stateProblems(seen: Observation, expected: Expected): string[] {
 export type Answerer = (method: string, url: string, view: AdminView) => AdminAnswer | Promise<AdminAnswer>;
 
 /**
- * An admin server on the **main thread** (A62's first control): the very `serveAdmin` the worker runs, over a message
- * channel in this thread, answering with `answer` (the real route table's by default).
+ * An admin server on the **main thread**, the first negative control of the answer-time test: the very `serveAdmin` the
+ * worker runs, over a message channel in this thread, answering with `answer` (the real route table's by default).
+ * [A62]
  */
 export function mainThreadAdmin(answer?: Answerer): AdminStarter {
   return async ({ address, beat, snapshot }) => {
@@ -589,9 +600,9 @@ export function mainThreadAdmin(answer?: Answerer): AdminStarter {
 }
 
 /**
- * An admin server that **reads the database** (A62's second control): on the main thread, as it must be to hold a
- * database, its `/status` reads the cursor through `database()` before it answers; every other request as the real
- * route table answers it.
+ * An admin server that **reads the database**, the second negative control of the answer-time test. It runs on the main
+ * thread, as it must to hold a database. Its `/status` reads the cursor through `database()` before it answers; it
+ * answers every other request as the real route table does. [A62]
  */
 export function databaseReadingAdmin(database: () => Promise<ReadOnlyDatabase>): AdminStarter {
   return mainThreadAdmin(async (method, url, view) => {

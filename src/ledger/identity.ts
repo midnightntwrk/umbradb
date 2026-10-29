@@ -1,36 +1,44 @@
 /**
- * The identity of the ledger packages this build carries, checked before any of them is imported
- * (`openspec/changes/core-arch/specs/ledger/spec.md` LG-5; A97, A173; `design.md` §5.2, §11; tasks 12.2, 12.2b).
+ * The identity of the ledger packages this build carries, checked before any of them is imported. [LG-5, A97, A173;
+ * design §5.2]
  *
- * A package is identified in the core version (CF-2, `../config/build.ts`) by its name, its version and its SHA-256:
- * the SHA-256 of the package's manifest, `vendor/ledger/<version>/SHA256SUMS` — one line `<sha256>  pkg/<file>` per
- * file of the package, sorted, as `npm run vendor:ledger` writes it (`vendor/ledger/lib.sh`) — so it commits to every
- * file's name and content, and a rebuild that matches the manifest (task 0.2's CI job) has the recorded identity. The
- * recorded values are `./releases.ts`' constants, which the browser build reads too.
+ * The core version (`../config/build.ts`) identifies a package by its name, its version and its SHA-256. The SHA-256
+ * is that of the package's manifest, `vendor/ledger/<version>/SHA256SUMS`: one line `<sha256>  pkg/<file>` per file
+ * of the package, sorted, as `npm run vendor:ledger` writes it (`vendor/ledger/lib.sh`). So it commits to every file's
+ * name and content, and a rebuild that matches the manifest has the recorded identity. The recorded values are
+ * `./releases.ts`' constants, which the browser build reads too. [CF-2]
  *
- * {@link verifyLedgerPackages} refuses with `package-hash-mismatch` (`design.md` §11; not retryable) when, for a
- * version the build carries, the manifest is missing or its SHA-256 is not the recorded one, a line of it is malformed,
- * or a file it lists is missing or has another SHA-256 than its line — so a package file changed by one byte refuses
- * startup, naming the version and the file. Files the manifest does not list are not part of the package and not read.
- * The check is driven by each version's manifest: a package rebuilt with other patches (question Q113) is recorded by
- * rewriting its manifest and the one constant of `./releases.ts` that a test holds equal to the manifest's SHA-256.
+ * {@link verifyLedgerPackages} fails with `package-hash-mismatch` (not retryable) when, for a version the build
+ * carries:
  *
- * `ledgerSources` (CF-4) chooses each version's source; this build carries vendored packages only, so a version whose
- * source is `released` refuses startup with `invalid-configuration` naming the setting (`./sources.ts`, question Q116).
+ * - the manifest is missing, or its SHA-256 is not the recorded one;
+ * - a line of the manifest is malformed;
+ * - a file it lists is missing, or has another SHA-256 than its line.
  *
- * **Where it runs** (task 12.2b): a thread checks a version's package before it imports it, and hashes a version's
- * files once — {@link checkLedgerPackages} and {@link checkLedgerPackage} remember, per thread, each directory and
- * version whose files passed (a refusal is not remembered), since a thread imports a package once and keeps it. The
- * process calls {@link checkLedgerPackages} at startup with its `ledgerSources`, before it starts its ledger worker and
- * before block S (`../runner/process.ts`), so a changed package refuses startup; the ledger worker — and any thread
- * loading adapters through `./load.ts` — calls {@link checkLedgerPackage} before it imports a version's package. In a
- * process whose graph loads ledger packages, a file is so hashed by the main thread once, at startup, and by the
- * worker once, before the first block of its version (again by a worker started anew, LG-14), never per block or
- * request: the three packages are 35 MB, 15 to 20 ms of the main thread's startup on an idle Apple M4 Max (up to 40 ms
- * on a loaded one), and a version 4 to 7 ms of the worker's first block of it.
+ * So a package file changed by one byte stops startup, naming the version and the file. Files the manifest does not
+ * list are not part of the package and are not read. Each version's manifest drives the check: a package rebuilt with
+ * other patches is recorded by rewriting its manifest and the one constant in `./releases.ts` that a test keeps equal
+ * to the manifest's SHA-256. [LG-5, Q113; design §11]
+ *
+ * `ledgerSources` chooses each version's source. This build carries vendored packages only, so a version whose source
+ * is `released` stops startup with `invalid-configuration`, naming the setting (`./sources.ts`). [CF-4, Q116]
+ *
+ * **Where it runs.** A thread checks a version's package before it imports it, and hashes a version's files once:
+ * {@link checkLedgerPackages} and {@link checkLedgerPackage} remember, per thread, each directory and version whose
+ * files passed (a failure is not remembered), since a thread imports a package once and keeps it.
+ *
+ * - The process calls {@link checkLedgerPackages} at startup with its `ledgerSources`, before it starts its ledger
+ *   worker and before block S (`../runner/process.ts`), so a changed package stops startup.
+ * - The ledger worker, and any thread loading adapters through `./load.ts`, calls {@link checkLedgerPackage} before it
+ *   imports a version's package.
+ *
+ * In a process whose graph loads ledger packages, a file is therefore hashed by the main thread once, at startup, and
+ * by the worker once, before the first block of its version (again by a worker started anew), never per block or
+ * request. The three packages are 35 MB: 15 to 20 ms of the main thread's startup on an idle Apple M4 Max (up to 40 ms
+ * on a loaded one), and 4 to 7 ms of the worker's first block of a version. [A173, LG-14]
  *
  * Node.js only (`node:fs`, `node:crypto`). The browser build bundles `browser/src/ledger/identity.ts` in this module's
- * place, which refuses the same `ledgerSources` and reads no file: `browser/build.ts` checks every package file it
+ * place, which rejects the same `ledgerSources` and reads no file: `browser/build.ts` checks every package file it
  * bundles with {@link readRecordedManifest} and {@link readPackageFile}, and the ledger worker checks the WebAssembly
  * it fetches against its manifest line.
  */
@@ -88,7 +96,7 @@ function mismatch(
 ): UmbraError {
   return new UmbraError(
     "package-hash-mismatch",
-    `the vendored ledger ${ledger} package ${packageName(ledger)} is not the one this build records: ${detail} (LG-5); ` +
+    `the vendored ledger ${ledger} package ${packageName(ledger)} is not the one this build records: ${detail}; ` +
       `restore vendor/ledger/${ledger} as committed, or rebuild it with npm run vendor:ledger and compare`,
     { ledger, package: packageName(ledger), file, reason, ...values },
   );

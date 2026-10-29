@@ -12,13 +12,16 @@ import { migrationPart } from "../../src/modules/adapters.js";
 import { type PostgresTestDatabase, type PostgresTestServer, startPostgresServer } from "./postgres-server.js";
 
 /**
- * What the writer's login must hold on PostgreSQL 18 (task 2.3, decision record Q90, `design.md` §4 "Roles"): a login
- * that is not a superuser but has `CREATEROLE` and `CREATE` on the database creates the module roles and schemas, grants
- * itself each role `WITH INHERIT TRUE, SET TRUE` (PostgreSQL 16 and later give its creator `ADMIN` only), and the roles
- * then guard as they do under a superuser (A13, A73); a login lacking a privilege, or facing a role another login
- * created, is refused with `invalid-configuration` (`reason: writer-privileges`) before anything is created. PGlite runs
- * as its superuser `postgres` only, so this is PostgreSQL's alone. Roles belong to the whole server, so each test uses
- * module ids of its own.
+ * What the writer's login must hold on PostgreSQL 18. [Q90; design §4 "Roles"]
+ *
+ * - A login that is not a superuser but has `CREATEROLE` and `CREATE` on the database creates the module roles and
+ *   schemas, and grants itself each role `WITH INHERIT TRUE, SET TRUE` (PostgreSQL 16 and later give its creator
+ *   `ADMIN` only). The roles then guard as they do under a superuser. [A13, A73]
+ * - A login lacking a privilege, or facing a role another login created, is refused with `invalid-configuration`
+ *   (`reason: writer-privileges`) before anything is created.
+ *
+ * PGlite runs as its superuser `postgres` only, so these tests are for PostgreSQL alone. Roles belong to the whole
+ * server, so each test uses module ids of its own.
  */
 
 let server: PostgresTestServer;
@@ -94,7 +97,7 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
       { role: "umbradb_m_login_b", grantor: "writer_one", admin: false, inherit: true, set: true },
     ]);
 
-    // A13 under this login: a's write into b's table is rejected and the transaction rolls back.
+    // Under this login, a's write into b's table is rejected and the transaction rolls back. [A13]
     const cross = (await outcome(
       db.transaction(async (tx) => {
         await setModuleRole(tx, plan, "login-a");
@@ -108,7 +111,7 @@ describe("a CREATEROLE login on PostgreSQL 18 (Q90)", () => {
     expect(await db.read((read) => read.query("SELECT (SELECT count(*) FROM login_a.t)::int AS a, (SELECT count(*) FROM login_b.t)::int AS b"))).toEqual([
       { a: 0, b: 0 },
     ]);
-    // A73 under this login: the TRUNCATE trigger was attached, and refuses in a block.
+    // Under this login, the TRUNCATE trigger was attached, and refuses in a block. [A73]
     const truncate = (await outcome(
       db.transaction(async (tx) => {
         await setModuleRole(tx, plan, "login-b");

@@ -2,24 +2,31 @@ import type { TapeRecord } from "../../tools/tape/index.js";
 import { bareExtrinsic, type ChainBlock, compact, content, hex } from "./fetch-fixtures.js";
 
 /**
- * Synthetic runtimes with chain events for task 11.1's tests (`core-chain-events`, `core-block-parsed`,
- * `core-tx-results`; CD-4 to CD-6): metadata V14 in `frame-metadata`'s layout over `scale-info`'s portable registry —
- * written here independently of the code under test — holding the types, calls, events and the `System::Events`
- * storage entry of a Midnight runtime, and the SCALE bytes of `System::Events` values, as a node gives them.
+ * Synthetic runtimes with chain events, for the tests of `core-chain-events`, `core-block-parsed` and
+ * `core-tx-results`. They hold metadata V14 in `frame-metadata`'s layout over `scale-info`'s portable registry, written
+ * here independently of the code under test. The metadata holds the types, calls, events and the `System::Events`
+ * storage entry of a Midnight runtime. The fixtures also give the SCALE bytes of `System::Events` values, as a node
+ * gives them. [CD-4, CD-5, CD-6]
  *
- * **The runtime** follows the real Midnight node metadata files (`midnight-indexer` 2.1.0-rc.4's `.node/*`, read by
- * task 11.1's probe): pallet indices `System` 0, `Timestamp` 1, `Grandpa` 3, `Midnight` 5, `MidnightSystem` 6,
- * `CNightObservation` 13, `Session` 30, `FederatedAuthorityObservation` 45; `System`'s events `ExtrinsicSuccess`
- * { dispatch_info } 0, `ExtrinsicFailed` { dispatch_error, dispatch_info } 1, `CodeUpdated` 2 — no fields up to
- * runtime 2.0, `{ hash }` from 2.1 (the real change {@link V2_1} models) —, `Remarked` { sender, hash } 5;
- * `Midnight`'s calls `send_mn_transaction` 0 and `set_tx_size_weight` 1 (Root only) and its events `ContractCall` 0,
- * `ContractDeploy` 1, `TxApplied` 2, `PayoutMinted` 4 and `TxPartialSuccess` 7 (one
- * unnamed field each, a details struct); `MidnightSystem`'s `SystemTransactionApplied` { hash, serialized_system_transaction }
- * 0; `CNightObservation`'s own `SystemTransactionApplied` { system_transaction_hash } 3 (a hash only); `Session`'s
- * `NewSession` { session_index } 0; `Grandpa`'s `NewAuthorities` { authority_set: Vec<([u8; 32], u64)> } 0.
- * `DispatchEventInfo` is { weight: { ref_time, proof_size: Compact<u64> }, class, pays_fee }; `DispatchError` has
- * `Other` 0, `CannotLookup` 1, `BadOrigin` 2 and `Module(ModuleError { index, error: [u8; 4] })` 3; `Phase` is
- * `ApplyExtrinsic(u32)` 0, `Finalization` 1, `Initialization` 2; an event record is { phase, event, topics: Vec<H256> }.
+ * **The runtime** follows the real Midnight node metadata files (`midnight-indexer` 2.1.0-rc.4's `.node/*`):
+ * - pallet indices: `System` 0, `Timestamp` 1, `Grandpa` 3, `Midnight` 5, `MidnightSystem` 6, `CNightObservation` 13,
+ *   `Session` 30, `FederatedAuthorityObservation` 45;
+ * - `System`'s events: `ExtrinsicSuccess` { dispatch_info } 0, `ExtrinsicFailed` { dispatch_error, dispatch_info } 1,
+ *   `CodeUpdated` 2 (no fields up to runtime 2.0, `{ hash }` from 2.1, the real change {@link V2_1} models),
+ *   `Remarked` { sender, hash } 5;
+ * - `Midnight`'s calls: `send_mn_transaction` 0 and `set_tx_size_weight` 1 (Root only);
+ * - `Midnight`'s events, each with one unnamed field (a details struct): `ContractCall` 0, `ContractDeploy` 1,
+ *   `TxApplied` 2, `PayoutMinted` 4, `TxPartialSuccess` 7;
+ * - `MidnightSystem`'s `SystemTransactionApplied` { hash, serialized_system_transaction } 0;
+ * - `CNightObservation`'s own `SystemTransactionApplied` { system_transaction_hash } 3 (a hash only);
+ * - `Session`'s `NewSession` { session_index } 0;
+ * - `Grandpa`'s `NewAuthorities` { authority_set: Vec<([u8; 32], u64)> } 0.
+ *
+ * The shared types:
+ * - `DispatchEventInfo` is { weight: { ref_time, proof_size: Compact<u64> }, class, pays_fee };
+ * - `DispatchError` has `Other` 0, `CannotLookup` 1, `BadOrigin` 2 and `Module(ModuleError { index, error: [u8; 4] })` 3;
+ * - `Phase` is `ApplyExtrinsic(u32)` 0, `Finalization` 1, `Initialization` 2;
+ * - an event record is { phase, event, topics: Vec<H256> }.
  */
 
 // ── SCALE ───────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -154,7 +161,7 @@ export function metadataV14(registry: Registry, pallets: readonly PalletMetadata
 export interface RuntimeShape {
   /** `System::CodeUpdated` carries `{ hash }` (runtime 2.1) rather than nothing (up to 2.0). */
   readonly codeUpdatedHash: boolean;
-  /** The `Timestamp` pallet's index: 1, or 2 with `Preimage` at 1 (task 10.3's synthetic upgrade). */
+  /** The `Timestamp` pallet's index: 1, or 2 with `Preimage` at 1 (the synthetic runtime upgrade). */
   readonly timestampIndex: 1 | 2;
   /** Leave the `System::Events` storage entry out (a metadata it cannot be read with). */
   readonly noEventsEntry?: boolean;

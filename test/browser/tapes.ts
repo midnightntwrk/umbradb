@@ -13,27 +13,27 @@ import {
 } from "../backbone/fetch-fixtures.js";
 
 /**
- * The synthetic tapes of the browser build's tests (task 16.1; A129–A132), in the node's answer shapes
+ * The synthetic tapes of the browser build's tests, in the node's answer shapes
  * (`test/backbone/fetch-fixtures.ts`, `events-fixtures.ts`): blocks 0 to {@link BrowserChain.last} of runtime 2.0, the
  * blocks {@link LEDGER_HEIGHTS} with real ledger v9 transactions (`test/ledger/adapter-fixtures.ts`: regular ones and a
  * system one, each with its `TxApplied` or `SystemTransactionApplied` event), so that `core-block-parsed` parses them
- * in the ledger worker and `core-tx-results` records their outcomes.
+ * in the ledger worker and `core-tx-results` records their outcomes. [A129–A132]
  *
- * **Sessions** (TT-2: the tape node serves its k-th connection the k-th session):
- * - {@link headSession}: a page with a new database asks the node's finalized head (BR-2: S is the head at creation) on
- *   a connection of its own — `chain_getFinalizedHead`, then the head's header —, which then ends;
+ * **Sessions** (the tape node serves its k-th connection the k-th session) [TT-2]:
+ * - {@link headSession}: a page with a new database asks the node's finalized head (S is the head at creation) on a
+ *   connection of its own (`chain_getFinalizedHead`, then the head's header), which then ends [BR-2];
  * - {@link syncSession}: the process on a new database from S, the head S at first, then each height to `to` finalized
  *   in turn (a finalized-head notification once the height before was fetched), so the process commits S to `to`;
  * - {@link resumeSession}: the process again on a database whose cursor is `cursor` (an OPFS database after a reload):
  *   the node's head is the cursor, so it resumes there and waits; {@link continueSession}: the same, then each height
  *   to `to` finalized in turn;
- * - {@link restoreSession}: a restore's checks against the node (BK-3, BK-5) — block 0, the finalized head (the
- *   source's subscriptions first), the block at the backup's height when the head is not below it —;
+ * - {@link restoreSession}: a restore's checks against the node: block 0, the finalized head (the source's
+ *   subscriptions first), the block at the backup's height when the head is not below it [BK-3, BK-5];
  *   {@link otherGenesisSession}: a node whose block 0 is another chain's.
  *
  * A session the page keeps open while a later one waits for the next connection (a reload's) ends with {@link
  * KEPT_OPEN}: a call record nothing asks, then the `disconnect` that separates the sessions — which, coming after a
- * record never answered, is never reached, so the connection is not dropped (TT-3).
+ * record never answered, is never reached, so the connection is not dropped. [TT-3]
  */
 
 /** The end of a session the page keeps open (see the module comment): a call no process makes, then the separator. */
@@ -99,7 +99,7 @@ function height(chain: BrowserChain, h: bigint, metadata: boolean): TapeRecord[]
   return finalizedWithEvents(at(chain, h), RUNTIME_2_0, value, metadata);
 }
 
-/** A page's question for the node's finalized head, `head` (BR-2; see the module comment). */
+/** A page's question for the node's finalized head, `head` (see the module comment). [BR-2] */
 export function headSession(chain: BrowserChain, head: bigint): TapeRecord[] {
   return [...headRead(at(chain, head)), { disconnect: true }];
 }

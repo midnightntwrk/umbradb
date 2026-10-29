@@ -6,18 +6,18 @@ import { openBlockWrites } from "../../src/db/write-handles.js";
 import type { Settings } from "../db/backends.js";
 
 /**
- * A141's long-work half (DB-15, owner decision Q71), as checks shared by the suite (`zero-timeouts.test.ts`, both
- * backends) and its negative control (`test/db/zero-timeouts.negative-control.test.ts`, a build without the zeros): the
- * writer, migrations, setup and the read handles given to callbacks run work the runner must finish, so with database
- * defaults of 1 s for every server-side timeout a 5 s migration, a block transaction left idle 5 s while a callback
- * awaits, and a callback's read running 5 s all complete, and `SHOW` in each reports 0. Each check does the work and
- * returns what it saw; it rejects when the work fails, which is what the negative control asserts.
+ * The long-work checks of the zero timeouts, shared by the suite (`zero-timeouts.test.ts`, both backends) and its
+ * negative control (`test/db/zero-timeouts.negative-control.test.ts`, a build without the zeros). The writer,
+ * migrations, setup and the read handles given to callbacks run work the runner must finish. So with database defaults
+ * of 1 s for every server-side timeout, a 5 s migration, a block transaction left idle 5 s while a callback awaits, and
+ * a callback's read running 5 s all complete, and `SHOW` reports 0 in each. Each check does the work and returns what
+ * it saw; it rejects when the work fails, which is what the negative control asserts. [A141, DB-15, Q71]
  *
- * The five timeouts are DB-15's (`idle_session_timeout` by owner decision Q93): a server, database or role default
- * for it would end the writer's session between blocks, and the writer lock with it (DB-11).
+ * The timeouts are five, including `idle_session_timeout`: a server, database or role default for it would end the
+ * writer's session between blocks, and the writer lock with it. [DB-15, DB-11, Q93]
  */
 
-/** Every server-side timeout at 1 s: A141's hostile defaults. */
+/** Every server-side timeout at 1 s: the hostile defaults the checks run under. [A141] */
 export const ONE_SECOND_TIMEOUTS: Settings = [
   ["statement_timeout", "1s"],
   ["lock_timeout", "1s"],
@@ -34,10 +34,10 @@ export const SHOW_TIMEOUTS = `SELECT ${TIMEOUT_NAMES.map((name) => `current_sett
 /** What `SHOW` reports for each timeout when it is 0. */
 export const ALL_ZERO: Readonly<Record<string, string>> = Object.fromEntries(TIMEOUT_NAMES.map((name) => [name, "0"]));
 
-/** What `SHOW` reports for each timeout at A141's hostile defaults. */
+/** What `SHOW` reports for each timeout at the hostile 1 s defaults. [A141] */
 export const ALL_ONE_SECOND: Readonly<Record<string, string>> = Object.fromEntries(ONE_SECOND_TIMEOUTS);
 
-/** The work each check does: A141's 5 s. */
+/** How long each check's work runs: 5 s. [A141] */
 export const LONG_MS = 5_000;
 
 /** A gap longer than the 1 s defaults, where a check also idles (setup, a callback's read, the writer between blocks). */
@@ -123,8 +123,8 @@ export async function slowMigrationAndSetup(
 }
 
 /**
- * A block transaction left idle 5 s while `m`'s `on-db-write` awaits, through the real block write handle (DB-3), then
- * the callback writes a row: resolves once the block committed, with what the callback saw after its wait.
+ * A block transaction left idle 5 s while `m`'s `on-db-write` awaits, through the real block write handle; then the
+ * callback writes a row. Resolves once the block committed, with what the callback saw after its wait. [DB-3]
  */
 export async function idleBlock(db: Database, plan: SchemaPlan, key: bigint): Promise<Outcome> {
   let settings: Row = {};
@@ -140,8 +140,8 @@ export async function idleBlock(db: Database, plan: SchemaPlan, key: bigint): Pr
 }
 
 /**
- * A callback's read running 5 s on the block write handle (`on-db-write` reads committed data plus the block's own
- * writes through it, DB-3): resolves once the block committed, with what the callback saw.
+ * A callback's read running 5 s on the block write handle, through which `on-db-write` reads committed data plus the
+ * block's own writes. Resolves once the block committed, with what the callback saw. [DB-3]
  */
 export async function slowReadInBlock(db: Database, plan: SchemaPlan, key: bigint): Promise<Outcome> {
   let settings: Row = {};
@@ -159,9 +159,9 @@ export async function slowReadInBlock(db: Database, plan: SchemaPlan, key: bigin
 }
 
 /**
- * The read handle a callback outside the block transaction gets (`on-compute`, `on-after-db-write`, … — design §2: a
- * read of the database API without the read option, on PostgreSQL a pooled read connection): a statement running 5 s,
- * then 2 s idle in the read's transaction, then one more statement. Resolves with what it saw.
+ * The read handle a callback outside the block transaction gets (`on-compute`, `on-after-db-write`, …): a read of the
+ * database API without the read option, on PostgreSQL a pooled read connection. Runs a statement for 5 s, idles 2 s in
+ * the read's transaction, then runs one more statement. Resolves with what it saw. [design §2]
  */
 export async function slowCallbackRead(db: Database): Promise<Outcome> {
   return db.read(async (read) => {
@@ -175,9 +175,9 @@ export async function slowCallbackRead(db: Database): Promise<Outcome> {
 }
 
 /**
- * The writer idle 2 s between two transactions (`idle_session_timeout`, decision record Q93): resolves with the
- * backend process each transaction ran on (`pg_backend_pid()`) — the same one when the writer's session, and with it
- * the writer lock (DB-11), outlived the gap — and what the second one saw.
+ * The writer idle 2 s between two transactions (`idle_session_timeout`). Resolves with the backend process each
+ * transaction ran on (`pg_backend_pid()`) and what the second one saw. The process is the same one when the writer's
+ * session, and with it the writer lock, outlived the gap. [Q93, DB-11]
  */
 export async function writerIdleBetweenBlocks(
   db: Database,

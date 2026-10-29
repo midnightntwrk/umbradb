@@ -8,21 +8,22 @@ import { HeightFailure, UnexpectedCursor } from "../../src/runner/loop.js";
 import { statusOf, type StatusFacts } from "../../src/runner/process.js";
 
 /**
- * Why a process is refused or halted, and which failures it retries (task 5.4; RN-8, IN-10, IN-12, AE-3, AE-5, AE-6;
- * `design.md` §11): `reasonOf` gives each failure a code of §11 with the height, module and point it happened at —
- * never a message —, and `retryOf` says which failures IN-10 retries instead of halting. The codes the reasons keep are
- * bound to §11's own text here, so the two lists cannot drift apart.
+ * Why a process is refused or halted, and which failures it retries. `reasonOf` gives each failure a code from the
+ * design's "Refusals and halts" section, with the height, module and point it happened at, never a message.
+ * `retryOf` says which failures are retried instead of halting. The codes the reasons keep are bound here to that
+ * section's own text, so the two lists cannot drift apart. [RN-8, IN-10, IN-12, AE-3, AE-5, AE-6; design §11]
  */
 
 const DESIGN = fileURLToPath(new URL("../../openspec/changes/core-arch/design.md", import.meta.url));
 
-/** The backticked codes of the paragraph of design §11 that starts with `opening`, up to the next paragraph's. */
+/** The backticked codes of the paragraph of the design's "Refusals and halts" section that starts with `opening`, up
+ *  to the next paragraph's. [design §11] */
 function section11Codes(opening: string, closing: string): Set<string> {
   const text = readFileSync(DESIGN, "utf8");
   const section = text.slice(text.indexOf("## 11. Refusals and halts"), text.indexOf("## 12. "));
   const start = section.indexOf(opening);
   const end = section.indexOf(closing);
-  // A heading of §11 reworded must fail here, not widen the paragraph to the end of the section.
+  // A reworded heading in that section must fail here, not widen the paragraph to the end of the section.
   if (start < 0 || end < start) throw new Error(`design §11 no longer has "${opening}" before "${closing}"`);
   const paragraph = section.slice(start, end);
   return new Set([...paragraph.matchAll(/`([a-z][a-z0-9-]*)`/g)].map((match) => match[1] as string));
@@ -105,7 +106,8 @@ describe("reasonOf: a failure's code, height, module and point (RN-8, AE-5, AE-6
     expect(at(new UmbraError("database-error", "BEGIN failed"))).toEqual(reason("database-error", { height: 3n }));
     expect(at(new UnexpectedCursor("left at 2"))).toEqual(reason("unexpected-cursor", { height: 3n }));
     expect(new UnexpectedCursor("left at 2")).toMatchObject({ name: "UnexpectedCursor", message: "left at 2" });
-    // Neither a database's nor named by §11: §11's general halt (task 10.4's registry may give them codes of their own).
+    // Neither a database error nor a code the design names: the general halt. A code registry may give them codes of
+    // their own. [design §11]
     expect(at(new UmbraError("node-error", "the node answered an error"))).toEqual(reason("database-error", { height: 3n }));
     expect(at(new Error("the source has no block at 3"))).toEqual(reason("database-error", { height: 3n }));
     expect(at("a string")).toEqual(reason("database-error", { height: 3n }));
@@ -195,7 +197,7 @@ describe("statusOf: refused and halted (AE-3, AE-4)", () => {
       ready: false,
       reason: refusal,
     });
-    // Ready even far behind without a readiness lag (AE-4), unlike a halted one at the same lag.
+    // Ready even far behind without a readiness lag, unlike a halted one at the same lag. [AE-4]
     expect(statusOf(base)).toMatchObject({ state: "syncing", ready: true, reason: null });
     expect(statusOf({ ...base, phase: "halted", reason: halt, head: 4n })).toMatchObject({ state: "halted", ready: false, lag: 0n });
   });

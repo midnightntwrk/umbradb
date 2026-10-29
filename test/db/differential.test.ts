@@ -6,17 +6,16 @@ import { RESULT_TYPES } from "../../src/deterministic-postgresql/index.js";
 import { BACKENDS, TEST_CURSOR, TEST_SCHEMA, type TestBackend, type TestDatabase } from "./backends.js";
 
 /**
- * A7 [DIFF] (DB-1): the database API gives identical query results on PostgreSQL 18 and PGlite 0.5.10 (PostgreSQL
- * 18.6 inside). The same statements, with the same parameters, run on one database of each backend built by the same
- * setup, and the mapped results — every row and every value, its JavaScript type included — are compared with each
- * other (not only with an expectation), as are the rows a write affects and the errors a statement fails with (code,
- * retryability, details, message). The suites that iterate `BACKENDS` (`results.test.ts`, `handles.test.ts`,
- * `read-height.property.test.ts`) show that each backend passes on its own; this file shows the two agree.
+ * The database API gives identical query results on PostgreSQL 18 and PGlite 0.5.10 (PostgreSQL 18.6 inside). The
+ * same statements, with the same parameters, run on one database of each backend built by the same setup. The mapped
+ * results (every row and every value, its JavaScript type included) are compared with each other, not only with an
+ * expectation. So are the rows a write affects and the errors a statement fails with (code, retryability, details,
+ * message). The suites that iterate `BACKENDS` (`results.test.ts`, `handles.test.ts`, `read-height.property.test.ts`)
+ * show that each backend passes on its own; this file shows the two agree. [A7 DIFF, DB-1]
  *
- * Date and time values are compared as the values the mapping makes of them (DB-2, owner decision Q68: RFC 3339 text,
- * `infinity` as the word, arrays element by element; task 2.2b), like every other value, and their case also checks
- * them against values written out by hand. `now()`, `version()` and other values that differ between two servers by
- * nature are not in the corpus.
+ * Date and time values are compared as the values the mapping makes of them, like every other value: RFC 3339 text,
+ * `infinity` as the word, arrays element by element. Their case also checks them against values written out by hand.
+ * `now()`, `version()` and other values that differ between two servers by nature are not in the corpus. [DB-2, Q68]
  */
 
 const SEED = 20261023;

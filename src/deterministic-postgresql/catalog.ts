@@ -1,27 +1,35 @@
 /**
- * The catalog reads of the `deterministic_postgresql` component (`openspec/changes/core-arch/design.md` §4, owner
- * decision Q69): what PostgreSQL's catalog says about the module tables, their columns and the relations of the module
- * schemas, read as the column-type rules (`./column-rules.ts`) take it — the rules' input, before any of them is
- * applied. The contents hash (`src/determinism/module-tables.ts`, DT-2, DT-3) and task 7.1's migration-time check
- * (DT-6) read the same facts here, so both give the same verdicts.
+ * The catalog reads of the `deterministic_postgresql` component: what PostgreSQL's catalog says about the module
+ * tables, their columns and the relations of the module schemas, in the form the column-type rules
+ * (`./column-rules.ts`) take. This is the rules' input, before any rule is applied. The contents hash
+ * (`src/determinism/module-tables.ts`) and the migration-time check read the same facts here, so both give the same
+ * verdicts. [DT-2, DT-3, DT-6, Q69; design §4]
  *
- * **Which tables count.** Every schema of the database counts — the schemas DT-3 hashes — except PostgreSQL's own
- * (`pg_catalog`, `pg_toast`, the temporary schemas — every name starting with `pg_`), `information_schema`, `public`,
- * where extensions install their tables, and `core_digest_shadow`, change capture's scratch schema, whose tables are
- * empty whenever no block is open (owner decision Q101). Of DB-8's other reserved names, `core_chain` and `core_digest`
- * count. A table is an ordinary or a partitioned table (`relkind` `r` or `p`); a partition is part of its partitioned
- * table, whose rows it holds, not a table of its own. Views, materialized views, sequences, composite types and
- * foreign tables hold no rows of their own and are not tables. (Why these schemas and tables:
- * `src/determinism/module-tables.ts`.)
+ * **Which tables count.** Every schema of the database counts (these are the schemas the contents hash covers), except:
  *
- * **How the catalog is read.** By name, never by OID or creation order: schemas and tables are sorted by the bytes of
- * their names' UTF-8 encoding (DT-3's byte order); a table's columns are in column order (DT-1), its attribute
- * numbers with dropped columns skipped, which the table's migrations fix (DB-9) and every database built by them
- * shares; column types are `format_type(atttypid, NULL)`'s names, the column types of DT-1 (`integer`, `bigint[]`,
- * …); the primary key's columns are in the order the key declares them (`pg_index.indkey`), which may differ from
- * column order. Each column also carries its declared type, its type modifier, the kind of its type (and of an
- * array's element), its identity and what in its default is not immutable. Every statement goes through one handle,
- * so the catalog is read from one committed state (DB-2).
+ * - PostgreSQL's own: `pg_catalog`, `pg_toast`, the temporary schemas, and every name starting with `pg_`;
+ * - `information_schema`;
+ * - `public`, where extensions install their tables;
+ * - `core_digest_shadow`, change capture's scratch schema, whose tables are empty whenever no block is open. [Q101]
+ *
+ * Of the other reserved schema names, `core_chain` and `core_digest` count. A table is an ordinary or a partitioned
+ * table (`relkind` `r` or `p`). A partition is part of its partitioned table, whose rows it holds, not a table of its
+ * own. Views, materialized views, sequences, composite types and foreign tables hold no rows of their own and are not
+ * tables. (Why these schemas and tables: `src/determinism/module-tables.ts`.) [DT-3, DB-8]
+ *
+ * **How the catalog is read.** By name, never by OID or creation order:
+ *
+ * - schemas and tables are sorted by the bytes of their names' UTF-8 encoding [DT-3];
+ * - a table's columns are in column order: its attribute numbers with dropped columns skipped, which the table's
+ *   migrations fix and every database built by them shares [DT-1, DB-9];
+ * - column types are the names `format_type(atttypid, NULL)` gives, the column types the value encoding knows
+ *   (`integer`, `bigint[]`, …) [DT-1];
+ * - the primary key's columns are in the order the key declares them (`pg_index.indkey`), which may differ from column
+ *   order.
+ *
+ * Each column also carries its declared type, its type modifier, the kind of its type (and of an array's element), its
+ * identity, and what in its default is not immutable. Every statement goes through one handle, so the catalog is read
+ * from one committed state. [DB-2]
  */
 
 import {
@@ -39,11 +47,13 @@ import {
 } from "./column-rules.js";
 
 /**
- * A handle every call of which sees the same committed state (DB-2): exactly the `query` of the database API's read
- * handle (`ReadHandle`, CORE-ARCH §4.10 and `design.md` §4), whose results are mapped as DB-2 maps them (`bigint` to
- * `bigint`, `bytea` to `Uint8Array`, `numeric` to its decimal text, `jsonb` parsed without loss; `./mapping.ts`). A
- * `ReadHandle` and a `BlockWriteHandle` are both one. Declared here, not taken from `src/db/api.ts`, so that the
- * component imports nothing else of `src/` (A138); the database API and the contents hash take it from here.
+ * A handle whose every call sees the same committed state: exactly the `query` of the database API's read handle
+ * (`ReadHandle`). Its results are mapped as the database API maps them (`bigint` to `bigint`, `bytea` to `Uint8Array`,
+ * `numeric` to its decimal text, `jsonb` parsed without loss; `./mapping.ts`). A `ReadHandle` and a `BlockWriteHandle`
+ * are both one. [DB-2; CORE-ARCH §4.10; design §4]
+ *
+ * It is declared here, not taken from `src/db/api.ts`, so that the component imports nothing else from `src/`; the
+ * database API and the contents hash take it from here. [A138]
  */
 export interface ConsistentRead {
   query(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
@@ -64,10 +74,10 @@ export interface CatalogTable extends TableFacts {
 }
 
 /**
- * The module tables of the database `read` sees, as the catalog describes them, in DT-3's order (by schema name, then
- * table name, as bytes), each with its columns in column order: their types, identity, and what in their defaults is
- * not immutable (read from the defaults' expression trees and one more catalog read, `./column-rules.ts`). Nothing is
- * refused here: this is the rules' input.
+ * The module tables of the database `read` sees, as the catalog describes them, sorted by schema name, then table
+ * name, as bytes. Each has its columns in column order: their types, identity, and what in their defaults is not
+ * immutable (read from the defaults' expression trees and one more catalog read, `./column-rules.ts`). Nothing is
+ * refused here: this is the rules' input. [DT-3]
  */
 export async function catalogTables(read: ConsistentRead, options: CatalogOptions = {}): Promise<CatalogTable[]> {
   const [filter, params] = schemaFilter(options);
@@ -111,11 +121,15 @@ export async function catalogTables(read: ConsistentRead, options: CatalogOption
 }
 
 /**
- * The relations of the module schemas that DT-6 refuses whatever they hold (owner decision Q61), as the catalog
- * describes them, in DT-3's order (by schema name, then name, as bytes): every sequence (`relkind = 'S'`, an identity
- * or `serial` column's own included), and every unlogged table, partitioned table or partition
- * (`relpersistence = 'u'`; a partition holds rows of its partitioned table, so it counts too) — each with the table it
- * belongs to, whose declaration `deterministic: false` would cover it (`./opt-out.ts`, owner decision Q76).
+ * The relations of the module schemas that are refused whatever they hold, as the catalog describes them, sorted by
+ * schema name, then name, as bytes. [DT-3, DT-6, Q61]
+ *
+ * - Every sequence (`relkind = 'S'`), including an identity or `serial` column's own.
+ * - Every unlogged table, partitioned table or partition (`relpersistence = 'u'`); a partition holds rows of its
+ *   partitioned table, so it counts too.
+ *
+ * Each comes with the table it belongs to, whose `deterministic: false` declaration would cover it (`./opt-out.ts`).
+ * [Q76]
  */
 export async function catalogRelations(read: ConsistentRead, options: CatalogOptions = {}): Promise<RelationFacts[]> {
   const [filter, params] = schemaFilter(options);
@@ -137,8 +151,8 @@ export async function catalogRelations(read: ConsistentRead, options: CatalogOpt
 /** Which schemas a catalog read covers. */
 export interface CatalogOptions {
   /**
-   * Only these schemas (the startup check reads a module's own, DT-6); every module schema when absent. A name outside
-   * the module schemas (`public`, `pg_*`, `information_schema`, `core_digest_shadow`) still gives nothing.
+   * Only these schemas (the startup check reads a module's own); every module schema when absent. A name outside the
+   * module schemas (`public`, `pg_*`, `information_schema`, `core_digest_shadow`) still gives nothing. [DT-6]
    */
   readonly schemas?: readonly string[];
 }
@@ -152,12 +166,14 @@ function schemaFilter(options: CatalogOptions): [string, unknown[] | undefined] 
 }
 
 /**
- * The module schemas, the schemas DT-3 hashes, as a condition on `n`, a relation's schema: every schema but
- * PostgreSQL's own (`pg_*`), `information_schema`, the reserved `public`, and change capture's scratch schema
- * `core_digest_shadow` (owner decision Q101: its shadow tables are empty at rest, and their layout is UmbraDB's, so a
- * release that changes it keeps contents hashes comparable) — the core's database or a private process's alike (owner
- * decision Q75). `core_chain` and `core_digest` are module schemas here: the digests are covered by the hash. Both
- * catalog reads take their schemas from it, so the tables and the relations the rules see are of the same schemas.
+ * The module schemas (the schemas the contents hash covers), as a condition on `n`, a relation's schema. Every schema
+ * counts except PostgreSQL's own (`pg_*`), `information_schema`, the reserved `public`, and change capture's scratch
+ * schema `core_digest_shadow`. Its shadow tables are empty at rest and their layout is UmbraDB's, so a release that
+ * changes it keeps contents hashes comparable. This holds for the core's database and a private process's alike.
+ * [DT-3, Q75, Q101]
+ *
+ * `core_chain` and `core_digest` are module schemas here: the hash covers the digests. Both catalog reads take their
+ * schemas from this condition, so the tables and the relations the rules see come from the same schemas.
  */
 const MODULE_SCHEMA_FILTER = `n.nspname NOT IN ('core_digest_shadow', 'information_schema', 'public')
   AND left(n.nspname::text, 3) <> 'pg_'`;
@@ -205,10 +221,10 @@ WHERE ${MODULE_TABLE_FILTER} AND a.attnum > 0 AND NOT a.attisdropped`;
 const IDENTITY: Readonly<Record<string, "always" | "by default">> = { a: "always", d: "by default" };
 
 /**
- * Sequences and unlogged tables (partitions included) of the module schemas: `design.md` §4's detection. Each with the
- * table it belongs to: a table's own, or the sequence's owning table — the column dependency an identity column
- * (`deptype` `i`) or `serial` and `OWNED BY` (`a`) records in `pg_depend` — taken at the root of its partition tree
- * (`pg_partition_root`, null for a table in none).
+ * Sequences and unlogged tables (partitions included) of the module schemas. Each comes with the table it belongs to:
+ * a table's own, or the sequence's owning table (the column dependency that an identity column, `deptype` `i`, or
+ * `serial` and `OWNED BY`, `a`, records in `pg_depend`), taken at the root of its partition tree (`pg_partition_root`,
+ * null for a table in none). [design §4]
  */
 const RELATIONS_SQL = `
 SELECT n.nspname::text AS schema_name, c.relname::text AS relation_name, c.relkind::text AS kind,
@@ -285,8 +301,8 @@ WHERE t.oid = ANY (${oids(needs.types)})`);
 const utf8 = new TextEncoder();
 
 /**
- * Orders strings by the bytes of their UTF-8 encodings (JavaScript's `<` compares UTF-16 code units instead): DT-3's
- * order of schemas and tables, which change capture and the digests follow too.
+ * Orders strings by the bytes of their UTF-8 encodings (JavaScript's `<` compares UTF-16 code units instead). This is
+ * the order of schemas and tables in the contents hash, which change capture and the digests follow too. [DT-3]
  */
 export function compareUtf8(a: string, b: string): number {
   const x = utf8.encode(a);

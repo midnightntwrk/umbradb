@@ -8,10 +8,10 @@ import { BACKUP_BACKENDS, type BackupBackend, pathOf } from "./backup-fixtures.j
 import { disagreeingNode, ledgerBackup, ledgerChain, restoreLedger } from "./restore-ledger.js";
 
 /**
- * A126's `backup-root-mismatch` (task 15.2; BK-3, LG-15), on PostgreSQL 18.6 and PGlite 0.5.10: a backup with
- * `core-ledger-state` in its history restores against a node whose ledger state root at the backup's height is the one
- * it stores, and is refused — after loading, its transaction rolled back, the target empty — against a node whose root
- * there is another. The chain and the restore: `./restore-ledger.ts`.
+ * The restore's `backup-root-mismatch` refusal, on PostgreSQL 18.6 and PGlite 0.5.10: a backup with `core-ledger-state`
+ * in its history restores against a node whose ledger state root at the backup's height is the one it stores, and is
+ * refused — after loading, its transaction rolled back, the target empty — against a node whose root there is another.
+ * The chain and the restore: `./restore-ledger.ts`. [A126, BK-3, LG-15]
  */
 
 const TEST_TIMEOUT_MS = 900_000;

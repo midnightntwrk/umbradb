@@ -4,9 +4,9 @@ import { type ClientOptions, WebSocket } from "ws";
 import { type Message, type MessageType, messageText, parseMessage } from "../../src/private/messages.js";
 
 /**
- * A raw client of the core's process transport for the tests of task 14.2 (PP-4, PP-11): it sends whatever text a test
- * gives it — a message, or one that is none — and records what the core answers and how the connection ends. Imports
- * nothing of Vitest.
+ * A raw client of the core's process transport for the transport tests. It sends whatever text a test gives it (a
+ * message, or text that is not one) and records what the core answers and how the connection ends. Imports nothing of
+ * Vitest. [PP-4, PP-11]
  */
 
 /** How a connection ended, or why it never opened. */

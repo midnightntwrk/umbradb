@@ -1,14 +1,17 @@
 /**
- * A stored ledger node's referenced keys, read without the ledger package (`openspec/changes/core-arch/design.md` §5.3;
- * `specs/ledger/spec.md` LG-11; task 12.3): the node-store bridge prefetches them on the main thread, which never loads
- * a ledger package (decision record Q36, Q49), so it reads the child list itself.
+ * A stored ledger node's referenced keys, read without the ledger package. The node-store bridge prefetches them on the
+ * main thread, which never loads a ledger package, so it reads the child list itself. [LG-11, Q36, Q49; design §5.3]
  *
  * A node's `children` is the ledger's serialization of its child list (`midnight-ledger` `storage-core/src/arena.rs`
- * `ArenaKey`, under the node's `layout-v2`): a `Vec` — its length as a SCALE compact integer — of children, each
- * `ArenaKey::Ref(key)` (the byte 0, then the 32-byte key) or `ArenaKey::Direct(node)` (the byte 1, then the embedded
- * node's payload as a `Vec<u8>` and its own child list). {@link childRefKeys} gives the by-reference keys, through
- * embedded children, in the list's order — the keys the package's `childRefs` gives, which lists them in an order of its
- * own walk (`test/ledger/node-refs.test.ts` holds them equal as sets). Pure: no Node.js import.
+ * `ArenaKey`, under the node's `layout-v2`). It is a `Vec` of children, its length a SCALE compact integer. Each child
+ * is one of:
+ *
+ * - `ArenaKey::Ref(key)`: the byte 0, then the 32-byte key;
+ * - `ArenaKey::Direct(node)`: the byte 1, then the embedded node's payload as a `Vec<u8>` and its own child list.
+ *
+ * {@link childRefKeys} gives the by-reference keys, through embedded children, in the list's order. They are the keys
+ * the package's `childRefs` gives, though it lists them in the order of its own walk (`test/ledger/node-refs.test.ts`
+ * checks they are equal as sets). Pure: no Node.js import.
  */
 
 /** A reader over a child list's bytes; every refusal names what was read. */

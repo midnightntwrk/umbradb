@@ -36,12 +36,18 @@ import {
 import { bareExtrinsic, compact, ledgerTransaction, timestampSet } from "./fetch-fixtures.js";
 
 /**
- * Task 11.1's placement of a block's transactions (CD-5), their outcomes (CD-6) and their parse, without a process:
- * the official indexer's cases (`midnight-indexer` `chain-indexer/src/infra/subxt_node/runtimes.rs`'s tests — a failed
- * Midnight extrinsic keeps its place, a governance system transaction among user transactions, system transactions
- * under every phase, block 0 in body order, a top-level `MidnightSystem` extrinsic is no transaction), each of its
- * divergences refused here, and the parser's one parse per transaction. The process-level criteria (A91–A93) are
- * `chain-data.test.ts`'s.
+ * The placement of a block's transactions, their outcomes and their parse, tested without a process. [CD-5, CD-6]
+ *
+ * The tests cover the official indexer's cases (the tests of `midnight-indexer`
+ * `chain-indexer/src/infra/subxt_node/runtimes.rs`):
+ * - a failed Midnight extrinsic keeps its place;
+ * - a governance system transaction among user transactions;
+ * - system transactions under every phase;
+ * - block 0 in body order;
+ * - a top-level `MidnightSystem` extrinsic is no transaction.
+ *
+ * They also cover each divergence from those cases, refused here, and the parser's one parse per transaction. The
+ * process-level criteria are tested in `chain-data.test.ts`. [A91, A92, A93]
  */
 
 const METADATA = midnightMetadata(V2_0);
@@ -174,7 +180,7 @@ describe("placing a block's transactions (CD-5)", () => {
     const one = [timestampSet(1n), ledgerTransaction([...tx(1)])];
     // A second outcome: applied twice, or applied and failed.
     expect(place(6n, one, [ev.success(0), ev.txApplied(1, fill(1)), ev.txApplied(1, fill(9)), ev.success(1)])).toThrow(
-      /block 6: event 2, Midnight::TxApplied, is a second outcome of extrinsic 1's transaction, so its transactions cannot be placed \(CD-5\)/,
+      /block 6: event 2, Midnight::TxApplied, is a second outcome of extrinsic 1's transaction, so its transactions cannot be placed$/,
     );
     expect(place(6n, one, [ev.txApplied(1, fill(1)), ev.failed(1)])).toThrow(/event 1, System::ExtrinsicFailed, is a second outcome/);
     // Succeeded without TxApplied or TxPartialSuccess, or no event at all.
@@ -309,7 +315,7 @@ describe("the parse (CD-5, LG-7)", () => {
       ]),
     } as unknown as BlockContext;
     await expect(blockParsedOf(context)).rejects.toThrow(
-      /block 8: transaction 0 is a regular transaction on the chain, and the ledger v9 reads its bytes as a system one \(CD-5\)/,
+      /block 8: transaction 0 is a regular transaction on the chain, and the ledger v9 reads its bytes as a system one$/,
     );
     const short: TransactionParser = { parse: async () => [] };
     await expect(blockParsedOf(context, { parser: short })).rejects.toThrow(/block 8: the parser gave 0 transactions for 1/);
@@ -342,7 +348,7 @@ describe("the parse (CD-5, LG-7)", () => {
     const parsed = await blockParsedOf(contextOf(own(regular), own(system)));
     expect(parsed.transactions.map((t) => t.kind)).toEqual(["regular", "regular", "system"]);
     await expect(blockParsedOf(contextOf(fill(1), own(system)))).rejects.toThrow(
-      /block 9: transaction 0's hash is 0x[0-9a-f]{64} to the ledger v9, and its chain event 1 carries 0x(01){32} \(CD-5\)/,
+      /block 9: transaction 0's hash is 0x[0-9a-f]{64} to the ledger v9, and its chain event 1 carries 0x(01){32}$/,
     );
     await expect(blockParsedOf(contextOf(own(regular), fill(2)))).rejects.toThrow(/transaction 2's hash .* its chain event 4 carries 0x(02){32}/);
     expect(chainHashOf(undefined)).toBeNull();
@@ -400,7 +406,7 @@ describe("the remaining refusals of placement, core-block-parsed and core-tx-res
       "runtime-metadata": { specVersion: 2_000_000, metadata: METADATA },
     };
     await expect(blockParsedOf(context(items))).rejects.toThrow(
-      /block 8: transaction 0 is a system transaction on the chain, and the ledger v9 reads its bytes as a regular one \(CD-5\)/,
+      /block 8: transaction 0 is a system transaction on the chain, and the ledger v9 reads its bytes as a regular one$/,
     );
   });
 });

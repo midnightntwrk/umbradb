@@ -3,21 +3,21 @@ import type { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 /**
- * The orphan guard of every child process a test starts (core-arch task 0.5, acceptance A153; `docs/issues/00015`,
- * `00022`): {@link spawnChild} is `node:child_process`'s `spawn`, and the child it starts is killed with SIGKILL as soon
- * as the test process that started it ends — normally, by a signal or by SIGKILL — whether or not the test reached its
- * own cleanup (Vitest's `--bail`, a test's timeout, Vitest killed) and whether or not the child can act: a child that
- * is stopped (`SIGSTOP`, A17's pause), whose event loop is blocked (PGlite's hung engine, `db/pglite-timeouts.test.ts`)
- * or that waits for a signal (`tools/tape/main.ts record`) is ended the same way. A test still stops its children
- * itself; the guard is for when it cannot.
+ * The orphan guard of every child process a test starts: {@link spawnChild} is `node:child_process`'s `spawn`, and the
+ * child it starts is killed with SIGKILL as soon as the test process that started it ends — normally, by a signal or by
+ * SIGKILL — whether or not the test reached its own cleanup (Vitest's `--bail`, a test's timeout, Vitest killed) and
+ * whether or not the child can act: a child that is stopped (`SIGSTOP`, as the writer-lock test pauses one), whose
+ * event loop is blocked (PGlite's hung engine, `db/pglite-timeouts.test.ts`) or that waits for a signal
+ * (`tools/tape/main.ts record`) is ended the same way. A test still stops its children itself; the guard is for when it
+ * cannot. [A153, A17; docs/issues/00015, docs/issues/00022]
  *
  * **How.** The first child a test process starts also starts that process's watcher (`orphan-watcher.mjs`, plain
  * Node.js), whose standard input is a pipe from the test process. The test process writes each child's pid to it when
  * the child starts and again when it exits. When the test process ends the operating system closes the pipe, however
- * the process ended; the watcher reads the end of its input, kills every child still listed and exits. The watcher
- * runs in a process group of its own, so that a Ctrl-C or a signal to the test process's group, which ends the test
- * process, does not end the watcher before its work; it outlives the test process by that kill only. Neither the
- * watcher nor its pipe keeps the test process alive.
+ * the process ended; the watcher reads the end of its input, kills every child still listed and exits. The watcher runs
+ * in a process group of its own, so that a Ctrl-C or a signal to the test process's group, which ends the test process,
+ * does not end the watcher before its work; it outlives the test process by that kill only. Neither the watcher nor its
+ * pipe keeps the test process alive.
  *
  * A child's own children are not listed: a child that starts processes of its own stops them itself. A pid the test
  * process had not yet seen exit when it ended is killed too; the operating system does not hand it to another process

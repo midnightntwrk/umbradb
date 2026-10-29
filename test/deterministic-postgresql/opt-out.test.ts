@@ -27,16 +27,18 @@ import { BACKENDS } from "../db/backends.js";
 import { declaration, userModules } from "../modules/declarations.js";
 
 /**
- * The opt-out of `design.md` §4's component table, row 9 (MD-1, DT-6; owner decision Q76; task 3.1): a `table` item
- * declared `deterministic: false` opts its tables out of the determinism rules. The declaration is the module's
- * (`src/modules/`); the skip is the component's, written once — {@link optOut}, which DT-6's refusals
- * ({@link databaseRefusals}, given the opted-out tables) and the `TRUNCATE` guard (`truncateGuardStatements`, task
- * 2.3) both use, and which task 7.1's startup check, `CHECK`s and change capture call: an opted-out table, the
- * partitions of an opted-out partitioned table, the sequences their columns own and such a table when unlogged are
- * skipped; every other table and sequence of the module is still refused as before. Shown here from a declaration,
- * through the schema plan (`plan.optedOut`, task 2.3) and the migrations that create the tables (task 2.4), on both
- * backends. The startup check that refuses (DT-6 at migration time), the `CHECK`s, the contents hash's
- * `[schema, table, null, null]` and the digests are task 7.1's.
+ * The opt-out, the last row of the design's component table: a `table` item declared `deterministic: false` opts its
+ * tables out of the determinism rules. The declaration is the module's (`src/modules/`). The skip is the component's,
+ * written once: {@link optOut}. [MD-1, DT-6, Q76; design §4]
+ *
+ * {@link optOut} is used by the column-type refusals ({@link databaseRefusals}, given the opted-out tables) and the
+ * `TRUNCATE` guard (`truncateGuardStatements`), and is called by the startup check, the `CHECK`s and change capture.
+ * It skips an opted-out table, the partitions of an opted-out partitioned table, the sequences their columns own, and
+ * such a table when unlogged. Every other table and sequence of the module is still refused as before. [DT-6]
+ *
+ * Shown here from a declaration, through the schema plan (`plan.optedOut`) and the migrations that create the tables,
+ * on both backends. The startup check that refuses at migration time, the `CHECK`s, the contents hash's
+ * `[schema, table, null, null]` and the digests are tested in the block further down. [DT-6, A147]
  */
 
 const T = (schema: string, table: string) => ({ schema, table });
@@ -140,8 +142,8 @@ describe.each(BACKENDS)("the opt-out from a declaration to the component's rules
   afterAll(() => backend.stop());
 
   /**
-   * A fresh database with `module`'s schema and plan, and the tables its migration declares. Since task 7.1 startup
-   * refuses a migration that leaves a table the rules refuse, and rolls it back, so the module's tables are made here
+   * A fresh database with `module`'s schema and plan, and the tables its migration declares. Startup refuses a
+   * migration that leaves a table the rules refuse, and rolls it back, so the module's tables are made here
    * outside the migration runner, as the module's role, after a startup that applied none of its migrations; the
    * startup check over them is the last test of this block.
    */
@@ -239,15 +241,19 @@ describe.each(BACKENDS)("the opt-out from a declaration to the component's rules
 });
 
 /**
- * A147's core part (MD-1, DT-3, DT-4, DT-6; owner decision Q76; task 7.1), on both backends: a `table` item declared
- * `deterministic: false` with a `now()` default and a `serial` column starts, and its partitioned table without a
- * primary key too; its rows — the times `now()` gave, the values `serial` drew, fractional `jsonb` and `numeric` values,
- * which no `CHECK` refuses there — are hashed by name only, so two databases differing only in them hash equal, and a
- * database without the tables hashes differently; the digests skip them (no capture trigger on the table or its
- * partitions, no shadow table, no row of `core_digest.tables`); the same tables without the flag refuse startup with
- * `non-deterministic-column`. The chains run through `schemaPlan`, `startDatabase` and the block write handles with the
- * real `core-digest` (`test/backbone/core-digest/chain.ts`). A147's private-process part is task 14.1's, its backup part
- * task 15.2's.
+ * The core part of the opt-out, on both backends:
+ * - a `table` item declared `deterministic: false` with a `now()` default and a `serial` column starts, and so does
+ *   its partitioned table without a primary key;
+ * - its rows (the times `now()` gave, the values `serial` drew, fractional `jsonb` and `numeric` values, which no
+ *   `CHECK` refuses there) are hashed by name only: two databases differing only in them hash equal, and a database
+ *   without the tables hashes differently; [DT-3]
+ * - the digests skip them: no capture trigger on the table or its partitions, no shadow table, no row of
+ *   `core_digest.tables`; [DT-4]
+ * - the same tables without the flag refuse startup with `non-deterministic-column`. [DT-6]
+ *
+ * The chains run through `schemaPlan`, `startDatabase` and the block write handles with the real `core-digest`
+ * (`test/backbone/core-digest/chain.ts`). The private-process part is tested in `test/private/determinism.test.ts`,
+ * the backup part in `opt-out-backup.test.ts`. [A147, MD-1, Q76]
  */
 function requestsModule(flag: { readonly deterministic?: false }, note: string): ModuleDeclaration {
   return testModule("kreq", {

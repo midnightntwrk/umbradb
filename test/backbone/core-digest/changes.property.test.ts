@@ -11,15 +11,20 @@ import { concatBytes } from "../../determinism/cbor-decoder.js";
 import { type Chain, digestRows, runBlock, startChain, testModule } from "./chain.js";
 
 /**
- * A56 (DT-4; task 7.1), property tests on both backends: for random sequences of inserts, updates, deletes and
- * same-value rewrites within one block — upserts, key changes, rows moved between partitions, several rows per
- * statement — the changes change capture records equal the difference between each table's state before and after the
- * block. The oracle reads each table whole at the start and at the end of the block (inside it, in the module's own
- * `on-db-write`), takes the difference by primary key, writes the changes' CBOR from DT-1's row encoding and hashes it
- * with `node:crypto` (DT-5's `SHA-256(previous ‖ CBOR(h) ‖ changes at h)`), and the block's digest must be that; a
- * table without changes must keep its row. `TRUNCATE`, which fires no row trigger, is refused in the block (A73), so
- * no change escapes the triggers. **Negative control:** with the capture trigger disabled on one table, the property
- * fails.
+ * Property tests on both backends. For random sequences of inserts, updates, deletes and same-value rewrites within
+ * one block (upserts, key changes, rows moved between partitions, several rows per statement), the changes that change
+ * capture records equal the difference between each table's state before and after the block. [A56, DT-4]
+ *
+ * The oracle:
+ * - reads each table whole at the start and at the end of the block (inside it, in the module's own `on-db-write`);
+ * - takes the difference by primary key;
+ * - writes the changes' CBOR from the row encoding and hashes it with `node:crypto`, as
+ *   `SHA-256(previous ‖ CBOR(h) ‖ changes at h)`.
+ * The block's digest must be that, and a table without changes must keep its row. [DT-1, DT-5]
+ *
+ * `TRUNCATE`, which fires no row trigger, is refused in the block, so no change escapes the triggers. [A73]
+ *
+ * **Negative control:** with the capture trigger disabled on one table, the property fails. [A56]
  *
  * Determinism: every property runs with a pinned, reported fast-check seed.
  */
@@ -27,7 +32,7 @@ import { type Chain, digestRows, runBlock, startChain, testModule } from "./chai
 const SEED = 20261025;
 const RUNS = 100;
 
-/** The tables of module `p`, each with its DT-1 column types and its key's columns (indexes) in key order. */
+/** The tables of module `p`, each with its column types and its key's columns (indexes) in key order. [DT-1] */
 const TABLES = {
   "p.kv": { columns: ["k", "v", "n"], types: ["bigint", "text", "bigint"], key: [0] },
   "p.ck": { columns: ["a", "b", "doc"], types: ["text", "bigint", "jsonb"], key: [0, 1] },
@@ -114,7 +119,7 @@ function keyId(key: readonly unknown[]): string {
 
 const utf8 = new TextEncoder();
 
-/** DT-2's order of two keys of `table`, written here: text by its UTF-8 bytes, integers by value. */
+/** The key order of two keys of `table`, written here: text by its UTF-8 bytes, integers by value. [DT-2] */
 function compareKeys(a: readonly unknown[], b: readonly unknown[]): number {
   for (let i = 0; i < a.length; i++) {
     const [x, y] = [a[i], b[i]];
@@ -129,7 +134,7 @@ function compareKeys(a: readonly unknown[], b: readonly unknown[]): number {
   return 0;
 }
 
-/** The oracle: `table`'s changes between two of its states, as DT-4's CBOR array, written out here. */
+/** The oracle: `table`'s changes between two of its states, as the changes' CBOR array, written out here. [DT-4] */
 function expectedChanges(name: TableName, before: Map<string, unknown[]>, after: Map<string, unknown[]>): Uint8Array | null {
   const table = TABLES[name];
   const keys = [...new Set([...before.keys(), ...after.keys()])]

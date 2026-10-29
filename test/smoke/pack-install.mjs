@@ -1,26 +1,29 @@
 #!/usr/bin/env node
 /**
- * The packed-tarball smoke test (`npm run test:smoke`; core-arch task 17.3: LS-1, LS-2, LS-3, LS-6; acceptance A2, A6;
- * `design.md` §12, §13 "Public API pins"). It packs UmbraDB as npm would publish it, installs the tarball in a throwaway
- * consumer project and uses it from there as a user would — never the repository's `src/`.
+ * The packed-tarball smoke test (`npm run test:smoke`). It packs UmbraDB as npm would publish it, installs the tarball
+ * in a throwaway consumer project and uses it from there as a user would — never the repository's `src/`.
+ * [LS-1, LS-2, LS-3, LS-6, A2, A6; design §12, §13 "Public API pins"]
  *
  *   Without Docker (always run):
  *     1. `npm pack`: the tarball ships `dist/index.d.ts` and the vendored ledger packages — for each ledger version its
  *        `SHA256SUMS`, `upstream.json` and every `pkg/` file the manifest lists, and nothing else of `vendor/` (without
  *        them an installed process refuses or halts once `core-block-parsed` runs: `src/ledger/load.ts` imports them);
- *     1b. nothing of `legacy/` and nothing of TransactionHistory in the tarball (task 17.1: A3, LS-3);
+ *     1b. nothing of `legacy/` and nothing of TransactionHistory in the tarball [A3, LS-3];
  *     2. the tarball installed in the scratch project;
  *     3. a deep import (`umbradb/dist/runner/process.js`) fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`: `exports` names
  *        only `"."`;
- *     4. a consumer importing every value and every type of §12 (read from `design.md`, as A1's pin reads it) from
- *        "umbradb", none `any`, and writing a configuration with them, type-checks under `--strict` (A2's first file);
- *     4c. a consumer importing any of 0.9.5's retired names — `PgTemporalKV`, `PgCheckpointStore`, `PgWatermarks`,
- *        `PgTransactionLeaseLayer`, `PgWalletStateEnvelopeStore`, `saveAndAdvance` (LS-2) or TransactionHistory's
- *        (LS-3) — fails to type-check, each name reported as not exported (A2's second file);
- *     4b. the installed `umbradb` command (package.json `bin`; LS-6, A6): with no argument and with `sync` it prints the
- *        usage and exits 2; `run`, `backup` and `restore` are recognized (each parses its own arguments or reads its
- *        configuration file); `config check` passes a configuration file that imports §12's builders from "umbradb"
- *        and enables `core-chain-events` and `core-block-parsed`, having run the TypeScript compiler on it.
+ *     4. a consumer importing every value and every type of the design's exported surface (read from `design.md`, as
+ *        the library-surface pin reads it) from "umbradb", none `any`, and writing a configuration with them,
+ *        type-checks under `--strict` (the first of the two consumer files) [A1, A2];
+ *     4c. a consumer importing any of 0.9.5's retired names — the storage parts `PgTemporalKV`, `PgCheckpointStore`,
+ *        `PgWatermarks`, `PgTransactionLeaseLayer`, `PgWalletStateEnvelopeStore`, `saveAndAdvance`, or
+ *        TransactionHistory's — fails to type-check, each name reported as not exported (the second consumer file)
+ *        [A2, LS-2, LS-3];
+ *     4b. the installed `umbradb` command (package.json `bin`): with no argument and with `sync` it prints the usage and
+ *        exits 2; `run`, `backup` and `restore` are recognized (each parses its own arguments or reads its
+ *        configuration file); `config check` passes a configuration file that imports the exported builders from
+ *        "umbradb" and enables `core-chain-events` and `core-block-parsed`, having run the TypeScript compiler on it
+ *        [LS-6, A6];
  *
  *   With Docker:
  *     5. a tape sync on PostgreSQL: a PostgreSQL container (the repository's one image), a tape node serving the browser
@@ -72,14 +75,14 @@ for (const f of ["dist/index.js", "dist/index.d.ts", "dist/cli/main.js"]) {
 const tscBin = join(repoRoot, "node_modules", "typescript", "bin", "tsc");
 if (!existsSync(tscBin)) fail(`typescript compiler not found at ${tscBin} -- install the devDependencies first.`);
 
-/** §12's surface, as A1's pin reads it from `design.md`. */
+/** The design's exported surface, as the library-surface pin reads it from `design.md`. [A1; design §12] */
 const SURFACE = section12Surface(readFileSync(join(repoRoot, "openspec/changes/core-arch/design.md"), "utf8"));
 if (SURFACE.values.length === 0 || SURFACE.types.length === 0) fail("design.md §12 lists no values or no types.");
 
 /** The ledger versions the build carries: each a directory of `vendor/ledger/`. */
 const LEDGERS = ["v8", "v9-rc3", "v9"];
 
-/** The retired names whose import must fail: 0.9.5's storage parts (LS-2) and TransactionHistory's (LS-3). */
+/** The retired names whose import must fail: 0.9.5's storage parts and TransactionHistory's. [LS-2, LS-3] */
 const RETIRED_VALUES = [
   "PgTemporalKV", "PgCheckpointStore", "PgWatermarks", "PgTransactionLeaseLayer", "PgWalletStateEnvelopeStore",
   "saveAndAdvance", "PgTransactionHistoryStorage",
@@ -93,7 +96,7 @@ const scratch = mkdtempSync(join(tmpdir(), "umbradb-smoke-"));
 const children = new Set();
 let container;
 
-/** The configuration file the command checks and runs: §12's builders and two core modules' declarations. */
+/** The configuration file the command checks and runs: the exported builders and two core modules' declarations. */
 function configFile({ start, genesis, node, database }) {
   const settings = {
     network: "custom",
@@ -147,7 +150,7 @@ async function dockerIndependentOracles() {
   if (strayVendor.length > 0) fail(`the packed tarball holds vendor/ files beyond the ledger packages:\n${strayVendor.join("\n")}`);
   console.log(`pack-install smoke: packed ${entry.filename}: dist/index.d.ts and the ${vendored.size} files of the vendored ledger packages (${LEDGERS.join(", ")}), nothing else of vendor/.`);
 
-  // ---- 1b. nothing of legacy/ and nothing of TransactionHistory (A3, LS-3) --------------------------------------------
+  // ---- 1b. nothing of legacy/ and nothing of TransactionHistory [A3, LS-3] --------------------------------------------
   const kept = shipped.filter(
     (p) => p === "legacy" || p.startsWith("legacy/") || /transaction[-_]?history|tx[-_]?history/i.test(p),
   );
@@ -186,7 +189,7 @@ async function dockerIndependentOracles() {
   }
   console.log("pack-install smoke: the deep import umbradb/dist/runner/process.js is blocked (ERR_PACKAGE_PATH_NOT_EXPORTED).");
 
-  // ---- 4. a consumer of every §12 export type-checks against the installed declarations (A2) ------------------------
+  // ---- 4. a consumer of every exported name type-checks against the installed declarations [A2] --------------------
   const compilerOptions = {
     module: "nodenext",
     moduleResolution: "nodenext",
@@ -210,7 +213,7 @@ async function dockerIndependentOracles() {
   }
   console.log(`pack-install smoke: a consumer importing all ${SURFACE.values.length} values and ${SURFACE.types.length} types of §12 from umbradb type-checks under --strict, none of them any (A2).`);
 
-  // ---- 4c. each retired name fails to type-check (A2, LS-2, LS-3) ----------------------------------------------------
+  // ---- 4c. each retired name fails to type-check [A2, LS-2, LS-3] ----------------------------------------------------
   const retired = typeCheck(
     "retired",
     [
@@ -228,7 +231,7 @@ async function dockerIndependentOracles() {
   }
   console.log(`pack-install smoke: importing any of ${[...RETIRED_VALUES, ...RETIRED_TYPES].join(", ")} from umbradb fails to type-check (A2, LS-2, LS-3).`);
 
-  // ---- 4b. the installed umbradb command (LS-6, A6) ------------------------------------------------------------------
+  // ---- 4b. the installed umbradb command [LS-6, A6] ------------------------------------------------------------------
   const umbradb = join(scratch, "node_modules", ".bin", shell ? "umbradb.cmd" : "umbradb");
   if (!existsSync(umbradb)) fail(`the installed package has no umbradb command at ${umbradb} (package.json bin, LS-6).`);
   const command = (args, cwd = scratch) => run(umbradb, args, { cwd });
@@ -272,7 +275,7 @@ function checkConfig(command, what) {
   if (
     check.status !== 0 ||
     !/^type check \(TypeScript \d+\.\d+\.\d+, noEmit\): passed$/m.test(check.stdout) ||
-    !check.stdout.includes("configuration (CF-1, CF-3): passed")
+    !check.stdout.includes("configuration (evaluation, validation): passed")
   ) {
     fail(`umbradb config check did not pass ${what} (A35, CF-10):\n${check.status}\n${check.stdout}\n${check.stderr}`);
   }
@@ -378,7 +381,8 @@ async function tapeSyncOracle(command) {
   }
 }
 
-/** The consumer of oracle 4: every §12 value and type imported from "umbradb", none `any`, a configuration written. */
+/** The consumer of oracle 4: every exported value and type imported from "umbradb", none `any`, a configuration
+ *  written. [design §12] */
 function consumerSource() {
   const { values, types } = SURFACE;
   return [

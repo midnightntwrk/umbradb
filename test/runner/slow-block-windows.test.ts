@@ -19,23 +19,24 @@ import { entry } from "../modules/graph-fixtures.js";
 import { InMemoryBlockSource, loopInput, RUNNER_BACKENDS, type Started, startWith } from "./loop-harness.js";
 
 /**
- * The windows of the slow-block watchdog outside a height's processing (task 5.5a; RN-17 as amended by the owner's
- * decision Q145 B; `src/runner/loop.ts`), at the loop level on PostgreSQL 18 and PGlite 0.5.10 — what A161
- * (`./slow-block-outside.test.ts`, through the process) leaves to the design:
+ * The windows of the slow-block watchdog outside a height's processing (`src/runner/loop.ts`), at the loop level on
+ * PostgreSQL 18 and PGlite 0.5.10. These are the details that the through-the-process test
+ * (`./slow-block-outside.test.ts`) leaves to the design: [RN-17, Q145 B, A161]
  * - **after a commit, one window** from the commit to the end of `on-stop-height`: `on-after-db-write` and
  *   `on-stop-height` together past `slowBlockMs` are slow, each alone not; the point is the last that began;
  * - **each `on-finalized` its own window**, named by the height of the head it announces: two in a row, each within
  *   `slowBlockMs`, are never slow, however long the loop waited between them;
- * - **RN-11's re-delivery** at a run's start, at the cursor's height;
- * - **a `COMMIT` that landed though its connection was lost** (IN-11): the retry's points after it are the window after
- *   the commit;
+ * - **the callbacks delivered again** at a run's start, at the cursor's height [RN-11];
+ * - **a `COMMIT` that landed though its connection was lost**: the retry's points after it are the window after the
+ *   commit [IN-11];
  * - **a failure closes the window** it happened in (the event says it did not complete); **a height stopped at the
- *   lockstep wait** (PP-6, task 14.3) closes its window too, so nothing is raised once the loop ended.
+ *   lockstep wait** closes its window too, so nothing is raised once the loop ended [PP-6].
+ *
  * The observer's events and `slowBlock()` are read directly (`window` names which window), and only those of the
- * windows a case holds open are compared (issue 00040): a window no case holds — a height's own processing, on
- * PostgreSQL its `on-db-write` and `COMMIT`, or a callback's read — can pass `slowBlockMs` on a loaded machine and raise
- * a correct `slow-block` of its own. A held window's own reads count toward its time: each case leaves them at least
- * 0.8 s, which the `on-finalized` and lockstep cases get from a `slowBlockMs` of 2,000 with their holds raised alike.
+ * windows a case holds open are compared. A window no case holds (a height's own processing, on PostgreSQL its
+ * `on-db-write` and `COMMIT`, or a callback's read) can pass `slowBlockMs` on a loaded machine and raise a correct
+ * `slow-block` of its own. A held window's own reads count toward its time: each case leaves them at least 0.8 s,
+ * which the `on-finalized` and lockstep cases get from a `slowBlockMs` of 2,000 with their holds raised alike.
  *
  * Each test waits on purpose (callbacks of up to 2.5 s, waits of up to 2.7 s): its budget is that plus Vitest's 60 s.
  */
@@ -161,7 +162,7 @@ function holder(
   });
 }
 
-/** `db`, whose next block transaction, once `state.armed`, loses its `COMMIT` after it landed (IN-11, DB-13). */
+/** `db`, whose next block transaction, once `state.armed`, loses its `COMMIT` after it landed. [IN-11, DB-13] */
 function landingCommits(db: Database): { readonly db: Database; readonly state: { armed: boolean } } {
   const state = { armed: false };
   const wrapped: Database = {

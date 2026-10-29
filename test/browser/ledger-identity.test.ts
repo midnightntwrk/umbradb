@@ -6,12 +6,11 @@ import { checkLedgerPackage, checkLedgerPackages } from "../../browser/src/ledge
 import { SUBSTITUTES } from "../../browser/build.js";
 
 /**
- * The browser build's startup check of the vendored ledger packages (`openspec/changes/core-arch/design.md` §5.2,
- * §9.2; LG-5, A173; task 12.2b): `browser/src/ledger/identity.ts`, bundled in place of `src/ledger/identity.ts` (which
- * reads files), so the process and the ledger worker call the same functions as in Node.js. It refuses
- * `ledgerSources: released` as Node.js's check does, naming the setting; it reads no file — the build checked every
- * package file it bundles (`browser/build.ts`), and the ledger worker checks the WebAssembly it fetches
- * (`browser/src/ledger/instantiate.ts`).
+ * The browser build's startup check of the vendored ledger packages: `browser/src/ledger/identity.ts`, bundled in place
+ * of `src/ledger/identity.ts` (which reads files), so the process and the ledger worker call the same functions as in
+ * Node.js. It refuses `ledgerSources: released` as Node.js's check does, naming the setting; it reads no file — the
+ * build checked every package file it bundles (`browser/build.ts`), and the ledger worker checks the WebAssembly it
+ * fetches (`browser/src/ledger/instantiate.ts`). [LG-5, A173; design §5.2, §9.2]
  */
 
 describe("the browser's startup check of the ledger packages (task 12.2b)", () => {

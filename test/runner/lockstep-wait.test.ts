@@ -16,13 +16,14 @@ import {
 } from "./loop-harness.js";
 
 /**
- * The finalized loop's lockstep wait (task 14.3; PP-6, RN-6, RN-13; A117's "before `BEGIN` with no transaction open",
- * `design.md` §2, §8), on PostgreSQL 18.6 and PGlite 0.5.10: given `LoopInput.lockstep` (the core's `Lockstep`,
- * `src/private/lockstep.ts`), the loop awaits it for each height h after h's `on-compute` and before h's block
- * transaction — with every read ended, so no transaction is open (`pg_stat_activity`; PGlite's one engine) and a read
- * of the database is served meanwhile (PGlite's one queue is free) —, commits h when it resolves true, and ends with its
- * signal, h not committed, when it resolves false (a stop while it waits). Committed negative control: a loop that opens
- * its block transaction before it waits fails the oracle.
+ * The finalized loop's lockstep wait, on PostgreSQL 18.6 and PGlite 0.5.10. Given `LoopInput.lockstep` (the core's
+ * `Lockstep`, `src/private/lockstep.ts`), the loop awaits it for each height h after h's `on-compute` and before h's
+ * block transaction, before its `BEGIN`. Every read has ended, so no transaction is open
+ * (`pg_stat_activity`; PGlite's one engine) and a read of the database is served meanwhile (PGlite's one queue is
+ * free). The loop commits h when the wait resolves true, and ends with its signal, h not committed, when it resolves
+ * false (a stop while it waits). [PP-6, RN-6, RN-13, A117; design §2, §8]
+ *
+ * Committed negative control: a loop that opens its block transaction before it waits fails the oracle.
  */
 
 /** A module recording the points it saw and writing one row per height (`probe.rows`). */
@@ -73,7 +74,8 @@ interface AtGate {
   readonly seen: readonly string[];
 }
 
-/** The oracle of A117's wait at the gate: every problem, none when it waits after on-compute, before BEGIN, holding nothing. */
+/** The oracle of the wait at the gate: every problem, none when it waits after on-compute, before BEGIN, holding
+ *  nothing. [A117] */
 export function gateProblems(at: AtGate): string[] {
   const problems: string[] = [];
   const h = at.height;

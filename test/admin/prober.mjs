@@ -1,9 +1,12 @@
-// The admin endpoints' prober (task 8.1, A62): a worker thread of its own that requests each path in turn, every
-// `intervalMs`, until it is told to stop, and reports every request — its path, its status (null when no answer came),
-// when it was sent (`process.hrtime.bigint()`, the clock every thread of the process shares) and how long its answer
-// took, from just before the request was written to the end of the answer — and, when asked (`bodies`, task 5.5), the
-// answer's body as text. It runs off the main thread, so a callback that blocks the main thread (A62's synchronous
-// loop) delays none of its requests or measurements: each time is the answer's time, measured from the request.
+// The admin endpoints' prober: a worker thread of its own that requests each path in turn, every `intervalMs`, until
+// it is told to stop. For every request it reports:
+// - its path, and its status (null when no answer came);
+// - when it was sent (`process.hrtime.bigint()`, the clock every thread of the process shares);
+// - how long its answer took, from just before the request was written to the end of the answer;
+// - when asked (`bodies`), the answer's body as text.
+//
+// It runs off the main thread, so a callback that blocks the main thread (such as a synchronous loop) delays none of
+// its requests or measurements: each time is the answer's time, measured from the request. [A62]
 //
 // Plain JavaScript, so that a worker thread loads it as it is.
 

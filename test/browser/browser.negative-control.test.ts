@@ -24,18 +24,20 @@ import { nodeRun } from "./node-run.js";
 import { browserChain, headSession, KEPT_OPEN, restoreSession, resumeSession, syncSession } from "./tapes.js";
 
 /**
- * The committed negative controls of the browser build's criteria (task 16.1): each builds a page that differs from
+ * The committed negative controls of the browser build's criteria: each builds a page that differs from
  * the real one in one way (`browser/build.ts`'s `control`) and runs the criterion's own oracle (`./browser-checks.ts`)
  * over it, which must then fail — the real build passing the same oracle is `./browser.test.ts`.
  *
- * - A129's second tab: a page that takes no Web Lock (`ignore-web-lock`) lets the second tab's core go for the database
- *   the first tab holds, and the check that it refused with `writer-lock-held` fails.
- * - A131's network check: a page that requests one URL beside the node (`foreign-request`) fails it, naming the URL.
- * - A132's equality: a page whose JSON reader is `JSON.parse` (`plain-json-reader`) reads the `probe` module's `jsonb`
- *   integers beyond 2^53 rounded — which the canonical encoding then refuses, so its core halts at S —, and it never
- *   has Node.js's contents hash.
- * - A131's restore (BK-5): a page whose restore skips BK-3's contents hash check (`restore-skips-contents-hash`)
- *   commits a tampered backup into a fresh profile, and the check that it is refused `contents-hash-mismatch` fails.
+ * - The second-tab check: a page that takes no Web Lock (`ignore-web-lock`) lets the second tab's core go for the
+ *   database the first tab holds, and the check that it refused with `writer-lock-held` fails [A129].
+ * - The network check: a page that requests one URL beside the node (`foreign-request`) fails it, naming the URL
+ *   [A131].
+ * - The equality with Node.js: a page whose JSON reader is `JSON.parse` (`plain-json-reader`) reads the `probe`
+ *   module's `jsonb` integers beyond 2^53 rounded. The canonical encoding then refuses them, so its core halts at S,
+ *   and it never has Node.js's contents hash [A132].
+ * - The restore check: a page whose restore skips the backup's contents hash check (`restore-skips-contents-hash`)
+ *   commits a tampered backup into a fresh profile, and the check that it is refused `contents-hash-mismatch` fails
+ *   [A131, BK-3, BK-5].
  */
 
 const chain = browserChain();

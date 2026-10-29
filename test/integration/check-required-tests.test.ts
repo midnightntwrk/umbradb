@@ -18,12 +18,13 @@ import {
 } from "./check-required-tests.js";
 
 /**
- * Unit coverage for the skip-enforcement reconciliation (Task 0.4, `design.md` §1.1). Exercises the
- * three acceptance cases deterministically against synthetic Vitest JSON reporter payloads — no
- * real vitest run needed — so the mechanism's teeth are proven in the required gate itself:
+ * Unit coverage for the skip-enforcement reconciliation. Exercises the three acceptance cases
+ * deterministically against synthetic Vitest JSON reporter payloads — no real vitest run needed — so
+ * the mechanism's teeth are proven in the required gate itself:
  *   (1) all required tests green  -> check passes;
  *   (2) one required test skipped  -> check fails AND names the id;
  *   (3) a deferred id skipped      -> check does NOT fail.
+ * [v1.0.0-recovery-testing design §1.1]
  */
 
 const MANIFEST: RequiredTestsManifest = {
@@ -200,7 +201,7 @@ describe("check-required-tests — skip-enforcement reconciliation (Task 0.4)", 
 
 
 /**
- * Change-level audit BLOCK 9 — the gate must FAIL CLOSED, be COUNT-PINNED, and be FILE-BOUND. These
+ * The gate must FAIL CLOSED, be COUNT-PINNED, and be FILE-BOUND. These
  * cases prove the reconciliation cannot fail open (an empty/absent/drifted manifest, or an id whose
  * token was moved to a trivial passing test in another file, all turn the gate RED), and that the
  * REAL manifest is structurally valid.
@@ -249,7 +250,7 @@ describe("check-required-tests — fail-closed + count-pin + file-binding (BLOCK
       expect(typeof entry.file, `required ${entry.id} must bind a file`).toBe("string");
       expect(existsSync(join(REPO_ROOT, entry.file!)), `bound file for ${entry.id} must exist: ${entry.file}`).toBe(true);
     }
-    // The crash harness's smoke ids 1-4, which design.md §13 keeps (core-arch task 17.2), are required entries.
+    // The crash harness's smoke ids 1-4, which are kept, are required entries. [design §13]
     expect(manifest.required.map((e) => e.id)).toEqual(expect.arrayContaining([
       "crash-harness.smoke.spawn-sigkill-container-survives",
       "crash-harness.smoke.pg-terminate-backend-drops-and-recovers",
@@ -309,8 +310,8 @@ describe("check-required-tests — fail-closed + count-pin + file-binding (BLOCK
 
 
 /**
- * Change-level round-4 (final hardening) — BLOCK 5 (manifest-ID uniqueness + a one-to-one id<->file
- * binding) and BLOCK 6 (deferred exemption structurally pinned + file-bound). These prove a deleted
+ * Manifest-ID uniqueness (a one-to-one id<->file binding), and the deferred exemption structurally
+ * pinned and file-bound. These prove a deleted
  * required test cannot be masked by a duplicate id, the sole deferred exemption cannot be silently
  * deleted, and a deferred skipped token moved to a different file fails the gate.
  */
@@ -322,7 +323,7 @@ describe("check-required-tests — manifest-ID uniqueness + deferred pin/file-bi
     return p;
   }
   /** The pins these tests load with: the real required pin, and one deferred entry, so the deferred checks run
-   *  although the real manifest defers nothing since core-arch task 17.2 (EXPECTED_DEFERRED_COUNT = 0). */
+   *  although the real manifest defers nothing (EXPECTED_DEFERRED_COUNT = 0). */
   const PINS = { required: EXPECTED_REQUIRED_COUNT, deferred: 1 };
   /** A minimal VALID manifest: PINS.required distinct file-bound required entries + PINS.deferred distinct
    *  file-bound deferred entries. Callers mutate a copy to build a defect. */

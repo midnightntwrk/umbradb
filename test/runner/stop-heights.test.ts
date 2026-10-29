@@ -11,10 +11,11 @@ import { core, entryOf, loggingModule, settle, startProcess, testBuild } from ".
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * Start and stop heights through the process (task 5.3; RN-9, RN-10, RN-11's re-delivery at the cursor, CF-6's raised
- * core stop): A45 — with the core's stop at 10 and the head at 20 the cursor ends at 10, the stopping modules and then
- * the core get `on-stop-height`, the state is `stopped` and ready; a restart at cursor 10 processes nothing and fires
- * the core's `on-stop-height` again — and the orders, handles and failures of the two points.
+ * Start and stop heights through the process, including the callbacks delivered again at the cursor after a restart,
+ * and a raised core stop. With the core's stop at 10 and the head at 20, the cursor ends at 10, the stopping modules
+ * and then the core get `on-stop-height`, and the state is `stopped` and ready. A restart at cursor 10 processes
+ * nothing and fires the core's `on-stop-height` again. Also tested: the orders, handles and failures of the two points.
+ * [RN-9, RN-10, RN-11, CF-6, A45]
  */
 
 const POINTS: readonly PointName[] = [
@@ -27,12 +28,12 @@ const POINTS: readonly PointName[] = [
   "on-stop-height",
 ];
 
-/** The modules of A45: `a` and `b` stop with the core at 10, `c` runs on, `d` stops at 6, `e` starts at 4. */
+/** The modules: `a` and `b` stop with the core at 10, `c` runs on, `d` stops at 6, `e` starts at 4. [A45] */
 function modules(log: string[]): ModuleDeclaration[] {
   const reader = loggingModule("reader", log, [], {
     points: {
       async "on-start-api"(_p, api) {
-        // The module states its height itself, with the envelope's helpers (RN-16; task 5.2b).
+        // The module states its height itself, with the envelope's helpers. [RN-16]
         api.http("GET", "/height", async (_request, read) => ({
           status: 200,
           headers: chainDataHeaders(await readChainDataView(read)),
@@ -44,7 +45,7 @@ function modules(log: string[]): ModuleDeclaration[] {
   return [...["a", "b", "c", "d", "e"].map((id) => loggingModule(id, log, POINTS)), reader];
 }
 
-/** A45's configuration on `database`, with the core's stop. */
+/** The configuration on `database`, with the core's stop. [A45] */
 function entries(database: DatabaseParts, user: readonly ModuleDeclaration[], stop: number | undefined) {
   const of = (id: string) => user.find((part) => part.id === id) as ModuleDeclaration;
   return [
@@ -108,7 +109,8 @@ const at = (log: readonly string[], point: PointName, height: number): string[] 
 const anyAbove = (log: readonly string[], height: number): boolean =>
   log.some((line) => Number(/@(\d+)/.exec(line)?.[1]) > height);
 
-/** A45's oracle over the first run (stop 10, head 20) and the restart at cursor 10: every problem, none when it holds. */
+/** The oracle over the first run (stop 10, head 20) and the restart at cursor 10: every problem, none when it holds.
+ *  [A45] */
 function a45Problems(first: RunObservation, restart: RunObservation): string[] {
   const problems: string[] = [];
   const stops = ["b on-stop-height@10", "a on-stop-height@10", "core-chain on-stop-height@10 core"];
@@ -147,7 +149,7 @@ class CoreStopsFirst extends FinalizedLoop {
   }
 }
 
-/** A negative control's loop: a restart re-delivers nothing at the cursor (RN-11 ignored). */
+/** A negative control's loop: a restart delivers nothing again at the cursor. [RN-11] */
 class NoRedelivery extends FinalizedLoop {
   protected override async redeliver(): Promise<void> {}
 }
@@ -167,7 +169,8 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       expect(first.status).toMatchObject({ state: "stopped", ready: true, cursor: 10n, conditions: [] });
       expect(first.status.ended).toEqual(first.ended);
       expect(first.lines).toEqual(["processing stopped at 10: the core's stop"]);
-      // RN-11: the restart re-delivered on-after-db-write for 10 to the modules active there, in order, before the stops.
+      // The restart delivered on-after-db-write for 10 again to the modules active there, in order, before the stops.
+      // [RN-11]
       expect(restart.log).toEqual([
         "a on-after-db-write@10",
         "b on-after-db-write@10",
@@ -375,7 +378,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
             try {
               p.publish("sneaky-client", 3);
             } catch {
-              // Caught: still a callback error (MD-7).
+              // Caught: still a callback error. [MD-7]
             }
           },
         },

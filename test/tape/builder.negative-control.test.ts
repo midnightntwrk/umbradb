@@ -3,8 +3,8 @@ import type * as Recording from "../../tools/tape/recording.js";
 import { expectRecordReplayIdentical } from "./builder-checks.js";
 
 /**
- * The committed negative controls of A71's record-and-replay check (task 9.2): wrong recording builders, each of which
- * must make the check `builder.test.ts` runs (`builder-checks.ts`, `expectRecordReplayIdentical`) fail.
+ * The committed negative controls of the record-and-replay check: wrong recording builders, each of which must make the
+ * check `builder.test.ts` runs (`builder-checks.ts`, `expectRecordReplayIdentical`) fail. [A71]
  *
  * - **A builder that drops a notification** (the first one it sees is forwarded to the client but not recorded): the
  *   replayed session misses that frame, so the byte-identical comparison fails.

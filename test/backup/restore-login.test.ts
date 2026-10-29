@@ -24,11 +24,11 @@ import { backupAt, chain, codeIn, emptied, restoreRun } from "./restore-fixtures
 import { connectionOfUrl, partsOfUrl } from "../db/connection.js";
 
 /**
- * A125's owners and grants with a login that is not a superuser (task 15.2; BK-3, DB-6, DB-7, decision record Q90), on a
- * PostgreSQL 18.6 server of its own, where no module role exists yet: a login without `CREATEROLE` is refused — the
- * restore rolled back, the target empty —, and a `CREATEROLE` login restores, creating the module roles and granting
- * itself their use, as startup's `prepareSchemas` would; its restored database's catalogs equal those of a database it
- * built by migrations. The backup is one PGlite wrote (`umbradb backup` needs no `pg_dump` for it).
+ * A restore's owners and grants with a login that is not a superuser, on a PostgreSQL 18.6 server of its own, where no
+ * module role exists yet: a login without `CREATEROLE` is refused — the restore rolled back, the target empty —, and a
+ * `CREATEROLE` login restores, creating the module roles and granting itself their use, as startup's `prepareSchemas`
+ * would; its restored database's catalogs equal those of a database it built by migrations. The backup is one PGlite
+ * wrote (`umbradb backup` needs no `pg_dump` for it). [A125, BK-3, DB-6, DB-7, Q90]
  */
 
 const TEST_TIMEOUT_MS = 900_000;

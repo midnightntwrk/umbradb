@@ -2,10 +2,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// Task 0.1 of `openspec/changes/core-arch` (proposal.md "New runtime dependencies", design.md §14): the versions
-// the characterization tests in this folder were run against are pinned exactly, in `package.json` and in the
-// lockfile that `npm ci` installs from. `typescript` is a runtime dependency (for `umbradb config check`, design.md
-// §7) and `zod` stays on major version 4 (owner decision Q45).
+// The versions the characterization tests in this folder were run against are pinned exactly, in `package.json` and
+// in the lockfile that `npm ci` installs from. `typescript` is a runtime dependency (for `umbradb config check`) and
+// `zod` stays on major version 4. [Q45; proposal "New runtime dependencies"; design §7, §14]
 
 type Manifest = {
   dependencies: Record<string, string>;

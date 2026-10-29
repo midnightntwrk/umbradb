@@ -5,21 +5,21 @@ import { dataHash } from "../../src/config/history.js";
 import { type PlainData, type PlainObject, samePlainData } from "../../src/config/plain-data.js";
 
 /**
- * A32 `[PROP]` (CF-7; task 4.3): for random data-field objects — plain data as a configuration's data fields are (CF-1:
- * objects, arrays, strings, booleans, `null`, integers from 0 to 2^53 − 1, nested) — `data_hash`, SHA-256 of the
- * canonical encoding (DT-1), is independent of property order at every depth and changes when any value changes, at any
- * depth. fast-check, seed recorded.
+ * Property tests (`[PROP]`) of `data_hash`, the SHA-256 of the canonical encoding. The inputs are random data-field
+ * objects: plain data, as a configuration's data fields are (objects, arrays, strings, booleans, `null`, integers from
+ * 0 to 2^53 − 1, nested). The hash does not depend on property order at any depth, and it changes when any value
+ * changes, at any depth. Uses fast-check, with the seed recorded. [A32 PROP, CF-7, CF-1, DT-1]
  *
- * The committed negative controls: a hash over the properties in their written order (`JSON.stringify`, unsorted)
- * fails the first property, and a hash of the keys alone fails the second — so each property can tell a hash that
- * breaks it.
+ * The committed negative controls show each property can catch a hash that breaks it:
+ * - a hash over the properties in their written order (`JSON.stringify`, unsorted) fails the first property;
+ * - a hash of the keys alone fails the second.
  */
 
 /** fast-check's seed and run count for every property here. */
 const SEED = 20261025;
 const RUNS = 300;
 
-/** Keys: identifiers, other ASCII, and any Unicode without lone surrogates (task 4.2 refuses those). */
+/** Keys: identifiers, other ASCII, and any Unicode without lone surrogates (the validation refuses those). */
 const key = fc.oneof(fc.string({ maxLength: 6 }), fc.string({ unit: "grapheme", maxLength: 4 }), fc.constantFrom("", "a", "b", "ab", "é", "😀"));
 
 /** A plain-data value of a data field, nested up to a few levels. */

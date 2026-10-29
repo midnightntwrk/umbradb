@@ -18,13 +18,15 @@ import {
 } from "./loop-harness.js";
 
 /**
- * One transaction per finalized height, and none while the loop waits (task 5.2; RN-6, RN-14; A41, A49): a catch-up of
- * 100 heights commits each in its own `BEGIN … COMMIT` with the cursor inside, in ascending order — the transaction ids
- * PostgreSQL recorded on each height's rows (`xmin`) are one per height, the same for the cursor row and the module's
- * row of that height, and ascending — and with the source's head at the cursor no transaction is open (PostgreSQL's
- * `pg_stat_activity`; PGlite's one engine), and processing resumes when the head rises. A41 and A49 name PostgreSQL;
- * both run on PGlite too. Each has its committed negative control: a loop that commits two heights in one transaction,
- * and one that waits inside a read.
+ * One transaction per finalized height, and none while the loop waits. [RN-6, RN-14]
+ * - A catch-up of 100 heights commits each in its own `BEGIN … COMMIT` with the cursor inside, in ascending order. The
+ *   transaction ids PostgreSQL recorded on each height's rows (`xmin`) are one per height, the same for the cursor row
+ *   and the module's row of that height, and ascending. [A41]
+ * - With the source's head at the cursor no transaction is open (PostgreSQL's `pg_stat_activity`; PGlite's one
+ *   engine), and processing resumes when the head rises. [A49]
+ *
+ * Both acceptance criteria name PostgreSQL; both run on PGlite too. Each has its committed negative control: a loop
+ * that commits two heights in one transaction, and one that waits inside a read. [A41, A49]
  */
 
 /** A module writing one row per height (`tx_probe.rows`). */
@@ -48,7 +50,8 @@ async function transactionIds(db: Database): Promise<{ height: bigint; cursor: b
   return rows.map((row) => ({ height: row.height as bigint, cursor: id(row.cursor), probe: id(row.probe) }));
 }
 
-/** A41's oracle: the problems found (none when each height committed alone, in ascending order). */
+/** The one-transaction-per-height oracle: the problems found (none when each height committed alone, in ascending
+ *  order). [A41] */
 function oneTransactionPerHeight(ids: readonly { height: bigint; cursor: bigint; probe: bigint }[], heights: number): string[] {
   const problems: string[] = [];
   if (ids.length !== heights) problems.push(`${ids.length} heights committed, not ${heights}`);
@@ -127,7 +130,7 @@ describe.each(RUNNER_BACKENDS)("one transaction per height, none while waiting, 
     expect(transactions).toBe(50);
   }, 120_000);
 
-  /** A49's oracle at a wait: the problems found (none when no transaction is open and the queue is free). */
+  /** The oracle at a wait: the problems found (none when no transaction is open and the queue is free). [A49] */
   async function openWhileWaiting(opened: RunnerDatabase): Promise<string[]> {
     const problems: string[] = [];
     const open = await opened.openTransactions();

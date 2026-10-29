@@ -19,26 +19,30 @@ import { PROCESS_BACKENDS } from "../../runner/process-backends.js";
 import { loggingModule } from "../../runner/process-build.js";
 
 /**
- * A63 (task 8.2; AE-2) through the process on PostgreSQL 18 and PGlite, with a 5 s liveness timeout set in the `core`
- * entry: while an `on-compute` callback awaits a 15 s operation, `/health/live` answers 200 throughout — awaiting leaves
- * the main thread's heartbeat ticking —; while one runs a 15 s synchronous loop, `/health/live` answers 503 from 5 s
- * into the loop on, every endpoint still answering within 1 s (the admin worker reads the last tick from shared memory
- * and needs nothing of the blocked main thread), and 200 again once the loop has ended.
+ * Liveness through the process, on PostgreSQL 18 and PGlite, with a 5 s liveness timeout set in the `core` entry:
+ * - while an `on-compute` callback awaits a 15 s operation, `/health/live` answers 200 throughout, since awaiting
+ *   leaves the main thread's heartbeat ticking;
+ * - while one runs a 15 s synchronous loop, `/health/live` answers 503 from 5 s into the loop on, and every endpoint
+ *   still answers within 1 s (the admin worker reads the last tick from shared memory and needs nothing from the
+ *   blocked main thread);
+ * - once the loop has ended, it answers 200 again.
+ * [A63, AE-2]
  *
- * **How it is timed** (as A62, `test/admin/admin-server.test.ts`): the prober is a worker thread of the test's own,
- * requesting the four endpoints in turn every 150 ms, each answer timed from its request on `process.hrtime.bigint()`,
- * the clock the callbacks read when their hold starts and ends and the heartbeat writes its ticks with. The last tick
- * before the loop is at most as old as the loop, so from 5 s into it the tick is older than 5 s: `/health/live` must
- * answer 503 to every request sent from then until 1 s before the loop ends (a later one may be answered after it), at
- * least 4 of them; and 200 to every request sent from 1 s after the loop on, at least 4 of them.
+ * **How it is timed** (as in `test/admin/admin-server.test.ts`). The prober is the test's own worker thread. It
+ * requests the four endpoints in turn every 150 ms and times each answer from its request on `process.hrtime.bigint()`.
+ * That is the same clock the callbacks read when their hold starts and ends, and the clock the heartbeat writes its
+ * ticks with. The last tick before the loop is at most as old as the loop, so from 5 s into it the tick is older than
+ * 5 s. So `/health/live` must answer 503 to every request sent from then until 1 s before the loop ends (a later one
+ * may be answered after it), at least 4 of them; and 200 to every request sent from 1 s after the loop on, at least 4
+ * of them. [A62, A63]
  *
- * Committed negative control: an admin server on the main thread (liveness read there, not on 8.1's worker) fails
- * A63's "every endpoint keeps answering within 1 s".
+ * Committed negative control: an admin server on the main thread (liveness read there, not on the admin worker) fails
+ * the check that every endpoint keeps answering within 1 s. [A63]
  */
 
-/** The liveness timeout A63 sets. */
+/** The liveness timeout this test sets. [A63] */
 const TIMEOUT_MS = 5_000;
-/** How long A63's callbacks hold. */
+/** How long the test's callbacks hold. [A63] */
 const HOLD_MS = 15_000;
 const NS = 1_000_000n;
 
@@ -55,7 +59,7 @@ function holding(hold: Hold, ms: number, mode: "block" | "await"): ModuleDeclara
         const until = hold.start + BigInt(ms) * NS;
         if (mode === "block") {
           while (process.hrtime.bigint() < until) {
-            // Computation on the main thread (AE-2's scenario): nothing else of this thread runs meanwhile.
+            // Computation on the main thread: nothing else on this thread runs meanwhile. [AE-2]
           }
         } else {
           // An awaited operation, at least `ms` by the clock the prober reads.
@@ -85,9 +89,12 @@ const liveBetween = (records: readonly ProbeRecord[], from: bigint, to: bigint) 
   records.filter((record) => record.path === "/health/live" && BigInt(record.sent) >= from && BigInt(record.sent) <= to);
 
 /**
- * A63's liveness oracle for a synchronous loop held in `hold`: 200 before it; 503 to every request sent from
- * {@link TIMEOUT_MS} into it to 1 s before its end, at least {@link PROBES_DURING_HOLD} of them; 200 to every request
- * sent from 1 s after it on, at least as many.
+ * The liveness oracle for a synchronous loop held in `hold`:
+ * - 200 before it;
+ * - 503 to every request sent from {@link TIMEOUT_MS} into it to 1 s before its end, at least
+ *   {@link PROBES_DURING_HOLD} of them;
+ * - 200 to every request sent from 1 s after it on, at least as many.
+ * [A63]
  */
 function stuckProblems(records: readonly ProbeRecord[], hold: Hold): string[] {
   const problems: string[] = [];
@@ -111,7 +118,7 @@ function stuckProblems(records: readonly ProbeRecord[], hold: Hold): string[] {
   return problems;
 }
 
-/** The statuses each endpoint may answer during A63's synchronous loop. */
+/** The statuses each endpoint may answer during the synchronous loop. [A63] */
 const DURING_LOOP: Readonly<Record<string, readonly number[]>> = {
   "/health/live": [200, 503],
   "/health/ready": [200, 503],

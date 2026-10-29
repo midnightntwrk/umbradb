@@ -28,8 +28,10 @@ import { type BackupBackend, type BackupDatabase, connectionOf, pathOf } from ".
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * A backup with `core-ledger-state` in its history, and its restore checked against a node (task 15.2; BK-3's
- * `backup-root-mismatch`; LG-15): the synthetic ledger tape of task 12.3's tests (`../backbone/ledger-tapes.ts`: real
+ * A backup with `core-ledger-state` in its history, and its restore checked against a node for `backup-root-mismatch`.
+ * [BK-3, LG-15]
+ *
+ * The backup comes from the synthetic ledger tape of the ledger ingest tests (`../backbone/ledger-tapes.ts`: real
  * ledger transactions on the undeployed devnet's genesis state, `midnight_ledgerStateRoot` at every block) synced from
  * genesis by the process of `../backbone/ingest-harness.ts` — UmbraDB's backbone over the node source on a tape node,
  * the ledger's core modules enabled from 0, the ledger in its worker thread —, backed up by the process at the head
@@ -69,7 +71,7 @@ export async function ledgerChain(): Promise<LedgerScenario> {
 
 /**
  * Syncs `scenario` from genesis on `db` and backs it up at its head through the process — or at `options.at`, with
- * `options`' records (a tape capped there), core modules and entries (task 13.1's handoff).
+ * `options`' records (a tape capped there), core modules and entries.
  */
 export async function ledgerBackup(
   db: BackupDatabase,
@@ -90,8 +92,8 @@ export async function ledgerBackup(
 }
 
 /**
- * A restore's build other than the ledger's core modules from 0 (task 13.1's handoff, CC-4): the build's core modules
- * and each one's entry (its start and stop).
+ * A restore's build other than the ledger's core modules from 0: the build's core modules and each one's entry (its
+ * start and stop). [CC-4]
  */
 export interface RestoreBuild {
   readonly core: readonly ModuleDeclaration[];

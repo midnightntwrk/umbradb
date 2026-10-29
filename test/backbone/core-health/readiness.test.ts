@@ -24,18 +24,27 @@ import { loggingModule } from "../../runner/process-build.js";
 import { ae4, caseText, READINESS_CASES, readinessProblems, WRONG_DECISIONS } from "./readiness-cases.js";
 
 /**
- * `/health/ready` (task 8.2; AE-4; A65, A140): `core-health` decides it in AE-4's order — 503 while `starting`,
- * `refused`, `halted` or `stopping`; 200 while `stopped`, whatever the lag; otherwise 200 when no readiness lag is set or
- * the lag is at or below it — from the published state and lag and the process revision's `readinessLag`, by
- * `readinessOf`, which the runner's `status()` uses too, so `/status`'s `ready` and `/health/ready` never disagree.
+ * `/health/ready`. `core-health` decides it from the published state and lag and the process revision's
+ * `readinessLag`, in this order:
+ * - 503 while `starting`, `refused`, `halted` or `stopping`;
+ * - 200 while `stopped`, whatever the lag;
+ * - otherwise 200 when no readiness lag is set or the lag is at or below it.
+ * The decision is `readinessOf`, which the runner's `status()` uses too, so `/status`'s `ready` and `/health/ready`
+ * never disagree. [AE-4, A140]
  *
- * The decision is tested against AE-4's cases (`./readiness-cases.ts`), each built so that applying another rule first
- * gets it wrong; the committed negative controls are those wrong orders, each failing the cases of the rule it moves,
- * and, through a process, the order task 5.3 first had (`following` ready before the lag is looked at), which fails
- * A65's third case. A65 then passes through the process: a readiness lag of 10 with lag 500 (503, then 200 once the
- * lag is 10 — every answer of the catch-up checked against AE-4; on PGlite, see the test), a stopped process with lag
- * 100 (200), a following one with threshold 20 and lag 15 (503), on PostgreSQL 18 and PGlite; and rule 1 before rule 3
- * there too (a halted or stopping process within its readiness lag answers 503), and conditions that change nothing.
+ * The decision is tested against the readiness cases (`./readiness-cases.ts`), each built so that applying another
+ * rule first gets it wrong. The committed negative controls are those wrong orders, each failing the cases of the rule
+ * it moves. Through a process, the control is the order an earlier version had (`following` ready before the lag is
+ * looked at), which fails the third process case below. [AE-4, A65]
+ *
+ * Then, through the process on PostgreSQL 18 and PGlite:
+ * - a readiness lag of 10 with lag 500: 503, then 200 once the lag is 10, every answer of the catch-up checked
+ *   against the readiness rule (on PGlite only, see the test);
+ * - a stopped process with lag 100: 200;
+ * - a following one with threshold 20 and lag 15: 503;
+ * - rule 1 before rule 3: a halted or stopping process within its readiness lag answers 503;
+ * - conditions that change nothing.
+ * [A65, AE-4]
  */
 
 /** A module whose `on-compute` awaits the gate of each height that has one. */
@@ -59,8 +68,8 @@ async function ready(origin: string) {
 }
 
 /**
- * AE-4's oracle over observed answers: each `/health/ready` answer is 200 exactly when AE-4 says so for the state, lag
- * and readiness lag it shows, and its body's `ready` agrees with its status.
+ * The readiness oracle over observed answers: each `/health/ready` answer is 200 exactly when the readiness rule says
+ * so for the state, lag and readiness lag it shows, and its body's `ready` agrees with its status. [AE-4]
  */
 function observedProblems(answers: readonly Awaited<ReturnType<typeof ready>>[], readinessLag: number | null): string[] {
   return answers.flatMap(({ status, body }) => {
@@ -169,7 +178,7 @@ function unreachableAt(height: bigint, healed: () => boolean): BlockSource & Blo
     cursor: (read) => source.cursor(read),
     finalizedHead: () => source.finalizedHead(),
     waitForHead: (above, signal) => source.waitForHead(above, signal),
-    // core-block-fetch's items, as the source gives them (task 10.3).
+    // core-block-fetch's items, as the source gives them.
     blockItems: (block: BlockRef) => source.blockItems(block),
     block: async (at) => {
       if (at === height && !healed()) throw new UmbraError("node-unreachable", "the test's node-unreachable");
@@ -184,7 +193,7 @@ describe.each(PROCESS_BACKENDS)("A65: /health/ready through the process on $name
 
   // The catch-up commits 490 blocks: 7 s on PGlite, 152 s on PostgreSQL at a load average of 20–50 (each block's
   // statements through Docker's port proxy). What it checks is the decision on the published lag, which does not depend
-  // on the backend, so it runs on PGlite; A65's other cases, and rule 1's, run on both.
+  // on the backend, so it runs on PGlite; the other process cases, and rule 1's, run on both. [A65]
   it.runIf(backend.kind === "pglite")("A65: readiness lag 10 and lag 500 answers 503, then 200 once the lag is 10 or less; every answer as AE-4 says", async () => {
     const gates = new Map([2n, 491n, 492n].map((height) => [height, gate()]));
     const run = startWithAdmin({
@@ -200,7 +209,7 @@ describe.each(PROCESS_BACKENDS)("A65: /health/ready through the process on $name
       body: { ready: false, state: "syncing", lag: "500", readinessLag: 10 },
     });
     gates.get(2n)?.open();
-    // The catch-up: every answer is AE-4's for what it shows.
+    // The catch-up: every answer is what the readiness rule gives for what it shows. [AE-4]
     const answers: Awaited<ReturnType<typeof ready>>[] = [];
     let reached = false;
     void gates.get(491n)?.reached.then(() => {

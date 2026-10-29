@@ -1,8 +1,8 @@
 /**
- * A block's chain events, decoded (`openspec/changes/core-arch/specs/chain-data/spec.md` CD-4; task 11.1): the
- * `System::Events` value of the block's own state (`src/backbone/core-block-fetch/events.ts`) read with the runtime
- * metadata of the block's parent's state — the runtime that executed the block (LG-4) —, each event with its place in
- * the block, its phase, its pallet and name, its fields, its topics and its bytes.
+ * A block's chain events, decoded. The `System::Events` value of the block's own state
+ * (`src/backbone/core-block-fetch/events.ts`) is read with the runtime metadata of the parent block's state, which is
+ * the runtime that executed the block. Each event comes with its place in the block, its phase, its pallet and name,
+ * its fields, its topics and its bytes. [CD-4, LG-4]
  *
  * **The encoding** (pinned against the node's sources, `midnight-node` 2.1.0-rc.4 at `1b2b31c`, whose `polkadot-sdk` is
  * `shieldedtech/polkadot-sdk` `stable2606` at `6b0ce48`): `frame_system`'s storage value `Events` is
@@ -69,7 +69,7 @@ interface RecordTypes {
 /** What the metadata says of `Events` that this decoder cannot read: refused with the reason. */
 function refused(height: bigint, why: string): Error {
   return new Error(
-    `the runtime metadata block ${height}'s events are decoded with ${why}, so its System::Events cannot be read (CD-4)`,
+    `the runtime metadata block ${height}'s events are decoded with ${why}, so its System::Events cannot be read`,
   );
 }
 

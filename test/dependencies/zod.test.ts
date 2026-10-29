@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
-// Task 0.1 of `openspec/changes/core-arch` (design.md §7 and §14): characterization tests of `zod` 4 (installed
-// 4.6.7 since task 0.6, kept on major version 4 by owner decision Q45) for module settings schemas. A field's kind
-// (`data`, `operational` or `secret`, CF-4) is carried in its metadata and read back with
+// Characterization tests of `zod` 4 (installed 4.6.7, kept on major version 4) for module settings schemas. A field's
+// kind (`data`, `operational` or `secret`) is carried in its metadata and read back with
 // `schema.shape[field].meta().kind`; defaults fill absent fields; issues name the offending field's path;
-// `z.toJSONSchema` keeps `kind`. Task 0.6 (issue 00032) adds the fix of GHSA-mrhx-c7xc-m3w5 (zod below 4.6.6): a
-// collection longer than its `max` is refused with one issue, its elements not parsed. They test zod itself, not
-// UmbraDB code.
+// `z.toJSONSchema` keeps `kind`. [Q45, CF-4; design §7, §14]
+//
+// They also check the fix of GHSA-mrhx-c7xc-m3w5 (zod below 4.6.6): a collection longer than its `max` is refused with
+// one issue, its elements not parsed. They test zod itself, not UmbraDB code. [docs/issues/00032]
 
 const settings = z.object({
   network: z.enum(["mainnet", "preview"]).meta({ kind: "data" }),

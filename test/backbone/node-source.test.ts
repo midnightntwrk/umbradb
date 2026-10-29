@@ -23,11 +23,14 @@ import {
 } from "./fetch-fixtures.js";
 
 /**
- * The node source of `core-block-fetch` (task 10.3; IN-4 to IN-6, IN-10) on its own, against a tape node, with a
- * recording queue runner in place of the finalized loop's (`QueueRunner`): the head and its notifications, IN-4's
- * finality conflicts, the prefetch's window and concurrency, the best-block queue — appends, switches, the walk,
- * `tipCap`, errors —, its runs, and its items. The process-level criteria (A79–A81, A83, A89) are
- * `test/backbone/ingest.test.ts`'s.
+ * The node source of `core-block-fetch` on its own, against a tape node, with a recording queue runner in place of the
+ * finalized loop's (`QueueRunner`). It covers:
+ * - the head and its notifications, and the finality conflicts [IN-4];
+ * - the prefetch's window and concurrency [IN-5];
+ * - the best-block queue (appends, switches, the walk, `tipCap`, errors) [IN-6, IN-10];
+ * - its runs, and its items.
+ *
+ * The process-level criteria are tested in `test/backbone/ingest.test.ts`. [A79–A81, A83, A89]
  */
 
 const quiet: ConnectSocket = (url, events, timers) => connectWebSocket(url, events, timers, { heartbeatMs: 3_600_000 });
@@ -154,8 +157,8 @@ const never = new AbortController().signal;
 const sameHash = (a: Uint8Array, b: Uint8Array): boolean => hex(a) === hex(b);
 
 /**
- * A call record the test itself makes, through the client, to let the notifications after it go out (TT-3: a
- * notification waits for every record before it): so the test sees the source before them.
+ * A call record the test itself makes, through the client, to let the notifications after it go out (a notification
+ * waits for every record before it), so the test sees the source before them. [TT-3]
  */
 const FENCE: TapeRecord = { method: "chain_getBlockHash", params: [999_999], result: hex(new Uint8Array(32).fill(9)) };
 const passFence = (client: NodeClient) => client.blockHash(999_999n);
@@ -687,7 +690,7 @@ describe("the best-block queue (IN-6)", () => {
   }, PATIENCE_MS);
 
   it("queues a best block the finalized head reached while it was prepared, and uses it at finality, unfetched", async () => {
-    // Task 11.1 (A92: each transaction parsed once): the head's notification of 101 comes while 101's prepare runs.
+    // Each transaction is parsed once: the head's notification of 101 comes while 101's prepare runs. [A92]
     const records: TapeRecord[] = [
       newHead(A(101)),
       fetched(A(101)),
@@ -782,7 +785,7 @@ describe("the best-block queue (IN-6)", () => {
     await until(() => runner.calls.length === 2, "one best block");
     await source.idle();
     expect(runner.calls).toEqual(["best 101A", "prepare 101A"]);
-    // A catch-up: the cursor 0, the head 100 — more than the window above it (Q129).
+    // A catch-up: the cursor 0, the head 100, more than the window above it. [Q129]
     const behind = await open([...subscriptions(), ...headRead(head), newHead(A(101))], { prefetchWindow: 64 });
     const quiet = new Recorder();
     await behind.source.cursor(cursorRead(at(0)));
@@ -1111,7 +1114,7 @@ describe("core-block-fetch's items from the node (CD-2, LG-1, LG-4)", () => {
     expect(items["block-body"].specVersion).toBe(2_000_000);
     expect(items["block-body"].extrinsics.map((e) => `${e.call?.pallet}.${e.call?.call}`)).toEqual(["Timestamp.set"]);
     expect(items["runtime-metadata"]).toEqual({ specVersion: 2_000_000, metadata: RUNTIME.metadata });
-    // Preprod's built-in table: runtime 2.0's ledger is v9 as it built it, the rc.3 package (task 12.2a, Q139 A).
+    // Preprod's built-in table: runtime 2.0's ledger is v9 as it built it, the rc.3 package. [Q139 A]
     expect(items["ledger-version"]).toBe("v9-rc3");
     expect(Object.isFrozen(items)).toBe(true);
     // The runtime read at the parent's state; its metadata once for the runtime.

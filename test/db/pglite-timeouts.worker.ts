@@ -6,8 +6,9 @@ import { SHOW_TIMEOUTS } from "../deterministic-postgresql/zero-timeouts-checks.
 /**
  * A PGlite engine in a process of its own, for `pglite-timeouts.test.ts`: a nonzero `idle_in_transaction_session_timeout`,
  * `transaction_timeout` or `idle_session_timeout` hangs PGlite 0.5.10 — synchronously, so the process's event loop
- * stops (design §14; probe 2026-10-25) — and only a parent that kills the process can bound that. Started with
- * `node --import tsx` and one JSON argument ({@link Job}); it reports each step as one JSON line on stdout
+ * stops (seen in a probe on 2026-10-25) — and only a parent that kills the process can bound that. [design §14]
+ *
+ * Started with `node --import tsx` and one JSON argument ({@link Job}); it reports each step as one JSON line on stdout
  * ({@link WorkerEvent}): what `SHOW` reports for the timeouts, then `sent` just before the statement that follows 2 s
  * idle in a transaction, then `answered` if that statement returns.
  *
@@ -16,7 +17,7 @@ import { SHOW_TIMEOUTS } from "../deterministic-postgresql/zero-timeouts-checks.
  * - `api-read`: the database API on an in-memory PGlite database: one read with the read option (`timeoutMs` 1000,
  *   which on PGlite sets nothing): the settings, 2 s idle, a statement. With `setsTimeouts`, the read's body first sets
  *   the two timeouts as PostgreSQL's bounded read does (`SET LOCAL`) — what a PGlite backend that applied the option
- *   would run: the negative control of A141's PGlite check.
+ *   would run: the negative control of the PGlite timeout check. [A141]
  */
 
 export type Job =

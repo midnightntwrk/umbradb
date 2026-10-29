@@ -5,9 +5,9 @@ import { type ChainBlock, hex } from "./fetch-fixtures.js";
 import type { Watched } from "./ingest-harness.js";
 
 /**
- * The oracles of task 10.3's criteria (`openspec/changes/core-arch/acceptance.md` A76, A79–A81, A83, A89), shared by
- * their tests (`ingest.test.ts`, `ingest-crash.test.ts`) and their committed negative controls
- * (`ingest.negative-control.test.ts`): each returns the problems it finds, so a control shows the very check failing.
+ * The oracles of the ingest tests (`ingest.test.ts`, `ingest-crash.test.ts`), shared with their committed negative
+ * controls (`ingest.negative-control.test.ts`). Each returns the problems it finds, so a control shows the very check
+ * failing. [A76, A79, A80, A81, A83, A89]
  */
 
 /** The blocks table's heights and transaction ids, in height order. */
@@ -19,9 +19,11 @@ async function blockRows(db: ProcessDatabase): Promise<{ readonly height: bigint
 }
 
 /**
- * Heights `from` to `to` committed once each, in order, each in a transaction of its own (RN-6, IN-4, IN-5): the blocks
- * table holds exactly them, with the chain's hashes, their transaction ids distinct and ascending, and the watching
- * module wrote each once, in order.
+ * Heights `from` to `to` committed once each, in order, each in a transaction of its own:
+ * - the blocks table holds exactly them, with the chain's hashes;
+ * - their transaction ids are distinct and ascending;
+ * - the watching module wrote each once, in order.
+ * [RN-6, IN-4, IN-5]
  */
 export async function committedOnce(
   db: ProcessDatabase,
@@ -52,7 +54,7 @@ export async function committedOnce(
   return problems;
 }
 
-/** A79's main clause: 11–20 committed once each in order over the jumping, repeating, reconnecting subscription. */
+/** 11–20 committed once each, in order, over the jumping, repeating, reconnecting subscription. [A79] */
 export function a79Problems(db: ProcessDatabase, seen: Watched, chain: readonly ChainBlock[]): Promise<string[]> {
   return committedOnce(db, seen, chain, 11n, 20n);
 }
@@ -64,8 +66,8 @@ export interface FetchSeen {
 }
 
 /**
- * A80: no height fetched more than `window` above the cursor at its fetch — so none fetched or held above that —, and
- * commits one per height in order from `from` to `to`.
+ * No height fetched more than `window` above the cursor at its fetch, so none was fetched or held above that; and one
+ * commit per height, in order, from `from` to `to`. [A80]
  */
 export async function a80Problems(
   db: ProcessDatabase,
@@ -89,7 +91,10 @@ export async function a80Problems(
   return [...problems, ...(await committedOnce(db, seen, chain, from, to))];
 }
 
-/** A83: every request the tape node received is one of IN-8's methods, and none was answered `not-on-tape`. */
+/**
+ * Every request the tape node received is one of the allowed node methods, and none was answered `not-on-tape`.
+ * [A83, IN-8]
+ */
 export function a83Problems(node: TapeNode): string[] {
   const problems: string[] = [];
   const methods = node.calls.map((call) => call.method ?? "(not a request)");
@@ -103,8 +108,11 @@ export function a83Problems(node: TapeNode): string[] {
 }
 
 /**
- * A81's switch: `on-rollback` once, naming `dropped` (101–103) lowest first; 101′ (`used`) fetched once
- * (`chain_getBlock`), so used at finality without being fetched again; and committed.
+ * The fork switch:
+ * - `on-rollback` fired once, naming `dropped` (101–103) lowest first;
+ * - 101′ (`used`) fetched once (`chain_getBlock`), so it was used at finality without being fetched again;
+ * - 101′ committed.
+ * [A81]
  */
 export async function a81Problems(
   db: ProcessDatabase,
@@ -126,7 +134,7 @@ export async function a81Problems(
   return problems;
 }
 
-/** What A89 expects the module to read at a height: the metadata's spec version and the body's calls. */
+/** What the module is expected to read at a height: the metadata's spec version and the body's calls. [A89] */
 export interface Decoded {
   readonly height: bigint;
   readonly specVersion: number;
@@ -134,8 +142,8 @@ export interface Decoded {
 }
 
 /**
- * A89: at each height the module requiring `block-body` read the extrinsics fetched for it, decoded with the metadata of
- * its parent's state — the spec version and the calls `expected` gives —, once.
+ * At each height, the module requiring `block-body` read the extrinsics fetched for it once, decoded with the metadata
+ * of its parent's state (the spec version and the calls `expected` gives). [A89]
  */
 export function a89Problems(seen: Watched, chain: readonly ChainBlock[], expected: readonly Decoded[]): string[] {
   const problems: string[] = [];
@@ -159,8 +167,8 @@ export function a89Problems(seen: Watched, chain: readonly ChainBlock[], expecte
 }
 
 /**
- * A76: no row of a block above the finalized head `finalized` in the blocks and hashes tables, the watching module's
- * table, or a digest; the identity's anchor the anchor's.
+ * No row of a block above the finalized head `finalized` in the blocks and hashes tables, the watching module's table,
+ * or a digest; the identity's anchor is the anchor's (OUTDATED). [A76]
  */
 export async function a76Problems(db: ProcessDatabase, finalized: bigint): Promise<string[]> {
   const problems: string[] = [];

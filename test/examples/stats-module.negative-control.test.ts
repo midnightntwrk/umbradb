@@ -11,7 +11,7 @@ import {
 } from "./example-checks.js";
 
 /**
- * Negative controls of `./stats-module.test.ts` (task 17.3a): each check fails on a copy of the example, or a
+ * Negative controls of `./stats-module.test.ts`: each check fails on a copy of the example, or a
  * document, changed in the one way it guards against — so a passing check means the example still matches the code.
  */
 

@@ -1,5 +1,5 @@
 /**
- * The node's answers, read into typed values (task 10.1), and the parameters the client sends.
+ * The node's answers, read into typed values, and the parameters the client sends.
  *
  * Substrate's JSON-RPC writes bytes as `0x`-prefixed hex, a block number in a header as a hex quantity (`"0x306fbc"`),
  * and `midnight_ledgerStateRoot` as a JSON array of byte values (a `Vec<u8>`, `midnight-node`
@@ -9,7 +9,7 @@
  * are frozen.
  *
  * Parameters are written as the node reads them and always in one form, so that a recorded tape matches the calls a
- * later run makes (TT-2): hashes and keys as lowercase `0x` hex, heights as JSON numbers.
+ * later run makes: hashes and keys as lowercase `0x` hex, heights as JSON numbers. [TT-2]
  */
 
 import { badAnswer, invalidParameter } from "./errors.js";

@@ -14,8 +14,8 @@ import {
 import { type PrivateOptions, startPrivate, startPublicCore } from "./builds.js";
 
 /**
- * A112 (PP-1; task 14.1): with a core and a private process running — the private process bound to the core's public
- * database, following it as it commits — the core's database connections reach only the public database.
+ * With a core and a private process running, the core's database connections reach only the public database. The
+ * private process is bound to the core's public database and follows it as it commits. [A112, PP-1]
  *
  * What is looked at is every connection, not a sample. On PostgreSQL each database logs every session that logs in
  * (`backends.ts`: a login event trigger), with its login: the core's is the server's login, the private process's own
@@ -31,7 +31,7 @@ const owner = new AsyncLocalStorage<string>();
 /** Every PGlite engine opened while the spy is on: its process and its data directory. */
 const engines: { readonly owner: string; readonly dataDir: string }[] = [];
 
-/** What one A112 run saw. */
+/** What one run saw. [A112] */
 export interface A112Observation {
   readonly kind: PrivateBackend["kind"];
   /** PostgreSQL: the core's login. */
@@ -52,7 +52,7 @@ export interface A112Observation {
 
 const HEAD = 10n;
 
-/** A112's oracle: every problem with what was observed, none when A112 holds. */
+/** The oracle: every problem with what was observed, none when the core reaches only the public database. [A112] */
 export function a112Problems(observed: A112Observation): string[] {
   const problems: string[] = [];
   if (observed.coreCursor !== HEAD) problems.push(`the core stopped at ${observed.coreCursor}, not ${HEAD}`);

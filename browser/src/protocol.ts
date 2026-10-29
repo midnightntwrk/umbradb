@@ -1,12 +1,17 @@
 /**
- * What the page and a process worker of the browser build say to each other (`openspec/changes/core-arch/specs/
- * browser/spec.md` BR-1, BR-3; `design.md` §9.2; task 16.1). The page starts the process (`start`), then calls it
- * (`call`): its state (`status`), the admin endpoints (`admin`, BR-3: `GET` of `/health/live`, `/health/ready`,
- * `/status`, `/config`), its database's contents hash (DT-3), a read of its database (one `REPEATABLE READ READ ONLY`
- * read, DB-2), its module API (`api`, `subscribe`, `unsubscribe`), a backup of its database and, before the core's
- * process starts, a restore into it (`backup`, `restore`: BK-5), and its stop (RN-13). The worker sends its log
- * lines, S once chosen, its startup's outcome and how processing ended. Every value crosses as JSON-ready data
- * ({@link jsonSafe}): heights and other integers beyond 2^53 as decimal text, bytes as `0x` hex.
+ * What the page and a process worker of the browser build say to each other. [BR-1, BR-3; design §9.2]
+ *
+ * The page starts the process (`start`), then calls it (`call`) for:
+ * - its state (`status`);
+ * - the admin endpoints (`admin`: `GET` of `/health/live`, `/health/ready`, `/status`, `/config`) [BR-3];
+ * - its database's contents hash [DT-3];
+ * - a read of its database, one `REPEATABLE READ READ ONLY` read [DB-2];
+ * - its module API (`api`, `subscribe`, `unsubscribe`);
+ * - a backup of its database and, before the core's process starts, a restore into it (`backup`, `restore`) [BK-5];
+ * - its stop [RN-13].
+ *
+ * The worker sends its log lines, S once chosen, its startup's outcome and how processing ended. Every value crosses as
+ * JSON-ready data ({@link jsonSafe}): heights and other integers beyond 2^53 as decimal text, bytes as `0x` hex.
  */
 
 import type { BrowserRun } from "./configuration.js";
@@ -24,7 +29,7 @@ export type CallMethod =
   | "restore"
   | "stop";
 
-/** The run the page starts a process with: S is null for a new database of the core, chosen by the worker (BR-2). */
+/** The run the page starts a process with: S is null for a new database of the core, chosen by the worker. [BR-2] */
 export type StartRun = Omit<BrowserRun, "start"> & { readonly start: number | null };
 
 /** From the page to a process worker. */

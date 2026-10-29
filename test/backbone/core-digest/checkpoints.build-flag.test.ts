@@ -6,13 +6,17 @@ import { BACKENDS } from "../../db/backends.js";
 import { checkpointRows, digestRows, runBlocks, startChain, testModule } from "./chain.js";
 
 /**
- * A57's checkpoints over several intervals (DT-5, owner decision Q86; task 7.1), on both backends, with the interval
- * shortened from 14,400 to 4 by a build flag no exported surface reaches, as A11's negative control does: the flag is
- * `CHECKPOINT_INTERVAL`, a constant of `src/backbone/core-digest/build-flags.ts`, 14,400 in the source and so in every
- * build made from it. Nothing at run time can change it — an importer cannot assign a `const` export, no option,
- * setting or environment variable reads it, and the module is not part of the package's surface (`package.json`
- * exports `"."` only). Only another build of that module changes it, which this file makes for itself: `vi.mock`
- * replaces the module, in this test file's module graph only, with one whose interval is 4.
+ * Digest checkpoints over several intervals, on both backends. The interval is shortened from 14,400 to 4 by a build
+ * flag that no exported surface reaches, the same way the block read queue's negative control works.
+ * [A57, DT-5, Q86, A11]
+ *
+ * The flag is `CHECKPOINT_INTERVAL`, a constant of `src/backbone/core-digest/build-flags.ts`: 14,400 in the source, and
+ * so in every build made from it. Nothing at run time can change it:
+ * - an importer cannot assign a `const` export;
+ * - no option, setting or environment variable reads it;
+ * - the module is not part of the package's surface (`package.json` exports `"."` only).
+ * Only another build of that module changes it, which this file makes for itself: `vi.mock` replaces the module, in
+ * this test file's module graph only, with one whose interval is 4.
  */
 
 vi.mock("../../../src/backbone/core-digest/build-flags.js", () => ({ CHECKPOINT_INTERVAL: 4n }));

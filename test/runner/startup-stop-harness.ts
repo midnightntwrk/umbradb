@@ -18,12 +18,15 @@ import { core, coreSettings, startProcess, testBuild } from "./process-build.js"
 import { freePort } from "./process-harness.js";
 
 /**
- * What A167's tests share (task 5.3b; RN-13 as amended: "During startup it SHALL stop before startup's next step and
- * end any wait for the node at once, an unreachable node's retries included"; `startup-stop.test.ts` and its negative
- * control `startup-stop.negative-control.test.ts`): a process on a new database whose startup waits for a node it
- * cannot reach — a closed port, so every connection is refused and the node client retries it with IN-10's back-off —,
- * stopped there by `ProcessHandle.stop()` or by SIGTERM (`terminationSignal` on an emitter of the test's), what it did
- * then ({@link A167Observation}), and the oracle {@link a167Problems}.
+ * What the tests of a stop during startup share (`startup-stop.test.ts` and its negative control
+ * `startup-stop.negative-control.test.ts`). During startup, a stop must take effect before startup's next step and
+ * end any wait for the node at once, including an unreachable node's retries. The shared parts:
+ * - a process on a new database whose startup waits for a node it cannot reach. The node is a closed port, so every
+ *   connection is refused and the node client retries it with its back-off;
+ * - the stop there, by `ProcessHandle.stop()` or by SIGTERM (`terminationSignal` on an emitter of the test's);
+ * - what the process did then ({@link A167Observation}), and the oracle {@link a167Problems}.
+ *
+ * [A167, RN-13, IN-10]
  *
  * The process is the tests' build (`process-build.ts`) with the node source on the `core` entry's `node`
  * (`nodeSourceOf`, as `umbradb run` makes it) and `backoffCeilingMs` 1 s, so a client that kept retrying would connect
@@ -32,17 +35,17 @@ import { freePort } from "./process-harness.js";
  * process, and note whether they were closed ({@link NodeWatch}). After the bound the test closes whatever the process
  * left open, so that a process that did not stop (the defect, a negative control) still ends and closes its database.
  *
- * Also a private process (PP-1: it never talks to the node; its view of the chain is its public side): one whose
- * startup waits for a core transport that accepts the connection and never answers ({@link privateRun}).
+ * Also a private process, which never talks to the node (its view of the chain is its public side): one whose
+ * startup waits for a core transport that accepts the connection and never answers ({@link privateRun}). [PP-1]
  */
 
-/** A167's bound: the process ends within 5 s of its stop. */
+/** The bound: the process ends within 5 s of its stop. [A167] */
 export const STOP_LIMIT_MS = 5_000;
 
 /** How long the tests watch for a connection attempt once the process closed or the bound passed: two retries. */
 export const WATCH_MS = 2_500;
 
-/** How long a process may take to reach its retrying startup on a loaded machine (task 0.5's notes). */
+/** How long a process may take to reach its retrying startup on a loaded machine. */
 export const PATIENCE_MS = 120_000;
 
 /** The `core` entry's `backoffCeilingMs` here: a client that kept retrying would connect again every second. */
@@ -68,7 +71,7 @@ export class NodeWatch {
   attempts = 0;
   late = 0;
   readonly #clients: WatchedClient[] = [];
-  /** How each attempt connects: `ws` unless given (task 5.3c's, which cuts the node at a request). */
+  /** How each attempt connects: `ws` unless given (the loop-stop tests give one that cuts the node at a request). */
   readonly #through: ConnectSocket;
 
   constructor(through: ConnectSocket = connectWebSocket) {
@@ -106,7 +109,7 @@ export class NodeWatch {
 /** How a test stops the process: `ProcessHandle.stop()`, or SIGTERM through `terminationSignal`. */
 export type StopBy = "stop" | "sigterm";
 
-/** What one A167 run showed. */
+/** What one run of a stop during startup showed. [A167] */
 export interface A167Observation {
   /** Before the stop: the state, and the attempts of its `node-retrying` condition (null without one). */
   readonly before: { readonly state: string; readonly retrying: number | null };
@@ -128,7 +131,7 @@ export interface A167Observation {
   readonly unclean: string | null;
 }
 
-/** A167's oracle: every problem with what was observed, none when A167 holds. */
+/** The oracle: every problem with what was observed, none when the stop during startup behaved as required. [A167] */
 export function a167Problems(observed: A167Observation): string[] {
   const problems: string[] = [];
   const { before } = observed;
@@ -210,10 +213,10 @@ export async function closedWithin(handle: ProcessHandle, from: number): Promise
 export type CheckOf = (watch: NodeWatch, options: () => NodeClientOptions) => NonNullable<ProcessInput["checkChain"]>;
 
 /**
- * A167's run on `db` (see the module comment): the process's startup retries the node, `by` stops it, and the run
+ * One run on `db` (see the module comment): the process's startup retries the node, `by` stops it, and the run
  * observes the state, `closed` against the bound, how processing ended, the node clients and their connection attempts
  * over {@link WATCH_MS} more, then — after closing what the process left — whether the database was closed. `check`
- * replaces startup's checks against the node (a negative control's).
+ * replaces startup's checks against the node (a negative control's). [A167]
  */
 export async function a167Run(
   backend: ProcessBackend,
@@ -273,9 +276,10 @@ export async function a167Run(
 }
 
 /**
- * The negative control's startup (A167): `core-chain`'s checks against the node as they are, asked through a node
- * source over a client of its own — made from the process's options, so the process shows its `node-retrying` — that
- * the stop does not reach: its wait for block 0 ignores the stop, as every startup's did before task 5.3b.
+ * The negative control's startup: `core-chain`'s checks against the node as they are, asked through a node source
+ * over a client of its own that the stop does not reach. The client is made from the process's options, so the process
+ * shows its `node-retrying`. Its wait for block 0 ignores the stop, as every startup's did before startup honoured
+ * stops. [A167]
  */
 export const ignoringWait: CheckOf =
   (watch, options) =>

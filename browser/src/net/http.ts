@@ -1,5 +1,5 @@
 /**
- * `node:http`'s `createServer`, as the core's process transport uses it (`src/private/core-transport.ts`; task 16.1),
+ * `node:http`'s `createServer`, as the core's process transport uses it (`src/private/core-transport.ts`),
  * over the page's message network (`./network.ts`): `listen(port, host)` names the address `host:port` on the page, and
  * each connection to it is handed to the server's `upgrade` listeners as a socket holding the connection's port, which
  * `./ws.ts`'s `WebSocketServer.handleUpgrade` opens. `address()` gives the address listened at, `close` stops it.

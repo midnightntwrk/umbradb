@@ -19,11 +19,13 @@ import { userModules } from "../modules/declarations.js";
 import { callArgsModule, STATE_BEFORE_TASK } from "./fixtures/task-modules.js";
 
 /**
- * Task 17.5b (the mutation pass task 12.6 deferred): what the ledger tasks' tests left to mutation — `plainDataProblem`'s
- * comparison of a value with its structured clone (driven through getters, which give the walk, the clone and the
- * comparison each their own value), a clone refused, a class with no name; `LedgerEngine`'s modules check, kept parse
- * and state before a block on the main thread; `withLedgerTasks`' points and freezing; `loadLedgerPackage`'s versions;
- * `checkLedgerSources`' default.
+ * What the ledger tasks' tests left to mutation testing:
+ * - `plainDataProblem`'s comparison of a value with its structured clone (driven through getters, which give the walk,
+ *   the clone and the comparison each their own value), a clone refused, a class with no name;
+ * - `LedgerEngine`'s modules check, kept parse and state before a block on the main thread;
+ * - `withLedgerTasks`' points and freezing;
+ * - `loadLedgerPackage`'s versions;
+ * - `checkLedgerSources`' default.
  */
 
 /** An object whose `k` gives `values` in turn (the last one again): the walk reads the first, the clone the second. */
@@ -93,7 +95,7 @@ describe("LedgerEngine on the main thread (task 17.5b)", () => {
   it("takes modules that are objects with an id, a module without tasks as none", () => {
     for (const module of [null, 1, "m", { id: 1 }, {}]) {
       expect(() => ledgerTasksOf([module as never]), String(module)).toThrow(
-        new TypeError("the ledger worker takes the modules the host ships: each a declaration, with its id (MD-1)"),
+        new TypeError("the ledger worker takes the modules the host ships: each a declaration, with its id"),
       );
     }
     expect(ledgerTasksOf([{ id: "m" } as never]).get("m")).toEqual([]);
@@ -104,7 +106,7 @@ describe("LedgerEngine on the main thread (task 17.5b)", () => {
     const engine = new LedgerEngine({ load: loadLedgerPackage, tasks: ledgerTasksOf([{ id: "s", ledgerTasks: [STATE_BEFORE_TASK] } as never]) });
     const refused = (what: string) =>
       `the ledger task root-before of s at block 1 needs the state before the block, and the ledger worker holds ${what} ` +
-      "(core-ledger-state's on-compute has it hold that state) (LG-17)";
+      "(core-ledger-state's on-compute has it hold that state)";
     await expect(engine.tasks(run(1n, "s", ["root-before"]))).rejects.toThrow(refused("no state"));
     await engine.genesis({
       ledger: "v9",
@@ -121,7 +123,7 @@ describe("LedgerEngine on the main thread (task 17.5b)", () => {
       "the ledger task root-before of s at block 2 needs the state before the block, and the ledger worker holds the state at 0",
     );
     expect(await engine.tasks(run(1n, "s", ["root-before"]))).toMatchObject({ "root-before": { height: 1n } });
-    await expect(engine.tasks(run(1n, "s", ["missing"]))).rejects.toThrow("(runLedgerWorker(modules), MD-1)");
+    await expect(engine.tasks(run(1n, "s", ["missing"]))).rejects.toThrow("(runLedgerWorker(modules))");
   });
 
   it("parses again a block kept with another ledger or another number of transactions; gives none for none", { timeout: 120_000 }, async () => {
@@ -139,7 +141,7 @@ describe("LedgerEngine on the main thread (task 17.5b)", () => {
     } as unknown as LedgerPackage;
     const engine = new LedgerEngine({ load: async () => fake });
     await expect(engine.parse("v9", at(4n), [Uint8Array.of(1)])).rejects.toThrow(
-      new TypeError("the v9 adapter parsed block 4 into an object of the class Map at $[0].native, not plain data (LG-7)"),
+      new TypeError("the v9 adapter parsed block 4 into an object of the class Map at $[0].native, not plain data"),
     );
   });
 });
@@ -205,7 +207,7 @@ describe("withLedgerTasks' points (task 17.5b)", () => {
     const wrapped = withLedgerTasks(declaration([task("a", false)]));
     await expect(wrapped.points["on-parse"]?.(context(), block(1n), sink().sink)).rejects.toThrow(
       "m declares ledger tasks and ran with a process context the runner did not bind to a ledger worker " +
-        "(bindLedgerTasks): its tasks run in the worker (LG-17)",
+        "(bindLedgerTasks): its tasks run in the worker",
     );
   });
 });
@@ -228,7 +230,7 @@ describe("loadLedgerPackage and checkLedgerSources (task 17.5b)", () => {
     expect(() => checkLedgerSources()).not.toThrow();
     expect(() => checkLedgerSources({ v9: "released" })).toThrow(
       "ledgerSources.v9 is released, and this build carries the vendored ledger v9 package only: the released packages " +
-        "lack the exports the ledger adapters need (LG-5, design.md section 5.2); set it to vendored",
+        "lack the exports the ledger adapters need; set it to vendored",
     );
   });
 });
@@ -254,26 +256,26 @@ describe("the vendored packages' manifest and files (task 17.5b, the pass task 1
 
   it("names a missing manifest, and one of another SHA-256 with both values", () => {
     const missing = refusal(() => readManifest(join(root, "none"), "v9", "0x00"));
-    expect(missing.message.startsWith(`${prefix}its SHA256SUMS is missing (LG-5)`)).toBe(true);
+    expect(missing.message.startsWith(`${prefix}its SHA256SUMS is missing;`)).toBe(true);
     const text = `${HASH}  pkg/a.js\n`;
     const found = manifest(text);
     const changed = refusal(() => readManifest(root, "v9", "0x01"));
-    expect(changed.message.startsWith(`${prefix}its SHA256SUMS has SHA-256 ${found} where the build records 0x01 (LG-5)`)).toBe(true);
+    expect(changed.message.startsWith(`${prefix}its SHA256SUMS has SHA-256 ${found} where the build records 0x01;`)).toBe(true);
     expect(changed.details).toMatchObject({ reason: "changed", expected: "0x01", found });
   });
 
   it("names the malformed line, and none for a manifest without its final newline", () => {
     const malformed = (text: string) => refusal(() => readManifest(root, "v9", manifest(text))).message;
-    expect(malformed(`${HASH}  pkg/a.js\n${HASH}  pkg/../b.js\n`)).toContain('per file (line 2) (LG-5)');
-    expect(malformed(`${HASH}  pkg/a.js\rb\n`)).toContain('per file (line 1) (LG-5)');
-    expect(malformed(`${HASH}  pkg/a.js`)).toContain('its SHA256SUMS is not one line "<sha256>  pkg/<file>" per file (LG-5)');
-    expect(malformed(`x${HASH}  pkg/a.js\n`)).toContain("per file (line 1) (LG-5)");
+    expect(malformed(`${HASH}  pkg/a.js\n${HASH}  pkg/../b.js\n`)).toContain('per file (line 2);');
+    expect(malformed(`${HASH}  pkg/a.js\rb\n`)).toContain('per file (line 1);');
+    expect(malformed(`${HASH}  pkg/a.js`)).toContain('its SHA256SUMS is not one line "<sha256>  pkg/<file>" per file;');
+    expect(malformed(`x${HASH}  pkg/a.js\n`)).toContain("per file (line 1);");
     expect(readManifest(root, "v9", manifest(`${HASH}  pkg/a.js\n`))).toEqual([{ sha256: `0x${HASH}`, path: "pkg/a.js" }]);
   });
 
   it("names a missing package file with the SHA-256 its manifest records", () => {
     const missing = refusal(() => readPackageFile(root, "v9", { sha256: "0x02", path: "pkg/none.js" }));
-    expect(missing.message.startsWith(`${prefix}pkg/none.js is missing (LG-5)`)).toBe(true);
+    expect(missing.message.startsWith(`${prefix}pkg/none.js is missing;`)).toBe(true);
     expect(missing.details).toMatchObject({ reason: "missing", file: "pkg/none.js", expected: "0x02" });
   });
 });

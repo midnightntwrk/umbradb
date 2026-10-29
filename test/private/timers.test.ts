@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { unrefTimer } from "../../src/private/timers.js";
 
 /**
- * The process transport's timers (task 16.1): `unrefTimer` lets a Node.js timer not keep the process alive, and does
+ * The process transport's timers: `unrefTimer` lets a Node.js timer not keep the process alive, and does
  * nothing to a browser worker's timer, which is a number (`src/private/timers.ts`).
  */
 describe("unrefTimer", () => {

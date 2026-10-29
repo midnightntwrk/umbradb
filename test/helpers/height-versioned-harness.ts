@@ -10,23 +10,31 @@ import { declaration } from "../modules/declarations.js";
 import { type HelperDatabase, helperDatabase, TOKEN_SCAN } from "./cursor-harness.js";
 
 /**
- * What the height-versioned table's tests share (task 6.2; SH-2, SH-3, A60, A61): a database on each backend started
- * as the cursor table's is (`cursor-harness.ts`' {@link helperDatabase}: `core-block-commit`, the modules, the real
- * `core-digest`, blocks through the real block write handles), with the test module `token-metadata` — a token's
- * metadata as of a height (CORE-ARCH §4.11a's example; FEATURES F4) in the helper's tables — and `token-scan`, another
- * module, which writes nothing of its own.
+ * What the height-versioned table's tests share. [SH-2, SH-3, A60, A61]
+ *
+ * A database on each backend, started as the cursor table's is (`cursor-harness.ts`' {@link helperDatabase}:
+ * `core-block-commit`, the modules, the real `core-digest`, blocks through the real block write handles). Its test
+ * modules are:
+ * - `token-metadata`, which keeps a token's metadata as of a height in the helper's tables, as in the spec's example;
+ *   [CORE-ARCH §4.11a; FEATURES F4]
+ * - `token-scan`, another module, which writes nothing of its own.
  *
  * `token-metadata` also holds three negative controls, each the helper's tables with one change to the migration's SQL,
- * read and written through the helper's own functions: `overlaps` closes a version one height late, so it overlaps the
- * next; `gaps` closes it one height early (its `CHECK` relaxed so that the early end is stored), leaving heights where
- * the key was not deleted yet reads nothing; `lenient` lets a second change of a key in one block through, overwriting
- * the block's first one (SH-3's rule left out). A60's property must fail on the first two, A61's check on the third.
+ * read and written through the helper's own functions:
+ * - `overlaps` closes a version one height late, so it overlaps the next;
+ * - `gaps` closes it one height early (its `CHECK` relaxed so that the early end is stored), leaving heights where the
+ *   key was not deleted yet reads nothing;
+ * - `lenient` lets a second change of a key in one block through, overwriting the block's first one: the
+ *   one-change-per-block rule left out. [SH-3]
+ *
+ * The height-versioned property must fail on the first two, and the one-change-per-block check on the third.
+ * [A60, A61]
  */
 
 /** The height-versioned table of `token-metadata`, in its own schema. */
 export const METADATA: HeightVersionedTable = heightVersionedTable({ schema: "token_metadata", table: "metadata" });
 
-/** The role `token-metadata` writes under (DB-6). */
+/** The role `token-metadata` writes under. [DB-6] */
 export const TOKEN_METADATA_ROLE = "umbradb_m_token_metadata";
 
 /** A negative control: the helper's functions over a table whose migration's SQL had `edits` applied. */
@@ -51,18 +59,24 @@ function control(table: string, edits: readonly (readonly [string | RegExp, stri
 /** Where the trigger closes a version: at the height of the change. */
 const CLOSES_AT_HEIGHT = "VALUES (k, OLD.from_height, height, OLD.value)";
 
-/** Negative control for A60: a version closes one height after the change, so it overlaps the next. */
+/** Negative control for the property: a version closes one height after the change, so it overlaps the next. [A60] */
 export const OVERLAPS: Control = control("overlaps", [
   [CLOSES_AT_HEIGHT, "VALUES (k, OLD.from_height, height + 1, OLD.value)"],
 ]);
 
-/** Negative control for A60: a version closes one height before the change, so the key reads nothing in between. */
+/**
+ * Negative control for the property: a version closes one height before the change, so the key reads nothing in
+ * between. [A60]
+ */
 export const GAPS: Control = control("gaps", [
   [CLOSES_AT_HEIGHT, "VALUES (k, OLD.from_height, height - 1, OLD.value)"],
   ["CHECK (from_height < to_height)", "CHECK (from_height <= to_height)"],
 ]);
 
-/** Negative control for A61: a second change of a key in one block overwrites the first (SH-3's refusal left out). */
+/**
+ * Negative control for the one-change-per-block check: a second change of a key in one block overwrites the first,
+ * because the refusal is left out. [A61, SH-3]
+ */
 export const LENIENT: Control = control("lenient", [
   [
     /RAISE EXCEPTION USING ERRCODE = 'unique_violation'[\s\S]*?k, height\);/,

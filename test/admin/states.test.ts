@@ -23,19 +23,27 @@ import {
 } from "./admin-harness.js";
 
 /**
- * A64 (task 8.1; AE-3, AE-4 as `status()` decides it, IN-12, RN-8) through the admin endpoints on both backends: each
- * state of AE-3 the runner has — `starting`, `refused`, `syncing`, `following`, `stopped`, `halted`, `stopping` — is
- * reached in a test and read on the admin listener, `/health/live` 200 in every one (a refused or halted process stays
- * up and live), `/health/ready` 200 or 503 as `status()` decides, `/status` the state with its reason; a refused start
- * keeps the process up with live 200 and ready 503 (AE-3's scenario: a migration checksum that changed). The conditions
- * the runner raises today are reached too: `waiting-for-node` (IN-2, task 10.2: S above the node's head),
- * `upgrade-required` (RN-12), `node-retrying` and `database-retrying` (IN-10). AE-3's other conditions are their tasks':
- * `finality-stall` 10.3, `waiting-for-lockstep` 14.3, `slow-block` 5.5.
+ * The process states through the admin endpoints, on both backends. Each state the runner has (`starting`, `refused`,
+ * `syncing`, `following`, `stopped`, `halted`, `stopping`) is reached in a test and read on the admin listener:
+ * - `/health/live` is 200 in every one: a refused or halted process stays up and live;
+ * - `/health/ready` is 200 or 503, as `status()` decides; [AE-4]
+ * - `/status` gives the state with its reason.
+ *
+ * A refused start, for example on a migration checksum that changed, keeps the process up with live 200 and ready 503.
+ * [A64, AE-3, IN-12, RN-8]
+ *
+ * The conditions the runner raises are reached too:
+ * - `waiting-for-node`, with the start height S above the node's head; [IN-2]
+ * - `upgrade-required`; [RN-12]
+ * - `node-retrying` and `database-retrying`. [IN-10]
+ *
+ * The other conditions (`finality-stall`, `waiting-for-lockstep`, `slow-block`) are tested with the parts that raise
+ * them. [AE-3]
  *
  * The runner publishes the snapshot at each heartbeat tick (every second) and at once when startup ends, processing
  * ends or the process starts stopping, so each test asks `/status` until the state it reached shows.
  *
- * Committed negative control: a refused start that stops the process fails A64's live-200 check.
+ * Committed negative control: a refused start that stops the process fails the live-200 check. [A64]
  */
 
 /** A module whose migration `001` is `sql`. */
@@ -83,7 +91,7 @@ function failingSource(
     },
     finalizedHead: () => source.finalizedHead(),
     waitForHead: (above, signal) => source.waitForHead(above, signal),
-    // core-block-fetch's items, as the source gives them (task 10.3).
+    // core-block-fetch's items, as the source gives them.
     blockItems: (block: BlockRef) => source.blockItems(block),
     block: async (height) => {
       if (height === fails.block && !healed()) throw failure();

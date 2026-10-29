@@ -8,12 +8,14 @@ import { makeCertificates, type TestCertificates } from "./certificates.js";
 import { endedWithin, hello, rawClient } from "./raw-client.js";
 
 /**
- * A121 `[CI]` (task 14.2; PP-11, owner decision Q34: opt-in): with the `core` entry's `tls` set, the core's process
- * transport requires mutual TLS — a private process without a certificate is refused by the core, and one with a
- * certificate a trusted root issued is accepted. The certificates are made by the test (`./certificates.ts`, the
- * `openssl` command, a temporary directory), never committed. Through raw clients (the TLS handshake itself) and through
- * private processes on PostgreSQL 18.6 and PGlite 0.5.10, with the committed negative control: a core that accepts a
- * client without a certificate under `tls` fails the oracle.
+ * Mutual TLS on the core's process transport, which is opt-in. With the `core` entry's `tls` set, the transport
+ * requires mutual TLS: a private process without a certificate is refused by the core, and one with a certificate a
+ * trusted root issued is accepted. [A121 CI, PP-11, Q34]
+ *
+ * The certificates are made by the test (`./certificates.ts`, the `openssl` command, a temporary directory), never
+ * committed. Tested through raw clients (the TLS handshake itself) and through private processes on PostgreSQL 18.6 and
+ * PGlite 0.5.10. Committed negative control: a core that accepts a client without a certificate under `tls` fails the
+ * oracle. [A121 CI]
  */
 
 let certs: TestCertificates;
@@ -29,9 +31,9 @@ const coreTls = () => ({ certificate: certs.server.certificate, key: certs.serve
 const privateTls = () => ({ certificate: certs.client.certificate, key: certs.client.key, trustedRoots: [certs.ca] });
 
 /**
- * A121's oracle against the transport at `address` (see the module comment): every problem, none when a client without a
- * certificate, one with a stranger's and a plain WebSocket are refused before any WebSocket exists, and one with a
- * trusted certificate is answered.
+ * The TLS oracle against the transport at `address` (see the module comment): every problem. There is none when a
+ * client without a certificate, one with a stranger's and a plain WebSocket are refused before any WebSocket exists,
+ * and one with a trusted certificate is answered. [A121 CI]
  */
 export async function tlsProblems(address: string): Promise<string[]> {
   const problems: string[] = [];

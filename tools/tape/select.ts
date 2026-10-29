@@ -1,10 +1,10 @@
 /**
- * How the variant transforms (`./transforms.ts`; task 9.2) find the records they change, each a small function of its
- * own, which the transforms apply and the negative controls replace: the call records a selection names, a
- * subscription's notifications in a session, and the subscriptions live at a place in the tape.
+ * How the variant transforms (`./transforms.ts`) find the records they change, each a small function of its own, which
+ * the transforms apply and the negative controls replace: the call records a selection names, a subscription's
+ * notifications in a session, and the subscriptions live at a place in the tape.
  *
- * **Lines** count from 1, as the reader's errors and the tape node's call log count them. **Sessions** count from 1
- * as the tape node serves them: the records up to and including each `disconnect`, then the records after the last
+ * **Lines** count from 1, as the reader's errors and the tape node's call log count them. **Sessions** count from 1 as
+ * the tape node serves them: the records up to and including each `disconnect`, then the records after the last
  * (`./session.ts`). **Subscription ids** are compared as JSON values, so the string `"7"` is not the number `7`.
  */
 

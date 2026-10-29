@@ -5,13 +5,13 @@ import { it } from "vitest";
 import { readTape, type Tape, tapeId } from "../../../tools/tape/index.js";
 
 /**
- * The recorded tapes of task 0.3 and how a test finds one (owner decisions Q123, Q130; `acceptance.md`'s tape note).
+ * The recorded tapes and how a test finds one. [Q123, Q130; acceptance's tape note]
  *
  * **The manifest** (`./manifest.json`, committed): one entry per tape — its name, its file name (`<name>.tape.jsonl`),
- * the network and the range of heights it holds, its SHA-256 (its `tapeId`, TT-1) and size in bytes, its records, the
+ * the network and the range of heights it holds, its SHA-256 (its `tapeId`) and size in bytes, its records, the
  * endpoint it was recorded from with the node version that node reported and the day, and why its bounds are what
- * they are. The tapes themselves are not in the repository (Q130): they are kept on the machine that recorded them,
- * until the owner decides where they are stored for CI.
+ * they are. The tapes themselves are not in the repository: they are kept on the machine that recorded them, until the
+ * owner decides where they are stored for CI. [TT-1, Q130]
  *
  * **The lookup** ({@link findTape}): a tape is looked for in the directory named by `UMBRADB_TAPES`, under its file
  * name. Absent — the variable unset or empty, or no such file — it is reported absent with a reason naming the tape,
@@ -41,7 +41,7 @@ export interface RealTape {
   readonly file: string;
   /** `mainnet`, `preprod`, `preview`, `stagenet` or `custom` (the undeployed devnet). */
   readonly network: string;
-  /** The heights whose every IN-8 call the tape holds, inclusive. */
+  /** The heights whose every allowed node call the tape holds, inclusive. [IN-8] */
   readonly from: number;
   readonly to: number;
   readonly sha256: string;
@@ -164,7 +164,7 @@ export function readManifest(path: string = MANIFEST_PATH): RealTapeManifest {
 /** The committed manifest. */
 export const MANIFEST: RealTapeManifest = readManifest();
 
-/** A tape found and checked: its file's path and bytes; `read()` parses them (TT-1). */
+/** A tape found and checked: its file's path and bytes; `read()` parses them. [TT-1] */
 export interface FoundTape {
   readonly found: true;
   readonly tape: RealTape;

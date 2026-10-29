@@ -13,17 +13,19 @@ import {
 } from "./height-versioned-harness.js";
 
 /**
- * A60 [PROP] (SH-2): for random sequences of writes, same-value writes and deletes over heights, reading the
- * height-versioned table at every height equals a reference model; versions of a key never overlap and consecutive
- * versions meet at their boundary (`to` of one = `from` of the next, unless deleted between) — on PostgreSQL 18 and
- * PGlite 0.5.10, through the real block write handles.
+ * For random sequences of writes, same-value writes and deletes over heights, reading the height-versioned table at
+ * every height equals a reference model. Versions of a key never overlap, and consecutive versions meet at their
+ * boundary (`to` of one = `from` of the next, unless deleted between). Runs on PostgreSQL 18 and PGlite 0.5.10, through
+ * the real block write handles. [A60 PROP, SH-2]
  *
- * A sequence is a list of blocks at consecutive heights, each changing a few keys of a small set once (SH-3: one change
- * of a key per block; A61 is the second change's test) — a write of a new value, a write of the value the key has
- * (or, for a key with none, of a new one), or a delete — and some blocks with no write at all, so that a key's versions
- * span several heights; some blocks fail after their writes and roll back, and their height is written again by the
- * next block, as the runner retries a height. The model holds each key's versions, `[from, to)` with `to` null for the
- * current one, built from the committed blocks only by SH-2's rules, and the heights at which a delete closed one.
+ * A sequence is a list of blocks at consecutive heights. Each block changes a few keys of a small set, each key once,
+ * since a key may change only once per block (a second change is tested in `height-versioned.test.ts`). A change is a
+ * write of a new value, a write of the value the key has (or, for a key with none, of a new one), or a delete. Some
+ * blocks have no write at all, so that a key's versions span several heights. Some blocks fail after their writes and
+ * roll back, and their height is written again by the next block, as the runner retries a height. [SH-3, A61]
+ *
+ * The model holds each key's versions, `[from, to)` with `to` null for the current one, built from the committed
+ * blocks only by the helper's versioning rules, and the heights at which a delete closed one. [SH-2]
  *
  * Checked inside each block, after each write, through the block's write handle: the key's current value, and its value
  * as of the block's height and the height before (the block's writes are at its height). After each block, through a
@@ -45,7 +47,7 @@ type Key = (typeof KEYS)[number];
 
 const text = fc.string({ unit: "grapheme", maxLength: 6 }).filter((s) => !s.includes("\u0000"));
 
-/** A canonical JSON value (DT-1, owner decision Q57): integers only, within the signed 64-bit range. */
+/** A canonical JSON value: integers only, within the signed 64-bit range. [DT-1, Q57] */
 const { value } = fc.letrec<{ value: VersionedValue }>((tie) => ({
   value: fc.oneof(
     { depthSize: "small", maxDepth: 3 },
@@ -63,7 +65,7 @@ const { value } = fc.letrec<{ value: VersionedValue }>((tie) => ({
 /** One change a block makes to a key. */
 type Op =
   | { readonly kind: "write"; readonly value: VersionedValue }
-  /** The value the key has (no version, SH-2); for a key with none, `fallback`. */
+  /** The value the key has, which makes no new version; for a key with none, `fallback`. [SH-2] */
   | { readonly kind: "same"; readonly fallback: VersionedValue }
   | { readonly kind: "delete" };
 
@@ -74,7 +76,7 @@ const op: fc.Arbitrary<Op> = fc.oneof(
 );
 
 interface Block {
-  /** At most one change per key (SH-3). */
+  /** At most one change per key. [SH-3] */
   readonly ops: readonly (readonly [Key, Op])[];
   /** The block fails after its writes, and rolls back. */
   readonly fails: boolean;
@@ -88,8 +90,8 @@ const block: fc.Arbitrary<Block> = fc.record({
 const sequences = fc.array(block, { minLength: 1, maxLength: 10 });
 
 /**
- * A value as a read gives it back (DB-2): the database API's lossless reader gives an integer within ±(2^53 − 1) as a
- * `number` and one beyond as a `bigint`; objects come back as plain objects.
+ * A value as a read gives it back: the database API's lossless reader gives an integer within ±(2^53 − 1) as a
+ * `number` and one beyond as a `bigint`; objects come back as plain objects. [DB-2]
  */
 function readBack(written: VersionedValue): VersionedValue {
   if (typeof written === "bigint") {
@@ -130,7 +132,7 @@ const same = (a: VersionedValue | undefined, b: VersionedValue | undefined): boo
 /** What a change did to the model. */
 type Effect = "new" | "closed-and-new" | "same" | "deleted" | "delete-of-none";
 
-/** SH-2's versions of each key, built from committed changes only. */
+/** The versions of each key, as the helper's versioning rules build them from committed changes only. [SH-2] */
 class Model {
   constructor(
     private readonly versions: Map<string, StoredVersion[]> = new Map(),
@@ -161,7 +163,7 @@ class Model {
     return this.of(key).find((v) => v.from <= height && (v.to === null || height < v.to))?.value;
   }
 
-  /** Applies `op` to `key` at `height` (SH-2), giving the value written (for a write) and what it did. */
+  /** Applies `op` to `key` at `height`, giving the value written (for a write) and what it did. [SH-2] */
   apply(key: string, change: Op, height: bigint): { readonly written?: VersionedValue; readonly effect: Effect } {
     const list = [...this.of(key)];
     const last = list.at(-1);
@@ -203,9 +205,9 @@ interface Counts {
 }
 
 /**
- * What is wrong with `stored`, the versions of one key as the tables hold them, by SH-2's rules alone: an empty or
- * reversed version, a current version (`to` null) that is not the last, two versions that overlap, two consecutive
- * versions that do not meet although the key was not deleted where the first ends.
+ * What is wrong with `stored`, the versions of one key as the tables hold them, by the versioning rules alone: an empty
+ * or reversed version, a current version (`to` null) that is not the last, two versions that overlap, two consecutive
+ * versions that do not meet although the key was not deleted where the first ends. [SH-2]
  */
 function structureProblems(
   name: string,
@@ -334,7 +336,7 @@ const noCounts = (): Counts => ({
 
 // The suite starts a database and runs 40 sequences of up to 10 blocks, each block followed by reads at every
 // height. The property's run on PostgreSQL took 47 s on a quiet machine, 221–398 s at a load average of about 61 and
-// 554 s at up to 85, and passed 600 s at a median of 77 (task 0.5, 2026-10-26), where the timed-out run went on against
+// 554 s at up to 85, and passed 600 s at a median of 77 (2026-10-26), where the timed-out run went on against
 // the shared database and failed the next test; so each test has 20 minutes, twice the slowest run that completed.
 const TITLE = "A60: the height-versioned table reads as its model at every height, on $name (SH-2)";
 

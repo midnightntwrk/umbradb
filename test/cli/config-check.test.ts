@@ -15,11 +15,16 @@ import type { PostgresParts } from "../../src/config/database-parts.js";
 import { type CliProject, cliProject, configText, coreSettings, inProcess, lineOf, treeOf } from "./cli-fixtures.js";
 
 /**
- * A35 `[CI]` without `--database` (CF-10), through `configCheck` and `runCommand` in this process: `umbradb config check
- * <file>` type-checks the file with the TypeScript compiler (`noEmit`), evaluates it (CF-1) and validates it (CF-3), and
- * prints every finding of every check with its path — a type error at `file:line:column`, a schema error at its path in
- * the configuration —, exits 0 only if every check it ran passed, opens no database and says the history checks were
- * not run. `./config-check-database.test.ts` has the `--database` half, `./umbradb.test.ts` the command in a child
+ * `umbradb config check` without `--database` `[CI]`, through `configCheck` and `runCommand` in this process.
+ * `umbradb config check <file>`:
+ * - type-checks the file with the TypeScript compiler (`noEmit`), evaluates it and validates it;
+ * - prints every finding of every check with its path: a type error at `file:line:column`, a schema error at its path
+ *   in the configuration;
+ * - exits 0 only if every check it ran passed;
+ * - opens no database and says the history checks were not run.
+ * [A35 CI, CF-1, CF-3, CF-10]
+ *
+ * `./config-check-database.test.ts` covers the `--database` half, and `./umbradb.test.ts` the command in a child
  * process (Node.js's own type stripping, real exit codes).
  */
 
@@ -65,11 +70,11 @@ function coreOnly(settings: string, before: readonly string[] = []): string {
   ]);
 }
 
-/** A35's "prints both with their paths": the type error at `file:line:column`, the schema error at its path. */
+/** "Prints both with their paths": the type error at `file:line:column`, the schema error at its path. [A35 CI] */
 function printsBoth(text: string, file: string, typeLine: number): boolean {
   return (
     text.includes(`  ${file}:${typeLine}:7: Type 'string' is not assignable to type 'number'. [TS2322]`) &&
-    /^ {2}entries\[0\]\.config\.apiReadTimeoutMs \(core from 0\): Too small: expected number to be >=1 \(CF-3\) \[invalid-configuration settings-schema\]$/m.test(
+    /^ {2}entries\[0\]\.config\.apiReadTimeoutMs \(core from 0\): Too small: expected number to be >=1 \[invalid-configuration settings-schema\]$/m.test(
       text,
     )
   );
@@ -90,10 +95,10 @@ describe("A35: a valid file", () => {
     expect(result.code).toBe(EXIT.ok);
     expect(result.stdout).toContain(`umbradb config check ${file}`);
     expect(result.stdout).toMatch(/^type check \(TypeScript 5\.9\.\d+, noEmit\): passed$/m);
-    expect(result.stdout).toMatch(/^configuration \(CF-1, CF-3\): passed$/m);
+    expect(result.stdout).toMatch(/^configuration \(evaluation, validation\): passed$/m);
     expect(result.stdout).toContain(HISTORY_NOT_RUN);
     expect(HISTORY_NOT_RUN).toBe(
-      "history (CF-3 for versionEntry revisions, CF-5, CF-6, CF-8): not run — no --database given, so no database was " +
+      "history (versionEntry revisions, revisions by (id, start), changes only to the future, one version per build): not run — no --database given, so no database was " +
         "opened and the history checks were not run",
     );
     expect(result.stdout).toMatch(/^passed: every check that ran passed; the history checks were not run$/m);
@@ -124,7 +129,7 @@ describe("A35: one type error and one schema error", () => {
     const typeLine = lineOf(text, "const label");
     expect(printsBoth(result.stdout, file, typeLine)).toBe(true);
     expect(result.stdout).toMatch(/^type check \(TypeScript 5\.9\.\d+, noEmit\): 1 finding$/m);
-    expect(result.stdout).toMatch(/^configuration \(CF-1, CF-3\): 1 finding$/m);
+    expect(result.stdout).toMatch(/^configuration \(evaluation, validation\): 1 finding$/m);
     expect(result.stdout).toContain(HISTORY_NOT_RUN);
     expect(result.stdout).toMatch(/^failed: 2 findings$/m);
     const report = await configCheck({ file, cwd: project.dir });
@@ -426,7 +431,7 @@ describe("modules: the build's, or a host program's", () => {
   });
 
   it("the command checks against UmbraDB's own modules and the file's: a user module it does not export is refused", async () => {
-    // The file declares stats but does not export it in modules (Q106 B: ./modules.test.ts has the export).
+    // The file declares stats but does not export it in modules (./modules.test.ts has the export). [Q106 B]
     const file = project.write("stats.config.ts", withStats());
     const result = await check(file);
     expect(result.code).toBe(EXIT.failed);
@@ -445,7 +450,7 @@ describe("modules: the build's, or a host program's", () => {
   it("the build's modules are its backbone parts and core modules with declarations, validated", () => {
     const build = buildDeclarations();
     expect(build.backbone.map((part) => part.id)).toEqual(["core-chain", "core-block-fetch", "core-block-commit", "core-digest", "core-health", "core-status", "core-config"]);
-    // Task 11.1's, 12.3's and 13.1's core modules, off unless a configuration enables them.
+    // The optional core modules, off unless a configuration enables them.
     expect(build.core.map((part) => part.id)).toEqual([
       "core-chain-events",
       "core-block-parsed",

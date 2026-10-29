@@ -16,11 +16,12 @@ import {
 import { modeProblems, watchFileModes } from "./file-modes.js";
 
 /**
- * A174's committed negative control (task 15.1b; BK-1, the threat model draft's gap 7): with a umask of `000`, on PGlite
- * 0.5.10, a process's backups (`ProcessHandle.backup`) whose temporary file is created another way — the seam
- * `BackupSeams.createTemporary` — fail A174's oracle (`./file-modes.ts`), while the same process's own backup passes it:
- * - created with the umask's mode, as `src/backup/backup.ts` created it before task 15.1b (`open(path, "wx")`): `0666`
- *   from its creation to after its rename;
+ * The file-mode check's committed negative control: with a umask of `000`, on PGlite 0.5.10, a process's backups
+ * (`ProcessHandle.backup`) whose temporary file is created another way (the seam `BackupSeams.createTemporary`) fail
+ * the file-mode oracle (`./file-modes.ts`), while the same process's own backup passes it.
+ * [A174, BK-1; threat model gap 7]
+ * - created with the umask's mode, as `src/backup/backup.ts` once created it (`open(path, "wx")`): `0666` from its
+ *   creation to after its rename;
  * - created open to all (`0666`) and narrowed to `0600` at once, before its first byte: `0600` at the end, but not from
  *   creation — another process could have opened it meanwhile and kept reading;
  * - and a backup written while nothing watched is not taken as checked: its creation was not seen.
@@ -76,7 +77,7 @@ describe("A174's negative control: temporary files created otherwise fail the or
         // The control's control: the process's own backup, watched the same way.
         expect(await watchedBackup(ticker, "real")).toEqual([]);
 
-        // As before task 15.1b: the temporary file created with Node.js's default mode, which the umask leaves 0666.
+        // As the backup once did: the temporary file created with Node.js's default mode, which the umask leaves 0666.
         const umaskMode = await watchedBackup(ticker, "umask-mode", { createTemporary: (path) => open(path, "wx") });
         expect(umaskMode).toContainEqual(expect.stringMatching(/^created \.umask-mode\.backup\.\d+\.[0-9a-f]+\.partial: mode 0666$/));
         expect(umaskMode).toContain("umask-mode.backup at the end: mode 0666");

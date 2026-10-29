@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-// Task 0.1 of `openspec/changes/core-arch` (design.md §9.2 and §14): characterization test of the pinned `esbuild`
-// 0.28.2 for the browser build. A worker entry that imports a `.wasm` asset bundles with zero errors and zero
-// warnings, the asset is emitted under a content-hashed name, and the bundle refers to it. The sources are written
-// to a temporary directory at test time and deleted afterwards.
+// A characterization test of the pinned `esbuild` 0.28.2 for the browser build. A worker entry that imports a `.wasm`
+// asset bundles with zero errors and zero warnings, the asset is emitted under a content-hashed name, and the bundle
+// refers to it. The sources are written to a temporary directory at test time and deleted afterwards.
+// [design §9.2, §14]
 
 // `(module (func (export "answer") (result i32) i32.const 42))`, assembled by hand.
 const ANSWER_WASM = Uint8Array.from([

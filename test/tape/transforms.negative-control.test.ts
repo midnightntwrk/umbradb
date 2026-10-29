@@ -8,8 +8,8 @@ import {
 } from "./transform-checks.js";
 
 /**
- * The committed negative controls of A71's transform checks (task 9.2): wrong transforms, each of which must make the
- * checks `transforms.test.ts` runs (`transform-checks.ts`) fail.
+ * The committed negative controls of the transform checks: wrong transforms, each of which must make the checks
+ * `transforms.test.ts` runs (`transform-checks.ts`) fail. [A71]
  *
  * - **A delay transform that sets `delayMs` on an unselected call** (every call of a selected call's method and
  *   params, as a transform selecting by pair instead of by line would): the committed `delay` output differs at line 8.

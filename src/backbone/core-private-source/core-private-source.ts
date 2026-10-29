@@ -1,98 +1,116 @@
 /**
- * The private backbone part `core-private-source` (`openspec/changes/core-arch/specs/private-processes/spec.md` PP-1,
- * PP-2, PP-3, PP-5; `design.md` §8, §10; CORE-ARCH §4.11, §4.14): a private process takes its heights from the public
- * database — never from the node — and keeps its own cursor, bound to that one public database.
+ * The private backbone part `core-private-source`. A private process takes its heights from the public database, never
+ * from the node, and keeps its own cursor, bound to that one public database.
+ * [PP-1, PP-2, PP-3, PP-5; CORE-ARCH §4.11, §4.14; design §8, §10]
  *
- * **Its table** (`design.md` §10), created by its migration under its own role: `core_private_source.cursor`, one row
- * (`id = 1`) — the private cursor, the public block the private process last committed (`height`, `hash` and
- * `parent_hash`, null before its first block; the parent hash, which design §10 did not list, is what the runner's
- * cursor and RN-11's re-delivery at it need of a block, decision record Q124), and the binding, the public database's
- * genesis hash and S (`public_genesis_hash`, `public_start_height`). It is a module table of the private plan like any
- * other: DT-6 checks it, its `CHECK`s and change capture are added, `core-digest` digests it and the contents hash
- * reads it (Q75).
+ * **Its table**, created by its migration under its own role, is `core_private_source.cursor`, with one row (`id = 1`):
+ * - the private cursor: the public block the private process last committed (`height`, `hash` and `parent_hash`), null
+ *   before its first block. The runner's cursor needs the parent hash, and so does delivering the block at the cursor
+ *   again after a restart. [RN-11, Q124]
+ * - the binding: the public database's genesis hash and S (`public_genesis_hash`, `public_start_height`).
+ * It is a module table of the private plan like any other: the determinism check covers it, its `CHECK`s and change
+ * capture are added, `core-digest` digests it and the contents hash reads it. [DT-6, Q75; design §10]
  *
- * **The binding** (PP-2), in its `on-start-db` — which runs before any private module migrates (RN-3's startup order,
- * Q95): the public database's identity is read ({@link readPublicIdentity}); on the first start it is recorded in the
- * row, and on every start the row's genesis hash and S must be the public database's, and the private S — the earliest
- * start of the private configuration's `core` entries — must not be below the public S; otherwise startup refuses
- * with `private-binding-mismatch` ({@link bindingRefusal}), the database unchanged. A public database whose core has
- * never started has no identity to bind to: that refuses too ({@link publicNotStarted}, decision record Q125) — first
- * at the source's startup check, before any migration.
+ * **The binding** is checked in the part's `on-start-db`, which runs before any private module migrates (the fixed
+ * startup order). The public database's identity is read ({@link readPublicIdentity}). On the first start it is
+ * recorded in the row. On every start, the row's genesis hash and S must be the public database's, and the private S
+ * (the earliest start of the private configuration's `core` entries) must not be below the public S. Otherwise startup
+ * refuses with `private-binding-mismatch` ({@link bindingRefusal}) and leaves the database unchanged. A public database
+ * whose core has never started has no identity to bind to, so that is refused too ({@link publicNotStarted}), first at
+ * the source's startup check, before any migration. [PP-2, RN-3, Q95, Q125]
  *
- * **`core-chain` on a private process** (task 10.2's part, unchanged): a private process never talks to the node
- * (PP-1), so its startup check of the chain is its source's ({@link PrivateBlockSource.checkChain}, in place of
- * `core-chain`'s IN-3 checks against a node), before any migration: the public database's identity is read — a public
- * database whose core never started refused ({@link publicNotStarted}) —, its genesis hash compared with the
- * configured network's (`configuredGenesisOf` of the process's `core` revision: the built-in table's for a known
- * network, `genesisHash` for `custom`), a difference refused with `private-binding-mismatch`, `details.reason`
- * `network` (owner decision Q136 B, task 10.2b; {@link networkRefusal}), and the public genesis hash handed to
- * `core-chain`, which records it with the private S in the private database's `core_chain.identity` on a new private
- * database and the anchor at block S, and publishes `config`, `db` and `ledger-table` (no node client: the private
- * `core` entry has no `node`). PP-2's comparisons with the recorded binding follow it there, before the graph (task
- * 14.1a) — the startup read of the private cursor reads the binding from the same row — and again in the part's
- * `on-start-db`, which records it: so a private database of the configured network bound to another public database
- * is refused by them (`genesis`, `start`), never by the graph reading the wrong public database's items. Last, the
- * check gives the graph the public core's `table` items with their heights ({@link readPublicItems}, read with the
- * identity; PP-13, owner decision Q126 B), which a private module may require. The bootstrap's wait (IN-2) waits, with
- * the condition `waiting-for-node`, for the public cursor to reach the private S.
+ * **`core-chain` on a private process** is unchanged. A private process never talks to the node, so its startup check
+ * of the chain is done by its source ({@link PrivateBlockSource.checkChain}) before any migration, instead of
+ * `core-chain`'s checks against a node:
+ * - The public database's identity is read; a public database whose core never started is refused
+ *   ({@link publicNotStarted}).
+ * - Its genesis hash is compared with the configured network's: `configuredGenesisOf` of the process's `core` revision,
+ *   which is the built-in table's hash for a known network, or `genesisHash` for `custom`. A difference is refused with
+ *   `private-binding-mismatch`, `details.reason` `network` ({@link networkRefusal}). [PP-1, IN-3, Q136 B]
+ * - The public genesis hash is handed to `core-chain`. On a new private database, `core-chain` records it with the
+ *   private S in the private database's `core_chain.identity`, along with the anchor at block S. It publishes `config`,
+ *   `db` and `ledger-table`, but no node client, since the private `core` entry has no `node`.
+ * - The comparisons with the recorded binding follow, before the graph is resolved (the startup read of the private
+ *   cursor reads the binding from the same row), and again in the part's `on-start-db`, which records it. So a private
+ *   database of the configured network that is bound to another public database is refused by them (`genesis`,
+ *   `start`), never by the graph reading the wrong public database's items. [PP-2]
+ * - Last, the check gives the graph the public core's `table` items with their heights ({@link readPublicItems}, read
+ *   with the identity), which a private module may require. [PP-13, Q126 B]
+ * The bootstrap's wait then waits, with the condition `waiting-for-node`, for the public cursor to reach the private S.
+ * [IN-2]
  *
- * **Block intake** (PP-3, PP-5) is the finalized loop's (`src/runner/loop.ts`) over this part's block source
- * ({@link PrivateBlockSource}): its cursor is the private cursor; its finalized head is the public cursor, read in a
- * consistent read of the public database; its block at h is the public block at h; it waits for the public cursor to
- * pass a height by reading it each time it is woken — by the core's `committed` messages and every (re)connection of
- * its transport (task 14.2), or, without a transport, a poll (`./public-database.ts`) —, so it never depends on receiving
- * every message. So, at a start and after every wake-up, the loop processes every height from the private cursor + 1 up to
- * the public cursor, in order, `on-finalized` once per new public head, and each height's `on-fetch` with a read of
- * public data ({@link PrivateBlockSource.fetchRead}). Each block's transaction moves the private cursor in this part's
- * `on-db-write`, the first among the parts that write (RN-3's fixed order), so the loop's check before the `COMMIT`
- * finds it at the block. An independent instance (PP-5) lags as it needs: nothing here makes the core wait.
+ * **Block intake** is the finalized loop (`src/runner/loop.ts`) running over this part's block source
+ * ({@link PrivateBlockSource}):
+ * - its cursor is the private cursor;
+ * - its finalized head is the public cursor, read in a consistent read of the public database;
+ * - its block at h is the public block at h;
+ * - it waits for the public cursor to pass a height by reading the cursor each time it is woken: by the core's
+ *   `committed` messages and every connection or reconnection of its transport, or, without a transport, by a poll
+ *   (`./public-database.ts`). So it never depends on receiving every message.
+ * At a start and after every wake-up, the loop processes every height from the private cursor + 1 up to the public
+ * cursor, in order: `on-finalized` once per new public head, and each height's `on-fetch` with a read of public data
+ * ({@link PrivateBlockSource.fetchRead}). Each block's transaction moves the private cursor in this part's
+ * `on-db-write`, the first of the parts that write in the fixed backbone order, so the loop's check before the `COMMIT`
+ * finds it at the block. An independent instance lags as much as it needs: nothing here makes the core wait.
+ * [PP-3, PP-5, RN-3]
  *
- * **Its making**: one {@link privateIntake} per private process start gives the part and the block source the process
- * runs with (`ProcessInput.source`), which share its public database — the part's binding reads it at startup, after
- * the runner made the source from the process's `core` revision (Q102) and before the loop runs.
+ * **How it is made**: one {@link privateIntake} per private process start gives the part and the block source the
+ * process runs with (`ProcessInput.source`), which share its public database. The part's binding reads that database at
+ * startup, after the runner has made the source from the process's `core` revision and before the loop runs. [Q102]
  *
- * **Its position on the transport** (task 14.2): every `hello` of the transport gives the private cursor — the one
- * startup read (the source's first {@link PrivateBlockSource.cursor}), then each block the part's `on-after-db-write`
- * sees committed — or, before the first commit, S − 1 with no hash (PP-4). The transport connects at startup's chain
- * check, after startup read the cursor (task 14.3: the instance learns there whether it is lockstep).
+ * **Its position on the transport**: every `hello` of the transport carries the private cursor (first the one startup
+ * read, the source's first {@link PrivateBlockSource.cursor}, then each block the part's `on-after-db-write` sees
+ * committed), or, before the first commit, S − 1 with no hash. The transport connects during startup's chain check,
+ * after startup has read the cursor; that is where the instance learns whether it is lockstep. [PP-4]
  *
- * **Lockstep** (PP-6, PP-7, owner decision Q142; task 14.3). With `coreTransport`, startup's chain check waits for the
- * transport's `hello-ack` — after the public database's own checks — and refuses a core of another network than the
- * configured one (`private-binding-mismatch`, `network`: with a PostgreSQL `publicDatabase` read directly, the core at
- * `coreTransport` is checked nowhere else; owner decision Q136, task 10.2b's note); the ack says whether the core lists
- * the instance in `lockstepInstances`. After the graph is resolved, a module declaring `needsLockstep` refuses to run on
- * an instance that is not lockstep, or has no `coreTransport` at all ({@link needsLockstepRefusal},
- * `needs-lockstep-not-listed`, before any migration). An instance lockstep at startup, or listed by a later `hello-ack`,
- * takes height h only while the public cursor is h: its block at h is read where the public cursor is h, and each
- * `on-fetch` read of public data begins at h and — through the core each statement being its own read (Q142) — reads
- * the public cursor again after the callback's data; a cursor past h halts the instance with `lockstep-behind`
- * ({@link lockstepBehind}). Each block the part's `on-after-db-write` sees committed is reported to the core (`report`,
- * sent only to a core that lists the instance), which waits for it before its next `BEGIN`; the core's refusal of a
- * report (`report-hash-mismatch`) fails the transport's waits and reads, which halts the instance.
+ * **Lockstep.** With `coreTransport`, startup's chain check waits for the transport's `hello-ack`, after the public
+ * database's own checks. It refuses a core of another network than the configured one (`private-binding-mismatch`,
+ * `network`): with a PostgreSQL `publicDatabase` read directly, nothing else checks the core at `coreTransport`.
+ * The ack says whether the core lists the instance in `lockstepInstances`. [PP-6, Q136 B, Q142]
  *
- * **A changed public configuration** (PP-14, owner decision Q147; task 14.1b). Startup's chain check reads the public
- * configuration history with the identity ({@link readPublicConfiguration}: the items and the configuration hash, the
- * core's own by the same rows and function). With `coreTransport` the transport is the check: it records the first
- * `hello-ack`'s `configHash` and is refused for good, with `public-config-changed`, by a later message carrying
- * another; the source then fails its next read of public data with that refusal, even one of a PostgreSQL public
- * database read directly, so no other height is processed. Without `coreTransport`, the source's first read after the
- * public database lost a connection ({@link PublicDatabase.reconnections}) reads the history again, in that read and
- * before its body, and fails with `public-config-changed` ({@link publicConfigChanged}) when its hash is not startup's.
+ * After the graph is resolved, a module declaring `needsLockstep` refuses to run on an instance that is not lockstep or
+ * has no `coreTransport` at all ({@link needsLockstepRefusal}, `needs-lockstep-not-listed`, before any migration).
+ * [PP-6]
  *
- * **The public configuration hash it accepted** (PP-14, owner decision Q159; task 14.1c). The part keeps, in its own
- * table `core_private_source.accepted_config` (one row, `id = 1`: `config_hash`, 32 bytes; migration `002`), the
- * public configuration hash the private process last accepted — a table of its own, declared `deterministic: false`
- * (item `accepted-config-hash`), so that neither change capture nor the digests nor the contents hash read its row: it
- * records an operator's acceptance at a start, not a function of the chain, and two private processes bound to one
- * public database hold the same private data whichever hashes each accepted on the way (Q75). Startup's read of the
- * private cursor reads it too ({@link readAcceptedConfigHash}); the chain check, after PP-2's checks and before the
- * graph, compares it with the hashes this start found — the public history's it read, and with `coreTransport` the
- * first `hello-ack`'s — and the operator's `updateHash` (`umbradb run --update-hash`; {@link startHashDecision}): a
- * first start records what it finds; the hash it accepted runs on; another hash stops the start with
- * `public-config-changed`, naming it and `--update-hash=<hash>`, unless it is the one given, which is then recorded by
- * the part's `on-start-db`, in its transaction after the binding — once the full checks passed (PP-2 in the chain
- * check, PP-13 in the graph) —; and two hashes found that differ (the core's configuration changed during the start, or
- * `coreTransport` and `publicDatabase` are not one core's, Q149) stop it whatever was given.
+ * An instance that is lockstep at startup, or listed by a later `hello-ack`, takes height h only while the public
+ * cursor is h. Its block at h is read where the public cursor is h. Each `on-fetch` read of public data begins at h
+ * and, after the callback's data, reads the public cursor again, because through the core each statement is its own
+ * read. A cursor past h halts the instance with `lockstep-behind` ({@link lockstepBehind}). [PP-6, PP-7, Q142]
+ *
+ * Each block the part's `on-after-db-write` sees committed is reported to the core (`report`, sent only to a core that
+ * lists the instance), which waits for it before its next `BEGIN`. If the core refuses a report
+ * (`report-hash-mismatch`), the transport's waits and reads fail, which halts the instance. [PP-6]
+ *
+ * **A changed public configuration.** Startup's chain check reads the public configuration history with the identity
+ * ({@link readPublicConfiguration}): the items, and the configuration hash the core computes from the same rows with
+ * the same function. [PP-14, Q147]
+ * - With `coreTransport`, the transport does the check. It records the first `hello-ack`'s `configHash`, and a later
+ *   message carrying another one refuses it for good with `public-config-changed`. The source then fails its next read
+ *   of public data with that refusal, even a read of a PostgreSQL public database read directly, so no other height is
+ *   processed.
+ * - Without `coreTransport`, the source's first read after the public database lost a connection
+ *   ({@link PublicDatabase.reconnections}) reads the history again, inside that read and before its body. It fails with
+ *   `public-config-changed` ({@link publicConfigChanged}) when the hash differs from the one read at startup.
+ *
+ * **The public configuration hash it accepted.** The part keeps the public configuration hash the private process last
+ * accepted in its own table `core_private_source.accepted_config` (one row, `id = 1`: `config_hash`, 32 bytes;
+ * migration `002`). The table is declared `deterministic: false` (item `accepted-config-hash`), so neither change
+ * capture nor the digests nor the contents hash read its row. It records an operator's acceptance at a start, which
+ * does not follow from the chain, and two private processes bound to one public database hold the same private data
+ * whatever hashes each accepted along the way. [PP-14, Q159, Q75]
+ *
+ * Startup's read of the private cursor reads this hash too ({@link readAcceptedConfigHash}). The chain check, after the
+ * binding checks and before the graph, compares it with the hashes this start found (the public history's, and with
+ * `coreTransport` the first `hello-ack`'s) and with the operator's `updateHash` (`umbradb run --update-hash`;
+ * {@link startHashDecision}):
+ * - a first start records the hash it finds;
+ * - the hash already accepted runs on;
+ * - another hash stops the start with `public-config-changed`, naming it and `--update-hash=<hash>`, unless it is the
+ *   hash given. A given hash is recorded by the part's `on-start-db`, in its transaction after the binding, once the
+ *   full checks have passed (the binding checks in the chain check, the public item checks in the graph);
+ * - two found hashes that differ stop the start whatever was given: either the core's configuration changed during the
+ *   start, or `coreTransport` and `publicDatabase` do not belong to the same core.
+ * [PP-2, PP-13, PP-14, Q149, Q159]
  */
 
 import { z } from "zod";
@@ -120,7 +138,7 @@ import {
 
 export { publicConfigChanged };
 
-/** `core-private-source`'s migrations (DB-9): applied once, in order; never changed. */
+/** `core-private-source`'s migrations: applied once, in order, and never changed. [DB-9] */
 export const CORE_PRIVATE_SOURCE_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
   {
     id: "001",
@@ -135,7 +153,7 @@ export const CORE_PRIVATE_SOURCE_MIGRATIONS: readonly { readonly id: string; rea
 )`,
   },
   {
-    // PP-14, owner decision Q159 (task 14.1c): the public configuration hash the private process accepted.
+    // The public configuration hash the private process accepted. [PP-14, Q159]
     id: "002",
     sql: `CREATE TABLE core_private_source.accepted_config (
   id smallint PRIMARY KEY CHECK (id = 1),
@@ -191,15 +209,15 @@ async function readPrivateRow(
 }
 
 /**
- * The binding a private database records (PP-2): its public database's genesis hash and S, read through `read`; null
- * before its first start recorded them, and before the table exists. A restore of a private process's backup compares
- * it with its public database's identity before the commit (BK-3, owner decision Q153; task 15.2a).
+ * The binding a private database records: its public database's genesis hash and S, read through `read`. Null before
+ * its first start recorded them, and before the table exists. A restore of a private process's backup compares it with
+ * its public database's identity before the commit. [PP-2, BK-3, Q153]
  */
 export async function readPrivateBinding(read: Pick<ReadHandle, "query">): Promise<PublicIdentity | null> {
   return (await readPrivateRow(read)).binding;
 }
 
-/** A private database's committed height (DB-2): the private cursor's height. */
+/** A private database's committed height: the private cursor's height. [DB-2] */
 export const privateCursorHeight = async (read: Pick<ReadHandle, "query">): Promise<bigint | null> =>
   (await readPrivateCursor(read))?.height ?? null;
 
@@ -207,8 +225,8 @@ export const privateCursorHeight = async (read: Pick<ReadHandle, "query">): Prom
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex")}`;
 
 /**
- * The public configuration hash a private database accepted (PP-14, owner decision Q159; task 14.1c), as `0x` hex, read
- * through `read`; null before its first start recorded one, and before its table exists (migration `002`).
+ * The public configuration hash a private database accepted, as `0x` hex, read through `read`. Null before its first
+ * start recorded one, and before its table exists (migration `002`). [PP-14, Q159]
  */
 export async function readAcceptedConfigHash(read: Pick<ReadHandle, "query">): Promise<string | null> {
   const [table] = await read.query(ACCEPTED_PRESENT_SQL);
@@ -220,9 +238,9 @@ export async function readAcceptedConfigHash(read: Pick<ReadHandle, "query">): P
 /** Whether two byte strings are equal. */
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => Buffer.from(a).equals(Buffer.from(b));
 
-/** The rule a private database's binding is held to (PP-2), for the refusals' messages. */
+/** The rule a private database's binding is held to, for the refusals' messages. [PP-2] */
 const RULE =
-  "a private database belongs to the one public database it was first started against (PP-2): point publicDatabase " +
+  "a private database belongs to the one public database it was first started against: point publicDatabase " +
   "at that public database, or give the private process a new database";
 
 /**
@@ -233,17 +251,17 @@ export function publicNotStarted(): UmbraError {
   return new UmbraError(
     "private-binding-mismatch",
     "the public database has no chain identity (core_chain.identity): its core has never started, so a private " +
-      "database cannot be bound to it (PP-2); start the core on it first",
+      "database cannot be bound to it; start the core on it first",
     { reason: "public-not-started" },
   );
 }
 
 /**
- * Q136 B's check (PP-2; task 10.2b): the refusal (`private-binding-mismatch`, `details.reason` `network`, not retried)
- * of a public database whose identity `current` has another genesis hash than the configured network's — `configured`,
- * `configuredGenesisOf` of the process's `core` revision —, compared whole; and of a known network whose built-in
- * table records no genesis hash, against which nothing can be checked (as the core refuses it, decision record Q117).
- * Null when the hashes are equal.
+ * The check of the configured network: the refusal (`private-binding-mismatch`, `details.reason` `network`, not
+ * retried) of a public database whose identity `current` has a different genesis hash than the configured network's.
+ * `configured` is `configuredGenesisOf` of the process's `core` revision, and the hashes are compared whole. A known
+ * network whose built-in table records no genesis hash is refused too, since nothing can be checked against it; the
+ * core refuses it the same way. Null when the hashes are equal. [PP-2, Q117, Q136 B]
  */
 export function networkRefusal(
   configured: ConfiguredGenesis,
@@ -256,7 +274,7 @@ export function networkRefusal(
       "private-binding-mismatch",
       `this build records no genesis hash for the network ${configured.network}, so the public database's genesis ` +
         `hash ${publicHash} cannot be checked against it: a private process of a known network starts only with a ` +
-        "build whose built-in table records its genesis hash (PP-2, decision records Q117, Q136)",
+        "build whose built-in table records its genesis hash",
       { reason: "network", network: configured.network, configured: null, public: publicHash },
     );
   }
@@ -268,16 +286,16 @@ export function networkRefusal(
   return new UmbraError(
     "private-binding-mismatch",
     `the private process is configured for the network ${configured.network}, whose genesis hash is ` +
-      `${hex(configured.hash)}, and ${found} (PP-2, decision record Q136); point publicDatabase or coreTransport at a ` +
+      `${hex(configured.hash)}, and ${found}; point publicDatabase or coreTransport at a ` +
       `public database of ${configured.network} and its core, or configure the network its public database is of`,
     { reason: "network", network: configured.network, configured: hex(configured.hash), public: publicHash },
   );
 }
 
 /**
- * PP-2's binding check: the refusal (`private-binding-mismatch`, not retried) of a private database that recorded
- * `recorded` — null on its first start — against the public database whose identity is `current`, for a private
- * process whose S is `privateStart`; null when it may start.
+ * The binding check: the refusal (`private-binding-mismatch`, not retried) of a private database that recorded
+ * `recorded` (null on its first start), against the public database whose identity is `current`, for a private process
+ * whose S is `privateStart`. Null when it may start. [PP-2]
  */
 export function bindingRefusal(
   recorded: PublicIdentity | null,
@@ -305,7 +323,7 @@ export function bindingRefusal(
     return new UmbraError(
       "private-binding-mismatch",
       `the private process starts at ${privateStart}, below the public database's start height S ${current.start}, ` +
-        "where it has no public block to take (PP-2): start the private process's core entry at or above it",
+        "where it has no public block to take: start the private process's core entry at or above it",
       { reason: "private-start-below", private: privateStart.toString(), public: current.start.toString() },
     );
   }
@@ -326,13 +344,14 @@ async function recordedBinding(w: SchemaWriteHandle): Promise<PublicIdentity | n
 export interface SourceTransport {
   /** The `hello-ack` that connects it (startup's chain check waits for it). */
   connection(): Promise<HelloAck>;
-  /** Tells the core that `block` committed, when it is lockstep (PP-6). */
+  /** Tells the core that `block` committed, when the instance is lockstep. [PP-6] */
   report(block: BlockRef): void;
   /** Whether the last `hello-ack` said the core lists the instance. */
   readonly lockstep: boolean;
   /**
-   * Why the core's transport is refused for good (`public-config-changed`, `report-hash-mismatch`), or null; the source
-   * reads public data no more once it is (PP-14: no other height processed). None for a transport that has none.
+   * Why the core's transport is refused for good (`public-config-changed`, `report-hash-mismatch`), or null. Once it
+   * is, the source reads no more public data, so no other height is processed. Absent for a transport that has none.
+   * [PP-14]
    */
   readonly refusal?: UmbraError | null;
   close(): Promise<void>;
@@ -346,9 +365,10 @@ const listed = (names: readonly string[]): string =>
   names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1) as string}`;
 
 /**
- * PP-6's refusal (`needs-lockstep-not-listed`, not retried) of the `modules` that declare `needsLockstep`, on an instance
- * that is not lockstep: the core's `hello-ack` said `lockstep: false` (`transport`), or it has no `coreTransport`, so no
- * core can hold it in lockstep. Null when none declares it, or the instance is lockstep.
+ * The refusal (`needs-lockstep-not-listed`, not retried) of the `modules` that declare `needsLockstep`, on an instance
+ * that is not lockstep: the core's `hello-ack` said `lockstep: false` (`transport`), or the instance has no
+ * `coreTransport`, so no core can hold it in lockstep. Null when no module declares it, or the instance is lockstep.
+ * [PP-6]
  */
 export function needsLockstepRefusal(modules: readonly ModuleDeclaration[], lockstep: boolean, transport: boolean): UmbraError | null {
   const needing = modules.filter((declaration) => declaration.needsLockstep === true).map((declaration) => declaration.id);
@@ -362,27 +382,27 @@ export function needsLockstepRefusal(modules: readonly ModuleDeclaration[], lock
   return new UmbraError(
     "needs-lockstep-not-listed",
     `${which} needsLockstep: it reads mutable public tables, which only a lockstep instance reads at the height it ` +
-      `processes (PP-6); ${why}`,
+      `processes; ${why}`,
     { modules: needing, transport },
   );
 }
 
 /**
- * PP-6's halt (`lockstep-behind`, not retried) of a lockstep instance processing `height` while the public cursor is
- * `cursor`, past it: the mutable public state at `height` is gone (the core listed the instance late, or does not wait
- * for it).
+ * The halt (`lockstep-behind`, not retried) of a lockstep instance processing `height` while the public cursor is
+ * `cursor`, past it. The mutable public state at `height` is gone: the core listed the instance late, or does not wait
+ * for it. [PP-6, PP-7]
  */
 export function lockstepBehind(height: bigint, cursor: bigint | null): UmbraError {
   return new UmbraError(
     "lockstep-behind",
     `the public cursor is ${cursor}, past height ${height}: a lockstep instance processes a height only while the public ` +
-      "cursor is that height (PP-6), and the mutable public state of the heights it missed is gone (PP-7); give it a new " +
+      "cursor is that height, and the mutable public state of the heights it missed is gone; give it a new " +
       "private database whose start is above the public cursor, or remove it from the core's lockstepInstances",
     { height: height.toString(), cursor: cursor === null ? null : cursor.toString() },
   );
 }
 
-/** The public configuration hashes a private start compares (PP-14, owner decision Q159; task 14.1c), each `0x` hex. */
+/** The public configuration hashes a private start compares, each as `0x` hex. [PP-14, Q159] */
 export interface StartHashes {
   /** The hash the private database accepted when it last ran; null on its first start. */
   readonly recorded: string | null;
@@ -410,7 +430,7 @@ export interface StartHashDecision {
   readonly reason: "first-start" | "unchanged" | "accepted" | "refused" | "none";
 }
 
-/** The start's stop when another hash is found than the one accepted, or two hashes found differ (PP-14, Q159). */
+/** Stops the start when the hash found is not the one accepted, or two found hashes differ. [PP-14, Q159] */
 function startStop(hashes: StartHashes, found: string, moved: boolean): UmbraError {
   const accept = `--update-hash=${found}`;
   const given =
@@ -420,12 +440,12 @@ function startStop(hashes: StartHashes, found: string, moved: boolean): UmbraErr
   const instead = hashes.recorded === null ? "" : `, in place of ${hashes.recorded}, the one it accepted`;
   const message = moved
     ? `the core at coreTransport sends the configuration hash ${hashes.core}, and the public configuration ` +
-      `history this start read hashes to ${hashes.history} (PP-14): the core's configuration changed during this ` +
-      "start, or coreTransport and publicDatabase are not one core's (decision record Q149), so the public table " +
+      `history this start read hashes to ${hashes.history}: the core's configuration changed during this ` +
+      "start, or coreTransport and publicDatabase are not one core's, so the public table " +
       "items checked are not the core's. Start the private process again once both give one hash — with " +
       `${accept}, to accept the core's${instead}.${given}`
     : `the public core's configuration hash is ${found}, and this private process last ran on ` +
-      `${hashes.recorded}, the one it accepted (PP-14): the public configuration changed since, so the public ` +
+      `${hashes.recorded}, the one it accepted: the public configuration changed since, so the public ` +
       `table items its modules read may no longer be what it checked.${given} To accept ${found}, start it with ` +
       `${accept} (startProcess's updateHash): the start then runs its full checks of the public side and records ` +
       "the new hash";
@@ -440,10 +460,14 @@ function startStop(hashes: StartHashes, found: string, moved: boolean): UmbraErr
 }
 
 /**
- * PP-14's comparison at a private start (owner decision Q159; task 14.1c): the hash found is the core's first
- * `hello-ack`'s, else the public history's. Two hashes found that differ stop the start, whatever was given or
- * recorded; a first start records the hash found; the hash recorded runs on; another hash is recorded when it is the
- * one given, and stops the start otherwise — naming it and `--update-hash` (`public-config-changed`, not retried).
+ * The comparison of public configuration hashes at a private start. The hash found is the core's first `hello-ack`'s,
+ * otherwise the public history's.
+ * - Two found hashes that differ stop the start, whatever was given or recorded.
+ * - A first start records the hash found.
+ * - The recorded hash runs on.
+ * - Another hash is recorded when it is the one given; otherwise it stops the start, naming the hash and
+ *   `--update-hash` (`public-config-changed`, not retried).
+ * [PP-14, Q159]
  */
 export function startHashDecision(hashes: StartHashes): StartHashDecision {
   if (hashes.core !== null && hashes.history !== null && hashes.core !== hashes.history) {
@@ -461,35 +485,35 @@ export function startHashDecision(hashes: StartHashes): StartHashDecision {
 export interface PrivateChecks {
   /** The configured network's check; {@link networkRefusal} unless given. */
   readonly network?: typeof networkRefusal;
-  /** PP-2's comparisons with the recorded binding; {@link bindingRefusal} unless given. */
+  /** The comparisons with the recorded binding; {@link bindingRefusal} unless given. [PP-2] */
   readonly binding?: typeof bindingRefusal;
   /**
-   * The private S, for PP-2's `private-start-below`; unless given (a source a test makes by hand) the public S, so that
-   * only the recorded binding is compared — the part's `on-start-db` compares the private S again.
+   * The private S, for the `private-start-below` check. When not given (a source a test makes by hand), it is the
+   * public S, so only the recorded binding is compared; the part's `on-start-db` compares the private S again. [PP-2]
    */
   readonly start?: bigint;
-  /** The negative controls' view of the public items the graph is given (PP-13); all of them, as read, unless given. */
+  /** The negative controls' view of the public items the graph is given; all of them, as read, unless given. [PP-13] */
   readonly publicItems?: (items: readonly PublicItem[]) => readonly PublicItem[];
   /**
-   * Whether a lockstep instance reads the public cursor again after each `on-fetch` callback's data (Q142); true
-   * unless given — false is the negative control's, which processes a cursor that moved meanwhile.
+   * Whether a lockstep instance reads the public cursor again after each `on-fetch` callback's data; true unless given.
+   * `false` is for a negative control, which processes a cursor that moved in the meantime. [Q142]
    */
   readonly reread?: boolean;
   /**
-   * Whether the public configuration hash is checked (PP-14; task 14.1b); `check` unless given — `ignore` is the
-   * negative control's, which goes on after the public configuration changed.
+   * Whether the public configuration hash is checked; `check` unless given. `ignore` is for a negative control, which
+   * goes on after the public configuration changed. [PP-14]
    */
   readonly configHash?: "check" | "ignore";
   /**
-   * PP-14's comparison at a start (task 14.1c); {@link startHashDecision} unless given — the negative controls' never
-   * compare the recorded hash, or accept any hash given.
+   * The comparison of hashes at a start; {@link startHashDecision} unless given. The negative controls' versions never
+   * compare the recorded hash, or accept any hash given. [PP-14]
    */
   readonly acceptance?: typeof startHashDecision;
 }
 
 /** What a {@link PrivateBlockSource} takes from its process besides its public side and checks. */
 export interface PrivateSourceOptions {
-  /** The public configuration hash the operator accepts for this start (PP-14, Q159; `startProcess`'s `updateHash`). */
+  /** The public configuration hash the operator accepts for this start (`startProcess`'s `updateHash`). [PP-14] */
   readonly updateHash?: string | null;
   /** Where it logs the hash it records; nowhere unless given. */
   readonly log?: (line: string) => void;
@@ -501,19 +525,19 @@ export class PrivateBlockSource implements BlockSource {
   readonly #wakes: PublicWakes;
   readonly #transport: SourceTransport | null;
   readonly #checks: PrivateChecks;
-  /** Whether the `hello-ack` of startup's chain check said the core lists the instance (PP-6). */
+  /** Whether the `hello-ack` of startup's chain check said the core lists the instance. [PP-6] */
   #lockstepAtStart = false;
-  /** Whether a startup chain check completed: from then on the source knows whether it is lockstep (task 14.4). */
+  /** Whether a startup chain check completed: from then on the source knows whether it is lockstep. */
   #checked = false;
   /** The private cursor last known committed: startup's read, then each block committed; undefined before startup's. */
   #position: BlockRef | null | undefined;
   /** The binding the private database recorded, as the last read of the cursor found it; null before any or without. */
   #recorded: PublicIdentity | null = null;
-  /** The public configuration hash startup's chain check read (PP-14); null before it, or before the table exists. */
+  /** The public configuration hash startup's chain check read; null before it, or before the table exists. [PP-14] */
   #publicConfigHash: string | null = null;
-  /** How many reconnections of the public database the configuration was last checked after (PP-14). */
+  /** The count of public database reconnections at the last configuration check. [PP-14] */
   #reconnections = 0;
-  /** The public configuration hash the private database accepted, as last read or written (PP-14, Q159). */
+  /** The public configuration hash the private database accepted, as last read or written. [PP-14, Q159] */
   #accepted: string | null = null;
   /**
    * Whether {@link cursor} reads it again: at first, and after the part's `on-start-db` wrote it (a retried startup
@@ -543,31 +567,31 @@ export class PrivateBlockSource implements BlockSource {
   }
 
   /**
-   * The private process's position for its transport's `hello` (PP-4): the private cursor last known committed, or
-   * `start` − 1 with no hash before its first commit.
+   * The private process's position for its transport's `hello`: the private cursor last known committed, or `start` − 1
+   * with no hash before its first commit. [PP-4]
    */
   position(start: bigint): { readonly height: bigint; readonly hash: Uint8Array | null } {
     const known = this.#position ?? null;
     return known === null ? { height: start - 1n, hash: null } : { height: known.height, hash: known.hash };
   }
 
-  /** A block committed (the part's `on-after-db-write`): the position from now on, reported to the core (PP-6). */
+  /** A block committed (the part's `on-after-db-write`): the position from now on, reported to the core. [PP-6] */
   committed(block: BlockRef): void {
     this.#position = block;
     this.#transport?.report(block);
   }
 
   /**
-   * Whether the instance is lockstep (PP-6): its startup's `hello-ack` said so — kept for the whole run, so a module
-   * needing it never runs unchecked —, or the last one did.
+   * Whether the instance is lockstep: its startup's `hello-ack` said so, or the last one did. The startup answer is
+   * kept for the whole run, so a module that needs lockstep never runs unchecked. [PP-6]
    */
   get lockstep(): boolean {
     return this.#lockstepAtStart || this.#transport?.lockstep === true;
   }
 
   /**
-   * Whether the instance is lockstep as `/status` shows it (`public.lockstep`, AE-5; task 14.4): {@link lockstep} once a
-   * startup chain check completed — without a transport, false —, null before.
+   * Whether the instance is lockstep, as `/status` shows it (`public.lockstep`): {@link lockstep} once a startup chain
+   * check completed (false without a transport), null before. [AE-5]
    */
   get lockstepShown(): boolean | null {
     return this.#checked ? this.lockstep : null;
@@ -578,14 +602,14 @@ export class PrivateBlockSource implements BlockSource {
     return this.#public;
   }
 
-  /** The public configuration hash startup's chain check read from the public database (PP-14); null before. */
+  /** The public configuration hash startup's chain check read from the public database; null before. [PP-14] */
   get publicConfigHash(): string | null {
     return this.#publicConfigHash;
   }
 
   /**
-   * The public configuration hash the part's `on-start-db` records (PP-14, Q159): the one startup's chain check found,
-   * on a first start or when the operator gave it; null when the recorded one stays, and once recorded.
+   * The public configuration hash the part's `on-start-db` records: the one startup's chain check found, on a first
+   * start or when the operator gave it. Null when the recorded one stays, and once it is recorded. [PP-14, Q159]
    */
   get pendingAcceptedHash(): string | null {
     return this.#pending;
@@ -597,9 +621,9 @@ export class PrivateBlockSource implements BlockSource {
     this.#log(
       this.#pendingReason === "accepted"
         ? `public configuration hash ${hash} accepted (--update-hash) in place of ${was}: recorded after the full ` +
-            "checks (PP-14)"
+            "checks"
         : `public configuration hash ${hash} recorded: the private database's first start records the hash it ` +
-            "finds (PP-14)",
+            "finds",
     );
     this.#accepted = hash;
     this.#acceptedStale = true;
@@ -607,10 +631,13 @@ export class PrivateBlockSource implements BlockSource {
   }
 
   /**
-   * One read of public data for the loop (PP-14; task 14.1b): none once the core's transport is refused for good — its
-   * refusal is the read's failure, so no other height is processed —; and, without a transport, the first read after
-   * the public database lost a connection reads the public configuration history again, in that read and before
-   * `body`, and fails with `public-config-changed` when its hash is not the one startup read.
+   * One read of public data for the loop.
+   * - Once the core's transport is refused for good, there is no read: the refusal is the read's failure, so no other
+   *   height is processed.
+   * - Without a transport, the first read after the public database lost a connection reads the public configuration
+   *   history again, inside that read and before `body`. It fails with `public-config-changed` when the hash differs
+   *   from the one startup read.
+   * [PP-14]
    */
   #read<T>(body: (read: ReadHandle) => Promise<T>): Promise<T> {
     const refusal = this.#transport?.refusal ?? null;
@@ -629,15 +656,15 @@ export class PrivateBlockSource implements BlockSource {
   }
 
   /**
-   * The private cursor, read through `read` ({@link readPrivateCursor}); the first read — startup's, of the committed
-   * cursor — is also the position until a block commits (the loop's later reads are inside a block's transaction). The
+   * The private cursor, read through `read` ({@link readPrivateCursor}). The first read (startup's, of the committed
+   * cursor) is also the position until a block commits; the loop's later reads are inside a block's transaction. The
    * binding the same row records is kept for {@link checkChain}, which startup runs after this read.
    */
   async cursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
     const { cursor, binding } = await readPrivateRow(read);
     this.#recorded = binding;
     if (this.#position === undefined) this.#position = cursor;
-    // PP-14 (Q159): the hash it accepted, for the chain check — at startup, and once more after on-start-db wrote it.
+    // The hash it accepted, for the chain check: at startup, and once more after on-start-db wrote it. [PP-14, Q159]
     if (this.#acceptedStale) {
       this.#accepted = await readAcceptedConfigHash(read);
       this.#acceptedStale = false;
@@ -646,8 +673,9 @@ export class PrivateBlockSource implements BlockSource {
   }
 
   /**
-   * The public cursor, in one read of the public database; before the core's first commit the height before the public
-   * S, with 32 zero bytes for its hashes, which the loop never processes (a private S is at least the public S, PP-2).
+   * The public cursor, in one read of the public database. Before the core's first commit, it is the height before the
+   * public S, with 32 zero bytes for its hashes; the loop never processes it, because a private S is at least the
+   * public S. [PP-2]
    */
   finalizedHead(): Promise<BlockRef> {
     return this.#read(async (read) => {
@@ -686,7 +714,8 @@ export class PrivateBlockSource implements BlockSource {
 
   /**
    * The public block at `height`; throws when the public database has none there. On a lockstep instance it is read
-   * where the public cursor is `height` (the read's height), else the instance halts with `lockstep-behind` (PP-6).
+   * where the public cursor is `height` (the read's height); otherwise the instance halts with `lockstep-behind`.
+   * [PP-6]
    */
   async block(height: bigint): Promise<BlockRef> {
     const block = await this.#read(async (read) => {
@@ -698,17 +727,20 @@ export class PrivateBlockSource implements BlockSource {
   }
 
   /**
-   * The chain's check at the private process's startup, before any migration and before the graph, in place of
-   * `core-chain`'s checks against a node (IN-3; PP-1: a private process never talks to the node), in this order (PP-2):
-   * the public database's chain identity read — a public database whose core has never started refused
-   * ({@link publicNotStarted}, Q125) —; its genesis hash compared with the configured network's, `input.configured`
-   * (Q136 B; {@link networkRefusal}); the binding the startup read of the private cursor found compared with it
-   * ({@link bindingRefusal}: `genesis`, `start`, `private-start-below`; task 14.1a — the part's `on-start-db` compares
-   * again in its transaction); with `coreTransport`, the core's `hello-ack` (its network, its lockstep flag); then the
-   * public configuration hash it accepted against the hashes found ({@link startHashDecision}; PP-14, Q159, task
-   * 14.1c). Resolves with the genesis hash, which `core-chain` records with the private S on a new private database,
-   * and the public core's `table` items with their heights, read with the identity ({@link readPublicItems}; PP-13),
-   * which the runner gives the graph.
+   * The chain check at the private process's startup, before any migration and before the graph. It replaces
+   * `core-chain`'s checks against a node, since a private process never talks to the node. In order: [IN-3, PP-1, PP-2]
+   * - The public database's chain identity is read; a public database whose core has never started is refused
+   *   ({@link publicNotStarted}). [Q125]
+   * - Its genesis hash is compared with the configured network's, `input.configured` ({@link networkRefusal}). [Q136 B]
+   * - The binding found by the startup read of the private cursor is compared with it ({@link bindingRefusal}:
+   *   `genesis`, `start`, `private-start-below`). The part's `on-start-db` compares again in its transaction.
+   * - With `coreTransport`, the core's `hello-ack` is checked (its network) and its lockstep flag kept.
+   * - The public configuration hash it accepted is compared with the hashes found ({@link startHashDecision}).
+   *   [PP-14, Q159]
+   *
+   * Resolves with the genesis hash, which `core-chain` records with the private S on a new private database, and the
+   * public core's `table` items with their heights, read with the identity ({@link readPublicItems}), which the runner
+   * gives the graph. [PP-13]
    */
   async checkChain(input: Pick<ChainCheckInput, "configured">): Promise<ChainCheck> {
     const reconnections = this.#public.reconnections?.() ?? 0;
@@ -724,7 +756,8 @@ export class PrivateBlockSource implements BlockSource {
     if (binding !== null) throw binding;
     let coreHash: string | null = null;
     if (this.#transport !== null) {
-      // The core the instance reports to (PP-6, task 14.3): of the configured network, and whether it lists it.
+      // The core the instance reports to: it must be of the configured network; the ack says whether it lists the
+      // instance. [PP-6]
       const ack = await this.#transport.connection();
       const core = { genesisHash: bytesOfHex(ack.genesis), start: BigInt(ack.start) };
       const other = (this.#checks.network ?? networkRefusal)(input.configured, core, "transport");
@@ -732,7 +765,7 @@ export class PrivateBlockSource implements BlockSource {
       this.#lockstepAtStart = ack.lockstep;
       coreHash = ack.configHash;
     }
-    // PP-14 at a start (Q159, task 14.1c): the hash it accepted against the hashes found, before the graph.
+    // The hash it accepted, compared with the hashes found, before the graph. [PP-14, Q159]
     const decision = (this.#checks.acceptance ?? startHashDecision)({
       recorded: this.#accepted,
       history: configHash,
@@ -747,11 +780,11 @@ export class PrivateBlockSource implements BlockSource {
         `--update-hash ${this.#updateHash} not used: ` +
           (decision.reason === "first-start"
             ? `the private database's first start records the hash it finds, ${decision.record}`
-            : `the public configuration hash is ${coreHash ?? configHash}, the one this private process accepted`) +
-          " (PP-14)",
+            : `the public configuration hash is ${coreHash ?? configHash}, the one this private process accepted`),
       );
     }
-    // PP-14: the public configuration as startup checked it; without a transport, read again at each reconnection.
+    // The public configuration as startup checked it; without a transport, it is read again at each reconnection.
+    // [PP-14]
     this.#publicConfigHash = configHash;
     this.#reconnections = reconnections;
     this.#checked = true;
@@ -761,22 +794,24 @@ export class PrivateBlockSource implements BlockSource {
 
   /**
    * The graph's modules at startup, after the chain check and before any migration (`BlockSource.checkModules`): a
-   * module declaring `needsLockstep` refuses to run on an instance that is not lockstep (PP-6,
-   * {@link needsLockstepRefusal}).
+   * module declaring `needsLockstep` refuses to run on an instance that is not lockstep ({@link needsLockstepRefusal}).
+   * [PP-6]
    */
   checkModules(modules: readonly ModuleDeclaration[]): void {
     const refusal = needsLockstepRefusal(modules, this.#lockstepAtStart, this.#transport !== null);
     if (refusal !== null) throw refusal;
   }
 
-  /** A read of the private database's committed height (DB-2): the private cursor's ({@link privateCursorHeight}). */
+  /** A read of the private database's committed height: the private cursor's ({@link privateCursorHeight}). [DB-2] */
   readonly committedHeight = privateCursorHeight;
 
   /**
-   * One `on-fetch` callback's read of public data for `height` (PP-3, Q100): a read of the public database at its
-   * cursor. On a lockstep instance the read begins at `height`, and after the callback the public cursor is read again
-   * (Q142: through the core each statement is its own read) — a cursor past `height` either time halts the instance
-   * with `lockstep-behind` (PP-6).
+   * One `on-fetch` callback's read of public data for `height`: a read of the public database at its cursor.
+   * [PP-3, Q100]
+   *
+   * On a lockstep instance the read begins at `height`, and after the callback the public cursor is read again, because
+   * through the core each statement is its own read. A cursor past `height` either time halts the instance with
+   * `lockstep-behind`. [PP-6, Q142]
    */
   readonly fetchRead = <T>(body: (read: ReadHandle) => Promise<T>, height: bigint): Promise<T> =>
     this.#read(async (read) => {
@@ -801,8 +836,8 @@ export class PrivateBlockSource implements BlockSource {
 }
 
 /**
- * A process's `public.lockstep` for `/status` (AE-5; task 14.4): its source's {@link PrivateBlockSource.lockstepShown}
- * on a private process; null for any other source (the core's), or none yet.
+ * A process's `public.lockstep` for `/status`: its source's {@link PrivateBlockSource.lockstepShown} on a private
+ * process; null for any other source (the core's), or when there is none yet. [AE-5]
  */
 export function publicLockstepOf(source: BlockSource | undefined): boolean | null {
   return source instanceof PrivateBlockSource ? source.lockstepShown : null;
@@ -819,15 +854,15 @@ export interface PrivateIntakeOptions {
   readonly wakes?: (core: CheckedEntry) => PublicWakes;
   /** The negative controls' binding check; {@link bindingRefusal} unless given. */
   readonly binding?: typeof bindingRefusal;
-  /** The negative controls' check of the configured network (Q136 B); {@link networkRefusal} unless given. */
+  /** The negative controls' check of the configured network; {@link networkRefusal} unless given. [Q136 B] */
   readonly network?: typeof networkRefusal;
-  /** The negative controls' view of the public items the graph is given (PP-13); all of them, as read, unless given. */
+  /** The negative controls' view of the public items the graph is given; all of them, as read, unless given. [PP-13] */
   readonly publicItems?: (items: readonly PublicItem[]) => readonly PublicItem[];
-  /** The negative control's lockstep instance that does not read the public cursor again (Q142); it does unless false. */
+  /** `false` makes a lockstep instance skip the second read of the public cursor (a negative control). [Q142] */
   readonly reread?: boolean;
-  /** The negative control's private process that ignores the public configuration hash (PP-14); checked unless `ignore`. */
+  /** `ignore` makes the private process ignore the public configuration hash (a negative control). [PP-14] */
   readonly configHash?: "check" | "ignore";
-  /** The negative controls' comparison at a start (PP-14, Q159); {@link startHashDecision} unless given. */
+  /** The negative controls' comparison at a start; {@link startHashDecision} unless given. [PP-14, Q159] */
   readonly acceptance?: typeof startHashDecision;
 }
 
@@ -835,7 +870,7 @@ export interface PrivateIntakeOptions {
 export interface PrivateShared {
   readonly start: bigint;
   readonly log: (line: string) => void;
-  /** `startProcess`'s `updateHash` (`umbradb run --update-hash`; PP-14, Q159); none unless given. */
+  /** `startProcess`'s `updateHash` (`umbradb run --update-hash`); none unless given. [PP-14, Q159] */
   readonly updateHash?: string;
 }
 
@@ -867,14 +902,15 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
         table: { schema: "core_private_source", tables: ["cursor"], kind: "mutable" },
       },
       {
-        // The public configuration hash it accepted (PP-14, Q159; task 14.1c): an operator's acceptance at a start, not
-        // a function of the chain, so out of change capture, the digests and the contents hash (Q76).
+        // The public configuration hash it accepted. It records an operator's acceptance at a start, which does not
+        // follow from the chain, so it is left out of change capture, the digests and the contents hash.
+        // [PP-14, Q159, Q76]
         name: "accepted-config-hash",
         lifetimes: ["table"],
         table: { schema: "core_private_source", tables: ["accepted_config"], kind: "mutable", deterministic: false },
       },
     ],
-    // Every backbone part starts at S, which is a mid-chain start when S is above genesis (Q96).
+    // Every backbone part starts at S, which is a mid-chain start when S is above genesis. [Q96]
     startsMidChain: true,
     configSchema: z.object({}),
     migrations: CORE_PRIVATE_SOURCE_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
@@ -893,7 +929,7 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
         const refusal = binding(recorded, current, (p.revisions[0] as Revision).start);
         if (refusal !== null) throw refusal;
         if (recorded === null) await w.execute(BIND_SQL, [current.genesisHash, current.start]);
-        // PP-14 (Q159, task 14.1c): the hash startup's chain check accepted, now that the full checks passed.
+        // The hash startup's chain check accepted, recorded now that the full checks have passed. [PP-14, Q159]
         const accepted = made.pendingAcceptedHash;
         if (accepted !== null) {
           await w.execute(ACCEPT_SQL, [bytesOfHex(accepted)]);

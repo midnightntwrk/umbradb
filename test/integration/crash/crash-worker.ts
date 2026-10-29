@@ -4,10 +4,9 @@
  * a transaction on the shared PostgreSQL container, writes in it, and pauses before its `COMMIT` — at a named point,
  * never on a timer — then reports readiness and waits for the parent's SIGKILL.
  *
- * Core-arch task 17.2 retired the 0.9.5 operations this worker used to run (a checkpoint save, a watermark, a key-value
- * write, a held lease) with the required ids 5–25 that drove them (`openspec/changes/core-arch/design.md` §13); task
- * 18.1 retargets it to drive the runner. It imports nothing of `src/` and does not import `setup.ts` (which loads
- * Vitest and Testcontainers).
+ * The 0.9.5 operations this worker used to run (a checkpoint save, a watermark, a key-value write, a held lease) were
+ * retired with the required ids 5–25 that drove them; the worker is to be retargeted to drive the runner. It imports
+ * nothing of `src/` and does not import `setup.ts` (which loads Vitest and Testcontainers). [design §13]
  */
 import postgres from "postgres";
 

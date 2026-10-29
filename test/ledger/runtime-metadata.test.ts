@@ -27,16 +27,19 @@ import {
 } from "./version-checks.js";
 
 /**
- * A96 `[CI]` (`openspec/changes/core-arch/acceptance.md` §12; LG-4; task 12.2), on a synthetic devnet upgrade tape:
- * runtime 1.0 (spec_version 1_000_000) until block U = 3 enacts 2.0 (2_000_000); F = 4. Each block's content is
- * decoded with the metadata of the runtime in its parent's state — `state_getMetadata` at the parent hash (block 0: at
- * block 0) — whose `spec_version` (`state_getRuntimeVersion` there) must be the block's `MNSV` version, or processing
- * halts with `metadata-mismatch`; metadata is cached by that `spec_version`. So U is decoded with the old metadata and F
- * with the new, and the cache never holds the new metadata under the old `spec_version`. The tape node serves the tape
- * and the node client of `src/node/` reads it, unchanged, as `core-block-fetch` does (task 10.3). The same checks run
- * on task 0.3's recorded devnet upgrade tape (`devnet-v8-v9-0-235`: runtime 1_000_000 until U = 102 enacts 2_001_000;
- * F = 103), skipped by name when the tape is absent: there U's and F's events are decoded besides, and U's do not
- * decode with the new runtime's metadata.
+ * Runtime metadata across an upgrade, on a synthetic devnet upgrade tape: runtime 1.0 (spec_version 1_000_000) runs
+ * until block U = 3 enacts 2.0 (2_000_000); F = 4. [A96 CI, LG-4; acceptance §12]
+ *
+ * Each block's content is decoded with the metadata of the runtime in its parent's state: `state_getMetadata` at the
+ * parent hash (block 0: at block 0). That runtime's `spec_version` (`state_getRuntimeVersion` there) must be the
+ * block's `MNSV` version, or processing halts with `metadata-mismatch`. Metadata is cached by that `spec_version`. So U
+ * is decoded with the old metadata and F with the new, and the cache never holds the new metadata under the old
+ * `spec_version`. The tape node serves the tape, and the node client of `src/node/` reads it unchanged, as
+ * `core-block-fetch` does. [A96 CI, LG-4]
+ *
+ * The same checks run on the recorded devnet upgrade tape (`devnet-v8-v9-0-235`: runtime 1_000_000 until U = 102
+ * enacts 2_001_000; F = 103), skipped by name when the tape is absent. There, U's and F's events are also decoded, and
+ * U's do not decode with the new runtime's metadata. [A96 CI]
  */
 
 const TIMEOUT_MS = 60_000;
@@ -55,8 +58,8 @@ async function withNode<T>(records: readonly TapeRecord[], body: (client: NodeCl
 }
 
 /**
- * The walk `core-block-fetch` makes per height (task 10.3): the block's hash and header, its ledger version from the
- * table (LG-1), then the metadata its content is decoded with (LG-4).
+ * The walk `core-block-fetch` makes per height: the block's hash and header, its ledger version from the table, then
+ * the metadata its content is decoded with. [LG-1, LG-4]
  */
 function walkOver(client: NodeClient, table: LedgerTable = SYNTHETIC_TABLE, last: number = UPGRADE.last): Walk {
   return async (from, metadata) => {
@@ -137,7 +140,7 @@ describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without t
     readonly f: { readonly height: number; readonly hash: string; readonly specVersion: number };
   }
 
-  /** The devnet's upgrade as task 0.3's manifest records it, checked against the tape's answers. */
+  /** The devnet's upgrade as the tape's manifest records it, checked against the tape's answers. */
   function devnetOf(found: FoundTape): { readonly boundary: Boundary; readonly answers: TapeAnswers; readonly upgrade: UpgradeCase } {
     const boundary = (found.tape.notes as { readonly boundaries: readonly Boundary[] }).boundaries[0] as Boundary;
     expect(boundary).toMatchObject({ u: { height: 102, specVersion: 1_000_000 }, f: { height: 103, specVersion: 2_001_000 } });
@@ -146,7 +149,7 @@ describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without t
     return { boundary, answers, upgrade: devnetUpgradeOf(answers, boundary, found.tape.to) };
   }
 
-  /** The devnet's own table, a custom network's (task 0.3's note (c)): runtime 1.0 → v8, 2.x → v9; F pinned. */
+  /** The devnet's own table, as a custom network's: runtime 1.0 → v8, 2.x → v9; F pinned. */
   const devnetTable = (boundary: Boundary): LedgerTable => ({
     rows: [
       { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
@@ -162,7 +165,7 @@ describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without t
       const { boundary, answers, upgrade } = devnetOf(found);
       expect(upgrade.last).toBe(235);
       // A walk from U is a process restarted at cursor U − 1: the tape gains that cursor's header and the metadata at
-      // its hash, copied from its runtime's record (decision record Q135 A; test/backbone/ledger-restart.ts).
+      // its hash, copied from its runtime's record (test/backbone/ledger-restart.ts). [Q135 A]
       const records = restartAt(found.read().records, BigInt(upgrade.u - 1));
       await withNode(records, async (client, node) => {
         await expectUpgradeDecoding(walkOver(client, devnetTable(boundary), upgrade.last), () => new RuntimeMetadata(client), upgrade);
@@ -202,7 +205,7 @@ describe("A96 on task 0.3's devnet upgrade tape (LG-4; skipped by name without t
         // Block 0 has no events (no block executed the genesis state); every other block has some.
         expect(names.get(0)).toEqual([]);
         for (let h = 1; h <= upgrade.last; h++) expect(names.get(h)?.length, `block ${h}'s events`).toBeGreaterThan(0);
-        // U enacts the runtime (`set_code`); F carries the node's three DUST reapply system transactions (task 0.3).
+        // U enacts the runtime (`set_code`); F carries the node's three DUST reapply system transactions.
         expect(names.get(upgrade.u)).toContain("System.CodeUpdated");
         expect(names.get(upgrade.u + 1)?.filter((name) => name === "MidnightSystem.SystemTransactionApplied")).toHaveLength(3);
         // U's events, written by the old runtime, do not decode with the new runtime's metadata (U's own state's).

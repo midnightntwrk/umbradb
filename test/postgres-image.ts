@@ -1,7 +1,7 @@
 /**
- * The one PostgreSQL image of the repository (owner decision Q82, acceptance A148): every PostgreSQL container the
- * tests, their Testcontainers helpers, the benchmarks and the pack smoke test start is this image, so all of them run
- * the major version PGlite embeds.
+ * The one PostgreSQL image of the repository: every PostgreSQL container the tests, their Testcontainers helpers, the
+ * benchmarks and the pack smoke test start is this image, so all of them run the major version PGlite embeds.
+ * [Q82, A148]
  *
  * The official `postgres` image, tag `18-alpine`, pinned by the digest of its multi-platform index: PostgreSQL 18.6 on
  * Alpine 3.24.2, the index the tag named from 2026-09-21 to 2026-10-22 (`docker-library/repo-info`,

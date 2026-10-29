@@ -15,12 +15,12 @@ import {
 } from "./real-tapes.js";
 
 /**
- * The lookup every real-tape test uses (task 0.3; owner decision Q130; `acceptance.md`'s tape note): a recorded tape is
- * found in the directory named by `UMBRADB_TAPES` under its manifest's file name, refused when its size or SHA-256 is
- * not the manifest's, and otherwise — the variable unset, or no such file — reported absent with the tape's name as
- * the reason, which `tapeTest` turns into Vitest's skip (`real-tapes.negative-control.test.ts` checks the skip as the
- * reporter shows it). The committed manifest (`test/tape/real/manifest.json`) names each tape's network, range,
- * SHA-256, size, source endpoint, the node version it reported and the day it was recorded.
+ * The lookup every real-tape test uses: a recorded tape is found in the directory named by `UMBRADB_TAPES` under its
+ * manifest's file name, refused when its size or SHA-256 is not the manifest's, and otherwise — the variable unset, or
+ * no such file — reported absent with the tape's name as the reason, which `tapeTest` turns into Vitest's skip
+ * (`real-tapes.negative-control.test.ts` checks the skip as the reporter shows it). The committed manifest
+ * (`test/tape/real/manifest.json`) names each tape's network, range, SHA-256, size, source endpoint, the node version
+ * it reported and the day it was recorded. [Q130; acceptance's tape note]
  */
 
 const RECORDS: readonly TapeRecord[] = [

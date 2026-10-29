@@ -34,20 +34,27 @@ import {
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * A157 `[CI]` (task 8.1b; AE-1, AE-3, CF-1–CF-3; owner decision Q137 B): a configuration that cannot be loaded, one that
- * is not plain data and one that fails its schemas each end the process — `startProcess` ends `refused` and its
- * `closed` resolves by itself, `umbradb run` exits with a non-zero code by itself —, logging every finding with its path
- * (each once, no secret), with no admin listener opened at any time: every process here is given a port of the test's
- * own as its admin address (the configuration's `listen.admin`, and the address any admin starter it is given listens
- * on), which is probed from its start until it ended, and an admin starter that records every listener asked for. A
- * refusal after the configuration is validated (AE-3's changed migration checksum) still answers the four endpoints and
- * stays up until stopped. On PostgreSQL 18.6 and PGlite 0.5.10 for `startProcess` (the database never opened either:
- * no session on PostgreSQL, no data directory on PGlite); through the command in this process and in a child process.
+ * A configuration that cannot be loaded, one that is not plain data and one that fails its schemas each end the
+ * process: `startProcess` ends `refused` and its `closed` resolves by itself, and `umbradb run` exits with a non-zero
+ * code by itself. The process logs every finding with its path (each once, no secret) and opens no admin listener at
+ * any time. [A157 CI, AE-1, CF-1–CF-3, Q137 B]
  *
- * Committed negative controls, each through its criterion's own oracle: a process that opens its admin listener at a
- * refusal of its configuration (task 8.1's Q127 rule, its `listen.admin` as loaded) fails "no admin listener opened";
- * one that ends on every refusal (the changed migration checksum too) fails the stay-up half; one that logs only the
- * refusal's code (task 8.1's log line) fails "every finding with its path", in the process and through the command.
+ * To check this, every process here is given a port of the test's own as its admin address (the configuration's
+ * `listen.admin`, and the address any admin starter it is given listens on). That port is probed from the process's
+ * start until it ended, and the admin starter records every listener asked for.
+ *
+ * A refusal after the configuration is validated, such as a changed migration checksum, still answers the four
+ * endpoints and stays up until stopped. [A157 CI, AE-3]
+ *
+ * Run on PostgreSQL 18.6 and PGlite 0.5.10 for `startProcess` (the database never opened either: no session on
+ * PostgreSQL, no data directory on PGlite), and through the command in this process and in a child process.
+ *
+ * Committed negative controls, each through its criterion's own oracle:
+ * - a process that opens its admin listener at a refusal of its configuration, on its `listen.admin` as loaded (the
+ *   earlier rule), fails "no admin listener opened"; [Q127 A]
+ * - one that ends on every refusal (the changed migration checksum too) fails the stay-up half;
+ * - one that logs only the refusal's code (the earlier log line) fails "every finding with its path", in the process
+ *   and through the command.
  */
 
 /** How long a refused configuration may take to end the process on a loaded machine (a wait on purpose). */
@@ -69,7 +76,7 @@ beforeAll(() => {
 
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 
-/** One refused configuration of A157. */
+/** One refused configuration of the test. [A157 CI] */
 interface Refusal {
   readonly what: string;
   readonly code: "invalid-configuration" | "not-plain-data";
@@ -89,7 +96,7 @@ function throwingFile(): string {
   return file;
 }
 
-/** A node URL holding the secret: a `secret` setting (CF-4). */
+/** A node URL holding the secret: a `secret` setting. [CF-4] */
 const SECRET_NODE = `ws://indexer:${SECRET}@127.0.0.1:9/node`;
 
 const REFUSALS: readonly Refusal[] = [
@@ -137,8 +144,8 @@ const REFUSALS: readonly Refusal[] = [
 ];
 
 /**
- * On the line (task 8.1b): a configuration that validates but has no `core` revision of the build's version (Q102),
- * so no `listen.admin` the process could take — refused before the `core` revision is known, it ends the process too.
+ * The boundary case: a configuration that validates but has no `core` revision of the build's version, so there is no
+ * `listen.admin` the process could take. Refused before the `core` revision is known, it ends the process too. [Q102]
  */
 const NO_CORE_REVISION: Refusal = {
   what: "no core revision of the build's version (its one core entry a versionEntry of another version)",
@@ -150,7 +157,7 @@ const NO_CORE_REVISION: Refusal = {
   paths: () => [join(directory, "versions.config.ts")],
 };
 
-/** The schema failure: the configuration whose `listen.admin` task 8.1 listened on (Q127 A). */
+/** The schema failure: the configuration whose `listen.admin` the earlier rule listened on. [Q127 A] */
 const SCHEMA_FAILURE = REFUSALS[3] as Refusal;
 
 /** Probes `127.0.0.1:port` every 25 ms until stopped: every answer it got (an HTTP status), and when the first came. */
@@ -196,7 +203,7 @@ function recordingStarter(address: string): { readonly start: AdminStarter; read
   return { start, asked, first };
 }
 
-/** The findings `error` carries, each with its path and message: what A157 expects logged. */
+/** The findings `error` carries, each with its path and message: what must be logged. [A157 CI] */
 function findingsOf(error: unknown): { readonly path: string; readonly message: string }[] {
   if (!(error instanceof UmbraError)) return [];
   const details = error.details as {
@@ -210,9 +217,11 @@ function findingsOf(error: unknown): { readonly path: string; readonly message: 
 }
 
 /**
- * A157's "log every finding with its path" over `lines`: each finding of `error` — its path and its message, the
- * message with any URL's credentials hidden (CF-4, AE-6) — in exactly one line; each of `paths` among them; `SECRET`
- * in no line. None when so.
+ * Checks "log every finding with its path" over `lines`. None when so: [A157 CI]
+ * - each finding of `error` is in exactly one line, with its path and its message, the message with any URL's
+ *   credentials hidden; [CF-4, AE-6]
+ * - each of `paths` is among them;
+ * - `SECRET` is in no line.
  */
 function findingProblems(lines: readonly string[], error: unknown, paths: readonly string[]): string[] {
   const problems: string[] = [];
@@ -248,11 +257,15 @@ function declarationsOf(user: readonly ModuleDeclaration[] = []): ProcessInput["
 }
 
 /**
- * A157's first half for `startProcess` over `refusal` on `backend`: the process started by `start` — with the recording
- * admin starter, or with `admin: true` (the real worker) when `real` — must refuse with the refusal's code, end by
- * itself (`closed` without a `stop()`) within {@link ENDS_WITHIN_MS}, `refused` with that code, having asked for no
- * admin listener, its admin port never answering and no `admin endpoints listening` line; log every finding with its
- * path ({@link findingProblems}); and leave its database unopened. None when so.
+ * The ending half of the test, for `startProcess` over `refusal` on `backend`. The process is started by `start`, with
+ * the recording admin starter, or with `admin: true` (the real worker) when `real`. It must:
+ * - refuse with the refusal's code, and end by itself (`closed` without a `stop()`) within {@link ENDS_WITHIN_MS},
+ *   `refused` with that code;
+ * - ask for no admin listener, its admin port never answering, with no `admin endpoints listening` line;
+ * - log every finding with its path ({@link findingProblems});
+ * - leave its database unopened.
+ *
+ * None when so. [A157 CI]
  */
 async function endedProblems(start: Start, backend: ProcessBackend, refusal: Refusal, real = false): Promise<string[]> {
   const problems: string[] = [];
@@ -324,10 +337,11 @@ function started(start: Start, database: DatabaseParts, address: string, user: r
 }
 
 /**
- * A157's second half on `backend`: a database whose module `m` applied its migration `001`, started again by `start`
- * with a changed `001` and the real admin worker on a free port, refuses with `migration-checksum-changed` after its
- * configuration was validated, and answers the four endpoints — live 200, ready 503, `/status` `refused` with the
- * reason, `/config` 200 (A64's oracle) — and is still up, answering them, 1.5 s later. None when so.
+ * The stay-up half of the test on `backend`. A database whose module `m` applied its migration `001` is started again
+ * by `start`, with a changed `001` and the real admin worker on a free port. It must refuse with
+ * `migration-checksum-changed` after its configuration was validated, and answer the four endpoints: live 200, ready
+ * 503, `/status` `refused` with the reason, `/config` 200 (the endpoint-state oracle). It must still be up, answering
+ * them, 1.5 s later. None when so. [A157 CI, A64]
  */
 async function stayUpProblems(start: Start, backend: ProcessBackend): Promise<string[]> {
   const problems: string[] = [];
@@ -385,9 +399,9 @@ function stoppedWith(handle: ProcessHandle, also: () => Promise<void>): ProcessH
 }
 
 /**
- * A negative control: a process that opens its admin listener at a refusal of its configuration, as task 8.1 did (Q127
- * A: the `listen.admin` of the configuration as loaded when it has one, else CF-4's default), through the admin
- * starter it was given, and stays up until stopped.
+ * A negative control: a process that opens its admin listener at a refusal of its configuration, as the earlier rule
+ * did, through the admin starter it was given, and stays up until stopped. It listens on the `listen.admin` of the
+ * configuration as loaded when it has one, else on the default. [Q127 A, CF-4]
  */
 const earlyListener =
   (start: Start): Start =>
@@ -418,7 +432,7 @@ const endsOnEveryRefusal =
     return handle;
   };
 
-/** The log of a negative control that logs only a startup refusal's code (task 8.1's line), and every other line. */
+/** The log of a negative control that logs only a startup refusal's code (the earlier line), and every other line. */
 function codeOnly(log: (line: string) => void): (line: string) => void {
   return (line) => {
     const refused = /^startup refused: ([a-z-]+)( \(|$)/.exec(line);
@@ -526,10 +540,10 @@ describe("A157: umbradb run on a refused configuration logs every finding and ex
   ];
 
   /**
-   * A157's `umbradb run` half in this process over `file`: the command, its process started by `start` with the
-   * recording admin starter, must end by itself — no signal sent — within {@link ENDS_WITHIN_MS} with exit 1; its
-   * stderr must log every finding with its path, each once (the command adds no line of its own: no `umbradb run:`),
-   * and no admin listener be asked for, answer or listen. None when so.
+   * The `umbradb run` half of the test in this process over `file`. The command, its process started by `start` with
+   * the recording admin starter, must end by itself (no signal sent) within {@link ENDS_WITHIN_MS} with exit 1. Its
+   * stderr must log every finding with its path, each once (the command adds no line of its own: no `umbradb run:`).
+   * No admin listener may be asked for, answer or listen. None when so. [A157 CI]
    */
   async function commandProblems(start: Start, file: (address: string) => string, paths: () => readonly string[]): Promise<string[]> {
     const problems: string[] = [];
@@ -569,10 +583,12 @@ describe("A157: umbradb run on a refused configuration logs every finding and ex
   }
 
   /**
-   * A157's stay-up half through the command: a file refused once its configuration is validated — PGlite without the
-   * development opt-in (CF-9's `development-opt-in-required`), before the database opens — keeps `umbradb run`, its
-   * process started by `start` with the real admin worker on the file's `listen.admin`, running and answering the four
-   * endpoints (A64's oracle) 1.5 s on, until SIGTERM; it then exits 1. None when so.
+   * The stay-up half of the test through the command. The file is refused once its configuration is validated, before
+   * the database opens: PGlite without the development opt-in (`development-opt-in-required`). [CF-9]
+   *
+   * `umbradb run`, its process started by `start` with the real admin worker on the file's `listen.admin`, must keep
+   * running and answering the four endpoints (the endpoint-state oracle) 1.5 s on, until SIGTERM. It then exits 1. None
+   * when so. [A157 CI, A64]
    */
   async function commandStayUpProblems(start: Start): Promise<string[]> {
     const problems: string[] = [];

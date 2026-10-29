@@ -7,12 +7,13 @@ import { build } from "esbuild";
 import type { ApplyInput, ApplyOutput, ParsedTransaction, StateSummary, StoredNode } from "../../src/ledger/types.js";
 import type { Ledger } from "./adapter-fixtures.js";
 
-// Task 12.1 (A98; LG-7, Q49): runs `fixtures/adapter-worker.ts` in a worker thread of its own. The entry is bundled
-// with esbuild (a plain worker cannot load the TypeScript sources), leaving the vendored ledger packages out of the
-// bundle as imports of their own files: their Node.js entries read the `.wasm` beside them. This is the hook a build of
-// the adapters needs (task 16.1 maps the same imports to the packages' browser entries). The packages' identity check,
-// which `src/ledger/load.ts` runs before each import (task 12.2b), reads them beside its own source, so its
-// `import.meta.url` stays its source file's in the bundle too.
+// Runs `fixtures/adapter-worker.ts` in a worker thread of its own. [A98; LG-7, Q49]
+//
+// The entry is bundled with esbuild (a plain worker cannot load the TypeScript sources), leaving the vendored ledger
+// packages out of the bundle as imports of their own files: their Node.js entries read the `.wasm` beside them. This is
+// the hook a build of the adapters needs (the browser build maps the same imports to the packages' browser entries).
+// The packages' identity check, which `src/ledger/load.ts` runs before each import, reads them beside its own source,
+// so its `import.meta.url` stays its source file's in the bundle too.
 
 export type AdapterWorkerRequest =
   | { op: "load"; ledger: Ledger; networkId: string; key: Uint8Array; nodes: StoredNode[] }
@@ -22,7 +23,7 @@ export type AdapterWorkerRequest =
 export interface LoadedState {
   stateRoot: Uint8Array;
   stateKey: Uint8Array;
-  /** The adapter's `stateSummary` of the loaded state (a load only; task 12.1b). */
+  /** The adapter's `stateSummary` of the loaded state (a load only). */
   summary?: StateSummary;
 }
 

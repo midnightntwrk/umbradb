@@ -1,21 +1,23 @@
 /**
- * The in-memory block source (`openspec/changes/core-arch/specs/runner/spec.md` RN-14; `design.md` §3, §12): the
- * block-source interface over blocks held in memory, for tests and module authors. Its finalized head only rises
- * ({@link InMemoryBlockSource.finalize}), as a node's does; the block at each height up to it is the one it was given,
- * or else {@link inMemoryBlock}'s, a chain whose hashes link; {@link InMemoryBlockSource.waitForHead} waits for the
- * head to pass a height; and its cursor is the blocks table's last row, read through the read it is given
- * (`core-block-commit`, `src/backbone/core-block-commit/`), the same table the node-backed source reads.
+ * The in-memory block source: the block-source interface over blocks held in memory, for tests and module authors.
+ * [RN-14; design §3, §12]
+ * - Its finalized head only rises ({@link InMemoryBlockSource.finalize}), as a node's does.
+ * - The block at each height up to the head is the one it was given, or else {@link inMemoryBlock}'s, a chain whose
+ *   hashes link.
+ * - {@link InMemoryBlockSource.waitForHead} waits for the head to pass a height.
+ * - Its cursor is the blocks table's last row, read through the read it is given (`core-block-commit`,
+ *   `src/backbone/core-block-commit/`): the same table the node-backed source reads.
  *
- * It holds no queue and no best blocks: `on-best-block` and `on-rollback` are the node-backed source's (IN-6, task 10.3),
- * and so is IN-4's finality check; IN-4's parent check is `core-block-commit`'s, for every source (task 10.2). The loop
- * runs `on-fetch` and `on-parse` itself (no `prepared`).
+ * It holds no queue and no best blocks. `on-best-block` and `on-rollback` belong to the node-backed source, and so does
+ * the finality check; the parent check is `core-block-commit`'s, for every source. The loop runs `on-fetch` and
+ * `on-parse` itself (no `prepared`). [IN-4, IN-6]
  *
- * **Its block items** ({@link InMemoryBlockSource.blockItems}): the real `core-block-fetch` publishes, at `on-fetch`, the
- * items its block source gives (CD-2; `src/backbone/core-block-fetch/`), so a module author's build with UmbraDB's
- * backbone runs on this source too. Its blocks have the runtime {@link IN_MEMORY_SPEC_VERSION}, the ledger
- * {@link IN_MEMORY_LEDGER}, the time {@link IN_MEMORY_START_MS} + height × 6,000 ms (6-second blocks), no extrinsics and
- * empty metadata, unless the options give a block's own (`items`). It decodes nothing: the `ledger-table` is not read.
- * Its blocks have no chain events ({@link InMemoryBlockSource.blockEvents}: none, for `core-chain-events`, task 11.1).
+ * **Its block items** ({@link InMemoryBlockSource.blockItems}). The real `core-block-fetch` publishes, at `on-fetch`,
+ * the items its block source gives (`src/backbone/core-block-fetch/`), so a module author's build with UmbraDB's
+ * backbone runs on this source too. Unless the options give a block's own (`items`), its blocks have the runtime
+ * {@link IN_MEMORY_SPEC_VERSION}, the ledger {@link IN_MEMORY_LEDGER}, the time {@link IN_MEMORY_START_MS} + height ×
+ * 6,000 ms (6-second blocks), no extrinsics and empty metadata. It decodes nothing: the `ledger-table` is not read. Its
+ * blocks have no chain events ({@link InMemoryBlockSource.blockEvents} gives none to `core-chain-events`). [CD-2, CD-4]
  */
 
 import { createHash } from "node:crypto";
@@ -24,7 +26,7 @@ import type { CoreBlockItems } from "../backbone/core-block-fetch/items.js";
 import type { ReadHandle } from "../db/api.js";
 import type { BlockRef, BlockSource } from "./block-source.js";
 
-/** The `spec_version` of every in-memory block unless given: runtime 2.0's (CORE-ARCH §4.8), whose ledger is v9. */
+/** The `spec_version` of every in-memory block unless given: runtime 2.0's, whose ledger is v9. [CORE-ARCH §4.8] */
 export const IN_MEMORY_SPEC_VERSION = 2_000_000;
 
 /** The ledger version of every in-memory block unless given. */
@@ -183,7 +185,7 @@ export class InMemoryBlockSource implements BlockSource {
     });
   }
 
-  /** A block's chain events for `core-chain-events` (CD-4): none, as its blocks have no extrinsics. */
+  /** A block's chain events for `core-chain-events`: none, as its blocks have no extrinsics. [CD-4] */
   async blockEvents(_block: BlockRef): Promise<Uint8Array | null> {
     return null;
   }

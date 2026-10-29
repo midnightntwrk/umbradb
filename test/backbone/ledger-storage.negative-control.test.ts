@@ -15,15 +15,16 @@ import { a100Problems, a102Problems, loaded, retentionSeen, retentionWatcher } f
 import { type LedgerScenario, ledgerScenario, type LedgerTx, RUNTIME_2_1 } from "./ledger-tapes.js";
 
 /**
- * The committed negative controls of task 12.4 (`openspec/changes/core-arch/acceptance.md` A100, A102, A103), each the
- * real `core-ledger-state` with one rule replaced (`coreLedgerState`'s options), run through the process on the same
- * scenario as its criterion and held to the same oracle (`./ledger-storage-checks.ts`), which must fail:
+ * The committed negative controls of the ledger storage tests. Each is the real `core-ledger-state` with one rule
+ * replaced (`coreLedgerState`'s options), run through the process on the same scenario as its criterion and held to
+ * the same oracle (`./ledger-storage-checks.ts`), which must fail. [A100, A102, A103]
  *
- * - A102: a restart that does not have the worker load the stored state at the cursor halts at the next block — the
- *   worker holds no state — so the next root is never the node's;
- * - A100: the conversion skipped — F applied with the state's own ledger, v8 — gives another root at F than the node's:
- *   `root-mismatch` at F;
- * - A103: a window that releases one state too early has the state at 4,000 released at cursor 5,000: its load fails.
+ * - A restart that does not have the worker load the stored state at the cursor halts at the next block, since the
+ *   worker holds no state, so the next root is never the node's. [A102]
+ * - Skipping the conversion, so F is applied with the state's own ledger (v8), gives another root at F than the
+ *   node's: `root-mismatch` at F. [A100]
+ * - A window that releases one state too early has the state at 4,000 released at cursor 5,000, so its load fails.
+ *   [A103]
  */
 
 /** The ledger's core modules with `core-ledger-state`'s rules `options` replaced. */
@@ -101,13 +102,15 @@ describe("A103's control (PGlite: 5,000 blocks once)", () => {
     const db = await backend.database();
     const seen = retentionSeen();
     const process = await runUntil(db, scenario.records, scenario.head, {
-      // As A103's own run: the sweep off (it does not change the window, and makes 5,000 blocks several times slower).
+      // As in the window test's own run: the sweep off (it does not change the window, and makes 5,000 blocks several
+      // times slower). [A103]
       settings: { retainStates: 1_000, sweep: "off" },
       core: coreWith({ retainedFrom: (revisions, height) => retainedFrom(revisions, height) + 1n }),
       user: [retentionWatcher(seen, new Map([[5_001n, [4_000n, 4_001n]]]))],
     });
     expect(process.status).toMatchObject({ cursor: 5_001n, reason: null });
-    // A103 holds the load of 4,000 to succeed: here it fails, and 4,001 is the oldest retained state.
+    // The window test requires the load of 4,000 to succeed: here it fails, and 4,001 is the oldest retained state.
+    // [A103]
     expect(seen.loads.get(5_001n)).toEqual(["4000 state-not-retained", loaded(scenario, 4_001n)]);
     expect(seen.loads.get(5_001n)?.[0]).not.toBe(loaded(scenario, 4_000n));
   }, PATIENCE_MS * 12);

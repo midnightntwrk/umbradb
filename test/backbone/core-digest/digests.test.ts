@@ -11,12 +11,15 @@ import { concatBytes, fromHex } from "../../determinism/cbor-decoder.js";
 import { BLOCK_COMMIT, type Chain, checkpointRows, digestRows, runBlocks, startChain, testModule } from "./chain.js";
 
 /**
- * A57 (DT-4, DT-5; owner decisions Q84, Q86; task 7.1), on both backends: `core-digest` keeps one digest per module
- * table, `SHA-256(previous ‖ CBOR(h) ‖ changes at h)` set in a block that changes the table and kept otherwise, with
- * 32 zero bytes before its first change; checkpoints at exactly the heights h ≥ S with h mod 14,400 = 0, equal to the
- * tables' rows there; every module table digested with no flag set, and a table declared `deterministic: false` not.
- * The chains run through `schemaPlan`, `startDatabase` and the block write handles, a block loop standing in for the
- * runner's (`./chain.ts`). The interval shortened by a build flag is `checkpoints.build-flag.test.ts`.
+ * Table digests, on both backends. `core-digest`:
+ * - keeps one digest per module table, `SHA-256(previous ‖ CBOR(h) ‖ changes at h)`, set in a block that changes the
+ *   table and kept otherwise, with 32 zero bytes before its first change;
+ * - writes checkpoints at exactly the heights h ≥ S with h mod 14,400 = 0, equal to the tables' rows there;
+ * - digests every module table with no flag set, and not a table declared `deterministic: false`.
+ * [A57, DT-4, DT-5, Q84, Q86]
+ *
+ * The chains run through `schemaPlan`, `startDatabase` and the block write handles, with a block loop standing in for
+ * the runner's (`./chain.ts`). The interval shortened by a build flag is tested in `checkpoints.build-flag.test.ts`.
  *
  * Expected digests are computed here with `node:crypto` from CBOR written out by hand (RFC 8949), not by the code
  * under test.
@@ -119,7 +122,7 @@ describe.each(BACKENDS)("A57: core-digest's per-table digests and checkpoints, o
         }
       }
     }
-    // Every deterministic module table has its row; the opted-out one has none at any height (A57's last clause).
+    // Every deterministic module table has its row; the opted-out one has none at any height. [A57]
     expect(Object.keys(a.after.get(10n) ?? {}).sort()).toEqual(["core_block_commit.blocks", "m.t", "m.u"]);
   }, 120_000);
 

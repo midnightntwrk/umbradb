@@ -11,13 +11,13 @@ import {
 import { RETIRED_EXPORTS } from "./retirement.js";
 
 /**
- * Task 17.4 (`tasks.md` 17.4; A4 `[DOC]`, LS-4): version `0.10.0`, the breaking-change line in `CHANGELOG.md` (one
- * line since task 17.4a, A4 as amended by owner decision Q169), and every backbone part and core module naming the
- * build's version (`UMBRADB_VERSION`), never a literal — `core-digest` wrote `"0.10.0"` by hand until task 17.4. The
- * checks are `./release-version.ts`'s, on the tree as it is: the files of `src/` read and parsed (no program, no type
- * checker), the command's build imported for the versions it carries at run time, `package.json`, its lock and
- * `CHANGELOG.md` read as text. Each check has committed negative controls below,
- * the first of them `core-digest`'s declaration as task 17.4 found it.
+ * Version `0.10.0`, the one breaking-change line in `CHANGELOG.md`, and every backbone part and core module naming the
+ * build's version (`UMBRADB_VERSION`), never a literal (`core-digest` once wrote `"0.10.0"` by hand). [A4 DOC, LS-4, Q169]
+ *
+ * The checks are `./release-version.ts`'s, on the tree as it is: the files of `src/` read and parsed (no program, no
+ * type checker), the command's build imported for the versions it carries at run time, `package.json`, its lock and
+ * `CHANGELOG.md` read as text. Each check has committed negative controls below, the first of them `core-digest`'s
+ * declaration as it once was.
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));

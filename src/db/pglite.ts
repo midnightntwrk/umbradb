@@ -1,31 +1,31 @@
 /**
- * The PGlite backend of the database API (`./api.ts`; DB-1, DB-2, DB-4, DB-13; `openspec/changes/core-arch/design.md`
- * §4), over `@electric-sql/pglite` 0.5.10: PostgreSQL 18.6 compiled to WebAssembly, run in this process, with one
- * session.
+ * The PGlite backend of the database API (`./api.ts`), over `@electric-sql/pglite` 0.5.10: PostgreSQL 18.6 compiled
+ * to WebAssembly, run in this process, with one session. [DB-1, DB-2, DB-4, DB-13; design §4]
  *
- * **One queue (DB-4).** Every read and every transaction is one *job* of one queue. Jobs run one at a time, in the
- * order they were asked for, and a job holds the session from its first statement to its last — also while its body
- * awaits something that is not the database. A block transaction is therefore one exclusive job: no read runs between
- * its `BEGIN` and its `COMMIT` (A11), and a read asked for meanwhile waits until the `COMMIT`, then sees the block.
- * - A **read** (DB-2): `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`; then `RESET ALL` and `RESET ROLE`, so that a
+ * **One queue.** Every read and every transaction is one *job* of one queue. Jobs run one at a time, in the order they
+ * were asked for, and a job holds the session from its first statement to its last, also while its body awaits
+ * something that is not the database. A block transaction is therefore one exclusive job: no read runs between its
+ * `BEGIN` and its `COMMIT`, and a read asked for meanwhile waits until the `COMMIT`, then sees the block. [DB-4, A11]
+ * - A **read**: `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`; then `RESET ALL` and `RESET ROLE`, so that a
  *   setting or role a transaction left on the one session does not reach the read (on PostgreSQL a read runs on a
  *   connection of its own and never sees one); then the committed height, read by the process's
  *   {@link CommittedHeight}; then the body's statements; then `ROLLBACK`, which also undoes the resets and any `SET`
- *   the body ran. Nothing commits while the job runs, so every statement sees the height the read reports.
- * - A **transaction**: `BEGIN`; the body's statements; `COMMIT` when the body resolves — a `COMMIT` that PostgreSQL
- *   answers with `ROLLBACK` (a failed statement aborted the transaction and the body caught its error) is an error,
- *   never a commit — or `ROLLBACK` when the body rejects, with the body's own error. A migration's text of several
+ *   the body ran. Nothing commits while the job runs, so every statement sees the height the read reports. [DB-2]
+ * - A **transaction**: `BEGIN`; the body's statements; then `COMMIT` when the body resolves, or `ROLLBACK` when the
+ *   body rejects, with the body's own error. A `COMMIT` that PostgreSQL answers with `ROLLBACK` (a failed statement
+ *   aborted the transaction and the body caught its error) is an error, never a commit. A migration's text of several
  *   statements runs in it through the engine's `exec`, by the path only the migration runner takes
  *   (`./multi-statement.ts`).
+ *
  * A read handle or transaction used after its job ended fails with `handle-closed`, before anything reaches the engine.
  * A job's body runs in the async context of the code that asked for it, as on PostgreSQL.
  *
- * **Calls from inside a job (Q73, resolved E by the owner, which keeps this guard).** A body that calls `read` or
- * `transaction` on the same database, instead of using the handle it was given, asks for a job that cannot start
- * before its own job ends; awaited, it would wait forever. Such a call, made while the calling code's own job — or a
- * job of the same database further out — still runs (which `AsyncLocalStorage` tells), is refused at once with
- * `database-error`, `reason: nested-call`. Code a job started that calls after the job's body has ended (a timer it
- * set) is an ordinary caller.
+ * **Calls from inside a job.** A body that calls `read` or `transaction` on the same database, instead of using the
+ * handle it was given, asks for a job that cannot start before its own job ends; awaited, it would wait forever. Such a
+ * call, made while the calling code's own job (or a job of the same database further out) still runs, is rejected at
+ * once with `database-error`, `reason: nested-call`; `AsyncLocalStorage` tells which job is running. Code a job started
+ * that calls after the job's body has ended (a timer it set) is an ordinary caller. The owner chose to keep this guard.
+ * [Q73]
  *
  * **Results and parameters** go through the `deterministic_postgresql` component's mapping, as on PostgreSQL. PGlite
  * hands over every value as the text PostgreSQL printed — every parser it has is replaced by the identity for each
@@ -37,31 +37,33 @@
  * and survive `RESET ALL`, while `ALTER DATABASE … SET` and `ALTER ROLE … SET` are not applied in PGlite's single-user
  * mode at all; {@link openPgliteOn} refuses an engine that does not run with them.
  *
- * **Timeouts (DB-15, owner decision Q71).** PGlite enforces no server-side timeout, and one that fires hangs the engine —
- * the whole process, synchronously: a nonzero `idle_in_transaction_session_timeout`, `transaction_timeout` or
- * `idle_session_timeout` once its time passed (`electric-sql/pglite#1058`; checked on 0.5.10, 2026-10-25). The
- * session settings' zero timeouts keep a configuration file's from reaching the engine, and a read with the read option
- * (`timeoutMs`, a module API request's) sets neither of the two a PostgreSQL read sets: on PGlite, a development
- * backend (DB-12), API reads are not bounded. The option is checked as on PostgreSQL (DB-1).
+ * **Timeouts.** PGlite enforces no server-side timeout, and one that fires hangs the engine, and so the whole process,
+ * synchronously: a nonzero `idle_in_transaction_session_timeout`, `transaction_timeout` or `idle_session_timeout` once
+ * its time passed (`electric-sql/pglite#1058`; checked on 0.5.10, 2026-10-25). The session settings' zero timeouts
+ * keep a configuration file's from reaching the engine. A read with the read option (`timeoutMs`, a module API
+ * request's) sets neither of the two a PostgreSQL read sets: PGlite is a development backend, and its API reads are
+ * not bounded. The option is still checked as on PostgreSQL. [DB-15, Q71, DB-12, DB-1]
  *
- * **Errors (DB-13).** PGlite runs in this process: there is no connection to lose, so no error of this backend is
+ * **Errors.** PGlite runs in this process: there is no connection to lose, so no error of this backend is
  * `connection-lost`, the one retryable code. A statement the server refused (severity `ERROR`) is `database-error`
- * with the server's SQLSTATE and the names it gives, as on PostgreSQL — never its `detail` (which can hold row values)
- * nor the statement's parameters — or `truncate-not-allowed` for the `deterministic_postgresql` component's `TRUNCATE`
- * refusal (DB-14). Anything else — a `FATAL` or `PANIC`, a WebAssembly trap, an exception inside PGlite
- * — means the engine itself failed: `database-error` with `reason: engine-failed`, not retryable, since no retry on the
- * same engine can succeed; every later read and transaction fails the same way, and only opening the data directory
- * again (a process restart, after the runner halts) recovers.
+ * with the server's SQLSTATE and the names it gives, as on PostgreSQL (never its `detail`, which can hold row values,
+ * nor the statement's parameters), or `truncate-not-allowed` for the `deterministic_postgresql` component's `TRUNCATE`
+ * refusal. [DB-13, DB-14]
+ *
+ * Anything else (a `FATAL` or `PANIC`, a WebAssembly trap, an exception inside PGlite) means the engine itself failed:
+ * `database-error` with `reason: engine-failed`, not retryable, since no retry on the same engine can succeed. Every
+ * later read and transaction fails the same way, and only opening the data directory again (a process restart, after
+ * the runner halts) recovers. [DB-13]
  *
  * **Closing.** Once closing starts, nothing more reaches the engine: the jobs still waiting and the running job's later
  * statements fail with `handle-closed`, and a transaction whose `COMMIT` was not yet sent is not committed (the engine
  * discards it when it closes). A statement already sent is waited for, then the engine is closed.
  *
- * **One writer, development only (DB-11, DB-12).** {@link openPglite} refuses without the development opt-in
- * (`development-opt-in-required`: PGlite runs without fsync), then takes the data directory's operating-system lock
- * (`./pglite-lock.ts`; none for `memory://`) before PGlite opens it, so a second process refuses with
- * `writer-lock-held` and never opens the directory; the lock is held for the process's life. {@link openPgliteOn}, the
- * seam for an engine already open, checks neither: whoever opened the engine did.
+ * **One writer, development only.** {@link openPglite} refuses without the development opt-in
+ * (`development-opt-in-required`: PGlite runs without fsync). It then takes the data directory's operating-system lock
+ * (`./pglite-lock.ts`; none for `memory://`) before PGlite opens it, so a second process fails with `writer-lock-held`
+ * and never opens the directory; the lock is held for the process's life. {@link openPgliteOn}, the seam for an engine
+ * already open, checks neither: whoever opened the engine did. [DB-11, DB-12]
  */
 
 import { AsyncLocalStorage, AsyncResource } from "node:async_hooks";
@@ -89,9 +91,9 @@ export const PGLITE_START_PARAMS: readonly string[] = [
 export interface PgliteOptions {
   /** Where the database lives: a directory on a local file system, or `memory://` for one held in memory only. */
   readonly dataDir: string;
-  /** How a read learns its committed height (DB-2). */
+  /** How a read learns its committed height. [DB-2] */
   readonly committedHeight: CommittedHeight;
-  /** The core entry's `developmentOptIn` (CF-4, CF-9): PGlite opens only under it (DB-12). */
+  /** The core entry's `developmentOptIn`: PGlite opens only under it. [CF-4, CF-9, DB-12] */
   readonly developmentOptIn: boolean;
 }
 
@@ -155,7 +157,7 @@ async function openOn(engine: PGlite, committedHeight: CommittedHeight, afterClo
 
 /**
  * What one exclusive job of a PGlite database gives its body ({@link exclusiveJob}): reads of committed data, and the
- * engine itself for a tool that speaks to it directly — `pg_dump` of `@electric-sql/pglite-tools` (BK-1, task 15.1).
+ * engine itself for a tool that speaks to it directly, such as `pg_dump` of `@electric-sql/pglite-tools`. [BK-1]
  */
 export interface ExclusiveJob {
   /**
@@ -175,9 +177,9 @@ export interface ExclusiveJob {
 const exclusiveJobs = new WeakMap<Database, <T>(body: (job: ExclusiveJob) => Promise<T>) => Promise<T>>();
 
 /**
- * Runs `body` as one job of the PGlite database `db`'s queue (DB-4), so no transaction commits while it runs — a
- * backup's manifest and dump see one committed height (BK-1) —; resolves with its result. Returns null for a database
- * that is not a PGlite database the API opened.
+ * Runs `body` as one job of the PGlite database `db`'s queue, so no transaction commits while it runs (a backup's
+ * manifest and dump see one committed height); resolves with its result. Returns null for a database that is not a
+ * PGlite database the API opened. [DB-4, BK-1]
  */
 export function exclusiveJob<T>(db: Database, body: (job: ExclusiveJob) => Promise<T>): Promise<T> | null {
   const run = exclusiveJobs.get(db);
@@ -195,10 +197,10 @@ interface ServerErrorFields {
 }
 
 /**
- * An error PGlite threw for a statement, as an {@link UmbraError} (DB-13): a statement the server refused (severity
- * `ERROR`, with a SQLSTATE) is `database-error` with the SQLSTATE and the constraint, table, schema and column the
- * server named (`truncate-not-allowed` for the component's `TRUNCATE` refusal, DB-14); anything else is the engine
- * failing (`reason: engine-failed`). Neither is retryable.
+ * An error PGlite threw for a statement, as an {@link UmbraError}. A statement the server refused (severity `ERROR`,
+ * with a SQLSTATE) is `database-error` with the SQLSTATE and the constraint, table, schema and column the server named
+ * (`truncate-not-allowed` for the component's `TRUNCATE` refusal). Anything else is the engine failing
+ * (`reason: engine-failed`). Neither is retryable. [DB-13, DB-14]
  */
 export function classifyPgliteError(error: unknown): UmbraError {
   const fields: ServerErrorFields = typeof error === "object" && error !== null ? (error as ServerErrorFields) : {};
@@ -230,7 +232,7 @@ function nestedCall(call: "read" | "transaction"): UmbraError {
   return new UmbraError(
     "database-error",
     `db.${call}() was called inside a running read or transaction of the same PGlite database: that job holds the ` +
-      "database's one queue until it ends, so the call could never run; use the handle the job was given (Q73)",
+      "database's one queue until it ends, so the call could never run; use the handle the job was given",
     { reason: "nested-call", call },
   );
 }
@@ -243,7 +245,7 @@ interface Job {
   readonly outer: Job | undefined;
 }
 
-/** The job the current code runs in, if any (Q73). */
+/** The job the current code runs in, if any. [Q73] */
 const currentJob = new AsyncLocalStorage<Job>();
 
 const keepText = (text: string): string => text;
@@ -258,7 +260,7 @@ interface Outcome {
   readonly command: string | undefined;
 }
 
-/** The queue: jobs one at a time, in the order asked for (DB-4). */
+/** The queue: jobs one at a time, in the order asked for. [DB-4] */
 class JobQueue {
   private readonly waiting: { readonly run: () => Promise<void>; readonly refuse: (error: unknown) => void }[] = [];
   private busy = false;
@@ -305,7 +307,8 @@ class PgliteDatabase implements Database {
   }
 
   read<T>(body: (read: ReadHandle) => Promise<T>, options?: ReadOptions): Promise<T> {
-    // Checked as on PostgreSQL, and then not applied: PGlite enforces neither timeout and hangs once one fires (DB-15).
+    // Checked as on PostgreSQL, and then not applied: PGlite enforces neither timeout and hangs once one fires.
+    // [DB-15]
     try {
       readTimeoutMs(options);
     } catch (error) {
@@ -315,7 +318,8 @@ class PgliteDatabase implements Database {
     if (refused !== undefined) return Promise.reject(refused);
     const outer = currentJob.getStore();
     const job = () => this.runRead(body, outer);
-    // A11's negative control only: a build with this flag lets reads run at once, outside the queue.
+    // For the read-isolation test's negative control only: a build with this flag lets reads run at once, outside the
+    // queue. [A11]
     return READS_BYPASS_QUEUE ? job() : this.queue.add(job);
   }
 
@@ -384,8 +388,8 @@ class PgliteDatabase implements Database {
   }
 
   /**
-   * A read inside the running job (DB-2): `REPEATABLE READ READ ONLY`, then `RESET ALL` and `RESET ROLE`, then the
-   * committed height, then `body`'s statements, then `ROLLBACK`; `ended` is called once `body` settled, before it.
+   * A read inside the running job: `REPEATABLE READ READ ONLY`, then `RESET ALL` and `RESET ROLE`, then the committed
+   * height, then `body`'s statements, then `ROLLBACK`; `ended` is called once `body` settled, before it. [DB-2]
    */
   private async readInJob<T>(body: (read: ReadHandle) => Promise<T>, ended: () => void = () => undefined): Promise<T> {
     let open = true;

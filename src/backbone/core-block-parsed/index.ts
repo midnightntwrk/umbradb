@@ -1,7 +1,7 @@
 /**
- * The core module `core-block-parsed` (CORE-ARCH §4.11; `openspec/changes/core-arch/specs/chain-data/spec.md` CD-5;
- * `design.md` §10; task 11.1): its declaration and table (`./core-block-parsed.ts`), the placement of a block's
- * transactions in their application order (`./placement.ts`) and the parse (`./parser.ts`).
+ * The core module `core-block-parsed`: its declaration and table (`./core-block-parsed.ts`), the placement of a
+ * block's transactions in their application order (`./placement.ts`) and the parse (`./parser.ts`).
+ * [CD-5; CORE-ARCH §4.11; design §10]
  */
 
 export * from "./core-block-parsed.js";

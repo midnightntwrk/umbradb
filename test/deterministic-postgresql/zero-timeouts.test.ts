@@ -19,22 +19,27 @@ import {
 } from "./zero-timeouts-checks.js";
 
 /**
- * The zero timeouts of the `deterministic_postgresql` component (`design.md` §4, "Session settings (Q65) and timeouts
- * (Q71)"; DB-15; task 2.7), on PostgreSQL 18 and on PGlite 0.5.10 — A141's long-work half. Every session of the
- * database API starts with `statement_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`,
- * `transaction_timeout` and `idle_session_timeout` at 0, whatever the database's defaults (PostgreSQL: `ALTER DATABASE`
- * and `ALTER ROLE … IN DATABASE`; PGlite: its configuration file), because the writer, migrations, setup and the read
- * handles given to callbacks run work the runner must finish. Here every one of them defaults to 1 s, and a 5 s
- * migration, setup idle 2 s, a block transaction left idle 5 s while a callback awaits, a callback's read running 5 s
- * (on the block write handle, and on a read handle outside the block) and the writer idle 2 s between blocks all
- * complete, with `SHOW` reporting 0 in each. `idle_session_timeout` is DB-15's fifth (owner decision Q93).
+ * The zero timeouts of the `deterministic_postgresql` component, on PostgreSQL 18 and on PGlite 0.5.10: the long-work
+ * checks. Every session of the database API starts with `statement_timeout`, `lock_timeout`,
+ * `idle_in_transaction_session_timeout`, `transaction_timeout` and `idle_session_timeout` at 0, whatever the database's
+ * defaults (PostgreSQL: `ALTER DATABASE` and `ALTER ROLE … IN DATABASE`; PGlite: its configuration file). This is
+ * because the writer, migrations, setup and the read handles given to callbacks run work the runner must finish.
+ * [A141, DB-15, Q65, Q71; design §4]
+ *
+ * Here every timeout defaults to 1 s, and all of these complete, with `SHOW` reporting 0 in each:
+ * - a 5 s migration;
+ * - setup idle 2 s;
+ * - a block transaction left idle 5 s while a callback awaits;
+ * - a callback's read running 5 s, on the block write handle and on a read handle outside the block;
+ * - the writer idle 2 s between blocks (`idle_session_timeout`, the fifth timeout).
+ * [A141, DB-15, Q93]
  *
  * Before its long work, each test checks that a read and a transaction report the zeros: on PGlite a nonzero
  * `idle_in_transaction_session_timeout`, `transaction_timeout` or `idle_session_timeout` hangs the engine — the whole
- * process, synchronously (design §14; probe 2026-10-25) — so a build without the zeros must fail there, at once, not
- * hang the suite. That such a build fails the long work itself is shown on PostgreSQL by
+ * process, synchronously (probe 2026-10-25) — so a build without the zeros must fail there, at once, not hang the
+ * suite. That such a build fails the long work itself is shown on PostgreSQL by
  * `test/db/zero-timeouts.negative-control.test.ts`, and the PGlite hang, bounded, in a process of its own by
- * `test/db/pglite-timeouts.test.ts`.
+ * `test/db/pglite-timeouts.test.ts`. [design §14]
  *
  * These tests wait seconds on purpose; each has a timeout far above its work (the default 5 s fails under load).
  */

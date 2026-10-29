@@ -1,48 +1,53 @@
 /**
- * The configuration history (`openspec/changes/core-arch/specs/configuration/spec.md` CF-5 to CF-9; `design.md` §7,
- * §10; CORE-ARCH §4.12; decision records Q7, Q32, Q33, Q43): `core_chain.config` holds, per revision, its id, start,
- * stop, version and data fields, so that configuration changes only the future. This module is its pure part — what a
- * revision records, how the configuration is compared with the recorded rows, the version check, and what startup
- * passes on; the table, its reading and its writing are `core-chain`'s (`src/backbone/core-chain/history.ts`).
+ * The configuration history. `core_chain.config` holds, per revision, its id, start, stop, version and data fields, so
+ * that a configuration change affects only the future. This module is its pure part: what a revision records, how the
+ * configuration is compared with the recorded rows, the version check, and what startup passes on. The table, its
+ * reading and its writing belong to `core-chain` (`src/backbone/core-chain/history.ts`).
+ * [CF-5, CF-6, CF-7, CF-8, CF-9, Q7, Q32, Q33, Q43; CORE-ARCH §4.12; design §7, §10]
  *
- * **A revision's row (CF-7, {@link rowOf}):** keyed by `(id, start)`; `stop` as written, null when absent and always
- * for `core`, whose stop is operational (CF-4); `version`, a module's semver or the core version's canonical JSON
- * ({@link canonicalJson}: RFC 8785 on plain data — keys sorted by UTF-16 code units, no whitespace); `data`, the
- * revision's data fields — for a revision of the build's version its parsed settings of kind `data`, defaults applied,
- * for an earlier `versionEntry` its `config` as written, which must equal the recorded data (CF-3) — and `data_hash`,
- * SHA-256 of their canonical encoding (DT-1, {@link dataHash}), independent of property order. A scheduled revision (a
- * `versionEntry` above the cursor) records id, start, stop and version only: `data` and `data_hash` null.
+ * **A revision's row** ({@link rowOf}) is keyed by `(id, start)` and holds [CF-7]:
+ * - `stop`, as written; null when absent, and always null for `core`, whose stop is operational [CF-4];
+ * - `version`: a module's semver, or the core version's canonical JSON ({@link canonicalJson}: RFC 8785 on plain
+ *   data, with keys sorted by UTF-16 code units and no whitespace);
+ * - `data`, the revision's data fields. For a revision of the build's version these are its parsed settings of kind
+ *   `data`, defaults applied. For an earlier `versionEntry` it is its `config` as written, which must equal the
+ *   recorded data [CF-3];
+ * - `data_hash`: SHA-256 of the data's canonical encoding ({@link dataHash}), independent of property order [DT-1].
  *
- * **Effective stops (CF-5):** a later revision of one id supersedes the earlier one from its start, so each revision's
- * last height is the next one's start − 1, or its own stop when that is lower (a gap: the module stops, and starts
- * again at the next revision, which MD-4 then checks). An own stop at or above the next start is superseded, as CF-5
- * reads; the core's own stop is operational and bounds no revision.
+ * A scheduled revision (a `versionEntry` above the cursor) records only id, start, stop and version: `data` and
+ * `data_hash` are null. [CF-3]
  *
- * **The checks ({@link HISTORY_RULES}),** run by {@link checkHistory} on the validated configuration, the cursor (null
- * on a new database), the build's declarations and the recorded rows, each finding every violation of its kind; the
- * first code with findings refuses startup with all of them:
- * 1. `missing-entry` (CF-5): every recorded row that starts at or below the cursor is listed by the configuration, by
- *    `(id, start)`; one that starts above it (any, on a new database) has affected no stored data and may be omitted —
- *    or moved, which omits its `(id, start)` and lists another — and is then deleted ({@link omissionAllowed},
- *    {@link HistoryCheck.deletes}; owner decision Q103, option B);
- * 2. `changes-past` (CF-6): an entry starting at or below the cursor c is recorded, with its version and every data
- *    field as recorded, and — for a module — its stop, unless both the recorded and the new stop are above c (no stop
- *    counts as above every c: {@link stopChangeAllowed}); operational and secret fields are never recorded, so they may
- *    change at any restart, the core's stop among them;
- * 3. `upgrade-required` (CF-8, Q43): for every entry, the revision covering c + 1 (S on a new database) names the
- *    build's version (`buildCoreVersion()` for `core`, the declaration's `version` for a module);
- * 4. `development-opt-in-required` (CF-9's configuration half): a `core` revision with `sweep: "off"` that runs above
- *    the cursor needs the development opt-in, which the process takes from its `core` revision (Q102, resolved A,
- *    `./process.ts`). PGlite's half is `openPglite`'s (`./database.ts`), a development-only module's the graph's
- *    (MD-5).
+ * **Effective stops.** A later revision of one id supersedes the earlier one from its start. So each revision's last
+ * height is the next one's start − 1, or its own stop when that is lower. That leaves a gap: the module stops, and
+ * starts again at the next revision, which the requirement graph then checks. An own stop at or above the next start
+ * is superseded. The core's own stop is operational and bounds no revision. [CF-5, MD-4]
  *
- * Every check runs before any migration: the runner calls {@link checkHistory} after opening the database and reading
- * the cursor and the history, and before `resolveGraph` and `startDatabase` (CF-8: "before any `on-start-db`", A33: no
- * `core_chain.migrations` row added). `core-chain`'s `on-start-db` then runs it again on the rows its own transaction
- * reads, and in that transaction deletes its {@link HistoryCheck.deletes} and records its {@link HistoryCheck.writes}
- * (CF-5: "in the transaction that records the configuration"; CF-6: "in the same transaction as the comparison"): the
- * omitted rows above the cursor; every entry above the cursor that differs from its row or has none, and a module's
- * stop changed above the cursor. Messages name paths, entries, fields, versions and heights — never a setting's value.
+ * **The checks** ({@link HISTORY_RULES}) are run by {@link checkHistory} on the validated configuration, the cursor
+ * (null on a new database), the build's declarations and the recorded rows. Each finds every violation of its kind,
+ * and the first code with findings stops startup with all of them:
+ * 1. `missing-entry`: the configuration lists, by `(id, start)`, every recorded row that starts at or below the
+ *    cursor. A row that starts above it (any row, on a new database) has affected no stored data. It may be omitted,
+ *    or moved (which omits its `(id, start)` and lists another), and is then deleted ({@link omissionAllowed},
+ *    {@link HistoryCheck.deletes}). [CF-5, Q103 B]
+ * 2. `changes-past`: an entry starting at or below the cursor c is recorded, with its version and every data field as
+ *    recorded. For a module, its stop is also as recorded, unless both the recorded and the new stop are above c (no
+ *    stop counts as above every c: {@link stopChangeAllowed}). Operational and secret fields are never recorded, so
+ *    they may change at any restart, the core's stop among them. [CF-6]
+ * 3. `upgrade-required`: for every entry, the revision covering c + 1 (S on a new database) names the build's version
+ *    (`buildCoreVersion()` for `core`, the declaration's `version` for a module). [CF-8, Q43]
+ * 4. `development-opt-in-required`: a `core` revision with `sweep: "off"` that runs above the cursor needs the
+ *    development opt-in, which the process takes from its `core` revision (`./process.ts`). This is the
+ *    configuration's half of the opt-in check: PGlite's half is in `openPglite` (`./database.ts`), and a
+ *    development-only module's in the requirement graph. [CF-9, Q102, MD-5]
+ *
+ * Every check runs before any migration. The runner calls {@link checkHistory} after opening the database and reading
+ * the cursor and the history, and before `resolveGraph` and `startDatabase`, so no `on-start-db` callback runs and no
+ * `core_chain.migrations` row is added. [CF-8, A33]
+ *
+ * `core-chain`'s `on-start-db` then runs the check again on the rows its own transaction reads. In that same
+ * transaction it deletes its {@link HistoryCheck.deletes} and records its {@link HistoryCheck.writes}: the omitted rows
+ * above the cursor; every entry above the cursor that differs from its row or has none; and a module's stop changed
+ * above the cursor. Messages name paths, entries, fields, versions and heights, never a setting's value. [CF-5, CF-6]
  */
 
 import { createHash } from "node:crypto";
@@ -64,7 +69,7 @@ import {
   type PlacedEntry,
 } from "./validate.js";
 
-/** A row of `core_chain.config` (CF-7, `design.md` §10). */
+/** A row of `core_chain.config`. [CF-7; design §10] */
 export interface HistoryRow {
   readonly id: string;
   readonly start: bigint;
@@ -72,7 +77,7 @@ export interface HistoryRow {
   readonly stop: bigint | null;
   /** A module's semver, or the core version's canonical JSON. */
   readonly version: string;
-  /** The data fields; null for a scheduled revision (CF-3). */
+  /** The data fields; null for a scheduled revision. [CF-3] */
   readonly data: PlainObject | null;
   /** SHA-256 of the data fields' canonical encoding; null with `data`. */
   readonly dataHash: Uint8Array | null;
@@ -114,9 +119,9 @@ export interface HistoryContext {
   /** The configuration's revisions, placed against the cursor (`entriesAtCursor`). */
   readonly entries: readonly PlacedEntry[];
   readonly history: readonly HistoryRow[];
-  /** The first height this process would run: cursor + 1, or S on a new database (CF-8). */
+  /** The first height this process would run: cursor + 1, or S on a new database. [CF-8] */
   readonly next: bigint;
-  /** The development opt-in of the process's `core` revision (Q102, resolved A). */
+  /** The development opt-in of the process's `core` revision. [Q102] */
   readonly developmentOptIn: boolean;
   /** The recorded row of `entry`'s `(id, start)`. */
   recorded(entry: CheckedEntry): HistoryRow | undefined;
@@ -124,13 +129,13 @@ export interface HistoryContext {
   listed(row: HistoryRow): boolean;
   /** The version this build carries for `id`: the core version for `core`, the declaration's for a module. */
   build(id: string): string | CoreVersion | undefined;
-  /** `entry`'s effective last height (CF-5), null for none. */
+  /** `entry`'s effective last height, null for none. [CF-5] */
   last(entry: CheckedEntry): bigint | null;
   /** What `entry` records as its data fields ({@link recordedData}). */
   recordedData(entry: CheckedEntry): PlainObject | null;
-  /** CF-6's allowance for a module's stop ({@link stopChangeAllowed}). */
+  /** When a module's stop may change ({@link stopChangeAllowed}). [CF-6] */
   stopChangeAllowed(recorded: bigint | null, configured: bigint | null, cursor: bigint): boolean;
-  /** CF-5's allowance for an omitted row ({@link omissionAllowed}). */
+  /** When a recorded row may be omitted ({@link omissionAllowed}). [CF-5] */
   omissionAllowed(row: HistoryRow, cursor: bigint | null): boolean;
 }
 
@@ -142,8 +147,9 @@ export interface HistoryRule {
 }
 
 /**
- * What {@link checkHistory} may be given besides its input — the rules, CF-6's two allowances and CF-5's, each
- * replaceable so that the negative controls can show what each one decides.
+ * What {@link checkHistory} may be given besides its input: the rules, what a revision records as data, when a stop may
+ * change and when a row may be omitted. Each is replaceable, so that the negative controls can show what each one
+ * decides. [CF-5, CF-6]
  */
 export interface HistoryOptions {
   /** The rules to run; {@link HISTORY_RULES} unless given. */
@@ -163,19 +169,19 @@ export interface HistoryCheck {
   readonly cursor: bigint | null;
   /** The configuration's revisions, placed against the cursor. */
   readonly entries: readonly PlacedEntry[];
-  /** The `core` revision whose operational settings the process uses (Q102, resolved A). */
+  /** The `core` revision whose operational settings the process uses. [Q102] */
   readonly process: CheckedEntry;
   /** Its `developmentOptIn`. */
   readonly developmentOptIn: boolean;
-  /** Every module revision with its effective stop (CF-5): `resolveGraph`'s `entries` ({@link graphInputOf}). */
+  /** Every module revision with its effective stop: `resolveGraph`'s `entries` ({@link graphInputOf}). [CF-5] */
   readonly graphEntries: readonly EntryRange[];
-  /** For DB-10 (`startDatabase`): per module, the versions of its recorded revisions that cover S..cursor. */
+  /** For `startDatabase`: per module, the versions of its recorded revisions that cover S..cursor. [DB-10] */
   readonly committedVersions: ReadonlyMap<string, readonly string[]>;
   /** The rows `core-chain` records, each inserted or replacing the row of its `(id, start)`. */
   readonly writes: readonly HistoryRow[];
   /**
    * The recorded rows `core-chain` deletes, in the transaction that records the writes: those the configuration omits
-   * that start above the cursor (CF-5, Q103 B), as read. None of them has a `(id, start)` among the writes.
+   * that start above the cursor, as read. None of them has a `(id, start)` among the writes. [CF-5, Q103 B]
    */
   readonly deletes: readonly HistoryRow[];
 }
@@ -191,7 +197,7 @@ export function canonicalJson(value: PlainData): string {
   return `{${members.join(",")}}`;
 }
 
-/** `data_hash` (CF-7): SHA-256 of the canonical encoding (DT-1) of a revision's data fields. */
+/** `data_hash`: SHA-256 of the canonical encoding of a revision's data fields. [CF-7, DT-1] */
 export function dataHash(data: PlainObject): Uint8Array {
   return new Uint8Array(createHash("sha256").update(encodeCanonical(data)).digest());
 }
@@ -202,19 +208,19 @@ export function versionText(version: string | CoreVersion): string {
 }
 
 /**
- * What a revision records as its data fields (CF-3, CF-4): for the build's version its settings of kind `data`, every
- * default applied; otherwise its `config` as written (an earlier revision's recorded data), or null for a scheduled
- * one.
+ * What a revision records as its data fields. For the build's version: its settings of kind `data`, every default
+ * applied. Otherwise its `config` as written (an earlier revision's recorded data), or null for a scheduled one.
+ * [CF-3, CF-4]
  */
 export function recordedData(entry: CheckedEntry): PlainObject | null {
   return entry.buildVersion ? entry.data : entry.settings;
 }
 
-/** The stop a revision has of its own: a module's as written, none for `core` (its stop is operational, CF-4). */
+/** The stop a revision has of its own: a module's as written, none for `core` (its stop is operational). [CF-4] */
 const ownStop = (entry: CheckedEntry): bigint | null =>
   entry.id === CORE_ENTRY_ID || entry.stop === null ? null : BigInt(entry.stop);
 
-/** The row of `core_chain.config` that `entry` records (CF-7). */
+/** The row of `core_chain.config` that `entry` records. [CF-7] */
 export function rowOf(
   entry: CheckedEntry,
   dataOf: (entry: CheckedEntry) => PlainObject | null = recordedData,
@@ -239,7 +245,7 @@ interface Span {
 
 const lower = (a: bigint | null, b: bigint | null): bigint | null => (a === null ? b : b === null || a < b ? a : b);
 
-/** Each item's last height (CF-5): its own stop, or the next start − 1 of its id when that is lower. */
+/** Each item's last height: its own stop, or the next start − 1 of its id when that is lower. [CF-5] */
 function lastHeights<T>(items: readonly T[], span: (item: T) => Span): Map<T, bigint | null> {
   const byId = new Map<string, { readonly item: T; readonly span: Span }[]>();
   for (const item of items) {
@@ -260,9 +266,9 @@ function lastHeights<T>(items: readonly T[], span: (item: T) => Span): Map<T, bi
 const spanOf = (entry: CheckedEntry): Span => ({ id: entry.id, start: BigInt(entry.start), stop: ownStop(entry) });
 
 /**
- * `resolveGraph`'s `entries` (3.2's note (a)): every module revision — never the core's — with its effective stop, in
- * the configuration's order. A scheduled revision is among them, judged by this build's declaration, the only one it
- * has: the build stops before it starts (RN-12), and the build carrying its version checks it again.
+ * `resolveGraph`'s `entries`: every module revision (never the core's) with its effective stop, in the configuration's
+ * order. A scheduled revision is among them, judged by this build's declaration, the only one it has. The build stops
+ * before that revision starts, and the build carrying its version checks it again. [RN-12]
  */
 export function graphEntries(entries: readonly CheckedEntry[]): EntryRange[] {
   const last = lastHeights(entries, spanOf);
@@ -274,7 +280,7 @@ export function graphEntries(entries: readonly CheckedEntry[]): EntryRange[] {
 const covers = (start: bigint, last: bigint | null, height: bigint): boolean =>
   start <= height && (last === null || height <= last);
 
-/** The revision of `id` covering `height` (CF-5: a later revision supersedes from its start), or undefined. */
+/** The revision of `id` covering `height` (a later revision supersedes from its start), or undefined. [CF-5] */
 export function revisionAt<E extends CheckedEntry>(entries: readonly E[], id: string, height: bigint): E | undefined {
   const own = entries.filter((entry) => entry.id === id);
   const last = lastHeights(own, spanOf);
@@ -282,9 +288,9 @@ export function revisionAt<E extends CheckedEntry>(entries: readonly E[], id: st
 }
 
 /**
- * DB-10's input (`startDatabase`'s `committedVersions`, task 2.4's note (f)): per module id, the versions of its
- * recorded revisions whose range — start to its last height (CF-5) — meets the committed heights S..cursor, in start
- * order; none on a new database. The `core` entry's versions are not module versions.
+ * `startDatabase`'s `committedVersions`: per module id, the versions of its recorded revisions whose range (start to
+ * last height) meets the committed heights S..cursor, in start order; none on a new database. The `core` entry's
+ * versions are not module versions. [DB-10, CF-5]
  */
 export function committedVersions(
   history: readonly HistoryRow[],
@@ -307,22 +313,26 @@ export function committedVersions(
   return versions;
 }
 
-/** A row of a public `core_chain.config` as a private process reads it: its entry, heights and `table` items (PP-13). */
+/**
+ * A row of a public `core_chain.config` as a private process reads it: its entry, heights and `table` items. [PP-13]
+ */
 export interface ProvidesRow {
   readonly id: string;
   readonly start: bigint;
   /** The stop as written; null when absent, and always for `core`. */
   readonly stop: bigint | null;
-  /** The `table` items the revision provides (`core_chain.config.provides`, task 14.1a): the backbone's for `core`. */
+  /** The `table` items the revision provides (`core_chain.config.provides`): the backbone's for `core`. */
   readonly provides: readonly string[];
 }
 
 /**
- * The public core's `table` items with their heights (PP-13, task 14.1a; `design.md` §8), from the rows of its
- * `core_chain.config`: each item of a row, provided by the row's entry from its start to its last height by CF-5 — its
- * own stop, or the start − 1 of the entry's next revision when that is lower, as {@link graphEntries} reckons it (the
- * core's stop bounds nothing). In the order of the rows' keys (ids by their UTF-8 bytes, then starts), each row's items
- * in its order. Refuses nothing: the graph judges the heights.
+ * The public core's `table` items with their heights, from the rows of its `core_chain.config`. Each item of a row is
+ * provided by the row's entry from its start to its last height: its own stop, or the start − 1 of the entry's next
+ * revision when that is lower, as {@link graphEntries} reckons it (the core's stop bounds nothing).
+ * [PP-13, CF-5; design §8]
+ *
+ * The items come in the order of the rows' keys (ids by their UTF-8 bytes, then starts), each row's items in its order.
+ * It rejects nothing: the graph judges the heights.
  */
 export function publicItemRanges(rows: readonly ProvidesRow[]): PublicItem[] {
   const last = lastHeights(rows, (row) => row);
@@ -334,7 +344,9 @@ export function publicItemRanges(rows: readonly ProvidesRow[]): PublicItem[] {
     );
 }
 
-/** A row of `core_chain.config` as the configuration hash reads it (RN-16, PP-14; `design.md` §8): no `data`, its hash. */
+/**
+ * A row of `core_chain.config` as the configuration hash reads it: no `data`, only its hash. [RN-16, PP-14; design §8]
+ */
 export interface ConfigHashRow {
   readonly id: string;
   readonly start: bigint;
@@ -343,7 +355,7 @@ export interface ConfigHashRow {
   readonly version: string;
   /** SHA-256 of the data fields' canonical encoding; null for a scheduled revision. */
   readonly dataHash: Uint8Array | null;
-  /** The `table` items the revision provides (PP-13). */
+  /** The `table` items the revision provides. [PP-13] */
   readonly provides: readonly string[];
 }
 
@@ -351,12 +363,13 @@ export interface ConfigHashRow {
 const CONFIG_HASH_TAG = Object.freeze(["umbradb-config-hash", 1] as const);
 
 /**
- * A process's configuration hash (RN-16, PP-14, owner decision Q147; task 14.1b; `design.md` §8): SHA-256 of the
- * canonical encoding (DT-1) of `["umbradb-config-hash", 1, rows]`, each row of its `core_chain.config` as
- * `[id, start, stop, version, data_hash, provides]`, the rows by id (UTF-8 bytes) and start — so in any order given —,
- * written `0x` and 64 lowercase hex digits. Every data field of every revision counts (through `data_hash`, CF-7), its
- * heights and version and the `table` items it provides; nothing operational or secret, which the history never
- * records (CF-4).
+ * A process's configuration hash: SHA-256 of the canonical encoding of `["umbradb-config-hash", 1, rows]`, written as
+ * `0x` and 64 lowercase hex digits. Each row of its `core_chain.config` is `[id, start, stop, version, data_hash,
+ * provides]`, and the rows are sorted by id (UTF-8 bytes) and start, so they may be given in any order.
+ * [RN-16, PP-14, Q147, DT-1; design §8]
+ *
+ * Every data field of every revision counts (through `data_hash`), as do its heights, its version and the `table`
+ * items it provides. Nothing operational or secret counts, since the history never records it. [CF-4, CF-7]
  */
 export function configHashOf(rows: readonly ConfigHashRow[]): string {
   const ordered = [...rows].sort((a, b) => utf8Order(a.id, b.id) || (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
@@ -368,8 +381,8 @@ export function configHashOf(rows: readonly ConfigHashRow[]): string {
 }
 
 /**
- * CF-6's allowance for a module's stop: a changed stop is accepted when both the recorded and the new one are above the
- * cursor — no stop counts as above every cursor — since then the change affects only heights not yet processed.
+ * When a module's stop may change: a changed stop is accepted when both the recorded and the new one are above the
+ * cursor (no stop counts as above every cursor), since then the change affects only heights not yet processed. [CF-6]
  */
 export function stopChangeAllowed(recorded: bigint | null, configured: bigint | null, cursor: bigint): boolean {
   const above = (stop: bigint | null) => stop === null || stop > cursor;
@@ -377,9 +390,8 @@ export function stopChangeAllowed(recorded: bigint | null, configured: bigint | 
 }
 
 /**
- * CF-5's allowance for an omitted row (owner decision Q103, option B): a recorded row the configuration no longer lists
- * is deleted, not refused, when it starts above the cursor — or nothing has committed (a null cursor) —, since no
- * stored data was processed with it.
+ * When a recorded row may be omitted: a row the configuration no longer lists is deleted, not rejected, when it starts
+ * above the cursor or nothing has committed (a null cursor), since no stored data was processed with it. [CF-5, Q103 B]
  */
 export function omissionAllowed(row: HistoryRow, cursor: bigint | null): boolean {
   return cursor === null || row.start > cursor;
@@ -454,8 +466,8 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
             `the history records ${row.id} from ${row.start} (version ${row.version}), which the configuration does ` +
               "not list: an entry is identified by its id and start, and the configuration lists every entry the " +
               `history records that starts at or below the cursor ${context.cursor}, since the heights up to the ` +
-              "cursor were processed with it (CF-5; one that starts above the cursor may be omitted or moved, " +
-              `decision record Q103); ${hint}`,
+              "cursor were processed with it (one that starts above the cursor may be omitted or moved); " +
+              `${hint}`,
             { id: row.id, start: Number(row.start), version: row.version },
           );
         }),
@@ -474,7 +486,7 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
             entry,
             null,
             `${atOrBelow(context)}, and the history records no such entry: the heights up to the cursor were ` +
-              "processed without it, and the past cannot change (CF-6); start it above the cursor, or resync into a " +
+              "processed without it, and the past cannot change; start it above the cursor, or resync into a " +
               "new database",
           ),
         ),
@@ -494,7 +506,7 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
             entry,
             "version",
             `${atOrBelow(context)} and names version ${configured}, where the history records ${row.version}: the ` +
-              "heights up to the cursor were processed by that version, and the past cannot change (CF-6); write the " +
+              "heights up to the cursor were processed by that version, and the past cannot change; write the " +
               "revision as recorded — versionEntry({ id, start, version, config }) with its recorded version and " +
               "data — and add the new version as a revision from above the cursor, or resync into a new database",
             { recorded: row.version, configured },
@@ -519,7 +531,7 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
               null,
               `${atOrBelow(context)}, and the history records no data for it (it was recorded as a scheduled ` +
                 "revision, and no build recorded its settings before its start): its data cannot be compared, so the " +
-                "past cannot be shown unchanged (CF-3, CF-6); resync into a new database",
+                "past cannot be shown unchanged; resync into a new database",
             ),
           ];
         }
@@ -541,7 +553,7 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
               entry,
               field,
               `${atOrBelow(context)}, and ${how}: the heights up to the cursor were processed with the recorded ` +
-                "data, and the past cannot change (CF-6); write it as recorded, and put the change in a new revision " +
+                "data, and the past cannot change; write it as recorded, and put the change in a new revision " +
                 "from above the cursor, or resync into a new database",
             );
           });
@@ -565,7 +577,7 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
             "stop",
             `${atOrBelow(context)}, and its stop changes from ${stopText(row.stop)} to ${stopText(configured)}: a ` +
               "module's stop may change only while both the recorded and the new stop are above the cursor, since " +
-              "the heights up to the cursor were processed with the recorded one (CF-6); write the recorded stop",
+              "the heights up to the cursor were processed with the recorded one; write the recorded stop",
             { recorded: asNumber(row.stop), configured: asNumber(configured) },
           ),
         ];
@@ -590,7 +602,7 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
             entry,
             "version",
             `the revision covering ${height} names version ${versionText(entry.version)}, and this build carries ` +
-              `${versionText(build)}: a build runs only the versions it carries (CF-8, decision record Q43); run the ` +
+              `${versionText(build)}: a build runs only the versions it carries; run the ` +
               `build that carries ${versionText(entry.version)} until it stops where the revision ends, or schedule ` +
               "this build's version as a revision from a height above the cursor",
             { id: entry.id, start: entry.start, needed: entry.version, build, height: context.next },
@@ -615,8 +627,8 @@ export const HISTORY_RULES: readonly HistoryRule[] = Object.freeze([
             entry,
             "sweep",
             'sweep: "off" is a development-only feature, and the process\'s core revision does not set ' +
-              "developmentOptIn: true: development-only features run only under the development opt-in (CF-9); set " +
-              "developmentOptIn: true in the latest core revision of this build (decision record Q102) for " +
+              "developmentOptIn: true: development-only features run only under the development opt-in; set " +
+              "developmentOptIn: true in the latest core revision of this build for " +
               "development, or keep the sweep on",
           ),
         ];
@@ -685,10 +697,10 @@ export function historyFindings(input: HistoryInput, options: HistoryOptions = {
 function refusal(code: HistoryCode, findings: readonly HistoryFinding[], context: HistoryContext): UmbraError {
   const where = context.file === null ? "the configuration" : `the configuration ${context.file}`;
   const what = {
-    "missing-entry": "omits entries the history records at or below the cursor (CF-5)",
-    "changes-past": "changes the past (CF-6)",
-    "upgrade-required": "needs another build (CF-8)",
-    "development-opt-in-required": "uses a development-only feature without the development opt-in (CF-9)",
+    "missing-entry": "omits entries the history records at or below the cursor",
+    "changes-past": "changes the past",
+    "upgrade-required": "needs another build",
+    "development-opt-in-required": "uses a development-only feature without the development opt-in",
   }[code];
   const base = { file: context.file, cursor: context.cursor, findings: Object.freeze([...findings]) };
   const extra =
@@ -732,7 +744,7 @@ export function checkHistory(input: HistoryInput, options: HistoryOptions = {}):
     }
     return recorded !== undefined && sameRow(recorded, row) ? [] : [row];
   });
-  // Every omitted row the listed rule did not refuse (CF-5, Q103 B).
+  // Every omitted row the `listed` rule did not reject. [CF-5, Q103 B]
   const deletes = context.history.filter((row) => !context.listed(row) && context.omissionAllowed(row, context.cursor));
   const process = processCoreEntry(input.config);
   return Object.freeze({
@@ -754,7 +766,7 @@ function sameRow(a: HistoryRow, b: HistoryRow): boolean {
   return a.stop === b.stop && a.version === b.version && data;
 }
 
-/** `resolveGraph`'s input from a history check and the build's declarations (3.2's note (a), 3.2a's (a)). */
+/** `resolveGraph`'s input from a history check and the build's declarations. */
 export function graphInputOf(check: HistoryCheck, declarations: DeclarationSet<ModuleDeclaration>): GraphInput {
   return {
     declarations,

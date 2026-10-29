@@ -1,11 +1,11 @@
 /**
- * What a browser build's configuration module gives (`openspec/changes/core-arch/specs/browser/spec.md` BR-1, BR-2;
- * `specs/configuration/spec.md` CF-1; `design.md` §9.2; task 16.1). The page bundles its configuration — as
- * `umbradb run` takes the configuration file, and the file's `modules` export as its user modules (Q106 B) — but some
- * of it is known only when the page runs: the node it was pointed at, where its database lives, and S. So the module's
- * default export makes each process's configuration data from the run ({@link BrowserRun}), together with the user
- * modules its build carries; the process worker hands the data to the runner, which holds it to CF-1's plain data and
- * validates it as it would a file.
+ * What a browser build's configuration module gives. The page bundles its configuration, just as `umbradb run` takes
+ * the configuration file and the file's `modules` export as its user modules. But some of it is known only when the
+ * page runs: the node it was pointed at, where its database lives, and S. [BR-1, BR-2, Q106 B; design §9.2]
+ *
+ * So the module's default export makes each process's configuration data from the run ({@link BrowserRun}), together
+ * with the user modules its build carries. The process worker hands the data to the runner, which requires it to be
+ * plain data and validates it as it would a file. [CF-1]
  */
 
 import type { PgliteMemoryParts, PglitePathParts } from "../../src/config/database-parts.js";
@@ -17,8 +17,8 @@ export interface BrowserRun {
   /** Where the database lives: `memory`, or a name in the origin's private file system (OPFS). */
   readonly storage: string;
   /**
-   * S: the node's finalized head when this database was created (BR-2), kept by the page for an OPFS database, or the
-   * restored backup's (BK-4).
+   * S: the node's finalized head when this database was created, kept by the page for an OPFS database, or the
+   * restored backup's S. [BR-2, BK-4]
    */
   readonly start: number;
   /** Every parameter of the page's address, as text (a configuration may read its own). */
@@ -41,13 +41,13 @@ export interface PrivateInstance {
 export interface BrowserConfiguration {
   /** The core (public) process's. */
   core(run: BrowserRun): ProcessConfiguration;
-  /** The private instances of `run`, each run in a worker of its own beside the core (BR-1); none unless given. */
+  /** The private instances of `run`, each run in a worker of its own beside the core; none unless given. [BR-1] */
   instances?(run: BrowserRun): readonly PrivateInstance[];
 }
 
 /**
- * The `database` setting of `storage` for the process `name` (`core`, or an instance's id), as parts (CF-4, owner
- * decision Q167 A): PGlite in memory, or a `path` that names a database in the origin's private file system.
+ * The `database` setting of `storage` for the process `name` (`core`, or an instance's id), as parts: PGlite in memory,
+ * or a `path` that names a database in the origin's private file system. [CF-4, Q167 A]
  */
 export function databaseOf(storage: string, name: string): PgliteMemoryParts | PglitePathParts {
   return storage === "memory"
@@ -55,7 +55,7 @@ export function databaseOf(storage: string, name: string): PgliteMemoryParts | P
     : { kind: "pglite", path: `${storage}${name === "core" ? "" : `-${name}`}` };
 }
 
-/** `data` with the development opt-in set on every `core` entry (BR-1: the browser build always sets it). */
+/** `data` with the development opt-in set on every `core` entry, since the browser build always sets it. [BR-1] */
 export function withDevelopmentOptIn(data: unknown): unknown {
   if (data === null || typeof data !== "object" || !Array.isArray((data as { entries?: unknown }).entries)) return data;
   const entries = (data as { entries: unknown[] }).entries.map((entry) => {

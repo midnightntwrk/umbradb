@@ -12,12 +12,14 @@ import type { ConsistentRead } from "../../src/determinism/module-tables.js";
 import { askedLater, BACKENDS, settlesWithin, TEST_CURSOR, TEST_SCHEMA } from "./backends.js";
 
 /**
- * DB-2's read handles and DB-5's writer transactions, on every backend of `backends.ts`: a read handle sees one
- * committed height and reports it; a transaction commits when its body resolves and rolls back when it throws; a handle
- * used after its read or transaction ended is refused (`handle-closed`) instead of reaching the database.
+ * Read handles and writer transactions, on every backend of `backends.ts`:
+ * - a read handle sees one committed height and reports it; [DB-2]
+ * - a transaction commits when its body resolves and rolls back when it throws; [DB-5]
+ * - a handle used after its read or transaction ended is refused (`handle-closed`) instead of reaching the database.
+ *   [DB-2, DB-5]
  *
- * A commit asked for while a read is open lands between the read's statements on PostgreSQL (DB-5); on PGlite it waits
- * until the read ends (DB-4), which the same tests check there instead of waiting for it inside the read.
+ * A commit asked for while a read is open lands between the read's statements on PostgreSQL. On PGlite it waits until
+ * the read ends, which the same tests check there instead of waiting for it inside the read. [DB-4, DB-5]
  */
 
 async function failure(run: () => Promise<unknown>): Promise<UmbraError> {

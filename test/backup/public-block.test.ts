@@ -5,10 +5,9 @@ import { checkPublicBlock, type PublicSide } from "../../src/backup/restore.js";
 import { UmbraError } from "../../src/db/errors.js";
 
 /**
- * Task 17.5b (the mutation pass task 15.2a deferred): BK-3's step 6 against a private process's public database
- * (`checkPublicBlock`, PP-12): the public head must be at or above the backup's height and its block there the backup's
- * — refused `backup-block-not-finalized` with no head, a head below, no block there or another one, each message and
- * its details.
+ * The restore's block check against a private process's public database (`checkPublicBlock`): the public head must be
+ * at or above the backup's height and its block there the backup's — refused `backup-block-not-finalized` with no head,
+ * a head below, no block there or another one, each message and its details. [BK-3, PP-12]
  */
 
 const hash = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
@@ -38,7 +37,7 @@ describe("checkPublicBlock (task 17.5b)", () => {
     expect(none.code).toBe("backup-block-not-finalized");
     expect(none.message).toBe(
       "the public database's committed head is none, below the backup's height 10: its core has not committed the " +
-        "backup's block there yet (BK-3, PP-12); restore once it has",
+        "backup's block there yet; restore once it has",
     );
     expect(none.details).toEqual({ height: "10", head: null });
     const below = refusal(() => checkPublicBlock(side(block(9n, 9), null), manifest));
@@ -51,7 +50,7 @@ describe("checkPublicBlock (task 17.5b)", () => {
     expect(none.code).toBe("backup-block-not-finalized");
     expect(none.message).toBe(
       `the public database's committed block at 10 has the hash none, and the backup's ${hex(hash(10))}: its core ` +
-        "committed another block there (BK-3, PP-12)",
+        "committed another block there",
     );
     expect(none.details).toEqual({ height: "10", public: null, backup: hex(hash(10)) });
     const other = refusal(() => checkPublicBlock(side(block(11n, 11), block(10n, 7)), manifest));

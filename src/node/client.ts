@@ -1,47 +1,56 @@
 /**
- * The node client (`openspec/changes/core-arch/design.md` §1 `src/node/`, §3; specs/ingest IN-8, IN-9, IN-10; task
- * 10.1): JSON-RPC 2.0 over one WebSocket to the Midnight node, refactored out of 0.9.5's
- * `chain-archive-sync/node-rpc-client.ts` (one HTTP POST per call, no subscriptions, no retry). It is the `node-client`
- * item `core-chain` provides (task 10.2), and `core-block-fetch` (task 10.3) reads the chain through it; `core-chain`'s
+ * The node client: JSON-RPC 2.0 over one WebSocket to the Midnight node. It is refactored out of 0.9.5's
+ * `chain-archive-sync/node-rpc-client.ts`, which made one HTTP POST per call, with no subscriptions and no retry. It is
+ * the `node-client` item that `core-chain` provides, and `core-block-fetch` reads the chain through it. `core-chain`'s
  * startup checks ask the block source, which the node-backed source answers from the node.
+ * [IN-8, IN-9, IN-10; design §1, §3]
  *
- * **Calls (IN-8).** One method per IN-8 call, with its parameters typed and its answer read into typed values
- * (`./decode.ts`); a block is always named by its hash or its height, never left to the node's best block, so every
- * answer is about a block the caller chose. {@link NodeClient.call} sends a raw call and refuses any method outside
- * IN-8 before it is sent. Each call is sent once per try, with a fresh id; an answer is paired with its call by id, in
- * whatever order answers come; an answer whose call already ended (timed out, aborted) is dropped.
+ * **Calls.** There is one method per allowed node call (`./methods.ts`), with its parameters typed and its answer read
+ * into typed values (`./decode.ts`). A block is always named by its hash or its height, never left to the node's best
+ * block, so every answer is about a block the caller chose. {@link NodeClient.call} sends a raw call, and refuses any
+ * method outside the allowed calls before it is sent. Each call is sent once per try, with a fresh id. An answer is
+ * paired with its call by id, in whatever order answers come; an answer whose call already ended (timed out, aborted)
+ * is dropped. [IN-8]
  *
  * **Subscriptions.** {@link NodeClient.subscribeNewHeads} and {@link NodeClient.subscribeFinalizedHeads} deliver each
- * notification's header, in the order the node sends them, from the subscription's answer on (a notification read in
- * the same batch as the answer included). A cancelled subscription is dropped on the client's side and never
- * re-established; no `chain_unsubscribe…` call is sent, as IN-8 has none, and the node ends the subscription with the
- * connection. After a reconnect every live subscription is made again and its subscriber told (`restarted`) before
- * its next header: notifications may have been lost meanwhile, so the runner reads the finalized head again (design
- * §3; IN-4 treats the finalized subscription as a bound that may jump, repeat or be lost).
+ * notification's header, in the order the node sends them, from the subscription's answer on (including a
+ * notification read in the same batch as the answer). A cancelled subscription is dropped on the client's side and
+ * never re-established. No `chain_unsubscribe…` call is sent, since it is not an allowed call; the node ends the
+ * subscription with the connection. After a reconnect, every live subscription is made again and its subscriber is
+ * told (`restarted`) before its next header. Notifications may have been lost meanwhile, so the runner reads the
+ * finalized head again: the finalized subscription is only a bound, which may jump, repeat or be lost.
+ * [IN-4, IN-8; design §3]
  *
- * **One connection, reconnected (IN-10).** The client connects at its first call or subscription and from then on
- * keeps one connection until {@link NodeClient.close}. When it fails or ends, the client connects again after
- * {@link backoffDelay} of the failed connections since the node last answered on one — 1 s, 2 s, 4 s, … up to
- * `backoffCeilingMs` (30 s by default), without limit; a connection the node accepts and drops before answering does
- * not reset the count. A connection attempt not open within the call timeout is given up and counts as failed. Its
- * state, as `/status` shows it ({@link NodeClient.connection}; AE-5, task 8.3a): `connecting` before the first
- * connection opened (the client unused, or its first attempt pending), `connected` while one is open, `retrying` from a
- * failed or lost connection until the next one opens (its back-off and each attempt), `closed` once closed;
- * `onConnectionChange` reports each change.
+ * **One connection, reconnected.** The client connects at its first call or subscription, and from then on keeps one
+ * connection until {@link NodeClient.close}. When the connection fails or ends, the client connects again after
+ * {@link backoffDelay} of the failed connections since the node last answered on one: 1 s, 2 s, 4 s, … up to
+ * `backoffCeilingMs` (30 s by default), without limit. A connection the node accepts and drops before answering does
+ * not reset the count. A connection attempt not open within the call timeout is given up and counts as failed.
+ * [IN-10]
  *
- * **Timeouts and retries (IN-10).** Every try of a call ends after its timeout (`callTimeoutMs`, 30 s by default, or
- * the call's `timeoutMs`); the connection stays (the transport's heartbeat finds a dead one, `./ws-socket.ts`). A call
- * retries by default: a retryable failure (`node-unreachable`: a lost or refused connection, a timeout, HTTP 429 or a
- * 5xx status, the node's rate limit) waits {@link backoffDelay} of its own tries and is sent again — on the next
- * connection if this one is gone — without limit, until it is answered, fails otherwise, is aborted by its `signal`,
- * or the client is closed. `retry: false` makes the first failure final, and fails at once while the client has no
- * connection: IN-10's rule for a queued best block, which is dropped instead. A failure that is not retryable
+ * The connection's state, as `/status` shows it ({@link NodeClient.connection}), is one of:
+ * - `connecting` before the first connection opened (the client is unused, or its first attempt is pending);
+ * - `connected` while one is open;
+ * - `retrying` from a failed or lost connection until the next one opens (its back-off and each attempt);
+ * - `closed` once closed.
+ *
+ * `onConnectionChange` reports each change. [AE-5]
+ *
+ * **Timeouts and retries.** Every try of a call ends after its timeout (`callTimeoutMs`, 30 s by default, or the
+ * call's `timeoutMs`). The connection stays open; the transport's heartbeat finds a dead one (`./ws-socket.ts`). A call
+ * retries by default. A retryable failure (`node-unreachable`: a lost or refused connection, a timeout, HTTP 429 or a
+ * 5xx status, the node's rate limit) waits {@link backoffDelay} of its own tries and is sent again, on the next
+ * connection if this one is gone. This repeats without limit, until the call is answered, fails otherwise, is aborted
+ * by its `signal`, or the client is closed. [IN-10]
+ *
+ * `retry: false` makes the first failure final, and fails at once while the client has no connection. That is the
+ * rule for a queued best block, which is dropped instead of retried. A failure that is not retryable
  * (`node-requirement`, `node-error`) is never retried. The `node-retrying` condition is {@link NodeClient.retrying}:
- * true while the connection is being re-established or any call waits for its next try; `onRetryingChange` reports
- * each change, `onRetry` each retry scheduled.
+ * true while the connection is being re-established or any call waits for its next try. `onRetryingChange` reports
+ * each change, and `onRetry` each retry scheduled. [IN-10]
  *
- * **Errors** are `UmbraError`s (`./errors.ts`) whose codes say what IN-9 and IN-10 do with them; none names the
- * node's URL, a `secret` field (CF-4).
+ * **Errors** are `UmbraError`s (`./errors.ts`) whose codes say whether the failure is retried or halts the process.
+ * None names the node's URL, which is a `secret` field. [IN-9, IN-10, CF-4]
  */
 
 import { UmbraError } from "../db/errors.js";
@@ -82,16 +91,16 @@ import { connectWebSocket } from "./ws-socket.js";
 /** The time a call, or a connection attempt, waits for the node's answer by default. */
 export const DEFAULT_CALL_TIMEOUT_MS = 30_000;
 
-/** `backoffCeilingMs`'s default (CF-4). */
+/** `backoffCeilingMs`'s default. [CF-4] */
 export const DEFAULT_BACKOFF_CEILING_MS = 30_000;
 
-/** The node connection's state, AE-5's four (see the module comment and {@link NodeClient.connection}). */
+/** The node connection's state, one of four (see the module comment and {@link NodeClient.connection}). [AE-5] */
 export type NodeConnection = "connecting" | "connected" | "retrying" | "closed";
 
 export interface NodeClientOptions {
   /** The node's WebSocket URL (`ws://` or `wss://`), the `core` entry's `node` field: a secret, never shown. */
   readonly url: string;
-  /** The longest wait between retries (CF-4's `backoffCeilingMs`); 30 000 by default. */
+  /** The longest wait between retries (`backoffCeilingMs`); 30 000 by default. [CF-4] */
   readonly backoffCeilingMs?: number;
   /** How long a call, or a connection attempt, waits for an answer; 30 000 by default. */
   readonly callTimeoutMs?: number;
@@ -109,7 +118,7 @@ export interface NodeClientOptions {
 
 /** One call's options. */
 export interface NodeCallOptions {
-  /** Retry a retryable failure with back-off, without limit (IN-10); true by default. */
+  /** Retry a retryable failure with back-off, without limit; true by default. [IN-10] */
   readonly retry?: boolean;
   /** This call's timeout per try, in milliseconds; the client's `callTimeoutMs` by default. */
   readonly timeoutMs?: number;
@@ -144,7 +153,7 @@ export interface HeadSubscriber {
 
 /** A live subscription. */
 export interface NodeSubscription {
-  /** Stops delivering; nothing is sent to the node (IN-8). */
+  /** Stops delivering; nothing is sent to the node. [IN-8] */
   cancel(): void;
 }
 
@@ -231,14 +240,16 @@ export class NodeClient {
     this.#onConnectionChange = options.onConnectionChange;
   }
 
-  /** IN-10's `node-retrying`: the connection is being re-established, or a call waits for its next try. */
+  /**
+   * The `node-retrying` condition: the connection is being re-established, or a call waits for its next try. [IN-10]
+   */
   get retrying(): boolean {
     return this.#reconnecting || this.#retryingCalls > 0;
   }
 
   /**
-   * The connection's state (AE-5): `closed` once closed; `connected` while a connection is open; `retrying` from a
-   * failed or lost connection until the next one opens; `connecting` before the first one opened.
+   * The connection's state: `closed` once closed; `connected` while a connection is open; `retrying` from a failed or
+   * lost connection until the next one opens; `connecting` before the first one opened. [AE-5]
    */
   get connection(): NodeConnection {
     if (this.#state === "closed") return "closed";
@@ -300,7 +311,8 @@ export class NodeClient {
 
   /**
    * `state_getKeysPaged(prefix, count, startKey, at)`: up to `count` keys under `prefix` in the state of the block
-   * `at`, in key order, after `startKey` (from the first when null). IN-8 allows it for block 0's registrations only.
+   * `at`, in key order, after `startKey` (from the first when null). The
+   * indexer calls it for block 0's registrations only. [IN-8]
    */
   async storageKeys(
     prefix: Uint8Array,
@@ -319,29 +331,32 @@ export class NodeClient {
     return keysAnswer(method, await this.call(method, params, options));
   }
 
-  /** `midnight_ledgerStateRoot(at)`: the ledger state root after the block `at` (LG-15). */
+  /** `midnight_ledgerStateRoot(at)`: the ledger state root after the block `at`. [LG-15] */
   async ledgerStateRoot(at: Uint8Array, options?: NodeCallOptions): Promise<Uint8Array> {
     const method = "midnight_ledgerStateRoot";
     return byteArrayAnswer(method, await this.call(method, [hashParameter(method, "at", at)], options));
   }
 
-  /** `system_properties`: the chain's properties (`genesis_state` among them, IN-7), as the node gives them. */
+  /** `system_properties`: the chain's properties (`genesis_state` among them), as the node gives them. [IN-7] */
   async systemProperties(options?: NodeCallOptions): Promise<Readonly<Record<string, unknown>>> {
     const method = "system_properties";
     return objectAnswer(method, await this.call(method, [], options));
   }
 
-  /** `chain_subscribeNewHeads`: each new best block's header (IN-6). */
+  /** `chain_subscribeNewHeads`: each new best block's header. [IN-6] */
   subscribeNewHeads(subscriber: HeadSubscriber): Promise<NodeSubscription> {
     return this.#subscribe("chain_subscribeNewHeads", subscriber);
   }
 
-  /** `chain_subscribeFinalizedHeads`: each finalized head's header, a bound that may jump, repeat or be lost (IN-4). */
+  /** `chain_subscribeFinalizedHeads`: each finalized head's header, a bound that may jump, repeat or be lost. [IN-4] */
   subscribeFinalizedHeads(subscriber: HeadSubscriber): Promise<NodeSubscription> {
     return this.#subscribe("chain_subscribeFinalizedHeads", subscriber);
   }
 
-  /** Sends `method` with `params` and resolves with the node's raw `result`; refuses a method outside IN-8. */
+  /**
+   * Sends `method` with `params` and resolves with the node's raw `result`; refuses a method outside the allowed node
+   * calls. [IN-8]
+   */
   async call(method: NodeCallMethod, params: readonly unknown[], options: NodeCallOptions = {}): Promise<unknown> {
     if (!isNodeCallMethod(method)) throw methodNotAllowed(method);
     return this.#withRetry(method, params, options, undefined);
@@ -430,7 +445,7 @@ export class NodeClient {
     );
   }
 
-  /** One call, with IN-10's retries. */
+  /** One call, with its retries. [IN-10] */
   async #withRetry(
     method: NodeMethod,
     params: readonly unknown[],

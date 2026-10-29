@@ -20,19 +20,22 @@ import {
 } from "./sweep-tapes.js";
 
 /**
- * The committed negative controls of task 12.5 (`openspec/changes/core-arch/acceptance.md` A104, A105), each run
- * through the process on the same scenario as its criterion and held to the same oracle, which must fail:
+ * The sweep's committed negative controls. Each runs through the process on the same scenario as the test it controls
+ * and is held to the same oracle, which must fail:
  *
- * - A105: a sweep that takes grey keys in insertion order (first in, first out) instead of byte order differs from the
- *   reference model on task 12.5's fixture — the fixture tells the two orders apart;
- * - A104: the same run without persisting the contract's keys (no `core-contract-states`): the nodes of its state of
- *   height 10 that only those keys held, stored while the states held them, are deleted by the sweep, and its keys
- *   do not load.
+ * - A sweep that takes grey keys in insertion order (first in, first out) instead of byte order differs from the
+ *   reference model on the sweep fixture: the fixture tells the two orders apart. [A105]
+ * - The same run without persisting the contract's keys (no `core-contract-states`). The nodes of its state of height
+ *   10 that only those keys held, stored while the states held them, are deleted by the sweep, and its keys do not
+ *   load. [A104]
  */
 
 const hex = (bytes: Uint8Array): string => Buffer.from(bytes).toString("hex");
 
-/** Grey keys in the order they joined the grey set (keys that joined together in byte order): A105's wrong order. */
+/**
+ * Grey keys in the order they joined the grey set (keys that joined together in byte order): the wrong order.
+ * [A105]
+ */
 function insertionOrder(): GreyPicker {
   const joined = new Map<string, number>();
   let next = 0;
@@ -83,7 +86,7 @@ describe.each(PROCESS_BACKENDS)("task 12.5's negative controls on $name", (backe
     // Those nodes were stored while the ledger states held the contract's state of 10 …
     const stored15 = new Set((sweeps.get(15n) as TableSnapshot).nodes);
     expect(only.filter((key) => stored15.has(key)).length).toBeGreaterThan(0);
-    // … and none of them is stored now: A104's oracle fails.
+    // … and none of them is stored now: the oracle fails. [A104]
     expect(only.filter((key) => end.has(key))).toEqual([]);
     // The contract's state of 10 no longer loads from its key: its value cannot be rebuilt from the stored nodes.
     const value = scenario.heights[10]?.contracts.get(`0x${hex(contract.address)}`)?.state as Uint8Array;

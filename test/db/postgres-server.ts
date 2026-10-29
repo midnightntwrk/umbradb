@@ -21,7 +21,7 @@ import { connectionOfUrl, partsOfUrl } from "./connection.js";
 export interface PostgresTestDatabase {
   /** The database's URL, for the tests' own plain driver connections. */
   readonly url: string;
-  /** The database's parts, as the `database` setting gives them (CF-4, owner decision Q167 A); `ssl` `disable`. */
+  /** The database's parts, as the `database` setting gives them, with `ssl` set to `disable`. [CF-4, Q167 A] */
   readonly setting: PostgresParts;
   /** A plain driver connection to the database, outside the API: setup SQL and fault injection only. */
   readonly admin: Sql;
@@ -59,7 +59,7 @@ export async function startPostgresServer(): Promise<PostgresTestServer> {
   // Each test database holds an admin connection and the API's own (a writer and its readers): room for many databases.
   const container = await startContainer(
     // A password unlike the login's name (`test`): the redaction hides a password wherever it appears, so a login
-    // whose name equals it would be hidden too (CF-4, Q167 A).
+    // whose name equals it would be hidden too. [CF-4, Q167 A]
     new PostgreSqlContainer(POSTGRES_IMAGE)
       .withPassword(TEST_PASSWORD)
       .withCommand(["postgres", "-c", "max_connections=400"]),

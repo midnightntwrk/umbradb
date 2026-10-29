@@ -13,22 +13,22 @@ import { committed, ingest } from "./ingest-harness.js";
 import { ledgerScenario } from "./ledger-tapes.js";
 
 /**
- * A101 (task 12.3; `openspec/changes/core-arch/acceptance.md` A101; LG-10, AE-2): while the ledger worker runs a 60 s
- * ledger step — a test package whose apply of block 2 spends 60 s in a synchronous loop, in the worker thread
- * (`test/ledger/fixtures/ledger-test-loader.ts`) — the process's admin endpoints (task 8.1's, started with `admin` and
- * a port of their own, `127.0.0.1:0`) are timed by a prober thread: `/health/live` answers 200 throughout and every
- * endpoint answers within 1 s, with `livenessTimeoutMs` 5,000, so a main thread held for more than 5 s would show.
+ * While the ledger worker runs a 60 s ledger step, a prober thread times the process's admin endpoints. The step is a
+ * test package whose apply of block 2 spends 60 s in a synchronous loop, in the worker thread
+ * (`test/ledger/fixtures/ledger-test-loader.ts`). The endpoints are started with `admin` and a port of their own
+ * (`127.0.0.1:0`). `/health/live` answers 200 throughout and every endpoint answers within 1 s. `livenessTimeoutMs` is
+ * 5,000, so a main thread held for more than 5 s would show. [A101, LG-10, AE-2]
  *
  * Committed negative control: the same package on the main thread (`inThreadLedger`, ledger work moved off the worker)
- * holds the heartbeat for 60 s, and `/health/live` answers 503 within the step: A101's oracle fails. On PGlite: the
- * criterion is about the threads, not the stored data.
+ * holds the heartbeat for 60 s, and `/health/live` answers 503 within the step, so the check fails. Runs on PGlite: the
+ * check is about the threads, not the stored data. [A101]
  */
 
 const STEP_MS = 60_000;
 const SLOW: TestLoaderData = { slowAt: { height: "2", ms: STEP_MS } };
 const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
 
-/** A101's expectation of each endpoint during the step: live, and the others answering as they may. */
+/** The expectation of each endpoint during the step: live, and the others answering as they may. [A101] */
 const EXPECTED: Readonly<Record<string, readonly number[]>> = {
   "/health/live": [200],
   "/health/ready": [200, 503],

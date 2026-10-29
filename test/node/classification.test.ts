@@ -4,11 +4,13 @@ import { BACKOFF_BASE_MS, backoffDelay } from "../../src/node/backoff.js";
 import { connectionFailure, rpcFailure } from "../../src/node/errors.js";
 
 /**
- * IN-10's two rules as pure functions (task 10.1), checked here case by case as the client's suite checks them end to
- * end (`client.test.ts`): the back-off — "exponential back-off from 1 s doubling up to `backoffCeilingMs` … without
- * limit" — and which node failure is retried (`node-unreachable`, retryable: a connection error, a timeout, a
- * handshake refused with HTTP 429 or a 5xx status, the node's own rate limit) and which halts (`node-requirement`,
- * IN-9's "state unavailable"; `node-error`, everything else).
+ * The node client's two retry rules as pure functions, checked here case by case; the client's suite checks them end
+ * to end (`client.test.ts`):
+ * - the back-off: from 1 s, doubling up to `backoffCeilingMs`, with no limit on attempts;
+ * - which node failure is retried and which halts. `node-unreachable` is retried: a connection error, a timeout, a
+ *   handshake refused with HTTP 429 or a 5xx status, the node's own rate limit. `node-requirement` (the node's state
+ *   is unavailable) halts, and so does `node-error`, everything else. [IN-9]
+ * [IN-10]
  */
 
 describe("backoffDelay (IN-10)", () => {

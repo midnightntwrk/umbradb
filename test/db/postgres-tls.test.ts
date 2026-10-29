@@ -6,17 +6,25 @@ import { driverConnectionOptions, openPostgres, type PostgresConnection } from "
 import { startTlsPostgres, type TlsPostgres } from "./postgres-tls-server.js";
 
 /**
- * `ssl` reaches the PostgreSQL driver (task 4.5; CF-4; owner decisions Q182 B, Q183 A; the threat model's gap 2): the
- * database API's PostgreSQL backend hands `postgres` 3.4.9 the mode as the driver reads it — `disable` as `false` (the
- * driver would read the text `"disable"` as a request for TLS), `require` as `"require"` (TLS, the certificate not
- * checked: `src/connection.js` sets `rejectUnauthorized: false` for it), `verify-full` as Node.js's TLS options that
- * check the certificate against the default roots and the host name (`rejectUnauthorized: true` and the host, which
- * Node.js's `checkServerIdentity` compares with the certificate's names; for an IP address the driver gives no
- * `servername`). Against a PostgreSQL 18.6 server that serves TLS only (`./postgres-tls-server.ts`): `require` connects
- * over TLS (`pg_stat_ssl`); `disable` is refused by the server (SQLSTATE 28000); `verify-full` is refused for a CA
- * that is not among Node.js's roots, connects once it is (`tls.setDefaultCACertificates`, the test's stand-in for a
- * CA among the built-in roots) and is refused for a host name the certificate does not name. The committed negative
- * control (the last test): a mapping that drops `ssl`, as the backend did before task 4.5, fails the `require` test.
+ * The `ssl` setting reaches the PostgreSQL driver. The database API's PostgreSQL backend hands `postgres` 3.4.9 the
+ * mode in the form the driver reads it:
+ * - `disable` as `false` (the driver would read the text `"disable"` as a request for TLS);
+ * - `require` as `"require"`: TLS without checking the certificate (`src/connection.js` sets
+ *   `rejectUnauthorized: false` for it);
+ * - `verify-full` as Node.js's TLS options that check the certificate against the default roots and the host name:
+ *   `rejectUnauthorized: true` and the host, which Node.js's `checkServerIdentity` compares with the certificate's
+ *   names (for an IP address the driver gives no `servername`).
+ * [CF-4, Q182 B, Q183 A]
+ *
+ * Against a PostgreSQL 18.6 server that serves TLS only (`./postgres-tls-server.ts`):
+ * - `require` connects over TLS (`pg_stat_ssl`);
+ * - `disable` is refused by the server (SQLSTATE 28000);
+ * - `verify-full` is refused for a CA that is not among Node.js's roots, connects once it is
+ *   (`tls.setDefaultCACertificates`, the test's stand-in for a CA among the built-in roots), and is refused for a
+ *   host name the certificate does not name.
+ *
+ * The committed negative control (the last test): a mapping that drops `ssl`, as an earlier version of the backend
+ * did, fails the `require` test.
  */
 
 const noHeight = async () => null;

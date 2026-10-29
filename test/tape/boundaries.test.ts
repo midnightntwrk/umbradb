@@ -6,13 +6,13 @@ import { ScriptedNode, type Script } from "./scripted-node.js";
 import { syntheticChain } from "./synthetic-chain.js";
 
 /**
- * The boundary reader (`tools/tape/boundaries.ts`; task 0.3, LG-3, 12.2's note (a)): a network's genesis — the hash of
- * block 0 and its runtime, the `MNSV` of block 0's header agreeing with `state_getRuntimeVersion` there — and every
- * runtime upgrade from genesis to the finalized head, found by sampling `state_getRuntimeVersion` every `step` blocks
- * and bisecting each change to its enactment block U (the first block whose state has the new runtime; F = U + 1),
- * each U and F checked against their headers' `MNSV` digests. It returns the record the built-in tables cite — the
- * node's answers `chain_getBlockHash`, `chain_getHeader` and `state_getRuntimeVersion` for block 0, and for each
- * boundary U − 1, U and F — in `test/node/fixtures/mainnet-answers.json`'s form.
+ * The boundary reader (`tools/tape/boundaries.ts`): a network's genesis — the hash of block 0 and its runtime, the
+ * `MNSV` of block 0's header agreeing with `state_getRuntimeVersion` there — and every runtime upgrade from genesis to
+ * the finalized head, found by sampling `state_getRuntimeVersion` every `step` blocks and bisecting each change to its
+ * enactment block U (the first block whose state has the new runtime; F = U + 1), each U and F checked against their
+ * headers' `MNSV` digests. It returns the record the built-in tables cite — the node's answers `chain_getBlockHash`,
+ * `chain_getHeader` and `state_getRuntimeVersion` for block 0, and for each boundary U − 1, U and F — in
+ * `test/node/fixtures/mainnet-answers.json`'s form. [LG-3]
  */
 
 const quietConnect: ConnectSocket = (url, events, timers) =>

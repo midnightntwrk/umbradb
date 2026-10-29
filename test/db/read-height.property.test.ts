@@ -4,8 +4,9 @@ import type { ReadHandle } from "../../src/db/api.js";
 import { BACKENDS, TEST_CURSOR, TEST_SCHEMA, type TestBackend, type TestDatabase } from "./backends.js";
 
 /**
- * A8 [PROP] (DB-2): for random interleavings of a writer committing heights and readers running multi-statement reads,
- * every read handle's statements see one height, and the handle reports it — on every backend of `backends.ts`.
+ * For random interleavings of a writer committing heights and readers running multi-statement reads, every read
+ * handle's statements see one height, and the handle reports it. This holds on every backend of `backends.ts`.
+ * [A8 PROP, DB-2]
  *
  * An interleaving is a list of steps in the order they are asked for: the writer commits the next height (one
  * transaction writing `t.blocks` and `t.rows`), or reader r opens a read, runs one statement in it, or ends it. A
@@ -13,12 +14,12 @@ import { BACKENDS, TEST_CURSOR, TEST_SCHEMA, type TestBackend, type TestDatabase
  * row count), so a statement that saw a later commit disagrees with the handle.
  *
  * Each step is asked for as soon as it comes, and the harness waits for it only when it can finish:
- * - On PostgreSQL (DB-5) always: the writer commits while reads are open, so every step finishes at once.
- * - On PGlite (DB-4) every read and every commit is a job of one queue, run one at a time in the order asked for: a
+ * - On PostgreSQL always: the writer commits while reads are open, so every step finishes at once. [DB-5]
+ * - On PGlite every read and every commit is a job of one queue, run one at a time in the order asked for: a
  *   commit asked for while a read is open waits until that read ends, a read asked for after it waits for the commit,
  *   and a statement of a read still waiting runs when the read starts. The harness keeps the same queue as a model
  *   and waits for a step only when the model says it can run, so it never waits inside a read for a commit queued
- *   behind it.
+ *   behind it. [DB-4]
  * A read must report the number of heights committed when it started (by the model, on PGlite) and every statement
  * must see that height. Two negative controls run the same property on handles that do not pin one snapshot — on
  * PGlite, a handle whose statements are separate queue jobs, and one whose height is read in a job of its own — and
@@ -122,7 +123,7 @@ async function run(backend: TestBackend, database: TestDatabase, reads: Reads, s
   return (backend.singleQueue ? queued : concurrent)(reads, steps, commit);
 }
 
-/** PostgreSQL (DB-5): every step finishes at once, so the harness waits for each before asking for the next. */
+/** PostgreSQL: every step finishes at once, so the harness waits for each before asking for the next. [DB-5] */
 async function concurrent(reads: Reads, steps: readonly Step[], commit: () => Promise<void>): Promise<Outcome> {
   let committed = 0n;
   let commitsWhileOpen = 0;
@@ -160,9 +161,9 @@ async function concurrent(reads: Reads, steps: readonly Step[], commit: () => Pr
 type Job = { readonly kind: "commit"; readonly done: Promise<void> } | { readonly kind: "read"; readonly read: HeldRead };
 
 /**
- * PGlite (DB-4): the harness keeps the backend's one queue as a model — jobs in the order asked for, the head running
- * — and waits only for the head: a commit at the head finishes; a read at the head starts, runs the commands sent to it
- * so far, and stays at the head until it is ended, holding every job behind it.
+ * PGlite: the harness keeps the backend's one queue as a model (jobs in the order asked for, the head running) and
+ * waits only for the head. A commit at the head finishes. A read at the head starts, runs the commands sent to it so
+ * far, and stays at the head until it is ended, holding every job behind it. [DB-4]
  */
 async function queued(reads: Reads, steps: readonly Step[], commit: () => Promise<void>): Promise<Outcome> {
   let committed = 0n;

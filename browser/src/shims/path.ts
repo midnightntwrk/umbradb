@@ -1,5 +1,5 @@
 /**
- * `node:path` in the browser build (`browser/build.ts`; task 16.1): POSIX `resolve`, `join`, `normalize`, `dirname` and
+ * `node:path` in the browser build (`browser/build.ts`): POSIX `resolve`, `join`, `normalize`, `dirname` and
  * `basename` (without a suffix), as Node.js's `node:path/posix` computes them, with `/` as the working directory — a
  * browser has no file system, so a path there only names something (a backup's file name, which the page then saves).
  * `test/browser/shims.test.ts` holds them equal to Node.js's on random paths.

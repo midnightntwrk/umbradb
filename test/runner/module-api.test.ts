@@ -20,13 +20,17 @@ import { declaration } from "../modules/declarations.js";
 import { BACKBONE, CORE_BLOCK_FETCH, CORE_CHAIN, entry, graphInput } from "../modules/graph-fixtures.js";
 
 /**
- * The module API without a listener (task 5.2a; RN-15, RN-16, DB-15; CORE-ARCH §4.10's `ApiRegistry`): the routes and
- * subscription names modules register in `on-start-api` (`ApiRoutes`, `registerModuleApis`), refused when registered
- * twice (`duplicate-api-route`); each request answered through one read bounded by `apiReadTimeoutMs`, with the
- * handler's answer as the handler wrote it — no envelope header or `extensions` added, no GraphQL response told apart
- * (RN-16, owner decisions Q104, Q105; task 5.2b) — and the envelope's helpers as a handler calls them
- * (`ModuleApi.answer`); the wire format of bodies and errors; and subscriptions (`ModuleApi.subscribe`). Over a
- * database and on `listen.api` it is `api-server.test.ts`; A141's request half is `api-timeouts.test.ts`.
+ * The module API without a listener, and its `ApiRegistry`. [RN-15, RN-16, DB-15; CORE-ARCH §4.10]
+ * - The routes and subscription names modules register in `on-start-api` (`ApiRoutes`, `registerModuleApis`), refused
+ *   when registered twice (`duplicate-api-route`).
+ * - Each request answered through one read bounded by `apiReadTimeoutMs`, with the handler's answer as the handler
+ *   wrote it: no envelope header or `extensions` added, no GraphQL response told apart. [RN-16, Q104, Q105]
+ * - The envelope's helpers as a handler calls them (`ModuleApi.answer`).
+ * - The wire format of bodies and errors.
+ * - Subscriptions (`ModuleApi.subscribe`).
+ *
+ * Over a database and on `listen.api` it is `api-server.test.ts`; the API read timeouts' request half is
+ * `api-timeouts.test.ts`. [A141]
  */
 
 const HASH = Uint8Array.from({ length: 32 }, (_, i) => i);
@@ -134,7 +138,7 @@ describe("ApiRoutes: what modules register in on-start-api (RN-15)", () => {
       const error = thrown(call);
       expect(error, what).toBeInstanceOf(TypeError);
       expect((error as Error).message, what).toMatch(/^m registered /);
-      expect((error as Error).message, what).toMatch(/\(RN-15\)$/);
+      expect((error as Error).message, what).not.toMatch(/\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
     }
     expect(routes.http).toHaveLength(0);
     expect(routes.subscriptions).toHaveLength(0);
@@ -145,11 +149,11 @@ describe("ApiRoutes: what modules register in on-start-api (RN-15)", () => {
     const registration = routes.open("m");
     registration.close();
     expect(() => registration.registry.http("GET", "/x", ok)).toThrow(
-      "m registered GET /x after its on-start-api callback ended: modules register their API once, at startup (RN-15)",
+      "m registered GET /x after its on-start-api callback ended: modules register their API once, at startup",
     );
     expect(() => registration.registry.subscription("s", () => () => undefined)).toThrow(
       "m registered the subscription s after its on-start-api callback ended: modules register their API once, at " +
-        "startup (RN-15)",
+        "startup",
     );
     expect(Object.isFrozen(registration.registry)).toBe(true);
   });
@@ -165,7 +169,7 @@ describe("ApiRoutes: what modules register in on-start-api (RN-15)", () => {
     expect(error).toBeInstanceOf(UmbraError);
     expect(error.code).toBe("duplicate-api-route");
     expect(error.details).toEqual({ kind: "http", route: "GET /api/v4/graphql", modules: ["a", "b"] });
-    expect(error.message).toBe("a and b both register GET /api/v4/graphql: a route is registered once (RN-15)");
+    expect(error.message).toBe("a and b both register GET /api/v4/graphql: a route is registered once");
   });
 
   it("refuses the same route twice in one module, and paths that differ only in their parameters' names", () => {
@@ -175,7 +179,7 @@ describe("ApiRoutes: what modules register in on-start-api (RN-15)", () => {
     one.registry.http("POST", "/q", ok);
     one.close();
     expect((thrown(() => same.check()) as UmbraError).details).toEqual({ kind: "http", route: "POST /q", modules: ["m", "m"] });
-    expect((thrown(() => same.check()) as UmbraError).message).toBe("m registers POST /q twice: a route is registered once (RN-15)");
+    expect((thrown(() => same.check()) as UmbraError).message).toBe("m registers POST /q twice: a route is registered once");
 
     const params = new ApiRoutes();
     const a = params.open("a");
@@ -201,7 +205,7 @@ describe("ApiRoutes: what modules register in on-start-api (RN-15)", () => {
     }
     const error = thrown(() => routes.check()) as UmbraError;
     expect(error.details).toEqual({ kind: "subscription", route: "heights", modules: ["a", "b"] });
-    expect(error.message).toBe("a and b both register the subscription heights: a subscription name is registered once (RN-15)");
+    expect(error.message).toBe("a and b both register the subscription heights: a subscription name is registered once");
   });
 
   it("accepts routes that differ in method, in a literal against a parameter, and a path named like a subscription", () => {
@@ -413,7 +417,7 @@ describe("ModuleApi.answer: one request, one bounded read, the module's answer (
     expect(view.headers).toEqual({ "Content-Type": JSON_TYPE });
     expect(errorOf(view)).toEqual({
       code: "no-committed-height",
-      message: "no height has committed yet: chain data is answered once block S commits (RN-16)",
+      message: "no height has committed yet: chain data is answered once block S commits",
     });
     const caught = await api.answer(request("GET", "/caught"));
     expect([caught.status, caught.headers, caught.body]).toEqual([
@@ -839,7 +843,7 @@ describe("registerModuleApis: on-start-api once, at startup (RN-1, RN-15)", () =
     expect((error as Error).message).toMatch(/^keeper published the process item thing after startup/);
     const open = new ProcessContexts({ graph });
     await expect(registerModuleApis({ graph, contexts: open })).rejects.toThrow(
-      "registerModuleApis: on-start-api runs once the process contexts are sealed (MD-7: after every on-start-db)",
+      "registerModuleApis: on-start-api runs once the process contexts are sealed, after every on-start-db",
     );
   });
 });

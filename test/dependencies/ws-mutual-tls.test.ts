@@ -8,12 +8,11 @@ import type { TLSSocket } from "node:tls";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 
-// Task 0.1 of `openspec/changes/core-arch` (design.md §8 and §14): characterization test of the pinned `ws` 8.22.0
-// as the process transport's opt-in mutual TLS (PP, A121): a WebSocket server over `https` that requires client
-// certificates (`requestCert`, `rejectUnauthorized`). A client holding a certificate issued by the trusted CA
-// connects; a client without a certificate, or with one from another CA, is refused before any WebSocket
-// connection exists. The certificates are generated at test time with the `openssl` command into a temporary
-// directory that is deleted afterwards; no key is committed.
+// A characterization test of the pinned `ws` 8.22.0 as the process transport's opt-in mutual TLS: a WebSocket server
+// over `https` that requires client certificates (`requestCert`, `rejectUnauthorized`). A client holding a certificate
+// issued by the trusted CA connects; a client without a certificate, or with one from another CA, is refused before any
+// WebSocket connection exists. The certificates are generated at test time with the `openssl` command into a temporary
+// directory that is deleted afterwards; no key is committed. [A121; design §8, §14]
 
 let dir: string;
 let server: Server;

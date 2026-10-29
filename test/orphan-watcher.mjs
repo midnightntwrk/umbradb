@@ -1,9 +1,9 @@
-// The orphan watcher of `test/child-processes.ts` (core-arch task 0.5): one per test process, started by it with a pipe
-// as standard input, in a process group of its own (so that a Ctrl-C or a signal to the test process's group does not
-// reach it). Each line it reads is `+<pid>` (a child the test process started), `-<pid>` (that child exited) or
+// The orphan watcher of `test/child-processes.ts`: one per test process, started by it with a pipe as standard input,
+// in a process group of its own (so that a Ctrl-C or a signal to the test process's group does not reach it). Each line
+// it reads is `+<pid>` (a child the test process started), `-<pid>` (that child exited) or
 // `#label=org.umbradb.test.<name>=<value>` (a Docker label filter naming the test process's containers, from
-// `test/containers.ts`; the filters given are all required). When its input ends — the test process ended, however
-// it ended, so the operating system closed the pipe — it kills every child still listed with SIGKILL, which also ends a
+// `test/containers.ts`; the filters given are all required). When its input ends — the test process ended, however it
+// ended, so the operating system closed the pipe — it kills every child still listed with SIGKILL, which also ends a
 // stopped child or one whose event loop is blocked, then removes every container the filters match, and exits.
 //
 // Plain JavaScript, so that it starts without a loader.

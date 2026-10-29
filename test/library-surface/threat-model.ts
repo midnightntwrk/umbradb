@@ -1,6 +1,5 @@
 /**
- * Task 17.4c (`openspec/changes/core-arch/tasks.md` 17.4c; A178 `[STATIC]`, owner decisions Q181 A, Q177 A, Q178 A,
- * Q179 A, Q180 A): `docs/THREAT_MODEL.md` describes 0.10.0.
+ * `docs/THREAT_MODEL.md` describes 0.10.0. [A178 STATIC, Q177 A, Q178 A, Q179 A, Q180 A, Q181 A]
  *
  * - **No 0.9.5 part named** ({@link retiredPartProblems}): none of {@link RETIRED_PARTS} (the checkpoint store, the
  *   chunk pool, the wallet envelope, TemporalKV) appears in it, in any spelling the patterns allow.
@@ -22,12 +21,12 @@ import { linkedPath, markdownLinks } from "./documents.js";
 /** The threat model's path from the repository root. */
 export const THREAT_MODEL = "docs/THREAT_MODEL.md";
 
-/** The documents that must link {@link THREAT_MODEL} (A178). */
+/** The documents that must link {@link THREAT_MODEL}. [A178 STATIC] */
 export const LINKING_DOCUMENTS: readonly string[] = ["README.md", "SECURITY.md"];
 
 /**
- * 0.9.5's parts A178 names, which the model must not name: as patterns, so `checkpoint-store`, `chunk_pool` and
- * `TemporalKV`'s `PgTemporalKV` count too.
+ * The 0.9.5 parts the model must not name: as patterns, so `checkpoint-store`, `chunk_pool` and `TemporalKV`'s
+ * `PgTemporalKV` count too. [A178 STATIC]
  */
 export const RETIRED_PARTS: readonly { readonly part: string; readonly pattern: RegExp }[] = [
   { part: "checkpoint store", pattern: /checkpoint[\s_-]?store/i },
@@ -50,7 +49,7 @@ export const BOUNDARIES: readonly string[] = [
   "Dependency producers and build pipeline → installed code",
 ];
 
-/** The owner's three areas (review of 2026-10-28; Q177 and Q178, Q179, Q180), each a section of its own. */
+/** The owner's three areas (review of 2026-10-28), each a section of its own. [Q177 A, Q178 A, Q179 A, Q180 A] */
 export const OWNER_AREAS: readonly string[] = [
   "Backups and restore",
   "The Midnight node",
@@ -60,7 +59,10 @@ export const OWNER_AREAS: readonly string[] = [
 /** The heading of the gap list. */
 export const KNOWN_GAPS = "Known gaps";
 
-/** The tasks that fixed a gap of the draft (14.2b and 4.5: 1, Q175; 4.5: 2; 12.2b: 3; 15.1b: 7; 17.4b: 9). */
+/**
+ * The task numbers the "Known gaps" section must name for the draft's fixed gaps: 14.2b and 4.5 fixed gap 1, 4.5 gap 2,
+ * 12.2b gap 3, 15.1b gap 7 and 17.4b gap 9. [Q175]
+ */
 export const GAP_TASKS: readonly string[] = ["14.2b", "4.5", "12.2b", "15.1b", "17.4b"];
 
 /** The issues that record the draft's gaps 4, 5, 6 and 8. */
@@ -117,8 +119,8 @@ export function citations(text: string): Citation[] {
 }
 
 /**
- * A178's problems with the model's citations: each names a file of the tree (`lineCount` gives its number of lines,
- * or `null` when it is not a file of the tree) with at least that many lines, and a line of at least 1.
+ * The problems with the model's citations: each names a file of the tree (`lineCount` gives its number of lines,
+ * or `null` when it is not a file of the tree) with at least that many lines, and a line of at least 1. [A178 STATIC]
  */
 export function citationProblems(text: string, lineCount: (path: string) => number | null): string[] {
   const problems: string[] = [];
@@ -140,7 +142,7 @@ export function lineCountOf(text: string): number {
   return text.endsWith("\n") ? lines - 1 : lines;
 }
 
-/** A178's problems with 0.9.5's parts: each line naming one of {@link RETIRED_PARTS}. */
+/** The problems with 0.9.5's parts: each line naming one of {@link RETIRED_PARTS}. [A178 STATIC] */
 export function retiredPartProblems(text: string): string[] {
   const problems: string[] = [];
   text.split("\n").forEach((line, index) => {
@@ -160,8 +162,9 @@ function headings(text: string): { readonly level: number; readonly title: strin
 }
 
 /**
- * A178's problems with the model's headings: each of the ten {@link BOUNDARIES} a `### N. <boundary>` heading (N its
+ * The problems with the model's headings: each of the ten {@link BOUNDARIES} a `### N. <boundary>` heading (N its
  * place, 1 to 10), each of the {@link OWNER_AREAS} and {@link KNOWN_GAPS} a `## <title>` heading, each exactly once.
+ * [A178 STATIC]
  */
 export function headingProblems(text: string): string[] {
   const found = headings(text);
@@ -181,8 +184,9 @@ export function headingProblems(text: string): string[] {
 }
 
 /**
- * A178's problems with the "Known gaps" section (from its heading to the next `#` or `##` heading): it names each task
+ * The problems with the "Known gaps" section (from its heading to the next `#` or `##` heading): it names each task
  * of {@link GAP_TASKS} ("task 14.2b", "tasks 12.2b and …" or the bare number) and each issue of {@link GAP_ISSUES}.
+ * [A178 STATIC]
  */
 export function knownGapProblems(text: string): string[] {
   const lines = proseLines(text);
@@ -204,7 +208,7 @@ export function knownGapProblems(text: string): string[] {
   return problems;
 }
 
-/** A178's problems with the links to the model: each of `documents` without a Markdown link resolving to it. */
+/** The problems with the links to the model: each of `documents` without a Markdown link resolving to it. [A178 STATIC] */
 export function threatModelLinkProblems(
   documents: readonly { readonly file: string; readonly text: string }[],
 ): string[] {

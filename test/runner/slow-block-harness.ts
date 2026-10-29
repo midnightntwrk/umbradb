@@ -13,35 +13,42 @@ import type { ProcessDatabase } from "./process-backends.js";
 import { core, entryOf, loggingModule, startProcess, testBuild } from "./process-build.js";
 
 /**
- * What the slow-block watchdog's tests share (task 5.5; RN-17, AE-3, AE-5, Q71; A142): a process of the test build
- * with its admin endpoints on `127.0.0.1:0` and its `slowBlockMs` set, over the in-memory chain wrapped so that the
- * tests know when the loop asked for each block; modules that hold a point at a height (awaiting, or blocking the main
- * thread); the observation of the runner's published state — `status()`, polled on the main thread — and of
- * `/status`, polled over HTTP, from the start until a while after the slow height committed; and A142's oracles over
- * what was observed.
+ * What the slow-block watchdog's tests share:
+ * - a process of the test build with its admin endpoints on `127.0.0.1:0` and its `slowBlockMs` set;
+ * - the in-memory chain, wrapped so that the tests know when the loop asked for each block;
+ * - modules that hold a point at a height (awaiting, or blocking the main thread);
+ * - the observation of the runner's published state (`status()`, polled on the main thread) and of `/status` (polled
+ *   over HTTP), from the start until a while after the slow height committed;
+ * - the oracles over what was observed.
  *
- * **A142** (the oracle {@link a142Problems}): with `slowBlockMs` 1000 and module `slow`'s `on-compute` at height 2
- * awaiting 3 s, `status()` and `/status` show `slow-block` with height 2, `on-compute` and `slow` within 2 s of the
- * callback's start (and not before height 2 has run 1 s), the process still ready; the height commits once — the
- * callback ran once, to its end, before the commit; no retry was logged or raised; nothing halted —; and no `status()`
- * or `/status` read after the commit shows the condition. With `slowBlockMs` 5000 ({@link quietProblems}) nothing shows
- * it and nothing logs it, and the height commits once.
+ * [RN-17, AE-3, AE-5, Q71]
  *
- * **A161** (task 5.5a, owner decision Q145 B; the oracle {@link a161Problems}): the same for a callback the loop awaits
- * outside a height's processing — `on-after-db-write` after height 2's commit, or `on-finalized` announcing height 2 —,
- * gone once that callback ends.
+ * **A slow height** (the oracle {@link a142Problems}). With `slowBlockMs` 1000 and module `slow`'s `on-compute` at
+ * height 2 awaiting 3 s:
+ * - `status()` and `/status` show `slow-block` with height 2, `on-compute` and `slow` within 2 s of the callback's
+ *   start (and not before height 2 has run 1 s), and the process is still ready;
+ * - the height commits once: the callback ran once, to its end, before the commit; no retry was logged or raised;
+ *   nothing halted;
+ * - no `status()` or `/status` read after the commit shows the condition.
+ *
+ * With `slowBlockMs` 5000 ({@link quietProblems}) nothing shows the condition or logs it, and the height commits once.
+ * [A142]
+ *
+ * **A slow callback outside a height's processing** (the oracle {@link a161Problems}). The same holds for a callback
+ * the loop awaits outside a height's processing (`on-after-db-write` after height 2's commit, or `on-finalized`
+ * announcing height 2), and the condition is gone once that callback ends. [A161, Q145 B]
  *
  * Imports nothing of Vitest: the oracles are applied to the real watchdog and to the negative controls' wrong ones.
  */
 
-/** The `/status` schema of task 8.3 (A66), which a body showing `slow-block` must also hold to. */
+/** The committed `/status` schema, which a body showing `slow-block` must also hold to. [A66] */
 export const STATUS_SCHEMA = validatorOf(schemaFile(new URL("../backbone/core-status/status.schema.json", import.meta.url)));
 
-/** A142's slow height: height 1 is processed fast before it. */
+/** The slow height: height 1 is processed fast before it. [A142] */
 export const SLOW_HEIGHT = 2n;
-/** How long A142's callback awaits. */
+/** How long the slow callback awaits. [A142] */
 export const HOLD_MS = 3_000;
-/** A142's bound: the condition shows within 2 s of the callback's start. */
+/** The bound: the condition shows within 2 s of the callback's start. [A142] */
 export const WITHIN_MS = 2_000;
 /** How long the observation goes on after the slow height committed: more than one heartbeat tick (1 s). */
 export const AFTER_COMMIT_MS = 1_500;
@@ -82,7 +89,7 @@ export async function hold(ms: number, mode: HoldMode): Promise<void> {
   const until = performance.now() + ms;
   if (mode === "block") {
     while (performance.now() < until) {
-      // Computation on the main thread: nothing else of it runs meanwhile (AE-2's blocking callback).
+      // Computation on the main thread: nothing else of it runs meanwhile, as with a blocking callback. [AE-2]
     }
     return;
   }
@@ -154,9 +161,9 @@ export function askedSource(head: bigint, memory = new InMemoryBlockSource({ hea
 }
 
 /**
- * A source that prepares heights ahead through the runner's queue (`attach`, `prepared`; IN-5's shape, as the node
- * source does): when the loop asks for a height, it prepares that height and the `ahead` − 1 above it up to the head
- * (`on-fetch` and `on-parse` through the queue runner), and hands the loop the asked one once prepared.
+ * A source that prepares heights ahead through the runner's queue (`attach`, `prepared`), shaped like the node source's
+ * finalized prefetch. When the loop asks for a height, it prepares that height and the `ahead` − 1 above it up to the
+ * head (`on-fetch` and `on-parse` through the queue runner), and hands the loop the asked one once prepared. [IN-5]
  */
 export function preparingSource(inner: AskedSource, ahead: number): AskedSource {
   const { memory, asked } = inner;
@@ -289,8 +296,9 @@ export const slowLines = (lines: readonly string[]): string[] =>
 
 /**
  * Reads `run`'s `status()` every 20 ms and its `/status` every 50 ms from now until `status()` has shown `height`
- * committed for {@link AFTER_COMMIT_MS} — with `ended`, that long after the later of the commit and the moment it
- * gives (A161: the held callback's end) —, or processing ended, or 60 s passed.
+ * committed for {@link AFTER_COMMIT_MS}, or processing ended, or 60 s passed. With `ended`, it reads that long after
+ * the later of the commit and the moment `ended` gives (for a callback outside a height: the held callback's end).
+ * [A161]
  */
 export async function observe(run: SlowRun, height = SLOW_HEIGHT, ended?: () => number | undefined): Promise<Observed> {
   const statuses: StatusRead[] = [];
@@ -349,10 +357,13 @@ export function commitsOnceProblems(observed: Observed, seen: Seen, lines: reado
   return problems;
 }
 
-/** What A142 wants `slow-block` to say while module `slow`'s `on-compute` holds height 2. */
+/** What `slow-block` must say while module `slow`'s `on-compute` holds height 2. [A142] */
 const EXPECTED = { code: "slow-block", height: SLOW_HEIGHT, point: "on-compute", module: "slow" };
 
-/** A142's oracle for `slowBlockMs` 1000 (see the module comment); `asked` is when the loop asked for height 2. */
+/**
+ * The slow height's oracle for `slowBlockMs` 1000 (see the module comment); `asked` is when the loop asked for height
+ * 2. [A142]
+ */
 export function a142Problems(observed: Observed, seen: Seen, lines: readonly string[], asked: number | undefined): string[] {
   const problems = commitsOnceProblems(observed, seen, lines);
   const start = seen.start ?? Number.NaN;
@@ -411,7 +422,7 @@ export function goneProblems(observed: Observed): string[] {
   return problems;
 }
 
-/** A142's oracle for `slowBlockMs` 5000: nothing shows `slow-block` or logs it, and the height commits once. */
+/** The oracle for `slowBlockMs` 5000: nothing shows `slow-block` or logs it, and the height commits once. [A142] */
 export function quietProblems(observed: Observed, seen: Seen, lines: readonly string[]): string[] {
   const problems = commitsOnceProblems(observed, seen, lines);
   const statuses = observed.statuses.filter(({ status }) => slowOf(status) !== undefined);
@@ -423,44 +434,47 @@ export function quietProblems(observed: Observed, seen: Seen, lines: readonly st
   return problems;
 }
 
-/** A161's points: a callback the loop awaits outside a height's processing (RN-17 as amended by Q145 B). */
+/** The points the loop awaits outside a height's processing. [A161, RN-17, Q145 B] */
 export type OutsidePoint = "on-after-db-write" | "on-finalized";
 
 /**
- * The points of a height's own window (RN-17, task 5.5). A `slow-block` at one of them is that height's processing,
- * never one of A161's windows: no test holds it, but on a loaded machine a height's `on-db-write` and `COMMIT` can pass
- * `slowBlockMs` 1000 and raise it, correctly (issue 00043).
+ * The points of a height's own window. A `slow-block` at one of them belongs to that height's processing, never to a
+ * window outside a height. No test holds these points, but on a loaded machine a height's `on-db-write` and `COMMIT`
+ * can pass `slowBlockMs` 1000 and raise the condition, correctly. [RN-17]
  */
 export const HEIGHT_POINTS: ReadonlySet<string> = new Set(["on-fetch", "on-parse", "on-start-height", "on-compute", "on-db-write"]);
 
-/** Whether `condition` (a `slow-block`, in `status()` or `/status`) is outside a height's processing: A161's. */
+/** Whether `condition` (a `slow-block`, in `status()` or `/status`) is outside a height's processing. [A161] */
 const outsideHeight = (condition: Readonly<Record<string, unknown>> | undefined): boolean =>
   condition !== undefined && !HEIGHT_POINTS.has(condition.point as string);
 
 /**
- * The log line that raises A161's condition: module `slow`'s `point` at height 2 (`on-finalized` announces height 2
- * as the finalized head), after `slowBlockMs` 1000.
+ * The log line that raises the condition outside a height: module `slow`'s `point` at height 2 (`on-finalized`
+ * announces height 2 as the finalized head), after `slowBlockMs` 1000. [A161]
  */
 export const a161Raised = (point: OutsidePoint): string =>
   point === "on-after-db-write"
     ? `slow block: height ${SLOW_HEIGHT} is still processing after slowBlockMs (1000 ms), in on-after-db-write of slow (after its commit)`
     : `slow block: height ${SLOW_HEIGHT} is still processing after slowBlockMs (1000 ms), in on-finalized of slow (the new finalized head)`;
 
-/** The log line that ends A161's window: its points ended. */
+/** The log line that ends the window outside a height: its points ended. [A161] */
 export const a161Ended = (point: OutsidePoint): RegExp =>
   point === "on-after-db-write"
     ? new RegExp(`^slow block: height ${SLOW_HEIGHT}'s points after its commit ended after \\d+ ms$`)
     : new RegExp(`^slow block: height ${SLOW_HEIGHT}'s on-finalized ended after \\d+ ms$`);
 
 /**
- * A161's oracle (task 5.5a; RN-17 as amended by Q145 B): with `slowBlockMs` 1000, module `slow`'s `point` at height 2
- * awaiting 3 s — `on-after-db-write` after height 2's commit, or `on-finalized` announcing height 2 as the head —
- * `status()` and `/status` show `slow-block` with height 2, `point` and `slow` within 2 s of the callback's start, and
- * not before its window was open for `slowBlockMs`; the condition is gone once that callback ends: no `status()` read
- * after the window's end (its log line) and no `/status` answer a heartbeat after it shows the condition at `point`,
- * each read for a while; nothing is cancelled or retried — the callback ran once, to its end; height 2 committed once,
- * with no retry, no other condition and no halt. A `slow-block` at a height's own points ({@link HEIGHT_POINTS}) is not
- * A161's condition and is not compared.
+ * The oracle for a slow callback outside a height's processing. With `slowBlockMs` 1000, module `slow`'s `point` at
+ * height 2 awaits 3 s (`on-after-db-write` after height 2's commit, or `on-finalized` announcing height 2 as the head):
+ * - `status()` and `/status` show `slow-block` with height 2, `point` and `slow` within 2 s of the callback's start,
+ *   and not before its window was open for `slowBlockMs`;
+ * - the condition is gone once that callback ends: no `status()` read after the window's end (its log line), and no
+ *   `/status` answer a heartbeat after it, shows the condition at `point`; each is read for a while;
+ * - nothing is cancelled or retried: the callback ran once, to its end; height 2 committed once, with no retry, no
+ *   other condition and no halt.
+ *
+ * A `slow-block` at a height's own points ({@link HEIGHT_POINTS}) is not this condition and is not compared.
+ * [A161, RN-17, Q145 B]
  */
 export function a161Problems(observed: Observed, seen: Seen, run: Pick<SlowRun, "lines" | "lineAt" | "startedAt">, point: OutsidePoint): string[] {
   const problems: string[] = [];
@@ -482,7 +496,7 @@ export function a161Problems(observed: Observed, seen: Seen, run: Pick<SlowRun, 
   const expected = { code: "slow-block", height: SLOW_HEIGHT, point, module: "slow" };
   // status(): the first read showing it, and a read known to come before its window opened — the last before the
   // commit for on-after-db-write (its window opens at the commit), the process's start for on-finalized. Height 2's own
-  // processing, if a loaded machine made it slow, is not A161's condition (issue 00043).
+  // processing, if a loaded machine made it slow, is not the condition checked here.
   const index = observed.statuses.findIndex(({ status }) => outsideHeight(slowOf(status)));
   const first = observed.statuses[index];
   if (first === undefined) problems.push("status() never showed slow-block");

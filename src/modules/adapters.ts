@@ -1,9 +1,8 @@
 /**
- * From validated declarations (`./validation.ts`) to the database API's inputs (`design.md` §4, §6; MD-1, DB-6, DB-8,
- * DB-9, DB-10): the schema plan's modules (`planSchemas`, `src/db/roles.ts`) and the migration runner's parts
- * (`startDatabase`, `src/db/migrate.ts`), taken from the same declarations. Which declarations a plan holds and in which
- * order the parts run are the requirement graph's (`./graph.ts`: its `modules`); running them is the runner's (tasks
- * 5.x).
+ * Turns validated declarations (`./validation.ts`) into the database API's inputs: the modules of the schema plan
+ * (`planSchemas`, `src/db/roles.ts`) and the parts the migration runner runs (`startDatabase`, `src/db/migrate.ts`).
+ * Which declarations go in, and in which order, comes from the requirement graph's `modules` (`./graph.ts`); the
+ * runner runs them. [MD-1, DB-6, DB-8, DB-9, DB-10; design §4, §6]
  */
 
 import type { SchemaWriteHandle } from "../db/api.js";
@@ -18,7 +17,7 @@ function schemaItem(item: ItemDeclaration): SchemaItem {
   return { name: item.name, table: { schema, tables, ...(deterministic === false ? { deterministic } : {}) } };
 }
 
-/** What the schema plan reads of a declaration (DB-6, DB-8): id, requirements, items and their tables, migrations. */
+/** What the schema plan reads of a declaration: id, requirements, items with their tables, migrations. [DB-6, DB-8] */
 export function schemaModule(declaration: ModuleDeclaration): SchemaModule {
   return {
     id: declaration.id,
@@ -29,18 +28,18 @@ export function schemaModule(declaration: ModuleDeclaration): SchemaModule {
 }
 
 /**
- * The schema plan's modules of `declarations`: every one except UmbraDB's own parts whose schemas are reserved
- * (`OWN_PARTS`: `core-chain`, `core-digest`), which run as the writer's login and are no module schemas of a plan.
+ * The schema plan's modules for `declarations`: all of them except UmbraDB's own parts with reserved schemas
+ * (`OWN_PARTS`: `core-chain`, `core-digest`), which run as the writer's login and get no module schema.
  */
 export function schemaModules(declarations: readonly ModuleDeclaration[]): SchemaModule[] {
   return declarations.filter((declaration) => !OWN_PARTS.includes(declaration.id)).map(schemaModule);
 }
 
 /**
- * The schema plan of one database's parts (DB-6, DB-8): `planSchemas` of its modules ({@link schemaModules}, every one
- * but `OWN_PARTS`) with the items of its own parts (`core-chain`, `core-digest`) in the plan's one namespace, so that no
- * module takes an own part's item name as its id (`db`, `config`, …: `schema-collision`). `declarations` are the
- * requirement graph's `modules` (`./graph.ts`): every part of the database, in startup order.
+ * The schema plan for one database's parts. Runs `planSchemas` on its modules ({@link schemaModules}) and also puts the
+ * item names of the own parts (`core-chain`, `core-digest`) in the plan's single namespace, so no module can use one of
+ * them (`db`, `config`, …) as its id; such a module is a `schema-collision`. `declarations` are the requirement graph's
+ * `modules` (`./graph.ts`): every part of the database, in startup order. [DB-6, DB-8]
  */
 export function schemaPlan(declarations: readonly ModuleDeclaration[]): SchemaPlan {
   const own = declarations
@@ -50,9 +49,10 @@ export function schemaPlan(declarations: readonly ModuleDeclaration[]): SchemaPl
 }
 
 /**
- * What the migration runner runs of a declaration (DB-9, DB-10): its id, version, `requiresResync` as declared, its
- * migrations, and its `on-start-db` callback — called as a method of its `points` with `context`, the module's process
- * context, and the schema write handle the runner opens (`src/db/write-handles.ts`), its error passed on unchanged.
+ * The part of a declaration the migration runner runs: its id, version, `requiresResync` as declared, its migrations,
+ * and its `on-start-db` callback. The callback is called as a method of `points`, with `context` (the module's process
+ * context) and the schema write handle the runner opens (`src/db/write-handles.ts`); its errors pass through unchanged.
+ * [DB-9, DB-10]
  */
 export function migrationPart(declaration: ModuleDeclaration, context: ProcessContext): MigrationPart {
   const { points } = declaration;

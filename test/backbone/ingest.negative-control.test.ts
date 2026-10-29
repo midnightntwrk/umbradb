@@ -24,34 +24,34 @@ import { committed, halted, ingest, PATIENCE_MS, slow, until } from "./ingest-ha
 import { a79Tape, upgradeTape } from "./ingest-tapes.js";
 
 /**
- * The committed negative controls of task 10.3's criteria (A79, A80, A81, A83, A89; A76's is
- * `ingest-crash.test.ts`'s): each a wrong node source — a subclass through the node source's seams — run through the
- * criterion's own oracle (`./ingest-checks.ts`) on PostgreSQL 18 and PGlite 0.5.10, which it fails; the real source
- * passes the same oracles in `ingest.test.ts`.
+ * The committed negative controls of the ingest tests; the crash test's control is in `ingest-crash.test.ts`. Each is a
+ * wrong node source, a subclass through the node source's seams. It runs through the test's own oracle
+ * (`./ingest-checks.ts`) on PostgreSQL 18 and PGlite 0.5.10, and fails it. The real source passes the same oracles in
+ * `ingest.test.ts`. [A79, A80, A81, A83, A89, A76]
  */
 
-/** A79's control: trusts the notifications after a reconnect, without reading the head again. */
+/** The reconnect control: trusts the notifications after a reconnect, without reading the head again. [A79] */
 class TrustsNotifications extends NodeBlockSource {
   protected override restarted(): void {
     // The lost notifications are not made up for: the next one is awaited.
   }
 }
 
-/** A80's control: a prefetch without a window, up to the head. */
+/** The window control: a prefetch without a window, up to the head. [A80] */
 class NoWindow extends NodeBlockSource {
   protected override windowEnd(_cursor: bigint, head: bigint): bigint {
     return head;
   }
 }
 
-/** A81's control: a queued block with the finalized hash is fetched again at finality. */
+/** The best-chain control: a queued block with the finalized hash is fetched again at finality. [A81] */
 class Refetches extends NodeBlockSource {
   protected override usesQueued(): boolean {
     return false;
   }
 }
 
-/** A89's control: a block decoded with the metadata of its own state, not its parent's. */
+/** The upgrade control: a block decoded with the metadata of its own state, not its parent's. [A89] */
 class OwnStateMetadata extends NodeBlockSource {
   readonly #own = new RuntimeMetadata(this.client);
 
@@ -61,8 +61,9 @@ class OwnStateMetadata extends NodeBlockSource {
 }
 
 /**
- * A83's control: once, while it fetches, it also asks the node a method outside IN-8, on a connection of its own — sent
- * beside its work, not awaited, so that its own calls keep their order.
+ * The node-methods control: once, while it fetches, it also asks the node a method outside the allowed node methods, on
+ * a connection of its own. The call is sent beside its work and not awaited, so that its own calls keep their order.
+ * [A83, IN-8]
  */
 function askingOutsideIn8(url: () => string): typeof NodeBlockSource {
   return class extends NodeBlockSource implements BlockItemSource {

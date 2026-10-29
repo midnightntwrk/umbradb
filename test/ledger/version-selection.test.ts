@@ -21,14 +21,17 @@ import {
 } from "./version-checks.js";
 
 /**
- * A94 `[CI]` (`openspec/changes/core-arch/acceptance.md` §12; LG-1, LG-2; task 12.2): each block's ledger version is
- * the row of the ledger version table covering the `spec_version` of its `MNSV` digest, and pins check the table. A
- * block with an unknown `spec_version` halts with `unknown-runtime`; with no `MNSV` digest or two, with
- * `bad-version-digest`; a block contradicting a pin, with `pin-mismatch` — each a typed `UmbraError` the finalized
- * loop turns into the halt of `design.md` §11. Synthetic tables and headers here, and the real mainnet header of block
- * 3,174,332 as the node returned it (`test/node/fixtures/mainnet-answers.json`, task 10.1). A94's last clause — the
- * mainnet header of block 1,774,492 passing the built-in pin — needs the pin and the header task 0.3 records:
- * `networks.test.ts` runs every built-in pin against the header its boundary's source records.
+ * Each block's ledger version is the row of the ledger version table covering the `spec_version` of its `MNSV`
+ * digest, and pins check the table. The halts are typed `UmbraError`s, which the finalized loop turns into a halt:
+ * - a block with an unknown `spec_version` halts with `unknown-runtime`;
+ * - a block with no `MNSV` digest, or two, with `bad-version-digest`;
+ * - a block contradicting a pin, with `pin-mismatch`.
+ *
+ * Synthetic tables and headers are used here, and the real mainnet header of block 3,174,332 as the node returned it
+ * (`test/node/fixtures/mainnet-answers.json`). [A94 CI, LG-1, LG-2; acceptance §12; design §11]
+ *
+ * That the mainnet header of block 1,774,492 passes the built-in pin needs the pin and the recorded header:
+ * `networks.test.ts` runs every built-in pin against the header its boundary's source records. [A94 CI]
  */
 
 describe("A94: the version digest, the rows and the pins (LG-1, LG-2)", () => {

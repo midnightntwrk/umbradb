@@ -1,9 +1,11 @@
 /**
  * SHA-256 (FIPS 180-4) in plain TypeScript, synchronous and incremental: what the browser build gives the code that
- * Node.js runs with `node:crypto`'s `createHash("sha256")` (`openspec/changes/core-arch/design.md` §9.2; task 16.1).
- * The contents hash (DT-3), the per-block digests (DT-5), the configuration's data hash (CF-6), a key's id (CF-11) and
- * a ledger transaction's hash all call it synchronously and feed it in pieces, which WebCrypto's one-shot, asynchronous
- * `digest` cannot do. `test/browser/shims.test.ts` holds it equal to Node.js's on random inputs split at random points.
+ * Node.js runs with `node:crypto`'s `createHash("sha256")`. [design §9.2]
+ *
+ * The contents hash, the per-block digests, the configuration's data hash, a key's id and a ledger transaction's hash
+ * all call it synchronously and feed it in pieces, which WebCrypto's one-shot, asynchronous `digest` cannot do.
+ * `test/browser/shims.test.ts` holds it equal to Node.js's on random inputs split at random points.
+ * [DT-3, DT-5, CF-6, CF-11]
  */
 
 const K = new Uint32Array([

@@ -20,11 +20,11 @@ import {
 import { BACKENDS } from "./backends.js";
 
 /**
- * The negative control of A141's long-work half (task 2.7): this file's module graph is built with the component's
- * session settings lacking the zero timeouts (`vi.mock` of `src/deterministic-postgresql/settings.ts`), so the database
- * API pins only the five settings of Q65. With every timeout defaulting to 1 s, each check of
+ * The negative control for long work not being cut off by timeouts. This file's module graph is built with the
+ * component's session settings lacking the zero timeouts (`vi.mock` of `src/deterministic-postgresql/settings.ts`), so
+ * the database API pins only the five pinned session settings. With every timeout defaulting to 1 s, each check of
  * `test/deterministic-postgresql/zero-timeouts-checks.ts` that passes on the real build must fail here: the database's
- * timeouts reach the writer, the migrations, setup and the callbacks' reads, and cut their work off.
+ * timeouts reach the writer, the migrations, setup and the callbacks' reads, and cut their work off. [A141, Q65]
  *
  * PostgreSQL only: on PGlite such a build hangs the process (a timeout that fires hangs the engine synchronously), so
  * PGlite's half runs, bounded, in processes of their own (`pglite-timeouts.test.ts`).

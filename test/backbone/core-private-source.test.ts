@@ -37,9 +37,9 @@ import type { HelloAck } from "../../src/private/messages.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 
 /**
- * `core-private-source`'s parts that need no database (task 14.1; PP-2, PP-3): the private block source over a public
- * database and wake-ups that tests give, the poll, the binding's refusals, the public database's opening, and the
- * private backbone's declarations. The parts with databases on both backends are `test/private/`'s.
+ * `core-private-source`'s parts that need no database: the private block source over a public database and wake-ups
+ * that tests give, the poll, the binding's refusals, the public database's opening, and the private backbone's
+ * declarations. The parts with databases on both backends are tested in `test/private/`. [PP-2, PP-3]
  */
 
 /** A read whose statements `answer` answers, by their SQL and parameters. */
@@ -69,7 +69,7 @@ const bytes = (byte: number): Uint8Array => new Uint8Array(32).fill(byte);
 
 const hexOf = (value: Uint8Array): string => `0x${Buffer.from(value).toString("hex")}`;
 
-/** {@link PUBLIC_CONFIG}'s items as the graph takes them: `pub` from 5 superseded at 8 (CF-5), its stop 9 no bound. */
+/** {@link PUBLIC_CONFIG}'s items as the graph takes them: `pub` from 5 superseded at 8, its stop 9 no bound. [CF-5] */
 const PUBLIC_ITEMS = [
   { item: "blocks", provider: "core", start: 3n, stop: null },
   { item: "chain-identity", provider: "core", start: 3n, stop: null },
@@ -301,7 +301,7 @@ describe("the private block source (PP-3)", () => {
     const { db, state } = fakePublic(publicAnswers({ head: 9n }));
     const source = new PrivateBlockSource(db, pollingWakes());
     expect(source.publicDatabase).toBe(db);
-    // An independent source reads at the public cursor, whatever the height (PP-5).
+    // An independent source reads at the public cursor, whatever the height. [PP-5]
     expect(await source.fetchRead(async (read) => read.height, 3n)).toBe(7n);
     await source.close();
     expect(state).toEqual({ reads: 1, closed: true });
@@ -519,7 +519,7 @@ describe("the private backbone (PP-1, RN-3)", () => {
   });
 });
 
-/** {@link PUBLIC_CONFIG}'s rows as the configuration hash takes them (RN-16, PP-14). */
+/** {@link PUBLIC_CONFIG}'s rows as the configuration hash takes them. [RN-16, PP-14] */
 const configRows = (rows: readonly Record<string, unknown>[]) =>
   rows.map((row) => ({
     id: row.entry_id as string,
@@ -532,7 +532,7 @@ const configRows = (rows: readonly Record<string, unknown>[]) =>
 
 /**
  * The `hello-ack` of the cores these tests stand in for: network 0xa1, S = 3, cursor 9, and the configuration hash of
- * {@link PUBLIC_CONFIG}, the history a real core's own hash is of (task 14.1c compares the two at a start).
+ * {@link PUBLIC_CONFIG}, the history a real core's own hash is of (the private process compares the two at a start).
  */
 const ACK_OF_CORE: HelloAck = {
   v: 1,
@@ -616,7 +616,7 @@ describe("lockstep on the private side (task 14.3; PP-6, PP-7, Q142)", () => {
     );
     expect(first.message).toContain(`the public database's genesis hash is ${hexOf(bytes(0xa1))}`);
     expect(both.state.asked).toBe(0);
-    // A core that cannot be reached fails the check with its failure: the runner retries it (IN-10).
+    // A core that cannot be reached fails the check with its failure: the runner retries it. [IN-10]
     const away = fakeTransport(new UmbraError("connection-lost", "away", {}));
     await expect(
       new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), away.transport).checkChain(
@@ -664,7 +664,7 @@ describe("lockstep on the private side (task 14.3; PP-6, PP-7, Q142)", () => {
     expect(behind).toMatchObject({ code: "lockstep-behind", retryable: false, details: { height: "5", cursor: "6" } });
     expect(behind.message).toContain("the public cursor is 6, past height 5");
     expect(lockstepBehind(5n, null).details).toEqual({ height: "5", cursor: null });
-    // An independent source takes it whatever the cursor (PP-5).
+    // An independent source takes it whatever the cursor. [PP-5]
     const independent = new PrivateBlockSource(db, pollingWakes(), fakeTransport({ lockstep: false }).transport);
     await independent.checkChain(configuredAs("custom", bytes(0xa1)));
     expect(await independent.block(5n)).toMatchObject({ height: 5n });
@@ -844,7 +844,7 @@ describe("PP-14: a changed public configuration halts a private process (task 14
     expect(error.retryable).toBe(false);
     expect(error.message).toContain(`0x${"01".repeat(32)}`);
     expect(error.message).toContain(`0x${"02".repeat(32)}`);
-    expect(error.message).toContain("PP-14");
+    expect(error.message).not.toMatch(/\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
   });
 
   it("negative control: a source told to ignore configHash keeps reading after a changed public configuration (fails PP-14)", async () => {
@@ -894,7 +894,7 @@ describe("PP-14 at a start: the public configuration hash a private process acce
       });
       expect(refusal?.message).toContain(`--update-hash=${H2}`);
       expect(refusal?.message).toContain(H1);
-      expect(refusal?.message).toContain("PP-14");
+      expect(refusal?.message).not.toMatch(/\b(?:[A-Z]{2,5}-\d+|Q\d+)\b/);
       if (given !== null) expect(refusal?.message).toContain(`The --update-hash given, ${given}, is not that hash`);
     }
   });
@@ -965,7 +965,7 @@ describe("PP-14 at a start: the public configuration hash a private process acce
     // Another: it stops before the graph, naming the history's hash.
     const changed = await refusalOf((await sourceWith(H1)).checkChain(configuredAs("custom", bytes(0xa1))));
     expect(changed).toMatchObject({ code: "public-config-changed", details: { recorded: H1, found: hashOfConfig, core: null } });
-    // A database bound to another public database is refused for its binding first (PP-2).
+    // A database bound to another public database is refused for its binding first. [PP-2]
     const elsewhere = await refusalOf((await sourceWith(H1, { binding: 0xb2 })).checkChain(configuredAs("custom", bytes(0xa1))));
     expect(elsewhere).toMatchObject({ code: "private-binding-mismatch", details: { reason: "genesis" } });
     // Given the hash found: it passes, and the hash is pending for the part's on-start-db.
@@ -1000,9 +1000,9 @@ describe("PP-14 at a start: the public configuration hash a private process acce
     await same.checkChain(configuredAs("custom", bytes(0xa1)));
     expect(same.pendingAcceptedHash).toBeNull();
     expect(lines).toEqual([
-      `--update-hash ${H2} not used: the private database's first start records the hash it finds, ${hashOfConfig} (PP-14)`,
+      `--update-hash ${H2} not used: the private database's first start records the hash it finds, ${hashOfConfig}`,
       `--update-hash ${H2} not used: the public configuration hash is ${hashOfConfig}, the one this private process ` +
-        "accepted (PP-14)",
+        "accepted",
     ]);
   });
 

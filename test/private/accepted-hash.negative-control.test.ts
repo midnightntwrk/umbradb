@@ -4,11 +4,13 @@ import { PRIVATE_BACKENDS, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.
 import { a165Problems, a165Run } from "./accepted-hash-checks.js";
 
 /**
- * A165's committed negative controls (task 14.1c; PP-14, owner decision Q159): two wrong start decisions given to the
- * private process's intake (`PrivateIntakeOptions.acceptance`), each failing A165's oracle on PostgreSQL 18.6 and PGlite
- * 0.5.10 — a start that never compares the hash it recorded (every start a first one: it records what it finds and
- * runs on after the core's configuration changed), and an `--update-hash` that accepts any hash (a start given the hash
- * it had accepted, not the new one, runs on). Each run ends after A165's third start (`short`).
+ * The accepted-hash scenario's committed negative controls: two wrong start decisions given to the private process's
+ * intake (`PrivateIntakeOptions.acceptance`), each failing the scenario's oracle on PostgreSQL 18.6 and PGlite 0.5.10:
+ * - a start that never compares the hash it recorded (every start a first one: it records what it finds and runs on
+ *   after the core's configuration changed);
+ * - an `--update-hash` that accepts any hash (a start given the hash it had accepted, not the new one, runs on).
+ *
+ * Each run ends after the scenario's third start (`short`). [A165, PP-14, Q159]
  */
 
 /** A start that never compares the recorded hash: every start records what it finds, as a first start does. */

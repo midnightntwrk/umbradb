@@ -20,21 +20,24 @@ import { validateDeclarations } from "../../src/modules/validation.js";
 import { FILE } from "./history-fixtures.js";
 
 /**
- * A startup standing in for the runner's (tasks 5.x) and for the backbone part `core-chain` (task 10.2), in the order
- * the plan's notes give (2.4 (g), 2.5 (d), 3.2 (b), 3.2a (a), 4.2 (a)): the declarations validated, the configuration
- * validated, (the database opened, its writer lock and durability probe — the database tests open it themselves), the
- * history read and checked with the cursor — CF-5, CF-6 and CF-8's version check, all before any migration — then the
- * graph resolved with the check's entries, S, opt-in and cursor, the schema plan, and `startDatabase` with the check's
- * committed versions, whose first part is `core-chain`: its migration `001` creates `core_chain.config`, and its
- * `on-start-db` compares the history again and records it, in one transaction (CF-6).
+ * A startup standing in for the runner's and for the backbone part `core-chain`. It runs the startup steps in order:
+ * 1. the declarations are validated;
+ * 2. the configuration is validated;
+ * 3. (the database is opened, with its writer lock and durability probe; the database tests open it themselves);
+ * 4. the history is read and checked with the cursor, including the version check, all before any migration;
+ *    [CF-5, CF-6, CF-8]
+ * 5. the graph is resolved with the check's entries, S, opt-in and cursor, then the schema plan is made;
+ * 6. `startDatabase` runs with the check's committed versions. Its first part is `core-chain`: its migration `001`
+ *    creates `core_chain.config`, and its `on-start-db` compares the history again and records it, in one
+ *    transaction. [CF-6]
  *
- * The cursor is given: the `blocks` table that holds it is task 10.2's, so a test commits "blocks" by passing a higher
- * cursor to the next startup, as task 2.4's A72 test gave the history.
+ * The cursor is given, because the `blocks` table that holds it belongs to the real `core-block-commit` part. A test
+ * commits "blocks" by passing a higher cursor to the next startup. [A72]
  */
 
 /**
  * A stand-in for `core-block-fetch`: the `block-header` item every test module requires, and the `ledger-version` item
- * the real `core-block-commit` requires (task 4.4's tests add it).
+ * the real `core-block-commit` requires (some tests add it).
  */
 const BLOCK_FETCH = defineModule({
   id: "core-block-fetch",
@@ -59,8 +62,8 @@ interface Holder {
 }
 
 /**
- * A stand-in for `core-chain`: `core_chain.config`'s migration (`001`; the real part's `002`, its identity, is task
- * 10.2's and not needed here), and the history recorded in its `on-start-db`.
+ * A stand-in for `core-chain`: `core_chain.config`'s migration (`001`; the real part's `002`, its identity, is not
+ * needed here), and the history recorded in its `on-start-db`.
  */
 function coreChain(holder: Holder): ModuleDeclaration {
   return defineModule({
@@ -93,11 +96,11 @@ export interface StartupOptions {
   /** The history's rules (a negative control leaves one out); every rule unless given. */
   readonly rules?: readonly HistoryRule[];
   /**
-   * A negative control of A33: the version check (`build-version`) left out of the checks before `startDatabase` and
-   * of `core-chain`'s, and run only after `startDatabase` — after the migrations.
+   * A negative control: the version check (`build-version`) is left out of the checks before `startDatabase` and of
+   * `core-chain`'s, and run only after `startDatabase`, that is after the migrations. [A33]
    */
   readonly versionCheckAfterMigrations?: boolean;
-  /** More backbone parts, after the stand-ins (task 4.4's tests add `core-block-commit`, whose table holds the cursor). */
+  /** More backbone parts, after the stand-ins (some tests add `core-block-commit`, whose table holds the cursor). */
   readonly backbone?: readonly ModuleDeclaration[];
 }
 

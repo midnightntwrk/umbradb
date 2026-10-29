@@ -8,12 +8,12 @@ import { type CheckTarget, CLI_BACKENDS } from "./database-fixtures.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * A6 and A35 `[CI]` through the command itself (task 4.4; LS-6, CF-10): `src/cli/main.ts` bundled with esbuild and run
+ * The subcommands and `config check` `[CI]` through the command itself: `src/cli/main.ts` bundled with esbuild and run
  * by Node.js in a child process, so the exit codes, the streams and the loading of the configuration are the real ones
  * — Node.js's own type stripping evaluates the file (its refusal of an `enum` included, which Vitest's transform
  * accepts), and the database is opened by another process than the tests' (a PGlite directory's operating-system lock
- * then belongs to the command). The breadth of both criteria is in `./command.test.ts`, `./config-check.test.ts` and
- * `./config-check-database.test.ts`, in this process.
+ * then belongs to the command). The full coverage of both is in `./command.test.ts`, `./config-check.test.ts` and
+ * `./config-check-database.test.ts`, in this process. [A6, A35 CI, LS-6, CF-10]
  */
 
 // Each test runs the TypeScript compiler on a file (about a second alone) and many open a database or start a process;
@@ -62,8 +62,8 @@ describe("A6: the command's usage and its commands (LS-6)", () => {
     expect(await inChild(project, ["--help"])).toEqual({ code: EXIT.ok, stdout: USAGE, stderr: "" });
   });
 
-  // umbradb run starts the process (task 4.4a): ./run.test.ts runs it in a child process; umbradb backup and restore
-  // (tasks 15.1, 15.2): test/backup/.
+  // umbradb run starts the process: ./run.test.ts runs it in a child process. umbradb backup and restore are covered in
+  // test/backup/.
   it("umbradb backup is recognized: without --out it prints the usage and exits 2", async () => {
     const result = await inChild(project, ["backup"]);
     expect(result).toEqual({
@@ -121,7 +121,7 @@ describe("A35: umbradb config check without --database", () => {
     const file = project.write("plain-package/umbradb.config.ts", coreOnly(UNREACHED));
     const result = await inChild(project, ["config", "check", file]);
     expect(result.stdout).toMatch(/^type check \(TypeScript 5\.9\.\d+, noEmit\): passed$/m);
-    expect(result.stdout).toMatch(/^configuration \(CF-1, CF-3\): passed$/m);
+    expect(result.stdout).toMatch(/^configuration \(evaluation, validation\): passed$/m);
     expect(result.code).toBe(EXIT.ok);
   });
 
@@ -142,7 +142,7 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35: umbradb config check --d
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  /** The file: core from 0 on `target`'s database with `retainStates`, the opt-in on PGlite (Q167 A: its own database). */
+  /** The file: core from 0 on `target`'s database with `retainStates`, the opt-in on PGlite (its own database). [Q167 A] */
   const fileWith = (name: string, target: CheckTarget, retainStates: number) =>
     project.write(
       name,

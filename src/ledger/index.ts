@@ -1,10 +1,14 @@
 /**
- * The ledger (`openspec/changes/core-arch/design.md` §1 `src/ledger/`, §5): the `LedgerPackage` adapters for v8 and
- * v9 (task 12.1); each block's ledger version from its `MNSV` digest, the built-in version tables
- * (`networks.json`) and their pins, the metadata a block is decoded with, and the identity check of the ledger
- * packages and their sources (tasks 12.2, 12.2b); the ledger worker, the node-store bridge and LG-8's block-level
- * replay rules (task 12.3). The storage, the sweep and ledger tasks follow (tasks 12.4–12.6). `design.md`
- * §12's surface takes `LedgerPackage`, `ParsedTransaction` and `LedgerTask` from here (task 17.3).
+ * The ledger. It holds:
+ *
+ * - the `LedgerPackage` adapters for v8 and v9;
+ * - each block's ledger version, read from its `MNSV` digest, with the built-in version tables (`networks.json`) and
+ *   their pins;
+ * - the metadata a block is decoded with;
+ * - the identity check of the ledger packages and their sources;
+ * - the ledger worker, the node-store bridge and the block-level replay rules (`./replay.ts`).
+ *
+ * The public surface takes `LedgerPackage`, `ParsedTransaction` and `LedgerTask` from here. [LG-8; design §1, §5, §12]
  */
 
 export * from "./adapter.js";

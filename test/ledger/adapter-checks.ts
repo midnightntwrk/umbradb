@@ -19,11 +19,11 @@ import {
 } from "./adapter-fixtures.js";
 import type { AdapterWorkerHost, LoadedState } from "./adapter-worker-host.js";
 
-// Task 12.1 of `openspec/changes/core-arch`: A98's clauses that the committed negative controls
-// (`adapter.negative-control.test.ts`) run against wrong adapters and the adapter test suite (`adapter-suite.ts`) runs
-// against the real ones. Each check fails with an assertion error.
+// The adapter checks that the committed negative controls (`adapter.negative-control.test.ts`) run against wrong
+// adapters and the adapter test suite (`adapter-suite.ts`) runs against the real ones. Each check fails with an
+// assertion error. [A98]
 
-/** The fast-check seed of the v8 `decodeLogItem` property (Q54), reported in its test's title. */
+/** The fast-check seed of the v8 `decodeLogItem` property, reported in its test's title. [Q54] */
 export const DECODE_SEED = 20261026;
 const DECODE_RUNS = 300;
 
@@ -36,9 +36,9 @@ const vendored = (ledger: Ledger, file: string): URL =>
   new URL(`../../vendor/ledger/${ledger}/${file}`, import.meta.url);
 
 /**
- * A98: `versionName` and `rawPackages()` return the recorded release and packages — the release name and package name
+ * `versionName` and `rawPackages()` return the recorded release and packages: the release name and package name
  * `vendor/ledger/<version>/upstream.json` records, the name and version the package's own `package.json` carries, and,
- * under that name, the very module loaded from `vendor/ledger/<version>/pkg/` (`raw`).
+ * under that name, the very module loaded from `vendor/ledger/<version>/pkg/` (`raw`). [A98]
  */
 export function expectRecordedRelease(adapter: LedgerPackage, ledger: Ledger, raw: object): void {
   const upstream = JSON.parse(readFileSync(vendored(ledger, "upstream.json"), "utf8")) as Upstream;
@@ -57,7 +57,7 @@ export function expectRecordedRelease(adapter: LedgerPackage, ledger: Ledger, ra
   expect(Object.isFrozen(packages)).toBe(true);
   expect(LEDGER_RELEASES[ledger]).toEqual({
     versionName: upstream.versionName,
-    // The package's identity (task 12.2): the SHA-256 of its manifest, which lists every file of the package.
+    // The package's identity: the SHA-256 of its manifest, which lists every file of the package.
     packages: [
       {
         name: manifest.name,
@@ -70,9 +70,9 @@ export function expectRecordedRelease(adapter: LedgerPackage, ledger: Ledger, ra
 }
 
 /**
- * A98 (owner decision Q55): a state under the ledger's 1,024-byte embedding limit — a blank one, whose state root is
- * the state itself, embedded, not a key — reloads in a fresh instance from the nodes a flush gave, by its `stateKey`.
- * `store` holds every node this test file's adapter flushed so far, as the database would.
+ * A state under the ledger's 1,024-byte embedding limit reloads in a fresh instance from the nodes a flush gave, by
+ * its `stateKey`. The state is a blank one, whose state root is the state itself, embedded, not a key. `store` holds
+ * every node this test file's adapter flushed so far, as the database would. [A98, Q55]
  */
 export async function expectSmallStateReloadsByKey(
   adapter: LedgerPackage,
@@ -114,10 +114,13 @@ export function logValueInputs(): Uint8Array[] {
 }
 
 /**
- * A98 (owner decision Q54): the v8 adapter's `decodeLogItem` returns null for every input — arbitrary bytes (a
- * fast-check property with a pinned seed) and the serialized log values a v9 ledger decodes — and its `apply` returns
- * no `logs` for a block whose contract call runs the VM's `log` twice, though the v8 ledger itself emits a
- * `ContractLog` event for each (the reference replay of the same block with the package's published API, the oracle).
+ * The v8 adapter reports no contract logs:
+ * - its `decodeLogItem` returns null for every input: arbitrary bytes (a fast-check property with a pinned seed) and
+ *   the serialized log values a v9 ledger decodes;
+ * - its `apply` returns no `logs` for a block whose contract call runs the VM's `log` twice, though the v8 ledger itself
+ *   emits a `ContractLog` event for each. The oracle is the reference replay of the same block with the package's
+ *   published API.
+ * [A98, Q54]
  */
 export async function expectNoV8Logs(adapter: LedgerPackage): Promise<void> {
   const property = fc.check(

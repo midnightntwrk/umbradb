@@ -19,18 +19,17 @@ import { core, settle, startProcess, testBuild } from "./process-build.js";
 import { spawnChild } from "../child-processes.js";
 
 /**
- * A44 and A46 (task 5.4; RN-5, RN-9, RN-11) with a real process killed by SIGKILL at the stated points, on PostgreSQL 18
- * and PGlite: the process is `crash.worker.ts`, started as `umbradb run` starts one (`startProcess` with its
- * configuration file); module `c` (`crash-module.ts`) holds for ever at the point and height the test names, so the
- * kill always comes exactly there; the restart runs in the test's own process with the same declaration and logs what
- * `c` was given.
- * - **A44** — killed after `c`'s `on-start-height` at its start h (4), inside `c`'s `on-db-write` of h with its row
- *   written, so before h commits: after the restart `on-start-height` fires for `c` at h again, before its
- *   `on-compute` at h (RN-9's at least once).
- * - **A46** — killed after the COMMIT of h (5), inside `c`'s `on-after-db-write` of h: after the restart
+ * A real process killed by SIGKILL at the stated points, on PostgreSQL 18 and PGlite. The process is `crash.worker.ts`,
+ * started as `umbradb run` starts one (`startProcess` with its configuration file). Module `c` (`crash-module.ts`)
+ * holds for ever at the point and height the test names, so the kill always comes exactly there. The restart runs in
+ * the test's own process with the same declaration and logs what `c` was given. [RN-5, RN-9, RN-11]
+ * - **Killed before h commits**: after `c`'s `on-start-height` at its start h (4), inside `c`'s `on-db-write` of h with
+ *   its row written. After the restart, `on-start-height` fires for `c` at h again, before its `on-compute` at h: it
+ *   fires at least once. [A44, RN-9]
+ * - **Killed after h commits**: after the COMMIT of h (5), inside `c`'s `on-after-db-write` of h. After the restart,
  *   `on-after-db-write` fires for h before any callback of h + 1, with h's height, hash and settings and no `block`
- *   items, and no `on-after-db-write` ever receives `block` items, re-delivered or not, though `c` puts one in each
- *   height's `on-parse` (RN-5, RN-11).
+ *   items. No `on-after-db-write` ever receives `block` items, delivered again or not, though `c` puts one in each
+ *   height's `on-parse`. [A46, RN-5, RN-11]
  */
 
 const WORKER = fileURLToPath(new URL("./crash.worker.ts", import.meta.url));
@@ -168,7 +167,8 @@ function killAndEnd(observed: CrashObservation, hold: CrashJob["hold"], from: nu
 const A44_HOLD = { point: "on-db-write", height: 4 } as const;
 const A46_HOLD = { point: "on-after-db-write", height: 5 } as const;
 
-/** A44's oracle (c from 4, killed in its `on-db-write` of 4): every problem, none when A44 holds. */
+/** The oracle for a kill before the commit (c from 4, killed in its `on-db-write` of 4): every problem, none when it
+ *  holds. [A44] */
 function a44Problems(observed: CrashObservation): string[] {
   const problems = killAndEnd(observed, A44_HOLD, 4, 3);
   const before = calls(observed.killed);
@@ -187,7 +187,8 @@ function a44Problems(observed: CrashObservation): string[] {
   return problems;
 }
 
-/** A46's oracle (c from 1 with k = 7, killed in its `on-after-db-write` of 5): every problem, none when A46 holds. */
+/** The oracle for a kill after the commit (c from 1 with k = 7, killed in its `on-after-db-write` of 5): every
+ *  problem, none when it holds. [A46] */
 function a46Problems(observed: CrashObservation): string[] {
   const problems = killAndEnd(observed, A46_HOLD, 1, 5);
   const h = A46_HOLD.height;
@@ -222,7 +223,7 @@ function a46Problems(observed: CrashObservation): string[] {
         problems.push(`in ${name} on-after-db-write at ${call.height} received block items ${call.items?.join(",")}`);
       }
       // The items the check relies on exist: each height's on-compute sees c's note, after the four the backbone's
-      // core-block-fetch puts at on-fetch (task 10.3, CD-2; core-block-commit reads two of them).
+      // core-block-fetch puts at on-fetch (core-block-commit reads two of them). [CD-2]
       const expected = "block-header,block-body,runtime-metadata,ledger-version,c-note";
       if (call.point === "on-compute" && call.items?.join(",") !== expected) {
         problems.push(`in ${name} on-compute at ${call.height} saw the items ${call.items?.join(",")}, not ${expected}`);

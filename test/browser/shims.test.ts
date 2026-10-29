@@ -13,10 +13,10 @@ import { Sha256, sha256 } from "../../browser/src/shims/sha256.js";
 import { UmbraError } from "../../src/db/errors.js";
 
 /**
- * What the browser build replaces of Node.js, held to Node.js's own (task 16.1; BR-4: the same results as Node.js):
+ * What the browser build replaces of Node.js, held to Node.js's own, since the browser must give the same results:
  * SHA-256 — synchronous, incremental, fed in any pieces — and the `Buffer` operations UmbraDB's sources use, each on
  * random inputs against Node.js's (fast-check, seed recorded); and the browser's pure pieces: the database's location,
- * the Web Lock's name, the development opt-in and the page's JSON-ready values.
+ * the Web Lock's name, the development opt-in and the page's JSON-ready values. [BR-4]
  */
 
 const SEED = 20261027;
