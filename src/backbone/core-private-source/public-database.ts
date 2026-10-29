@@ -153,6 +153,8 @@ export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
     onReadSessionLost: () => {
       lost += 1;
     },
+    // The public process migrates its database at its own startups, which this process does not see.
+    preparedStatements: false,
   });
   return Object.freeze({
     read: <T>(body: (read: ReadHandle) => Promise<T>): Promise<T> => db.read(body),

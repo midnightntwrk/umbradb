@@ -1221,7 +1221,12 @@ class Process implements ProcessHandle {
     const connection = { ...parts, user: reader.user, ...(reader.password === undefined ? {} : { password: reader.password }) };
     // A retried startup opens it again.
     await this.#transportReader?.close();
-    const pool = openPostgres({ connection, committedHeight: source.committedHeight ?? cursorHeight });
+    // Private clients send this pool their own SQL, whose texts vary: it prepares none of it.
+    const pool = openPostgres({
+      connection,
+      committedHeight: source.committedHeight ?? cursorHeight,
+      preparedStatements: false,
+    });
     this.#transportReader = pool;
     const facts = await pool.read((read) => transportReaderFacts(read, database.user));
     refuseWritingReader(facts, this.#input.transportReaderCheck);

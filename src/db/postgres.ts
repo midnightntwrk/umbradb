@@ -132,6 +132,11 @@ export interface PostgresOptions {
    * process uses it to read its public database again at a reconnection. None unless given. [PP-14]
    */
   readonly onReadSessionLost?: () => void;
+  /**
+   * Whether sessions prepare the statements they repeat; default true. False for a pool on a database another process
+   * migrates, and for one that runs SQL others send (see `SchemaChanges`).
+   */
+  readonly preparedStatements?: boolean;
   /** The negative control's mapping of the parts to the driver's options; {@link driverConnectionOptions} unless given. */
   readonly driverOptions?: (connection: PostgresConnection) => DriverConnectionOptions;
 }
@@ -236,6 +241,40 @@ interface Outcome {
   readonly command: string;
 }
 
+/** The most statement texts a session prepares in its life (see `Session.prepares`): above the build's own, a fixed bound. */
+const PREPARED_TEXTS = 256;
+
+/**
+ * Counts the statements that may change a table's columns (DDL) on any session this process opened to one database,
+ * through any pool: a session reuses only the texts it prepared since the last one. PostgreSQL re-plans a prepared
+ * statement after DDL, but refuses one whose result columns changed (`cached plan must not change result type`), which
+ * aborts the transaction it runs in; the driver's retry cannot recover that. A text prepared before such DDL is never
+ * prepared again on that session, since the driver would reuse its stale entry: it runs unprepared, as without
+ * preparing. A writer's `ROLLBACK` counts too, since the DDL it undoes changes the columns back. Schema changes come
+ * from the writer's migrations at startup, under the writer lock. A private process's pool on its public database,
+ * which the public process migrates unseen, prepares nothing, nor does the transport's pool, which runs the SQL
+ * private clients send (`preparedStatements: false`).
+ */
+interface SchemaChanges {
+  count: number;
+}
+
+/** A command tag of a statement that may change a table's or a view's columns. */
+const SCHEMA_CHANGE = /^(CREATE|ALTER|DROP|DO|CALL)\b/;
+
+/** The schema-change count of each database this process opened, by server and database name. */
+const SCHEMA_CHANGES = new Map<string, SchemaChanges>();
+
+function schemaChangesOf(connection: DriverConnectionOptions): SchemaChanges {
+  const key = JSON.stringify([connection.host, connection.port, connection.path ?? null, connection.database]);
+  let changes = SCHEMA_CHANGES.get(key);
+  if (changes === undefined) {
+    changes = { count: 0 };
+    SCHEMA_CHANGES.set(key, changes);
+  }
+  return changes;
+}
+
 /** One connection, used until it is lost or ended (see the module comment). */
 class Session {
   private readonly sql: Sql;
@@ -245,13 +284,19 @@ class Session {
     connection: DriverConnectionOptions,
     private readonly role: Role,
     connectTimeoutSeconds: number | undefined,
+    private readonly schemaChanges: SchemaChanges = { count: 0 },
+    private readonly preparedLimit: number = PREPARED_TEXTS,
   ) {
     // The driver's types take one host as text; it takes the lists `driverConnectionOptions` gives as they are.
     this.sql = (postgres as unknown as (options: object) => Sql)({
       ...connection,
       max: 1,
       fetch_types: false,
-      prepare: false,
+      // A statement with parameters is prepared once per session, by name, and reused: without it the driver describes
+      // every such statement before running it, a second round trip each time. The sessions are UmbraDB's own, pinned
+      // for their life with no pooler between, so a named statement stays theirs; `send` decides which texts
+      // (`prepares`).
+      prepare: true,
       // Never recycled: the writer's connection holds the writer lock for as long as it lives (./writer-lock.ts).
       // [DB-11]
       max_lifetime: null,
@@ -271,6 +316,31 @@ class Session {
       },
       ...(connectTimeoutSeconds === undefined ? {} : { connect_timeout: connectTimeoutSeconds }),
     }) as unknown as Sql;
+  }
+
+  /** The texts this session prepared since the last schema change it knows of ({@link SchemaChanges}). */
+  private readonly preparedTexts = new Set<string>();
+  /** The texts it prepared before a schema change: never prepared again on this session. */
+  private readonly retiredTexts = new Set<string>();
+  private seenSchemaChanges = 0;
+
+  /**
+   * Whether `text` runs as a named prepared statement: one prepared since the last schema change, or a new one while
+   * this session has prepared fewer than {@link PREPARED_TEXTS} in its life. The driver keeps each without limit for the
+   * session's life (it keys them by text, every parameter typed alike). A caller sending ever new texts, such as a
+   * private client's reads or a module's built SQL, so costs the server at most that many; the rest run as now,
+   * described first.
+   */
+  private prepares(text: string): boolean {
+    if (this.seenSchemaChanges !== this.schemaChanges.count) {
+      this.seenSchemaChanges = this.schemaChanges.count;
+      for (const known of this.preparedTexts) this.retiredTexts.add(known);
+      this.preparedTexts.clear();
+    }
+    if (this.preparedTexts.has(text)) return true;
+    if (this.retiredTexts.has(text) || this.preparedTexts.size + this.retiredTexts.size >= this.preparedLimit) return false;
+    this.preparedTexts.add(text);
+    return true;
   }
 
   /** True until the connection is lost or ended. */
@@ -295,6 +365,9 @@ class Session {
       command: string;
     };
     const result = (await this.send(text, args, simple)) as Raw;
+    if (SCHEMA_CHANGE.test(result.command) || (this.role === "writer" && result.command === "ROLLBACK")) {
+      this.schemaChanges.count += 1;
+    }
     const columns = (result.columns ?? []).map((column) => ({ name: column.name, type: column.type }));
     const rows = mapRows(
       columns,
@@ -308,7 +381,12 @@ class Session {
    * migration's, `./multi-statement.ts`); its results are not read (the driver gives one per statement).
    */
   async script(text: string): Promise<void> {
-    await this.send(text, [], true);
+    try {
+      await this.send(text, [], true);
+    } finally {
+      // A migration's script: whatever it ran, the tables it names may have other columns now.
+      this.schemaChanges.count += 1;
+    }
   }
 
   /** Sends a text to the server unless the session ended or was lost; a driver error as an {@link UmbraError}. */
@@ -322,7 +400,8 @@ class Session {
     }
     try {
       // `simple` is a runtime option of `unsafe` the driver's types do not declare (`postgres` 3.4.9 `index.js`).
-      const options = { simple } as unknown as postgres.UnsafeQueryOptions;
+      const prepare = !simple && args.length > 0 && this.prepares(text);
+      const options = { simple, prepare } as unknown as postgres.UnsafeQueryOptions;
       return await this.sql.unsafe(text, args as string[], options).raw();
     } catch (error) {
       if (this.ended) throw handleClosed("database");
@@ -580,7 +659,10 @@ export function openPostgres(options: PostgresOptions): Database {
     throw new UmbraError("invalid-configuration", message, { parameter: "readConnections" });
   }
   const connection = (options.driverOptions ?? driverConnectionOptions)(options.connection);
-  const session = (role: Role) => () => new Session(connection, role, options.connectTimeoutSeconds);
+  const schemaChanges = schemaChangesOf(connection);
+  const preparedLimit = options.preparedStatements === false ? 0 : PREPARED_TEXTS;
+  const session = (role: Role) => () =>
+    new Session(connection, role, options.connectTimeoutSeconds, schemaChanges, preparedLimit);
   const writer = new Writer(session("writer"), options.fullPageWritesOffAllowed ?? false);
   const pool = new ReadPool(readConnections, session("reader"), options.onReadSessionLost);
   let closed = false;
