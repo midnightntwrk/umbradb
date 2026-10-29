@@ -1,7 +1,7 @@
 {
   "format": "umbradb-real-tapes",
   "version": 1,
-  "about": "The recorded tapes of core-arch task 0.3 (owner decisions Q123, Q130), read by test/tape/real/real-tapes.ts. Each tape is a JSON-lines tape (TT-1) holding every IN-8 call of every height of its range and a live window of both head subscriptions, recorded once with tools/tape/main.ts range through the recording builder. The tapes are not in this repository: they are kept on the machine that recorded them until the owner decides where they are stored; a test finds a tape in the directory named by UMBRADB_TAPES under its file name, checks its size and SHA-256, and is skipped with the tape's name as the reason when it is absent.",
+  "about": "The recorded tapes of core-arch task 0.3 (owner decisions Q123, Q130), read by test/tape/real/real-tapes.ts. Each tape is a JSON-lines tape (TT-1) holding every IN-8 call of every height of its range and a live window of both head subscriptions, recorded once with tools/tape/main.ts range through the recording builder. The tapes are published outside this repository at https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1 (see the acceptance.md tape note for the devnet filename mapping); a test finds a tape in the directory named by UMBRADB_TAPES under its file name, checks its size and SHA-256, and is skipped with the tape's name as the reason when it is absent.",
   "tapes": [
     {
       "name": "mainnet-1774000-1780000",

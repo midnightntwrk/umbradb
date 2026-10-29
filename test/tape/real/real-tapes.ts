@@ -10,8 +10,9 @@ import { readTape, type Tape, tapeId } from "../../../tools/tape/index.js";
  * **The manifest** (`./manifest.json`, committed): one entry per tape — its name, its file name (`<name>.tape.jsonl`),
  * the network and the range of heights it holds, its SHA-256 (its `tapeId`) and size in bytes, its records, the
  * endpoint it was recorded from with the node version that node reported and the day, and why its bounds are what
- * they are. The tapes themselves are not in the repository: they are kept on the machine that recorded them, until the
- * owner decides where they are stored for CI. [TT-1, Q130]
+ * they are. The tapes themselves are published outside this repository:
+ * https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1
+ * [TT-1, Q130; acceptance's tape note for the devnet filename mapping]
  *
  * **The lookup** ({@link findTape}): a tape is looked for in the directory named by `UMBRADB_TAPES`, under its file
  * name. Absent — the variable unset or empty, or no such file — it is reported absent with a reason naming the tape,
