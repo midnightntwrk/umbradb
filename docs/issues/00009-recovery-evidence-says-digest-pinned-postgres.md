@@ -1,6 +1,7 @@
 # 00009 — The recovery evidence says its PostgreSQL image was digest-pinned; the test setup used a tag
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-29: `docs/recovery/EVIDENCE.md` keeps the run's record and adds a note under its
+  table that the image was pinned by tag, not digest, at `8a684fc`.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-24, during task 0.4 of `openspec/changes/core-arch` (PostgreSQL 18 pins, owner decision Q82),
   while deciding which documents that name `postgres:17-alpine` are records of past runs.
