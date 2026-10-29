@@ -13,7 +13,7 @@ import {
   type TestDatabase,
   TEST_TIMEOUT_MS,
 } from "./backends.js";
-import { cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import { readIdentity } from "../../src/backbone/core-chain/index.js";
 import type { Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";

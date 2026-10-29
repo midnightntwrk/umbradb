@@ -3,11 +3,7 @@
  * startup checks against the node, and the `process` items every module may require: `config`, `node-client`, `db`
  * (read-only) and `ledger-table`. [CD-1, IN-2, IN-3, MD-7, Q73; CORE-ARCH §4.4, §4.11; design §11]
  *
- * **Its tables** live in its reserved schema `core_chain`. Its migrations create them as the writer's login, and every
- * module role can read them: [DB-6, DB-8; design §10]
- * - `001`: the history's `core_chain.config` ({@link CONFIG_MIGRATION});
- * - `002`: `core_chain.identity`, one row holding the genesis hash, S, and the anchor hash, which is null until block S
- *   commits. [CD-1]
+ * **The tables** and every statement are in `./sql.ts`.
  *
  * **Startup**, as the runner (`src/runner/process.ts`) runs it:
  * 1. After the history's check and before any migration, {@link checkChain} asks the block source (the node, through
@@ -42,7 +38,7 @@ import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { HistoryOptions } from "../../config/history.js";
 import type { CheckedConfig } from "../../config/validate.js";
-import type { BlockWriteHandle, Database, ReadHandle, SchemaWriteHandle } from "../../db/api.js";
+import type { BlockWriteHandle, Database, SchemaWriteHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { readOnlyDatabase } from "../../db/read-only.js";
 import { type BuiltInNetwork, builtInNetwork } from "../../ledger/networks.js";
@@ -52,61 +48,11 @@ import type { PublicItem } from "../../modules/graph.js";
 import type { DeclarationSet } from "../../modules/validation.js";
 import type { NodeClient, NodeClientOptions } from "../../node/client.js";
 import type { BlockRef, BlockSource } from "../../runner/block-source.js";
-import { CONFIG_MIGRATION, recordHistory } from "./history.js";
+import { recordHistory } from "./history.js";
+import { type ChainIdentity, CORE_CHAIN_MIGRATIONS, IDENTITY_TABLE, recordAnchor, recordIdentity } from "./sql.js";
 
 /** The part's id: the first in the fixed backbone order (`BACKBONE_ORDER`). [RN-3] */
 export const CORE_CHAIN_ID = "core-chain";
-
-/** The identity's table: one row (id = 1). */
-export const IDENTITY_TABLE = "core_chain.identity";
-
-/** `core-chain`'s migration `002`, which creates the identity's table; it never changes. [DB-9] */
-export const IDENTITY_MIGRATION: { readonly id: string; readonly sql: string } = Object.freeze({
-  id: "002",
-  sql: `CREATE TABLE ${IDENTITY_TABLE} (
-  id smallint PRIMARY KEY CHECK (id = 1),
-  genesis_hash bytea NOT NULL CHECK (octet_length(genesis_hash) = 32),
-  start_height bigint NOT NULL CHECK (start_height >= 0),
-  anchor_hash bytea CHECK (octet_length(anchor_hash) = 32)
-);`,
-});
-
-/** `core-chain`'s migrations, in order: `001` creates the history's table, `002` the identity's. [DB-9] */
-export const CORE_CHAIN_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  CONFIG_MIGRATION,
-  IDENTITY_MIGRATION,
-]);
-
-/** The chain's identity as `core_chain.identity` holds it. [CD-1] */
-export interface ChainIdentity {
-  readonly genesisHash: Uint8Array;
-  /** S. */
-  readonly start: bigint;
-  /** The hash of block S; null until it commits. */
-  readonly anchorHash: Uint8Array | null;
-}
-
-const IDENTITY_PRESENT_SQL = "SELECT to_regclass('core_chain.identity') IS NOT NULL AS present";
-const IDENTITY_SQL = `SELECT genesis_hash, start_height, anchor_hash FROM ${IDENTITY_TABLE} WHERE id = 1`;
-const RECORD_IDENTITY_SQL = `INSERT INTO ${IDENTITY_TABLE} (id, genesis_hash, start_height) VALUES (1, $1, $2)
-  ON CONFLICT (id) DO UPDATE SET genesis_hash = EXCLUDED.genesis_hash, start_height = EXCLUDED.start_height`;
-const ANCHOR_SQL = `UPDATE ${IDENTITY_TABLE} SET anchor_hash = $1 WHERE id = 1 AND anchor_hash IS NULL`;
-
-/**
- * The chain's identity, read through `read` (a read handle, a transaction or a write handle); null before the table
- * exists (a database before its first startup) or while it holds no row.
- */
-export async function readIdentity(read: Pick<ReadHandle, "query">): Promise<ChainIdentity | null> {
-  const [table] = await read.query(IDENTITY_PRESENT_SQL);
-  if (table?.present !== true) return null;
-  const [row] = await read.query(IDENTITY_SQL);
-  if (row === undefined) return null;
-  return Object.freeze({
-    genesisHash: row.genesis_hash as Uint8Array,
-    start: row.start_height as bigint,
-    anchorHash: row.anchor_hash as Uint8Array | null,
-  });
-}
 
 /** A hash as `0x`-prefixed lowercase hex, as the process transport writes hashes. */
 function hex(bytes: Uint8Array): string {
@@ -367,7 +313,7 @@ export async function coreChainStartDb(
 ): Promise<void> {
   const { facts, db } = boundTo(p, "on-start-db");
   await recordHistory(w, { config: facts.config, declarations: facts.declarations, cursor: facts.cursor }, options.history);
-  if (facts.cursor === null) await w.execute(RECORD_IDENTITY_SQL, [facts.genesisHash, facts.start]);
+  if (facts.cursor === null) await recordIdentity(w, facts.genesisHash, facts.start);
   p.publish("config", facts.config);
   if (facts.nodeClient !== null) p.publish("node-client", facts.nodeClient);
   p.publish("db", db);
@@ -382,7 +328,7 @@ export async function coreChainStartDb(
 export async function coreChainDbWrite(p: ProcessContext, b: BlockContext, w: BlockWriteHandle): Promise<void> {
   const { facts } = boundTo(p, "on-db-write");
   if (b.height !== facts.start) return;
-  const recorded = await w.execute(ANCHOR_SQL, [b.hash]);
+  const recorded = await recordAnchor(w, b.hash);
   if (recorded !== 1) {
     throw new Error(
       `core-chain could not record the anchor hash of block S (${b.height}) in ${IDENTITY_TABLE}: the row is missing ` +

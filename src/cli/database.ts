@@ -26,8 +26,8 @@
  */
 
 import { join, resolve } from "node:path";
-import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
-import { readHistory } from "../backbone/core-chain/history.js";
+import { cursorHeight } from "../backbone/core-block-commit/sql.js";
+import { readHistory } from "../backbone/core-chain/sql.js";
 import type { HistoryRow } from "../config/history.js";
 import { databaseTarget } from "../config/database.js";
 import type { DatabaseParts } from "../config/database-parts.js";

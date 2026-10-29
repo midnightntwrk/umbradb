@@ -8,7 +8,6 @@ import {
   boundLedger,
   computeBlock,
   CORE_LEDGER_STATE,
-  CORE_LEDGER_STATE_MIGRATIONS,
   itemsOf,
   NODES_PER_STATEMENT,
   parentTimeOf,
@@ -18,6 +17,7 @@ import {
   taggedAddress,
   writeBlock,
 } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
+import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/sql.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { type AppliedState, EvictionRefused } from "../../src/ledger/worker/engine.js";
 import type { LedgerHost } from "../../src/ledger/worker/host.js";

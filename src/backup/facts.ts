@@ -13,9 +13,9 @@
  * - the contents hash, which records the tables declared `deterministic: false` by name only [DT-3, Q76].
  */
 
-import { readCursor } from "../backbone/core-block-commit/core-block-commit.js";
-import { readIdentity } from "../backbone/core-chain/core-chain.js";
-import { readPrivateCursor } from "../backbone/core-private-source/core-private-source.js";
+import { readCursor } from "../backbone/core-block-commit/sql.js";
+import { readIdentity } from "../backbone/core-chain/sql.js";
+import { readPrivateCursor } from "../backbone/core-private-source/sql.js";
 import type { PlainObject } from "../config/plain-data.js";
 import type { ReadHandle } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";

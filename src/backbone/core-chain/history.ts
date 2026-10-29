@@ -1,32 +1,19 @@
 /**
  * `core-chain`'s configuration history in `core_chain.config`. This file holds:
- * - the table, created by `core-chain`'s migration as the writer's login (`core_chain` is a reserved schema, one of
- *   UmbraDB's own parts') [DB-8];
- * - reading its rows;
- * - recording a startup's configuration in it.
+ * - the `table` items a revision provides ({@link tableItemsOf});
+ * - the configuration hash of a database ({@link readConfigHash});
+ * - recording a startup's configuration in the table ({@link recordHistory}).
  *
  * What is compared and recorded is decided by `checkHistory` (`src/config/history.ts`). The backbone part `core-chain`
- * itself (`./core-chain.ts`) lists {@link CONFIG_MIGRATION} first among its migrations and calls {@link recordHistory}
- * in its `on-start-db`. [CF-5, CF-6, CF-7, CF-8; CORE-ARCH §4.12; design §7]
+ * itself (`./core-chain.ts`) lists `CONFIG_MIGRATION` first among its migrations and calls {@link recordHistory} in its
+ * `on-start-db`. [CF-5, CF-6, CF-7, CF-8; CORE-ARCH §4.12; design §7]
  *
- * **The table's columns**: [design §10]
- * - `(entry_id, start)`: the key;
- * - `stop`: null when absent, and always null for `core`, enforced by a `CHECK` (its stop is operational) [CF-4];
- * - `version`: text, a module's semver or the core version's canonical JSON;
- * - `data` and `data_hash`: the data fields as `jsonb` (written as their canonical JSON) and their SHA-256. Both are
- *   null for a scheduled revision, which records only id, start, stop and version, and otherwise both are present (a
- *   `CHECK`) [CF-3];
- * - `provides`: the names of the `table` items the revision provides ({@link tableItemsOf}): a module's from the
- *   build's declaration of it, and `core`'s from the build's backbone parts. A private process's graph counts them as
- *   provided at the revision's heights. [PP-13, Q126 B; design §8]
- *
- * Every module role reads the table (through the database API's default privileges on `core_chain`); none writes it.
- * [DB-6]
+ * **The tables** and every statement are in `./sql.ts`.
  *
  * **Order at startup**: [CF-6, CF-8]
- * 1. The runner reads the rows ({@link readHistory}; there are none before the table exists) and checks the
+ * 1. The runner reads the rows (`readHistory`, in `./sql.ts`; there are none before the table exists) and checks the
  *    configuration against them before any migration runs.
- * 2. `startDatabase` then runs `core-chain` first: this migration on a new database, then its `on-start-db`.
+ * 2. `startDatabase` then runs `core-chain` first: its migration `001` on a new database, then its `on-start-db`.
  * 3. That `on-start-db` compares again with the rows its own transaction reads. In that same transaction it deletes the
  *    omitted rows above the cursor and records the check's writes ({@link recordHistory}), each with its `provides`.
  *    [CF-5, Q103 B]
@@ -38,66 +25,17 @@
 import {
   canonicalJson,
   checkHistory,
-  type ConfigHashRow,
   configHashOf,
   type HistoryCheck,
   type HistoryInput,
   type HistoryOptions,
-  type HistoryRow,
 } from "../../config/history.js";
 import { CORE_ENTRY_ID } from "../../config/entries.js";
-import type { PlainObject } from "../../config/plain-data.js";
 import type { ReadHandle, Transaction } from "../../db/api.js";
-import { keyOrderTerm } from "../../deterministic-postgresql/index.js";
 import type { ModuleDeclaration } from "../../modules/declaration.js";
 import { utf8Order } from "../../modules/graph.js";
 import type { DeclarationSet } from "../../modules/validation.js";
-
-/**
- * `core-chain`'s migration `001`, which creates the history's table. It is applied once and recorded under
- * `core-chain`, and it never changes once a database has applied it, since its checksum is fixed by the databases that
- * applied it. (`provides` was added in place before any database existed.) The part's other migrations follow it
- * (`CORE_CHAIN_MIGRATIONS`, `./core-chain.ts`). [DB-9]
- */
-export const CONFIG_MIGRATION: { readonly id: string; readonly sql: string } = Object.freeze({
-  id: "001",
-  sql: `CREATE TABLE core_chain.config (
-  entry_id text NOT NULL,
-  start bigint NOT NULL CHECK (start >= 0),
-  stop bigint CHECK (stop >= start),
-  version text NOT NULL,
-  data jsonb,
-  data_hash bytea,
-  provides text[] NOT NULL,
-  PRIMARY KEY (entry_id, start),
-  CHECK ((data IS NULL AND data_hash IS NULL) OR (data IS NOT NULL AND octet_length(data_hash) = 32)),
-  CHECK (entry_id <> 'core' OR stop IS NULL)
-);`,
-});
-
-const PRESENT_SQL = "SELECT to_regclass('core_chain.config') IS NOT NULL AS present";
-
-/**
- * In primary-key order (the component's `keyOrderTerm`: ids by their bytes), so refusals list rows the same way
- * everywhere. [DT-2]
- */
-const ROWS_SQL = `SELECT entry_id, start, stop, version, data, data_hash FROM core_chain.config
-  ORDER BY ${keyOrderTerm("entry_id", "text")}, ${keyOrderTerm("start", "bigint")}`;
-
-const DELETE_SQL = "DELETE FROM core_chain.config WHERE entry_id = $1 AND start = $2";
-
-/** The columns the configuration hash reads, from every row, with the data read by its hash only. [RN-16, PP-14] */
-const CONFIG_HASH_SQL = "SELECT entry_id, start, stop, version, data_hash, provides FROM core_chain.config";
-
-const RECORD_SQL = `INSERT INTO core_chain.config (entry_id, start, stop, version, data, data_hash, provides)
-  VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::text[])
-  ON CONFLICT (entry_id, start) DO UPDATE
-  SET stop = EXCLUDED.stop, version = EXCLUDED.version, data = EXCLUDED.data, data_hash = EXCLUDED.data_hash,
-    provides = EXCLUDED.provides`;
-
-/** A revision above the cursor given this build's `provides`, only where its row's differ (so nothing else is written). */
-const PROVIDES_SQL = `UPDATE core_chain.config SET provides = $3::text[]
-  WHERE entry_id = $1 AND start = $2 AND provides IS DISTINCT FROM $3::text[]`;
+import { deleteConfigRow, readConfigRows, readHistory, updateProvides, writeConfigRow } from "./sql.js";
 
 /**
  * What `core_chain.config.provides` records for a revision of `id` in a build of `declarations`: the names of the
@@ -120,46 +58,6 @@ export function tableItemsOf(declarations: DeclarationSet<ModuleDeclaration>, id
     part.provides.filter((item) => item.lifetimes.includes("table")).map((item) => item.name),
   );
   return [...new Set(names)].sort(utf8Order);
-}
-
-/**
- * The rows of `core_chain.config`, by id (in UTF-8 byte order) and start; none while the table does not exist (a new
- * database, before `core-chain`'s migration). Takes a read handle, a transaction or a write handle.
- */
-export async function readHistory(read: Pick<ReadHandle, "query">): Promise<HistoryRow[]> {
-  const [{ present }] = (await read.query(PRESENT_SQL)) as [{ present: boolean }];
-  if (!present) return [];
-  const rows = await read.query(ROWS_SQL);
-  return rows.map((row) =>
-    Object.freeze({
-      id: row.entry_id as string,
-      start: row.start as bigint,
-      stop: row.stop as bigint | null,
-      version: row.version as string,
-      data: row.data as PlainObject | null,
-      dataHash: row.data_hash === null ? null : new Uint8Array(row.data_hash as Uint8Array),
-    }),
-  );
-}
-
-/**
- * The rows of `core_chain.config` as the configuration hash reads them, in no order (`configHashOf` orders them); null
- * while the table does not exist. Takes any handle that reads. [RN-16, PP-14; design §8]
- */
-export async function readConfigRows(read: Pick<ReadHandle, "query">): Promise<ConfigHashRow[] | null> {
-  const [{ present }] = (await read.query(PRESENT_SQL)) as [{ present: boolean }];
-  if (!present) return null;
-  const rows = await read.query(CONFIG_HASH_SQL);
-  return rows.map((row) =>
-    Object.freeze({
-      id: row.entry_id as string,
-      start: row.start as bigint,
-      stop: row.stop as bigint | null,
-      version: row.version as string,
-      dataHash: row.data_hash === null ? null : new Uint8Array(row.data_hash as Uint8Array),
-      provides: Object.freeze([...(row.provides as string[])]),
-    }),
-  );
 }
 
 /**
@@ -187,19 +85,19 @@ export async function recordHistory(
   options: HistoryOptions = {},
 ): Promise<HistoryCheck> {
   const check = checkHistory({ ...input, history: await readHistory(tx) }, options);
-  for (const row of check.deletes) await tx.execute(DELETE_SQL, [row.id, row.start]);
+  for (const row of check.deletes) await deleteConfigRow(tx, row.id, row.start);
   const written = new Set<string>();
   for (const row of check.writes) {
     const data = row.data === null ? null : canonicalJson(row.data);
     const provides = tableItemsOf(input.declarations, row.id);
-    await tx.execute(RECORD_SQL, [row.id, row.start, row.stop, row.version, data, row.dataHash, provides]);
+    await writeConfigRow(tx, { ...row, data, provides });
     written.add(`${row.id}\u0000${row.start}`);
   }
   // The other revisions above the cursor take this build's items too; those at or below it keep theirs. [CF-6]
   for (const entry of check.entries) {
     const start = BigInt(entry.start);
     if (entry.started || written.has(`${entry.id}\u0000${start}`)) continue;
-    await tx.execute(PROVIDES_SQL, [entry.id, start, tableItemsOf(input.declarations, entry.id)]);
+    await updateProvides(tx, entry.id, start, tableItemsOf(input.declarations, entry.id));
   }
   return check;
 }

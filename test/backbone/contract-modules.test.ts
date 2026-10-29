@@ -1,12 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import {
-  CONTRACT_LOGS_MIGRATIONS,
-  type ContractLog,
-  contractLogsItemOf,
-  LOG_EVENT_TYPES,
-  writeLogRows,
-} from "../../src/backbone/contract-logs/contract-logs.js";
+import { type ContractLog, contractLogsItemOf, writeLogRows } from "../../src/backbone/contract-logs/contract-logs.js";
+import { CONTRACT_LOGS_MIGRATIONS, LOG_EVENT_TYPES } from "../../src/backbone/contract-logs/sql.js";
 import type { BlockTransaction } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import {
   CONTRACT_LOG_SITES_TASK,
@@ -18,11 +13,8 @@ import {
 import { mainThreadLogReader as inThreadLogReader } from "./main-thread-log-reader.js";
 import { literalAt, type LogSite, logSitesOf } from "../../src/backbone/core-contract-logs-fast/transcripts.js";
 import { fullLogsOf } from "../../src/backbone/core-contract-logs-full/core-contract-logs-full.js";
-import {
-  CONTRACT_STATES_MIGRATIONS,
-  contractStatesOf,
-  writeStateRows,
-} from "../../src/backbone/core-contract-states/core-contract-states.js";
+import { contractStatesOf, writeStateRows } from "../../src/backbone/core-contract-states/core-contract-states.js";
+import { CONTRACT_STATES_MIGRATIONS } from "../../src/backbone/core-contract-states/sql.js";
 import { loadLedgerPackage } from "../../src/ledger/load.js";
 import type { ChainOutcome, LedgerPackage, VmLog } from "../../src/ledger/types.js";
 import type { BlockContext } from "../../src/modules/declaration.js";

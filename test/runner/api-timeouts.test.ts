@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import type { Database, ReadHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";

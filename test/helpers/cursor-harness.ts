@@ -1,4 +1,5 @@
-import { CORE_BLOCK_COMMIT, cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { CORE_BLOCK_COMMIT } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import { CORE_DIGEST } from "../../src/backbone/core-digest/core-digest.js";
 import type { BlockWriteHandle, Database } from "../../src/db/api.js";
 import type { UmbraError } from "../../src/db/errors.js";

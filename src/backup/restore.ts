@@ -74,16 +74,15 @@ import {
   bindingRefusal,
   networkRefusal,
   publicNotStarted,
-  readPrivateBinding,
 } from "../backbone/core-private-source/core-private-source.js";
+import { readPrivateBinding } from "../backbone/core-private-source/sql.js";
 import {
   type PublicDatabase,
   type PublicIdentity,
-  readPublicBlock,
   readPublicCursor,
   readPublicIdentity,
-  readPublicItems,
 } from "../backbone/core-private-source/public-database.js";
+import { readPublicBlock, readPublicItems } from "../backbone/core-private-source/sql.js";
 import { checkHistory, graphInputOf, type HistoryRow } from "../config/history.js";
 import type { PlainObject } from "../config/plain-data.js";
 import { processCoreEntry } from "../config/process.js";

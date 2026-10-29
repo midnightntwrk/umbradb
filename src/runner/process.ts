@@ -197,7 +197,7 @@
  *   (`BlockSource.nodeView`) [AE-5].
  */
 
-import { cursorHeight } from "../backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight } from "../backbone/core-block-commit/sql.js";
 import { bindCoreBlockFetch, CORE_BLOCK_FETCH_ID, isBlockItemSource } from "../backbone/core-block-fetch/core-block-fetch.js";
 import { isBlockEventSource } from "../backbone/core-block-fetch/events.js";
 import { bindLedgerParser, CORE_BLOCK_PARSED_ID } from "../backbone/core-block-parsed/core-block-parsed.js";

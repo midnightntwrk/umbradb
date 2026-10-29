@@ -1,15 +1,13 @@
 import { PGlite } from "@electric-sql/pglite";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
+import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/sql.js";
 import {
-  GREY_TABLE,
-  MARKS_TABLE,
-  SWEEP_TABLE,
   sqlSweepTables,
   sweepReset,
   type SweepWrites,
   writeSweep,
 } from "../../src/backbone/core-ledger-state/sweep.js";
+import { GREY_TABLE, MARKS_TABLE, SWEEP_TABLE } from "../../src/backbone/core-ledger-state/sql.js";
 import type { Database, ReadHandle } from "../../src/db/api.js";
 import { openPgliteOn, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
 

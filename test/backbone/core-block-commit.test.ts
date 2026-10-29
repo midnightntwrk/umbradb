@@ -1,19 +1,21 @@
 import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  BLOCKS_TABLE,
   checkParent,
   commitBlock,
   CORE_BLOCK_COMMIT,
+  MAX_BLOCK_TIME_MS,
+  writeBlockRow,
+  writeHashRow,
+} from "../../src/backbone/core-block-commit/core-block-commit.js";
+import {
+  BLOCKS_TABLE,
   CORE_BLOCK_COMMIT_MIGRATIONS,
   CURSOR_TABLE,
   cursorHeight,
   HASHES_TABLE,
-  MAX_BLOCK_TIME_MS,
   readCursor,
-  writeBlockRow,
-  writeHashRow,
-} from "../../src/backbone/core-block-commit/core-block-commit.js";
+} from "../../src/backbone/core-block-commit/sql.js";
 import {
   HEIGHT_PARTITION_SIZE,
   heightPartitionsSql,

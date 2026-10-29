@@ -20,9 +20,8 @@
  *
  * A block without a transaction loads no ledger package.
  *
- * **At `on-db-write`** it writes one row per transaction in one statement:
- * `core_block_parsed.transactions (height, tx_index) → tx_hash, kind, size`, append-only and range-partitioned by
- * height. [design §10]
+ * **At `on-db-write`** it writes one row per transaction in one statement. **The table** and every statement are in
+ * `./sql.ts`. [design §10]
  *
  * **The worker's parses** are released once their block has committed (`on-after-db-write`), and when a queued best
  * block is dropped (`on-rollback`), so the worker keeps no block it will not apply.
@@ -42,18 +41,15 @@ import { ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
 import type { BlockBody } from "../core-block-fetch/items.js";
 import { chainEventsItemOf, metadataView, runtimeMetadataOf } from "../core-chain-events/core-chain-events.js";
 import type { ChainEvent, EventPhase } from "../core-chain-events/events.js";
-import { heightPartitionsSql } from "../height-partitions.js";
 import { inThreadParser, type TransactionParser, workerParser } from "./parser.js";
 import { MIDNIGHT, MIDNIGHT_SYSTEM, placeTransactions } from "./placement.js";
+import { CORE_BLOCK_PARSED_MIGRATIONS, insertTransactionRows } from "./sql.js";
 
 /** The module's id. */
 export const CORE_BLOCK_PARSED_ID = "core-block-parsed";
 
 /** The `block` (and `table`) item it provides. */
 export const BLOCK_PARSED_ITEM = "block-parsed";
-
-/** Its table: one row per transaction. */
-export const TRANSACTIONS_TABLE = "core_block_parsed.transactions";
 
 /** A transaction of `block-parsed`: the ledger's plain data and where the chain put it. */
 export interface BlockTransaction extends ParsedTransaction {
@@ -83,26 +79,6 @@ export interface BlockParsedOptions {
    */
   readonly chainHash?: (event: ChainEvent | undefined) => Uint8Array | null;
 }
-
-/** `core-block-parsed`'s migrations: applied once and recorded under `core-block-parsed`; they never change. [DB-9] */
-export const CORE_BLOCK_PARSED_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  {
-    id: "001",
-    sql: `CREATE TABLE ${TRANSACTIONS_TABLE} (
-  height bigint NOT NULL CHECK (height >= 0),
-  tx_index bigint NOT NULL CHECK (tx_index >= 0),
-  tx_hash bytea NOT NULL CHECK (octet_length(tx_hash) = 32),
-  kind text NOT NULL CHECK (kind IN ('regular', 'system')),
-  size integer NOT NULL CHECK (size > 0),
-  PRIMARY KEY (height, tx_index)
-) PARTITION BY RANGE (height);
-${heightPartitionsSql(TRANSACTIONS_TABLE)}`,
-  },
-]);
-
-const INSERT_SQL = `INSERT INTO ${TRANSACTIONS_TABLE} (height, tx_index, tx_hash, kind, size)
-  SELECT $1::bigint, t.tx_index, t.tx_hash, t.kind, t.size
-  FROM unnest($2::bigint[], $3::bytea[], $4::text[], $5::integer[]) AS t (tx_index, tx_hash, kind, size)`;
 
 /** The parser of {@link coreBlockParsedOnParse} when none is given: in the calling thread (a test's build). */
 const PARSER = inThreadParser();
@@ -223,13 +199,7 @@ export function blockParsedItemOf(b: BlockContext, module: string): BlockParsed 
 export async function writeTransactionRows(w: Pick<BlockWriteHandle, "execute">, b: BlockContext): Promise<void> {
   const { transactions } = blockParsedItemOf(b, CORE_BLOCK_PARSED_ID);
   if (transactions.length === 0) return;
-  await w.execute(INSERT_SQL, [
-    b.height,
-    transactions.map((transaction) => BigInt(transaction.index)),
-    transactions.map((transaction) => transaction.hash),
-    transactions.map((transaction) => transaction.kind),
-    transactions.map((transaction) => transaction.size),
-  ]);
+  await insertTransactionRows(w, b.height, transactions);
 }
 
 /**

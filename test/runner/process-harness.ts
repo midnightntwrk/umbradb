@@ -1,5 +1,5 @@
 import { createServer } from "node:net";
-import { readCursor } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { readCursor } from "../../src/backbone/core-block-commit/sql.js";
 import type { Database, ReadOnlyDatabase } from "../../src/db/api.js";
 import { startDatabase } from "../../src/db/migrate.js";
 import { readOnlyDatabase } from "../../src/db/read-only.js";

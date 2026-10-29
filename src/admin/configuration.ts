@@ -31,7 +31,7 @@ import type { HistoryRow } from "../config/history.js";
 import { type PlainData, type PlainObject } from "../config/plain-data.js";
 import type { Redactor } from "../config/redact.js";
 import { type CheckedConfig, type CheckedEntry, fieldKinds, type PlacedEntry } from "../config/validate.js";
-import type { ChainIdentity } from "../backbone/core-chain/core-chain.js";
+import type { ChainIdentity } from "../backbone/core-chain/sql.js";
 import { migrationChecksum } from "../db/roles.js";
 import { type ModuleDeclaration, POINTS } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";

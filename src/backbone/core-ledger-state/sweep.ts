@@ -40,11 +40,30 @@
  * node). [LG-14]
  *
  * {@link GreyPicker} is the seam a negative control replaces, using insertion order instead of byte order. [A105]
+ *
+ * Its tables and every statement are in `./sql.ts`.
  */
 
 import type { BlockWriteHandle, ReadHandle } from "../../db/api.js";
 import { childRefKeys } from "../../ledger/node-refs.js";
 import type { NodeBatch } from "../../ledger/types.js";
+import {
+  allGreyKeys,
+  clearGrey,
+  clearMarks,
+  deleteGrey,
+  deleteNodes,
+  insertGrey,
+  insertMarks,
+  keyFlags,
+  nodeChildren,
+  readSweepRow,
+  rootKeys,
+  scanNodes,
+  smallestGreyKeys,
+  SWEEP_TABLE,
+  updateSweepRow,
+} from "./sql.js";
 
 /** K: the node units each block's step may spend, a constant of the UmbraDB version. [LG-14] */
 export const SWEEP_BUDGET = 10_000;
@@ -274,75 +293,38 @@ export function sweepReset(state: SweepState): SweepWrites {
   });
 }
 
-/** Its tables. [design §10] */
-export const SWEEP_TABLE = "core_ledger_state.sweep";
-export const GREY_TABLE = "core_ledger_state.grey";
-export const MARKS_TABLE = "core_ledger_state.marks";
-const NODES = "core_ledger_state.nodes";
-const ROOT_COUNTS = "core_ledger_state.root_counts";
-
-const bytes = (value: unknown, what: string): Uint8Array => {
-  if (!(value instanceof Uint8Array)) throw new TypeError(`${what} is not bytes`);
-  return value;
-};
-
 /** The {@link SweepTables} of a read at h − 1 (`core-ledger-state`'s on-compute read). */
 export function sqlSweepTables(read: Pick<ReadHandle, "query">): SweepTables {
-  const keys = (rows: Record<string, unknown>[], table: string): Uint8Array[] => rows.map((row) => bytes(row.node_key, `${table}.node_key`));
   return {
     async state() {
-      const [row] = await read.query(`SELECT cycle, phase, sweep_after FROM ${SWEEP_TABLE} WHERE id = 1`);
+      const row = await readSweepRow(read);
       if (row === undefined) throw new Error(`${SWEEP_TABLE} holds no row (its migration inserts it)`);
-      return {
-        cycle: BigInt(row.cycle as bigint | number | string),
-        phase: row.phase as SweepPhase,
-        sweepAfter: row.sweep_after === null ? null : bytes(row.sweep_after, `${SWEEP_TABLE}.sweep_after`),
-      };
+      return row;
     },
-    roots: async () => keys(await read.query(`SELECT node_key FROM ${ROOT_COUNTS} ORDER BY node_key`), ROOT_COUNTS),
-    smallestGrey: async (limit) => keys(await read.query(`SELECT node_key FROM ${GREY_TABLE} ORDER BY node_key LIMIT $1`, [limit]), GREY_TABLE),
-    allGrey: async () => keys(await read.query(`SELECT node_key FROM ${GREY_TABLE} ORDER BY node_key`), GREY_TABLE),
+    roots: () => rootKeys(read),
+    smallestGrey: (limit) => smallestGreyKeys(read, limit),
+    allGrey: () => allGreyKeys(read),
     async flags(wanted) {
       if (wanted.length === 0) return new Map();
-      const rows = await read.query(
-        `SELECT k.node_key, EXISTS (SELECT 1 FROM ${GREY_TABLE} g WHERE g.node_key = k.node_key) AS grey,
-           EXISTS (SELECT 1 FROM ${MARKS_TABLE} m WHERE m.node_key = k.node_key) AS marked
-         FROM unnest($1::bytea[]) AS k (node_key)`,
-        [[...wanted]],
-      );
-      return new Map(rows.map((row) => [hexOf(bytes(row.node_key, "a key")), { grey: row.grey === true, marked: row.marked === true }]));
+      const rows = await keyFlags(read, wanted);
+      return new Map(rows.map(({ key, grey, marked }) => [hexOf(key), { grey, marked }]));
     },
     async children(wanted) {
       if (wanted.length === 0) return new Map();
-      const rows = await read.query(`SELECT node_key, children FROM ${NODES} WHERE node_key = ANY($1::bytea[])`, [[...wanted]]);
-      return new Map(rows.map((row) => [hexOf(bytes(row.node_key, `${NODES}.node_key`)), bytes(row.children, `${NODES}.children`)]));
+      const rows = await nodeChildren(read, wanted);
+      return new Map(rows.map(({ key, children }) => [hexOf(key), children]));
     },
-    async scan(after, limit) {
-      const marked = `EXISTS (SELECT 1 FROM ${MARKS_TABLE} m WHERE m.node_key = n.node_key) AS marked`;
-      const rows =
-        after === null
-          ? await read.query(`SELECT n.node_key, ${marked} FROM ${NODES} n ORDER BY n.node_key LIMIT $1`, [limit])
-          : await read.query(`SELECT n.node_key, ${marked} FROM ${NODES} n WHERE n.node_key > $1 ORDER BY n.node_key LIMIT $2`, [after, limit]);
-      return rows.map((row) => ({ key: bytes(row.node_key, `${NODES}.node_key`), marked: row.marked === true }));
-    },
+    scan: (after, limit) => scanNodes(read, after, limit),
   };
 }
 
 /** Writes one block's step, in its transaction after its batch (see the module comment). */
 export async function writeSweep(w: Pick<BlockWriteHandle, "execute">, writes: SweepWrites): Promise<void> {
-  if (writes.greyAll) await w.execute(`DELETE FROM ${GREY_TABLE}`);
-  else if (writes.greyDeleted.length > 0) await w.execute(`DELETE FROM ${GREY_TABLE} WHERE node_key = ANY($1::bytea[])`, [[...writes.greyDeleted]]);
-  if (writes.greyInserted.length > 0) {
-    await w.execute(`INSERT INTO ${GREY_TABLE} (node_key) SELECT unnest($1::bytea[])`, [[...writes.greyInserted]]);
-  }
-  if (writes.marksCleared) await w.execute(`DELETE FROM ${MARKS_TABLE}`);
-  else if (writes.marksInserted.length > 0) {
-    await w.execute(`INSERT INTO ${MARKS_TABLE} (node_key) SELECT unnest($1::bytea[])`, [[...writes.marksInserted]]);
-  }
-  if (writes.deleted.length > 0) await w.execute(`DELETE FROM ${NODES} WHERE node_key = ANY($1::bytea[])`, [[...writes.deleted]]);
-  await w.execute(`UPDATE ${SWEEP_TABLE} SET cycle = $1, phase = $2, sweep_after = $3 WHERE id = 1`, [
-    writes.after.cycle,
-    writes.after.phase,
-    writes.after.sweepAfter,
-  ]);
+  if (writes.greyAll) await clearGrey(w);
+  else if (writes.greyDeleted.length > 0) await deleteGrey(w, writes.greyDeleted);
+  if (writes.greyInserted.length > 0) await insertGrey(w, writes.greyInserted);
+  if (writes.marksCleared) await clearMarks(w);
+  else if (writes.marksInserted.length > 0) await insertMarks(w, writes.marksInserted);
+  if (writes.deleted.length > 0) await deleteNodes(w, writes.deleted);
+  await updateSweepRow(w, writes.after);
 }

@@ -15,13 +15,8 @@
  * `core-tx-results` can read them at `on-parse`. A block without an `Events` value (block 0) has none, and its metadata
  * is not read. [RN-5]
  *
- * **At `on-db-write`** it writes one row per event, `core_chain_events.events (height, event_index) → phase,
- * extrinsic_index, pallet, name, bytes, fields`, in one statement per block:
- * - the phase as `initialization`, `apply-extrinsic` or `finalization`;
- * - the extrinsic index under `apply-extrinsic` only (enforced by a `CHECK`);
- * - the record's SCALE bytes, and its fields as canonical JSON (`./scale-value.ts`).
- *
- * The table is append-only and range-partitioned by height (`../height-partitions.ts`). [design §10]
+ * **At `on-db-write`** it writes one row per event, in one statement per block. **The table** and every statement are
+ * in `./sql.ts`. [design §10]
  *
  * The declaration ({@link CORE_CHAIN_EVENTS}) is a constant, as `core-block-fetch`'s: the source is found through the
  * process context (a `WeakMap`), so one build's declarations serve every process.
@@ -34,9 +29,8 @@ import type { RuntimeMetadataEntry } from "../../ledger/metadata.js";
 import { type BlockContext, defineModule, type ItemSink, type ProcessContext } from "../../modules/declaration.js";
 import type { BlockEventSource } from "../core-block-fetch/events.js";
 import { readRuntimeMetadata, type RuntimeMetadataView } from "../core-block-fetch/metadata.js";
-import { heightPartitionsSql } from "../height-partitions.js";
 import { type ChainEvent, decodeChainEvents } from "./events.js";
-import { canonicalJson } from "./scale-value.js";
+import { CORE_CHAIN_EVENTS_MIGRATIONS, insertEventRows } from "./sql.js";
 
 /** The module's id. */
 export const CORE_CHAIN_EVENTS_ID = "core-chain-events";
@@ -44,36 +38,8 @@ export const CORE_CHAIN_EVENTS_ID = "core-chain-events";
 /** The `block` (and `table`) item it provides. */
 export const CHAIN_EVENTS_ITEM = "chain-events";
 
-/** Its table: one row per chain event. */
-export const EVENTS_TABLE = "core_chain_events.events";
-
 /** The largest extrinsic index the `integer` column holds: 2^31 − 1 (a phase's index is a `u32`). */
 const MAX_EXTRINSIC_INDEX = 2_147_483_647;
-
-/** `core-chain-events`' migrations: applied once, recorded under `core-chain-events`, never changed. [DB-9] */
-export const CORE_CHAIN_EVENTS_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  {
-    id: "001",
-    sql: `CREATE TABLE ${EVENTS_TABLE} (
-  height bigint NOT NULL CHECK (height >= 0),
-  event_index bigint NOT NULL CHECK (event_index >= 0),
-  phase text NOT NULL CHECK (phase IN ('initialization', 'apply-extrinsic', 'finalization')),
-  extrinsic_index integer CHECK (extrinsic_index >= 0),
-  pallet text NOT NULL CHECK (pallet <> ''),
-  name text NOT NULL CHECK (name <> ''),
-  bytes bytea NOT NULL,
-  fields jsonb NOT NULL,
-  CHECK ((phase = 'apply-extrinsic') = (extrinsic_index IS NOT NULL)),
-  PRIMARY KEY (height, event_index)
-) PARTITION BY RANGE (height);
-${heightPartitionsSql(EVENTS_TABLE)}`,
-  },
-]);
-
-const INSERT_SQL = `INSERT INTO ${EVENTS_TABLE} (height, event_index, phase, extrinsic_index, pallet, name, bytes, fields)
-  SELECT $1::bigint, e.event_index, e.phase, e.extrinsic_index, e.pallet, e.name, e.bytes, e.fields
-  FROM unnest($2::bigint[], $3::text[], $4::integer[], $5::text[], $6::text[], $7::bytea[], $8::jsonb[])
-    AS e (event_index, phase, extrinsic_index, pallet, name, bytes, fields)`;
 
 const BOUND = new WeakMap<ProcessContext, BlockEventSource>();
 
@@ -164,16 +130,7 @@ export async function writeEventRows(w: Pick<BlockWriteHandle, "execute">, b: Bl
       );
     }
   }
-  await w.execute(INSERT_SQL, [
-    b.height,
-    events.map((event) => BigInt(event.index)),
-    events.map((event) => event.phase),
-    events.map((event) => event.extrinsicIndex),
-    events.map((event) => event.pallet),
-    events.map((event) => event.name),
-    events.map((event) => event.bytes),
-    events.map((event) => canonicalJson(event.fields)),
-  ]);
+  await insertEventRows(w, b.height, events);
 }
 
 /**

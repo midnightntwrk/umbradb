@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cursorHeight, readCursor } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight, readCursor } from "../../src/backbone/core-block-commit/sql.js";
 import { bindCoreBlockFetch, CORE_BLOCK_FETCH_ID } from "../../src/backbone/core-block-fetch/index.js";
 import {
   bindCoreChain,

@@ -44,6 +44,8 @@
  *   `stateTrees`);
  * - its `segment_results`, and its ledger `events` (each transaction's numbered from 0 in emission order).
  *
+ * **The tables** and every statement are in `./sql.ts`.
+ *
  * **At `on-after-db-write`** it tells the worker the block committed, so the state after h becomes the one h + 1 is
  * applied on. It does not wait for the answer, since that callback holds a read (see the callback).
  *
@@ -98,19 +100,28 @@ import type { ChainOutcome, LedgerEvent, LedgerName, StateSummary, TransactionRe
 import { type AppliedState, type ContractKeys, isEvictionRefused } from "../../ledger/worker/engine.js";
 import type { LedgerHost } from "../../ledger/worker/host.js";
 import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration, type ProcessContext } from "../../modules/declaration.js";
-import { BLOCKS_TABLE, blockHeaderOf, ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
+import { blockHeaderOf, ledgerVersionOf } from "../core-block-commit/core-block-commit.js";
 import type { BlockLedgerSource } from "../core-block-fetch/ledger-source.js";
 import { blockParsedItemOf } from "../core-block-parsed/core-block-parsed.js";
 import { chainEventsItemOf } from "../core-chain-events/core-chain-events.js";
 import { txResultsItemOf } from "../core-tx-results/core-tx-results.js";
-import { heightPartitionsSql } from "../height-partitions.js";
 import { type CoreRevision, coreRevisionsOf, releasedBy, retainedFrom, retentionWindow, revisionAt } from "./retention.js";
 import {
-  GREY_TABLE,
+  addRootCounts,
+  blockTimeMsAt,
+  CORE_LEDGER_STATE_MIGRATIONS,
+  deployedBelow,
+  insertEvents,
+  insertNodes,
+  insertSegmentResults,
+  insertStateRow,
+  STATES_TABLE,
+  stateAt,
+  stateKeysBetween,
+} from "./sql.js";
+import {
   type GreyPicker,
-  MARKS_TABLE,
   SWEEP_BUDGET,
-  SWEEP_TABLE,
   sqlSweepTables,
   sweepReset,
   sweepStep,
@@ -131,133 +142,8 @@ export const SEGMENT_RESULTS_ITEM = "segment-results";
 /** A `block` item only: the logs' table, `contract_logs.logs`, belongs to the `core-contract-logs-*` modules. */
 export const VM_LOGS_ITEM = "vm-logs";
 
-/** Its tables. [design §10] */
-export const NODES_TABLE = "core_ledger_state.nodes";
-export const ROOT_COUNTS_TABLE = "core_ledger_state.root_counts";
-export const STATES_TABLE = "core_ledger_state.states";
-export const SEGMENT_RESULTS_TABLE = "core_ledger_state.segment_results";
-export const EVENTS_TABLE = "core_ledger_state.events";
-
-/** The kinds of `core_ledger_state.events`, including `contract-deploy`, which is stored too. [LG-16; design §10] */
-export const EVENT_KINDS = Object.freeze([
-  "zswap-input",
-  "zswap-output",
-  "contract-deploy",
-  "dust-initial-utxo",
-  "dust-generation-dtime-update",
-  "dust-spend-processed",
-  "param-change",
-] as const);
-
 /** The nodes written per statement: a block's batch is chunked so no statement's parameters grow without bound. */
 export const NODES_PER_STATEMENT = 1_000;
-
-const kinds = EVENT_KINDS.map((kind) => `'${kind}'`).join(", ");
-
-/** `core-ledger-state`'s migrations: applied once, recorded under `core-ledger-state`, never changed. [DB-9] */
-export const CORE_LEDGER_STATE_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  {
-    id: "001",
-    sql: `CREATE TABLE ${NODES_TABLE} (
-  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
-  data bytea NOT NULL,
-  children bytea NOT NULL,
-  PRIMARY KEY (node_key)
-);
-CREATE TABLE ${ROOT_COUNTS_TABLE} (
-  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
-  count integer NOT NULL CHECK (count > 0),
-  PRIMARY KEY (node_key)
-);
-CREATE TABLE ${STATES_TABLE} (
-  height bigint NOT NULL CHECK (height >= 0),
-  state_key bytea NOT NULL CHECK (octet_length(state_key) = 32),
-  state_root bytea NOT NULL,
-  zswap_first_free bigint NOT NULL CHECK (zswap_first_free >= 0),
-  zswap_root bytea NOT NULL,
-  dust_commitment_first_free bigint NOT NULL CHECK (dust_commitment_first_free >= 0),
-  dust_commitment_root bytea NOT NULL,
-  dust_generation_first_free bigint NOT NULL CHECK (dust_generation_first_free >= 0),
-  dust_generation_root bytea NOT NULL,
-  PRIMARY KEY (height)
-) PARTITION BY RANGE (height);
-${heightPartitionsSql(STATES_TABLE)}
-CREATE TABLE ${SEGMENT_RESULTS_TABLE} (
-  height bigint NOT NULL CHECK (height >= 0),
-  tx_index bigint NOT NULL CHECK (tx_index >= 0),
-  segment integer NOT NULL CHECK (segment >= 0),
-  success boolean NOT NULL,
-  PRIMARY KEY (height, tx_index, segment)
-) PARTITION BY RANGE (height);
-${heightPartitionsSql(SEGMENT_RESULTS_TABLE)}
-CREATE TABLE ${EVENTS_TABLE} (
-  height bigint NOT NULL CHECK (height >= 0),
-  tx_index bigint NOT NULL CHECK (tx_index >= 0),
-  event_index bigint NOT NULL CHECK (event_index >= 0),
-  kind text NOT NULL CHECK (kind IN (${kinds})),
-  logical_segment integer NOT NULL CHECK (logical_segment >= 0),
-  physical_segment integer NOT NULL CHECK (physical_segment >= 0),
-  bytes bytea NOT NULL,
-  nullifier bytea,
-  commitment bytea,
-  tree_index bigint CHECK (tree_index >= 0),
-  contract_address bytea,
-  PRIMARY KEY (height, tx_index, event_index)
-) PARTITION BY RANGE (height);
-${heightPartitionsSql(EVENTS_TABLE)}`,
-  },
-  {
-    // The mark-and-sweep (`./sweep.ts`): its row, its grey set and its marks. [LG-14]
-    id: "002",
-    sql: `CREATE TABLE ${SWEEP_TABLE} (
-  id smallint NOT NULL CHECK (id = 1),
-  cycle bigint NOT NULL CHECK (cycle >= 0),
-  phase text NOT NULL CHECK (phase IN ('idle', 'mark', 'sweep')),
-  sweep_after bytea CHECK (octet_length(sweep_after) = 32),
-  PRIMARY KEY (id)
-);
-INSERT INTO ${SWEEP_TABLE} (id, cycle, phase, sweep_after) VALUES (1, 0, 'idle', NULL);
-CREATE TABLE ${GREY_TABLE} (
-  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
-  PRIMARY KEY (node_key)
-);
-CREATE TABLE ${MARKS_TABLE} (
-  node_key bytea NOT NULL CHECK (octet_length(node_key) = 32),
-  PRIMARY KEY (node_key)
-);`,
-  },
-]);
-
-const PARENT_TIME_SQL = `SELECT (extract(epoch FROM block_time) * 1000)::bigint AS ms FROM ${BLOCKS_TABLE} WHERE height = $1`;
-/** The state stored after a block, with the block's hash and ledger. [LG-11, LG-12] */
-const STATE_AT_SQL = `SELECT s.state_key, s.state_root, b.hash, b.ledger_version FROM ${STATES_TABLE} s
-  JOIN ${BLOCKS_TABLE} b ON b.height = s.height WHERE s.height = $1`;
-/** The contracts deployed below height `$1`: every contract a state there holds, which all get a row at F. [CC-1] */
-const DEPLOYED_SQL = `SELECT DISTINCT contract_address FROM ${EVENTS_TABLE} WHERE kind = 'contract-deploy' AND height < $1`;
-/** The keys of the states stored after the blocks `$1` to `$2` − 1, in height order: a block's releases. [LG-12] */
-const KEYS_SQL = `SELECT height, state_key FROM ${STATES_TABLE} WHERE height >= $1 AND height < $2 ORDER BY height`;
-const NODES_SQL = `INSERT INTO ${NODES_TABLE} (node_key, data, children)
-  SELECT n.node_key, n.data, n.children FROM unnest($1::bytea[], $2::bytea[], $3::bytea[]) AS n (node_key, data, children)
-  ON CONFLICT (node_key) DO NOTHING`;
-const ROOT_COUNTS_SQL = `WITH d AS (SELECT * FROM unnest($1::bytea[], $2::integer[]) AS d (node_key, delta)),
-  merged AS (SELECT d.node_key, coalesce(r.count, 0) + d.delta AS count FROM d LEFT JOIN ${ROOT_COUNTS_TABLE} r USING (node_key)),
-  gone AS (DELETE FROM ${ROOT_COUNTS_TABLE} r USING merged m WHERE r.node_key = m.node_key AND m.count = 0)
-  INSERT INTO ${ROOT_COUNTS_TABLE} (node_key, count) SELECT node_key, count FROM merged WHERE count <> 0
-  ON CONFLICT (node_key) DO UPDATE SET count = EXCLUDED.count`;
-const STATES_SQL = `INSERT INTO ${STATES_TABLE} (height, state_key, state_root, zswap_first_free, zswap_root,
-  dust_commitment_first_free, dust_commitment_root, dust_generation_first_free, dust_generation_root)
-  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`;
-const SEGMENTS_SQL = `INSERT INTO ${SEGMENT_RESULTS_TABLE} (height, tx_index, segment, success)
-  SELECT $1::bigint, s.tx_index, s.segment, s.success FROM unnest($2::bigint[], $3::integer[], $4::boolean[])
-    AS s (tx_index, segment, success)`;
-const EVENTS_SQL = `INSERT INTO ${EVENTS_TABLE} (height, tx_index, event_index, kind, logical_segment, physical_segment, bytes,
-  nullifier, commitment, tree_index, contract_address)
-  SELECT $1::bigint, e.tx_index, e.event_index, e.kind, e.logical_segment, e.physical_segment, e.bytes, e.nullifier,
-    e.commitment, e.tree_index, e.contract_address
-  FROM unnest($2::bigint[], $3::bigint[], $4::text[], $5::integer[], $6::integer[], $7::bytea[], $8::bytea[], $9::bytea[],
-    $10::bigint[], $11::bytea[])
-    AS e (tx_index, event_index, kind, logical_segment, physical_segment, bytes, nullifier, commitment, tree_index,
-      contract_address)`;
 
 /** The `ledger-state` item: the state after the block as plain data; the state itself stays in the worker. [LG-16] */
 export interface LedgerStateItem extends StateSummary {
@@ -364,11 +250,11 @@ export function chainOutcomesOf(b: BlockContext): readonly ChainOutcome[] {
 /** Block `b`'s parent time in milliseconds, read at h − 1 (block 0 has none), with the replay rules applied. [LG-8] */
 export async function parentTimeOf(read: Pick<ReadHandle, "query">, b: BlockContext, ownMs: bigint): Promise<bigint> {
   if (b.height === 0n) return parentTimestampMs(null, ownMs);
-  const [row] = await read.query(PARENT_TIME_SQL, [b.height - 1n]);
-  if (row === undefined) {
+  const ms = await blockTimeMsAt(read, b.height - 1n);
+  if (ms === undefined) {
     throw new Error(`block ${b.height}: the blocks table holds no block ${b.height - 1n} to take the parent time from`);
   }
-  return parentTimestampMs(BigInt(row.ms as bigint | number | string), ownMs);
+  return parentTimestampMs(ms, ownMs);
 }
 
 /** The pending writes of each process context: the block `on-compute` applied and its sweep step, for its `on-db-write`. */
@@ -389,26 +275,6 @@ export function revisionsOf(p: ProcessContext): readonly CoreRevision[] {
   return revisions;
 }
 
-const bytesOf = (value: unknown, what: string): Uint8Array => {
-  if (!(value instanceof Uint8Array)) throw new TypeError(`${what} is not bytes`);
-  return value;
-};
-
-/** The state stored after block `height` (see {@link STATE_AT_SQL}); throws naming the height when none is. */
-async function stateAt(
-  read: Pick<ReadHandle, "query">,
-  height: bigint,
-): Promise<{ readonly stateKey: Uint8Array; readonly stateRoot: Uint8Array; readonly hash: Uint8Array; readonly ledger: LedgerName }> {
-  const [row] = await read.query(STATE_AT_SQL, [height]);
-  if (row === undefined) throw new Error(`${STATES_TABLE} holds no state after block ${height}`);
-  return {
-    stateKey: bytesOf(row.state_key, `${STATES_TABLE}.state_key`),
-    stateRoot: bytesOf(row.state_root, `${STATES_TABLE}.state_root`),
-    hash: bytesOf(row.hash, `${BLOCKS_TABLE}.hash`),
-    ledger: row.ledger_version as LedgerName,
-  };
-}
-
 /** The keys of the states that block `b` releases from the retention window (see the module comment). [LG-12] */
 async function releasesOf(
   p: ProcessContext,
@@ -418,11 +284,14 @@ async function releasesOf(
 ): Promise<Uint8Array[]> {
   const { from, to } = releasedBy(revisionsOf(p), b.height, options.retainedFrom ?? retainedFrom);
   if (from >= to) return [];
-  const rows = await read.query(KEYS_SQL, [from, to]);
-  if (rows.length !== Number(to - from)) {
-    throw new Error(`block ${b.height} releases the states of ${from} to ${to - 1n}, and ${STATES_TABLE} holds ${rows.length} of them`);
+  const keys = await stateKeysBetween(read, from, to);
+  if (keys.length !== Number(to - from)) {
+    throw new Error(
+      `block ${b.height} releases the states of ${from} to ${to - 1n}, ` +
+        `and ${STATES_TABLE} holds ${keys.length} of them`,
+    );
   }
-  return rows.map((row) => bytesOf(row.state_key, `${STATES_TABLE}.state_key`));
+  return keys;
 }
 
 /**
@@ -471,12 +340,6 @@ function maintainedOf(b: BlockContext): Uint8Array[] {
       if (!(address instanceof Uint8Array)) throw new TypeError(`block ${b.height}: a ContractMaintain event without its contract_address bytes`);
       return taggedAddress(address);
     });
-}
-
-/** The contracts deployed below `height` (see {@link DEPLOYED_SQL}), read at h − 1. */
-async function deployedBelow(read: Pick<ReadHandle, "query">, height: bigint): Promise<Uint8Array[]> {
-  const rows = await read.query(DEPLOYED_SQL, [height]);
-  return rows.map((row) => bytesOf(row.contract_address, `${EVENTS_TABLE}.contract_address`));
 }
 
 /** `core-ledger-state`'s `on-compute` (see the module comment): returns what the block's `on-db-write` writes. */
@@ -587,33 +450,16 @@ export function itemsOf(applied: AppliedState): {
 
 /** Writes the block `applied` describes, in its transaction (see the module comment). */
 export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: AppliedState): Promise<void> {
-  const { batch, output, summary } = applied;
+  const { batch, output, summary, height, stateKey, stateRoot } = applied;
   for (let at = 0; at < batch.inserts.length; at += NODES_PER_STATEMENT) {
     const chunk = batch.inserts.slice(at, at + NODES_PER_STATEMENT);
-    await w.execute(NODES_SQL, [chunk.map((n) => n.key), chunk.map((n) => n.data), chunk.map((n) => n.children)]);
+    await insertNodes(w, chunk);
   }
   const counts = batch.rootCounts.filter((count) => count.delta !== 0);
-  if (counts.length > 0) await w.execute(ROOT_COUNTS_SQL, [counts.map((c) => c.key), counts.map((c) => c.delta)]);
-  await w.execute(STATES_SQL, [
-    applied.height,
-    applied.stateKey,
-    applied.stateRoot,
-    summary.zswapFirstFree,
-    summary.zswapRoot,
-    summary.dustCommitmentFirstFree,
-    summary.dustCommitmentRoot,
-    summary.dustGenerationFirstFree,
-    summary.dustGenerationRoot,
-  ]);
+  if (counts.length > 0) await addRootCounts(w, counts);
+  await insertStateRow(w, { ...summary, height, stateKey, stateRoot });
   const segments = output.results.flatMap((result, tx) => result.segments.map((s) => ({ tx, ...s })));
-  if (segments.length > 0) {
-    await w.execute(SEGMENTS_SQL, [
-      applied.height,
-      segments.map((s) => BigInt(s.tx)),
-      segments.map((s) => s.segment),
-      segments.map((s) => s.success),
-    ]);
-  }
+  if (segments.length > 0) await insertSegmentResults(w, height, segments);
   if (output.events.length > 0) {
     const numbers = new Map<number, number>();
     const indexes = output.events.map((event) => {
@@ -621,20 +467,7 @@ export async function writeBlock(w: Pick<BlockWriteHandle, "execute">, applied: 
       numbers.set(event.transaction, index + 1);
       return BigInt(index);
     });
-    const events = output.events;
-    await w.execute(EVENTS_SQL, [
-      applied.height,
-      events.map((e) => BigInt(e.transaction)),
-      indexes,
-      events.map((e) => e.kind),
-      events.map((e) => e.logicalSegment),
-      events.map((e) => e.physicalSegment),
-      events.map((e) => e.bytes),
-      events.map((e) => e.nullifier),
-      events.map((e) => e.commitment),
-      events.map((e) => e.treeIndex),
-      events.map((e) => e.contractAddress),
-    ]);
+    await insertEvents(w, height, output.events, indexes);
   }
 }
 

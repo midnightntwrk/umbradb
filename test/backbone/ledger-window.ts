@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import type { PostgresParts } from "../../src/config/database-parts.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import { nodeSourceOf } from "../../src/backbone/core-block-fetch/index.js";
 import type { Manifest } from "../../src/backup/manifest.js";
 import { type Restored, restoreBackup } from "../../src/backup/restore.js";

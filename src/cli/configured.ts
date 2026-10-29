@@ -19,8 +19,8 @@
  */
 
 import { join, resolve } from "node:path";
-import { readCursor } from "../backbone/core-block-commit/core-block-commit.js";
-import { readPrivateCursor } from "../backbone/core-private-source/core-private-source.js";
+import { readCursor } from "../backbone/core-block-commit/sql.js";
+import { readPrivateCursor } from "../backbone/core-private-source/sql.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import { databaseTarget } from "../config/database.js";
 import type { DatabaseParts, PglitePathParts } from "../config/database-parts.js";

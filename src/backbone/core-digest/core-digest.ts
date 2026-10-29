@@ -4,16 +4,10 @@
  * chain can then compare table by table: which table differs, and in which 14,400-height window it began to.
  * [DT-4, DT-5, Q84, Q86; CORE-ARCH §4.11, §4.13; design §4 "Change capture for digests", §6]
  *
- * **Its tables**, created by its migration as the writer's login (`core_digest` is a reserved schema, one of UmbraDB's
- * own parts'): [DB-8; design §10]
- * - `core_digest.tables (schema, table) → (height, digest)`: a table's row is set in the block that changes it, and
- *   kept as it is otherwise;
- * - `core_digest.checkpoints (height, schema, table) → digest`.
+ * **The tables** and every statement are in `./sql.ts`.
  *
- * The migration also creates `core_digest_shadow`, the schema of the shadow tables that change capture writes
- * (`src/db/change-capture.ts`). Every module role may read `core_digest` (the database API grants it, as it does
- * `core_chain`). A module that requires `digest-tables` or `digest-checkpoints` reads them in its `on-db-write`, which
- * runs before `core-digest`'s, so it sees the digests of h − 1.
+ * A module that requires `digest-tables` or `digest-checkpoints` reads them in its `on-db-write`, which runs before
+ * `core-digest`'s, so it sees the digests of h − 1.
  *
  * **Its `on-db-write`** runs last in the block. The runner calls it through `writes.write("core-digest", …)`, which
  * runs it as the login. For each table whose changes are captured, in the fixed table order: [RN-3, DT-3]
@@ -33,44 +27,11 @@
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { BlockWriteHandle } from "../../db/api.js";
-import { capturedTables, SHADOW_SCHEMA, takeChanges } from "../../db/change-capture.js";
+import { capturedTables, takeChanges } from "../../db/change-capture.js";
 import { isCheckpointHeight, nextDigest, tableChanges } from "../../determinism/digest.js";
 import { defineModule } from "../../modules/declaration.js";
 import { CHECKPOINT_INTERVAL } from "./build-flags.js";
-
-/**
- * `core-digest`'s migrations: applied once, in order, and recorded under `core-digest`. They never change, since each
- * checksum is fixed by the databases that applied it. [DB-9]
- */
-export const CORE_DIGEST_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  {
-    id: "001",
-    sql: `CREATE SCHEMA core_digest;
-CREATE SCHEMA ${SHADOW_SCHEMA};
-CREATE TABLE core_digest.tables (
-  "schema" text NOT NULL,
-  "table" text NOT NULL,
-  height bigint NOT NULL,
-  digest bytea NOT NULL CHECK (octet_length(digest) = 32),
-  PRIMARY KEY ("schema", "table")
-);
-CREATE TABLE core_digest.checkpoints (
-  height bigint NOT NULL,
-  "schema" text NOT NULL,
-  "table" text NOT NULL,
-  digest bytea NOT NULL CHECK (octet_length(digest) = 32),
-  PRIMARY KEY (height, "schema", "table")
-);`,
-  },
-]);
-
-const DIGESTS_SQL = `SELECT "schema", "table", digest FROM core_digest.tables`;
-
-const SET_DIGEST_SQL = `INSERT INTO core_digest.tables ("schema", "table", height, digest) VALUES ($1, $2, $3, $4)
-  ON CONFLICT ("schema", "table") DO UPDATE SET height = EXCLUDED.height, digest = EXCLUDED.digest`;
-
-const CHECKPOINT_SQL = `INSERT INTO core_digest.checkpoints (height, "schema", "table", digest)
-  SELECT $1::bigint, "schema", "table", digest FROM core_digest.tables`;
+import { CORE_DIGEST_MIGRATIONS, checkpointDigests, readDigests, setDigest } from "./sql.js";
 
 /**
  * `core-digest`'s work for the block at `height` (see the module comment), on the block's write handle, after every
@@ -79,8 +40,8 @@ const CHECKPOINT_SQL = `INSERT INTO core_digest.checkpoints (height, "schema", "
 export async function digestBlock(w: BlockWriteHandle, height: bigint): Promise<void> {
   const tables = await capturedTables(w);
   const previous = new Map<string, Uint8Array>();
-  for (const row of await w.query(DIGESTS_SQL)) {
-    previous.set(JSON.stringify([row.schema, row.table]), row.digest as Uint8Array);
+  for (const row of await readDigests(w)) {
+    previous.set(JSON.stringify([row.schema, row.table]), row.digest);
   }
   for (const table of tables) {
     const touched = await takeChanges(w, table);
@@ -90,9 +51,9 @@ export async function digestBlock(w: BlockWriteHandle, height: bigint): Promise<
     );
     if (changes.count === 0) continue;
     const digest = nextDigest(previous.get(JSON.stringify([table.schema, table.name])) ?? null, height, changes.bytes);
-    await w.execute(SET_DIGEST_SQL, [table.schema, table.name, height, digest]);
+    await setDigest(w, { schema: table.schema, table: table.name, height, digest });
   }
-  if (isCheckpointHeight(height, CHECKPOINT_INTERVAL)) await w.execute(CHECKPOINT_SQL, [height]);
+  if (isCheckpointHeight(height, CHECKPOINT_INTERVAL)) await checkpointDigests(w, height);
 }
 
 /**

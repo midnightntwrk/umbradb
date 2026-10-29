@@ -19,7 +19,7 @@
  * (`contracts`). A contract the state does not hold (a deploy that did not apply) has no keys and no row. [CC-1]
  *
  * **At `on-compute`** it puts the `block` item `contract-states` (the rows, frozen); **at `on-db-write`** it writes them
- * in one statement. The table is append-only and range-partitioned by height.
+ * in one statement. **The table** and every statement are in `./sql.ts`.
  *
  * The declaration ({@link CORE_CONTRACT_STATES}) is a constant built over its rule. A negative control's build composes
  * its own with {@link coreContractStates}.
@@ -31,37 +31,12 @@ import type { BlockWriteHandle } from "../../db/api.js";
 import type { ContractKeys } from "../../ledger/worker/engine.js";
 import { type BlockContext, type DefinedModule, defineModule, type ModuleDeclaration } from "../../modules/declaration.js";
 import { CORE_CONTRACT_STATES_ID, LEDGER_STATE_ITEM } from "../core-ledger-state/core-ledger-state.js";
-import { heightPartitionsSql } from "../height-partitions.js";
+import { CONTRACT_STATES_MIGRATIONS, type ContractStateRow, insertStateRows } from "./sql.js";
 
 export { CORE_CONTRACT_STATES_ID };
 
 /** The `block` (and `table`) item it provides. */
 export const CONTRACT_STATES_ITEM = "contract-states";
-
-/** Its table: one row per contract and block. */
-export const STATES_TABLE = "core_contract_states.states";
-
-/** `core-contract-states`' migrations: applied once, recorded under `core-contract-states`, never changed. [DB-9] */
-export const CONTRACT_STATES_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  {
-    id: "001",
-    sql: `CREATE TABLE ${STATES_TABLE} (
-  contract_address bytea NOT NULL CHECK (octet_length(contract_address) = 32),
-  height bigint NOT NULL CHECK (height >= 0),
-  state_key bytea NOT NULL CHECK (octet_length(state_key) = 32),
-  zswap_state_key bytea NOT NULL CHECK (octet_length(zswap_state_key) = 32),
-  PRIMARY KEY (contract_address, height)
-) PARTITION BY RANGE (height);
-${heightPartitionsSql(STATES_TABLE)}`,
-  },
-]);
-
-/** A row of `core_contract_states.states`: a contract's keys after the block. [CC-1] */
-export interface ContractStateRow {
-  readonly address: Uint8Array;
-  readonly stateKey: Uint8Array;
-  readonly zswapStateKey: Uint8Array;
-}
 
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex")}`;
 
@@ -92,14 +67,10 @@ export function contractStatesItemOf(b: BlockContext): readonly ContractStateRow
   return rows as readonly ContractStateRow[];
 }
 
-const INSERT_SQL = `INSERT INTO ${STATES_TABLE} (contract_address, height, state_key, zswap_state_key)
-  SELECT r.contract_address, $1::bigint, r.state_key, r.zswap_state_key
-  FROM unnest($2::bytea[], $3::bytea[], $4::bytea[]) AS r (contract_address, state_key, zswap_state_key)`;
-
 /** Writes `rows`, block `height`'s, in one statement; none for no row. */
 export async function writeStateRows(w: Pick<BlockWriteHandle, "execute">, height: bigint, rows: readonly ContractStateRow[]): Promise<void> {
   if (rows.length === 0) return;
-  await w.execute(INSERT_SQL, [height, rows.map((row) => row.address), rows.map((row) => row.stateKey), rows.map((row) => row.zswapStateKey)]);
+  await insertStateRows(w, height, rows);
 }
 
 /** The rule a negative control may replace (see the module comment). */

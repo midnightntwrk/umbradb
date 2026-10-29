@@ -37,7 +37,7 @@ import type { ModuleDeclaration, Revision } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
 import { Heartbeat } from "../runner/heartbeat.js";
 import type { ProcessStatus } from "../runner/process.js";
-import { readIdentity } from "../backbone/core-chain/core-chain.js";
+import { readIdentity } from "../backbone/core-chain/sql.js";
 import type { HistoryCheck, HistoryRow } from "../config/history.js";
 import { type ConfigFacts, configOf, type OpenedConfig, UNVALIDATED_CONFIG } from "./configuration.js";
 import { earlyRedactor } from "./redaction.js";

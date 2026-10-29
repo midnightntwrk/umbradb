@@ -136,7 +136,7 @@
  * One window is open at a time: the loop awaits them in series.
  */
 
-import { BLOCKS_TABLE } from "../backbone/core-block-commit/core-block-commit.js";
+import { BLOCKS_TABLE } from "../backbone/core-block-commit/sql.js";
 import type { Database, ReadHandle, Transaction } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import type { SchemaPlan } from "../db/roles.js";

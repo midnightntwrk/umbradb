@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import { EXIT } from "../../src/cli/command.js";
 import { openPostgres } from "../../src/db/postgres.js";
 import type { ReadHandle } from "../../src/db/api.js";

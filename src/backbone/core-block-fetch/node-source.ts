@@ -101,7 +101,7 @@ import type {
   SourceCondition,
   SourceNodeView,
 } from "../../runner/block-source.js";
-import { readCursor } from "../core-block-commit/core-block-commit.js";
+import { readCursor } from "../core-block-commit/sql.js";
 import { blockTimeOf, decodeExtrinsics } from "./extrinsics.js";
 import { headerHash } from "./header.js";
 import { type BlockEventSource, systemEventsKey } from "./events.js";

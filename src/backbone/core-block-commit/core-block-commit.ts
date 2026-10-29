@@ -4,20 +4,10 @@
  * transaction. [CD-3, IN-4, RN-3, RN-6, RN-14; CORE-ARCH §4.5, §4.11; design §3]
  *
  * The table's last row is the cursor. (This is the blocks table, not the cursor-table helper in `src/helpers/`.) The
- * block sources read it through the read they are given ({@link readCursor}), and so does the database API's committed
- * height ({@link cursorHeight}), so a read's height and its snapshot always agree. [DB-2, SH-1]
+ * block sources read it through the read they are given (`readCursor`, in `./sql.ts`), and so does the database API's
+ * committed height (`cursorHeight`), so a read's height and its snapshot always agree. [DB-2, SH-1]
  *
- * **The tables**, created by its migration `001` under the part's role: [design §10]
- * - `core_block_commit.blocks (height) → hash, parent_hash, spec_version, ledger_version, block_time`,
- *   range-partitioned by height as 0.9.5's `chain_archive` store was (`../height-partitions.ts`); hashes are 32 bytes
- *   (`CHECK`s). `block_time` is the block's own time, a `timestamptz` converted exactly from the node's milliseconds
- *   and read back as RFC 3339 text. The conversion uses PostgreSQL's integer interval input (`'<ms> milliseconds'`),
- *   never a floating-point value: `to_timestamp`, and `bigint * interval` (which multiplies by a `double precision`),
- *   both round far from 1970. On PostgreSQL 18.6 and PGlite 0.5.10, 253402300799999 ms becomes `…59.999008Z` that way.
- *   [Q74, DB-2]
- * - `core_block_commit.hashes (hash) → height`, not partitioned. PostgreSQL cannot enforce a unique hash on the
- *   height-partitioned `blocks` table (a unique index there must include the partition key), so this table's primary
- *   key enforces it across every partition. [CD-3]
+ * **The tables** and every statement are in `./sql.ts`.
  *
  * **Per block** ({@link commitBlock}), in this order:
  * 1. the block's row ({@link writeBlockRow}, so the cursor comes first), from the block context and the `block` items
@@ -34,27 +24,17 @@
 
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
-import type { BlockWriteHandle, CommittedHeight, ReadHandle } from "../../db/api.js";
+import type { BlockWriteHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { type BlockContext, defineModule } from "../../modules/declaration.js";
-import type { BlockRef } from "../../runner/block-source.js";
-import { heightPartitionsSql } from "../height-partitions.js";
-
-/** The blocks table, whose last row is the cursor. */
-export const BLOCKS_TABLE = "core_block_commit.blocks";
-
-/** The hashes table: one row per block hash, with the hash as its primary key. [CD-3] */
-export const HASHES_TABLE = "core_block_commit.hashes";
-
-/**
- * The blocks table's former name, being retired (the cursor-table helper, `cursorTable`, is a different thing).
- * `src/runner/loop.ts` still imports it.
- * @deprecated Use {@link BLOCKS_TABLE}.
- */
-export const CURSOR_TABLE = BLOCKS_TABLE;
-
-/** The hashes table's primary key, whose violation is `duplicate-block-hash`. */
-const HASHES_PRIMARY_KEY = "hashes_pkey";
+import {
+  CORE_BLOCK_COMMIT_MIGRATIONS,
+  HASHES_PRIMARY_KEY,
+  HASHES_TABLE,
+  hashAt,
+  insertBlockRow,
+  insertHashRow,
+} from "./sql.js";
 
 /**
  * The latest block time stored, in milliseconds since 1970: 9999-12-31T23:59:59.999Z. The database API reads a
@@ -75,34 +55,6 @@ export interface BlockHeaderItem {
   readonly specVersion: number;
   readonly timestampMs: bigint;
 }
-
-/** `core-block-commit`'s migrations: applied once and recorded under `core-block-commit`; they never change. [DB-9] */
-export const CORE_BLOCK_COMMIT_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  {
-    id: "001",
-    sql: `CREATE TABLE ${BLOCKS_TABLE} (
-  height bigint NOT NULL CHECK (height >= 0),
-  hash bytea NOT NULL CHECK (octet_length(hash) = 32),
-  parent_hash bytea NOT NULL CHECK (octet_length(parent_hash) = 32),
-  spec_version integer NOT NULL CHECK (spec_version >= 0),
-  ledger_version text NOT NULL CHECK (ledger_version <> ''),
-  block_time timestamptz NOT NULL,
-  PRIMARY KEY (height)
-) PARTITION BY RANGE (height);
-${heightPartitionsSql(BLOCKS_TABLE)}
-CREATE TABLE ${HASHES_TABLE} (
-  hash bytea PRIMARY KEY CHECK (octet_length(hash) = 32),
-  height bigint NOT NULL CHECK (height >= 0)
-);`,
-  },
-]);
-
-const PRESENT_SQL = "SELECT to_regclass('core_block_commit.blocks') IS NOT NULL AS present";
-const CURSOR_SQL = `SELECT height, hash, parent_hash FROM ${BLOCKS_TABLE} ORDER BY height DESC LIMIT 1`;
-const BLOCK_SQL = `INSERT INTO ${BLOCKS_TABLE} (height, hash, parent_hash, spec_version, ledger_version, block_time)
-  VALUES ($1, $2, $3, $4, $5, timestamptz 'epoch' + ($6::bigint::text || ' milliseconds')::interval)`;
-const HASH_SQL = `INSERT INTO ${HASHES_TABLE} (hash, height) VALUES ($1, $2)`;
-const PARENT_SQL = `SELECT hash FROM ${BLOCKS_TABLE} WHERE height = $1`;
 
 /** A hash as `0x`-prefixed lowercase hex, as the process transport and the chain-data envelope write hashes. */
 function hex(bytes: Uint8Array): string {
@@ -164,7 +116,14 @@ export function ledgerVersionOf(b: BlockContext): string {
 export async function writeBlockRow(w: Pick<BlockWriteHandle, "execute">, b: BlockContext): Promise<void> {
   const { specVersion, timestampMs } = blockHeaderOf(b);
   const ledger = ledgerVersionOf(b);
-  await w.execute(BLOCK_SQL, [b.height, b.hash, b.parentHash, specVersion, ledger, timestampMs]);
+  await insertBlockRow(w, {
+    height: b.height,
+    hash: b.hash,
+    parentHash: b.parentHash,
+    specVersion,
+    ledgerVersion: ledger,
+    timestampMs,
+  });
 }
 
 /**
@@ -174,7 +133,7 @@ export async function writeBlockRow(w: Pick<BlockWriteHandle, "execute">, b: Blo
  */
 export async function writeHashRow(w: Pick<BlockWriteHandle, "execute">, b: BlockContext): Promise<void> {
   try {
-    await w.execute(HASH_SQL, [b.hash, b.height]);
+    await insertHashRow(w, b.hash, b.height);
   } catch (error) {
     const details = error instanceof UmbraError ? error.details : undefined;
     if (details?.sqlstate !== "23505" || details.constraint !== HASHES_PRIMARY_KEY) throw error;
@@ -196,9 +155,8 @@ export async function writeHashRow(w: Pick<BlockWriteHandle, "execute">, b: Bloc
  * [IN-4]
  */
 export async function checkParent(w: Pick<BlockWriteHandle, "query">, b: BlockContext): Promise<void> {
-  const [parent] = await w.query(PARENT_SQL, [b.height - 1n]);
-  if (parent === undefined) return;
-  const stored = parent.hash as Uint8Array;
+  const stored = await hashAt(w, b.height - 1n);
+  if (stored === undefined) return;
   if (sameBytes(stored, b.parentHash)) return;
   throw new UmbraError(
     "parent-mismatch",
@@ -241,22 +199,3 @@ export const CORE_BLOCK_COMMIT = defineModule({
     },
   },
 });
-
-/**
- * The cursor, read through `read` (a read handle, or the block's transaction): the blocks table's row of the highest
- * height; null before the table exists (a database before its first startup) or while it holds no row.
- */
-export async function readCursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
-  const [table] = await read.query(PRESENT_SQL);
-  if (table?.present !== true) return null;
-  const [row] = await read.query(CURSOR_SQL);
-  if (row === undefined) return null;
-  return Object.freeze({
-    height: row.height as bigint,
-    hash: row.hash as Uint8Array,
-    parentHash: row.parent_hash as Uint8Array,
-  });
-}
-
-/** The database API's committed height: the cursor's height, read through the read's own handle. [DB-2] */
-export const cursorHeight: CommittedHeight = async (read) => (await readCursor(read))?.height ?? null;

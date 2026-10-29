@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import { readManifestLine, type Manifest } from "../../src/backup/manifest.js";
 import { commandBuild } from "../../src/cli/build-modules.js";
 import { loadConfig } from "../../src/config/load.js";

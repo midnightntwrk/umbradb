@@ -7,12 +7,12 @@
  * It is also woken whenever the public cursor may have moved.
  * [PP-1, PP-2, PP-3, PP-4, PP-5, Q100; CORE-ARCH §4.14; design §8]
  *
- * **Every read of public tables is in this file:**
+ * **Every read of public tables is in this file, or with its statement in `./sql.ts`:**
  * - {@link readPublicIdentity}: `core_chain.identity`'s genesis hash and S, through `core-chain`'s own `readIdentity`.
- * - {@link readPublicItems}: the public core's `table` items with their heights, from `core_chain.config`'s
+ * - `readPublicItems` (`./sql.ts`): the public core's `table` items with their heights, from `core_chain.config`'s
  *   `provides`. [PP-13]
- * - {@link readPublicBlock}: the height, hash and parent hash in `core_block_commit.blocks`, which its other columns,
- *   its partitions and the `hashes` table do not affect.
+ * - `readPublicBlock` (`./sql.ts`): the height, hash and parent hash in `core_block_commit.blocks`, which its other
+ *   columns, its partitions and the `hashes` table do not affect.
  * - The public cursor: `core-block-commit`'s own `readCursor`, the last row of the blocks table, read the way the core
  *   reads it.
  *
@@ -33,9 +33,9 @@
  */
 
 import type { PostgresParts } from "../../config/database-parts.js";
-import { BLOCKS_TABLE, cursorHeight, readCursor } from "../core-block-commit/core-block-commit.js";
-import { readIdentity } from "../core-chain/core-chain.js";
-import { readConfigRows } from "../core-chain/history.js";
+import { cursorHeight, readCursor } from "../core-block-commit/sql.js";
+import { readIdentity } from "../core-chain/sql.js";
+import { readConfigRows } from "../core-chain/sql.js";
 import { configHashOf, publicItemRanges } from "../../config/history.js";
 import type { PlainObject } from "../../config/plain-data.js";
 import type { CheckedEntry } from "../../config/validate.js";
@@ -83,17 +83,6 @@ export interface PublicIdentity {
 /** How often {@link pollingWakes} wakes a private process that has no transport to the core. */
 export const PUBLIC_POLL_MS = 1_000;
 
-const CONFIG_PRESENT_SQL = "SELECT to_regclass('core_chain.config') IS NOT NULL AS present";
-const ITEMS_SQL = "SELECT entry_id, start, stop, provides FROM core_chain.config";
-const BLOCKS_PRESENT_SQL = `SELECT to_regclass('${BLOCKS_TABLE}') IS NOT NULL AS present`;
-const BLOCK_SQL = `SELECT height, hash, parent_hash FROM ${BLOCKS_TABLE} WHERE height = $1`;
-
-/** Whether `read` finds the table a `to_regclass` statement asks for. */
-async function present(read: Pick<ReadHandle, "query">, sql: string): Promise<boolean> {
-  const [row] = await read.query(sql);
-  return row?.present === true;
-}
-
 /**
  * The public database's chain identity (its genesis hash and S), read by `core-chain`'s `readIdentity`. Null before
  * its core first started, when there is no `core_chain.identity` row.
@@ -101,24 +90,6 @@ async function present(read: Pick<ReadHandle, "query">, sql: string): Promise<bo
 export async function readPublicIdentity(read: Pick<ReadHandle, "query">): Promise<PublicIdentity | null> {
   const identity = await readIdentity(read);
   return identity === null ? null : Object.freeze({ genesisHash: identity.genesisHash, start: identity.start });
-}
-
-/**
- * The public core's `table` items with their heights. Every row of its `core_chain.config` is a revision of one of its
- * entries, with the `table` items it provides (`provides`); `publicItemRanges` turns them into items, each from its
- * revision's start to the revision's last height. Empty before the table exists. [PP-13, CF-5; design §8]
- */
-export async function readPublicItems(read: Pick<ReadHandle, "query">): Promise<PublicItem[]> {
-  if (!(await present(read, CONFIG_PRESENT_SQL))) return [];
-  const rows = await read.query(ITEMS_SQL);
-  return publicItemRanges(
-    rows.map((row) => ({
-      id: row.entry_id as string,
-      start: row.start as bigint,
-      stop: row.stop as bigint | null,
-      provides: row.provides as string[],
-    })),
-  );
 }
 
 /** The public configuration as a private process reads it at startup: its `table` items and its configuration hash. */
@@ -129,9 +100,9 @@ export interface PublicConfiguration {
 }
 
 /**
- * The public core's `table` items with their heights (as {@link readPublicItems} returns them) and its configuration
- * hash, both from one statement of `read`. The hash is the same one the core computes (`readConfigHash`), from the
- * same rows with the same function. [PP-13, PP-14, RN-16]
+ * The public core's `table` items with their heights (as `readPublicItems`, in `./sql.ts`, returns them) and its
+ * configuration hash, both from one statement of `read`. The hash is the same one the core computes
+ * (`readConfigHash`), from the same rows with the same function. [PP-13, PP-14, RN-16]
  */
 export async function readPublicConfiguration(read: Pick<ReadHandle, "query">): Promise<PublicConfiguration> {
   const rows = await readConfigRows(read);
@@ -143,18 +114,6 @@ export async function readPublicConfiguration(read: Pick<ReadHandle, "query">): 
 export async function readPublicConfigHash(read: Pick<ReadHandle, "query">): Promise<string | null> {
   const rows = await readConfigRows(read);
   return rows === null ? null : configHashOf(rows);
-}
-
-/** The public block at `height` — its height, hash and parent hash —, or null when the public database has none. */
-export async function readPublicBlock(read: Pick<ReadHandle, "query">, height: bigint): Promise<BlockRef | null> {
-  if (!(await present(read, BLOCKS_PRESENT_SQL))) return null;
-  const [row] = await read.query(BLOCK_SQL, [height]);
-  if (row === undefined) return null;
-  return Object.freeze({
-    height: row.height as bigint,
-    hash: row.hash as Uint8Array,
-    parentHash: row.parent_hash as Uint8Array,
-  });
 }
 
 /** The public cursor: the last block the core committed (`core-block-commit`'s cursor table), or null before any. */

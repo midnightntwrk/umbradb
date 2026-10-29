@@ -74,7 +74,7 @@ import type { AddressInfo } from "node:net";
 import { type RawData, type WebSocket, WebSocketServer } from "ws";
 import type { Database, ReadHandle } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
-import { BLOCKS_TABLE } from "../backbone/core-block-commit/core-block-commit.js";
+import { BLOCKS_TABLE } from "../backbone/core-block-commit/sql.js";
 import { RESULT_TYPES, resultColumns, type ResultColumn } from "../deterministic-postgresql/index.js";
 import type { BlockRef } from "../runner/block-source.js";
 import { Lockstep } from "./lockstep.js";

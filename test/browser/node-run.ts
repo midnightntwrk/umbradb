@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type BrowserRun, withDevelopmentOptIn } from "../../browser/src/configuration.js";
-import { cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import { nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
 import { buildDeclarations, commandBuild } from "../../src/cli/build-modules.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";

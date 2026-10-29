@@ -4,7 +4,8 @@ import { blockParsedItemOf } from "../../src/backbone/core-block-parsed/core-blo
 import { coreContractLogsFast } from "../../src/backbone/core-contract-logs-fast/core-contract-logs-fast.js";
 import { mainThreadLogReader as inThreadLogReader } from "./main-thread-log-reader.js";
 import { coreContractLogsFull } from "../../src/backbone/core-contract-logs-full/core-contract-logs-full.js";
-import { type ContractStateRow, contractStatesOf, coreContractStates } from "../../src/backbone/core-contract-states/core-contract-states.js";
+import { contractStatesOf, coreContractStates } from "../../src/backbone/core-contract-states/core-contract-states.js";
+import { type ContractStateRow } from "../../src/backbone/core-contract-states/sql.js";
 import { txResultsItemOf } from "../../src/backbone/core-tx-results/core-tx-results.js";
 import type { BlockContext } from "../../src/modules/declaration.js";
 import { BACKUP_BACKENDS, type BackupBackend } from "../backup/backup-fixtures.js";

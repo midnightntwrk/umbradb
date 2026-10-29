@@ -1,4 +1,5 @@
-import { CORE_BLOCK_COMMIT, cursorHeight, readCursor } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { CORE_BLOCK_COMMIT } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight, readCursor } from "../../src/backbone/core-block-commit/sql.js";
 import type { BlockWriteHandle, Database, Transaction } from "../../src/db/api.js";
 import { startDatabase } from "../../src/db/migrate.js";
 import type { SchemaPlan } from "../../src/db/roles.js";

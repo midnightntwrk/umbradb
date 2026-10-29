@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cursorHeight } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import type { CommittedHeight, ReadHandle } from "../../src/db/api.js";
 import { openPglite } from "../../src/db/pglite.js";
 import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";

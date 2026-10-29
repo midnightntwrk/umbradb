@@ -26,8 +26,8 @@
  * `block-parsed.transactions[i]`. It is a frozen array of `ChainOutcome` (`src/ledger/types.ts`), exactly what the
  * ledger's `apply` takes as `ApplyInput.outcomes`, so `core-ledger-state` passes it on unchanged.
  *
- * **At `on-db-write`** it writes one row per transaction, `core_tx_results.results (height, tx_index) → outcome`, in one
- * statement. The table is append-only and range-partitioned by height.
+ * **At `on-db-write`** it writes one row per transaction, in one statement. **The table** and every statement are in
+ * `./sql.ts`.
  */
 
 import { z } from "zod";
@@ -39,16 +39,13 @@ import { type BlockTransaction, blockParsedItemOf } from "../core-block-parsed/c
 import { MIDNIGHT, MIDNIGHT_SYSTEM, SYSTEM } from "../core-block-parsed/placement.js";
 import { chainEventsItemOf } from "../core-chain-events/core-chain-events.js";
 import type { ChainEvent } from "../core-chain-events/events.js";
-import { heightPartitionsSql } from "../height-partitions.js";
+import { CORE_TX_RESULTS_MIGRATIONS, insertResultRows } from "./sql.js";
 
 /** The module's id. */
 export const CORE_TX_RESULTS_ID = "core-tx-results";
 
 /** The `block` (and `table`) item it provides. */
 export const TX_RESULTS_ITEM = "tx-results";
-
-/** Its table: one row per transaction. */
-export const RESULTS_TABLE = "core_tx_results.results";
 
 /** The outcome each event gives the transaction it placed, by `<pallet>::<event>` (see the module comment). */
 export const OUTCOMES: Readonly<Record<string, ChainOutcome>> = Object.freeze({
@@ -57,23 +54,6 @@ export const OUTCOMES: Readonly<Record<string, ChainOutcome>> = Object.freeze({
   [`${SYSTEM.pallet}::${SYSTEM.failed}`]: "failure",
   [`${MIDNIGHT_SYSTEM.pallet}::${MIDNIGHT_SYSTEM.applied}`]: "success",
 });
-
-/** `core-tx-results`' migrations: applied once, recorded under `core-tx-results`, never changed. [DB-9] */
-export const CORE_TX_RESULTS_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  {
-    id: "001",
-    sql: `CREATE TABLE ${RESULTS_TABLE} (
-  height bigint NOT NULL CHECK (height >= 0),
-  tx_index bigint NOT NULL CHECK (tx_index >= 0),
-  outcome text NOT NULL CHECK (outcome IN ('success', 'partial', 'failure')),
-  PRIMARY KEY (height, tx_index)
-) PARTITION BY RANGE (height);
-${heightPartitionsSql(RESULTS_TABLE)}`,
-  },
-]);
-
-const INSERT_SQL = `INSERT INTO ${RESULTS_TABLE} (height, tx_index, outcome)
-  SELECT $1::bigint, r.tx_index, r.outcome FROM unnest($2::bigint[], $3::text[]) AS r (tx_index, outcome)`;
 
 /**
  * The outcome of `transaction` of block `height`, from the event of `events` that placed it (see the module comment);
@@ -123,7 +103,7 @@ export function txResultsItemOf(b: BlockContext): readonly ChainOutcome[] {
 export async function writeResultRows(w: Pick<BlockWriteHandle, "execute">, b: BlockContext): Promise<void> {
   const results = txResultsItemOf(b);
   if (results.length === 0) return;
-  await w.execute(INSERT_SQL, [b.height, results.map((_outcome, index) => BigInt(index)), [...results]]);
+  await insertResultRows(w, b.height, results);
 }
 
 /**

@@ -41,7 +41,7 @@
 import "./shims/prelude.js";
 import { pgDump } from "@electric-sql/pglite-tools/pg_dump";
 import configuration from "umbradb:configuration";
-import { readCursor } from "../../src/backbone/core-block-commit/core-block-commit.js";
+import { readCursor } from "../../src/backbone/core-block-commit/sql.js";
 import { nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
 import { nodeOptionsOf } from "../../src/backbone/core-chain/core-chain.js";
 import { privateIntake } from "../../src/backbone/core-private-source/index.js";

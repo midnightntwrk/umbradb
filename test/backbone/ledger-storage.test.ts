@@ -8,7 +8,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CORE_CONTRACT_STATES } from "../../src/backbone/core-contract-states/core-contract-states.js";
-import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/core-ledger-state.js";
+import { CORE_LEDGER_STATE_MIGRATIONS } from "../../src/backbone/core-ledger-state/sql.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";

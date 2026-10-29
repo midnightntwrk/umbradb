@@ -3,13 +3,7 @@
  * from the node, and keeps its own cursor, bound to that one public database.
  * [PP-1, PP-2, PP-3, PP-5; CORE-ARCH §4.11, §4.14; design §8, §10]
  *
- * **Its table**, created by its migration under its own role, is `core_private_source.cursor`, with one row (`id = 1`):
- * - the private cursor: the public block the private process last committed (`height`, `hash` and `parent_hash`), null
- *   before its first block. The runner's cursor needs the parent hash, and so does delivering the block at the cursor
- *   again after a restart. [RN-11, Q124]
- * - the binding: the public database's genesis hash and S (`public_genesis_hash`, `public_start_height`).
- * It is a module table of the private plan like any other: the determinism check covers it, its `CHECK`s and change
- * capture are added, `core-digest` digests it and the contents hash reads it. [DT-6, Q75; design §10]
+ * **The tables** and every statement are in `./sql.ts`.
  *
  * **The binding** is checked in the part's `on-start-db`, which runs before any private module migrates (the fixed
  * startup order). The public database's identity is read ({@link readPublicIdentity}). On the first start it is
@@ -34,8 +28,8 @@
  *   cursor reads the binding from the same row), and again in the part's `on-start-db`, which records it. So a private
  *   database of the configured network that is bound to another public database is refused by them (`genesis`,
  *   `start`), never by the graph reading the wrong public database's items. [PP-2]
- * - Last, the check gives the graph the public core's `table` items with their heights ({@link readPublicItems}, read
- *   with the identity), which a private module may require. [PP-13, Q126 B]
+ * - Last, the check gives the graph the public core's `table` items with their heights (`readPublicItems`, in
+ *   `./sql.ts`, read with the identity), which a private module may require. [PP-13, Q126 B]
  * The bootstrap's wait then waits, with the condition `waiting-for-node`, for the public cursor to reach the private S.
  * [IN-2]
  *
@@ -118,7 +112,7 @@ import { UMBRADB_VERSION } from "../../config/build.js";
 import type { HelloAck } from "../../private/messages.js";
 import type { ChainCheck, ChainCheckInput, ConfiguredGenesis } from "../core-chain/core-chain.js";
 import type { CheckedEntry } from "../../config/validate.js";
-import type { ReadHandle, SchemaWriteHandle } from "../../db/api.js";
+import type { ReadHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import type { ModuleDeclaration, Revision } from "../../modules/declaration.js";
 import type { PublicItem } from "../../modules/graph.js";
@@ -129,111 +123,27 @@ import {
   type PublicDatabase,
   type PublicIdentity,
   type PublicWakes,
-  readPublicBlock,
   readPublicConfigHash,
   readPublicConfiguration,
   readPublicCursor,
   readPublicIdentity,
 } from "./public-database.js";
+import {
+  CORE_PRIVATE_SOURCE_MIGRATIONS,
+  insertBinding,
+  movePrivateCursor,
+  privateCursorHeight,
+  readAcceptedConfigHash,
+  readPrivateRow,
+  readPublicBlock,
+  recordedBinding,
+  writeAcceptedConfigHash,
+} from "./sql.js";
 
 export { publicConfigChanged };
 
-/** `core-private-source`'s migrations: applied once, in order, and never changed. [DB-9] */
-export const CORE_PRIVATE_SOURCE_MIGRATIONS: readonly { readonly id: string; readonly sql: string }[] = Object.freeze([
-  {
-    id: "001",
-    sql: `CREATE TABLE core_private_source.cursor (
-  id smallint PRIMARY KEY CHECK (id = 1),
-  height bigint,
-  hash bytea,
-  parent_hash bytea,
-  public_genesis_hash bytea NOT NULL CHECK (octet_length(public_genesis_hash) = 32),
-  public_start_height bigint NOT NULL,
-  CHECK ((height IS NULL) = (hash IS NULL) AND (height IS NULL) = (parent_hash IS NULL))
-)`,
-  },
-  {
-    // The public configuration hash the private process accepted. [PP-14, Q159]
-    id: "002",
-    sql: `CREATE TABLE core_private_source.accepted_config (
-  id smallint PRIMARY KEY CHECK (id = 1),
-  config_hash bytea NOT NULL CHECK (octet_length(config_hash) = 32)
-)`,
-  },
-]);
-
-const PRESENT_SQL = "SELECT to_regclass('core_private_source.cursor') IS NOT NULL AS present";
-const CURSOR_SQL =
-  "SELECT height, hash, parent_hash, public_genesis_hash, public_start_height FROM core_private_source.cursor WHERE id = 1";
-const BINDING_SQL = "SELECT public_genesis_hash, public_start_height FROM core_private_source.cursor WHERE id = 1";
-const BIND_SQL =
-  "INSERT INTO core_private_source.cursor (id, public_genesis_hash, public_start_height) VALUES (1, $1, $2)";
-const MOVE_SQL = "UPDATE core_private_source.cursor SET height = $1, hash = $2, parent_hash = $3 WHERE id = 1";
-const ACCEPTED_PRESENT_SQL = "SELECT to_regclass('core_private_source.accepted_config') IS NOT NULL AS present";
-const ACCEPTED_SQL = "SELECT config_hash FROM core_private_source.accepted_config WHERE id = 1";
-const ACCEPT_SQL =
-  "INSERT INTO core_private_source.accepted_config (id, config_hash) VALUES (1, $1) " +
-  "ON CONFLICT (id) DO UPDATE SET config_hash = EXCLUDED.config_hash";
-
-/**
- * The private cursor, read through `read` (a read handle, or the block's transaction): the public block the private
- * process last committed; null before its first block, and before the table exists (a database before its first
- * startup).
- */
-export async function readPrivateCursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
-  return (await readPrivateRow(read)).cursor;
-}
-
-/**
- * The private cursor ({@link readPrivateCursor}) and the binding the same row records — the public database's genesis
- * hash and S, null before the first start recorded them —, in one statement.
- */
-async function readPrivateRow(
-  read: Pick<ReadHandle, "query">,
-): Promise<{ readonly cursor: BlockRef | null; readonly binding: PublicIdentity | null }> {
-  const [table] = await read.query(PRESENT_SQL);
-  if (table?.present !== true) return { cursor: null, binding: null };
-  const [row] = await read.query(CURSOR_SQL);
-  if (row === undefined) return { cursor: null, binding: null };
-  const binding = Object.freeze({
-    genesisHash: row.public_genesis_hash as Uint8Array,
-    start: row.public_start_height as bigint,
-  });
-  if (row.height === null) return { cursor: null, binding };
-  const cursor = Object.freeze({
-    height: row.height as bigint,
-    hash: row.hash as Uint8Array,
-    parentHash: row.parent_hash as Uint8Array,
-  });
-  return { cursor, binding };
-}
-
-/**
- * The binding a private database records: its public database's genesis hash and S, read through `read`. Null before
- * its first start recorded them, and before the table exists. A restore of a private process's backup compares it with
- * its public database's identity before the commit. [PP-2, BK-3, Q153]
- */
-export async function readPrivateBinding(read: Pick<ReadHandle, "query">): Promise<PublicIdentity | null> {
-  return (await readPrivateRow(read)).binding;
-}
-
-/** A private database's committed height: the private cursor's height. [DB-2] */
-export const privateCursorHeight = async (read: Pick<ReadHandle, "query">): Promise<bigint | null> =>
-  (await readPrivateCursor(read))?.height ?? null;
-
 /** A byte string as `0x`-prefixed lowercase hex. */
 const hex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString("hex")}`;
-
-/**
- * The public configuration hash a private database accepted, as `0x` hex, read through `read`. Null before its first
- * start recorded one, and before its table exists (migration `002`). [PP-14, Q159]
- */
-export async function readAcceptedConfigHash(read: Pick<ReadHandle, "query">): Promise<string | null> {
-  const [table] = await read.query(ACCEPTED_PRESENT_SQL);
-  if (table?.present !== true) return null;
-  const [row] = await read.query(ACCEPTED_SQL);
-  return row?.config_hash instanceof Uint8Array ? hex(row.config_hash) : null;
-}
 
 /** Whether two byte strings are equal. */
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => Buffer.from(a).equals(Buffer.from(b));
@@ -328,13 +238,6 @@ export function bindingRefusal(
     );
   }
   return null;
-}
-
-/** The binding a private database recorded, read in its `on-start-db`'s transaction; null on its first start. */
-async function recordedBinding(w: SchemaWriteHandle): Promise<PublicIdentity | null> {
-  const [row] = await w.query(BINDING_SQL);
-  if (row === undefined) return null;
-  return { genesisHash: row.public_genesis_hash as Uint8Array, start: row.public_start_height as bigint };
 }
 
 /**
@@ -656,9 +559,9 @@ export class PrivateBlockSource implements BlockSource {
   }
 
   /**
-   * The private cursor, read through `read` ({@link readPrivateCursor}). The first read (startup's, of the committed
-   * cursor) is also the position until a block commits; the loop's later reads are inside a block's transaction. The
-   * binding the same row records is kept for {@link checkChain}, which startup runs after this read.
+   * The private cursor, read through `read` (`readPrivateCursor`, in `./sql.ts`). The first read (startup's, of the
+   * committed cursor) is also the position until a block commits; the loop's later reads are inside a block's
+   * transaction. The binding the same row records is kept for {@link checkChain}, which startup runs after this read.
    */
   async cursor(read: Pick<ReadHandle, "query">): Promise<BlockRef | null> {
     const { cursor, binding } = await readPrivateRow(read);
@@ -739,8 +642,8 @@ export class PrivateBlockSource implements BlockSource {
    *   [PP-14, Q159]
    *
    * Resolves with the genesis hash, which `core-chain` records with the private S on a new private database, and the
-   * public core's `table` items with their heights, read with the identity ({@link readPublicItems}), which the runner
-   * gives the graph. [PP-13]
+   * public core's `table` items with their heights, read with the identity (`readPublicItems`, in `./sql.ts`), which
+   * the runner gives the graph. [PP-13]
    */
   async checkChain(input: Pick<ChainCheckInput, "configured">): Promise<ChainCheck> {
     const reconnections = this.#public.reconnections?.() ?? 0;
@@ -928,16 +831,16 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
         // A backbone part's revisions are the `core` entry's, in start order: the first one's start is S.
         const refusal = binding(recorded, current, (p.revisions[0] as Revision).start);
         if (refusal !== null) throw refusal;
-        if (recorded === null) await w.execute(BIND_SQL, [current.genesisHash, current.start]);
+        if (recorded === null) await insertBinding(w, current);
         // The hash startup's chain check accepted, recorded now that the full checks have passed. [PP-14, Q159]
         const accepted = made.pendingAcceptedHash;
         if (accepted !== null) {
-          await w.execute(ACCEPT_SQL, [bytesOfHex(accepted)]);
+          await writeAcceptedConfigHash(w, bytesOfHex(accepted));
           made.acceptedRecorded(accepted);
         }
       },
       async "on-db-write"(_p, b, w) {
-        await w.execute(MOVE_SQL, [b.height, b.hash, b.parentHash]);
+        await movePrivateCursor(w, b);
       },
       async "on-after-db-write"(_p, b) {
         made?.committed({ height: b.height, hash: b.hash, parentHash: b.parentHash });

@@ -21,7 +21,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { readCursor } from "../backbone/core-block-commit/core-block-commit.js";
+import { readCursor } from "../backbone/core-block-commit/sql.js";
 import type { CoreBlockItems } from "../backbone/core-block-fetch/items.js";
 import type { ReadHandle } from "../db/api.js";
 import type { BlockRef, BlockSource } from "./block-source.js";
