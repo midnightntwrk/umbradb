@@ -168,3 +168,9 @@ there.
 #### Scenario: Every refusal and halt has a test
 - **WHEN** the refusal and halt list of `design.md` §11 is compared with the test suite
 - **THEN** each entry has a test that triggers it and checks its code
+
+## Current release campaign evidence (owner Q195, 2026-10-28)
+
+For the 0.10.0 §18 campaign, IN-4 is exercised against the local preprod archive directly over RPC for fixed blocks
+0–10,000 inclusive, on PostgreSQL, Node PGlite and Chrome PGlite. The workload is ledger v8 and sparse; no other
+network, ledger-v9 or upgrade-boundary coverage is claimed. The permanent ingest requirements remain unchanged.

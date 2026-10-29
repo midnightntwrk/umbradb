@@ -645,29 +645,36 @@ skipped with a named reason when the tape is absent. Synthetic tapes built by th
 
 ## 16. Whole system
 
-- **A133** `[CI]` Stagenet blocks 0–10,000 and preview blocks 0–10,000, from genesis, with every core module except
+**0.10.0 release campaign amendment (owner Q195, 2026-10-28).** The current campaign uses only the existing local
+preprod archive, directly over RPC, with fixed genesis and terminal hashes. No tapes or additional networks are
+prepared. A133/A134/A135 use 0–10,000 inclusive and A143 uses 0–1,999 inclusive. This is host-run preprod ledger-v8
+evidence; it does not demonstrate stagenet, preview, ledger-v9 or upgrade-boundary coverage. Those runs are deferred
+in ROADMAP.md, not passed. Existing fixtures and historical evidence retain their original scope. G6 must reconcile
+host reports with CI without treating absent, skipped or failed required tests as passed.
+
+- **A133** `[MANUAL]` For this campaign, local preprod blocks 0–10,000, from genesis, with every core module except
   `-fast`, sync with every state root matching the node's. (IN-4, LG-15)
   **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
 - **A154** **Withdrawn** (owner decision Q155: the full syncs are skipped).
-- **A134** `[FAULT]` The crash sweep of A50 repeated on the stagenet 0–10,000 tape with every core module except
+- **A134** `[FAULT]` The crash sweep of A50 repeated on the fixed local preprod 0–10,000 range with every core module except
   `-fast`: every mandatory point (inside `on-compute`; inside `on-db-write` after the first and the last callback; just
   before and just after COMMIT; during a sweep step) and 100 seeded random points leave no partial block, no skipped
   height, and a contents hash equal to an uninterrupted run's; **negative control:** a build that writes the ledger
   nodes in a transaction of their own is detected. (RN-6, IN-1, LG-11, LG-14)
   **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
-- **A135** `[DIFF]` The same range and configuration on PostgreSQL, on PGlite in Node.js and on PGlite in Chrome give
-  equal contents hashes. (DT-3, BR-4)
+- **A135** `[DIFF]` For this campaign, the same fixed preprod range and configuration on PostgreSQL, on PGlite in Node.js and on PGlite in Chrome give
+  equal contents hashes. Deliberate data/root mismatches, including the browser leg, must fail. (DT-3, BR-4)
   **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
-- **A136** `[MANUAL]` Ingest throughput over stagenet 0–10,000 with every core module except `-fast`, on PostgreSQL 18,
+- **A136** `[MANUAL]` For this campaign, ingest throughput over local preprod 0–10,000 with every core module except `-fast`, on PostgreSQL 18,
   median of 3 runs — each from an empty database on a freshly started PostgreSQL, against the same local archive node
   in Docker after one warm-up pass, timed from process start to the commit of block 10,000 — is equal to or better than
-  the official midnight-indexer's (release/4.4, PostgreSQL backend) on the same machine; the measurements are recorded
+  the official midnight-indexer's (verified preprod-compatible pinned build, PostgreSQL backend) on the same machine; the measurements are recorded
   in the pull request. (CORE-ARCH SC-009)
   **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
-- **A143** `[MEASURE]` The tape-apply baseline: the first 2,000 blocks of A133's stagenet tape, applied from an empty
+- **A143** `[MEASURE]` The local-RPC ingest baseline: preprod blocks 0–1,999 inclusive read directly from the archive, from an empty
   database with every core module except `-fast`, 5 times on PostgreSQL 18 and 5 times on PGlite; the run reports, per
   backend, the median total time and the median time per block next to the committed reference
-  (`bench/baselines/tape-apply.json`, which names the machine it was measured on), and whether `slowBlockMs`'s default
+  (`bench/baselines/preprod-local-ingest.json`, which names the machine it was measured on), and whether `slowBlockMs`'s default
   is at least 10 times the median time per block; the figures are recorded in the pull request. (Q72)
   **Deferred after 0.10.0** (owner decision Q191): run for a later release; 0.10.0 is a pre-release without it.
 

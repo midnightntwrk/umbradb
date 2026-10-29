@@ -73,14 +73,19 @@ supply-chain gate, the vendored ledger rebuild, and `npm run graph:check`.
 - **The crash sweeps** (18.1): kill the runner at every point that matters and at 100 random ones, with test modules,
   and check every restart ends with the same data as a run that never stopped; the same with 20 restarts; and a
   negative control the sweep must catch.
-- **The full-core runs** (18.2): stagenet and preview from genesis to block 10,000 with every core module, every
+- **The full-core runs** (18.2): local preprod from genesis to block 10,000 (Q195) with every core module, every
   ledger state root matching the node's; the crash sweep repeated on that chain; PostgreSQL, PGlite in Node.js and
   PGlite in Chrome giving the same contents hash.
-- **The ingest benchmark** (18.3): UmbraDB against the official Midnight indexer over stagenet 0–10,000, on the same
+- **The ingest benchmark** (18.3): UmbraDB against the official Midnight indexer over local preprod 0–10,000 with a verified compatible build, on the same
   machine.
-- **The tape-apply baseline** (18.5): the time to apply 2,000 recorded stagenet blocks on each backend, committed as
+- **The local-RPC ingest baseline** (18.5): the time to ingest preprod blocks 0–1,999 directly from the local archive on each backend, committed as
   a reference.
 - **The last four required test ids**, which the crash runs bring.
+
+### Deferred network coverage (Q195)
+
+Stagenet and preview 0–10,000 full-core/root/differential runs, including ledger-v9 and upgrade-boundary coverage,
+remain later work. The preprod-only campaign does not mark them passed or require tape preparation.
 
 ### Later core work
 

@@ -4097,7 +4097,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       Q155).
       **Moved after 0.10.0 (2026-10-28, owner decision Q191):** 0.10.0 goes out as a pre-release without this run;
       `ROADMAP.md` lists it with the release gates still to run.
-- [ ] 18.2 The full-core runs: stagenet and preview 0–10,000 from genesis; the full-core crash sweep and its negative
+- [ ] 18.2 The full-core runs for this campaign (Q195): local preprod 0–10,000 inclusive from genesis; the full-core crash sweep and its negative
       control; the three-backend comparison.
       **Acceptance:** A133, A134, A135.
       Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
@@ -4108,7 +4108,7 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       `-fast`, the node `wss://rpc.stagenet.shielded.tools`, in Docker; the core stopped at 100 with every state root
       checked, on PostgreSQL 18 and on PGlite in Node.js, and both backups give contents hash
       `0x7d8ee00280d74919703b5a6e8289225c6471f75fb34b6d5b9014373a2e3bc878`.
-- [ ] 18.3 The ingest benchmark against the official indexer (`bench/ingest-vs-official/`), recorded in the PR.
+- [ ] 18.3 The local preprod 0–10,000 ingest benchmark against a verified compatible official indexer (`bench/ingest-vs-official/`), recorded in the PR.
       **Acceptance:** A136.
       Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
       Q155).
@@ -4122,8 +4122,8 @@ it; 17 retires the 0.9.5 parts and moves the gates; 18 runs the whole-system che
       **Done for 0.10.0 (2026-10-28, owner decision Q191 A):** the 18 ids whose tests exist are in the manifest and the
       pinned count is 22; A5's check allows only the four ids the crash runs bring (`runner.crash-sweep.*`,
       `runner.restart-20.contents-hash-equal`, `core.full-crash-sweep`), which make it 26 after 0.10.0.
-- [ ] 18.5 The tape-apply baseline (Q72): the measurement of A143 in CI, its committed reference
-      (`bench/baselines/tape-apply.json`), and the check of `slowBlockMs`'s default against it.
+- [ ] 18.5 The local-RPC ingest baseline (Q195): the host measurement of A143, its committed reference
+      (`bench/baselines/preprod-local-ingest.json`), and the check of `slowBlockMs`'s default against it.
       **Acceptance:** A143; its figures recorded in the pull request.
       Run and verified by the owner; suggested by the orchestrator only once every other task is done (owner decision
       Q155).
