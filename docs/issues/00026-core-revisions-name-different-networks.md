@@ -2,9 +2,13 @@
 
 - **Status:** OPEN
 - **Area:** logic
-- **Severity:** med
-- **Effort:** needs the owner's decision: forbidding a network change between configuration revisions changes the
-  configuration rules.
+- **Severity:** low — lowered from med on 2026-10-30 by the owner: no other network's blocks can be stored (the stored
+  genesis hash refuses another network's node at every start, and the parent check keeps one continuous chain). What
+  is wrong is the history's record of the network for the early heights; the label picks the ledger version table,
+  which is the same for every built-in network today, so the blocks decode alike. It would matter only if the
+  networks' tables came to differ, or with a `custom` network's own table.
+- **Effort:** small, not urgent — refuse a configuration whose `core` revisions name different networks (a change to
+  the configuration rules); no decision needed before 0.10.0.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 10.2a of `openspec/changes/core-arch` (the node's genesis hash compared with the
   configured network's at every start, decision records Q117 A and Q120 B). The configuration code involved is tasks
