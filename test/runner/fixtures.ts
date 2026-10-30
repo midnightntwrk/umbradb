@@ -7,8 +7,9 @@ import type {
   ModuleDeclaration,
   PointName,
   ProcessContext,
+  Revision,
 } from "../../src/modules/declaration.js";
-import type { PointArguments, PointRun } from "../../src/runner/dispatch.js";
+import { isBackbonePart, type PointArguments, type PointRun } from "../../src/runner/dispatch.js";
 
 /**
  * What the runner's dispatch tests share: a recorder of callbacks starting and ending (its event list is the logical
@@ -119,16 +120,27 @@ export const ARGUMENTS: { readonly [P in PointName]: PointArguments<P> } = Objec
   "on-stop-height": [{ entryId: "m", height: 1n }, READ],
 });
 
-/** One process context per module, made on first use and the same object afterwards. [MD-7] */
+/**
+ * One process context per module, made on first use and the same object afterwards. A backbone part's context has one
+ * revision, the `core` entry's from `start` (S: 1, the loop harness's default start, unless given), as the runner gives
+ * every backbone part the `core` entry's revisions; `core-block-commit`'s parent check reads S there. A module's has
+ * none. [MD-7, IN-4]
+ */
 export class Contexts {
   readonly #byId = new Map<string, ProcessContext>();
+  readonly #core: readonly Revision[];
   readonly asked: string[] = [];
+
+  constructor(start = 1n) {
+    this.#core = Object.freeze([Object.freeze({ start, stop: null, version: "core", settings: Object.freeze({}) })]);
+  }
 
   of(id: string): ProcessContext {
     this.asked.push(id);
     let context = this.#byId.get(id);
     if (context === undefined) {
-      context = Object.freeze({ items: new Map<string, unknown>(), revisions: [], publish: () => undefined });
+      const revisions = isBackbonePart({ id }) ? this.#core : [];
+      context = Object.freeze({ items: new Map<string, unknown>(), revisions, publish: () => undefined });
       this.#byId.set(id, context);
     }
     return context;

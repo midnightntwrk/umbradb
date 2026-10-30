@@ -14,8 +14,10 @@
  *    `block-header` (its spec version and time) and `ledger-version`, which `core-block-fetch` puts at `on-fetch`. It
  *    is refused before anything is sent when the items are missing or unreadable. [CD-2, CD-3]
  * 2. its hash's row ({@link writeHashRow}); a primary-key violation fails the block with `duplicate-block-hash`.
- * 3. the parent check ({@link checkParent}): a block whose parent hash is not the hash of the block stored at h − 1
- *    fails with `parent-mismatch`. The anchor, block S, has no stored parent and is not checked. [IN-4]
+ * 3. the parent check ({@link checkParent}): a block whose parent hash is not the hash of the block stored at h − 1,
+ *    or that has no block stored at h − 1, fails with `parent-mismatch`. Only the anchor, block S, has no stored parent
+ *    and is not checked. The part takes S from its process context's revisions ({@link startOf}), in memory, so the
+ *    check still sends one statement per block. [IN-4, CF-2]
  *
  * The duplicate check comes first, so an earlier block delivered again (its hash repeated, its parent not the cursor)
  * is named for what it is. Both failures are halts: the part's `on-db-write` rejects with the `UmbraError`, the block
@@ -26,7 +28,7 @@ import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { BlockWriteHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
-import { type BlockContext, defineModule } from "../../modules/declaration.js";
+import { type BlockContext, defineModule, type ProcessContext } from "../../modules/declaration.js";
 import {
   CORE_BLOCK_COMMIT_MIGRATIONS,
   HASHES_PRIMARY_KEY,
@@ -149,28 +151,60 @@ export async function writeHashRow(w: Pick<BlockWriteHandle, "execute">, b: Bloc
 }
 
 /**
- * The parent check. The block's parent hash must be the hash of the block stored at h − 1 (the cursor, for the block
- * the loop processes), or the block fails with `parent-mismatch` (with the height and both hashes). With no block
- * stored at h − 1 there is nothing to compare: that is the anchor, block S, whose parent the database never holds.
- * [IN-4]
+ * S, the database's start height, from `core-block-commit`'s process context `p`. The runner gives every backbone part
+ * the `core` entry's revisions in start order (`processRevisions`, `src/runner/process.ts`), and S is the earliest
+ * `core` entry's start, so it is the first revision's start: the height `core-chain` records in `core_chain.identity`
+ * and whose block's hash it records as the anchor. A restored database keeps the backup's S, which restore requires
+ * the configuration to have, so S is the same there. It is in memory, so the parent check sends no statement for it.
+ * Throws a plain `Error` for a context without revisions, which the runner never gives a backbone part.
+ * [CF-2, IN-2, BK-4, MD-7]
  */
-export async function checkParent(w: Pick<BlockWriteHandle, "query">, b: BlockContext): Promise<void> {
+export function startOf(p: Pick<ProcessContext, "revisions">): bigint {
+  const first = p.revisions[0];
+  if (first === undefined) {
+    throw new Error(
+      "core-block-commit ran with a process context that has no revision: the runner gives every backbone part the " +
+        "core entry's revisions, the first starting at S, which the parent check needs",
+    );
+  }
+  return first.start;
+}
+
+/**
+ * The parent check, for a database whose start height is `start` (S). The anchor, block S, passes unchecked: its parent
+ * is below S, which the database never holds. Every other block's parent hash must be the hash of the block stored at
+ * h − 1 (the cursor, for the block the loop processes), or the block fails with `parent-mismatch`, with the height,
+ * its parent hash and the stored hash. [IN-4]
+ *
+ * With no block stored at h − 1 the block fails too, its stored hash null: committed, it would leave a missing height
+ * that every later block extends. That happens when the loop's cursor is not the database's (a bug), when another
+ * writer deleted the rows below the block, or for a first block that is not S. [IN-4]
+ */
+export async function checkParent(w: Pick<BlockWriteHandle, "query">, b: BlockContext, start: bigint): Promise<void> {
+  if (b.height === start) return;
   const stored = await hashAt(w, b.height - 1n);
-  if (stored === undefined) return;
-  if (sameBytes(stored, b.parentHash)) return;
+  if (stored !== undefined && sameBytes(stored, b.parentHash)) return;
+  const found =
+    stored === undefined
+      ? `the database holds no block at height ${b.height - 1n}`
+      : `the block at height ${b.height - 1n} is ${hex(stored)}`;
   throw new UmbraError(
     "parent-mismatch",
-    `the block at height ${b.height} names the parent ${hex(b.parentHash)}, but the block at height ${b.height - 1n} ` +
-      `is ${hex(stored)}: the block does not extend the database's chain; processing halts at ${b.height}`,
-    { height: b.height, parentHash: hex(b.parentHash), stored: hex(stored) },
+    `the block at height ${b.height} names the parent ${hex(b.parentHash)}, but ${found}: the block does not extend ` +
+      `the database's chain; processing halts at ${b.height}`,
+    { height: b.height, parentHash: hex(b.parentHash), stored: stored === undefined ? null : hex(stored) },
   );
 }
 
-/** `core-block-commit`'s work for block `b`, in its order (see the module comment). */
-export async function commitBlock(w: Pick<BlockWriteHandle, "query" | "execute">, b: BlockContext): Promise<void> {
+/** `core-block-commit`'s work for block `b` of a database whose S is `start`, in its order (see the module comment). */
+export async function commitBlock(
+  w: Pick<BlockWriteHandle, "query" | "execute">,
+  b: BlockContext,
+  start: bigint,
+): Promise<void> {
   await writeBlockRow(w, b);
   await writeHashRow(w, b);
-  await checkParent(w, b);
+  await checkParent(w, b, start);
 }
 
 /**
@@ -194,8 +228,8 @@ export const CORE_BLOCK_COMMIT = defineModule({
   configSchema: z.object({}),
   migrations: CORE_BLOCK_COMMIT_MIGRATIONS.map(({ id, sql }) => ({ id, sql })),
   points: {
-    async "on-db-write"(_p, b, w) {
-      await commitBlock(w, b);
+    async "on-db-write"(p, b, w) {
+      await commitBlock(w, b, startOf(p));
     },
   },
 });

@@ -122,7 +122,7 @@ export async function startWith(
     readonly contexts?: Contexts;
   } = {},
 ): Promise<Started> {
-  const contexts = options.contexts ?? new Contexts();
+  const contexts = options.contexts ?? new Contexts(options.start ?? 1n);
   const cursor = (await db.read((read) => readCursor(read)))?.height ?? null;
   const graph = resolveGraph({
     declarations: validateDeclarations({ backbone: options.backbone ?? LOOP_BACKBONE, core: [], user }),

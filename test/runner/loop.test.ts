@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { writeBlockRow, writeHashRow } from "../../src/backbone/core-block-commit/core-block-commit.js";
 import type { BlockWriteHandle, ReadHandle, ReadOnlyDatabase, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { readOnlyDatabase } from "../../src/db/read-only.js";
@@ -931,13 +932,38 @@ describe.each(RUNNER_BACKENDS)("the finalized loop on $name", (backend) => {
     }, 60_000);
 
     it("a source that gives the block of another height stops it before COMMIT: the cursor is not the height's", async () => {
-      const { db } = await backend.database();
-      const started = await startWith(db, [mod("m", {})], [entry("m", 1)]);
       class Shifted extends InMemoryBlockSource {
         override async block(height: bigint) {
           return inMemoryBlock(height === 2n ? 7n : height);
         }
       }
+      // The real core-block-commit refuses block 7 first, in its on-db-write: the database holds no block at 6. [IN-4]
+      const refused = await failureOf(
+        await startWith((await backend.database()).db, [mod("m", {})], [entry("m", 1)]),
+        new Shifted({ head: 3n }),
+        3n,
+      );
+      expect(where(refused)).toEqual({ height: 2n, point: "on-db-write", module: "core-block-commit", committed: false });
+      expect(((refused as HeightFailure).cause as CallbackFailure).cause).toMatchObject({
+        code: "parent-mismatch",
+        details: { height: 7n, stored: null },
+      });
+      // Its rows written without the parent check, the loop's own check before the COMMIT stops it.
+      const { db } = await backend.database();
+      const rowsOnly = LOOP_BACKBONE.map((d) =>
+        d.id === "core-block-commit"
+          ? {
+              ...d,
+              points: {
+                async "on-db-write"(_p: unknown, b: BlockContext, w: BlockWriteHandle) {
+                  await writeBlockRow(w, b);
+                  await writeHashRow(w, b);
+                },
+              },
+            }
+          : d,
+      ) as ModuleDeclaration[];
+      const started = await startWith(db, [mod("m", {})], [entry("m", 1)], { backbone: rowsOnly });
       const failure = await failureOf(started, new Shifted({ head: 3n }), 3n);
       expect(where(failure)).toEqual({ height: 2n, point: undefined, module: undefined, committed: false });
       expect((failure as HeightFailure).message).toMatch(

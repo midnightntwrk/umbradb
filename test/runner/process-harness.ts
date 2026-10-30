@@ -11,6 +11,7 @@ import { validateDeclarations } from "../../src/modules/validation.js";
 import { type StartedModuleApi, startModuleApi } from "../../src/runner/api-server.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { FinalizedLoop, type LoopInput } from "../../src/runner/loop.js";
+import { isBackbonePart } from "../../src/runner/dispatch.js";
 import { ApiRoutes, type ModuleApi } from "../../src/runner/module-api.js";
 import { ProcessContexts } from "../../src/runner/process-context.js";
 import { CORE_CHAIN } from "../modules/graph-fixtures.js";
@@ -101,16 +102,21 @@ export async function startThroughSeal(
 ): Promise<SealedStart> {
   const backbone = options.backbone ?? publishingBackbone(db).backbone;
   const cursor = (await db.read((read) => readCursor(read)))?.height ?? null;
+  const start = options.start ?? 1n;
   const graph = resolveGraph({
     declarations: validateDeclarations({ backbone, core: [], user }),
-    start: options.start ?? 1n,
+    start,
     entries,
     developmentOptIn: false,
     cursor,
   });
   const plan = schemaPlan(graph.modules);
   const Contexts = options.contexts ?? ProcessContexts;
-  const contexts = new Contexts({ graph, ...(options.revisionsOf === undefined ? {} : { revisionsOf: options.revisionsOf }) });
+  // Unless given, each backbone part gets the `core` entry's one revision from S, as the runner's `processRevisions`
+  // gives it: `core-block-commit`'s parent check reads S there. A module gets none. [MD-7, IN-4]
+  const core: readonly Revision[] = Object.freeze([Object.freeze({ start, stop: null, version: "core", settings: Object.freeze({}) })]);
+  const revisionsOf = options.revisionsOf ?? ((id: string) => (isBackbonePart({ id }) ? core : []));
+  const contexts = new Contexts({ graph, revisionsOf });
   await startDatabase(db, {
     plan,
     parts: graph.modules.map((part) => contexts.startDbPart(part)),

@@ -1,6 +1,9 @@
 # 00028 — `core-block-commit`'s parent check lets a block above a gap commit
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-10-29: `checkParent` passes a block without a stored parent only at S, which
+  `core-block-commit` takes from its process context's first `core` revision (in memory, no extra statement); any other
+  block with no block stored at h − 1 fails with `parent-mismatch`, `stored: null`. Tested on PostgreSQL 18 and PGlite:
+  a never-written and a deleted h − 1, and a first block that is not S.
 - **Area:** logic
 - **Severity:** high
 - **Effort:** small — about 10 lines and a test in the block-commit check, but it is on the path every block takes, so

@@ -28,6 +28,7 @@ import type { LedgerTable } from "../../src/ledger/version-table.js";
 import { buildDeclarations } from "../../src/cli/build-modules.js";
 import { checkHistory, graphInputOf } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
+import { processCoreEntry } from "../../src/config/process.js";
 import { type CheckedConfig, validateConfig } from "../../src/config/validate.js";
 import type { Database } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -40,6 +41,7 @@ import { NodeClient } from "../../src/node/index.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import { FinalizedLoop } from "../../src/runner/loop.js";
+import { processRevisions } from "../../src/runner/process.js";
 import { ProcessContexts } from "../../src/runner/process-context.js";
 import { BACKENDS, type TestBackend } from "../db/backends.js";
 import { readOnlyProblems } from "../db/read-only-checks.js";
@@ -474,7 +476,8 @@ async function startChain(
   const { cursor, history } = await db.read(async (read) => ({ cursor: await readCursor(read), history: await readHistory(read) }));
   const check = checkHistory({ config, cursor: cursor?.height ?? null, declarations, history });
   const graph = resolveGraph(graphInputOf(check, declarations));
-  const contexts = new ProcessContexts({ graph });
+  // Each part's revisions as the runner gives them: every backbone part's are the core entry's, from S. [MD-7]
+  const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, processCoreEntry(config)) });
   const facts: CoreChainFacts = {
     config,
     declarations,

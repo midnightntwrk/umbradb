@@ -29,7 +29,7 @@ import { startDatabase } from "../../src/db/migrate.js";
 import type { SchemaPlan } from "../../src/db/roles.js";
 import { openBlockWrites } from "../../src/db/write-handles.js";
 import { migrationPart, schemaPlan } from "../../src/modules/adapters.js";
-import type { BlockContext } from "../../src/modules/declaration.js";
+import type { BlockContext, ProcessContext } from "../../src/modules/declaration.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import { inMemoryBlock } from "../../src/runner/in-memory-source.js";
@@ -44,7 +44,8 @@ import { STAND_IN_LEDGER, STAND_IN_SPEC_VERSION, standInHeader, standInItems } f
  * - the unpartitioned `hashes` table, whose primary key makes a repeated hash fail the block with
  *   `duplicate-block-hash`;
  * - the parent check, after it, which fails with `parent-mismatch` a block whose parent is not the block stored at
- *   h − 1.
+ *   h − 1, or a block other than S with no block stored at h − 1 (its stored hash null). S comes from the part's
+ *   process context, as the runner gives it (`contextAt`).
  * [CD-3, IN-4, Q74; design §3, §10; CORE-ARCH §4.11]
  *
  * The block time is the node's milliseconds, converted to `timestamptz` exactly (by PostgreSQL's integer interval
@@ -55,7 +56,15 @@ import { STAND_IN_LEDGER, STAND_IN_SPEC_VERSION, standInHeader, standInItems } f
  * puts (`./block-fetch-stand-in.ts`). The same checks through the real process are in `chain-process.test.ts`. [A90]
  */
 
-const CONTEXT = { items: new Map(), revisions: [], publish: () => undefined };
+/**
+ * The part's process context in a process whose start height is `start`. The runner gives every backbone part the
+ * `core` entry's revisions, in start order (`processRevisions`), so the first one starts at S: the parent check reads
+ * S there. [CF-2, IN-4, MD-7]
+ */
+function contextAt(start: bigint): ProcessContext {
+  const core = Object.freeze({ start, stop: null, version: UMBRADB_VERSION, settings: Object.freeze({}) });
+  return Object.freeze({ items: new Map(), revisions: Object.freeze([core]), publish: () => undefined });
+}
 
 /** The block context of `block`, with the stand-in's items unless `items` are given. */
 function contextOf(block: BlockRef, items: ReadonlyMap<string, unknown> = standInItems(block.height)): BlockContext {
@@ -80,27 +89,34 @@ interface Committed {
   block(b: BlockContext, commit?: Commit): Promise<void>;
   /** Rows of `sql` through a read. */
   rows(sql: string, params?: unknown[]): Promise<Record<string, unknown>[]>;
+  /** Runs `sql` outside the API, as another writer of the database would. */
+  exec(sql: string): Promise<void>;
 }
 
-const partWrite: Commit = (w, b) => {
-  const write = CORE_BLOCK_COMMIT.points["on-db-write"];
-  if (write === undefined) throw new Error("core-block-commit registers no on-db-write");
-  return write.call(CORE_BLOCK_COMMIT.points, CONTEXT, b, w);
-};
+/** The part's own `on-db-write`, in a process whose S is `start`. */
+const partWrite =
+  (start: bigint): Commit =>
+  (w, b) => {
+    const write = CORE_BLOCK_COMMIT.points["on-db-write"];
+    if (write === undefined) throw new Error("core-block-commit registers no on-db-write");
+    return write.call(CORE_BLOCK_COMMIT.points, contextAt(start), b, w);
+  };
 
-async function committed(backend: TestBackend): Promise<Committed> {
-  const { db } = await backend.database("SELECT 1", cursorHeight);
+/** A database started for a process whose S is `start` (1 unless given), the default chain's first height. */
+async function committed(backend: TestBackend, start = 1n): Promise<Committed> {
+  const { db, exec } = await backend.database("SELECT 1", cursorHeight);
   const plan = schemaPlan([CORE_BLOCK_COMMIT]);
   await startDatabase(db, {
     plan,
-    parts: [migrationPart(CORE_BLOCK_COMMIT, CONTEXT)],
+    parts: [migrationPart(CORE_BLOCK_COMMIT, contextAt(start))],
     committedVersions: new Map(),
     handles: { height: null },
   });
   return {
     db,
     plan,
-    async block(b, commit = partWrite) {
+    exec,
+    async block(b, commit = partWrite(start)) {
       const previous = await db.read((read) => readCursor(read));
       await db.transaction((tx) =>
         openBlockWrites(tx, plan, { height: previous?.height ?? null }).write("core-block-commit", (w) => commit(w, b)),
@@ -430,7 +446,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
   }, 60_000);
 
   it("refuses a hash a block already has — in another height partition too — with duplicate-block-hash (CD-3)", async () => {
-    const { block, rows } = await committed(backend);
+    const { block, rows } = await committed(backend, BigInt(HEIGHT_PARTITION_SIZE - 2));
     const p0 = HEIGHT_PARTITION_SIZE - 2;
     for (const height of [p0, p0 + 1, p0 + 2].map(BigInt)) await block(contextOf(inMemoryBlock(height)));
     // Height 1,000,001 (partition p1) repeats 999,999's hash (partition p0); its parent is 1,000,000's: it links.
@@ -458,7 +474,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
   }, 60_000);
 
   it("refuses a block whose parent is not the block stored at h − 1 with parent-mismatch (IN-4)", async () => {
-    const { block, rows } = await committed(backend);
+    const { block, rows } = await committed(backend, 5n);
     for (const height of [5n, 6n]) await block(contextOf(inMemoryBlock(height)));
     const other = new Uint8Array(32).fill(9);
     const error = await failureOf(block(contextOf(blockAt(7n, { parentHash: other }))));
@@ -473,10 +489,48 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     expect(await rows("SELECT count(*)::int AS n FROM core_block_commit.hashes")).toEqual([{ n: 2 }]);
   }, 60_000);
 
-  it("checks no parent for the anchor, the first block, whose parent the database does not hold", async () => {
-    const { block, rows } = await committed(backend);
+  it("checks no parent for the anchor, block S, whose parent the database does not hold", async () => {
+    const { block, rows } = await committed(backend, 40n);
     await block(contextOf(blockAt(40n, { parentHash: new Uint8Array(32).fill(3) })));
     expect(await rows("SELECT height FROM core_block_commit.blocks")).toEqual([{ height: 40n }]);
+  }, 60_000);
+
+  it("refuses a block above S whose h − 1 holds no block, never written or deleted by another writer, with parent-mismatch and no stored hash (IN-4)", async () => {
+    const { block, rows, exec } = await committed(backend, 5n);
+    for (const height of [5n, 6n]) await block(contextOf(inMemoryBlock(height)));
+    const refusedAbove = async (height: bigint): Promise<void> => {
+      const error = await failureOf(block(contextOf(inMemoryBlock(height))));
+      expect(codeOf(error)).toBe("parent-mismatch");
+      expect((error as UmbraError).retryable).toBe(false);
+      expect((error as UmbraError).details).toEqual({
+        height,
+        parentHash: hex(inMemoryBlock(height).parentHash),
+        stored: null,
+      });
+      expect((error as UmbraError).message).toContain(`no block at height ${height - 1n}`);
+    };
+    // Height 7 never written: block 8 would leave a hole every later block extends.
+    await refusedAbove(8n);
+    expect(await rows("SELECT height FROM core_block_commit.blocks ORDER BY height")).toEqual([{ height: 5n }, { height: 6n }]);
+    // Height 7 written, then deleted by another writer of the database: block 8 is refused alike.
+    await block(contextOf(inMemoryBlock(7n)));
+    await exec("DELETE FROM core_block_commit.hashes WHERE height = 7; DELETE FROM core_block_commit.blocks WHERE height = 7");
+    await refusedAbove(8n);
+    expect(await rows("SELECT count(*)::int AS n FROM core_block_commit.hashes")).toEqual([{ n: 2 }]);
+    // Negative control: with block 7 stored again, the same block 8 commits; only the missing parent refused it.
+    await block(contextOf(inMemoryBlock(7n)));
+    await block(contextOf(inMemoryBlock(8n)));
+    expect(await rows("SELECT max(height) AS h FROM core_block_commit.blocks")).toEqual([{ h: 8n }]);
+  }, 60_000);
+
+  it("refuses as the first block of an empty database any block but S, with parent-mismatch and no stored hash (IN-4)", async () => {
+    const { block, rows } = await committed(backend, 5n);
+    for (const height of [6n, 4n]) {
+      const error = await failureOf(block(contextOf(inMemoryBlock(height))));
+      expect(codeOf(error)).toBe("parent-mismatch");
+      expect((error as UmbraError).details).toMatchObject({ height, stored: null });
+    }
+    expect(await rows("SELECT count(*)::int AS n FROM core_block_commit.blocks")).toEqual([{ n: 0 }]);
   }, 60_000);
 
   it("names duplicate-block-hash before parent-mismatch for a block that is both: an earlier block delivered again", async () => {
@@ -493,13 +547,13 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     const again = contextOf(blockAt(4n, { hash: inMemoryBlock(2n).hash, parentHash: inMemoryBlock(1n).hash }));
     const parentFirst: Commit = async (w, b) => {
       await writeBlockRow(w, b);
-      await checkParent(w, b);
+      await checkParent(w, b, 1n);
       await writeHashRow(w, b);
     };
     expect(codeOf(await failureOf(block(again, parentFirst)))).toBe("parent-mismatch");
     const noHashRow: Commit = async (w, b) => {
       await writeBlockRow(w, b);
-      await checkParent(w, b);
+      await checkParent(w, b, 1n);
     };
     const linking = contextOf(blockAt(4n, { hash: inMemoryBlock(2n).hash }));
     await block(linking, noHashRow);
@@ -509,7 +563,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     // The part itself, in its order, is what refuses it.
     const { block: fresh } = await committed(backend);
     for (const height of [1n, 2n, 3n]) await fresh(contextOf(inMemoryBlock(height)));
-    expect(codeOf(await failureOf(fresh(linking, commitBlock)))).toBe("duplicate-block-hash");
+    expect(codeOf(await failureOf(fresh(linking, (w, b) => commitBlock(w, b, 1n))))).toBe("duplicate-block-hash");
   }, 60_000);
 
   it("reads the cursor as the highest height across partitions, none before the table exists or while it is empty", async () => {
@@ -519,14 +573,19 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     const plan = schemaPlan([CORE_BLOCK_COMMIT]);
     await startDatabase(db, {
       plan,
-      parts: [migrationPart(CORE_BLOCK_COMMIT, CONTEXT)],
+      parts: [migrationPart(CORE_BLOCK_COMMIT, contextAt(3n))],
       committedVersions: new Map(),
       handles: { height: null },
     });
     expect(await db.read((read) => readCursor(read))).toBeNull();
+    // The rows only, without the parent check, which refuses a block above a missing height: this reads the cursor.
+    const rowsOnly: Commit = async (w, b) => {
+      await writeBlockRow(w, b);
+      await writeHashRow(w, b);
+    };
     const write = (b: BlockRef) =>
-      db.transaction((tx) => openBlockWrites(tx, plan, { height: null }).write("core-block-commit", (w) => partWrite(w, contextOf(b))));
-    // The anchor in the default partition, then lower heights in p0 and p4: the highest is the cursor.
+      db.transaction((tx) => openBlockWrites(tx, plan, { height: null }).write("core-block-commit", (w) => rowsOnly(w, contextOf(b))));
+    // A row in the default partition, then lower heights in p0 and p4: the highest is the cursor.
     for (const height of [5_000_007n, 3n, 4_999_999n]) await write(inMemoryBlock(height));
     const cursor = await db.read((read) => readCursor(read));
     expect(cursor).toEqual(inMemoryBlock(5_000_007n));
@@ -535,7 +594,7 @@ describe.each(BACKENDS)("core_block_commit's tables on $name", (backend) => {
     // Inside a block, the block's own row is already the cursor.
     await db.transaction(async (tx) => {
       await openBlockWrites(tx, plan, { height: 5_000_007n }).write("core-block-commit", (w) =>
-        partWrite(w, contextOf(inMemoryBlock(5_000_008n))),
+        partWrite(3n)(w, contextOf(inMemoryBlock(5_000_008n))),
       );
       expect(await readCursor(tx)).toEqual(inMemoryBlock(5_000_008n));
     });

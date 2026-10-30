@@ -13,6 +13,7 @@ import { z } from "zod";
 import {
   checkParent,
   CORE_BLOCK_COMMIT,
+  startOf,
   writeBlockRow,
   writeHashRow,
 } from "../../src/backbone/core-block-commit/core-block-commit.js";
@@ -895,17 +896,17 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
   }, PATIENCE_MS * 2);
 
   it("A90 negative controls: no hashes row lets the repeat commit and the next block halt with parent-mismatch; the parent check first names parent-mismatch", async () => {
-    const variant = (write: (w: never, b: never) => Promise<void>): ModuleDeclaration => ({
+    const variant = (write: (w: never, b: never, start: bigint) => Promise<void>): ModuleDeclaration => ({
       ...CORE_BLOCK_COMMIT,
-      points: { "on-db-write": async (_p, b, w) => write(w as never, b as never) },
+      points: { "on-db-write": async (p, b, w) => write(w as never, b as never, startOf(p)) },
     });
-    const noHashRow = variant(async (w, b) => {
+    const noHashRow = variant(async (w, b, start) => {
       await writeBlockRow(w, b);
-      await checkParent(w, b);
+      await checkParent(w, b, start);
     });
-    const parentFirst = variant(async (w, b) => {
+    const parentFirst = variant(async (w, b, start) => {
       await writeBlockRow(w, b);
-      await checkParent(w, b);
+      await checkParent(w, b, start);
       await writeHashRow(w, b);
     });
     const unhashed = a90Problems(await a90Run(linking(), noHashRow), 1_000_001n);

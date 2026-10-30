@@ -331,8 +331,12 @@ describe("recovery after a lost database connection (IN-10, IN-11) on PostgreSQL
     expect(asLost).toContain(`on-compute ran 2 times at ${H}, not once`);
     const asLanded = processedAgainProblems(await recoveryRun("before", AlwaysLanded), "before");
     expect(asLanded).toContain(`on-compute ran 1 times at ${H}, not 2`);
-    expect(asLanded).toContain("rec.rows holds 1,2,4,5");
-    // Heights 4 and 5 committed above the missing 3.
-    expect(asLanded).toContain("the blocks table holds 1,2,4,5");
+    // Read as landed, 3 is never committed, and the next block, 4, is refused by the parent check: the database holds
+    // no block at 3. Nothing commits above the missing height. [IN-4]
+    expect(asLanded).toContain(
+      'the process is halted with {"code":"parent-mismatch","height":"4","module":"core-block-commit","point":"on-db-write"}',
+    );
+    expect(asLanded).toContain("rec.rows holds 1,2");
+    expect(asLanded).toContain("the blocks table holds 1,2");
   }, 2 * RUN_MS);
 });
