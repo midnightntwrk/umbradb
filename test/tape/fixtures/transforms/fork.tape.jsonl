@@ -1,0 +1,6 @@
+{"subscribe":"n-1","method":"chain_subscribeNewHeads","params":[]}
+{"notify":"n-1","result":{"number":"0x2","fork":"b"}}
+{"notify":"n-1","result":{"number":"0x3","fork":"b"}}
+{"method":"chain_getBlockHash","params":[3],"result":"0xb3"}
+{"notify":"n-1","result":{"number":"0x4","fork":"b"}}
+{"notify":"n-1","result":{"number":"0x5","fork":"b"}}

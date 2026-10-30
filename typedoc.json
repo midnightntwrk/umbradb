@@ -1,15 +1,15 @@
 {
   "entryPoints": [
-    "src/interfaces/storage-errors.ts",
-    "src/interfaces/transaction-lease.ts",
-    "src/interfaces/temporal-kv.ts",
-    "src/interfaces/checkpoint-store.ts",
-    "src/interfaces/watermarks.ts"
+    "src/index.ts"
   ],
   "out": "docs/api/storage",
   "excludePrivate": true,
   "excludeInternal": true,
   "readme": "none",
   "treatWarningsAsErrors": true,
-  "validation": { "notExported": true, "invalidLink": true, "notDocumented": false }
+  "validation": {
+    "notExported": false,
+    "invalidLink": true,
+    "notDocumented": false
+  }
 }

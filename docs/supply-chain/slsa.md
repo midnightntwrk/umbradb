@@ -69,12 +69,16 @@ package. What already exists is the *foundation* for L1 and the inputs L2 will a
   hosted platform — the L1/L2 substrate — but it **emits no provenance**.
 - **Exceptional input hygiene** (what L2 provenance will attest to):
   - **307/307 npm packages** resolved from `registry.npmjs.org`, each with a `sha512` integrity
-    hash; runtime scope is 2 zero-dependency packages (`postgres`, `zod`).
+    hash; the npm runtime scope is 5 zero-dependency packages (`@electric-sql/pglite`, `postgres`,
+    `typescript`, `ws`, `zod`), and the vendored ledger WASM packages below are runtime artifacts too.
   - **Nix** dev environment fully pinned: exact git revs for every Midnight/Cardano flake input,
     **sha256**-pinned release binaries (cardano-node 11.0.1, cardano-db-sync 13.7.1.0,
     midnight-node 1.0.1), and **`@sha256:` digest-pinned** Docker images (indexer-standalone 4.3.3,
     proof-server 8.1.0).
   - **Lean/mathlib** locked to exact git revs at toolchain `v4.32.0`.
+  - **Vendored ledger WASM** (`vendor/ledger/`) built from exact `midnight-ledger` commits and in-repo patches
+    in a digest-pinned image, its output pinned by SHA-256 and rebuilt and compared in CI on two architectures —
+    a reproducible build, though still without signed provenance.
 
 This pinning is a genuine supply-chain strength — but SLSA levels are about **signed provenance of
 the build**, which pinning alone does not provide. So the *build level* is L0–L1 despite the strong

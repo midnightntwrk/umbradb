@@ -1,0 +1,663 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://umbradb.local/schemas/admin/config.json",
+  "title": "GET /config",
+  "description": "The body of the admin endpoint GET /config (AE-5; core-config, task 8.4): every secret field and every credential in a URL as [redacted] (AE-6), null where nothing is known yet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "core",
+    "entries",
+    "history",
+    "modules",
+    "chain",
+    "ledger",
+    "database",
+    "build"
+  ],
+  "properties": {
+    "core": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "start",
+            "settings"
+          ],
+          "properties": {
+            "start": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "settings": {
+              "$ref": "#/$defs/settings"
+            }
+          }
+        }
+      ]
+    },
+    "entries": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/entry"
+          }
+        }
+      ]
+    },
+    "history": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/recorded"
+          }
+        }
+      ]
+    },
+    "modules": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/declaration"
+          }
+        }
+      ]
+    },
+    "chain": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/chain"
+        }
+      ]
+    },
+    "ledger": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/ledger"
+        }
+      ]
+    },
+    "database": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/database"
+        }
+      ]
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "umbradb"
+      ],
+      "description": "The build's version; no commit (AE-5 as amended by the owner's decision Q134 D).",
+      "properties": {
+        "umbradb": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "height": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$"
+    },
+    "settings": {
+      "type": "object",
+      "description": "A revision's settings as they may be shown: each secret field, each password part of a database setting, and each credential in a URL, [redacted]."
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "version",
+          "sha256"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "ledgers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ledger",
+          "versionName",
+          "packages"
+        ],
+        "properties": {
+          "ledger": {
+            "enum": [
+              "v8",
+              "v9-rc3",
+              "v9",
+              "v10"
+            ]
+          },
+          "versionName": {
+            "type": "string",
+            "minLength": 1
+          },
+          "packages": {
+            "$ref": "#/$defs/packages"
+          }
+        }
+      }
+    },
+    "coreVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "umbradb",
+        "ledgers"
+      ],
+      "properties": {
+        "umbradb": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ledgers": {
+          "$ref": "#/$defs/ledgers"
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "start",
+        "stop",
+        "version",
+        "buildVersion",
+        "started",
+        "scheduled",
+        "settings"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stop": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "version": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "$ref": "#/$defs/coreVersion"
+            }
+          ]
+        },
+        "buildVersion": {
+          "type": "boolean"
+        },
+        "started": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "scheduled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "settings": {
+          "$ref": "#/$defs/settings"
+        }
+      }
+    },
+    "recorded": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "start",
+        "stop",
+        "version",
+        "data",
+        "dataHash"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start": {
+          "$ref": "#/$defs/height"
+        },
+        "stop": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/height"
+            }
+          ]
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/settings"
+            }
+          ]
+        },
+        "dataHash": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/hash"
+            }
+          ]
+        }
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "lifetimes",
+        "table"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lifetimes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "process",
+              "block",
+              "table"
+            ]
+          }
+        },
+        "table": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "schema",
+                "tables",
+                "kind",
+                "deterministic"
+              ],
+              "properties": {
+                "schema": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tables": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "kind": {
+                  "enum": [
+                    "append-only",
+                    "mutable"
+                  ]
+                },
+                "deterministic": {
+                  "type": "boolean"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "declaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "side",
+        "origin",
+        "requires",
+        "provides",
+        "startsMidChain",
+        "developmentOnly",
+        "requiresResync",
+        "needsLockstep",
+        "settings",
+        "migrations",
+        "points"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "side": {
+          "enum": [
+            "public",
+            "private"
+          ]
+        },
+        "origin": {
+          "enum": [
+            "backbone",
+            "core",
+            "user"
+          ]
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        },
+        "startsMidChain": {
+          "type": "boolean"
+        },
+        "developmentOnly": {
+          "type": "boolean"
+        },
+        "requiresResync": {
+          "type": "boolean"
+        },
+        "needsLockstep": {
+          "type": "boolean"
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": [
+              "data",
+              "operational",
+              "secret"
+            ]
+          }
+        },
+        "migrations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "checksum"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "checksum": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/point"
+          }
+        }
+      }
+    },
+    "point": {
+      "enum": [
+        "on-start-db",
+        "on-start-api",
+        "on-best-block",
+        "on-fetch",
+        "on-parse",
+        "on-rollback",
+        "on-finalized",
+        "on-start-height",
+        "on-compute",
+        "on-db-write",
+        "on-after-db-write",
+        "on-stop-height"
+      ]
+    },
+    "chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "network",
+        "genesisHash",
+        "start",
+        "anchorHash"
+      ],
+      "properties": {
+        "network": {
+          "enum": [
+            "mainnet",
+            "preprod",
+            "preview",
+            "stagenet",
+            "custom"
+          ]
+        },
+        "genesisHash": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/hash"
+            }
+          ]
+        },
+        "start": {
+          "$ref": "#/$defs/height"
+        },
+        "anchorHash": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/hash"
+            }
+          ]
+        }
+      }
+    },
+    "ledger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "table",
+        "packages"
+      ],
+      "properties": {
+        "table": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "rows",
+            "pins"
+          ],
+          "properties": {
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "specVersionMin",
+                  "specVersionMax",
+                  "ledger"
+                ],
+                "properties": {
+                  "specVersionMin": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "specVersionMax": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "ledger": {
+                    "enum": [
+                      "v8",
+                      "v9-rc3",
+                      "v9",
+                      "v10"
+                    ]
+                  }
+                }
+              }
+            },
+            "pins": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "height",
+                  "hash",
+                  "specVersion"
+                ],
+                "properties": {
+                  "height": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "hash": {
+                    "$ref": "#/$defs/hash"
+                  },
+                  "specVersion": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "packages": {
+          "$ref": "#/$defs/ledgers"
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend",
+        "version",
+        "writerLock"
+      ],
+      "properties": {
+        "backend": {
+          "enum": [
+            "postgres",
+            "pglite"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "writerLock": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

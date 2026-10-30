@@ -1,0 +1,760 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://umbradb.local/schemas/admin/status.json",
+  "title": "GET /status",
+  "description": "The body of the admin endpoint GET /status (AE-5; core-status, task 8.3): heights as decimal text, times as RFC 3339 UTC text (Q68), null where nothing reports a value yet.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "state",
+    "ready",
+    "conditions",
+    "cursor",
+    "head",
+    "lag",
+    "reason",
+    "instance",
+    "lastCommitAt",
+    "node",
+    "modules",
+    "ledger",
+    "privateInstances",
+    "public",
+    "uptimeMs"
+  ],
+  "properties": {
+    "state": {
+      "enum": [
+        "starting",
+        "refused",
+        "syncing",
+        "following",
+        "stopped",
+        "halted",
+        "stopping"
+      ]
+    },
+    "ready": {
+      "type": "boolean"
+    },
+    "conditions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/condition"
+      }
+    },
+    "cursor": {
+      "$ref": "#/$defs/heightOrNull"
+    },
+    "head": {
+      "$ref": "#/$defs/heightOrNull"
+    },
+    "lag": {
+      "$ref": "#/$defs/heightOrNull"
+    },
+    "reason": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/reason"
+        }
+      ]
+    },
+    "instance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "id"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "core",
+            "private"
+          ]
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      }
+    },
+    "lastCommitAt": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/utcTime"
+        }
+      ]
+    },
+    "node": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/node"
+        }
+      ]
+    },
+    "modules": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/module"
+          }
+        }
+      ]
+    },
+    "ledger": {
+      "type": "null",
+      "description": "The ledger version, package and last root check: null until the ledger tasks (12.x) report them."
+    },
+    "privateInstances": {
+      "description": "On the core, its private instances (PP-9, AE-5; task 14.4): each listed or connected one with its id, connection, lockstep flag and synced height only; null on a private process, and on the core until startup opened its database.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/privateInstance"
+          }
+        }
+      ]
+    },
+    "public": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/public"
+        }
+      ]
+    },
+    "uptimeMs": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "height": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)$"
+    },
+    "heightOrNull": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/height"
+        }
+      ]
+    },
+    "utcTime": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{0,2}[1-9])?Z$"
+    },
+    "point": {
+      "enum": [
+        "on-start-db",
+        "on-start-api",
+        "on-best-block",
+        "on-fetch",
+        "on-parse",
+        "on-rollback",
+        "on-finalized",
+        "on-start-height",
+        "on-compute",
+        "on-db-write",
+        "on-after-db-write",
+        "on-stop-height"
+      ]
+    },
+    "token": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "coreVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "umbradb",
+        "ledgers"
+      ],
+      "properties": {
+        "umbradb": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ledgers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "ledger",
+              "versionName",
+              "packages"
+            ],
+            "properties": {
+              "ledger": {
+                "enum": [
+                  "v8",
+                  "v9-rc3",
+                  "v9",
+                  "v10"
+                ]
+              },
+              "versionName": {
+                "type": "string",
+                "minLength": 1
+              },
+              "packages": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "version",
+                    "sha256"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-f]{64}$"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "condition": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "height",
+            "head"
+          ],
+          "properties": {
+            "code": {
+              "const": "waiting-for-node"
+            },
+            "height": {
+              "$ref": "#/$defs/height"
+            },
+            "head": {
+              "$ref": "#/$defs/height"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "height",
+            "instances"
+          ],
+          "properties": {
+            "code": {
+              "const": "waiting-for-lockstep"
+            },
+            "height": {
+              "$ref": "#/$defs/height"
+            },
+            "instances": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "instance",
+                  "connected",
+                  "height",
+                  "refused"
+                ],
+                "properties": {
+                  "instance": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "connected": {
+                    "type": "boolean"
+                  },
+                  "height": {
+                    "$ref": "#/$defs/heightOrNull"
+                  },
+                  "refused": {
+                    "enum": [
+                      null,
+                      "lockstep-behind",
+                      "report-hash-mismatch"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "height",
+            "entries"
+          ],
+          "properties": {
+            "code": {
+              "const": "upgrade-required"
+            },
+            "height": {
+              "$ref": "#/$defs/height"
+            },
+            "entries": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "start",
+                  "needed",
+                  "build"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "start": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "needed": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "$ref": "#/$defs/coreVersion"
+                      }
+                    ]
+                  },
+                  "build": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "$ref": "#/$defs/coreVersion"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "attempts",
+            "height"
+          ],
+          "properties": {
+            "code": {
+              "enum": [
+                "node-retrying",
+                "database-retrying"
+              ]
+            },
+            "attempts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "height": {
+              "$ref": "#/$defs/heightOrNull"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "tipCap",
+            "height"
+          ],
+          "properties": {
+            "code": {
+              "const": "finality-stall"
+            },
+            "tipCap": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "height": {
+              "$ref": "#/$defs/height"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "height",
+            "point",
+            "module"
+          ],
+          "properties": {
+            "code": {
+              "const": "slow-block"
+            },
+            "height": {
+              "$ref": "#/$defs/height"
+            },
+            "point": {
+              "$ref": "#/$defs/point"
+            },
+            "module": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "since",
+            "by"
+          ],
+          "properties": {
+            "code": {
+              "const": "paused"
+            },
+            "since": {
+              "$ref": "#/$defs/utcTime"
+            },
+            "by": {
+              "enum": [
+                "pause",
+                "signal"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "height",
+        "module",
+        "point",
+        "message",
+        "details"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/token"
+        },
+        "height": {
+          "$ref": "#/$defs/heightOrNull"
+        },
+        "module": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "point": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/point"
+            }
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/token"
+            },
+            "migration": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._-]{1,64}$"
+            },
+            "findings": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "message"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finalizedHead",
+        "bestHead",
+        "connection",
+        "retries",
+        "queueDepth",
+        "tipCap",
+        "finalityStall"
+      ],
+      "properties": {
+        "finalizedHead": {
+          "$ref": "#/$defs/heightOrNull"
+        },
+        "bestHead": {
+          "description": "The best head the node announced last (task 8.3a): its latest new-heads notification's height; null before it announced one, or without a node source.",
+          "$ref": "#/$defs/heightOrNull"
+        },
+        "connection": {
+          "description": "The node connection's state (AE-5; task 8.3a): connecting before the first connection opened, connected while one is open, retrying from a failed or lost connection until the next one opens, closed once closed; null only before the process made its node client.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "connecting",
+                "connected",
+                "retrying",
+                "closed"
+              ]
+            }
+          ]
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "queueDepth": {
+          "description": "The best-block queue's length (IN-6; task 8.3a); null for a block source that keeps no queue.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tipCap": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "finalityStall": {
+          "type": "boolean"
+        }
+      }
+    },
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "version",
+        "side",
+        "origin",
+        "start",
+        "stop",
+        "stopped",
+        "tables"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "side": {
+          "enum": [
+            "public",
+            "private"
+          ]
+        },
+        "origin": {
+          "enum": [
+            "backbone",
+            "core",
+            "user"
+          ]
+        },
+        "start": {
+          "$ref": "#/$defs/heightOrNull"
+        },
+        "stop": {
+          "$ref": "#/$defs/heightOrNull"
+        },
+        "stopped": {
+          "type": "boolean"
+        },
+        "tables": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schema",
+              "table",
+              "height",
+              "digest"
+            ],
+            "properties": {
+              "schema": {
+                "type": "string",
+                "minLength": 1
+              },
+              "table": {
+                "type": "string",
+                "minLength": 1
+              },
+              "height": {
+                "$ref": "#/$defs/heightOrNull"
+              },
+              "digest": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-f]{64}$"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "public": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cursor",
+        "lockstep"
+      ],
+      "properties": {
+        "cursor": {
+          "$ref": "#/$defs/heightOrNull"
+        },
+        "lockstep": {
+          "description": "Whether the private process runs in lockstep (PP-6; task 14.4): its core's hello-ack said so; null until startup's chain check knows.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        }
+      }
+    },
+    "privateInstance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "connected",
+        "lockstep",
+        "height"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "connected": {
+          "type": "boolean"
+        },
+        "lockstep": {
+          "type": "boolean"
+        },
+        "height": {
+          "$ref": "#/$defs/heightOrNull"
+        }
+      }
+    }
+  }
+}

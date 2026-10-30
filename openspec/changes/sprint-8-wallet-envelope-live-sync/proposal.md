@@ -1,6 +1,6 @@
 # Proposal — Sprint 8: WalletState Envelope + Live Preprod DB-Sync + Cold-Boot Recovery
 
-> **Status:** Implemented and audited (F9 status update). The envelope module, the adapter seam,
+> **Status:** Implemented: audited (F9 status update). The envelope module, the adapter seam,
 > the Pg-only conformance suite, and the live preprod DB-sync + cold-boot recovery tests described
 > below are all implemented, and the live tiers were confirmed to pass against real public preprod
 > on 2026-07-22 (funding tx `b194e71d4d22ed09846cd88aab67c6bb4eec69ea6df5aead3bdb22bfe3493341`,

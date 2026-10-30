@@ -1,6 +1,7 @@
 # Proposal — v1.0.0-infosec-signoff
 
-> **Status:** Draft for the 1.0.0 program. Capability: `security-posture`. Covers gate items
+> **Status:** Implemented: merged to `main` in `7ee8a4b`; written for the 1.0.0 program.
+> Capability: `security-posture`. Covers gate items
 > **G15–G19** of `ROADMAP-v1.0.0-CONSOLIDATED.md` (the InfoSec sign-off section, §E). Primary
 > evidence: `04-infosec-codebase.md`, `05-infosec-infra.md`, adjudicated by `council/C-security.md`.
 

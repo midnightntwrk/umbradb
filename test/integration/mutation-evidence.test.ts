@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { gateAdapters, tallyMutants } from "../../scripts/mutation-evidence.mjs";
 
 /**
- * Unit coverage for the per-adapter mutation runner's EVIDENCE gate (change-level round-3 BLOCK 5).
+ * Unit coverage for the per-adapter mutation runner's EVIDENCE gate.
  * Proves absence-of-evidence is NOT scored as a pass: a missing/empty report, a nonzero Stryker exit,
  * or an adapter whose mutants are ALL CompileError/RuntimeError (zero VALID mutants) each FAIL the gate
  * and are never coerced to 100%. Pure (no Docker), so the teeth run in the required gate itself.

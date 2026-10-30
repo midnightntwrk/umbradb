@@ -1,0 +1,650 @@
+/**
+ * Declaration validation at startup. Before anything else runs, the runner checks every declaration the host gives it
+ * and stops at the first fault, naming the module and the cause. [MD-1, MD-2, Q94; design §6, §11]
+ *
+ * **One validation, typed or not.** A declaration written in TypeScript was already checked by `defineModule`'s type
+ * (`./declaration.ts`); one written in JavaScript or built at run time was not. So validation takes `unknown` and
+ * rejects, with `invalid-declaration` and the field's name, everything `ModuleDeclaration`'s type forbids: a missing
+ * or misspelled property, a value of the wrong type, a version that is not semver, `deterministic: true`. It also
+ * rejects `needsLockstep` on a public module, since only a private process can run in lockstep. [MD-1, A20, PP-6]
+ *
+ * **The rules.** Once every declaration has a valid shape, each rule of {@link DECLARATION_RULES} runs over all of
+ * them, in this order, each with its own error code [MD-2]:
+ * - `bad-id`: an id or item name that breaks the name pattern (the same check the schema plan makes,
+ *   `src/db/roles.ts`) [DB-8];
+ * - `reserved-prefix`: a user module whose id is `core` (the id of the core's own configuration entries) or starts with
+ *   `core-` or `on-` [CF-2];
+ * - `duplicate-id`: an id that another declaration already has (caught here, before the schema plan would report it as
+ *   a schema collision);
+ * - `no-requirement`: a user or core module that requires no item (backbone parts may require none);
+ * - `item-no-lifetime`: an item without a lifetime;
+ * - `table-item-no-kind`: a `table` item without a kind;
+ * - `field-no-kind`: a settings field without a kind, read from `schema.shape[field].meta().kind` [CF-4; design §7];
+ * - `unknown-point`: a callback under a name that is not a point [MD-1].
+ *
+ * Two related checks live elsewhere: colliding schema names are caught by the schema plan (`planSchemas`, including
+ * `shared-item-migrations-differ`), which receives one database's declarations through `./adapters.ts`; and the
+ * requirements between modules are checked by the requirement graph (`./graph.ts`). [MD-2]
+ *
+ * **Who declares what.** A set has three lists: UmbraDB's own backbone parts, the core modules it ships, and the host's
+ * user modules. Only user modules are barred from the reserved prefixes, and only backbone parts may require nothing
+ * (`core-chain` and the admin endpoints' parts require no item). [MD-2; CORE-ARCH §4.11]
+ */
+
+import { CORE_ENTRY_ID } from "../config/entries.js";
+import { checkNames } from "../db/roles.js";
+import { type ErrorCode, UmbraError } from "../db/errors.js";
+import {
+  FIELD_KINDS,
+  LIFETIMES,
+  type ModuleDeclaration,
+  POINTS,
+  TABLE_KINDS,
+} from "./declaration.js";
+
+/** Where a declaration comes from: UmbraDB's backbone, the core modules it ships, or the host program. */
+export type DeclarationOrigin = "backbone" | "core" | "user";
+
+/** The declarations of one build, by origin, each list in the order the host gives it. */
+export interface DeclarationSet<T = unknown> {
+  readonly backbone: readonly T[];
+  readonly core: readonly T[];
+  readonly user: readonly T[];
+}
+
+/** A declaration whose shape is valid, and where it is in its set. */
+export interface PlacedDeclaration {
+  readonly origin: DeclarationOrigin;
+  /** Its index in its origin's list, from 0. */
+  readonly index: number;
+  readonly declaration: ModuleDeclaration;
+}
+
+/** One validation rule, checked over every declaration of a set. [MD-1, MD-2] */
+export interface DeclarationRule {
+  readonly code: ErrorCode;
+  /** The first refusal of this cause, in the set's order, or undefined. */
+  check(declarations: readonly PlacedDeclaration[]): UmbraError | undefined;
+}
+
+const ORIGINS: readonly DeclarationOrigin[] = ["backbone", "core", "user"];
+
+const LABEL: Readonly<Record<DeclarationOrigin, string>> = {
+  backbone: "backbone part",
+  core: "core module",
+  user: "user module",
+};
+
+/** The properties of a declaration (`ModuleDeclaration`), of an item, of its table and of a migration. */
+const DECLARATION_PROPERTIES = [
+  "id",
+  "version",
+  "side",
+  "requires",
+  "provides",
+  "startsMidChain",
+  "needsLockstep",
+  "developmentOnly",
+  "configSchema",
+  "migrations",
+  "requiresResync",
+  "ledgerTasks",
+  "points",
+];
+const ITEM_PROPERTIES = ["name", "lifetimes", "table"];
+const TABLE_PROPERTIES = ["schema", "tables", "kind", "deterministic"];
+const MIGRATION_PROPERTIES = ["id", "sql"];
+const TASK_PROPERTIES = ["name", "needsState", "run"];
+
+/**
+ * The semver 2.0.0 grammar, as suggested on semver.org. Configuration versions are checked with it too
+ * (`src/config/validate.ts`).
+ */
+export const SEMVER =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+
+/** Two or more names, quoted: `"a", "b" or "c"`. */
+const quoted = (names: readonly string[]): string => {
+  const words = names.map((name) => JSON.stringify(name));
+  return `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
+};
+
+// ── shapes: what the type forbids ───────────────────────────────────────────────────────────────────────────────────
+
+type Plain = Record<string, unknown>;
+
+const isObject = (value: unknown): value is Plain =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** How a found value reads in a message. */
+function shown(value: unknown): string {
+  if (value === undefined) return "missing";
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "a list";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "function") return "a function";
+  if (typeof value === "object") return "an object";
+  return String(value);
+}
+
+/** One declaration's shape check, which knows how to name it in a refusal. */
+class Shape {
+  readonly module: string | null;
+
+  constructor(
+    readonly origin: DeclarationOrigin,
+    readonly index: number,
+    id: unknown,
+  ) {
+    this.module = typeof id === "string" ? id : null;
+  }
+
+  /** The declaration, as a refusal names it: by its id, or without one by its place. */
+  get who(): string {
+    return this.module === null
+      ? `the ${LABEL[this.origin]} at position ${this.index + 1}`
+      : `the ${LABEL[this.origin]} ${this.module}`;
+  }
+
+  refuse(field: string, expected: string, message: string): never {
+    throw new UmbraError("invalid-declaration", message, {
+      module: this.module,
+      origin: this.origin,
+      index: this.index,
+      field,
+      expected,
+    });
+  }
+
+  /** Refuses `field` holding `found` where the declaration has `expected`, with an optional fix. */
+  wrong(field: string, found: unknown, expected: string, fix?: string): never {
+    const then = fix === undefined ? "" : `; ${fix}`;
+    return this.refuse(
+      field,
+      expected,
+      `${this.who}: ${field} is ${shown(found)}, where a module declaration has ${expected}${then}`,
+    );
+  }
+
+  /** Refuses the first property of `value` (at `path`) that `known` does not name. */
+  onlyKnown(value: Plain, path: string, known: readonly string[]): void {
+    const unknown = Object.keys(value).find((key) => !known.includes(key));
+    if (unknown === undefined) return;
+    const field = path === "" ? unknown : `${path}.${unknown}`;
+    const where = path === "" ? "a module declaration" : `${path} of a module declaration`;
+    this.refuse(
+      field,
+      `one of ${known.join(", ")}`,
+      `${this.who} has the property ${field}, which ${where} does not have: its properties are ` +
+        `${known.join(", ")}; remove it, or correct its name`,
+    );
+  }
+
+  string(value: Plain, key: string, path: string): string {
+    const found = value[key];
+    if (typeof found !== "string") this.wrong(path, found, "a string");
+    return found;
+  }
+
+  /** A list of strings; `required` false accepts undefined. */
+  strings(value: unknown, path: string, required: boolean): string[] | undefined {
+    if (value === undefined && !required) return undefined;
+    if (!Array.isArray(value)) return this.wrong(path, value, "a list of strings");
+    value.forEach((element, index) => {
+      if (typeof element !== "string") this.wrong(`${path}[${index}]`, element, "a string");
+    });
+    return value as string[];
+  }
+
+  /** A boolean; `required` false accepts undefined. */
+  boolean(value: Plain, key: string, required: boolean): void {
+    const found = value[key];
+    if (found === undefined && !required) return;
+    if (typeof found !== "boolean") this.wrong(key, found, required ? "true or false" : "true, false or nothing");
+  }
+
+  /** One of `allowed`. */
+  oneOf(found: unknown, path: string, allowed: readonly string[]): void {
+    if (!allowed.includes(found as string)) this.wrong(path, found, quoted(allowed));
+  }
+}
+
+/** True for a zod 4 object schema of the `zod` package (`z.object`, `z.strictObject`, `z.looseObject`). */
+function isZodObject(value: unknown): value is { readonly shape: Record<string, unknown> } {
+  if (!isObject(value)) return false;
+  const internals = value._zod as { readonly def?: { readonly type?: unknown } } | undefined;
+  return (
+    internals?.def?.type === "object" &&
+    typeof value.meta === "function" &&
+    typeof value.safeParse === "function" &&
+    isObject(value.shape)
+  );
+}
+
+/** Checks one item's shape. A missing lifetime or kind is left to the rules, which report it with its own code. */
+function checkItem(shape: Shape, item: unknown, at: string, tables: Map<string, string>): string {
+  if (!isObject(item)) shape.wrong(at, item, "an item, { name, lifetimes, table? }");
+  shape.onlyKnown(item, at, ITEM_PROPERTIES);
+  const name = shape.string(item, "name", `${at}.name`);
+  const lifetimes = item.lifetimes;
+  if (lifetimes !== undefined) {
+    if (!Array.isArray(lifetimes)) shape.wrong(`${at}.lifetimes`, lifetimes, `a list of ${quoted(LIFETIMES)}`);
+    lifetimes.forEach((lifetime, index) => shape.oneOf(lifetime, `${at}.lifetimes[${index}]`, LIFETIMES));
+  }
+  const table = item.table;
+  if (table === undefined) return name;
+  if (!isObject(table)) return shape.wrong(`${at}.table`, table, "a table, { schema, tables, kind, deterministic? }");
+  shape.onlyKnown(table, `${at}.table`, TABLE_PROPERTIES);
+  const schema = shape.string(table, "schema", `${at}.table.schema`);
+  const names = shape.strings(table.tables, `${at}.table.tables`, true) as string[];
+  if (table.kind !== undefined) shape.oneOf(table.kind, `${at}.table.kind`, TABLE_KINDS);
+  if (table.deterministic !== undefined && table.deterministic !== false) {
+    shape.wrong(
+      `${at}.table.deterministic`,
+      table.deterministic,
+      "false, or nothing",
+      "tables are deterministic unless declared deterministic: false, so omit it for a deterministic table",
+    );
+  }
+  if (Array.isArray(lifetimes) && lifetimes.length > 0 && !lifetimes.includes("table")) {
+    shape.refuse(
+      `${at}.table`,
+      "no table on an item without the lifetime table",
+      `${shape.who} declares a table for the item ${name}, which does not have the lifetime table: only a table ` +
+        "item has tables; add \"table\" to its lifetimes, or remove its table",
+    );
+  }
+  names.forEach((listed, index) => {
+    const qualified = `${schema}.${listed}`;
+    const other = tables.get(qualified);
+    if (other !== undefined && other !== name) {
+      shape.refuse(
+        `${at}.table.tables[${index}]`,
+        "a table no other item of the module lists",
+        `${shape.who} lists the table ${qualified} in the items ${other} and ${name}: a table belongs to one item, ` +
+          "whose kind and deterministic flag decide how it is kept; list it in one item only",
+      );
+    }
+    tables.set(qualified, name);
+  });
+  return name;
+}
+
+/**
+ * Checks a declaration's `ledgerTasks`: a list of `{ name, needsState, run }`, each named after a different `block`
+ * item the module provides. A module with tasks must require `block-parsed`, since its tasks run on the block's parse.
+ * If any task sets `needsState`, the module must also require `ledger-state`, so the graph rejects it wherever
+ * `core-ledger-state` is not active. A private module has no tasks, because a private process has no ledger worker.
+ * [LG-7, LG-17]
+ */
+function checkLedgerTasks(shape: Shape, value: Plain): void {
+  const tasks = value.ledgerTasks;
+  if (tasks === undefined) return;
+  if (!Array.isArray(tasks)) shape.wrong("ledgerTasks", tasks, "a list of ledger tasks, { name, needsState, run }");
+  if (tasks.length === 0) return;
+  if (value.side === "private") {
+    shape.refuse(
+      "ledgerTasks",
+      "nothing, on a private module",
+      `${shape.who} is a private module and declares ledger tasks: a private process has no ledger worker; ` +
+        "read the public tables instead, or move the task to a public module",
+    );
+  }
+  const requires = value.requires as string[];
+  const provides = value.provides as Plain[];
+  const named = new Map<string, number>();
+  tasks.forEach((task, position) => {
+    const at = `ledgerTasks[${position}]`;
+    if (!isObject(task)) shape.wrong(at, task, "a ledger task, { name, needsState, run }");
+    shape.onlyKnown(task, at, TASK_PROPERTIES);
+    const name = shape.string(task, "name", `${at}.name`);
+    if (typeof task.needsState !== "boolean") shape.wrong(`${at}.needsState`, task.needsState, "true or false");
+    if (typeof task.run !== "function") shape.wrong(`${at}.run`, task.run, "a function, (block) => plain data");
+    const item = provides.find((candidate) => candidate.name === name);
+    if (item === undefined || !(item.lifetimes as string[]).includes("block")) {
+      shape.refuse(
+        `${at}.name`,
+        "a block item the module provides",
+        `${shape.who}'s ledger task ${name} names no block item the module provides: a task's result becomes the ` +
+          `module's block item of its name; provide { name: "${name}", lifetimes: ["block"] }`,
+      );
+    }
+    const before = named.get(name);
+    if (before !== undefined) {
+      shape.refuse(
+        `${at}.name`,
+        "a task name used once",
+        `${shape.who} declares the ledger task ${name} twice (ledgerTasks[${before}] and ${at}): each task gives one ` +
+          "item",
+      );
+    }
+    named.set(name, position);
+    if (task.needsState === true && !requires.includes("ledger-state")) {
+      shape.refuse(
+        `${at}.needsState`,
+        "a module that requires ledger-state",
+        `${shape.who}'s ledger task ${name} needs the state before the block, and the module does not require ` +
+          "ledger-state: it must, so that the graph refuses it where core-ledger-state is not active",
+      );
+    }
+  });
+  if (!requires.includes("block-parsed")) {
+    shape.refuse(
+      "requires",
+      "a list holding block-parsed",
+      `${shape.who} declares ledger tasks and does not require block-parsed: its tasks run on the block's one parse, ` +
+        "core-block-parsed's; require block-parsed",
+    );
+  }
+}
+
+/** Checks everything `ModuleDeclaration`'s type requires of `value`, except what the rules check. */
+function checkShape(value: unknown, origin: DeclarationOrigin, index: number): ModuleDeclaration {
+  const shape: Shape = new Shape(origin, index, isObject(value) ? value.id : undefined);
+  if (!isObject(value)) {
+    return shape.refuse(
+      "",
+      "a module declaration object",
+      `${shape.who} is not an object (it is ${shown(value)}): a module is a declaration object, the one its package ` +
+        "exports, made with defineModule",
+    );
+  }
+  shape.onlyKnown(value, "", DECLARATION_PROPERTIES);
+  shape.string(value, "id", "id");
+  const version = value.version;
+  if (typeof version !== "string" || !SEMVER.test(version)) {
+    shape.wrong("version", version, 'a semver version such as "1.0.0"');
+  }
+  shape.oneOf(value.side, "side", ["public", "private"]);
+  shape.strings(value.requires, "requires", true);
+
+  const provides = value.provides;
+  if (!Array.isArray(provides)) shape.wrong("provides", provides, "a list of items");
+  const names = new Map<string, number>();
+  const tables = new Map<string, string>();
+  provides.forEach((item, position) => {
+    const at = `provides[${position}]`;
+    const name = checkItem(shape, item, at, tables);
+    const first = names.get(name);
+    if (first !== undefined) {
+      shape.refuse(
+        `${at}.name`,
+        "an item provided once",
+        `${shape.who} provides the item ${name} twice (provides[${first}] and ${at}): a module declares each item ` +
+          "once, with all its lifetimes; merge the two",
+      );
+    }
+    names.set(name, position);
+  });
+
+  shape.boolean(value, "startsMidChain", true);
+  shape.boolean(value, "needsLockstep", false);
+  if (value.side === "public" && value.needsLockstep !== undefined) {
+    // Only a private module can run in lockstep with the public side. [PP-6]
+    shape.refuse(
+      "needsLockstep",
+      "nothing, on a public module",
+      `${shape.who} is a public module and declares needsLockstep, which only a private module declares: ` +
+        `lockstep is a private process's; declare the module side: "private", or remove needsLockstep`,
+    );
+  }
+  shape.boolean(value, "developmentOnly", false);
+  if (!isZodObject(value.configSchema)) {
+    shape.wrong(
+      "configSchema",
+      value.configSchema,
+      "a zod 4 object schema, z.object({ … }), from the zod package",
+      "declare the module's settings with z.object, each field with .meta({ kind })",
+    );
+  }
+
+  const migrations = value.migrations;
+  if (!Array.isArray(migrations)) shape.wrong("migrations", migrations, "a list of migrations, { id, sql }");
+  migrations.forEach((migration, position) => {
+    const at = `migrations[${position}]`;
+    if (!isObject(migration)) shape.wrong(at, migration, "a migration, { id, sql }");
+    shape.onlyKnown(migration, at, MIGRATION_PROPERTIES);
+    shape.string(migration, "id", `${at}.id`);
+    shape.string(migration, "sql", `${at}.sql`);
+  });
+  shape.boolean(value, "requiresResync", false);
+  checkLedgerTasks(shape, value);
+
+  const points = value.points;
+  if (!isObject(points)) return shape.wrong("points", points, "an object of callbacks by point name");
+  for (const point of POINTS) {
+    const callback = points[point];
+    if (callback !== undefined && typeof callback !== "function") {
+      shape.wrong(`points[${JSON.stringify(point)}]`, callback, "a function: the point's callback");
+    }
+  }
+  return value as unknown as ModuleDeclaration;
+}
+
+// ── the rules ───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The first refusal `check` gives for a declaration of `declarations`, in order. */
+function first(
+  declarations: readonly PlacedDeclaration[],
+  check: (placed: PlacedDeclaration) => UmbraError | undefined,
+): UmbraError | undefined {
+  for (const placed of declarations) {
+    const found = check(placed);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * Every id and item name must match the name pattern. Uses the schema plan's own check (`checkNames`) and returns its
+ * refusal; any other error it throws reaches `validateWith` unchanged. [DB-8]
+ */
+const badId: DeclarationRule = {
+  code: "bad-id",
+  check: (declarations) =>
+    first(declarations, ({ declaration }) => {
+      try {
+        checkNames(declaration);
+        return undefined;
+      } catch (error) {
+        return error as UmbraError;
+      }
+    }),
+};
+
+const PREFIXES = ["core-", "on-"];
+
+/**
+ * A user module's id may not be `core` or start with `core-` or `on-`. `core` is the id of the core's own configuration
+ * entries, and the configuration identifies an entry by its id and start, so a module with that id could not be told
+ * apart from the core. [MD-2, CF-2, CF-5]
+ */
+const reservedPrefix: DeclarationRule = {
+  code: "reserved-prefix",
+  check: (declarations) =>
+    first(declarations, ({ origin, declaration: { id } }) => {
+      if (origin !== "user") return undefined;
+      if (id === CORE_ENTRY_ID) {
+        return new UmbraError(
+          "reserved-prefix",
+          `the user module core has the id "core", which is the id of the core's own configuration entries: the ` +
+            "configuration identifies each entry by its id and start, so it could not tell this module's revisions " +
+            "from the core's; choose another id",
+          { module: id },
+        );
+      }
+      const prefix = PREFIXES.find((candidate) => id.startsWith(candidate));
+      if (prefix === undefined) return undefined;
+      return new UmbraError(
+        "reserved-prefix",
+        `the user module ${id} has an id starting with ${JSON.stringify(prefix)}: ids starting with "core-" are ` +
+          'UmbraDB\'s own (its backbone parts and core modules), and those starting with "on-" read as point names;' +
+          " choose an id without either prefix",
+        { module: id, prefix },
+      );
+    }),
+};
+
+/** No two declarations of a set may share an id. [MD-2] */
+const duplicateId: DeclarationRule = {
+  code: "duplicate-id",
+  check: (declarations) => {
+    const seen = new Map<string, PlacedDeclaration>();
+    return first(declarations, (placed) => {
+      const { id } = placed.declaration;
+      const earlier = seen.get(id);
+      seen.set(id, earlier ?? placed);
+      if (earlier === undefined) return undefined;
+      return new UmbraError(
+        "duplicate-id",
+        `the ${LABEL[placed.origin]} ${id} (position ${placed.index + 1}) has the id of the ` +
+          `${LABEL[earlier.origin]} at position ${earlier.index + 1}: every module needs an id of its own, since its ` +
+          "schema, its database role, its configuration entries and its migrations' records are named after it; " +
+          "rename one of them, or ship the module once",
+        {
+          module: id,
+          first: { origin: earlier.origin, index: earlier.index },
+          second: { origin: placed.origin, index: placed.index },
+        },
+      );
+    });
+  },
+};
+
+/** User and core modules must require at least one item; backbone parts may require none. [MD-2] */
+const noRequirement: DeclarationRule = {
+  code: "no-requirement",
+  check: (declarations) =>
+    first(declarations, ({ origin, declaration: { id, requires } }) => {
+      if (origin === "backbone" || requires.length > 0) return undefined;
+      return new UmbraError(
+        "no-requirement",
+        `the ${LABEL[origin]} ${id} requires no item: every module requires at least one item another part provides — ` +
+          "the data its own is derived from, which also places it in each point's order; list in " +
+          'requires the items it reads, for example "block-header"',
+        { module: id },
+      );
+    }),
+};
+
+/** Every item a module provides must have a lifetime. [MD-2] */
+const itemNoLifetime: DeclarationRule = {
+  code: "item-no-lifetime",
+  check: (declarations) =>
+    first(declarations, ({ declaration: { id, provides } }) => {
+      const item = provides.find((candidate) => {
+        const lifetimes = candidate.lifetimes as readonly unknown[] | undefined;
+        return lifetimes === undefined || lifetimes.length === 0;
+      });
+      if (item === undefined) return undefined;
+      return new UmbraError(
+        "item-no-lifetime",
+        `module ${id} provides the item ${item.name} without a lifetime: every item has one or more — "process" (set ` +
+          'once per process), "block" (passed in each block\'s context) or "table" (stored in tables) — which say ' +
+          'when and how its consumers get it; declare them, for example lifetimes: ["block", "table"]',
+        { module: id, item: item.name },
+      );
+    }),
+};
+
+/** An item with the lifetime `table` must declare a table, and that table must have a kind. [MD-2] */
+const tableItemNoKind: DeclarationRule = {
+  code: "table-item-no-kind",
+  check: (declarations) =>
+    first(declarations, ({ declaration: { id, provides } }) => {
+      const item = provides.find(
+        (candidate) =>
+          (candidate.lifetimes as unknown[] | undefined)?.includes("table") === true &&
+          (candidate.table as { kind?: unknown } | undefined)?.kind === undefined,
+      );
+      if (item === undefined) return undefined;
+      const lead = `module ${id} declares the table item ${item.name} without a kind:`;
+      const message =
+        item.table === undefined
+          ? `${lead} it has the lifetime "table" but no table — no schema, tables or kind; add table: ` +
+            '{ schema, tables, kind: "append-only" or "mutable" }'
+          : `${lead} a table item's tables are either only appended to ("append-only") or also changed ` +
+            '("mutable"); add kind: "append-only" or kind: "mutable" to its table';
+      return new UmbraError("table-item-no-kind", message, { module: id, item: item.name });
+    }),
+};
+
+/** Every settings field's outermost schema must carry a `kind`: data, operational or secret. [MD-2, CF-4] */
+const fieldNoKind: DeclarationRule = {
+  code: "field-no-kind",
+  check: (declarations) =>
+    first(declarations, ({ declaration: { id, configSchema } }) => {
+      for (const [field, schema] of Object.entries(configSchema.shape)) {
+        const meta = schema as { meta?: () => unknown };
+        const kind = typeof meta.meta === "function" ? (meta.meta() as { kind?: unknown } | undefined)?.kind : undefined;
+        if ((FIELD_KINDS as readonly unknown[]).includes(kind)) continue;
+        const has = kind === undefined ? "has no kind" : `has the kind ${JSON.stringify(kind)}, which is none of them`;
+        return new UmbraError(
+          "field-no-kind",
+          `the setting ${JSON.stringify(field)} of module ${id} ${has}: every setting is "data" (recorded in the ` +
+            'configuration history), "operational" (not recorded) or "secret" (never shown or logged); ' +
+            'declare it with .meta({ kind: "data" }) on the field\'s outermost schema — after .default() or ' +
+            ".optional(), which hide metadata set before them",
+          { module: id, field, kind: kind ?? null },
+        );
+      }
+      return undefined;
+    }),
+};
+
+/** Every callback must be registered under a point's name. [MD-1] */
+const unknownPoint: DeclarationRule = {
+  code: "unknown-point",
+  check: (declarations) =>
+    first(declarations, ({ declaration: { id, points } }) => {
+      const point = Object.keys(points).find((name) => !(POINTS as readonly string[]).includes(name));
+      if (point === undefined) return undefined;
+      return new UmbraError(
+        "unknown-point",
+        `module ${id} declares a callback under ${JSON.stringify(point)}, which is not a point: the points are ` +
+          `${POINTS.join(", ")}; move the callback to the point it is meant for`,
+        { module: id, point },
+      );
+    }),
+};
+
+/** The validation rules, in the order they are checked. [MD-1, MD-2] */
+export const DECLARATION_RULES: readonly DeclarationRule[] = Object.freeze([
+  badId,
+  reservedPrefix,
+  duplicateId,
+  noRequirement,
+  itemNoLifetime,
+  tableItemNoKind,
+  fieldNoKind,
+  unknownPoint,
+]);
+
+/**
+ * Validates `set` with `rules`: every declaration's shape first, in the set's order (`invalid-declaration`), then each
+ * rule over all of them. Throws the first refusal; returns the same declarations, typed, in the same lists.
+ */
+export function validateWith(
+  set: DeclarationSet,
+  rules: readonly DeclarationRule[],
+): DeclarationSet<ModuleDeclaration> {
+  const placed: PlacedDeclaration[] = [];
+  for (const origin of ORIGINS) {
+    set[origin].forEach((value, index) => placed.push({ origin, index, declaration: checkShape(value, origin, index) }));
+  }
+  for (const rule of rules) {
+    const refusal = rule.check(placed);
+    if (refusal !== undefined) throw refusal;
+  }
+  const of = (origin: DeclarationOrigin) =>
+    Object.freeze(placed.filter((entry) => entry.origin === origin).map((entry) => entry.declaration));
+  return Object.freeze({ backbone: of("backbone"), core: of("core"), user: of("user") });
+}
+
+/**
+ * Validates a build's declarations at startup, as the module comment describes. Throws a non-retryable `UmbraError`
+ * naming the module and the cause; otherwise returns the same declarations, typed. [MD-1, MD-2]
+ */
+export function validateDeclarations(set: DeclarationSet): DeclarationSet<ModuleDeclaration> {
+  return validateWith(set, DECLARATION_RULES);
+}

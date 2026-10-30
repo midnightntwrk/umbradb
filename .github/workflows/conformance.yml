@@ -16,23 +16,22 @@ concurrency:
 
 jobs:
   test:
-    # F5 (audit finding): the Pg-only conformance suite (`test/postgres/**`, `test/integration/
-    # pg-tx-history-adapter.test.ts`) uses testcontainers (`@testcontainers/postgresql`), which
+    # F5 (audit finding): the Pg-only conformance suite (`test/postgres/**`, `test/db/**` and the
+    # other database suites) uses testcontainers (`@testcontainers/postgresql`), which
     # starts its OWN disposable Postgres container via the Docker daemon already present on
     # ubuntu-latest runners -- no `services: postgres` block is needed or used. This is the
     # required merge gate; it never runs the env-gated live tier (`test:live`), which needs a real
     # preprod network, a funded seed, and a built midnight-wallet checkout none of which are
-    # available (or wanted) in CI (`design.md` §7.4).
+    # available (or wanted) in CI (`design.md` §7.4). TransactionHistory's tests, the live tier among
+    # them, are kept in `legacy/transaction-history/` outside this run (core-arch task 17.1, LS-3).
     #
-    # Timeout posture (v1.0.0-recovery-testing Task 7.1): the crash (~26s), soak (~73s) and
-    # differential (~10s) suites now RUN in this gate (Testcontainers, `UMBRADB_LIVE_PREPROD`
-    # unset), plus v8 coverage instrumentation. Measured wall-clock for the whole deterministic set
-    # is ~100s on a 24-core host; on a 4-core runner with coverage it is comfortably single-digit
-    # minutes, so the soak stays in THIS job and `timeout-minutes: 30` is kept (no split needed).
-    # StrykerJS mutation is a SEPARATE still-required job (below) so its cost never competes with
-    # this one's clock.
+    # Timeout posture: 0.10.0's suite (345 files, about 5,600 tests, with v8 coverage) takes 10 to 16 minutes on a
+    # many-core host and about 8,800 CPU-seconds in all; on the first pull request run (PR #16, 2026-10-28) a hosted
+    # runner finished 137 of 345 files in 30 minutes, all passing, and was cancelled. `timeout-minutes: 120`, as the
+    # mutation job's, until the suite is split across jobs. StrykerJS mutation is a SEPARATE still-required job (below)
+    # so its cost never competes with this one's clock.
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -48,6 +47,13 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Chrome for the browser build's tests
+        # core-arch task 16.1 (A129–A132): `test/browser/` drives the runner image's Google Chrome headless over the
+        # DevTools protocol (`test/browser/chrome.ts`; no test dependency). Its version is printed for the record.
+        run: |
+          google-chrome --version
+          echo "UMBRADB_CHROME=$(command -v google-chrome)" >> "$GITHUB_ENV"
+
       - name: Run conformance gate (tests + coverage + required-test skip-enforcement)
         # `npm run test:conformance` is now `scripts/conformance-gate.mjs` (Task 7.1): it runs
         # `vitest run --coverage` with `UMBRADB_LIVE_PREPROD` UNSET (so the crash/soak/differential
@@ -61,38 +67,25 @@ jobs:
         #
         # Suites that ALWAYS self-skip in CI (reported SKIPPED, never silently counted as passed;
         # none are `"required"` manifest ids, so they cannot make the reconciliation red):
-        #   - the two live/cold-boot integration tests (gated behind UMBRADB_LIVE_PREPROD);
-        #   - test/integration/chain-archive-sync.integration.test.ts (needs a live local Midnight
-        #     devnet: node RPC :9944 + indexer :8088, not provisioned here);
         #   - test/integration/chain-archive-replay-decode.integration.test.ts (needs a built
         #     sibling midnight-wallet checkout + a captured indexer SQLite DB, absent in CI).
         # A green CI run therefore says NOTHING about those suites beyond clean collection.
         run: npm run test:conformance
 
   mutation:
-    # StrykerJS durability mutation gate (v1.0.0-recovery-testing Task 7.3; guideline §2.3/§3.6).
-    # A SEPARATE still-required job (never optional, never live-gated) so mutation cost is off the
-    # `test` job's clock. SCOPE: the FIVE durability adapters `stryker.conf.json` mutates —
-    # save-and-advance.ts (the co-transactional save+cursor keystone), checkpoint-store.ts,
-    # watermarks.ts, transaction-lease.ts, temporal-kv.ts — each paired with its own fast `.test.ts`
-    # unit suite (`vitest.mutation.config.ts`). `break` is committed at 65 in `stryker.conf.json`
-    # (measured AGGREGATE 70.68% over 726 mutants; guideline floor is break:60) and is enforced here
-    # on the aggregate across all five adapters.
+    # The StrykerJS mutation gate (openspec/changes/core-arch design.md §13, task 17.2): a SEPARATE still-required job
+    # (never optional, never live-gated) so mutation cost is off the `test` job's clock. SCOPE: the nine targets
+    # `stryker.conf.json` mutates (graph, dispatch, history, cbor, digest, height-versioned, cursor-table, sweep,
+    # node-source), each with its fast tests in `vitest.mutation.config.ts`; `break` is 65 on the AGGREGATE over
+    # valid mutants, which `scripts/mutation-per-adapter.mjs` sums over one `stryker run --mutate <file>` per target.
     #
-    # RUNTIME / TIMEOUT: this job runs the five adapters PER-ADAPTER (`npm run test:mutation:ci` ->
-    # `scripts/mutation-per-adapter.mjs`) — one `stryker run --mutate <file>` each, so every adapter
-    # reuses ONE Testcontainers Postgres. That is the MEASURED, reliably-completing path: ~1,384s
-    # (~23 min) wall-clock on a 24-core host (per-adapter 17s/85s/348s/323s/611s), versus the single
-    # interleaved `stryker run` (`npm run test:mutation`) that churns a container per file switch and
-    # is slower/unbounded — which is why the old 20-min budget could kill the gate before it produced
-    # a threshold verdict. `break:65` is applied to the AGGREGATE score only: an adapter run in
-    # isolation lacks the sibling-suite coverage the interleaved config gives it (transaction-lease
-    # alone is 64.83%), so the runner sums all adapters and gates the aggregate (a conservative lower
-    # bound). `timeout-minutes: 45` sits safely above the ~23 min measurement with headroom for a
-    # slower CI runner, so the gate always finishes and emits its pass/fail. Uses testcontainers via
-    # the same ubuntu-latest Docker daemon as the `test` job — no `services:` block needed.
+    # RUNTIME / TIMEOUT (task 17.3): task 17.2 measured `npm run test:mutation:ci` at about 58 min in all (3,163 valid
+    # mutants; node-source alone 1,446 s with 121 timed-out mutants, graph 1,068 s, cbor 494 s) on a loaded 24-core
+    # machine with Stryker's fixed `concurrency: 3`. The 45 minutes this job had for 0.9.5's five adapters (~23 min)
+    # would end the gate before its verdict, so the job has 120 minutes: about twice the measurement, for a slower
+    # runner. Uses Testcontainers through the runner's Docker daemon, like the `test` job.
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -105,5 +98,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run StrykerJS mutation gate (5 durability adapters, per-adapter; aggregate break:65)
+      - name: Run StrykerJS mutation gate (nine targets, one run each; aggregate break:65)
         run: npm run test:mutation:ci

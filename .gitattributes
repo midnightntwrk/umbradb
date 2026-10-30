@@ -1,0 +1,3 @@
+# Vendored ledger builds (vendor/ledger/README.md): their bytes are pinned by SHA256SUMS and their patches are
+# applied with `git apply`, so no end-of-line conversion may touch them.
+vendor/ledger/** -text

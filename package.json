@@ -1,7 +1,7 @@
 {
   "name": "umbradb",
-  "version": "0.9.5",
-  "description": "A local, single-writer, PostgreSQL-backed temporal and content-addressed store for Midnight wallet state.",
+  "version": "0.10.0",
+  "description": "A standalone Midnight indexer that reads finalized blocks from a Midnight node into PostgreSQL or PGlite, with modules attached to one runner.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -13,8 +13,15 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "umbradb": "dist/cli/main.js"
+  },
   "files": [
     "dist",
+    "vendor/ledger/*/pkg/**",
+    "vendor/ledger/*/SHA256SUMS",
+    "vendor/ledger/*/upstream.json",
+    "!vendor/ledger/README.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -32,8 +39,10 @@
     "node": ">=24"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit && tsc -p examples/stats-module",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
+    "build:browser": "node browser/build.ts",
+    "web": "node browser/build.ts && node browser/serve.ts",
     "docs:storage": "typedoc",
     "docs:storage:check": "typedoc --emit none --treatWarningsAsErrors",
     "test": "vitest run",
@@ -41,31 +50,44 @@
     "test:coverage": "vitest run --coverage",
     "test:mutation": "stryker run",
     "test:mutation:ci": "node scripts/mutation-per-adapter.mjs",
-    "test:live": "UMBRADB_LIVE_PREPROD=1 vitest run test/integration/preprod-db-sync.integration.test.ts test/integration/cold-boot-recovery.integration.test.ts",
     "test:smoke": "npm run build && node test/smoke/pack-install.mjs",
-    "archive:sync": "tsx chain-archive-sync/sync-cli.ts",
     "bench": "tsx bench/harness.ts",
     "bench:smoke": "tsx bench/smoke.ts",
+    "vendor:ledger": "bash vendor/ledger/vendor-ledger.sh",
     "graph:refresh": "bash scripts/graphify/run.sh refresh",
     "graph:check": "bash scripts/graphify/run.sh check"
   },
   "dependencies": {
+    "@electric-sql/pglite": "0.5.10",
     "postgres": "^3.4.9",
-    "zod": "^4.0.0"
+    "typescript": "^5.9.0",
+    "ws": "8.22.0",
+    "zod": "^4.6.7"
+  },
+  "peerDependencies": {
+    "@electric-sql/pglite-tools": "0.4.10"
+  },
+  "peerDependenciesMeta": {
+    "@electric-sql/pglite-tools": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@electric-sql/pglite-tools": "0.4.10",
     "@midnightntwrk/wallet-sdk-abstractions": "3.0.0-canary.20260716150734-e744d99",
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/vitest-runner": "^9.6.1",
     "@testcontainers/postgresql": "^12.0.4",
     "@types/node": "^26.1.1",
+    "@types/ws": "8.18.2",
     "@vitest/coverage-v8": "^4.1.10",
+    "ajv": "8.18.0",
     "effect": "3.22.0",
+    "esbuild": "0.28.2",
     "fast-check": "^4.9.0",
     "tinybench": "^2.9.0",
     "tsx": "^4.23.1",
     "typedoc": "^0.28.0",
-    "typescript": "^5.9.0",
     "vitest": "^4.1.10"
   }
 }

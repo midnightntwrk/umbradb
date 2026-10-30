@@ -1,0 +1,4 @@
+# The vendored ledger packages' build output (vendor/ledger/README.md): wasm-bindgen glue and upstream midnight-ledger
+# declarations, regenerated from the pinned source and the patches, which the graph does cover. Left out so that
+# generated code does not make up half of the graph.
+vendor/ledger/*/pkg/

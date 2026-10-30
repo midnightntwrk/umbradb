@@ -1,4 +1,4 @@
-# Acceptance — v1.0.0: Formal completion (`formal-completion`)
+# Acceptance — v1.1.0: Formal completion (`formal-completion`)
 
 ## The forced decision (must be recorded before this change closes)
 

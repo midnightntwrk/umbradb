@@ -1,21 +1,35 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  "_comment": "v1.0.0-recovery-testing durability mutation gate (guideline §2.3/§3.6). §2.3 requires StrykerJS mutation on AT LEAST FOUR durability adapters; this mutates FIVE — save-and-advance.ts (the co-commit keystone), checkpoint-store.ts, watermarks.ts, transaction-lease.ts, temporal-kv.ts — each paired with its own fast .test.ts unit suite via vitest.mutation.config.ts (perTest coverage reruns only a mutant's covering tests). MEASURED BASELINE 2026-07-24 (per-adapter, single-container reuse; each adapter's own .test.ts): save-and-advance 100.00% (5 mutants), watermarks 84.21% (38), checkpoint-store 76.41% (195), temporal-kv 70.26% (195), transaction-lease 64.83% (293) => AGGREGATE 70.68% over 726 mutants (505 killed, 6 timeout, 136 survived, 76 no-coverage). The per-adapter aggregate is a conservative LOWER BOUND for this interleaved config: here each adapter's mutants ALSO get coverage from sibling suites (checkpoint-store.test.ts / save-and-advance.test.ts drive transaction-lease.ts, etc.), so no-coverage mutants can only become killed, never lowering the score. break is committed at 65 — below the measured 70.68% aggregate (honest, green-now), WELL ABOVE guideline §2.3's break:60 floor; it ratchets up and MUST NOT be lowered to pass. Per-adapter wall-clock (concurrency 3): 17s / 85s / 348s / 323s / 611s. To reproduce fast, run mutation per-adapter (single-container reuse) rather than all five interleaved (which churns a container per file-switch).",
+  "_comment": "Mutation gate (openspec/changes/core-arch design.md §13, task 17.2): the nine targets of the core — src/modules/graph.ts (graph resolution), src/runner/dispatch.ts (the order within a point; §13's src/runner/order.ts), src/config/history.ts, src/determinism/cbor.ts, src/determinism/digest.ts, src/helpers/height-versioned.ts, src/helpers/cursor-table.ts, src/backbone/core-ledger-state/sweep.ts (§13's src/ledger/sweep.ts) and src/backbone/core-block-fetch/node-source.ts (the block fetch queue; §13's src/backbone/block-fetch-queue.ts) — each with its fast tests in vitest.mutation.config.ts (perTest coverage reruns only a mutant's covering tests). 0.9.5's five durability adapters were retired with their parts. break stays at 65 on the aggregate over valid mutants (scripts/mutation-per-adapter.mjs runs one stryker run per target); it ratchets up and MUST NOT be lowered to pass. MEASURED BASELINE 2026-10-27 (task 17.2; npm run test:mutation:ci on a loaded machine, load average 25-45, about 58 min in all): graph 87.81% (837 valid, 1068s), dispatch 95.80% (143, 62s), history 86.10% (597, 37s), cbor 98.18% (603, 494s), digest 96.05% (76, 183s), height-versioned 74.07% (54, 66s), cursor-table 78.38% (37, 59s), sweep 60.62% (325, 42s; 79 mutants no-coverage from its one unit test file), node-source 77.80% (491, 1446s; 121 timeouts) => AGGREGATE 85.33% over 3163 valid mutants (2554 killed, 145 timeout, 373 survived, 91 no coverage). REMEASURED 2026-10-28 (task 17.5b, the sweep given its tables test, about 41 min): graph 87.80%, dispatch 95.80%, history 85.81%, cbor 96.85%, digest 96.05%, height-versioned 74.07%, cursor-table 78.38%, sweep 90.33% (300 valid), node-source 77.48% => AGGREGATE 87.98% over 3162 valid mutants (2651 killed, 131 timeout, 361 survived, 19 no coverage).",
   "testRunner": "vitest",
-  "vitest": { "configFile": "vitest.mutation.config.ts" },
+  "vitest": {
+    "configFile": "vitest.mutation.config.ts"
+  },
   "mutate": [
-    "src/postgres/save-and-advance.ts",
-    "src/postgres/checkpoint-store.ts",
-    "src/postgres/watermarks.ts",
-    "src/postgres/transaction-lease.ts",
-    "src/postgres/temporal-kv.ts"
+    "src/modules/graph.ts",
+    "src/runner/dispatch.ts",
+    "src/config/history.ts",
+    "src/determinism/cbor.ts",
+    "src/determinism/digest.ts",
+    "src/helpers/height-versioned.ts",
+    "src/helpers/cursor-table.ts",
+    "src/backbone/core-ledger-state/sweep.ts",
+    "src/backbone/core-block-fetch/node-source.ts"
   ],
   "coverageAnalysis": "perTest",
-  "reporters": ["clear-text", "html", "json"],
+  "reporters": [
+    "clear-text",
+    "html",
+    "json"
+  ],
   "concurrency": 3,
   "timeoutMS": 25000,
   "timeoutFactor": 2,
-  "thresholds": { "high": 90, "low": 70, "break": 65 },
+  "thresholds": {
+    "high": 90,
+    "low": 70,
+    "break": 65
+  },
   "tempDirName": ".stryker-tmp",
   "cleanTempDir": true
 }

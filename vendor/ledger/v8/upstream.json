@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/midnightntwrk/midnight-ledger",
+  "commit": "36d7442172136758e33009f75ff4aa56616cff40",
+  "tag": "ledger-8.1.2",
+  "versionName": "ledger-8.1.2",
+  "build": {
+    "crate": "midnight-ledger-wasm",
+    "wasmBindgen": "0.2.108",
+    "dtsTemplate": "ledger-wasm/ledger-v8.template.d.ts",
+    "dtsName": "ledger-v8.d.ts"
+  },
+  "package": {
+    "name": "@umbradb/vendored-ledger-v8",
+    "version": "8.1.2"
+  }
+}

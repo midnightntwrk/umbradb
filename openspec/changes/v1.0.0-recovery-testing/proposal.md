@@ -1,6 +1,7 @@
 # Proposal — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)
 
-> **Status:** Proposed for the 1.0.0 program. Change id `v1.0.0-recovery-testing`, capability
+> **Status:** Implemented: merged to `main` in `4e04926`; written for the 1.0.0 program.
+> Change id `v1.0.0-recovery-testing`, capability
 > `recovery-testing`. This is the **testing gate** (roadmap gate items **G9–G12**) — the "long
 > pole" of the 1.0.0 milestone (`ROADMAP-v1.0.0-CONSOLIDATED.md` §"Critical path", step 4).
 

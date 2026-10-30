@@ -1,6 +1,7 @@
 # Proposal — v1.0.0-perf-baseline
 
-> **Status:** Proposed. Part of the UmbraDB 1.0.0 program (`ROADMAP-v1.0.0-CONSOLIDATED.md`,
+> **Status:** Implemented: merged to `main` in `855fb22`.
+> Part of the UmbraDB 1.0.0 program (`ROADMAP-v1.0.0-CONSOLIDATED.md`,
 > gate section **D. Performance**). Change id: `v1.0.0-perf-baseline`; capability:
 > `performance-baseline`.
 

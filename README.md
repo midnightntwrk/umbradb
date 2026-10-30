@@ -1,352 +1,592 @@
 # UmbraDB
 
-![A near-total solar eclipse: a matte black disc with a single point of light at its upper-left rim, ringed by a faint corona, against a deep indigo field](https://raw.githubusercontent.com/midnightntwrk/umbradb/main/docs/assets/penumbra.png)
+![A near-total solar eclipse: a black disc ringed by a faint corona](docs/assets/penumbra.png)
 
-A local, persistent datastore for [Midnight](https://midnight.network) clients: wallets, dev tooling,
-and anything else that needs durable, versioned, content-addressed storage without running a
-heavyweight database service of its own.
+A Midnight Modular Indexer. UmbraDB reads blocks from Midnight, and stores what the modules compute in PostgreSQL
+deterministically. Run what you need, extend what is missing.
 
-UmbraDB is a library over PostgreSQL, talking to it through
-[`postgres.js`](https://github.com/porsager/postgres) with no ORM. You supply the database; UmbraDB
-owns a schema inside it. It is single-writer and local, and it is not a distributed database or a
-service you run for other tenants.
+## What UmbraDB is
 
-Not published to npm yet. Install from the repository until it is:
+- **Standalone.** It needs only a Midnight node: no other indexer, no other service.
+- **Official ledger parsing.** Transactions are parsed and applied by the official `midnight-ledger` packages; UmbraDB
+  never re-implements their formats.
+- **Modules.** A feature is a module: its tables, its callbacks for each block, its API. Adding one leaves the core as
+  it is, and UmbraDB's own core modules use the same API as yours.
+- **Only what you configure.** A process runs the modules its configuration file names, and nothing else.
+- **One block, one transaction.** Only finalized blocks are stored, so the database never rolls back. A crash leaves
+  the last whole block, and a restart resumes there.
+- **Deterministic.** The same chain gives the same database. Each table has a digest, updated every block, and two
+  instances compare one contents hash.
+- **Backup and restore.** A backup is a `pg_dump` file, checked against its contents hash when it is restored.
+- **Private data apart.** Private modules run in private processes with their own databases; the public database stays
+  shareable.
+- **Server and browser.** The same code runs on Node.js with PostgreSQL 18 and in a browser page on PGlite.
 
-```bash
-npm install github:midnightntwrk/umbradb#19e225bfdabed2056f1192795db7b1932a530eb2  # v0.9.5
+## Requirements
+
+- **Node.js 24** or later. The configuration file is TypeScript, loaded through Node.js's type stripping.
+- **A Midnight node's WebSocket RPC** (`ws://` or `wss://`), such as the public preview node
+  `wss://rpc.preview.midnight.network`.
+- **A database (OPTIONAL):** PostgreSQL 18, or nothing extra with PGlite (bundled; development only, see
+  [Choosing a database](docs/choosing-a-database.md)).
+- **For backups (OPTIONAL):** PostgreSQL 18's `pg_dump`, or on PGlite `@electric-sql/pglite-tools@0.4.10`.
+- **For the tests (OPTIONAL):** Docker (PostgreSQL 18 runs in Testcontainers), and Chrome for the browser tests.
+
+## Quick start (CLI)
+
+### Create a project
+
+```sh
+mkdir my-indexer && cd my-indexer
+npm init -y && npm pkg set type=module
 ```
 
-or from a tarball built locally:
+### Install UmbraDB
 
-```bash
-git clone https://github.com/midnightntwrk/umbradb && cd umbradb
-npm ci && npm run build && npm pack
-npm install /path/to/umbradb-0.9.5.tgz
+UmbraDB is not on npm yet; each version's package is attached to its
+[GitHub release](https://github.com/midnightntwrk/umbradb/releases). Install it in the project: the configuration
+file imports `umbradb` from the project's `node_modules`, and the install also adds the `umbradb` command
+(`npx umbradb`).
+
+```sh
+npm install https://github.com/midnightntwrk/umbradb/releases/download/v0.10.0-rc.1/umbradb-0.10.0.tgz
 ```
+
+`v0.10.0-rc.1` is a pre-release of 0.10.0, for review and feedback. To update, run it again with the new release's
+URL. To build the package yourself, or to run UmbraDB from a clone,
+see [Building from source](docs/building-from-source.md).
+
+### `umbradb.config.ts`
+
+Create `umbradb.config.ts` in `my-indexer/`, next to `package.json`, with this content. It is the configuration file:
+a TypeScript module whose default export names the network, the node, the database, the addresses to listen on, and
+the modules to run. `umbradb run` reads `./umbradb.config.ts` unless `--config` names another file.
 
 ```ts
-import { createClient, runMigrations, PgTemporalKV, DEFAULT_SCHEMA } from "umbradb";
+import { coreEntry, defineConfig } from "umbradb";
 
-const sql = createClient({ connectionString: process.env.DATABASE_URL });
-await runMigrations(sql, { schema: DEFAULT_SCHEMA });   // forward-only; also runs the durability probe
-
-const kv = new PgTemporalKV(sql);
-await kv.put("wallet", "preprod", "balance", { night: "2000" });
-const now  = await kv.get("wallet", "preprod", "balance");
-const then = await kv.getAt("wallet", "preprod", "balance", { kind: "version", version: 3n });
-```
-
-Keys are addressed by namespace, scope and key.
-
-Everything is imported from the package root. There is no supported deep import: the `exports` map
-exposes a single `"."`, and reaching into internals fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
-
-Node 24 or later. The package is ESM only, so `require()` will not resolve it. PostgreSQL 17 is
-tested and supported; 15 and 16 should work and are untested; below 15 will not work, because the
-schema uses syntax introduced in 15.
-
-> **Version 0.9.5.** Under SemVer, `0.y.z` carries **no compatibility guarantee yet**. The surface is
-> already enumerated and drift-tested, but the *promise* not to break it lands at 1.0.0. See
-> [Status](#status).
-
----
-
-## Contents
-
-- [What it does](#what-it-does) · [Why Postgres](#why-postgres) · [The five primitives](#the-five-primitives)
-- [Durability and crash semantics](#durability-and-crash-semantics) · [Errors](#errors-and-retryability)
-- [Verification: what is proved, checked, and tested](#verification-what-is-proved-checked-and-tested)
-- [Schema and migrations](#schema-and-migrations) · [Performance](#performance-and-ceilings)
-- [Security](#security) · [What UmbraDB is not](#what-umbradb-is-not) · [Status](#status)
-
----
-
-## What it does
-
-Five focused primitives, plus two capabilities built on them.
-
-| Primitive | Purpose |
-|---|---|
-| **TemporalKV** | Versioned key-value store with point-in-time reads |
-| **CheckpointStore** | Content-addressed, deduplicated, chunked snapshot storage with GC |
-| **Watermarks** | Unversioned sync-progress cursors |
-| **Transaction/Lease** | Real Postgres transactions + connection-pinned advisory locks |
-| **TransactionHistory** | Per-wallet transaction history, GIN-indexed on identifiers |
-
-| Capability | Built from |
-|---|---|
-| **WalletStateEnvelope** | `CheckpointStore`. Persists a whole wallet-sync snapshot in one `save()` |
-| **`saveAndAdvance`** | `CheckpointStore` + `Watermarks`. The co-transactional cursor primitive |
-
-## Why Postgres
-
-Client-side blockchain tooling tends to reach for MongoDB by default, then discovers it doesn't need
-most of what that buys: sharding, flexible schema evolution across a large team, an aggregation
-pipeline. What it actually needs is versioned reads, content-addressed dedup, a single-writer lease,
-and a boring, well-understood storage engine everyone already has. Postgres gives you all of that
-directly, with real ACID transactions instead of a replica-set-gated approximation.
-
----
-
-## The five primitives
-
-### TemporalKV: versioned KV with history
-
-```ts
-const kv = new PgTemporalKV(sql);
-
-await kv.put("key", value);                          // append a new version
-await kv.put("key", value, { expectedVersion: 4n }); // compare-and-swap
-await kv.get("key");                                 // latest
-await kv.getAt("key", { version: 3n });              // by version
-await kv.getAt("key", { asOf: someDate });           // by timestamp
-```
-
-Every `put` appends a version; nothing is overwritten in place. `expectedVersion` makes the write a
-CAS, a mismatch raises `VersionConflictError` rather than clobbering. Point-in-time reads are
-addressable two ways (by version, or by wall-clock `asOf`), and the two agree for any successfully
-persisted write.
-
-**Retention.** History is prunable. Reads inside the retention window are exact; reads for a version
-that has been pruned raise `HistoryUnavailableError` rather than silently returning a neighbour, an
-unavailable answer is distinguishable from a wrong one.
-
-### CheckpointStore: content-addressed snapshots
-
-```ts
-const store = new PgCheckpointStore(sql);
-
-await store.save({ walletId, networkId, data });   // chunks, dedups, writes a manifest
-await store.load({ walletId, networkId });         // newest
-await store.history({ walletId, networkId });      // manifest list with sizes
-await store.prune({ walletId, networkId, keep: 5 });
-```
-
-Large snapshots are split into fixed-size 4 MiB chunks, addressed by content hash, and shared through
-a **global chunk pool**, identical chunks are stored once across all wallets. Each save writes a
-manifest with a `manifest_hash` computed at write time and re-verified on load, so a corrupted or
-partially-written manifest raises `ManifestCorruptError` instead of loading as truncated state.
-
-**GC is two-step.** `prune` first removes manifests, then reclaims chunks no live manifest references,
-subject to a 15-minute grace window, which stops GC reclaiming a chunk an in-flight `save` still
-means to reuse. A save that re-references an existing chunk resets that chunk's clock as it goes, so
-the exposure is the gap between one save touching a chunk and that same save committing, not the
-length of the save overall. Keep that gap under fifteen minutes. Reads (`load`, `history`) run in
-REPEATABLE READ so they stay consistent against a concurrently committing `prune`.
-
-### Watermarks: sync cursors
-
-```ts
-const wm = new PgWatermarks(sql);
-await wm.set("sync", "preprod", { height: "1807503" });
-await wm.get("sync", "preprod");
-```
-
-Deliberately last-write-wins and unversioned, a cursor has no history worth keeping. Stored in a
-single table at `fillfactor = 90` with **no secondary index**, which is a hard invariant: adding one
-would break HOT update eligibility and turn the hottest write path in the system into a bloat source.
-
-Large integers cross the boundary as decimal **strings**, not JS numbers, so a block height cannot
-silently lose precision.
-
-### Transaction/Lease: the control algebra
-
-```ts
-const tx = new PgTransactionLeaseLayer(sql);
-
-await tx.withTransaction(async (handle) => {
-  await kv.put("a", v1, { tx: handle });
-  await kv.put("b", v2, { tx: handle });          // both, or neither
-});
-
-await tx.withLease("sync-writer", async () => {   // single-writer coordination
-  // ...
+export default defineConfig({
+  entries: [
+    coreEntry({
+      start: 0,
+      config: {
+        network: "preview",
+        node: "wss://rpc.preview.midnight.network",
+        database: { kind: "pglite", path: "data" },
+        listen: { admin: "127.0.0.1:8081" },
+        developmentOptIn: true, // PGlite is a development database
+      },
+    }),
+  ],
 });
 ```
 
-This is the algebra the other modules run inside. `withTransaction` gives real atomicity across
-primitives; `acquireLease` / `tryAcquireLease` / `releaseLease` / `withLease` give single-writer
-coordination via **connection-pinned** advisory locks, the lease is held for the life of the
-connection, with no TTL and no stealing.
+### Check and run
 
-`withLease` surfaces release faults rather than swallowing them: if the body succeeds but the release
-fails, you get an `AggregateError`, not a silent success.
+```sh
+npx umbradb config check umbradb.config.ts   # checks the file without starting anything
+npx umbradb run                              # reads ./umbradb.config.ts; Ctrl-C stops it
+```
 
-### TransactionHistory + WalletStateEnvelope
+From a second terminal:
 
-`PgTransactionHistoryStorage` mirrors the Midnight wallet SDK's `TransactionHistoryStorage`
-interface, lifecycle-aware upsert/merge, identifier-subset pending-clear, GIN-indexed on a
-denormalized `identifiers` array.
+```sh
+curl http://127.0.0.1:8081/status
+```
 
-`PgWalletStateEnvelopeStore` persists a shielded/unshielded/dust wallet-sync snapshot as one
-`CheckpointStore.save()`. It's a capability, not a sixth primitive: no table, no migration of its own.
+```text
+{ "state": "syncing", "ready": true, "conditions": [], "cursor": "288", "head": "1485778", "lag": "1485490",
+  "reason": null, "lastCommitAt": "2026-10-27T21:26:10.806Z", "node": { … }, "modules": [ … ], "uptimeMs": 35561 }
+```
 
----
+`start` is the first height the database holds. From 0, the process syncs preview from genesis (about 10 heights a
+second, so days). On a new database, a `start` near the node's head (the `head` above) reaches `following` within a
+minute. To index something, add modules: [Example: loading `stats-module`](#example-loading-stats-module).
 
-## Durability and crash semantics
+## Quick start (browser)
 
-This is the part most storage layers get quietly wrong, so it's stated explicitly.
+The same core runs in a Chrome page, with PGlite, from a clone of the repository. The page has no
+`umbradb.config.ts`: its configuration is a module bundled into it, `browser/src/config.ts` (the core and three core
+modules); name your own module to change it.
 
-**The cursor never outruns the data.** `saveAndAdvance` writes a checkpoint and advances its watermark
-**in one transaction**. Without that, a cursor can commit ahead of the checkpoint it points at, and a
-crash leaves you resuming from a position whose data was never durable, a silent gap. This was the
-single correctness blocker of the 1.0 program, and it is closed:
+```sh
+git clone https://github.com/midnightntwrk/umbradb my-web-indexer
+cd my-web-indexer
+git checkout -q v0.10.0-rc.1                                  # the release's code
+npm ci
+node browser/build.ts --configuration browser/src/config.ts   # builds the page into dist-browser/
+node browser/serve.ts                                         # serves it on 127.0.0.1:8090; Ctrl-C stops it
+# npm run web: both steps with the default configuration (it rebuilds: not after your own build)
+```
+
+Then open [http://127.0.0.1:8090/?node=wss://rpc.preview.midnight.network][preview-page] in Chrome. Within
+seconds the page shows the core `following`, lag 0. [UmbraDB in a browser](docs/browser.md) covers the headers the
+page needs, its parameters (kept storage, other networks, restore), your own modules and backups.
+
+[preview-page]: http://127.0.0.1:8090/?node=wss://rpc.preview.midnight.network
+
+## Configuration files
+
+A process runs from one TypeScript file, `umbradb.config.ts` in the working directory unless `--config` names another:
 
 ```ts
-import { saveAndAdvance } from "umbradb";
-await saveAndAdvance(sql, { checkpoint, watermark });   // atomic
+import { CORE_BLOCK_PARSED, CORE_CHAIN_EVENTS, CORE_TX_RESULTS, coreEntry, defineConfig } from "umbradb";
+import { statsModule } from "./stats-module.ts";
+
+export const modules = [statsModule]; // the user modules this build runs
+
+const database = {
+  kind: "postgres",
+  host: "db.internal",
+  user: "umbradb",
+  password: process.env.DB_PASSWORD,
+  name: "indexer",
+} as const;
+
+export default defineConfig({
+  entries: [
+    coreEntry({ start: 0, config: { network: "preview", node: "wss://…", database } }),
+    CORE_CHAIN_EVENTS.entry({ start: 0, config: {} }),
+    CORE_BLOCK_PARSED.entry({ start: 0, config: {} }),
+    CORE_TX_RESULTS.entry({ start: 0, config: {} }),
+    statsModule.entry({ start: 0, config: { countSystem: true, recentLimit: 5 } }),
+  ],
+});
 ```
 
-**Startup asserts its own preconditions.** `runMigrations` runs a durability probe: it checks `fsync`,
-`synchronous_commit` and `full_page_writes`, and makes a best-effort detection of a transaction
-pooler sitting in front of Postgres, because a pooler silently breaks the session-scoped advisory
-locks the lease depends on. `fsync=off` and `full_page_writes=off` are hard violations that refuse to migrate;
-`synchronous_commit=off` returns a warning instead, since it costs a tail of acknowledged commits on
-an OS crash without corrupting anything. A violation raises `DurabilityContractError` or
-`TransactionPoolerDetectedError` at startup, not at 3 a.m.
+- **The default export** is `defineConfig({ entries })`. `coreEntry` is the process itself; each other entry runs one
+  module from a height (`start`, and optionally `stop`) with its settings.
+- **The `modules` export** lists your modules' declarations. The file imports them; nothing is loaded by name.
+- **Revisions.** A second entry for a module from a higher `start` changes its settings from that height.
+  `versionEntry({ id, start, version, config })` keeps a revision that an earlier version of a module ran.
+- **Setting kinds.** A `data` setting changes what is stored: it is recorded in the database's configuration history
+  and may change only from a future height. An `operational` setting may change at any restart. A `secret` setting is
+  never shown or logged (`[redacted]`).
+- **The file is code.** It holds erasable TypeScript only (no `enum`, `namespace` or parameter properties), is an ES
+  module, may import module packages and may read environment variables, for secrets for example.
 
-**Failure is bounded.** Server-side `statement_timeout`, `lock_timeout` and
-`idle_in_transaction_session_timeout` are set, and the migration lock acquire is bounded via a
-transaction-scoped `SET LOCAL`, raising `MigrationLockTimeoutError` rather than hanging forever.
+The `core` entry's settings, the main ones (`GET /config` shows them all, with their defaults):
 
-**Verified by killing it.** The crash suite kills the process *and*, separately, Postgres, mid-save ,
-including an **unclean** postmaster kill (SIGQUIT) followed by crash recovery, under both
-`synchronous_commit = on` and `off`. Under `off`, losing a tail of acked commits is acceptable;
-an inverted durability order is a failure. These run in required CI, enforced by test id, so a
-re-introduced skip turns the build red by name rather than passing silently.
-
----
-
-## Errors and retryability
-
-Every error is a `StorageError` subclass with a stable `code` and a machine-readable `retryable`
-field. **24 codes**, of which exactly four are retryable:
-
-```
-CONNECTION_ERROR · TRANSACTION_FAULT · LEASE_TIMEOUT · MIGRATION_LOCK_TIMEOUT
-```
-
-```ts
-try {
-  await kv.put(namespace, scope, key, value);
-} catch (e) {
-  if (e instanceof StorageError && e.retryable === "retryable") { /* safe to retry */ }
-}
-```
-
-`retryable` is a string (`"retryable"`, `"non-retryable"`, `"conditional"`), so compare it. A bare
-`if (e.retryable)` is true for every `StorageError`.
-
-The catalog in [`docs/ERROR-CATALOG.md`](docs/ERROR-CATALOG.md) is not maintained by hand, a drift
-test derives it from the exported classes with no hard-coded count, and fails CI if the table, the
-CHANGELOG and the exported surface disagree.
-
-**Known limitation:** Postgres `28xxx` authentication failures currently surface as a retryable
-`ConnectionError`. Bound your retries accordingly. A distinct `AuthenticationError` is an additive
-1.1 candidate, it was deliberately *not* added during the surface freeze, because a freeze freezes
-the existing surface rather than adding behaviour to it.
-
----
-
-## Verification: what is proved, checked, and tested
-
-UmbraDB has a formal storage algebra ([`Formal/STORAGE_ALGEBRA.md`](Formal/STORAGE_ALGEBRA.md)) of
-nine laws, two of which split, giving eleven obligations. Three verification methods apply, and they
-are not interchangeable:
-
-| Status | Method | Strength |
+| Setting | Default | |
 |---|---|---|
-| `PROVED` | Lean 4 + mathlib, CI-gated | unbounded, for the abstract model |
-| `MODEL-CHECKED` | Quint (planned: `v1.1.0-quint-model-checking`) | bounded, no counterexample up to N |
-| `RUNTIME-TESTED` | P1–P10 property tests vs real Postgres | sampled, on the real adapter |
+| `network` | | `mainnet`, `preprod`, `preview`, `stagenet`, or `custom` with `genesisHash` |
+| `node` | | The node's WebSocket URL (secret) |
+| `database` | | The database as parts, PostgreSQL or PGlite (below); only `password` is secret |
+| `developmentOptIn` | `false` | Required for PGlite and for development-only modules |
+| `listen.admin` | `0.0.0.0:8081` | The admin endpoints |
+| `listen.api` | none | The module API; without it, no module API is served |
+| `listen.transport` | none | The private processes' transport |
+| `transportReader` | none | The login of the transport's reads; required with `listen.transport` on PostgreSQL |
+| `readinessLag` | none | `/health/ready` answers 503 while the lag is above it |
+| `followingThreshold` | `3` | The lag at or below which the state is `following` |
+| `backupAtStop` | none | A file the process writes a backup to at the core's `stop` |
+| `backupOnSignal` | none | A file the process writes a backup to on SIGUSR2, without stopping |
+| `retainStates` | `0` | Ledger states kept before the latest (`core-ledger-state`) |
+| `livenessTimeoutMs` | `30000` | `/health/live` answers 503 when the main loop is stuck longer |
+| `slowBlockMs` | `60000` | The `slow-block` condition after a height runs longer |
+| `apiReadTimeoutMs` | `30000` | A module API request's read, on PostgreSQL (504 `query-timeout`) |
 
-| Law | Status |
+The database's parts: `{ kind: "postgres", host, port, user, password, name, ssl }`, `{ kind: "pglite", path }` or
+`{ kind: "pglite", memory: true }`. A PostgreSQL database's `port` is 5432 unless given, and `ssl` is `disable`,
+`require` or `verify-full`: `disable` by default for `localhost`, `127.0.0.1`, `::1` or a socket directory, `require`
+for any other host. The [operator guide](docs/operator-guide.md#the-database) describes each part, TLS and the
+transport reader's login.
+
+## The `umbradb` command
+
+- `umbradb run [--config <file>] [--update-hash=<hash>]`: runs the process of the configuration until SIGTERM or
+  SIGINT, which let the height in progress finish. `--update-hash` accepts a changed public configuration on a private
+  process ([Private processes](#private-processes-briefly)).
+- `umbradb config check <file> [--database]`: type-checks and validates the file without starting anything; with
+  `--database`, also checks it against the configuration history of the database the file names, read-only.
+- `umbradb backup --out <file> [--config <file>]`: writes a backup of the configuration's database.
+- `umbradb restore <file> [--config <file>]`: restores a backup into the configuration's database, which must be
+  empty.
+- `umbradb --help`: the usage.
+
+`--config` defaults to `umbradb.config.ts` in the working directory.
+
+```sh
+npx umbradb backup --out preview-10000.backup                            # umbradb.config.ts's database
+npx umbradb restore preview-10000.backup --config restored.config.ts     # into an empty database
+```
+
+| Exit | `run` | `config check` | `backup` | `restore` |
+|---|---|---|---|---|
+| 0 | Stopped by a signal | Every check passed | Written | Committed |
+| 1 | Startup refused, or processing halted | A finding, or the check could not finish | Refused | Refused |
+| 2 | Wrong argument | Wrong argument | Wrong argument | Wrong argument |
+
+`run` exits 1 at once, without a signal, when the configuration cannot be loaded or fails its schemas. A refused
+backup writes no file, and a refused restore commits nothing. No command or an unknown one prints the usage and exits
+2; 3 is kept for a command a build does not provide.
+
+## Backup and restore
+
+**What a backup holds.** A `pg_dump` file in plain SQL (`--inserts --no-owner --no-privileges`): every table of the
+database at one committed height, so whole blocks only. Its first line is UmbraDB's manifest: the chain's genesis hash,
+S, the height and its block hash, the ledger state root (with `core-ledger-state`), the configuration history, the
+applied migrations with their checksums, the contents hash, and the PostgreSQL, UmbraDB and tool versions. Use a backup
+to move an indexer, or to start a new one mid-chain without syncing from genesis. To check that two databases agree,
+compare their digests and contents hashes (`/status`), not their files. Every backup file is created owner-only
+(`0600`); UmbraDB neither encrypts nor signs it, so storing, moving and encrypting backups is the operator's.
+
+**Taking one.**
+
+```sh
+npx umbradb backup --out preview-10000.backup [--config umbradb.config.ts]
+```
+
+```text
+umbradb backup: wrote …/preview-10000.backup: height 10000, contents hash 0x5f7b75c9…, pglite-tools 18.6
+```
+
+- **PostgreSQL:** runs PostgreSQL 18's `pg_dump` (on `PATH`, or `UMBRADB_PG_DUMP=/path/to/pg_dump`) beside the running
+  indexer, in one snapshot. Without it: `backup-tools-missing`, naming what to install.
+- **PGlite:** needs `npm install @electric-sql/pglite-tools@0.4.10`. A PGlite directory opens in one process at a time,
+  so the command refuses with `writer-lock-held` while the indexer runs on it.
+- **From a running process:** set `backupOnSignal: "<file>"` in the `core` entry and send `kill -USR2 <pid>`: the
+  process writes a backup at its next pause between heights, then continues. This is how to back up a running PGlite
+  indexer from a shell.
+- **At the core's stop:** set `backupAtStop: "<file>"`; the process writes the backup right after its `stop` height
+  commits, and keeps serving that height.
+- **A private process's database** is not backed up without the development opt-in (`private-backup-refused`).
+
+**Restoring one.**
+
+```sh
+npx umbradb restore preview-10000.backup [--config umbradb.config.ts]
+```
+
+```text
+umbradb restore: restored …/preview-10000.backup: height 10000, contents hash 0x5f7b75c9…; the database resumes
+from 10001
+```
+
+**Restore only backups you wrote, or trust.** A restore runs the file's SQL with the writer's rights — the database
+login's — before its checks after loading can refuse it. The checks catch a damaged backup or one from another chain;
+they do not make a hostile file safe. The [threat model](docs/THREAT_MODEL.md#backups-and-restore) says what such a
+file can do.
+
+The target must be empty: a new PostgreSQL database, or a PGlite directory with no database in it. The configuration
+must be the one the backup's indexer ran with, up to the backup's height (later revisions are allowed), and its build
+must carry the versions and migrations the backup's database used. The command reads the configuration's node, and
+refuses, leaving the target as it was, with:
+
+| Code | Why |
 |---|---|
-| T3 temporal projection, T5 coherence, W1 last-write-wins, C1 chunk semilattice | **`PROVED`** (the frozen 1.0 cut-line) |
-| T1 per-key, T2 CAS, T4 dual-addressing | `PROVED` (in-tree) |
-| C2a GC safety, L1 lease mutex | `RUNTIME-TESTED` only (P8, P10), model checking planned |
-| C2b eventual collection | mechanism tested; **liveness not verified** |
-| T1 cross-writer | **OPEN** |
-| abstract → PostgreSQL refinement | **unmechanized**, trusted |
+| `restore-target-not-empty` | The target holds a schema, or anything in `public` |
+| `backup-format-unknown` | Not a format-1 backup, or it holds SQL a restore does not run |
+| `backup-history-mismatch` | The configuration's S or history up to the backup's height differs from the backup's |
+| `backup-build-mismatch` | The build lacks an entry's version or a migration the backup applied |
+| `backup-genesis-mismatch` | The node serves another chain |
+| `backup-block-not-finalized` | The node has not finalized the backup's block, or finalized another at its height |
+| `contents-hash-mismatch` | The restored data is not what the manifest says |
+| `backup-root-mismatch` | With `core-ledger-state`, the restored ledger state root is not the node's |
 
-Two things this table is careful about:
+The first six are checked before loading; the last two after, inside the restore's one transaction, which then rolls
+back. An interrupted restore leaves the target empty. Then `umbradb run` with the same configuration resumes from the
+backup's height + 1. A private process's backup is restored the same way with the private configuration, checked
+against its public database instead of a node ([operator guide](docs/operator-guide.md#restoring-a-backup)).
 
-**`0 sorry` certifies depth, not breadth.** The Lean trust gate scans the whole tree for
-`sorry`/`admit`/`axiom`/`unsafe`, then builds and independently re-checks every declaration. That
-proves *what is stated* is proved. It cannot detect a law that was never stated.
+## Admin endpoints and process states
 
-**The refinement gap is not an oversight.** No theorem relates any Lean definition to SQL DDL, a
-trigger, `clock_timestamp()`, or the TypeScript adapter. Following the AWS TLA+ precedent, the
-adapter is a trusted, unmechanized refinement, bridged empirically by the P1–P10 property tests
-running against real Postgres via Testcontainers.
+The admin endpoints listen on `listen.admin` (default `0.0.0.0:8081`: set `127.0.0.1:8081` to keep them local). They
+run in a worker thread of their own, so they answer while a block holds the database.
 
----
+- `GET /health/live`: 200 while the process's main loop ticks within `livenessTimeoutMs`, in every state; 503 when
+  it is stuck.
+- `GET /health/ready`: 200 when the process should get traffic: `syncing` or `following` within `readinessLag` (if
+  set), or `stopped`; 503 otherwise.
+- `GET /status`: the state, conditions, cursor, node head and lag; the `reason` of a refusal or halt (its code,
+  height, module and point); the node; every module with its tables' digests; the ledger; the private instances.
+- `GET /config`: the configuration as validated (secrets `[redacted]`), its history, every module's declaration
+  without its callbacks, the chain, the ledger table, the database.
 
-## Schema and migrations
+A process is in one state at a time:
 
-Forward-only, lineage `000` → `006`, applied by `runMigrations` under a bounded advisory lock. There
-is no down-migration: rolling back means restoring a backup. `schema` is a **namespace, not a
-security boundary**, see [Security](#security).
+- `starting`: startup (the checks, the migrations, `on-start-db`, `on-start-api`). Wait; a `waiting-for-node`
+  condition says what it waits for.
+- `refused`: startup refused; the process stays up and live. Read `reason` and the log, fix the cause, restart.
+- `syncing`: processing, the lag above `followingThreshold` (3). Wait.
+- `following`: processing, the lag at or below it.
+- `stopped`: at the core's `stop`, or before an upgrade boundary; it serves reads at its height. Raise or remove
+  `stop`, or deploy the build that an `upgrade-required` condition asks for.
+- `halted`: a callback or a check failed, and nothing of that height was stored; the API serves the last committed
+  height. Read `reason` and the log, fix the cause, restart.
+- `stopping`: after SIGTERM or SIGINT, the height in progress finishes. A second signal ends the process at once.
 
-Full reference: [`docs/SCHEMA.md`](docs/SCHEMA.md), contracts in [`docs/CONTRACT.md`](docs/CONTRACT.md).
+A configuration that cannot be loaded or fails its schemas is no state: `umbradb run` logs every finding with its path
+and exits 1 at once, without opening the admin listener.
 
-## Performance and ceilings
+| Condition | Meaning |
+|---|---|
+| `waiting-for-node` | Startup waits for the node's finalized head to reach S (a new database) or the cursor |
+| `node-retrying` | The node is unreachable; retried with back-off up to `backoffCeilingMs`, never a failure |
+| `database-retrying` | The database connection was lost; retried |
+| `finality-stall` | `tipCap` best blocks are queued and none is finalized: the node's finality has stalled |
+| `slow-block` | The height in progress has run longer than `slowBlockMs`; names the point and module |
+| `upgrade-required` | The next height's revision needs a module version this build lacks; it stops before it |
+| `waiting-for-lockstep` | The core waits for a lockstep private instance to commit the height |
+| `paused` | The loop is paused between two heights, by a host program or for a backup on SIGUSR2 |
 
-A committed benchmark baseline (`bench/baseline.1.0.0-perf-baseline.1.json`) covers versioned KV
-throughput/latency, checkpoint save/load/dedup ratio, GC pass duration as the chunk store grows, and
-lease contention. Hot paths are batched: chunk and junction inserts are multi-row, and `history()`
-is a single grouped query rather than N+1.
+## Module API and its headers
 
-**No performance number gates a release**, only that a reproducible baseline exists. Documented
-scalability ceilings (SC-1…SC-6) are in [`Performance/CEILINGS.md`](Performance/CEILINGS.md); the GC
-anti-join curve is measured to 10⁶ chunks in the baseline artifact.
+The module API listens on `listen.api` (none unless set): HTTP, and WebSocket subscriptions on the same port. Its
+routes and subscriptions are the modules' own, registered in their `on-start-api`; UmbraDB adds none. A request reads
+the latest committed height.
 
-## Security
+Headers UmbraDB adds to every answer:
 
-Read [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) before deploying. The load-bearing points:
+- `X-Umbra-Version`: the build's version.
+- `X-Umbra-Config-Hash`: the hash of the process's configuration data. It changes only when the process restarts with
+  other configuration data, and holds no secret.
 
-- **Single trusted writer.** The threat model assumes one writer that is trusted.
-- **`schema` is namespacing, not a tenant boundary.** Do not use it to isolate mutually distrusting
-  parties.
-- **No at-rest encryption.** This is a *binding deployer precondition*: anyone who can read the
-  Postgres data files, a backup, or a replica reads your data in the clear. Encrypt the substrate.
-- **Cross-wallet dedup is a side channel.** The global chunk pool means storing a chunk reveals
-  whether an identical chunk already exists. Under the single-writer model both channels require
-  already being the writer; per-wallet keyed chunking is a 1.1 item.
+Headers a module writes with the helpers (`answerChainData`, `chainDataHeaders`; `withViewExtensions` puts the same in
+a GraphQL response's `extensions`):
 
-## What UmbraDB is not
+- `X-Umbra-View`: `finalized`, the only view of this version.
+- `X-Umbra-Height` and `X-Umbra-Hash`: the committed height the request read, and its block hash.
 
-- **Not an ORM or query builder.** Five narrow interfaces, not "do anything with Postgres".
-- **Not distributed or multi-node.** Single writer, single Postgres instance.
-- **Not multi-tenant.** See the schema/dedup caveats above.
-- **Not a chain indexer.** It stores what a client gives it and stays indexer-agnostic.
-- **Not encrypted at rest.**
+```text
+$ curl -i http://127.0.0.1:18080/stats-module/latest
+HTTP/1.1 200 OK
+X-Umbra-View: finalized
+X-Umbra-Height: 10000
+X-Umbra-Hash: 0xc624be4b97369a7ae10c73dd6f1fa8e3f7981aa2a0a289300afebe2db4284c1b
+X-Umbra-Version: 0.10.0
+X-Umbra-Config-Hash: 0xbe1cfe852fbf5c1ca04b855da86b697bf9d5bba861330d83f9e1834d7a7d12f7
+{"height":"10000","hash":"0xc624…","block_time":"2026-07-17T08:06:48.001Z","tx_count":0,"total_tx":"290",…}
+```
 
----
+UmbraDB's own errors are `{ "error": { "code", "message" } }`: 400 `invalid-request`, 404 `not-found`, 405
+`method-not-allowed`, 413 `request-too-large` (over 1 MiB), 500 `internal-error` (a handler that threw), 503
+`no-committed-height` (before the first block commits), 504 `query-timeout`.
 
-## Status
+Subscriptions are JSON messages over WebSocket, on any path:
 
-**Current release: `0.9.5`: "Penumbra".**
+```text
+→ {"type":"subscribe","id":"s1","name":"stats-module-blocks","args":{"minTx":0}}
+← {"type":"subscribed","id":"s1"}
+← {"type":"next","id":"s1","value":{"height":"252","hash":"0xd445…","tx_count":0,"failed_count":0,"total_tx":"59"}}
+→ {"type":"unsubscribe","id":"s1"}
+← {"type":"complete","id":"s1"}
+```
 
-All twenty gate items of the 1.0.0 program (G1–G20) are merged, across five OpenSpec changes covering
-the public-surface freeze, durable checkpoint cursor, recovery testing, performance baseline and
-security sign-off. `0.9.5` ships that code.
+## UmbraDB node architecture
 
-*An umbra is the total shadow; a penumbra is the partial shadow you pass through immediately before
-totality. 0.9.5 is that phase, the surface is real, the SemVer promise is not yet binding. 1.0.0 is
-"Totality".*
+A process reads the Midnight node on two paths. Best blocks, not yet final, are worked on early and never stored.
+Each finalized height is processed in one database transaction, then the loop goes back to the node for the next.
+Module callbacks (`on-*`) run at fixed points on these paths:
 
-**What 1.0.0 additionally requires:** a full local sync of UmbraDB against Midnight, archive node →
-local indexer → UmbraDB, end to end, demonstrated on infrastructure we run rather than a hosted
-indexer we call. Progress and rationale: [`ROADMAP.md`](ROADMAP.md) § "What blocks 1.0.0".
+```mermaid
+flowchart TD
+  startdb["on-start-db"] --> startapi["on-start-api"]
+  startapi --> node(["Midnight node"])
+  node -- new best block --> best["on-best-block"]
+  best --> bestfetch["on-fetch, on-parse"]
+  bestfetch --> rollback["on-rollback"]
+  node -- new finalized head --> fin["on-finalized"]
+  fin --> fetch["on-fetch, on-parse"]
+  bestfetch -. reused at finality .-> fetch
+  fetch --> starth["on-start-height"]
+  starth --> compute["on-compute"]
+  compute --> write["on-db-write<br/>one transaction"]
+  write --> after["on-after-db-write"]
+  after -- next height, or wait --> node
+  after -. once .-> stoph["on-stop-height"]
+  classDef unfinalized fill:#EEEDFE,stroke:#534AB7,color:#3C3489
+  classDef finalized fill:#E1F5EE,stroke:#0F6E56,color:#085041
+  class best,bestfetch,rollback unfinalized
+  class fin,fetch,starth,compute,write,after,stoph finalized
+```
 
-**Next:** [Quint model checking](openspec/changes/v1.1.0-quint-model-checking/) for C2a, C2b, L1 and
-cross-writer T1, the concurrency and liveness laws a sequential proof model handles badly.
+[UmbraDB node architecture](docs/node-architecture.md) explains each step: the best-block queue and rollbacks, the
+prefetch, the block transaction, failures, and private processes.
 
-- Roadmap: [`ROADMAP.md`](ROADMAP.md) · Stability policy: [`docs/STABILITY.md`](docs/STABILITY.md)
-- Changelog: [`CHANGELOG.md`](CHANGELOG.md) · Release records: [`docs/releases/`](docs/releases/)
+## Modules, briefly
 
-## License
+A module is one `defineModule({ … })` declaration in TypeScript:
 
-Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+- `id` and `version`; the id is also its database schema (`-` becomes `_`) and role.
+- `requires` and `provides`: the named items it reads and offers (a block's parsed transactions, a table, a process
+  value). Startup orders the modules by them, and refuses a missing provider or a cycle before any block.
+- `migrations`: the SQL of its tables, run once each and checksummed. Tables follow a deterministic subset of
+  PostgreSQL (a primary key, no floats, no `now()` defaults), so every machine holds the same rows.
+- `configSchema`: its settings, a zod object, each field `data`, `operational` or `secret`.
+- `points`: its callbacks. At startup `on-start-db` and `on-start-api`; for each finalized height `on-fetch`,
+  `on-parse`, `on-compute`, `on-db-write` (inside the block's transaction) and `on-after-db-write` (after the commit).
+  A callback that throws halts processing, and nothing of that height is stored.
+
+Modules are trusted code: database roles stop one from writing another's tables by mistake, and nothing more.
+
+UmbraDB's core modules provide the chain data; each runs only where the configuration has an entry for it:
+
+| Core module | Stores |
+|---|---|
+| `core-chain-events` | Each block's chain events: pallet, name, fields |
+| `core-block-parsed` | Each block's transactions: hash, kind, size, segments |
+| `core-tx-results` | Each transaction's outcome: success, partial or failure |
+| `core-ledger-state` | The ledger state per height; checks the state root every block |
+| `core-contract-states` | Contract state keys per height |
+| `core-contract-logs-full`, `core-contract-logs-fast` | Contract logs; the fast one is for development |
+
+The blocks table (`core_block_commit.blocks`) and the digests are always there. To build a module, read the
+[module guide](docs/module-guide.md).
+
+## Example: loading `stats-module`
+
+`stats-module` stores one row per height (the block's hash, how many transactions it carried, how many failed, and a
+running total) and serves the rows over HTTP and a subscription. Its code is in
+[`examples/stats-module/`](examples/stats-module/), with `stats-module.ts`, `umbradb.config.ts`, `run.sh` and `try.sh`;
+the [module guide](docs/module-guide.md) walks through it. It imports from `"umbradb"`:
+
+```ts
+import { z } from "zod";
+import { answerChainData, defineModule, type ParsedTransaction, type ReadHandle } from "umbradb";
+
+export const statsModule = defineModule({
+  id: "stats-module", // its schema is stats_module
+  version: "1.0.0",
+  side: "public",
+  requires: ["blocks", "block-parsed", "tx-results"],
+  // …provides, startsMidChain, configSchema, migrations, points: see the file
+});
+```
+
+Its configuration loads it in two places: the `modules` export puts it in the build, and its entry runs it from a
+height with its settings. It needs `block-parsed` and `tx-results`, so the configuration enables `core-block-parsed`
+and `core-tx-results`, and `core-chain-events`, which both require:
+
+```ts
+import { CORE_BLOCK_PARSED, CORE_CHAIN_EVENTS, CORE_TX_RESULTS, coreEntry, defineConfig } from "umbradb";
+import { statsModule } from "./stats-module.ts";
+
+export const modules = [statsModule];
+
+export default defineConfig({
+  entries: [
+    coreEntry({
+      start: 0,
+      config: {
+        network: "preview",
+        node: "wss://rpc.preview.midnight.network",
+        database: { kind: "pglite", path: "data/preview" },
+        listen: { api: "127.0.0.1:18080", admin: "127.0.0.1:18081" },
+        developmentOptIn: true,
+      },
+    }),
+    CORE_CHAIN_EVENTS.entry({ start: 0, config: {} }),
+    CORE_BLOCK_PARSED.entry({ start: 0, config: {} }),
+    CORE_TX_RESULTS.entry({ start: 0, config: {} }),
+    statsModule.entry({ start: 0, config: { countSystem: true, recentLimit: 5 } }),
+  ],
+});
+```
+
+From the repository, after `npm ci && npm run build`:
+
+```sh
+cd examples/stats-module
+./run.sh check                                         # umbradb config check umbradb.config.ts
+./run.sh                                               # umbradb run
+curl -i http://127.0.0.1:18080/stats-module/latest     # from a second terminal; ./try.sh sends more
+```
+
+Its routes: `GET /stats-module/latest`, `GET /stats-module/blocks/:height`, `GET /stats-module/recent?limit=N`, and the
+subscription `stats-module-blocks` (`args: { "minTx": n }`). At height 10,000 of preview:
+
+```text
+$ curl http://127.0.0.1:18080/stats-module/recent?limit=2
+{"blocks":[{"height":"9998","hash":"0x1a8c…","block_time":"2026-07-17T08:06:36Z","tx_count":1,"total_tx":"290",…},
+           {"height":"9997","hash":"0x4580…","block_time":"2026-07-17T08:06:30Z","tx_count":1,"total_tx":"289",…}]}
+
+$ curl http://127.0.0.1:18080/stats-module/blocks/abc
+{"error":"bad-height","message":"a height is a whole number"}
+```
+
+`countSystem` is a `data` setting: changing it in the entry from 0 after the process ran is refused (with the process
+stopped, `umbradb config check umbradb.config.ts --database` reports `changes-past`). Add a revision from a future
+height instead: `statsModule.entry({ start: 10001, config: { countSystem: false } })`.
+
+## Private processes, briefly
+
+A private process runs `side: "private"` modules apart from the public one: another `umbradb run`, with its own
+database. It never talks to the node: it takes each height from the public database once the public process has
+committed it. The public database stays shareable; what the private modules derive stays in the private database.
+UmbraDB takes no keys itself: a private module takes them through its `secret` settings or its own API.
+
+Its `core` entry has an `instanceId` and no `node`, and reaches the public data directly (`publicDatabase`, a
+PostgreSQL database's parts), through the public process's transport (`coreTransport`, the public `listen.transport`),
+or both:
+
+```ts
+coreEntry({
+  start: 0, // not below the public process's S
+  config: {
+    network: "preview",
+    instanceId: "wallet-a",
+    database: { kind: "postgres", host: "db.internal", user: "wallet_a", password: "…", name: "umbradb_wallet_a" },
+    publicDatabase: { kind: "postgres", host: "db.internal", user: "reader", password: "…", name: "umbradb" },
+    coreTransport: "127.0.0.1:9100",
+    listen: { api: "127.0.0.1:18180", admin: "127.0.0.1:18181" },
+  },
+}),
+```
+
+- **Binding.** A private database is bound to the public database it first started against
+  (`private-binding-mismatch` for another).
+- **Lockstep.** A module that reads mutable public tables declares `needsLockstep: true`. Its instance must be listed
+  in the public `core` entry's `lockstepInstances` and connect through `coreTransport`; the public process then waits
+  for it at each height (`waiting-for-lockstep`), and an instance that falls behind halts with `lockstep-behind`.
+  Other instances run independently, as far behind as they need.
+- **Reads only.** The public process runs a private process's reads on its `transportReader` login, which may only
+  read, and refuses any statement that is not one read (`read-refused`).
+- **The public configuration hash.** Every module API answer and every message the public process sends on the
+  transport carries its configuration hash, and a private process keeps the one it accepted. When the public process
+  restarts with other configuration data, a private process halts with `public-config-changed`, and each later start
+  stops the same way, naming the new hash; check that the public side still provides what the private modules read,
+  then start it once with `umbradb run --update-hash=<hash>`.
+
+## Project status, development and links
+
+**Status.** Pre-1.0: version `0.10.0`. Under SemVer a `0.y.z` release makes no compatibility promise.
+
+**Roadmap.** The [ROADMAP](ROADMAP.md) says where the project stands and what comes next: feature modules built on
+the core, each with its own specification. Wallet and dApp APIs compatible with the official indexer, token metadata
+(MIP-0018), unshielded and shielded token state, fast DUST and shielded sync, private wallet data, a JSON-RPC for
+Passport, an explorer, and private user secrets.
+
+**Breaking change from 0.9.5.** 0.9.5 was a PostgreSQL storage library for wallet state. 0.10.0 is the indexer: no
+0.9.5 export or database is carried over; the indexer starts a new database. The [CHANGELOG](CHANGELOG.md) lists what
+changed. The specification is the OpenSpec change [`core-arch`](openspec/changes/core-arch/) (`proposal.md`,
+`design.md`, the capability specs), and the [operator guide](docs/operator-guide.md) covers running it.
+
+**Security.** Read the [threat model](docs/THREAT_MODEL.md) and the [security policy](SECURITY.md) before deploying:
+modules and configuration files are trusted code, the node is trusted for what it says is finalized, and a restore
+runs its file's SQL. Report vulnerabilities through GitHub's private vulnerability reporting, not public issues.
+
+**Building.** [Building from source](docs/building-from-source.md) covers the build, packing your own tarball, and
+running from a clone.
+
+**Tests.**
+
+```sh
+npm test                    # vitest
+npm run test:conformance    # the required gate: every suite with coverage floors, and every required test run
+```
+
+The PostgreSQL suites run PostgreSQL 18 in Docker (Testcontainers); the browser suites drive the machine's Chrome
+headless (`UMBRADB_CHROME` names another).
+
+Recorded tapes: [releases](https://github.com/midnight-experiments/umbradb-tapes/releases) ·
+[v0.10.0-rc.1](https://github.com/midnight-experiments/umbradb-tapes/releases/tag/v0.10.0-rc.1).
+Set `UMBRADB_TAPES` to the download directory; see the [fixture note](openspec/changes/core-arch/acceptance.md) for filenames.
+
+**Knowledge graph.** The code, docs and specs are graphified in `graphify-out/`, committed. `npm run graph:refresh`
+rebuilds it; commit the result with the change that prompted it. `npm run graph:check` exits 0 when it is current, 1
+when stale, 2 when missing or not written by `graph:refresh`.
+
+- [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
+- Issues: [github.com/midnightntwrk/umbradb/issues](https://github.com/midnightntwrk/umbradb/issues).
+- License: Apache License 2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)).

@@ -1,0 +1,535 @@
+import { setTimeout as sleep } from "node:timers/promises";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { BlockItemSource } from "../../src/backbone/core-block-fetch/index.js";
+import { UmbraError } from "../../src/db/errors.js";
+import { backoffDelay } from "../../src/node/backoff.js";
+import { NodeClient, type NodeClientOptions, type NodeRetry } from "../../src/node/client.js";
+import type { ModuleDeclaration } from "../../src/modules/declaration.js";
+import type { BlockRef, BlockSource } from "../../src/runner/block-source.js";
+import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
+import type { ProcessHandle, ProcessStatus } from "../../src/runner/process.js";
+import { createdDirectory, cursorIn, pairs, PROCESS_BACKENDS, type ProcessDatabase } from "./process-backends.js";
+import { core, entryOf, loggingModule, settle, startProcess, testBuild } from "./process-build.js";
+
+/**
+ * What the process retries instead of halting: a lost database connection (`connection-lost`) and an unreachable node
+ * (`node-unreachable`), the two retryable codes. They are retried wherever they come from: a callback's statement, the
+ * block transaction, the loop's cursor read, startup's steps after the database opened. Any other error halts.
+ * [IN-10, RN-8, DB-11, DB-13; CORE-ARCH §4.6]
+ *
+ * The process raises the condition `database-retrying` or `node-retrying` (with the attempts and the height), waits
+ * the back-off (1 s, doubling up to the process revision's `backoffCeilingMs`) and runs again:
+ * - a height whose transaction was lost after its `on-compute` began is processed again from `on-compute`, keeping its
+ *   items from before it (`recovery.test.ts`) [IN-10];
+ * - any other failure runs the loop again from the cursor, whose callbacks it delivers again [RN-11].
+ *
+ * The condition clears once a height commits or the loop finds nothing to process. A stop ends the wait at once. A
+ * writer that finds its lock taken when it reconnects halts for good (`writer-lock-lost`). The terminated connections
+ * are PostgreSQL's; PGlite has none to lose. [DB-11]
+ */
+
+const HEAD = 5n;
+/** The back-off ceiling the retries run with here: 20 ms, so no test waits the back-off's seconds. [IN-10] */
+const CEILING = 20;
+
+/** A block source over `source` whose methods may fail first (`fail` decides per call, by method and height). */
+function flakySource(
+  source: InMemoryBlockSource,
+  fail: (method: "cursor" | "block", height: bigint | null) => Error | undefined,
+): BlockSource & BlockItemSource {
+  return {
+    cursor: async (read) => {
+      const error = fail("cursor", null);
+      if (error !== undefined) throw error;
+      return source.cursor(read);
+    },
+    finalizedHead: () => source.finalizedHead(),
+    waitForHead: (above, signal) => source.waitForHead(above, signal),
+    // core-block-fetch's items, as the source gives them.
+    blockItems: (block: BlockRef) => source.blockItems(block),
+    block: async (height) => {
+      const error = fail("block", height);
+      if (error !== undefined) throw error;
+      return source.block(height);
+    },
+  };
+}
+
+/** Starts a build of `user` on `db`, `extra` in the `core` entry; the handle and its log lines. */
+function start(
+  db: ProcessDatabase,
+  user: readonly ModuleDeclaration[],
+  source: BlockSource,
+  extra: Readonly<Record<string, unknown>> = { backoffCeilingMs: CEILING },
+): { readonly handle: ProcessHandle; readonly lines: string[] } {
+  const build = testBuild(user);
+  const lines: string[] = [];
+  const handle = startProcess({
+    declarations: build.declarations,
+    config: { data: { entries: [core(db.setting, 1, { extra }), ...user.map((part) => entryOf(part, 1))] } },
+    source,
+    log: (line) => createdDirectory(line) || lines.push(line),
+  });
+  return { handle, lines };
+}
+
+/** Module `w`: two rows per height in `on-db-write`; `hold(height)`, awaited after the first row, may hold it there. */
+function twoRows(log: string[], hold: (height: bigint) => Promise<void> = async () => undefined): ModuleDeclaration {
+  return loggingModule("w", log, ["on-after-db-write"], {
+    migrations: [{ id: "001", sql: "CREATE TABLE w.rows (height bigint, part integer, PRIMARY KEY (height, part))" }],
+    points: {
+      ...loggingModule("w", log, ["on-after-db-write"]).points,
+      async "on-db-write"(_p, b, w) {
+        log.push(`w on-db-write@${b.height}`);
+        await w.execute("INSERT INTO w.rows (height, part) VALUES ($1, 1)", [b.height]);
+        await hold(b.height);
+        await w.execute("INSERT INTO w.rows (height, part) VALUES ($1, 2)", [b.height]);
+      },
+    },
+  });
+}
+
+/** A promise and its resolver. */
+function signal(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const retryLine = (where: "processing" | "startup", code: string, attempt: number) =>
+  new RegExp(`^${where} retries in ${CEILING} ms \\(${code}, attempt ${attempt}\\): `);
+
+describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop(), 60_000);
+
+  it("an unreachable node is retried with node-retrying and the back-off, then every height runs once", async () => {
+    const db = await backend.database();
+    const log: string[] = [];
+    const seen: ProcessStatus[] = [];
+    let failures = 0;
+    let handle!: ProcessHandle;
+    const source = new InMemoryBlockSource({ head: HEAD });
+    // Block 3 fails twice, then block 5 — the head — twice: the commit of 3 started the count again.
+    const flaky = flakySource(source, (method, height) => {
+      if (method !== "block" || (height !== 3n && height !== 5n)) return undefined;
+      seen.push(handle.status());
+      if (height === 3n) return failures++ < 2 ? new UmbraError("node-unreachable", "the node did not answer for block 3") : undefined;
+      return failures++ < 5 ? new UmbraError("node-unreachable", "the node did not answer for block 5") : undefined;
+    });
+    const started = start(db, [loggingModule("w", log, ["on-db-write", "on-after-db-write"])], flaky);
+    handle = started.handle;
+    try {
+      expect(await settle(handle, source, HEAD)).toBe("waiting");
+      expect(seen.map((status) => status.conditions)).toEqual([
+        [],
+        [{ code: "node-retrying", attempts: 1, height: 3n }],
+        [{ code: "node-retrying", attempts: 2, height: 3n }],
+        [],
+        [{ code: "node-retrying", attempts: 1, height: 5n }],
+        [{ code: "node-retrying", attempts: 2, height: 5n }],
+      ]);
+      expect(Object.isFrozen(seen[1]?.conditions[0])).toBe(true);
+      expect(handle.status()).toMatchObject({ state: "following", conditions: [], cursor: HEAD, reason: null, ended: null });
+    } finally {
+      await handle.stop();
+    }
+    expect(started.lines).toHaveLength(4);
+    expect(started.lines[0]).toMatch(retryLine("processing", "node-retrying", 1));
+    expect(started.lines[1]).toMatch(retryLine("processing", "node-retrying", 2));
+    expect(started.lines[2]).toMatch(retryLine("processing", "node-retrying", 1));
+    expect(started.lines[3]).toMatch(retryLine("processing", "node-retrying", 2));
+    expect(started.lines[0]).toContain("the node did not answer for block 3");
+    expect(started.lines[2]).toContain("the node did not answer for block 5");
+    // Each height written once; the cursor's on-after-db-write delivered again at each retry. [RN-11]
+    expect(log).toEqual([
+      "w on-db-write@1",
+      "w on-after-db-write@1",
+      "w on-db-write@2",
+      "w on-after-db-write@2",
+      "w on-after-db-write@2",
+      "w on-after-db-write@2",
+      "w on-db-write@3",
+      "w on-after-db-write@3",
+      "w on-db-write@4",
+      "w on-after-db-write@4",
+      "w on-after-db-write@4",
+      "w on-after-db-write@4",
+      "w on-db-write@5",
+      "w on-after-db-write@5",
+    ]);
+    expect(await cursorIn(db)).toBe(5);
+  }, 180_000);
+
+  it("a node unreachable in on-compute of h is retried with node-retrying; h is processed again from on-compute, not fetched or parsed again (task 10.4)", async () => {
+    const db = await backend.database();
+    const log: string[] = [];
+    const seen: ProcessStatus[] = [];
+    let handle!: ProcessHandle;
+    const base = loggingModule("w", log, ["on-fetch", "on-parse", "on-db-write", "on-after-db-write"]);
+    const w = loggingModule("w", log, [], {
+      points: {
+        ...base.points,
+        async "on-compute"(_p, b) {
+          log.push(`w on-compute@${b.height}`);
+          if (b.height !== 3n) return;
+          if (log.filter((line) => line === "w on-compute@3").length === 1) {
+            throw new UmbraError("node-unreachable", "the node did not answer in on-compute");
+          }
+          seen.push(handle.status());
+        },
+      },
+    });
+    const source = new InMemoryBlockSource({ head: HEAD });
+    const started = start(db, [w], source);
+    handle = started.handle;
+    try {
+      expect(await settle(handle, source, HEAD)).toBe("waiting");
+      expect(handle.status()).toMatchObject({ state: "following", conditions: [], cursor: HEAD, reason: null });
+    } finally {
+      await handle.stop();
+    }
+    expect(seen.map((status) => status.conditions)).toEqual([[{ code: "node-retrying", attempts: 1, height: 3n }]]);
+    expect(started.lines).toHaveLength(1);
+    expect(started.lines[0]).toMatch(retryLine("processing", "node-retrying", 1));
+    const at = (height: number) => ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"].map((p) => `w ${p}@${height}`);
+    // 3 again from on-compute: not fetched or parsed again, and the cursor's on-after-db-write (2) not re-delivered.
+    expect(log).toEqual([...at(1), ...at(2), "w on-fetch@3", "w on-parse@3", "w on-compute@3", ...at(3).slice(2), ...at(4), ...at(5)]);
+    expect(await cursorIn(db)).toBe(5);
+  }, 180_000);
+
+  it("the node client's own retries show node-retrying — its most attempts, at the height processed or waited for, none during startup — are logged, clear when it stops, and give way to the process's own node-retrying (task 10.4)", async () => {
+    const db = await backend.database();
+    // The process's real client, never connected (the in-memory source asks the node nothing); the test plays its
+    // retry reports through the options the process gave it.
+    let options!: NodeClientOptions;
+    const nodeClient = (given: NodeClientOptions): NodeClient => {
+      options = given;
+      return new NodeClient(given);
+    };
+    const retry = (operation: NodeRetry["operation"], attempt: number): void =>
+      options.onRetry?.({
+        operation,
+        attempt,
+        delayMs: backoffDelay(attempt, 30_000),
+        error: new UmbraError("node-unreachable", `the node did not answer (${operation})`),
+      });
+    let handle!: ProcessHandle;
+    const seen: Record<string, ProcessStatus["conditions"]> = {};
+    let reads = 0;
+    let sixes = 0;
+    const source = new InMemoryBlockSource({ head: HEAD });
+    const flaky = flakySource(source, (method, height) => {
+      if (method === "cursor" && ++reads === 1) {
+        // Startup's cursor read: the client retries the connection, then a call, then the connection again.
+        retry("connect", 1);
+        seen.starting = handle.status().conditions;
+        retry("chain_getBlockHash", 1);
+        retry("connect", 2);
+        seen.most = handle.status().conditions;
+        options.onRetryingChange?.(false);
+        seen.cleared = handle.status().conditions;
+      }
+      if (method === "block" && height === 6n && ++sixes <= 2) {
+        if (sixes === 1) {
+          retry("connect", 4);
+          return new UmbraError("node-unreachable", "the node did not answer for block 6");
+        }
+        seen.both = handle.status().conditions;
+      }
+      return undefined;
+    });
+    const lines: string[] = [];
+    handle = startProcess({
+      declarations: testBuild([]).declarations,
+      config: { data: { entries: [core(db.setting, 1, { extra: { backoffCeilingMs: CEILING } })] } },
+      source: flaky,
+      log: (line) => createdDirectory(line) || lines.push(line),
+      nodeClient,
+    });
+    try {
+      expect(await settle(handle, source, HEAD)).toBe("waiting");
+      retry("connect", 1);
+      // Waiting for a head above 5: the height the loop waits for is 6.
+      seen.waiting = handle.status().conditions;
+      expect(handle.status().state).toBe("following");
+      source.finalize(6n);
+      expect(await settle(handle, source, 6n)).toBe("waiting");
+      options.onRetryingChange?.(false);
+      seen.end = handle.status().conditions;
+    } finally {
+      await handle.stop();
+    }
+    expect(seen).toEqual({
+      starting: [{ code: "node-retrying", attempts: 1, height: null }],
+      most: [{ code: "node-retrying", attempts: 2, height: null }],
+      cleared: [],
+      waiting: [{ code: "node-retrying", attempts: 1, height: 6n }],
+      // The process retries block 6 itself (attempt 1) while the client reports attempt 4: one node-retrying, the
+      // process's.
+      both: [{ code: "node-retrying", attempts: 1, height: 6n }],
+      end: [],
+    });
+    expect(lines.filter((line) => line.startsWith("node retries"))).toEqual([
+      "node retries in 1000 ms (node-retrying, connect, attempt 1): the node did not answer (connect)",
+      "node retries in 1000 ms (node-retrying, chain_getBlockHash, attempt 1): the node did not answer (chain_getBlockHash)",
+      "node retries in 2000 ms (node-retrying, connect, attempt 2): the node did not answer (connect)",
+      "node retries in 1000 ms (node-retrying, connect, attempt 1): the node did not answer (connect)",
+      "node retries in 8000 ms (node-retrying, connect, attempt 4): the node did not answer (connect)",
+    ]);
+    expect(await cursorIn(db)).toBe(6);
+  }, 180_000);
+
+  it("a retried failure clears once the loop finds nothing to process", async () => {
+    const db = await backend.database();
+    const source = new InMemoryBlockSource({ head: HEAD });
+    const first = start(db, [], source);
+    expect(await settle(first.handle, source, HEAD)).toBe("waiting");
+    await first.handle.stop();
+    // At the cursor 5 with the head 5: the loop's cursor read fails once, then it has nothing to process.
+    let reads = 0;
+    const flaky = flakySource(source, (method) =>
+      method === "cursor" && ++reads === 2 ? new UmbraError("connection-lost", "the reader connection was lost") : undefined,
+    );
+    const again = start(db, [], flaky);
+    try {
+      expect(await settle(again.handle, source, HEAD)).toBe("waiting");
+      expect(again.handle.status()).toMatchObject({ state: "following", conditions: [], cursor: HEAD });
+    } finally {
+      await again.handle.stop();
+    }
+    expect(again.lines).toHaveLength(1);
+    expect(again.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
+  }, 180_000);
+
+  it("a retryable failure of the height in progress when stop() was called is not retried: processing ends by the stop", async () => {
+    const db = await backend.database();
+    let reached!: () => void;
+    const atTwo = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let fail!: () => void;
+    const failing = new Promise<void>((resolve) => {
+      fail = resolve;
+    });
+    const fetching = loggingModule("fetching", [], [], {
+      points: {
+        async "on-fetch"(_p, b) {
+          if (b.height !== 2n) return;
+          reached();
+          await failing;
+          throw new UmbraError("node-unreachable", "the node did not answer while the process stops");
+        },
+      },
+    });
+    const started = start(db, [fetching], new InMemoryBlockSource({ head: HEAD }));
+    await atTwo;
+    const stopping = started.handle.stop();
+    fail();
+    await stopping;
+    expect(await started.handle.ended).toEqual({ kind: "signal" });
+    expect(started.handle.status()).toMatchObject({ state: "stopping", conditions: [], reason: null });
+    expect(started.lines).toEqual([]);
+    expect(await cursorIn(db)).toBe(1);
+  }, 180_000);
+
+  it("a lost connection at the loop's cursor read is retried with database-retrying and no height", async () => {
+    const db = await backend.database();
+    const seen: ProcessStatus[] = [];
+    let reads = 0;
+    let handle!: ProcessHandle;
+    const source = new InMemoryBlockSource({ head: HEAD });
+    // The first cursor read is startup's, the second the loop's.
+    const flaky = flakySource(source, (method) => {
+      if (method !== "cursor") return undefined;
+      reads++;
+      if (reads === 3) seen.push(handle.status());
+      return reads === 2 ? new UmbraError("connection-lost", "the reader connection was lost") : undefined;
+    });
+    const started = start(db, [], flaky);
+    handle = started.handle;
+    try {
+      expect(await settle(handle, source, HEAD)).toBe("waiting");
+    } finally {
+      await handle.stop();
+    }
+    expect(seen.map((status) => status.conditions)).toEqual([[{ code: "database-retrying", attempts: 1, height: null }]]);
+    expect(started.lines).toHaveLength(1);
+    expect(started.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
+    expect(await cursorIn(db)).toBe(5);
+  }, 180_000);
+
+  it("a stop during the back-off ends processing at once", async () => {
+    const db = await backend.database();
+    const source = new InMemoryBlockSource({ head: HEAD });
+    const failing = flakySource(source, (method, height) =>
+      method === "block" && height === 2n ? new UmbraError("node-unreachable", "never answers") : undefined,
+    );
+    // The default ceiling: 1 s, 2 s, then 4 s before the third retry.
+    const log: string[] = [];
+    const started = start(db, [loggingModule("w", log, ["on-after-db-write"])], failing, {});
+    const third = signal();
+    const watching = setInterval(() => {
+      if (started.lines.some((line) => line.includes("attempt 3"))) third.resolve();
+    }, 5);
+    try {
+      await third.promise;
+    } finally {
+      clearInterval(watching);
+    }
+    expect(started.handle.status().conditions).toEqual([{ code: "node-retrying", attempts: 3, height: 2n }]);
+    await sleep(50);
+    const before = [...log];
+    const began = performance.now();
+    await started.handle.stop();
+    expect(performance.now() - began).toBeLessThan(2_000);
+    expect(await started.handle.ended).toEqual({ kind: "signal" });
+    // The cursor's on-after-db-write was re-delivered at each retry, and no callback ran after the stop.
+    expect(before).toEqual(["w on-after-db-write@1", "w on-after-db-write@1", "w on-after-db-write@1"]);
+    expect(log).toEqual(before);
+    expect(started.lines.filter((line) => line.includes("retries in"))).toHaveLength(3);
+    expect(started.lines[2]).toMatch(/^processing retries in 4000 ms \(node-retrying, attempt 3\): /);
+  }, 180_000);
+
+  if (backend.kind === "postgres") {
+    it("the writer's connection terminated during on-db-write of h: retried with database-retrying, h committed once, complete", async () => {
+      // The retry processes h again from on-compute: the cursor's on-after-db-write, which ran before h began, is not
+      // delivered again. [IN-10]
+      const db = await backend.database();
+      const log: string[] = [];
+      const reached = signal();
+      const release = signal();
+      const seen: ProcessStatus[] = [];
+      let handle!: ProcessHandle;
+      let held = false;
+      const w = twoRows(log, async (height) => {
+        if (height !== 3n) return;
+        if (held) {
+          seen.push(handle.status());
+          return;
+        }
+        held = true;
+        reached.resolve();
+        await release.promise;
+      });
+      const source = new InMemoryBlockSource({ head: HEAD });
+      const started = start(db, [w], source);
+      handle = started.handle;
+      try {
+        await reached.promise;
+        await db.terminateWriter!();
+        release.resolve();
+        expect(await settle(handle, source, HEAD)).toBe("waiting");
+        expect(handle.status()).toMatchObject({ state: "following", conditions: [], cursor: HEAD, reason: null });
+      } finally {
+        await handle.stop();
+      }
+      expect(seen.map((status) => status.conditions)).toEqual([[{ code: "database-retrying", attempts: 1, height: 3n }]]);
+      expect(started.lines).toHaveLength(1);
+      expect(started.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
+      expect(started.lines[0]).toContain("connection");
+      expect(log).toEqual([
+        "w on-db-write@1",
+        "w on-after-db-write@1",
+        "w on-db-write@2",
+        "w on-after-db-write@2",
+        "w on-db-write@3",
+        "w on-db-write@3",
+        "w on-after-db-write@3",
+        "w on-db-write@4",
+        "w on-after-db-write@4",
+        "w on-db-write@5",
+        "w on-after-db-write@5",
+      ]);
+      expect(await pairs(db, "SELECT height::int AS h, count(*)::int AS v FROM w.rows GROUP BY height ORDER BY height")).toEqual([
+        [1, 2],
+        [2, 2],
+        [3, 2],
+        [4, 2],
+        [5, 2],
+      ]);
+    }, 180_000);
+
+    it("the writer's connection terminated during on-start-db: startup retried with database-retrying while starting", async () => {
+      const db = await backend.database();
+      const reached = signal();
+      const release = signal();
+      const seen: ProcessStatus[] = [];
+      let handle!: ProcessHandle;
+      let calls = 0;
+      const setup = loggingModule("setup", [], [], {
+        points: {
+          async "on-start-db"(_p, w) {
+            calls++;
+            if (calls > 1) {
+              seen.push(handle.status());
+              return;
+            }
+            reached.resolve();
+            await release.promise;
+            await w.execute("INSERT INTO setup.rows (height) VALUES (0)");
+          },
+        },
+      });
+      const source = new InMemoryBlockSource({ head: HEAD });
+      const started = start(db, [setup], source);
+      handle = started.handle;
+      try {
+        await reached.promise;
+        await db.terminateWriter!();
+        release.resolve();
+        await handle.started;
+        // Startup completed: the condition is gone before any height commits.
+        expect(handle.status()).toMatchObject({ conditions: [], cursor: null });
+        expect(await settle(handle, source, HEAD)).toBe("waiting");
+        expect(handle.status()).toMatchObject({ state: "following", conditions: [] });
+      } finally {
+        await handle.stop();
+      }
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({ state: "starting", conditions: [{ code: "database-retrying", attempts: 1, height: null }] });
+      expect(started.lines).toHaveLength(1);
+      expect(started.lines[0]).toMatch(retryLine("startup", "database-retrying", 1));
+      expect(await cursorIn(db)).toBe(5);
+      // The rolled-back first on-start-db wrote nothing.
+      expect(await db.query("SELECT height FROM setup.rows")).toEqual([]);
+    }, 180_000);
+
+    it("a writer that finds its lock taken when it reconnects halts with writer-lock-lost, for good (DB-11)", async () => {
+      const db = await backend.database();
+      const reached = signal();
+      const release = signal();
+      let held = false;
+      const w = twoRows([], async (height) => {
+        if (height !== 3n || held) return;
+        held = true;
+        reached.resolve();
+        await release.promise;
+      });
+      const source = new InMemoryBlockSource({ head: HEAD });
+      const started = start(db, [w], source);
+      try {
+        await reached.promise;
+        await db.terminateWriter!();
+        expect(await db.takeWriterLock!()).toBe(true);
+        release.resolve();
+        expect(await started.handle.ended).toMatchObject({ kind: "failed" });
+        expect(started.handle.status()).toMatchObject({
+          state: "halted",
+          ready: false,
+          reason: { code: "writer-lock-lost", height: 3n, module: null, point: null },
+          conditions: [],
+          cursor: 2n,
+        });
+      } finally {
+        await started.handle.stop();
+      }
+      expect(started.lines).toHaveLength(2);
+      expect(started.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
+      expect(started.lines[1]).toMatch(/^processing halted \(writer-lock-lost\): /);
+      expect(await cursorIn(db)).toBe(2);
+    }, 180_000);
+  }
+});

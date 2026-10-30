@@ -1,0 +1,1250 @@
+{
+  "description": "The node's end-of-block arithmetic for a table of block costs and for blocks of one system transaction, computed in Rust by oracle/main.rs (run by oracle/run.sh in the vendored ledger build image) against an unpatched midnight-ledger checkout at each vendored version's pinned commit: midnight-node 2.1.0-rc.4's clamp_and_normalize and compute_overall_fullness, then its apply_post_block_update (ledger v8 post_block_update, ledger v9 apply_post_block_update) on a blank 'undeployed' state at 1750000000 s. 'roundTrip' is the published JavaScript API's path (each FixedPoint through a JavaScript number), null where the published API refuses the cost. FixedPoint values are the integer value * 2^64; costs and FixedPoints are decimal strings; parameters are the SHA-256 of their tagged serialization, with the fee prices also as the 80 bytes they serialize to inside it. Task 12.1a, owner decision Q113 A, A151.",
+  "computed": "2026-10-26",
+  "versions": {
+    "v8": {
+      "release": "ledger-8.1.2",
+      "commit": "36d7442172136758e33009f75ff4aa56616cff40",
+      "blankStateRoot": "015428756e6465706c6f796564000f00009c72df4355002801910a068b0300008a523d003a6d3d004a8327009e362e00a24b260092c12d002e9b230026ae6100864a2c004a6952005ee116009ebd310072bb3b00e69e33000e6a3300c2e32f0072ac2f006a143300d2770900000e33130000ca126f0000368b12000416422500ae190100c2702f00fe1023006a8017003ce2691700389eda3100aade3100da23260082630e00e6c85f01ba880e001efe2c0002f10800ba650e000a623d003a020f001a592d00ee371300202e5103000cfac34000428c4000d6504e00f906e6f64e00fd066a7b8500b112ad16b2f0a0001123629a3800823d4b00009afa460c3e6e9a000122fa993800a21a6c0000562e440cfa3d5e000ecc1b00c6b14100e2991b003619f100592a0d0cbabdcd0000c549aa93d5004a622401f92d002aadda0000ad5142be00011e41e700d12901163eb6b90000d55e72c1cf0066d91a01252ecd1b9ee6c70000696126a6fe005294dd02d1136eb64800cabcb4000096533b0c62fef90166cfe9020522c6ed43000af4ae00005a7a3c0c5e38f901e23c0400da822b0e1d06fadf7b2a03896519cb07010e345b0126fcc900eef345380e2d0e00f6d748144e25970c4aa29704da2a3000ced095fb0a87df0500c6fc990902127a0002fd431410000284d71700000200400002127a000700d6117e03070010a5d4e8070010a5d4e802350c00420d030002093d00000000000000008000000000000000000700f2052a012d81302a000000000000000000000000000000000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000100e00000000000000000000000000000000000000000040000000000000000000000000000000006400000000000000d107a10f00010400000104000001940304428400000000000000000000000000000000000000000000000000000000000000000004010801040401040000010c0220001001040000010400000104000001040000010400000100040104000001040000010400000118022000022000200104000001040000010400000104000001040000010400000104000001040000",
+      "limits": {
+        "readTime": "1000000000000",
+        "computeTime": "1000000000000",
+        "blockUsage": "200000",
+        "bytesWritten": "50000",
+        "bytesChurned": "1000000"
+      },
+      "cases": [
+        {
+          "name": "an empty block",
+          "cost": {
+            "readTime": "0",
+            "computeTime": "0",
+            "blockUsage": "0",
+            "bytesWritten": "0",
+            "bytesChurned": "0"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "0"
+            },
+            "feePrices": {
+              "overallPrice": "175990940750749979440",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a6ab38e8d06bb539cf644c7c119d1b049037b9fbbd8ac9885ffede09953a8442",
+            "feePricesBytes": "3053453f2c6c5d8a090000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "fe0aeb231288c1df8ad28f198cf1e59784ad2d21d45064f7936e76a94b06032a"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "0"
+            },
+            "feePrices": {
+              "overallPrice": "175990940750749979440",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a6ab38e8d06bb539cf644c7c119d1b049037b9fbbd8ac9885ffede09953a8442",
+            "feePricesBytes": "3053453f2c6c5d8a090000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "fe0aeb231288c1df8ad28f198cf1e59784ad2d21d45064f7936e76a94b06032a"
+          }
+        },
+        {
+          "name": "a deploy's block usage: 2,635 of 200,000",
+          "cost": {
+            "readTime": "0",
+            "computeTime": "0",
+            "blockUsage": "2635",
+            "bytesWritten": "0",
+            "bytesChurned": "0"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "243035853171123343",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "243035853171123343"
+            },
+            "feePrices": {
+              "overallPrice": "176402852133026044380",
+              "readFactor": "18435956614508144894",
+              "computeFactor": "18435956614508144894",
+              "blockUsageFactor": "18479106451313771782",
+              "writeFactor": "18435956614508144894"
+            },
+            "stateRoot": "0065a109d615ec0597e6741ae650823da9154b768fb47b7e3ab372c2ff12a3917f",
+            "feePricesBytes": "dc99c68264d314900900000000000000fe6845eedcacd9ff0000000000000000fe6845eedcacd9ff000000000000000006c52f3569f972000100000000000000fe6845eedcacd9ff0000000000000000",
+            "parametersSha256": "0c2eb863df74cef4b488923a7f7c6f23470490dcaa8e3b04ff263b3727e87858"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "243035853171123328",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "243035853171123328"
+            },
+            "feePrices": {
+              "overallPrice": "176402852133026044280",
+              "readFactor": "18435956614508144897",
+              "computeFactor": "18435956614508144897",
+              "blockUsageFactor": "18479106451313771775",
+              "writeFactor": "18435956614508144897"
+            },
+            "stateRoot": "0070eabb3d22036d123d26ec18762e5ae82691e8bb465ec040d8ca51ac53d1779f",
+            "feePricesBytes": "7899c68264d314900900000000000000016945eedcacd9ff0000000000000000016945eedcacd9ff0000000000000000ffc42f3569f972000100000000000000016945eedcacd9ff0000000000000000",
+            "parametersSha256": "82ef599239f2de4a43e94b85929801a8682599096aa4fa9c15a0054a3c617eaf"
+          }
+        },
+        {
+          "name": "one picosecond of read time",
+          "cost": {
+            "readTime": "1",
+            "computeTime": "0",
+            "blockUsage": "0",
+            "bytesWritten": "0",
+            "bytesChurned": "0"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "18446745",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "18446745"
+            },
+            "feePrices": {
+              "overallPrice": "175990940750749979440",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a6ab38e8d06bb539cf644c7c119d1b049037b9fbbd8ac9885ffede09953a8442",
+            "feePricesBytes": "3053453f2c6c5d8a090000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "fe0aeb231288c1df8ad28f198cf1e59784ad2d21d45064f7936e76a94b06032a"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "18446745",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "18446745"
+            },
+            "feePrices": {
+              "overallPrice": "175990940750749979440",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a6ab38e8d06bb539cf644c7c119d1b049037b9fbbd8ac9885ffede09953a8442",
+            "feePricesBytes": "3053453f2c6c5d8a090000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "fe0aeb231288c1df8ad28f198cf1e59784ad2d21d45064f7936e76a94b06032a"
+          }
+        },
+        {
+          "name": "every dimension, no value a round fraction",
+          "cost": {
+            "readTime": "123456789",
+            "computeTime": "987654321",
+            "blockUsage": "2635",
+            "bytesWritten": "777",
+            "bytesChurned": "33333"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "2277375790844961",
+              "computeTime": "18219006492780382",
+              "blockUsage": "243035853171123343",
+              "bytesWritten": "286662402905446433",
+              "bytesChurned": "614885320208960485",
+              "overall": "614885320208960485"
+            },
+            "feePrices": {
+              "overallPrice": "178238417361451443450",
+              "readFactor": "18377319445277823606",
+              "computeFactor": "18377319445277823606",
+              "blockUsageFactor": "18420332040261073826",
+              "writeFactor": "18612005364021485427"
+            },
+            "stateRoot": "00bb23f69f7a3cb5c59a7850b137b1f32f86f130e0db0eb86f4eb6ed2ddc808a9c",
+            "feePricesBytes": "fa64211d3e108ea9090000000000000076d2a913ab5a09ff000000000000000076d2a913ab5a09ff0000000000000000a2fb8140652aa2ff0000000000000000735f2a9844204b020100000000000000",
+            "parametersSha256": "8904d0a064470062d6ecf9777e178fef04880947879834a8719ca6bb15abf36e"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "2277375790844961",
+              "computeTime": "18219006492780384",
+              "blockUsage": "243035853171123328",
+              "bytesWritten": "286662402905446432",
+              "bytesChurned": "614885320208960512",
+              "overall": "614885320208960512"
+            },
+            "feePrices": {
+              "overallPrice": "178238417361451443530",
+              "readFactor": "18377319445277823606",
+              "computeFactor": "18377319445277823606",
+              "blockUsageFactor": "18420332040261073815",
+              "writeFactor": "18612005364021485436"
+            },
+            "stateRoot": "000e989b586194d422f790ccb730eb2a5d983f920bb7611c96682b3f9e1ca4ff52",
+            "feePricesBytes": "4a65211d3e108ea9090000000000000076d2a913ab5a09ff000000000000000076d2a913ab5a09ff000000000000000097fb8140652aa2ff00000000000000007c5f2a9844204b020100000000000000",
+            "parametersSha256": "59633b6c40842edf0c47c59288973b18e4eb260a9bb00fbc09bab23471bd1642"
+          }
+        },
+        {
+          "name": "half of every limit",
+          "cost": {
+            "readTime": "500000000000",
+            "computeTime": "500000000000",
+            "blockUsage": "100000",
+            "bytesWritten": "25000",
+            "bytesChurned": "500000"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "9223372036854775808",
+              "computeTime": "9223372036854775808",
+              "blockUsage": "9223372036854775808",
+              "bytesWritten": "9223372036854775808",
+              "bytesChurned": "9223372036854775808",
+              "overall": "9223372036854775808"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516170",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00affbf9f6270a17ee8d9de37dcab2b615e124e2c46b3476e24bd2e7b66d2ba5ef",
+            "feePricesBytes": "0a000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "29d05d209a2c4d500c9827c001a367b9966aa10e03cd18a6351c74d2c8d5704c"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "9223372036854775808",
+              "computeTime": "9223372036854775808",
+              "blockUsage": "9223372036854775808",
+              "bytesWritten": "9223372036854775808",
+              "bytesChurned": "9223372036854775808",
+              "overall": "9223372036854775808"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516170",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00affbf9f6270a17ee8d9de37dcab2b615e124e2c46b3476e24bd2e7b66d2ba5ef",
+            "feePricesBytes": "0a000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "29d05d209a2c4d500c9827c001a367b9966aa10e03cd18a6351c74d2c8d5704c"
+          }
+        },
+        {
+          "name": "exactly the limits",
+          "cost": {
+            "readTime": "1000000000000",
+            "computeTime": "1000000000000",
+            "blockUsage": "200000",
+            "bytesWritten": "50000",
+            "bytesChurned": "1000000"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "18446744073709551616",
+              "computeTime": "18446744073709551616",
+              "blockUsage": "18446744073709551616",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "18446744073709551616",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "0001655c4a305eb8ff3757a94600f100844b6ee7eecc2f34cb1b1356e4fea0b9fd",
+            "feePricesBytes": "0280bac0d393a2750a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "695e531f960a0a02ac44d601f74bb4913980536cde05aa7432a1743ab3064061"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "18446744073709551616",
+              "computeTime": "18446744073709551616",
+              "blockUsage": "18446744073709551616",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "18446744073709551616",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "0001655c4a305eb8ff3757a94600f100844b6ee7eecc2f34cb1b1356e4fea0b9fd",
+            "feePricesBytes": "0280bac0d393a2750a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "695e531f960a0a02ac44d601f74bb4913980536cde05aa7432a1743ab3064061"
+          }
+        },
+        {
+          "name": "above the limits in four dimensions",
+          "cost": {
+            "readTime": "2000000000000",
+            "computeTime": "999999999999",
+            "blockUsage": "250000",
+            "bytesWritten": "60000",
+            "bytesChurned": "1000001"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "18446744073709551616",
+              "computeTime": "18446744073691104872",
+              "blockUsage": "18446744073709551616",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "18446744073709551616",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "0001655c4a305eb8ff3757a94600f100844b6ee7eecc2f34cb1b1356e4fea0b9fd",
+            "feePricesBytes": "0280bac0d393a2750a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "695e531f960a0a02ac44d601f74bb4913980536cde05aa7432a1743ab3064061"
+          },
+          "roundTrip": null
+        },
+        {
+          "name": "the largest sum, every dimension saturated",
+          "cost": {
+            "readTime": "18446744073709551615",
+            "computeTime": "18446744073709551615",
+            "blockUsage": "18446744073709551615",
+            "bytesWritten": "18446744073709551615",
+            "bytesChurned": "18446744073709551615"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "18446744073709551616",
+              "computeTime": "18446744073709551616",
+              "blockUsage": "18446744073709551616",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "18446744073709551616",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "0001655c4a305eb8ff3757a94600f100844b6ee7eecc2f34cb1b1356e4fea0b9fd",
+            "feePricesBytes": "0280bac0d393a2750a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "695e531f960a0a02ac44d601f74bb4913980536cde05aa7432a1743ab3064061"
+          },
+          "roundTrip": null
+        },
+        {
+          "name": "a block of one deploy",
+          "cost": {
+            "readTime": "1785000000",
+            "computeTime": "1975817471",
+            "blockUsage": "2635",
+            "bytesWritten": "2893",
+            "bytesChurned": "6144"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "32927438171571550",
+              "computeTime": "36447399223901044",
+              "blockUsage": "243035853171123343",
+              "bytesWritten": "1067328612104834657",
+              "bytesChurned": "113336795588871486",
+              "overall": "1067328612104834657"
+            },
+            "feePrices": {
+              "overallPrice": "179315603250568197050",
+              "readFactor": "18349347451830181173",
+              "computeFactor": "18349347451830181173",
+              "blockUsageFactor": "18392294577633956106",
+              "writeFactor": "18695986813543888014"
+            },
+            "stateRoot": "0061c48d9782091ff3ef5ec551cd6b3fd077ae043148f51c26f315273e8fa67c4f",
+            "feePricesBytes": "ba73ff021aff80b80900000000000000359d8ed649faa5fe0000000000000000359d8ed649faa5fe00000000000000000a1137c8788e3eff00000000000000008eb4ab8af37c75030100000000000000",
+            "parametersSha256": "fdea1fd8499207a2c119e352668e1d3b6c66e82d0cc9c56e091f0c1957805c14"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "32927438171571552",
+              "computeTime": "36447399223901040",
+              "blockUsage": "243035853171123328",
+              "bytesWritten": "1067328612104834688",
+              "bytesChurned": "113336795588871488",
+              "overall": "1067328612104834688"
+            },
+            "feePrices": {
+              "overallPrice": "179315603250568197110",
+              "readFactor": "18349347451830181174",
+              "computeFactor": "18349347451830181174",
+              "blockUsageFactor": "18392294577633956097",
+              "writeFactor": "18695986813543888021"
+            },
+            "stateRoot": "00d9fe7bbc1d9a2f544a611ed9d3302e479ccd9791bda6ab00bb446e306f91afa4",
+            "feePricesBytes": "f673ff021aff80b80900000000000000369d8ed649faa5fe0000000000000000369d8ed649faa5fe0000000000000000011137c8788e3eff000000000000000095b4ab8af37c75030100000000000000",
+            "parametersSha256": "3b1276daba9f71d8e769bc23aae8e3dbe39958d6b2839c200c52f098c5671ecf"
+          }
+        },
+        {
+          "name": "a block of a deploy and a call",
+          "cost": {
+            "readTime": "4590000000",
+            "computeTime": "16710636115",
+            "blockUsage": "7761",
+            "bytesWritten": "2989",
+            "bytesChurned": "78400"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "84670555298326842",
+              "computeTime": "308256827722293056",
+              "blockUsage": "715825903780299151",
+              "bytesWritten": "1102746360726356996",
+              "bytesChurned": "1446224735378828847",
+              "overall": "1446224735378828847"
+            },
+            "feePrices": {
+              "overallPrice": "179919503336981581530",
+              "readFactor": "18256198224502211013",
+              "computeFactor": "18346509875743402701",
+              "blockUsageFactor": "18520545486127410744",
+              "writeFactor": "18663722708465182007"
+            },
+            "stateRoot": "007fbaa47116aa1bc71fe4a057ae672e8f00114301e30026cbdf907c11fb04e05f",
+            "feePricesBytes": "dace7ed5077be2c00900000000000000c54192488f0b5bfd0000000000000000cdaae12b87e59bfe000000000000000038ae165bfe310601010000000000000037657530ebdc02030100000000000000",
+            "parametersSha256": "4282b6f07135567fa400ea6d688732d7af19295b8675259ff53324acd0df0128"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "84670555298326848",
+              "computeTime": "308256827722293056",
+              "blockUsage": "715825903780299136",
+              "bytesWritten": "1102746360726356992",
+              "bytesChurned": "1446224735378828800",
+              "overall": "1446224735378828800"
+            },
+            "feePrices": {
+              "overallPrice": "179919503336981581460",
+              "readFactor": "18256198224502211016",
+              "computeFactor": "18346509875743402705",
+              "blockUsageFactor": "18520545486127410742",
+              "writeFactor": "18663722708465182003"
+            },
+            "stateRoot": "008b4f1159eac4db24f3eafb5cdadc69062fd803f800d36163ba961c71111c4574",
+            "feePricesBytes": "94ce7ed5077be2c00900000000000000c84192488f0b5bfd0000000000000000d1aae12b87e59bfe000000000000000036ae165bfe310601010000000000000033657530ebdc02030100000000000000",
+            "parametersSha256": "246b26daa0b423dd1fde0558103d797e8665579356e6b4f0c357783fc558e551"
+          }
+        },
+        {
+          "name": "a block of twenty deploys, above the bytes-written limit",
+          "cost": {
+            "readTime": "35700000000",
+            "computeTime": "39516349420",
+            "blockUsage": "52700",
+            "bytesWritten": "57860",
+            "bytesChurned": "122880"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "658548763431430993",
+              "computeTime": "728947984478020878",
+              "blockUsage": "4860717063422466851",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "2266735911777429703",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "17968545049158863716",
+              "computeFactor": "17989682086309882652",
+              "blockUsageFactor": "18391904418969273948",
+              "writeFactor": "19436844740400186148"
+            },
+            "stateRoot": "009a300b61459be10167c252011b611f6064009c14f91b22f9e608754f942d50f5",
+            "feePricesBytes": "0280bac0d393a2750a0000000000000064cbb75185185df900000000000000001c6bb5488b30a8f900000000000000005cc699e39f2b3dff00000000000000002403f9814f8bbd0d0100000000000000",
+            "parametersSha256": "1499360e7c91c690e0bfcb99d8c02d80d02f699f8a7d243f9c91eb719a8f1fc2"
+          },
+          "roundTrip": null
+        },
+        {
+          "name": "a block of the system transaction, a deploy and a call",
+          "cost": {
+            "readTime": "4760000000",
+            "computeTime": "16880636115",
+            "blockUsage": "7761",
+            "bytesWritten": "2989",
+            "bytesChurned": "78432"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "87806501790857466",
+              "computeTime": "311392774214823680",
+              "blockUsage": "715825903780299151",
+              "bytesWritten": "1102746360726356996",
+              "bytesChurned": "1446815031189187553",
+              "overall": "1446815031189187553"
+            },
+            "feePrices": {
+              "overallPrice": "179920355383582582300",
+              "readFactor": "18255610318866780429",
+              "computeFactor": "18348206845849782291",
+              "blockUsageFactor": "18519949067698521798",
+              "writeFactor": "18663210062423121948"
+            },
+            "stateRoot": "00f23198b11f4e56f1e0b212fcace18d002214a8cd72e9ab72c714dc34d3c2943d",
+            "feePricesBytes": "1ce67a64f681e5c009000000000000000d9102d6dcf458fd0000000000000000134844d0e9eca1fe0000000000000000c6467fde8d13040101000000000000001ce0397bab0a01030100000000000000",
+            "parametersSha256": "e1bc37b7ae8d48de0fc2a617bfb5b7f8ba7bffd21329ae7f177b67ce7f105758"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "87806501790857472",
+              "computeTime": "311392774214823680",
+              "blockUsage": "715825903780299136",
+              "bytesWritten": "1102746360726356992",
+              "bytesChurned": "1446815031189187584",
+              "overall": "1446815031189187584"
+            },
+            "feePrices": {
+              "overallPrice": "179920355383582582340",
+              "readFactor": "18255610318866780429",
+              "computeFactor": "18348206845849782291",
+              "blockUsageFactor": "18519949067698521792",
+              "writeFactor": "18663210062423121952"
+            },
+            "stateRoot": "00afd68878a6a0b6939048ba4a060c4fd08b880bdc62822e768b5eb0d4317aa277",
+            "feePricesBytes": "44e67a64f681e5c009000000000000000d9102d6dcf458fd0000000000000000134844d0e9eca1fe0000000000000000c0467fde8d130401010000000000000020e0397bab0a01030100000000000000",
+            "parametersSha256": "923fb5600b4a82ae14ca5cc5d0a74463d8ed2c546b0378853afca7cc209cfb84"
+          }
+        }
+      ],
+      "systemTransactions": [
+        {
+          "name": "DistributeReserve(1000000000000000)",
+          "bytes": "6d69646e696768743a73797374656d2d7472616e73616374696f6e5b76365d3a050f0080c6a47e8d03",
+          "cost": {
+            "readTime": "170000000",
+            "computeTime": "170000000",
+            "blockUsage": "0",
+            "bytesWritten": "0",
+            "bytesChurned": "32"
+          },
+          "block": {
+            "fullness": {
+              "readTime": "3135946492530624",
+              "computeTime": "3135946492530624",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "590295810358706",
+              "overall": "3135946492530624"
+            },
+            "feePrices": {
+              "overallPrice": "175990940750749979440",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00ea7c34e659772c83c4471251741a7c89799e1b0187c2b6f5b0106be9262debef",
+            "feePricesBytes": "3053453f2c6c5d8a090000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "fe0aeb231288c1df8ad28f198cf1e59784ad2d21d45064f7936e76a94b06032a"
+          }
+        },
+        {
+          "name": "OverwriteParameters(the blank state's parameters)",
+          "bytes": "6d69646e696768743a73797374656d2d7472616e73616374696f6e5b76365d3a00068b0300008a523d003a6d3d004a8327009e362e00a24b260092c12d002e9b230026ae6100864a2c004a6952005ee116009ebd310072bb3b00e69e33000e6a3300c2e32f0072ac2f006a143300d2770900000e33130000ca126f0000368b12000416422500ae190100c2702f00fe1023006a8017003ce2691700389eda3100aade3100da23260082630e00e6c85f01ba880e001efe2c0002f10800ba650e000a623d003a020f001a592d00ee371300202e5103000cfac34000428c4000d6504e00f906e6f64e00fd066a7b8500b112ad16b2f0a0001123629a3800823d4b00009afa460c3e6e9a000122fa993800a21a6c0000562e440cfa3d5e000ecc1b00c6b14100e2991b003619f100592a0d0cbabdcd0000c549aa93d5004a622401f92d002aadda0000ad5142be00011e41e700d12901163eb6b90000d55e72c1cf0066d91a01252ecd1b9ee6c70000696126a6fe005294dd02d1136eb64800cabcb4000096533b0c62fef90166cfe9020522c6ed43000af4ae00005a7a3c0c5e38f901e23c0400da822b0e1d06fadf7b2a03896519cb07010e345b0126fcc900eef345380e2d0e00f6d748144e25970c4aa29704da2a3000ced095fb0a87df0500c6fc990902127a0002fd431410000284d71700000200400002127a000700d6117e03070010a5d4e8070010a5d4e802350c00420d030002093d00000000000000008000000000000000000700f2052a012d81302a000000000000000000000000000000000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000100e00000000000000000000000000000000000000000040000000000000000000000000000000006400000000000000d107a10f",
+          "cost": {
+            "readTime": "0",
+            "computeTime": "0",
+            "blockUsage": "0",
+            "bytesWritten": "0",
+            "bytesChurned": "676"
+          },
+          "block": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "12469998993827657",
+              "overall": "12469998993827657"
+            },
+            "feePrices": {
+              "overallPrice": "175990940750749979440",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a6ab38e8d06bb539cf644c7c119d1b049037b9fbbd8ac9885ffede09953a8442",
+            "feePricesBytes": "3053453f2c6c5d8a090000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "fe0aeb231288c1df8ad28f198cf1e59784ad2d21d45064f7936e76a94b06032a"
+          }
+        }
+      ],
+      "blankParametersSha256": "7421ce5fae59600df2f80f2f3c9e3afdbe06204404d9b5e38dfd705420ae8150"
+    },
+    "v9": {
+      "release": "ledger-9.1.0.0-rc.5",
+      "commit": "67f9f97246339539af0091c4d8c6bc5ab236a191",
+      "blankStateRoot": "015428756e6465706c6f796564000f00009c72df43550028019d0b068b0300008a523d003a6d3d004a8327009e362e00a24b260092c12d002e9b230026ae6100864a2c004a6952005ee116009ebd310072bb3b00e69e33000e6a3300c2e32f0072ac2f006a143300d2770900000e33130000ca126f0000368b12000416422500ae190100c2702f00fe1023006a8017003ce2691700389eda3100aade3100da23260082630e00e6c85f01ba880e001efe2c0002f10800ba650e000a623d003a020f001a592d00ee371300202e5103000cfac34000428c4000d6504e00f906e6f64e00fd066a7b8500b112ad16b2f0a0001123629a3800823d4b00009afa460c3e6e9a000122fa993800a21a6c0000562e440cfa3d5e000ecc1b00c6b14100e2991b003619f100592a0d0cbabdcd0000c549aa93d5004a622401f92d002aadda0000ad5142be00011e41e700d12901163eb6b90000d55e72c1cf0066d91a01252ecd1b9ee6c70000696126a6fe005294dd02d1136eb64800cabcb4000096533b0c62fef90166cfe9020522c6ed43000af4ae00005a7a3c0c5e38f901e23c0400da822b0e1d06fadf7b2a03896519cb07010e345b0126fcc900eef345380e2d0e00f6d748144e25970c4aa29704da2a3000ced095fb0a87df0500c6fc990902127a0002fd4314000284d71700000000000000000040000000000000000000000000000000000100000000000000000000000000000001000000000000000200400002127a000700d6117e03070010a5d4e8070010a5d4e802350c00420d030002093d0000000000000000800000000000000000420d03000700f2052a012d81302a000000000000000000000000000000000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000100e000000000000000000000000000000000000000000400000000000000000000000000000000064000000000000009101a10f00000000000000000a0000000000000000010400000104000001940304428400000000000000000000000000000000000000000000000000000000000000000004010801040401040000010c0220001001040000010400000104000001040000010400000100040104000001040000010400000118022000022000200104000001040000010400000104000001040000010400000104000001040000",
+      "limits": {
+        "readTime": "1000000000000",
+        "computeTime": "1000000000000",
+        "blockUsage": "200000",
+        "bytesWritten": "50000",
+        "bytesChurned": "1000000"
+      },
+      "cases": [
+        {
+          "name": "an empty block",
+          "cost": {
+            "readTime": "0",
+            "computeTime": "0",
+            "blockUsage": "0",
+            "bytesWritten": "0",
+            "bytesChurned": "0"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "0"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a93750ee17e3e03bd5e47b724633a93ffcb6ac5c0ac2cadeb3e6f3c966e08c39",
+            "feePricesBytes": "00000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "38d99ef89d303fc126754e68b35c79a1804abcf734f627f35748d164fe503c29"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "0"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a93750ee17e3e03bd5e47b724633a93ffcb6ac5c0ac2cadeb3e6f3c966e08c39",
+            "feePricesBytes": "00000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "38d99ef89d303fc126754e68b35c79a1804abcf734f627f35748d164fe503c29"
+          }
+        },
+        {
+          "name": "a deploy's block usage: 2,635 of 200,000",
+          "cost": {
+            "readTime": "0",
+            "computeTime": "0",
+            "blockUsage": "2635",
+            "bytesWritten": "0",
+            "bytesChurned": "0"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "243035853171123343",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "243035853171123343"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18435956614508144894",
+              "computeFactor": "18435956614508144894",
+              "blockUsageFactor": "18479106451313771782",
+              "writeFactor": "18435956614508144894"
+            },
+            "stateRoot": "0023d3441b808ea75400b62b291655fc9b29b40d6842c2d1ed25fa67ee12e85bb1",
+            "feePricesBytes": "00000000000000000a00000000000000fe6845eedcacd9ff0000000000000000fe6845eedcacd9ff000000000000000006c52f3569f972000100000000000000fe6845eedcacd9ff0000000000000000",
+            "parametersSha256": "abd3f1bfe03ca05cb18b8de127238c8b58c8cb7aeed0708722e9065891406b82"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "243035853171123328",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "243035853171123328"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18435956614508144897",
+              "computeFactor": "18435956614508144897",
+              "blockUsageFactor": "18479106451313771775",
+              "writeFactor": "18435956614508144897"
+            },
+            "stateRoot": "00f0d2097943fe939de7cbadc41fb2cc6a8dd2082bcccc664f020597fee14d4970",
+            "feePricesBytes": "00000000000000000a00000000000000016945eedcacd9ff0000000000000000016945eedcacd9ff0000000000000000ffc42f3569f972000100000000000000016945eedcacd9ff0000000000000000",
+            "parametersSha256": "75f6936abdc1b064ff8f91f9030c07d54ccb3b3919e5ff477f53b4d2ba69d9a2"
+          }
+        },
+        {
+          "name": "one picosecond of read time",
+          "cost": {
+            "readTime": "1",
+            "computeTime": "0",
+            "blockUsage": "0",
+            "bytesWritten": "0",
+            "bytesChurned": "0"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "18446745",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "18446745"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a93750ee17e3e03bd5e47b724633a93ffcb6ac5c0ac2cadeb3e6f3c966e08c39",
+            "feePricesBytes": "00000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "38d99ef89d303fc126754e68b35c79a1804abcf734f627f35748d164fe503c29"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "18446745",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "0",
+              "overall": "18446745"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a93750ee17e3e03bd5e47b724633a93ffcb6ac5c0ac2cadeb3e6f3c966e08c39",
+            "feePricesBytes": "00000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "38d99ef89d303fc126754e68b35c79a1804abcf734f627f35748d164fe503c29"
+          }
+        },
+        {
+          "name": "every dimension, no value a round fraction",
+          "cost": {
+            "readTime": "123456789",
+            "computeTime": "987654321",
+            "blockUsage": "2635",
+            "bytesWritten": "777",
+            "bytesChurned": "33333"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "2277375790844961",
+              "computeTime": "18219006492780382",
+              "blockUsage": "243035853171123343",
+              "bytesWritten": "286662402905446433",
+              "bytesChurned": "614885320208960485",
+              "overall": "614885320208960485"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18377319445277823606",
+              "computeFactor": "18377319445277823606",
+              "blockUsageFactor": "18420332040261073826",
+              "writeFactor": "18612005364021485427"
+            },
+            "stateRoot": "00b2471f19166d9d191f6f7ad2f9783fd3ccf5887ed25051a0009619084825e411",
+            "feePricesBytes": "00000000000000000a0000000000000076d2a913ab5a09ff000000000000000076d2a913ab5a09ff0000000000000000a2fb8140652aa2ff0000000000000000735f2a9844204b020100000000000000",
+            "parametersSha256": "f237deefffbe198cfa28bd234f477d109309476f330bd58d43aafe9e8e2949a2"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "2277375790844961",
+              "computeTime": "18219006492780384",
+              "blockUsage": "243035853171123328",
+              "bytesWritten": "286662402905446432",
+              "bytesChurned": "614885320208960512",
+              "overall": "614885320208960512"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18377319445277823606",
+              "computeFactor": "18377319445277823606",
+              "blockUsageFactor": "18420332040261073815",
+              "writeFactor": "18612005364021485436"
+            },
+            "stateRoot": "009a977fbbe00fd1fadd62092e6ca5d1a5bcf3796fd5886d229d24cc8de1df5e24",
+            "feePricesBytes": "00000000000000000a0000000000000076d2a913ab5a09ff000000000000000076d2a913ab5a09ff000000000000000097fb8140652aa2ff00000000000000007c5f2a9844204b020100000000000000",
+            "parametersSha256": "21764a6697b234b11104e8de298198d403ec718554fb2c5f3430e77b32df8e70"
+          }
+        },
+        {
+          "name": "half of every limit",
+          "cost": {
+            "readTime": "500000000000",
+            "computeTime": "500000000000",
+            "blockUsage": "100000",
+            "bytesWritten": "25000",
+            "bytesChurned": "500000"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "9223372036854775808",
+              "computeTime": "9223372036854775808",
+              "blockUsage": "9223372036854775808",
+              "bytesWritten": "9223372036854775808",
+              "bytesChurned": "9223372036854775808",
+              "overall": "9223372036854775808"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516170",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "0022a836f65ddf6e74b67cdaae579a778c08a63895ff3b981bea0e67aba839cc3b",
+            "feePricesBytes": "0a000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "d228ea99f409ca4b5ce30a74342dfaf3e0bf28d329fe61e98ed92076edcda8c1"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "9223372036854775808",
+              "computeTime": "9223372036854775808",
+              "blockUsage": "9223372036854775808",
+              "bytesWritten": "9223372036854775808",
+              "bytesChurned": "9223372036854775808",
+              "overall": "9223372036854775808"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516170",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "0022a836f65ddf6e74b67cdaae579a778c08a63895ff3b981bea0e67aba839cc3b",
+            "feePricesBytes": "0a000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "d228ea99f409ca4b5ce30a74342dfaf3e0bf28d329fe61e98ed92076edcda8c1"
+          }
+        },
+        {
+          "name": "exactly the limits",
+          "cost": {
+            "readTime": "1000000000000",
+            "computeTime": "1000000000000",
+            "blockUsage": "200000",
+            "bytesWritten": "50000",
+            "bytesChurned": "1000000"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "18446744073709551616",
+              "computeTime": "18446744073709551616",
+              "blockUsage": "18446744073709551616",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "18446744073709551616",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "002711c0ce844b810454fb492a6bd540d5464c4b24b0bb8e09b4672d5a983992e5",
+            "feePricesBytes": "0280bac0d393a2750a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "787978808efba3e0e9772b355ebaed9c304bc61c87aeedc5143e483180c5c032"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "18446744073709551616",
+              "computeTime": "18446744073709551616",
+              "blockUsage": "18446744073709551616",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "18446744073709551616",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "002711c0ce844b810454fb492a6bd540d5464c4b24b0bb8e09b4672d5a983992e5",
+            "feePricesBytes": "0280bac0d393a2750a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "787978808efba3e0e9772b355ebaed9c304bc61c87aeedc5143e483180c5c032"
+          }
+        },
+        {
+          "name": "above the limits in four dimensions",
+          "cost": {
+            "readTime": "2000000000000",
+            "computeTime": "999999999999",
+            "blockUsage": "250000",
+            "bytesWritten": "60000",
+            "bytesChurned": "1000001"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "18446744073709551616",
+              "computeTime": "18446744073691104872",
+              "blockUsage": "18446744073709551616",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "18446744073709551616",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "002711c0ce844b810454fb492a6bd540d5464c4b24b0bb8e09b4672d5a983992e5",
+            "feePricesBytes": "0280bac0d393a2750a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "787978808efba3e0e9772b355ebaed9c304bc61c87aeedc5143e483180c5c032"
+          },
+          "roundTrip": null
+        },
+        {
+          "name": "the largest sum, every dimension saturated",
+          "cost": {
+            "readTime": "18446744073709551615",
+            "computeTime": "18446744073709551615",
+            "blockUsage": "18446744073709551615",
+            "bytesWritten": "18446744073709551615",
+            "bytesChurned": "18446744073709551615"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "18446744073709551616",
+              "computeTime": "18446744073709551616",
+              "blockUsage": "18446744073709551616",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "18446744073709551616",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "002711c0ce844b810454fb492a6bd540d5464c4b24b0bb8e09b4672d5a983992e5",
+            "feePricesBytes": "0280bac0d393a2750a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "787978808efba3e0e9772b355ebaed9c304bc61c87aeedc5143e483180c5c032"
+          },
+          "roundTrip": null
+        },
+        {
+          "name": "a block of one deploy",
+          "cost": {
+            "readTime": "1785000000",
+            "computeTime": "1975817471",
+            "blockUsage": "2637",
+            "bytesWritten": "2895",
+            "bytesChurned": "6144"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "32927438171571550",
+              "computeTime": "36447399223901044",
+              "blockUsage": "243220320611860439",
+              "bytesWritten": "1068066481867783039",
+              "bytesChurned": "113336795588871486",
+              "overall": "1068066481867783039"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18349276908487210193",
+              "computeFactor": "18349276908487210193",
+              "blockUsageFactor": "18392359135200390667",
+              "writeFactor": "18696063342663395411"
+            },
+            "stateRoot": "00c2a808a1232d0ca939b897ad859a50c45fc9a15cb9cdc8ee0561f6bca89d5310",
+            "feePricesBytes": "00000000000000000a00000000000000d174a82f21baa5fe0000000000000000d174a82f21baa5fe00000000000000000bae07c32fc93eff00000000000000005368a7dd8dc275030100000000000000",
+            "parametersSha256": "ba7d5e486787c5688d97eceddac396267f69f6fd3d19905e9a9f18e70f2042ba"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "32927438171571552",
+              "computeTime": "36447399223901040",
+              "blockUsage": "243220320611860448",
+              "bytesWritten": "1068066481867783040",
+              "bytesChurned": "113336795588871488",
+              "overall": "1068066481867783040"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18349276908487210192",
+              "computeFactor": "18349276908487210192",
+              "blockUsageFactor": "18392359135200390672",
+              "writeFactor": "18696063342663395410"
+            },
+            "stateRoot": "00776446dd77975b4fef3a3fd114d5e07ab29fc33f13f546918c7b69dd9a8a5360",
+            "feePricesBytes": "00000000000000000a00000000000000d074a82f21baa5fe0000000000000000d074a82f21baa5fe000000000000000010ae07c32fc93eff00000000000000005268a7dd8dc275030100000000000000",
+            "parametersSha256": "64091483cd4d81bda3bd9ea5c2a4394e6d74ae9928395c9ca52c50fc80f74cad"
+          }
+        },
+        {
+          "name": "a block of a deploy and a call",
+          "cost": {
+            "readTime": "4590000000",
+            "computeTime": "16710636115",
+            "blockUsage": "7763",
+            "bytesWritten": "2991",
+            "bytesChurned": "78400"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "84670555298326842",
+              "computeTime": "308256827722293056",
+              "blockUsage": "716010371221036246",
+              "bytesWritten": "1103484230489305378",
+              "bytesChurned": "1446224735378828847",
+              "overall": "1446224735378828847"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18256184113700754838",
+              "computeFactor": "18346495695137173146",
+              "blockUsageFactor": "18520588203325303922",
+              "writeFactor": "18663708282674974558"
+            },
+            "stateRoot": "002ff5f9cb1e56f6ccf86c3c1d322cb0a79a87839519d1c1a6df9c8944fd29980d",
+            "feePricesBytes": "00000000000000000a00000000000000965543dbb9fe5afd00000000000000009a6ee27da1d89bfe000000000000000072ac7e3ad858060101000000000000005e8f5b6ccccf02030100000000000000",
+            "parametersSha256": "4d1759315f46ce013baa24ac95faffa2e21ab543c52b5b2d6e65d71b3f3befd9"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "84670555298326848",
+              "computeTime": "308256827722293056",
+              "blockUsage": "716010371221036288",
+              "bytesWritten": "1103484230489305344",
+              "bytesChurned": "1446224735378828800",
+              "overall": "1446224735378828800"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18256184113700754837",
+              "computeFactor": "18346495695137173145",
+              "blockUsageFactor": "18520588203325303935",
+              "writeFactor": "18663708282674974550"
+            },
+            "stateRoot": "000d9feadd99b87eccfceb78b6a6906d8565bea4ea9f100b91a2396a3ba8ac4984",
+            "feePricesBytes": "00000000000000000a00000000000000955543dbb9fe5afd0000000000000000996ee27da1d89bfe00000000000000007fac7e3ad85806010100000000000000568f5b6ccccf02030100000000000000",
+            "parametersSha256": "3abe647ac15ec10dc9fd789b3db341c61320c25a92ba9db8171ead98bb811359"
+          }
+        },
+        {
+          "name": "a block of twenty deploys, above the bytes-written limit",
+          "cost": {
+            "readTime": "35700000000",
+            "computeTime": "39516349420",
+            "blockUsage": "52740",
+            "bytesWritten": "57900",
+            "bytesChurned": "122880"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "658548763431430993",
+              "computeTime": "728947984478020878",
+              "blockUsage": "4864406412237208762",
+              "bytesWritten": "18446744073709551616",
+              "bytesChurned": "2266735911777429703",
+              "overall": "18446744073709551616"
+            },
+            "feePrices": {
+              "overallPrice": "192943940723441041410",
+              "readFactor": "17968498578068479576",
+              "computeFactor": "17989635560553905877",
+              "blockUsageFactor": "18392047684291253924",
+              "writeFactor": "19436794471924567088"
+            },
+            "stateRoot": "006db3458a6d0e500a336771982d26ddec2a18bf1e53c26e11ebbdb7a0638cc0aa",
+            "feePricesBytes": "0280bac0d393a2750a00000000000000581ee26c41ee5cf90000000000000000d5fe8ca93a06a8f90000000000000000a4d63972ecad3dff0000000000000000300c5777975dbd0d0100000000000000",
+            "parametersSha256": "bf4624a7173f11a10c3003c44e5af279ef2e4267cb5b4a2fd9cd4832b5a3cb33"
+          },
+          "roundTrip": null
+        },
+        {
+          "name": "a block of the system transaction, a deploy and a call",
+          "cost": {
+            "readTime": "4760000000",
+            "computeTime": "16880636115",
+            "blockUsage": "7763",
+            "bytesWritten": "2991",
+            "bytesChurned": "78432"
+          },
+          "exact": {
+            "fullness": {
+              "readTime": "87806501790857466",
+              "computeTime": "311392774214823680",
+              "blockUsage": "716010371221036246",
+              "bytesWritten": "1103484230489305378",
+              "bytesChurned": "1446815031189187553",
+              "overall": "1446815031189187553"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18255596208974131532",
+              "computeFactor": "18348192664388611030",
+              "blockUsageFactor": "18519991783981767208",
+              "writeFactor": "18663195637493696694"
+            },
+            "stateRoot": "0011ad7bd687f636479918cfc7309e3df358d78c243b6e9a79bf960846cc10ee24",
+            "feePricesBytes": "00000000000000000a000000000000004cf1de9e07e858fd0000000000000000d6ab4fef03e0a1fe000000000000000028da6287673a04010100000000000000b6886eea8cfd00030100000000000000",
+            "parametersSha256": "80d5cd3b54c80a85b1c1d602b8d3afb55aab3c88783b74104dda6f1fb0b3c4c7"
+          },
+          "roundTrip": {
+            "fullness": {
+              "readTime": "87806501790857472",
+              "computeTime": "311392774214823680",
+              "blockUsage": "716010371221036288",
+              "bytesWritten": "1103484230489305344",
+              "bytesChurned": "1446815031189187584",
+              "overall": "1446815031189187584"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18255596208974131528",
+              "computeFactor": "18348192664388611026",
+              "blockUsageFactor": "18519991783981767218",
+              "writeFactor": "18663195637493696694"
+            },
+            "stateRoot": "00288fabac64954883d938c5715be8f58d6d860a226813c0fd1d16a980665ea3c4",
+            "feePricesBytes": "00000000000000000a0000000000000048f1de9e07e858fd0000000000000000d2ab4fef03e0a1fe000000000000000032da6287673a04010100000000000000b6886eea8cfd00030100000000000000",
+            "parametersSha256": "5bb68b6b8cce995895dcbce97ea937ac168f9e7dc06931efa9ff338bf12d9d35"
+          }
+        }
+      ],
+      "systemTransactions": [
+        {
+          "name": "DistributeReserve(1000000000000000)",
+          "bytes": "6d69646e696768743a73797374656d2d7472616e73616374696f6e5b76395d3a050f0080c6a47e8d03",
+          "cost": {
+            "readTime": "170000000",
+            "computeTime": "170000000",
+            "blockUsage": "0",
+            "bytesWritten": "0",
+            "bytesChurned": "32"
+          },
+          "block": {
+            "fullness": {
+              "readTime": "3135946492530624",
+              "computeTime": "3135946492530624",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "590295810358706",
+              "overall": "3135946492530624"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "006d3e3fecedf8cec5dfb5c4b8c813c6cbf60b140b94dc50a553c067ab2321d95f",
+            "feePricesBytes": "00000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "38d99ef89d303fc126754e68b35c79a1804abcf734f627f35748d164fe503c29"
+          }
+        },
+        {
+          "name": "OverwriteParameters(the blank state's parameters)",
+          "bytes": "6d69646e696768743a73797374656d2d7472616e73616374696f6e5b76395d3a00068b0300008a523d003a6d3d004a8327009e362e00a24b260092c12d002e9b230026ae6100864a2c004a6952005ee116009ebd310072bb3b00e69e33000e6a3300c2e32f0072ac2f006a143300d2770900000e33130000ca126f0000368b12000416422500ae190100c2702f00fe1023006a8017003ce2691700389eda3100aade3100da23260082630e00e6c85f01ba880e001efe2c0002f10800ba650e000a623d003a020f001a592d00ee371300202e5103000cfac34000428c4000d6504e00f906e6f64e00fd066a7b8500b112ad16b2f0a0001123629a3800823d4b00009afa460c3e6e9a000122fa993800a21a6c0000562e440cfa3d5e000ecc1b00c6b14100e2991b003619f100592a0d0cbabdcd0000c549aa93d5004a622401f92d002aadda0000ad5142be00011e41e700d12901163eb6b90000d55e72c1cf0066d91a01252ecd1b9ee6c70000696126a6fe005294dd02d1136eb64800cabcb4000096533b0c62fef90166cfe9020522c6ed43000af4ae00005a7a3c0c5e38f901e23c0400da822b0e1d06fadf7b2a03896519cb07010e345b0126fcc900eef345380e2d0e00f6d748144e25970c4aa29704da2a3000ced095fb0a87df0500c6fc990902127a0002fd4314000284d71700000000000000000040000000000000000000000000000000000100000000000000000000000000000001000000000000000200400002127a000700d6117e03070010a5d4e8070010a5d4e802350c00420d030002093d0000000000000000800000000000000000420d03000700f2052a012d81302a000000000000000000000000000000000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000100e000000000000000000000000000000000000000000400000000000000000000000000000000064000000000000009101a10f00000000000000000a00000000000000",
+          "cost": {
+            "readTime": "0",
+            "computeTime": "0",
+            "blockUsage": "0",
+            "bytesWritten": "0",
+            "bytesChurned": "743"
+          },
+          "block": {
+            "fullness": {
+              "readTime": "0",
+              "computeTime": "0",
+              "blockUsage": "0",
+              "bytesWritten": "0",
+              "bytesChurned": "13705930846766197",
+              "overall": "13705930846766197"
+            },
+            "feePrices": {
+              "overallPrice": "184467440737095516160",
+              "readFactor": "18446744073709551616",
+              "computeFactor": "18446744073709551616",
+              "blockUsageFactor": "18446744073709551616",
+              "writeFactor": "18446744073709551616"
+            },
+            "stateRoot": "00a93750ee17e3e03bd5e47b724633a93ffcb6ac5c0ac2cadeb3e6f3c966e08c39",
+            "feePricesBytes": "00000000000000000a0000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000000010000000000000000000000000000000100000000000000",
+            "parametersSha256": "38d99ef89d303fc126754e68b35c79a1804abcf734f627f35748d164fe503c29"
+          }
+        }
+      ],
+      "blankParametersSha256": "38d99ef89d303fc126754e68b35c79a1804abcf734f627f35748d164fe503c29"
+    }
+  }
+}

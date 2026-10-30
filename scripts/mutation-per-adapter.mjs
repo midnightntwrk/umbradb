@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Per-adapter StrykerJS runner + aggregate gate (v1.0.0-recovery-testing Task 7.3). Runs EACH
+// Per-adapter StrykerJS runner + aggregate gate. Runs EACH
 // durability adapter's mutation pass as its OWN `stryker run --mutate <file>` invocation, so every
 // adapter reuses ONE Testcontainers Postgres -- the fast, MEASURED path -- instead of one interleaved
 // `stryker run` that churns a container per file switch.
 //
-// EVIDENCE DISCIPLINE (change-level round-3 BLOCK 5). The old runner scored absence-of-evidence as a
+// EVIDENCE DISCIPLINE. The old runner scored absence-of-evidence as a
 // pass: it ignored a nonzero Stryker exit whenever any JSON report existed, and scored ZERO usable
 // mutants as 100%. So an adapter with an empty report or only CompileError/RuntimeError mutants
 // contributed NO evidence yet the run exited 0. This runner FAILS (nonzero exit) if ANY adapter
@@ -16,7 +16,7 @@
 // PER-ADAPTER BREAK NEUTRALIZATION. An adapter run in isolation lacks the sibling-suite coverage the
 // interleaved config gives it, so its isolated score is a conservative LOWER BOUND (transaction-lease
 // alone 64.83% < break 65). We gate the AGGREGATE, not each adapter. To ALSO treat a nonzero Stryker
-// exit as a genuine failure (BLOCK 5(a)), we run each adapter under a per-adapter config whose
+// exit as a genuine failure (case (a) above), we run each adapter under a per-adapter config whose
 // `thresholds.break = 0` -- so a low score never itself trips a nonzero exit, leaving a nonzero exit
 // to mean a real Stryker error (config / dry-run / internal), which we then fail on.
 import { spawnSync } from "node:child_process";

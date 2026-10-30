@@ -1,6 +1,7 @@
 # Proposal — v1.0.0-durable-checkpoint-cursor
 
-> **Status:** Proposed for the 1.0.0 program. Capability: `durable-composition`. This change is
+> **Status:** Implemented: merged to `main` in `2cb5d00`; written for the 1.0.0 program.
+> Capability: `durable-composition`. This change is
 > **API-affecting** and MUST land in the pre-freeze phase (`council/A-release-scope.md` §5 Phase 1,
 > `ROADMAP-v1.0.0-CONSOLIDATED.md` critical-path step 1–2) — it changes
 > `CheckpointStore.save`'s signature, so it cannot follow the API freeze (`G1`) without forcing a

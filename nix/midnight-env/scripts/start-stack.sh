@@ -10,7 +10,7 @@
 #
 # TLS: the Ledger-8+ midnight-node MANDATES a TLS connection to the cexplorer DB
 # (`allow_non_ssl` is deprecated/ignored). Step [0] gives the local Postgres a TLS endpoint
-# before anything connects. See design/db-sync-tls-feasibility.md.
+# before anything connects.
 set -euo pipefail
 
 FLAKE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,7 +27,7 @@ echo "==> [0/4] Ensuring the db-sync Postgres has a TLS endpoint (Ledger-8 node 
 # Self-signed cert + ssl=on for the local cluster. Certs live OUTSIDE PGDATA so initdb on a
 # fresh cluster is unaffected. `ssl=on` is permissive (does not force TLS), so cardano-db-sync's
 # own plaintext connection keeps working. VerifyFull: sign with a CA and set the node's
-# --ssl_root_cert (see design/db-sync-tls-feasibility.md).
+# --ssl_root_cert.
 SSL_DIR="${DB_TLS_SSL_DIR:-/etc/ssl/postgres}"
 if [ ! -f "$SSL_DIR/server.key" ]; then
   mkdir -p "$SSL_DIR"
