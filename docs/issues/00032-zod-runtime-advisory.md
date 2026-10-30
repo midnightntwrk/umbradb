@@ -4,6 +4,8 @@
   in the task's local commit: `zod` `^4.6.7`, locked at 4.6.7; the runtime `npm audit --audit-level=high --omit=dev`
   finds 0 vulnerabilities. See "Resolution" below.
 - **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
+- **Area:** deps
+- **Severity:** high
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

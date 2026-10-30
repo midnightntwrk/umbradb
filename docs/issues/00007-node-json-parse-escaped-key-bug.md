@@ -1,6 +1,9 @@
 # 00007 — Remove UmbraDB's own JSON reader once Node.js fixes `JSON.parse`'s escaped-key bug
 
 - **Status:** OPEN
+- **Area:** deps
+- **Severity:** low
+- **Effort:** waiting on Node.js — the workaround stays until a Node.js release with the fix.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-23, during task 2.2 of `openspec/changes/core-arch` (the PGlite backend), by the A7 differential's
   seeded round trip; the owner decided to keep the workaround (the decision record's Q78) and to track its removal here.

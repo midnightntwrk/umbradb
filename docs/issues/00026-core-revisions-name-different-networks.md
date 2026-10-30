@@ -1,6 +1,10 @@
 # 00026 — A configuration's `core` revisions may name different networks
 
 - **Status:** OPEN
+- **Area:** logic
+- **Severity:** med
+- **Effort:** needs the owner's decision: forbidding a network change between configuration revisions changes the
+  configuration rules.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 10.2a of `openspec/changes/core-arch` (the node's genesis hash compared with the
   configured network's at every start, decision records Q117 A and Q120 B). The configuration code involved is tasks

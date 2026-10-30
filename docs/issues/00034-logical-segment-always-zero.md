@@ -1,6 +1,9 @@
 # 00034 — `contract_logs.logs.logical_segment` is 0 for every log: the ledger labels fallible contract events so
 
 - **Status:** OPEN upstream; the module guide's note (`docs/module-guide.md`, contract logs) was added 2026-10-29.
+- **Area:** logic
+- **Severity:** low
+- **Effort:** waiting on the ledger team — documented in the module guide meanwhile.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

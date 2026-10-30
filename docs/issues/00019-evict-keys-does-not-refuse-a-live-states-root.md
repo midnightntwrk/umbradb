@@ -1,6 +1,10 @@
 # 00019 — `evictKeys` does not refuse the root node of a live ledger state
 
 - **Status:** OPEN
+- **Area:** logic
+- **Severity:** low
+- **Effort:** waiting on the ledger patch — safe today because of how UmbraDB calls it; the vendored README's wording
+  could be corrected now.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 12.1 of `openspec/changes/core-arch` (the `LedgerPackage` adapters), outside its
   change: the behaviour is the vendored packages' (task 0.2's patches), which task 12.1 does not change.

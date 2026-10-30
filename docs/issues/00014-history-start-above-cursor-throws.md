@@ -1,6 +1,10 @@
 # 00014 — The history check throws a plain `Error` when a configuration's S is above the database's cursor
 
 - **Status:** OPEN
+- **Area:** logic
+- **Severity:** low
+- **Effort:** small — throw a clear, named error instead of a generic one, and update the test that expects the generic
+  one.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-25, during task 4.4 of `openspec/changes/core-arch` (`umbradb config check --database`), while
   checking configurations against a database with a recorded history.

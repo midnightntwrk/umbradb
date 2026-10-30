@@ -1,6 +1,10 @@
 # 00013 — A nondeterministic collation compares differently on PGlite and on PostgreSQL
 
 - **Status:** OPEN
+- **Area:** logic
+- **Severity:** med
+- **Effort:** needs the owner's decision: refusing these sorting rules (or allowing them) is a change to the determinism
+  spec.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-25, during task 7.1 of `openspec/changes/core-arch` (change capture for the digests), while testing
   that a shadow table keys its rows with the collations of its module table's key columns.

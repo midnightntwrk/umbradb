@@ -1,6 +1,9 @@
 # 00044 — `docs/supply-chain/` states a gate set and package counts that are no longer true
 
 - **Status:** OPEN
+- **Area:** docs
+- **Severity:** med
+- **Effort:** medium — regenerate the counts from the lockfile and rewrite the gate list; fixes 00005 at the same time.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

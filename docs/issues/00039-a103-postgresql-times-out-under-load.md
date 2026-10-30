@@ -4,6 +4,8 @@
   PGlite, and PostgreSQL continues from its backup at 4,990 restored with `umbradb restore`'s code
   (`test/backbone/ledger-window.ts`, `ledger-window.test.ts`); the case in `ledger-storage.test.ts` is gone.
 - **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
+- **Area:** test
+- **Severity:** med
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

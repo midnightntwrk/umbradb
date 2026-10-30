@@ -4,6 +4,8 @@
   local commit: `test/tape/command.test.ts` starts `tools/tape/main.ts` with `spawnChild` (`test/child-processes.ts`),
   whose watcher kills the child when the test process ends. See "Resolution" below.
 - **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
+- **Area:** test
+- **Severity:** low
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, by the orchestrator, after task 12.2's runner reported two processes it had not started in lane
   3's worktree.

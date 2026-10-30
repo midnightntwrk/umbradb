@@ -1,6 +1,9 @@
 # 00025 — The module API listener refuses a request that offers an upgrade other than WebSocket
 
 - **Status:** OPEN
+- **Area:** bug
+- **Severity:** low
+- **Effort:** small — hand only WebSocket upgrades to the WebSocket server and ignore the rest.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 5.2c of `openspec/changes/core-arch`, while testing `X-Umbra-Version` on `ws`'s
   refusals of an upgrade. The code involved is task 5.2a's; task 5.2c did not change which requests are upgraded.

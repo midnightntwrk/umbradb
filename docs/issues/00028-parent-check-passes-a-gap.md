@@ -1,6 +1,10 @@
 # 00028 — `core-block-commit`'s parent check lets a block above a gap commit
 
 - **Status:** OPEN
+- **Area:** logic
+- **Severity:** high
+- **Effort:** small — about 10 lines and a test in the block-commit check, but it is on the path every block takes, so
+  it needs care.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 10.4 of `openspec/changes/core-arch`, in the run of the A86 negative control
   `AlwaysLanded` (`test/runner/recovery.test.ts`): a recovery that reads a `COMMIT` that did not land as landed skips

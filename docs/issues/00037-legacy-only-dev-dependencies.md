@@ -1,6 +1,9 @@
 # 00037 — Two development dependencies are used only by the frozen `legacy/transaction-history/`
 
 - **Status:** OPEN
+- **Area:** deps
+- **Severity:** low
+- **Effort:** medium — removing the two packages changes the lockfile, and one test relies on their lockfile entry.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-27, during task 17.2 of `openspec/changes/core-arch` (the retirement of the 0.9.5 parts).
 

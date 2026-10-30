@@ -2,6 +2,8 @@
 
 - **Status:** CLOSED — fixed 2026-10-29: `IN_MEMORY_SPEC_VERSION` is 2,001,000 (runtime 2.1, ledger v9), and
   `test/backbone/core-block-fetch.test.ts` checks that every known network's table maps it to `IN_MEMORY_LEDGER`.
+- **Area:** logic
+- **Severity:** low
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-27, during task 12.2a of `openspec/changes/core-arch` (owner decision Q139 A: runtime 2.0's ledger
   is the package `v9-rc3`), outside its change: the constants are `src/runner/`'s (task 5.2, task 10.3's block items).

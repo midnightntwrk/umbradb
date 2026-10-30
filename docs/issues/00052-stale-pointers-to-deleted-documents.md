@@ -3,6 +3,8 @@
 - **Status:** CLOSED — fixed 2026-10-29: `openspec/config.yaml`'s context and design rule describe 0.10.0 and cite
   `openspec/changes/core-arch/design.md`; the code and workflow comments cite current sources or none. Left as they are:
   `legacy/transaction-history/` (frozen) and `AUTONOMOUS_RUN_LOG.md` (append-only).
+- **Area:** docs
+- **Severity:** low
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

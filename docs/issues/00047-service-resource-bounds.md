@@ -1,6 +1,10 @@
 # 00047 — Resource limits are per message or connection, not per service
 
 - **Status:** OPEN
+- **Area:** security
+- **Severity:** med
+- **Effort:** large — service-wide limits (connections, subscriptions, read size while it is built) across the transport
+  and the API.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

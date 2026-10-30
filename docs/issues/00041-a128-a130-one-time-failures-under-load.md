@@ -1,6 +1,9 @@
 # 00041 — A128 refused once and A130 hung once under load, each passing in every other run
 
 - **Status:** OPEN
+- **Area:** test
+- **Severity:** med
+- **Effort:** unknown — the cause is not found; diagnostics are in place, so the next failure should name it.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Diagnostics added:** task 17.5a (2026-10-27). `test/backup/restore.test.ts`'s `continueTo` puts how processing
   ended — for a refusal or a failure the error's name, code and message and each cause's — and the ticker's log lines

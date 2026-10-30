@@ -1,6 +1,10 @@
 # 00011 — A server `FATAL` while a statement is pending reaches the database API as `CONNECTION_CLOSED`: the server's reason is lost
 
 - **Status:** OPEN
+- **Area:** bug
+- **Severity:** low
+- **Effort:** small if documented here; the real fix (keeping the server's reason) is in the PostgreSQL driver,
+  upstream.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-25, during task 2.7 of `openspec/changes/core-arch` (timeouts by connection role), in the
   negative control that runs the database API without its zero timeouts against 1 s database defaults.

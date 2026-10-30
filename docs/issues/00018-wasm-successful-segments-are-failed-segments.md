@@ -1,6 +1,9 @@
 # 00018 — The ledger packages' `successfulSegments` is true for the segments that failed
 
 - **Status:** OPEN
+- **Area:** deps
+- **Severity:** low
+- **Effort:** waiting on the ledger team — UmbraDB already flips the value.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 12.1 of `openspec/changes/core-arch` (the `LedgerPackage` adapters), outside its
   change: the code is upstream `midnight-ledger`'s, built unchanged into both vendored packages (`vendor/ledger/`).

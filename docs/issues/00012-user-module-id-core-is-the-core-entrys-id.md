@@ -3,6 +3,8 @@
 - **Status:** CLOSED — fixed by task 4.1 of `openspec/changes/core-arch` (2026-10-25): declaration validation refuses
   a user module whose id is `core` with `reserved-prefix`, and MD-2 and A21 name the case (see "Resolution").
 - **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
+- **Area:** logic
+- **Severity:** med
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-25, during task 3.2 of `openspec/changes/core-arch` (graph resolution per height range), while
   deciding what the graph does with an entry whose id is `core`.

@@ -7,6 +7,8 @@
   no height is reported after its commit (a height that commits in time), and gives a held height's retry
   `slowBlockMs` 3,500. Every case still fails a wrong watchdog the way it did.
 - **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
+- **Area:** test
+- **Severity:** med
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

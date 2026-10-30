@@ -1,6 +1,9 @@
 # 00030 — Two processes starting at once on one PostgreSQL server race to create the same module roles
 
 - **Status:** OPEN
+- **Area:** bug
+- **Severity:** med
+- **Effort:** small — take a database lock around role creation, in both places that create roles (startup and restore).
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

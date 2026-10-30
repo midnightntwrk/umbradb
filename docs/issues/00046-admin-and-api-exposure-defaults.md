@@ -1,6 +1,10 @@
 # 00046 — The admin endpoints listen on all interfaces by default, and no HTTP service has an access policy
 
 - **Status:** OPEN
+- **Area:** security
+- **Severity:** med
+- **Effort:** small change, but needs the owner's decision: a local-only default would break setups that check health
+  from outside a container.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

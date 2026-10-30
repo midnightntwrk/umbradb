@@ -2,6 +2,10 @@
 
 - **Status:** OPEN — mitigated 2026-10-29, cause not fixed: the conformance gate's deadline (see 00027) ends a hung run
   with exit 124 instead of leaving it running.
+- **Area:** bug
+- **Severity:** med
+- **Effort:** mitigated — the gate's deadline ends a hung run; the cause is not found and could also hang a real
+  development process.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

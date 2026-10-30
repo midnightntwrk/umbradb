@@ -1,6 +1,9 @@
 # 00038 — The A87 registry cannot name a test written with `it.runIf` or `it.skipIf`
 
 - **Status:** OPEN
+- **Area:** test
+- **Severity:** low
+- **Effort:** medium — teach the requirement-to-test list to see one-database tests, then register the 12 such tests.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

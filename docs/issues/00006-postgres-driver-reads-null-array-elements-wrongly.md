@@ -7,6 +7,8 @@
 - **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed. The DB-2
   spec edit the Resolution lists as pending is in place (`openspec/changes/core-arch/specs/database-api/spec.md`); the
   mapping now lives in `src/deterministic-postgresql/mapping.ts`.
+- **Area:** bug
+- **Severity:** high
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-23, during task 1.3 of `openspec/changes/core-arch` (column-type rules), while writing a
   hand-computed contents-hash oracle for a `varchar[]` column.

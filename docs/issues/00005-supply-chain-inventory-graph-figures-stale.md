@@ -1,6 +1,9 @@
 # 00005 — The supply-chain inventory's npm graph figures and dev table are stale
 
 - **Status:** OPEN
+- **Area:** docs
+- **Severity:** low
+- **Effort:** medium — fixed together with 00044 (same pages).
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-22, during task 0.1 of `openspec/changes/core-arch` (dependency pins). Numbered 00005 because
   an unrelated 00004 is already drafted in another working copy.

@@ -1,6 +1,9 @@
 # 00024 — The module API listener closes a refused request's connection before its client has sent the body
 
 - **Status:** OPEN
+- **Area:** bug
+- **Severity:** med
+- **Effort:** small — read and discard the rest of a too-large request before answering, in the API's request handling.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 5.2b of `openspec/changes/core-arch`, when
   `test/runner/api-server.test.ts`'s "answers a body larger than its limit with 413 request-too-large, and a body that

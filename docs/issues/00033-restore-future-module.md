@@ -3,6 +3,8 @@
 - **Status:** CLOSED — fixed 2026-10-29: `restoreGrants` runs `prepareSchemas` before the `REVOKE`, so the schema of a
   module starting above the backup's height exists; `test/backup/restore.test.ts` restores with such a module on both
   backends.
+- **Area:** bug
+- **Severity:** med
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

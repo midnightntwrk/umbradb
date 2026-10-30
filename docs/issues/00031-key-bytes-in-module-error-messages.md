@@ -1,6 +1,10 @@
 # 00031 — A module's error message can carry a secret setting's bytes into the log in a form the redaction misses
 
 - **Status:** OPEN
+- **Area:** security
+- **Severity:** low
+- **Effort:** medium — teach the log redaction more encodings (plain hex, base64); module authors stay responsible for
+  what they log.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

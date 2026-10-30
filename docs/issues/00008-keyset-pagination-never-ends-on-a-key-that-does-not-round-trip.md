@@ -1,6 +1,9 @@
 # 00008 — The rows of a table are read forever when a key read back does not round-trip
 
 - **Status:** OPEN
+- **Area:** logic
+- **Severity:** low
+- **Effort:** small — stop reading when a page does not move forward; latent today, no key type triggers it.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-24, during task 2.2b of `openspec/changes/core-arch` (date and time values), by its mutation-style
   negative controls: two wrong variants of the date and time mapping made the determinism suites hang instead of fail.

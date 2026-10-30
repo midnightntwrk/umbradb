@@ -1,6 +1,9 @@
 # 00053 — the exported `startProcess` cannot be called with the package alone
 
 - **Status:** OPEN
+- **Area:** bug
+- **Severity:** med
+- **Effort:** medium — a public API decision: which core pieces (or a ready-made builder) the package should export.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

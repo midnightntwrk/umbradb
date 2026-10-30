@@ -2,6 +2,8 @@
 
 - **Status:** CLOSED — fixed 2026-10-29: `coverage.all` is gone (Vitest 4 reports every file `coverage.include`
   matches), and `tsconfig.json` includes both Vitest configs, so `npm run typecheck` checks them.
+- **Area:** test
+- **Severity:** low
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 17.1 of `openspec/changes/core-arch` (TransactionHistory to `legacy/`), when A3's
   static test first imported the run's configuration with a plain `import`.

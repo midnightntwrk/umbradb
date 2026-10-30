@@ -2,6 +2,9 @@
 
 - **Status:** OPEN — diagnostics added 2026-10-29, cause not found: `test/private/accepted-hash-checks.ts` now prints
   the race step's error when its H3 is null or its start was not refused as expected.
+- **Area:** test
+- **Severity:** med
+- **Effort:** unknown — the failure now prints its cause; waiting for it to happen again.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

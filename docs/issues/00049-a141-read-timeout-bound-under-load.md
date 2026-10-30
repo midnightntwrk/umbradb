@@ -1,6 +1,10 @@
 # 00049 — A141's "within 2 s" on PostgreSQL fails once under load
 
 - **Status:** OPEN
+- **Area:** test
+- **Severity:** med
+- **Effort:** needs the owner's decision: the 2-second limit is written into the agreed requirement, so loosening it is
+  a requirement change, not a test fix.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

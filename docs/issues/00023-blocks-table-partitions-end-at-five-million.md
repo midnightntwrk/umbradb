@@ -1,6 +1,10 @@
 # 00023 — The blocks table's height partitions end at 5,000,000
 
 - **Status:** OPEN
+- **Area:** infra
+- **Severity:** low
+- **Effort:** large — adding partitions later means a migration of the height-split tables of seven modules; deferred on
+  purpose.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, task 10.2's question Q119 of `openspec/changes/core-arch`; kept open as a reminder by the owner
   ("Add a note that this needs to updated in the future").

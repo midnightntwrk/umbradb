@@ -2,6 +2,8 @@
 
 - **Status:** CLOSED — fixed 2026-10-29: `connectWebSocket` refuses a `heartbeatMs` that is not a whole number from 1 to
   2^31 − 1 with `invalid-configuration` before connecting; the tests that passed a larger value use 2^31 − 1.
+- **Area:** bug
+- **Severity:** low
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 9.2 of `openspec/changes/core-arch` (the recording builder), outside its change
   (`src/node/` is task 10.1's).

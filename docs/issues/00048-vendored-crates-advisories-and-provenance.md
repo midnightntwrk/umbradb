@@ -1,6 +1,10 @@
 # 00048 — No advisory scan covers the vendored Rust crates, and releases have no provenance
 
 - **Status:** OPEN
+- **Area:** deps
+- **Severity:** med
+- **Effort:** large — new CI scanning for the bundled Rust code plus a release workflow; the owner decides where release
+  automation lives.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

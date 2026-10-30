@@ -3,6 +3,9 @@
 - **Status:** OPEN — mitigated 2026-10-29, cause not fixed: `scripts/conformance-gate.mjs` kills Vitest's whole process
   group past `UMBRADB_CONFORMANCE_DEADLINE_MS` (default 60 min) and fails with exit 124, so a hung worker no longer
   blocks the gate forever.
+- **Area:** test
+- **Severity:** med
+- **Effort:** mitigated — the gate's deadline ends a hung run; the hang itself is inside V8 (Node.js) and not fixed.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 10.2a of `openspec/changes/core-arch`, in a run of `npx vitest run test/runner
   test/backbone test/admin test/private test/config test/cli` (76 files) on Node.js v24.9.0 at a load average of 10–28.

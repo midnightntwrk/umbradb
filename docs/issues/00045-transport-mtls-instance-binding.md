@@ -1,6 +1,9 @@
 # 00045 — Mutual TLS does not bind a certificate to an instance id
 
 - **Status:** OPEN
+- **Area:** security
+- **Severity:** med
+- **Effort:** large — tying a certificate to an instance name needs a configuration and transport design, not a patch.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

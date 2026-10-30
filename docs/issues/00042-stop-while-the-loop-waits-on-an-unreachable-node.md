@@ -3,6 +3,8 @@
 - **Status:** CLOSED — fixed by task 5.3c (2026-10-27): reproduced by A169's tests, then the node client closed at
   the stop once the loop runs (see Resolution); never filed on GitHub
 - **Verified:** COMPLETED — re-checked 2026-10-29 at `258cec6`: the fix is present and has not regressed.
+- **Area:** bug
+- **Severity:** med
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem

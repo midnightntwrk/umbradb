@@ -1,6 +1,10 @@
 # 00020 — A module id that is a reserved SQL key word passes DB-8, and every unquoted reference to its schema fails
 
 - **Status:** OPEN
+- **Area:** logic
+- **Severity:** low
+- **Effort:** medium — refuse module ids that are reserved SQL words, which needs a reliable keyword list for both
+  databases.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-10-26, during task 5.4 of `openspec/changes/core-arch` (failure handling), when a test module named
   `user` refused startup with `migration-failed` on PostgreSQL 18.6 and on PGlite 0.5.10.

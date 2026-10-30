@@ -1,6 +1,10 @@
 # 00029 — `umbradb config check --database` reads a private database's cursor from the public cursor table
 
 - **Status:** OPEN
+- **Area:** bug
+- **Severity:** med
+- **Effort:** medium — the database check must learn whether the configuration is public or private and read that side's
+  cursor.
 - **GitHub:** NOT IN GITHUB ISSUE
 
 ## Problem
