@@ -227,8 +227,9 @@ for its own reason with the fault put back. Database criteria run on PostgreSQL 
   `invalid-request`; an unknown subscription name is answered as on the listener; a message over
   `DEFAULT_MAX_MESSAGE_BYTES` closes the connection; a subscriber holding more than the module API's
   `MAX_BUFFERED_BYTES` unsent is terminated; the upgrade response carries `X-Umbra-Version` and, once the hash exists,
-  `X-Umbra-Config-Hash`, which holds no secret (with a password in `database`, it neither holds it nor changes with
-  it); each negative control removes its check on the mounted path only and fails. (LM-4, RN-15, RN-16)
+  `X-Umbra-Config-Hash`, which holds no secret: it neither holds nor changes with a password in `database` (on
+  PostgreSQL) or a TLS key and a node URL's credentials (on PGlite, whose `database` has no password, CF-4); each
+  negative control removes its check on the mounted path only and fails. (LM-4, RN-15, RN-16)
 
 ## 9. `core-arch` criteria rewritten by this change
 
@@ -245,7 +246,7 @@ Each replaces the `core-arch` criterion of the same id; only what is in bold cha
   configuration changed halts with `public-config-changed` at its next message from the core, before it processes
   another height; a core restarted with the same configuration changes nothing; every module API answer **written
   after the hash exists (after `on-start-db`)** carries `X-Umbra-Config-Hash`, which holds no secret (with a password
-  in `database`, the header neither holds it nor changes with it); a private process without a transport, reading the
+  in `database` **on PostgreSQL**, the header neither holds it nor changes with it); a private process without a transport, reading the
   public configuration history again at a reconnection to its public database, halts alike. (PP-14, RN-16, PP-4,
   owner decision Q147)
 - **A166** `[CI]` Under the opt-in, a PGlite `path` `<tmp>/a/b` with `<tmp>/a` missing: **`startUmbraDB`** and
