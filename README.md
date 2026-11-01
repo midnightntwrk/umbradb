@@ -173,7 +173,7 @@ The `core` entry's settings, the main ones (`GET /config` shows them all, with t
 | `node` | | The node's WebSocket URL (secret) |
 | `database` | | The database as parts, PostgreSQL or PGlite (below); only `password` is secret |
 | `developmentOptIn` | `false` | Required for PGlite and for development-only modules |
-| `listen.admin` | `0.0.0.0:8081` | The admin endpoints |
+| `listen.admin` | `0.0.0.0:8081` | The admin endpoints (a program's own process listens only if asked: `startUmbraDB`) |
 | `listen.api` | none | The module API; without it, no module API is served |
 | `listen.privateLink` | none | The private processes' link (renamed from `listen.transport`) |
 | `transportReader` | none | The login of the link's reads; required with `listen.privateLink` on PostgreSQL |
@@ -220,6 +220,28 @@ npx umbradb restore preview-10000.backup --config restored.config.ts     # into 
 `run` exits 1 at once, without a signal, when the configuration cannot be loaded or fails its schemas. A refused
 backup writes no file, and a refused restore commits nothing. No command or an unknown one prints the usage and exits
 2; 3 is kept for a command a build does not provide.
+
+## In your own program: `startUmbraDB`
+
+A program of yours — a server, a test — can run UmbraDB in its own process instead of the command, with the same
+configuration file or the same data:
+
+```ts
+import { createServer } from "node:http";
+import { startUmbraDB } from "umbradb";
+
+const indexer = startUmbraDB({ config: { file: "umbradb.config.ts" }, log: (line) => console.error(line) });
+createServer(indexer.api.http).listen(18080, "127.0.0.1"); // the module API, mounted in your server
+process.once("SIGTERM", () => void indexer.stop());
+```
+
+It returns its handle at once, and every refusal rejects `indexer.started` (an `UmbraError` with the code
+`indexer.status()` shows). It does nothing to your program unless asked: no signal handler, no output without `log`, no
+port unless its `network` option asks for one (an address the file writes and the option does not use is refused,
+`network-address-conflict`), no default file. Its handle carries the module API's and admin's handlers, to mount in
+your server, and the private link can run over channels you provide. The command's backup settings are refused there
+(`library-setting-refused`): call `indexer.backup(file)`. The [module guide](docs/module-guide.md) covers it: §17 runs a
+module test with it, on an in-memory chain; §18 lists its options, its handle, the network request and the channels.
 
 ## Backup and restore
 
@@ -301,7 +323,8 @@ run in a worker thread of their own, so they answer while a block holds the data
 - `GET /status`: the state, conditions, cursor, node head and lag; the `reason` of a refusal or halt (its code,
   height, module and point); the node; every module with its tables' digests; the ledger; the private instances.
 - `GET /config`: the configuration as validated (secrets `[redacted]`), its history, every module's declaration
-  without its callbacks, the chain, the ledger table, the database.
+  without its callbacks, the chain, the ledger table, the database, and how each surface is served (`network`:
+  `listening`, `connecting`, `mounted`, `channels`, `connect` or `none`).
 
 A process is in one state at a time:
 
@@ -560,7 +583,8 @@ Passport, an explorer, and private user secrets.
 **Breaking change from 0.9.5.** 0.9.5 was a PostgreSQL storage library for wallet state. 0.10.0 is the indexer: no
 0.9.5 export or database is carried over; the indexer starts a new database. The [CHANGELOG](CHANGELOG.md) lists what
 changed. The specification is the OpenSpec change [`core-arch`](openspec/changes/core-arch/) (`proposal.md`,
-`design.md`, the capability specs), and the [operator guide](docs/operator-guide.md) covers running it.
+`design.md`, the capability specs), with [`start-umbradb`](openspec/changes/start-umbradb/) for UmbraDB as a library,
+and the [operator guide](docs/operator-guide.md) covers running it.
 
 **Security.** Read the [threat model](docs/THREAT_MODEL.md) and the [security policy](SECURITY.md) before deploying:
 modules and configuration files are trusted code, the node is trusted for what it says is finalized, and a restore

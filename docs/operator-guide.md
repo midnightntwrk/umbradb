@@ -22,7 +22,8 @@ database: { kind: "pglite", memory: true },
 - `port` is 5432 unless given. `password` may be left out: the PostgreSQL driver then takes `PGPASSWORD` from the
   process's environment, as libpq does.
 - A `host` starting with `/` is a Unix socket directory: the process connects to `<host>/.s.PGSQL.<port>`.
-- A PGlite `path` is a directory, a relative one read from the process's working directory.
+- A PGlite `path` is a directory, a relative one read from the process's working directory (a host program's
+  `startUmbraDB` reads it from its `cwd`).
 - Only `password` is secret: `/config` shows it as `[redacted]`, and every log line and error hides it wherever it
   appears. The host, port, user, name, `ssl` and a PGlite `path` are shown in `/config` and in the log, so a mistyped
   host or directory can be seen.
@@ -79,7 +80,9 @@ from outside its process, and the check says so.
 
 A core on PostgreSQL that listens for private processes (`listen.privateLink`) runs their reads on a login of its own,
 `transportReader` (owner decision Q175). The setting is required there, and refused on PGlite, whose database has one
-session:
+session. A host program that carries the link itself — over channels, or at an address it gives in code
+(`startUmbraDB`'s `network`, [module guide](module-guide.md) §18) — needs it too, else startup refuses
+`private-link-misconfigured` (`reader-missing`), and the reads run on it as below. A listening core's settings:
 
 ```ts
 database: { kind: "postgres", host: "db.internal", user: "umbradb", password: "…", name: "indexer" },
@@ -312,9 +315,10 @@ private process with that hash:
 umbradb run --update-hash=0x<64 hex digits> [--config umbradb.config.ts]
 ```
 
-That start runs every check of the public side — the binding, the public table items its modules require — and
-records the hash once they pass; later starts need no flag. A hash given that is not the one found accepts nothing, and
-the start stops as before; a value that is not `0x` and 64 lowercase hex digits prints the usage (exit 2). A start can
-also stop when the core's configuration changes during it, or when `privateLink` and `publicDatabase` are not one
-core's: start it again once both give one hash. A restored private backup holds the hash its process had accepted, so
-the restored process's first start compares it the same way.
+That start runs every check of the public side — the binding, the public table items its modules require — and records
+the hash once they pass; later starts need no flag. A host program that runs the private process with `startUmbraDB`
+gives the hash as its `acceptPublicConfigHash` option. A hash given that is not the one found accepts nothing, and the
+start stops as before; a value that is not `0x` and 64 lowercase hex digits prints the usage (exit 2). A start can also
+stop when the core's configuration changes during it, or when `privateLink` and `publicDatabase` are not one core's:
+start it again once both give one hash. A restored private backup holds the hash its process had accepted, so the
+restored process's first start compares it the same way.

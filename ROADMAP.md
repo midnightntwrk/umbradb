@@ -15,7 +15,9 @@ carries none of its API or databases over.
 ## 0.10.0: the core architecture (`openspec/changes/core-arch`)
 
 The change [`core-arch`](openspec/changes/core-arch/) builds the indexer on the parts of 0.9.5 that still apply. The
-owner approved it on 2026-10-22 (commit `52cc6d4`) and decided it ships as one change and one pull request.
+owner approved it on 2026-10-22 (commit `52cc6d4`) and decided it ships as one change and one pull request. The change
+[`start-umbradb`](openspec/changes/start-umbradb/), approved on 2026-11-01, makes UmbraDB usable as a library and lands
+in the same pull request before 0.10.0 is final (owner decision D-9).
 
 **The architecture.**
 
@@ -39,10 +41,15 @@ owner approved it on 2026-10-22 (commit `52cc6d4`) and decided it ships as one c
 - **Private processes** run private modules on their own databases, fed from the public one, independently or in
   lockstep; the public database stays shareable.
 - **Server and browser.** The same code runs in Node.js and, for development, in a browser page on PGlite.
+- **One engine, three entry points** (`start-umbradb`). `umbradb run`, a host program's `startUmbraDB` and the browser
+  demo start through one engine, and every command assembles its build through one resolver. A host program's process
+  does nothing to the program unless asked — no signal handler, no output without `log`, no port unless its network
+  request asks — and its handle carries the module API's and admin's handlers to mount in the host's server; the
+  private link runs over sockets or over channels the host provides.
 
-The exported surface is the one `openspec/changes/core-arch/design.md` §12 lists: 54 names, 27 values and 27 types,
-pinned by `test/library-surface/surface.test.ts` (A1); the command is `umbradb` (`run`, `config check`, `backup`,
-`restore`).
+The exported surface is the one `openspec/changes/core-arch/design.md` §12 lists, as
+`openspec/changes/start-umbradb/design.md` §4 amends it: 66 names, 28 values and 38 types, pinned by
+`test/library-surface/surface.test.ts` (A1); the command is `umbradb` (`run`, `config check`, `backup`, `restore`).
 
 **Status.**
 
@@ -55,6 +62,11 @@ pinned by `test/library-surface/surface.test.ts` (A1); the command is `umbradb` 
   The mutation gate scores 87.98 % against its break of 65, and no coverage floor is pending.
 - [x] The required test ids (task 18.4): the 18 ids of `acceptance.md` §17 whose tests exist are in the conformance
   gate's manifest, which fails the gate if any of them is missing, skipped or failing.
+- [x] UmbraDB as a library (`start-umbradb`, its `tasks.md` §0–§8): the resolver and the engine's input, the renamed
+  settings, `startUmbraDB` with its guarantees, the network request, the mounted handlers, the private link over
+  channels, the browser demo on the engine, the documents and the pack smoke, each task test first with its criteria.
+- [ ] `start-umbradb`'s full verification (§9: coverage, mutation, the conformance gate, the acceptance map) and its
+  review lanes (§10).
 - [ ] A pre-release of 0.10.0, its pull request and GitHub release open for review and feedback; the release gates
   below follow it.
 - [ ] Review and the pull-request record (`docs/PULL_REQUEST_CHECKLIST.md`), then the merge.

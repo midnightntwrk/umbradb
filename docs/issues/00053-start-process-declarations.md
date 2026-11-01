@@ -1,6 +1,7 @@
 # 00053 — the exported `startProcess` cannot be called with the package alone
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-11-01 by the `start-umbradb` change: `startUmbraDB` assembles UmbraDB's parts and
+  core modules from the user modules alone, and the module guide's recipe is back (§17, `examples/try-module/`).
 - **Area:** bug
 - **Severity:** med
 - **Effort:** medium — a public API decision: which core pieces (or a ready-made builder) the package should export.

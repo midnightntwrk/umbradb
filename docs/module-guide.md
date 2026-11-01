@@ -638,7 +638,131 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 - **`requiresResync: true`** marks a version that must change stored values: only a database no other version of the
   module wrote accepts it; any other refuses at startup with `requires-resync`.
 
-## 17. Trying a module against another node
+## 17. Trying a module
+
+**In a test.** `startUmbraDB` runs UmbraDB inside the test's own process (§18). On an in-memory chain
+(`InMemoryBlockSource`) and PGlite in memory it needs no node, no database server and no file, and it listens on no
+port: the test's own server calls the module API's handler. This is
+[`examples/try-module/try-module.ts`](../examples/try-module/try-module.ts); `node --test try-module.ts` runs it in a
+project that installed `umbradb` and `zod`:
+
+```ts
+/**
+ * A module test: UmbraDB runs a module in the test's own process, on an in-memory chain — no node, no database
+ * server, no file. Run it with `node --test try-module.ts` in a project that installed `umbradb` (and `zod`).
+ */
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { test } from "node:test";
+import { z } from "zod";
+import { answerChainData, coreEntry, defineConfig, defineModule, InMemoryBlockSource, startUmbraDB } from "umbradb";
+
+// The module under test: for each height, the runtime version of its block and how many extrinsics it carried, and
+// one route that answers the latest row.
+const blockRuntimes = defineModule({
+  id: "block-runtimes",
+  version: "1.0.0",
+  side: "public",
+  requires: ["block-body"],
+  provides: [
+    {
+      name: "block-runtimes-rows",
+      lifetimes: ["table"],
+      table: { schema: "block_runtimes", tables: ["rows"], kind: "append-only" },
+    },
+  ],
+  startsMidChain: true,
+  configSchema: z.object({}),
+  migrations: [
+    {
+      id: "001",
+      sql: `CREATE TABLE block_runtimes.rows (
+        height bigint PRIMARY KEY,
+        spec_version integer NOT NULL,
+        extrinsics integer NOT NULL
+      )`,
+    },
+  ],
+  points: {
+    async "on-db-write"(_processContext, block, writer) {
+      const body = block.items.get("block-body") as { specVersion: number; extrinsics: readonly unknown[] };
+      await writer.execute("INSERT INTO block_runtimes.rows (height, spec_version, extrinsics) VALUES ($1, $2, $3)", [
+        block.height,
+        body.specVersion,
+        body.extrinsics.length,
+      ]);
+    },
+    async "on-start-api"(_processContext, api) {
+      api.http("GET", "/block-runtimes/latest", async (_request, read) =>
+        answerChainData(read, async (view) => {
+          const [row] = await read.query("SELECT * FROM block_runtimes.rows WHERE height = $1", [view.height]);
+          return row === undefined ? { status: 404, body: { error: "no-row" } } : { status: 200, body: row };
+        }),
+      );
+    },
+  },
+});
+
+test("block-runtimes stores every height and answers the latest", async () => {
+  // Blocks 0 to 10 in memory, each of runtime 2,001,000 with no extrinsics. The `custom` network's genesis is the
+  // chain's block 0, and its ledger table gives that runtime a ledger version (v9).
+  const source = new InMemoryBlockSource({ head: 10n });
+  const genesis = await source.block(0n);
+  const config = defineConfig({
+    entries: [
+      coreEntry({
+        start: 0,
+        stop: 10, // the run ends on its own once height 10 is committed
+        config: {
+          network: "custom",
+          genesisHash: `0x${Buffer.from(genesis.hash).toString("hex")}`,
+          ledgerTable: {
+            rows: [
+              { specVersionMin: 22_000, specVersionMax: 22_999, ledger: "v8" },
+              { specVersionMin: 1_000_000, specVersionMax: 1_999_999, ledger: "v8" },
+              { specVersionMin: 2_000_000, specVersionMax: 2_999_999, ledger: "v9" },
+            ],
+          },
+          node: "ws://127.0.0.1:9", // never contacted: the in-memory chain is the source
+          database: { kind: "pglite", memory: true },
+          developmentOptIn: true, // PGlite is a development database
+        },
+      }),
+      blockRuntimes.entry({ start: 0, config: {} }),
+    ],
+  });
+
+  const handle = startUmbraDB({ config: { data: config }, modules: [blockRuntimes], source });
+  // UmbraDB listens on no port: the test's own server calls the module API's handler.
+  const server = createServer((request, response) => handle.api.http(request, response));
+  try {
+    await handle.started;
+    assert.deepEqual(await handle.ended, { kind: "stopped", height: 10n, core: true, upgrade: null });
+    assert.equal(handle.status().cursor, 10n);
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    const answer = await fetch(`http://127.0.0.1:${port}/block-runtimes/latest`);
+    assert.equal(answer.status, 200);
+    assert.equal(answer.headers.get("x-umbra-height"), "10");
+    assert.deepEqual(await answer.json(), { height: "10", spec_version: 2_001_000, extrinsics: 0 });
+  } finally {
+    server.close();
+    await handle.stop();
+    await handle.closed;
+  }
+});
+```
+
+The `custom` network's genesis hash is the in-memory chain's block 0, and its ledger table gives the chain's runtime
+(2,001,000: every in-memory block's unless the source's `items` option gives another) a ledger version. `node` is
+checked as a setting and never contacted: with a `source`, UmbraDB makes no node client. The core's `stop` ends the run
+once height 10 is committed: `ended` resolves `stopped`, and the module API answers reads at that height until
+`stop()`. Put your module in place of `blockRuntimes` (its declaration in `modules`, its entry in `entries`), with the
+core modules it requires: `CORE_CHAIN_EVENTS.entry(…)` and the others, as a configuration file has them. An in-memory
+block carries no extrinsics and no chain events, so its `block-parsed` holds no transaction and `core-chain-events`
+stores no event for it.
 
 - **Another node.** `STATS_NODE=ws://127.0.0.1:9944 ./run.sh` runs the example against a local node — a devnet, or a
   node of your own on preview — instead of the public one; the database directory keeps the chain it first synced, so
@@ -646,6 +770,119 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 - **Starting near the head.** A module that declares `startsMidChain: true` can start near the node's head on a new
   database (`start` above 0 in every entry), and reach `following` within a minute instead of syncing from genesis.
   `stats-module` keeps a running total from 0, so it cannot.
+
+## 18. Running UmbraDB in your own program
+
+`umbradb run` is one way to run a process; `startUmbraDB(options)` is the other, inside a program of yours (a host): a
+server that mounts the module API in its own routes, a test (§17), a tool. It runs the indexer in the host's process —
+no child process, no binary, no shell — and returns its handle at once; whatever is wrong with the options or the
+configuration rejects `started`, it never throws. The command and a host start through the same engine, so a
+configuration file runs the same way in both, except for what the command does to its program (below).
+
+```ts
+import { createServer } from "node:http";
+import { startUmbraDB } from "umbradb";
+
+const indexer = startUmbraDB({
+  config: { file: "umbradb.config.ts" }, // its `modules` export is the build's user modules
+  log: (line) => console.error(line), // without it, UmbraDB writes nothing
+});
+
+const api = createServer(indexer.api.http); // the module API's routes …
+api.on("upgrade", indexer.api.upgrade); // … and its subscriptions, on your own server
+api.listen(18080, "127.0.0.1");
+const admin = createServer(indexer.admin.http); // /health/live, /health/ready, /status, /config
+admin.listen(18081, "127.0.0.1");
+
+process.once("SIGTERM", () => void indexer.stop()); // signals are yours: UmbraDB listens to none
+indexer.started.then(
+  ({ start }) => console.error(`started; the database's first height is ${start}`),
+  (error) => console.error(`refused: ${error.code}`), // also in status().reason; admin answers why
+);
+await indexer.closed; // always resolves, after stop() or after a refused configuration
+api.close();
+admin.close();
+```
+
+- **The options.** `config` is required: `{ file }` (a path or a `file:` URL; no file is looked for otherwise) or `{
+  data }`, what a configuration file's default export holds. `cwd` is the base of every relative path — the file, a
+  PGlite `path`, `backup(target)` — and `process.cwd()` unless given. With `{ data }` the user modules are `modules`
+  (their declarations) or `modulesFrom` (the `URL` of a module file whose `modules` export lists them, as a
+  configuration file's does); a module that declares ledger tasks must come through `modulesFrom`, which the ledger
+  worker imports too (`ledger-tasks-need-modules-from` otherwise), and modules given twice are refused
+  (`modules-given-twice`). `source` is an in-memory chain, exactly an `InMemoryBlockSource`, on a public process
+  (`source-refused` otherwise). `signal` stops the process when it aborts, as `stop()` does; `log` gets every log line
+  and the worker threads' output; `acceptPublicConfigHash` is a private process's `--update-hash` (§14); `network` is
+  below. A malformed option is refused `invalid-configuration` (`invalid-option`), naming its path.
+- **The handle.** `status()`: the state, conditions, cursor, head, lag, reason and how processing ended, as `/status`
+  shows them, and `listening`, each surface's bound address or null. `started` resolves `{ api, side, start }` (the
+  module API's bound address or null, the side, the database's first height S); it rejects with an `UmbraError` whose
+  code is the one `status().reason` shows, its `cause` the original failure when that was not an `UmbraError`, and
+  with the abort reason when `stop()` or `signal` ended startup (an `AbortError` for `stop()`). It is marked handled,
+  so leaving it unawaited is no unhandled rejection. `ended` resolves how processing ended and never rejects; `closed`
+  resolves once everything is closed, always, a failing close step logged and the next one run. `stop()` lets the
+  height in progress finish; `pause()` and `resume()` hold the loop between two heights; `backup(target)` writes a
+  backup of the last committed height (on PostgreSQL it runs `pg_dump`), replacing a file there.
+- **What it does not do.** It adds no listener to `process` (no SIGTERM, SIGINT or SIGUSR2 handling: stop it yourself),
+  writes nothing to stdout or stderr without `log`, starts no child process except `pg_dump` for `backup()` on
+  PostgreSQL, opens no port unless `network` asks, never sets `process.exitCode`, and starts a worker thread only for
+  the ledger (when the build needs it) and for admin (when admin listens). The command's backups are refused:
+  `backupAtStop` and `backupOnSignal` in the core's revision end startup with `library-setting-refused`; call
+  `backup(target)` instead. The nearest to a backup at the core's stop is `const end = await indexer.ended; if (end.kind
+  === "stopped" && end.core) await indexer.backup(file)`, which replaces any file there (the command keeps a backup of
+  the same height). Two limits are PGlite's: on some internal failures it writes with `console.error`, and its runtime
+  holds an assignment to `process.exitCode` that a start, a failed query and a close do not reach, but a fatal path (a
+  WebAssembly abort) may. A PGlite directory's lock is held until the host process ends: another process cannot open the
+  directory before that, and within the host a new handle opens it once the first handle's `closed` resolved
+  (`writer-lock-held` before). A host that never calls `stop()` on a PGlite process stays alive up to 10 seconds after
+  the last query, by PGlite's own timer; `stop()` clears it.
+- **Starting a new database.** `finalizedHeight(node, { signal, timeoutMs })` answers the node's finalized height, a
+  start S for a new database: `node-unreachable` after `timeoutMs` (30 s unless given), the signal's reason when it
+  aborts.
+
+**The network request.** Nothing listens and no link opens unless `network` asks:
+
+| Value | `api`, `admin` | `privateLink.publicSide` | `privateLink.privateSide` |
+|---|---|---|---|
+| absent or `false` | no listener: call the handle's handlers | no link | no link |
+| `true` | listen at the address the core's revision writes (`listen.api`, `listen.admin`) | listen at its `listen.privateLink`, with its `tls` | connect to its `privateLink`, with its `tls` |
+| `{ host?, port }` | listen there (`host` `127.0.0.1` unless given; port 0: a free one, in `status().listening`) | listen there, with the revision's `tls` | connect there, with the revision's `tls` |
+| `{ channels: true }` | — | no socket: pass each channel to `privateLink.accept` | — |
+| `{ connect }` | — | — | no socket: `connect(signal)` gives each channel |
+
+Before anything opens, startup refuses an address both written and given in code, or `true` with none written
+(`network-address-conflict`, `both`, `no-address`); an address written for a surface of the process's side that the
+request does not use as an address (`network-address-conflict`, `unused`: a configuration that `umbradb run` also runs,
+with `listen.admin` written, needs `admin: true` here); the other side's `privateLink` sub-key
+(`private-link-misconfigured`, `wrong-side`); and on PostgreSQL a public link given in code without `transportReader`
+(`private-link-misconfigured`, `reader-missing`). A `listen.privateLink` written on a private process is ignored, as the
+command ignores it. `/config` shows the addresses as bound and, in `network`, each surface's mode: `listening`,
+`connecting`, `mounted`, `channels`, `connect` or `none`.
+
+- **Mounted handlers.** `api.http(request, response)` and `api.upgrade(request, socket, head)` are the module API's,
+  with its listener's rules: the 1 MiB body limit (413), the read timeout on PostgreSQL (504), the 64 KiB message limit,
+  a subscriber more than 1 MiB behind disconnected, and `X-Umbra-Version` on every answer, `X-Umbra-Config-Hash` from
+  `on-start-db` on. Pass the request unread: a request whose body your server read first (a body parser) is answered 400
+  `invalid-request`. While the process is `starting`, `refused`, or `stopping` once its height in progress is done, they
+  answer 503 `{ "error": { "code": "not-serving", "message" }, "state", "reason" }`; while it is `stopped` or `halted`
+  they answer reads at its cursor until `stop()`. `admin.http` answers the four admin endpoints from memory in every
+  state, and after `closed` from the last snapshot; its `/health/live` runs on your thread and answers 200 with
+  `"thread": "host"`, so it cannot see that thread blocked: for that probe, ask admin to listen (`admin: true` or `{
+  port }`), which answers from a thread of its own. TLS, authentication, Origin checks, connection and rate limits are
+  your server's, and so are its own error answers.
+- **The private link over channels** (§14), when the host carries it — a `MessageChannel`, a TEE's own carrier. The
+  public process asks `privateLink: { publicSide: { channels: true } }` and gets each channel through
+  `privateLink.accept(channel)`, from `startUmbraDB`'s return on: channels accepted before the link starts (after the
+  migrations) wait, at most 64 (more are closed `try-again`). A private process asks `privateLink: { privateSide: {
+  connect } }`: UmbraDB calls `connect(signal)` at each connection and reconnection, and a rejection is a lost
+  connection, retried with back-off; `stop()` aborts the signal. A channel (`PrivateLinkChannel`) is `send(text)`,
+  `onMessage(listener)`, `onClose(listener)` (each returning its disposer), `close()`, and optionally `terminate()` and
+  `bufferedAmount()`. Your carrier delivers whole messages, in order, with no loss and no duplication until the channel
+  ends, and keeps a message sent before `onMessage` is registered; one without `bufferedAmount` bounds its own queue.
+  UmbraDB wraps the link's messages in an envelope of its own (both ends are UmbraDB processes), pings every 15 seconds
+  and ends a channel that answers no ping within two (`no-pong`), and keeps the link's checks of a socket: messages up
+  to 64 MiB, the reads confined, one channel per instance id. `messagePortChannel(port)` adapts a browser or
+  `worker_threads` `MessagePort`.
 
 ## Appendix A. Reference
 
@@ -665,6 +902,10 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
   - Processing halts: `callback-error`, `handle-closed`, `truncate-not-allowed`, `database-error`, `root-mismatch`,
     `fast-log-unsupported`, `lockstep-behind`, `public-config-changed`.
   - A call your code may catch: `query-timeout`, `no-committed-height`, `state-not-retained`, `read-refused`.
+  - A host's start (§18): `invalid-configuration` (`invalid-option`, and the finding `renamed-setting` for
+    `listen.transport` and `coreTransport`, now `listen.privateLink` and `privateLink`), `modules-given-twice`,
+    `ledger-tasks-need-modules-from`, `source-refused`, `library-setting-refused`, `network-address-conflict`,
+    `private-link-misconfigured`, `listen-failed`, `writer-lock-held`.
 - **A.3 Refused column types, and why.** `real`, `double precision`: approximate, so one value computed two ways can
   differ in its last bits. `numeric(p,s)` with s > 0: every value prints with s decimals, and stored numbers must be
   integers. `timestamp`, `date`: no time zone, so one value is a different instant in each zone. `time`, `timetz`: a
