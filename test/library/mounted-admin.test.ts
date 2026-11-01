@@ -115,8 +115,8 @@ function factsHold() {
 
 /** The handle a host gets over the engine started with `options`' exact input plus `seams`. */
 function startWithSeams(options: UmbraDBOptions, seams: Partial<EngineOptions>): UmbraDBHandle {
-  const { input, log } = engineInputOf(options);
-  return handleOf(startProcess({ ...input, ...seams }), log);
+  const { input } = engineInputOf(options);
+  return handleOf(startProcess({ ...input, ...seams }));
 }
 
 /** `handle`'s listening admin as an origin. */

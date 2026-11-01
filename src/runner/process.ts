@@ -186,19 +186,22 @@
  * on SIGUSR2 included — resolves against {@link EngineOptions.cwd}; nothing here reads the working directory. [LM-2,
  * G8, G10]
  *
- * **The process transport** (`../private/core-transport.ts`). A public process whose network plan listens for its
- * private link (the command's at `listen.privateLink`) starts it once its database is open and its chain known (step 7,
- * before the bootstrap's wait).
- * The process tells it each commit (`committed`) and closes it at its stop or at a refusal. A listener that cannot listen
- * refuses startup (`listen-failed`). [PP-4]
+ * **The process transport** (`../private/core-transport.ts`, its sessions). A public process whose network plan serves
+ * its private link starts it once its database is open and its chain known (step 7, before the bootstrap's wait):
+ * listening over WebSocket (`../private/core-socket.ts`; the command's at `listen.privateLink`), or over the channels a
+ * host hands it (`../private/core-channels.ts`, `publicSide: { channels: true }`), which queue from the process's start
+ * until then. The process tells it each commit (`committed`) and closes it at its stop or at a refusal; the queued
+ * channels are closed at once at either (`private-link-not-accepting`), as is every channel a process not accepting
+ * them is given ({@link ProcessHandle.privateLink}). A listener that cannot listen refuses startup (`listen-failed`).
+ * [PP-4, LM-6, N9]
  *
  * On PostgreSQL the transport's reads run on a read pool of their own, logged in as `core.transportReader`
  * (`../private/transport-reader.ts`). Startup first checks that this login cannot write (`transport-reader-can-write`),
  * and the pool closes with the transport. On PGlite the reads share the database's one session. [CF-4, Q175 A]
  *
  * A private process's side of the transport belongs to its block source (`openPublicSide`), which the process gives S,
- * its log and the plan's link: the address it connects to, with the revision's `tls` ({@link SourceShared}).
- * [PP-4, LM-3]
+ * its log and the plan's link: the address it connects to, with the revision's `tls`, or the host's `connect`, which
+ * opens a channel on each (re)connection ({@link SourceShared}). [PP-4, LM-3, LM-6]
  *
  * **Lockstep** (`../private/lockstep.ts`). A public process whose `core` revision lists `lockstepInstances` keeps one
  * bookkeeping of them for its run. Its transport tells that bookkeeping of the instances' `hello`s, reports and closes,
@@ -277,7 +280,7 @@ import {
   waitForNode,
 } from "../backbone/core-chain/index.js";
 import { readinessOf } from "../backbone/core-health/readiness.js";
-import { type PrivateLinkAddress, publicLockstepOf } from "../backbone/core-private-source/index.js";
+import { type PrivateLink, publicLockstepOf } from "../backbone/core-private-source/index.js";
 import { buildCoreVersion, type CoreVersion } from "../config/build.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import { openConfiguredDatabase } from "../config/database.js";
@@ -340,7 +343,9 @@ import {
 } from "./loop.js";
 import { LoopPauses, type PauseBy, type PauseHold } from "./pause.js";
 import { ProcessContexts } from "./process-context.js";
-import type { TransportTls } from "../private/core-transport.js";
+import type { PrivateLinkChannel } from "../library/channels.js";
+import { type CoreChannelSeams, CoreChannels, refuseChannel } from "../private/core-channels.js";
+import type { CoreLink, TransportTls } from "../private/core-transport.js";
 import { type CoreTransport, startCoreTransport } from "../private/core-socket.js";
 import { type BackupInput, type BackupSeams, type BackupWritten, backupAtStop, writeBackup } from "../backup/backup.js";
 import { databaseTarget } from "../config/database.js";
@@ -531,6 +536,13 @@ export interface EngineOptions {
   readonly mountedApi?: MountedApiSeams;
   /** The fact-read tests' hold and the negative controls' admin (`AdminSeams`); none unless given. [L61, L65] */
   readonly adminSeams?: AdminSeams;
+  /**
+   * The tests' and the negative controls' changes of the private link over channels only, on both sides: the
+   * endpoints' clock, the link's limits, and on the public side a message read without the link's schemas, a second
+   * `hello` accepted, the read gate off, the transport reader's check skipped (`readerCheck: "skip"`); none unless
+   * given. The socket link is unchanged by them. [L34, L38, L66, L67]
+   */
+  readonly channelLink?: CoreChannelSeams & { readonly readerCheck?: "skip" };
 }
 
 /** What {@link startProcess}, the engine, takes: the build and the options. [LM-1] */
@@ -553,10 +565,11 @@ export interface SourceShared {
   /** {@link EngineOptions.acceptPublicConfigHash}, when given (a private source's). */
   readonly updateHash?: string;
   /**
-   * A private process's link to the core, as its network plan connects (the address with the `tls` setting), or null
-   * for none: a private source's; a public process's source ignores it. [PP-4, LM-3]
+   * A private process's link to the core, as its network plan connects — the address with the `tls` setting, or the
+   * host's `connect` for channels —, or null for none: a private source's; a public process's source ignores it.
+   * [PP-4, LM-3, LM-6]
    */
-  readonly link: PrivateLinkAddress | null;
+  readonly link: PrivateLink | null;
 }
 
 /** The process's state: exactly one at a time. [AE-3; CORE-ARCH §4.18] */
@@ -775,6 +788,13 @@ export interface ProcessHandle {
   readonly api: { readonly http: NodeHttpHandler; readonly upgrade: NodeUpgradeHandler };
   /** Admin's handler a host mounts in its own server, from the start on (`../admin/mounted.ts`). [LM-4, LM-5, AE-1] */
   readonly admin: { readonly http: NodeHttpHandler };
+  /**
+   * The private link's channels a host hands a public process whose network request asks for them
+   * (`publicSide: { channels: true }`): queued until the link starts, then sessions of the link
+   * (`../private/core-channels.ts`); on any other process, after a refusal and once stopping, closed
+   * `private-link-not-accepting` with a line logged. Never throws. [LM-6, N9]
+   */
+  readonly privateLink: { readonly accept: (channel: PrivateLinkChannel) => void };
 }
 
 /** What {@link statusOf} computes the state from. */
@@ -992,6 +1012,32 @@ export function ledgerWorkerOf(
 }
 
 /**
+ * Whether `network` asks for the public side of the private link over channels (`publicSide: { channels: true }`):
+ * then channels are queued from the start, before the plan judges the request. [LM-6]
+ */
+function asksForChannels(network: EngineNetwork): boolean {
+  if (network === "configured") return false;
+  const publicSide = network.privateLink?.publicSide;
+  return typeof publicSide === "object" && publicSide !== null && (publicSide as { readonly channels?: unknown }).channels === true;
+}
+
+/**
+ * A private process's link from its plan: the address it connects to with the revision's `tls`, or the host's
+ * `connect` with the channel link's seams; null when the plan connects to nothing. [PP-4, PP-11, LM-3, LM-6]
+ */
+function privateLinkOf(plan: NetworkPlan, core: CheckedEntry, seams: EngineOptions["channelLink"]): PrivateLink | null {
+  const link = plan.privateLink;
+  if (link.mode === "connecting") return { address: link.address.text, tls: (core.settings as PlainObject).tls as TransportTls | undefined };
+  if (link.mode !== "connect") return null;
+  const carried = {
+    ...(seams?.timers === undefined ? {} : { timers: seams.timers }),
+    ...(seams?.limits === undefined ? {} : { limits: seams.limits }),
+    ...(seams?.message === undefined ? {} : { message: seams.message }),
+  };
+  return { connect: link.connect, seams: carried };
+}
+
+/**
  * How the engine reads the chain unless a test gives its block source: as the resolver says (`sourceKind`), the node
  * through `core-block-fetch`'s node source, or a private process's public side through its private intake.
  * [RN-14, PP-1]
@@ -1086,8 +1132,15 @@ class Process implements ProcessHandle {
   #ledger: LedgerHost | undefined;
   /** The network plan, once startup made it (see {@link EngineNetwork}). [LM-3] */
   #plan: NetworkPlan | undefined;
-  /** A public process's process transport where its plan listens (`../private/core-transport.ts`). [PP-4] */
+  /** A public process's process transport where its plan listens (`../private/core-socket.ts`). [PP-4] */
   #transport: CoreTransport | undefined;
+  /**
+   * A public process's link over channels, from the start on when its network request asks for it: the queue, then
+   * the link once started (`../private/core-channels.ts`). [LM-6]
+   */
+  readonly #channels: CoreChannels | undefined;
+  /** The link a public process serves, over its socket or its channels, once started. [PP-4, LM-6] */
+  #link: CoreLink | undefined;
   /** Whether the transport's and the module API's listeners were closed: their addresses are then no more. [L21] */
   #transportClosed = false;
   #apiClosed = false;
@@ -1131,8 +1184,24 @@ class Process implements ProcessHandle {
   /** Admin's handler (see **The handlers** in the module comment). [LM-4, LM-5] */
   readonly admin = Object.freeze({ http: mountedAdminHandler((method, url) => this.#admin.answer(method, url)) });
 
+  /** The private link's channels (see {@link ProcessHandle.privateLink}): never throws. [LM-6, N9] */
+  readonly privateLink = Object.freeze({
+    accept: (channel: PrivateLinkChannel): void => {
+      try {
+        if (this.#channels === undefined) refuseChannel(channel, (line) => this.#log(line), "this process accepts no channels");
+        else this.#channels.accept(channel);
+      } catch {
+        // A host's channel that throws is ended as far as this process goes; nothing reaches the host.
+      }
+    },
+  });
+
   constructor(input: EngineInput) {
     this.#input = input;
+    // Channels queue from the start when the request asks for them; the plan, once made, judges the request. [LM-6]
+    this.#channels = asksForChannels(input.network)
+      ? new CoreChannels({ log: (line) => this.#log(line), ...input.channelLink })
+      : undefined;
     const { adminListener } = input;
     this.#admin = new ProcessAdmin({
       status: () => this.status(),
@@ -1220,11 +1289,16 @@ class Process implements ProcessHandle {
     await this.#api.close();
   }
 
-  /** Closes the process transport, if any; its address is then no more ({@link listening}). [PP-4, L21] */
+  /**
+   * Closes the process transport, if any — its address is then no more ({@link listening}) —, and the link over
+   * channels, if any: its queue and its sessions. [PP-4, L21, LM-6]
+   */
   async #closeTransport(): Promise<void> {
-    if (this.#transport === undefined) return;
-    this.#transportClosed = true;
-    await this.#transport.close();
+    if (this.#transport !== undefined) {
+      this.#transportClosed = true;
+      await this.#transport.close();
+    }
+    await this.#channels?.close();
   }
 
   stop(): Promise<void> {
@@ -1412,6 +1486,8 @@ class Process implements ProcessHandle {
   async #close(): Promise<void> {
     const starting = this.#phase === "starting";
     this.#phase = "stopping";
+    // From the stop on no channel is accepted, and the queued ones are closed; open ones close with the link. [LM-6]
+    this.#channels?.stopAccepting("the process is stopping");
     this.#admin.publish();
     this.#stop.abort();
     // The waits for the chain end now, not once startup or the loop has ended. [RN-13]
@@ -1484,7 +1560,7 @@ class Process implements ProcessHandle {
    */
   #privateSide(): PrivateSideFacts {
     return Object.freeze({
-      instances: privateInstancesOf(this.#lockstep?.instances() ?? [], this.#transport?.instances() ?? []),
+      instances: privateInstancesOf(this.#lockstep?.instances() ?? [], this.#link?.instances() ?? []),
       lockstep: publicLockstepOf(this.#source),
     });
   }
@@ -1661,11 +1737,9 @@ class Process implements ProcessHandle {
         start: BigInt(checked.start),
         log: (line) => this.#log(line),
         ...(input.acceptPublicConfigHash === undefined ? {} : { updateHash: input.acceptPublicConfigHash }),
-        // A private process connects to the core where its plan says, with the revision's tls. [PP-4, PP-11, LM-3]
-        link:
-          plan.privateLink.mode === "connecting"
-            ? { address: plan.privateLink.address.text, tls: (core.settings as PlainObject).tls as TransportTls | undefined }
-            : null,
+        // A private process connects to the core where its plan says, with the revision's tls, or over the host's
+        // channels. [PP-4, PP-11, LM-3, LM-6]
+        link: privateLinkOf(plan, core, input.channelLink),
       };
       const given = input.inMemorySource ?? input.source ?? sourceOf(resolved);
       const source: BlockSource = typeof given === "function" ? given(core, shared) : given;
@@ -1706,6 +1780,8 @@ class Process implements ProcessHandle {
           this.#log(`startup refused: ${reasonOf(error).code}: ${messageOf(error)}`);
         }
       }
+      // A refusal accepts no more channels, and closes the queued ones. [LM-6, L38]
+      this.#channels?.stopAccepting("startup was refused");
       // The module API opens in the last step, after which only a stop throws: the stop closes it. Every step runs and
       // the refusal stays the one thrown, whatever a step does. [G7]
       await this.#closeAll([
@@ -1730,7 +1806,7 @@ class Process implements ProcessHandle {
    * - on PGlite, the database itself, whose one session is the writer's.
    * [CF-4, PP-4, Q175 A]
    */
-  async #transportReads(settings: PlainObject, db: Database, source: BlockSource): Promise<Pick<Database, "read">> {
+  async #transportReads(settings: PlainObject, db: Database, source: BlockSource, overChannels: boolean): Promise<Pick<Database, "read">> {
     const database = settings.database as unknown as DatabaseParts;
     if (database.kind !== "postgres") return db;
     const reader = settings.transportReader as unknown as TransportReader;
@@ -1745,6 +1821,8 @@ class Process implements ProcessHandle {
       preparedStatements: false,
     });
     this.#transportReader = pool;
+    // The negative control's channel link skips the check; the socket link always runs it. [L67]
+    if (overChannels && this.#input.channelLink?.readerCheck === "skip") return pool;
     const facts = await pool.read((read) => transportReaderFacts(read, database.user));
     refuseWritingReader(facts, this.#input.transportReaderCheck);
     this.#log(`transport reads as ${facts.user}, a login that may only read`);
@@ -1860,13 +1938,11 @@ class Process implements ProcessHandle {
     if (this.#lockstep === undefined && lockstepInstances.length > 0) {
       this.#lockstep = new Lockstep({ listed: lockstepInstances, log: (line) => this.#log(line) });
     }
-    if (this.#transport === undefined && this.#side === "public" && transportAddress !== undefined) {
-      const reads = await this.#transportReads(settings, db, source);
-      this.#transport = await startCoreTransport({
-        address: transportAddress,
-        tls: settings.tls as TransportTls | undefined,
+    const overChannels = network.privateLink.mode === "channels";
+    if (this.#link === undefined && this.#side === "public" && (transportAddress !== undefined || overChannels)) {
+      const reads = await this.#transportReads(settings, db, source, overChannels);
+      const sessions = {
         db: reads,
-        ...(input.transportReads === undefined ? {} : { reads: input.transportReads }),
         genesis: genesisHash,
         start,
         cursor: () => this.#cursor,
@@ -1874,8 +1950,23 @@ class Process implements ProcessHandle {
         ...(this.#lockstep === undefined ? {} : { lockstep: this.#lockstep }),
         readTimeoutMs: settings.apiReadTimeoutMs as number,
         configHash,
-        log: (line) => this.#log(line),
-      });
+        log: (line: string) => this.#log(line),
+      };
+      if (transportAddress !== undefined) {
+        this.#transport = await startCoreTransport({
+          address: transportAddress,
+          tls: settings.tls as TransportTls | undefined,
+          ...(input.transportReads === undefined ? {} : { reads: input.transportReads }),
+          ...sessions,
+        });
+        this.#link = this.#transport;
+      } else {
+        // The channels queued until now become sessions, in the order they were accepted. [LM-6, L38]
+        const channels = this.#channels as CoreChannels;
+        channels.start(sessions);
+        this.#link = channels;
+        this.#log("private link: accepting channels");
+      }
       // `/status` and `/config` show where it listens at once.
       this.#admin.publish();
       this.#step();
@@ -1923,7 +2014,7 @@ class Process implements ProcessHandle {
           this.#cursor = block.height;
           this.#recovered();
           this.#admin.committed();
-          this.#transport?.committed(block);
+          this.#link?.committed(block);
         },
       },
     });

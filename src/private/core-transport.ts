@@ -188,8 +188,8 @@ export interface LinkConnection {
   send(text: string): void;
   /** Ends it with `code` and `reason`: the carrier's own close (a WebSocket's close frame, a channel's close message). */
   close(code: number, reason: string): void;
-  /** Ends it at once. */
-  terminate(): void;
+  /** Ends it at once; `reason` is the session's (a channel tells its peer, a socket tells nothing). */
+  terminate(reason: string): void;
 }
 
 /** What a carrier read from its peer: a message as {@link parseMessage} reads it, or a fault of the carrier's own. */
@@ -468,7 +468,7 @@ export function coreSessions(options: CoreSessionOptions): CoreSessions {
         drop: (code: number, reason: string) => drop(session, code, reason),
         terminate: (reason: string) => {
           options.log(`transport: closed the connection${of(session)}: ${reason}`);
-          connection.terminate();
+          connection.terminate(reason);
         },
         closed: () => {
           if (session.hello !== null && connected.get(session.hello.instance) === session) {

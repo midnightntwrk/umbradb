@@ -63,8 +63,8 @@ function listenerOf(handle: UmbraDBHandle): { readonly origin: string; readonly 
 
 /** The handle a host gets over the engine started with `options`' exact input plus `seams` (the controls'). */
 function startWithSeams(options: UmbraDBOptions, seams: Partial<EngineOptions>): UmbraDBHandle {
-  const { input, log } = engineInputOf(options);
-  return handleOf(startProcess({ ...input, ...seams }), log);
+  const { input } = engineInputOf(options);
+  return handleOf(startProcess({ ...input, ...seams }));
 }
 
 /** Problems with `answer`'s core headers: the version once, and the hash once as `hash` (or absent for null). */

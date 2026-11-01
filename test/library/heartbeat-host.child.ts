@@ -27,8 +27,8 @@ const handle =
   job.mode === "library"
     ? startUmbraDB(options)
     : (() => {
-        const { input, log } = engineInputOf(options);
-        return handleOf(startProcess({ ...input, adminSeams: { heartbeatKeepsAlive: true } }), log);
+        const { input } = engineInputOf(options);
+        return handleOf(startProcess({ ...input, adminSeams: { heartbeatKeepsAlive: true } }));
       })();
 await handle.started;
 await cursorReaches(handle, 2n);

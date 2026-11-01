@@ -124,7 +124,7 @@ import type { BlockRef, BlockSource } from "../../runner/block-source.js";
 import { publicConfigChanged } from "../../private/private-transport.js";
 import {
   openPublicSide,
-  type PrivateLinkAddress,
+  type PrivateLink,
   type PublicDatabase,
   type PublicIdentity,
   type PublicWakes,
@@ -787,7 +787,7 @@ export interface PrivateShared {
   /** The engine's `acceptPublicConfigHash` (`umbradb run --update-hash`); none unless given. [PP-14, Q159] */
   readonly updateHash?: string;
   /** The link to the core the process's network plan gives (`openPublicSide`); none unless given. [PP-4, LM-3] */
-  readonly link?: PrivateLinkAddress | null;
+  readonly link?: PrivateLink | null;
 }
 
 /** One private process start's `core-private-source`: the part and the block source it is bound to. */

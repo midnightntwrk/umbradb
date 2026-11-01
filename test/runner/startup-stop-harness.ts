@@ -308,8 +308,8 @@ export function stopBy(by: StopBy, handle: Pick<ProcessHandle, "stop">, signals:
  * under the handle `startUmbraDB` gives. [A167, LM-1]
  */
 export function libraryProcess(options: UmbraDBOptions, seams: Partial<EngineOptions>): UmbraDBHandle {
-  const { input, log } = engineInputOf(options);
-  return handleOf(startProcess({ ...input, ...seams }), log);
+  const { input } = engineInputOf(options);
+  return handleOf(startProcess({ ...input, ...seams }));
 }
 
 /**

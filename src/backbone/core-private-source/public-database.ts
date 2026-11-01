@@ -44,8 +44,9 @@ import { UmbraError } from "../../db/errors.js";
 import { openPostgres } from "../../db/postgres.js";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { TransportTls } from "../../private/core-transport.js";
-import type { PrivateTransport, TransportPosition } from "../../private/private-transport.js";
-import { privateSocketTransport } from "../../private/private-socket.js";
+import { PrivateTransport, type TransportPosition } from "../../private/private-transport.js";
+import { socketCarrier } from "../../private/private-socket.js";
+import { type ChannelCarrierSeams, channelCarrier, type ConnectChannel } from "../../private/private-channels.js";
 import type { PublicItem } from "../../modules/graph.js";
 import type { BlockRef } from "../../runner/block-source.js";
 
@@ -175,10 +176,22 @@ export interface PrivateLinkAddress {
   readonly tls?: TransportTls | undefined;
 }
 
+/**
+ * The private link over channels a private process's host opens (`privateSide: { connect }`): a new channel on each
+ * (re)connection; `seams` are the tests' (the endpoints' clock, the link's limits). [LM-6]
+ */
+export interface PrivateLinkConnect {
+  readonly connect: ConnectChannel;
+  readonly seams?: ChannelCarrierSeams;
+}
+
+/** A private process's link to the core: an address, or the host's channels. [PP-4, LM-3, LM-6] */
+export type PrivateLink = PrivateLinkAddress | PrivateLinkConnect;
+
 /** What {@link openPublicSide} needs besides the `core` revision: the private process's position, S and its log. */
 export interface PublicSideOptions {
   /** The link to the core, or null for none: the process then reads a PostgreSQL `publicDatabase` and polls. [LM-3] */
-  readonly link: PrivateLinkAddress | null;
+  readonly link: PrivateLink | null;
   /** Its position now, for each `hello` of its transport. */
   readonly position: () => TransportPosition;
   /** Where its transport's log lines go. */
@@ -199,8 +212,9 @@ export interface PublicSide {
 
 /**
  * The public side of a private process, built from its `core` revision and its link (see the module comment):
- * - a transport to the core over `options.link` when there is one (with the revision's `instanceId` and
- *   `backoffCeilingMs`); the revision's `privateLink` is not read here, its caller's plan decides the link;
+ * - a transport to the core over `options.link` when there is one — over WebSocket to its address, or over the host's
+ *   channels (`connect`) — with the revision's `instanceId` and `backoffCeilingMs`; the revision's `privateLink` is not
+ *   read here, its caller's plan decides the link;
  * - its public database, read directly when `publicDatabase` is PostgreSQL's parts, otherwise through the transport;
  * - its wake-ups: the transport's, otherwise a poll.
  *
@@ -217,9 +231,9 @@ export function openPublicSide(
   const { link } = options;
   const transport =
     link !== null
-      ? privateSocketTransport({
-          address: link.address,
-          tls: link.tls,
+      ? new PrivateTransport({
+          // Over WebSocket to the link's address, or over the host's channels. [PP-4, LM-6]
+          carrier: "connect" in link ? channelCarrier(link.connect, link.seams) : socketCarrier(link.address, link.tls),
           instance: settings.instanceId as string,
           version: UMBRADB_VERSION,
           position: options.position,

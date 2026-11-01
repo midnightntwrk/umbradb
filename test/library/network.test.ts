@@ -121,8 +121,8 @@ async function refusedProblems(
 
 /** The facade over the engine started with `options`' exact input but the network plan without `rule`. [L15–L18] */
 function startWithout(rule: NetworkRuleName, options: UmbraDBOptions): UmbraDBHandle {
-  const { input, log } = engineInputOf(options);
-  return handleOf(startProcess({ ...input, networkRules: NETWORK_RULES.filter((one) => one.name !== rule) }), log);
+  const { input } = engineInputOf(options);
+  return handleOf(startProcess({ ...input, networkRules: NETWORK_RULES.filter((one) => one.name !== rule) }));
 }
 
 /** Runs the oracle on `startUmbraDB(options)` and, with `rule` removed, on its negative control. */
@@ -236,7 +236,10 @@ describe.each(PROCESS_BACKENDS)("the network plan's refusals through startUmbraD
       "unused",
     );
     expect(problems).toEqual([]);
-    expect(control).toContain("startup completed");
+    // Without the rule the request is not refused for the address: the process starts its link over channels — on
+    // PostgreSQL its reads log in as this test's reader, which the server does not know, so startup fails later with
+    // another code.
+    expect(control?.some((problem) => problem.startsWith("refused with ") || problem === "startup completed")).toBe(true);
   }, 240_000);
 
   it("L17: a private process's privateLink written while privateSide is { connect } is refused network-address-conflict (unused)", async () => {
@@ -304,7 +307,9 @@ describe("the reader login of a public link given in the request, on PostgreSQL 
       "reader-missing",
     );
     expect(problems).toEqual([]);
-    expect(control).toContain("startup completed");
+    // Without the rule the link over channels has no reader login to read as: startup fails later, not with this
+    // refusal.
+    expect(control?.some((problem) => problem.startsWith("refused with "))).toBe(true);
   }, 240_000);
 
   it("L18: publicSide: { host, port } without transportReader is refused private-link-misconfigured (reader-missing)", async () => {

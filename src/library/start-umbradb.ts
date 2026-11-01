@@ -37,10 +37,12 @@
  * (`api.http`, `api.upgrade`) apply the module API listener's per-request and per-message rules and headers, and answer
  * 503 with the lifecycle's body — `{ error: { code: "not-serving", message }, state, reason }` — while the module API
  * does not serve (starting, refused, after a stop's drain). Admin's (`admin.http`) answers the four endpoints from the
- * process's snapshot in memory, in every state and after `closed`. `privateLink.accept(channel)` closes a channel the
- * process does not accept (`private-link-not-accepting`), logs a line and throws nothing. The host owns what its own
- * server does: TLS, authentication, Origin policy, connection and rate limits, and its own error answers.
- * [LM-4, LM-5, LM-6, N7, N8, N9]
+ * process's snapshot in memory, in every state and after `closed`. `privateLink.accept(channel)` is the engine's: with
+ * `publicSide: { channels: true }` it queues the channel until the link starts, then serves it as a session of the
+ * link (`../private/core-channels.ts`); a channel the process does not accept — another request, after a refusal or
+ * once stopping — is closed (`private-link-not-accepting`), a line logged, nothing thrown. `messagePortChannel`
+ * (`./channels.ts`) adapts a `MessagePort` to a channel. The host owns what its own server and channels do: TLS,
+ * authentication, Origin policy, connection and rate limits, and its own error answers. [LM-4, LM-5, LM-6, N7, N8, N9]
  */
 
 import { resolve } from "node:path";
@@ -189,14 +191,11 @@ const startedOf = (started: StartedProcess): UmbraDBStarted =>
   Object.freeze({ api: started.api, side: started.side, start: started.start });
 
 /**
- * What `startUmbraDB` gives the engine for `options`, and the host's `log` (guarded) for the handle: the options read
- * once and checked, their refusal given to the engine to throw at its configuration step. Exported for the tests, which
- * start the engine with this input plus a seam of their own. [LM-1, LM-10]
+ * What `startUmbraDB` gives the engine for `options`: the options read once and checked, their refusal given to the
+ * engine to throw at its configuration step, the host's `log` guarded. Exported for the tests, which start the engine
+ * with this input plus a seam of their own. [LM-1, LM-10]
  */
-export function engineInputOf(options: UmbraDBOptions): {
-  readonly input: EngineInput;
-  readonly log: ((line: string) => void) | undefined;
-} {
+export function engineInputOf(options: UmbraDBOptions): { readonly input: EngineInput } {
   const read = readOptions(options);
   const refusal =
     optionsRefusal(optionFindings(read)) ?? modulesGivenTwice(read.values) ?? sourceRefusal(read.values.source);
@@ -227,23 +226,22 @@ export function engineInputOf(options: UmbraDBOptions): {
       },
     },
   };
-  return { input, log };
+  return { input };
 }
 
 /**
  * Starts UmbraDB in this process (see the module comment) and returns its handle at once; never throws. [LM-1, LM-9]
  */
 export function startUmbraDB(options: UmbraDBOptions): UmbraDBHandle {
-  const { input, log } = engineInputOf(options);
-  return handleOf(startProcess(input), log);
+  return handleOf(startProcess(engineInputOf(options).input));
 }
 
 /**
- * The facade over the engine's `handle` (see the module comment); `log` the host's, guarded. Exported for the tests,
- * which take the handle a host gets over an engine started with {@link engineInputOf}'s input plus a seam of their own
- * (a node client that counts its connections). [LM-9, L52]
+ * The facade over the engine's `handle` (see the module comment). Exported for the tests, which take the handle a host
+ * gets over an engine started with {@link engineInputOf}'s input plus a seam of their own (a node client that counts
+ * its connections). [LM-9, L52]
  */
-export function handleOf(handle: ProcessHandle, log: ((line: string) => void) | undefined): UmbraDBHandle {
+export function handleOf(handle: ProcessHandle): UmbraDBHandle {
   const started = handle.started.then(startedOf);
   // As the engine's: a host that never attaches a handler gets no unhandled rejection. [LM-9]
   started.catch(() => undefined);
@@ -259,15 +257,7 @@ export function handleOf(handle: ProcessHandle, log: ((line: string) => void) | 
     // The engine's handlers, from the return on. [LM-4, LM-5]
     api: Object.freeze({ http: handle.api.http, upgrade: handle.api.upgrade }),
     admin: Object.freeze({ http: handle.admin.http }),
-    privateLink: Object.freeze({
-      accept: (channel: PrivateLinkChannel) => {
-        try {
-          channel.close();
-        } catch {
-          // A carrier whose close throws is ended as far as this process goes.
-        }
-        log?.("private link: a channel was closed (private-link-not-accepting): this process accepts no channels");
-      },
-    }),
+    // The engine's: it queues, serves or refuses the channel, and never throws. [LM-6, N9]
+    privateLink: Object.freeze({ accept: (channel: PrivateLinkChannel) => handle.privateLink.accept(channel) }),
   });
 }

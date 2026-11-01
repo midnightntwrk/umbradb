@@ -424,12 +424,12 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
   it("L30's negative control: a process that ends at every refusal fails 'closed waits for stop()' and the admin's answers", async () => {
     // The facade's exact engine input, the engine stopping itself once startup refused, as a class-A refusal ends.
     const endsOnEveryRefusal = (options: UmbraDBOptions): UmbraDBHandle => {
-      const { input, log } = engineInputOf(options);
+      const { input } = engineInputOf(options);
       const engine: ProcessHandle = startProcess(input as EngineInput);
       void engine.ended.then((end) => {
         if (end.kind === "refused") void engine.stop();
       });
-      return handleOf(engine, log);
+      return handleOf(engine);
     };
     const cases = await classBCases();
     try {
