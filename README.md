@@ -175,8 +175,8 @@ The `core` entry's settings, the main ones (`GET /config` shows them all, with t
 | `developmentOptIn` | `false` | Required for PGlite and for development-only modules |
 | `listen.admin` | `0.0.0.0:8081` | The admin endpoints |
 | `listen.api` | none | The module API; without it, no module API is served |
-| `listen.transport` | none | The private processes' transport |
-| `transportReader` | none | The login of the transport's reads; required with `listen.transport` on PostgreSQL |
+| `listen.privateLink` | none | The private processes' link (renamed from `listen.transport`) |
+| `transportReader` | none | The login of the link's reads; required with `listen.privateLink` on PostgreSQL |
 | `readinessLag` | none | `/health/ready` answers 503 while the lag is above it |
 | `followingThreshold` | `3` | The lag at or below which the state is `following` |
 | `backupAtStop` | none | A file the process writes a backup to at the core's `stop` |
@@ -517,8 +517,8 @@ committed it. The public database stays shareable; what the private modules deri
 UmbraDB takes no keys itself: a private module takes them through its `secret` settings or its own API.
 
 Its `core` entry has an `instanceId` and no `node`, and reaches the public data directly (`publicDatabase`, a
-PostgreSQL database's parts), through the public process's transport (`coreTransport`, the public `listen.transport`),
-or both:
+PostgreSQL database's parts), through the public process's link (`privateLink`, the public `listen.privateLink`; up to
+`v0.10.0-rc.1` they were `coreTransport` and `listen.transport`, names now refused), or both:
 
 ```ts
 coreEntry({
@@ -528,7 +528,7 @@ coreEntry({
     instanceId: "wallet-a",
     database: { kind: "postgres", host: "db.internal", user: "wallet_a", password: "…", name: "umbradb_wallet_a" },
     publicDatabase: { kind: "postgres", host: "db.internal", user: "reader", password: "…", name: "umbradb" },
-    coreTransport: "127.0.0.1:9100",
+    privateLink: "127.0.0.1:9100",
     listen: { api: "127.0.0.1:18180", admin: "127.0.0.1:18181" },
   },
 }),
@@ -537,7 +537,7 @@ coreEntry({
 - **Binding.** A private database is bound to the public database it first started against
   (`private-binding-mismatch` for another).
 - **Lockstep.** A module that reads mutable public tables declares `needsLockstep: true`. Its instance must be listed
-  in the public `core` entry's `lockstepInstances` and connect through `coreTransport`; the public process then waits
+  in the public `core` entry's `lockstepInstances` and connect through `privateLink`; the public process then waits
   for it at each height (`waiting-for-lockstep`), and an instance that falls behind halts with `lockstep-behind`.
   Other instances run independently, as far behind as they need.
 - **Reads only.** The public process runs a private process's reads on its `transportReader` login, which may only

@@ -77,13 +77,13 @@ from outside its process, and the check says so.
 
 ### The transport reader
 
-A core on PostgreSQL that listens for private processes (`listen.transport`) runs their reads on a login of its own,
+A core on PostgreSQL that listens for private processes (`listen.privateLink`) runs their reads on a login of its own,
 `transportReader` (owner decision Q175). The setting is required there, and refused on PGlite, whose database has one
 session:
 
 ```ts
 database: { kind: "postgres", host: "db.internal", user: "umbradb", password: "…", name: "indexer" },
-listen: { transport: "0.0.0.0:7000" },
+listen: { privateLink: "0.0.0.0:7000" },
 transportReader: { user: "umbradb_transport", password: "…" },
 ```
 
@@ -290,7 +290,7 @@ configuration: it keeps the backup's S and resumes from the backup's height + 1.
 A private process's backup (written under the development opt-in) is restored the same way, with the private
 process's configuration: the command checks it against the configured public database instead of a node — read as the
 private process reads it, a PostgreSQL `publicDatabase` directly or else through the core's transport at
-`coreTransport`, so a PGlite public database needs its core running —: the public database's genesis hash and S must
+`privateLink`, so a PGlite public database needs its core running —: the public database's genesis hash and S must
 be the ones the backup's database is bound to, else `private-binding-mismatch` names which (`public-not-started`,
 `network` and `private-start-below` before loading; `genesis` and `start`, read from the backup's own binding, after
 loading, inside the restore's transaction), and the public database's committed block at the backup's height must be
@@ -314,6 +314,6 @@ umbradb run --update-hash=0x<64 hex digits> [--config umbradb.config.ts]
 That start runs every check of the public side — the binding, the public table items its modules require — and
 records the hash once they pass; later starts need no flag. A hash given that is not the one found accepts nothing, and
 the start stops as before; a value that is not `0x` and 64 lowercase hex digits prints the usage (exit 2). A start can
-also stop when the core's configuration changes during it, or when `coreTransport` and `publicDatabase` are not one
+also stop when the core's configuration changes during it, or when `privateLink` and `publicDatabase` are not one
 core's: start it again once both give one hash. A restored private backup holds the hash its process had accepted, so
 the restored process's first start compares it the same way.

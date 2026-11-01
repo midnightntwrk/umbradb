@@ -174,7 +174,7 @@ Accepted statements execute inside the read-only transaction opened by `Database
 PP-4, design §8 “Confined reads”).
 
 On PostgreSQL these reads run on a read pool of their own, logged in as `core.transportReader`
-(`{ user, password }`), which is required there with `listen.transport` and refused on PGlite
+(`{ user, password }`), which is required there with `listen.privateLink` and refused on PGlite
 (`src/config/core-settings.ts:224`, `src/runner/process.ts:1165`, `src/runner/process.ts:1283`; CF-4, Q175 A).
 Before the transport listens, startup refuses `transport-reader-can-write` when that login is a superuser, holds
 `CREATEROLE`, `CREATEDB` or `BYPASSRLS`, is a member of the writer's login, or holds a privilege beyond reading on

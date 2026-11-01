@@ -30,12 +30,13 @@ work is not needed by the library refactor, so it is recorded here.
 
 ## Evidence
 
-- `src/config/core-settings.ts:192` — `tls` has no rule tying it to `listen.transport` or `coreTransport`.
-- `src/config/core-settings.ts:178-185` — `listen` (with `transport`) is in both sides' schema;
+- `src/config/core-settings.ts:192` — `tls` has no rule tying it to `listen.privateLink` or `privateLink` (then
+  `listen.transport` and `coreTransport`).
+- `src/config/core-settings.ts:178-185` — `listen` (with `privateLink`, then `transport`) is in both sides' schema;
   `src/runner/process.ts:1336` opens the core transport only on the public side, so on a private process the address
   is ignored.
 - `src/config/core-settings.ts:236` (`transportReaderRule`) — `transportReader` is required on PostgreSQL with
-  `listen.transport` and refused on PGlite; nothing refuses it without a link.
+  `listen.privateLink` (then `listen.transport`) and refused on PGlite; nothing refuses it without a link.
 - `src/config/core-settings.ts:284` — `lockstepInstances` defaults to `[]` with no rule on the link;
   `openspec/changes/core-arch/specs/private-processes/spec.md:105-117` (Q24) and `test/private/lockstep-wait.test.ts`,
   `test/private/privacy.test.ts` keep the wait.

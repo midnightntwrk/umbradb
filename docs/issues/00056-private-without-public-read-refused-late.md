@@ -11,11 +11,11 @@
 
 ## Problem
 
-A private process whose `core` entry has neither a link to the public process (`coreTransport`) nor a PostgreSQL
-`publicDatabase` (absent, or PGlite) cannot read the public data. This is a fact of the configuration alone, but it is
-refused only when the private source is made, after the admin listener has opened: the process stays up `refused`
-(`invalid-configuration`, reason `public-database-transport`) instead of ending at startup's configuration step, and
-`config check` accepts the file.
+A private process whose `core` entry has neither a link to the public process (`privateLink`, formerly
+`coreTransport`) nor a PostgreSQL `publicDatabase` (absent, or PGlite) cannot read the public data. This is a fact of
+the configuration alone, but it is refused only when the private source is made, after the admin listener has opened:
+the process stays up `refused` (`invalid-configuration`, reason `public-database-transport`) instead of ending at
+startup's configuration step, and `config check` accepts the file.
 
 ## Evidence
 

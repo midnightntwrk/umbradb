@@ -91,8 +91,8 @@ export default configuration;
 - **Your own modules:** add each module's declaration to `modules` and its entry to `data.entries`, as a configuration
   file does. A module's own settings can read the page's parameters through `run.params`.
 - **Private instances:** `instances(run)` returns `{ id, configure(run) }` for each; each runs in a worker of its own
-  beside the core. The core listens for them on the page's message network (`listen: { transport: "core:1" }`) and a
-  private instance connects with `coreTransport: "core:1"`. `test/browser/fixtures/configuration.ts` is a complete
+  beside the core. The core listens for them on the page's message network (`listen: { privateLink: "core:1" }`) and a
+  private instance connects with `privateLink: "core:1"`. `test/browser/fixtures/configuration.ts` is a complete
   example with a user module and a private instance.
 - **Imports:** the default and the tests' configuration import UmbraDB from the repository's `src/` and
   `browser/src/configuration.ts` by relative path, so the build bundles the sources and replaces what a browser lacks
@@ -157,7 +157,7 @@ the ledger worker — and replace only what a browser does not have, each in one
 | Development opt-in | Required for PGlite, set in the file | Always set by the build |
 | Imports | `umbradb` (the package) | The repository's `src/` by relative path |
 | Private processes | Another `umbradb run`, its own database and file | Workers in the same page, from `instances(run)` |
-| Process transport | `listen.transport` / `coreTransport` as `host:port` | Names on the page's message network (`core:1`) |
+| Process transport | `listen.privateLink` / `privateLink` as `host:port` | Names on the page's message network (`core:1`) |
 | Module API | HTTP on `listen.api` (`host:port`) | The core worker's message channel (`listen.api` as a name, e.g. `core:2`) |
 | `/status`, `/health/*`, `/config` | HTTP on `listen.admin` | `umbradb.core.call("admin", "/status")` (or another path) in the console |
 | Backups | `umbradb backup`, `backupOnSignal` (SIGUSR2), `pg_dump` | The Back up button; `restore` parameter to load one |

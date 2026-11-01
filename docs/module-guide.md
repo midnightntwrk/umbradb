@@ -586,12 +586,12 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 
 - **What a private process is.** A module declared `side: "private"` runs in a private process: another `umbradb
   run`, whose `core` entry has an `instanceId` and no `node`, and reaches the public data through `publicDatabase` (a
-  PostgreSQL database's parts) or the public process's transport (`coreTransport`, the public `listen.transport`). It
+  PostgreSQL database's parts) or the public process's link (`privateLink`, the public `listen.privateLink`). It
   keeps its own database; §4 applies to it, so two private processes with the same configuration, bound to the same
   public database, hold the same private rows.
 - **Reading public data in `on-fetch`.** `on-fetch(processContext, block, out, read)` gets a fourth argument, a read of
   the public database at its committed height, which may be above `block.height`. Read public tables by height (`WHERE
-  height = $1`), and only append-only ones: their rows for a height never change. Through `coreTransport` each statement
+  height = $1`), and only append-only ones: their rows for a height never change. Through `privateLink` each statement
   must be one read — its first word `SELECT`, `WITH`, `VALUES` or `TABLE`, naming no `pg_` function and none of the
   others the [threat model](THREAT_MODEL.md) lists —, else it fails with `read-refused` and the core runs nothing of it.
 - **Which public items you may require.** Public `table` items (`blocks`, `ledger-events`, a public module's tables):
@@ -599,7 +599,7 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
   `block` and `process` items (`block-header`, `node-client`) are not available; a private process has its own
   `config`, `db` and `ledger-table`.
 - **Mutable public tables need lockstep.** Declare `needsLockstep: true` and run the module on an instance the public
-  `core` entry lists in `lockstepInstances`, with `coreTransport` set (`needs-lockstep-not-listed` otherwise). The
+  `core` entry lists in `lockstepInstances`, with `privateLink` set (`needs-lockstep-not-listed` otherwise). The
   public process then waits for the instance at each height, so your read sees exactly `block.height`. An instance that
   falls behind halts with `lockstep-behind`; one listed late needs a new private database starting above the public
   cursor.
@@ -611,7 +611,7 @@ const then = await metadata.read(read, "token-1", block.height - 10n);  // as of
 - **Private inputs are the module's.** UmbraDB takes no keys for you: take them through `secret` settings or your own
   API on the private process, keep them in your private tables, and never put them in an error message or an API
   answer. Your reads of public data are seen — by the public database's operator and logs and, through
-  `coreTransport`, by the core —: read public rows by height and filter them in your module, so that values derived
+  `privateLink`, by the core —: read public rows by height and filter them in your module, so that values derived
   from private data stay out of the queries.
 
 ## 15. Migrations
