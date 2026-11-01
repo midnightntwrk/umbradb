@@ -10,7 +10,7 @@ import {
   messagePortChannel,
   readEnvelope,
 } from "../../src/library/channels.js";
-import { MAX_MESSAGE_BYTES, PING_INTERVAL_MS } from "../../src/private/core-transport.js";
+import { MAX_BUFFERED_BYTES, MAX_MESSAGE_BYTES, PING_INTERVAL_MS } from "../../src/private/core-transport.js";
 import { channelPair, controlledTimers, rawPeer, until } from "./channel-fixtures.js";
 
 /**
@@ -20,20 +20,30 @@ import { channelPair, controlledTimers, rawPeer, until } from "./channel-fixture
  * - the envelope: each kind, and every fault of its shape;
  * - the UTF-8 count of a message, against Node.js's own (`Buffer.byteLength`);
  * - an endpoint: its own close and terminate end the channel whatever the carrier tells (L42), the pings on a
- *   controlled clock (L34's rule), the size of a message (L36's rule), `bufferedAmount`, and a carrier that throws.
+ *   controlled clock (L34's rule), the size of a message (L36's rule), `bufferedAmount`, and a carrier that throws;
+ * - L35's rule on every send of an endpoint, either side's: a message of the link, a ping, a pong — over the limit
+ *   the channel ends `too-slow` (1008), its owner told once, the close itself sent unchecked, never again.
  */
 
 /** An endpoint's events, recorded. */
 function recorder() {
-  const seen: { received: unknown[]; oversized: [number, string][]; unanswered: number; ended: [number, string][] } = {
+  const seen: {
+    received: unknown[];
+    oversized: [number, string][];
+    backlogged: [number, string][];
+    unanswered: number;
+    ended: [number, string][];
+  } = {
     received: [],
     oversized: [],
+    backlogged: [],
     unanswered: 0,
     ended: [],
   };
   const events: EndpointEvents = {
     received: (received) => seen.received.push(received),
     oversized: (code, reason) => seen.oversized.push([code, reason]),
+    backlogged: (code, reason) => seen.backlogged.push([code, reason]),
     unanswered: () => {
       seen.unanswered += 1;
     },
@@ -315,6 +325,68 @@ describe("an endpoint (LM-6)", () => {
     expect(new ChannelEndpoint(throwing, recorder().events).bufferedAmount()).toBeNull();
     const [none] = channelPair();
     expect(new ChannelEndpoint(none, recorder().events).bufferedAmount()).toBeNull();
+  });
+
+  /**
+   * What the peer of an endpoint saw when the endpoint had to send `kind` with `held` bytes undelivered and its limit
+   * `max` (the default, {@link MAX_BUFFERED_BYTES}, unless given): the messages and pongs it got, how the channel ended,
+   * and what the endpoint told its owner.
+   */
+  async function sendHolding(kind: "message" | "ping" | "pong", held: number, max?: number) {
+    const [mine, theirs] = channelPair({ bufferedAmount: () => held });
+    const clock = controlledTimers();
+    const { seen, events } = recorder();
+    const endpoint = new ChannelEndpoint(mine, events, {
+      timers: clock.timers,
+      ...(max === undefined ? {} : { maxBufferedBytes: max }),
+    });
+    const peer = rawPeer(theirs);
+    let pongs = 0;
+    theirs.onMessage((text) => {
+      if (text === '{"link":1,"kind":"pong"}') pongs += 1;
+    });
+    await settle();
+    if (kind === "message") endpoint.send(JSON.stringify({ v: 1, type: "report" }));
+    else if (kind === "ping") clock.advance(PING_INTERVAL_MS);
+    else peer.ping();
+    await until(() => peer.end !== null || peer.received.length + peer.pings + pongs > 0, `the ${kind}'s outcome`, 5_000);
+    await settle();
+    return { received: peer.received.length, pings: peer.pings, pongs, end: peer.end, backlogged: seen.backlogged, ended: seen.ended, closes: mine.closes };
+  }
+
+  it("L35's rule on every send: a message, a ping, a pong at MAX_BUFFERED_BYTES undelivered go out; above it the channel ends too-slow, its owner told once", async () => {
+    for (const kind of ["message", "ping", "pong"] as const) {
+      const at = await sendHolding(kind, MAX_BUFFERED_BYTES);
+      expect([kind, at.received + at.pings + at.pongs, at.end, at.backlogged]).toEqual([kind, 1, null, []]);
+      const over = await sendHolding(kind, MAX_BUFFERED_BYTES + 1);
+      expect([kind, over.received, over.pings, over.pongs, over.end]).toEqual([kind, 0, 0, 0, { code: 1008, reason: "too-slow" }]);
+      expect([over.backlogged, over.ended, over.closes]).toEqual([[[1008, "too-slow"]], [[1008, "too-slow"]], 1]);
+      // A limit of its own (the link's limits): the same rule at it.
+      expect((await sendHolding(kind, 11, 10)).end).toEqual({ code: 1008, reason: "too-slow" });
+      expect((await sendHolding(kind, 10, 10)).end).toBeNull();
+    }
+  });
+
+  it("L35's close cannot recur: an owner that sends and closes again when told is told once, and the close itself goes out unchecked", async () => {
+    const [mine, theirs] = channelPair({ bufferedAmount: () => MAX_BUFFERED_BYTES + 1 });
+    const peer = rawPeer(theirs);
+    let told = 0;
+    const endpoint: ChannelEndpoint = new ChannelEndpoint(mine, {
+      ...recorder().events,
+      backlogged: (code, reason) => {
+        told += 1;
+        endpoint.send(JSON.stringify({ v: 1, type: "report" }));
+        endpoint.close(code, reason);
+      },
+    });
+    expect(() => endpoint.send(JSON.stringify({ v: 1, type: "report" }))).not.toThrow();
+    expect(await peer.ended).toEqual({ code: 1008, reason: "too-slow" });
+    expect([told, peer.received.length, mine.closes, endpoint.open]).toEqual([1, 0, 1, false]);
+    // An endpoint's own close is not held back by what waits: the peer is told its code and reason.
+    const [slow, other] = channelPair({ bufferedAmount: () => MAX_BUFFERED_BYTES + 1 });
+    const second = rawPeer(other);
+    new ChannelEndpoint(slow, recorder().events).close(1001, "the core is stopping");
+    expect(await second.ended).toEqual({ code: 1001, reason: "the core is stopping" });
   });
 
   it("a carrier whose send throws has ended; one whose registration throws is told ended once made", async () => {

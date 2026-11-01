@@ -4,7 +4,8 @@ import { UmbraError } from "../../src/db/errors.js";
 import { channelCarrier } from "../../src/private/private-channels.js";
 import { type CarrierConnection, type CarrierEvents, type PrivateCarrier, PrivateTransport } from "../../src/private/private-transport.js";
 import { defineModule, type ModuleDeclaration } from "../../src/modules/declaration.js";
-import { PING_INTERVAL_MS } from "../../src/private/core-transport.js";
+import { MAX_BUFFERED_BYTES, PING_INTERVAL_MS } from "../../src/private/core-transport.js";
+import { CoreChannels } from "../../src/private/core-channels.js";
 import { startUmbraDB } from "../../src/library/start-umbradb.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { PrivateLinkChannel } from "../../src/library/channels.js";
@@ -30,6 +31,11 @@ import { cursorReaches, libraryData } from "./library-fixtures.js";
  * - **L41** `[NEG]`: a `connect()` that never settles does not delay `stop()`; a channel it resolves after `stop()` is
  *   closed; a rejection after it is not unhandled; no retry starts. Negative control: a carrier that waits for its
  *   `connect()` at the stop and ignores the signal (the fault) fails the same oracle, at the transport.
+ * - **L35** `[NEG]` beyond the core's own sends (`./channel-link.test.ts`): on the private side, a channel holding more
+ *   than `MAX_BUFFERED_BYTES` undelivered is closed 1008 `too-slow` at its next send (the `hello`), and the transport
+ *   connects again; on a queued channel of the core, at its next ping, and at its answer to the peer's ping. Negative
+ *   controls: the limit raised beyond any amount (the carrier's and the queue's seams, channels only): the slow channel
+ *   stays, and each oracle fails.
  */
 
 /** A promise the test opens, and whether the code that awaits it reached it. */
@@ -537,5 +543,88 @@ describe("the channel carrier at the transport (LM-6)", () => {
     } finally {
       await transport.close();
     }
+  }, 30_000);
+});
+
+/**
+ * The private side's L35 run over a channel carrier with `seams`: its first channel holds more than
+ * `MAX_BUFFERED_BYTES` undelivered, its second none. Every problem, none when the first was closed `too-slow` before
+ * the `hello` went out and the transport connected again.
+ */
+async function privateSlowProblems(seams: Parameters<typeof channelCarrier>[1] = {}): Promise<string[]> {
+  const cores: RawPeer[] = [];
+  const { transport, lines } = transportOver(
+    channelCarrier(async () => {
+      const held = cores.length === 0 ? MAX_BUFFERED_BYTES + 1 : 0;
+      const [privateEnd, coreEnd] = channelPair({ bufferedAmount: () => held });
+      cores.push(rawPeer(coreEnd));
+      return privateEnd;
+    }, seams),
+  );
+  const problems: string[] = [];
+  try {
+    await until(() => cores.length === 1, "the first channel");
+    const first = cores[0] as RawPeer;
+    const end = await Promise.race([first.ended, new Promise<null>((resolve) => setTimeout(() => resolve(null), 2_000))]);
+    if (JSON.stringify(end) !== JSON.stringify({ code: 1008, reason: "too-slow" })) problems.push(`the slow channel ended ${JSON.stringify(end)}, not 1008 too-slow`);
+    if (first.received.length > 0) problems.push(`the slow channel carried ${first.received.length} message(s)`);
+    await until(() => cores.length === 2, "a second channel", 5_000).catch(() => problems.push("no second channel was opened"));
+    if (!lines.some((line) => line.startsWith("transport: too-slow (1008 too-slow); connecting again in "))) problems.push("too-slow was not logged");
+  } finally {
+    await transport.close();
+  }
+  return problems;
+}
+
+describe("L35 on the private side and on a queued channel (LM-6)", () => {
+  it("the private side: a channel over MAX_BUFFERED_BYTES is closed too-slow at its hello, and the transport connects again", async () => {
+    expect(await privateSlowProblems()).toEqual([]);
+  }, 30_000);
+
+  it("negative control (committed): the private side's limit raised beyond any amount: the slow channel carries the hello and stays, and the oracle fails", async () => {
+    const problems = await privateSlowProblems({ limits: { maxBufferedBytes: Number.MAX_SAFE_INTEGER } });
+    expect(problems).toContain("the slow channel ended null, not 1008 too-slow");
+    expect(problems).toContain("the slow channel carried 1 message(s)");
+  }, 30_000);
+
+  /** One queued channel's L35 run on a core link not started, its limit `maxBufferedBytes` (the default unless given). */
+  async function queuedSlowProblems(maxBufferedBytes?: number): Promise<string[]> {
+    const clock = controlledTimers();
+    const lines: string[] = [];
+    const link = new CoreChannels({
+      log: (line) => lines.push(line),
+      timers: clock.timers,
+      ...(maxBufferedBytes === undefined ? {} : { limits: { maxBufferedBytes } }),
+    });
+    const problems: string[] = [];
+    // One at its ping, one at its answer to the peer's ping.
+    const [pingedEnd, pingedPeerEnd] = channelPair({ bufferedAmount: () => MAX_BUFFERED_BYTES + 1 });
+    const [answeringEnd, answeringPeerEnd] = channelPair({ bufferedAmount: () => MAX_BUFFERED_BYTES + 1 });
+    link.accept(pingedEnd);
+    link.accept(answeringEnd);
+    const pinged = rawPeer(pingedPeerEnd);
+    const answering = rawPeer(answeringPeerEnd);
+    pinged.send(peerHello("queued-pinged"));
+    answering.send(peerHello("queued-answering"));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    answering.ping();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    await tick(clock, PING_INTERVAL_MS);
+    for (const [name, peer] of [["at its answer to a ping", answering], ["at its ping", pinged]] as const) {
+      if (JSON.stringify(peer.end) !== JSON.stringify({ code: 1008, reason: "too-slow" })) problems.push(`${name}: ended ${JSON.stringify(peer.end)}, not 1008 too-slow`);
+    }
+    if (lines.filter((line) => line === "private link: closed a queued channel: too-slow").length !== 2) problems.push(`logged ${JSON.stringify(lines)}`);
+    await link.close();
+    return problems;
+  }
+
+  it("a queued channel over MAX_BUFFERED_BYTES is closed too-slow at its ping, and at its answer to the peer's ping", async () => {
+    expect(await queuedSlowProblems()).toEqual([]);
+  }, 30_000);
+
+  it("negative control (committed): the queue's limit raised beyond any amount: both stay queued, and the oracle fails", async () => {
+    const problems = await queuedSlowProblems(Number.MAX_SAFE_INTEGER);
+    expect(problems.some((problem) => problem.startsWith("at its ping: ended null"))).toBe(true);
+    expect(problems.some((problem) => problem.startsWith("at its answer to a ping: ended null"))).toBe(true);
   }, 30_000);
 });

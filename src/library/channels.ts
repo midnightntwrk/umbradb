@@ -34,12 +34,15 @@
  * - it pings its peer one interval after it is made ({@link PING_INTERVAL_MS}), then every interval, answers its peer's
  *   pings, and gives up on a peer whose ping is still unanswered at the next interval (`no-pong`): a dead peer is found
  *   within two intervals;
- * - it tells the bytes the channel has not delivered yet, when the channel knows them;
+ * - it tells the bytes the channel has not delivered yet, when the channel knows them, and checks them before every
+ *   send — a message of the link, a ping, a pong: more than its limit ({@link MAX_BUFFERED_BYTES}) waiting ends the
+ *   channel 1008 `too-slow`, its owner told once; the `close` that ends it is sent unchecked, and nothing after it, so
+ *   the check cannot come back to itself;
  * - its own close or terminate sends the peer a `close` envelope and ends the channel at once — its listeners disposed,
  *   its owner told —, whatever the carrier's own close does. [LM-6, L42]
  */
 
-import { MAX_MESSAGE_BYTES, PING_INTERVAL_MS, type Received } from "../private/core-transport.js";
+import { CLOSE_PROTOCOL, MAX_BUFFERED_BYTES, MAX_MESSAGE_BYTES, PING_INTERVAL_MS, type Received } from "../private/core-transport.js";
 import { messageOfValue } from "../private/messages.js";
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
 import { unrefTimer } from "../private/timers.js";
@@ -222,6 +225,11 @@ export interface EndpointEvents {
   received(received: Received): void;
   /** A message over the limit: the owner closes the channel with `code` (1009) and `reason` (`too-large`). */
   oversized(code: number, reason: string): void;
+  /**
+   * More than the limit waits undelivered at a send: the endpoint ends the channel with `code` (1008) and `reason`
+   * (`too-slow`) once the owner was told, whatever the owner does. [LM-6, L35]
+   */
+  backlogged(code: number, reason: string): void;
   /** The peer did not answer the last ping by the next interval: the owner ends the channel (`no-pong`). */
   unanswered(): void;
   /** The channel ended — by the peer's `close`, the carrier's end (1006, no reason), or the endpoint's own close. */
@@ -234,6 +242,8 @@ export interface EndpointOptions {
   readonly maxMessageBytes?: number;
   /** The interval of its pings; {@link PING_INTERVAL_MS} unless given. */
   readonly pingIntervalMs?: number;
+  /** The most bytes waiting undelivered at a send; {@link MAX_BUFFERED_BYTES} unless given (the link's limits). */
+  readonly maxBufferedBytes?: number;
   /** Its interval's clock; {@link REAL_TIMERS} unless given (the tests' controlled clock). */
   readonly timers?: LinkTimers;
   /** How a `message` envelope's value is read: the link's schemas unless given (a negative control's). */
@@ -248,8 +258,11 @@ export class ChannelEndpoint {
   readonly #channel: PrivateLinkChannel;
   #events: EndpointEvents;
   #maxMessageBytes: number;
+  readonly #maxBufferedBytes: number;
   readonly #message: (value: unknown) => Received;
   #ended = false;
+  /** Set once a send found more than the limit waiting: from then on only the `close` that ends the channel is sent. */
+  #backlogged = false;
   /** Whether a ping is sent and not answered yet. */
   #awaiting = false;
   readonly #dispose: (() => void)[] = [];
@@ -263,6 +276,7 @@ export class ChannelEndpoint {
     this.#channel = channel;
     this.#events = events;
     this.#maxMessageBytes = options.maxMessageBytes ?? MAX_MESSAGE_BYTES;
+    this.#maxBufferedBytes = options.maxBufferedBytes ?? MAX_BUFFERED_BYTES;
     this.#message = options.message ?? messageOfValue;
     // Registered at once: the carrier keeps what arrived before for this listener. A carrier whose registration
     // throws has ended; its owner is told once it holds the endpoint. [LM-6]
@@ -318,14 +332,14 @@ export class ChannelEndpoint {
   /** Ends the channel with `code` and `reason`: the peer is told, then the carrier closed. [LM-6, L42] */
   close(code: number, reason: string): void {
     if (this.#ended) return;
-    this.#post(controlEnvelope({ kind: "close", code, reason }));
+    this.#post(controlEnvelope({ kind: "close", code, reason }), "unchecked");
     this.#end(code, reason, () => this.#channel.close());
   }
 
   /** Ends the channel at once with `code` and `reason`: the peer is told, then the carrier ended. [LM-6, L42] */
   terminate(code: number, reason: string): void {
     if (this.#ended) return;
-    this.#post(controlEnvelope({ kind: "close", code, reason }));
+    this.#post(controlEnvelope({ kind: "close", code, reason }), "unchecked");
     this.#end(code, reason, () => (this.#channel.terminate === undefined ? this.#channel.close() : this.#channel.terminate()));
   }
 
@@ -372,9 +386,23 @@ export class ChannelEndpoint {
     }
   }
 
-  /** Posts `text` on the channel; a carrier whose `send` throws has ended. */
-  #post(text: string): void {
+  /**
+   * Posts `text` on the channel; a carrier whose `send` throws has ended. Every send but the `close` that ends the
+   * channel (`unchecked`) is checked first: with more than the limit waiting the owner is told, and the channel ended
+   * `too-slow` (see the module comment). [LM-6, L35]
+   */
+  #post(text: string, check: "checked" | "unchecked" = "checked"): void {
     if (this.#ended) return;
+    if (check === "checked") {
+      if (this.#backlogged) return;
+      const held = this.bufferedAmount();
+      if (held !== null && held > this.#maxBufferedBytes) {
+        this.#backlogged = true;
+        this.#events.backlogged(CLOSE_PROTOCOL, "too-slow");
+        this.close(CLOSE_PROTOCOL, "too-slow");
+        return;
+      }
+    }
     try {
       this.#channel.send(text);
     } catch {

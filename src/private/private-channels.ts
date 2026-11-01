@@ -12,7 +12,8 @@
  * once, a later rejection is consumed, and no retry starts. A channel open at the stop is closed (1001). [LM-6, L41]
  *
  * The endpoint gives up on a core that does not answer its ping by the next interval ("the core did not answer a
- * ping", `no-pong`), as the socket carrier does. [LM-6]
+ * ping", `no-pong`), as the socket carrier does, and closes a channel that holds more than the link's
+ * `MAX_BUFFERED_BYTES` undelivered at a send (`too-slow`); the transport then connects again. [LM-6, L35]
  */
 
 import {
@@ -30,7 +31,7 @@ export type ConnectChannel = (signal: AbortSignal) => Promise<PrivateLinkChannel
 /** The tests' changes of the channel carrier: the endpoints' clock, the link's limits, a control's message reading. */
 export interface ChannelCarrierSeams {
   readonly timers?: LinkTimers;
-  readonly limits?: Partial<Pick<TransportLimits, "maxMessageBytes" | "pingIntervalMs">>;
+  readonly limits?: Partial<Pick<TransportLimits, "maxMessageBytes" | "maxBufferedBytes" | "pingIntervalMs">>;
   /** How a message envelope's value is read: the link's schemas unless given (a negative control's). [L66] */
   readonly message?: (value: unknown) => Received;
 }
@@ -61,7 +62,7 @@ function discard(channel: unknown): void {
 
 /** The channel carrier over the host's `connect` (see the module comment). [LM-6] */
 export function channelCarrier(connect: ConnectChannel, seams: ChannelCarrierSeams = {}): PrivateCarrier {
-  const { maxMessageBytes, pingIntervalMs } = { ...TRANSPORT_LIMITS, ...seams.limits };
+  const { maxMessageBytes, maxBufferedBytes, pingIntervalMs } = { ...TRANSPORT_LIMITS, ...seams.limits };
   return Object.freeze({
     where: "over a channel",
     dial(events: CarrierEvents, signal: AbortSignal): CarrierConnection {
@@ -77,6 +78,9 @@ export function channelCarrier(connect: ConnectChannel, seams: ChannelCarrierSea
               events.failed(reason);
               endpoint?.close(code, reason);
             },
+            // A core that reads so slowly that the channel holds more than the limit: closed so, and connected again.
+            // [LM-6, L35]
+            backlogged: (_code, reason) => events.failed(reason),
             unanswered: () => {
               events.failed("the core did not answer a ping");
               endpoint?.terminate(CLOSE_PROTOCOL, "no-pong");
@@ -88,6 +92,7 @@ export function channelCarrier(connect: ConnectChannel, seams: ChannelCarrierSea
           },
           {
             maxMessageBytes,
+            maxBufferedBytes,
             pingIntervalMs,
             ...(seams.timers === undefined ? {} : { timers: seams.timers }),
             ...(seams.message === undefined ? {} : { message: seams.message }),

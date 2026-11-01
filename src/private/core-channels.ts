@@ -82,7 +82,7 @@ export interface CoreChannelsOptions extends CoreChannelSeams {
 
 /** The events of an endpoint no one is told of yet (until attached), or ever (a refused channel). */
 const ignore = (): void => undefined;
-const QUIET: EndpointEvents = Object.freeze({ received: ignore, oversized: ignore, unanswered: ignore, ended: ignore });
+const QUIET: EndpointEvents = Object.freeze({ received: ignore, oversized: ignore, backlogged: ignore, unanswered: ignore, ended: ignore });
 
 /** A queued channel and its held `hello`. */
 interface Queued {
@@ -188,6 +188,7 @@ export class CoreChannels implements CoreLink {
     return new ChannelEndpoint(channel, QUIET, {
       maxMessageBytes,
       pingIntervalMs: this.#limits.pingIntervalMs,
+      maxBufferedBytes: this.#limits.maxBufferedBytes,
       ...(seams.timers === undefined ? {} : { timers: seams.timers }),
       ...(seams.message === undefined ? {} : { message: seams.message }),
     });
@@ -208,6 +209,8 @@ export class CoreChannels implements CoreLink {
         else queued.hello = received.message;
       },
       oversized: close,
+      // A queued channel sends only the envelope's pings and pongs: one too slow for them is closed so. [LM-6, L35]
+      backlogged: close,
       unanswered: () => {
         this.#options.log("private link: closed a queued channel: no-pong");
         endpoint.terminate(CLOSE_PROTOCOL, "no-pong");
@@ -234,6 +237,7 @@ export class CoreChannels implements CoreLink {
     endpoint.attach({
       received: (received) => session.received(received),
       oversized: (code, reason) => session.drop(code, reason),
+      backlogged: (code, reason) => session.drop(code, reason),
       unanswered: () => session.terminate("no-pong"),
       ended: () => {
         this.#open.delete(endpoint);
