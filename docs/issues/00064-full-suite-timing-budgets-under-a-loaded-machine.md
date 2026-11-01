@@ -58,6 +58,19 @@ files with four workers, then `test/library/network.test.ts` and `test/backbone/
     `test/helpers/cursor-table`, `test/private/lockstep-reads`, `test/private/privacy.negative-control`,
     `test/containers` — whose failure left a container behind: issue 00066).
 
+The full runs of `start-umbradb` P9 (2026-11-01, 20.6 min; the load 3.4 at the start, then the suite's own: Docker
+Desktop's VM at about 650 % CPU, the load average 30–48 by the end) had, besides the known ones, each passing when its
+file runs alone right after (3 files, 26 tests):
+
+12. `test/admin/states.test.ts` A64 ("stopped at the core's stop …" and "refused …") and
+    `test/backbone/core-health/liveness.test.ts` A63 (both cases), as above.
+13. `test/backbone/contract-logs-handoff.test.ts`, A111 on PostgreSQL — the process started on the restored database was
+    refused `writer-lock-held` ("another session (backend pid …) holds this database's writer lock"): the restore's own
+    writer session had not ended on the server yet, as in A165's control (item 9). What the run shows: the restore had
+    returned, and a session still held the lock when the next writer checked it (the log line names its backend pid);
+    alone, with the machine quiet, the check never meets it. Not investigated further (which session, and how long it
+    stays after its client closed, is unconfirmed).
+
 ## Evidence
 
 - `test/library/network.test.ts:30-31` — `CONTROL_SETTLES_MS = 5_000`; `:79-86` the race that reports
@@ -65,10 +78,12 @@ files with four workers, then `test/library/network.test.ts` and `test/backbone/
 - `test/backbone/core-health/liveness.test.ts:77` — `probedThrough`'s wait for `/status`, 20 s.
 - `test/db/prepared-statements.test.ts:119` — the test's 60 s budget.
 - The run's log and the reruns: the `start-umbradb` plan's P7 notes (`p7/logs/full-1.log`, `rerun-flaky.log`) and P8
-  notes (`p8/logs/full-1.log`, `rerun-1.log`, `rerun-network.log`, `rerun-a103.log`).
+  notes (`p8/logs/full-1.log`, `rerun-1.log`, `rerun-network.log`, `rerun-a103.log`); P9 notes (`p9/logs/full-1.log`, `rerun-1.log`).
 
 ## Suggested fix
 
+For items 9 and 13, a test that starts a second writer right after the first one closed waits until the first's
+sessions are gone (`pg_stat_activity`, as `test/private/backends.ts`'s `connected` does) before it starts the second.
 For the controls of item 1, wait for startup to settle with the suite's patience (the control's outcome is a
 completed startup or a later refusal, both of which come), keeping the 5 s budget only for the class-A refusal the
 main oracle expects to be prompt. For items 2 and 3, start their clocks once the process is serving (A63) and give the
