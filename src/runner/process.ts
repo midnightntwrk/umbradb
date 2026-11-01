@@ -1124,6 +1124,11 @@ class Process implements ProcessHandle {
   readonly #input: EngineInput;
   readonly #stop = new AbortController();
   #resolveClosed!: () => void;
+  /**
+   * Removes the process's listener from the host's signal: called once the process has closed, whichever way it ended,
+   * so that a long-lived signal keeps no listener of a closed process (nor the process through it). [LM-9, RN-13]
+   */
+  #unfollowSignal: () => void = () => undefined;
   #closing: Promise<void> | undefined;
   #phase: StatusFacts["phase"] = "starting";
   #redactor: Redactor | undefined;
@@ -1258,7 +1263,10 @@ class Process implements ProcessHandle {
       ...(input.adminSeams === undefined ? {} : { seams: input.adminSeams }),
     });
     this.closed = new Promise((resolve) => {
-      this.#resolveClosed = resolve;
+      this.#resolveClosed = () => {
+        this.#unfollowSignal();
+        resolve();
+      };
     });
     const startup = this.#startup();
     // Decided once, before anything else sees startup end: `/status` shows the reason as `started` rejects. [LM-9]
@@ -1276,7 +1284,11 @@ class Process implements ProcessHandle {
     this.#admin.follow(startup, this.ended);
     const { signal } = input;
     if (signal?.aborted === true) void this.#stopWith(signal.reason);
-    else signal?.addEventListener("abort", () => void this.#stopWith(signal.reason), { once: true });
+    else if (signal !== undefined) {
+      const stop = (): void => void this.#stopWith(signal.reason);
+      signal.addEventListener("abort", stop, { once: true });
+      this.#unfollowSignal = () => signal.removeEventListener("abort", stop);
+    }
   }
 
   status(): ProcessStatus {

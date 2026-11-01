@@ -1,5 +1,5 @@
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
-import { EventEmitter } from "node:events";
+import { EventEmitter, getEventListeners } from "node:events";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,6 +39,9 @@ import { runQuietChild } from "./quiet-child.js";
  * - L12: no ledger worker without the ledger, no admin thread without a listening admin (the `worker_threads`
  *   diagnostics channel, which sees the ledger worker and the admin worker when they start).
  * - L14: aborting `signal` stops like `stop()`, during startup and while processing.
+ * - A handle's listener on the host's `signal` is removed once `closed` resolves, whichever way the process ended — a
+ *   stop, a class-A refusal, a stop during startup, a class-B refusal then a stop — so that repeated starts under one
+ *   long-lived signal leave its listener count where it started, on PostgreSQL, a PGlite directory and in memory.
  * - L47 `[NEG]`: `library-setting-refused` for `backupAtStop` and `backupOnSignal`; the control is the engine without
  *   the library's check, which starts.
  */
@@ -567,6 +570,69 @@ describe("L14: aborting signal stops like stop() (LM-9, RN-13)", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(unhandled).toEqual([]);
   }, 60_000);
+});
+
+/** The `abort` listeners `signal` holds now. */
+const abortListeners = (signal: AbortSignal): number => getEventListeners(signal, "abort").length;
+
+describe.each([
+  ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
+  ["PGlite in memory", null] as const,
+])("a closed handle leaves no listener on the host's signal, on %s (LM-9, RN-13)", (_name, backend) => {
+  beforeAll(() => backend?.start(), 180_000);
+  afterAll(() => backend?.stop(), 60_000);
+  const database = async (): Promise<DatabaseParts> => (backend === null ? PGLITE_MEMORY : (await backend.database()).setting);
+
+  it("a stop, a class-A refusal, a stop during startup, a class-B refusal then a stop, twice each: the count is back where it started", async () => {
+    const { signal } = new AbortController();
+    const before = abortListeners(signal);
+    const failing = rowsModule("failing", undefined, {
+      points: {
+        async "on-start-db"() {
+          throw new Error("the module cannot start");
+        },
+      },
+    });
+    const seen: string[] = [];
+    for (let round = 1; round <= 2; round++) {
+      const served = startUmbraDB({ config: { data: libraryData(await database()) }, signal, source: new InMemoryBlockSource({ head: 2n }) });
+      await cursorReaches(served, 2n);
+      // While it runs, its listener is there: aborting the signal stops it.
+      seen.push(`round ${round} serving: ${abortListeners(signal) - before}`);
+      await served.stop();
+      seen.push(`round ${round} stopped: ${abortListeners(signal) - before}`);
+
+      const refused = startUmbraDB({ config: { data: { entries: [] } }, signal });
+      await refused.closed;
+      seen.push(`round ${round} refused (class A): ${abortListeners(signal) - before}`);
+
+      const interrupted = startUmbraDB({ config: { data: libraryData(await database()) }, signal, source: new InMemoryBlockSource({ head: 2n }) });
+      await interrupted.stop();
+      seen.push(`round ${round} stopped during startup: ${abortListeners(signal) - before}`);
+
+      const broken = startUmbraDB({
+        config: { data: libraryData(await database(), [failing]) },
+        modules: [failing],
+        signal,
+        source: new InMemoryBlockSource({ head: 2n }),
+      });
+      await expect(broken.started).rejects.toMatchObject({ code: "callback-error" });
+      // Refused after its configuration step, it stays up until stop(): the signal still stops it.
+      seen.push(`round ${round} refused (class B): ${abortListeners(signal) - before}`);
+      await broken.stop();
+      seen.push(`round ${round} refused (class B), stopped: ${abortListeners(signal) - before}`);
+    }
+    expect(seen).toEqual(
+      [1, 2].flatMap((round) => [
+        `round ${round} serving: 1`,
+        `round ${round} stopped: 0`,
+        `round ${round} refused (class A): 0`,
+        `round ${round} stopped during startup: 0`,
+        `round ${round} refused (class B): 1`,
+        `round ${round} refused (class B), stopped: 0`,
+      ]),
+    );
+  }, 180_000);
 });
 
 describe.each(PROCESS_BACKENDS)("L47: library-setting-refused (LM-2, BK-1) on $name", (backend: ProcessBackend) => {
