@@ -41,7 +41,8 @@ import {
  *   read past it completes, as on the listener (DB-15). Controls: the mounted path without the body limit, and over a
  *   module API whose read is not bounded, each fail the oracle.
  * - **L68** `[NEG]`: through mounted `api.upgrade`, as on the listener: a message that is not a JSON object with a
- *   type, a `subscribe` without a valid id, an unknown type are answered `invalid-request`, an unknown subscription
+ *   type, a `subscribe` without a valid id, an unknown type, an `unsubscribe` whose id is an object whose conversion
+ *   to text throws are answered `invalid-request` (the connection goes on), an unknown subscription
  *   name `not-found`; a message over the module API's 64 KiB closes the connection (1009); a subscriber holding more
  *   than 1 MiB unsent is disconnected; the upgrade's 101 carries `X-Umbra-Version` and `X-Umbra-Config-Hash`, which
  *   holds no secret and does not change with one (a password in `database` on PostgreSQL; a TLS key and a node URL's
@@ -141,7 +142,12 @@ const PROTOCOL_ERRORS = [
     error: { code: "invalid-request", message: "a subscribe message has an id, a string of 1 to 128 characters, and a name, a string" },
   },
   { type: "error", id: "x", error: { code: "not-found", message: "no subscription is named nothing" } },
+  // An id whose conversion to text throws: answered, never thrown out of the socket's callback. [LM-4, LM-10]
+  { type: "error", error: { code: "invalid-request", message: "an unsubscribe message's id is a string, not an object" } },
 ];
+
+/** An `unsubscribe` whose id is an object whose conversion to text throws. */
+const POISONED_UNSUBSCRIBE = '{"type":"unsubscribe","id":{"toString":null}}';
 
 /**
  * The L68 subscription checks at `ws` (see the module comment), `hooks` the module's emits. Each client is closed
@@ -149,7 +155,7 @@ const PROTOCOL_ERRORS = [
  */
 async function subscriptionSeen(ws: string, hooks: MapiHooks): Promise<SubscriptionSeen> {
   const protocol = await Client.connect(ws);
-  for (const message of ["{not json", { type: "dance" }, { type: "subscribe", id: 7, name: "feed" }, { type: "subscribe", id: "x", name: "nothing" }]) {
+  for (const message of ["{not json", { type: "dance" }, { type: "subscribe", id: 7, name: "feed" }, { type: "subscribe", id: "x", name: "nothing" }, POISONED_UNSUBSCRIBE]) {
     protocol.send(message);
   }
   // Every answer comes within 3 s, or the check counts what came.

@@ -1,3 +1,7 @@
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { mountedAdminFetch } from "../../src/admin/mounted.js";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
@@ -5,15 +9,30 @@ import type { ReadHandle } from "../../src/db/api.js";
 import type { PrivateLinkChannel } from "../../src/library/channels.js";
 import type { ApiRegistry } from "../../src/modules/declaration.js";
 import { coreHeaders, notServingResponse, refuseChannelNotServing } from "../../src/runner/api-answers.js";
-import { answerRequest, connectChannel, connectionRules, moduleApiFetch, responseOf } from "../../src/runner/api-session.js";
+import {
+  answerRequest,
+  connectChannel,
+  connectionRules,
+  moduleApiFetch,
+  responseOf,
+  type SubscriptionCarrier,
+  SubscriptionConnection,
+} from "../../src/runner/api-session.js";
+import { listenModuleApi, moduleApiHandlers } from "../../src/runner/api-socket.js";
 import { ApiRoutes, ModuleApi } from "../../src/runner/module-api.js";
 import { channelPair, until } from "../library/channel-fixtures.js";
+import { Client } from "../library/mounted-fixtures.js";
 
 /**
  * The module API's session logic on its own (`src/runner/api-session.ts`), with the module API over a stand-in
  * database whose reads see height 7: the fetch-style handler's and the channel connection's edges that the processes'
  * tests do not reach — a body whose stream fails, an answer with no body, a carrier that throws in each of its members,
  * a carrier without `terminate` — and the lifecycle's and admin's fetch-style answers. [LM-11, RN-15, RN-16, LM-5]
+ *
+ * A client's malformed message — any JSON value where an id or a field is expected, objects whose conversion to text
+ * throws among them — is answered `invalid-request` and the connection goes on, on each carrier of the protocol: a
+ * host's channel (the engine's `api.connect`), the handlers mounted in a host's server (`api.upgrade`) and the listener
+ * (`listen.api`); and, as a property, on the session itself. [LM-4, LM-10, RN-15]
  */
 
 const read: ReadHandle = Object.freeze({ height: 7n, query: async () => [] }) as unknown as ReadHandle;
@@ -163,5 +182,99 @@ describe("the module API's session logic (LM-11)", () => {
     const ok = await fetch(new Request("http://admin/status?x=1"));
     expect([ok.status, await ok.json(), ok.headers.get("content-length")]).toEqual([200, { ok: true }, "11"]);
     expect(seen).toEqual(["GET /fail", "GET /status?x=1"]);
+  });
+});
+
+/** Values a client sends where an id or a field is expected whose conversion to text throws (`String(value)`). */
+const POISONED: readonly unknown[] = [{ toString: null }, { toString: {}, valueOf: {} }, [{ toString: null }]];
+
+/** The messages of a malformed client, then a valid `subscribe`, and the answers each gets, in order. [LM-4, LM-10] */
+const MALFORMED_CLIENT: readonly { readonly sent: unknown; readonly answer: unknown }[] = [
+  ...POISONED.map((id) => ({
+    sent: { type: "unsubscribe", id },
+    answer: {
+      type: "error",
+      error: { code: "invalid-request", message: `an unsubscribe message's id is a string, not ${Array.isArray(id) ? "a list" : "an object"}` },
+    },
+  })),
+  ...POISONED.map((id) => ({
+    sent: { type: "subscribe", id, name: "feed" },
+    answer: {
+      type: "error",
+      error: { code: "invalid-request", message: "a subscribe message has an id, a string of 1 to 128 characters, and a name, a string" },
+    },
+  })),
+  ...POISONED.map((type) => ({
+    sent: { type },
+    answer: { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } },
+  })),
+  { sent: { type: "subscribe", id: "after", name: "feed" }, answer: { type: "subscribed", id: "after" } },
+];
+
+describe("a subscription client's malformed message is answered invalid-request, never thrown (LM-4, LM-10)", () => {
+  it("over a host's channel (api.connect): each answered, the connection goes on", async () => {
+    const [mine, peer] = channelPair();
+    const answers: unknown[] = [];
+    peer.onMessage((text) => answers.push(JSON.parse(text)));
+    connectChannel(mine, api(new Set()), { rules: connectionRules({}) });
+    for (const { sent } of MALFORMED_CLIENT) peer.send(JSON.stringify(sent));
+    await until(() => answers.length >= MALFORMED_CLIENT.length, "every answer", 5_000);
+    expect(answers).toEqual(MALFORMED_CLIENT.map(({ answer }) => answer));
+    expect(mine.ended).toBe(false);
+  });
+
+  it("through the handlers mounted in a host's server (api.upgrade): each answered, the connection goes on", async () => {
+    const handlers = moduleApiHandlers(api(new Set()));
+    const server = createServer((_request, response) => response.end());
+    server.on("upgrade", handlers.upgrade);
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const client = await Client.connect(`ws://127.0.0.1:${(server.address() as AddressInfo).port}/subscriptions`);
+    try {
+      for (const { sent } of MALFORMED_CLIENT) client.send(sent);
+      expect(await client.until(MALFORMED_CLIENT.length, 5_000)).toEqual(MALFORMED_CLIENT.map(({ answer }) => answer));
+    } finally {
+      await client.close();
+      await handlers.close();
+      server.close();
+    }
+  });
+
+  it("on the listener (listen.api): each answered, the connection goes on", async () => {
+    const listener = await listenModuleApi(api(new Set()), "127.0.0.1:0");
+    const client = await Client.connect(`ws://127.0.0.1:${listener.port}/`);
+    try {
+      for (const { sent } of MALFORMED_CLIENT) client.send(sent);
+      expect(await client.until(MALFORMED_CLIENT.length, 5_000)).toEqual(MALFORMED_CLIENT.map(({ answer }) => answer));
+    } finally {
+      await client.close();
+      await listener.close();
+    }
+  });
+
+  it("any JSON value, or a poisoned object, in any field of a message: one answer, never a throw (fast-check, seed 2848, 500 runs)", () => {
+    const poisoned = fc.constantFrom(...POISONED);
+    const value = fc.oneof(fc.jsonValue(), poisoned, fc.array(poisoned, { maxLength: 2 }), fc.dictionary(fc.string(), poisoned, { maxKeys: 2 }));
+    const message = fc.oneof(
+      fc.record({ type: value }),
+      fc.record({ type: fc.constantFrom("subscribe", "unsubscribe"), id: value, name: value, args: value }),
+      fc.record({ type: fc.constantFrom("subscribe", "unsubscribe"), id: value }),
+      value,
+    );
+    const emits = new Set<(value: unknown) => void>();
+    const module = api(emits);
+    fc.assert(
+      fc.property(message, (sent) => {
+        const out: string[] = [];
+        const carrier: SubscriptionCarrier = { send: (text) => out.push(text), bufferedAmount: () => 0, disconnect: () => undefined };
+        const connection = new SubscriptionConnection(carrier, module, connectionRules({}));
+        expect(() => connection.received(JSON.stringify(sent))).not.toThrow();
+        expect(out).toHaveLength(1);
+        expect(["error", "subscribed", "complete"]).toContain((JSON.parse(out[0] as string) as { type: string }).type);
+        connection.ended();
+      }),
+      { seed: 2848, numRuns: 500 },
+    );
+    expect(emits.size).toBe(0);
   });
 });

@@ -134,6 +134,36 @@ describe("the envelope (LM-6)", () => {
   });
 });
 
+describe("a peer's malformed envelope is a fault, never a throw (LM-6, LM-10)", () => {
+  it("each field of the envelope, and of the hello it carries, replaced by any JSON value or a poisoned object (fast-check, seed 2849, 500 runs)", () => {
+    // Values whose conversion to text throws (`String(value)`), among any JSON value.
+    const poisoned = fc.constantFrom<unknown>({ toString: null }, { toString: {}, valueOf: {} }, [{ toString: null }]);
+    const value = fc.oneof(fc.jsonValue(), poisoned, fc.array(poisoned, { maxLength: 2 }), fc.dictionary(fc.string(), poisoned, { maxKeys: 2 }));
+    const hello = { v: 1, type: "hello", instance: "i-1", version: "0.10.0", height: "0", hash: null };
+    const fields = [
+      ...["link", "kind", "message"].map((key) => ({ in: "envelope", key })),
+      ...["code", "reason"].map((key) => ({ in: "close", key })),
+      ...Object.keys(hello).map((key) => ({ in: "hello", key })),
+    ];
+    fc.assert(
+      fc.property(fc.constantFrom(...fields), value, (field, found) => {
+        const envelope: Record<string, unknown> =
+          field.in === "close"
+            ? { link: 1, kind: "close", code: 1008, reason: "r", [field.key]: found }
+            : field.in === "hello"
+              ? { link: 1, kind: "message", message: { ...hello, [field.key]: found } }
+              : { link: 1, kind: "message", message: hello, [field.key]: found };
+        let read: ReturnType<typeof readEnvelope> | undefined;
+        expect(() => {
+          read = readEnvelope(JSON.stringify(envelope));
+        }).not.toThrow();
+        expect(["message", "close", "fault"]).toContain(read?.kind);
+      }),
+      { seed: 2849, numRuns: 500 },
+    );
+  });
+});
+
 describe("a message's size in UTF-8 bytes (LM-6)", () => {
   it("agrees with Buffer.byteLength at and around every limit (fast-check, seed 6006, 300 runs)", () => {
     fc.assert(

@@ -254,7 +254,11 @@ export class SubscriptionConnection {
       }
     } else if (type === "unsubscribe") {
       const unsubscribe = typeof id === "string" ? this.#subscriptions.get(id) : undefined;
-      if (unsubscribe === undefined) {
+      if (typeof id === "object" && id !== null) {
+        // An object or a list is never converted to text: its conversion may throw (`{ "toString": null }`), and the
+        // connection's fault must stay the connection's. [LM-4, LM-10]
+        this.#refuse(errorMessage(INVALID, `an unsubscribe message's id is a string, not ${Array.isArray(id) ? "a list" : "an object"}`));
+      } else if (unsubscribe === undefined) {
         this.#refuse(errorMessage(INVALID, `no subscription ${String(id)} is open`, typeof id === "string" ? id : undefined));
       } else {
         this.#subscriptions.delete(id as string);

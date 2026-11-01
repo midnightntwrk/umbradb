@@ -1,3 +1,4 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
   decodeParameter,
@@ -279,5 +280,26 @@ describe("the values' encoding (design §8), and reading them back", () => {
     const carried = params.map(encodeParameter);
     expect(carried).toEqual(["5", "0x0001feff", "plain", 3, true, null, ["1", "0x0001feff"], { a: 1n }, "2025-05-21T14:30:00.000Z"]);
     expect(carried.map((param) => decodeParameter(param))).toEqual(["5", bytes, "plain", 3, true, null, ["1", bytes], { a: 1n }, "2025-05-21T14:30:00.000Z"]);
+  });
+});
+
+describe("a peer's malformed message is a fault, never a throw (PP-4, LM-10)", () => {
+  it("each field of each message type replaced by any JSON value or a poisoned object (fast-check, seed 2850, 500 runs)", () => {
+    // Values whose conversion to text throws (`String(value)`), among any JSON value.
+    const poisoned = fc.constantFrom<unknown>({ toString: null }, { toString: {}, valueOf: {} }, [{ toString: null }]);
+    const value = fc.oneof(fc.jsonValue(), poisoned, fc.array(poisoned, { maxLength: 2 }), fc.dictionary(fc.string(), poisoned, { maxKeys: 2 }));
+    fc.assert(
+      fc.property(fc.constantFrom(...MESSAGE_TYPES), value, fc.nat(), (type, found, at) => {
+        const message = { ...SAMPLES[type] } as Record<string, unknown>;
+        const keys = Object.keys(message);
+        message[keys[at % keys.length] as string] = found;
+        let parsed: ReturnType<typeof parseMessage> | undefined;
+        expect(() => {
+          parsed = parseMessage(JSON.stringify(message));
+        }).not.toThrow();
+        expect(typeof parsed?.ok).toBe("boolean");
+      }),
+      { seed: 2850, numRuns: 500 },
+    );
   });
 });

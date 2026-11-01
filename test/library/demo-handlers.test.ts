@@ -24,7 +24,7 @@ import { eventually, exchange, type Exchanged, headerValues, type MapiHooks, map
  * - `admin.fetch` answers the four endpoints as mounted `admin.http` does, in every state and after `closed`.
  * - `api.connect(channel)` runs the module API's subscription protocol on a host's channel — a Node.js `MessageChannel`
  *   through `messagePortChannel`, and a test-owned channel — with the module API's rules and no envelope: its error
- *   answers, its 64 KiB message limit in UTF-8 bytes (the channel closed), its slow-subscriber close through
+ *   answers (an `unsubscribe` whose id is an object whose conversion to text throws among them), its 64 KiB message limit in UTF-8 bytes (the channel closed), its slow-subscriber close through
  *   `bufferedAmount` (after the module's emit returned), the channels closed at the stop; a channel offered while the
  *   module API does not serve gets the lifecycle's body, then is closed.
  * - `[NEG]` Each check removed on the mounted paths (`mountedApi`: the message limit, the slow-subscriber check, the
@@ -103,7 +103,12 @@ const PROTOCOL_ERRORS = [
   { type: "error", id: "x", error: { code: "not-found", message: "no subscription is named nothing" } },
   // A message that is no text, as a WebSocket's binary frame.
   { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } },
+  // An id whose conversion to text throws: answered, never thrown out of the channel's callback. [LM-4, LM-10]
+  { type: "error", error: { code: "invalid-request", message: "an unsubscribe message's id is a string, not an object" } },
 ];
+
+/** An `unsubscribe` whose id is an object whose conversion to text throws. */
+const POISONED_UNSUBSCRIBE = '{"type":"unsubscribe","id":{"toString":null}}';
 
 /** The test's end of a Node.js `MessageChannel` the engine's `api.connect` serves: every message kept, and its close. */
 class PortPeer {
@@ -158,7 +163,7 @@ interface ConnectSeen {
 /** The `api.connect` checks on a serving `engine` (see the module comment), `hooks` the module's emits. */
 async function connectSeen(engine: ProcessHandle, hooks: MapiHooks): Promise<ConnectSeen> {
   const protocol = connected(engine);
-  for (const message of ["{not json", { type: "dance" }, { type: "subscribe", id: 7, name: "feed" }, { type: "subscribe", id: "x", name: "nothing" }, { raw: { not: "text" } }]) {
+  for (const message of ["{not json", { type: "dance" }, { type: "subscribe", id: 7, name: "feed" }, { type: "subscribe", id: "x", name: "nothing" }, { raw: { not: "text" } }, POISONED_UNSUBSCRIBE]) {
     protocol.send(message);
   }
   const errors = await protocol.count(PROTOCOL_ERRORS.length, 3_000);
