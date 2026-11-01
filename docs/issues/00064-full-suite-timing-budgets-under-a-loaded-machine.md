@@ -70,6 +70,12 @@ file runs alone right after (3 files, 26 tests):
     returned, and a session still held the lock when the next writer checked it (the log line names its backend pid);
     alone, with the machine quiet, the check never meets it. Not investigated further (which session, and how long it
     stays after its client closed, is unconfirmed).
+14. `test/library/guarantees.test.ts`, L9's negative control ("a closer that stops at the first failure fails it — the
+    later steps never run") — its 60 s test budget ran out in `start-umbradb` P10.4a's full run (2026-11-01, 20 min,
+    376 files; A62 and A63 on PostgreSQL and A103, as this issue's earlier items, and A177, as issue 00062, failed
+    beside it, each passing alone). Its two
+    faulted closes leave their database open by design (the closer stops before the database's step); alone the file
+    passes 37 of 37. Not investigated further.
 
 ## Evidence
 
@@ -78,7 +84,7 @@ file runs alone right after (3 files, 26 tests):
 - `test/backbone/core-health/liveness.test.ts:77` — `probedThrough`'s wait for `/status`, 20 s.
 - `test/db/prepared-statements.test.ts:119` — the test's 60 s budget.
 - The run's log and the reruns: the `start-umbradb` plan's P7 notes (`p7/logs/full-1.log`, `rerun-flaky.log`) and P8
-  notes (`p8/logs/full-1.log`, `rerun-1.log`, `rerun-network.log`, `rerun-a103.log`); P9 notes (`p9/logs/full-1.log`, `rerun-1.log`).
+  notes (`p8/logs/full-1.log`, `rerun-1.log`, `rerun-network.log`, `rerun-a103.log`); P9 notes (`p9/logs/full-1.log`, `rerun-1.log`); P10.4a notes (`p104a/full.log`, `reruns.log`).
 
 ## Suggested fix
 
