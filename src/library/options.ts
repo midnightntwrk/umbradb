@@ -6,9 +6,14 @@
  * **The options' shapes** ({@link optionFindings}): an option of a type it cannot have, an unknown option, and a
  * malformed network request are each a finding at the option's path (`config`, `network.api.port`), and together the
  * refusal `invalid-configuration` with the reason `invalid-option` ({@link optionsRefusal}). [L62]
+ *
+ * **The settings of the process's `core` revision a library process refuses** ({@link librarySettingsRefusal}):
+ * `backupAtStop` and `backupOnSignal`, which write backups at the command's stop and on its SIGUSR2; a host writes its
+ * backups with `UmbraDBHandle.backup` instead (`library-setting-refused`, naming the setting). [LM-2, BK-1, G3, L47]
  */
 
-import type { Finding } from "../config/validate.js";
+import type { PlainObject } from "../config/plain-data.js";
+import type { CheckedEntry, Finding } from "../config/validate.js";
 import { UmbraError } from "../db/errors.js";
 
 /** The options `startUmbraDB` knows (design §4). */
@@ -221,5 +226,25 @@ export function optionsRefusal(findings: readonly Finding[]): UmbraError | null 
     "invalid-configuration",
     `the options of startUmbraDB were refused (${count}): ${findings.map((found) => found.message).join("; ")}`,
     { reason: "invalid-option", option: first.path, findings: Object.freeze([...findings]) },
+  );
+}
+
+/** The settings of a `core` revision a library process refuses (see the module comment). [LM-2, BK-1, L47] */
+export const LIBRARY_REFUSED_SETTINGS: readonly string[] = Object.freeze(["backupAtStop", "backupOnSignal"]);
+
+/**
+ * The refusal of a library process whose `core` revision sets one of {@link LIBRARY_REFUSED_SETTINGS}, naming the first
+ * (`setting`) and every one set (`settings`); null when it sets none. [LM-2, BK-1, G3, L47]
+ */
+export function librarySettingsRefusal(core: CheckedEntry): UmbraError | null {
+  const settings = (core.settings ?? {}) as PlainObject;
+  const set = LIBRARY_REFUSED_SETTINGS.filter((name) => settings[name] !== undefined);
+  const [setting] = set;
+  if (setting === undefined) return null;
+  return new UmbraError(
+    "library-setting-refused",
+    `the core revision from ${core.start} sets ${set.join(" and ")}, which only umbradb run writes (at the core's stop, ` +
+      "on SIGUSR2): a host program writes its backups with UmbraDBHandle.backup(target); remove the setting",
+    { setting, settings: Object.freeze([...set]), entry: core.index },
   );
 }

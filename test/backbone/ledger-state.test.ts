@@ -278,7 +278,7 @@ describe.each(PROCESS_BACKENDS)("core-ledger-state through the process on $name"
     const last = scenario.heights.at(-1)!;
     const database = await openConfiguredDatabase(
       { settings: { database: db.setting, developmentOptIn: true } } as never,
-      { committedHeight: async () => null },
+      { committedHeight: async () => null, cwd: process.cwd() },
     );
     const host = startLedgerWorker();
     try {
@@ -426,7 +426,7 @@ describe("A99 on task 0.3's recorded ranges from genesis (owner decision Q133 C;
     expect(row).toMatchObject({ ledger: "v9-rc3" });
     const database = await openConfiguredDatabase(
       { settings: { database: db.setting, developmentOptIn: true } } as never,
-      { committedHeight: async () => null },
+      { committedHeight: async () => null, cwd: process.cwd() },
     );
     const host = startLedgerWorker();
     try {

@@ -232,6 +232,14 @@ export const ERROR_CODES = [
    * login, or a privilege beyond reading on a public schema or table; `details { user, found }`. [CF-4, PP-4, Q175 A]
    */
   "transport-reader-can-write",
+  // A library process's refusals at startup's configuration step (`src/library/`): the process ends `refused`.
+  // [LM-2, LM-10]
+  /**
+   * A library process's `core` revision sets a setting only `umbradb run` acts on: `backupAtStop` or `backupOnSignal`,
+   * whose backups a host writes with `UmbraDBHandle.backup` instead; `details { setting, settings, entry }`.
+   * [LM-2, BK-1]
+   */
+  "library-setting-refused",
   // The backup's refusals (`src/backup/`): the command exits 1 and writes no file. [BK-1, PP-12]
   /**
    * The tool a backup needs is missing or of another major version than 18: the PostgreSQL 18 client's `pg_dump` for a

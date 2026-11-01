@@ -45,7 +45,7 @@
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { UmbraError } from "../db/errors.js";
 import { LEDGER_RELEASES } from "./releases.js";
@@ -194,7 +194,8 @@ const verified = new Set<string>();
  * calls before it imports `ledger`'s package (`./load.ts`). Throws `package-hash-mismatch`.
  */
 export function checkLedgerPackage(ledger: LedgerName, options: { readonly root?: string } = {}): void {
-  const root = resolve(options.root ?? VENDORED_LEDGER_ROOT);
+  // The root is absolute (UmbraDB's own, or a test's copy): normalized, never resolved against the working directory.
+  const root = normalize(options.root ?? VENDORED_LEDGER_ROOT);
   const key = `${ledger}\u0000${root}`;
   if (verified.has(key)) return;
   verifyLedgerPackage(ledger, root);

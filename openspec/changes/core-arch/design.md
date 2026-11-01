@@ -1775,7 +1775,9 @@ revision is known, logs every finding and ends the process, serving no admin end
 public configuration hash than the one it accepted, not given with --update-hash: PP-14, owner decision Q159, task
 14.1c; §8), `transport-reader-can-write` (a public process's `core.transportReader` login that could write: CF-4, PP-4,
 owner decision Q175, task 4.5; §8), `package-hash-mismatch`,
-`writer-lock-held`, `durability-fsync-off`, `durability-pooler`, `durability-full-page-writes-off`; `callback-error` (a
+`writer-lock-held`, `durability-fsync-off`, `durability-pooler`, `durability-full-page-writes-off`,
+`library-setting-refused` (a library process's core revision setting `backupAtStop` or `backupOnSignal`: LM-2,
+the start-umbradb change's design §7.2); `callback-error` (a
 failing `on-start-db` or `on-start-api`, with point and module) and `listen-failed` (a listener that cannot bind)
 (Q115). **Backup and restore refuse** (the command exits non-zero; nothing is written or committed):
 `backup-tools-missing`, `private-backup-refused`, `backup-format-unknown`, `restore-target-not-empty`,

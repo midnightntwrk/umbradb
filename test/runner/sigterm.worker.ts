@@ -40,7 +40,7 @@ if (job.mode === "exit-at-once") process.once("SIGTERM", () => process.exit(0));
 const hold = new Promise<void>((resolve) => {
   process.once("SIGTERM", () => resolve());
 });
-const termination = job.mode === "runner" ? terminationSignal() : undefined;
+const termination = job.mode === "runner" ? terminationSignal(process) : undefined;
 // The in-memory source holds nothing open while the loop waits: the heartbeat and a node source would. The
 // same interval ends a worker whose test died without stopping it (Vitest's bail, a test's timeout): `w` would hold its
 // block open for ever. Orphaned, its parent is no longer the test's.

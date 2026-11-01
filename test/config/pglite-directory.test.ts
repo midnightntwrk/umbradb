@@ -278,7 +278,7 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
 
   it("creates nothing without the development opt-in: PGlite refuses first (CF-9)", async () => {
     const entry = coreRevision({ kind: "pglite", path: join(tmp, "n", "o") }, { developmentOptIn: false });
-    const error = await refusal(() => openConfiguredDatabase(entry, { committedHeight: noHeight }));
+    const error = await refusal(() => openConfiguredDatabase(entry, { committedHeight: noHeight, cwd: process.cwd() }));
     expect(error.code).toBe("development-opt-in-required");
     expect(existsSync(join(tmp, "n"))).toBe(false);
   });
@@ -287,6 +287,7 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
     const directory = join(tmp, "p", "q");
     const db = await openConfiguredDatabase(coreRevision({ kind: "pglite", path: `file://${directory}` }), {
       committedHeight: noHeight,
+      cwd: process.cwd(),
     });
     try {
       expect(await db.read((read) => read.query("SELECT 1 AS one"))).toEqual([{ one: 1 }]);
@@ -302,7 +303,7 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
     writeFileSync(file, "x");
     const directory = join(file, "r", "s");
     const entry = coreRevision({ kind: "pglite", path: directory });
-    const error = await refusal(() => openConfiguredDatabase(entry, { committedHeight: noHeight }));
+    const error = await refusal(() => openConfiguredDatabase(entry, { committedHeight: noHeight, cwd: process.cwd() }));
     expect(error.code).toBe("database-error");
     expect(error.details).toEqual({ reason: "open-failed" });
     expect(error.message).not.toContain(tmp);
@@ -321,6 +322,7 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
     const lines: string[] = [];
     const db = await openConfiguredDatabase(coreRevision({ kind: "pglite", path: existing }), {
       committedHeight: noHeight,
+      cwd: process.cwd(),
       log: (line) => lines.push(line),
     });
     await db.close();
@@ -328,10 +330,10 @@ describe("openConfiguredDatabase and a PGlite directory's missing parents (CF-4,
     // An existing directory is not created: no line says so.
     expect(lines).toEqual([]);
     // `memory://` and `idb://…` read as relative paths would be `memory:` and `idb:` in the working directory.
-    const memory = await openConfiguredDatabase(coreRevision({ kind: "pglite", memory: true }), { committedHeight: noHeight });
+    const memory = await openConfiguredDatabase(coreRevision({ kind: "pglite", memory: true }), { committedHeight: noHeight, cwd: process.cwd() });
     await memory.close();
     const idb = coreRevision({ kind: "pglite", path: "idb://umbradb-2-2c" });
-    const browser = await refusal(() => openConfiguredDatabase(idb, { committedHeight: noHeight }));
+    const browser = await refusal(() => openConfiguredDatabase(idb, { committedHeight: noHeight, cwd: process.cwd() }));
     expect(browser.code).toBe("invalid-configuration");
     expect(existsSync(resolve("memory:"))).toBe(false);
     expect(existsSync(resolve("idb:"))).toBe(false);

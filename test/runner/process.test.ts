@@ -563,9 +563,9 @@ describe("terminationSignal: SIGTERM stops the process (RN-13)", () => {
     expect(second.signal.aborted).toBe(false);
   });
 
-  it("listens to this process by default", () => {
+  it("listens to the process it is given, this process here (the engine reads no process of its own: G10)", () => {
     const before = process.listenerCount("SIGTERM");
-    const termination = terminationSignal();
+    const termination = terminationSignal(process);
     expect(process.listenerCount("SIGTERM")).toBe(before + 1);
     termination.dispose();
     expect(process.listenerCount("SIGTERM")).toBe(before);

@@ -30,12 +30,16 @@
  *   directory, so its parent must exist. The lock itself creates nothing, and rejects a directory whose parent is
  *   missing (`open-failed`); so do the read-only uses, which never call it. [CF-4, Q163]
  *
- * `node:sqlite` prints an experimental warning on Node.js 24 when first loaded, so it is loaded only when a directory is
- * locked.
+ * **`node:sqlite`, loaded quietly.** It is loaded only when a directory is locked, through one import the whole process
+ * shares ({@link quietImport}): the first lock starts it, and every later or overlapping one awaits the same. Node.js 24
+ * prints an `ExperimentalWarning` when it is first loaded, through `process.emitWarning`; while the import runs,
+ * `process.emitWarning` is wrapped to drop that warning alone ({@link isSqliteWarning}) and pass every other on, and
+ * once it settled the original is put back — unless the host program replaced it meanwhile, whose own is then kept. So
+ * a host program sees no output of its own from it, and its warning listeners get every other warning. [LM-2, G2, L3]
  */
 
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, normalize, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { UmbraError } from "./errors.js";
 
@@ -88,9 +92,11 @@ function lockHeld(holder: "this process" | "another process"): UmbraError {
 }
 
 /**
- * The path of the data directory `dataDir`, resolved against the working directory (PGlite's own reading of it:
- * `file://` and a bare path are a directory; `memory://` and an empty text are in memory), or undefined for one kept in
- * memory. Throws `invalid-configuration` for the browser's file systems.
+ * The path of the data directory `dataDir` (PGlite's own reading of it: `file://` and a bare path are a directory;
+ * `memory://` and an empty text are in memory), or undefined for one kept in memory. The path is absolute: what opens
+ * a configured database resolves its `path` against the process's `cwd` first (`../config/database.ts`), so that
+ * nothing here reads the working directory. Throws `invalid-configuration` for the browser's file systems and for a
+ * relative path. [LM-2, G8]
  */
 function directoryPath(dataDir: string): string | undefined {
   if (dataDir === "" || dataDir.startsWith("memory://")) return undefined;
@@ -101,7 +107,18 @@ function directoryPath(dataDir: string): string | undefined {
       { parameter: "database" },
     );
   }
-  return resolve(dataDir.startsWith("file://") ? dataDir.slice("file://".length) : dataDir);
+  const given = dataDir.startsWith("file://") ? dataDir.slice("file://".length) : dataDir;
+  if (!isAbsolute(given)) {
+    throw new UmbraError(
+      "invalid-configuration",
+      "a PGlite data directory is opened by its absolute path: its configured path is resolved against the process's " +
+        "working directory first",
+      { parameter: "database", reason: "relative-path" },
+    );
+  }
+  // `dir/.`, `dir/x/..` and `dir/` name `dir`; normalizing reads nothing.
+  const path = normalize(given);
+  return path.length > 1 && path.endsWith(sep) ? path.slice(0, -1) : path;
 }
 
 /** What {@link createPgliteDirectory} created: the directory, and this many missing parent directories with it. */
@@ -184,7 +201,7 @@ export function pgliteLockFile(dataDir: string): string | undefined {
 export async function acquirePgliteLock(dataDir: string): Promise<PgliteLockUse | undefined> {
   const file = pgliteLockFile(dataDir);
   if (file === undefined) return undefined;
-  const { DatabaseSync } = await import("node:sqlite");
+  const { DatabaseSync } = await sqliteModule();
   // From here on nothing awaits, so no other opening in this process interleaves.
   let entry = held.get(file);
   if (entry !== undefined) {
@@ -217,3 +234,86 @@ export async function acquirePgliteLock(dataDir: string): Promise<PgliteLockUse 
     },
   };
 }
+
+/** The arguments of a call of `process.emitWarning`. */
+export type WarningArguments = readonly unknown[];
+
+/** How a warning is emitted: `process.emitWarning`'s shape. */
+export type EmitWarning = (...args: never[]) => void;
+
+/** Where {@link quietImport} wraps the emitter while its import runs: read it, and set it. */
+export interface WarningHook {
+  get(): EmitWarning;
+  set(emit: EmitWarning): void;
+}
+
+/** The warning `node:sqlite` emits when first loaded (Node.js 24.9.0). [G2] */
+const SQLITE_WARNING = "SQLite is an experimental feature and might change at any time";
+
+/**
+ * Whether a call of `process.emitWarning` with `args` is `node:sqlite`'s experimental warning: its message, with the
+ * type `ExperimentalWarning` given as the second argument, as its `type` option, or as the name of a warning given as
+ * an `Error`. [G2, L3]
+ */
+export function isSqliteWarning(args: WarningArguments): boolean {
+  const [warning, second] = args;
+  if (warning instanceof Error) return warning.name === "ExperimentalWarning" && warning.message === SQLITE_WARNING;
+  const type =
+    typeof second === "string"
+      ? second
+      : typeof second === "object" && second !== null
+        ? (second as { readonly type?: unknown }).type
+        : undefined;
+  return warning === SQLITE_WARNING && type === "ExperimentalWarning";
+}
+
+/**
+ * One import shared by every caller (see the module comment): `load` starts on the first call, and every call until it
+ * settles, or after it resolved, gets the same module. While it runs, `hook`'s emitter is replaced by one that drops
+ * each warning `drop` takes and passes every other to the emitter it replaced; when it settles that emitter is put
+ * back, unless `hook` holds another than the wrapper by then (the host program's), which is kept. A load that rejects
+ * rejects its callers, and the next call loads again. [LM-2, G2, L3]
+ */
+export function quietImport<T>(load: () => Promise<T>, hook: WarningHook, drop: (args: WarningArguments) => boolean): () => Promise<T> {
+  let shared: Promise<T> | undefined;
+  return () => {
+    if (shared !== undefined) return shared;
+    const original = hook.get();
+    const wrapper = ((...args: never[]) => {
+      if (!drop(args)) original(...args);
+    }) as EmitWarning;
+    hook.set(wrapper);
+    const restore = (): void => {
+      if (hook.get() === wrapper) hook.set(original);
+    };
+    let loading: Promise<T>;
+    try {
+      loading = load();
+    } catch (error) {
+      loading = Promise.reject(error);
+    }
+    shared = loading.then(
+      (module) => {
+        restore();
+        return module;
+      },
+      (error: unknown) => {
+        restore();
+        shared = undefined;
+        throw error;
+      },
+    );
+    return shared;
+  };
+}
+
+/** Node.js's `process.emitWarning`, the one global this module reads and sets. [G10] */
+export const SQLITE_WARNING_HOOK: WarningHook = Object.freeze({
+  get: () => process.emitWarning as EmitWarning,
+  set: (emit: EmitWarning) => {
+    process.emitWarning = emit as typeof process.emitWarning;
+  },
+});
+
+/** `node:sqlite`, imported once for the process, its experimental warning dropped (see the module comment). [G2] */
+const sqliteModule = quietImport(() => import("node:sqlite"), SQLITE_WARNING_HOOK, isSqliteWarning);

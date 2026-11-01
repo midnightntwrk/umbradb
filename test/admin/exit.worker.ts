@@ -24,7 +24,7 @@ setInterval(() => {
   if (process.ppid !== parent) process.exit(4);
 }, 500).unref();
 
-const termination = terminationSignal();
+const termination = terminationSignal(process);
 const build = testBuild([]);
 const extra = {
   listen: { admin: mode === "taken" ? address : "127.0.0.1:0" },

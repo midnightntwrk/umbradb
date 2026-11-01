@@ -178,7 +178,7 @@ const databaseFirst =
       declarations: { backbone: [], core: [], user: [] },
       side: "public",
     });
-    const db = await openConfiguredDatabase(processCoreEntry(checked), { committedHeight: async () => null });
+    const db = await openConfiguredDatabase(processCoreEntry(checked), { committedHeight: async () => null, cwd: process.cwd() });
     try {
       await db.read(async (read) => read.query("SELECT 1"));
       return await startAdminServer(options);

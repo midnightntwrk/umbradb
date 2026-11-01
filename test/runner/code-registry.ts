@@ -332,6 +332,12 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
         "another value stops; a core changed during the start stops it",
     },
   ],
+  "refusal:library-setting-refused": [
+    {
+      file: "test/library/guarantees.test.ts",
+      test: "backupAtStop, backupOnSignal and both are each refused library-setting-refused, naming the setting; nothing opened",
+    },
+  ],
   "refusal:transport-reader-can-write": [
     {
       file: "test/private/transport-reader.test.ts",

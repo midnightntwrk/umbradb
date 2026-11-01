@@ -61,7 +61,7 @@ async function load(entries: string) {
       "",
     ].join("\n"),
   );
-  return loadConfig({ file, cwd: process.cwd() });
+  return loadConfig({ file, cwd: globalThis.process.cwd() });
 }
 
 const noHeight: CommittedHeight = async () => null;
@@ -84,7 +84,7 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
       `coreEntry({ start: 0, config: { ...settings, database: ${JSON.stringify({ kind: "pglite", path: dataDir })}${optIn} } })`;
     const declarations = build([]);
     const without = processCoreEntry(validateConfig({ config: await load(coreOf("")), declarations, side: "public" }));
-    const error = await refusal(() => openConfiguredDatabase(without, { committedHeight: noHeight }));
+    const error = await refusal(() => openConfiguredDatabase(without, { committedHeight: noHeight, cwd: globalThis.process.cwd() }));
     expect(error.code).toBe("development-opt-in-required");
     expect(error.details).toEqual({ feature: "pglite" });
     for (const words of ["PGlite", "developmentOptIn: true"]) expect(error.message).toContain(words);
@@ -92,7 +92,7 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
     const withOptIn = processCoreEntry(
       validateConfig({ config: await load(coreOf(", developmentOptIn: true")), declarations, side: "public" }),
     );
-    const db = await openConfiguredDatabase(withOptIn, { committedHeight: noHeight });
+    const db = await openConfiguredDatabase(withOptIn, { committedHeight: noHeight, cwd: globalThis.process.cwd() });
     try {
       expect(await db.read((read) => read.query("SELECT 1 AS one"))).toEqual([{ one: 1 }]);
     } finally {
@@ -109,12 +109,12 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
       'coreEntry({ start: 0, config: { ...settings, database: { kind: "pglite", memory: true }, developmentOptIn: true } }), ' +
         'coreEntry({ start: 10, config: { ...settings, database: { kind: "pglite", memory: true } } })',
     );
-    expect((await refusal(() => openConfiguredDatabase(earlierOnly, { committedHeight: noHeight }))).details).toEqual({ feature: "pglite" });
+    expect((await refusal(() => openConfiguredDatabase(earlierOnly, { committedHeight: noHeight, cwd: globalThis.process.cwd() }))).details).toEqual({ feature: "pglite" });
     const latest = await process(
       'coreEntry({ start: 0, config: { ...settings, database: { kind: "pglite", memory: true } } }), ' +
         'coreEntry({ start: 10, config: { ...settings, database: { kind: "pglite", memory: true }, developmentOptIn: true } })',
     );
-    const db = await openConfiguredDatabase(latest, { committedHeight: noHeight });
+    const db = await openConfiguredDatabase(latest, { committedHeight: noHeight, cwd: globalThis.process.cwd() });
     await db.close();
   });
 
@@ -132,7 +132,7 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
     const declarations = build([]);
     const process = async (config: string) =>
       processCoreEntry(validateConfig({ config: await load(`coreEntry({ start: 0, config: { ...settings, ${config} } })`), declarations, side: "public" }));
-    const options = { committedHeight: noHeight };
+    const options = { committedHeight: noHeight, cwd: globalThis.process.cwd() };
     expect(databaseOptions(await process('database: { kind: "pglite", memory: true }'), options)).toEqual({
       backend: "pglite",
       options: { dataDir: "memory://", committedHeight: noHeight, developmentOptIn: false },
@@ -167,7 +167,7 @@ describe("A34: PGlite refuses without developmentOptIn, through a configuration 
       }),
     );
     // No connection is made until one is needed (`openPostgres`): opening succeeds, and closing it is harmless.
-    const db = await openConfiguredDatabase(entry, { committedHeight: noHeight });
+    const db = await openConfiguredDatabase(entry, { committedHeight: noHeight, cwd: globalThis.process.cwd() });
     await db.close();
   });
 });

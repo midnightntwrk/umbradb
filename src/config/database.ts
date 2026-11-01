@@ -2,8 +2,8 @@
  * Opening the database a configuration names. The `database` setting of the process's `core` revision
  * (`./process.ts`) is given as parts (`./database-parts.ts`) and chooses the backend:
  * - `{ kind: "pglite", memory: true }`: an in-memory PGlite database;
- * - `{ kind: "pglite", path }`: a PGlite database in that directory (a relative path resolves against the working
- *   directory, as PGlite and its lock do);
+ * - `{ kind: "pglite", path }`: a PGlite database in that directory, a relative path resolved against the process's
+ *   `cwd` ({@link ConfiguredDatabaseOptions.cwd}), never the host program's own working directory [LM-2, G8];
  * - `{ kind: "postgres", … }`: PostgreSQL, with its host, port, login, name and `ssl`.
  *
  * The revision's `developmentOptIn` and `fullPageWritesOffAllowed` go to the backend that takes them.
@@ -20,6 +20,7 @@
  * Node.js only, since `openPglite`'s lock reads the file system; the browser build opens its own database.
  */
 
+import { resolve } from "node:path";
 import type { CommittedHeight, Database } from "../db/api.js";
 import { openPglite, type PgliteOptions } from "../db/pglite.js";
 import { createdDirectoryLine, createPgliteDirectory } from "../db/pglite-lock.js";
@@ -42,10 +43,22 @@ export function databaseTarget(database: DatabaseParts): DatabaseTarget {
   return { backend: "pglite", dataDir: "memory" in database ? "memory://" : database.path };
 }
 
+/**
+ * The data directory PGlite opens for the configured `dataDir`: a path (bare or `file://`) resolved against `cwd`;
+ * any other URL (`memory://`, the browser's `idb://` and `opfs-ahp://`, which the lock refuses) as it is.
+ * [LM-2, G8, L10]
+ */
+export function pgliteDirectory(dataDir: string, cwd: string): string {
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(dataDir) && !dataDir.startsWith("file://")) return dataDir;
+  return resolve(cwd, dataDir.startsWith("file://") ? dataDir.slice("file://".length) : dataDir);
+}
+
 /** What {@link databaseOptions} and {@link openConfiguredDatabase} take besides the revision. */
 export interface ConfiguredDatabaseOptions {
   /** How a read learns its committed height: the block source's cursor. [DB-2] */
   readonly committedHeight: CommittedHeight;
+  /** The base of a relative PGlite `path`: the process's working directory (`EngineInput.cwd`). [LM-2, G8] */
+  readonly cwd: string;
   /** Where the line saying a PGlite directory was created goes; nowhere unless given. [Q165 B] */
   readonly log?: (line: string) => void;
 }
@@ -67,7 +80,8 @@ export function databaseOptions(entry: CheckedEntry, options: ConfiguredDatabase
   const { committedHeight } = options;
   if (target.backend === "pglite") {
     const developmentOptIn = settings.developmentOptIn === true;
-    return { backend: "pglite", options: { dataDir: target.dataDir, committedHeight, developmentOptIn } };
+    const dataDir = pgliteDirectory(target.dataDir, options.cwd);
+    return { backend: "pglite", options: { dataDir, committedHeight, developmentOptIn } };
   }
   const fullPageWritesOffAllowed = settings.fullPageWritesOffAllowed === true;
   return { backend: "postgres", options: { connection: target.connection, committedHeight, fullPageWritesOffAllowed } };
@@ -92,7 +106,9 @@ export async function openConfiguredDatabase(
   // Without the opt-in nothing is created: `openPglite` refuses first. [CF-9]
   if (configured.options.developmentOptIn) {
     const created = createPgliteDirectory(configured.options.dataDir);
-    if (created !== null) options.log?.(createdDirectoryLine(configured.options.dataDir, created));
+    // The line names the path as configured, so a mistyped one is seen as written. [Q165 B]
+    const written = databaseTarget(entry.settings?.database as unknown as DatabaseParts);
+    if (created !== null) options.log?.(createdDirectoryLine(written.backend === "pglite" ? written.dataDir : "", created));
   }
   return openPglite(configured.options);
 }

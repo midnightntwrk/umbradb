@@ -52,6 +52,10 @@
  * then the block source. It rejects {@link ProcessHandle.started} with the refusal. The process stays up, `refused`
  * with the refusal's reason, until it is stopped. [IN-12, AE-3]
  *
+ * **Every close runs whole** ({@link closeSteps}): startup's after a refusal, {@link ProcessHandle.stop}'s, and the end
+ * of a refused configuration. Each step runs whatever an earlier one did; a step that fails is logged (`close: <step>
+ * failed (<code>): <message>`), a refusal stays the one thrown, and `closed` resolves. [LM-2, G7]
+ *
  * **A refusal of the configuration itself** ends the process instead. This covers steps 1 and 2, before the process's
  * `core` revision is known: loading the configuration, the declarations, its plain data and validation, and the choice
  * of its revision. The process logs every finding with its path (`./configuration-refusal.ts`) and opens no admin
@@ -116,7 +120,7 @@
  * client's retries (`node retries in <ms> ms (node-retrying, <call or connect>, attempt <n>): …`). The condition clears
  * when the client stops retrying. [IN-10]
  *
- * **SIGTERM.** {@link terminationSignal} gives a signal that SIGTERM aborts. Aborting {@link EngineOptions.signal}, or
+ * **SIGTERM.** {@link terminationSignal} gives a signal that SIGTERM of the `process` it is given aborts. Aborting {@link EngineOptions.signal}, or
  * calling {@link ProcessHandle.stop}, enters `stopping` and aborts the loop's signal. The loop finishes the height in
  * progress (so a block whose transaction is open commits) and starts no other. The process awaits it, then closes the
  * module API (WebSocket clients get 1001, every connection ends), the node client, the database and the block source.
@@ -161,6 +165,10 @@
  * (`readConfigHash`: the hash of the process's own `core_chain.config`). It is kept in memory for the run: the module
  * API sets it as `X-Umbra-Config-Hash` on every answer, and the core's transport sends it on its messages.
  * [RN-16, PP-14, Q147]
+ *
+ * **Paths.** Every relative path the process meets — a `{ file }`, a PGlite `path`, a backup's target, at the stop and
+ * on SIGUSR2 included — resolves against {@link EngineOptions.cwd}; nothing here reads the working directory. [LM-2,
+ * G8, G10]
  *
  * **The process transport** (`../private/core-transport.ts`). A public process whose `core` revision has
  * `listen.privateLink` starts it once its database is open and its chain known (step 7, before the bootstrap's wait).
@@ -442,6 +450,14 @@ export interface EngineOptions {
    * (`../private/transport-reader.ts`) unless given. [A177]
    */
   readonly transportReaderCheck?: (facts: TransportReaderFacts) => readonly string[];
+  /**
+   * The fault tests' named program point in every close (`stop()`'s, startup's after a refusal, the end of a refused
+   * configuration): called with each step's name before the step runs; what it throws or rejects with is that step's
+   * failure. [G7, L9 FAULT]
+   */
+  readonly closeFault?: (step: string) => unknown;
+  /** The negative control's way of running the close steps; {@link closeSteps} unless given. [L9] */
+  readonly closeHelper?: CloseHelper;
 }
 
 /** What {@link startProcess}, the engine, takes: the build and the options. [LM-1] */
@@ -647,9 +663,9 @@ export interface ProcessHandle {
    */
   readonly closed: Promise<void>;
   /**
-   * Writes a backup of the process's database at its committed height to the file `out` (`../backup/`), while
-   * processing runs or after it ended: on PostgreSQL in one read's snapshot beside the commits, on PGlite as one job of
-   * the database's queue, so commits wait for it. Resolves with the backup once its file is complete; rejects with
+   * Writes a backup of the process's database at its committed height to the file `out` (a path relative to
+   * {@link EngineOptions.cwd}; `../backup/`), while processing runs or after it ended: on PostgreSQL in one read's
+   * snapshot beside the commits, on PGlite as one job of the database's queue, so commits wait for it. Resolves with the backup once its file is complete; rejects with
    * startup's refusal, with `handle-closed` once the process is stopping, and with the backup's refusals
    * (`private-backup-refused`, `backup-tools-missing`, `no-committed-height`), writing no file. `seams` are the
    * negative controls' only (`BackupSeams`: a dump outside the manifest's snapshot), not for programs. [BK-1]
@@ -773,10 +789,10 @@ export interface SignalTarget {
 }
 
 /**
- * For a Node.js process: a signal that aborts on the first SIGTERM `target` receives (the {@link EngineOptions.signal}
- * of `umbradb run`), and `dispose`, which stops listening. [RN-13]
+ * For a Node.js process: a signal that aborts on the first SIGTERM `target` receives (a program's own `process`, or a
+ * test's emitter), and `dispose`, which stops listening. The engine never reads `process` itself. [RN-13, G1, G10]
  */
-export function terminationSignal(target: SignalTarget = process): { readonly signal: AbortSignal; dispose(): void } {
+export function terminationSignal(target: SignalTarget): { readonly signal: AbortSignal; dispose(): void } {
   const controller = new AbortController();
   const listener = (): void => controller.abort();
   target.once("SIGTERM", listener);
@@ -785,6 +801,27 @@ export function terminationSignal(target: SignalTarget = process): { readonly si
 
 /** An error's message, or the value as text. */
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** One step of closing a process: its name, as the log names it, and its work. */
+export type CloseStep = readonly [name: string, work: () => unknown];
+
+/**
+ * How a process closes: each step runs, in order, whatever an earlier one did; a step that throws or rejects is
+ * logged — `close: <name> failed (<code>): <message>` — and the next runs. Never rejects. [LM-2, G7, L9]
+ */
+export type CloseHelper = (steps: readonly CloseStep[], log: (line: string) => void) => Promise<void>;
+
+/** {@link CloseHelper}, every step isolated (see there). [LM-2, G7, L9] */
+export const closeSteps: CloseHelper = async (steps, log) => {
+  for (const [name, work] of steps) {
+    try {
+      await work();
+    } catch (error) {
+      const code = error instanceof UmbraError ? error.code : "error";
+      log(`close: ${name} failed (${code}): ${messageOf(error)}`);
+    }
+  }
+};
 
 /**
  * `part`, with an `on-start-db` that fails with a `CallbackFailure` naming the point and the part (as a failing
@@ -1022,7 +1059,7 @@ class Process implements ProcessHandle {
   async backup(out: string, seams: BackupSeams = {}): Promise<BackupWritten> {
     await this.started;
     if (this.#closing !== undefined || this.#db === undefined) throw handleClosed("database");
-    return writeBackup(this.#backupInput(resolve(out)), seams);
+    return writeBackup(this.#backupInput(resolve(this.#input.cwd, out)), seams);
   }
 
   pause(): Promise<void> {
@@ -1077,7 +1114,7 @@ class Process implements ProcessHandle {
 
   /**
    * The backup on signal: a hold on the loop; once it is paused (or processing ended), the backup of the cursor's
-   * height to `out` (relative to the working directory) by the same rules as the backup at stop; then the hold
+   * height to `out` (relative to the process's `cwd`) by the same rules as the backup at stop; then the hold
    * released. Logged; never rejects. [BK-1, Q152 B]
    */
   async #backupOnSignal(out: string): Promise<void> {
@@ -1099,7 +1136,7 @@ class Process implements ProcessHandle {
       this.#log(
         `backup on signal: processing ${how} ${height === null ? "before any height committed" : `at height ${height}`}`,
       );
-      const input = this.#backupInput(resolve(out));
+      const input = this.#backupInput(resolve(this.#input.cwd, out));
       const { written, manifest } =
         height === null ? { written: true, ...(await writeBackup(input)) } : await backupAtStop(input, height);
       this.#log(
@@ -1134,7 +1171,7 @@ class Process implements ProcessHandle {
 
   /**
    * The backup at stop: after the core's `on-stop-height`, to the `core` revision's `backupAtStop` when set (relative
-   * to the working directory), unless the file there is a backup of `height` already. Logged, a failure too, which
+   * to the process's `cwd`) and the port given, unless the file there is a backup of `height` already. Logged, a failure too, which
    * leaves the process `stopped`. [BK-1; CORE-ARCH §4.15]
    */
   async #backupAtStop(height: bigint): Promise<void> {
@@ -1145,7 +1182,7 @@ class Process implements ProcessHandle {
       return;
     }
     try {
-      const { written, manifest } = await backupAtStop(this.#backupInput(resolve(out)), height);
+      const { written, manifest } = await backupAtStop(this.#backupInput(resolve(this.#input.cwd, out)), height);
       this.#log(
         written
           ? `backup at stop written to ${out}: height ${height}, contents hash ${manifest.contentsHash}`
@@ -1157,7 +1194,23 @@ class Process implements ProcessHandle {
     }
   }
 
-  /** {@link stop}'s work. */
+  /**
+   * Runs `steps` through the close helper (each isolated, its failure logged), with the fault tests' point before each.
+   * Never rejects. [G7, L9]
+   */
+  #closeAll(steps: readonly CloseStep[]): Promise<void> {
+    const fault = this.#input.closeFault;
+    const faulted: readonly CloseStep[] =
+      fault === undefined
+        ? steps
+        : steps.map(([name, work]) => [name, async () => {
+            await fault(name);
+            return work();
+          }]);
+    return (this.#input.closeHelper ?? closeSteps)(faulted, (line) => this.#log(line));
+  }
+
+  /** {@link stop}'s work. Every step runs, whatever an earlier one did, and `closed` resolves. [RN-13, G7] */
   async #close(): Promise<void> {
     const starting = this.#phase === "starting";
     this.#phase = "stopping";
@@ -1167,19 +1220,21 @@ class Process implements ProcessHandle {
     const waits = starting ? this.#endStartupWaits() : this.#endLoopWaits();
     await this.ended;
     try {
-      await this.#api?.close();
+      await this.#closeAll([
+        ["module API", () => this.#api?.close()],
+        ["the stop's waits", () => waits],
+        ["core transport", () => this.#transport?.close()],
+        ["transport reader", () => this.#transportReader?.close()],
+        ["node client", () => this.#closeNode()],
+        ["ledger worker", () => this.#ledger?.close()],
+        // A backup on SIGUSR2 being written ends before the database closes.
+        ["backup on signal", () => this.#signalBackup],
+        ["database", () => this.#db?.close()],
+        ["block source", () => this.#source?.close?.()],
+        ["admin", () => this.#admin?.close()],
+        ["SIGUSR2 listener", () => this.#unlisten?.()],
+      ]);
     } finally {
-      await waits;
-      await this.#transport?.close();
-      await this.#transportReader?.close();
-      await this.#closeNode();
-      await this.#ledger?.close();
-      // A backup on SIGUSR2 being written ends before the database closes.
-      await this.#signalBackup;
-      await this.#db?.close();
-      await this.#source?.close?.();
-      if (this.#admin !== undefined) await this.#admin.close();
-      this.#unlisten?.();
       this.#resolveClosed();
     }
   }
@@ -1355,6 +1410,8 @@ class Process implements ProcessHandle {
       // A read's height is the cursor's: the core's cursor table, or a private process's own (its source's). [DB-2]
       const db = await openConfiguredDatabase(core, {
         committedHeight: source.committedHeight ?? openedCursorHeight(),
+        // A relative PGlite path is the process's working directory's, never the host's own. [LM-2, G8]
+        cwd: input.cwd,
         log: (line) => this.#log(line),
       });
       // The log shows the database's parts, except the password. [CF-4, Q167 A]
@@ -1382,13 +1439,16 @@ class Process implements ProcessHandle {
           this.#log(`startup refused: ${reasonOf(error).code}: ${messageOf(error)}`);
         }
       }
-      // The module API opens in the last step, after which only a stop throws: the stop closes it.
-      await this.#transport?.close();
-      await this.#transportReader?.close();
-      await this.#closeNode();
-      await this.#ledger?.close();
-      await this.#db?.close();
-      await this.#source?.close?.();
+      // The module API opens in the last step, after which only a stop throws: the stop closes it. Every step runs and
+      // the refusal stays the one thrown, whatever a step does. [G7]
+      await this.#closeAll([
+        ["core transport", () => this.#transport?.close()],
+        ["transport reader", () => this.#transportReader?.close()],
+        ["node client", () => this.#closeNode()],
+        ["ledger worker", () => this.#ledger?.close()],
+        ["database", () => this.#db?.close()],
+        ["block source", () => this.#source?.close?.()],
+      ]);
       throw error;
     }
   }
@@ -1735,8 +1795,11 @@ class Process implements ProcessHandle {
    * stopped, `closed` resolved. The state stays `refused`, and {@link stop} returns this. [Q137 B]
    */
   async #endItself(): Promise<void> {
-    await this.#admin?.close();
-    this.#resolveClosed();
+    try {
+      await this.#closeAll([["admin", () => this.#admin?.close()]]);
+    } finally {
+      this.#resolveClosed();
+    }
   }
 }
 

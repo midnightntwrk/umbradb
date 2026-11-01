@@ -9,8 +9,9 @@
  *
  * **It does nothing to the host program by default.** It gives the engine none of the command's ports — no SIGUSR2
  * listener, no backup at the stop, no admin listener, the worker threads' output into the host's `log` — and the
- * host's `log` only when given; the configuration is the one given, `{ file }` or `{ data }`, no file looked for.
- * [LM-2, G1–G5]
+ * host's `log` only when given; the configuration is the one given, `{ file }` or `{ data }`, no file looked for. A
+ * `core` revision that sets `backupAtStop` or `backupOnSignal`, which only the command acts on, is refused
+ * (`library-setting-refused`). [LM-2, G1–G5, L47]
  *
  * **`cwd`.** Every relative path the process meets — a `{ file }`, a PGlite `path`, a backup's target — resolves
  * against `cwd`, the host's working directory (`process.cwd()`) unless given; a relative `cwd` resolves against it
@@ -52,7 +53,7 @@ import {
 } from "../runner/process.js";
 import type { NetworkRequest } from "../runner/resolve.js";
 import type { PrivateLinkChannel } from "./channels.js";
-import { optionFindings, optionsRefusal, readOptions } from "./options.js";
+import { librarySettingsRefusal, optionFindings, optionsRefusal, readOptions } from "./options.js";
 
 /** An address a surface listens at once bound: the host as the system reports it, and the port. [LM-3, LM-9] */
 export interface Address {
@@ -219,7 +220,14 @@ export function startUmbraDB(options: UmbraDBOptions): UmbraDBHandle {
     ...(values.signal === undefined ? {} : { signal: values.signal as AbortSignal }),
     ...(values.source === undefined ? {} : { source: values.source as InMemoryBlockSource }),
     ...(values.acceptPublicConfigHash === undefined ? {} : { acceptPublicConfigHash: values.acceptPublicConfigHash as string }),
-    library: { refusal },
+    // The settings only the command acts on are refused once the process's core revision is known. [LM-2, G3, L47]
+    library: {
+      refusal,
+      resolved: (resolved) => {
+        const refused = librarySettingsRefusal(resolved.core);
+        if (refused !== null) throw refused;
+      },
+    },
   };
   return handleOf(startProcess(input), log);
 }

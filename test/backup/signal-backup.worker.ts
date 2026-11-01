@@ -35,7 +35,7 @@ const orphanGuard = setInterval(() => {
   if (process.ppid !== parent) process.exit(4);
 }, 500);
 
-const termination = terminationSignal();
+const termination = terminationSignal(process);
 const loaded = await loadConfig({ file: job.configFile, cwd: process.cwd() });
 const source = new InMemoryBlockSource({ head: 1n });
 const handle = startProcess({

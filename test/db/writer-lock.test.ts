@@ -215,12 +215,16 @@ describe("the PGlite operating-system lock (DB-11, owner decision Q50)", () => {
     await first.close();
   }, 120_000);
 
-  it("gives a directory not created yet one lock file however it is written: a trailing /., a relative path", async () => {
+  it("gives a directory not created yet one lock file however it is written: a trailing /., a .., a trailing /; refuses a relative path", async () => {
     const work = workDirectory();
     const expected = pgliteLockFile(join(work, "new"));
     expect(pgliteLockFile(`${work}/new/.`)).toBe(expected);
     expect(pgliteLockFile(`${work}/x/../new`)).toBe(expected);
-    expect(pgliteLockFile(relative(process.cwd(), join(work, "new")))).toBe(expected);
+    expect(pgliteLockFile(`${work}/new/`)).toBe(expected);
+    // A relative path reaches the lock only resolved against the process's cwd first (G8): here it is refused.
+    expect(() => pgliteLockFile(relative(process.cwd(), join(work, "new")))).toThrow(
+      expect.objectContaining({ code: "invalid-configuration", details: { parameter: "database", reason: "relative-path" } }),
+    );
     const db = await openPglite({ dataDir: `${work}/new/.`, committedHeight: noHeight, developmentOptIn: true });
     expect(existsSync(expected!)).toBe(true);
     const refused = await rejection(() => openPglite({ dataDir: join(work, "new"), committedHeight: noHeight, developmentOptIn: true }));

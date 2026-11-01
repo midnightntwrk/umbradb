@@ -82,6 +82,7 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "needs-lockstep-not-listed",
   "public-config-changed",
   "transport-reader-can-write",
+  "library-setting-refused",
 ] as const);
 
 /**
