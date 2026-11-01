@@ -38,6 +38,23 @@ export async function loadConfig(_options: LoadOptions): Promise<LoadedConfig> {
   throw noFile();
 }
 
+/** What `src/config/load.ts`'s import of a file gives, for the same types. */
+export interface ImportedConfig {
+  readonly file: string;
+  readonly data: unknown;
+  readonly exports: Readonly<Record<string, unknown>>;
+}
+
+/** Refuses, as {@link loadConfig} does: the browser build imports no configuration file. */
+export async function importConfig(_options: LoadOptions): Promise<ImportedConfig> {
+  throw noFile();
+}
+
+/** Refuses, as {@link loadConfig} does: with no file imported, there is no `modules` export to read. */
+export function configModules(_imported: ImportedConfig): readonly unknown[] {
+  throw noFile();
+}
+
 /** Refuses, as {@link loadConfig} does: the browser build imports no module file (`modulesFrom`). */
 export async function loadModuleList(_url: URL): Promise<readonly unknown[]> {
   throw noFile();

@@ -121,6 +121,25 @@ export function configModuleUrl(path: string): URL {
 
 /** Loads the configuration file: see the module comment. [CF-1] */
 export async function loadConfig(options: LoadOptions): Promise<LoadedConfig> {
+  const imported = await importConfig(options);
+  return Object.freeze({ file: imported.file, data: imported.data, modules: configModules(imported) });
+}
+
+/**
+ * A configuration file imported: its absolute path, its evaluated data (deeply frozen) and its module's exports, the
+ * `modules` export not checked yet ({@link configModules}). [CF-1]
+ */
+export interface ImportedConfig {
+  readonly file: string;
+  readonly data: PlainData;
+  readonly exports: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * {@link loadConfig} up to the file's data, its `modules` export not checked yet: so that a caller knows the data, and
+ * so its secrets, before anything it shows of that check. [CF-1, CF-4]
+ */
+export async function importConfig(options: LoadOptions): Promise<ImportedConfig> {
   const file = configPath(options.file ?? DEFAULT_CONFIG_FILE, options.cwd);
   if (!(await isFile(file))) {
     throw invalid(
@@ -157,7 +176,12 @@ export async function loadConfig(options: LoadOptions): Promise<LoadedConfig> {
     );
   }
   const data = plainData(module.default, file);
-  return Object.freeze({ file, data, modules: modulesOf(module, file) });
+  return Object.freeze({ file, data, exports: module });
+}
+
+/** The user modules of an imported configuration file: its `modules` export, a list, or none (see the module comment). */
+export function configModules(imported: ImportedConfig): readonly unknown[] {
+  return modulesOf(imported.exports, imported.file);
 }
 
 /**
@@ -195,7 +219,7 @@ export async function loadModuleList(url: URL): Promise<readonly unknown[]> {
 }
 
 /** The file's user modules (see the module comment): its `modules` export, a list, or none; `what` names the file. */
-function modulesOf(module: Record<string, unknown>, file: string, what = "the configuration file"): readonly unknown[] {
+function modulesOf(module: Readonly<Record<string, unknown>>, file: string, what = "the configuration file"): readonly unknown[] {
   if (!(MODULES_EXPORT in module)) return Object.freeze([]);
   const modules = module[MODULES_EXPORT];
   if (!Array.isArray(modules)) {

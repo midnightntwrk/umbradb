@@ -18,6 +18,10 @@
  *
  * Every line goes through the redaction its caller gives: before the validation nothing tells a configuration's
  * secrets apart but the validation's own reading of them (`configSecrets`, `earlyRedactor`), and the URL patterns.
+ *
+ * **The refusal a host is given** ({@link shownRefusal}): a refusal whose text holds a secret the redaction knows — a
+ * module file's own error quoted in its message, a user module's value in its declaration's refusal, a path — is given
+ * as a copy with that text redacted, its code, details and cause kept; any other refusal is given as it is. [CF-4, AE-6]
  */
 
 import { findingText, refusalFindings } from "../config/findings.js";
@@ -51,4 +55,34 @@ export function configurationRefusalLines(error: unknown, redact: (text: string)
   const count = `${findings.length} finding${findings.length === 1 ? "" : "s"}`;
   const header = `startup refused: ${reasonOf(error).code} (${count}); the process ends`;
   return [header, ...findings.map((text) => `startup refused: ${text}`)].map(redact);
+}
+
+/** `value` with every string through `redact`: arrays and plain objects copied when one inside changed, else `value`. */
+function redactedValue(value: unknown, redact: (text: string) => string): unknown {
+  if (typeof value === "string") return redact(value);
+  if (Array.isArray(value)) {
+    const copy = value.map((inner) => redactedValue(inner, redact));
+    return copy.some((inner, index) => inner !== value[index]) ? Object.freeze(copy) : value;
+  }
+  if (typeof value === "object" && value !== null) {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return value;
+    const entries = Object.entries(value);
+    const copy = entries.map(([key, inner]) => [key, redactedValue(inner, redact)] as const);
+    return copy.some(([, inner], index) => inner !== (entries[index] as [string, unknown])[1]) ? Object.freeze(Object.fromEntries(copy)) : value;
+  }
+  return value;
+}
+
+/**
+ * The refusal `error` as a host is shown it (see the module comment): an `UmbraError` whose message or details
+ * `redact` changes is copied — its code, its message and details redacted, its cause —, else `error` itself.
+ * [CF-4, AE-6]
+ */
+export function shownRefusal(error: unknown, redact: (text: string) => string): unknown {
+  if (!(error instanceof UmbraError)) return error;
+  const message = redact(error.message);
+  const details = redactedValue(error.details, redact) as Record<string, unknown>;
+  if (message === error.message && details === error.details) return error;
+  return new UmbraError(error.code, message, details, error.cause === undefined ? undefined : { cause: error.cause });
 }

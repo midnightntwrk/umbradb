@@ -25,6 +25,12 @@
  * {@link resolveConfig} carries the secrets of the configuration as the validation reads them (`configSecrets`), which
  * {@link refusalSecrets} gives, so that the caller redacts what it shows of the refusal: none for data that is not
  * plain data, and none for a refusal of the declarations, which comes before the configuration is read. [AE-6, CF-4]
+ *
+ * **The secrets known before the validation** ({@link knownSecrets}): for what a caller shows of a refusal that comes
+ * before the configuration is validated — a module file that cannot be imported, the user modules' own refusal —
+ * the secrets of the data as far as they can be told: each entry's by the kinds its module declares, read as the
+ * validation reads them; while the user modules are not known (a module file not imported yet), or cannot be read as
+ * declarations, every string of an entry whose module the build does not hold (fail closed). [CF-4, AE-6]
  */
 
 import { type PrivateIntake, privateIntake } from "../backbone/core-private-source/index.js";
@@ -32,7 +38,8 @@ import { commandBuild } from "../cli/build-modules.js";
 import { DEFAULT_ADMIN_ADDRESS, type ProcessSide } from "../config/core-settings.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { UmbraError } from "../db/errors.js";
-import { plainData } from "../config/plain-data.js";
+import { type PlainData, plainData } from "../config/plain-data.js";
+import { secretStrings } from "../config/redact.js";
 import { processCoreEntry } from "../config/process.js";
 import {
   type CheckedConfig,
@@ -66,6 +73,40 @@ export function refusalSecrets(error: unknown): readonly string[] {
 
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * The secrets of the configuration `data` before the resolver validated it (see the module comment), its user modules
+ * `userModules` as given, or null while they are not known; none for data that is not plain data. Never throws.
+ * [CF-4, AE-6]
+ */
+export function knownSecrets(data: unknown, userModules: readonly unknown[] | null): readonly string[] {
+  let plain: PlainData;
+  try {
+    plain = plainData(data);
+  } catch {
+    return [];
+  }
+  const side = inferSide(plain);
+  const config = { data: plain };
+  if (userModules !== null) {
+    try {
+      // Not validated yet: the validation's reading of secrets takes declarations leniently, and a throw is caught.
+      const declarations = commandBuild(userModules, { side }) as DeclarationSet<ModuleDeclaration>;
+      return configSecrets({ config, declarations, side });
+    } catch {
+      // Modules that cannot be read as declarations (their own refusal follows): their entries fail closed below.
+    }
+  }
+  const build = commandBuild([], { side }) as DeclarationSet<ModuleDeclaration>;
+  const held = new Set([...build.backbone, ...build.core].map((declaration) => declaration.id));
+  const entries = isObject(plain) && Array.isArray(plain.entries) ? (plain.entries as readonly PlainData[]) : [];
+  const unknown = entries.flatMap((entry) =>
+    isObject(entry) && entry.id !== CORE_ENTRY_ID && !held.has(entry.id as string) && isObject(entry.config)
+      ? secretStrings(entry.config as Parameters<typeof secretStrings>[0], {})
+      : [],
+  );
+  return [...configSecrets({ config, declarations: build, side }), ...unknown];
+}
 
 /**
  * The process's side, from the configuration's data: private when a `core` entry's `config` has `instanceId` and none

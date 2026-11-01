@@ -212,11 +212,13 @@
  * On a private process, the source checks the resolved graph's modules after step 7 resolves the graph and before any
  * migration (`BlockSource.checkModules`: `needs-lockstep-not-listed`). [PP-6]
  *
- * **Logs** go through the configuration's redaction (`configRedactor`) once it is validated. A refusal of the
- * configuration itself is logged finding by finding, with its secrets redacted as the validation reads them (the
- * resolver's `refusalSecrets`: the configuration as loaded, else the URL patterns only): `startup refused: <code> (<n>
- * findings); the process ends`, then `startup refused: <path>: <message> [<code>]` for each finding. A later refusal,
- * a halt and each retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
+ * **Logs** go through the configuration's redaction (`configRedactor`) once it is validated, and before that through
+ * the data's secrets as far as they are known (the resolver's `knownSecrets`, from the moment the data is given or the
+ * file imported, before a module file is imported or the user modules are checked; the URL patterns only before). A
+ * refusal of the configuration itself is logged finding by finding, with those secrets and the ones the validation
+ * read (the resolver's `refusalSecrets`) redacted: `startup refused: <code> (<n> findings); the process ends`, then
+ * `startup refused: <path>: <message> [<code>]` for each finding; `started` rejects with the refusal redacted alike
+ * (`shownRefusal`), and admin shows its reason so. A later refusal, a halt and each retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
  * `processing retries in <ms> ms (<condition>, attempt <n>): …`, `startup retries …`). [CF-4, AE-6]
  *
  * **Ports.** What a process does to the program it runs in comes only through its ports, each off when absent, so a
@@ -295,7 +297,7 @@ import { openPostgres } from "../db/postgres.js";
 import { refuseWritingReader, transportReaderFacts, type TransportReaderFacts } from "../private/transport-reader.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkHistory, graphInputOf, type HistoryCheck, versionText } from "../config/history.js";
-import { configModuleUrl, configPath, loadConfig, loadModuleList } from "../config/load.js";
+import { configModules, configModuleUrl, configPath, importConfig, loadModuleList } from "../config/load.js";
 import { resolve } from "node:path";
 import type { PlainObject } from "../config/plain-data.js";
 import { configRedactor, type Redactor, redactor } from "../config/redact.js";
@@ -335,6 +337,7 @@ import {
   type NetworkPlan,
   type NetworkRequest,
   type NetworkRule,
+  knownSecrets,
   planNetwork,
   refusalSecrets,
   type Resolved,
@@ -343,7 +346,7 @@ import {
 } from "./resolve.js";
 import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import type { InMemoryBlockSource } from "./in-memory-source.js";
-import { configurationRefusalLines } from "./configuration-refusal.js";
+import { configurationRefusalLines, shownRefusal } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf, startupRejection } from "./failures.js";
 import { followSignal } from "./host-signal.js";
@@ -1133,6 +1136,14 @@ class Process implements ProcessHandle {
   #closing: Promise<void> | undefined;
   #phase: StatusFacts["phase"] = "starting";
   #redactor: Redactor | undefined;
+  /**
+   * The redaction of what startup shows before the configuration is validated: the data's secrets as far as they are
+   * known (the resolver's `knownSecrets`), from the moment the data is (given, or the file imported); the URL patterns
+   * only before. [CF-4, AE-6]
+   */
+  #known: { readonly secrets: readonly string[]; readonly redactor: Redactor } = { secrets: [], redactor: redactor([]) };
+  /** The redaction a refusal of the configuration step was shown with (its log lines, admin), for its rejection. */
+  #refusalRedactor: Redactor | undefined;
   /** The process's side, once the resolver took it from the configuration; public until then. [CF-4] */
   #side: ProcessSide = "public";
   /**
@@ -1380,8 +1391,11 @@ class Process implements ProcessHandle {
     if (this.#stop.signal.aborted) {
       return { kind: "stopped", rejection: this.#abortReason, end: this.#ended({ kind: "signal" }) };
     }
-    const reason = this.#fail("refused", error);
-    const rejection = startupRejection(error, reason);
+    // A refusal of the configuration step is given redacted as its log lines were: its own text may quote the host's.
+    // [CF-4, AE-6]
+    const shown = this.#refusalRedactor === undefined ? error : shownRefusal(error, this.#refusalRedactor.text);
+    const reason = this.#fail("refused", shown);
+    const rejection = startupRejection(shown, reason);
     const end = this.#ended({ kind: "refused", error: rejection });
     return { kind: "refused", rejection, end, configurationStep: this.#configurationStep };
   }
@@ -1661,10 +1675,19 @@ class Process implements ProcessHandle {
     return { modes, addresses: { listen, privateLink: connecting } };
   }
 
-  /** A log line, through the configuration's redaction once it is known; nowhere without the `log` port. [LM-2] */
+  /**
+   * A log line, through the configuration's redaction once it is validated, else through the secrets known before
+   * (`#known`); nowhere without the `log` port. [LM-2, CF-4]
+   */
   #log(text: string): void {
     const { log } = this.#input;
-    if (log !== undefined) log(this.#redactor === undefined ? text : this.#redactor.text(text));
+    if (log !== undefined) log((this.#redactor ?? this.#known.redactor).text(text));
+  }
+
+  /** The configuration's data `data` is known, its user modules `userModules` (null: not yet): see `#known`. [CF-4] */
+  #know(data: unknown, userModules: readonly unknown[] | null): void {
+    const secrets = knownSecrets(data, userModules);
+    this.#known = { secrets, redactor: redactor(secrets) };
   }
 
   /** Where the worker threads' output goes: inherited (`umbradb run`), or into the log, redacted. [LM-2, L4, L55] */
@@ -1690,11 +1713,21 @@ class Process implements ProcessHandle {
    */
   async #load(): Promise<LoadedInput> {
     const { config, cwd, userModules } = this.#input;
-    const loaded: LoadedInput =
-      "file" in config ? await loadConfig({ file: config.file, cwd }) : { file: null, data: config.data, modules: [] };
+    let loaded: LoadedInput;
+    if ("file" in config) {
+      const imported = await importConfig({ file: config.file, cwd });
+      // The file's secrets are known before its `modules` export is checked, whose refusal names the file. [CF-4]
+      const exported = Object.hasOwn(imported.exports, "modules") ? imported.exports.modules : [];
+      this.#know(imported.data, Array.isArray(exported) ? exported : null);
+      loaded = { file: imported.file, data: imported.data, modules: configModules(imported) };
+    } else {
+      loaded = { file: null, data: config.data, modules: [] };
+    }
     // A module file's list (`modulesFrom`), imported as the ledger worker imports it. [LM-7]
     if (userModules !== undefined && "from" in userModules && userModules.from instanceof URL) {
-      return { ...loaded, modules: await loadModuleList(userModules.from) };
+      const modules = await loadModuleList(userModules.from);
+      this.#know(loaded.data, modules);
+      return { ...loaded, modules };
     }
     return loaded;
   }
@@ -1747,6 +1780,12 @@ class Process implements ProcessHandle {
       // A refusal of a host's options comes before anything is read. [LM-10, L62]
       const refusal = input.library?.refusal ?? null;
       if (refusal !== null) throw refusal;
+      // Data given is known before anything can fail with text of the host's: a module file's own error, a user module's
+      // value. Its user modules, objects, are known with it; a module file's, once it is imported. [CF-4, AE-6]
+      if ("data" in input.config) {
+        const given = input.userModules;
+        this.#know(input.config.data, given === undefined ? [] : "modules" in given ? given.modules : given.from === "config" ? [] : null);
+      }
       const loaded = await this.#load();
       this.#step();
       const resolved = this.#resolve(loaded);
@@ -1830,7 +1869,8 @@ class Process implements ProcessHandle {
         if (this.#configurationStep) {
           // A refusal of the configuration step: every finding logged, its secrets redacted as the validation read
           // them (the resolver's), and the URL patterns only before; `#run` then ends the process. [Q137 B, AE-6]
-          const early = redactor(refusalSecrets(error));
+          const early = redactor([...this.#known.secrets, ...refusalSecrets(error)]);
+          this.#refusalRedactor = early;
           for (const line of configurationRefusalLines(error, early.text)) this.#log(line);
           // The mounted handler's `/status` shows the reason redacted alike. [AE-6]
           this.#admin.refusedWith(early);
