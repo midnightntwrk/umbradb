@@ -11,7 +11,8 @@
  *    command's build for it with the user modules ({@link UserModulesSource}) validated, the data held to the
  *    plain-data rules and validated, and the `core` entry's operational and secret fields taken from its latest
  *    revision of the build's version, for the whole run: the database, the node, `listen.api`, the timeouts, the
- *    development opt-in, the core's stop. [MD-2, CF-3, Q102]
+ *    development opt-in, the core's stop. A host program's own checks of this step ({@link LibraryChecks}: its
+ *    options, before the load; what resolved, after) refuse here too. [MD-2, CF-3, Q102, LM-10]
  * 3. Make the process's one node client from this revision's `node` (`nodeOptionsOf`), and the block source from the
  *    revision and that client: the node's (`core-block-fetch`'s node source, `nodeSourceOf`) on the core, the private
  *    intake's on a private process. [RN-14, PP-1]
@@ -268,7 +269,7 @@ import { resolveGraph } from "../modules/graph.js";
 import type { DeclarationSet } from "../modules/validation.js";
 import { type StartedModuleApi, startModuleApi } from "./api-server.js";
 import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
-import { refusalSecrets, type Resolved, resolve as resolveBuild } from "./resolve.js";
+import { type NetworkRequest, refusalSecrets, type Resolved, resolve as resolveBuild } from "./resolve.js";
 import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import { configurationRefusalLines } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
@@ -314,10 +315,34 @@ export type EngineBuild =
   | { readonly userModules: UserModulesSource; readonly declarations?: undefined }
   | { readonly declarations: DeclarationSet; readonly userModules?: undefined };
 
+/**
+ * Which surfaces listen and connect: `"configured"`, `umbradb run`'s — the module API at the `core` revision's
+ * `listen.api`, a public process's private link at its `listen.privateLink`, a private process's at its `privateLink`,
+ * each when written, and admin at `listen.admin` through the {@link EngineOptions.adminListener} port —, or a host
+ * program's request ({@link NetworkRequest}), under which the process opens no listener and makes no link: the module
+ * API's and admin's handlers are the host's to mount. [LM-3, G4, N1; design §5]
+ */
+export type EngineNetwork = "configured" | NetworkRequest;
+
+/**
+ * A host program's own checks of startup's configuration step (`startUmbraDB`'s, `../library/`), refusals of class A
+ * like the configuration's own: the process ends `refused` by itself, nothing opened. [LM-10; design §7.2]
+ */
+export interface LibraryChecks {
+  /** The refusal of the host's options, given before anything is read: startup refuses with it first. [L62] */
+  readonly refusal: UmbraError | null;
+  /** Throws the refusal of a build and configuration the host may not run, once they are resolved. */
+  readonly resolved?: (resolved: Resolved) => void;
+}
+
 /** What {@link startProcess}, the engine, takes besides the build ({@link EngineInput}). */
 export interface EngineOptions {
   /** The configuration (see {@link EngineConfig}). */
   readonly config: EngineConfig;
+  /** Which surfaces listen and connect (see {@link EngineNetwork}). [LM-3] */
+  readonly network: EngineNetwork;
+  /** A host program's checks of the configuration step (see {@link LibraryChecks}); none unless given. [LM-10] */
+  readonly library?: LibraryChecks;
   /** The working directory: a relative `{ file }` resolves against it, never against the host's own. [LM-2, CF-1] */
   readonly cwd: string;
   /**
@@ -573,12 +598,34 @@ export interface StartedProcess {
   readonly core: CheckedEntry;
   /** Where the module API listens (`listen.api`), or null without it. */
   readonly api: { readonly host: string; readonly port: number } | null;
+  /** The process's side, as the resolver took it from the configuration. [CF-4] */
+  readonly side: ProcessSide;
+  /** S, the database's start. */
+  readonly start: bigint;
+}
+
+/** An address a listener is bound at: the host as the system reports it, and the port. */
+export interface BoundAddress {
+  readonly host: string;
+  readonly port: number;
+}
+
+/**
+ * Where the process's surfaces listen now: each listener's bound address once it is bound, null while it is not, when
+ * the surface does not listen, and once it closed. [LM-3, LM-9, L21]
+ */
+export interface ProcessListening {
+  readonly api: BoundAddress | null;
+  readonly admin: BoundAddress | null;
+  readonly privateLink: BoundAddress | null;
 }
 
 /** A process {@link startProcess} started. */
 export interface ProcessHandle {
   /** The process's state now. */
   status(): ProcessStatus;
+  /** Where its surfaces listen now (see {@link ProcessListening}). [LM-9] */
+  listening(): ProcessListening;
   /** Resolves once startup completed and the loop runs; rejects with startup's refusal or failure. */
   readonly started: Promise<StartedProcess>;
   /** Resolves with how processing ended (also when startup did not complete); never rejects. */
@@ -957,6 +1004,16 @@ class Process implements ProcessHandle {
     });
   }
 
+  listening(): ProcessListening {
+    const bound = (address: { readonly host: string; readonly port: number } | null | undefined): BoundAddress | null =>
+      address === null || address === undefined ? null : Object.freeze({ host: address.host, port: address.port });
+    return Object.freeze({
+      api: bound(this.#api?.server),
+      admin: bound(this.#admin?.listening()),
+      privateLink: bound(this.#transport),
+    });
+  }
+
   stop(): Promise<void> {
     this.#closing ??= this.#close();
     return this.#closing;
@@ -1250,9 +1307,14 @@ class Process implements ProcessHandle {
     const input = this.#input;
     try {
       this.#step();
+      // A refusal of a host's options comes before anything is read. [LM-10, L62]
+      const refusal = input.library?.refusal ?? null;
+      if (refusal !== null) throw refusal;
       const loaded = await this.#load();
       this.#step();
       const resolved = this.#resolve(loaded);
+      // A host's own checks of what resolved: still the configuration step, so the process ends as above. [LM-10]
+      input.library?.resolved?.(resolved);
       // A module's ledger tasks run through points of its own (`src/ledger/tasks.ts`). [LG-17]
       const declarations = withLedgerTaskPoints(resolved.declarations);
       const { checked, core } = resolved;
@@ -1455,8 +1517,11 @@ class Process implements ProcessHandle {
       genesisHash,
     });
     // The process transport: a public process given listen.privateLink listens for private ones from here on, once,
-    // before the bootstrap's wait, so that they connect before S commits. [PP-4]
-    const { privateLink: transportAddress } = settings.listen as { readonly privateLink?: string };
+    // before the bootstrap's wait, so that they connect before S commits; only for the command's network, a host's
+    // request opening no listener. [PP-4, LM-3]
+    const configured = input.network === "configured";
+    const { privateLink: written } = settings.listen as { readonly privateLink?: string };
+    const transportAddress = configured ? written : undefined;
     const lockstepInstances = (settings.lockstepInstances as unknown as readonly string[] | undefined) ?? [];
     // Lockstep: one bookkeeping for the run, which the transport tells and the loop waits on. [PP-6]
     if (this.#lockstep === undefined && lockstepInstances.length > 0) {
@@ -1484,7 +1549,8 @@ class Process implements ProcessHandle {
     // before the module API, so that a retried startup (a node unreachable meanwhile) never finds it listening. [IN-2]
     if (cursor === null) await waitForNode(source, start, this.#stop.signal, waiting);
     this.#step();
-    const { api: address } = settings.listen as { readonly api?: string };
+    // The module API's listener at listen.api, for the command's network only: a host mounts its handlers. [LM-3, G4]
+    const address = configured ? (settings.listen as { readonly api?: string }).api : undefined;
     this.#api = await startModuleApi({
       graph,
       contexts,
@@ -1530,7 +1596,7 @@ class Process implements ProcessHandle {
     const api = server === null ? null : Object.freeze({ host: server.host, port: server.port });
     // Not stopping (the step above): from here on a stop finds the loop running.
     this.#phase = "running";
-    return { loop, started: Object.freeze({ core, api }) };
+    return { loop, started: Object.freeze({ core, api, side: this.#side, start }) };
   }
 
   /**

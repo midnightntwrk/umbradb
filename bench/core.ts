@@ -39,6 +39,7 @@ async function commitSamples(database: object, options: CommitOptions): Promise<
   const handle = startProcess({
     userModules: { modules: [] },
     cwd: process.cwd(),
+    network: "configured",
     config: {
       data: {
         entries: [

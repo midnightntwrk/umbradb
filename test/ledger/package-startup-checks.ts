@@ -193,6 +193,7 @@ function packageProcess(start: StartPackageProcess, startup: PackageStartup): { 
   const extra = startup.ledgerSources === undefined ? {} : { extra: { ledgerSources: startup.ledgerSources } };
   const input: EngineInput = {
     cwd: process.cwd(),
+    network: "configured",
     declarations: chainDeclarations([], { core: modules }),
     config: { data: { entries: [core(startup.db.setting, S, extra), ...modules.map((module) => entryOf(module, S))] } },
     source,

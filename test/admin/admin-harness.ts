@@ -292,6 +292,7 @@ export function startWithAdmin(options: AdminRunOptions): AdminRun {
   const starter = options.starter ?? startAdminServer;
   const handle = startProcess({
     cwd: process.cwd(),
+    network: "configured",
     declarations: { ...build.declarations, backbone: [...build.declarations.backbone, ...ADMIN_BACKBONE] },
     config: { data: { entries } },
     source,

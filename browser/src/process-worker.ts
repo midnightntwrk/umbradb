@@ -200,6 +200,7 @@ async function startWorkerProcess(message: Extract<ToProcessWorker, { type: "sta
   handle = startProcess({
     config: { data: withDevelopmentOptIn(data) },
     cwd: "/",
+    network: "configured",
     userModules: { modules },
     log: (line) => post({ type: "log", line }),
     adminListener: messageAdmin,

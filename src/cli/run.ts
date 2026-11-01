@@ -192,6 +192,8 @@ export async function runProcess(options: RunOptions, seams: RunSeams = {}): Pro
   try {
     const handle = (seams.start ?? startProcess)({
       config: { file: options.file ?? DEFAULT_CONFIG_FILE },
+      // Every surface whose address the file writes, admin at its default when none is. [LM-3]
+      network: "configured",
       cwd: options.cwd,
       userModules: seams.userModules ?? { from: "config" },
       signal: stop.signal,

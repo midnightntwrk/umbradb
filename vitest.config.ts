@@ -54,6 +54,8 @@ const CORE_ARCH = {
   "**/src/admin/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the process transport's directory (task 14.2).
   "**/src/private/**": { lines: 90, branches: 85, perFile: true },
+  // §13's default for `src/**`, added with the library entry's directory (`start-umbradb` design §1).
+  "**/src/library/**": { lines: 90, branches: 85, perFile: true },
   // §13's default for `src/**`, added with the ledger adapters' directory (task 12.1).
   "**/src/ledger/**": { lines: 90, branches: 85, perFile: true },
   // The test tape (task 9.1): not in the package, but the tests of ingest, faults and differentials stand on it, so it

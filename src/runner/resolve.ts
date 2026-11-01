@@ -36,6 +36,7 @@ import {
   configSecrets,
   validateConfig,
 } from "../config/validate.js";
+import type { PrivateLinkChannel } from "../library/channels.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
 
@@ -149,6 +150,33 @@ export interface ResolvedConfig {
   readonly core: CheckedEntry;
   /** The addresses that revision writes, before defaults. */
   readonly surfaces: Surfaces;
+}
+
+/**
+ * An address a host gives a surface in code: `host` (`127.0.0.1` unless given) and `port` (0 for a free one; the bound
+ * address is then the one the system gave). [LM-3]
+ */
+export interface AddressRequest {
+  readonly host?: string;
+  readonly port: number;
+}
+
+/**
+ * A host's network request (design §5.1): for each surface, absent or `false` (no listener: its handlers on the
+ * handle; no link), `true` (the address the process's `core` revision writes), an {@link AddressRequest}, or — for the
+ * private link — the public side's `{ channels: true }` (the host hands it each channel) and the private side's
+ * `{ connect }` (the host opens each channel). [LM-3, LM-6]
+ */
+export interface NetworkRequest {
+  readonly api?: boolean | AddressRequest;
+  readonly admin?: boolean | AddressRequest;
+  readonly privateLink?: {
+    readonly publicSide?: boolean | AddressRequest | { readonly channels: true };
+    readonly privateSide?:
+      | boolean
+      | AddressRequest
+      | { readonly connect: (signal: AbortSignal) => Promise<PrivateLinkChannel> };
+  };
 }
 
 /** A written address, or null. */

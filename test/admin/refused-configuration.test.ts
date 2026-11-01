@@ -280,6 +280,7 @@ async function endedProblems(start: Start, backend: ProcessBackend, refusal: Ref
   const watch = probe(port);
   const handle = start({
     cwd: process.cwd(),
+    network: "configured",
     declarations: declarationsOf(),
     config: refusal.config(db.setting, address),
     source: adminSource(3n),
@@ -337,6 +338,7 @@ function started(
 ) {
   return start({
     cwd: process.cwd(),
+    network: "configured",
     declarations: declarationsOf(user),
     config: { data: { entries: [adminCore(database, 1, { extra: { listen: { admin: address } } }), ...user.map((part) => entryOf(part, 1))] } },
     source: adminSource(3n),
@@ -393,6 +395,7 @@ function stoppedWith(handle: ProcessHandle, also: () => Promise<void>): ProcessH
     ended: handle.ended,
     closed,
     status: () => handle.status(),
+    listening: () => handle.listening(),
     backup: (out, seams) => handle.backup(out, seams),
     pause: () => handle.pause(),
     resume: () => handle.resume(),

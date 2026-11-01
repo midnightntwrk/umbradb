@@ -32,6 +32,7 @@ const extra = {
 };
 const handle = startProcess({
   cwd: process.cwd(),
+  network: "configured",
   declarations: build.declarations,
   config: { data: { entries: [adminCore(database, 1, { extra })] } },
   source: adminSource(2n),

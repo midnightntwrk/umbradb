@@ -369,6 +369,12 @@ export class ProcessAdmin {
     });
   }
 
+  /** Where the listener listens once it does; null before, without one, and once closed. [LM-9, L21] */
+  listening(): { readonly host: string; readonly port: number } | null {
+    const server = this.#server;
+    return this.#closed || server === undefined ? null : Object.freeze({ host: server.host, port: server.port });
+  }
+
   /** Publishes the snapshot of `status()` to the listener when it changed since the last one it was sent. */
   publish(): void {
     if (this.#closed || this.#server === undefined) return;

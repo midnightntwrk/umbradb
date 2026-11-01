@@ -66,6 +66,7 @@ function started(
   const lines: string[] = [];
   const handle = start({
     cwd: process.cwd(),
+    network: "configured",
     declarations: { ...build.declarations, backbone: [...build.declarations.backbone, ...ADMIN_BACKBONE] },
     config: { data: { entries: entriesOf(database, address, rest.user) } },
     source: adminSource(3n),

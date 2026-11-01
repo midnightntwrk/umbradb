@@ -11,6 +11,7 @@ import { type InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-mem
 import {
   type EngineBuild,
   type EngineInput,
+  type EngineNetwork,
   type EngineOptions,
   type ProcessHandle,
   type ProcessingEnd,
@@ -43,7 +44,7 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * `test/admin/` that takes the runner's own fails `test/admin/test-processes.test.ts`. [AE-1, CF-4, Q128 B]
  */
 export function startProcess(input: TestProcessInput): ProcessHandle {
-  return startRunnerProcess({ ...input, cwd: input.cwd ?? process.cwd() });
+  return startRunnerProcess({ ...input, cwd: input.cwd ?? process.cwd(), network: input.network ?? "configured" });
 }
 
 /**
@@ -56,8 +57,14 @@ export function startWithoutAdmin(input: EngineInput): ProcessHandle {
   return startProcess(rest);
 }
 
-/** The engine's input for the tests: its `cwd` the test's working directory unless given. */
-export type TestProcessInput = Omit<EngineOptions, "cwd"> & { readonly cwd?: string } & EngineBuild;
+/**
+ * The engine's input for the tests: its `cwd` the test's working directory unless given, its network the command's
+ * (`"configured"`: the addresses the configuration writes) unless given.
+ */
+export type TestProcessInput = Omit<EngineOptions, "cwd" | "network"> & {
+  readonly cwd?: string;
+  readonly network?: EngineNetwork;
+} & EngineBuild;
 
 /** What the `core-chain` stand-in saw. */
 export interface CoreSeen {
