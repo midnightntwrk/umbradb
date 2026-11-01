@@ -235,12 +235,61 @@ before the review.
 
 ## 9. Full verification (AGENTS.md stage 3, as far as it runs locally)
 
-- [ ] 9.1 `npm run typecheck`, the full `npx vitest run` and `npm run test:coverage` with every floor met.
-- [ ] 9.2 The mutation gate (`npm run test:mutation:ci`, at least 65 % on its targets), the pack smoke, the graph check,
+- [x] 9.0 A117's oracle (found in 8.6's run 2: an open transaction seen while the core waited).
+      **Acceptance:** the cause found, and either the core's waiting path fixed test-first or the oracle rewritten with
+      its negative control still failing.
+      **Done (2026-11-01, `e2201c8`):** an instrumented count (not committed) showed the session counted was admin's
+      short fact read on the core's login, which every engine process runs since 5.3 (a forced 0.4 s read reproduced
+      the failure; 80 looks at real waits, quiet and loaded, saw no open transaction; the negative control's block
+      transaction is the same `pid` and `xact_start` in all five looks). PP-6 is met. The oracle now counts a
+      transaction only when the same one is open in two consecutive looks; the control's assertion is unchanged and
+      still failing; three unit cases pin the rule; the file five times, 11 of 11 each (the organizer's question Q-19).
+- [x] 9.1 `npm run typecheck`, the full `npx vitest run` and `npm run test:coverage` with every floor met.
+      **Acceptance:** typecheck exit 0; the full runs fail only §0's known tests and the known load-only flakes (issues
+      00062, 00064, each passing alone), 00065's V8 fault or 00054's PGlite hang; every coverage floor met.
+      **Done (2026-11-01):** `npm run typecheck` exit 0. Three full runs of the suite on `e2201c8`/`8cc9754` (the change
+      after `e2201c8` is an issue file): plain `npx vitest run` — 6,105 tests, 25 failed (§0's 20; A63 ×2, A64 ×2 of
+      issue 00064; A111 on PostgreSQL refused `writer-lock-held` after its restore, added to 00064 in `8cc9754`; the
+      three files pass alone), 20.6 min, the load the suite's own (Docker's VM at about 650 % CPU, load average up to
+      48); the conformance gate's run (9.2) — exactly §0's 20, 9.7 min; and `npx vitest run --coverage
+      --coverage.reportOnFailure=true` (Vitest 4 checks the floors only when every test passed unless that flag is set)
+      — §0's 20, and one fork hung inside PGlite (issue 00054, seen again: `bd9a991`), killed by hand. **Coverage:
+      every floor met** (no threshold error; each of 209 files checked against `vitest.config.ts`'s floors: none below,
+      the tightest `src/private/core-channels.ts` at 85.00 % branches against 85); all files 99.73 % lines, 98.38 %
+      branches. `test/browser/` (headless Chrome) passed in each run.
+- [x] 9.2 The mutation gate (`npm run test:mutation:ci`, at least 65 % on its targets), the pack smoke, the graph check,
       and `npm run test:conformance`.
-- [ ] 9.3 The acceptance map (`acceptance-map.md`): each of L1 … L68 and the rewritten A-criteria to its test file and
+      **Acceptance:** the mutation gate passes; `npm run test:smoke` passes; `npm run graph:check` exits 0 after the
+      section's refresh; the conformance gate fails only §0's known tests, every required test executed and passed.
+      **Done (2026-11-01):** `npm run test:conformance` on `8cc9754` (9.7 min, within its 60 min deadline): 6,105 tests,
+      exactly §0's 20 failed, 56 skipped as §0; the required-test reconciliation OK, all 22 required tests executed and
+      passed; the gate exits 1 for the 20. `npm run test:mutation:ci` (39.6 min, load about 2): **PASSED, aggregate
+      87.37 %** over 3,127 valid mutants (break 65) — `src/modules/graph.ts` 87.80 % (836 valid), `src/runner/dispatch.ts`
+      95.80 % (143), `src/config/history.ts` 85.81 % (620; the one target this change touched), `src/determinism/cbor.ts`
+      96.85 % (603), `src/determinism/digest.ts` 96.05 % (76), `src/helpers/height-versioned.ts` 74.07 % (54),
+      `src/helpers/cursor-table.ts` 78.38 % (37), `src/backbone/core-ledger-state/sweep.ts` 87.11 % (225),
+      `src/backbone/core-block-fetch/node-source.ts` 76.36 % (533). `npm run test:smoke`: PASS (A2's consumer of 28
+      values and 38 types, the module test of L54 from the installed package, the tape sync on PostgreSQL). `npm run
+      bench:smoke` (non-gating): no workload above 10× its baseline. `npm run graph:check` before the section's refresh:
+      exit 1, stale (this section's commits), as expected; after the refresh: exit 0 (11.4's step, done for §9 in its
+      graph commit).
+- [x] 9.3 The acceptance map (`acceptance-map.md`): each of L1 … L68 and the rewritten A-criteria to its test file and
       title, and each `[NEG]` control to the run that shows it failing.
-- [ ] 9.4 What cannot run locally (a CI-only or release-candidate criterion) recorded as pending.
+      **Acceptance:** every criterion has its tests; every `[NEG]` criterion its committed control, seen failing; each
+      cited title exists in its file and passed.
+      **Done (2026-11-01):** `acceptance-map.md`; 339 cited titles, each found in its file's source and each test it
+      names passed in 9.2's conformance run (the one skip: A162's PostgreSQL-only case on PGlite, by design). Every
+      `[NEG]` criterion has its committed control (passing there, i.e. its oracle failing with the fault put back), and
+      where the build put the fault back in the source, the count that failed. No criterion without a test.
+- [x] 9.4 What cannot run locally (a CI-only or release-candidate criterion) recorded as pending.
+      **Done (2026-11-01):** no acceptance criterion needs CI or a release candidate (L54 runs from the packed tarball
+      locally). Pending for CI on the PR head carrying this change: the `test` job (the conformance gate on a hosted
+      runner, red on §0's 20 until issues 00059 and 00060 are fixed — the organizer's question Q-1) and the `mutation`
+      job of `conformance.yml`; `lean.yml` (needs mathlib; nothing under `Formal/` changed since `d46db79`);
+      `supply-chain.yml` (`npm audit`, gitleaks; `package-lock.json`, `.npmrc`, `.gitleaks.toml`, `nix/` unchanged);
+      `vendored-ledger.yml` (`vendor/` unchanged); `scan.yaml` (the organization's scan); `pack-smoke.yml`, `graph.yml`
+      and `bench-smoke.yml`, whose commands pass here. Definition of done item 5 — the 0.10.0 release checklist's gates
+      and the conformance gate on that head (D-9) — stays pending until it runs there.
 
 ## 10. Review (AGENTS.md stage 4, bounded)
 
