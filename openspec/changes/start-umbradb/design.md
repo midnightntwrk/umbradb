@@ -1,7 +1,7 @@
 # Design — START-UMBRADB: UmbraDB as a library
 
 Section numbers of `core-arch` are cited as `core-arch design §n`. Requirement ids are this change's (`LM-*`) or
-`core-arch`'s (`AE-*`, `RN-*`, `CF-*`, …); criteria are this change's `L1` … `L67` (`acceptance.md`).
+`core-arch`'s (`AE-*`, `RN-*`, `CF-*`, …); criteria are this change's `L1` … `L68` (`acceptance.md`).
 
 ## 0. Baseline
 

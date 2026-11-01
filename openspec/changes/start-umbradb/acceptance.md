@@ -207,11 +207,12 @@ for its own reason with the fault put back. Database criteria run on PostgreSQL 
   the URL; one whose `modules` export is missing, or not an array, is refused `modules-not-a-list`. (LM-7)
 - **L64** `[CI]` `umbradb run` on a private configuration that writes `listen.privateLink` starts as today, opens no
   listener for it and refuses nothing; `startUmbraDB` on the same configuration does the same. (LM-3, CF-4)
-- **L65** `[CI][NEG]` Through mounted `admin.http`, with a password in `database` and in `transportReader`, a TLS key
-  and a node URL with credentials: `/config` shows each as `[redacted]`; a callback that throws an error whose message
-  holds the database password makes `/status` show the code, height, module and point and the password nowhere; the
-  negative control serves the raw settings and fails. The same holds through mounted `api.http` error answers. (LM-4,
-  AE-6)
+- **L65** `[CI][NEG]` Secrets through mounted `admin.http`. On PostgreSQL, with a password in `database` and in
+  `transportReader`, a TLS key and a node URL with credentials; on PGlite, with a TLS key and a node URL with
+  credentials (PGlite refuses `transportReader`, CF-4): `/config` shows each secret as `[redacted]`; a callback that
+  throws an error whose message holds one of them makes `/status` show the code, height, module and point and the
+  secret nowhere; the negative control serves the raw settings on the mounted path and fails. The same holds for the
+  error answers of mounted `api.http`. (LM-4, AE-6)
 - **L66** `[CI][NEG]` Over a channel link (public `{ channels: true }`, private `{ connect }`): a `read` whose
   statement is not one read is answered `read-refused` naming it and runs nothing (A172's cases); a message failing its
   schema, or with an unknown `v` or `type`, closes the channel; a second `hello` with a connected instance id is
@@ -221,6 +222,13 @@ for its own reason with the fault put back. Database criteria run on PostgreSQL 
   superuser, holds `CREATEROLE`, is a member of the writer's login or holds `INSERT` on a public table refuses startup
   `transport-reader-can-write`, as A177 does on the socket link; the negative control skips the check for channels and
   fails. (LM-3, LM-6, CF-4)
+- **L68** `[CI][NEG]` Through mounted `api.upgrade`, as on the listener (`src/runner/api-server.ts`): a message that is
+  not a JSON object with a `type`, a `subscribe` without a valid `id` and `name`, and an unknown `type` are answered
+  `invalid-request`; an unknown subscription name is answered as on the listener; a message over
+  `DEFAULT_MAX_MESSAGE_BYTES` closes the connection; a subscriber holding more than the module API's
+  `MAX_BUFFERED_BYTES` unsent is terminated; the upgrade response carries `X-Umbra-Version` and, once the hash exists,
+  `X-Umbra-Config-Hash`, which holds no secret (with a password in `database`, it neither holds it nor changes with
+  it); each negative control removes its check on the mounted path only and fails. (LM-4, RN-15, RN-16)
 
 ## 9. `core-arch` criteria rewritten by this change
 
@@ -277,7 +285,7 @@ the `network` field of `/config` (`design.md` §5.2); A66's text is unchanged.
 | LM-1 | L12, L32, L53, L54, L55, L56, L57, L62 |
 | LM-2 | L1–L11, L13, L47, L60 |
 | LM-3 | L6, L15–L22, L62, L64, L67 |
-| LM-4 | L23, L24, L65 |
+| LM-4 | L23, L24, L65, L68 |
 | LM-5 | L25–L29, L61 |
 | LM-6 | L33–L42, L66, L67 |
 | LM-7 | L43–L46, L63 |

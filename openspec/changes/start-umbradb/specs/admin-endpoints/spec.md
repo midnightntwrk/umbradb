@@ -77,9 +77,11 @@ cursor and, for a private process, the public cursor minus its own.
   `started`'s rejection and on `log`, and no admin listener opened
 
 #### Scenario: A fault of the build's declarations ends the process
-- **WHEN** startup refuses because the configuration file exports `modules = [stats, stats]` (`duplicate-id`, MD-2)
+- **WHEN** `umbradb run` refuses at startup because the configuration file exports `modules = [stats, stats]`
+  (`duplicate-id`, MD-2)
 - **THEN** the finding is logged with the module and its position, the process exits with a non-zero code, and no
-  admin listener was opened
+  admin listener was opened; started with `startUmbraDB` and `modules: [stats, stats]`, it ends `refused` with
+  `closed` resolved, the finding in `started`'s rejection and on `log`, and no admin listener opened
 
 ### Requirement: AE-5 `/status` and `/config` contents
 
