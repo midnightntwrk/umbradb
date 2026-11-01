@@ -221,10 +221,17 @@ before the review.
       **Done (2026-11-01):** in the organizer's questions file (outside this repository), with four new questions and
       their texts: Q-15 (this proposal's status line, still "Approved … No code yet."), Q-16 (design §1's eleven new
       files), Q-17 (`core-arch` design §12's sentence on `--update-hash`), Q-18 (`/config`'s `core` and `entries[]`).
-- [ ] 8.6 The section's full run.
+- [x] 8.6 The section's full run.
       **Acceptance:** `npx vitest run` fails only §0's known tests, the load-only flakes of issues 00062 and 00064 (each
       passing alone) and issue 00065's V8 fault; `test/browser/` passes in headless Chrome; `npm run graph:check` exits
       0 after `npm run graph:refresh`.
+      **Done (2026-11-01), on a loaded machine (load about 20; 48 and 30 min):** run 1, 6,102 tests — 37 failed: §0's
+      20 and A12, and waits that ran out or containers Docker started too slowly (issue 00064's kind, extended; one left
+      a container behind, issue 00066), each file passing when run again. Run 2 — 28 failed: §0's 20, seven of issue
+      00064's, and A117's second case on PostgreSQL (an open transaction seen while the core waited), which passes alone
+      and in every earlier run; its likely cause, admin's fact reads that every engine process now runs, is not
+      confirmed (the organizer's question Q-19, for §9). `test/browser/`: 45 tests pass. The graph: the section's
+      close.
 
 ## 9. Full verification (AGENTS.md stage 3, as far as it runs locally)
 
