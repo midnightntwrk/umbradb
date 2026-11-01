@@ -41,6 +41,10 @@
  * Then they give the table in effect as the parsed `ledgerTable` (`.overwrite`, which keeps the object schema, so
  * `shape` and the kinds still read as above). So the history records the table a revision ran with, with every
  * default applied. [LG-3, CF-7]
+ *
+ * **Renamed settings** ({@link RENAMED_CORE_SETTINGS}): the private link's two addresses were `listen.transport` and
+ * `coreTransport`; they are `listen.privateLink` and `privateLink`. The validation refuses an old key, naming the new
+ * one (`renamed-setting`, `./validate.ts`). [CF-4, L51 CI]
  */
 
 import { z } from "zod";
@@ -301,6 +305,25 @@ export const PRIVATE_CORE_SCHEMA = z
   .superRefine(genesisHashRule)
   .superRefine(ledgerTableRule)
   .overwrite(withLedgerTable);
+
+/** A renamed setting of the `core` entry: its old key and the key that replaced it, as paths in its `config`. */
+export interface RenamedSetting {
+  readonly from: SettingPath;
+  readonly to: SettingPath;
+}
+
+/** A setting's path in the `core` entry's `config`: a field, or a field of an object field (`listen.privateLink`). */
+export type SettingPath = readonly [string] | readonly [string, string];
+
+/**
+ * The `core` entry's renamed settings: the private link's listen address (`listen.transport`, now `listen.privateLink`)
+ * and the address a private process connects to (`coreTransport`, now `privateLink`). An old key is refused on either
+ * side, naming the new one (`renamed-setting`, `./validate.ts`). [CF-4, L51 CI]
+ */
+export const RENAMED_CORE_SETTINGS: readonly RenamedSetting[] = Object.freeze([
+  Object.freeze({ from: ["listen", "transport"], to: ["listen", "privateLink"] } as const),
+  Object.freeze({ from: ["coreTransport"], to: ["privateLink"] } as const),
+]);
 
 /** The `core` entry's schema for a process of `side`. */
 export function coreSettingsSchema(side: ProcessSide): typeof PUBLIC_CORE_SCHEMA | typeof PRIVATE_CORE_SCHEMA {

@@ -356,6 +356,90 @@ const A28: readonly Row[] = [
   },
   // ── the settings of a revision of the build's version ──────────────────────────────────────────────────────────
   {
+    name: "the renamed listen.transport, on a public process",
+    rule: "renamed-setting",
+    config: () => withCore({ ...CORE_SETTINGS, listen: { transport: "127.0.0.1:7000" } }),
+    findings: [
+      {
+        path: "entries[0].config.listen.transport",
+        entry: core0,
+        field: "listen",
+        says: [
+          "the setting listen.transport is renamed listen.privateLink",
+          "write the same address as listen.privateLink",
+        ],
+      },
+    ],
+  },
+  {
+    name: "the renamed listen.transport, on a private process",
+    rule: "renamed-setting",
+    side: "private",
+    config: () => withPrivateCore({ ...PRIVATE_SETTINGS, listen: { transport: "127.0.0.1:7000" } }),
+    findings: [
+      {
+        path: "entries[0].config.listen.transport",
+        entry: core0,
+        field: "listen",
+        says: ["the setting listen.transport is renamed listen.privateLink"],
+      },
+    ],
+  },
+  {
+    name: "the renamed coreTransport, on a private process",
+    rule: "renamed-setting",
+    side: "private",
+    config: () => withPrivateCore({ ...PRIVATE_SETTINGS, coreTransport: "127.0.0.1:7000" }),
+    findings: [
+      {
+        path: "entries[0].config.coreTransport",
+        entry: core0,
+        field: "coreTransport",
+        says: ["the setting coreTransport is renamed privateLink", "write the same address as privateLink"],
+      },
+    ],
+  },
+  {
+    name: "the renamed coreTransport, on a public process",
+    rule: "renamed-setting",
+    config: () => withCore({ ...CORE_SETTINGS, coreTransport: "127.0.0.1:7000" }),
+    findings: [
+      {
+        path: "entries[0].config.coreTransport",
+        entry: core0,
+        field: "coreTransport",
+        says: [
+          "the setting coreTransport is renamed privateLink, which is a private process's setting",
+          "this process is public; remove it",
+        ],
+      },
+    ],
+  },
+  {
+    name: "the renamed listen.transport in a core revision of another version",
+    rule: "renamed-setting",
+    config: () => ({
+      entries: [
+        versionEntry({
+          id: "core",
+          start: 0,
+          stop: 99,
+          version: earlierCore(HASH),
+          config: { network: "preprod", listen: { transport: "127.0.0.1:7000" } },
+        }),
+        coreEntry({ start: 100, config: { ...CORE_SETTINGS } }),
+      ],
+    }),
+    findings: [
+      {
+        path: "entries[0].config.listen.transport",
+        entry: core0,
+        field: "listen",
+        says: ["the setting listen.transport is renamed listen.privateLink"],
+      },
+    ],
+  },
+  {
     name: "a misspelled core setting",
     rule: "settings-unknown",
     config: () => withCore({ ...CORE_SETTINGS, databse: "postgres://indexer:pw@db/umbradb" }),
@@ -884,6 +968,58 @@ describe("A28 negative control: the validation without one rule loses exactly th
     const lenient = CONFIG_RULES.filter((rule) => rule.name !== "settings-unknown");
     expect(configFindings(input(config), lenient)).toEqual([]);
     expect(configFindings(input(config)).map((finding) => finding.path)).toEqual(["entries[1].config.polMs"]);
+  });
+});
+
+describe("L51: a renamed key of the core entry is one finding, renamed-setting, naming the new key (CF-4)", () => {
+  /** The rule and path of each finding of `config` for a process of `side`. */
+  const found = (config: unknown, side: ProcessSide = "public") =>
+    configFindings(input(config, side)).map(({ rule, path }) => [rule, path]);
+
+  it("each renamed key is refused once, by renamed-setting alone, also beside the key that replaced it", () => {
+    const both = { listen: { transport: "127.0.0.1:7000", privateLink: "127.0.0.1:7000" }, coreTransport: "core:1" };
+    expect(found(withPrivateCore({ ...PRIVATE_SETTINGS, ...both, privateLink: "core:1" }), "private")).toEqual([
+      ["renamed-setting", "entries[0].config.listen.transport"],
+      ["renamed-setting", "entries[0].config.coreTransport"],
+    ]);
+    expect(found(withCore({ ...CORE_SETTINGS, ...both }))).toEqual([
+      ["renamed-setting", "entries[0].config.listen.transport"],
+      ["renamed-setting", "entries[0].config.coreTransport"],
+    ]);
+  });
+
+  it("the key that replaced it is validated as any setting: a malformed address beside the old key is its own finding", () => {
+    expect(found(withCore({ ...CORE_SETTINGS, listen: { transport: "127.0.0.1:7000", privateLink: "no address" } }))).toEqual([
+      ["renamed-setting", "entries[0].config.listen.transport"],
+      ["settings-schema", "entries[0].config.listen.privateLink"],
+    ]);
+  });
+
+  it("the new keys pass, and a listen that is not an object is the schema's finding, not a renamed key", () => {
+    expect(found(withCore({ ...CORE_SETTINGS, listen: { privateLink: "127.0.0.1:7000" } }))).toEqual([]);
+    expect(found(withPrivateCore({ ...PRIVATE_SETTINGS, privateLink: "core:1" }), "private")).toEqual([]);
+    expect(found(withCore({ ...CORE_SETTINGS, listen: "127.0.0.1:7000" }))).toEqual([
+      ["settings-schema", "entries[0].config.listen"],
+    ]);
+  });
+
+  it("a module's own settings are its own: a module setting named coreTransport, or listen.transport, is no renamed key", () => {
+    const linked = defineModule({
+      ...declaration("linked"),
+      configSchema: z.object({
+        coreTransport: z.string().meta({ kind: "operational" }),
+        listen: z.object({ transport: z.string() }).meta({ kind: "operational" }),
+      }),
+    });
+    const config = withEntry(linked.entry({ start: 0, config: { coreTransport: "a:1", listen: { transport: "b:2" } } }));
+    expect(configFindings(input(config, "public", [linked]))).toEqual([]);
+  });
+
+  it("negative control (committed): without renamed-setting, the old keys are refused by no rule and silently dropped", () => {
+    const lenient = CONFIG_RULES.filter((rule) => rule.name !== "renamed-setting");
+    const config = withPrivateCore({ ...PRIVATE_SETTINGS, listen: { transport: "127.0.0.1:7000" }, coreTransport: "core:1" });
+    expect(configFindings(input(config, "private"), lenient)).toEqual([]);
+    expect(found(config, "private").map(([rule]) => rule)).toEqual(["renamed-setting", "renamed-setting"]);
   });
 });
 

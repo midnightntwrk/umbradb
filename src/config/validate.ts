@@ -39,6 +39,9 @@
  * - No field the schema does not declare. zod 4's `z.object` strips an unknown key, so a misspelled setting would be
  *   silently dropped instead of refused. The key check against `schema.shape` covers every schema, strict or not, and
  *   a field of the other side's `core` entry is named as such. [CF-2]
+ * - No renamed `core` setting (`RENAMED_CORE_SETTINGS`, `./core-settings.ts`), in any `core` revision: each old key is
+ *   one finding, `renamed-setting`, naming the key that replaced it. The other checks read a `core` revision's settings
+ *   without its old keys, so an old key is not also an unknown setting or a schema issue. [CF-4, L51 CI]
  * - Then the schema's own `safeParse` on the declared fields. It is duck-typed, never `instanceof`, so a module that
  *   bundles its own copy of zod 4 works. Each issue is a finding at its path, its message passed through the redaction,
  *   since a module's custom message may repeat the value it refuses.
@@ -56,7 +59,13 @@ import { UmbraError } from "../db/errors.js";
 import { FIELD_KINDS, type FieldKind, type ModuleDeclaration } from "../modules/declaration.js";
 import { type DeclarationSet, SEMVER } from "../modules/validation.js";
 import { buildCoreVersion, type CoreVersion } from "./build.js";
-import { CORE_VERSION_SCHEMA, coreSettingsSchema, type ProcessSide } from "./core-settings.js";
+import {
+  CORE_VERSION_SCHEMA,
+  coreSettingsSchema,
+  type ProcessSide,
+  RENAMED_CORE_SETTINGS,
+  type SettingPath,
+} from "./core-settings.js";
 import { CORE_ENTRY_ID } from "./entries.js";
 import { pathOf, type PlainData, type PlainObject, plainData, samePlainData } from "./plain-data.js";
 import { credentialsIn, redactor, secretStrings } from "./redact.js";
@@ -358,10 +367,40 @@ function contextOf(input: ConfigInput): ConfigContext {
 const objects = (context: ConfigContext): (EntryView & { readonly object: Plain })[] =>
   (context.entries ?? []).filter((view): view is EntryView & { readonly object: Plain } => view.object !== null);
 
-/** The entries whose settings are validated: their version is the build's and their `config` an object. */
+/** True when `value` has the setting at `path`: each key on the way an object's own property. */
+function holds(value: Plain, path: SettingPath): boolean {
+  let at: PlainData = value;
+  for (const key of path) {
+    if (!isObject(at) || !Object.hasOwn(at, key)) return false;
+    at = at[key] as PlainData;
+  }
+  return true;
+}
+
+/** `object` without its property `key`. */
+const dropped = (object: Plain, key: string): Plain =>
+  Object.fromEntries(Object.entries(object).filter(([field]) => field !== key));
+
+/** `value` without the setting at `path`; `value` itself when it has none. */
+function without(value: Plain, path: SettingPath): Plain {
+  if (!holds(value, path)) return value;
+  const [outer, inner] = path;
+  return inner === undefined ? dropped(value, outer) : { ...value, [outer]: dropped(value[outer] as Plain, inner) };
+}
+
+/** A `core` revision's settings without its renamed settings, which `renamed-setting` reports alone. [CF-4, L51 CI] */
+const withoutRenamed = (config: Plain): Plain =>
+  RENAMED_CORE_SETTINGS.reduce((kept, { from }) => without(kept, from), config);
+
+/**
+ * The entries whose settings are validated: their version is the build's and their `config` an object. A `core`
+ * revision's settings come without its renamed settings ({@link withoutRenamed}). [CF-4, L51 CI]
+ */
 const validated = (context: ConfigContext) =>
   objects(context).flatMap((view) =>
-    view.schema !== null && isObject(view.object.config) ? [{ view, schema: view.schema, config: view.object.config }] : [],
+    view.schema !== null && isObject(view.object.config)
+      ? [{ view, schema: view.schema, config: view.core ? withoutRenamed(view.object.config) : view.object.config }]
+      : [],
   );
 
 /** The entry's settings that its schema declares (the others are `settings-unknown`'s). */
@@ -716,6 +755,28 @@ export const CONFIG_RULES: readonly ConfigRule[] = Object.freeze([
       walk(context.data, "", []);
       return findings;
     },
+  },
+  {
+    // A renamed setting of any `core` revision, as written (`RENAMED_CORE_SETTINGS`): one finding at the old key,
+    // naming the key that replaced it, and saying so when that key is the other side's. [CF-4, L51 CI]
+    name: "renamed-setting",
+    check: (context) =>
+      objects(context).flatMap((view) => {
+        const { config } = view.object;
+        if (!view.core || !isObject(config)) return [];
+        const own = coreSettingsSchema(context.side).shape;
+        return RENAMED_CORE_SETTINGS.filter(({ from }) => holds(config, from)).map(({ from, to }) => {
+          const old = from.join(".");
+          const now = to.join(".");
+          const theirs = context.side === "public" ? "private" : "public";
+          const detail = Object.hasOwn(own, to[0])
+            ? `the setting ${old} is renamed ${now}: write the same address as ${now}`
+            : `the setting ${old} is renamed ${now}, which is a ${theirs} process's setting, and this process is ` +
+              `${context.side}; remove it`;
+          const path = from.reduce<string>((at, key) => pathOf(at, key), `${view.path}.config`);
+          return finding("renamed-setting", path, view, from[0], detail);
+        });
+      }),
   },
   {
     name: "settings-unknown",
