@@ -4,6 +4,7 @@ import { startAdminServer } from "../../src/admin/server.js";
 import { CORE_BLOCK_PARSED } from "../../src/backbone/core-block-parsed/core-block-parsed.js";
 import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-chain-events.js";
 import { typeScriptEntry } from "../../src/ledger/worker/host.js";
+import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { drainWorkerOutput } from "../../src/runner/worker-output.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
@@ -16,12 +17,12 @@ import { core, entryOf, settle, startProcess } from "./process-build.js";
  * own stdout and stderr. The negative control gives the engine the command's `workerOutput: "inherit"` port: the
  * threads' lines then reach the process's own streams and none reaches the log, which is also `umbradb run`'s
  * behaviour of today (L55). Each thread is started from an entry that writes one line to each stream and then runs
- * UmbraDB's own (`./fixtures/noisy-*-entry.ts`). [L4, L55, LM-2]
- *
- * PGlite only: the threads' output is not about the database.
+ * UmbraDB's own (`./fixtures/noisy-*-entry.ts`). On PostgreSQL 18 (Docker), a PGlite directory and PGlite in memory
+ * (definition of done item 3). [L4, L55, LM-2]
  */
 
-const backend = PROCESS_BACKENDS.find((candidate) => candidate.kind === "pglite") as ProcessBackend;
+/** PGlite in memory, the third database of the library's guarantees. */
+const PGLITE_MEMORY: DatabaseParts = Object.freeze({ kind: "pglite", memory: true }) as DatabaseParts;
 
 const LEDGER_ENTRY = typeScriptEntry(new URL("./fixtures/noisy-ledger-entry.ts", import.meta.url));
 const ADMIN_ENTRY = typeScriptEntry(new URL("./fixtures/noisy-admin-entry.ts", import.meta.url));
@@ -50,12 +51,11 @@ interface Seen {
 }
 
 /**
- * Runs a process that needs the ledger (`core-block-parsed`) and listens for admin, both threads from the noisy
- * entries, with `workerOutput` as given, until the four lines arrived where `arrived` looks (or 30 s passed); then
- * stops it. The process's stdout and stderr are recorded meanwhile, and nothing of them is written.
+ * Runs a process on `database` that needs the ledger (`core-block-parsed`) and listens for admin, both threads from
+ * the noisy entries, with `workerOutput` as given, until the four lines arrived where `arrived` looks (or 30 s passed);
+ * then stops it. The process's stdout and stderr are recorded meanwhile, and nothing of them is written.
  */
-async function run(workerOutput: "inherit" | undefined, arrived: (seen: Seen) => boolean): Promise<Seen> {
-  const db = await backend.database();
+async function run(database: DatabaseParts, workerOutput: "inherit" | undefined, arrived: (seen: Seen) => boolean): Promise<Seen> {
   const source = new InMemoryBlockSource({ head: 3n });
   const modules = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED];
   const log: string[] = [];
@@ -71,7 +71,7 @@ async function run(workerOutput: "inherit" | undefined, arrived: (seen: Seen) =>
       config: {
         data: {
           entries: [
-            core(db.setting, 1, { extra: { listen: { admin: "127.0.0.1:0" } } }),
+            core(database, 1, { extra: { listen: { admin: "127.0.0.1:0" } } }),
             ...modules.map((module) => entryOf(module, 1)),
           ],
         },
@@ -115,16 +115,21 @@ function outputProblems(seen: Seen): string[] {
   ];
 }
 
-describe("L4: the worker threads' output reaches the log and nothing else (LM-2)", () => {
-  beforeAll(() => backend.start(), 180_000);
-  afterAll(() => backend.stop(), 60_000);
+describe.each([
+  ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
+  ["PGlite in memory", null] as const,
+])("L4: the worker threads' output reaches the log and nothing else (LM-2), on %s", (_name, backend: ProcessBackend | null) => {
+  beforeAll(() => backend?.start(), 180_000);
+  afterAll(() => backend?.stop(), 60_000);
+  /** A database of its own for one run. */
+  const database = async (): Promise<DatabaseParts> => (backend === null ? PGLITE_MEMORY : (await backend.database()).setting);
 
   it("with the log port, the ledger worker's and the admin worker's lines reach the log only", async () => {
-    expect(outputProblems(await run(undefined, (now) => holds(now.log, LOGGED)))).toEqual([]);
+    expect(outputProblems(await run(await database(), undefined, (now) => holds(now.log, LOGGED)))).toEqual([]);
   }, 120_000);
 
   it("negative control (and L55): the command's workerOutput: \"inherit\" fails it, its lines on the process's own streams", async () => {
-    const seen = await run("inherit", (now) => holds([...now.stdout, ...now.stderr], WRITTEN));
+    const seen = await run(await database(), "inherit", (now) => holds([...now.stdout, ...now.stderr], WRITTEN));
     expect(outputProblems(seen).sort()).toEqual(
       [
         ...LOGGED.map((line) => `not in the log: ${line}`),

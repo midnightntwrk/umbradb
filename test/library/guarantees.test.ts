@@ -205,35 +205,39 @@ async function threadsDuring(body: () => Promise<void>): Promise<number> {
   return threads;
 }
 
-describe.each(BACKUP_BACKENDS)("L5: no child process without backup(); a backup's own, on $name", (backend: BackupBackend) => {
+describe.each([
+  ...BACKUP_BACKENDS.map((backend) => [backend.name, backend] as const),
+  ["PGlite in memory", null] as const,
+])("L5: no child process without backup(); a backup's own, on %s", (_name, backend) => {
   let tmp: string;
   beforeAll(async () => {
-    await backend.start();
+    await backend?.start();
     tmp = mkdtempSync(join(tmpdir(), "umbradb-library-children-"));
-    if (backend.kind === "postgres") process.env.UMBRADB_PG_DUMP = backend.env().UMBRADB_PG_DUMP;
+    if (backend?.kind === "postgres") process.env.UMBRADB_PG_DUMP = backend.env().UMBRADB_PG_DUMP;
   }, 300_000);
   afterAll(async () => {
     delete process.env.UMBRADB_PG_DUMP;
     rmSync(tmp, { recursive: true, force: true });
-    await backend.stop();
+    await backend?.stop();
   }, 120_000);
 
   it("start → blocks → stop spawns nothing; backup() spawns pg_dump --version then pg_dump on PostgreSQL, nothing on PGlite", async () => {
-    const db = await backend.database();
+    const setting = backend === null ? PGLITE_MEMORY : (await backend.database()).setting;
+    const name = backend?.kind ?? "memory";
     const m = rowsModule("m");
     let handle: UmbraDBHandle | undefined;
     const running = await childrenDuring(async () => {
-      handle = startUmbraDB({ config: { data: libraryData(db.setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 4n }) });
+      handle = startUmbraDB({ config: { data: libraryData(setting, [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 4n }) });
       await handle.started;
       await cursorReaches(handle, 4n);
     });
     expect(running).toEqual([]);
     const backup = await childrenDuring(async () => {
-      await (handle as UmbraDBHandle).backup(join(tmp, `${backend.kind}.backup`));
+      await (handle as UmbraDBHandle).backup(join(tmp, `${name}.backup`));
     });
     const stopping = await childrenDuring(() => (handle as UmbraDBHandle).stop());
     expect(stopping).toEqual([]);
-    if (backend.kind === "postgres") {
+    if (backend?.kind === "postgres") {
       const tool = process.env.UMBRADB_PG_DUMP as string;
       expect(backup.map((args) => args[0])).toEqual([tool, tool]);
       expect(backup[0]?.slice(1)).toEqual(["--version"]);
@@ -241,7 +245,7 @@ describe.each(BACKUP_BACKENDS)("L5: no child process without backup(); a backup'
     } else {
       expect(backup).toEqual([]);
     }
-    expect(existsSync(join(tmp, `${backend.kind}.backup`))).toBe(true);
+    expect(existsSync(join(tmp, `${name}.backup`))).toBe(true);
   }, 300_000);
 });
 
@@ -311,12 +315,22 @@ describe("L7: no configuration file is looked for or read but config.file (CF-1)
   });
   afterAll(() => rmSync(cwd, { recursive: true, force: true }));
 
-  it("startUmbraDB with { data } and cwd holding a umbradb.config.ts never reads it", async () => {
-    const handle = startUmbraDB({ config: { data: libraryData(PGLITE_MEMORY) }, cwd, source: new InMemoryBlockSource({ head: 1n }) });
-    await handle.started;
-    await handle.stop();
-    expect(existsSync(join(cwd, "read.mark"))).toBe(false);
-  }, 60_000);
+  describe.each([
+    ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
+    ["PGlite in memory", null] as const,
+  ])("on %s", (_name, backend) => {
+    beforeAll(() => backend?.start(), 180_000);
+    afterAll(() => backend?.stop(), 60_000);
+
+    it("startUmbraDB with { data } and cwd holding a umbradb.config.ts never reads it", async () => {
+      const setting = backend === null ? PGLITE_MEMORY : (await backend.database()).setting;
+      const handle = startUmbraDB({ config: { data: libraryData(setting) }, cwd, source: new InMemoryBlockSource({ head: 1n }) });
+      await handle.started;
+      await cursorReaches(handle, 1n);
+      await handle.stop();
+      expect(existsSync(join(cwd, "read.mark"))).toBe(false);
+    }, 60_000);
+  });
 
   it("negative control: umbradb run in that directory reads it", async () => {
     const end = await runProcess(
@@ -349,19 +363,24 @@ interface FaultedClose {
 }
 
 /**
- * Runs one close with a fault at `step` (see L9 in the module comment): `kind` is `"stop"` (a process that started,
- * then stopped), `"refusal"` (a startup refused after its database opened: a migration that fails) or `"configuration"`
- * (a configuration refused at its validation, with the admin port given, so its end closes admin). `helper` is the
- * negative control's closer, when given.
+ * Runs one close on `database` with a fault at `step` (see L9 in the module comment): `kind` is `"stop"` (a process
+ * that started, then stopped), `"refusal"` (a startup refused after its database opened: a migration that fails) or
+ * `"configuration"` (a configuration refused at its validation, with the admin port given, so its end closes admin).
+ * `helper` is the negative control's closer, when given.
  */
-async function faultedClose(kind: "stop" | "refusal" | "configuration", step: string, helper?: CloseHelper): Promise<FaultedClose> {
+async function faultedClose(
+  database: DatabaseParts,
+  kind: "stop" | "refusal" | "configuration",
+  step: string,
+  helper?: CloseHelper,
+): Promise<FaultedClose> {
   const steps: string[] = [];
   const lines: string[] = [];
   const broken = rowsModule("broken", undefined, { migrations: [{ id: "001", sql: "CREATE TABLE broken.rows (" }] });
   const extra = kind === "configuration" ? { livenessTimeoutMs: "thirty seconds" } : {};
   const modules = kind === "refusal" ? [broken] : [];
   const handle = startProcess({
-    config: { data: libraryData(PGLITE_MEMORY, modules, extra) },
+    config: { data: libraryData(database, modules, extra) },
     userModules: { modules },
     network: {},
     source: new InMemoryBlockSource({ head: 2n }),
@@ -390,7 +409,14 @@ async function faultedClose(kind: "stop" | "refusal" | "configuration", step: st
   return { steps, lines, started, closed };
 }
 
-describe("L9: every close step runs, a failure logged, closed resolved, nothing unhandled (G7)", () => {
+describe.each([
+  ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
+  ["PGlite in memory", null] as const,
+])("L9: every close step runs, a failure logged, closed resolved, nothing unhandled (G7), on %s", (_name, backend) => {
+  beforeAll(() => backend?.start(), 180_000);
+  afterAll(() => backend?.stop(), 60_000);
+  /** A database of its own for one close. */
+  const database = async (): Promise<DatabaseParts> => (backend === null ? PGLITE_MEMORY : (await backend.database()).setting);
   const unhandled: unknown[] = [];
   const record = (reason: unknown): void => {
     unhandled.push(reason);
@@ -403,7 +429,7 @@ describe("L9: every close step runs, a failure logged, closed resolved, nothing 
   });
 
   it("stop()'s close: the node client's step fails, the database, the block source and admin still close", async () => {
-    const run = await faultedClose("stop", "node client");
+    const run = await faultedClose(await database(), "stop", "node client");
     expect(run.started).toBe("started");
     expect(run.steps).toEqual([
       "module API",
@@ -423,7 +449,7 @@ describe("L9: every close step runs, a failure logged, closed resolved, nothing 
   }, 60_000);
 
   it("startup's refusal cleanup: the transport's step fails, the database still closes, the refusal stays the one thrown", async () => {
-    const run = await faultedClose("refusal", "core transport");
+    const run = await faultedClose(await database(), "refusal", "core transport");
     expect(run.started).toBe("refused migration-failed");
     expect(run.steps.slice(0, 6)).toEqual(["core transport", "transport reader", "node client", "ledger worker", "database", "block source"]);
     expect(run.lines).toContain("close: core transport failed (error): the core transport step fails here");
@@ -431,7 +457,7 @@ describe("L9: every close step runs, a failure logged, closed resolved, nothing 
   }, 60_000);
 
   it("a configuration refusal's end: admin's step fails, closed still resolves", async () => {
-    const run = await faultedClose("configuration", "admin");
+    const run = await faultedClose(await database(), "configuration", "admin");
     expect(run.started).toBe("refused invalid-configuration");
     // Startup's cleanup (nothing was opened), then the end's own step.
     expect(run.steps).toEqual(["core transport", "transport reader", "node client", "ledger worker", "database", "block source", "admin"]);
@@ -463,10 +489,10 @@ describe("L9: every close step runs, a failure logged, closed resolved, nothing 
   });
 
   it("negative control: a closer that stops at the first failure fails it — the later steps never run", async () => {
-    const run = await faultedClose("stop", "node client", stopsAtFirstFailure);
+    const run = await faultedClose(await database(), "stop", "node client", stopsAtFirstFailure);
     expect(run.steps).toEqual(["module API", "the stop's waits", "core transport", "transport reader", "node client"]);
     // The refusal's cleanup stops at its first step; the later stop()'s close stops at the same step.
-    const refused = await faultedClose("refusal", "core transport", stopsAtFirstFailure);
+    const refused = await faultedClose(await database(), "refusal", "core transport", stopsAtFirstFailure);
     expect(refused.steps).toEqual(["core transport", "module API", "the stop's waits", "core transport"]);
   }, 60_000);
 });
@@ -533,21 +559,28 @@ describe.each([
   }, 120_000);
 });
 
-describe("L14: aborting signal stops like stop() (LM-9, RN-13)", () => {
+describe.each([
+  ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
+  ["PGlite in memory", null] as const,
+])("L14: aborting signal stops like stop() (LM-9, RN-13), on %s", (_name, backend) => {
   const unhandled: unknown[] = [];
   const record = (reason: unknown): void => {
     unhandled.push(reason);
   };
-  beforeAll(() => {
+  beforeAll(async () => {
     process.on("unhandledRejection", record);
-  });
-  afterAll(() => {
+    await backend?.start();
+  }, 180_000);
+  afterAll(async () => {
     process.off("unhandledRejection", record);
-  });
+    await backend?.stop();
+  }, 60_000);
+  /** A database of its own for one start. */
+  const database = async (): Promise<DatabaseParts> => (backend === null ? PGLITE_MEMORY : (await backend.database()).setting);
 
   it("while processing: stopping, ended by the signal, closed resolved; no handler on started is needed", async () => {
     const controller = new AbortController();
-    const handle = startUmbraDB({ config: { data: libraryData(PGLITE_MEMORY) }, signal: controller.signal, source: new InMemoryBlockSource({ head: 3n }) });
+    const handle = startUmbraDB({ config: { data: libraryData(await database()) }, signal: controller.signal, source: new InMemoryBlockSource({ head: 3n }) });
     await cursorReaches(handle, 3n);
     controller.abort();
     await handle.closed;
@@ -557,13 +590,13 @@ describe("L14: aborting signal stops like stop() (LM-9, RN-13)", () => {
 
   it("during startup, and with a signal aborted before the call: closed resolves, started rejects, nothing unhandled", async () => {
     const controller = new AbortController();
-    const starting = startUmbraDB({ config: { data: libraryData(PGLITE_MEMORY) }, signal: controller.signal, source: new InMemoryBlockSource({ head: 3n }) });
+    const starting = startUmbraDB({ config: { data: libraryData(await database()) }, signal: controller.signal, source: new InMemoryBlockSource({ head: 3n }) });
     controller.abort();
     await starting.closed;
     await expect(starting.started).rejects.toBeDefined();
     expect(await starting.ended).toEqual({ kind: "signal" });
     const aborted = AbortSignal.abort(new Error("the host is leaving"));
-    const early = startUmbraDB({ config: { data: libraryData(PGLITE_MEMORY) }, signal: aborted });
+    const early = startUmbraDB({ config: { data: libraryData(await database()) }, signal: aborted });
     await early.closed;
     expect(early.status().state).toBe("stopping");
     // A turn for any rejection nobody handled to be reported.
