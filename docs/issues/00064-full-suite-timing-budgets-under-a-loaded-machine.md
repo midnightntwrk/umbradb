@@ -39,13 +39,33 @@ when its file runs alone (6 files, 62 tests, right after the third run):
    `test/admin/states.test.ts`, A64 "stopped at the core's stop …" and "halted …";
    `test/private/transport-intake.test.ts`, A114 "dropped while the public cursor advances 50 heights …".
 
+The full run at the end of `start-umbradb` P8 (48 min; the load about 20, Docker Desktop's `com.docker.sailor` at about
+200 % CPU throughout, another program of the owner's beside it) had more, each passing when its file runs again (13
+files with four workers, then `test/library/network.test.ts` and `test/backbone/ledger-window.test.ts` alone):
+
+6. `test/library/network.test.ts` — all seven controls on PostgreSQL; two of them (L16, L17) again in the rerun with
+   four workers, none alone.
+7. `test/admin/admin-server.test.ts`, A62's main case "while a callback runs a 10 s synchronous loop on the main thread,
+   each endpoint answers within 1 s" (`/status never matched within 20000 ms`: still `starting`); A64 and A63 as above.
+8. `test/db/read-timeouts.test.ts`, A141 "fails pg_sleep(60) with query-timeout … within 2 s" (2,034 ms); F2 as above.
+9. `test/library/modules.test.ts`, L43 on PostgreSQL — its 120 s budget; `test/private/accepted-hash.negative-control
+   .test.ts`, A165's control on PostgreSQL — the restarted core refused `writer-lock-held`, the first writer's session
+   not yet gone when the second started.
+10. `test/backbone/ledger-window.test.ts`, A103 on PostgreSQL — its 1,440 s budget ran out; alone the file takes 90 s,
+    so this one may have been stuck rather than slow (not investigated; issue 00062 records the same test's PGlite
+    files missing in another run).
+11. Docker itself: five suites' PostgreSQL containers "not healthy after 120000ms" (`test/db/durability-probe`,
+    `test/helpers/cursor-table`, `test/private/lockstep-reads`, `test/private/privacy.negative-control`,
+    `test/containers` — whose failure left a container behind: issue 00066).
+
 ## Evidence
 
 - `test/library/network.test.ts:30-31` — `CONTROL_SETTLES_MS = 5_000`; `:79-86` the race that reports
   `startup did not settle within … ms`.
 - `test/backbone/core-health/liveness.test.ts:77` — `probedThrough`'s wait for `/status`, 20 s.
 - `test/db/prepared-statements.test.ts:119` — the test's 60 s budget.
-- The run's log and the reruns: the `start-umbradb` plan's P7 notes (`p7/logs/full-1.log`, `rerun-flaky.log`).
+- The run's log and the reruns: the `start-umbradb` plan's P7 notes (`p7/logs/full-1.log`, `rerun-flaky.log`) and P8
+  notes (`p8/logs/full-1.log`, `rerun-1.log`, `rerun-network.log`, `rerun-a103.log`).
 
 ## Suggested fix
 
