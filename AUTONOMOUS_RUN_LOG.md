@@ -455,3 +455,17 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   oracle now counts a transaction only when the same one (`pid`, `xact_start`) is open in two consecutive looks; the
   negative control still fails it. *Follow-up:* a single fact read slower than the 200 ms between looks would still be
   counted (one took 241 ms under 14 CPU burners); if it recurs, require three consecutive looks.
+- **R2 — Five code defects escaped P1–P9 and were found by stage 4's cold lane** (`plan-task-runner / claude-opus-5-5 /
+  P10.4a`; found by Codex, gpt-6-astra, P10.2). A malformed subscription id (`{"toString":null}`) threw out of the
+  socket's and the channel's callback (C-F1); a `modulesFrom` that failed to import logged, and rejected `started` with,
+  a credential the configuration held (C-F2); option reads below the top level threw synchronously (C-F3, also the spec
+  lane's F1); the private side's sends and the envelope's pings and pongs bypassed `bufferedAmount`'s limit (C-F4); a
+  closed process kept its listener on the host's signal (C-F5). *Second story:* each phase's tests were written from its
+  criteria's words, and each criterion named one path: L68's malformed messages were the shapes the listener's own test
+  had (no object where an id goes), L35 named "the channel" and its test took the core's application send, L62 listed
+  the malformed values of design §5.1 (a getter only at the top level), and the redaction tests started from validated
+  configurations — so the paths beside the named one had no test, and a review that read for "every path the
+  requirement covers" found them. The fixes add each missing path's test (seen failing first; the private side's and the
+  queue's L35 controls and C-F2's committed): `79d34d4`, `7b27e48`, `fc9e3e0`, `c2b782b`, `572bb24`. *Follow-up:*
+  none dated; Q-20 records C-F2's readings (fail closed before the user modules are known, the redacted copy, the kept
+  cause) for the owner.
