@@ -24,10 +24,15 @@ check`, `umbradb backup` and `umbradb restore` theirs — through one resolver (
 ### Requirement: LM-2 No program-level behaviour by default
 
 WHILE a process runs through `startUmbraDB`, THE system SHALL add no listener to `process`; SHALL write nothing to
-stdout or stderr unless the host gives `log`, to which the worker threads' output goes; SHALL start no child process
+stdout or stderr unless the host gives `log`, to which the worker threads' output goes — except what PGlite itself
+writes with `console.error` on its internal failure paths (a failed extension fetch, a failed file write, a protocol
+read error), which UmbraDB does not route and documents; SHALL start no child process
 unless the host calls `backup()` on PostgreSQL; SHALL open no port unless the network request asks (LM-3); SHALL look
 for and read no configuration file except `config.file`; SHALL neither end the host process nor set its exit status,
-and leave no unhandled rejection; SHALL resolve every relative path against `cwd` (default `process.cwd()`); and SHALL
+and leave no unhandled rejection — except that PGlite's runtime contains an assignment to `process.exitCode`, not
+reached on a start, a failed query or a close in memory or on a directory (a run on Node.js 24.9.0 with PGlite 0.5.10,
+2026-11-01), which planning prevents where it can and otherwise documents for PGlite's fatal paths (owner decision
+D-22); SHALL resolve every relative path against `cwd` (default `process.cwd()`); and SHALL
 read the global `process` only for `cwd()` in the Node entry, `hrtime` (heartbeat, admin), `pid` and `env` inside
 `backup()`, and `emitWarning` around the `node:sqlite` import, whose `ExperimentalWarning` it SHALL drop through one
 shared import (`design.md` §7.1, G1–G10). IF `backupAtStop` or `backupOnSignal` is set in the process's core
@@ -64,7 +69,10 @@ show the plan's addresses as bound and a `network` field naming each surface's m
 THE handle SHALL carry the module API's handlers (`api.http` for requests, `api.upgrade` for subscriptions), admin's
 (`admin.http`) and the private link's (`privateLink.accept`) from `startUmbraDB`'s return on, whether or not a surface
 listens. Mounted handlers SHALL apply UmbraDB's per-request and per-message rules as its listeners do — the request body
-limit, read timeouts, message schemas and size, the instance id rule, `/config` redaction —, while the host owns TLS,
+limit, read timeouts where the backend enforces them (DB-15: PostgreSQL; PGlite API reads are not bounded), message
+schemas and size, the instance id rule, `/config` redaction and error texts from codes only (AE-6) —, and a channel
+link SHALL apply the link's as the socket link does (PP-4's message schemas, confined reads, `duplicate-instance`,
+the reader login's privilege check), while the host owns TLS,
 authentication, Origin policy, connection and rate limits. Every module-API answer UmbraDB writes, mounted or on its
 listener, SHALL carry the headers of RN-16.
 

@@ -21,8 +21,9 @@ for its own reason with the fault put back. Database criteria run on PostgreSQL 
 
 - **L1** `[CI][NEG]` Start → blocks → `backup()` (PGlite) → `stop()` adds no listener to `process`, for any event.
   (LM-2)
-- **L2** `[CI][NEG]` The same run without `log` writes nothing to stdout or stderr, with PGlite in memory, a PGlite
-  directory (the `node:sqlite` import) and PostgreSQL. (LM-2)
+- **L2** `[CI][NEG]` The same run without `log`, and a refused start, a failed SQL statement and a halt, write nothing
+  to stdout or stderr, with PGlite in memory, a PGlite directory (the `node:sqlite` import) and PostgreSQL. (PGlite's
+  own `console.error` on its internal failure paths is LM-2's documented exception, not exercised here.) (LM-2)
 - **L3** `[CI][NEG]` The `node:sqlite` `ExperimentalWarning` is dropped; another `ExperimentalWarning` emitted while
   the wrapper is installed reaches the host's listeners; a host that replaced `process.emitWarning` meanwhile keeps its
   replacement; two overlapping PGlite directory acquisitions, finishing in either order, share one import and leave
@@ -34,8 +35,9 @@ for its own reason with the fault put back. Database criteria run on PostgreSQL 
 - **L6** `[CI][NEG]` No listening socket exists without a request. (LM-2, LM-3)
 - **L7** `[CI][NEG]` No configuration file is looked for or read except `config.file`: a `umbradb.config.ts` in `cwd`
   is not read. (LM-2, CF-1)
-- **L8** `[CI]` `process.exitCode` is unchanged after a refused start, a halt and a stop. (LM-2; PGlite's startup
-  path: owner decision D-22)
+- **L8** `[CI][NEG]` `process.exitCode` is unchanged after a start, a refused start, a failed SQL statement, a halt and a
+  stop, in memory, on a PGlite directory and on PostgreSQL; the negative control sets it in the engine's stop. (PGlite's
+  fatal paths are LM-2's documented exception, owner decision D-22.) (LM-2)
 - **L9** `[FAULT][NEG]` A close step that rejects is logged, later steps run, `closed` resolves, and no rejection is
   unhandled — in `stop()`'s close, startup's refusal cleanup, and a configuration refusal's end. (LM-2)
 - **L10** `[CI]` With `cwd` ≠ `process.cwd()`: a `{ file }`, a `{ data }` PGlite path and a backup target resolve
@@ -77,8 +79,9 @@ for its own reason with the fault put back. Database criteria run on PostgreSQL 
   (LM-3, AE-5)
 - **L23** `[CI]` Every module-API answer, mounted and on the listener, carries `X-Umbra-Version`;
   `X-Umbra-Config-Hash` is absent before the hash exists and present after. (LM-4, RN-16)
-- **L24** `[CI][NEG]` Mounted `api.http`: a body over the limit gets 413; a read past its timeout fails as on the
-  listener. (LM-4)
+- **L24** `[CI][NEG]` Mounted `api.http`: a body over the limit gets 413 on both backends; on PostgreSQL, a read past
+  `apiReadTimeoutMs` fails `query-timeout` as on the listener; on PGlite the read is not bounded, as on the listener
+  (DB-15). (LM-4, DB-15)
 
 ## 3. Lifecycle
 
@@ -185,15 +188,17 @@ for its own reason with the fault put back. Database criteria run on PostgreSQL 
   codes, `callback-error` and `listen-failed` added to `ERROR_CODES`, and the removed exports; the module guide's
   "try your module" recipe (removed with issue 00053) is restored, using `startUmbraDB` with L54's fixture. (LS-1)
 
-## 8. Mounted admin, the database, and the additions of the review
+## 8. Mounted admin, the database, security through the new paths, and the review's additions
 
 - **L60** `[CI]` In one host, a second handle on a PGlite directory refuses `writer-lock-held` while the first is
   open, and opens after the first handle's `closed`. (LM-2)
-- **L61** `[CI][NEG]` Mounted admin's `/status` and `/config`, with no admin listener, carry the same
-  `core_digest.tables` rows, database version and identity anchor as a listening admin's on the same database: after
-  startup's open with no commit yet (a restart on a database with a cursor), after commits, and after a forced
-  interleaving in which a commit lands during a read; no database read runs per request; the heartbeat's timer does not
-  keep the host's event loop alive. (LM-5, AE-1, AE-5)
+- **L61** `[CI][NEG]` Mounted admin's `/status` and `/config`, with no admin listener, reach the expected
+  `core_digest.tables` rows, database version and identity anchor — read independently from the database at the
+  committed height through a separate read handle — after startup's open with no commit yet (a restart on a database
+  with a cursor), after commits, and after a forced interleaving in which a commit lands during a fact read; a
+  listening admin on the same database reaches the same expected values; the negative control disables the follow-up
+  read after an interleaved commit and fails the freshness assertion; no database read runs per request; the
+  heartbeat's timer does not keep the host's event loop alive. (LM-5, AE-1, AE-5)
 - **L62** `[CI][NEG]` A malformed option — `config` with neither `file` nor `data`, `modules` not an array,
   `modulesFrom` not a `URL`, `network: "configured"`, `api: { port: 1.5 }`, `publicSide: { channels: false }`, an
   unknown `network` key — makes `started` reject with `invalid-configuration`, reason `invalid-option`, naming the
@@ -202,6 +207,20 @@ for its own reason with the fault put back. Database criteria run on PostgreSQL 
   the URL; one whose `modules` export is missing, or not an array, is refused `modules-not-a-list`. (LM-7)
 - **L64** `[CI]` `umbradb run` on a private configuration that writes `listen.privateLink` starts as today, opens no
   listener for it and refuses nothing; `startUmbraDB` on the same configuration does the same. (LM-3, CF-4)
+- **L65** `[CI][NEG]` Through mounted `admin.http`, with a password in `database` and in `transportReader`, a TLS key
+  and a node URL with credentials: `/config` shows each as `[redacted]`; a callback that throws an error whose message
+  holds the database password makes `/status` show the code, height, module and point and the password nowhere; the
+  negative control serves the raw settings and fails. The same holds through mounted `api.http` error answers. (LM-4,
+  AE-6)
+- **L66** `[CI][NEG]` Over a channel link (public `{ channels: true }`, private `{ connect }`): a `read` whose
+  statement is not one read is answered `read-refused` naming it and runs nothing (A172's cases); a message failing its
+  schema, or with an unknown `v` or `type`, closes the channel; a second `hello` with a connected instance id is
+  refused `duplicate-instance`; an instance id outside the id rule closes the channel; each negative control (the check
+  removed on the channel path only) fails. (LM-6, PP-4)
+- **L67** `[CI][NEG]` On PostgreSQL with `publicSide: { channels: true }`: a `transportReader` login that is a
+  superuser, holds `CREATEROLE`, is a member of the writer's login or holds `INSERT` on a public table refuses startup
+  `transport-reader-can-write`, as A177 does on the socket link; the negative control skips the check for channels and
+  fails. (LM-3, LM-6, CF-4)
 
 ## 9. `core-arch` criteria rewritten by this change
 
@@ -257,10 +276,10 @@ the `network` field of `/config` (`design.md` §5.2); A66's text is unchanged.
 |---|---|
 | LM-1 | L12, L32, L53, L54, L55, L56, L57, L62 |
 | LM-2 | L1–L11, L13, L47, L60 |
-| LM-3 | L6, L15–L22, L62, L64 |
-| LM-4 | L23, L24 |
+| LM-3 | L6, L15–L22, L62, L64, L67 |
+| LM-4 | L23, L24, L65 |
 | LM-5 | L25–L29, L61 |
-| LM-6 | L33–L42 |
+| LM-6 | L33–L42, L66, L67 |
 | LM-7 | L43–L46, L63 |
 | LM-8 | L48, L49 |
 | LM-9 | L14, L21, L29, L30, L32, L50, L52 |

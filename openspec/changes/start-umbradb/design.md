@@ -1,7 +1,7 @@
 # Design — START-UMBRADB: UmbraDB as a library
 
 Section numbers of `core-arch` are cited as `core-arch design §n`. Requirement ids are this change's (`LM-*`) or
-`core-arch`'s (`AE-*`, `RN-*`, `CF-*`, …); criteria are this change's `L1` … `L64` (`acceptance.md`).
+`core-arch`'s (`AE-*`, `RN-*`, `CF-*`, …); criteria are this change's `L1` … `L67` (`acceptance.md`).
 
 ## 0. Baseline
 
@@ -245,7 +245,10 @@ request gets wrong or leaves unsafe (N2–N5); settings that cannot take effect 
   with the link given in the request (`publicSide: { channels: true }`, or `{ host, port }`) the plan requires it →
   `private-link-misconfigured` (`reader-missing`).
 - **N6.** UmbraDB's per-request and per-message rules apply in every mode: the request body limit (413), read
-  timeouts, message schemas and size, the instance id rule, `/config` redaction.
+  timeouts where the backend enforces them (DB-15: on PostgreSQL; PGlite API reads are not bounded, mounted or not),
+  message schemas and size, the instance id rule, `/config` redaction and error texts from codes (AE-6); over a channel
+  link, the link's own rules as on the socket link: PP-4's schemas, confined reads (`read-refused`),
+  `duplicate-instance`, and the reader login's privilege check (`transport-reader-can-write`).
 - **N7.** Connection rules belong to the socket's owner: with mounted handlers or a channel, the host owns TLS,
   authentication, Origin policy, connection and rate limits.
 - **N8.** Headers (owner decision D-17): every module-API answer UmbraDB writes — on its own listener and from mounted
@@ -370,7 +373,7 @@ export interface PrivateLinkChannel {
   failure to import it refuses with `invalid-configuration`, reason `load-failed`, naming the URL; a `modules` export
   that is missing or not an array, reason `modules-not-a-list` (`src/config/load.ts:25-31`).
 - A `{ file }` is evaluated once per host process on the main thread (ESM cache); module files must not change while
-  UmbraDB runs. A check that both threads loaded the same modules is issue 00057; the worker's start, restart and
+  UmbraDB runs, and a module must export the same declarations in every thread (not, for example, by `isMainThread`). A check that both threads loaded the same modules is issue 00057; the worker's start, restart and
   failure paths are unchanged.
 - **The browser demo:** its ledger worker has no user-module source yet; a ledger-task user module is refused there
   (`ledger-tasks-need-modules-from`), filed as an issue in `docs/issues/` when the demo change lands.
@@ -382,11 +385,11 @@ export interface PrivateLinkChannel {
 | # | Guarantee | Change at the base commit |
 |---|---|---|
 | G1 | No listener is added to `process` | the SIGUSR2 default (`?? nodeSignals()`, `src/runner/process.ts:904`) becomes the command's port |
-| G2 | Nothing on stdout/stderr unless the host gives `log` | the default log `process.stderr` is removed; the ledger and admin workers start with `stdout: true, stderr: true` (`src/ledger/worker/host.ts:299`, `src/admin/server.ts:86`), drained to `log` or dropped (the command's `workerOutput` port keeps them inherited); the `node:sqlite` `ExperimentalWarning` is dropped (owner decision D-15) through **one shared import**: the first PGlite directory to need `node:sqlite` starts one `import("node:sqlite")` (`src/db/pglite-lock.ts:184-187`) that every later or overlapping acquisition awaits; `process.emitWarning` is wrapped once for that import's lifetime, dropping only that warning, and restored when it settles, unless the host replaced it meanwhile (kept). **Known limit, unconfirmed (read from the bundle, not run):** PGlite itself calls `console.error` on some error paths (`node_modules/@electric-sql/pglite/dist/index.js`) — documented, not routed |
+| G2 | Nothing on stdout/stderr unless the host gives `log` | the default log `process.stderr` is removed; the ledger and admin workers start with `stdout: true, stderr: true` (`src/ledger/worker/host.ts:299`, `src/admin/server.ts:86`), drained to `log` or dropped (the command's `workerOutput` port keeps them inherited); the `node:sqlite` `ExperimentalWarning` is dropped (owner decision D-15) through **one shared import**: the first PGlite directory to need `node:sqlite` starts one `import("node:sqlite")` (`src/db/pglite-lock.ts:184-187`) that every later or overlapping acquisition awaits; `process.emitWarning` is wrapped once for that import's lifetime, dropping only that warning, and restored when it settles, unless the host replaced it meanwhile (kept). **Known limit:** PGlite itself calls `console.error` on some internal failure paths (`node_modules/@electric-sql/pglite/dist/index.js`); a run on Node.js 24.9.0 (2026-11-01) saw none on a start, a failed query or a close; those failure paths are **unconfirmed** and documented, not routed; LM-2 states the exception |
 | G3 | No child process unless the host calls `backup()` on PostgreSQL (`pg_dump --version`, `pg_dump`) | `backupAtStop`, `backupOnSignal` refused in library mode (class A) |
 | G4 | No port unless the request asks (§5) | the admin default listener and the `listen.*` handling move to the plan |
 | G5 | No configuration file is looked for or read except `config.file` | the `umbradb.config.ts` default lookup is the command's only |
-| G6 | UmbraDB never ends the host process or sets its exit status: no `process.exit`, no `process.exitCode`, no unhandled rejection | `signal` abort → `stop()` with a `catch`. PGlite 0.5.10's runtime contains an assignment to `process.exitCode` in its startup path; whether it is reached is **unconfirmed**. Planning first looks for a way to stop it (owner decision D-22); otherwise it is documented as a known limit |
+| G6 | UmbraDB never ends the host process or sets its exit status: no `process.exit`, no `process.exitCode`, no unhandled rejection | `signal` abort → `stop()` with a `catch`. PGlite 0.5.10's runtime contains an assignment to `process.exitCode`; a run on Node.js 24.9.0 (2026-11-01) showed it **not reached** on a start, a failed query or a close, in memory and on a directory. Its fatal paths (a WASM abort) are **unconfirmed**: planning prevents the assignment where it can, otherwise documents it for those paths (owner decision D-22); LM-2 states the exception |
 | G7 | `closed` always resolves; every close step runs even if one fails; failures go to `log` | one close helper (each step isolated) for `#close`, startup's refusal cleanup and `#endItself`; the original failure is kept |
 | G8 | Relative paths resolve against `cwd` only | the PGlite path, the backup target, the file lookup — all through `EngineInput.cwd` |
 | G9 | Threads: the ledger worker only when the build needs the ledger; the admin thread only when admin listens | — |

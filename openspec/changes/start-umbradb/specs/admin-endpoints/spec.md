@@ -33,7 +33,7 @@ answer 200 while the last tick is within the liveness timeout (default 30 s) and
 mounted admin handler runs on the host's thread, so it cannot observe a blocked thread: its `GET /health/live` SHALL
 answer 200 whenever it answers, with `"thread": "host"` and the heartbeat's age (LM-5). A callback that awaits I/O (the
 database, the network, a worker) SHALL NOT stop the heartbeat; a callback that blocks the main thread with computation
-longer than the liveness timeout SHALL make `/health/live` answer 503, because the process is then stuck by definition —
+longer than the liveness timeout SHALL make `/health/live` on the admin listener answer 503, because the process is then stuck by definition —
 long computation belongs in a worker thread (as the ledger's does, project 3).
 
 #### Scenario: A long awaiting callback does not fail liveness
@@ -41,8 +41,9 @@ long computation belongs in a worker thread (as the ledger's does, project 3).
 - **THEN** `/health/live` answers 200 throughout
 
 #### Scenario: A blocking callback fails liveness, and the endpoints still answer
-- **WHEN** an `on-compute` callback runs a 60 s synchronous loop
-- **THEN** `/health/live` answers 503 after 30 s, and every endpoint keeps answering within 1 s
+- **WHEN** an `on-compute` callback runs a 60 s synchronous loop in a process whose admin listens
+- **THEN** `/health/live` on the admin listener answers 503 after 30 s, and every endpoint on it keeps answering within
+  1 s; a mounted admin handler, on the blocked thread, answers only once the loop ends
 
 ### Requirement: AE-3 States and conditions
 
@@ -53,7 +54,7 @@ with zero or more conditions — `waiting-for-node`, `waiting-for-lockstep`, `fi
 heights, BK-1: with `since` and `by`, `pause` for `UmbraDBHandle.pause()` or `signal` for a backup on SIGUSR2; owner
 decision Q174). A refused or halted process SHALL stay up and live, except that IF the build's module declarations fail
 their validation (MD-2), or the configuration cannot be loaded, is not plain data (CF-1) or fails its schemas (CF-2,
-CF-3), THEN the process SHALL log every finding with its path and exit with a non-zero code, having served no admin
+CF-3), THEN `umbradb run` SHALL log every finding with its path and exit with a non-zero code, having served no admin
 endpoint (owner decisions Q137, Q148). A library process refused at its configuration step — those cases, and the
 library's option and network-plan checks (LM-10) — SHALL end `refused` with `closed` resolved and no admin listener
 opened, its mounted admin handler still answering (LM-5). **Lag** is, for the core, the node's finalized head minus the
@@ -70,9 +71,10 @@ cursor and, for a private process, the public cursor minus its own.
   loop run again
 
 #### Scenario: A refused configuration ends the process
-- **WHEN** startup refuses because a setting fails its schema (`livenessTimeoutMs: "30s"`)
+- **WHEN** `umbradb run` refuses at startup because a setting fails its schema (`livenessTimeoutMs: "30s"`)
 - **THEN** every finding is logged with its path, the process exits with a non-zero code, and no admin listener was
-  opened
+  opened; started with `startUmbraDB`, the same configuration ends `refused` with `closed` resolved, the findings in
+  `started`'s rejection and on `log`, and no admin listener opened
 
 #### Scenario: A fault of the build's declarations ends the process
 - **WHEN** startup refuses because the configuration file exports `modules = [stats, stats]` (`duplicate-id`, MD-2)

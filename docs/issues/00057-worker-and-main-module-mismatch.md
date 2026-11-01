@@ -2,9 +2,10 @@
 
 - **Status:** OPEN
 - **Area:** logic
-- **Severity:** low — both threads import the same file (or URL); they differ only if the file changes while UmbraDB
-  runs. A task missing on the worker fails when it is invoked; a task whose body changed under the same id, version,
-  name and `needsState` is not detected at all.
+- **Severity:** low — both threads import the same file (or URL); they differ if the file changes while UmbraDB runs,
+  or if the module exports different declarations by execution context (for example by `isMainThread`,
+  `node_modules/@types/node/worker_threads.d.ts:89`). A task missing on the worker fails when it is invoked; a task
+  whose body differs under the same id, version, name and `needsState` is not detected at all.
 - **Effort:** medium — a manifest check, a readiness barrier in `LedgerHost`, and its restart, failure and stop
   paths.
 - **GitHub:** NOT IN GITHUB ISSUE
