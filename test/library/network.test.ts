@@ -1,6 +1,3 @@
-import { existsSync } from "node:fs";
-import { createServer } from "node:net";
-import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { coreEntry } from "../../src/config/entries.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
@@ -12,6 +9,7 @@ import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../
 import { freePort } from "../runner/process-harness.js";
 import { coreSettings, startProcess } from "../runner/process-build.js";
 import { libraryData } from "./library-fixtures.js";
+import { commandRefusalProblems, CONTROL_SETTLES_MS, type Expected, listeningSockets, refusedProblems } from "./network-refusals.js";
 
 /**
  * The network plan's refusals through `startUmbraDB` `[CI][NEG]` (L15–L18): a host's request at odds with the
@@ -21,27 +19,11 @@ import { libraryData } from "./library-fixtures.js";
  * listening socket in this process, the addresses involved still free), no database (no PGlite directory, no schema on
  * PostgreSQL). On PostgreSQL 18 (Docker) and a PGlite directory. Each case's committed negative control starts the
  * engine with the facade's exact input but the plan without that rule (`networkRules`): the oracle then fails, for the
- * rule's own reason. The plan's every row is in `test/runner/network-plan.test.ts`. [LM-3, LM-10, L15–L18]
+ * rule's own reason. L18's schema case (a written `listen.privateLink`, no `transportReader`) is refused through the
+ * schema by `startUmbraDB` and by `umbradb run`; its control, the schema's rule removed, is
+ * `./network.negative-control.test.ts`. The oracle is `./network-refusals.ts`'s. The plan's every row is in
+ * `test/runner/network-plan.test.ts`. [LM-3, LM-10, L15–L18]
  */
-
-/** How long a refused process may take to end by itself on a loaded machine. */
-const ENDS_WITHIN_MS = 30_000;
-
-/** How long a negative control's startup is given to settle: a class-A refusal takes well under it. */
-const CONTROL_SETTLES_MS = 5_000;
-
-/** The listening sockets of this process (each is a `TCPServerWrap`). */
-const listeningSockets = (): number =>
-  process.getActiveResourcesInfo().filter((resource) => resource === "TCPServerWrap").length;
-
-/** Whether `port` on 127.0.0.1 is free: nothing listens there. */
-function portFree(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const server = createServer();
-    server.once("error", () => resolve(false));
-    server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
-  });
-}
 
 /** A private process's configuration data on `database`: the tests' network, no `node`, `extra` settings. */
 function privateData(database: DatabaseParts, extra: Readonly<Record<string, unknown>> = {}) {
@@ -52,72 +34,6 @@ function privateData(database: DatabaseParts, extra: Readonly<Record<string, unk
 const connect = async (): Promise<PrivateLinkChannel> => {
   throw new Error("the plan's tests never connect");
 };
-
-/**
- * What a case expects: the refusal's code and reason (or, for the schema's refusal, the path of its finding), and the
- * ports it names, which must stay free.
- */
-interface Expected {
-  readonly code: "network-address-conflict" | "private-link-misconfigured" | "invalid-configuration";
-  readonly reason: NetworkRuleName | null;
-  readonly finding?: string;
-  readonly ports: readonly number[];
-}
-
-/**
- * The oracle (see the module comment): every problem of `handle`, started on `db`, against `expected`; none when it was
- * refused so and opened nothing. `sockets` is this process's count of listening sockets before the start.
- */
-async function refusedProblems(
-  handle: UmbraDBHandle,
-  db: ProcessDatabase,
-  expected: Expected,
-  sockets: number,
-  settlesMs = ENDS_WITHIN_MS,
-): Promise<string[]> {
-  const problems: string[] = [];
-  const settled = await Promise.race([
-    handle.started.then(
-      () => ({ error: null }),
-      (error: unknown) => ({ error }),
-    ),
-    sleep(settlesMs, "pending" as const),
-  ]);
-  if (settled === "pending") problems.push(`startup did not settle within ${settlesMs} ms`);
-  else if (settled.error === null) problems.push("startup completed");
-  else {
-    const error = settled.error as { code?: unknown; details?: { reason?: unknown; findings?: readonly { path?: unknown }[] } };
-    if (error.code !== expected.code) problems.push(`refused with ${String(error.code)}, not ${expected.code}`);
-    else if (expected.reason !== null && error.details?.reason !== expected.reason) {
-      problems.push(`refused for ${String(error.details?.reason)}, not ${expected.reason}`);
-    }
-    if (expected.finding !== undefined && !(error.details?.findings ?? []).some((one) => one.path === expected.finding)) {
-      problems.push(`no finding at ${expected.finding}`);
-    }
-  }
-  const during = listeningSockets();
-  if (during !== sockets) problems.push(`${during - sockets} listening socket(s) while it ran`);
-  for (const port of expected.ports) if (!(await portFree(port))) problems.push(`port ${port} is bound`);
-  // Only a refusal of the configuration step ends the process by itself: one that started, or was refused later, is
-  // given a moment only, its problem already found.
-  const patience = problems.length === 0 ? ENDS_WITHIN_MS : 500;
-  if (settled === "pending" || !(await Promise.race([handle.closed.then(() => true), sleep(patience, false)]))) {
-    problems.push("the process did not end by itself");
-  }
-  const status = handle.status();
-  if (status.state !== "refused") problems.push(`the process is ${status.state}, not refused`);
-  if (status.reason?.code !== expected.code) problems.push(`its reason is ${status.reason?.code ?? "none"}`);
-  const { listening } = status;
-  if (listening.api !== null || listening.admin !== null || listening.privateLink !== null) {
-    problems.push(`listening ${JSON.stringify(listening)}`);
-  }
-  if (db.directory !== undefined && existsSync(db.directory)) problems.push("its database directory exists");
-  if (db.directory === undefined) {
-    const [row] = await db.query("SELECT to_regnamespace('core_chain') IS NULL AS fresh");
-    if (row?.fresh !== true) problems.push("its PostgreSQL database was migrated");
-  }
-  return problems;
-}
 
 /** The facade over the engine started with `options`' exact input but the network plan without `rule`. [L15–L18] */
 function startWithout(rule: NetworkRuleName, options: UmbraDBOptions): UmbraDBHandle {
@@ -342,5 +258,8 @@ describe("the reader login of a public link given in the request, on PostgreSQL 
       null,
     );
     expect(problems).toEqual([]);
+    // The command's half: umbradb run on the same configuration, written to its file. [L18, A177]
+    const db = await backend.database();
+    expect(await commandRefusalProblems(db.setting, written, "entries[0].config.transportReader")).toEqual([]);
   }, 240_000);
 });

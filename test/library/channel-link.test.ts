@@ -21,9 +21,10 @@ import { PrivateTransport } from "../../src/private/private-transport.js";
  * - **L20** (PostgreSQL): the link's reads over channels run on the reader login — `current_user` in a read is
  *   `core.transportReader`'s.
  * - **L34** `[FAULT][NEG]`: on a controlled clock, a peer that stops answering pings is ended `no-pong` at the second
- *   interval, not before its first ping is outstanding; its instance id is free and a reconnect is answered. The
- *   committed negative control is the same run with the endpoints' interval never falling due (no liveness): the dead
- *   peer stays connected, and the oracle fails.
+ *   interval, not before its first ping is outstanding; its instance id is free: a reconnect with it is answered
+ *   `hello-ack` with `refused: null`. The committed negative control is the same run with the endpoints' interval never
+ *   falling due (no liveness): the dead peer stays connected, its id held (the reconnect refused `duplicate-instance`),
+ *   and the oracle fails.
  * - **L35** `[NEG]`: a channel whose `bufferedAmount` is above `MAX_BUFFERED_BYTES` is closed 1008 `too-slow` at the
  *   core's next send; at the limit it is not. Negative control: the check's limit raised beyond any amount (the link's
  *   limit seam, channels only): the oracle fails.
@@ -156,13 +157,16 @@ async function livenessRun(db: TestDatabase, clock: { readonly timers: LinkTimer
     const atFirst = { pings: peer.pings, end: peer.end };
     await tick(PING_INTERVAL_MS);
     const atSecond = { pings: peer.pings, end: peer.end };
-    // A reconnect with the same id.
-    const again = await greeted(core, "dead-peer").then(
-      (peer) => ({ answered: true, peer }),
-      () => ({ answered: false, peer: null }),
-    );
-    again.peer?.ended.catch(() => undefined);
-    return { beforeFirst, atFirst, atSecond, again: again.answered, lines: [...core.lines] };
+    // A reconnect with the same id: its hello-ack, whose `refused` is null only when the id was freed (a connected id
+    // is refused duplicate-instance, L66).
+    const [coreEnd, peerEnd] = channelPair();
+    core.handle.privateLink.accept(coreEnd);
+    const second = rawPeer(peerEnd);
+    second.ended.catch(() => undefined);
+    second.send(peerHello("dead-peer"));
+    const ack = await second.next("hello-ack").catch(() => null);
+    const again = ack === null ? null : { refused: "refused" in ack ? ack.refused : "absent" };
+    return { beforeFirst, atFirst, atSecond, again, lines: [...core.lines] };
   } finally {
     await core.handle.stop();
   }
@@ -178,7 +182,8 @@ function livenessProblems(run: Awaited<ReturnType<typeof livenessRun>>): string[
   }
   if (!run.lines.includes("transport: closed the connection of dead-peer: no-pong")) problems.push("no-pong was not logged");
   if (!run.lines.includes("transport: instance dead-peer disconnected")) problems.push("its id was not freed");
-  if (!run.again) problems.push("a reconnect with its id was not answered");
+  if (run.again === null) problems.push("a reconnect with its id was not answered");
+  else if (run.again.refused !== null) problems.push(`a reconnect with its id was refused ${String(run.again.refused)}`);
   return problems;
 }
 
@@ -197,6 +202,8 @@ describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name (LM-6)", 
     const problems = livenessProblems(await livenessRun(await backend.database("public"), STOPPED_CLOCK));
     expect(problems.some((problem) => problem.startsWith("at the first interval it was not pinged"))).toBe(true);
     expect(problems.some((problem) => problem.startsWith("at the second interval it was not ended no-pong"))).toBe(true);
+    // The dead peer still holds its id: the reconnect is answered, refused duplicate-instance.
+    expect(problems).toContain("a reconnect with its id was refused duplicate-instance");
   }, 120_000);
 
   it("L35: a bufferedAmount above MAX_BUFFERED_BYTES closes the channel too-slow at the core's next send; at the limit it does not", async () => {

@@ -16,6 +16,7 @@ import { startProcess } from "../runner/process-build.js";
 import { TASK_ROWS } from "./fixtures/task-modules.js";
 import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library-fixtures.js";
 import { exchange, mountHandlers } from "./mounted-fixtures.js";
+import { L63_CASES, moduleListProblems } from "./module-list-cases.js";
 
 /**
  * A library process's user modules (LM-7): `modules` objects, or `modulesFrom`, a module URL both threads import; a
@@ -30,8 +31,9 @@ import { exchange, mountHandlers } from "./mounted-fixtures.js";
  *   halts at the first height.
  * - L46: `modulesFrom` with a ledger task: the task runs in the ledger worker (its item names the thread).
  * - L63 `[NEG]`: a `modulesFrom` that fails to import is refused `load-failed`, one whose `modules` export is missing or
- *   not an array `modules-not-a-list`, each naming the URL; the control is a configuration file's export, where a
- *   missing one is an empty list.
+ *   not an array `modules-not-a-list`, each naming the URL (the cases and oracle are `./module-list-cases.ts`'s); a
+ *   configuration file's export, unlike it, is optional. The negative controls, `./modules.negative-control.test.ts`:
+ *   each of `loadModuleList`'s three rules removed fails the oracle on its own cases.
  * - CF-4 `[NEG]` on the refusals that come before the configuration is validated — a `modulesFrom` that cannot be
  *   imported, a user module's own refusal, a `{ file }` whose `modules` export is no list: a credential the
  *   configuration holds (`database.password`, the node URL's) that the refusal's text would show is shown nowhere — not
@@ -195,24 +197,12 @@ describe.each(PROCESS_BACKENDS)("L46: modulesFrom with a ledger task, on $name",
 });
 
 describe("L63: a modulesFrom that cannot give its list is refused, naming the URL (LM-7)", () => {
-  it.each([
-    ["modules-throws.ts", "load-failed"],
-    ["modules-missing.ts", "modules-not-a-list"],
-    ["modules-not-a-list.ts", "modules-not-a-list"],
-    ["no-such-module.ts", "load-failed"],
-  ])("%s: invalid-configuration, %s", async (name, reason) => {
-    const url = new URL(name, FIXTURES);
-    const handle = startUmbraDB({ config: { data: libraryData(PGLITE_MEMORY) }, modulesFrom: url });
-    const error = await handle.started.then(
-      () => null,
-      (caught: { code: string; message: string; details: { reason: string; file: string } }) => caught,
-    );
-    expect(error).toMatchObject({ code: "invalid-configuration", details: { reason, file: url.href } });
-    expect(error?.message).toContain(url.href);
-    await closedByItself(handle);
+  it.each(L63_CASES)("%s: invalid-configuration, %s", async (name, reason) => {
+    // The oracle (`./module-list-cases.ts`): refused with the reason, naming the URL, ended by itself.
+    expect(await moduleListProblems(name, reason)).toEqual([]);
   }, 60_000);
 
-  it("negative control: a configuration file's export is optional — the same missing export reads as no modules", async () => {
+  it("a configuration file's export is optional, unlike modulesFrom's: the same missing export reads as no modules", async () => {
     const dir = mkdtempSync(join(tmpdir(), "umbradb-library-l63-"));
     try {
       const file = join(dir, "no-modules.config.ts");

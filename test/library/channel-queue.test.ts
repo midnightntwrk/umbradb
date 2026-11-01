@@ -6,13 +6,12 @@ import { type CarrierConnection, type CarrierEvents, type PrivateCarrier, Privat
 import { defineModule, type ModuleDeclaration } from "../../src/modules/declaration.js";
 import { MAX_BUFFERED_BYTES, PING_INTERVAL_MS } from "../../src/private/core-transport.js";
 import { CoreChannels } from "../../src/private/core-channels.js";
-import { startUmbraDB } from "../../src/library/start-umbradb.js";
-import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { PrivateLinkChannel } from "../../src/library/channels.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS } from "../private/backends.js";
 import { channelPair, controlledTimers, type ControlledTimers, peerHello, rawPeer, type RawPeer, type TestEnd, until } from "./channel-fixtures.js";
 import { channelCore, channelPrivate, linkTo, type Logged } from "./channel-processes.js";
-import { cursorReaches, libraryData } from "./library-fixtures.js";
+import { cursorReaches } from "./library-fixtures.js";
+import { l39Problems } from "./refused-channels.js";
 
 /**
  * The channel link's queue and its ends `[CI]`, on PostgreSQL 18 (Docker) and PGlite 0.5.10 [LM-6, N9]:
@@ -25,7 +24,8 @@ import { cursorReaches, libraryData } from "./library-fixtures.js";
  *   lifted (the channel link's seam), the 65th is queued, and the oracle fails.
  * - **L39** `[NEG]`: `accept()` on a process not accepting channels (no channel request), after a refusal and after
  *   `stop()`: the channel closes `private-link-not-accepting`, a line is logged, nothing throws (a carrier that throws
- *   included). Negative control: the same oracle on a process that accepts channels fails.
+ *   included; the run and oracle are `./refused-channels.ts`'s). Negative control,
+ *   `./channel-queue.negative-control.test.ts`: the not-accepting paths keeping the channel fail the same oracle.
  * - **L40**: a `connect()` that rejects is retried with the back-off (1 s, doubling up to `backoffCeilingMs`), each
  *   logged, until one resolves; the private process then follows.
  * - **L41** `[NEG]`: a `connect()` that never settles does not delay `stop()`; a channel it resolves after `stop()` is
@@ -211,63 +211,8 @@ describe.each(PRIVATE_BACKENDS)("the channel link's queue and ends on $name (LM-
   }, 120_000);
 
   it("L39: accept() on a process not accepting channels, or after stop(): closed private-link-not-accepting, a line logged, nothing thrown", async () => {
-    const lines: string[] = [];
-    const plain = startUmbraDB({
-      config: { data: libraryData((await backend.database("public")).setting) },
-      source: new InMemoryBlockSource({ head: 2n }),
-      log: (line) => lines.push(line),
-    });
-    try {
-      await plain.started;
-      const [coreEnd, peerEnd] = channelPair();
-      const peer = rawPeer(peerEnd);
-      expect(() => plain.privateLink.accept(coreEnd)).not.toThrow();
-      expect(await peer.ended).toEqual({ code: 1008, reason: "private-link-not-accepting" });
-      expect(lines).toContain("private link: a channel was closed (private-link-not-accepting): this process accepts no channels");
-      // A carrier that throws at every call: nothing reaches the host.
-      const throwing = {
-        send: () => {
-          throw new Error("send");
-        },
-        onMessage: () => {
-          throw new Error("onMessage");
-        },
-        onClose: () => {
-          throw new Error("onClose");
-        },
-        close: () => {
-          throw new Error("close");
-        },
-      } satisfies PrivateLinkChannel;
-      expect(() => plain.privateLink.accept(throwing)).not.toThrow();
-    } finally {
-      await plain.stop();
-    }
-    const core = channelCore(await backend.database("public"), { head: 2n });
-    await core.handle.started;
-    const open = accepted(core);
-    open.peer.send(peerHello("open-at-stop"));
-    await open.peer.next("hello-ack");
-    await core.handle.stop();
-    // The stop closed the open session as a socket link's does.
-    expect(await open.peer.ended).toEqual({ code: 1001, reason: "the core is stopping" });
-    const after = accepted(core);
-    expect(await after.peer.ended).toEqual({ code: 1008, reason: "private-link-not-accepting" });
-    expect(core.lines).toContain("private link: a channel was closed (private-link-not-accepting): the process is stopping");
-  }, 120_000);
-
-  it("L39 negative control (committed): the same oracle on a process that accepts channels fails", async () => {
-    const core = channelCore(await backend.database("public"), { head: 2n });
-    try {
-      await core.handle.started;
-      const one = accepted(core);
-      one.peer.send(peerHello("accepted"));
-      await one.peer.next("hello-ack");
-      expect(one.peer.end).toBeNull();
-      expect(core.lines.some((line) => line.includes("private-link-not-accepting"))).toBe(false);
-    } finally {
-      await core.handle.stop();
-    }
+    // The run and its oracle (`./refused-channels.ts`): no channel request, then a channel core after its stop.
+    expect(await l39Problems(backend)).toEqual([]);
   }, 120_000);
 
   it("L40: a rejecting connect() is retried with the back-off, each attempt logged, until one resolves; the private process then follows", async () => {

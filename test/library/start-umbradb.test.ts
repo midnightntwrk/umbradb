@@ -9,8 +9,8 @@ import { lifecycleBody } from "../../src/runner/api-answers.js";
 import { startUmbraDB, type UmbraDBHandle, type UmbraDBOptions } from "../../src/library/start-umbradb.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
-import { startProcess } from "../runner/process-build.js";
 import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library-fixtures.js";
+import { closedByItself, MALFORMED, optionProblems, throwing, UNREADABLE } from "./option-cases.js";
 import { runQuietChild } from "./quiet-child.js";
 
 /**
@@ -22,8 +22,9 @@ import { runQuietChild } from "./quiet-child.js";
  * - L52: the handle has exactly design §4's members, `backup` takes one argument, `UmbraDBStarted` holds no setting, and
  *   no test seam of the engine is an option.
  * - L62 `[NEG]`: each malformed option makes `started` reject with `invalid-configuration`, reason `invalid-option`,
- *   naming the option's path, the process ending `refused` by itself; `startUmbraDB` throws in none. The negative
- *   control gives the engine the same options unchecked: none of them is refused `invalid-option`.
+ *   naming the option's path, the process ending `refused` by itself; `startUmbraDB` throws in none (the cases and the
+ *   oracle are `./option-cases.ts`'s). The negative controls, `./start-umbradb.negative-control.test.ts`: the facade
+ *   without its option check, and the facade reading the options as given, fail the same oracle.
  * - LM-1's "it never throws" for options that cannot be read as given: a getter or a proxy's trap that throws inside
  *   `config` or `network` (at any depth), a proxy as an option or as the options, a revoked proxy, a fake URL or
  *   `AbortSignal` (made with `Object.create` of its prototype, or a proxy of a real one), an array whose elements
@@ -37,19 +38,6 @@ import { runQuietChild } from "./quiet-child.js";
 
 /** The members of design §4's handle, sorted. [L52] */
 const HANDLE_MEMBERS = ["admin", "api", "backup", "closed", "ended", "pause", "privateLink", "resume", "started", "status", "stop"];
-
-/** Waits for `handle` to have closed, the process ending by itself (a configuration refusal), or fails after 30 s. */
-async function closedByItself(handle: UmbraDBHandle): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("the process did not end by itself within 30 s")), 30_000);
-  });
-  try {
-    await Promise.race([handle.closed, late]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 describe("LM-1: a module test needs nothing else", () => {
   it("startUmbraDB({ config: { data }, modules: [m], source }) on PGlite in memory reaches the in-memory head", async () => {
@@ -126,43 +114,10 @@ describe("L52: the handle and what it gives", () => {
   }, 60_000);
 });
 
-/** L62's malformed options, each with the path its refusal names. */
-const MALFORMED: readonly (readonly [string, unknown, string])[] = [
-  ["config with neither file nor data", { config: {} }, "config"],
-  ["config with both", { config: { file: "a.ts", data: {} } }, "config"],
-  ["no config", {}, "config"],
-  ["modules not an array", { config: { data: {} }, modules: "m" }, "modules"],
-  ["modulesFrom not a URL", { config: { data: {} }, modulesFrom: "./modules.ts" }, "modulesFrom"],
-  ['network: "configured"', { config: { data: {} }, network: "configured" }, "network"],
-  ["api: { port: 1.5 }", { config: { data: {} }, network: { api: { port: 1.5 } } }, "network.api.port"],
-  [
-    "publicSide: { channels: false }",
-    { config: { data: {} }, network: { privateLink: { publicSide: { channels: false } } } },
-    "network.privateLink.publicSide.channels",
-  ],
-  ["an unknown network key", { config: { data: {} }, network: { apis: true } }, "network.apis"],
-  ["a host that is no string", { config: { data: {} }, network: { admin: { host: 1, port: 0 } } }, "network.admin.host"],
-  ["cwd not a string", { config: { data: {} }, cwd: 7 }, "cwd"],
-  ["a log that is no function", { config: { data: {} }, log: "stderr" }, "log"],
-  ["signal not an AbortSignal", { config: { data: {} }, signal: {} }, "signal"],
-  ["acceptPublicConfigHash of another form", { config: { data: {} }, acceptPublicConfigHash: "0xAB" }, "acceptPublicConfigHash"],
-  ["options that are no object", null, "options"],
-];
-
 describe("L62: a malformed option is refused invalid-option, naming its path; startUmbraDB never throws", () => {
   it.each(MALFORMED)("%s", async (_name, options, path) => {
-    let handle: UmbraDBHandle | undefined;
-    expect(() => {
-      handle = startUmbraDB(options as UmbraDBOptions);
-    }).not.toThrow();
-    const refused = handle as UmbraDBHandle;
-    await expect(refused.started).rejects.toMatchObject({
-      code: "invalid-configuration",
-      details: { reason: "invalid-option", option: path },
-    });
-    await closedByItself(refused);
-    expect(refused.status()).toMatchObject({ state: "refused", reason: { code: "invalid-configuration" } });
-    expect(await refused.ended).toMatchObject({ kind: "refused" });
+    // The oracle (`./option-cases.ts`): no throw; started rejects invalid-option at the path; refused by itself.
+    expect(await optionProblems(() => startUmbraDB(options as UmbraDBOptions), path)).toEqual([]);
   });
 
   it("an option whose reading throws is refused at its path, and nothing else is read", async () => {
@@ -195,106 +150,11 @@ describe("L62: a malformed option is refused invalid-option, naming its path; st
       "startup refused: network.api.port: a port is an integer from 0 to 65535 (0: a free port) [invalid-configuration invalid-option]",
     ]);
   });
-
-  it("negative control: the same options given to the engine unchecked are refused invalid-option by nothing", async () => {
-    // What the facade would hand the engine without its option check: the configuration as given (or none), the
-    // modules as given, the network request as given.
-    const codes: string[] = [];
-    for (const [, options] of MALFORMED.filter(([, given]) => given !== null)) {
-      const given = options as Record<string, unknown>;
-      const config = given.config as { file?: string; data?: unknown } | undefined;
-      let handle;
-      try {
-        handle = startProcess({
-          config: config !== undefined && "file" in config ? { file: String(config.file) } : { data: config?.data ?? null },
-          userModules: { modules: Array.isArray(given.modules) ? given.modules : [] },
-          network: {},
-          source: new InMemoryBlockSource({ head: 1n }),
-          log: () => undefined,
-        });
-      } catch (error) {
-        codes.push(`threw ${String(error)}`);
-        continue;
-      }
-      codes.push(
-        await handle.started.then(
-          () => "started",
-          (error: { code?: string; details?: { reason?: string } }) => `${error.code} ${error.details?.reason ?? ""}`.trim(),
-        ),
-      );
-      await handle.stop();
-    }
-    expect(codes.filter((code) => code.endsWith("invalid-option"))).toEqual([]);
-  }, 60_000);
 });
-
-/** A getter that throws. */
-const throwing = (): never => {
-  throw new Error("a getter that throws");
-};
-
-/** A revoked proxy: every operation on it throws, `Array.isArray` included. */
-const revoked = (): object => {
-  const { proxy, revoke } = Proxy.revocable({}, {});
-  revoke();
-  return proxy;
-};
-
-/** A proxy whose traps all throw. */
-const hostile = (target: object = {}): object =>
-  new Proxy(target, {
-    ownKeys: throwing,
-    get: throwing,
-    has: throwing,
-    getOwnPropertyDescriptor: throwing,
-    getPrototypeOf: throwing,
-  });
-
-/** Options that cannot be read as given, each with the path its refusal names. [LM-1, L62] */
-const UNREADABLE: readonly (readonly [string, () => unknown, string])[] = [
-  ["config.file's getter", () => ({ config: { get file() { return throwing(); } } }), "config.file"],
-  ["config.data's getter", () => ({ config: { get data() { return throwing(); } } }), "config.data"],
-  ["config as a hostile proxy", () => ({ config: hostile({ data: {} }) }), "config"],
-  ["config as a revoked proxy", () => ({ config: revoked() }), "config"],
-  ["config.file a fake URL", () => ({ config: { file: Object.create(URL.prototype) } }), "config.file"],
-  ["config.file a proxy of a URL", () => ({ config: { file: new Proxy(new URL("file:///srv/umbradb.config.ts"), {}) } }), "config.file"],
-  ["network.api's getter", () => ({ config: { data: {} }, network: { get api() { return throwing(); } } }), "network.api"],
-  ["network as a hostile proxy", () => ({ config: { data: {} }, network: hostile() }), "network"],
-  ["network.api.port's getter", () => ({ config: { data: {} }, network: { api: { get port() { return throwing(); } } } }), "network.api.port"],
-  [
-    "privateLink.publicSide's getter",
-    () => ({ config: { data: {} }, network: { privateLink: { get publicSide() { return throwing(); } } } }),
-    "network.privateLink.publicSide",
-  ],
-  [
-    "publicSide.channels's getter",
-    () => ({ config: { data: {} }, network: { privateLink: { publicSide: { get channels() { return throwing(); } } } } }),
-    "network.privateLink.publicSide.channels",
-  ],
-  ["privateLink as a revoked proxy", () => ({ config: { data: {} }, network: { privateLink: revoked() } }), "network.privateLink"],
-  ["signal made from AbortSignal's prototype", () => ({ config: { data: {} }, signal: Object.create(AbortSignal.prototype) }), "signal"],
-  ["signal a proxy of a real one", () => ({ config: { data: {} }, signal: new Proxy(new AbortController().signal, {}) }), "signal"],
-  ["signal a hostile proxy", () => ({ config: { data: {} }, signal: hostile() }), "signal"],
-  ["modules a hostile proxy of an array", () => ({ config: { data: {} }, modules: hostile([]) }), "modules"],
-  ["modules a revoked proxy", () => ({ config: { data: {} }, modules: revoked() }), "modules"],
-  ["modulesFrom a fake URL", () => ({ config: { data: {} }, modulesFrom: Object.create(URL.prototype) }), "modulesFrom"],
-  ["the options a revoked proxy", () => revoked(), "options"],
-  ["the options a hostile proxy", () => hostile(), "options"],
-];
 
 describe("LM-1: options that cannot be read as given are refused through started, never thrown", () => {
   it.each(UNREADABLE)("%s", async (_name, options, path) => {
-    let handle: UmbraDBHandle | undefined;
-    expect(() => {
-      handle = startUmbraDB(options() as UmbraDBOptions);
-    }).not.toThrow();
-    const refused = handle as UmbraDBHandle;
-    await expect(refused.started).rejects.toMatchObject({
-      code: "invalid-configuration",
-      details: { reason: "invalid-option", option: path },
-    });
-    await closedByItself(refused);
-    expect(refused.status()).toMatchObject({ state: "refused", reason: { code: "invalid-configuration" } });
+    expect(await optionProblems(() => startUmbraDB(options() as UmbraDBOptions), path)).toEqual([]);
   });
 
   it("each option is read once: a getter's second value is never the one used", async () => {
