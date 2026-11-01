@@ -13,6 +13,7 @@ import { defineModule, type ModuleDeclaration } from "../../src/modules/declarat
 import { validateDeclarations } from "../../src/modules/validation.js";
 import {
   inferSide,
+  knownSecrets,
   refusalSecrets,
   resolve,
   resolveConfig,
@@ -26,6 +27,9 @@ import { coreSettings } from "./process-build.js";
  * assembled, for the engine, `umbradb config check`, `umbradb backup`, `umbradb restore` and the browser demo. Each
  * stage gives what the steps it replaces gave, and throws their refusals unchanged, carrying the loaded configuration's
  * secrets for the caller's redaction. [LM-1, L56, L57, CF-1, CF-2, CF-3, MD-2, Q102]
+ *
+ * Also the secrets known before the validation (`knownSecrets`), for a refusal that comes before it: by the kinds the
+ * build's modules declare, fail closed for an entry whose module is not known yet or not readable. [CF-4, AE-6]
  */
 
 const MEMORY = { kind: "pglite", memory: true } as const;
@@ -278,5 +282,40 @@ describe("resolve: the declarations, then the configuration, and how the engine 
     const error = thrown(() => resolve({ data: privateData(), file: null, userModules: [], side: "public" }));
     expect(error).toMatchObject({ code: "invalid-configuration" });
     expect(JSON.stringify((error as UmbraError).details)).toContain("instanceId");
+  });
+});
+
+describe("knownSecrets: the data's secrets before the validation (CF-4, AE-6)", () => {
+  /** A user module entry of `module` holding `config`. */
+  const entryOf = (id: string, config: Readonly<Record<string, unknown>>) => ({ id, start: 1, version: "1.2.0", config });
+  const secretModule = defineModule({
+    ...userModule("keyed"),
+    configSchema: z.object({
+      apiKey: z.string().meta({ kind: "secret" }),
+      table: z.string().meta({ kind: "data" }),
+    }),
+  });
+  const data = publicData({}, [entryOf("keyed", { apiKey: "pw-KNOWN-key", table: "plain-KNOWN-table" })]);
+
+  it("with the user modules known: each entry's by its module's kinds, as the validation reads them", () => {
+    const secrets = knownSecrets(data, [secretModule]);
+    expect(secrets).toEqual(expect.arrayContaining([NODE, KEY, "pw-KNOWN-key"]));
+    expect(secrets).not.toContain("plain-KNOWN-table");
+    // The validation's own reading of them, once the build is validated, is the same.
+    const declarations = resolveDeclarations({ userModules: [secretModule], side: "public" });
+    expect([...secrets].sort()).toEqual([...configSecrets({ config: { data: plainData(data) }, declarations, side: "public" })].sort());
+  });
+
+  it("with the user modules not known yet, or not readable as declarations: every string of an entry of no module the build holds", () => {
+    for (const modules of [null, [null]]) {
+      const secrets = knownSecrets(data, modules);
+      expect(secrets).toEqual(expect.arrayContaining([NODE, KEY, "pw-KNOWN-key", "plain-KNOWN-table"]));
+    }
+  });
+
+  it("none for data that is not plain data, and never a throw", () => {
+    expect(knownSecrets({ entries: [() => undefined] }, [])).toEqual([]);
+    expect(knownSecrets(new Proxy({}, { ownKeys: () => { throw new Error("trap"); } }), null)).toEqual([]);
+    expect(knownSecrets(null, null)).toEqual([]);
   });
 });

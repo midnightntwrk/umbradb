@@ -11,7 +11,8 @@ import { processCoreEntry } from "../../src/config/process.js";
 import { REDACTED, redactor } from "../../src/config/redact.js";
 import { type ConfigInput, validateConfig } from "../../src/config/validate.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
-import { configurationRefusalLines } from "../../src/runner/configuration-refusal.js";
+import { UmbraError } from "../../src/db/errors.js";
+import { configurationRefusalLines, shownRefusal } from "../../src/runner/configuration-refusal.js";
 import { coreSettings } from "./process-build.js";
 
 /**
@@ -19,6 +20,9 @@ import { coreSettings } from "./process-build.js";
  * and that the process ends, then one line per finding (its path and message with its code, as `umbradb config check`
  * prints it), every line through the redaction it is given. Also the cases the command's own lines covered (its earlier
  * `refusalLines`, which these replace). [AE-3, CF-1–CF-3, Q137 B]
+ *
+ * And the refusal a host is given (`shownRefusal`): a copy redacted when its message or details hold a secret — code,
+ * details and cause kept —, the refusal itself otherwise. [CF-4, AE-6]
  */
 
 const PASSWORD = "pw-8-1b-LINES";
@@ -172,5 +176,43 @@ describe("configurationRefusalLines", () => {
     const lines = configurationRefusalLines(error, (text) => `<${text}>`);
     expect(lines.length).toBe(2);
     for (const line of lines) expect(line).toMatch(/^<startup refused: .*>$/);
+  });
+});
+
+describe("shownRefusal: the refusal a host is given (CF-4, AE-6)", () => {
+  const redact = redactor([PASSWORD]).text;
+
+  it("a refusal whose message or details hold a secret is a copy: redacted, its code, its other details and its cause kept", () => {
+    const cause = new Error(`the import failed with ${PASSWORD}`);
+    const refusal = new UmbraError(
+      "invalid-configuration",
+      `the module file could not be loaded: ${PASSWORD}`,
+      { reason: "load-failed", file: `/srv/${PASSWORD}/m.ts`, height: 5n, found: [PASSWORD, 1], where: { path: PASSWORD }, at: new Date(0) },
+      { cause },
+    );
+    const shown = shownRefusal(refusal, redact) as UmbraError;
+    expect(shown).not.toBe(refusal);
+    expect(shown).toBeInstanceOf(UmbraError);
+    expect([shown.code, shown.message, shown.cause]).toEqual(["invalid-configuration", `the module file could not be loaded: ${REDACTED}`, cause]);
+    expect(shown.details).toEqual({
+      reason: "load-failed",
+      file: `/srv/${REDACTED}/m.ts`,
+      height: 5n,
+      found: [REDACTED, 1],
+      where: { path: REDACTED },
+      at: new Date(0),
+    });
+    expect(shown.stack).not.toContain(PASSWORD);
+    // Only its details: a copy too, without a cause when it had none.
+    const inDetails = shownRefusal(new UmbraError("invalid-declaration", "a module is refused", { module: PASSWORD }), redact) as UmbraError;
+    expect([inDetails.message, inDetails.details.module, inDetails.cause]).toEqual(["a module is refused", REDACTED, undefined]);
+  });
+
+  it("a refusal that holds none is given itself, and a value that is no UmbraError as it is", () => {
+    const refusal = new UmbraError("modules-given-twice", "the user modules are given twice", { given: ["modules", "modulesFrom"], at: { list: [1] } });
+    expect(shownRefusal(refusal, redact)).toBe(refusal);
+    const error = new Error(PASSWORD);
+    expect(shownRefusal(error, redact)).toBe(error);
+    expect(shownRefusal("text", redact)).toBe("text");
   });
 });
