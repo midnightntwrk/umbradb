@@ -1,12 +1,12 @@
-# 00065 — Node.js 24.9.0's V8 aborts in its JIT page bookkeeping while freeing WebAssembly code, and the test fork hangs
+# 00065 — Node.js 24.9.0's V8 aborts in its JIT page bookkeeping freeing WebAssembly code, and a test fork hangs
 
 - **Status:** OPEN
 - **Area:** test environment (Node.js / V8)
 - **Severity:** medium — when it strikes, a test fork neither finishes nor exits: the full run waits for it without
   end (it held one run 22 minutes until the fork was killed) and that file's results are lost; nothing in UmbraDB's
   code is in the failing stack.
-- **Effort:** unknown — first, whether a later Node.js 24 release carries V8's fix; otherwise a way to keep a dying fork
-  from hanging the run.
+- **Effort:** unknown — first, whether a later Node.js 24 release carries V8's fix; otherwise a way to keep a dying
+  fork from hanging the run.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-11-01, twice during `start-umbradb` P7 (Mac, Apple Silicon, Node.js 24.9.0, `npx vitest run`, the
   `forks` pool): in a run of `test/library` with `test/admin`, and in the second phase-end full run. Never seen in the
@@ -25,8 +25,8 @@ or a ledger package's). The process does not then exit:
   orphaned (parent 1) at about 94 % CPU and was killed.
 - In the second, a native sample of the stuck fork (`sample <pid>`) showed its main thread inside `V8_Fatal`, looping
   in the signal handler (`_sigtramp` → `uv__signal_handler`), and one of its worker threads blocked on the
-  `ThreadIsolation` mutex (`RegisterJitAllocation` → `absl::Mutex::Lock`) while compiling a regular expression. Killing
-  the fork let Vitest finish: "Worker exited unexpectedly", the file uncounted (372 of 373 files reported).
+  `ThreadIsolation` mutex (`RegisterJitAllocation` → `absl::Mutex::Lock`) while compiling a regular expression.
+  Killing the fork let Vitest finish: "Worker exited unexpectedly", the file uncounted (372 of 373 files reported).
 
 ## Evidence
 

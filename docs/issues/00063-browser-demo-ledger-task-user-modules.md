@@ -24,9 +24,10 @@ only the core modules' tasks.
 ## Evidence
 
 - `src/runner/process.ts:1695` — the rule `ledger-tasks-need-modules-from` for user modules given as objects.
-- `browser/src/process-worker.ts:246` — the demo starts the engine with `userModules: { modules }`.
-- `browser/src/ledger-worker.ts:13` — the browser's ledger worker runs `src/ledger/worker/entry.ts`, which imports user
-  modules only from `workerData.modules`, a URL (`src/ledger/worker/entry.ts:27-28`), which the browser never gives.
+- `browser/src/process-worker.ts:250` — the demo starts the engine with `userModules: { modules }`.
+- `browser/src/ledger-worker.ts:13` — the browser's ledger worker runs `src/ledger/worker/entry.ts`, which imports
+  user modules only from `workerData.modules`, a URL (`src/ledger/worker/entry.ts:27-28`), which the browser never
+  gives.
 - `openspec/changes/start-umbradb/design.md` §6, last bullet; §7.2's table ("a ledger-task module in the demo").
 
 ## Suggested fix

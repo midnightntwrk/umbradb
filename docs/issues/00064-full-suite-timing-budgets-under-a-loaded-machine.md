@@ -1,4 +1,4 @@
-# 00064 — Under a loaded machine, timing budgets of tests run out in the full suite (L15–L18's controls, A63, F2, …)
+# 00064 — Under a loaded machine, tests' timing budgets run out in the full suite (L15–L18's controls, A63, F2, …)
 
 - **Status:** OPEN
 - **Area:** test
@@ -23,8 +23,8 @@ had these, each a wait that ran out:
    process takes longer than 5 s to start, so the control reports "pending" instead of failing the oracle the way it
    should. The main oracles of the same tests passed.
 2. `test/backbone/core-health/liveness.test.ts`, A63 on PostgreSQL — `/status never matched within 20000 ms`: the
-   process was still `starting` (its node client `connecting`) 20 s after it began, before the 15 s `on-compute` hold the
-   test is about.
+   process was still `starting` (its node client `connecting`) 20 s after it began, before the 15 s `on-compute` hold
+   the test is about.
 3. `test/db/prepared-statements.test.ts` (issue 00033's F2), "prepares at most 256 texts on a session, and answers
    every query above that, unprepared" — `Test timed out in 60000ms`.
 
@@ -36,8 +36,8 @@ when its file runs alone (6 files, 62 tests, right after the third run):
 5. `test/admin/admin-server.test.ts`, "negative control: an admin server on the main thread fails A62's
    synchronous-loop case"; `test/runner/slow-block.test.ts`, "with slowBlockMs 5000 and the same callback: never shown,
    never logged; committed once"; `test/db/zero-timeouts.negative-control.test.ts`, its two 5 s cases;
-   `test/admin/states.test.ts`, A64 "stopped at the core's stop …" and "halted …"; `test/private/transport-intake.test.ts`,
-   A114 "dropped while the public cursor advances 50 heights …".
+   `test/admin/states.test.ts`, A64 "stopped at the core's stop …" and "halted …";
+   `test/private/transport-intake.test.ts`, A114 "dropped while the public cursor advances 50 heights …".
 
 ## Evidence
 
