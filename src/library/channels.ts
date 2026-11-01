@@ -271,7 +271,7 @@ export class ChannelEndpoint {
       this.#dispose.push(channel.onClose(() => this.#end(CLOSE_ABNORMAL, "")));
     } catch {
       this.#ended = true;
-      for (const dispose of this.#dispose.splice(0)) this.#guard(dispose);
+      for (const dispose of this.#dispose.splice(0)) this.#quietly(dispose);
       queueMicrotask(() => this.#events.ended(CLOSE_ABNORMAL, ""));
       return;
     }
@@ -386,17 +386,17 @@ export class ChannelEndpoint {
   #end(code: number, reason: string, end?: () => void): void {
     if (this.#ended) return;
     this.#ended = true;
-    for (const dispose of this.#dispose.splice(0)) this.#guard(dispose);
-    if (end !== undefined) this.#guard(end);
+    for (const dispose of this.#dispose.splice(0)) this.#quietly(dispose);
+    if (end !== undefined) this.#quietly(end);
     this.#events.ended(code, reason);
   }
 
-  /** Runs one of the carrier's methods; one that throws ends the channel as far as UmbraDB goes. */
-  #guard(work: () => unknown): void {
+  /** Runs one of the carrier's methods at the channel's end; one that throws changes nothing: the channel has ended. */
+  #quietly(work: () => unknown): void {
     try {
       work();
     } catch {
-      if (!this.#ended) this.#end(CLOSE_ABNORMAL, "");
+      // The channel has ended as far as UmbraDB goes.
     }
   }
 }

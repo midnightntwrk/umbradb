@@ -123,12 +123,12 @@ export function channelCarrier(connect: ConnectChannel, seams: ChannelCarrierSea
       return Object.freeze({
         send: (text: string) => endpoint?.send(text),
         close: (code: number, reason: string) => {
-          if (endpoint === undefined) done = true;
-          else endpoint.close(code, reason);
+          done = true;
+          endpoint?.close(code, reason);
         },
         shutdown: async () => {
-          if (endpoint === undefined) done = true;
-          else endpoint.close(1001, "the private process is stopping");
+          done = true;
+          endpoint?.close(1001, "the private process is stopping");
         },
       });
     },

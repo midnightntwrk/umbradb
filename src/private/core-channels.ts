@@ -80,6 +80,10 @@ export interface CoreChannelsOptions extends CoreChannelSeams {
   readonly log: (line: string) => void;
 }
 
+/** The events of an endpoint no one is told of yet (until attached), or ever (a refused channel). */
+const ignore = (): void => undefined;
+const QUIET: EndpointEvents = Object.freeze({ received: ignore, oversized: ignore, unanswered: ignore, ended: ignore });
+
 /** A queued channel and its held `hello`. */
 interface Queued {
   readonly endpoint: ChannelEndpoint;
@@ -91,17 +95,8 @@ interface Queued {
  * [N9, L39]
  */
 export function refuseChannel(channel: PrivateLinkChannel, log: (line: string) => void, why: string): void {
-  try {
-    const endpoint = new ChannelEndpoint(channel, {
-      received: () => undefined,
-      oversized: () => undefined,
-      unanswered: () => undefined,
-      ended: () => undefined,
-    });
-    endpoint.close(CLOSE_PROTOCOL, NOT_ACCEPTING);
-  } catch {
-    // A carrier that throws is ended as far as this process goes.
-  }
+  // The endpoint catches whatever the carrier throws: a carrier that throws is ended as far as this process goes.
+  new ChannelEndpoint(channel, QUIET).close(CLOSE_PROTOCOL, NOT_ACCEPTING);
   log(`private link: a channel was closed (${NOT_ACCEPTING}): ${why}`);
 }
 
@@ -119,16 +114,6 @@ export class CoreChannels implements CoreLink {
   constructor(options: CoreChannelsOptions) {
     this.#options = options;
     this.#limits = { ...TRANSPORT_LIMITS, ...options.limits };
-  }
-
-  /** Whether the link has started: its channels are sessions. */
-  get started(): boolean {
-    return this.#sessions !== undefined;
-  }
-
-  /** How many channels wait for the link to start. */
-  get queued(): number {
-    return this.#queue.length;
   }
 
   /** Takes `channel` (see the module comment); never throws. [LM-6, N9] */
@@ -199,9 +184,8 @@ export class CoreChannels implements CoreLink {
 
   /** UmbraDB's end of `channel`, its messages at most `maxMessageBytes`; told of nothing until attached. */
   #endpoint(channel: PrivateLinkChannel, maxMessageBytes: number): ChannelEndpoint {
-    const quiet: EndpointEvents = { received: () => undefined, oversized: () => undefined, unanswered: () => undefined, ended: () => undefined };
     const seams = this.#options;
-    return new ChannelEndpoint(channel, quiet, {
+    return new ChannelEndpoint(channel, QUIET, {
       maxMessageBytes,
       pingIntervalMs: this.#limits.pingIntervalMs,
       ...(seams.timers === undefined ? {} : { timers: seams.timers }),

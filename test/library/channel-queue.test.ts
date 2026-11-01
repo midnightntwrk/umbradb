@@ -414,3 +414,128 @@ describe("L41 at the transport: the stop and a pending connect() (LM-6)", () => 
     expect(problems.some((problem) => problem.startsWith("the channel resolved after the stop was closed 0"))).toBe(true);
   }, 30_000);
 });
+
+/** A private transport over `carrier`, its log kept. */
+function transportOver(carrier: PrivateCarrier) {
+  const lines: string[] = [];
+  const transport = new PrivateTransport({
+    carrier,
+    instance: "carrier-unit",
+    version: "0.10.0",
+    position: () => ({ height: 0n, hash: null }),
+    backoffCeilingMs: 1_000,
+    log: (line) => lines.push(line),
+  });
+  void transport.connection().catch(() => undefined);
+  return { transport, lines };
+}
+
+/** A hello-ack a stand-in core sends. */
+const ACK = {
+  v: 1,
+  type: "hello-ack",
+  lockstep: false,
+  genesis: `0x${"00".repeat(32)}`,
+  start: "1",
+  cursor: null,
+  refused: null,
+  configHash: `0x${"c1".repeat(32)}`,
+};
+
+describe("the channel carrier at the transport (LM-6)", () => {
+  it("a connect() that resolves with no channel, or throws, is a lost connection; the next one connects", async () => {
+    const cores: RawPeer[] = [];
+    let calls = 0;
+    const { transport, lines } = transportOver(
+      channelCarrier((() => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve(null as unknown as PrivateLinkChannel);
+        if (calls === 2) return Promise.resolve({ send: () => undefined } as unknown as PrivateLinkChannel);
+        if (calls === 3) throw new TypeError("not a promise at all");
+        const [privateEnd, coreEnd] = channelPair();
+        cores.push(rawPeer(coreEnd));
+        return Promise.resolve(privateEnd);
+      }) as (signal: AbortSignal) => Promise<PrivateLinkChannel>),
+    );
+    try {
+      await until(() => cores.length === 1, "the fourth connect()", 15_000);
+      (cores[0] as RawPeer).send(ACK);
+      await until(() => transport.state === "connected", "connected", 10_000);
+      expect(lines.filter((line) => line.includes("connect()"))).toEqual([
+        "transport: the host's connect() resolved with no channel; connecting again in 1000 ms (attempt 1)",
+        "transport: the host's connect() resolved with no channel; connecting again in 1000 ms (attempt 2)",
+        "transport: the host's connect() rejected (TypeError); connecting again in 1000 ms (attempt 3)",
+      ]);
+      expect(lines).toContain("transport: connected to the core over a channel");
+    } finally {
+      await transport.close();
+    }
+  }, 30_000);
+
+  it("a value that is no channel, resolved after the stop, is left alone; a channel is closed (L41)", async () => {
+    const pending: ((value: unknown) => void)[] = [];
+    const { transport } = transportOver(
+      channelCarrier(() => new Promise<PrivateLinkChannel>((resolve) => pending.push(resolve as (value: unknown) => void))),
+    );
+    await until(() => pending.length === 1, "the connect()");
+    await transport.close();
+    (pending[0] as (value: unknown) => void)("no channel");
+    await new Promise((done) => setTimeout(done, 50));
+    expect(transport.state).toBe("closed");
+  }, 30_000);
+
+  it("a core message over the private side's limit closes its channel too-large (1009), and it connects again", async () => {
+    const cores: RawPeer[] = [];
+    const { transport, lines } = transportOver(
+      channelCarrier(
+        async () => {
+          const [privateEnd, coreEnd] = channelPair();
+          cores.push(rawPeer(coreEnd));
+          return privateEnd;
+        },
+        { limits: { maxMessageBytes: 400 } },
+      ),
+    );
+    try {
+      await until(() => cores.length === 1, "the first channel");
+      const core = cores[0] as RawPeer;
+      core.send({ ...ACK, pad: "x".repeat(400) });
+      expect(await core.ended).toEqual({ code: 1009, reason: "too-large" });
+      await until(() => cores.length === 2, "a second channel", 10_000);
+      expect(lines.some((line) => line.startsWith("transport: too-large (1009 too-large); connecting again in "))).toBe(true);
+    } finally {
+      await transport.close();
+    }
+  }, 30_000);
+
+  it("on a controlled clock, a core that stops answering pings is left at the second interval (no-pong), and it connects again", async () => {
+    const clock = controlledTimers();
+    const cores: RawPeer[] = [];
+    const { transport, lines } = transportOver(
+      channelCarrier(
+        async () => {
+          const [privateEnd, coreEnd] = channelPair();
+          cores.push(rawPeer(coreEnd));
+          return privateEnd;
+        },
+        { timers: clock.timers },
+      ),
+    );
+    try {
+      await until(() => cores.length === 1, "the first channel");
+      const core = cores[0] as RawPeer;
+      core.answersPings = false;
+      core.send(ACK);
+      await until(() => transport.state === "connected", "connected");
+      await tick(clock, PING_INTERVAL_MS);
+      expect(core.pings).toBe(1);
+      expect(core.end).toBeNull();
+      await tick(clock, PING_INTERVAL_MS);
+      expect(await core.ended).toEqual({ code: 1008, reason: "no-pong" });
+      await until(() => cores.length === 2, "a second channel", 10_000);
+      expect(lines.some((line) => line.startsWith("transport: the core did not answer a ping (1008 no-pong); connecting again in "))).toBe(true);
+    } finally {
+      await transport.close();
+    }
+  }, 30_000);
+});
