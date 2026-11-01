@@ -101,14 +101,14 @@ export function withoutPending(surface: Surface, pending: Surface): Surface {
 }
 
 /**
- * The amendment's names not exported yet: the `MessagePort` adapter of the private link's channels and its carrier's
- * type, which the channel link writes (the start-umbradb change's P6.2). The list only shrinks: `./surface.test.ts`
- * checks each name is the amendment's and still unexported, and the pin is whole once it is empty.
- * [A1; start-umbradb design §5.4]
+ * The amendment's names not exported yet: none. The last two, the `MessagePort` adapter of the private link's channels
+ * and its carrier's type (`messagePortChannel`, `MessagePortLike`), are exported with the channel link. The list only
+ * shrinks: `./surface.test.ts` checks it is empty, so the pin is the whole amended surface.
+ * [A1; start-umbradb design §4, §5.4]
  */
 export const PENDING_EXPORTS: Surface = Object.freeze({
-  values: Object.freeze(["messagePortChannel"]),
-  types: Object.freeze(["MessagePortLike"]),
+  values: Object.freeze([]),
+  types: Object.freeze([]),
 });
 
 /**

@@ -29,10 +29,9 @@ import {
  * it. The core modules' declarations the surface exports are what a configuration writes entries of.
  * [A1 STATIC, LS-1; design §12; start-umbradb design §4]
  *
- * **Pending** (`PENDING_EXPORTS`): the amendment's names whose code a later step of the change writes — the private
- * link's `MessagePort` adapter and its carrier's type, written with the channel link. They are not exported yet; the
- * test checks that each is the amendment's and still unexported, so the list only shrinks and the pin is whole once it
- * is empty.
+ * **Pending** (`PENDING_EXPORTS`): the amendment's names whose code a later step of the change wrote. The last two —
+ * the private link's `MessagePort` adapter and its carrier's type — are exported with the channel link, so the list is
+ * empty and the pin is the whole amended surface; the test checks it stays empty.
  */
 
 // The checks start the TypeScript compiler on the barrel and every file it reaches: a few seconds alone, more under the
@@ -62,7 +61,7 @@ describe("A1: src/index.ts exports exactly design.md §12's surface, as start-um
     expect(base.values).not.toContain("src/runner/envelope.ts");
   });
 
-  it("§4 adds three values and fourteen types and removes five names of §12; the pending ones are its, unexported", () => {
+  it("§4 adds three values and fourteen types and removes five names of §12; none is pending any more", () => {
     expect(amendment.addedValues).toEqual(["startUmbraDB", "finalizedHeight", "messagePortChannel"]);
     expect(amendment.addedTypes).toHaveLength(14);
     expect(amendment.addedTypes).toEqual(expect.arrayContaining(["UmbraDBOptions", "UmbraDBHandle", "PrivateLinkChannel"]));
@@ -73,7 +72,10 @@ describe("A1: src/index.ts exports exactly design.md §12's surface, as start-um
     // What §4 keeps stays: the in-memory chain and its block reference.
     expect(amended.values).toContain("InMemoryBlockSource");
     expect(amended.types).toContain("BlockRef");
+    expect(PENDING).toEqual({ values: [], types: [] });
     const found = surfaceOf(INDEX);
+    for (const name of ["messagePortChannel"]) expect(found.values).toContain(name);
+    for (const name of ["MessagePortLike", "PrivateLinkChannel"]) expect(found.types).toContain(name);
     for (const name of PENDING.values) {
       expect(amendment.addedValues).toContain(name);
       expect([...found.values, ...found.types]).not.toContain(name);
@@ -84,8 +86,9 @@ describe("A1: src/index.ts exports exactly design.md §12's surface, as start-um
     }
   });
 
-  it("the pinned surface is the amended one less the pending names, as the pack smoke's consumer imports it", () => {
+  it("the pinned surface is the amended one, as the pack smoke's consumer imports it", () => {
     expect(pinnedSurface(design, change)).toEqual(expected);
+    expect(expected).toEqual(amended);
   });
 
   it("a reworded §4 Exports bullet fails rather than amending nothing", () => {

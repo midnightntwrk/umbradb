@@ -216,6 +216,14 @@ export function parseMessage(text: string): Parsed {
   } catch {
     return { ok: false, fault: "not-json", detail: "the message is not JSON" };
   }
+  return messageOfValue(parsed);
+}
+
+/**
+ * Reads one message's JSON value, as {@link parseMessage} reads it once its text is parsed (a channel's envelope
+ * carries the value, `src/library/channels.ts`): the message, or why it is none. [PP-4, LM-6]
+ */
+export function messageOfValue(parsed: unknown): Parsed {
   if (!isObject(parsed)) return { ok: false, fault: "invalid-message", detail: "the message is not a JSON object" };
   if (parsed.v !== PROTOCOL_VERSION) {
     return { ok: false, fault: "unknown-version", detail: `v is ${describe(parsed.v)}, where this build speaks v 1` };
