@@ -7,15 +7,23 @@ import type { Lockstep, LockstepCondition, LockstepInstance } from "../../src/pr
 import { inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import { FinalizedLoop, type HeightRun, type LockstepWait, type LoopInput } from "../../src/runner/loop.js";
 import { settlesWithin } from "../db/backends.js";
-import { PRIVATE_BACKENDS, type PrivateBackend, REACH_TIMEOUT_MS, START_TIMEOUT_MS, type TestDatabase, TEST_TIMEOUT_MS } from "./backends.js";
+import {
+  type OpenTransaction,
+  PRIVATE_BACKENDS,
+  type PrivateBackend,
+  REACH_TIMEOUT_MS,
+  START_TIMEOUT_MS,
+  type TestDatabase,
+  TEST_TIMEOUT_MS,
+} from "./backends.js";
 import { launchPrivate, launchPublicCore, type PrivateProcess, type PrivateSeen, type PublicCore } from "./builds.js";
 import { RetargetProxy } from "./relays.js";
 
 /**
  * The core's wait for a lockstep instance, on PostgreSQL 18.6 and PGlite 0.5.10. A core listing a private instance in
  * `lockstepInstances` waits before `BEGIN` of each height h until the instance has committed h − 1. While it waits:
- * - no transaction is open (PostgreSQL's `pg_stat_activity`; on PGlite, its one queue is free, so a read of the core's
- *   database is answered meanwhile);
+ * - no transaction is open (PostgreSQL's `pg_stat_activity`: no session's transaction is open across two looks 200 ms
+ *   apart; on PGlite, its one queue is free, so a read of the core's database is answered meanwhile);
  * - the condition `waiting-for-lockstep` names the instance.
  * [A117 FAULT, PP-6; required test id `private.lockstep-waits-no-transaction`]
  *
@@ -70,8 +78,8 @@ const loginOf = (setting: DatabaseParts): string => (setting as PostgresParts).u
 interface WaitSample {
   readonly cursor: bigint | null;
   readonly condition: LockstepCondition | null;
-  /** PostgreSQL: the core's sessions with a transaction open; null on PGlite. */
-  readonly open: number | null;
+  /** PostgreSQL: the core's sessions with a transaction open, each with its transaction's start; null on PGlite. */
+  readonly open: readonly OpenTransaction[] | null;
   /** Whether a read of the core's database was answered within {@link QUEUE_MS}. */
   readonly queue: "free" | "held";
 }
@@ -91,7 +99,7 @@ async function sampleWait(core: PublicCore, db: TestDatabase, backend: PrivateBa
     const probe = core.db().read((read) => read.query("SELECT 1 AS one"));
     probe.catch(() => undefined);
     const queue = (await settlesWithin(probe, QUEUE_MS)) ? "free" : "held";
-    const open = backend.kind === "postgres" ? await (db.openTransactions as (login: string) => Promise<number>)(loginOf(db.setting)) : null;
+    const open = backend.kind === "postgres" ? await (db.openTransactions as (login: string) => Promise<readonly OpenTransaction[]>)(loginOf(db.setting)) : null;
     samples.push({ cursor: core.handle.status().cursor, condition: waitingOf(core), open, queue });
     if (queue === "held") break;
     await sleep(200);
@@ -112,6 +120,24 @@ interface ExpectedWait {
 const shown = (instances: readonly LockstepInstance[]): string =>
   instances.map((one) => `${one.instance} (connected ${one.connected}, at ${one.height}, refused ${one.refused})`).join(", ") || "none";
 
+/**
+ * The transactions open across two consecutive looks: the same session's (`pid`) transaction (`xact_start`) seen in both.
+ * A core that waits inside its block transaction holds it through every look of the wait (the negative control's is in
+ * all five). A look may also land on a short read of the same login that has nothing to do with the wait — admin's fact
+ * reads, which follow `opened()` and each commit — and that read has ended by the next look, 200 ms later: the core's
+ * own wait holds no transaction then. [A117 FAULT, PP-6]
+ */
+export function heldTransactions(samples: readonly WaitSample[]): OpenTransaction[] {
+  const held = new Map<string, OpenTransaction>();
+  for (let index = 1; index < samples.length; index++) {
+    const before = samples[index - 1]?.open ?? [];
+    for (const one of samples[index]?.open ?? []) {
+      if (before.some((earlier) => earlier.pid === one.pid && earlier.xactStart === one.xactStart)) held.set(`${one.pid} ${one.xactStart}`, one);
+    }
+  }
+  return [...held.values()];
+}
+
 /** The oracle for one wait (see the module comment): every problem, none when it holds. [A117 FAULT] */
 export function waitProblems(samples: readonly WaitSample[], expected: ExpectedWait): string[] {
   const problems: string[] = [];
@@ -131,11 +157,12 @@ export function waitProblems(samples: readonly WaitSample[], expected: ExpectedW
     ) {
       problems.push(`waiting-for-lockstep at ${sample.condition.height} named ${shown(sample.condition.instances)}`);
     }
-    if (sample.open !== null && sample.open > 0) problems.push(`the core held ${sample.open} transaction(s) open while it waited (pg_stat_activity)`);
     if (sample.queue === "held") {
       problems.push(`a read of the core's database waited over ${QUEUE_MS / 1_000} s while the core waited: its one queue was held`);
     }
   }
+  const held = heldTransactions(samples);
+  if (held.length > 0) problems.push(`the core held ${held.length} transaction(s) open while it waited (pg_stat_activity)`);
   return [...new Set(problems)];
 }
 
@@ -240,6 +267,33 @@ async function a117Problems(backend: PrivateBackend): Promise<string[]> {
   }
   return problems;
 }
+
+describe("A117's oracle for an open transaction (PostgreSQL's looks, no database)", () => {
+  /** Five looks at a core waiting at S = 1, never seen, with `open` the sessions each look saw. */
+  const waiting: LockstepCondition = { code: "waiting-for-lockstep", height: 1n, instances: [{ instance: LISTED, connected: false, height: null, refused: null }] };
+  const looks = (...open: (readonly OpenTransaction[])[]): WaitSample[] =>
+    open.map((sessions) => ({ cursor: null, condition: waiting, open: sessions, queue: "free" }));
+  const read = { pid: 267, xactStart: "2026-11-01 19:07:08.871+00" };
+  const next = { pid: 267, xactStart: "2026-11-01 19:07:09.301+00" };
+  const block = { pid: 409, xactStart: "2026-11-01 19:06:07.161+00" };
+  const HELD = "the core held 1 transaction(s) open while it waited (pg_stat_activity)";
+
+  it("a short read of the core's login that one look lands on is no transaction the wait holds", () => {
+    expect(waitProblems(looks([read], [], [], [], []), UNSEEN)).toEqual([]);
+    expect(waitProblems(looks([], [], [], [], [read]), UNSEEN)).toEqual([]);
+  });
+
+  it("two reads in a row on one pooled session (same pid, a new xact_start) hold nothing either", () => {
+    expect(waitProblems(looks([read], [next], [], [], []), UNSEEN)).toEqual([]);
+  });
+
+  it("one transaction open across two consecutive looks is held, as the negative control's block transaction in all five", () => {
+    expect(waitProblems(looks([], [read], [read], [], []), UNSEEN)).toEqual([HELD]);
+    expect(waitProblems(looks([block], [block], [block], [block], [block]), UNSEEN)).toEqual([HELD]);
+    expect(waitProblems(looks([block, read], [block], [block, next], [block], [block]), UNSEEN)).toEqual([HELD]);
+    expect(heldTransactions(looks([block], [block, read], [block, read], [block], [block]))).toEqual([block, read]);
+  });
+});
 
 describe.each(PRIVATE_BACKENDS)("A117: the core waits for a lockstep instance on $name (PP-6)", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);

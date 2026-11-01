@@ -62,10 +62,11 @@ export interface TestDatabase {
    */
   connected?(login: string): Promise<number>;
   /**
-   * PostgreSQL: how many of the database API's sessions (`application_name` `umbradb`) of `login` have a transaction open
-   * on the database now (`pg_stat_activity`'s `xact_start`), the asking session not counted.
+   * PostgreSQL: the database API's sessions (`application_name` `umbradb`) of `login` that have a transaction open on the
+   * database now (`pg_stat_activity`'s `xact_start`), the asking session not listed: each one's `pid` and the
+   * transaction's start, so that a caller can tell one transaction held across two looks from two short ones.
    */
-  openTransactions?(login: string): Promise<number>;
+  openTransactions?(login: string): Promise<readonly OpenTransaction[]>;
   /** PostgreSQL: runs `sql` as the server's login on the database (a login created, its password changed). */
   exec?(sql: string): Promise<void>;
   /**
@@ -78,6 +79,13 @@ export interface TestDatabase {
    * while no process holds it open (this process reuses its lock).
    */
   read<T>(body: (read: ReadHandle) => Promise<T>, committedHeight?: CommittedHeight): Promise<T>;
+}
+
+/** A transaction open on PostgreSQL, as `pg_stat_activity` shows it: its session's `pid` and the transaction's start. */
+export interface OpenTransaction {
+  readonly pid: number;
+  /** `xact_start` as text: equal in two looks only for the same transaction of the session. */
+  readonly xactStart: string;
 }
 
 /** A backend that hands out the databases of a test. */
@@ -150,12 +158,12 @@ function postgresBackend(): PrivateBackend {
           return count;
         },
         async openTransactions(login) {
-          const [row] = await database.admin.unsafe(
-            "SELECT count(*)::int AS open FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() " +
-              "AND backend_type = 'client backend' AND application_name = 'umbradb' AND usename = $1 AND xact_start IS NOT NULL",
+          const rows = await database.admin.unsafe(
+            "SELECT pid, xact_start::text AS xact_start FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid() " +
+              "AND backend_type = 'client backend' AND application_name = 'umbradb' AND usename = $1 AND xact_start IS NOT NULL ORDER BY pid",
             [login],
           );
-          return Number(row?.open);
+          return rows.map((row) => Object.freeze({ pid: Number(row.pid), xactStart: String(row.xact_start) }));
         },
         async exec(sql) {
           await database.admin.unsafe(sql);
