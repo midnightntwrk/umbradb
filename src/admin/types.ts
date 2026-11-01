@@ -253,6 +253,11 @@ export interface ConfigSnapshot {
   readonly database: { readonly backend: "postgres" | "pglite"; readonly version: string | null; readonly writerLock: boolean } | null;
   /** The build: UmbraDB's version; no commit. [AE-5, Q134 D] */
   readonly build: { readonly umbradb: string };
+  /**
+   * How each surface runs, as the process's network plan has it (`listening`, `connecting`, `mounted`, `channels`,
+   * `connect` or `none`); null before the configuration is validated. [LM-3, AE-5]
+   */
+  readonly network: { readonly api: string; readonly admin: string; readonly privateLink: string } | null;
 }
 
 /** What the runner publishes to the admin worker (see the module comment). */

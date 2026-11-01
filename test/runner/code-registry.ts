@@ -347,6 +347,18 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   "refusal:ledger-tasks-need-modules-from": [
     { file: "test/library/modules.test.ts", test: "refused before anything opens, naming the module" },
   ],
+  "refusal:network-address-conflict": [
+    {
+      file: "test/library/network.test.ts",
+      test: "L15: listen.api written and api: { port } in code is refused network-address-conflict (both); no port opened",
+    },
+  ],
+  "refusal:private-link-misconfigured": [
+    {
+      file: "test/library/network.test.ts",
+      test: "L18: privateSide on a public process is refused private-link-misconfigured (wrong-side)",
+    },
+  ],
   "refusal:source-refused": [
     { file: "test/library/source.test.ts", test: "an instance given a hook names the hook members it carries" },
     { file: "test/library/source.test.ts", test: "an in-memory source on a private process is refused source-refused; nothing opened" },

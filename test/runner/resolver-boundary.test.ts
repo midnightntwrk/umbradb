@@ -10,8 +10,9 @@ import { boundaryOf, boundarySources, hostWith, REPOSITORY } from "./resolver-bo
  * adds such calls to a fixture copy of `src/cli/backup.ts` (the repository's file is left as it is), in each form a
  * module could take one, and sees each reported, while a comment, a string and a type position are not. [L56, LM-1]
  *
- * `buildDeclarations` was removed with the resolver, and `planNetwork` is written with the network plan: a guard whose
- * function no source declares guards nothing, and the test names which guards the sources declare.
+ * `buildDeclarations` was removed with the resolver: a guard whose function no source declares guards nothing, and the
+ * test names which guards the sources declare. `planNetwork` is declared in the resolver and called by the engine
+ * only.
  */
 
 // Building the program over every source takes a few seconds; on a loaded machine, more.
@@ -31,6 +32,7 @@ const FORBIDDEN = [
   "export const leakedBuild = () => build.commandBuild([]);",
   'export const leakedSide = (data: unknown) => resolver["inferSide"](data);',
   "export const leakedList = [{ validateConfig }];",
+  'export const leakedPlan = (input: Parameters<typeof resolver.planNetwork>[0]) => resolver.planNetwork(input, "configured");',
   "// validateConfig(input) in a comment calls nothing, nor does the string below.",
   'export const named = "processCoreEntry";',
 ];
@@ -47,7 +49,7 @@ describe("L56: the resolver's boundary over the repository's sources", () => {
 
   it("no module but the resolver calls its steps, and none but the engine plans the network", () => {
     const boundary = boundaryOf(files, options);
-    expect(boundary.guarded).toEqual(["commandBuild", "inferSide", "processCoreEntry", "validateConfig"]);
+    expect(boundary.guarded).toEqual(["commandBuild", "inferSide", "planNetwork", "processCoreEntry", "validateConfig"]);
     expect(boundary.crossings).toEqual([]);
   }, TIMEOUT_MS);
 
@@ -63,6 +65,7 @@ describe("L56: the resolver's boundary over the repository's sources", () => {
       `src/cli/backup.ts:${line(FORBIDDEN[6] as string)}: commandBuild`,
       `src/cli/backup.ts:${line(FORBIDDEN[7] as string)}: inferSide`,
       `src/cli/backup.ts:${line(FORBIDDEN[8] as string)}: validateConfig`,
+      `src/cli/backup.ts:${line(FORBIDDEN[9] as string)}: planNetwork`,
     ]);
     // The repository's own file is unchanged: the fixture copy is the compiler host's only.
     expect(readFileSync(BACKUP, "utf8")).toBe(original);

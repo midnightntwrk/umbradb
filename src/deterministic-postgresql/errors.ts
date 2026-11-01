@@ -270,6 +270,19 @@ export const ERROR_CODES = [
    * its public side (`reason: private-process`). [LM-8]
    */
   "source-refused",
+  /**
+   * A library process's network request at odds with the addresses its `core` revision writes
+   * (`src/runner/resolve.ts`, `planNetwork`): an address both written and given in code (`reason: both`), `true` with
+   * none written (`no-address`), or an address written for a surface the request does not use as an address
+   * (`unused`); `details { reason, surface, request, setting, problems }`. [LM-3]
+   */
+  "network-address-conflict",
+  /**
+   * A library process's request of its private link that cannot run: the other side's request (`reason: wrong-side`),
+   * or, on PostgreSQL, the public side given in the request with no `transportReader` (`reader-missing`);
+   * `details { reason, surface, request, setting, problems }`. [LM-3, CF-4]
+   */
+  "private-link-misconfigured",
   // The backup's refusals (`src/backup/`): the command exits 1 and writes no file. [BK-1, PP-12]
   /**
    * The tool a backup needs is missing or of another major version than 18: the PostgreSQL 18 client's `pg_dump` for a

@@ -13,8 +13,12 @@
  *    plain-data rules and validated, and the `core` entry's operational and secret fields taken from its latest
  *    revision of the build's version, for the whole run: the database, the node, `listen.api`, the timeouts, the
  *    development opt-in, the core's stop. User modules given as objects that declare ledger tasks refuse here
- *    (`ledger-tasks-need-modules-from`: the ledger worker imports files, never objects). A host program's own checks of this step ({@link LibraryChecks}: its
- *    options, before the load; what resolved, after) refuse here too. [MD-2, CF-3, Q102, LM-10]
+ *    (`ledger-tasks-need-modules-from`: the ledger worker imports files, never objects). Then the network plan
+ *    (`planNetwork`, {@link EngineNetwork}): what listens, what connects and how the private link runs, from the
+ *    request and the addresses the revision writes; a host's request at odds with them refuses here
+ *    (`network-address-conflict`, `private-link-misconfigured`). A host program's own checks of this step
+ *    ({@link LibraryChecks}: its options, before the load; what resolved, after) refuse here too.
+ *    [MD-2, CF-3, Q102, LM-3, LM-10]
  * 3. Make the process's one node client from this revision's `node` (`nodeOptionsOf`), and the block source from the
  *    revision and that client: the node's (`core-block-fetch`'s node source, `nodeSourceOf`) on the core, the private
  *    intake's on a private process. [RN-14, PP-1]
@@ -47,7 +51,8 @@
  *    - seal the contexts (`process-item-missing`).
  * 8. On a database without a cursor, after every bootstrap step has run, wait while S is above the node's finalized
  *    head (`waitForNode`). The process stays `starting`, with the condition `waiting-for-node`. [IN-2]
- * 9. Run `on-start-api` and serve the module API on `listen.api` (`startModuleApi`).
+ * 9. Run `on-start-api` and serve the module API where the plan puts it (`startModuleApi`; the command's at
+ *    `listen.api`).
  * 10. Run the finalized loop, with the core's stop and the upgrade boundary ({@link upgradeBoundary}). [RN-12]
  *
  * A refusal closes what startup opened: the node client, the ledger worker, the database (its writer lock released),
@@ -65,10 +70,11 @@
  * failed (<code>): <message>`), a refusal stays the one thrown, and `closed` resolves. [LM-2, G7]
  *
  * **A refusal of the configuration step** (class A) ends the process instead. The class is the startup step's: steps
- * 1 and 2 — loading the configuration, the declarations, its plain data and validation, the choice of its revision, and
- * a host program's own checks ({@link EngineOptions.library}: its options, its in-memory chain, the settings it
- * refuses) —, before the database opens, the ledger worker starts or any port opens. The process logs every finding
- * with its path (`./configuration-refusal.ts`) and opens no admin listener (there is no validated `listen.admin`). It is
+ * 1 and 2 — loading the configuration, the declarations, its plain data and validation, the choice of its revision,
+ * the network plan, and a host program's own checks ({@link EngineOptions.library}: its options, its in-memory chain,
+ * the settings it refuses) —, before the database opens, the ledger worker starts or any port opens. The process logs
+ * every finding with its path (`./configuration-refusal.ts`) and opens no admin listener (it listens only once the plan
+ * is made and the step passed). It is
  * `refused` with `closed` resolved, so nothing is left to stop, and `umbradb run` then exits 1. Every later refusal
  * (class B) keeps the process up, as above. [Q137 B, LM-10]
  *
@@ -180,8 +186,9 @@
  * on SIGUSR2 included — resolves against {@link EngineOptions.cwd}; nothing here reads the working directory. [LM-2,
  * G8, G10]
  *
- * **The process transport** (`../private/core-transport.ts`). A public process whose `core` revision has
- * `listen.privateLink` starts it once its database is open and its chain known (step 7, before the bootstrap's wait).
+ * **The process transport** (`../private/core-transport.ts`). A public process whose network plan listens for its
+ * private link (the command's at `listen.privateLink`) starts it once its database is open and its chain known (step 7,
+ * before the bootstrap's wait).
  * The process tells it each commit (`committed`) and closes it at its stop or at a refusal. A listener that cannot listen
  * refuses startup (`listen-failed`). [PP-4]
  *
@@ -189,13 +196,14 @@
  * (`../private/transport-reader.ts`). Startup first checks that this login cannot write (`transport-reader-can-write`),
  * and the pool closes with the transport. On PGlite the reads share the database's one session. [CF-4, Q175 A]
  *
- * A private process's side of the transport belongs to its block source (`openPublicSide`), which the process gives S
- * and its log ({@link SourceShared}). [PP-4]
+ * A private process's side of the transport belongs to its block source (`openPublicSide`), which the process gives S,
+ * its log and the plan's link: the address it connects to, with the revision's `tls` ({@link SourceShared}).
+ * [PP-4, LM-3]
  *
  * **Lockstep** (`../private/lockstep.ts`). A public process whose `core` revision lists `lockstepInstances` keeps one
  * bookkeeping of them for its run. Its transport tells that bookkeeping of the instances' `hello`s, reports and closes,
  * and the loop awaits it before each block's `BEGIN` (`LoopInput.lockstep`). While the loop waits, the process raises
- * `waiting-for-lockstep`. Without `listen.privateLink` no listed instance can connect, and the core waits for them.
+ * `waiting-for-lockstep`. Without a link no listed instance can connect, and the core waits for them.
  * [PP-6, PP-7, Q24]
  *
  * On a private process, the source checks the resolved graph's modules after step 7 resolves the graph and before any
@@ -223,8 +231,9 @@
  * [AE-1, AE-2, Q128 B]:
  * - The heartbeat ticks from `startProcess` on and publishes `status()` to the admin worker. It ends when a refusal of
  *   the configuration ends the process.
- * - The admin listener starts on `listen.admin` once the process's `core` revision is known, before the database
- *   opens, and never before (a refusal before that ends the process, as above). A listener that cannot listen (for
+ * - The admin listener starts where the network plan puts it (the command's on `listen.admin`, `0.0.0.0:8081` unless
+ *   written) once the process's `core` revision and its plan are known, before the database opens, and never before
+ *   (a refusal before that ends the process, as above). A listener that cannot listen (for
  *   example, when another listener holds the address) refuses startup with `listen-failed`. It closes after the
  *   database at {@link ProcessHandle.stop}.
  * - `/status`'s node shows the node client's connection state (published at once when it changes, and once the client
@@ -254,7 +263,7 @@ import {
   waitForNode,
 } from "../backbone/core-chain/index.js";
 import { readinessOf } from "../backbone/core-health/readiness.js";
-import { publicLockstepOf } from "../backbone/core-private-source/index.js";
+import { type PrivateLinkAddress, publicLockstepOf } from "../backbone/core-private-source/index.js";
 import { buildCoreVersion, type CoreVersion } from "../config/build.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import { openConfiguredDatabase } from "../config/database.js";
@@ -279,6 +288,7 @@ import type { WorkerOutput } from "./worker-output.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
+import type { NetworkShown } from "../admin/configuration.js";
 import { type PrivateSideFacts, ProcessAdmin } from "../admin/process-admin.js";
 import { type NodeFacts, utcText } from "../admin/snapshot.js";
 import type { AdminStarter } from "../admin/server.js";
@@ -287,7 +297,18 @@ import { resolveGraph } from "../modules/graph.js";
 import type { DeclarationSet } from "../modules/validation.js";
 import { type StartedModuleApi, startModuleApi } from "./api-server.js";
 import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
-import { type NetworkRequest, refusalSecrets, type Resolved, resolve as resolveBuild } from "./resolve.js";
+import {
+  addressText,
+  type LinkPlan,
+  type NetworkPlan,
+  type NetworkRequest,
+  type NetworkRule,
+  planNetwork,
+  refusalSecrets,
+  type Resolved,
+  resolve as resolveBuild,
+  type ServicePlan,
+} from "./resolve.js";
 import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import type { InMemoryBlockSource } from "./in-memory-source.js";
 import { configurationRefusalLines } from "./configuration-refusal.js";
@@ -342,11 +363,12 @@ export type EngineBuild =
   | { readonly declarations: DeclarationSet; readonly userModules?: undefined };
 
 /**
- * Which surfaces listen and connect: `"configured"`, `umbradb run`'s — the module API at the `core` revision's
- * `listen.api`, a public process's private link at its `listen.privateLink`, a private process's at its `privateLink`,
- * each when written, and admin at `listen.admin` through the {@link EngineOptions.adminListener} port —, or a host
- * program's request ({@link NetworkRequest}), under which the process opens no listener and makes no link: the module
- * API's and admin's handlers are the host's to mount. [LM-3, G4, N1; design §5]
+ * Which surfaces listen and connect, as the network plan makes it from this and the addresses the `core` revision
+ * writes (`planNetwork`, `./resolve.ts`): `"configured"`, `umbradb run`'s — the module API at `listen.api`, a public
+ * process's private link at its `listen.privateLink`, a private process's to its `privateLink`, each when written, and
+ * admin at `listen.admin` or its default —, or a host program's request ({@link NetworkRequest}): nothing unless
+ * asked, the module API's and admin's handlers then the host's to mount. Admin listens only through the
+ * {@link EngineOptions.adminListener} port. [LM-3, G4, N1; design §5]
  */
 export type EngineNetwork = "configured" | NetworkRequest;
 
@@ -367,6 +389,8 @@ export interface EngineOptions {
   readonly config: EngineConfig;
   /** Which surfaces listen and connect (see {@link EngineNetwork}). [LM-3] */
   readonly network: EngineNetwork;
+  /** The negative controls' rules of the network plan: `NETWORK_RULES` (`./resolve.ts`) unless given. [L15–L18] */
+  readonly networkRules?: readonly NetworkRule[];
   /** A host program's checks of the configuration step (see {@link LibraryChecks}); none unless given. [LM-10] */
   readonly library?: LibraryChecks;
   /** The working directory: a relative `{ file }` resolves against it, never against the host's own. [LM-2, CF-1] */
@@ -504,6 +528,11 @@ export interface SourceShared {
   readonly log: (line: string) => void;
   /** {@link EngineOptions.acceptPublicConfigHash}, when given (a private source's). */
   readonly updateHash?: string;
+  /**
+   * A private process's link to the core, as its network plan connects (the address with the `tls` setting), or null
+   * for none: a private source's; a public process's source ignores it. [PP-4, LM-3]
+   */
+  readonly link: PrivateLinkAddress | null;
 }
 
 /** The process's state: exactly one at a time. [AE-3; CORE-ARCH §4.18] */
@@ -637,7 +666,7 @@ export interface ProcessStatus {
 export interface StartedProcess {
   /** The `core` revision whose operational and secret fields the process runs with. [Q102] */
   readonly core: CheckedEntry;
-  /** Where the module API listens (`listen.api`), or null without it. */
+  /** Where the module API listens (where the plan puts it: the command's `listen.api`), or null without it. */
   readonly api: { readonly host: string; readonly port: number } | null;
   /** The process's side, as the resolver took it from the configuration. [CF-4] */
   readonly side: ProcessSide;
@@ -1021,8 +1050,13 @@ class Process implements ProcessHandle {
   #nodeClosed: Promise<void> | undefined;
   /** The process's ledger worker, once its graph needs one; kept across a retried startup. */
   #ledger: LedgerHost | undefined;
-  /** A public process's process transport on `listen.privateLink` (`../private/core-transport.ts`). [PP-4] */
+  /** The network plan, once startup made it (see {@link EngineNetwork}). [LM-3] */
+  #plan: NetworkPlan | undefined;
+  /** A public process's process transport where its plan listens (`../private/core-transport.ts`). [PP-4] */
   #transport: CoreTransport | undefined;
+  /** Whether the transport's and the module API's listeners were closed: their addresses are then no more. [L21] */
+  #transportClosed = false;
+  #apiClosed = false;
   /** The transport's read pool on PostgreSQL, logged in as `core.transportReader`. [Q175 A] */
   #transportReader: Database | undefined;
   /** The loop startup made (for its slow height). [RN-17] */
@@ -1054,6 +1088,7 @@ class Process implements ProcessHandle {
             log: (line) => this.#log(line),
             privateSide: () => this.#privateSide(),
             node: () => this.#nodeFacts(),
+            network: () => this.#networkShown(),
             start: adminListener,
             output: this.#workerOutput(),
           });
@@ -1109,10 +1144,24 @@ class Process implements ProcessHandle {
     const bound = (address: { readonly host: string; readonly port: number } | null | undefined): BoundAddress | null =>
       address === null || address === undefined ? null : Object.freeze({ host: address.host, port: address.port });
     return Object.freeze({
-      api: bound(this.#api?.server),
+      api: this.#apiClosed ? null : bound(this.#api?.server),
       admin: bound(this.#admin?.listening()),
-      privateLink: bound(this.#transport),
+      privateLink: this.#transportClosed ? null : bound(this.#transport),
     });
+  }
+
+  /** Closes the module API's listener, if any; its address is then no more ({@link listening}). [RN-13, L21] */
+  async #closeApi(): Promise<void> {
+    if (this.#api === undefined) return;
+    this.#apiClosed = true;
+    await this.#api.close();
+  }
+
+  /** Closes the process transport, if any; its address is then no more ({@link listening}). [PP-4, L21] */
+  async #closeTransport(): Promise<void> {
+    if (this.#transport === undefined) return;
+    this.#transportClosed = true;
+    await this.#transport.close();
   }
 
   stop(): Promise<void> {
@@ -1307,9 +1356,9 @@ class Process implements ProcessHandle {
     await this.ended;
     try {
       await this.#closeAll([
-        ["module API", () => this.#api?.close()],
+        ["module API", () => this.#closeApi()],
         ["the stop's waits", () => waits],
-        ["core transport", () => this.#transport?.close()],
+        ["core transport", () => this.#closeTransport()],
         ["transport reader", () => this.#transportReader?.close()],
         ["node client", () => this.#closeNode()],
         ["ledger worker", () => this.#ledger?.close()],
@@ -1388,6 +1437,31 @@ class Process implements ProcessHandle {
       connection: this.#nodeClient?.connection ?? null,
       queueDepth: view?.queueDepth ?? null,
     });
+  }
+
+  /**
+   * What `/config` shows of the network ({@link NetworkShown}): each surface's mode in the plan, and for a host's
+   * request the process revision's addresses as bound — a listener's the plan's host with the port it bound, absent
+   * until it binds and once it closed; a private process's link the address it connects to. The command's plan shows
+   * the revision's addresses as written. Null before the plan. [LM-3, AE-5, L22]
+   */
+  #networkShown(): NetworkShown | null {
+    const plan = this.#plan;
+    if (plan === undefined) return null;
+    const modes = { api: plan.api.mode, admin: plan.admin.mode, privateLink: plan.privateLink.mode };
+    if (plan.configured) return { modes, addresses: null };
+    const listening = this.listening();
+    const listen: Record<string, string> = {};
+    const bound = (surface: ServicePlan | LinkPlan, at: BoundAddress | null): string | null =>
+      surface.mode === "listening" && at !== null ? addressText(surface.address.host, at.port) : null;
+    const api = bound(plan.api, listening.api);
+    const admin = bound(plan.admin, listening.admin);
+    const link = this.#side === "public" ? bound(plan.privateLink, listening.privateLink) : null;
+    if (api !== null) listen.api = api;
+    if (admin !== null) listen.admin = admin;
+    if (link !== null) listen.privateLink = link;
+    const connecting = plan.privateLink.mode === "connecting" ? plan.privateLink.address.text : null;
+    return { modes, addresses: { listen, privateLink: connecting } };
   }
 
   /** A log line, through the configuration's redaction once it is known; nowhere without the `log` port. [LM-2] */
@@ -1480,6 +1554,11 @@ class Process implements ProcessHandle {
       this.#step();
       const resolved = this.#resolve(loaded);
       this.#refuseObjectTasks(resolved);
+      // The network plan: a request at odds with the written addresses refuses here, before anything opens. [LM-3]
+      const planned = planNetwork(resolved, input.network, input.networkRules);
+      if (planned.refusal !== null) throw planned.refusal;
+      const plan = planned.plan;
+      this.#plan = plan;
       // A host's own checks of what resolved: still the configuration step, so the process ends as above. [LM-10]
       input.library?.resolved?.(resolved);
       // The configuration step ends here: a later refusal keeps the process up (class B). [LM-10]
@@ -1493,7 +1572,8 @@ class Process implements ProcessHandle {
       this.#core = core;
       this.#listenForBackups(core);
       if (this.#admin !== undefined) {
-        await this.#admin.serve(checked, core);
+        // Admin listens where the plan puts it, once the configuration and the plan are validated. [AE-1, LM-3]
+        await this.#admin.serve(checked, core, plan.admin.mode === "listening" ? plan.admin.address.text : null);
         this.#step();
       }
       // A host's in-memory chain needs no node: no client is made, so `node` is never contacted. [LM-8, L49]
@@ -1516,6 +1596,11 @@ class Process implements ProcessHandle {
         start: BigInt(checked.start),
         log: (line) => this.#log(line),
         ...(input.acceptPublicConfigHash === undefined ? {} : { updateHash: input.acceptPublicConfigHash }),
+        // A private process connects to the core where its plan says, with the revision's tls. [PP-4, PP-11, LM-3]
+        link:
+          plan.privateLink.mode === "connecting"
+            ? { address: plan.privateLink.address.text, tls: (core.settings as PlainObject).tls as TransportTls | undefined }
+            : null,
       };
       const given = input.inMemorySource ?? input.source ?? sourceOf(resolved);
       const source: BlockSource = typeof given === "function" ? given(core, shared) : given;
@@ -1557,7 +1642,7 @@ class Process implements ProcessHandle {
       // The module API opens in the last step, after which only a stop throws: the stop closes it. Every step runs and
       // the refusal stays the one thrown, whatever a step does. [G7]
       await this.#closeAll([
-        ["core transport", () => this.#transport?.close()],
+        ["core transport", () => this.#closeTransport()],
         ["transport reader", () => this.#transportReader?.close()],
         ["node client", () => this.#closeNode()],
         ["ledger worker", () => this.#ledger?.close()],
@@ -1696,12 +1781,11 @@ class Process implements ProcessHandle {
       history,
       genesisHash,
     });
-    // The process transport: a public process given listen.privateLink listens for private ones from here on, once,
-    // before the bootstrap's wait, so that they connect before S commits; only for the command's network, a host's
-    // request opening no listener. [PP-4, LM-3]
-    const configured = input.network === "configured";
-    const { privateLink: written } = settings.listen as { readonly privateLink?: string };
-    const transportAddress = configured ? written : undefined;
+    // The process transport: a public process whose plan listens for its private link (the command's at
+    // listen.privateLink, a host's where its request says) listens for private ones from here on, once, before the
+    // bootstrap's wait, so that they connect before S commits. [PP-4, LM-3]
+    const network = this.#plan as NetworkPlan;
+    const transportAddress = network.privateLink.mode === "listening" ? network.privateLink.address.text : undefined;
     const lockstepInstances = (settings.lockstepInstances as unknown as readonly string[] | undefined) ?? [];
     // Lockstep: one bookkeeping for the run, which the transport tells and the loop waits on. [PP-6]
     if (this.#lockstep === undefined && lockstepInstances.length > 0) {
@@ -1723,14 +1807,16 @@ class Process implements ProcessHandle {
         configHash,
         log: (line) => this.#log(line),
       });
+      // `/status` and `/config` show where it listens at once.
+      this.#admin?.publish();
       this.#step();
     }
     // The bootstrap's wait: every bootstrap step has run, and nothing is processed until block S commits. It comes
     // before the module API, so that a retried startup (a node unreachable meanwhile) never finds it listening. [IN-2]
     if (cursor === null) await waitForNode(source, start, this.#stop.signal, waiting);
     this.#step();
-    // The module API's listener at listen.api, for the command's network only: a host mounts its handlers. [LM-3, G4]
-    const address = configured ? (settings.listen as { readonly api?: string }).api : undefined;
+    // The module API's listener where the plan puts it; otherwise none, a host mounting its handlers. [LM-3, G4]
+    const address = network.api.mode === "listening" ? network.api.address.text : undefined;
     this.#api = await startModuleApi({
       graph,
       contexts,

@@ -19,6 +19,11 @@
  *   supplies the last, since the process knows it from its writer's start and failures.
  * - **the build**: UmbraDB's version. There is no commit, since a running build does not know the commit it was built
  *   from. [AE-5, Q134 D]
+ * - **the network** ({@link withNetwork}): how each surface runs, as the process's network plan has it, and, for a
+ *   library process, the process revision's `listen` and `privateLink` as the plan's addresses as bound — a requested
+ *   port 0 shown as the port bound, an address absent where nothing listens or connects at it. The command's revision
+ *   keeps its `listen` as written (its plan is the written addresses, admin's default among them). The entries in
+ *   effect show every revision as validated. [LM-3, AE-5]
  *
  * Before the configuration is validated, nothing of it is shown ({@link UNVALIDATED_CONFIG}), since its secrets are not
  * known yet. [AE-6; CORE-ARCH §4.18]
@@ -55,7 +60,36 @@ export const UNVALIDATED_CONFIG: ConfigSnapshot = Object.freeze({
   ledger: null,
   database: null,
   build: BUILD,
+  network: null,
 });
+
+/**
+ * What `/config` shows of the process's network (see the module comment): each surface's mode, and the process
+ * revision's addresses as the plan has them bound — `listen`'s `api`, `admin` and (a public process's) `privateLink`,
+ * and a private process's `privateLink` — or null to show the revision's own (the command's). [LM-3, AE-5]
+ */
+export interface NetworkShown {
+  readonly modes: { readonly api: string; readonly admin: string; readonly privateLink: string };
+  readonly addresses: { readonly listen: Readonly<Record<string, string>>; readonly privateLink: string | null } | null;
+}
+
+/**
+ * `config` with the network `shown` (see {@link NetworkShown}); unchanged before the configuration is validated, where
+ * every field but the build is null, and without a plan. [LM-3, AE-5]
+ */
+export function withNetwork(config: ConfigSnapshot, shown: NetworkShown | null): ConfigSnapshot {
+  if (config.core === null || shown === null) return config;
+  const network = Object.freeze({ ...shown.modes });
+  if (shown.addresses === null) return Object.freeze({ ...config, network });
+  const { privateLink: _written, ...rest } = config.core.settings;
+  const { addresses } = shown;
+  const settings = Object.freeze({
+    ...rest,
+    listen: Object.freeze({ ...addresses.listen }),
+    ...(addresses.privateLink === null ? {} : { privateLink: addresses.privateLink }),
+  });
+  return Object.freeze({ ...config, core: Object.freeze({ ...config.core, settings }), network });
+}
 
 /** What startup knows once the database is open and its history checked (`ProcessAdmin.opened`). */
 export interface OpenedConfig {
@@ -183,5 +217,7 @@ export function configOf(facts: ConfigFacts, writerLock: boolean): ConfigSnapsho
       writerLock,
     }),
     build: BUILD,
+    // The network plan's modes join at each snapshot (`withNetwork`). [LM-3]
+    network: null,
   });
 }

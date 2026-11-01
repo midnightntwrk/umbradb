@@ -21,7 +21,7 @@ import { BACKBONE_ORDER, resolveGraph } from "../../../src/modules/graph.js";
 import { validateDeclarations } from "../../../src/modules/validation.js";
 import { resolveDeclarations } from "../../../src/runner/resolve.js";
 import { type StatusFacts, statusOf } from "../../../src/runner/process.js";
-import { adminCoreSettings, adminSnapshot, ask, startWithAdmin, statusSnapshot, statusWhen } from "../../admin/admin-harness.js";
+import { adminCoreSettings, adminSnapshot, ask, startWithAdmin, statusSnapshot, statusWhen, writtenAdmin } from "../../admin/admin-harness.js";
 import { LOOP_BACKBONE } from "../../runner/loop-harness.js";
 import { loggingModule } from "../../runner/process-build.js";
 
@@ -303,7 +303,7 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     let cursor: bigint | null = null;
     const admin = new ProcessAdmin({ status: () => status({ cursor }), log: () => undefined, start: fake.start });
     const config = checked();
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(fake.published.at(-1)?.status).toMatchObject({ instance: { role: "core", id: null }, node: { tipCap: 40 }, modules: null });
     const queries: string[] = [];
     let release!: () => void;
@@ -359,7 +359,7 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => status(), log: () => undefined, start: fake.start });
     const config = checked();
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     let reads = 0;
     let fail = false;
     const db = {
@@ -393,7 +393,7 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => status(), log: () => undefined, start: fake.start, side: "private" });
     const config = checked("private");
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     const queries: string[] = [];
     const db = {
       read: async <T>(body: (read: { query(sql: string): Promise<Record<string, unknown>[]> }) => Promise<T>): Promise<T> =>
@@ -413,7 +413,7 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => status(), log: () => undefined, start: fake.start, privateSide: () => side });
     const config = checked();
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(fake.published.at(-1)?.status.privateInstances).toBeNull();
     const db = { read: async () => [] };
     admin.opened({ declarations: validateDeclarations({ backbone: [CORE_CHAIN], core: [], user: [] }), modules: [CORE_CHAIN], revisionsOf: () => [], db: db as never, ...OPENED });
@@ -427,7 +427,7 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     const privately = recording();
     const other = new ProcessAdmin({ status: () => status(), log: () => undefined, start: privately.start, side: "private", privateSide: () => ({ instances: [], lockstep: true }) });
     const privateConfig = checked("private");
-    await other.serve(privateConfig, privateConfig.entries[0] as never);
+    await other.serve(privateConfig, privateConfig.entries[0] as never, writtenAdmin(privateConfig));
     expect(privately.published.at(-1)?.status).toMatchObject({ privateInstances: null, public: { lockstep: true } });
     await other.close();
   });
@@ -438,7 +438,7 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => status(), log: () => undefined, start: fake.start, node: () => (asked++, node) });
     const config = checked();
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(fake.published.at(-1)?.status.node).toMatchObject({ bestHead: null, connection: "connecting", queueDepth: 0 });
     const before = asked;
     node.bestHead = 104n;
@@ -455,7 +455,7 @@ describe("ProcessAdmin's /status facts: the digests read, the last commit, the s
     // Without it, nothing is known of the node beyond status(): the three are null.
     const bare = recording();
     const plain = new ProcessAdmin({ status: () => status(), log: () => undefined, start: bare.start });
-    await plain.serve(config, config.entries[0] as never);
+    await plain.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(bare.published.at(-1)?.status.node).toMatchObject({ bestHead: null, connection: null, queueDepth: null });
     await plain.close();
   });

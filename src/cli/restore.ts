@@ -36,6 +36,7 @@ import type { PlainObject } from "../config/plain-data.js";
 import { redactor } from "../config/redact.js";
 import { UmbraError } from "../db/errors.js";
 import { NodeClient } from "../node/client.js";
+import type { TransportTls } from "../private/core-transport.js";
 import type { BlockSource } from "../runner/block-source.js";
 import { type CommandConfig, commandTarget, openRestoreTarget, readCommandConfig } from "./configured.js";
 
@@ -109,9 +110,16 @@ function chainOf(config: CommandConfig, seams: RestoreCommandSeams, log: (line: 
     if (seams.publicDatabase !== undefined) {
       return { chain: { publicDatabase: seams.publicDatabase(config) }, close: async () => undefined };
     }
-    // The target is empty: its position is a private database's before its first commit. [PP-4]
+    // The target is empty: its position is a private database's before its first commit. Its link is the address the
+    // revision writes as privateLink, with its tls, as the command's process connects. [PP-4, LM-3]
     const start = BigInt(config.checked.start);
-    const side = openPublicSide(config.core, { position: () => ({ height: start - 1n, hash: null }), log });
+    const address = config.surfaces.privateLink;
+    const tls = (config.core.settings as PlainObject).tls as unknown as TransportTls | undefined;
+    const side = openPublicSide(config.core, {
+      link: address === null ? null : { address, tls },
+      position: () => ({ height: start - 1n, hash: null }),
+      log,
+    });
     return {
       chain: { publicDatabase: side.publicDatabase },
       async close() {

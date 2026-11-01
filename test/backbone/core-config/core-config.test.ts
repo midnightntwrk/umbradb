@@ -26,7 +26,7 @@ import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { BACKBONE_ORDER, resolveGraph } from "../../../src/modules/graph.js";
 import { type DeclarationSet, validateDeclarations } from "../../../src/modules/validation.js";
 import { statusOf, type StatusFacts } from "../../../src/runner/process.js";
-import { ADMIN_GENESIS, adminCoreSettings, adminSnapshot, ask, startWithAdmin, statusWhen, within } from "../../admin/admin-harness.js";
+import { ADMIN_GENESIS, adminCoreSettings, adminSnapshot, ask, startWithAdmin, statusWhen, within, writtenAdmin } from "../../admin/admin-harness.js";
 import { LOOP_BACKBONE } from "../../runner/loop-harness.js";
 import { entryOf, loggingModule } from "../../runner/process-build.js";
 import { TEST_LEDGER_TABLE } from "../../private/builds.js";
@@ -127,6 +127,7 @@ describe("/config: the published configuration", () => {
       ledger: null,
       database: null,
       build: { umbradb: UMBRADB_VERSION },
+      network: null,
     });
   });
 });
@@ -303,7 +304,7 @@ describe("ProcessAdmin's /config facts: the database's version, the anchor once 
     let status = running();
     const admin = new ProcessAdmin({ status: () => status, log: () => undefined, start: fake.start });
     const { checked: config, declarations: built } = checked([core()], []);
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(fake.published.at(-1)?.config).toMatchObject({ database: { backend: "postgres", version: null, writerLock: false } });
     const queries: string[] = [];
     let anchor: Uint8Array | null = null;

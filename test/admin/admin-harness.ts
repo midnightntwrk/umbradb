@@ -56,6 +56,15 @@ export function shownDatabase(database: DatabaseParts): Record<string, unknown> 
   return "password" in database && database.password !== undefined ? { ...database, password: "[redacted]" } : { ...database };
 }
 
+/**
+ * The admin address of `config`'s first entry as validated (`listen.admin`, or its default): what the engine's network
+ * plan gives `ProcessAdmin.serve` for `umbradb run`'s request. [AE-1, LM-3]
+ */
+export function writtenAdmin(config: { readonly entries: readonly { readonly settings?: unknown }[] }): string {
+  const settings = config.entries[0]?.settings as { readonly listen: { readonly admin: string } };
+  return settings.listen.admin;
+}
+
 /** A `core` entry of the tests from `start` (see {@link adminCoreSettings}). */
 export function adminCore(
   database: DatabaseParts,

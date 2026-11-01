@@ -8,8 +8,8 @@
  * (`closed` resolves). [LM-1, LM-10, L62]
  *
  * **It does nothing to the host program by default.** It gives the engine none of the command's ports — no SIGUSR2
- * listener, no backup at the stop, no admin listener, the worker threads' output into the host's `log` — and the
- * host's `log` only when given; the configuration is the one given, `{ file }` or `{ data }`, no file looked for. A
+ * listener, no backup at the stop, no admin listener unless the request asks admin to listen, the worker threads'
+ * output into the host's `log` — and the host's `log` only when given; the configuration is the one given, `{ file }` or `{ data }`, no file looked for. A
  * `core` revision that sets `backupAtStop` or `backupOnSignal`, which only the command acts on, is refused
  * (`library-setting-refused`). [LM-2, G1–G5, L47]
  *
@@ -28,9 +28,10 @@
  * nor its `backup(out, seams)`; {@link UmbraDBStarted} holds the module API's address, the side and S — never the
  * checked settings, which hold the TLS key and the database's password. [LM-9, L52]
  *
- * **The network.** A host's request is held to its shape here (`network`, design §5.1) and given to the engine,
- * which opens no listener and makes no link for a library process: a surface listens only where the network plan
- * (`planNetwork`) puts it. [LM-3, G4, N1]
+ * **The network.** A host's request is held to its shape here (`network`, design §5.1) and given to the engine, whose
+ * network plan (`planNetwork`) combines it with the addresses the configuration writes and refuses what it gets wrong
+ * (`network-address-conflict`, `private-link-misconfigured`): nothing listens or connects unless asked. The admin
+ * listener's thread (the engine's admin port) is given only when the request asks admin to listen. [LM-3, G4, G9, N1]
  *
  * **The handlers** exist from the return on. `privateLink.accept(channel)` closes a channel the process does not
  * accept (`private-link-not-accepting`), logs a line and throws nothing. The module API's (`api.http`, `api.upgrade`)
@@ -41,6 +42,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
 import type { Duplex } from "node:stream";
+import { startAdminServer } from "../admin/server.js";
 import type { BackupWritten } from "../backup/backup.js";
 import { UMBRADB_VERSION } from "../config/build.js";
 import type { ProcessSide } from "../config/core-settings.js";
@@ -229,6 +231,12 @@ function userModulesOf(values: Readonly<Record<string, unknown>>): EngineInput["
   return { modules: (values.modules as readonly unknown[] | undefined) ?? [] };
 }
 
+/** Whether the network request, as checked, asks admin to listen: `true`, or `{ host?, port }`. [LM-3, G9] */
+function listensForAdmin(network: unknown): boolean {
+  const admin = (network as NetworkRequest | undefined)?.admin;
+  return admin === true || (typeof admin === "object" && admin !== null);
+}
+
 /** The handle's `started` from the engine's: its module API's address, side and S, never the settings. [L52] */
 const startedOf = (started: StartedProcess): UmbraDBStarted =>
   Object.freeze({ api: started.api, side: started.side, start: started.start });
@@ -256,6 +264,8 @@ export function engineInputOf(options: UmbraDBOptions): {
     cwd,
     userModules: userModulesOf(values),
     network: (values.network as NetworkRequest | undefined) ?? {},
+    // The admin thread only when admin is asked to listen (`true`, or an address in code). [G4, G9, LM-3]
+    ...(listensForAdmin(values.network) ? { adminListener: startAdminServer } : {}),
     ...(log === undefined ? {} : { log }),
     ...(values.signal === undefined ? {} : { signal: values.signal as AbortSignal }),
     // The host's in-memory chain: the process's block source, and no node client. [LM-8, L49]

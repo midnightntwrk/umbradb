@@ -248,6 +248,13 @@ describe("L62: the options' shapes, finding by finding", () => {
     expect(paths({ config: { data: {} }, network: { api: "yes" } })).toEqual(["network.api"]);
     expect(paths({ config: { data: {} }, network: { api: { port: 1, tls: true } } })).toEqual(["network.api.tls"]);
     expect(paths({ config: { data: {} }, network: { api: { port: 65_536 } } })).toEqual(["network.api.port"]);
+    // A host as the configuration's addresses name one: a name or IPv4 address without spaces, or an IPv6 address.
+    for (const host of ["a b", "", "[::1]", "user@host", "host/path", "host:1"]) {
+      expect(paths({ config: { data: {} }, network: { admin: { host, port: 0 } } }), host).toEqual(["network.admin.host"]);
+    }
+    for (const host of ["localhost", "0.0.0.0", "::1", "fe80::1", "indexer.internal"]) {
+      expect(paths({ config: { data: {} }, network: { admin: { host, port: 0 } } }), host).toEqual([]);
+    }
     expect(paths({ config: { data: {} }, network: { privateLink: true } })).toEqual(["network.privateLink"]);
     expect(paths({ config: { data: {} }, network: { privateLink: { either: true } } })).toEqual(["network.privateLink.either"]);
     expect(paths({ config: { data: {} }, network: { privateLink: { publicSide: { channels: true, port: 1 } } } })).toEqual([

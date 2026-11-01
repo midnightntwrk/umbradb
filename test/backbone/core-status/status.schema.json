@@ -73,8 +73,10 @@
         "role": {
           "enum": [
             "core",
-            "private"
-          ]
+            "private",
+            null
+          ],
+          "description": "The process's side; null until it is known (a mounted admin handler before the configuration is validated: start-umbradb design §5.3)."
         },
         "id": {
           "type": [

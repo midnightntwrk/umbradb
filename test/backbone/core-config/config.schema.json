@@ -13,7 +13,8 @@
     "chain",
     "ledger",
     "database",
-    "build"
+    "build",
+    "network"
   ],
   "properties": {
     "core": {
@@ -122,6 +123,48 @@
           "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+"
         }
       }
+    },
+    "network": {
+      "description": "How each surface runs, as the process's network plan has it (start-umbradb design §5.2): null before the configuration is validated.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "api",
+            "admin",
+            "privateLink"
+          ],
+          "properties": {
+            "api": {
+              "enum": [
+                "listening",
+                "mounted",
+                "none"
+              ]
+            },
+            "admin": {
+              "enum": [
+                "listening",
+                "mounted",
+                "none"
+              ]
+            },
+            "privateLink": {
+              "enum": [
+                "listening",
+                "connecting",
+                "channels",
+                "connect",
+                "none"
+              ]
+            }
+          }
+        }
+      ]
     }
   },
   "$defs": {

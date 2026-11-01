@@ -29,6 +29,7 @@ import {
   startWithAdmin,
   statusWhen,
   within,
+  writtenAdmin,
 } from "./admin-harness.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
@@ -395,7 +396,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => status, log: (line) => lines.push(line), start: fake.start });
     const config = checked();
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(fake.started).toEqual([expect.objectContaining({ address: "127.0.0.1:0", beat: expect.any(SharedArrayBuffer) })]);
     expect(fake.published).toHaveLength(1);
     expect(fake.published[0]).toMatchObject({ livenessTimeoutMs: 7_000, readinessLag: null, status: { state: "following", cursor: "1" } });
@@ -420,7 +421,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     await sleep(1_100);
     expect(fake.published.at(-1)?.status).toMatchObject({ cursor: "3" });
     // Closed: it starts nothing more.
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(fake.started).toHaveLength(1);
   });
 
@@ -429,7 +430,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => status, log: () => undefined, start: fake.start });
     const config = checked();
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     let settle!: () => void;
     let fail!: (error: unknown) => void;
     const ok = new Promise<void>((resolve) => {
@@ -464,7 +465,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
       },
     });
     const config = checked();
-    const serving = admin.serve(config, config.entries[0] as never);
+    const serving = admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     await sleep(10);
     const closing = admin.close();
     release();
@@ -486,7 +487,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
       },
     });
     const config = checked();
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(lines).toEqual(["admin endpoints failed: the admin worker broke", "admin endpoints listening on 127.0.0.1:10001"]);
     await admin.close();
   });
@@ -506,7 +507,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
       },
     });
     const config = checked();
-    const serving = admin.serve(config, config.entries[0] as never);
+    const serving = admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     await sleep(10);
     status = running({ cursor: 9n, head: 9n });
     release();
@@ -520,7 +521,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     const admin = new ProcessAdmin({ status: () => running(), log: () => undefined, start: fake.start });
     await admin.close();
     const config = checked();
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(fake.started).toEqual([]);
   });
 
@@ -546,7 +547,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
     });
     const fake = recording();
     const admin = new ProcessAdmin({ status: () => running(), log: () => undefined, start: fake.start });
-    await admin.serve(config, config.entries[0] as never);
+    await admin.serve(config, config.entries[0] as never, writtenAdmin(config));
     expect(fake.published[0]?.config.core?.settings).toMatchObject({
       database: { kind: "postgres", host: "127.0.0.1", port: 9, user: "indexer", password: "[redacted]", name: "umbra", ssl: "disable" },
       backupAtStop: "/backups/[redacted]",
@@ -564,7 +565,7 @@ describe("ProcessAdmin: the runner's side of the admin endpoints", () => {
       },
     });
     const config = checked();
-    await expect(admin.serve(config, config.entries[0] as never)).rejects.toThrow("no listener");
+    await expect(admin.serve(config, config.entries[0] as never, writtenAdmin(config))).rejects.toThrow("no listener");
     await admin.close();
   });
 });

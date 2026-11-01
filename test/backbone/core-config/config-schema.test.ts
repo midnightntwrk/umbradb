@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { configOf, UNVALIDATED_CONFIG } from "../../../src/admin/configuration.js";
+import { configOf, type NetworkShown, UNVALIDATED_CONFIG, withNetwork } from "../../../src/admin/configuration.js";
 import { CORE_DIGEST } from "../../../src/backbone/core-digest/index.js";
 import { coreEntry, versionEntry } from "../../../src/config/entries.js";
 import { checkHistory } from "../../../src/config/history.js";
@@ -40,8 +40,14 @@ function moded(version = "1.0.0"): ModuleDeclaration {
   });
 }
 
-/** A full `/config` body as `configOf` builds it, on the test network. */
-function body(): Record<string, unknown> {
+/** A library process's network as `/config` shows it: its plan's modes, its addresses as bound. [LM-3, L22] */
+const LIBRARY_NETWORK: NetworkShown = {
+  modes: { api: "mounted", admin: "listening", privateLink: "channels" },
+  addresses: { listen: { admin: "127.0.0.1:41234" }, privateLink: null },
+};
+
+/** A full `/config` body as `configOf` builds it, on the test network, with `network` shown when given. */
+function body(network: NetworkShown | null = null): Record<string, unknown> {
   const m = moded();
   const declarations = validateDeclarations({ backbone: [], core: [], user: [m] });
   const entries = [coreEntry({ start: 1, config: adminCoreSettings({ kind: "pglite", memory: true }) as never }), entryOf(m, 1, { mode: "b" })];
@@ -65,13 +71,22 @@ function body(): Record<string, unknown> {
     },
     true,
   );
-  return JSON.parse(JSON.stringify(shown)) as Record<string, unknown>;
+  return JSON.parse(JSON.stringify(withNetwork(shown, network))) as Record<string, unknown>;
 }
 
 describe("A66: /config's JSON schema", () => {
   it("is a draft 2020-12 schema; a full body validates, and so does one before the validation", () => {
     expect(CONFIG_SCHEMA.problems(body())).toEqual([]);
     expect(CONFIG_SCHEMA.problems(JSON.parse(JSON.stringify(UNVALIDATED_CONFIG)))).toEqual([]);
+  });
+
+  it("a body with the network shown validates: each surface's mode, and a library process's addresses as bound (L22)", () => {
+    expect(CONFIG_SCHEMA.problems(body(LIBRARY_NETWORK))).toEqual([]);
+    const command: NetworkShown = { modes: { api: "none", admin: "listening", privateLink: "listening" }, addresses: null };
+    expect(CONFIG_SCHEMA.problems(body(command))).toEqual([]);
+    const shown = body(LIBRARY_NETWORK) as Record<string, any>;
+    expect(shown.network).toEqual({ api: "mounted", admin: "listening", privateLink: "channels" });
+    expect(shown.core.settings.listen).toEqual({ admin: "127.0.0.1:41234" });
   });
 
   it("names MD-1's points, lifetimes, table kinds and setting kinds, and every field the endpoint answers, each required", () => {
@@ -85,7 +100,7 @@ describe("A66: /config's JSON schema", () => {
   });
 
   it("negative controls: a body missing any required field, with an extra one, or with a value of another form fails", () => {
-    const valid = body();
+    const valid = body(LIBRARY_NETWORK);
     for (const field of Object.keys(valid)) {
       const missing = { ...valid };
       delete missing[field];
@@ -108,6 +123,11 @@ describe("A66: /config's JSON schema", () => {
       "a writer lock as text": (b) => (b.database.writerLock = "held"),
       "a build commit (none since Q134 D)": (b) => (b.build.commit = "a75ed95"),
       "a build commit of null": (b) => (b.build.commit = null),
+      "a network without its link's mode": (b) => (b.network = { api: "mounted", admin: "listening" }),
+      "a module API connecting": (b) => (b.network = { api: "connecting", admin: "listening", privateLink: "none" }),
+      "admin over channels": (b) => (b.network = { api: "mounted", admin: "channels", privateLink: "none" }),
+      "a link mounted": (b) => (b.network = { api: "mounted", admin: "listening", privateLink: "mounted" }),
+      "a network as text": (b) => (b.network = "listening"),
     };
     for (const [name, change] of Object.entries(wrong)) {
       const changed = JSON.parse(JSON.stringify(valid)) as Record<string, any>;

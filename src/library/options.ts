@@ -101,6 +101,13 @@ export function readOptions(options: unknown): ReadOptions {
   return { values: Object.freeze(values), findings, readable: true };
 }
 
+/**
+ * A host as an address names it, the rule of the configuration's addresses (`host:port`): a host name or an IPv4
+ * address without spaces, `:`, `/`, brackets or `@`, or an IPv6 address (hex digits, `:` and `.`, unbracketed).
+ * [LM-3, CF-4]
+ */
+const isHost = (host: string): boolean => /^[^\s:/[\]@]+$/.test(host) || (host.includes(":") && /^[0-9A-Fa-f:.]+$/.test(host));
+
 /** The findings of a `{ host?, port }` address request at `path`. [LM-3, L62] */
 function addressFindings(value: Readonly<Record<string, unknown>>, path: string): Finding[] {
   const found: Finding[] = [];
@@ -110,7 +117,11 @@ function addressFindings(value: Readonly<Record<string, unknown>>, path: string)
     }
   }
   const { host, port } = value;
-  if (host !== undefined && typeof host !== "string") found.push(finding(`${path}.host`, "a host is a string"));
+  if (host !== undefined && (typeof host !== "string" || !isHost(host))) {
+    found.push(
+      finding(`${path}.host`, "a host is a string: a host name or an IPv4 address without spaces, or an IPv6 address"),
+    );
+  }
   if (!Number.isInteger(port) || (port as number) < 0 || (port as number) > 65_535) {
     found.push(finding(`${path}.port`, "a port is an integer from 0 to 65535 (0: a free port)"));
   }

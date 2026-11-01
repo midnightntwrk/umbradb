@@ -89,6 +89,8 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "modules-given-twice",
   "ledger-tasks-need-modules-from",
   "source-refused",
+  "network-address-conflict",
+  "private-link-misconfigured",
   "callback-error",
   "listen-failed",
 ] as const);

@@ -584,7 +584,7 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startUmbraDB
     if (db.directory !== undefined) expect(existsSync(db.directory)).toBe(false);
   }, 120_000);
 
-  it("A157: a refusal after the configuration is validated (a changed migration checksum) keeps startUmbraDB up, refused, until stopped", async () => {
+  it("A157: a refusal after the configuration is validated (a changed migration checksum) keeps startUmbraDB up, refused, its listening admin answering the four endpoints, until stopped", async () => {
     const db = await backend.database();
     const config = (sql: string) => ({
       data: { entries: [adminCore(db.setting, 1), entryOf(migrating(sql), 1)] },
@@ -598,12 +598,27 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startUmbraDB
     for (let waited = 0; first.status().cursor !== 3n && waited < 60_000; waited += 25) await sleep(25);
     await first.stop();
     const changed = "CREATE TABLE m.rows (height bigint PRIMARY KEY, x int)";
-    const second = startUmbraDB({ config: config(changed), modules: [migrating(changed)], source: adminSource(3n) });
+    const second = startUmbraDB({
+      config: config(changed),
+      modules: [migrating(changed)],
+      source: adminSource(3n),
+      // A listening admin, at a free port: it keeps answering through the refusal (class B). [AE-3, LM-10]
+      network: { admin: { port: 0 } },
+    });
     try {
       await expect(second.started).rejects.toMatchObject({ code: "migration-checksum-changed" });
       expect(second.status()).toMatchObject({ state: "refused", ready: false, reason: { code: "migration-checksum-changed", module: "m" } });
       expect(await within(second.closed, 1_500)).toBe(false);
       expect(second.status().state).toBe("refused");
+      const admin = second.status().listening.admin;
+      expect(admin).not.toBeNull();
+      const origin = `http://127.0.0.1:${admin?.port}`;
+      expect((await ask(origin, "/health/live")).status).toBe(200);
+      expect((await ask(origin, "/health/ready")).status).toBe(503);
+      const status = await ask(origin, "/status");
+      expect(status.status).toBe(200);
+      expect(status.json).toMatchObject({ state: "refused", reason: { code: "migration-checksum-changed", module: "m" } });
+      expect((await ask(origin, "/config")).status).toBe(200);
     } finally {
       await second.stop();
     }

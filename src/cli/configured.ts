@@ -39,7 +39,7 @@ import { openPostgres, type PostgresConnection } from "../db/postgres.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
 import { isPrivateDatabase } from "../backup/facts.js";
-import { type ResolvedConfig, resolveConfig, resolveDeclarations, resolveSide } from "../runner/resolve.js";
+import { type ResolvedConfig, resolveConfig, resolveDeclarations, resolveSide, type Surfaces } from "../runner/resolve.js";
 import { isRegularFile } from "./type-check.js";
 
 /** The configuration a backup or restore command runs with. */
@@ -51,6 +51,8 @@ export interface CommandConfig {
   readonly side: ProcessSide;
   /** The process's `core` revision. [Q102] */
   readonly core: CheckedEntry;
+  /** The addresses that revision writes, before defaults (a private restore's link is its `privateLink`). [LM-3] */
+  readonly surfaces: Surfaces;
   /** Its `database` setting's parts. */
   readonly database: DatabaseParts;
   readonly developmentOptIn: boolean;
@@ -91,7 +93,7 @@ export async function readCommandConfig(
   } catch (error) {
     throw configurationRefused(error, loaded.file);
   }
-  const { checked, core } = resolved;
+  const { checked, core, surfaces } = resolved;
   const settings = core.settings as PlainObject;
   return Object.freeze({
     file: loaded.file,
@@ -99,6 +101,7 @@ export async function readCommandConfig(
     declarations,
     side,
     core,
+    surfaces,
     database: settings.database as unknown as DatabaseParts,
     developmentOptIn: settings.developmentOptIn === true,
     redact,

@@ -1,5 +1,6 @@
 /**
- * A private process's side of the process transport: its connection to the core's `privateLink` address. It:
+ * A private process's side of the process transport: its connection to the core at its link's address (the network
+ * plan's: `privateLink` for `umbradb run`, or a library host's request). It:
  * - wakes the process's wait for the public cursor ({@link PrivateTransport.next}, the `PublicWakes` of
  *   `src/backbone/core-private-source/`);
  * - tells the core where the process is ({@link PrivateTransport.connection}'s `hello`, then
@@ -95,7 +96,7 @@ export interface TransportPosition {
 
 /** What {@link PrivateTransport} takes. */
 export interface PrivateTransportOptions {
-  /** `privateLink`, `host:port`. */
+  /** The link's address (`privateLink` for the command), `host:port`. */
   readonly address: string;
   /** The `tls` setting; plain WebSocket without it. */
   readonly tls?: TransportTls | undefined;

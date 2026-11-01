@@ -39,7 +39,7 @@ import { Heartbeat } from "../runner/heartbeat.js";
 import type { ProcessStatus } from "../runner/process.js";
 import { readIdentity } from "../backbone/core-chain/sql.js";
 import type { HistoryCheck, HistoryRow } from "../config/history.js";
-import { type ConfigFacts, configOf, type OpenedConfig, UNVALIDATED_CONFIG } from "./configuration.js";
+import { type ConfigFacts, configOf, type NetworkShown, type OpenedConfig, UNVALIDATED_CONFIG, withNetwork } from "./configuration.js";
 import { earlyRedactor } from "./redaction.js";
 import type { WorkerOutput } from "../runner/worker-output.js";
 import { type AdminServer, type AdminStarter, startAdminServer } from "./server.js";
@@ -83,6 +83,11 @@ export interface ProcessAdminOptions {
    * connection's state, the best-block queue's length; the three null unless given. [AE-5]
    */
   readonly node?: () => NodeFacts;
+  /**
+   * The process's network as `/config` shows it, asked at each snapshot: its plan's modes and, for a library process,
+   * its addresses as bound (`withNetwork`); none before the plan, or unless given. [LM-3, AE-5]
+   */
+  readonly network?: () => NetworkShown | null;
 }
 
 /** What `/status` shows of the private side (see {@link ProcessAdminOptions.privateSide}). */
@@ -175,6 +180,7 @@ export class ProcessAdmin {
   #side: ProcessSide;
   readonly #privateSide: (() => PrivateSideFacts) | undefined;
   readonly #node: (() => NodeFacts) | undefined;
+  readonly #network: (() => NetworkShown | null) | undefined;
   readonly #startedNs = process.hrtime.bigint();
   #redactor: Redactor = earlyRedactor(undefined);
   #liveness = DEFAULT_LIVENESS_TIMEOUT_MS;
@@ -211,15 +217,17 @@ export class ProcessAdmin {
     this.#side = options.side ?? "public";
     this.#privateSide = options.privateSide;
     this.#node = options.node;
+    this.#network = options.network;
     this.#heartbeat = new Heartbeat(() => this.publish());
   }
 
   /**
-   * The process's `core` revision is known (`core` of `checked`): starts the listener on its `listen.admin`, with its
-   * liveness timeout, its readiness lag, the configuration's redaction and its side; resolves once it listens, rejects
-   * when it cannot.
+   * The process's `core` revision is known (`core` of `checked`) and its network planned: takes the revision's liveness
+   * timeout, its readiness lag, the configuration's redaction and its side, and starts the listener at `address`, the
+   * plan's (`listen.admin` or its default for `umbradb run`), or none for null; resolves once it listens, rejects when it
+   * cannot. [AE-1, LM-3]
    */
-  async serve(checked: CheckedConfig, core: CheckedEntry): Promise<void> {
+  async serve(checked: CheckedConfig, core: CheckedEntry, address: string | null): Promise<void> {
     if (this.#closed || this.#listening !== undefined) return;
     const settings = core.settings as Readonly<Record<string, unknown>>;
     this.#side = checked.side;
@@ -230,8 +238,7 @@ export class ProcessAdmin {
     this.#tipCap = settings.tipCap as number;
     this.#configFacts = { redactor: this.#redactor, checked, core };
     this.#config = configOf({ ...this.#configFacts, opened: null }, false);
-    const { admin } = settings.listen as { readonly admin: string };
-    await this.#listen(admin);
+    if (address !== null) await this.#listen(address);
   }
 
   /**
@@ -346,10 +353,11 @@ export class ProcessAdmin {
     const status = this.#status();
     const { database } = this.#config;
     const writerLock = writerLockHeld(this.#opened !== null, status);
-    const config =
+    const locked =
       database === null || database.writerLock === writerLock
         ? this.#config
         : Object.freeze({ ...this.#config, database: Object.freeze({ ...database, writerLock }) });
+    const config = withNetwork(locked, this.#network?.() ?? null);
     const privateSide = this.#privateSide?.();
     const node = this.#node?.();
     return snapshotOf(status, {

@@ -79,6 +79,12 @@ describe("A66: /status's JSON schema", () => {
     expect(body()).toMatchObject({ lastCommitAt: "2026-10-26T12:00:00.25Z", uptimeMs: 1_500 });
   });
 
+  it("holds instance.role null while the process's side is not known (start-umbradb, A66's schema additions; AE-5)", () => {
+    const starting = body() as Record<string, any>;
+    expect(STATUS_SCHEMA.problems({ ...starting, instance: { role: null, id: null } })).toEqual([]);
+    expect(STATUS_SCHEMA.problems({ ...starting, instance: { role: "host", id: null } }).length).toBeGreaterThan(0);
+  });
+
   it("holds the private instances and the lockstep flag (task 14.4; PP-9, AE-5)", () => {
     const instances = [
       { id: "keeper", connected: true, lockstep: true, height: "100" },

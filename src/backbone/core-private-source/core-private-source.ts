@@ -52,6 +52,10 @@
  * process runs with (`ProcessInput.source`), which share its public database. The part's binding reads that database at
  * startup, after the runner has made the source from the process's `core` revision and before the loop runs. [Q102]
  *
+ * **Its link to the core** is the one the process gives it ({@link PrivateShared.link}): its network plan's, which for
+ * `umbradb run` is the revision's `privateLink` and for a library process the address its request gives. "With
+ * `privateLink`" below means with that link. [LM-3]
+ *
  * **Its position on the transport**: every `hello` of the transport carries the private cursor (first the one startup
  * read, the source's first {@link PrivateBlockSource.cursor}, then each block the part's `on-after-db-write` sees
  * committed), or, before the first commit, S − 1 with no hash. The transport connects during startup's chain check,
@@ -120,6 +124,7 @@ import type { BlockRef, BlockSource } from "../../runner/block-source.js";
 import { publicConfigChanged } from "../../private/private-transport.js";
 import {
   openPublicSide,
+  type PrivateLinkAddress,
   type PublicDatabase,
   type PublicIdentity,
   type PublicWakes,
@@ -772,12 +777,17 @@ export interface PrivateIntakeOptions {
   readonly acceptance?: typeof startHashDecision;
 }
 
-/** What the process shares with its private source: S, its log and the hash its operator accepts (`updateHash`). */
+/**
+ * What the process shares with its private source: S, its log, the hash its operator accepts (`updateHash`) and its
+ * link to the core.
+ */
 export interface PrivateShared {
   readonly start: bigint;
   readonly log: (line: string) => void;
   /** The engine's `acceptPublicConfigHash` (`umbradb run --update-hash`); none unless given. [PP-14, Q159] */
   readonly updateHash?: string;
+  /** The link to the core the process's network plan gives (`openPublicSide`); none unless given. [PP-4, LM-3] */
+  readonly link?: PrivateLinkAddress | null;
 }
 
 /** One private process start's `core-private-source`: the part and the block source it is bound to. */
@@ -857,6 +867,7 @@ export function privateIntake(options: PrivateIntakeOptions = {}): PrivateIntake
       const side = openPublicSide(
         core,
         {
+          link: shared?.link ?? null,
           position: () => (made as PrivateBlockSource).position(start),
           log: shared?.log ?? (() => undefined),
           ...(options.configHash === undefined ? {} : { configHash: options.configHash }),

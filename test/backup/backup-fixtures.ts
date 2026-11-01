@@ -198,12 +198,14 @@ export async function startTicker(
 /**
  * A library host's ticker process: `startUmbraDB` on the configuration file `file` (its user modules its own `modules`
  * export) over an in-memory chain to `head`, its log collected. No setting only the command acts on may be in the file
- * (`library-setting-refused`). [LM-1, BK-1]
+ * (`library-setting-refused`). The file writes `listen.admin` (a free port, for the command), so the host asks for
+ * admin at it (`network: { admin: true }`): an address written for a surface the request does not use is refused
+ * (`network-address-conflict`, `unused`). [LM-1, LM-3, BK-1]
  */
 export function startLibraryTicker(file: string, head: bigint): TickerProcess<UmbraDBHandle> {
   const source = new InMemoryBlockSource({ head });
   const lines: string[] = [];
-  const handle = startUmbraDB({ config: { file }, source, log: (line) => lines.push(line) });
+  const handle = startUmbraDB({ config: { file }, source, network: { admin: true }, log: (line) => lines.push(line) });
   return tickerOf(handle, source, lines);
 }
 

@@ -163,8 +163,21 @@ export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
   });
 }
 
+/**
+ * The private link a private process's public side connects over: the core's address, `host:port`, and the `tls`
+ * setting, mutual TLS when given. A process takes it from its network plan (the `core` revision's `privateLink` for
+ * `umbradb run`, or the address its host's request gives); a restore from the revision's `privateLink`.
+ * [PP-4, PP-11, LM-3]
+ */
+export interface PrivateLinkAddress {
+  readonly address: string;
+  readonly tls?: TransportTls | undefined;
+}
+
 /** What {@link openPublicSide} needs besides the `core` revision: the private process's position, S and its log. */
 export interface PublicSideOptions {
+  /** The link to the core, or null for none: the process then reads a PostgreSQL `publicDatabase` and polls. [LM-3] */
+  readonly link: PrivateLinkAddress | null;
   /** Its position now, for each `hello` of its transport. */
   readonly position: () => TransportPosition;
   /** Where its transport's log lines go. */
@@ -179,20 +192,20 @@ export interface PublicSideOptions {
 export interface PublicSide {
   readonly publicDatabase: PublicDatabase;
   readonly wakes: PublicWakes;
-  /** The transport to the core, made from `privateLink`; null without it. */
+  /** The transport to the core, made from the link; null without one. */
   readonly transport: PrivateTransport | null;
 }
 
 /**
- * The public side of a private process, built from its `core` revision (see the module comment):
- * - a transport to the core when the revision has `privateLink` (with its `tls`, `instanceId` and
- *   `backoffCeilingMs`);
+ * The public side of a private process, built from its `core` revision and its link (see the module comment):
+ * - a transport to the core over `options.link` when there is one (with the revision's `instanceId` and
+ *   `backoffCeilingMs`); the revision's `privateLink` is not read here, its caller's plan decides the link;
  * - its public database, read directly when `publicDatabase` is PostgreSQL's parts, otherwise through the transport;
  * - its wake-ups: the transport's, otherwise a poll.
  *
- * Throws `invalid-configuration` (`public-database-transport`) for a revision with neither a PostgreSQL
- * `publicDatabase` nor a `privateLink`, since it then has no way to read public data. `given` replaces the public
- * database or the wake-ups (tests use it for direct reads and links).
+ * Throws `invalid-configuration` (`public-database-transport`) for a revision with no PostgreSQL `publicDatabase` and
+ * no link, since it then has no way to read public data. `given` replaces the public database or the wake-ups (tests
+ * use it for direct reads and links). [PP-4, LM-3]
  */
 export function openPublicSide(
   core: CheckedEntry,
@@ -200,12 +213,12 @@ export function openPublicSide(
   given: { readonly publicDatabase?: PublicDatabase; readonly wakes?: PublicWakes } = {},
 ): PublicSide {
   const settings = core.settings as PlainObject;
-  const address = settings.privateLink;
+  const { link } = options;
   const transport =
-    typeof address === "string"
+    link !== null
       ? new PrivateTransport({
-          address,
-          tls: settings.tls as unknown as TransportTls | undefined,
+          address: link.address,
+          tls: link.tls,
           instance: settings.instanceId as string,
           version: UMBRADB_VERSION,
           position: options.position,
@@ -221,10 +234,10 @@ export function openPublicSide(
     const which = settings.publicDatabase === undefined ? "no publicDatabase" : "a PGlite publicDatabase";
     throw new UmbraError(
       "invalid-configuration",
-      `the private process's core entry has ${which} and no privateLink: a private process reads a PostgreSQL ` +
-        "public database directly (publicDatabase, a login that may only read), or any public database through the " +
-        "core's transport (privateLink, the core's listen.privateLink), which also wakes it at every public commit; " +
-        "give it one of them",
+      `the private process's core entry has ${which} and the process has no private link: a private process reads ` +
+        "a PostgreSQL public database directly (publicDatabase, a login that may only read), or any public database " +
+        "through the core's transport (privateLink, the core's listen.privateLink; for a library process, the network " +
+        "request's privateLink.privateSide), which also wakes it at every public commit; give it one of them",
       { reason: "public-database-transport" },
     );
   }
