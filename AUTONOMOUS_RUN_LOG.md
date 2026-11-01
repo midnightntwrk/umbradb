@@ -435,3 +435,23 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   temp directory, a git index, an exporter return value) met a pinned-graphify behavior the previous
   round had not read, so each check found narrower cases. *Follow-up (done):* the owner capped the
   loop at one last check; local and Linux rebuilds are byte-identical.
+
+---
+
+## Change: `start-umbradb` — UmbraDB as a library (2026-11-01)
+
+### Rework (class 4)
+
+- **R1 — A117's no-transaction oracle counted admin's short reads** (`plan-task-runner / claude-opus-5-5 / P9`).
+  Since `start-umbradb` gave every engine process admin (design §5.3: mounted admin keeps the fact reads), admin reads
+  the server version, the identity anchor and `core_digest.tables` on the core's own login right after `opened()` and
+  after commits. A117's oracle (`test/private/lockstep-wait.test.ts`) counted any session of that login with a
+  transaction open at one of its five `pg_stat_activity` looks, so one full run on a loaded machine failed it while the
+  core itself waited outside any transaction (PP-6 met). Eight full runs after the change passed before that one did.
+  *Second story:* the oracle was written when the tests' processes had no admin, so "a transaction of the core's login"
+  and "the core's wait holding a transaction" were the same thing; adding a reader on the same login split them, and
+  only load made a look land on the reader. An instrumented count (each session's `state`, `query`, `xact_start`)
+  confirmed it: a forced 0.4 s admin read reproduced the failure, and 80 looks at real waits saw nothing open. The
+  oracle now counts a transaction only when the same one (`pid`, `xact_start`) is open in two consecutive looks; the
+  negative control still fails it. *Follow-up:* a single fact read slower than the 200 ms between looks would still be
+  counted (one took 241 ms under 14 CPU burners); if it recurs, require three consecutive looks.
