@@ -1,6 +1,12 @@
 # 00067 — `startUmbraDB` throws synchronously when the host's working directory no longer exists
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-11-01 in `a469e20` (`start-umbradb` P10.4b): an absolute `cwd` is used as it is,
+  without reading the working directory; `process.cwd()` is read only for a `cwd` absent or relative, guarded, and when
+  it throws the options are refused at the configuration step (`invalid-configuration`, `invalid-option`) with a finding
+  at `cwd` naming the remedy (an absolute `cwd`), through `started` — `startUmbraDB` returns its handle. Test:
+  `test/library/start-umbradb.test.ts` › «LM-1: a host whose working directory was removed (issue 00067)», a child host
+  (`test/library/gone-cwd.child.ts`) that removes its own working directory; it failed on the tree before the fix (all
+  three starts threw `ENOENT … uv_cwd` out of the call) and passes after.
 - **Area:** library
 - **Severity:** low — a host whose working directory was removed under it; no bad option is involved, so LM-1's
   "never throws for bad options" is not broken, but the handle is not returned either.
