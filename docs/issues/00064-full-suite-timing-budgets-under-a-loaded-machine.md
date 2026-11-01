@@ -1,4 +1,4 @@
-# 00064 — Under a loaded machine, three tests' timing budgets run out in the full suite: L15–L18's controls, A63, F2
+# 00064 — Under a loaded machine, timing budgets of tests run out in the full suite (L15–L18's controls, A63, F2, …)
 
 - **Status:** OPEN
 - **Area:** test
@@ -27,6 +27,17 @@ had these, each a wait that ran out:
    test is about.
 3. `test/db/prepared-statements.test.ts` (issue 00033's F2), "prepares at most 256 texts on a session, and answers
    every query above that, unprepared" — `Test timed out in 60000ms`.
+
+Two more full runs on the same tree, the machine still loaded (43 and 28 min), had more of the same kind, each passing
+when its file runs alone (6 files, 62 tests, right after the third run):
+
+4. `test/library/network.test.ts` again — five controls in the second run (L15, L16, L17 ×2, L18), one in the third
+   (L15).
+5. `test/admin/admin-server.test.ts`, "negative control: an admin server on the main thread fails A62's
+   synchronous-loop case"; `test/runner/slow-block.test.ts`, "with slowBlockMs 5000 and the same callback: never shown,
+   never logged; committed once"; `test/db/zero-timeouts.negative-control.test.ts`, its two 5 s cases;
+   `test/admin/states.test.ts`, A64 "stopped at the core's stop …" and "halted …"; `test/private/transport-intake.test.ts`,
+   A114 "dropped while the public cursor advances 50 heights …".
 
 ## Evidence
 
