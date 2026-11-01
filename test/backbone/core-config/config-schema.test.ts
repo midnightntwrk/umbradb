@@ -8,6 +8,7 @@ import { configRedactor } from "../../../src/config/redact.js";
 import { FIELD_KINDS, LIFETIMES, type ModuleDeclaration, POINTS, TABLE_KINDS } from "../../../src/modules/declaration.js";
 import { validateDeclarations } from "../../../src/modules/validation.js";
 import { validateConfig } from "../../../src/config/validate.js";
+import { processCoreEntry } from "../../../src/config/process.js";
 import { adminCore, adminCoreSettings, type AdminRun, ask, shownDatabase, startWithAdmin, statusWhen } from "../../admin/admin-harness.js";
 import { schemaFile, validatorOf } from "../../admin/json-schema.js";
 import { PROCESS_BACKENDS } from "../../runner/process-backends.js";
@@ -45,7 +46,7 @@ function body(): Record<string, unknown> {
   const declarations = validateDeclarations({ backbone: [], core: [], user: [m] });
   const entries = [coreEntry({ start: 1, config: adminCoreSettings({ kind: "pglite", memory: true }) as never }), entryOf(m, 1, { mode: "b" })];
   const checked = validateConfig({ config: { data: { entries: entries as never } }, declarations, side: "public" });
-  const check = checkHistory({ config: checked, cursor: null, declarations, history: [] });
+  const check = checkHistory({ config: checked, cursor: null, declarations, history: [], process: processCoreEntry(checked) });
   const genesis = new Uint8Array(32).fill(0x81);
   const shown = configOf(
     {

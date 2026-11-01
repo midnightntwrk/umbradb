@@ -4,11 +4,13 @@ import { type CoreSettings, coreEntry, versionEntry } from "../../src/config/ent
 import {
   checkHistory,
   type HistoryCheck,
+  type HistoryInput,
   type HistoryOptions,
   type HistoryRow,
 } from "../../src/config/history.js";
 import { plainData, type PlainObject } from "../../src/config/plain-data.js";
-import { type CheckedConfig, validateConfig } from "../../src/config/validate.js";
+import { processCoreEntry } from "../../src/config/process.js";
+import { type CheckedConfig, type CheckedEntry, validateConfig } from "../../src/config/validate.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { builtInLedgerTable } from "../../src/ledger/networks.js";
 import { defineModule, type ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -121,6 +123,14 @@ export function checked(entries: readonly unknown[], declarations: DeclarationSe
 }
 
 /**
+ * The history check's input `input` with its configuration's process revision (`processCoreEntry`), as the resolver
+ * gives it to the runner (`src/runner/resolve.ts`). [Q102]
+ */
+export function withProcess<T extends Omit<HistoryInput, "process">>(input: T): T & { readonly process: CheckedEntry } {
+  return { ...input, process: processCoreEntry(input.config) };
+}
+
+/**
  * The history once `deletes` are deleted and `writes` recorded: each deleted by its `(id, start)`, each write inserted
  * or replacing the row of its `(id, start)`.
  */
@@ -157,7 +167,7 @@ export class Simulation {
   start(start: Start): HistoryCheck {
     const declarations = build(start.user);
     const config = checked(start.entries, declarations);
-    const check = checkHistory({ config, cursor: start.cursor, declarations, history: this.history }, start.options);
+    const check = checkHistory(withProcess({ config, cursor: start.cursor, declarations, history: this.history }), start.options);
     this.history = recordedAfter(this.history, check.writes, check.deletes);
     return check;
   }

@@ -8,7 +8,7 @@ import { CORE_BLOCK_COMMIT } from "../../../src/backbone/core-block-commit/core-
 import { CORE_CHAIN } from "../../../src/backbone/core-chain/index.js";
 import { CORE_DIGEST } from "../../../src/backbone/core-digest/index.js";
 import { CORE_HEALTH, CORE_HEALTH_ENDPOINTS } from "../../../src/backbone/core-health/index.js";
-import { buildDeclarations } from "../../../src/cli/build-modules.js";
+import { resolveDeclarations } from "../../../src/runner/resolve.js";
 import { UMBRADB_VERSION } from "../../../src/config/build.js";
 import { BACKBONE_ORDER, resolveGraph } from "../../../src/modules/graph.js";
 import { validateDeclarations } from "../../../src/modules/validation.js";
@@ -70,10 +70,10 @@ describe("core-health's declaration (CORE-ARCH §4.11: no points, requires nothi
     const graph = resolveGraph({ declarations, start: 1n, entries: [], developmentOptIn: false, cursor: null });
     const ids = graph.modules.map((part) => part.id);
     expect(ids.indexOf("core-health")).toBe(ids.indexOf("core-digest") + 1);
-    const build = buildDeclarations().backbone.map((part) => part.id);
+    const build = resolveDeclarations({ userModules: [], side: "public" }).backbone.map((part) => part.id);
     expect(build).toContain("core-health");
     expect(build.indexOf("core-health")).toBeGreaterThan(build.indexOf("core-digest"));
-    expect(buildDeclarations().backbone.find((part) => part.id === "core-health")).toBe(CORE_HEALTH);
+    expect(resolveDeclarations({ userModules: [], side: "public" }).backbone.find((part) => part.id === "core-health")).toBe(CORE_HEALTH);
   });
 });
 

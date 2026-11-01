@@ -85,8 +85,7 @@ import {
 import { readPublicBlock, readPublicItems } from "../backbone/core-private-source/sql.js";
 import { checkHistory, graphInputOf, type HistoryRow } from "../config/history.js";
 import type { PlainObject } from "../config/plain-data.js";
-import { processCoreEntry } from "../config/process.js";
-import type { CheckedConfig } from "../config/validate.js";
+import type { CheckedConfig, CheckedEntry } from "../config/validate.js";
 import type { Database, Transaction } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import { checkRecordedMigrations, restoreGrants } from "../db/migrate.js";
@@ -122,6 +121,11 @@ interface RestoreBase {
   /** The validated configuration and the build's declarations (the configuration file's). [CF-1] */
   readonly config: CheckedConfig;
   readonly declarations: DeclarationSet<ModuleDeclaration>;
+  /**
+   * The process's `core` revision (the resolver's `core`, `src/runner/resolve.ts`), whose development opt-in the
+   * history's check reads and whose network a private backup's public database is checked against. [Q102]
+   */
+  readonly core: CheckedEntry;
 }
 
 /**
@@ -270,7 +274,7 @@ export interface PublicSide {
  */
 async function checkPublicSide(
   publicDatabase: PublicDatabase,
-  config: CheckedConfig,
+  core: CheckedEntry,
   manifest: Manifest,
 ): Promise<PublicSide> {
   const height = BigInt(manifest.height);
@@ -281,7 +285,7 @@ async function checkPublicSide(
     return { identity, items, head: await readPublicCursor(read), block: await readPublicBlock(read, height) };
   });
   if (side === null) throw publicNotStarted();
-  const network = networkRefusal(configuredGenesisOf(processCoreEntry(config).settings as PlainObject), side.identity);
+  const network = networkRefusal(configuredGenesisOf(core.settings as PlainObject), side.identity);
   if (network !== null) throw network;
   // The backup's binding itself is in its rows, compared once loaded: here only its S against the public S.
   const below = bindingRefusal(null, side.identity, BigInt(manifest.start));
@@ -337,9 +341,10 @@ async function checkBeforeLoading(input: RestoreInput): Promise<Checked> {
       cursor: height,
       declarations: input.declarations,
       history: historyRows(manifest),
+      process: input.core,
     });
     // A private process's backup: its public database's binding before the graph, which counts its items. [PP-13]
-    if (input.publicDatabase !== undefined) side = await checkPublicSide(input.publicDatabase, input.config, manifest);
+    if (input.publicDatabase !== undefined) side = await checkPublicSide(input.publicDatabase, input.core, manifest);
     const graph = resolveGraph({
       ...graphInputOf(check, input.declarations),
       ...(side === null ? {} : { publicItems: side.items }),

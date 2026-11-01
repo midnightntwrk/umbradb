@@ -19,7 +19,7 @@ import { validateConfig } from "../../../src/config/validate.js";
 import type { Revision } from "../../../src/modules/declaration.js";
 import { BACKBONE_ORDER, resolveGraph } from "../../../src/modules/graph.js";
 import { validateDeclarations } from "../../../src/modules/validation.js";
-import { buildDeclarations } from "../../../src/cli/build-modules.js";
+import { resolveDeclarations } from "../../../src/runner/resolve.js";
 import { type StatusFacts, statusOf } from "../../../src/runner/process.js";
 import { adminCoreSettings, adminSnapshot, ask, startWithAdmin, statusSnapshot, statusWhen } from "../../admin/admin-harness.js";
 import { LOOP_BACKBONE } from "../../runner/loop-harness.js";
@@ -100,7 +100,7 @@ describe("core-status's declaration (CORE-ARCH §4.11)", () => {
     const declarations = validateDeclarations({ backbone: [CORE_STATUS, CORE_HEALTH, ...[...LOOP_BACKBONE].reverse()], core: [], user: [] });
     const ids = resolveGraph({ declarations, start: 1n, entries: [], developmentOptIn: false, cursor: null }).modules.map((part) => part.id);
     expect(ids.indexOf("core-status")).toBe(ids.indexOf("core-health") + 1);
-    const build = buildDeclarations().backbone;
+    const build = resolveDeclarations({ userModules: [], side: "public" }).backbone;
     expect(build.find((part) => part.id === "core-status")).toBe(CORE_STATUS);
     expect(build.map((part) => part.id).indexOf("core-status")).toBe(build.map((part) => part.id).indexOf("core-health") + 1);
   });

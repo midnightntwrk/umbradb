@@ -1247,7 +1247,7 @@ class Process implements ProcessHandle {
     }));
     this.#step();
     this.#cursor = cursor?.height ?? null;
-    const check = checkHistory({ config: checked, cursor: this.#cursor, declarations, history });
+    const check = checkHistory({ config: checked, cursor: this.#cursor, declarations, history, process: core });
     const waiting = (wait: NodeWait | null): void => this.#waiting(wait);
     // A private process's source checks its chain itself, since a private process never talks to the node. [PP-1]
     const { genesisHash, publicItems } = await (input.checkChain ?? source.checkChain?.bind(source) ?? checkChain)({
@@ -1272,6 +1272,7 @@ class Process implements ProcessHandle {
     // startup binds its new contexts, the node client kept.
     bindCoreChain(contexts.of(CORE_CHAIN_ID), {
       config: checked,
+      process: core,
       declarations,
       cursor: this.#cursor,
       db,

@@ -61,7 +61,7 @@ import {
   startProcess,
 } from "../runner/process.js";
 import { commandBuild } from "./build-modules.js";
-import { inferSide } from "./config-check.js";
+import { inferSide } from "../runner/resolve.js";
 
 /** The signals that stop the process. [RN-13] */
 export const STOP_SIGNALS = Object.freeze(["SIGTERM", "SIGINT"] as const);

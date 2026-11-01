@@ -177,7 +177,7 @@ describe("A34: a development-only module refuses without developmentOptIn, throu
   async function resolve(entries: string) {
     const declarations = build([DEVTOOL]);
     const config = validateConfig({ config: await load(entries), declarations, side: "public" });
-    const check = checkHistory({ config, cursor: null, declarations, history: [] });
+    const check = checkHistory({ config, cursor: null, declarations, history: [], process: processCoreEntry(config) });
     return resolveGraph(graphInputOf(check, declarations));
   }
 
@@ -211,7 +211,7 @@ describe("CF-9: sweep: off refuses without developmentOptIn, through a configura
         declarations,
         side: "public",
       });
-      return checkHistory({ config, cursor: null, declarations, history: [] });
+      return checkHistory({ config, cursor: null, declarations, history: [], process: processCoreEntry(config) });
     };
     const error = await refusal(() => check(""));
     expect(error.code).toBe("development-opt-in-required");

@@ -9,6 +9,7 @@ import type { DatabaseParts, PostgresParts } from "../../src/config/database-par
 import { coreEntry } from "../../src/config/entries.js";
 import { canonicalJson, checkHistory } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
+import { processCoreEntry } from "../../src/config/process.js";
 import { type CheckedConfig, type CheckedEntry, validateConfig } from "../../src/config/validate.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -196,22 +197,14 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
 
     it("negative control: a process taking the first core revision's operational fields fails A149", async () => {
       const problems = a149Problems(await a149Run(await backend.database(), await backend.database(), firstCoreRevision));
-      if (backend.kind === "pglite") {
-        // The first revision has no opt-in, so PGlite refuses to open its database. [CF-9]
-        expect(problems).toEqual([
-          "startup 1 refused (development-opt-in-required)",
-          "startup 2 refused (development-opt-in-required)",
-          "the later revision's database holds cursor null, not 8",
-        ]);
-      } else {
-        expect(problems).toContain("startup 1 ran with the core revision from 1");
-        expect(problems).toContain("startup 1 made its block source with node ws://127.0.0.1:9/n1");
-        expect(problems).toContain(
-          "startup 1: core-chain's settings at 1, 2, 3, 4, 5 were not the later revision's operational fields",
-        );
-        expect(problems).toContain("the later revision's database holds cursor null, not 8");
-        expect(problems).toContain("the earlier revision's database was opened and written");
-      }
+      // The first revision has no opt-in, and the process takes every operational field from the one revision it runs
+      // with, the history's opt-in included: the development-only module refuses startup on either backend (on PGlite
+      // its database refuses to open first). [CF-9, Q102]
+      expect(problems).toEqual([
+        "startup 1 refused (development-opt-in-required)",
+        "startup 2 refused (development-opt-in-required)",
+        "the later revision's database holds cursor null, not 8",
+      ]);
     }, 180_000);
   });
 
@@ -582,7 +575,7 @@ describe("terminationSignal: SIGTERM stops the process (RN-13)", () => {
 function checked(entries: readonly unknown[], user: readonly ModuleDeclaration[], cursor: bigint | null = null) {
   const declarations = validateDeclarations({ backbone: testBuild([]).declarations.backbone, core: [], user });
   const config = validateConfig({ config: { data: plainData({ entries }) }, declarations, side: "public" });
-  return { declarations, config, check: checkHistory({ config, cursor, declarations, history: [] }) };
+  return { declarations, config, check: checkHistory({ config, cursor, declarations, history: [], process: processCoreEntry(config) }) };
 }
 
 describe("upgradeBoundary: RN-12's first height of a version the build does not carry", () => {

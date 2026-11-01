@@ -10,6 +10,7 @@ import {
   type HistoryRule,
 } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
+import { processCoreEntry } from "../../src/config/process.js";
 import { validateConfig } from "../../src/config/validate.js";
 import type { Database } from "../../src/db/api.js";
 import { type AppliedMigration, startDatabase } from "../../src/db/migrate.js";
@@ -122,7 +123,7 @@ export async function startup(db: Database, options: StartupOptions): Promise<St
   const config = validateConfig({ config: { file: FILE, data: plainData({ entries: options.entries }) }, declarations, side: "public" });
   const all = options.rules ?? HISTORY_RULES;
   const rules = options.versionCheckAfterMigrations === true ? all.filter((rule) => rule.name !== "build-version") : all;
-  const input = { config, cursor: options.cursor, declarations };
+  const input = { config, cursor: options.cursor, declarations, process: processCoreEntry(config) };
   const history = await db.read((read) => readHistory(read));
   const check = checkHistory({ ...input, history }, { rules });
   holder.input = input;
@@ -153,7 +154,7 @@ export function historyInput(
 ): Omit<HistoryInput, "history"> {
   const declarations = validateDeclarations({ backbone: [BLOCK_FETCH], core: [], user });
   const config = validateConfig({ config: { file: FILE, data: plainData({ entries }) }, declarations, side: "public" });
-  return { config, cursor, declarations };
+  return { config, cursor, declarations, process: processCoreEntry(config) };
 }
 
 /** The rows of `core_chain.config`, read as the history reads them (none before the first startup). */

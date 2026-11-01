@@ -5,8 +5,7 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { CHECK_STEPS, type CheckStep, configCheck, type ConfigCheckReport, HISTORY_NOT_RUN } from "../../src/cli/config-check.js";
-import { buildDeclarations } from "../../src/cli/build-modules.js";
-import { inferSide } from "../../src/cli/config-check.js";
+import { resolveDeclarations } from "../../src/runner/resolve.js";
 import { EXIT } from "../../src/cli/command.js";
 import { buildCoreVersion } from "../../src/config/build.js";
 import { defineModule } from "../../src/modules/declaration.js";
@@ -377,18 +376,6 @@ describe("the type check's options, as the process loads the file", () => {
 });
 
 describe("the process's side, from the configuration", () => {
-  it("private when a core entry has instanceId and none has node", () => {
-    const entry = (config: Record<string, unknown>) => ({ id: "core", start: 0, config });
-    expect(inferSide({ entries: [entry({ instanceId: "a" })] })).toBe("private");
-    expect(inferSide({ entries: [entry({ instanceId: "a" }), entry({ node: "ws://n" })] })).toBe("public");
-    expect(inferSide({ entries: [entry({ node: "ws://n" })] })).toBe("public");
-    expect(inferSide({ entries: [entry({})] })).toBe("public");
-    expect(inferSide({ entries: [{ id: "m", start: 0, config: { instanceId: "a" } }] })).toBe("public");
-    expect(inferSide({ entries: "none" })).toBe("public");
-    expect(inferSide(null)).toBe("public");
-    expect(inferSide({ entries: [null, { id: "core", config: null }, entry({ instanceId: "a" })] })).toBe("private");
-  });
-
   it("a private configuration is validated against the private core schema", async () => {
     const settings = JSON.stringify({ network: "preprod", database: unanswered, instanceId: "wallet-1" });
     const file = project.write("private.config.ts", coreOnly(settings));
@@ -436,19 +423,19 @@ describe("modules: the build's, or a host program's", () => {
     const result = await check(file);
     expect(result.code).toBe(EXIT.failed);
     expect(result.stdout).toContain("entries[1].id (stats from 10): this build has no module stats");
-    expect(buildDeclarations().user).toEqual([]);
+    expect(resolveDeclarations({ userModules: [], side: "public" }).user).toEqual([]);
   });
 
   it("a host program passes its own declarations to configCheck, and the file checks against them", async () => {
     const file = project.write("stats-host.config.ts", withStats());
-    const build = buildDeclarations();
+    const build = resolveDeclarations({ userModules: [], side: "public" });
     const declarations = validateDeclarations({ backbone: build.backbone, core: build.core, user: [STATS] });
     const report = await configCheck({ file, cwd: project.dir, declarations });
     expect(report.passed).toBe(true);
   });
 
   it("the build's modules are its backbone parts and core modules with declarations, validated", () => {
-    const build = buildDeclarations();
+    const build = resolveDeclarations({ userModules: [], side: "public" });
     expect(build.backbone.map((part) => part.id)).toEqual(["core-chain", "core-block-fetch", "core-block-commit", "core-digest", "core-health", "core-status", "core-config"]);
     // The optional core modules, off unless a configuration enables them.
     expect(build.core.map((part) => part.id)).toEqual([

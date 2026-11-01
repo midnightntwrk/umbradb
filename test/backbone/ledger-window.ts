@@ -7,6 +7,7 @@ import { nodeSourceOf } from "../../src/backbone/core-block-fetch/index.js";
 import type { Manifest } from "../../src/backup/manifest.js";
 import { type Restored, restoreBackup } from "../../src/backup/restore.js";
 import { plainData } from "../../src/config/plain-data.js";
+import { processCoreEntry } from "../../src/config/process.js";
 import { validateConfig } from "../../src/config/validate.js";
 import { openPostgres } from "../../src/db/postgres.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
@@ -130,6 +131,7 @@ export async function restoreOnPostgres(target: ProcessDatabase, backup: WindowB
       },
       config,
       declarations,
+      core: processCoreEntry(config),
       source,
     });
   } finally {

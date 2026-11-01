@@ -15,12 +15,13 @@ import { CORE_CONFIG, CORE_CONFIG_ENDPOINTS } from "../../../src/backbone/core-c
 import { CORE_DIGEST } from "../../../src/backbone/core-digest/index.js";
 import { CORE_HEALTH } from "../../../src/backbone/core-health/index.js";
 import { CORE_STATUS } from "../../../src/backbone/core-status/index.js";
-import { buildDeclarations } from "../../../src/cli/build-modules.js";
+import { resolveDeclarations } from "../../../src/runner/resolve.js";
 import { buildCoreVersion, UMBRADB_VERSION } from "../../../src/config/build.js";
 import { coreEntry, versionEntry } from "../../../src/config/entries.js";
 import { checkHistory } from "../../../src/config/history.js";
 import { configRedactor } from "../../../src/config/redact.js";
 import { validateConfig } from "../../../src/config/validate.js";
+import { processCoreEntry } from "../../../src/config/process.js";
 import type { ModuleDeclaration } from "../../../src/modules/declaration.js";
 import { BACKBONE_ORDER, resolveGraph } from "../../../src/modules/graph.js";
 import { type DeclarationSet, validateDeclarations } from "../../../src/modules/validation.js";
@@ -105,7 +106,7 @@ describe("core-config's declaration (CORE-ARCH §4.11)", () => {
     const declarations = validateDeclarations({ backbone: [CORE_CONFIG, CORE_STATUS, CORE_HEALTH, ...[...LOOP_BACKBONE].reverse()], core: [], user: [] });
     const ids = resolveGraph({ declarations, start: 1n, entries: [], developmentOptIn: false, cursor: null }).modules.map((part) => part.id);
     expect(ids.slice(-3)).toEqual(["core-health", "core-status", "core-config"]);
-    const build = buildDeclarations().backbone;
+    const build = resolveDeclarations({ userModules: [], side: "public" }).backbone;
     expect(build.at(-1)).toBe(CORE_CONFIG);
   });
 });
@@ -181,7 +182,7 @@ describe("configOf: what /config shows (AE-5), every secret redacted (AE-6)", ()
     // A database written by m 0.9.0 up to 3, now run by m 1.0.0 from 4: m 0.9.0's revision is a recorded versionEntry.
     const old = module("0.9.0");
     const first = checked([core(), { id: "m", start: 1, version: "0.9.0", config: { mode: "x", feed: `https://u:${PASSWORD}@old.example` } }], [old]);
-    const rows = checkHistory({ config: first.checked, cursor: null, declarations: first.declarations, history: [] }).writes;
+    const rows = checkHistory({ config: first.checked, cursor: null, declarations: first.declarations, history: [], process: processCoreEntry(first.checked) }).writes;
     const m = module();
     const entries = [
       core(),
@@ -189,7 +190,7 @@ describe("configOf: what /config shows (AE-5), every secret redacted (AE-6)", ()
       entryOf(m, 4, { mode: "y" }),
     ];
     const now = checked(entries, [m]);
-    const check = checkHistory({ config: now.checked, cursor: 3n, declarations: now.declarations, history: rows });
+    const check = checkHistory({ config: now.checked, cursor: 3n, declarations: now.declarations, history: rows, process: processCoreEntry(now.checked) });
     const declarations: DeclarationSet<ModuleDeclaration> = validateDeclarations({ backbone: [CORE_CHAIN, CORE_BLOCK_COMMIT, CORE_DIGEST, CORE_CONFIG], core: [], user: [m] });
     // The chain's genesis hash, as startup's check found it, over the configured one.
     const genesis = new Uint8Array(32).fill(0x82);
@@ -319,7 +320,7 @@ describe("ProcessAdmin's /config facts: the database's version, the anchor once 
           },
         }),
     };
-    const check = checkHistory({ config, cursor: null, declarations: built, history: [] });
+    const check = checkHistory({ config, cursor: null, declarations: built, history: [], process: processCoreEntry(config) });
     admin.opened({
       declarations: built,
       modules: [CORE_CHAIN],

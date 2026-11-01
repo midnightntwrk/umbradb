@@ -5,7 +5,8 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { type BrowserRun, withDevelopmentOptIn } from "../../browser/src/configuration.js";
 import { cursorHeight } from "../../src/backbone/core-block-commit/sql.js";
 import { nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
-import { buildDeclarations, commandBuild } from "../../src/cli/build-modules.js";
+import { commandBuild } from "../../src/cli/build-modules.js";
+import { resolveDeclarations } from "../../src/runner/resolve.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import { openPglite } from "../../src/db/pglite.js";
 import { schemaPlan } from "../../src/modules/adapters.js";
@@ -74,7 +75,7 @@ export async function nodeRun(records: readonly TapeRecord[], params: Readonly<R
     } finally {
       await handle.stop();
     }
-    const declarations = buildDeclarations(modules);
+    const declarations = resolveDeclarations({ userModules: modules, side: "public" });
     const { optedOut } = schemaPlan([...declarations.backbone, ...declarations.core, ...declarations.user]);
     const db = await openPglite({ dataDir: directory, committedHeight: cursorHeight, developmentOptIn: true });
     try {

@@ -37,7 +37,7 @@
 import { z } from "zod";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { HistoryOptions } from "../../config/history.js";
-import type { CheckedConfig } from "../../config/validate.js";
+import type { CheckedConfig, CheckedEntry } from "../../config/validate.js";
 import type { BlockWriteHandle, Database, SchemaWriteHandle } from "../../db/api.js";
 import { UmbraError } from "../../db/errors.js";
 import { readOnlyDatabase } from "../../db/read-only.js";
@@ -242,6 +242,8 @@ export function nodeOptionsOf(settings: Readonly<Record<string, unknown>>): Node
 export interface CoreChainFacts {
   /** The validated configuration: its history is recorded, and it is published as the `config` item. [CF-6] */
   readonly config: CheckedConfig;
+  /** The process's `core` revision, whose development opt-in the history's check reads. [Q102] */
+  readonly process: CheckedEntry;
   /** The build's validated declarations, which the history's check reads. */
   readonly declarations: DeclarationSet<ModuleDeclaration>;
   /** The cursor's height at startup, null on a new database. */
@@ -312,7 +314,8 @@ export async function coreChainStartDb(
   options: { readonly history?: HistoryOptions } = {},
 ): Promise<void> {
   const { facts, db } = boundTo(p, "on-start-db");
-  await recordHistory(w, { config: facts.config, declarations: facts.declarations, cursor: facts.cursor }, options.history);
+  const { config, declarations, cursor, process } = facts;
+  await recordHistory(w, { config, declarations, cursor, process }, options.history);
   if (facts.cursor === null) await recordIdentity(w, facts.genesisHash, facts.start);
   p.publish("config", facts.config);
   if (facts.nodeClient !== null) p.publish("node-client", facts.nodeClient);

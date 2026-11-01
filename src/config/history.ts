@@ -36,7 +36,7 @@
  * 3. `upgrade-required`: for every entry, the revision covering c + 1 (S on a new database) names the build's version
  *    (`buildCoreVersion()` for `core`, the declaration's `version` for a module). [CF-8, Q43]
  * 4. `development-opt-in-required`: a `core` revision with `sweep: "off"` that runs above the cursor needs the
- *    development opt-in, which the process takes from its `core` revision (`./process.ts`). This is the
+ *    development opt-in, which the process takes from its `core` revision ({@link HistoryInput.process}). This is the
  *    configuration's half of the opt-in check: PGlite's half is in `openPglite` (`./database.ts`), and a
  *    development-only module's in the requirement graph. [CF-9, Q102, MD-5]
  *
@@ -59,7 +59,6 @@ import type { DeclarationSet } from "../modules/validation.js";
 import { buildCoreVersion, type CoreVersion } from "./build.js";
 import { CORE_ENTRY_ID } from "./entries.js";
 import { pathOf, type PlainData, type PlainObject, samePlainData } from "./plain-data.js";
-import { processCoreEntry } from "./process.js";
 import {
   type CheckedConfig,
   type CheckedEntry,
@@ -110,6 +109,11 @@ export interface HistoryInput {
   readonly declarations: DeclarationSet<ModuleDeclaration>;
   /** The rows of `core_chain.config` (`readHistory`); none on a new database. */
   readonly history: readonly HistoryRow[];
+  /**
+   * The process's `core` revision, whose operational settings it runs with (the resolver's `core`,
+   * `src/runner/resolve.ts`): its development opt-in is the history's. [Q102, CF-9]
+   */
+  readonly process: CheckedEntry;
 }
 
 /** What the rules check (see {@link HistoryRule}). */
@@ -662,7 +666,7 @@ function contextOf(input: HistoryInput, options: HistoryOptions): HistoryContext
     );
   }
   const entries = entriesAtCursor(config, cursor);
-  const process = processCoreEntry(config);
+  const { process } = input;
   const rows = new Map(input.history.map((row) => [keyOf(row.id, row.start), row]));
   const listed = new Set(entries.map((entry) => keyOf(entry.id, BigInt(entry.start))));
   const builds = new Map<string, string | CoreVersion>([[CORE_ENTRY_ID, buildCoreVersion()]]);
@@ -724,8 +728,8 @@ function refusal(code: HistoryCode, findings: readonly HistoryFinding[], context
  * Checks the configuration against the history at the cursor (see the module comment) and returns what startup goes on
  * with; throws the first code with findings (`missing-entry`, `changes-past`, `upgrade-required`,
  * `development-opt-in-required`; not retryable) with every finding of it in `details.findings` — and, before any rule,
- * `entriesAtCursor`'s and `processCoreEntry`'s `invalid-configuration`, and an `Error` for a cursor that is no height
- * or is below S (the caller's error).
+ * `entriesAtCursor`'s `invalid-configuration`, and an `Error` for a cursor that is no height or is below S (the
+ * caller's error).
  */
 export function checkHistory(input: HistoryInput, options: HistoryOptions = {}): HistoryCheck {
   const context = contextOf(input, options);
@@ -746,12 +750,11 @@ export function checkHistory(input: HistoryInput, options: HistoryOptions = {}):
   });
   // Every omitted row the `listed` rule did not reject. [CF-5, Q103 B]
   const deletes = context.history.filter((row) => !context.listed(row) && context.omissionAllowed(row, context.cursor));
-  const process = processCoreEntry(input.config);
   return Object.freeze({
     start: BigInt(input.config.start),
     cursor: input.cursor,
     entries: context.entries,
-    process,
+    process: input.process,
     developmentOptIn: context.developmentOptIn,
     graphEntries: Object.freeze(graphEntries(context.entries)),
     committedVersions: committedVersions(input.history, BigInt(input.config.start), input.cursor),

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
-import { buildDeclarations, commandBuild } from "../../src/cli/build-modules.js";
+import { commandBuild } from "../../src/cli/build-modules.js";
+import { resolveDeclarations } from "../../src/runner/resolve.js";
 import { EXIT } from "../../src/cli/command.js";
 import { configCheck, type ConfigCheckReport } from "../../src/cli/config-check.js";
 import { loadConfig } from "../../src/config/load.js";
@@ -139,10 +140,10 @@ describe("how the file's modules join the build (Q106 B)", () => {
     const loaded = await loadConfig({
       file: write({ modules: "[prices, stats]", before: ['import { prices } from "./prices.ts";'] }),
     });
-    const build = buildDeclarations(loaded.modules);
+    const build = resolveDeclarations({ userModules: loaded.modules, side: "public" });
     expect(build.user.map((module) => module.id)).toEqual(["prices", "stats"]);
-    expect(build.backbone).toEqual(buildDeclarations().backbone);
-    expect(build.core).toEqual(buildDeclarations().core);
+    expect(build.backbone).toEqual(resolveDeclarations({ userModules: [], side: "public" }).backbone);
+    expect(build.core).toEqual(resolveDeclarations({ userModules: [], side: "public" }).core);
     // The declarations themselves, not copies: the callbacks are the file's; the list a frozen copy of the file's.
     expect(build.user[1]).toBe(loaded.modules[1]);
     expect(Object.isFrozen(loaded.modules)).toBe(true);
@@ -192,7 +193,7 @@ describe("how the file's modules join the build (Q106 B)", () => {
     expect(build.core).toEqual([]);
     expect(build.user).toEqual([secret]);
     expect(commandBuild([secret]).backbone.map((part) => (part as { id: string }).id)).toEqual(
-      buildDeclarations().backbone.map((part) => part.id),
+      resolveDeclarations({ userModules: [], side: "public" }).backbone.map((part) => part.id),
     );
   });
 
@@ -223,7 +224,7 @@ describe("how the file's modules join the build (Q106 B)", () => {
   });
 
   it("a host program's own declarations are used as given: the file's modules are then not taken", async () => {
-    const build = buildDeclarations();
+    const build = resolveDeclarations({ userModules: [], side: "public" });
     const declarations = validateDeclarations({ backbone: build.backbone, core: build.core, user: [] });
     const report = await configCheck({ file: write(), cwd: project.dir, declarations });
     expect(codesOf(report, "configuration")).toEqual(["invalid-configuration entry-id entries[1].id"]);

@@ -24,7 +24,7 @@
  * development opt-in check that opens a PGlite database. [MD-3, MD-4, MD-5, MD-6, CF-9]
  *
  * **The process's side** (`public` or `private`, which decides the `core` schema that applies) is taken from the file
- * ({@link inferSide}) unless given. [CF-4]
+ * (`resolveSide`, `src/runner/resolve.ts`) unless given. [CF-4]
  *
  * **The build's modules** are the command's (`./build-modules.ts`): UmbraDB's own backbone parts and core modules, and
  * as its user modules the ones the file exports in `modules`. So the entries of a user module the file ships are
@@ -43,11 +43,9 @@
 import { resolve } from "node:path";
 import type { ProcessSide } from "../config/core-settings.js";
 import { type DatabaseParts, isMemoryDatabase } from "../config/database-parts.js";
-import { CORE_ENTRY_ID } from "../config/entries.js";
 import { historyFindings, type HistoryRow } from "../config/history.js";
 import { type ConfigFinding, findingText, refusalFindings } from "../config/findings.js";
 import { type LoadedConfig, loadConfig, MODULES_EXPORT } from "../config/load.js";
-import type { PlainData } from "../config/plain-data.js";
 import { processCoreEntry } from "../config/process.js";
 import { type Redactor, redactor } from "../config/redact.js";
 import {
@@ -60,7 +58,7 @@ import {
 import { UmbraError } from "../db/errors.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
-import { buildDeclarations } from "./build-modules.js";
+import { resolveDeclarations, resolveSide } from "../runner/resolve.js";
 import { type DatabaseState, readDatabaseState } from "./database.js";
 import { isRegularFile, typeCheckFile } from "./type-check.js";
 
@@ -77,10 +75,10 @@ export interface ConfigCheckOptions {
   readonly database?: boolean | undefined;
   /**
    * The build's declarations, validated; unless given, the command's own with the file's `modules` as its user modules
-   * (`buildDeclarations`). [Q106 B]
+   * (`resolveDeclarations`). [Q106 B]
    */
   readonly declarations?: DeclarationSet<ModuleDeclaration>;
-  /** The process's side; taken from the file ({@link inferSide}) unless given. */
+  /** The process's side; taken from the file (`resolveSide`) unless given. */
   readonly side?: ProcessSide;
 }
 
@@ -176,24 +174,6 @@ const NO_DATABASE = "no --database given, so no database was opened and the hist
 /** The history check's line without `--database`, which reports that the history checks were not run. [CF-10] */
 export const HISTORY_NOT_RUN = `${HISTORY_TITLE}: not run — ${NO_DATABASE}`;
 
-const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-/**
- * The process's side, from the evaluated file: private when a `core` entry's `config` has `instanceId` and none has
- * `node` (a public process's `core` entry requires `node`, a private one's `instanceId`), and public otherwise. Then
- * the validation names a private process's field in a public one's entry as such. [CF-4]
- */
-export function inferSide(data: PlainData | unknown): ProcessSide {
-  const entries = isObject(data) && Array.isArray(data.entries) ? (data.entries as readonly unknown[]) : [];
-  const configs = entries.flatMap((entry) =>
-    isObject(entry) && entry.id === CORE_ENTRY_ID && isObject(entry.config) ? [entry.config] : [],
-  );
-  const has = (field: string) => configs.some((config) => Object.hasOwn(config, field));
-  return has("instanceId") && !has("node") ? "private" : "public";
-}
-
-
 /** An error's code: an `UmbraError`'s own, `error` for any other. */
 export const errorCode = (error: unknown): string => (error instanceof UmbraError ? error.code : "error");
 
@@ -271,11 +251,11 @@ const CONFIGURATION: CheckStep = {
     } catch (error) {
       return stepReport("configuration", CONFIGURATION_TITLE, refusalFindings(error, state.file));
     }
-    const side = state.side ?? inferSide(state.loaded.data);
+    const side = resolveSide(state.loaded.data, state.side);
     if (state.declarations === null) {
       const user = state.userModules(state.loaded);
       try {
-        state.declarations = buildDeclarations(user, { side });
+        state.declarations = resolveDeclarations({ userModules: user, side });
       } catch (error) {
         return stepReport("configuration", CONFIGURATION_TITLE, [declarationFinding(error, user)], UNVALIDATED);
       }
@@ -352,7 +332,13 @@ const HISTORY: CheckStep = {
     const history: readonly HistoryRow[] = read.kind === "read" ? read.history : [];
     const note = readNote(read);
     try {
-      const findings = historyFindings({ config: state.checked, cursor, declarations: state.declarations, history });
+      const findings = historyFindings({
+        config: state.checked,
+        cursor,
+        declarations: state.declarations,
+        history,
+        process: state.process,
+      });
       return stepReport("history", HISTORY_TITLE, findings.map((found) => ruleFinding(found.code, found)), note);
     } catch (error) {
       const details = error instanceof UmbraError ? (error.details as { readonly findings?: readonly Finding[] }) : {};

@@ -4,10 +4,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { recordHistory } from "../../src/backbone/core-chain/index.js";
 import { EXIT } from "../../src/cli/command.js";
 import { configCheck } from "../../src/cli/config-check.js";
-import { buildDeclarations } from "../../src/cli/build-modules.js";
+import { resolveDeclarations } from "../../src/runner/resolve.js";
 import { acquirePgliteLock } from "../../src/db/pglite-lock.js";
 import { startWriter } from "../../src/db/writer-lock.js";
 import { plainData } from "../../src/config/plain-data.js";
+import { processCoreEntry } from "../../src/config/process.js";
 import { validateConfig } from "../../src/config/validate.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { coreEntry } from "../../src/config/entries.js";
@@ -223,14 +224,14 @@ describe.each(CLI_BACKENDS.map((make) => make()))("A35 with --database on $name"
 
   it("the negative control: a check that recorded the history, or ran the migrations, changes the snapshot", async () => {
     // Recording, as core-chain's on-start-db does, with a revision above the cursor that the history lacks.
-    const declarations = buildDeclarations();
+    const declarations = resolveDeclarations({ userModules: [], side: "public" });
     const entries = [...HISTORY, coreEntry({ start: 300, config: RECORDED })];
     const config = validateConfig({ config: { data: plainData({ entries }) }, declarations, side: "public" });
     const recorded = await backend.target();
     await recorded.setup(HISTORY, CURSOR);
     const before = await recorded.snapshot();
     await recorded.withDatabase((db) =>
-      db.transaction((tx) => recordHistory(tx, { config, cursor: CURSOR, declarations })),
+      db.transaction((tx) => recordHistory(tx, { config, cursor: CURSOR, declarations, process: processCoreEntry(config) })),
     );
     const after = await recorded.snapshot();
     expect(after).not.toEqual(before);

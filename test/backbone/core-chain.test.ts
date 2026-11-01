@@ -25,7 +25,7 @@ import { UMBRADB_VERSION } from "../../src/config/build.js";
 import networksFile from "../../src/ledger/networks.json" with { type: "json" };
 import { builtInNetwork, KNOWN_NETWORKS, ledgerTableOf, parseNetworksFile } from "../../src/ledger/networks.js";
 import type { LedgerTable } from "../../src/ledger/version-table.js";
-import { buildDeclarations } from "../../src/cli/build-modules.js";
+import { resolveDeclarations } from "../../src/runner/resolve.js";
 import { checkHistory, graphInputOf } from "../../src/config/history.js";
 import { plainData } from "../../src/config/plain-data.js";
 import { processCoreEntry } from "../../src/config/process.js";
@@ -474,12 +474,14 @@ async function startChain(
   const declarations = validateDeclarations(options.backbone === undefined ? set : { ...set, backbone: [...options.backbone] });
   const config = configOf(declarations, options.starts ?? [S]);
   const { cursor, history } = await db.read(async (read) => ({ cursor: await readCursor(read), history: await readHistory(read) }));
-  const check = checkHistory({ config, cursor: cursor?.height ?? null, declarations, history });
+  const process = processCoreEntry(config);
+  const check = checkHistory({ config, cursor: cursor?.height ?? null, declarations, history, process });
   const graph = resolveGraph(graphInputOf(check, declarations));
   // Each part's revisions as the runner gives them: every backbone part's are the core entry's, from S. [MD-7]
-  const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, processCoreEntry(config)) });
+  const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, process) });
   const facts: CoreChainFacts = {
     config,
+    process,
     declarations,
     cursor: cursor?.height ?? null,
     db,
@@ -705,7 +707,7 @@ describe("core-chain outside a process", () => {
 
 describe("the table items a revision's row records (core_chain.config.provides; PP-13, task 14.1a)", () => {
   it("records a module's table items from its declaration and the core's from the backbone, each once, by UTF-8 bytes", () => {
-    const build = buildDeclarations();
+    const build = resolveDeclarations({ userModules: [], side: "public" });
     expect(tableItemsOf(build, "core")).toEqual(["blocks", "chain-identity", "digest-checkpoints", "digest-tables"]);
     expect(tableItemsOf(build, "core-ledger-state")).toEqual(["ledger-events", "ledger-state", "segment-results"]);
     // Both providers of the shared contract-logs record it.
@@ -726,7 +728,7 @@ describe("the table items a revision's row records (core_chain.config.provides; 
 
   it("records a private process's core from its own backbone (core-private-source, core-digest)", () => {
     // core-private-source's accepted-config-hash beside its private-cursor. [PP-14, Q159]
-    expect(tableItemsOf(buildDeclarations([], { side: "private" }), "core")).toEqual([
+    expect(tableItemsOf(resolveDeclarations({ userModules: [], side: "private" }), "core")).toEqual([
       "accepted-config-hash",
       "chain-identity",
       "digest-checkpoints",
@@ -736,6 +738,6 @@ describe("the table items a revision's row records (core_chain.config.provides; 
   });
 
   it("throws for an id the build has no declaration of: the configuration refuses such an entry first (CF-3)", () => {
-    expect(() => tableItemsOf(buildDeclarations(), "nobody")).toThrow(/tableItemsOf: the build has no module nobody/);
+    expect(() => tableItemsOf(resolveDeclarations({ userModules: [], side: "public" }), "nobody")).toThrow(/tableItemsOf: the build has no module nobody/);
   });
 });

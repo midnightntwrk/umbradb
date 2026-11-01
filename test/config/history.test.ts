@@ -47,6 +47,7 @@ import {
   moduleN,
   N,
   oldCore,
+  withProcess,
   rowAt,
   Simulation,
   type Start,
@@ -257,7 +258,7 @@ describe("CF-5, A30: revisions by (id, start); a later one supersedes the earlie
   it("lets a module that cannot start mid-chain continue at a later revision's start (no mid-chain start, CF-5)", () => {
     const declarations = build([HISTORIC]);
     const accepted = (entries: readonly unknown[]) => {
-      const check = checkHistory({ config: checked(entries, declarations), cursor: null, declarations, history: [] });
+      const check = checkHistory(withProcess({ config: checked(entries, declarations), cursor: null, declarations, history: [] }));
       return resolveGraph(graphInputOf(check, declarations));
     };
     const revisions = (stop?: number) => [
@@ -320,7 +321,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
       { id: "m", start: 0n, stop: null, version: "0.9.0", data: { limit: 1 }, dataHash: dataHash({ limit: 1 }) },
       { id: "m", start: 50n, stop: 80n, version: "1.1.0", data: null, dataHash: null },
     ];
-    const error = refusal(() => checkHistory({ config: checked([CORE, m(10)], declarations), cursor: 60n, declarations, history }));
+    const error = refusal(() => checkHistory(withProcess({ config: checked([CORE, m(10)], declarations), cursor: 60n, declarations, history })));
     expect(error.code).toBe("missing-entry");
     const [other, scheduled] = (error.details.findings as HistoryFinding[]).map((f) => f.message);
     expect(other).toContain("versionEntry({ id, start, version, config }) with its recorded version and data");
@@ -331,7 +332,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
     const declarations = build();
     const config = { ...checked([CORE, m(1)], declarations), file: null };
     const history = [rowOf(config.entries[0]!), { ...rowOf(config.entries[1]!), start: 50n }];
-    const error = refusal(() => checkHistory({ config, cursor: 50n, declarations, history }));
+    const error = refusal(() => checkHistory(withProcess({ config, cursor: 50n, declarations, history })));
     expect(
       error.message.startsWith("the configuration omits entries the history records at or below the cursor: entries: "),
     ).toBe(true);
@@ -348,7 +349,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
       { ...rowOf(checked([CORE, m(10)], declarations).entries[1]!) },
       { id: "m1", start: 0n, stop: null, version: "1.0.0", data: { limit: 10 }, dataHash: dataHash({ limit: 10 }) },
     ];
-    const error = refusal(() => checkHistory({ config: checked([CORE, m(10)], declarations), cursor: C, declarations, history }));
+    const error = refusal(() => checkHistory(withProcess({ config: checked([CORE, m(10)], declarations), cursor: C, declarations, history })));
     expect(error.details.missing).toEqual([{ id: "m1", start: 0 }]);
   });
 
@@ -356,7 +357,7 @@ describe("A30: a configuration omitting a recorded entry that starts at or below
     const db = new Simulation();
     db.start({ entries: [CORE, m(1), m(50)], cursor: null });
     const declarations = build();
-    const input = { config: checked([CORE, m(1, { limit: 2 })], declarations), cursor: 60n, declarations, history: db.history };
+    const input = withProcess({ config: checked([CORE, m(1, { limit: 2 })], declarations), cursor: 60n, declarations, history: db.history });
     expect(historyFindings(input).map((f) => [f.code, f.path])).toEqual([
       ["missing-entry", "entries"],
       ["changes-past", "entries[1].config.limit"],
@@ -392,7 +393,7 @@ describe("A30, Q103 B: a recorded entry that starts above the cursor may be omit
     const declarations = build();
     const before = new Simulation();
     before.start({ entries: [CORE, m(1), m(50)], cursor: null });
-    expect(historyFindings({ config: checked([CORE, m(1)], declarations), cursor: C, declarations, history: before.history })).toEqual([]);
+    expect(historyFindings(withProcess({ config: checked([CORE, m(1)], declarations), cursor: C, declarations, history: before.history }))).toEqual([]);
     // Restarted unchanged: nothing to delete.
     expect(db.start({ entries: [CORE, m(1)], cursor: C }).deletes).toEqual([]);
   });
@@ -851,7 +852,7 @@ describe("A31: configuration changes only the future (CF-6)", () => {
     ];
     const declarations = build();
     const error = refusal(() =>
-      checkHistory({ config: checked([CORE, m(10)], declarations), cursor: C, declarations, history }),
+      checkHistory(withProcess({ config: checked([CORE, m(10)], declarations), cursor: C, declarations, history })),
     );
     expect(error.code).toBe("changes-past");
     expect(found(error)).toEqual([["data", "entries[1].config", null]]);
@@ -946,7 +947,7 @@ function mRow(start: number, version: string, stop: number | null = null): Histo
 function versionOutcome(entries: readonly unknown[], user: Start["user"], cursor: bigint | null, history: readonly HistoryRow[]) {
   const declarations = build(user);
   try {
-    checkHistory({ config: checked(entries, declarations), cursor, declarations, history });
+    checkHistory(withProcess({ config: checked(entries, declarations), cursor, declarations, history }));
     return "accepted";
   } catch (error) {
     if (!(error instanceof UmbraError)) throw error;
@@ -1086,10 +1087,10 @@ describe("Q102 (option A): the process's operational settings are the latest cor
     const config = checked([core(30, { tipCap: 3 }), core(0, { developmentOptIn: true }), core(10, { tipCap: 1 })], build([]));
     expect(processCoreEntry(config)).toMatchObject({ start: 30, settings: { tipCap: 3, developmentOptIn: false } });
     const declarations = build([]);
-    const check = checkHistory({ config, cursor: null, declarations, history: [] });
+    const check = checkHistory(withProcess({ config, cursor: null, declarations, history: [] }));
     expect([check.process.start, check.developmentOptIn]).toEqual([30, false]);
     const later = checked([core(0), core(10, { developmentOptIn: true })], declarations);
-    expect(checkHistory({ config: later, cursor: null, declarations, history: [] }).developmentOptIn).toBe(true);
+    expect(checkHistory(withProcess({ config: later, cursor: null, declarations, history: [] })).developmentOptIn).toBe(true);
   });
 
   it("skips core revisions of other versions, and refuses a configuration that has none of the build's", () => {
@@ -1142,7 +1143,7 @@ describe("the graph's input and the caller's errors", () => {
   it("gives resolveGraph S, every module revision with its effective stop, the opt-in and the cursor", () => {
     const declarations = build([M_1_0, N]);
     const config = checked([core(5), core(9, { developmentOptIn: true }), m(5), m(8, {}, 30), n(6)], declarations);
-    const check = checkHistory({ config, cursor: null, declarations, history: [] });
+    const check = checkHistory(withProcess({ config, cursor: null, declarations, history: [] }));
     expect(graphInputOf(check, declarations)).toEqual({
       declarations,
       start: 5n,
@@ -1171,14 +1172,14 @@ describe("the graph's input and the caller's errors", () => {
     expect(db.refusal({ entries: both, user: [M_1_1], cursor: C }).code).toBe("upgrade-required");
     const declarations = build();
     const config = checked([core(5), m(5)], declarations);
-    expect(checkHistory({ config, cursor: 5n, declarations, history: [rowOf(config.entries[0]!), rowOf(config.entries[1]!)] }).writes).toEqual([]);
+    expect(checkHistory(withProcess({ config, cursor: 5n, declarations, history: [rowOf(config.entries[0]!), rowOf(config.entries[1]!)] })).writes).toEqual([]);
   });
 
   it("refuses a cursor that is no height, or below S, as the caller's error (thrown)", () => {
     const declarations = build();
     const config = checked([core(5), m(5)], declarations);
-    expect(() => checkHistory({ config, cursor: 4n, declarations, history: [] })).toThrow(/below S \(5\)/);
-    expect(() => checkHistory({ config, cursor: 7 as unknown as bigint, declarations, history: [] })).toThrow(/neither null/);
+    expect(() => checkHistory(withProcess({ config, cursor: 4n, declarations, history: [] }))).toThrow(/below S \(5\)/);
+    expect(() => checkHistory(withProcess({ config, cursor: 7 as unknown as bigint, declarations, history: [] }))).toThrow(/neither null/);
   });
 });
 
@@ -1286,7 +1287,7 @@ describe("negative controls (committed)", () => {
     const db = new Simulation();
     db.start({ entries: [CORE, m(0)], cursor: null });
     const declarations = build();
-    const input = { config: checked([CORE, m(0)], declarations), cursor: C, declarations, history: db.history };
+    const input = withProcess({ config: checked([CORE, m(0)], declarations), cursor: C, declarations, history: db.history });
     expect(historyFindings(input)).toEqual([]);
   });
 });

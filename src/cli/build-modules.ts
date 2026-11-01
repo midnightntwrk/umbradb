@@ -42,7 +42,7 @@ import { CORE_STATUS } from "../backbone/core-status/core-status.js";
 import { CORE_TX_RESULTS } from "../backbone/core-tx-results/core-tx-results.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
-import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
+import type { DeclarationSet } from "../modules/validation.js";
 
 /** The admin endpoints' parts, on either side. [AE-1] */
 const ADMIN_PARTS: readonly ModuleDeclaration[] = Object.freeze([CORE_HEALTH, CORE_STATUS, CORE_CONFIG]);
@@ -77,7 +77,8 @@ export interface CommandBuildOptions {
 
 /**
  * The command's build for a process of `options.side`, with `user` — the configuration file's `modules` — as its user
- * modules, not validated (the runner validates it at startup); see the module comment. [MD-2]
+ * modules, not validated: the resolver validates it (`resolveDeclarations`, `src/runner/resolve.ts`), the only caller
+ * outside the tests; see the module comment. [MD-2, LM-1]
  */
 export function commandBuild(user: readonly unknown[] = [], options: CommandBuildOptions = {}): DeclarationSet {
   if (options.side === "private") {
@@ -85,16 +86,4 @@ export function commandBuild(user: readonly unknown[] = [], options: CommandBuil
     return { backbone: [CORE_CHAIN, ...privateBackbone(intake), ...ADMIN_PARTS], core: [], user: [...user] };
   }
   return { backbone: [...PUBLIC_BACKBONE], core: [...CORE_MODULES], user: [...user] };
-}
-
-/**
- * The declarations of the command's build, validated: its backbone parts and core modules, and `user` as its user
- * modules (the configuration file's; none unless given). Throws the first fault, an `UmbraError` naming the module.
- * [MD-2, CF-1]
- */
-export function buildDeclarations(
-  user: readonly unknown[] = [],
-  options: CommandBuildOptions = {},
-): DeclarationSet<ModuleDeclaration> {
-  return validateDeclarations(commandBuild(user, options));
 }

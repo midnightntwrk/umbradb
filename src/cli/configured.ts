@@ -38,8 +38,7 @@ import { openPostgres, type PostgresConnection } from "../db/postgres.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
 import { isPrivateDatabase } from "../backup/facts.js";
-import { buildDeclarations } from "./build-modules.js";
-import { inferSide } from "./config-check.js";
+import { inferSide, resolveDeclarations } from "../runner/resolve.js";
 import { isRegularFile } from "./type-check.js";
 
 /** The configuration a backup or restore command runs with. */
@@ -83,7 +82,7 @@ export async function readCommandConfig(
     throw configurationRefused(error, file);
   }
   const side = inferSide(loaded.data);
-  const declarations = buildDeclarations(loaded.modules, { side });
+  const declarations = resolveDeclarations({ userModules: loaded.modules, side });
   const input = { config: loaded, declarations, side };
   const redact = redactor(configSecrets(input));
   let checked: CheckedConfig;

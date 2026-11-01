@@ -10,6 +10,7 @@ import { CORE_TX_RESULTS } from "../../src/backbone/core-tx-results/core-tx-resu
 import type { Manifest } from "../../src/backup/manifest.js";
 import { type RestoreInput, type RestoreSeams, restoreBackup } from "../../src/backup/restore.js";
 import { plainData } from "../../src/config/plain-data.js";
+import { processCoreEntry } from "../../src/config/process.js";
 import { validateConfig } from "../../src/config/validate.js";
 import { openPglite } from "../../src/db/pglite.js";
 import { openPostgres } from "../../src/db/postgres.js";
@@ -146,6 +147,7 @@ export async function restoreLedger(
         : openPglite({ dataDir, committedHeight: cursorHeight, developmentOptIn: true }),
     config,
     declarations,
+    core: processCoreEntry(config),
     source,
   };
   try {

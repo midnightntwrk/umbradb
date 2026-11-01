@@ -49,7 +49,8 @@ import { manifestLine, readManifestLine } from "../../src/backup/manifest.js";
 import { type PgliteDump, pgliteBackupText } from "../../src/backup/pglite-backup.js";
 import { type RestoreSeams, restoreBackup } from "../../src/backup/restore.js";
 import { blobText } from "../../src/backup/text.js";
-import { buildDeclarations, commandBuild } from "../../src/cli/build-modules.js";
+import { commandBuild } from "../../src/cli/build-modules.js";
+import { resolveDeclarations } from "../../src/runner/resolve.js";
 import { type PlainObject, plainData } from "../../src/config/plain-data.js";
 import { processCoreEntry } from "../../src/config/process.js";
 import { validateConfig } from "../../src/config/validate.js";
@@ -136,7 +137,7 @@ async function restoreInto(file: Blob, run: StartRun): Promise<unknown> {
       () => run.start ?? 0,
     );
     const { data, modules } = (configuration as BrowserConfiguration).core({ ...run, start });
-    const declarations = buildDeclarations(modules);
+    const declarations = resolveDeclarations({ userModules: modules, side: "public" });
     const config = validateConfig({ config: { data: plainData(withDevelopmentOptIn(data)) }, declarations, side: "public" });
     const core = processCoreEntry(config);
     const options = nodeOptionsOf(core.settings as PlainObject);
@@ -154,6 +155,7 @@ async function restoreInto(file: Blob, run: StartRun): Promise<unknown> {
           open: () => openConfiguredDatabase(core, { committedHeight: coreCommittedHeight }),
           config,
           declarations,
+          core,
           source,
         },
         RESTORE_SEAMS,

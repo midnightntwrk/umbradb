@@ -157,6 +157,7 @@ export async function runRestore(options: RestoreCommandOptions, seams: RestoreC
         open: () => openRestoreTarget(target, config, (line) => options.say?.(redact.text(`umbradb restore: ${line}`))),
         config: config.checked,
         declarations: config.declarations,
+        core: config.core,
         ...chain,
       },
       seams.restore,
