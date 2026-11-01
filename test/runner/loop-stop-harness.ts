@@ -22,10 +22,14 @@ import {
   CEILING_MS,
   closedWithin,
   databaseLeftOpen,
+  libraryProcess,
   NodeWatch,
   retryingOf,
+  type StartVia,
   STOP_LIMIT_MS,
   type StopBy,
+  type StopHandle,
+  stopBy,
   WATCH_MS,
 } from "./startup-stop-harness.js";
 
@@ -243,25 +247,38 @@ function entriesOf(db: ProcessDatabase, scenario: LoopStopScenario, url: string)
   ];
 }
 
-/** The process for `scenario` on `db` against the node at `url` (see the module comment). */
+/**
+ * The process for `scenario` on `db` against the node at `url` (see the module comment), started `via` the engine
+ * (the tests' chain build) or as a library host does (`startUmbraDB`'s input and handle: the command's build, the
+ * watcher as its `modules`), `more` the run's seams. [A169, LM-1]
+ */
 function processFor(
   db: ProcessDatabase,
   scenario: LoopStopScenario,
   url: string,
   lines: string[],
   more: Partial<EngineOptions> = {},
-): ProcessHandle {
+  via: StartVia = "engine",
+): StopHandle {
+  const log = (line: string): void => {
+    lines.push(line);
+  };
+  const data = { entries: entriesOf(db, scenario, url) };
+  if (via === "library") {
+    const { signal, ...seams } = more;
+    return libraryProcess({ config: { data }, modules: [watcher(watched())], log, ...(signal === undefined ? {} : { signal }) }, seams);
+  }
   return startProcess({
     declarations: chainDeclarations([watcher(watched())], { core: scenario.core }),
-    config: { data: { entries: entriesOf(db, scenario, url) } },
+    config: { data },
     source: nodeSourceOf,
-    log: (line) => lines.push(line),
+    log,
     ...more,
   });
 }
 
 /** Waits until the loop waits at h + 1 on the node gone: running, the cursor h, `node-retrying`, two refused. */
-async function waitingAt(handle: ProcessHandle, scenario: LoopStopScenario, outage: Outage, lines: string[]): Promise<void> {
+async function waitingAt(handle: Pick<ProcessHandle, "status">, scenario: LoopStopScenario, outage: Outage, lines: string[]): Promise<void> {
   const deadline = Date.now() + PATIENCE_MS;
   for (;;) {
     const status = handle.status();
@@ -302,6 +319,7 @@ export async function a169Run(
   scenario: LoopStopScenario,
   by: StopBy,
   source?: SourceOf,
+  via: StartVia = "engine",
 ): Promise<{ readonly observed: A169Observation; readonly lines: readonly string[] }> {
   const outage = new Outage(scenario.cut);
   const node = await TapeNode.start({ records: scenario.records });
@@ -310,15 +328,24 @@ export async function a169Run(
   let options: NodeClientOptions | undefined;
   const signals = new EventEmitter();
   const termination = by === "sigterm" ? terminationSignal(signals) : undefined;
+  const host = by === "signal" ? new AbortController() : undefined;
+  const signal = termination?.signal ?? host?.signal;
   const lines: string[] = [];
-  const handle = processFor(db, scenario, node.url, lines, {
-    ...(source === undefined ? {} : { source: source(watch, () => options as NodeClientOptions) }),
-    nodeClient: (given) => {
-      options = given;
-      return watch.client(given);
+  const handle = processFor(
+    db,
+    scenario,
+    node.url,
+    lines,
+    {
+      ...(source === undefined ? {} : { source: source(watch, () => options as NodeClientOptions) }),
+      nodeClient: (given) => {
+        options = given;
+        return watch.client(given);
+      },
+      ...(signal === undefined ? {} : { signal }),
     },
-    ...(termination === undefined ? {} : { signal: termination.signal }),
-  });
+    via,
+  );
   let observed: Omit<A169Observation, "unclean" | "above">;
   try {
     await waitingAt(handle, scenario, outage, lines);
@@ -327,8 +354,7 @@ export async function a169Run(
     const refused = outage.refused;
     watch.stopped = true;
     const from = performance.now();
-    if (by === "stop") void handle.stop();
-    else signals.emit("SIGTERM");
+    stopBy(by, handle, signals, host);
     const atStop = handle.status().state;
     const closedMs = await closedWithin(handle, from);
     const ended = handle.status().ended?.kind ?? null;
@@ -362,11 +388,11 @@ export async function a169Run(
  * restart at h asks). Returns every problem; none once h + 1 committed and each of the scenario's tables holds its
  * row. [RN-13, A169]
  */
-export async function restartedProblems(db: ProcessDatabase, scenario: LoopStopScenario): Promise<string[]> {
+export async function restartedProblems(db: ProcessDatabase, scenario: LoopStopScenario, via: StartVia = "engine"): Promise<string[]> {
   const next = scenario.height + 1n;
   const node = await TapeNode.start({ records: restartAt(scenario.records, scenario.height) });
   const lines: string[] = [];
-  const handle = processFor(db, scenario, node.url, lines);
+  const handle = processFor(db, scenario, node.url, lines, {}, via);
   const problems: string[] = [];
   try {
     const deadline = Date.now() + PATIENCE_MS;

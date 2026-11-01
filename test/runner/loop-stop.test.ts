@@ -12,11 +12,13 @@ import {
   restartedProblems,
   rootScenario,
 } from "./loop-stop-harness.js";
-import { NodeWatch, type StopBy } from "./startup-stop-harness.js";
+import { NodeWatch, type StartVia, type StopBy } from "./startup-stop-harness.js";
 
 /**
  * `[CI]` SIGTERM while the loop waits on an unreachable node. A tape node answers up to height h and then refuses
- * connections. SIGTERM, and likewise `ProcessHandle.stop()`, ends the process within 5 s while the running loop waits
+ * connections. SIGTERM, and likewise `UmbraDBHandle.stop()` (and a library host's own `AbortSignal`: `startUmbraDB`'s
+ * input and handle, with the run's node client seam) and the engine's `ProcessHandle.stop()`, ends the process within
+ * 5 s while the running loop waits
  * for h + 1's block, and, with `core-ledger-state`, while its `on-compute` at h + 1 awaits the state root. It ends with
  * `ended` of kind `signal`, no connection attempt after the stop, and nothing of h + 1 stored; a restart against a node
  * that answers again processes h + 1. [A169 CI, RN-13]
@@ -89,16 +91,19 @@ async function openTransactionProblems(backend: ProcessBackend): Promise<string[
   return problems;
 }
 
-/** The case on both backends for `scenario`, stopped `by`: each run's problems, its restart's included. [A169 CI] */
-async function a169(scenario: LoopStopScenario, by: StopBy): Promise<Record<string, string[]>> {
+/**
+ * The case on both backends for `scenario`, stopped `by`, the process started `via` the engine or as a library host:
+ * each run's problems, its restart's included. [A169 CI]
+ */
+async function a169(scenario: LoopStopScenario, by: StopBy, via: StartVia = "engine"): Promise<Record<string, string[]>> {
   const found: Record<string, string[]> = {};
   for (const backend of PROCESS_BACKENDS) {
     const db = await backend.database();
-    const { observed, lines } = await a169Run(backend, db, scenario, by);
+    const { observed, lines } = await a169Run(backend, db, scenario, by, undefined, via);
     const problems = a169Problems(scenario, observed);
     // The log of a run that went wrong, for the reader of the failure.
     if (problems.length > 0) problems.push(`log: ${lines.slice(-15).join(" | ")}`);
-    found[backend.name] = [...problems, ...(await restartedProblems(db, scenario))];
+    found[backend.name] = [...problems, ...(await restartedProblems(db, scenario, via))];
   }
   return found;
 }
@@ -131,6 +136,18 @@ describe("A169: a stop while the running loop waits on an unreachable node ends 
       expect(await a169(root, by)).toEqual(NONE);
     },
     2 * RUN_TIMEOUT_MS,
+  );
+
+  it.each<[StopBy, string]>([
+    ["stop", "UmbraDBHandle.stop()"],
+    ["signal", "the host's AbortSignal aborted"],
+  ])(
+    "A169 through startUmbraDB: %s — %s while the loop waits for h + 1's block, and while core-ledger-state's on-compute at h + 1 awaits the state root, ends the process within 5 s: ended by the signal, the node client closed, no connection attempt after the stop, nothing of h + 1 stored, the database closed; a restart processes h + 1; on PostgreSQL and on PGlite",
+    async (by) => {
+      expect(await a169(blockScenario(), by, "library")).toEqual(NONE);
+      expect(await a169(root, by, "library")).toEqual(NONE);
+    },
+    4 * RUN_TIMEOUT_MS,
   );
 
   it(

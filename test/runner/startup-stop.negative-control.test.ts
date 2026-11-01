@@ -32,4 +32,22 @@ describe("negative control (A167): a startup whose wait for the node ignores the
     },
     4 * PATIENCE_MS + 240_000,
   );
+
+  it(
+    "fails A167 through startUmbraDB too: UmbraDBHandle.stop() on a startup whose wait ignores it, on PostgreSQL and on PGlite",
+    async () => {
+      const found: Record<string, string[]> = {};
+      for (const backend of PROCESS_BACKENDS) {
+        found[backend.name] = a167Problems(await a167Run(backend, await backend.database(), "stop", ignoringWait, "library"));
+      }
+      const failed = [
+        `the process did not close within ${STOP_LIMIT_MS} ms of its stop`,
+        `processing ended not at all within ${STOP_LIMIT_MS} ms of the stop, not by the signal`,
+        expect.stringMatching(/^node clients not closed: [12] of 2$/),
+        expect.stringMatching(/^connection attempts to the node after the stop: [1-9]\d*$/),
+      ];
+      expect(found).toEqual(Object.fromEntries(PROCESS_BACKENDS.map((backend) => [backend.name, failed])));
+    },
+    4 * PATIENCE_MS + 240_000,
+  );
 });

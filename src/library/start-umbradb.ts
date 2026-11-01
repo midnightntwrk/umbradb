@@ -281,8 +281,12 @@ export function startUmbraDB(options: UmbraDBOptions): UmbraDBHandle {
   return handleOf(startProcess(input), log);
 }
 
-/** The facade over the engine's `handle` (see the module comment). [LM-9, L52] */
-function handleOf(handle: ProcessHandle, log: ((line: string) => void) | undefined): UmbraDBHandle {
+/**
+ * The facade over the engine's `handle` (see the module comment); `log` the host's, guarded. Exported for the tests,
+ * which take the handle a host gets over an engine started with {@link engineInputOf}'s input plus a seam of their own
+ * (a node client that counts its connections). [LM-9, L52]
+ */
+export function handleOf(handle: ProcessHandle, log: ((line: string) => void) | undefined): UmbraDBHandle {
   const started = handle.started.then(startedOf);
   // As the engine's: a host that never attaches a handler gets no unhandled rejection. [LM-9]
   started.catch(() => undefined);

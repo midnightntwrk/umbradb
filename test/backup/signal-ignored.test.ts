@@ -4,7 +4,16 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type CliProject, cliProject } from "../cli/cli-fixtures.js";
 import { runInChild } from "../cli/run-fixtures.js";
-import { BACKUP_BACKENDS, type BackupBackend, PATIENCE_MS, tickerModule } from "./backup-fixtures.js";
+import type { UmbraDBHandle } from "../../src/library/start-umbradb.js";
+import {
+  BACKUP_BACKENDS,
+  type BackupBackend,
+  PATIENCE_MS,
+  startLibraryTicker,
+  type TickerProcess,
+  tickerModule,
+  writeTickerConfig,
+} from "./backup-fixtures.js";
 import { type Pausable, recorderModule, startPausable, writePausableConfig } from "./pause-fixtures.js";
 import { listenerProblems, pacedNode, sigusr2Ignored, writeRunConfig } from "./signal-ignored-fixtures.js";
 
@@ -14,10 +23,12 @@ import { listenerProblems, pacedNode, sigusr2Ignored, writeRunConfig } from "./s
  * the signal and `backupOnSignal`, writes no file, keeps committing heights and exits 0 on SIGTERM
  * (`./signal-ignored-fixtures.ts`'s `sigusr2Ignored`). [A175 CI, BK-1, Q173 C]
  *
- * A process the engine starts without `backupOnSignal` adds no SIGUSR2 listener while it starts, runs or closes
- * (`listenerProblems`), so Node.js's default or the host's own handler applies; with `backupOnSignal` and the
- * command's port for signals (`backupSignals: process`) it adds one while it runs, which shows the count sees the
- * process's listener. The negative controls are `./signal-ignored.negative-control.test.ts`.
+ * A process a host starts with `startUmbraDB` adds no SIGUSR2 listener while it starts, runs or closes
+ * (`listenerProblems`), so Node.js's default or the host's own handler applies; a core revision that sets
+ * `backupOnSignal` is refused there (`library-setting-refused`, L47) and adds none either. The engine without
+ * `backupOnSignal` adds none; with it and the command's port for signals (`backupSignals: process`) it adds one while it
+ * runs, which shows the count sees the process's listener. The negative controls are
+ * `./signal-ignored.negative-control.test.ts`.
  */
 
 /** Each test waits on purpose for processes: its own budget, for a loaded machine. */
@@ -64,8 +75,33 @@ describe("A175: SIGUSR2 without backupOnSignal (BK-1, Q173 C)", () => {
   );
 
   it(
-    "A175: a process started with startProcess without backupOnSignal adds no SIGUSR2 listener; with it, one while " +
-      "it runs",
+    "A175: a process started with startUmbraDB adds no SIGUSR2 listener while it starts, runs or closes; one whose " +
+      "core revision sets backupOnSignal is refused library-setting-refused (L47) and adds none either",
+    async () => {
+      const library = (extra: Readonly<Record<string, unknown>>) => {
+        let run: TickerProcess<UmbraDBHandle> | undefined;
+        return {
+          async start() {
+            const db = await PGLITE.database();
+            run = startLibraryTicker(writeTickerConfig(project, { database: db.setting, extra }), 6n);
+          },
+          running: async () => {
+            const { handle } = run as TickerProcess<UmbraDBHandle>;
+            if (extra.backupOnSignal === undefined) await (run as TickerProcess<UmbraDBHandle>).reach(3n);
+            else await expect(handle.started).rejects.toMatchObject({ code: "library-setting-refused", details: { setting: "backupOnSignal" } });
+          },
+          stop: async () => (run as TickerProcess<UmbraDBHandle>).handle.stop(),
+        };
+      };
+      expect(await listenerProblems(library({}))).toEqual([]);
+      expect(await listenerProblems(library({ backupOnSignal: join(dir, "refused.backup") }))).toEqual([]);
+    },
+    TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "the oracle sees a process's listener: the engine without backupOnSignal adds none; with it and the command's " +
+      "port for signals, one while it runs",
     async () => {
       const pausable = (extra: Readonly<Record<string, unknown>>, signals?: typeof process) => {
         let run: Pausable | undefined;

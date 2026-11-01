@@ -3,13 +3,15 @@ import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { UmbraError } from "../../src/db/errors.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { core, settle, startProcess, testBuild } from "../runner/process-build.js";
+import { startUmbraDB } from "../../src/library/start-umbradb.js";
+import { core, startProcess, testBuild } from "../runner/process-build.js";
 
 /**
  * The first check of creating a missing PGlite directory, shared by its test (`./pglite-directory.test.ts`) and its
- * committed negative control (`./pglite-directory.negative-control.test.ts`). It runs the runner's `startProcess` on
- * `database: { kind: "pglite", path: <directory> }` under the development opt-in, with the directory's parent
- * missing, over an in-memory chain whose head is S, and reads what it left on disk. [A166, CF-4, Q163 A]
+ * committed negative control (`./pglite-directory.negative-control.test.ts`). It runs the runner's `startProcess`, or
+ * a library host's `startUmbraDB`, on `database: { kind: "pglite", path: <directory> }` under the development opt-in,
+ * with the directory's parent missing, over an in-memory chain whose head is S, and reads what it left on disk.
+ * [A166, CF-4, Q163 A]
  */
 
 /** S, and the in-memory chain's head: the process commits block S and waits for the next. */
@@ -53,20 +55,31 @@ export async function committedIn(directory: string, height: bigint): Promise<bo
   return rows.length === 1;
 }
 
-/** Starts a process on the PGlite `directory` (see the module comment) until it waits past S; stops it. */
-export async function processOn(directory: string): Promise<ProcessObservation> {
+/**
+ * How a check starts its process: the runner's `startProcess` (the engine, with the tests' build), or `startUmbraDB` (a
+ * library host's, with the command's build). [A166]
+ */
+export type StartVia = "engine" | "library";
+
+/**
+ * Starts a process on the PGlite `directory` (see the module comment) through `via` until it waits past S; stops it.
+ */
+export async function processOn(directory: string, via: StartVia = "engine"): Promise<ProcessObservation> {
   const source = new InMemoryBlockSource({ head: S });
   const lines: string[] = [];
-  const handle = startProcess({
-    declarations: testBuild([]).declarations,
-    config: { data: { entries: [core({ kind: "pglite", path: directory }, Number(S))] } },
-    source,
-    log: (line) => lines.push(line),
-  });
+  const data = { entries: [core({ kind: "pglite", path: directory }, Number(S))] };
+  const log = (line: string): void => {
+    lines.push(line);
+  };
+  const handle =
+    via === "engine"
+      ? startProcess({ declarations: testBuild([]).declarations, config: { data }, source, log })
+      : startUmbraDB({ config: { data }, source, log });
   let refused: string | null = null;
   let ended: string | null = null;
   try {
-    const how = await settle(handle, source, S);
+    await handle.started;
+    const how = await Promise.race([source.waiting(S).then(() => "waiting" as const), handle.ended]);
     if (how !== "waiting") ended = how.kind;
   } catch (error) {
     const details = error instanceof UmbraError ? (error.details as { reason?: unknown } | undefined) : undefined;

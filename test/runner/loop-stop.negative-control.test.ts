@@ -36,4 +36,24 @@ describe("negative control (A169): a loop whose node calls ignore the stop", () 
     },
     4 * PATIENCE_MS + 240_000,
   );
+
+  it(
+    "fails A169 through startUmbraDB too: UmbraDBHandle.stop() on a loop whose node calls ignore it, on PostgreSQL and on PGlite",
+    async () => {
+      const scenario = blockScenario();
+      const found: Record<string, string[]> = {};
+      for (const backend of PROCESS_BACKENDS) {
+        const { observed } = await a169Run(backend, await backend.database(), scenario, "stop", ignoringSource, "library");
+        found[backend.name] = a169Problems(scenario, observed);
+      }
+      const failed = [
+        `the process did not close within ${STOP_LIMIT_MS} ms of its stop`,
+        `processing ended not at all within ${STOP_LIMIT_MS} ms of the stop, not by the signal`,
+        "node clients not closed: 1 of 2",
+        expect.stringMatching(/^connection attempts to the node after the stop: [1-9]\d*$/),
+      ];
+      expect(found).toEqual(Object.fromEntries(PROCESS_BACKENDS.map((backend) => [backend.name, failed])));
+    },
+    4 * PATIENCE_MS + 240_000,
+  );
 });

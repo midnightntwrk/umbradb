@@ -13,6 +13,7 @@ import type { CommittedHeight, ReadHandle } from "../../src/db/api.js";
 import { openPglite, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
 import { openPostgres } from "../../src/db/postgres.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
+import { startUmbraDB, type UmbraDBHandle } from "../../src/library/start-umbradb.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { BackupSignals, ProcessHandle, EngineInput } from "../../src/runner/process.js";
 import { spawnChild } from "../child-processes.js";
@@ -142,8 +143,8 @@ export function writeTickerConfig(project: CliProject, options: TickerConfig): s
 }
 
 /** A process of a ticker configuration file over an in-memory chain whose head is `head`. */
-export interface TickerProcess {
-  readonly handle: ProcessHandle;
+export interface TickerProcess<Handle extends TickerHandle = ProcessHandle> {
+  readonly handle: Handle;
   readonly source: InMemoryBlockSource;
   readonly lines: string[];
   /** Waits until the cursor is at least `height`; rejects if processing ends first or `PATIENCE_MS` passes. */
@@ -156,6 +157,9 @@ export interface TickerProcess {
    */
   feed(to: bigint): void;
 }
+
+/** What a ticker's handle gives its `feed` and `reach`: the engine's handle, or a library host's. */
+export type TickerHandle = Pick<ProcessHandle, "status" | "ended">;
 
 /** How often {@link TickerProcess.feed} finalizes the next block. */
 export const FEED_MS = 5;
@@ -188,6 +192,23 @@ export async function startTicker(
     ...(options.backupSignals === undefined ? {} : { backupSignals: options.backupSignals }),
     log: (line) => lines.push(line),
   });
+  return tickerOf(handle, source, lines);
+}
+
+/**
+ * A library host's ticker process: `startUmbraDB` on the configuration file `file` (its user modules its own `modules`
+ * export) over an in-memory chain to `head`, its log collected. No setting only the command acts on may be in the file
+ * (`library-setting-refused`). [LM-1, BK-1]
+ */
+export function startLibraryTicker(file: string, head: bigint): TickerProcess<UmbraDBHandle> {
+  const source = new InMemoryBlockSource({ head });
+  const lines: string[] = [];
+  const handle = startUmbraDB({ config: { file }, source, log: (line) => lines.push(line) });
+  return tickerOf(handle, source, lines);
+}
+
+/** The ticker of `handle` over `source`, its log `lines` (see {@link TickerProcess}). */
+function tickerOf<Handle extends TickerHandle>(handle: Handle, source: InMemoryBlockSource, lines: string[]): TickerProcess<Handle> {
   return {
     handle,
     source,

@@ -31,8 +31,8 @@ import { committedIn, processOn, processProblems, rowsIn, S } from "./pglite-dir
 /**
  * Creating a missing PGlite directory (`[CI]`). Under the development opt-in, a PGlite directory whose parent is
  * missing is created, with that parent, by whatever writes the database, and each then commits:
- * - the runner's `startProcess` and `umbradb run`, here in this process and as the command itself in a child process
- *   with the relative path `data/preview` (commits block S);
+ * - `startUmbraDB` (a library host's), the runner's `startProcess` and `umbradb run`, here in this process and as the
+ *   command itself in a child process with the relative path `data/preview` (commits block S);
  * - `umbradb restore` into its target (commits the backup's height).
  *
  * The read-only uses, `umbradb config check --database` and `umbradb backup`, create no directory.
@@ -100,11 +100,19 @@ async function until(check: () => boolean, failed: () => string | null): Promise
 }
 
 describe("A166: what writes a PGlite database creates its directory with any missing parent (CF-4, Q163)", () => {
-  it("startProcess creates <tmp>/a/b with <tmp>/a, takes the lock beside it, and commits block S", async () => {
+  it("startUmbraDB creates <tmp>/a/b with <tmp>/a, logs it naming it, takes the lock beside it, and commits block S", async () => {
     const directory = join(tmp, "a", "b");
     expect(existsSync(join(tmp, "a"))).toBe(false);
-    expect(processProblems(await processOn(directory))).toEqual([]);
+    const observed = await processOn(directory, "library");
+    expect(processProblems(observed)).toEqual([]);
+    expect(observed.lines).toContain(`created a new PGlite data directory ${directory} (and 1 missing parent directory)`);
     expect(statSync(join(tmp, "a")).isDirectory()).toBe(true);
+  }, PATIENCE_MS * 2);
+
+  it("startProcess, the engine, creates <tmp>/engine/b with <tmp>/engine and commits block S", async () => {
+    const directory = join(tmp, "engine", "b");
+    expect(processProblems(await processOn(directory))).toEqual([]);
+    expect(statSync(join(tmp, "engine")).isDirectory()).toBe(true);
   }, PATIENCE_MS * 2);
 
   it("umbradb run, in this process, creates <tmp>/run/a/b with its parents and commits block S", async () => {

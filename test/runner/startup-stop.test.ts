@@ -18,9 +18,11 @@ import {
 } from "./startup-stop-harness.js";
 
 /**
- * `[CI]` With the node unreachable (a closed port) and startup retrying it, SIGTERM, and likewise
- * `ProcessHandle.stop()`, ends the process within 5 s: `stopping`, then `ended` of kind `signal`, the node client
- * closed, no connection attempt after the stop, no second signal; `umbradb run` exits 0. [A167 CI, RN-13, IN-10]
+ * `[CI]` With the node unreachable (a closed port) and startup retrying it, SIGTERM, and likewise `UmbraDBHandle.stop()`
+ * (and a library host's own `AbortSignal`) and the engine's `ProcessHandle.stop()`, ends the process within 5 s:
+ * `stopping`, then `ended` of kind `signal`, the node client closed, no connection attempt after the stop, no second
+ * signal; `umbradb run` exits 0. A library host's process is `startUmbraDB`'s — its input (the command's build) and
+ * its handle — with the run's node client seam, which counts the connection attempts. [A167 CI, RN-13, IN-10, LM-9]
  *
  * On PostgreSQL 18.6 and PGlite 0.5.10, each a new database that startup opened before it asked the node for block 0
  * (`core-chain`'s `checkChain`): in this process (`startup-stop-harness.ts`), and through the bundled command in a
@@ -58,6 +60,23 @@ describe("A167: a stop during startup with the node unreachable ends the process
       const found: Record<string, string[]> = {};
       for (const backend of PROCESS_BACKENDS) {
         const observed = await a167Run(backend, await backend.database(), by);
+        const clients = observed.clients === 1 ? [] : [`the process made ${observed.clients} node clients, not 1`];
+        found[backend.name] = [...a167Problems(observed), ...clients];
+      }
+      expect(found).toEqual(NONE);
+    },
+    2 * RUN_TIMEOUT_MS,
+  );
+
+  it.each<[StopBy, string]>([
+    ["stop", "UmbraDBHandle.stop()"],
+    ["signal", "the host's AbortSignal aborted"],
+  ])(
+    "A167 through startUmbraDB: %s — %s while startup retries an unreachable node for block 0 ends the process within 5 s: stopping, ended by the signal, the node client closed, no connection attempt after the stop, the database closed; on PostgreSQL and on PGlite",
+    async (by) => {
+      const found: Record<string, string[]> = {};
+      for (const backend of PROCESS_BACKENDS) {
+        const observed = await a167Run(backend, await backend.database(), by, undefined, "library");
         const clients = observed.clients === 1 ? [] : [`the process made ${observed.clients} node clients, not 1`];
         found[backend.name] = [...a167Problems(observed), ...clients];
       }

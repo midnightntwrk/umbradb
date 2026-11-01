@@ -29,6 +29,7 @@ import {
   manifestOf,
   PATIENCE_MS,
   pathOf,
+  startLibraryTicker,
   startTicker,
   type TickerProcess,
   tickerModule,
@@ -44,7 +45,7 @@ import {
 } from "./file-modes.js";
 
 /**
- * With a umask of `000`, every backup file UmbraDB writes on Node.js — `ProcessHandle.backup`, at stop
+ * With a umask of `000`, every backup file UmbraDB writes on Node.js — `UmbraDBHandle.backup` (a library host's), at stop
  * (`backupAtStop`), on SIGUSR2 (`backupOnSignal`), `umbradb backup` in this process and as a process of its own whose
  * umask a shell set — has mode `0600` from creation (its temporary file included) to after its rename, on PostgreSQL
  * 18.6, where `pg_dump`'s output fills it, and PGlite 0.5.10, where the process writes the dump itself; an earlier file
@@ -200,12 +201,12 @@ describe("A174: the observer (a umask of 000)", () => {
 
 describe.each(BACKUP_BACKENDS)("A174 on $name: every backup file is 0600 from creation to after its rename", (backend) => {
   it(
-    "ProcessHandle.backup, while blocks commit; an earlier file at the path, open to all, replaced",
+    "UmbraDBHandle.backup (startUmbraDB), while blocks commit; an earlier file at the path, open to all, replaced",
     async () => {
       const db = await backend.database();
       const place = placeFor(backend, "handle");
       earlierFile(place.out);
-      const ticker = await startTicker(writeTickerConfig(project, { database: db.setting }), 1n);
+      const ticker = startLibraryTicker(writeTickerConfig(project, { database: db.setting }), 1n);
       let observations: ModeObservation[] = [];
       try {
         await ticker.handle.started;

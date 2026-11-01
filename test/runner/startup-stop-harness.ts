@@ -10,7 +10,8 @@ import { coreEntry } from "../../src/config/entries.js";
 import { NodeClient, type NodeClientOptions } from "../../src/node/client.js";
 import type { ConnectSocket } from "../../src/node/socket.js";
 import { connectWebSocket } from "../../src/node/ws-socket.js";
-import { type ProcessHandle, type EngineInput, terminationSignal } from "../../src/runner/process.js";
+import { engineInputOf, handleOf, type UmbraDBHandle, type UmbraDBOptions } from "../../src/library/start-umbradb.js";
+import { type EngineInput, type EngineOptions, type ProcessHandle, terminationSignal } from "../../src/runner/process.js";
 import type { ProcessBackend, ProcessDatabase } from "./process-backends.js";
 import { core, coreSettings, startProcess, testBuild } from "./process-build.js";
 import { freePort } from "./process-harness.js";
@@ -104,8 +105,21 @@ export class NodeWatch {
   }
 }
 
-/** How a test stops the process: `ProcessHandle.stop()`, or SIGTERM through `terminationSignal`. */
-export type StopBy = "stop" | "sigterm";
+/**
+ * How a test stops the process: its handle's `stop()` (the engine's `ProcessHandle.stop()`, or a library host's
+ * `UmbraDBHandle.stop()`), SIGTERM through `terminationSignal`, or a library host's own `AbortSignal` aborted.
+ */
+export type StopBy = "stop" | "sigterm" | "signal";
+
+/**
+ * How a run starts its process: the engine with the tests' build (`startProcess`), or as a library host does —
+ * `startUmbraDB`'s input for the same configuration (`engineInputOf`, the command's build) and the handle it gives
+ * (`handleOf`), with the run's node client seam added. [A167, LM-1]
+ */
+export type StartVia = "engine" | "library";
+
+/** What a run reads of its process: the engine's handle or a library host's. */
+export type StopHandle = Pick<ProcessHandle, "status" | "closed" | "ended" | "stop">;
 
 /** What one run of a stop during startup showed. [A167] */
 export interface A167Observation {
@@ -172,13 +186,13 @@ export async function databaseLeftOpen(kind: ProcessBackend["kind"], db: Process
 }
 
 /** The process's `node-retrying` attempts, or null without the condition. */
-export function retryingOf(handle: ProcessHandle): number | null {
+export function retryingOf(handle: Pick<ProcessHandle, "status">): number | null {
   const condition = handle.status().conditions.find((one) => one.code === "node-retrying");
   return condition !== undefined && "attempts" in condition ? condition.attempts : null;
 }
 
 /** Waits until startup retries the node: `starting`, with `node-retrying` at 2 attempts or more. */
-async function startupRetrying(handle: ProcessHandle, watch: NodeWatch): Promise<void> {
+async function startupRetrying(handle: Pick<ProcessHandle, "status">, watch: NodeWatch): Promise<void> {
   const deadline = Date.now() + PATIENCE_MS;
   for (;;) {
     const { state } = handle.status();
@@ -192,7 +206,7 @@ async function startupRetrying(handle: ProcessHandle, watch: NodeWatch): Promise
 }
 
 /** Resolves with the milliseconds from `from` to `closed`, or null once {@link STOP_LIMIT_MS} passed first. */
-export async function closedWithin(handle: ProcessHandle, from: number): Promise<number | null> {
+export async function closedWithin(handle: Pick<ProcessHandle, "closed">, from: number): Promise<number | null> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), STOP_LIMIT_MS);
@@ -221,24 +235,34 @@ export async function a167Run(
   db: ProcessDatabase,
   by: StopBy,
   check?: CheckOf,
+  via: StartVia = "engine",
 ): Promise<A167Observation> {
   const node = `ws://127.0.0.1:${await freePort()}`;
   const watch = new NodeWatch();
   let options: NodeClientOptions | undefined;
   const signals = new EventEmitter();
   const termination = by === "sigterm" ? terminationSignal(signals) : undefined;
-  const handle = startProcess({
-    declarations: testBuild([]).declarations,
-    config: { data: { entries: [core(db.setting, 1, { extra: { node, backoffCeilingMs: CEILING_MS } })] } },
-    source: nodeSourceOf,
-    nodeClient: (given) => {
+  const host = by === "signal" ? new AbortController() : undefined;
+  const signal = termination?.signal ?? host?.signal;
+  const data = { entries: [core(db.setting, 1, { extra: { node, backoffCeilingMs: CEILING_MS } })] };
+  const seams = {
+    nodeClient: (given: NodeClientOptions) => {
       options = given;
       return watch.client(given);
     },
     ...(check === undefined ? {} : { checkChain: check(watch, () => options as NodeClientOptions) }),
-    ...(termination === undefined ? {} : { signal: termination.signal }),
-    log: () => undefined,
-  });
+  };
+  const handle: StopHandle =
+    via === "engine"
+      ? startProcess({
+          declarations: testBuild([]).declarations,
+          config: { data },
+          source: nodeSourceOf,
+          ...seams,
+          ...(signal === undefined ? {} : { signal }),
+          log: () => undefined,
+        })
+      : libraryProcess({ config: { data }, ...(signal === undefined ? {} : { signal }) }, seams);
   let observed: Omit<A167Observation, "unclean">;
   try {
     await startupRetrying(handle, watch);
@@ -246,8 +270,7 @@ export async function a167Run(
     const attemptsBefore = watch.attempts;
     watch.stopped = true;
     const from = performance.now();
-    if (by === "stop") void handle.stop();
-    else signals.emit("SIGTERM");
+    stopBy(by, handle, signals, host);
     const atStop = handle.status().state;
     const closedMs = await closedWithin(handle, from);
     const ended = handle.status().ended?.kind ?? null;
@@ -271,6 +294,22 @@ export async function a167Run(
     termination?.dispose();
   }
   return { ...observed, unclean: await databaseLeftOpen(backend.kind, db) };
+}
+
+/** Stops `handle` `by` (see {@link StopBy}): its `stop()`, SIGTERM on `signals`, or the host's `controller` aborted. */
+export function stopBy(by: StopBy, handle: Pick<ProcessHandle, "stop">, signals: EventEmitter, controller?: AbortController): void {
+  if (by === "stop") void handle.stop();
+  else if (by === "sigterm") signals.emit("SIGTERM");
+  else controller?.abort(new Error("the host stops UmbraDB"));
+}
+
+/**
+ * A library host's process for `options` (see {@link StartVia}): the engine given `startUmbraDB`'s input plus `seams`,
+ * under the handle `startUmbraDB` gives. [A167, LM-1]
+ */
+export function libraryProcess(options: UmbraDBOptions, seams: Partial<EngineOptions>): UmbraDBHandle {
+  const { input, log } = engineInputOf(options);
+  return handleOf(startProcess({ ...input, ...seams }), log);
 }
 
 /**

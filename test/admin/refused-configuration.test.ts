@@ -14,6 +14,7 @@ import { UmbraError } from "../../src/db/errors.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { type EngineConfig, type EngineInput, type ProcessHandle, startProcess } from "../../src/runner/process.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
+import { startUmbraDB, type UmbraDBOptions } from "../../src/library/start-umbradb.js";
 import { type CliProject, cliProject, inProcess } from "../cli/cli-fixtures.js";
 import { exitWithin, runCoreSettings, runInChild } from "../cli/run-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
@@ -36,16 +37,18 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
  * A configuration that cannot be loaded, one that is not plain data and one that fails its schemas each end the
- * process: `startProcess` ends `refused` and its `closed` resolves by itself, and `umbradb run` exits with a non-zero
- * code by itself. The process logs every finding with its path (each once, no secret) and opens no admin listener at
- * any time. [A157 CI, AE-1, CF-1–CF-3, Q137 B]
+ * process: `startUmbraDB` and `startProcess` end `refused` and their `closed` resolves by itself, and `umbradb run`
+ * exits with a non-zero code by itself. The process logs every finding with its path (each once, no secret) and opens
+ * no admin listener at any time. A build whose module declarations fail MD-2 ends `startUmbraDB` alike. A library host
+ * asks for admin at the configuration's `listen.admin` (`network: { admin: true }`), which the test probes.
+ * [A157 CI, AE-1, CF-1–CF-3, Q137 B, LM-10]
  *
  * To check this, every process here is given a port of the test's own as its admin address (the configuration's
  * `listen.admin`, and the address any admin starter it is given listens on). That port is probed from the process's
  * start until it ended, and the admin starter records every listener asked for.
  *
  * A refusal after the configuration is validated, such as a changed migration checksum, still answers the four
- * endpoints and stays up until stopped. [A157 CI, AE-3]
+ * endpoints and stays up until stopped; through `startUmbraDB` it stays up `refused` until stopped. [A157 CI, AE-3]
  *
  * Run on PostgreSQL 18.6 and PGlite 0.5.10 for `startProcess` (the database never opened either: no session on
  * PostgreSQL, no data directory on PGlite), and through the command in this process and in a child process.
@@ -497,6 +500,115 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startProcess
       "no line logs the finding at entries[0].config.apiReadTimeoutMs",
     ]);
   }, 120_000);
+});
+
+/**
+ * The ending half for `startUmbraDB` over `refusal` on `backend` (A157 as start-umbradb rewrites it): the library host's
+ * process, asking for its admin listener at the configuration's `listen.admin` (`network: { admin: true }`, the test's
+ * probed port), must refuse with the refusal's code and end by itself, `refused` with `closed` resolved; no admin
+ * listener may answer at any time; its log gets every finding with its path ({@link findingProblems}); its database
+ * stays unopened. None when so. [A157 CI, LM-10, AE-3]
+ */
+async function libraryEndedProblems(backend: ProcessBackend, refusal: Refusal): Promise<string[]> {
+  const problems: string[] = [];
+  const port = await freePort();
+  const db = await backend.database();
+  const observer = backend.kind === "postgres" ? await backend.database() : null;
+  const before = observer === null ? null : await sessionsOf(observer, db);
+  const lines: string[] = [];
+  const watch = probe(port);
+  const handle = startUmbraDB({
+    config: refusal.config(db.setting, `127.0.0.1:${port}`) as UmbraDBOptions["config"],
+    source: adminSource(3n),
+    network: { admin: true },
+    log: (line) => lines.push(line),
+  });
+  try {
+    const error = await handle.started.then(
+      () => null,
+      (caught: unknown) => caught,
+    );
+    if (error === null) problems.push("startup completed");
+    else if ((error as { code?: unknown }).code !== refusal.code) {
+      problems.push(`refused with ${String((error as { code?: unknown }).code)}, not ${refusal.code}`);
+    }
+    await Promise.race([handle.closed, watch.seen, sleep(ENDS_WITHIN_MS)]);
+    if (!(await within(handle.closed, 500))) problems.push("the process did not end by itself");
+    const answered = await watch.stop();
+    const status = handle.status();
+    if (status.state !== "refused") problems.push(`the process is ${status.state}, not refused`);
+    if (status.ended?.kind !== "refused") problems.push(`processing ended ${status.ended?.kind ?? "not at all"}, not refused`);
+    if (status.reason?.code !== refusal.code) problems.push(`its reason is ${status.reason?.code ?? "none"}, not ${refusal.code}`);
+    if (answered.length > 0) problems.push(`the admin port answered ${answered.length} request(s)`);
+    if (status.listening.admin !== null) problems.push("an admin listener is bound");
+    if (lines.some((line) => line.startsWith("admin endpoints listening"))) problems.push("an admin listener listened");
+    problems.push(...findingProblems(lines, error, refusal.paths()));
+    if (db.directory !== undefined && existsSync(db.directory)) problems.push("its database directory exists");
+    if (observer !== null && before !== null) {
+      const after = await sessionsOf(observer, db);
+      if (after.total !== before.total) problems.push(`${after.total - before.total} session(s) on its database`);
+    }
+  } finally {
+    await handle.stop();
+    await watch.stop();
+  }
+  return problems;
+}
+
+describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startUmbraDB on $name", (backend) => {
+  beforeAll(() => backend.start(), 180_000);
+  afterAll(() => backend.stop(), 60_000);
+
+  it("A157: a file that cannot be loaded, data not plain and settings failing their schemas each end startUmbraDB refused with closed resolved, every finding logged with its path, no admin listener opened", async () => {
+    for (const refusal of REFUSALS) expect(await libraryEndedProblems(backend, refusal), refusal.what).toEqual([]);
+  }, 300_000);
+
+  it("A157: a build whose module declarations fail MD-2 ends startUmbraDB refused with closed resolved, the finding logged, nothing opened", async () => {
+    const db = await backend.database();
+    const lines: string[] = [];
+    const handle = startUmbraDB({
+      config: { data: { entries: [adminCore(db.setting, 1)] } },
+      modules: [{ id: "Bad" } as never],
+      source: adminSource(3n),
+      network: { admin: true },
+      log: (line) => lines.push(line),
+    });
+    await expect(handle.started).rejects.toMatchObject({ code: "invalid-declaration", details: { module: "Bad" } });
+    expect(await within(handle.closed, ENDS_WITHIN_MS)).toBe(true);
+    expect(handle.status()).toMatchObject({ state: "refused", reason: { code: "invalid-declaration", module: "Bad" } });
+    expect(handle.status().listening).toEqual({ api: null, admin: null, privateLink: null });
+    expect(lines).toEqual([
+      "startup refused: invalid-declaration (1 finding); the process ends",
+      expect.stringMatching(/^startup refused: the user module Bad: .* \[invalid-declaration\]$/),
+    ]);
+    if (db.directory !== undefined) expect(existsSync(db.directory)).toBe(false);
+  }, 120_000);
+
+  it("A157: a refusal after the configuration is validated (a changed migration checksum) keeps startUmbraDB up, refused, until stopped", async () => {
+    const db = await backend.database();
+    const config = (sql: string) => ({
+      data: { entries: [adminCore(db.setting, 1), entryOf(migrating(sql), 1)] },
+    });
+    const first = startUmbraDB({
+      config: config("CREATE TABLE m.rows (height bigint PRIMARY KEY)"),
+      modules: [migrating("CREATE TABLE m.rows (height bigint PRIMARY KEY)")],
+      source: adminSource(3n),
+    });
+    await first.started;
+    for (let waited = 0; first.status().cursor !== 3n && waited < 60_000; waited += 25) await sleep(25);
+    await first.stop();
+    const changed = "CREATE TABLE m.rows (height bigint PRIMARY KEY, x int)";
+    const second = startUmbraDB({ config: config(changed), modules: [migrating(changed)], source: adminSource(3n) });
+    try {
+      await expect(second.started).rejects.toMatchObject({ code: "migration-checksum-changed" });
+      expect(second.status()).toMatchObject({ state: "refused", ready: false, reason: { code: "migration-checksum-changed", module: "m" } });
+      expect(await within(second.closed, 1_500)).toBe(false);
+      expect(second.status().state).toBe("refused");
+    } finally {
+      await second.stop();
+    }
+    await second.closed;
+  }, 180_000);
 });
 
 describe("A157: umbradb run on a refused configuration logs every finding and exits 1 by itself", () => {
