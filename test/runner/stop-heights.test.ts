@@ -264,7 +264,7 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
       const db = await backend.database();
       const first = await run(db, 10);
       const one = first.log.filter((line) => line.endsWith("@1") || line.endsWith("@1 core"));
-      expect(one.slice(0, 14)).toEqual([
+      expect(one.slice(0, 13)).toEqual([
         "a on-fetch@1",
         "b on-fetch@1",
         "c on-fetch@1",
@@ -278,8 +278,10 @@ describe.each(PROCESS_BACKENDS)("start and stop heights (RN-9, RN-10, RN-11) on 
         "b on-start-height@1",
         "c on-start-height@1",
         "d on-start-height@1",
-        "a on-compute@1",
       ]);
+      // Then on-compute: its callbacks run in parallel, each in a read of its own, so whichever read the database gives
+      // first logs first; every one comes after every on-start-height. [RN-3, RN-9]
+      expect(one.slice(13, 17).sort()).toEqual(["a on-compute@1", "b on-compute@1", "c on-compute@1", "d on-compute@1"]);
       expect(at(first.log, "on-start-height", 4)).toEqual(["e on-start-height@4"]);
       expect(first.log.indexOf("e on-start-height@4")).toBeLessThan(first.log.indexOf("e on-compute@4"));
       expect(first.log.indexOf("e on-start-height@4")).toBeGreaterThan(first.log.indexOf("e on-parse@4"));
