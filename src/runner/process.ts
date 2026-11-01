@@ -256,6 +256,12 @@
  *   through the handlers. Otherwise (`starting`, `refused`, after the drain) the lifecycle's 503 (`./api-answers.ts`),
  *   with `X-Umbra-Version` and, once startup read it, `X-Umbra-Config-Hash`.
  * - {@link ProcessHandle.admin}: the four endpoints from the snapshot in memory, in every state and after `closed`.
+ *
+ * The browser demo, which has no Node.js server, reaches the same handlers through three internal members of the
+ * handle, which `startUmbraDB` does not give a host [LM-11; design §8]: `api.fetch` (a fetch-style `Request` in, its
+ * `Response` out, the module API's rules and headers), `api.connect` (the subscription protocol on a host's channel,
+ * with the module API's message limit and slow-subscriber close, no envelope) and `admin.fetch`, each with the same
+ * lifecycle as `api.http`, `api.upgrade` and `admin.http`; and it reads its process through {@link ProcessHandle.opened}.
  */
 
 import { openedCursorHeight } from "../backbone/core-block-commit/sql.js";
@@ -306,15 +312,22 @@ import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
 import type { NetworkShown } from "../admin/configuration.js";
-import { mountedAdminHandler } from "../admin/mounted.js";
+import { mountedAdminFetch, mountedAdminHandler } from "../admin/mounted.js";
 import { type AdminSeams, type PrivateSideFacts, ProcessAdmin } from "../admin/process-admin.js";
 import { type NodeFacts, utcText } from "../admin/snapshot.js";
 import type { AdminStarter } from "../admin/server.js";
 import { NodeClient, type NodeClientOptions, type NodeRetry } from "../node/client.js";
 import { resolveGraph } from "../modules/graph.js";
 import type { DeclarationSet } from "../modules/validation.js";
-import { answerNotServing, type NodeHttpHandler, type NodeUpgradeHandler, refuseNotServing } from "./api-answers.js";
-import { type MountedApiSeams, type StartedModuleApi, startModuleApi } from "./api-server.js";
+import {
+  answerNotServing,
+  type NodeHttpHandler,
+  type NodeUpgradeHandler,
+  notServingResponse,
+  refuseChannelNotServing,
+  refuseNotServing,
+} from "./api-answers.js";
+import { type FetchHandler, type MountedApiSeams, type StartedModuleApi, startModuleApi } from "./api-server.js";
 import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
 import {
   addressText,
@@ -727,6 +740,12 @@ export interface ProcessListening {
   readonly privateLink: BoundAddress | null;
 }
 
+/** What {@link ProcessHandle.opened} gives while the module API is open. [LM-11] */
+export interface OpenedProcess {
+  readonly db: Database;
+  readonly optedOut: readonly TableName[];
+}
+
 /** A process {@link startProcess} started. */
 export interface ProcessHandle {
   /** The process's state now. */
@@ -785,9 +804,22 @@ export interface ProcessHandle {
    * The module API's handlers a host mounts in its own server, from the start on (see **The handlers** in the module
    * comment): `http` for its requests, `upgrade` for its subscriptions. [LM-4, LM-5]
    */
-  readonly api: { readonly http: NodeHttpHandler; readonly upgrade: NodeUpgradeHandler };
-  /** Admin's handler a host mounts in its own server, from the start on (`../admin/mounted.ts`). [LM-4, LM-5, AE-1] */
-  readonly admin: { readonly http: NodeHttpHandler };
+  readonly api: {
+    readonly http: NodeHttpHandler;
+    readonly upgrade: NodeUpgradeHandler;
+    /** The same module API for a fetch-style `Request` (the browser demo's; internal). Never rejects. [LM-11] */
+    readonly fetch: FetchHandler;
+    /** The module API's subscriptions on a host's channel (the browser demo's; internal). Never throws. [LM-11] */
+    readonly connect: (channel: PrivateLinkChannel) => void;
+  };
+  /** Admin's handlers a host mounts, from the start on (`../admin/mounted.ts`); `fetch` the demo's. [LM-4, LM-5, AE-1] */
+  readonly admin: { readonly http: NodeHttpHandler; readonly fetch: FetchHandler };
+  /**
+   * The database the module API reads and the schema plan's tables declared `deterministic: false`, while the module
+   * API is open (see {@link ProcessHandle.api}); null before and after. The browser demo's contents hash, reads and
+   * backup read through it (internal). [LM-11, DT-3, BK-5]
+   */
+  opened(): OpenedProcess | null;
   /**
    * The private link's channels a host hands a public process whose network request asks for them
    * (`publicSide: { channels: true }`): queued until the link starts, then sessions of the link
@@ -1170,19 +1202,31 @@ class Process implements ProcessHandle {
    */
   readonly api = Object.freeze({
     http: (request: Parameters<NodeHttpHandler>[0], response: Parameters<NodeHttpHandler>[1]): void => {
-      const handlers = this.#openApi()?.handlers;
-      if (handlers === null || handlers === undefined) answerNotServing(response, this.status(), this.#configHash);
-      else handlers.http(request, response);
+      const api = this.#openApi();
+      if (api === undefined) answerNotServing(response, this.status(), this.#configHash);
+      else api.node().http(request, response);
     },
     upgrade: (request: Parameters<NodeUpgradeHandler>[0], socket: Parameters<NodeUpgradeHandler>[1], head: Buffer): void => {
-      const handlers = this.#openApi()?.handlers;
-      if (handlers === null || handlers === undefined) refuseNotServing(socket, this.status(), this.#configHash);
-      else handlers.upgrade(request, socket, head);
+      const api = this.#openApi();
+      if (api === undefined) refuseNotServing(socket, this.status(), this.#configHash);
+      else api.node().upgrade(request, socket, head);
+    },
+    fetch: (request: Request): Promise<Response> => {
+      const api = this.#openApi();
+      return api === undefined ? Promise.resolve(notServingResponse(this.status(), this.#configHash)) : api.fetch(request);
+    },
+    connect: (channel: PrivateLinkChannel): void => {
+      const api = this.#openApi();
+      if (api === undefined) refuseChannelNotServing(channel, this.status());
+      else api.connect(channel);
     },
   });
 
-  /** Admin's handler (see **The handlers** in the module comment). [LM-4, LM-5] */
-  readonly admin = Object.freeze({ http: mountedAdminHandler((method, url) => this.#admin.answer(method, url)) });
+  /** Admin's handlers (see **The handlers** in the module comment). [LM-4, LM-5, LM-11] */
+  readonly admin = Object.freeze({
+    http: mountedAdminHandler((method, url) => this.#admin.answer(method, url)),
+    fetch: mountedAdminFetch((method, url) => this.#admin.answer(method, url)),
+  });
 
   /** The private link's channels (see {@link ProcessHandle.privateLink}): never throws. [LM-6, N9] */
   readonly privateLink = Object.freeze({
@@ -1269,6 +1313,11 @@ class Process implements ProcessHandle {
       admin: bound(this.#admin.listening()),
       privateLink: this.#transportClosed ? null : bound(this.#transport),
     });
+  }
+
+  opened(): OpenedProcess | null {
+    const db = this.#db;
+    return this.#openApi() === undefined || db === undefined ? null : Object.freeze({ db, optedOut: this.#optedOut });
   }
 
   /**

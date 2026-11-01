@@ -1,7 +1,8 @@
 /**
- * Admin's handler mounted in a library host's own server (`startUmbraDB`'s `admin.http`): it answers the four endpoints
- * on the host's thread, as the admin listener answers them, from the snapshot the process builds in memory at the
- * request (`ProcessAdmin.answer`, `./process-admin.ts`), with no database read. [AE-1, AE-5, LM-4, LM-5; design §5.3]
+ * Admin's handlers mounted in a library host's own server (`startUmbraDB`'s `admin.http`) and the browser demo's
+ * fetch-style one (`admin.fetch`): they answer the four endpoints on the host's thread, as the admin listener answers
+ * them, from the snapshot the process builds in memory at the request (`ProcessAdmin.answer`, `./process-admin.ts`),
+ * with no database read. [AE-1, AE-5, LM-4, LM-5, LM-11; design §5.3, §8]
  *
  * An answer is written as the admin listener writes it (`./serve.ts`): JSON with `Content-Type: application/json;
  * charset=utf-8`, `Content-Length` and `Cache-Control: no-store`, and no `X-Umbra-*` header; a `HEAD` gets the headers
@@ -18,8 +19,15 @@ import type { AdminAnswer } from "./types.js";
 /** The content type of every answer (the admin listener's). */
 const CONTENT_TYPE = "application/json; charset=utf-8";
 
-/** How a mounted request is answered: its method and URL as the host's server read them. */
+/** How a mounted request is answered: its method and URL (its path and query) as the host's server read them. */
 export type MountedAdminAnswer = (method: string, url: string) => AdminAnswer;
+
+/** The headers of an answer whose JSON text is `text` (the admin listener's). */
+const headersOf = (text: string): Record<string, string> => ({
+  "Content-Type": CONTENT_TYPE,
+  "Content-Length": String(new TextEncoder().encode(text).byteLength),
+  "Cache-Control": "no-store",
+});
 
 /** The handler of a host's server's `request` event that answers through `answer` (see the module comment). [LM-4] */
 export function mountedAdminHandler(answer: MountedAdminAnswer): (request: IncomingMessage, response: ServerResponse) => void {
@@ -34,14 +42,29 @@ export function mountedAdminHandler(answer: MountedAdminAnswer): (request: Incom
     try {
       if (response.headersSent) return;
       const text = JSON.stringify(answered.body);
-      response.writeHead(answered.status, {
-        "Content-Type": CONTENT_TYPE,
-        "Content-Length": String(new TextEncoder().encode(text).byteLength),
-        "Cache-Control": "no-store",
-      });
+      response.writeHead(answered.status, headersOf(text));
       response.end(text);
     } catch {
       // The host's response could not be written (its connection ended): there is nothing to answer.
     }
+  };
+}
+
+/**
+ * The fetch-style handler that answers through `answer` (see the module comment): a `Request` in, its `Response` out,
+ * with the same status, body and headers as the Node.js handler's; a `HEAD` gets the headers only. Never rejects.
+ * [LM-11, AE-1]
+ */
+export function mountedAdminFetch(answer: MountedAdminAnswer): (request: Request) => Promise<Response> {
+  return async (request) => {
+    let answered: AdminAnswer;
+    try {
+      const url = new URL(request.url);
+      answered = answer(request.method, `${url.pathname}${url.search}`);
+    } catch {
+      answered = FAILED;
+    }
+    const text = JSON.stringify(answered.body);
+    return new Response(request.method === "HEAD" ? null : text, { status: answered.status, headers: headersOf(text) });
   };
 }

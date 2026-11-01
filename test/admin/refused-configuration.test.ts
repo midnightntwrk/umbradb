@@ -406,6 +406,7 @@ function stoppedWith(handle: ProcessHandle, also: () => Promise<void>): ProcessH
     api: handle.api,
     admin: handle.admin,
     privateLink: handle.privateLink,
+    opened: () => handle.opened(),
     stop: () => {
       stopping ??= (async () => {
         await handle.stop();

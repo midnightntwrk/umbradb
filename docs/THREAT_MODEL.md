@@ -118,17 +118,17 @@ Optional HTTP routes and WebSocket subscriptions carry requests, parameters and 
 HTTP handlers read a committed snapshot with the configured PostgreSQL read timeout
 (`src/runner/module-api.ts:367`).
 Default limits are 1 MiB for HTTP bodies, 64 KiB for WebSocket messages and 1 MiB buffered output before a slow
-subscriber is disconnected (`src/runner/api-server.ts:70`, `src/runner/api-server.ts:74`,
-`src/runner/api-server.ts:76`, `src/runner/api-server.ts:265`).
+subscriber is disconnected (`src/runner/api-session.ts:39`, `src/runner/api-session.ts:43`,
+`src/runner/api-session.ts:45`, `src/runner/api-session.ts:220`).
 
 The listener supplies no authentication, authorization, TLS or WebSocket Origin policy
-(`src/runner/api-server.ts:408`, `src/runner/api-server.ts:418`).
+(`src/runner/api-socket.ts:334`, `src/runner/api-socket.ts:300`).
 A handler serving private data can therefore disclose it to anyone reaching the listener.
 Aggregate connection and subscription admission limits are also absent
-(`src/runner/api-server.ts:402`, `src/runner/api-server.ts:234`; gaps 5 and 6).
+(`src/runner/api-socket.ts:287`, `src/runner/api-session.ts:207`; gaps 5 and 6).
 
 Every HTTP answer identifies the build and configuration hash. View, height and block-hash envelopes require
-module use of the envelope helpers (`src/runner/api-server.ts:92`, `src/runner/api-server.ts:99`; RN-16).
+module use of the envelope helpers (`src/runner/api-answers.ts:58`, `src/runner/api-socket.ts:102`; RN-16).
 These fields neither authenticate the server nor prove its database contents.
 
 Unexpected handler failures receive a fixed client-facing error, while the error itself reaches the reporting
@@ -363,8 +363,8 @@ The current defaults are:
 - **Admin:** plain HTTP on `0.0.0.0:8081`, without caller authentication
   (`src/config/core-settings.ts:60`, `src/admin/serve.ts:82`).
 - **Module API:** no listener unless `listen.api` is set; then HTTP and WebSocket
-  (`src/runner/api-server.ts:483`, `src/runner/api-server.ts:408`,
-  `src/runner/api-server.ts:418`).
+  (`src/runner/api-socket.ts:325`, `src/runner/api-socket.ts:334`,
+  `src/runner/api-socket.ts:300`).
 - **Private transport:** no configured listener by default; without `tls`, its server is plaintext HTTP/WebSocket
   (`src/config/core-settings.ts:170`, `src/private/core-transport.ts:264`).
 - **PostgreSQL:** the database's parts, `ssl` passed to the driver explicitly: `require` unless the host is loopback
@@ -381,7 +381,7 @@ The current defaults are:
 
 Transport `tls` applies to that transport, not the admin listener, module API or database
 (`src/private/core-transport.ts:266`, `src/admin/serve.ts:82`,
-`src/runner/api-server.ts:408`, `src/db/postgres.ts:250`).
+`src/runner/api-socket.ts:334`, `src/db/postgres.ts:250`).
 Browser transport uses page message channels and refuses the TLS option
 (`browser/src/net/https.ts:9`).
 Browser admin monitoring shares its process worker and can stall with it
@@ -430,7 +430,7 @@ core key handling and TEE attestation are outside scope
 Private database separation does not conceal queries sent to public infrastructure, authenticate transport
 instance ids or authorize module API callers
 (`src/private/private-transport.ts:313`, `src/private/core-transport.ts:311`,
-`src/runner/api-server.ts:408`).
+`src/runner/api-socket.ts:334`).
 No independent consensus verification is claimed (`src/node/decode.ts:105`).
 The default browser configuration omits `core-ledger-state`, so it performs no ledger root replay check
 (`browser/src/config.ts:6`).
@@ -473,13 +473,13 @@ Vulnerability reporting, including the private reporting route and fallback cont
 5. **Admin and module API access policy — open, issue 00046.** Admin defaults to all interfaces, and HTTP services
    supply no caller authentication or WebSocket Origin policy
    (`docs/issues/00046-admin-and-api-exposure-defaults.md:3`, `src/config/core-settings.ts:60`,
-   `src/admin/serve.ts:66`, `src/runner/api-server.ts:408`, `src/runner/api-server.ts:418`).
+   `src/admin/serve.ts:66`, `src/runner/api-socket.ts:334`, `src/runner/api-socket.ts:300`).
 
 6. **Service resource bounds — open, issue 00047.** Connections and subscriptions have no aggregate admission limit,
    transport results are materialized before the size check, PGlite read timeouts are not applied and ledger work has
    no deadline (`docs/issues/00047-service-resource-bounds.md:3`, `src/private/core-transport.ts:456`,
    `src/private/core-transport.ts:392`, `src/private/core-transport.ts:405`,
-   `src/runner/api-server.ts:234`, `src/db/pglite.ts:308`, `src/ledger/worker/host.ts:16`).
+   `src/runner/api-session.ts:207`, `src/db/pglite.ts:308`, `src/ledger/worker/host.ts:16`).
 
 7. **Backup file mode — fixed by task 15.1b, as built.** Files are created owner-only and set to `0600` before writing,
    with backup failure if `chmod` is refused; encryption and origin remain the operator's responsibilities

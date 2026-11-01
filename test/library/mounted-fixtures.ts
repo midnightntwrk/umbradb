@@ -213,6 +213,8 @@ export interface MapiHooks {
   readonly haltAt?: bigint;
   /** The message of the error `/fails` throws and the halt's (a careless one may hold a secret). */
   readonly failure?: string;
+  /** Told each height once its `on-after-db-write` emitted to `feed`'s subscribers (none unless given). */
+  readonly afterWrite?: (height: bigint) => void;
 }
 
 /**
@@ -254,6 +256,7 @@ export function mapiModule(hooks: MapiHooks): ModuleDeclaration {
       },
       async "on-after-db-write"(_p, b) {
         for (const emit of hooks.emits) emit({ height: b.height });
+        hooks.afterWrite?.(b.height);
       },
       async "on-start-api"(_p, api) {
         api.http("GET", "/rows", async (_request, read) => {

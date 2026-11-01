@@ -13,13 +13,16 @@
  * once its drain ended (or stopped before the module API ever opened) — a request gets 503 with the module API's error
  * envelope, the state and the reason: `{ "error": { "code": "not-serving", "message" }, "state", "reason" }`, the
  * message made of the state's name only and the reason of its code, height, module and point, never a failure's text.
- * An upgrade gets the same answer on its socket, which then ends. Nothing else writes this body: never in place of a
- * module's own answer, nor of the module API's own `503 no-committed-height`. [LM-5, AE-6, RN-16]
+ * An upgrade gets the same answer on its socket, which then ends; a fetch-style request gets it as a `Response`; a
+ * channel offered for subscriptions gets the body as its one message, then is closed. Nothing else writes this body:
+ * never in place of a module's own answer, nor of the module API's own `503 no-committed-height`.
+ * [LM-5, LM-11, AE-6, RN-16]
  */
 
 import type { IncomingMessage, OutgoingHttpHeader, OutgoingHttpHeaders, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { UMBRADB_VERSION } from "../config/build.js";
+import type { PrivateLinkChannel } from "../library/channels.js";
 import type { ProcessReason } from "./failures.js";
 import type { ProcessState } from "./process.js";
 
@@ -139,5 +142,28 @@ export function refuseNotServing(socket: Duplex, status: LifecycleStatus, config
     socket.end(`HTTP/1.1 503 Service Unavailable\r\n${head}\r\n${body}`);
   } catch {
     socket.destroy();
+  }
+}
+
+/** The lifecycle's 503 for `status` as a fetch `Response`, with the core's headers (`configHash` once it exists). [LM-5, LM-11] */
+export function notServingResponse(status: LifecycleStatus, configHash: string | undefined): Response {
+  const body = lifecycleBody(status);
+  return new Response(body, { status: 503, headers: lifecycleHeaders(body, configHash) });
+}
+
+/**
+ * Sends a channel offered for the module API's subscriptions the lifecycle's body for `status` as its one message, then
+ * closes it; a channel that throws is left, as far as UmbraDB goes, ended. [LM-5, LM-11]
+ */
+export function refuseChannelNotServing(channel: PrivateLinkChannel, status: LifecycleStatus): void {
+  try {
+    channel.send(lifecycleBody(status));
+  } catch {
+    // The host's carrier failed: there is nothing to tell it.
+  }
+  try {
+    channel.close();
+  } catch {
+    // Closed as far as UmbraDB goes.
   }
 }
