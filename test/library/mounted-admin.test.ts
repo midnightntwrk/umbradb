@@ -260,7 +260,11 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
           const at = performance.now();
           const answer = await ask(host.admin, path, "GET", 5_000);
           const ms = performance.now() - at;
-          if (answer.status === null || ms > ANSWER_MS) slow.push(`${path}: ${answer.status ?? answer.error} after ${Math.round(ms)} ms`);
+          // The endpoints' own answers: readiness may be either; the others 200 with the snapshot's JSON.
+          const answered = path === "/health/ready" ? answer.status === 200 || answer.status === 503 : answer.status === 200;
+          if (!answered || typeof answer.json !== "object" || ms > ANSWER_MS) {
+            slow.push(`${path}: ${answer.status ?? answer.error} after ${Math.round(ms)} ms`);
+          }
         }
       }
       expect(slow).toEqual([]);
