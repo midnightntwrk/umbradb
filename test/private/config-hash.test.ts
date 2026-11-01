@@ -7,7 +7,8 @@ import { a162Problems, a162Run } from "./config-hash-checks.js";
  * - a private process running against a core that restarts with a data field of its configuration changed halts with
  *   `public-config-changed` at its next message from the core, before it processes another height;
  * - a core restarted with the same configuration, or with only its secrets changed, changes nothing;
- * - every module API answer carries `X-Umbra-Config-Hash`, which holds no secret (a password in `database` on
+ * - every module API answer written after the hash exists (after `on-start-db`) — on the core's listener and through
+ *   its mounted handler — carries `X-Umbra-Config-Hash`, which holds no secret (a password in `database` on
  *   PostgreSQL, the node URL's on both) and does not change with one;
  * - on PostgreSQL a private process without a transport, reading the public configuration history again at a
  *   reconnection to its public database, halts alike (a PGlite public database is read only through the core's

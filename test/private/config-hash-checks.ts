@@ -4,6 +4,7 @@ import type { EngineInput } from "../../src/runner/process.js";
 import { type PrivateBackend, READER_LOGIN, type TestDatabase } from "./backends.js";
 import { launchPrivate, launchPublicCore, type PrivateProcess, type PublicCore } from "./builds.js";
 import { RetargetProxy } from "./relays.js";
+import { type Mountable, mountHandlers } from "../library/mounted-fixtures.js";
 import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
 
 /**
@@ -22,7 +23,9 @@ import type { DatabaseParts, PostgresParts } from "../../src/config/database-par
  * restart every session of the private process's public login is ended (`pg_terminate_backend`), so that it connects to
  * its public database again — when it reads the public configuration history again. After (3) the core is taken to 16
  * and the run waits until the private process has ended or reached 16. Each restart's answers of the core's module API
- * (`GET /level` and a 404) and one of the private process's are read for `X-Umbra-Config-Hash`. [PP-14]
+ * (`GET /level` and a 404) and one of the private process's are read for `X-Umbra-Config-Hash`; the core's are read both
+ * on its listener and through its mounted handler (the engine's `api.http`, in a host server of the test's), every one
+ * written after the hash exists. [PP-14, LM-4]
  */
 
 /** The public module `pub` (see the module comment). */
@@ -186,13 +189,23 @@ export async function a162Run(backend: PrivateBackend, options: A162Options): Pr
   const reconnect = async (): Promise<void> => {
     if (!options.transport) await publicDb.terminate?.(READER_LOGIN);
   };
-  const reads = (where: string, api: { readonly host: string; readonly port: number } | null) =>
-    headersOf(where, originOf(api), ["/level", "/nothing"]);
+  /** The core's answers on its listener and through its mounted handler, both after the hash exists. [RN-16, LM-4] */
+  const reads = async (where: string, api: { readonly host: string; readonly port: number } | null, handle: Mountable) => {
+    const host = await mountHandlers(handle);
+    try {
+      return [
+        ...(await headersOf(where, originOf(api), ["/level", "/nothing"])),
+        ...(await headersOf(`${where} (mounted)`, host.origin, ["/level", "/nothing"])),
+      ];
+    } finally {
+      await host.close();
+    }
+  };
   try {
     if (options.transport) proxy.retarget(await core.transportWithin(300_000));
     const first = await core.handle.started;
     await core.advance(5n);
-    const seenFirst = await reads("the core's first start", first.api);
+    const seenFirst = await reads("the core's first start", first.api, core.handle);
     let own: HeaderSeen[] = [];
     if (withPrivate) {
       const privateDb = await backend.database("private");
@@ -210,19 +223,19 @@ export async function a162Run(backend: PrivateBackend, options: A162Options): Pr
     }
     // (1) The same configuration.
     const same = await restart(8n, false, SECRETS.first);
-    const seenSame = await reads("the core restarted with the same configuration", same.api);
+    const seenSame = await reads("the core restarted with the same configuration", same.api, core.handle);
     await reconnect();
     if (watcher !== undefined) await watcher.reach(8n);
     const afterSame = watcher?.handle.status().cursor ?? null;
     // (2) Only secrets changed.
     const secretsChanged = await restart(11n, false, SECRETS.second);
-    const seenSecrets = await reads("the core restarted with only secrets changed", secretsChanged.api);
+    const seenSecrets = await reads("the core restarted with only secrets changed", secretsChanged.api, core.handle);
     await reconnect();
     if (watcher !== undefined) await watcher.reach(11n);
     const afterSecrets = watcher?.handle.status().cursor ?? null;
     // (3) A data field changed, at the same head first; then the core goes on to 16.
     const changed = await restart(11n, true, SECRETS.second);
-    const seenChanged = await reads("the core restarted with a data field changed", changed.api);
+    const seenChanged = await reads("the core restarted with a data field changed", changed.api, core.handle);
     await reconnect();
     if (watcher !== undefined) {
       const running = watcher;
