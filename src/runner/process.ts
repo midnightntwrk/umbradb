@@ -346,6 +346,7 @@ import type { InMemoryBlockSource } from "./in-memory-source.js";
 import { configurationRefusalLines } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf, startupRejection } from "./failures.js";
+import { followSignal } from "./host-signal.js";
 import {
   FinalizedLoop,
   HeightFailure,
@@ -1282,13 +1283,9 @@ class Process implements ProcessHandle {
     this.started.catch(() => undefined);
     this.ended = this.#run(outcome);
     this.#admin.follow(startup, this.ended);
-    const { signal } = input;
-    if (signal?.aborted === true) void this.#stopWith(signal.reason);
-    else if (signal !== undefined) {
-      const stop = (): void => void this.#stopWith(signal.reason);
-      signal.addEventListener("abort", stop, { once: true });
-      this.#unfollowSignal = () => signal.removeEventListener("abort", stop);
-    }
+    // The host's signal is read through AbortSignal's own members, never the object's: nothing of it throws here.
+    // [LM-1, LM-9]
+    if (input.signal !== undefined) this.#unfollowSignal = followSignal(input.signal, (reason) => void this.#stopWith(reason));
   }
 
   status(): ProcessStatus {

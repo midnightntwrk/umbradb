@@ -3,9 +3,17 @@
  * configuration step (class A): `startUmbraDB` never throws for it, the engine refuses with it before anything opens,
  * and `started` rejects with it. [LM-1, LM-3, LM-10; design §4, §5.1, §7.2]
  *
+ * **The options read once** ({@link readOptions}): every option, and inside `config`, `network` and `modules` every
+ * member the checks and the engine use, is read once into plain data (frozen copies of the objects, a file URL as a URL
+ * of its own, the signal checked as one), each read guarded: a getter or a proxy's trap that throws, a revoked proxy,
+ * is a finding at its path (`network.api.port: reading it threw`), never a throw out of `startUmbraDB`. What is checked
+ * is what the engine is given; nothing of the host's objects is read again. [LM-1, L62]
+ *
  * **The options' shapes** ({@link optionFindings}): an option of a type it cannot have, an unknown option, and a
  * malformed network request are each a finding at the option's path (`config`, `network.api.port`), and together the
- * refusal `invalid-configuration` with the reason `invalid-option` ({@link optionsRefusal}). [L62]
+ * refusal `invalid-configuration` with the reason `invalid-option` ({@link optionsRefusal}). A URL is one when URL's own
+ * accessor reads it, an `AbortSignal` when AbortSignal's does and it is no proxy: an object made from their prototypes,
+ * or a proxy of one, is not. [L62, LM-1]
  *
  * **User modules given twice** ({@link modulesGivenTwice}): `modules` with a `{ file }` configuration, whose own
  * `modules` export they are, `modules` and `modulesFrom`, or `modulesFrom` with `{ file }` (`modules-given-twice`).
@@ -27,6 +35,7 @@ import type { ProcessSide } from "../config/core-settings.js";
 import type { PlainObject } from "../config/plain-data.js";
 import type { CheckedEntry, Finding } from "../config/validate.js";
 import { UmbraError } from "../db/errors.js";
+import { isSignal } from "../runner/host-signal.js";
 import { InMemoryBlockSource } from "../runner/in-memory-source.js";
 
 /** The options `startUmbraDB` knows (design §4). */
@@ -63,18 +72,96 @@ export function readOption(
   }
 }
 
+/** What {@link guarded} answers for a read that threw. */
+const THREW: unique symbol = Symbol("threw");
+
+/** What `read` gives, or {@link THREW} when it throws (a getter, a proxy's trap, a revoked proxy). [LM-1] */
+function guarded<T>(read: () => T): T | typeof THREW {
+  try {
+    return read();
+  } catch {
+    return THREW;
+  }
+}
+
 /** The keys of `object`, or null when listing them threw. */
 function keysOf(object: object): readonly string[] | null {
-  try {
-    return Object.keys(object);
-  } catch {
-    return null;
-  }
+  const keys = guarded(() => Object.keys(object));
+  return keys === THREW ? null : keys;
 }
 
 /** A finding of the options at `path`: its message names the path. [L62] */
 const finding = (path: string, message: string): Finding =>
   Object.freeze({ rule: "invalid-option", path, entry: null, field: null, message: `${path}: ${message}` });
+
+/** The finding of a read at `path` that threw. [LM-1] */
+const threw = (path: string): Finding => finding(path, "reading it threw");
+
+/**
+ * `value` read once as plain data at `path`, `depth` levels down (see the module comment): an array becomes a frozen
+ * copy of its elements, another object (a proxy's too) a frozen object of its own enumerable keys and their values,
+ * anything else is itself. Each read that throws adds its finding to `found`, and what could not be read is
+ * undefined: nothing of the host's object is kept. [LM-1, L62]
+ */
+function snapshot(value: unknown, path: string, depth: number, found: Finding[]): unknown {
+  if (depth === 0 || typeof value !== "object" || value === null) return value;
+  const array = guarded(() => Array.isArray(value));
+  if (array === THREW) {
+    found.push(threw(path));
+    return undefined;
+  }
+  if (array) {
+    const elements = guarded(() => Array.prototype.slice.call(value) as unknown[]);
+    if (elements === THREW) {
+      found.push(threw(path));
+      return undefined;
+    }
+    return Object.freeze(elements.map((element, index) => snapshot(element, `${path}[${index}]`, depth - 1, found)));
+  }
+  const keys = keysOf(value);
+  if (keys === null) {
+    found.push(threw(path));
+    return undefined;
+  }
+  const entries: [string, unknown][] = [];
+  for (const key of keys) {
+    const inner = guarded(() => (value as Readonly<Record<string, unknown>>)[key]);
+    if (inner === THREW) found.push(threw(`${path}.${key}`));
+    else entries.push([key, snapshot(inner, `${path}.${key}`, depth - 1, found)]);
+  }
+  // `Object.fromEntries` keeps a key named `__proto__` as an own key, as the checks read it.
+  return Object.freeze(Object.fromEntries(entries));
+}
+
+/** URL's own accessor of a URL's text, as a function of its receiver: it throws for anything that is no URL. */
+const HREF = (Object.getOwnPropertyDescriptor(URL.prototype, "href") as PropertyDescriptor).get as (this: URL) => string;
+
+/** `value` as a URL of its own when it is a URL (URL's own accessor reads it), else null. [LM-1, CF-1] */
+function urlOf(value: unknown): URL | null {
+  if (typeof value !== "object" || value === null || types.isProxy(value)) return null;
+  const href = guarded(() => HREF.call(value as URL));
+  return href === THREW ? null : new URL(href);
+}
+
+/** Whether `value` is an `AbortSignal` (AbortSignal's own accessor reads it), and no proxy of one. [LM-1, LM-9] */
+const isAbortSignal = (value: unknown): value is AbortSignal => isSignal(value) && !types.isProxy(value);
+
+/** How deep each option holding objects is read (see {@link snapshot}): `network` to its surfaces' members. */
+const DEPTHS: Readonly<Record<string, number>> = Object.freeze({ config: 1, modules: 1, network: 3 });
+
+/**
+ * The option `key`'s value as read once (see the module comment): its objects copied, a URL as one of its own; a
+ * value that is no URL where one is taken stays as given, for its check to refuse. [LM-1]
+ */
+function readValue(key: string, value: unknown, found: Finding[]): unknown {
+  const read = snapshot(value, key, DEPTHS[key] ?? 0, found);
+  if (key === "modulesFrom") return urlOf(read) ?? read;
+  if (key === "config" && isObject(read) && typeof read.file === "object") {
+    const file = urlOf(read.file);
+    return file === null ? read : Object.freeze({ ...read, file });
+  }
+  return read;
+}
 
 /** The options read once: each value, or a finding when reading it threw. */
 export interface ReadOptions {
@@ -82,23 +169,36 @@ export interface ReadOptions {
   readonly findings: readonly Finding[];
   /** False when the options themselves could not be read (no object, or keys that cannot be listed). */
   readonly readable: boolean;
+  /** The options a read of which threw: their findings say so, and their shapes are not checked. */
+  readonly unread: readonly string[];
 }
 
-/** Reads every option of `options` once (see {@link readOption}); none of an `options` that is no object. */
+/** Reads every option of `options` once (see the module comment); none of an `options` that is no object. */
 export function readOptions(options: unknown): ReadOptions {
-  if (!isObject(options)) {
-    return { values: {}, findings: [finding("options", "startUmbraDB takes one object of options")], readable: false };
+  const object = guarded(() => isObject(options));
+  if (object !== true) {
+    const message = object === THREW ? "reading it threw" : "startUmbraDB takes one object of options";
+    return { values: {}, findings: [finding("options", message)], readable: false, unread: [] };
   }
-  const keys = keysOf(options);
-  if (keys === null) return { values: {}, findings: [finding("options", "its keys cannot be read")], readable: false };
+  const keys = keysOf(options as object);
+  if (keys === null) return { values: {}, findings: [finding("options", "its keys cannot be read")], readable: false, unread: [] };
   const values: Record<string, unknown> = {};
   const findings: Finding[] = [];
+  const unread: string[] = [];
   for (const key of keys) {
-    const read = readOption(options, key);
-    if ("thrown" in read) findings.push(finding(key, "reading it threw"));
-    else if (read.value !== undefined) values[key] = read.value;
+    const read = readOption(options as Readonly<Record<string, unknown>>, key);
+    if ("thrown" in read) {
+      findings.push(threw(key));
+      unread.push(key);
+      continue;
+    }
+    if (read.value === undefined) continue;
+    const before = findings.length;
+    const value = readValue(key, read.value, findings);
+    if (findings.length === before) values[key] = value;
+    else unread.push(key);
   }
-  return { values: Object.freeze(values), findings, readable: true };
+  return { values: Object.freeze(values), findings, readable: true, unread: Object.freeze(unread) };
 }
 
 /**
@@ -201,7 +301,7 @@ function configFindings(config: unknown): Finding[] {
   const hasData = keys.includes("data");
   if (hasFile === hasData) {
     found.push(finding("config", hasFile ? "gives file and data both: one of them" : "has neither file nor data"));
-  } else if (hasFile && typeof config.file !== "string" && !(config.file instanceof URL)) {
+  } else if (hasFile && typeof config.file !== "string" && urlOf(config.file) === null) {
     found.push(finding("config.file", "is a path (a string) or a file URL"));
   }
   return found;
@@ -217,16 +317,18 @@ export function optionFindings(read: ReadOptions): Finding[] {
       found.push(finding(key, `is no option of startUmbraDB (${OPTION_NAMES.join(", ")})`));
     }
   }
-  found.push(...configFindings(values.config));
+  // An option whose read threw has its finding already: its shape is not judged from what could be read of it.
+  const unread = new Set(read.unread);
+  if (!unread.has("config")) found.push(...configFindings(values.config));
   const { cwd, modules, signal, log, acceptPublicConfigHash } = values;
   if (cwd !== undefined && typeof cwd !== "string") found.push(finding("cwd", "is a path, a string"));
   if (modules !== undefined && !Array.isArray(modules)) {
     found.push(finding("modules", "is an array of module declarations"));
   }
-  if (values.modulesFrom !== undefined && !(values.modulesFrom instanceof URL)) {
+  if (values.modulesFrom !== undefined && urlOf(values.modulesFrom) === null) {
     found.push(finding("modulesFrom", "is the URL of an ES module whose modules export lists the user modules"));
   }
-  if (signal !== undefined && !(signal instanceof AbortSignal)) found.push(finding("signal", "is an AbortSignal"));
+  if (signal !== undefined && !isAbortSignal(signal)) found.push(finding("signal", "is an AbortSignal"));
   if (log !== undefined && typeof log !== "function") found.push(finding("log", "is a function of one line"));
   const hash = acceptPublicConfigHash;
   if (hash !== undefined && (typeof hash !== "string" || !CONFIG_HASH.test(hash))) {
@@ -238,7 +340,7 @@ export function optionFindings(read: ReadOptions): Finding[] {
       ),
     );
   }
-  found.push(...networkFindings(values.network));
+  if (!unread.has("network")) found.push(...networkFindings(values.network));
   return found;
 }
 

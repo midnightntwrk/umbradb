@@ -23,6 +23,11 @@ import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library
  * - L62 `[NEG]`: each malformed option makes `started` reject with `invalid-configuration`, reason `invalid-option`,
  *   naming the option's path, the process ending `refused` by itself; `startUmbraDB` throws in none. The negative
  *   control gives the engine the same options unchecked: none of them is refused `invalid-option`.
+ * - LM-1's "it never throws" for options that cannot be read as given: a getter or a proxy's trap that throws inside
+ *   `config` or `network` (at any depth), a proxy as an option or as the options, a revoked proxy, a fake URL or
+ *   `AbortSignal` (made with `Object.create` of its prototype, or a proxy of a real one), an array whose elements
+ *   cannot be read: each refused `invalid-option` at its path through `started`; a real `AbortSignal` whose own members
+ *   were replaced, and a proxy that only hides `in`, start as given.
  * - L51's library half: a renamed key is refused `renamed-setting` naming the new key, nothing opened.
  * - The handlers exist from the return on: `privateLink.accept` closes a channel this process does not accept and
  *   throws nothing; the module API's answer the lifecycle's 503 until the module API serves, admin's answer throughout
@@ -219,6 +224,128 @@ describe("L62: a malformed option is refused invalid-option, naming its path; st
       await handle.stop();
     }
     expect(codes.filter((code) => code.endsWith("invalid-option"))).toEqual([]);
+  }, 60_000);
+});
+
+/** A getter that throws. */
+const throwing = (): never => {
+  throw new Error("a getter that throws");
+};
+
+/** A revoked proxy: every operation on it throws, `Array.isArray` included. */
+const revoked = (): object => {
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  return proxy;
+};
+
+/** A proxy whose traps all throw. */
+const hostile = (target: object = {}): object =>
+  new Proxy(target, {
+    ownKeys: throwing,
+    get: throwing,
+    has: throwing,
+    getOwnPropertyDescriptor: throwing,
+    getPrototypeOf: throwing,
+  });
+
+/** Options that cannot be read as given, each with the path its refusal names. [LM-1, L62] */
+const UNREADABLE: readonly (readonly [string, () => unknown, string])[] = [
+  ["config.file's getter", () => ({ config: { get file() { return throwing(); } } }), "config.file"],
+  ["config.data's getter", () => ({ config: { get data() { return throwing(); } } }), "config.data"],
+  ["config as a hostile proxy", () => ({ config: hostile({ data: {} }) }), "config"],
+  ["config as a revoked proxy", () => ({ config: revoked() }), "config"],
+  ["config.file a fake URL", () => ({ config: { file: Object.create(URL.prototype) } }), "config.file"],
+  ["config.file a proxy of a URL", () => ({ config: { file: new Proxy(new URL("file:///srv/umbradb.config.ts"), {}) } }), "config.file"],
+  ["network.api's getter", () => ({ config: { data: {} }, network: { get api() { return throwing(); } } }), "network.api"],
+  ["network as a hostile proxy", () => ({ config: { data: {} }, network: hostile() }), "network"],
+  ["network.api.port's getter", () => ({ config: { data: {} }, network: { api: { get port() { return throwing(); } } } }), "network.api.port"],
+  [
+    "privateLink.publicSide's getter",
+    () => ({ config: { data: {} }, network: { privateLink: { get publicSide() { return throwing(); } } } }),
+    "network.privateLink.publicSide",
+  ],
+  [
+    "publicSide.channels's getter",
+    () => ({ config: { data: {} }, network: { privateLink: { publicSide: { get channels() { return throwing(); } } } } }),
+    "network.privateLink.publicSide.channels",
+  ],
+  ["privateLink as a revoked proxy", () => ({ config: { data: {} }, network: { privateLink: revoked() } }), "network.privateLink"],
+  ["signal made from AbortSignal's prototype", () => ({ config: { data: {} }, signal: Object.create(AbortSignal.prototype) }), "signal"],
+  ["signal a proxy of a real one", () => ({ config: { data: {} }, signal: new Proxy(new AbortController().signal, {}) }), "signal"],
+  ["signal a hostile proxy", () => ({ config: { data: {} }, signal: hostile() }), "signal"],
+  ["modules a hostile proxy of an array", () => ({ config: { data: {} }, modules: hostile([]) }), "modules"],
+  ["modules a revoked proxy", () => ({ config: { data: {} }, modules: revoked() }), "modules"],
+  ["modulesFrom a fake URL", () => ({ config: { data: {} }, modulesFrom: Object.create(URL.prototype) }), "modulesFrom"],
+  ["the options a revoked proxy", () => revoked(), "options"],
+  ["the options a hostile proxy", () => hostile(), "options"],
+];
+
+describe("LM-1: options that cannot be read as given are refused through started, never thrown", () => {
+  it.each(UNREADABLE)("%s", async (_name, options, path) => {
+    let handle: UmbraDBHandle | undefined;
+    expect(() => {
+      handle = startUmbraDB(options() as UmbraDBOptions);
+    }).not.toThrow();
+    const refused = handle as UmbraDBHandle;
+    await expect(refused.started).rejects.toMatchObject({
+      code: "invalid-configuration",
+      details: { reason: "invalid-option", option: path },
+    });
+    await closedByItself(refused);
+    expect(refused.status()).toMatchObject({ state: "refused", reason: { code: "invalid-configuration" } });
+  });
+
+  it("each option is read once: a getter's second value is never the one used", async () => {
+    let reads = 0;
+    const handle = startUmbraDB({
+      config: {
+        get data() {
+          reads += 1;
+          return reads === 1 ? libraryData(PGLITE_MEMORY) : null;
+        },
+      },
+      network: {
+        get api() {
+          reads += 1;
+          return false;
+        },
+      },
+      source: new InMemoryBlockSource({ head: 1n }),
+    } as UmbraDBOptions);
+    try {
+      await handle.started;
+      expect(reads).toBe(2);
+    } finally {
+      await handle.stop();
+    }
+  }, 60_000);
+
+  it("a real AbortSignal whose own members were replaced, and a proxy that hides only `in`, start as given; the signal still stops it", async () => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    for (const member of ["aborted", "reason", "addEventListener", "removeEventListener"]) {
+      Object.defineProperty(signal, member, { get: throwing });
+    }
+    const connect = async (): Promise<PrivateLinkChannel> => throwing();
+    let handle: UmbraDBHandle | undefined;
+    expect(() => {
+      handle = startUmbraDB({
+        config: { data: libraryData(PGLITE_MEMORY) },
+        signal,
+        source: new InMemoryBlockSource({ head: 1n }),
+        network: { privateLink: { privateSide: new Proxy({ connect }, { has: throwing }) } },
+      } as unknown as UmbraDBOptions);
+    }).not.toThrow();
+    const started = handle as UmbraDBHandle;
+    // A public process refuses a private side's request: the request was read, and judged by the network plan.
+    await expect(started.started).rejects.toMatchObject({ code: "private-link-misconfigured" });
+    await closedByItself(started);
+    const served = startUmbraDB({ config: { data: libraryData(PGLITE_MEMORY) }, signal, source: new InMemoryBlockSource({ head: 1n }) });
+    await served.started;
+    controller.abort();
+    await served.closed;
+    expect(await served.ended).toEqual({ kind: "signal" });
   }, 60_000);
 });
 
