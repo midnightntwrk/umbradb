@@ -478,7 +478,7 @@ describe("a public process whose listen.privateLink is taken refuses startup (li
     const db = await backend.database("public");
     const running = launchPublicCore({ database: db.setting, head: 2n, extra: { listen: { privateLink: `127.0.0.1:${port}` } } });
     try {
-      await expect(running.handle.started).rejects.toMatchObject({ code: "EADDRINUSE" });
+      await expect(running.handle.started).rejects.toMatchObject({ code: "listen-failed", cause: { code: "EADDRINUSE" } });
       expect(running.handle.status()).toMatchObject({ state: "refused", reason: { code: "listen-failed" } });
     } finally {
       await running.stop();

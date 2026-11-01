@@ -24,6 +24,9 @@
  *
  * Its module is the wrapper's, or else the one an `UmbraError`'s details name (`details.module`, e.g. a migration's).
  *
+ * **A startup's rejection** ({@link startupRejection}) carries the reason's code: the failure when it is an `UmbraError`
+ * of that code, else one wrapping it as its `cause`. [LM-9]
+ *
  * **Retries** ({@link retryOf}). The two retryable codes (`UmbraError.retryable`) never halt: a lost database
  * connection (`connection-lost`) is retried with the condition `database-retrying`, and an unreachable node
  * (`node-unreachable`) with `node-retrying`. This holds when they are the failure itself, directly or inside the
@@ -86,15 +89,18 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "modules-given-twice",
   "ledger-tasks-need-modules-from",
   "source-refused",
+  "callback-error",
+  "listen-failed",
 ] as const);
 
 /**
- * The listed processing halts that are `UmbraError` codes today. `callback-error` and `unexpected-cursor` are the
- * runner's own ({@link ReasonCode}). A private instance's three are the two of lockstep (`lockstep-behind`,
+ * The listed processing halts that are `UmbraError` codes. `unexpected-cursor` is the runner's own
+ * ({@link ReasonCode}). A private instance's three are the two of lockstep (`lockstep-behind`,
  * `report-hash-mismatch`) and that of a changed public configuration (`public-config-changed`).
  * [PP-6, PP-14; design §11]
  */
 export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
+  "callback-error",
   "database-error",
   "parent-mismatch",
   "finality-conflict",
@@ -116,10 +122,10 @@ export const HALT_CODES: readonly ErrorCode[] = Object.freeze([
 const NAMED: ReadonlySet<ErrorCode> = new Set([...REFUSAL_CODES, ...HALT_CODES]);
 
 /**
- * A reason's code: a listed one, either an `UmbraError`'s or one of the runner's own three (including `listen-failed`).
- * [Q115; design §11]
+ * A reason's code: a listed one, an `UmbraError`'s — `callback-error` and `listen-failed` among them — or the loop's own
+ * cursor check, `unexpected-cursor`, which only a halt gives. [Q115, LM-9; design §11]
  */
-export type ReasonCode = ErrorCode | "callback-error" | "unexpected-cursor" | "listen-failed";
+export type ReasonCode = ErrorCode | "unexpected-cursor";
 
 /**
  * Why a process is `refused` or `halted`: the code and where it happened, frozen, null where none applies.
@@ -184,6 +190,34 @@ export function reasonOf(error: unknown): ProcessReason {
     module: module ?? (typeof named === "string" ? named : null),
     point: point ?? null,
   });
+}
+
+/**
+ * What a process's `started` rejects with when startup refused or failed with `error`, whose reason is `reason` (one
+ * code for one failure): the failure itself — looked through the runner's wrappers — when it is an `UmbraError` of the
+ * reason's code; else a new `UmbraError` of that code, naming the reason's module and point, whose `cause` is the
+ * failure (a callback's own error, Node.js's error of `listen`, any value thrown). Its message is made of the reason's
+ * fields only, so it holds nothing of the failure's own message. The loop's cursor check, `unexpected-cursor`, is no
+ * startup step's: were a startup to meet it, the rejection would carry the general code. [LM-9, AE-6]
+ */
+export function startupRejection(error: unknown, reason: ProcessReason = reasonOf(error)): UmbraError {
+  const { failure } = unwrap(error);
+  if (failure instanceof UmbraError && failure.code === reason.code) return failure;
+  const code: ErrorCode = reason.code === "unexpected-cursor" ? "database-error" : reason.code;
+  const where = [
+    ...(reason.module === null ? [] : [`module ${reason.module}`]),
+    ...(reason.point === null ? [] : [`point ${reason.point}`]),
+  ];
+  const details = {
+    ...(reason.module === null ? {} : { module: reason.module }),
+    ...(reason.point === null ? {} : { point: reason.point }),
+  };
+  return new UmbraError(
+    code,
+    `startup refused with ${code}${where.length === 0 ? "" : ` (${where.join(", ")})`}: the failure is this error's cause`,
+    details,
+    { cause: failure },
+  );
 }
 
 /** The condition a retried failure raises. [IN-10, AE-3] */

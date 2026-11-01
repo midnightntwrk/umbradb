@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ERROR_CODES, type ErrorCode, UmbraError } from "../../src/db/errors.js";
 import { CallbackFailure } from "../../src/runner/dispatch.js";
-import { HALT_CODES, type ProcessReason, reasonOf, REFUSAL_CODES, retryOf } from "../../src/runner/failures.js";
+import { HALT_CODES, type ProcessReason, reasonOf, REFUSAL_CODES, retryOf, startupRejection } from "../../src/runner/failures.js";
 import { HeightFailure, UnexpectedCursor } from "../../src/runner/loop.js";
 import { statusOf, type StatusFacts } from "../../src/runner/process.js";
 
@@ -53,10 +53,15 @@ describe("the codes reasons keep: design §11's", () => {
     expect(halts.has("callback-error")).toBe(true);
     expect([...REFUSAL_CODES].sort()).toEqual(known(refusals));
     expect([...HALT_CODES].sort()).toEqual(known(halts));
-    // The two halt codes no UmbraError carries are the runner's own: a callback's failure, and the loop's cursor check.
-    expect([...halts].filter((code) => !(ERROR_CODES as readonly string[]).includes(code))).toEqual(
-      expect.arrayContaining(["callback-error", "unexpected-cursor"]),
-    );
+    // A callback's failure and a listener that cannot bind are UmbraError codes, so a startup's rejection carries them;
+    // the one halt code no UmbraError carries is the loop's own cursor check. [LM-9, design §11]
+    expect(ERROR_CODES).toEqual(expect.arrayContaining(["callback-error", "listen-failed"]));
+    expect(REFUSAL_CODES).toEqual(expect.arrayContaining(["callback-error", "listen-failed"]));
+    expect(HALT_CODES).toContain("callback-error");
+    expect(HALT_CODES).not.toContain("listen-failed");
+    const notErrorCodes = [...halts].filter((code) => !(ERROR_CODES as readonly string[]).includes(code));
+    expect(notErrorCodes).toContain("unexpected-cursor");
+    expect(notErrorCodes).not.toContain("callback-error");
     expect(Object.isFrozen(REFUSAL_CODES)).toBe(true);
     expect(Object.isFrozen(HALT_CODES)).toBe(true);
   });
@@ -141,6 +146,65 @@ describe("reasonOf: a failure's code, height, module and point (RN-8, AE-5, AE-6
     expect(reasonOf(listenError("EADDRINUSE"))).toEqual(reason("listen-failed"));
     expect(reasonOf(Object.assign(new Error("connect"), { syscall: "connect" }))).toEqual(reason("database-error"));
     expect(reasonOf(new Error("the source cannot read the cursor"))).toEqual(reason("database-error"));
+  });
+});
+
+describe("startupRejection: what started rejects with, one code for one failure (LM-9)", () => {
+  const secret = "s3cr3t-in-a-message";
+
+  it("the failure itself when it is an UmbraError of the reason's code, unwrapped from the runner's wrappers", () => {
+    const refusal = new UmbraError("migration-checksum-changed", "001 changed", { module: "m", migration: "001" });
+    expect(startupRejection(refusal)).toBe(refusal);
+    const inCallback = new UmbraError("migration-failed", "001 failed", { module: "setup" });
+    expect(startupRejection(new CallbackFailure("on-start-db", "setup", inCallback))).toBe(inCallback);
+    const listed = new UmbraError("database-error", "duplicate key");
+    expect(startupRejection(new CallbackFailure("on-start-db", "setup", listed))).toBe(listed);
+  });
+
+  it("else a new UmbraError of the reason's code, naming the module and point, its cause the thrown value", () => {
+    const thrown = new Error(`x ${secret}`);
+    const rejection = startupRejection(new CallbackFailure("on-start-db", "setup", thrown));
+    expect(rejection).toBeInstanceOf(UmbraError);
+    expect(rejection).toMatchObject({ code: "callback-error", details: { module: "setup", point: "on-start-db" } });
+    expect(rejection.cause).toBe(thrown);
+    expect(rejection.message).not.toContain(secret);
+    expect(reasonOf(rejection)).toEqual(reason("callback-error", { module: "setup" }));
+
+    const listen = listenError("EADDRINUSE");
+    expect(startupRejection(listen)).toMatchObject({ code: "listen-failed", details: {}, cause: listen });
+    const plain = new Error(`the source cannot read the cursor ${secret}`);
+    const general = startupRejection(plain);
+    expect(general).toMatchObject({ code: "database-error", cause: plain });
+    expect(general.message).not.toContain(secret);
+    expect(startupRejection("a string")).toMatchObject({ code: "database-error", cause: "a string" });
+    // An UmbraError whose code §11 does not list is the general refusal's cause.
+    const other = new UmbraError("node-error", "the node answered an error");
+    expect(startupRejection(other)).toMatchObject({ code: "database-error", cause: other });
+    // A misuse in a callback: callback-error, the misuse its cause.
+    const misuse = new UmbraError("handle-closed", "kept");
+    expect(startupRejection(new CallbackFailure("on-start-api", "api", misuse))).toMatchObject({
+      code: "callback-error",
+      details: { module: "api", point: "on-start-api" },
+      cause: misuse,
+    });
+  });
+
+  it("the loop's cursor check, which no startup step meets, would carry the general code", () => {
+    const check = new UnexpectedCursor("left at 2");
+    expect(startupRejection(check)).toMatchObject({ code: "database-error", cause: check });
+  });
+
+  it("its code is always the reason's that status() shows", () => {
+    const failures: unknown[] = [
+      new UmbraError("genesis-mismatch", "other chain"),
+      new CallbackFailure("on-start-db", "s", new Error("x")),
+      new CallbackFailure("on-start-api", "a", "y"),
+      listenError("EACCES"),
+      new Error("plain"),
+      new UmbraError("handle-closed", "closed"),
+      Symbol("thrown"),
+    ];
+    for (const failure of failures) expect(startupRejection(failure).code).toBe(reasonOf(failure).code);
   });
 });
 

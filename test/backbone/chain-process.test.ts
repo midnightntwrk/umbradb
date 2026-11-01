@@ -342,8 +342,10 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
       user: [recorder({ blocks: new Map() })],
       settings: { listen: { api: `127.0.0.1:${port}` } },
     });
-    expect(await refusalOf(handle)).toBe(gone);
-    expect(await handle.ended).toEqual({ kind: "refused", error: gone });
+    // The rejection is the general refusal, the source's failure its cause. [LM-9]
+    const rejection = await refusalOf(handle);
+    expect(rejection).toMatchObject({ code: "database-error", cause: gone });
+    expect(await handle.ended).toEqual({ kind: "refused", error: rejection });
     // The refused state: refused with the general refusal code (a source's failure has no code of its own among the
     // refusal codes), not ready. [design §11]
     expect(handle.status()).toMatchObject({

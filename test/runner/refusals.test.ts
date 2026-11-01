@@ -2,6 +2,7 @@ import { createServer, type Server } from "node:net";
 import { once } from "node:events";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { UmbraError } from "../../src/db/errors.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { ProcessHandle } from "../../src/runner/process.js";
@@ -104,7 +105,15 @@ describe.each(PROCESS_BACKENDS)("refused startups (IN-12, AE-3) on $name", (back
     ] as const) {
       const setup = loggingModule("setup", [], [], { points: { "on-start-db": failing as never } });
       const { handle } = await startOn(await backend.database(), [setup]);
-      await expect(handle.started, what).rejects.toMatchObject({ name: "CallbackFailure", point: "on-start-db", module: "setup" });
+      // One code for one failure: the rejection is an UmbraError of the reason's code; the module's own error, a plain
+      // Error, is its cause, and the module's SQL error (an UmbraError of that code) is the rejection itself. [LM-9]
+      const rejection = await handle.started.then(() => null, (error: unknown) => error);
+      expect(rejection, what).toBeInstanceOf(UmbraError);
+      expect(rejection, what).toMatchObject({ code });
+      if (code === "callback-error") {
+        expect(rejection).toMatchObject({ details: { module: "setup", point: "on-start-db" }, cause: { message: "on-start-db fails" } });
+      }
+      expect(await handle.ended, what).toEqual({ kind: "refused", error: rejection });
       expect(handle.status(), what).toMatchObject({
         state: "refused",
         ready: false,
@@ -139,7 +148,8 @@ describe.each(PROCESS_BACKENDS)("refused startups (IN-12, AE-3) on $name", (back
     try {
       const db = await backend.database();
       const { handle, lines } = await startOn(db, [], `127.0.0.1:${port}`);
-      await expect(handle.started).rejects.toMatchObject({ code: "EADDRINUSE" });
+      // The rejection is listen-failed, Node.js's error of `listen` its cause. [LM-9]
+      await expect(handle.started).rejects.toMatchObject({ code: "listen-failed", cause: { code: "EADDRINUSE", syscall: "listen" } });
       expect(handle.status()).toMatchObject({
         state: "refused",
         ready: false,
@@ -198,7 +208,8 @@ describe("refused startups without a database", () => {
       },
       log: (line) => createdDirectory(line) || lines.push(line),
     });
-    await expect(handle.started).rejects.toBe("the source cannot be made");
+    // The rejection is the general refusal, the thrown value its cause. [LM-9]
+    await expect(handle.started).rejects.toMatchObject({ code: "database-error", cause: "the source cannot be made" });
     expect(handle.status()).toMatchObject({
       state: "refused",
       reason: { code: "database-error", height: null, module: null, point: null },
@@ -219,6 +230,8 @@ describe("refused startups without a database", () => {
     });
     expect(await handle.ended).toEqual({ kind: "signal" });
     expect(handle.status()).toMatchObject({ state: "stopping", reason: null });
+    // `started` rejects with the abort reason, the signal's own. [LM-9]
+    await expect(handle.started).rejects.toBe(controller.signal.reason);
     await handle.closed;
   });
 });

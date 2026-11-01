@@ -6,7 +6,7 @@ import type { NodeClient, NodeClientOptions } from "../../src/node/client.js";
 import { engineInputOf, startUmbraDB, type UmbraDBHandle } from "../../src/library/start-umbradb.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import { startProcess as startEngine, type ProcessHandle } from "../../src/runner/process.js";
+import type { ProcessHandle } from "../../src/runner/process.js";
 import { privateCoreEntry } from "../private/builds.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { startProcess } from "../runner/process-build.js";
@@ -215,7 +215,7 @@ describe.each(PROCESS_BACKENDS)("L49: with an in-memory source, no node client a
       const db = await backend.database();
       const options = { config: { data: libraryData(db.setting, [], { node: node.url }) }, source: new InMemoryBlockSource({ head: 3n }) };
       const { input } = engineInputOf(options);
-      await run(startEngine({ ...input, nodeClient: counting(real) }), 3n);
+      await run(startProcess({ ...input, nodeClient: counting(real) }), 3n);
       expect(made).toEqual([]);
       expect(node.connections()).toBe(0);
 
@@ -226,7 +226,7 @@ describe.each(PROCESS_BACKENDS)("L49: with an in-memory source, no node client a
         source: new InMemoryBlockSource({ head: 3n }),
       }).input;
       const { inMemorySource, ...rest } = seam;
-      await run(startEngine({ ...rest, source: inMemorySource as InMemoryBlockSource, nodeClient: counting(real) }), 3n);
+      await run(startProcess({ ...rest, source: inMemorySource as InMemoryBlockSource, nodeClient: counting(real) }), 3n);
       expect(made).toHaveLength(1);
 
       // Control: the node's own source on the same `node` connects to it (the server ends each connection).

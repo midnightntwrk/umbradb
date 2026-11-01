@@ -51,18 +51,26 @@
  * 10. Run the finalized loop, with the core's stop and the upgrade boundary ({@link upgradeBoundary}). [RN-12]
  *
  * A refusal closes what startup opened: the node client, the ledger worker, the database (its writer lock released),
- * then the block source. It rejects {@link ProcessHandle.started} with the refusal. The process stays up, `refused`
- * with the refusal's reason, until it is stopped. [IN-12, AE-3]
+ * then the block source. It rejects {@link ProcessHandle.started} with the reason's code (`startupRejection`): the
+ * refusal itself when it is an `UmbraError` of that code, else one whose `cause` is what failed. The process stays up,
+ * `refused` with the refusal's reason, until it is stopped. [IN-12, AE-3, LM-9]
+ *
+ * **A stop during startup** ({@link ProcessHandle.stop}, or {@link EngineOptions.signal}) is no refusal: `started`
+ * rejects with the abort reason, as `fetch` does — the signal's `reason`, or for `stop()` an `AbortError`
+ * `DOMException` —, in place of whatever the step it cut short threw (a closed node client's `handle-closed`, the stop's
+ * own abort); the process is `stopping` with no reason. [LM-9, RN-13]
  *
  * **Every close runs whole** ({@link closeSteps}): startup's after a refusal, {@link ProcessHandle.stop}'s, and the end
  * of a refused configuration. Each step runs whatever an earlier one did; a step that fails is logged (`close: <step>
  * failed (<code>): <message>`), a refusal stays the one thrown, and `closed` resolves. [LM-2, G7]
  *
- * **A refusal of the configuration itself** ends the process instead. This covers steps 1 and 2, before the process's
- * `core` revision is known: loading the configuration, the declarations, its plain data and validation, and the choice
- * of its revision. The process logs every finding with its path (`./configuration-refusal.ts`) and opens no admin
- * listener (there is no validated `listen.admin`). It is `refused` with `closed` resolved, so nothing is left to stop,
- * and `umbradb run` then exits 1. Every later refusal keeps the process up, as above. [Q137 B]
+ * **A refusal of the configuration step** (class A) ends the process instead. The class is the startup step's: steps
+ * 1 and 2 — loading the configuration, the declarations, its plain data and validation, the choice of its revision, and
+ * a host program's own checks ({@link EngineOptions.library}: its options, its in-memory chain, the settings it
+ * refuses) —, before the database opens, the ledger worker starts or any port opens. The process logs every finding
+ * with its path (`./configuration-refusal.ts`) and opens no admin listener (there is no validated `listen.admin`). It is
+ * `refused` with `closed` resolved, so nothing is left to stop, and `umbradb run` then exits 1. Every later refusal
+ * (class B) keeps the process up, as above. [Q137 B, LM-10]
  *
  * A retryable failure of steps 4 to 8 (`connection-lost`, `node-unreachable`) refuses nothing. After the retry back-off
  * (see **Retries**), steps 4 to 10 run again, with new process contexts and new bindings of `core-chain` and
@@ -284,7 +292,7 @@ import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import type { InMemoryBlockSource } from "./in-memory-source.js";
 import { configurationRefusalLines } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
-import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failures.js";
+import { type ProcessReason, reasonOf, type RetryCode, retryOf, startupRejection } from "./failures.js";
 import {
   FinalizedLoop,
   HeightFailure,
@@ -659,7 +667,11 @@ export interface ProcessHandle {
   status(): ProcessStatus;
   /** Where its surfaces listen now (see {@link ProcessListening}). [LM-9] */
   listening(): ProcessListening;
-  /** Resolves once startup completed and the loop runs; rejects with startup's refusal or failure. */
+  /**
+   * Resolves once startup completed and the loop runs. Rejects with an `UmbraError` of the reason's code when startup
+   * refused or failed, and with the abort reason when a stop ended it (see the module comment); marked handled.
+   * [LM-9]
+   */
   readonly started: Promise<StartedProcess>;
   /** Resolves with how processing ended (also when startup did not complete); never rejects. */
   readonly ended: Promise<ProcessingEnd>;
@@ -942,6 +954,16 @@ interface Startup {
   readonly started: StartedProcess;
 }
 
+/**
+ * How startup ended, decided once when it settled, for `started` and the run alike: it completed; a stop ended it
+ * (`started` rejects with the abort reason); or it refused, at the configuration step (class A) or later (class B),
+ * `started` rejecting with `rejection`. [LM-9, LM-10]
+ */
+type StartupOutcome =
+  | { readonly kind: "started"; readonly startup: Startup }
+  | { readonly kind: "stopped"; readonly rejection: unknown }
+  | { readonly kind: "refused"; readonly rejection: UmbraError; readonly configurationStep: boolean };
+
 /** What startup has once the database opened: what its later steps — run again on a retryable failure — need. */
 interface Opened {
   readonly declarations: DeclarationSet<ModuleDeclaration>;
@@ -964,6 +986,13 @@ class Process implements ProcessHandle {
   #redactor: Redactor | undefined;
   /** The process's side, once the resolver took it from the configuration; public until then. [CF-4] */
   #side: ProcessSide = "public";
+  /**
+   * Whether startup is still at its configuration step (steps 1 and 2, a host's checks included), where a refusal is of
+   * class A and ends the process. [LM-10, Q137 B]
+   */
+  #configurationStep = true;
+  /** What `started` rejects with when a stop ends startup: the first stop's abort reason. [LM-9] */
+  #abortReason: unknown;
   #core: CheckedEntry | undefined;
   #start: bigint | null = null;
   #cursor: bigint | null = null;
@@ -1027,14 +1056,22 @@ class Process implements ProcessHandle {
       this.#resolveClosed = resolve;
     });
     const startup = this.#startup();
-    this.started = startup.then(({ started }) => started);
-    // `ended` tells a refusal too: a caller that awaits only `ended` leaves no rejection unhandled.
+    // Decided once, before anything else sees startup end: `/status` shows the reason as `started` rejects. [LM-9]
+    const outcome = startup.then(
+      (completed): StartupOutcome => ({ kind: "started", startup: completed }),
+      (error: unknown): StartupOutcome => this.#startupEnded(error),
+    );
+    this.started = outcome.then((settled) => {
+      if (settled.kind === "started") return settled.startup.started;
+      throw settled.rejection;
+    });
+    // `ended` tells a refusal too: a caller that awaits only `ended` leaves no rejection unhandled. [LM-9]
     this.started.catch(() => undefined);
-    this.ended = this.#run(startup);
+    this.ended = this.#run(outcome);
     this.#admin?.follow(startup, this.ended);
     const { signal } = input;
-    if (signal?.aborted === true) void this.stop();
-    else signal?.addEventListener("abort", () => void this.stop(), { once: true });
+    if (signal?.aborted === true) void this.#stopWith(signal.reason);
+    else signal?.addEventListener("abort", () => void this.#stopWith(signal.reason), { once: true });
   }
 
   status(): ProcessStatus {
@@ -1074,8 +1111,24 @@ class Process implements ProcessHandle {
   }
 
   stop(): Promise<void> {
+    return this.#stopWith(new DOMException("the process was stopped (stop()) before its startup completed", "AbortError"));
+  }
+
+  /** {@link stop}, by `stop()` or the signal: the first stop's `reason` is what a startup it ends rejects with. */
+  #stopWith(reason: unknown): Promise<void> {
+    if (this.#closing === undefined) this.#abortReason = reason;
     this.#closing ??= this.#close();
     return this.#closing;
+  }
+
+  /**
+   * How startup ended with `error` (see {@link StartupOutcome}): by a stop, `started` rejecting with the abort reason;
+   * else a refusal, its reason recorded (`refused`) and `started` rejecting with the reason's code. [LM-9, LM-10]
+   */
+  #startupEnded(error: unknown): StartupOutcome {
+    if (this.#stop.signal.aborted) return { kind: "stopped", rejection: this.#abortReason };
+    const reason = this.#fail("refused", error);
+    return { kind: "refused", rejection: startupRejection(error, reason), configurationStep: this.#configurationStep };
   }
 
   async backup(out: string, seams: BackupSeams = {}): Promise<BackupWritten> {
@@ -1418,6 +1471,8 @@ class Process implements ProcessHandle {
       this.#refuseObjectTasks(resolved);
       // A host's own checks of what resolved: still the configuration step, so the process ends as above. [LM-10]
       input.library?.resolved?.(resolved);
+      // The configuration step ends here: a later refusal keeps the process up (class B). [LM-10]
+      this.#configurationStep = false;
       // A module's ledger tasks run through points of its own (`src/ledger/tasks.ts`). [LG-17]
       const declarations = withLedgerTaskPoints(resolved.declarations);
       const { checked, core } = resolved;
@@ -1479,8 +1534,8 @@ class Process implements ProcessHandle {
       }
     } catch (error) {
       if (!this.#stop.signal.aborted) {
-        if (this.#core === undefined) {
-          // A refusal of the configuration itself: every finding logged, its secrets redacted as the validation read
+        if (this.#configurationStep) {
+          // A refusal of the configuration step: every finding logged, its secrets redacted as the validation read
           // them (the resolver's), and the URL patterns only before; `#run` then ends the process. [Q137 B, AE-6]
           const early = redactor(refusalSecrets(error));
           for (const line of configurationRefusalLines(error, early.text)) this.#log(line);
@@ -1796,18 +1851,16 @@ class Process implements ProcessHandle {
   }
 
   /** Startup, then the loop: resolves with how processing ended (see {@link ProcessingEnd}). */
-  async #run(startup: Promise<Startup>): Promise<ProcessingEnd> {
-    let loop: FinalizedLoop;
-    try {
-      ({ loop } = await startup);
-    } catch (error) {
-      if (this.#stop.signal.aborted) return this.#ended({ kind: "signal" });
-      this.#fail("refused", error);
-      const end = this.#ended({ kind: "refused", error });
-      // Refused before its `core` revision was known: by the configuration itself, which ends the process. [Q137 B]
-      if (this.#core === undefined) this.#closing ??= this.#endItself();
+  async #run(outcome: Promise<StartupOutcome>): Promise<ProcessingEnd> {
+    const settled = await outcome;
+    if (settled.kind === "stopped") return this.#ended({ kind: "signal" });
+    if (settled.kind === "refused") {
+      const end = this.#ended({ kind: "refused", error: settled.rejection });
+      // Refused at the configuration step (class A), which ends the process. [Q137 B, LM-10]
+      if (settled.configurationStep) this.#closing ??= this.#endItself();
       return end;
     }
+    const { loop } = settled.startup;
     let end: LoopEnd;
     for (;;) {
       try {

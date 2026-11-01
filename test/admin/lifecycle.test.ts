@@ -142,7 +142,7 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints' life with the process on $
     try {
       const db = await backend.database();
       const run = startWithAdmin({ database: db.setting, extra: { listen: { admin: `127.0.0.1:${held.port}` } } });
-      await expect(run.handle.started).rejects.toMatchObject({ code: "EADDRINUSE", syscall: "listen" });
+      await expect(run.handle.started).rejects.toMatchObject({ code: "listen-failed", cause: { code: "EADDRINUSE", syscall: "listen" } });
       await run.handle.ended;
       expect(run.handle.status()).toMatchObject({
         state: "refused",

@@ -105,6 +105,18 @@ export const ERROR_CODES = [
    * modules. [RN-15]
    */
   "duplicate-api-route",
+  /**
+   * A module's callback failed: it threw, or misused a handle (`handle-closed` of a handle kept past its callback). At
+   * startup (`on-start-db`, `on-start-api`) startup refuses; while processing, the process halts. Its reason names the
+   * module and the point; a startup's rejection of this code has the callback's error as its `cause`. [RN-8, LM-9]
+   */
+  "callback-error",
+  /**
+   * A listener could not bind its address — the module API's, admin's or the private link's (Node.js's error of `listen`,
+   * such as `EADDRINUSE`): startup refuses. A startup's rejection of this code has Node.js's error as its `cause`.
+   * [Q115, LM-9]
+   */
+  "listen-failed",
   // Startup refusals of migrations (`src/db/migrate.ts`). [DB-9, DB-10, Q91]
   "migration-checksum-changed",
   "migration-missing",

@@ -1761,9 +1761,9 @@ module table.
 Each code below has a test that triggers it and checks it, named in `test/runner/code-registry.ts`, or the task that
 adds it there (A87; task 10.4): a code added here comes with its test.
 
-**Startup refuses** (state `refused`, live, not ready — but a refusal of the configuration itself, before its core
-revision is known, logs every finding and ends the process, serving no admin endpoint: owner decision Q137 B, task
-8.1b), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,
+**Startup refuses** (state `refused`, live, not ready — but a class-A refusal (the start-umbradb change's design §7.2:
+one of the configuration step, the library's option checks included) logs every finding and ends the process, serving
+no admin endpoint: owner decision Q137 B, task 8.1b), with these codes: `genesis-mismatch`, `cursor-hash-mismatch`,
 `changes-past`, `missing-entry`, `not-plain-data`, `invalid-configuration`, `upgrade-required`, `requires-resync`,
 `migration-checksum-changed`, `migration-missing`, `migration-failed`, `non-deterministic-column`,
 `non-deterministic-table`, `no-primary-key`, `unsupported-key-type`, `unsupported-column-type` (DT-6, Q58, Q61),

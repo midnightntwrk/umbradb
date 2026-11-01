@@ -346,7 +346,11 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         source: new InMemoryBlockSource({ head: 2n }),
         log: () => undefined,
       });
-      await expect(refused.started).rejects.toMatchObject({ name: "CallbackFailure", point: "on-start-api", module: "failing" });
+      await expect(refused.started).rejects.toMatchObject({
+        code: "callback-error",
+        details: { module: "failing", point: "on-start-api" },
+        cause: { message: "on-start-api fails" },
+      });
       expect(await refused.ended).toMatchObject({ kind: "refused" });
       // Not stopped: the refusal itself released the database (its writer lock on both backends).
       // The history recorded the entry of failing (its on-start-db ran): the next build lists it, with no callbacks.
@@ -477,6 +481,8 @@ describe.each(PROCESS_BACKENDS)("the process on $name", (backend) => {
         signal: controller.signal,
         log: () => undefined,
       });
+      // The abort reason itself, the signal's. [LM-9]
+      await expect(early.started).rejects.toBe(controller.signal.reason);
       await expect(early.started).rejects.toMatchObject({ name: "AbortError" });
       expect(await early.ended).toEqual({ kind: "signal" });
       await early.closed;
@@ -765,11 +771,11 @@ describe("startProcess without a database", () => {
       source: new InMemoryBlockSource({ head: 1n }),
       log: (line) => lines.push(line),
     });
-    // A failing on-start-db names its point and module, its cause the value thrown.
+    // A failing on-start-db: callback-error naming its point and module, its cause the value thrown. [LM-9]
     await expect(handle.started).rejects.toMatchObject({
-      name: "CallbackFailure",
-      point: "on-start-db",
-      module: "throwing",
+      name: "UmbraError",
+      code: "callback-error",
+      details: { point: "on-start-db", module: "throwing" },
       cause: "on-start-db throws a string",
     });
     await handle.stop();
@@ -835,7 +841,7 @@ describe("startProcess without a database", () => {
       source: failing,
       log: () => undefined,
     });
-    await expect(handle.started).rejects.toThrow("the source cannot read the cursor");
+    await expect(handle.started).rejects.toMatchObject({ code: "database-error", cause: { message: "the source cannot read the cursor" } });
     await handle.stop();
   });
 });

@@ -133,11 +133,13 @@ async function takenProblems(backend: ProcessBackend, start: Start, admin?: (dat
     await first.handle.started;
     const before = backend.kind === "postgres" ? await sessionsOf(firstDb, secondDb) : null;
     const second = started(start, secondDb.setting, address, admin === undefined ? {} : { admin: admin(secondDb.setting) });
+    // The rejection is listen-failed, Node.js's error of `listen` its cause. [LM-9]
     const outcome = await second.handle.started.then(
       () => "started",
-      (error: NodeJS.ErrnoException) => `${error.code} on ${error.syscall}`,
+      (error: { readonly code?: unknown; readonly cause?: NodeJS.ErrnoException }) =>
+        `${String(error.code)}: ${String(error.cause?.code)} on ${String(error.cause?.syscall)}`,
     );
-    if (outcome !== "EADDRINUSE on listen") problems.push(`second: ${outcome}`);
+    if (outcome !== "listen-failed: EADDRINUSE on listen") problems.push(`second: ${outcome}`);
     else {
       await second.handle.ended;
       const status = second.handle.status();
