@@ -1,19 +1,22 @@
 /**
  * One process of the browser build in a dedicated Web Worker: the core (`./core-worker.ts`) or a private instance
- * (`./private-worker.ts`). It is started as `umbradb run` starts one (`src/cli/run.ts`), through the same engine
- * (`startProcess`) and its resolver. [BR-1, BR-2, BR-3, BR-4, LM-1, LM-11; design §9.2]
- * - the build is the resolver's for the side the configuration describes (`src/runner/resolve.ts`: UmbraDB's backbone
- *   parts and core modules, and the configuration's user modules; a private process's backbone with its private
- *   intake);
- * - the configuration is the bundled module's data for this run (`umbradb:configuration`, `./configuration.ts`), with
- *   the development opt-in set on every `core` entry. The browser build always runs under it, as it runs PGlite only.
- *   Startup requires it to be plain data and validates it [BR-1, CF-1];
- * - the block source is the engine's: the node's for the core, the private intake's for a private process, whose
- *   transport to the core runs over the page's message network (`./net/`);
- * - the ledger worker is a Web Worker beside this one (`ledger-worker.js`, `src/ledger/worker/host.ts` unchanged), its
- *   node-store bridge a `SharedArrayBuffer` (the page is cross-origin isolated);
- * - the admin endpoints are calls on this worker's channel (`./admin.ts`), and so is the module API (`./runner/
- *   api.ts`) [BR-3].
+ * (`./private-worker.ts`). It is started through the engine (`startProcess`, `src/runner/process.ts`), as `umbradb run`
+ * and `startUmbraDB` start one, with the browser's ports. [BR-1, BR-2, BR-3, BR-4, LM-1, LM-11; design §8]
+ * - the configuration is `{ data }`: the bundled module's data for this run (`umbradb:configuration`,
+ *   `./configuration.ts`), with the development opt-in set on every `core` entry. The browser build always runs under
+ *   it, as it runs PGlite only. Startup requires it to be plain data and validates it [BR-1, CF-1]; the working
+ *   directory is `/`;
+ * - the build is the resolver's for the side the configuration describes, with the configuration's user modules as
+ *   objects (`src/runner/resolve.ts`);
+ * - the ports: the log (the page's), the ledger worker's entry (`ledger-worker.js`, a Web Worker beside this one, its
+ *   node-store bridge a `SharedArrayBuffer`: the page is cross-origin isolated); no admin listener;
+ * - the network: nothing listens. The core's private link runs over channels (`publicSide: { channels: true }`), each
+ *   one the page hands it for a private process (`./link.ts`); a private process connects over a new `MessageChannel`
+ *   the page makes at each (re)connection (`privateSide: { connect }`). The module API and admin are answered by the
+ *   process's fetch-style handlers (`api.fetch`, `admin.fetch`) and its subscriptions on a channel (`api.connect`),
+ *   all on this worker's message channel [BR-3, LM-3];
+ * - the contents hash, the page's reads and the backup read the database the process opened, while its module API is
+ *   open (`ProcessHandle.opened`).
  *
  * **S.** The page gives the core S when its database exists (an OPFS database it created before, or a restored
  * backup); for a new database it gives none, and the worker reads the node's finalized head at that moment — its hash,
@@ -22,7 +25,8 @@
  * as it records any S. [BR-2]
  *
  * A refusal of the configuration itself ends the process: the worker reports it (`refused`, with the finding's
- * details) and the process's log has every finding. Nothing more answers but the worker's own calls. [Q137 B]
+ * details) and the process's log has every finding; the admin endpoints keep answering from the process's last
+ * snapshot. [Q137 B, LM-5]
  *
  * **Backup and restore.** `backup` writes a backup of the process's database as `umbradb backup` does on PGlite, and
  * gives the page its text, which the page saves as a file. The backup is the manifest and `pg_dump` of
@@ -50,17 +54,16 @@ import { type PgliteDump, pgliteBackupText } from "../../src/backup/pglite-backu
 import { type RestoreSeams, restoreBackup } from "../../src/backup/restore.js";
 import { blobText } from "../../src/backup/text.js";
 import type { PlainObject } from "../../src/config/plain-data.js";
-import { resolve } from "../../src/runner/resolve.js";
-import type { CommittedHeight, Database } from "../../src/db/api.js";
+import type { CommittedHeight } from "../../src/db/api.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
+import { messagePortChannel, type PrivateLinkChannel } from "../../src/library/channels.js";
 import { NodeClient } from "../../src/node/client.js";
-import { type ProcessHandle, startProcess } from "../../src/runner/process.js";
-import { adminAnswer, messageAdmin } from "./admin.js";
+import { type OpenedProcess, type ProcessHandle, startProcess } from "../../src/runner/process.js";
+import { type NetworkRequest, resolve } from "../../src/runner/resolve.js";
 import { type BrowserConfiguration, type BrowserRun, withDevelopmentOptIn } from "./configuration.js";
 import { openConfiguredDatabase } from "./db/database.js";
-import { useNetwork } from "./net/network.js";
+import { type DemoLink, demoLink } from "./link.js";
 import { crossedError, type FromProcessWorker, jsonSafe, type StartRun, type ToProcessWorker } from "./protocol.js";
-import { openedProcess } from "./runner/process-registry.js";
 
 /** The worker's global scope, as this module uses it. */
 interface Scope {
@@ -74,6 +77,13 @@ const post = (message: FromProcessWorker): void => scope.postMessage(message);
 
 let handle: ProcessHandle | null = null;
 let starting: Promise<void> | null = null;
+/** This worker's ends of the link channels, by the page's link id (`./link.ts`). */
+const links = new Map<number, DemoLink>();
+/** The core's link channels the page handed over before its process started: accepted once it starts. */
+const early: PrivateLinkChannel[] = [];
+/** A private process's `connect()` calls waiting for the page's channel, by request. */
+const asked = new Map<number, (channel: PrivateLinkChannel) => void>();
+let nextAsk = 1;
 /**
  * The side of the process this worker started, which `backup` checks since a private database is not backed up without
  * the development opt-in; the core's until `start` says. [PP-12]
@@ -81,7 +91,6 @@ let starting: Promise<void> | null = null;
 let side: "public" | "private" = "public";
 /** Whether a restore runs in this worker now (one at a time). */
 let restoring = false;
-const subscriptions = new Map<string, () => void>();
 
 /** The committed height of a core's database: its cursor's; a restore's target is a core's (see above). [DB-2] */
 const coreCommittedHeight: CommittedHeight = async (read) => (await readCursor(read))?.height ?? null;
@@ -90,12 +99,15 @@ const coreCommittedHeight: CommittedHeight = async (read) => (await readCursor(r
 const RESTORE_SEAMS: RestoreSeams =
   __UMBRADB_BROWSER_CONTROL__ === "restore-skips-contents-hash" ? { skip: { contentsHash: true } } : {};
 
+/** The process's database and its `deterministic: false` tables while its module API is open, or null. */
+const openedProcess = (): OpenedProcess | null => handle?.opened() ?? null;
+
 /** A backup of this worker's process's database (see the module comment): its manifest's facts and the file's text. */
 async function backUp(): Promise<unknown> {
   const opened = openedProcess();
   if (opened === null) throw new Error("the process has not completed its startup, or has stopped: nothing to back up");
-  // The database the process opened and handed its module API: a PGlite database of the API (exclusiveJob checks it).
-  const db = opened.db as Database;
+  // The database the process opened and handed its module API: a PGlite database (exclusiveJob checks it).
+  const { db } = opened;
   const { manifest, text } = await pgliteBackupText(
     { db, optedOut: opened.optedOut, side, developmentOptIn: true },
     pgDump as unknown as PgliteDump,
@@ -181,9 +193,39 @@ async function finalizedHeight(node: string): Promise<number> {
   }
 }
 
+/**
+ * A private process's `connect`: asks the page for a new link channel and resolves with this worker's end. The page
+ * always answers; an end it gives after the process stopped is closed by the process. [LM-6, LM-11]
+ */
+function connectLink(): Promise<PrivateLinkChannel> {
+  const ask = nextAsk++;
+  return new Promise((resolve) => {
+    asked.set(ask, resolve);
+    post({ type: "link-connect", ask });
+  });
+}
+
+/** Takes the page's link messages (see `./protocol.ts`). */
+function onLink(message: Exclude<ToProcessWorker, { type: "start" } | { type: "call" }>): void {
+  if (message.type === "link-drop") {
+    links.get(message.link)?.end();
+    links.delete(message.link);
+    return;
+  }
+  const link = demoLink(message.port);
+  links.set(message.link, link);
+  if (message.type === "link-accept") {
+    if (handle === null) early.push(link.channel);
+    else handle.privateLink.accept(link.channel);
+    return;
+  }
+  const resolve = asked.get(message.ask);
+  asked.delete(message.ask);
+  resolve?.(link.channel);
+}
+
 /** Starts this worker's process (see the module comment). */
 async function startWorkerProcess(message: Extract<ToProcessWorker, { type: "start" }>): Promise<void> {
-  useNetwork(message.network);
   side = message.side;
   const chosen = configuration as BrowserConfiguration;
   const isCore = message.side === "public";
@@ -197,20 +239,25 @@ async function startWorkerProcess(message: Extract<ToProcessWorker, { type: "sta
   const { data, modules } = instance === null ? chosen.core(run) : instance.configure(run);
   const ledgerEntry = new URL("./ledger-worker.js", scope.location.href);
   // The engine's resolver takes the side from the configuration: a private instance's has instanceId and no node.
-  handle = startProcess({
+  // Nothing listens: the link over the page's channels, the module API and admin through the handle. [LM-3, LM-11]
+  const network: NetworkRequest = isCore
+    ? { privateLink: { publicSide: { channels: true } } }
+    : { privateLink: { privateSide: { connect: connectLink } } };
+  const started = startProcess({
     config: { data: withDevelopmentOptIn(data) },
     cwd: "/",
-    network: "configured",
+    network,
     userModules: { modules },
     log: (line) => post({ type: "log", line }),
-    adminListener: messageAdmin,
     ledgerWorkerEntry: ledgerEntry,
   });
-  handle.started.then(
-    (started) => post({ type: "started", api: started.api }),
+  handle = started;
+  for (const channel of early.splice(0)) started.privateLink.accept(channel);
+  started.started.then(
+    () => post({ type: "started" }),
     (error: unknown) => post({ type: "refused", error: crossedError(error) }),
   );
-  void handle.ended.then((end) => post({ type: "ended", end: jsonSafe(end) }));
+  void started.ended.then((end) => post({ type: "ended", end: jsonSafe(end) }));
 }
 
 /** Answers one call of the page (see `./protocol.ts`). */
@@ -220,9 +267,9 @@ async function answer(method: string, args: readonly unknown[]): Promise<unknown
     case "status":
       return jsonSafe(handle?.status() ?? null);
     case "admin": {
-      const answered = adminAnswer("GET", String(args[0]));
-      if (answered === null) throw new Error("no admin endpoint is served: the process's core revision is not known");
-      return jsonSafe(answered);
+      if (handle === null) throw new Error("no admin endpoint answers yet: the process has not started");
+      const answered = await handle.admin.fetch(new Request(new URL(String(args[0]), scope.location.href)));
+      return { status: answered.status, body: await answered.json() };
     }
     case "contents-hash": {
       const opened = openedProcess();
@@ -239,23 +286,17 @@ async function answer(method: string, args: readonly unknown[]): Promise<unknown
       return opened.db.read(async (read) => jsonSafe({ height: read.height, rows: await read.query(sql, params ?? []) }));
     }
     case "api": {
-      const api = openedProcess()?.api ?? null;
-      if (api === null) throw new Error("no module API answers: the process has no listen.api, or has not started it");
+      if (handle === null) throw new Error("no module API answers yet: the process has not started");
       const [request] = args as [{ method: string; path: string; query?: [string, string][]; body?: string }];
-      return jsonSafe(await api.answer(request));
+      const url = new URL(request.path, scope.location.href);
+      for (const [name, value] of request.query ?? []) url.searchParams.append(name, value);
+      const answered = await handle.api.fetch(new Request(url, { method: request.method, ...(request.body === undefined ? {} : { body: request.body }) }));
+      return { status: answered.status, headers: Object.fromEntries(answered.headers), body: await answered.text() };
     }
-    case "subscribe": {
-      const api = openedProcess()?.api ?? null;
-      if (api === null) throw new Error("no module API answers: the process has no listen.api, or has not started it");
-      const [id, name, subscriptionArgs] = args as [string, string, unknown];
-      if (subscriptions.has(id)) throw new Error(`subscription ${id} is open already`);
-      subscriptions.set(id, api.subscribe(name, subscriptionArgs, (value) => post({ type: "next", subscription: id, value: jsonSafe(value) })));
-      return null;
-    }
-    case "unsubscribe": {
-      const [id] = args as [string];
-      subscriptions.get(id)?.();
-      subscriptions.delete(id);
+    case "connect-api": {
+      if (handle === null) throw new Error("no module API answers yet: the process has not started");
+      const [port] = args as [MessagePort];
+      handle.api.connect(messagePortChannel(port));
       return null;
     }
     case "backup":
@@ -275,6 +316,10 @@ async function answer(method: string, args: readonly unknown[]): Promise<unknown
 
 scope.addEventListener("message", (event) => {
   const message = event.data;
+  if (message.type === "link-accept" || message.type === "link-channel" || message.type === "link-drop") {
+    onLink(message);
+    return;
+  }
   if (message.type === "start") {
     if (starting !== null || restoring) return;
     starting = startWorkerProcess(message).catch((error: unknown) => {

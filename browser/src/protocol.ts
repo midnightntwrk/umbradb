@@ -1,14 +1,20 @@
 /**
- * What the page and a process worker of the browser build say to each other. [BR-1, BR-3; design §9.2]
+ * What the page and a process worker of the browser build say to each other. [BR-1, BR-3, LM-11; design §8]
  *
  * The page starts the process (`start`), then calls it (`call`) for:
  * - its state (`status`);
- * - the admin endpoints (`admin`: `GET` of `/health/live`, `/health/ready`, `/status`, `/config`) [BR-3];
+ * - the admin endpoints (`admin`: `GET` of `/health/live`, `/health/ready`, `/status`, `/config`), answered by the
+ *   process's own fetch-style admin handler (`admin.fetch`) [BR-3];
  * - its database's contents hash [DT-3];
  * - a read of its database, one `REPEATABLE READ READ ONLY` read [DB-2];
- * - its module API (`api`, `subscribe`, `unsubscribe`);
+ * - its module API (`api`: one request, answered by the module API's fetch-style handler, `api.fetch`; `connect-api`:
+ *   a `MessagePort` the page made, on which the process serves the module API's subscriptions, `api.connect`);
  * - a backup of its database and, before the core's process starts, a restore into it (`backup`, `restore`) [BK-5];
  * - its stop [RN-13].
+ *
+ * **The private link** runs over `MessageChannel`s the page makes (`./link.ts`): a private worker asks for one at each
+ * (re)connection (`link-connect`); the page gives one end to the core worker (`link-accept`) and the other to the
+ * private worker (`link-channel`); a link the page drops is told to both (`link-drop`). [LM-6, LM-11]
  *
  * The worker sends its log lines, S once chosen, its startup's outcome and how processing ended. Every value crosses as
  * JSON-ready data ({@link jsonSafe}): heights and other integers beyond 2^53 as decimal text, bytes as `0x` hex.
@@ -17,17 +23,7 @@
 import type { BrowserRun } from "./configuration.js";
 
 /** A call the page makes of a process worker. */
-export type CallMethod =
-  | "status"
-  | "admin"
-  | "contents-hash"
-  | "read"
-  | "api"
-  | "subscribe"
-  | "unsubscribe"
-  | "backup"
-  | "restore"
-  | "stop";
+export type CallMethod = "status" | "admin" | "contents-hash" | "read" | "api" | "connect-api" | "backup" | "restore" | "stop";
 
 /** The run the page starts a process with: S is null for a new database of the core, chosen by the worker. [BR-2] */
 export type StartRun = Omit<BrowserRun, "start"> & { readonly start: number | null };
@@ -40,10 +36,15 @@ export type ToProcessWorker =
       /** A private process's instance id; null for the core. */
       readonly instance: string | null;
       readonly run: StartRun;
-      /** The worker's port on the page's message network (`./net/network.ts`). */
-      readonly network: MessagePort;
     }
-  | { readonly type: "call"; readonly id: number; readonly method: CallMethod; readonly args: readonly unknown[] };
+  /** A call; a `MessagePort` among its arguments is transferred (`connect-api`'s). */
+  | { readonly type: "call"; readonly id: number; readonly method: CallMethod; readonly args: readonly unknown[] }
+  /** To the core worker: one end of link channel `link`, for its process's `privateLink.accept`. */
+  | { readonly type: "link-accept"; readonly link: number; readonly port: MessagePort }
+  /** To a private worker: the other end of link channel `link`, the answer to its `link-connect` `ask`. */
+  | { readonly type: "link-channel"; readonly ask: number; readonly link: number; readonly port: MessagePort }
+  /** To both workers of link channel `link`: the page dropped it. */
+  | { readonly type: "link-drop"; readonly link: number };
 
 /** An error as it crosses: its name, message and, for an `UmbraError`, its code and details. */
 export interface CrossedError {
@@ -58,13 +59,14 @@ export type FromProcessWorker =
   | { readonly type: "log"; readonly line: string }
   /** S, and the private instances the configuration has (the core's only). */
   | { readonly type: "chosen"; readonly start: number; readonly instances: readonly string[] }
-  /** Startup completed; `api` is where the module API answers (the worker's channel), null without `listen.api`. */
-  | { readonly type: "started"; readonly api: { readonly host: string; readonly port: number } | null }
+  /** Startup completed. */
+  | { readonly type: "started" }
   | { readonly type: "refused"; readonly error: CrossedError }
   | { readonly type: "ended"; readonly end: unknown }
   | { readonly type: "result"; readonly id: number; readonly ok: true; readonly value: unknown }
   | { readonly type: "result"; readonly id: number; readonly ok: false; readonly error: CrossedError }
-  | { readonly type: "next"; readonly subscription: string; readonly value: unknown };
+  /** A private worker's process asks for a new link channel (its `connect`), `ask` naming the request. */
+  | { readonly type: "link-connect"; readonly ask: number };
 
 const HEX = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, "0"));
 

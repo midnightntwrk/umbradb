@@ -3,9 +3,14 @@
  * product and testing modules. It is a development setup. [BR-1, BR-2, BR-3, BR-4, BK-5; design §9.2]
  *
  * **What it starts.** The core worker (`core-worker.js`), then, once the core has chosen S, one private worker
- * (`private-worker.js`) for each private instance the bundled configuration has. Every worker joins the page's message
- * network (`./net/broker.ts`), over which the private instances reach the core's transport. Each worker owns its
- * database, through its Web Lock. [BR-1]
+ * (`private-worker.js`) for each private instance the bundled configuration has. Each worker owns its database,
+ * through its Web Lock. [BR-1]
+ *
+ * **The private link.** When a private worker's process connects to the core (at its start, and again after a lost
+ * connection), it asks the page for a channel: the page makes a new `MessageChannel`, gives one end to the core worker
+ * and the other to the private worker, and records it (`links`); the link's messages then go from worker to worker.
+ * `dropLink(instance)` drops an instance's channel, as a lost connection would end it: both workers are told, and the
+ * private process connects again over a new channel (`./link.ts`). [LM-6, LM-11, L58]
  *
  * **Its address's parameters.**
  * - `node`: the node's WebSocket URL, which must allow the page's origin [BR-3].
@@ -18,7 +23,8 @@
  * for is new, and the core worker chooses S as the node's finalized head at that moment. [BR-2]
  *
  * **What it reaches:** its own origin, for its files; the node, through the core worker's WebSocket; and a backup file
- * the user picks. The admin endpoints and the module API are calls on the workers' channels. [BR-3]
+ * the user picks. The admin endpoints and the module API are calls on the workers' channels, and the module API's
+ * subscriptions run on a `MessageChannel` of their own (`openApi`). [BR-3, LM-11]
  *
  * **Backup and restore.** "Back up" asks the core worker for a backup of its database and saves it as a file
  * (`umbradb-<storage>-<height>.backup`). The backup is the one `umbradb backup` takes on PGlite: the manifest and
@@ -31,22 +37,41 @@
  * height + 1. [BK-3, BK-4, BK-5]
  *
  * **`window.umbradb`** is the page's state and its calls, for whoever drives it (the tests, a console): `ready`
- * (resolves once every worker is started), `start` (S), `core` and `instances` (each with `call`, its `log` and its
- * `events`), `backup()` and `restore(file)` (the buttons' work), what each did (`backups`, `restores`), and `errors`
- * (the page's own).
+ * (resolves once every worker is started), `start` (S), `core` and `instances` (each with `call`, `openApi`, its `log`
+ * and its `events`), `backup()` and `restore(file)` (the buttons' work), what each did (`backups`, `restores`), the
+ * link channels made (`links`) and `dropLink(instance)`, and `errors` (the page's own).
  */
 
-import { NetworkBroker } from "./net/broker.js";
 import type { CallMethod, CrossedError, FromProcessWorker, StartRun, ToProcessWorker } from "./protocol.js";
+
+/** A channel of the module API's subscriptions (`openApi`): the page's end, every message kept parsed. [LM-11] */
+export interface ApiChannel {
+  /** Sends `message` as JSON text (a text as it is). */
+  send(message: unknown): void;
+  /** Every message the process sent, parsed, in order. */
+  readonly received: unknown[];
+  close(): void;
+}
+
+/** A link channel the page made (see the module comment). */
+export interface LinkRecord {
+  readonly link: number;
+  /** The private instance that asked for it. */
+  readonly instance: string;
+  /** Whether the page dropped it. */
+  dropped: boolean;
+}
 
 /** A process worker as the page drives it. */
 export interface ProcessView {
   readonly name: string;
   /** Calls the process (`./protocol.ts`); rejects with the worker's error (its name, message, code and details). */
   call(method: CallMethod, ...args: unknown[]): Promise<unknown>;
+  /** Opens a channel on which the process serves the module API's subscriptions (`api.connect`). [LM-11] */
+  openApi(): Promise<ApiChannel>;
   /** Its log lines, in order. */
   readonly log: string[];
-  /** What it told the page besides log lines and results: `chosen`, `started`, `refused`, `ended`, `next`. */
+  /** What it told the page besides log lines, results and link requests: `chosen`, `started`, `refused`, `ended`. */
   readonly events: FromProcessWorker[];
 }
 
@@ -91,6 +116,10 @@ export interface PageState {
   restore(file: Blob, name?: string): Promise<RestoreRecord>;
   readonly backups: SavedBackup[];
   readonly restores: RestoreRecord[];
+  /** Every link channel the page made, in order. [L58] */
+  readonly links: LinkRecord[];
+  /** Drops `instance`'s link channel now open, as a lost connection (see the module comment); its id, or null. */
+  dropLink(instance: string): number | null;
   readonly errors: string[];
 }
 
@@ -100,8 +129,9 @@ const node = params.node ?? "";
 const startKey = `umbradb-start:${storage}`;
 /** Whether the page waits for a backup to restore before it starts the core (see the module comment). */
 const restoreMode = params.restore !== undefined && storage !== "memory";
-const broker = new NetworkBroker();
 const errors: string[] = [];
+const links: LinkRecord[] = [];
+let nextLink = 1;
 const backups: SavedBackup[] = [];
 const restores: RestoreRecord[] = [];
 
@@ -132,6 +162,10 @@ function makeWorker(file: string, name: string): WorkerView {
       appendLog(name, message.line);
       return;
     }
+    if (message.type === "link-connect") {
+      makeLink(name, worker, message.ask);
+      return;
+    }
     if (message.type === "result") {
       const call = waiting.get(message.id);
       waiting.delete(message.id);
@@ -151,17 +185,54 @@ function makeWorker(file: string, name: string): WorkerView {
     log,
     events,
     begin(side, instance, run) {
-      const network = broker.join();
-      worker.postMessage({ type: "start", side, instance, run, network } satisfies ToProcessWorker, [network]);
+      worker.postMessage({ type: "start", side, instance, run } satisfies ToProcessWorker);
     },
-    call(method, ...args) {
-      const id = next++;
-      return new Promise((resolve, reject) => {
-        waiting.set(id, { resolve, reject });
-        worker.postMessage({ type: "call", id, method, args } satisfies ToProcessWorker);
-      });
+    call,
+    async openApi() {
+      const channel = new MessageChannel();
+      const received: unknown[] = [];
+      channel.port1.onmessage = (event: MessageEvent<unknown>) =>
+        received.push(typeof event.data === "string" ? JSON.parse(event.data) : event.data);
+      await call("connect-api", channel.port2);
+      return {
+        send: (message: unknown) => channel.port1.postMessage(typeof message === "string" ? message : JSON.stringify(message)),
+        received,
+        close: () => channel.port1.close(),
+      };
     },
   };
+
+  function call(method: CallMethod, ...args: unknown[]): Promise<unknown> {
+    const id = next++;
+    // A port among the arguments goes to the worker (`connect-api`'s).
+    const transfer = args.filter((arg): arg is MessagePort => arg instanceof MessagePort);
+    return new Promise((resolve, reject) => {
+      waiting.set(id, { resolve, reject });
+      worker.postMessage({ type: "call", id, method, args } satisfies ToProcessWorker, transfer);
+    });
+  }
+}
+
+/**
+ * A new link channel for private instance `instance` (its worker `from`), the answer to its request `ask`: one end to
+ * the core worker, the other to it (see the module comment). [LM-6, LM-11]
+ */
+function makeLink(instance: string, from: Worker, ask: number): void {
+  const link = nextLink++;
+  const channel = new MessageChannel();
+  links.push({ link, instance, dropped: false });
+  core.worker.postMessage({ type: "link-accept", link, port: channel.port1 } satisfies ToProcessWorker, [channel.port1]);
+  from.postMessage({ type: "link-channel", ask, link, port: channel.port2 } satisfies ToProcessWorker, [channel.port2]);
+}
+
+/** Drops `instance`'s link channel now open (see the module comment). [L58] */
+function dropLink(instance: string): number | null {
+  const open = links.findLast((record) => record.instance === instance && !record.dropped);
+  const view = instances[instance] as WorkerView | undefined;
+  if (open === undefined || view === undefined) return null;
+  open.dropped = true;
+  for (const worker of [core.worker, view.worker]) worker.postMessage({ type: "link-drop", link: open.link } satisfies ToProcessWorker);
+  return open.link;
 }
 
 /** Resolves with the core's `chosen` event. */
@@ -188,7 +259,7 @@ function startWorker(file: string, name: string, side: "public" | "private", ins
 
 const run: StartRun = { node, storage, start: keptStart(), params };
 const core = makeWorker("./core-worker.js", "core");
-const instances: Record<string, ProcessView> = {};
+const instances: Record<string, WorkerView> = {};
 /** Starts the core's process with `started` (at once, or once a backup is restored). */
 let beginCore: (started: StartRun) => void = () => undefined;
 const coreBegun = new Promise<void>((resolve) => {
@@ -262,6 +333,8 @@ const state: PageState = {
   restore: (file, name) => restoreFrom(file, name ?? (file as { name?: string }).name ?? "backup"),
   backups,
   restores,
+  links,
+  dropLink,
   errors,
 };
 state.ready.catch((error: unknown) => errors.push(String(error)));

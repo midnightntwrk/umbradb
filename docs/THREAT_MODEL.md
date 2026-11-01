@@ -226,7 +226,7 @@ These checks do not make hostile SQL safe. Restore authority, origin and encrypt
 
 The browser build runs processes in dedicated workers with their own PGlite databases; transport, module API and
 admin calls use page-controlled message channels
-(`browser/src/process-worker.ts:2`, `browser/src/process-worker.ts:14`; BR-1, BR-3).
+(`browser/src/process-worker.ts:2`, `browser/src/process-worker.ts:13`; BR-1, BR-3).
 Web Locks prevent cooperating tabs or workers from opening the same OPFS database
 (`browser/src/db/web-lock.ts:83`).
 
@@ -382,10 +382,10 @@ The current defaults are:
 Transport `tls` applies to that transport, not the admin listener, module API or database
 (`src/private/core-transport.ts:266`, `src/admin/serve.ts:82`,
 `src/runner/api-socket.ts:334`, `src/db/postgres.ts:250`).
-Browser transport uses page message channels and refuses the TLS option
-(`browser/src/net/https.ts:9`).
+Browser transport runs over page `MessageChannel`s, where a transport `tls` setting has no effect
+(`browser/src/process-worker.ts:243`).
 Browser admin monitoring shares its process worker and can stall with it
-(`browser/src/process-worker.ts:14`, `browser/src/admin.ts:42`).
+(`browser/src/process-worker.ts:16`, `browser/src/process-worker.ts:271`).
 
 `database` and a private process's `publicDatabase` use parts:
 `{ kind: "postgres", host, port, user, password, name, ssl }`,
@@ -435,7 +435,7 @@ No independent consensus verification is claimed (`src/node/decode.ts:105`).
 The default browser configuration omits `core-ledger-state`, so it performs no ledger root replay check
 (`browser/src/config.ts:6`).
 PGlite and browser operation are development facilities, not a production privacy boundary
-(`src/db/durability-probe.ts:11`, `browser/src/process-worker.ts:8`).
+(`src/db/durability-probe.ts:11`, `browser/src/process-worker.ts:6`).
 
 Resource exhaustion, node unavailability and lockstep peer failures remain availability risks
 (`docs/issues/00047-service-resource-bounds.md:8`, `src/private/lockstep.ts:144`).

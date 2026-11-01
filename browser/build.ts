@@ -11,30 +11,33 @@
  * Run it as `node browser/build.ts [--configuration <module>] [--out <dir>]`. A test builds its own page with its own
  * configuration through {@link buildBrowser}. [BR-1, BR-2, BR-3, BR-4; design §9.2]
  *
- * **The same code as Node.js.** The workers bundle UmbraDB's sources unchanged — the runner, the modules, the database
- * API on PGlite, the determinism code, the node client, the ledger worker's host and entry, the process transport —
- * and replace only what a browser does not have, each in one place:
+ * **The same code as Node.js.** The workers bundle UmbraDB's sources unchanged — the engine, the modules, the database
+ * API on PGlite, the determinism code, the node client, the ledger worker's host and entry, the private link's session
+ * logic and its channels, the module API's session logic — and replace only what a browser does not have, each in one
+ * place [LM-11; design §8]:
  * - Node.js's built-in modules, for the files of `src/` that import them: `node:crypto` (SHA-256, synchronous and
  *   incremental: `./src/shims/crypto.ts`), `node:async_hooks` (no asynchronous context: PGlite's nested-call guard is
  *   off, `./src/shims/async-hooks.ts`), `node:worker_threads` (Web Workers: `./src/shims/worker-threads-*.ts`),
- *   `node:fs` (no file is read: `./src/shims/fs.ts`), `node:http`, `node:https` and `ws` for the process transport
- *   (the page's message network: `./src/net/`), `node:path` (POSIX paths from `/`); `Buffer`
+ *   `node:fs` (no file is read: `./src/shims/fs.ts`), `node:path` (POSIX paths from `/`); `Buffer`
  *   (`./src/shims/buffer.ts`), given to the files of `src/` that name it; `process.hrtime.bigint` (the heartbeat's
  *   clock: `performance.now()`, `./src/shims/prelude.ts`). Any other built-in module a file of UmbraDB's imports fails
- *   the build, naming it.
+ *   the build, naming it — `node:http`, `node:https` and `ws` among them, which only the socket carriers import.
  * - Whole modules ({@link SUBSTITUTES}): the database's opening (PGlite in memory or OPFS, never PostgreSQL), the
  *   writer lock (Web Locks), the configuration loader (a bundled configuration, no file), the node client's socket (the
- *   browser's `WebSocket`), the module API's listener (the worker's message channel) and the ledger packages' identity
- *   check (`./src/ledger/identity.ts`: `ledgerSources` refused as in Node.js, no file read; see below).
+ *   browser's `WebSocket`) and the ledger packages' identity check (`./src/ledger/identity.ts`: `ledgerSources`
+ *   refused as in Node.js, no file read; see below).
  * - The vendored ledger packages' Node.js entries (`vendor/ledger/<version>/pkg/*_fs.js`, which read their `.wasm`
  *   synchronously): the same entry, its WebAssembly read beside the ledger worker (a synchronous request, as Node.js's
  *   `readFileSync`), checked against the package's `SHA256SUMS` (`package-hash-mismatch` otherwise) and instantiated
  *   synchronously (`./src/ledger/instantiate.ts`).
  * - PGlite's own Node.js paths (guarded at run time by PGlite) are left as they are, never reached; its Node.js file
  *   system (`fs/nodefs.js`), imported statically there, is a stub that refuses.
- * - Modules the browser does not carry ({@link UNAVAILABLE}: `umbradb backup`'s file writer) are bundled as stubs whose
- *   exports fail when used. The page's backup and restore run the same code without it: the PGlite backup's text
- *   (`src/backup/pglite-backup.ts`) and `restoreBackup` over the picked file's text (`src/backup/text.ts`). [BK-5]
+ * - Modules the browser does not carry ({@link UNAVAILABLE}: `umbradb backup`'s file writer and the socket carriers)
+ *   are bundled as stubs whose exports fail when used. The page's backup and restore run the same code without the
+ *   writer: the PGlite backup's text (`src/backup/pglite-backup.ts`) and `restoreBackup` over the picked file's text
+ *   (`src/backup/text.ts`) [BK-5]. Its processes listen nowhere: the private link runs over the page's
+ *   `MessageChannel`s and the module API and admin answer through the process's fetch-style handlers, so the socket
+ *   carriers' stubs are never called. [LM-11; design §8]
  *
  * **The vendored packages' bytes are checked when the build reads them.** Before anything is bundled, each version's
  * `SHA256SUMS` is checked against the SHA-256 the build records (`LEDGER_RELEASES`). Then every package file the
@@ -109,17 +112,26 @@ export const SUBSTITUTES: Readonly<Record<string, string>> = Object.freeze({
   "src/db/postgres.ts": "browser/src/db/postgres.ts",
   "src/ledger/identity.ts": "browser/src/ledger/identity.ts",
   "src/node/ws-socket.ts": "browser/src/node/web-socket.ts",
-  "src/runner/api-server.ts": "browser/src/runner/api.ts",
 });
 
 /**
  * UmbraDB's modules the browser does not carry, by their path in the repository: each is bundled as a module of the
- * same value exports, every one of which fails when used ({@link unavailableModule}). `src/backup/backup.ts`
- * (`umbradb backup`) runs `pg_dump` and writes files; the page's own backup and restore use the parts that do neither
- * (see the module comment), so `restoreBackup`'s import of its `firstLine` is never called there. A path no file of the
- * build imports is never reached. [BK-5]
+ * same value exports, every one of which fails when used ({@link unavailableModule}). A path no file of the build
+ * imports is never reached.
+ * - `src/backup/backup.ts` (`umbradb backup`) runs `pg_dump` and writes files; the page's own backup and restore use
+ *   the parts that do neither (see the module comment), so `restoreBackup`'s import of its `firstLine` is never called
+ *   there. [BK-5]
+ * - The socket carriers — the private link's server and client (`src/private/core-socket.ts`,
+ *   `src/private/private-socket.ts`) and the module API's Node.js handlers and listener (`src/runner/api-socket.ts`) —
+ *   import `node:http`, `node:https` and `ws`; the engine and the private intake import them, and a page's process,
+ *   which listens nowhere and links over channels, never calls them. [LM-11; design §8]
  */
-export const UNAVAILABLE: readonly string[] = Object.freeze(["src/backup/backup.ts"]);
+export const UNAVAILABLE: readonly string[] = Object.freeze([
+  "src/backup/backup.ts",
+  "src/private/core-socket.ts",
+  "src/private/private-socket.ts",
+  "src/runner/api-socket.ts",
+]);
 
 /** Node.js's built-in modules UmbraDB's files import, and what the browser gives them instead. */
 const BUILTINS: Readonly<Record<string, string>> = Object.freeze({
@@ -127,9 +139,6 @@ const BUILTINS: Readonly<Record<string, string>> = Object.freeze({
   "node:path": "browser/src/shims/path.ts",
   "node:async_hooks": "browser/src/shims/async-hooks.ts",
   "node:fs": "browser/src/shims/fs.ts",
-  "node:http": "browser/src/net/http.ts",
-  "node:https": "browser/src/net/https.ts",
-  ws: "browser/src/net/ws.ts",
 });
 
 /** PGlite's files the page needs beside its bundles (PGlite fetches them relative to the bundle). */
@@ -286,8 +295,11 @@ function browserPlugin(options: {
         if (shim !== undefined) return { path: join(REPOSITORY, shim) };
         return { errors: [{ text: `${args.path}, imported by ${repositoryPath(args.importer)}, has no browser replacement (browser/build.ts)` }] };
       });
+      // `ws` is Node.js's like a built-in module: only the socket carriers import it, which the build stubs.
       build.onResolve({ filter: /^ws$/ }, (args) =>
-        args.importer.includes("/node_modules/") ? { path: "ws", external: true } : { path: join(REPOSITORY, BUILTINS.ws as string) },
+        args.importer.includes("/node_modules/")
+          ? { path: "ws", external: true }
+          : { errors: [{ text: `ws, imported by ${repositoryPath(args.importer)}, has no browser replacement (browser/build.ts)` }] },
       );
       build.onResolve({ filter: /^\.\.?\// }, (args) => {
         if (args.importer.includes("/node_modules/") || args.namespace !== "file") return undefined;

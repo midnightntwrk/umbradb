@@ -15,11 +15,14 @@ import {
   syncedProblems,
 } from "./browser-checks.js";
 import {
+  apiChannel,
   BROWSER_TEST_TIMEOUT_MS,
   backupThrough,
   call,
   contentsHashOf,
   eventWhen,
+  linksOf,
+  logOf,
   type PageBench,
   pageBench,
   pageUrl,
@@ -35,6 +38,8 @@ import {
   browserChain,
   continueSession,
   headSession,
+  heldBefore,
+  heldClock,
   KEPT_OPEN,
   otherGenesisSession,
   restoreSession,
@@ -50,6 +55,10 @@ import {
  * `/status`, the contents hash, reads of the workers' databases; the page's backup and restore as the user makes them).
  * A machine without Chrome fails these tests, naming `UMBRADB_CHROME`; none is skipped. The committed negative controls
  * are `./browser.negative-control.test.ts`. [BR-1 to BR-4, BK-5, A129–A132]
+ *
+ * The page runs each process on the engine (`browser/src/process-worker.ts`): nothing listens; the private link runs
+ * over a `MessageChannel` the page makes for each (re)connection, the module API and admin through the process's
+ * fetch-style handlers, the subscriptions on a channel of their own. [LM-11, L58]
  */
 
 const chain = browserChain();
@@ -67,9 +76,9 @@ async function chrome(): Promise<ChromeBrowser> {
   return browser;
 }
 
-/** A tape node serving `records`, closed after the file. */
-async function tapeNode(records: Parameters<typeof TapeNode.start>[0]["records"]): Promise<TapeNode> {
-  const node = await TapeNode.start({ records });
+/** A tape node serving `records` (on `clock`, a hold's), closed after the file. */
+async function tapeNode(records: Parameters<typeof TapeNode.start>[0]["records"], clock?: ReturnType<typeof heldClock>["clock"]): Promise<TapeNode> {
+  const node = await TapeNode.start({ records, ...(clock === undefined ? {} : { clock }) });
   nodes.push(node);
   return node;
 }
@@ -99,7 +108,7 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
     async () => {
       const node = await tapeNode([...headSession(chain, 3n), ...syncSession(chain, 3n, 9n)]);
       const browser = await chrome();
-      const tab = await browser.open(pageUrl(bench.server.origin, params({ node: node.url, private: "1", lockstep: "1", api: "1" })));
+      const tab = await browser.open(pageUrl(bench.server.origin, params({ node: node.url, private: "1", lockstep: "1" })));
       const core = await statusWhen(tab, "core", (s) => s.cursor === "9" && s.state === "following", "following at 9");
       const p1 = await statusWhen(tab, "p1", (s) => s.cursor === "9" && s.state === "following", "following at 9");
       expect([...syncedProblems("the core", core, 9n), ...syncedProblems("p1", p1, 9n)]).toEqual([]);
@@ -135,22 +144,34 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
         const version = await readOf(tab, who, "SELECT version() AS v");
         expect(String(version.rows[0]?.v)).toMatch(/^PostgreSQL 18\.\d+ .*emscripten/i);
       }
-      // The lockstep instance read each public block through the core's transport and stored its hash. [PP-4, PP-6]
+      // The lockstep instance read each public block through the core's link and stored its hash. [PP-4, PP-6]
       expect(p1.public).toMatchObject({ cursor: "9", lockstep: true });
       const shadow = await readOf(tab, "p1", "SELECT height, public_hash FROM shadow.rows ORDER BY height");
       expect(shadow.rows).toEqual(chain.blocks.slice(3, 10).map((block) => ({ height: `${block.height}`, public_hash: block.hex })));
 
-      // The module API answers on the core worker's channel (`listen.api`), which startup reports as its address.
-      expect((await eventWhen(tab, "core", "started")).api).toEqual({ host: "message-channel", port: 0 });
-      expect((await eventWhen(tab, "p1", "started")).api).toBeNull();
-      // The handler's answer, written as the module
-      // API writes JSON (a bigint as its decimal text), the jsonb integers beyond 2^53 kept exactly.
-      const answer = await call<{ status: number; body: string }>(tab, "core", "api", { method: "GET", path: "/probe/5" });
+      // Nothing listens: the link over the page's channels (one, made when p1 connected), the module API and admin
+      // through the handlers. [LM-3, LM-11]
+      for (const [who, link] of [["core", "channels"], ["p1", "connect"]] as const) {
+        const config = (await call<{ body: { network: unknown } }>(tab, who, "admin", "/config"))?.body;
+        expect(config?.network, who).toEqual({ api: "mounted", admin: "mounted", privateLink: link });
+      }
+      expect(await logOf(tab, "core")).toContain("private link: accepting channels");
+      expect(await linksOf(tab)).toEqual([{ link: 1, instance: "p1", dropped: false }]);
+      // The module API's fetch-style handler: the handler's answer written as the module API writes JSON (a bigint as
+      // its decimal text), the jsonb integers beyond 2^53 kept exactly, with the core's headers. [RN-16]
+      const answer = await call<{ status: number; headers: Record<string, string>; body: string }>(tab, "core", "api", { method: "GET", path: "/probe/5" });
       expect(answer?.status).toBe(200);
       expect(answer?.body).toContain(`"big":"${9_007_199_254_740_993n + 5_000n}"`);
       expect(answer?.body).toContain('"readHeight":"9"');
+      expect(answer?.headers["x-umbra-version"]).toMatch(/^\d+\.\d+\.\d+/);
+      expect(answer?.headers["x-umbra-config-hash"]).toMatch(/^0x[0-9a-f]{64}$/);
       expect((await call<{ status: number }>(tab, "core", "api", { method: "GET", path: "/probe/2" }))?.status).toBe(404);
-      await expect(call(tab, "core", "subscribe", "s1", "nothing")).rejects.toThrow(/no subscription is named nothing/);
+      // The subscriptions, on a channel of their own (api.connect).
+      const subscriptions = await apiChannel(tab, "core", "a129");
+      await subscriptions.send({ type: "subscribe", id: "s1", name: "nothing" });
+      expect(await subscriptions.until(1, "the answer to an unknown subscription")).toEqual([
+        { type: "error", id: "s1", error: { code: "not-found", message: "no subscription is named nothing" } },
+      ]);
 
       // The page reached nothing but its own files and the node. [A131 CI, BR-3]
       expect(networkProblems(tab.requests, { origin: bench.server.origin, node: node.url, files: bench.build.files })).toEqual([]);
@@ -200,6 +221,68 @@ describe("the browser build in headless Chrome (task 16.1)", () => {
         ...resumeProblems("the core", { cursor: core.cursor, hash: before.core.hash }, { status: coreAfter, ...after.core }),
         ...resumeProblems("p1", { cursor: p1.cursor, hash: before.p1.hash }, { status: p1After, ...after.p1 }),
       ]).toEqual([]);
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "L58 [CI][DIFF] the demo on the engine: the lockstep private worker connects again over a new MessageChannel and " +
+      "goes on in lockstep; the module API's subscriptions run through api.connect; the page reaches its files and the node only",
+    async () => {
+      // The core is held before height 6 (its first node call of 6 unanswered until the hold is released): with p1
+      // listed as lockstep, both wait at 5 while the page drops p1's link and p1 connects again; then 6 to 9 go over
+      // the new channel. [LM-11, PP-6]
+      const hold = heldClock();
+      const node = await tapeNode([...headSession(chain, 3n), ...heldBefore(syncSession(chain, 3n, 9n), 6n)], hold.clock);
+      const browser = await chrome();
+      const tab = await browser.open(pageUrl(bench.server.origin, params({ node: node.url, private: "1", lockstep: "1" })));
+      await statusWhen(tab, "core", (s) => s.cursor === "5", "the core at 5, held before 6");
+      await statusWhen(tab, "p1", (s) => s.cursor === "5", "p1 at 5");
+      const subscriptions = await apiChannel(tab, "core", "l58");
+      await subscriptions.send({ type: "subscribe", id: "h", name: "probe-heights" });
+      expect(await subscriptions.until(1, "the subscription's acknowledgement")).toEqual([{ type: "subscribed", id: "h" }]);
+      expect(await linksOf(tab)).toEqual([{ link: 1, instance: "p1", dropped: false }]);
+
+      // The page drops the link, as a lost connection: p1 asks for a new channel, and the core takes it.
+      expect(await tab.evaluate<number | null>('window.umbradb.dropLink("p1")')).toBe(1);
+      const reconnected = async (): Promise<boolean> => {
+        const links = await linksOf(tab);
+        const core = await statusOf(tab, "core");
+        const instance = (core as { privateInstances?: { id: string; connected: boolean }[] } | null)?.privateInstances?.find((one) => one.id === "p1");
+        return links.length === 2 && instance?.connected === true;
+      };
+      const deadline = Date.now() + 120_000;
+      while (!(await reconnected())) {
+        if (Date.now() > deadline) throw new Error(`p1 did not connect again: links ${JSON.stringify(await linksOf(tab))}, core ${JSON.stringify(await statusOf(tab, "core"))}`);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      expect(await linksOf(tab)).toEqual([
+        { link: 1, instance: "p1", dropped: true },
+        { link: 2, instance: "p1", dropped: false },
+      ]);
+      // Still held: nothing has moved past 5.
+      expect([(await statusOf(tab, "core"))?.cursor, (await statusOf(tab, "p1"))?.cursor]).toEqual(["5", "5"]);
+
+      hold.release();
+      const core = await statusWhen(tab, "core", (s) => s.cursor === "9" && s.state === "following", "following at 9");
+      const p1 = await statusWhen(tab, "p1", (s) => s.cursor === "9" && s.state === "following", "following at 9");
+      expect([...syncedProblems("the core", core, 9n), ...syncedProblems("p1", p1, 9n)]).toEqual([]);
+      expect(p1.public).toMatchObject({ cursor: "9", lockstep: true });
+      // p1 read 6 to 9 through the core over the new channel, each public block's hash as the core committed it.
+      const shadow = await readOf(tab, "p1", "SELECT height, public_hash FROM shadow.rows ORDER BY height");
+      expect(shadow.rows).toEqual(chain.blocks.slice(3, 10).map((block) => ({ height: `${block.height}`, public_hash: block.hex })));
+      expect(await linksOf(tab)).toHaveLength(2);
+      // The subscription got each height the core committed after it opened, in order, with its hash.
+      const values = await subscriptions.until(5, "the values of 6 to 9");
+      expect(values.slice(1)).toEqual(
+        chain.blocks.slice(6, 10).map((block) => ({ type: "next", id: "h", value: { height: `${block.height}`, hash: block.hex } })),
+      );
+      // The same contents hash as Node.js on the same tape and configuration. [A132]
+      const chosen = await eventWhen(tab, "core", "chosen");
+      const inChrome = await contentsHashOf(tab, "core");
+      const inNode = await nodeRun([...headSession(chain, 3n), ...syncSession(chain, 3n, 9n)], params({}), 9n);
+      expect(sameHashProblems({ start: chosen.start, status: core, ...inChrome }, inNode)).toEqual([]);
+      expect(networkProblems(tab.requests, { origin: bench.server.origin, node: node.url, files: bench.build.files })).toEqual([]);
     },
     BROWSER_TEST_TIMEOUT_MS,
   );

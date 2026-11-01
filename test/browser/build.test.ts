@@ -21,6 +21,11 @@ import { TEST_CONFIGURATION } from "./browser-harness.js";
  * gives what `src/` imports from the module it replaces, that a built-in module of Node.js no replacement covers fails
  * the build by name, the rewrite of the vendored ledger packages' Node.js entries, and the check of every vendored
  * package file the build bundles against its recorded SHA-256. [design §9.2]
+ *
+ * The socket carriers (the private link's server and client, the module API's Node.js handlers and listener) are in
+ * the bundles only as their stubs, the private link's and the module API's session logic bundled whole; `node:http`,
+ * `node:https` and `ws` have no browser replacement, so a build that carried a carrier itself would fail, naming it
+ * (the negative control below). [LM-11, L58; design §8]
  */
 
 const directories: string[] = [];
@@ -134,6 +139,14 @@ describe("the browser build (task 16.1)", () => {
       "src/ledger/load.ts",
       "src/private/core-transport.ts",
       "src/private/private-transport.ts",
+      // The private link over channels and the module API's session logic: the demo's carriers. [LM-11]
+      "src/private/core-channels.ts",
+      "src/private/private-channels.ts",
+      "src/library/channels.ts",
+      "src/runner/api-session.ts",
+      "src/runner/api-server.ts",
+      "src/runner/api-answers.ts",
+      "browser/src/link.ts",
       "src/admin/process-admin.ts",
       "src/cli/build-modules.ts",
       // The page's backup and restore: the same backup text and restore as the commands', and pglite-tools. [BK-5]
@@ -150,12 +163,34 @@ describe("the browser build (task 16.1)", () => {
       expect(testBuild.inputs, replaced).not.toContain(replaced);
       expect(testBuild.inputs).toContain(replacement);
     }
-    for (const left of ["src/runner/api-server.ts", "src/admin/serve.ts", "src/admin/worker.ts", "src/config/load.ts"]) {
+    for (const left of ["src/admin/serve.ts", "src/admin/worker.ts", "src/config/load.ts", "src/library/start-umbradb.ts"]) {
       expect(testBuild.inputs, left).not.toContain(left);
     }
+    // The socket carriers are their stubs only; no shim of a socket is left. [LM-11, L58]
+    for (const carrier of ["src/private/core-socket.ts", "src/private/private-socket.ts", "src/runner/api-socket.ts"]) {
+      expect(testBuild.inputs, carrier).not.toContain(carrier);
+      expect(testBuild.inputs, carrier).toContain(`umbradb-unavailable:${join(REPOSITORY, carrier)}`);
+    }
+    expect(testBuild.inputs.filter((input) => input.startsWith("browser/src/net/") || input.startsWith("browser/src/runner/"))).toEqual([]);
     expect(testBuild.inputs.some((input) => input.includes("node_modules/postgres/"))).toBe(false);
     expect(testBuild.inputs.some((input) => /node_modules\/ws\//.test(input))).toBe(false);
   });
+
+  it("fails, naming the importer, on node:http, node:https or ws outside a stubbed carrier; without the stubs, on the carriers' own", async () => {
+    const directory = temporary("umbradb-build-");
+    for (const imported of ["node:http", "node:https", "ws"]) {
+      const configuration = join(directory, `configuration-${imported.replace(":", "-")}.ts`);
+      writeFileSync(configuration, `import * as carrier from "${imported}";\nexport default { core: () => ({ data: carrier, modules: [] }) };\n`);
+      await expect(buildBrowser({ outdir: join(directory, "out"), configuration }), imported).rejects.toThrow(
+        new RegExp(`${imported}, imported by .*configuration-.*\\.ts, has no browser replacement`),
+      );
+    }
+    // The negative control: the carriers carried themselves fail the build, by their own imports.
+    const failed = buildBrowser({ outdir: join(directory, "out2"), configuration: TEST_CONFIGURATION, unavailable: ["src/backup/backup.ts"] });
+    await expect(failed).rejects.toThrow(/(node:http|node:https|ws), imported by src\/private\/core-socket\.ts, has no browser replacement/);
+    await expect(failed).rejects.toThrow(/(node:http|ws), imported by src\/runner\/api-socket\.ts, has no browser replacement/);
+    await expect(failed).rejects.toThrow(/ws, imported by src\/private\/private-socket\.ts, has no browser replacement/);
+  }, 300_000);
 
   it("gives, in each replacement, every value the bundled files of src/ import from the module it replaces", () => {
     for (const [replaced, replacement] of Object.entries(SUBSTITUTES)) {
@@ -173,7 +208,7 @@ describe("the browser build (task 16.1)", () => {
   });
 
   it("bundles a module the browser does not carry as one whose exports fail when used, so its importers still build", async () => {
-    expect(UNAVAILABLE).toEqual(["src/backup/backup.ts"]);
+    expect(UNAVAILABLE).toEqual(["src/backup/backup.ts", "src/private/core-socket.ts", "src/private/private-socket.ts", "src/runner/api-socket.ts"]);
     const stub = unavailableModule(
       [
         'import { x } from "./x.js";',

@@ -27,12 +27,14 @@ import {
  * `jsonb` document with integers beyond 2^53 (what the JSON reader must read without loss for equal contents hashes:
  * the equality check's negative control reads it with `JSON.parse`), and a `double precision` third of it in a table
  * declared `deterministic: false` (the contents hash names it only, so both runs must pass the schema plan's list), and
- * whose module API answers `GET /probe/:height` with that document. With `api=1` the module API answers on the core
- * worker's channel (`listen.api`); with `private=1` the core listens for private instances on the page's network
- * (`listen.privateLink` `core:1`), and with `lockstep=1` it lists the private instance `p1` as lockstep. [A132, Q76]
+ * whose module API answers `GET /probe/:height` with that document and emits `{ height, hash }` to each subscriber of
+ * `probe-heights` once the height committed (`on-after-db-write`). The module API always answers, through the core
+ * worker's handlers; with `lockstep=1` the core lists the private instance `p1` as lockstep. The configuration writes no
+ * address: the private link runs over the page's channels, which the process workers ask for. [A132, Q76, LM-11]
  *
- * **The private instance `p1`** (with `private=1`) reads public data through the core's transport (`privateLink`
- * `core:1`), from S, with the private module `shadow`, which stores each public block's hash as the core committed it.
+ * **The private instance `p1`** (with `private=1`) reads public data through the core's link — a `MessageChannel` the
+ * page makes for each connection —, from S, with the private module `shadow`, which stores each public block's hash as
+ * the core committed it.
  */
 
 /** The page's parameter values the configuration reads (each text). */
@@ -55,6 +57,9 @@ const DEFAULT_MODULES = [CORE_CHAIN_EVENTS.id, CORE_BLOCK_PARSED.id, CORE_TX_RES
 export function probeDocument(height: bigint): string {
   return `{"height": ${height}, "big": ${9_007_199_254_740_993n + height * 1_000n}, "list": [${2n ** 62n + height}, -${2n ** 60n}]}`;
 }
+
+/** The emits of `probe-heights`' open subscriptions, in this process. */
+const SUBSCRIBERS = new Set<(value: unknown) => void>();
 
 /** The user module `probe` (see the module comment). */
 export const PROBE: ModuleDeclaration = {
@@ -88,6 +93,13 @@ export const PROBE: ModuleDeclaration = {
           ? { status: 404, body: { error: `no probe row at ${request.params.height}` } }
           : { status: 200, body: { readHeight: `${read.height}`, doc: row.doc } };
       });
+      api.subscription("probe-heights", (_args, emit) => {
+        SUBSCRIBERS.add(emit);
+        return () => SUBSCRIBERS.delete(emit);
+      });
+    },
+    async "on-after-db-write"(_p, b) {
+      for (const emit of [...SUBSCRIBERS]) emit({ height: b.height, hash: b.hash });
     },
     async "on-db-write"(_p, b, w) {
       await w.execute("INSERT INTO probe.rows (height, hash, doc) VALUES ($1, $2, $3::jsonb)", [b.height, b.hash, probeDocument(b.height)]);
@@ -125,11 +137,6 @@ export const SHADOW: ModuleDeclaration = {
 /** The core's configuration for `run` (see the module comment). */
 export function coreConfiguration(run: BrowserRun): ProcessConfiguration {
   const modules = (param(run, "modules") ?? DEFAULT_MODULES).split(",").filter((id) => id !== "");
-  const listen = {
-    ...(param(run, "api") === "1" ? { api: "core:2" } : {}),
-    ...(param(run, "private") === "1" ? { privateLink: "core:1" } : {}),
-  };
-  const transport = Object.keys(listen).length === 0 ? {} : { listen };
   const lockstep = param(run, "lockstep") === "1" ? { lockstepInstances: ["p1"] } : {};
   return {
     data: defineConfig({
@@ -142,7 +149,6 @@ export function coreConfiguration(run: BrowserRun): ProcessConfiguration {
             ledgerTable: LEDGER_TABLE,
             node: run.node,
             database: databaseOf(run.storage, "core"),
-            ...transport,
             ...lockstep,
           } as never,
         }),
@@ -171,7 +177,6 @@ export function privateConfiguration(run: BrowserRun): ProcessConfiguration {
             ledgerTable: LEDGER_TABLE,
             database: databaseOf(run.storage, "p1"),
             instanceId: "p1",
-            privateLink: "core:1",
           } as never,
         }),
         { id: SHADOW.id, version: SHADOW.version, start: run.start, config: {} } as never,

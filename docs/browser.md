@@ -89,11 +89,15 @@ export default configuration;
 - **Database:** `databaseOf(run.storage, name)` gives the `database` setting: PGlite in memory, or a database in the
   origin's private file system (OPFS) named after `storage`, plus `-<instance id>` for a private instance.
 - **Your own modules:** add each module's declaration to `modules` and its entry to `data.entries`, as a configuration
-  file does. A module's own settings can read the page's parameters through `run.params`.
+  file does. A module's own settings can read the page's parameters through `run.params`. A module that declares
+  ledger tasks is refused (`ledger-tasks-need-modules-from`): the page's ledger worker has no way to import user
+  modules yet.
 - **Private instances:** `instances(run)` returns `{ id, configure(run) }` for each; each runs in a worker of its own
-  beside the core. The core listens for them on the page's message network (`listen: { privateLink: "core:1" }`) and a
-  private instance connects with `privateLink: "core:1"`. `test/browser/fixtures/configuration.ts` is a complete
-  example with a user module and a private instance.
+  beside the core. The private link needs no address: whenever a private instance connects to the core (at its start,
+  and again after a lost connection), the page makes a new `MessageChannel` and hands one end to the core worker and
+  the other to the private worker. A configuration that writes `listen.privateLink` or `privateLink` is refused
+  (`network-address-conflict`, `unused`), and so is `listen.api`. `test/browser/fixtures/configuration.ts` is a
+  complete example with a user module and a private instance.
 - **Imports:** the default and the tests' configuration import UmbraDB from the repository's `src/` and
   `browser/src/configuration.ts` by relative path, so the build bundles the sources and replaces what a browser lacks
   (below).
@@ -120,7 +124,12 @@ across reloads. A configuration may read parameters of its own from `run.params`
 ## Backups and status
 
 The page's Back up button saves a backup of the database as a file; the `restore` parameter loads one. In the console,
-`await umbradb.core.call("admin", "/status")` answers what `/status` answers.
+`await umbradb.core.call("admin", "/status")` answers what `/status` answers, and
+`await umbradb.core.call("api", { method: "GET", path: "/your/route" })` what the module API answers.
+`const api = await umbradb.core.openApi()` opens a channel of the module API's subscriptions: `api.send({ type:
+"subscribe", id: "1", name: "<subscription>" })`, then read `api.received`. `umbradb.links` lists the private link's
+channels, and `umbradb.dropLink("<instance id>")` drops one, as a lost connection would: the instance connects again
+over a new channel.
 
 ## How the page is built
 
@@ -129,18 +138,21 @@ workers (`core-worker.js`, `private-worker.js`, one process each), the ledger wo
 WebAssembly and data files, `pglite-tools`' `pg_dump` WebAssembly for the Back up button, and the vendored ledger
 packages' WebAssembly (`ledger/<version>/`). `dist-browser/` is not part of the npm package.
 
-The workers bundle UmbraDB's sources unchanged — the runner, the modules, the database API on PGlite, the node client,
-the ledger worker — and replace only what a browser does not have, each in one place:
+The workers bundle UmbraDB's sources unchanged — the engine, the modules, the database API on PGlite, the node client,
+the ledger worker, the private link over channels, the module API's handlers — and replace only what a browser does
+not have, each in one place. Each process starts through the same engine as `umbradb run` and `startUmbraDB`, with its
+configuration as data and nothing listening: its private link runs over the page's channels, and its module API and
+admin are answered by its own handlers, called on the worker's message channel.
 
 - **Node.js built-ins:** `node:crypto` (SHA-256), `node:worker_threads` (Web Workers), `node:fs` (no file is read),
-  `node:http`, `node:https` and `ws` (the page's message network), `node:path`, `node:async_hooks` and `Buffer` have
-  replacements under `browser/src/shims/` and `browser/src/net/`. Any other built-in a file of UmbraDB's imports fails
-  the build, naming it.
+  `node:path`, `node:async_hooks` and `Buffer` have replacements under `browser/src/shims/`. Any other built-in a file
+  of UmbraDB's imports fails the build, naming it; so does `ws`.
 - **Whole modules:** opening the database (PGlite in memory or OPFS, never PostgreSQL), the writer lock (Web Locks),
-  the configuration loader (the bundled module, no file), the node client's socket (the browser's `WebSocket`) and the
-  module API's listener (the worker's message channel).
-- **What the browser does not carry:** `umbradb backup`'s file writer is bundled as a stub that fails when used; the
-  page's Back up button and `restore` run the same backup code without it.
+  the configuration loader (the bundled module, no file) and the node client's socket (the browser's `WebSocket`).
+- **What the browser does not carry:** `umbradb backup`'s file writer and the socket carriers (the private link's
+  server and client, the module API's Node.js handlers and listener) are bundled as stubs that fail when used. The
+  page's Back up button and `restore` run the same backup code without the writer, and its processes never call the
+  carriers.
 - **The vendored ledger packages** are checked as the build reads them: each version's `SHA256SUMS`, then every file
   bundled and every WebAssembly written, against it. A changed or unlisted file fails the build with
   `package-hash-mismatch`. The page checks each WebAssembly again when the ledger worker loads it.
@@ -157,8 +169,8 @@ the ledger worker — and replace only what a browser does not have, each in one
 | Development opt-in | Required for PGlite, set in the file | Always set by the build |
 | Imports | `umbradb` (the package) | The repository's `src/` by relative path |
 | Private processes | Another `umbradb run`, its own database and file | Workers in the same page, from `instances(run)` |
-| Process transport | `listen.privateLink` / `privateLink` as `host:port` | Names on the page's message network (`core:1`) |
-| Module API | HTTP on `listen.api` (`host:port`) | The core worker's message channel (`listen.api` as a name, e.g. `core:2`) |
+| Private link | `listen.privateLink` / `privateLink` as `host:port` | A `MessageChannel` per connection, made by the page; no address |
+| Module API | HTTP on `listen.api` (`host:port`) | `umbradb.core.call("api", …)`; subscriptions on `umbradb.core.openApi()` |
 | `/status`, `/health/*`, `/config` | HTTP on `listen.admin` | `umbradb.core.call("admin", "/status")` (or another path) in the console |
 | Backups | `umbradb backup`, `backupOnSignal` (SIGUSR2), `pg_dump` | The Back up button; `restore` parameter to load one |
 | Writer lock | PostgreSQL: a session advisory lock; PGlite: an OS file lock beside the directory | A Web Lock; a second tab gets `writer-lock-held` |

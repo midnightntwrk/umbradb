@@ -1,4 +1,4 @@
-import type { TapeRecord } from "../../tools/tape/index.js";
+import type { TapeClock, TapeRecord } from "../../tools/tape/index.js";
 import { E, type EventSpec, ledgerTransactions } from "../backbone/chain-data-tapes.js";
 import { eventsValue, finalizedWithEvents, RUNTIME_2_0 } from "../backbone/events-fixtures.js";
 import {
@@ -34,6 +34,10 @@ import {
  * A session the page keeps open while a later one waits for the next connection (a reload's) ends with {@link
  * KEPT_OPEN}: a call record nothing asks, then the `disconnect` that separates the sessions — which, coming after a
  * record never answered, is never reached, so the connection is not dropped. [TT-3]
+ *
+ * **A hold** ({@link heldBefore}, {@link heldClock}): a session whose height `h` is not answered until the test lets it
+ * — the first call of `h` delayed on a clock that stands still until released —, so the core waits before `h` while the
+ * test does what it claims comes first. [L58]
  */
 
 /** The end of a session the page keeps open (see the module comment): a call no process makes, then the separator. */
@@ -142,3 +146,52 @@ export function otherGenesisSession(): TapeRecord[] {
   return [...blockRef(chainBlock(0n, null, { branch: "another chain" })), ...KEPT_OPEN];
 }
 
+
+/** The longest delay a tape record takes: the hold's, which only {@link heldClock}'s release ends. */
+const HOLD_MS = 2_147_483_647;
+
+/** `records` with the first call of height `height` (its `chain_getBlockHash`) held (see the module comment). */
+export function heldBefore(records: readonly TapeRecord[], height: bigint): TapeRecord[] {
+  let held = false;
+  return records.map((record) => {
+    const call = record as { readonly method?: string; readonly params?: readonly unknown[] };
+    if (held || call.method !== "chain_getBlockHash" || call.params?.[0] !== Number(height)) return record;
+    held = true;
+    return { ...record, delayMs: HOLD_MS } as TapeRecord;
+  });
+}
+
+/**
+ * A tape node's clock that stands still until {@link HeldClock.release}: a delayed answer (a {@link heldBefore} hold)
+ * waits until then, and is sent at once after it; an answer without a delay is sent at once, as ever.
+ */
+export interface HeldClock {
+  readonly clock: TapeClock;
+  release(): void;
+}
+
+export function heldClock(): HeldClock {
+  let released = false;
+  const waiting = new Set<() => void>();
+  return {
+    clock: {
+      setTimeout(run: () => void, _ms: number): unknown {
+        // Once released, every delay has passed: the node's check of the time left finds none (`Infinity` is now).
+        if (released) return setTimeout(run, 0);
+        waiting.add(run);
+        return run;
+      },
+      clearTimeout(handle: unknown): void {
+        if (!waiting.delete(handle as () => void)) clearTimeout(handle as Parameters<typeof clearTimeout>[0]);
+      },
+      now: () => (released ? Number.POSITIVE_INFINITY : 0),
+    },
+    release() {
+      released = true;
+      for (const run of [...waiting]) {
+        waiting.delete(run);
+        run();
+      }
+    },
+  };
+}

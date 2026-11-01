@@ -98,7 +98,6 @@ export interface PageEvent {
   readonly instances?: readonly string[];
   readonly error?: { readonly name: string; readonly message: string; readonly code: string | null; readonly details: unknown };
   readonly end?: unknown;
-  readonly api?: { readonly host: string; readonly port: number } | null;
 }
 
 const viewOf = (who: ProcessName): string =>
@@ -194,6 +193,52 @@ export async function eventWhen(tab: ChromeTab, who: ProcessName, type: string, 
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${who}'s ${type}\n${await tabReport(tab, [who])}`);
     await sleep(200);
   }
+}
+
+/** A link channel the page made (`browser/src/page.ts`'s `LinkRecord`). [L58] */
+export interface PageLink {
+  readonly link: number;
+  readonly instance: string;
+  readonly dropped: boolean;
+}
+
+/** Every link channel the page made, in order. */
+export async function linksOf(tab: ChromeTab): Promise<PageLink[]> {
+  return (await tab.evaluate<PageLink[] | null>("window.umbradb?.links ?? null").catch(() => null)) ?? [];
+}
+
+/**
+ * A channel of `who`'s module API subscriptions the page opened (`openApi`, the process's `api.connect`), kept in the
+ * page as `name`: what the test sends on it, and every message it received, parsed. [LM-11, L58]
+ */
+export interface PageApiChannel {
+  send(message: unknown): Promise<void>;
+  received(): Promise<unknown[]>;
+  /** Waits until it received at least `count` messages; fails after `patience`, naming `what`. */
+  until(count: number, what: string, patience?: number): Promise<unknown[]>;
+}
+
+/** Opens a channel of `who`'s module API subscriptions in the page (see {@link PageApiChannel}). */
+export async function apiChannel(tab: ChromeTab, who: ProcessName, name: string): Promise<PageApiChannel> {
+  const kept = `window.__umbradbApi[${JSON.stringify(name)}]`;
+  await tab.evaluate(`(async () => { window.__umbradbApi ??= {}; ${kept} = await ${viewOf(who)}.openApi(); return null; })()`);
+  const received = async (): Promise<unknown[]> => (await tab.evaluate<unknown[]>(`${kept}.received`)) ?? [];
+  return {
+    send: async (message) => {
+      await tab.evaluate(`${kept}.send(${JSON.stringify(message)})`);
+    },
+    received,
+    async until(count, what, patience = PATIENCE_MS) {
+      const deadline = Date.now() + patience;
+      for (;;) {
+        const now = await byDeadline(received(), deadline, NO_ANSWER);
+        if (now === NO_ANSWER) throw await noAnswer(tab, who, what, patience);
+        if (now.length >= count) return now;
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}: received ${JSON.stringify(now)}\n${await tabReport(tab, [who])}`);
+        await sleep(100);
+      }
+    },
+  };
 }
 
 /** `who`'s contents hash now, with the height its read saw. [DT-3] */
