@@ -1,7 +1,8 @@
 # Proposal — START-UMBRADB: UmbraDB as a library (`start-umbradb`)
 
-> **Status:** Approved (2026-11-01, the owner, at the stage-1 gate: the cold adversarial review and three targeted fix
-> checks, the last PASS; LM-2's two PGlite exceptions approved with it). No code yet.
+> **Status:** In progress — approved 2026-11-01 by the owner at the stage-1 gate (the cold adversarial review and three
+> targeted fix checks, the last PASS; LM-2's two PGlite exceptions approved with it); implemented on the branch
+> (`tasks.md` §1–§9), in stage-4 review (§10).
 
 ## Why
 
