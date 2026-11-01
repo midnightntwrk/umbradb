@@ -8,8 +8,9 @@ import { EXIT, runProcessCommand } from "../../src/cli/command.js";
 import { buildCoreVersion } from "../../src/config/build.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { UmbraError } from "../../src/db/errors.js";
-import { type EngineConfig, startProcess } from "../../src/runner/process.js";
+import type { EngineConfig } from "../../src/runner/process.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
+import { startProcess } from "../runner/process-build.js";
 import { inProcess } from "./cli-fixtures.js";
 
 /**
@@ -175,7 +176,6 @@ describe.each(PROCESS_BACKENDS)("L51: a renamed key is refused with renamed-sett
           config,
           cwd: directory,
           userModules: { from: "config" },
-          admin: false,
           log: (line) => lines.push(line),
         });
         const refusal = await handle.started.then(
