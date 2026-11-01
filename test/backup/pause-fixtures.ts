@@ -186,7 +186,7 @@ export const isPoint = (entry: string): boolean => !entry.startsWith("log: ");
 
 /** Starts the process of the configuration `file` over the in-memory chain up to `options.head` (see the module comment). */
 export async function startPausable(file: string, options: PausableOptions): Promise<Pausable> {
-  const loaded = await loadConfig({ file });
+  const loaded = await loadConfig({ file, cwd: process.cwd() });
   const source = new InMemoryBlockSource({ head: options.head });
   const shared = timeline();
   hooks().clear();

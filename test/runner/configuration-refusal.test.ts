@@ -86,7 +86,7 @@ describe("configurationRefusalLines", () => {
 
   it("the loader's refusal at the file, one finding", async () => {
     const file = join(directory, "no-such.config.ts");
-    const error = await loadConfig({ file }).catch((caught: unknown) => caught);
+    const error = await loadConfig({ file, cwd: process.cwd() }).catch((caught: unknown) => caught);
     expect(configurationRefusalLines(error, redactor([]).text)).toEqual([
       "startup refused: invalid-configuration (1 finding); the process ends",
       expect.stringMatching(
@@ -98,7 +98,7 @@ describe("configurationRefusalLines", () => {
   it("a loader's refusal quoting the file's own error shows no URL's credentials (AE-6)", async () => {
     const file = join(directory, "throws.config.ts");
     writeFileSync(file, `throw new Error("cannot reach postgres://indexer:${PASSWORD}@db.example/x");\nexport default {};\n`);
-    const error = await loadConfig({ file }).catch((caught: unknown) => caught);
+    const error = await loadConfig({ file, cwd: process.cwd() }).catch((caught: unknown) => caught);
     const lines = configurationRefusalLines(error, redactor([]).text);
     expect(lines).toEqual([
       "startup refused: invalid-configuration (1 finding); the process ends",

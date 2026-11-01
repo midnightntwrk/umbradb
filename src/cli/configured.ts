@@ -2,10 +2,12 @@
  * What `umbradb backup` and `umbradb restore` read from the configuration file. [BK-1, BK-3; design §9.1, §12]
  *
  * As `umbradb run` does, the command loads the file (`--config`, or `umbradb.config.ts` in the working directory). It
- * makes the command's build with the user modules the file exports (`./build-modules.ts`), for the side the file
- * describes (`inferSide`), and validates the configuration with that build. It then takes the process's `core`
- * revision: its `database` is the database the command works on, and its `developmentOptIn` the opt-in. A refusal of
- * any of this is the configuration's own, with every finding. [CF-1, CF-9, PP-12, Q102, Q106 B]
+ * resolves it through the resolver every caller shares (`src/runner/resolve.ts`): the side the file describes, the
+ * command's build with the user modules the file exports (`resolveDeclarations`), and the configuration validated with
+ * that build, with the process's `core` revision (`resolveConfig`): its `database` is the database the command works
+ * on, and its `developmentOptIn` the opt-in. A refusal of the loading or of the configuration is the configuration's
+ * own, with every finding; a fault of the build's declarations is thrown as it is. [CF-1, CF-9, PP-12, Q102, Q106 B,
+ * LM-1]
  *
  * **The database** ({@link openCommandDatabase}). [DB-11, CF-4, Q163]
  * - PostgreSQL is opened through the database API with one read connection, which makes no connection until it is
@@ -27,9 +29,8 @@ import type { DatabaseParts, PglitePathParts } from "../config/database-parts.js
 import { findingText, refusalFindings } from "../config/findings.js";
 import { DEFAULT_CONFIG_FILE, type LoadedConfig, loadConfig } from "../config/load.js";
 import type { PlainObject } from "../config/plain-data.js";
-import { processCoreEntry } from "../config/process.js";
 import { type Redactor, redactor } from "../config/redact.js";
-import { type CheckedConfig, type CheckedEntry, configSecrets, validateConfig } from "../config/validate.js";
+import { type CheckedConfig, type CheckedEntry, configSecrets } from "../config/validate.js";
 import type { CommittedHeight, Database } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import { openPglite } from "../db/pglite.js";
@@ -38,7 +39,7 @@ import { openPostgres, type PostgresConnection } from "../db/postgres.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
 import { isPrivateDatabase } from "../backup/facts.js";
-import { inferSide, resolveDeclarations } from "../runner/resolve.js";
+import { type ResolvedConfig, resolveConfig, resolveDeclarations, resolveSide } from "../runner/resolve.js";
 import { isRegularFile } from "./type-check.js";
 
 /** The configuration a backup or restore command runs with. */
@@ -81,18 +82,16 @@ export async function readCommandConfig(
   } catch (error) {
     throw configurationRefused(error, file);
   }
-  const side = inferSide(loaded.data);
+  const side = resolveSide(loaded.data);
   const declarations = resolveDeclarations({ userModules: loaded.modules, side });
-  const input = { config: loaded, declarations, side };
-  const redact = redactor(configSecrets(input));
-  let checked: CheckedConfig;
-  let core: CheckedEntry;
+  const redact = redactor(configSecrets({ config: loaded, declarations, side }));
+  let resolved: ResolvedConfig;
   try {
-    checked = validateConfig(input);
-    core = processCoreEntry(checked);
+    resolved = resolveConfig({ data: loaded.data, file: loaded.file, declarations, side });
   } catch (error) {
     throw configurationRefused(error, loaded.file);
   }
+  const { checked, core } = resolved;
   const settings = core.settings as PlainObject;
   return Object.freeze({
     file: loaded.file,

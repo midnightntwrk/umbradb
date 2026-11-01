@@ -139,6 +139,7 @@ describe("how the file's modules join the build (Q106 B)", () => {
   it("they are the build's user modules, in the file's order, after UmbraDB's own backbone parts and core modules", async () => {
     const loaded = await loadConfig({
       file: write({ modules: "[prices, stats]", before: ['import { prices } from "./prices.ts";'] }),
+      cwd: project.dir,
     });
     const build = resolveDeclarations({ userModules: loaded.modules, side: "public" });
     expect(build.user.map((module) => module.id)).toEqual(["prices", "stats"]);
@@ -217,7 +218,7 @@ describe("how the file's modules join the build (Q106 B)", () => {
   });
 
   it("a file without the export has no user modules; the command's build is UmbraDB's own", async () => {
-    const loaded = await loadConfig({ file: write({ modules: null }) });
+    const loaded = await loadConfig({ file: write({ modules: null }), cwd: project.dir });
     expect(loaded.modules).toEqual([]);
     expect(Object.isFrozen(loaded.modules)).toBe(true);
     expect(commandBuild(loaded.modules).user).toEqual([]);

@@ -6,9 +6,11 @@
  * 1. **type check**: the TypeScript compiler on the file, `noEmit` (`./type-check.ts`), each diagnostic at
  *    `file:line:column`.
  * 2. **configuration**: the file is evaluated by the loader, which runs the operator's code (`not-plain-data` at its
- *    path). It is then validated: the shape, and the schema checks of every revision of the build's version, every
- *    violation at once (`src/config/validate.ts`). Last, the process's `core` revision is taken
- *    (`src/config/process.ts`); a file whose every `core` entry is a `versionEntry` has none. [CF-1, CF-3, Q44, Q102]
+ *    path). It is then resolved in the resolver's two stages, as every caller resolves it (`src/runner/resolve.ts`):
+ *    the build's declarations (`resolveDeclarations`), then the configuration (`resolveConfig`), validated — the shape,
+ *    and the schema checks of every revision of the build's version, every violation at once — with the process's
+ *    `core` revision taken; a file whose every `core` entry is a `versionEntry` has none. [CF-1, CF-3, Q44, Q102,
+ *    LM-1]
  * 3. **history**, with `--database` only: the database the file's `core` revision configures (the flag takes no value)
  *    is read read-only (`./database.ts`). The history's checks then run on the validated configuration at its cursor:
  *    first the checks of the `versionEntry` revisions (`entriesAtCursor`), then the checks of revisions by
@@ -26,7 +28,7 @@
  * **The process's side** (`public` or `private`, which decides the `core` schema that applies) is taken from the file
  * (`resolveSide`, `src/runner/resolve.ts`) unless given. [CF-4]
  *
- * **The build's modules** are the command's (`./build-modules.ts`): UmbraDB's own backbone parts and core modules, and
+ * **The build's modules** are the command's (`resolveDeclarations`): UmbraDB's own backbone parts and core modules, and
  * as its user modules the ones the file exports in `modules`. So the entries of a user module the file ships are
  * checked against its schema as UmbraDB's own are. A fault of those declarations (a list element that is no
  * declaration, a module listed twice, a user module with an id of UmbraDB's own) is the configuration check's finding
@@ -46,19 +48,12 @@ import { type DatabaseParts, isMemoryDatabase } from "../config/database-parts.j
 import { historyFindings, type HistoryRow } from "../config/history.js";
 import { type ConfigFinding, findingText, refusalFindings } from "../config/findings.js";
 import { type LoadedConfig, loadConfig, MODULES_EXPORT } from "../config/load.js";
-import { processCoreEntry } from "../config/process.js";
 import { type Redactor, redactor } from "../config/redact.js";
-import {
-  type CheckedConfig,
-  type CheckedEntry,
-  configSecrets,
-  type Finding,
-  validateConfig,
-} from "../config/validate.js";
+import { type CheckedConfig, type CheckedEntry, configSecrets, type Finding } from "../config/validate.js";
 import { UmbraError } from "../db/errors.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { DeclarationSet } from "../modules/validation.js";
-import { resolveDeclarations, resolveSide } from "../runner/resolve.js";
+import { resolveConfig, resolveDeclarations, resolveSide } from "../runner/resolve.js";
 import { type DatabaseState, readDatabaseState } from "./database.js";
 import { isRegularFile, typeCheckFile } from "./type-check.js";
 
@@ -260,11 +255,12 @@ const CONFIGURATION: CheckStep = {
         return stepReport("configuration", CONFIGURATION_TITLE, [declarationFinding(error, user)], UNVALIDATED);
       }
     }
-    const input = { config: state.loaded, declarations: state.declarations, side };
-    state.secrets.push(...configSecrets(input));
+    const { declarations } = state;
+    state.secrets.push(...configSecrets({ config: state.loaded, declarations, side }));
     try {
-      state.checked = validateConfig(input);
-      state.process = processCoreEntry(state.checked);
+      const resolved = resolveConfig({ data: state.loaded.data, file: state.loaded.file, declarations, side });
+      state.checked = resolved.checked;
+      state.process = resolved.core;
     } catch (error) {
       return stepReport("configuration", CONFIGURATION_TITLE, refusalFindings(error, state.file));
     }

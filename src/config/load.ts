@@ -15,8 +15,8 @@
  *
  * The `umbradb` command takes them as its build's user modules (`src/cli/build-modules.ts`): the file is then the host
  * program, and no module is loaded by name. Without the export the list is empty; an export that is not a list refuses
- * startup (`modules-not-a-list`). A program that calls `startProcess` itself gives its own declarations and may pass
- * these. [MD-1, Q106 B]
+ * startup (`modules-not-a-list`). The engine (`src/runner/process.ts`) loads a `{ file }` configuration with this
+ * loader and takes these as the build's user modules unless it is given a list. [MD-1, LM-7, Q106 B]
  *
  * A `.ts` file is an ES module when the nearest `package.json` says `"type": "module"`, or when Node.js detects ES
  * module syntax in it, as for a `.js` file (a `.mts` file always is). The file may import module packages and read
@@ -47,8 +47,11 @@ export const DEFAULT_CONFIG_FILE = "umbradb.config.ts";
 export interface LoadOptions {
   /** The file (`--config`), absolute or relative to `cwd`; {@link DEFAULT_CONFIG_FILE} when absent. */
   readonly file?: string;
-  /** The working directory; `process.cwd()` when absent. */
-  readonly cwd?: string;
+  /**
+   * The working directory a relative `file` resolves against: always given, so that the loader never reads the host
+   * program's own (a library host's `cwd`, the command's working directory). [LM-2, CF-1]
+   */
+  readonly cwd: string;
 }
 
 /** A loaded configuration: the file's absolute path, its evaluated data, deeply frozen, and its user modules. */
@@ -88,8 +91,8 @@ async function isFile(file: string): Promise<boolean> {
 }
 
 /** Loads the configuration file: see the module comment. [CF-1] */
-export async function loadConfig(options: LoadOptions = {}): Promise<LoadedConfig> {
-  const file = resolve(options.cwd ?? process.cwd(), options.file ?? DEFAULT_CONFIG_FILE);
+export async function loadConfig(options: LoadOptions): Promise<LoadedConfig> {
+  const file = resolve(options.cwd, options.file ?? DEFAULT_CONFIG_FILE);
   if (!(await isFile(file))) {
     throw invalid(
       file,

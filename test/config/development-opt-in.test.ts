@@ -61,7 +61,7 @@ async function load(entries: string) {
       "",
     ].join("\n"),
   );
-  return loadConfig({ file });
+  return loadConfig({ file, cwd: process.cwd() });
 }
 
 const noHeight: CommittedHeight = async () => null;

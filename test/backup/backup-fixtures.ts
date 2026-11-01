@@ -176,7 +176,7 @@ export async function startTicker(
   chain?: EngineInput["source"],
   options: TickerOptions = {},
 ): Promise<TickerProcess> {
-  const loaded = await loadConfig({ file });
+  const loaded = await loadConfig({ file, cwd: process.cwd() });
   const source = new InMemoryBlockSource({ head });
   const lines: string[] = [];
   const handle = startProcess({

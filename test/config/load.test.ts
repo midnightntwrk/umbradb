@@ -89,10 +89,13 @@ describe("CF-1: the loader takes the file's default export as plain data", () =>
     expect(Object.isFrozen(loaded)).toBe(true);
   });
 
-  it("uses the process's working directory when none is given", async () => {
-    // The repository has no umbradb.config.ts, so the default path is named in the refusal.
-    const error = await refusal(() => loadConfig());
-    expect(error.details).toEqual({ file: resolve(process.cwd(), "umbradb.config.ts"), reason: "file-not-found" });
+  it("resolves a relative file against the working directory given, never the process's own (LM-2)", async () => {
+    // The repository has no umbradb.config.ts: a default path under the process's directory would be named here.
+    const cwd = join(directory, "elsewhere");
+    mkdirSync(cwd);
+    const error = await refusal(() => loadConfig({ cwd }));
+    expect(error.details).toEqual({ file: join(cwd, "umbradb.config.ts"), reason: "file-not-found" });
+    expect(cwd).not.toBe(process.cwd());
   });
 
   it("loads a given path, relative to the working directory or absolute", async () => {
@@ -113,7 +116,7 @@ describe("CF-1: the loader takes the file's default export as plain data", () =>
         "",
       ].join("\n"),
     );
-    const loaded = await loadConfig({ file });
+    const loaded = await loadConfig({ file, cwd: directory });
     await new Promise((settle) => setTimeout(settle, 20));
     const exported = (globalThis as Record<string, unknown>).umbradbTest41 as { entries: { config: object }[] };
     expect(exported.entries[0]?.config).toEqual({ pollMs: 1 });
@@ -131,7 +134,7 @@ describe("CF-1: the loader takes the file's default export as plain data", () =>
         "export default { entries: [{ id: \"core\", config: { database: { kind: \"postgres\", host: \"db\", " +
           "password: process.env.UMBRADB_TEST_4_1_DATABASE! } } }] };\n",
       );
-      expect((await loadConfig({ file })).data).toEqual({
+      expect((await loadConfig({ file, cwd: directory })).data).toEqual({
         entries: [{ id: "core", config: { database: { kind: "postgres", host: "db", password: "pw-4-1-ENV" } } }],
       });
     } finally {
@@ -143,7 +146,7 @@ describe("CF-1: the loader takes the file's default export as plain data", () =>
 describe("CF-1: a file that cannot be loaded refuses startup with invalid-configuration, naming the file", () => {
   it("no file at the path", async () => {
     const file = join(directory, "missing.config.ts");
-    const error = await refusal(() => loadConfig({ file }));
+    const error = await refusal(() => loadConfig({ file, cwd: directory }));
     expect(error.code).toBe("invalid-configuration");
     expect(error.retryable).toBe(false);
     expect(error.details).toEqual({ file, reason: "file-not-found" });
@@ -155,13 +158,13 @@ describe("CF-1: a file that cannot be loaded refuses startup with invalid-config
   it("a directory at the path", async () => {
     const file = join(directory, "a-directory.config.ts");
     mkdirSync(file);
-    const error = await refusal(() => loadConfig({ file }));
+    const error = await refusal(() => loadConfig({ file, cwd: directory }));
     expect(error.details).toEqual({ file, reason: "file-not-found" });
   });
 
   it("no default export", async () => {
     const file = write("named.config.ts", "export const config = { entries: [] };\n");
-    const error = await refusal(() => loadConfig({ file }));
+    const error = await refusal(() => loadConfig({ file, cwd: directory }));
     expect(error.code).toBe("invalid-configuration");
     expect(error.details).toEqual({ file, reason: "no-default-export" });
     expect(error.message).toContain(`${file} has no default export`);
@@ -170,7 +173,7 @@ describe("CF-1: a file that cannot be loaded refuses startup with invalid-config
 
   it("an error thrown while the file is evaluated, kept as the cause", async () => {
     const file = write("throws.config.ts", 'throw new Error("set UMBRADB_DATABASE");\nexport default {};\n');
-    const error = await refusal(() => loadConfig({ file }));
+    const error = await refusal(() => loadConfig({ file, cwd: directory }));
     expect(error.code).toBe("invalid-configuration");
     expect(error.details).toEqual({ file, reason: "load-failed", errorCode: null });
     expect(error.message).toContain(`the configuration file ${file} could not be loaded: set UMBRADB_DATABASE`);
@@ -179,20 +182,20 @@ describe("CF-1: a file that cannot be loaded refuses startup with invalid-config
 
   it("a value thrown that is not an Error", async () => {
     const file = write("throws-text.config.ts", 'throw "no node configured";\nexport default {};\n');
-    const error = await refusal(() => loadConfig({ file }));
+    const error = await refusal(() => loadConfig({ file, cwd: directory }));
     expect(error.details).toEqual({ file, reason: "load-failed", errorCode: null });
     expect(error.message).toMatch(/could not be loaded: no node configured$/);
   });
 
   it("an import the file makes that does not resolve is a load failure, not a missing file", async () => {
     const file = write("imports.config.ts", 'import "./not-there.js";\nexport default { entries: [] };\n');
-    const error = await refusal(() => loadConfig({ file }));
+    const error = await refusal(() => loadConfig({ file, cwd: directory }));
     expect(error.details).toMatchObject({ file, reason: "load-failed" });
   });
 
   it("names the file in a not-plain-data refusal", async () => {
     const file = write("function.config.ts", "export default { entries: [{ id: \"core\", config: { onError: () => 0 } }] };\n");
-    const error = await refusal(() => loadConfig({ file }));
+    const error = await refusal(() => loadConfig({ file, cwd: directory }));
     expect(error.code).toBe("not-plain-data");
     expect(error.details).toEqual({ file, path: "entries[0].config.onError", found: "a function" });
   });
@@ -205,7 +208,7 @@ describe("CF-1: in a plain Node.js process, the file is loaded by Node.js's own 
       `import { loadConfig } from ${JSON.stringify(pathToFileURL(bundle).href)};`,
       "const typescript = process.features.typescript;",
       "try {",
-      `  const { data } = await loadConfig({ file: ${JSON.stringify(file)} });`,
+      `  const { data } = await loadConfig({ file: ${JSON.stringify(file)}, cwd: "/" });`,
       "  console.log(JSON.stringify({ typescript, data }));",
       "} catch (error) {",
       "  console.log(JSON.stringify({ typescript, code: error.code, details: error.details, message: error.message }));",

@@ -36,7 +36,7 @@ const orphanGuard = setInterval(() => {
 }, 500);
 
 const termination = terminationSignal();
-const loaded = await loadConfig({ file: job.configFile });
+const loaded = await loadConfig({ file: job.configFile, cwd: process.cwd() });
 const source = new InMemoryBlockSource({ head: 1n });
 const handle = startProcess({
   declarations: commandBuild(loaded.modules),

@@ -14,7 +14,7 @@ export const MODULES_EXPORT = "modules";
 /** What `src/config/load.ts`'s loader takes, for the same types. */
 export interface LoadOptions {
   readonly file?: string;
-  readonly cwd?: string;
+  readonly cwd: string;
 }
 
 /** What `src/config/load.ts`'s loader gives, for the same types. */
@@ -25,7 +25,7 @@ export interface LoadedConfig {
 }
 
 /** Refuses: the browser build's configuration is bundled data, never a file (see the module comment). */
-export async function loadConfig(_options: LoadOptions = {}): Promise<LoadedConfig> {
+export async function loadConfig(_options: LoadOptions): Promise<LoadedConfig> {
   throw new UmbraError(
     "invalid-configuration",
     "the browser build reads no configuration file: its configuration is bundled with the page and given as data",

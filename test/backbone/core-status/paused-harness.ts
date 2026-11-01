@@ -144,7 +144,7 @@ async function start(
   wrap: (start: AdminStarter) => AdminStarter,
   signals?: EventEmitter,
 ): Promise<Running> {
-  const loaded = await loadConfig({ file });
+  const loaded = await loadConfig({ file, cwd: process.cwd() });
   const source = new InMemoryBlockSource({ head });
   const lines: string[] = [];
   let listening!: (server: AdminServer) => void;

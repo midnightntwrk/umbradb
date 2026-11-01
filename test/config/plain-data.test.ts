@@ -350,7 +350,7 @@ describe("A26: each value that is not plain data refuses startup with not-plain-
   for (const row of A26) {
     it(row.name, async () => {
       const file = files.get(row.name) as string;
-      const error = await refusal(() => loadConfig({ file }));
+      const error = await refusal(() => loadConfig({ file, cwd: process.cwd() }));
       expect(error.code).toBe("not-plain-data");
       expect(error.retryable).toBe(false);
       expect(error.details).toEqual({ file, path: row.path, found: row.found });
@@ -377,7 +377,7 @@ describe("A26: each value that is not plain data refuses startup with not-plain-
   it("control: the same file without the value loads", async () => {
     const file = join(directory, "a26-control.config.ts");
     writeFileSync(file, configSource(`[${CORE}, stats.entry({ start: 2_500_000, stop: 2_600_000, config: { pollMs: 1000 } })]`));
-    const { data } = await loadConfig({ file });
+    const { data } = await loadConfig({ file, cwd: process.cwd() });
     expect(data).toEqual({
       entries: [
         { id: "core", start: 0, version: buildCoreVersion(), config: { ...CORE_SETTINGS } },
