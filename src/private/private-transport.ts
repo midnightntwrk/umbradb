@@ -1,6 +1,8 @@
 /**
- * A private process's side of the process transport: its connection to the core at its link's address (the network
- * plan's: `privateLink` for `umbradb run`, or a library host's request). It:
+ * A private process's side of the process transport: its session logic, which every carrier of the link shares. Its
+ * connection to the core goes over its carrier ({@link PrivateCarrier}): a WebSocket to the link's address (the network
+ * plan's: `privateLink` for `umbradb run`, or a library host's request; `./private-socket.ts`), or the channels a
+ * library host opens (`connect`; `./private-channels.ts`). It:
  * - wakes the process's wait for the public cursor ({@link PrivateTransport.next}, the `PublicWakes` of
  *   `src/backbone/core-private-source/`);
  * - tells the core where the process is ({@link PrivateTransport.connection}'s `hello`, then
@@ -12,10 +14,11 @@
  * CORE-ARCH §4.14]
  *
  * **Connecting.** Startup's chain check connects ({@link PrivateTransport.connection}), after startup has read the
- * private cursor. It connects to `ws://<privateLink>`, or to `wss://` with the `core` entry's `tls`: its certificate
- * and key are presented to the core, and the core's certificate is checked against `trustedRoots`. On open it sends
+ * private cursor, through its carrier ({@link PrivateCarrier.dial}): over WebSocket to `ws://<privateLink>`, or to
+ * `wss://` with the `core` entry's `tls` (its certificate and key are presented to the core, and the core's certificate
+ * is checked against `trustedRoots`), or over a new channel from the host. Once the connection is open it sends
  * `hello`: its instance id, the build's version, and its position (the private cursor, or S − 1 with no hash before its
- * first commit). [PP-11]
+ * first commit). The carrier pings the core and gives up on a core that does not answer. [PP-11, LM-6]
  *
  * The `hello-ack` decides what happens next:
  * - `refused: null` connects it, and every waiter is woken: after every reconnect the private process reads the public
@@ -39,7 +42,8 @@
  * and {@link PrivateTransport.connection} fails with that `UmbraError` (not retryable), so the process halts. [PP-6]
  *
  * **While the core is away.** The core never waits for an independent instance, and the instance does not need the
- * core to stay up. A lost connection (closed, refused, a protocol fault, no pong within `PING_INTERVAL_MS`) is logged.
+ * core to stay up. A lost connection (closed, refused, a protocol fault, no pong within `PING_INTERVAL_MS`, a host's
+ * `connect()` that rejected) is logged.
  * Connecting again starts after the node client's back-off (1 s, doubling up to the `core` entry's `backoffCeilingMs`),
  * again and again until the process stops; the back-off starts again from 1 s once a `hello-ack` connects it.
  * Meanwhile:
@@ -69,11 +73,10 @@
  * one only a private process sends, closes the connection. [PP-4, PP-9, Q140 C]
  */
 
-import { WebSocket } from "ws";
 import type { ReadHandle } from "../db/api.js";
 import { ERROR_CODES, type ErrorCode, UmbraError } from "../db/errors.js";
 import { backoffDelay } from "../node/backoff.js";
-import { CLOSE_PROTOCOL, REPORT_HASH_MISMATCH, TRANSPORT_LIMITS, type TransportLimits, type TransportTls } from "./core-transport.js";
+import { CLOSE_PROTOCOL, type Received, REPORT_HASH_MISMATCH } from "./core-transport.js";
 import {
   decodeValue,
   encodeParameter,
@@ -82,7 +85,6 @@ import {
   type JsonValue,
   type Message,
   messageText,
-  parseMessage,
   type ReadResult,
   type StatementResult,
 } from "./messages.js";
@@ -94,12 +96,42 @@ export interface TransportPosition {
   readonly hash: Uint8Array | null;
 }
 
+/** What one connection of the transport tells it, as its carrier sees it happen. [PP-4, LM-6] */
+export interface CarrierEvents {
+  /** The connection is open: the transport sends its `hello`. */
+  opened(): void;
+  /** A message from the core, or why what it sent is none. */
+  received(received: Received): void;
+  /** Why the connection is about to end, for its log line: an error, a ping the core did not answer. */
+  failed(reason: string): void;
+  /** The connection ended, with its close's code and reason (empty when it had none). */
+  ended(code: number, reason: string): void;
+}
+
+/** One connection a carrier made. */
+export interface CarrierConnection {
+  send(text: string): void;
+  /** Ends it with `code` and `reason`. */
+  close(code: number, reason: string): void;
+  /** Ends it for the process's stop: resolves once it ended, or after the carrier's own deadline. */
+  shutdown(): Promise<void>;
+}
+
+/** How the transport connects to the core: a WebSocket to an address, or a host's channels. [PP-4, LM-6] */
+export interface PrivateCarrier {
+  /** Where it connects, in a log line (`at 127.0.0.1:7000`, `over a channel`). */
+  readonly where: string;
+  /**
+   * Makes one connection, whose events go to `events`, none of them before this returns. `signal` aborts at the
+   * transport's close: a connection made after it is ended at once.
+   */
+  dial(events: CarrierEvents, signal: AbortSignal): CarrierConnection;
+}
+
 /** What {@link PrivateTransport} takes. */
 export interface PrivateTransportOptions {
-  /** The link's address (`privateLink` for the command), `host:port`. */
-  readonly address: string;
-  /** The `tls` setting; plain WebSocket without it. */
-  readonly tls?: TransportTls | undefined;
+  /** How it connects to the core. */
+  readonly carrier: PrivateCarrier;
   /** `instanceId`. */
   readonly instance: string;
   /** The build's version, for `hello`. */
@@ -110,8 +142,6 @@ export interface PrivateTransportOptions {
   readonly backoffCeilingMs: number;
   /** Where log lines go. */
   readonly log: (line: string) => void;
-  /** The tests' limits (the largest message, the ping's interval); `TRANSPORT_LIMITS` unless given. */
-  readonly limits?: Partial<Pick<TransportLimits, "maxMessageBytes" | "pingIntervalMs">>;
   /**
    * Whether a `configHash` other than the first `hello-ack`'s refuses the transport; `check` unless given. `ignore` is
    * the negative control's, which goes on after the core's configuration changed. [PP-14]
@@ -210,11 +240,11 @@ function rowsOf(result: StatementResult): Record<string, unknown>[] {
 export class PrivateTransport {
   readonly #options: PrivateTransportOptions;
   #state: TransportState = "idle";
-  #socket: WebSocket | undefined;
+  #connection: CarrierConnection | undefined;
   #attempts = 0;
   #timer: NodeJS.Timeout | undefined;
-  #pinger: NodeJS.Timeout | undefined;
-  #alive = true;
+  /** Aborted at {@link close}: the carrier makes no connection after it. */
+  readonly #stopped = new AbortController();
   #next = 0;
   #ack: HelloAck | null = null;
   /** Why the core refused it for good, once it did. */
@@ -270,9 +300,9 @@ export class PrivateTransport {
    * it; a block committed meanwhile is the position of the next `hello`. [PP-6]
    */
   report(block: { readonly height: bigint; readonly hash: Uint8Array }): void {
-    const socket = this.#socket;
-    if (this.#state !== "connected" || socket === undefined || this.#ack?.lockstep !== true || this.#ack.refused !== null) return;
-    socket.send(messageText({ v: 1, type: "report", height: block.height.toString(), hash: hexOf(block.hash) }));
+    const connection = this.#connection;
+    if (this.#state !== "connected" || connection === undefined || this.#ack?.lockstep !== true || this.#ack.refused !== null) return;
+    connection.send(messageText({ v: 1, type: "report", height: block.height.toString(), hash: hexOf(block.hash) }));
   }
 
   /**
@@ -338,22 +368,11 @@ export class PrivateTransport {
     if (this.#state === "closed") return;
     this.#state = "closed";
     clearTimeout(this.#timer);
-    clearInterval(this.#pinger);
-    const socket = this.#socket;
-    this.#socket = undefined;
+    this.#stopped.abort();
+    const connection = this.#connection;
+    this.#connection = undefined;
     this.#fail(lost("the process is stopping"));
-    if (socket !== undefined && socket.readyState !== socket.CLOSED) {
-      await new Promise<void>((resolve) => {
-        socket.once("close", () => resolve());
-        socket.close(1001, "the private process is stopping");
-        unrefTimer(
-          setTimeout(() => {
-            socket.terminate();
-            resolve();
-          }, 1_000),
-        );
-      });
-    }
+    await connection?.shutdown();
   }
 
   /** Connects unless it is connected, connecting, waiting to connect again, or closed. */
@@ -368,7 +387,7 @@ export class PrivateTransport {
       await new Promise<void>((resolve, reject) => this.#connecting.add({ resolve, reject }));
     }
     if (this.#refusal !== null) throw this.#refusal;
-    if (this.#state !== "connected" || this.#socket === undefined) {
+    if (this.#state !== "connected" || this.#connection === undefined) {
       throw lost(this.#state === "closed" ? "the process is stopping" : "the core is not connected; connecting again");
     }
   }
@@ -376,83 +395,63 @@ export class PrivateTransport {
   /** Sends `statements` as one `read` once connected, and resolves with its `read-result` (or fails). */
   async #request(statements: { sql: string; params: JsonValue[] }[]): Promise<ReadResult> {
     await this.#connected();
-    const socket = this.#socket as WebSocket;
+    const connection = this.#connection as CarrierConnection;
     this.#next += 1;
     const id = String(this.#next);
     const answer = await new Promise<ReadResult>((resolve, reject) => {
       this.#pending.set(id, { resolve, reject });
-      socket.send(messageText({ v: 1, type: "read", id, statements }));
+      connection.send(messageText({ v: 1, type: "read", id, statements }));
     });
     if (answer.error !== undefined) throw readFailure(answer);
     return answer;
   }
 
   #connect(): void {
-    const { address, tls } = this.#options;
     this.#state = "connecting";
-    const url = `${tls === undefined ? "ws" : "wss"}://${address}/`;
-    const limits = { ...TRANSPORT_LIMITS, ...this.#options.limits };
-    const socket = new WebSocket(url, {
-      maxPayload: limits.maxMessageBytes,
-      perMessageDeflate: false,
-      ...(tls === undefined ? {} : { cert: tls.certificate, key: tls.key, ca: [...tls.trustedRoots] }),
-    });
-    this.#socket = socket;
     let reason = "the connection closed";
-    socket.on("open", () => {
-      const position = this.#options.position();
-      this.#alive = true;
-      socket.send(
-        messageText({
-          v: 1,
-          type: "hello",
-          instance: this.#options.instance,
-          version: this.#options.version,
-          height: position.height.toString(),
-          hash: position.hash === null ? null : hexOf(position.hash),
-        }),
-      );
-      this.#pinger = setInterval(() => {
-        if (!this.#alive) {
-          reason = "the core did not answer a ping";
-          socket.terminate();
-          return;
-        }
-        this.#alive = false;
-        socket.ping();
-      }, limits.pingIntervalMs);
-      unrefTimer(this.#pinger);
-    });
-    socket.on("pong", () => {
-      this.#alive = true;
-    });
-    socket.on("message", (data, binary) => {
-      const fault = this.#receive(binary ? null : data.toString());
-      if (fault !== null) {
-        reason = fault;
-        socket.close(CLOSE_PROTOCOL, fault);
-      }
-    });
-    socket.on("error", (error: Error & { code?: string }) => {
-      reason = error.code ?? error.message;
-    });
-    socket.on("close", (code, why) => {
-      if (this.#socket !== socket) return;
-      clearInterval(this.#pinger);
-      this.#socket = undefined;
-      if (code === CLOSE_PROTOCOL && why.toString() === REPORT_HASH_MISMATCH) {
-        this.#refuse();
-        return;
-      }
-      const text = why.length > 0 ? `${reason} (${code} ${why.toString()})` : reason;
-      this.#lost(text);
-    });
+    const connection: CarrierConnection = this.#options.carrier.dial(
+      {
+        opened: () => {
+          const position = this.#options.position();
+          connection.send(
+            messageText({
+              v: 1,
+              type: "hello",
+              instance: this.#options.instance,
+              version: this.#options.version,
+              height: position.height.toString(),
+              hash: position.hash === null ? null : hexOf(position.hash),
+            }),
+          );
+        },
+        received: (received) => {
+          const fault = this.#receive(received);
+          if (fault !== null) {
+            reason = fault;
+            connection.close(CLOSE_PROTOCOL, fault);
+          }
+        },
+        failed: (why) => {
+          reason = why;
+        },
+        ended: (code, why) => {
+          if (this.#connection !== connection) return;
+          this.#connection = undefined;
+          if (code === CLOSE_PROTOCOL && why === REPORT_HASH_MISMATCH) {
+            this.#refuse();
+            return;
+          }
+          const text = why.length > 0 ? `${reason} (${code} ${why})` : reason;
+          this.#lost(text);
+        },
+      },
+      this.#stopped.signal,
+    );
+    this.#connection = connection;
   }
 
   /** Handles one message from the core; returns why the connection must close, or null. */
-  #receive(text: string | null): string | null {
-    if (text === null) return "binary-frame";
-    const parsed = parseMessage(text);
+  #receive(parsed: Received): string | null {
     if (!parsed.ok) return parsed.fault;
     const message: Message = parsed.message;
     switch (message.type) {
@@ -463,7 +462,7 @@ export class PrivateTransport {
         this.#state = "connected";
         this.#attempts = 0;
         const behind = message.refused === null ? "" : "; refused lockstep-behind: this instance is behind the public cursor";
-        this.#options.log(`transport: connected to the core at ${this.#options.address}${behind}`);
+        this.#options.log(`transport: connected to the core ${this.#options.carrier.where}${behind}`);
         for (const waiting of this.#connecting) waiting.resolve();
         this.#connecting.clear();
         this.#wake();
@@ -503,12 +502,11 @@ export class PrivateTransport {
       `transport: the core's configuration hash is now ${found}, not ${recorded} as when this instance started: ` +
         "public-config-changed",
     );
-    const socket = this.#socket;
-    this.#socket = undefined;
-    clearInterval(this.#pinger);
+    const connection = this.#connection;
+    this.#connection = undefined;
     this.#fail(this.#refusal);
     for (const waiter of [...this.#waiters]) waiter.fail(this.#refusal);
-    socket?.close(1000, "public-config-changed");
+    connection?.close(1000, "public-config-changed");
     return true;
   }
 
@@ -543,7 +541,7 @@ export class PrivateTransport {
 
   /** The connection was lost (or never made): fail what waited on it and connect again after the back-off. */
   #lost(why: string): void {
-    // A close of its own never comes here: `close` drops the socket first.
+    // A close of its own never comes here: `close` drops the connection first.
     this.#fail(lost(why));
     this.#attempts += 1;
     const delay = backoffDelay(this.#attempts, this.#options.backoffCeilingMs);

@@ -340,7 +340,8 @@ import {
 } from "./loop.js";
 import { LoopPauses, type PauseBy, type PauseHold } from "./pause.js";
 import { ProcessContexts } from "./process-context.js";
-import { type CoreTransport, startCoreTransport, type TransportTls } from "../private/core-transport.js";
+import type { TransportTls } from "../private/core-transport.js";
+import { type CoreTransport, startCoreTransport } from "../private/core-socket.js";
 import { type BackupInput, type BackupSeams, type BackupWritten, backupAtStop, writeBackup } from "../backup/backup.js";
 import { databaseTarget } from "../config/database.js";
 import { handleClosed, UmbraError } from "../db/errors.js";

@@ -6,10 +6,10 @@ import { type WebSocket, WebSocketServer } from "ws";
 import type { ReadHandle } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { type ResultColumn, RESULT_COLUMNS } from "../../src/deterministic-postgresql/index.js";
-import { type CoreTransport, type CoreTransportOptions, splitAddress, startCoreTransport } from "../../src/private/core-transport.js";
+import { type CoreTransport, type CoreTransportOptions, splitAddress, startCoreTransport } from "../../src/private/core-socket.js";
 import { Lockstep } from "../../src/private/lockstep.js";
 import { hexOf, type Message, messageText, parseMessage } from "../../src/private/messages.js";
-import { PrivateTransport, type PrivateTransportOptions } from "../../src/private/private-transport.js";
+import { type PrivateSocketTransportOptions as PrivateTransportOptions, privateSocketTransport } from "../../src/private/private-socket.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
 import { launchPublicCore } from "./builds.js";
 import { endedWithin, hello, rawClient } from "./raw-client.js";
@@ -536,7 +536,7 @@ const ACK: Message = {
 /** A private transport to `address`, its log kept, its back-off 50 ms. */
 function client(address: string, rest: Partial<PrivateTransportOptions> = {}) {
   const lines: string[] = [];
-  const transport = new PrivateTransport({
+  const transport = privateSocketTransport({
     address,
     instance: "p-1",
     version: "0.9.5",

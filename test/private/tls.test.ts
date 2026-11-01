@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { mutualTlsOptions, startCoreTransport } from "../../src/private/core-transport.js";
+import { mutualTlsOptions, startCoreTransport } from "../../src/private/core-socket.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
 import { launchPrivate, type PublicCore, startPublicCore } from "./builds.js";
 import { makeCertificates, type TestCertificates } from "./certificates.js";

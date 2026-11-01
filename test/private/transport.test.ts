@@ -4,9 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
 import type { ReadHandle } from "../../src/db/api.js";
-import { startCoreTransport } from "../../src/private/core-transport.js";
+import { startCoreTransport } from "../../src/private/core-socket.js";
 import { decodeValue, hexOf, type JsonValue, type Message, messageText, type ReadResult } from "../../src/private/messages.js";
-import { PrivateTransport } from "../../src/private/private-transport.js";
+import { privateSocketTransport } from "../../src/private/private-socket.js";
 import { inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
 import { genesisHex, launchPublicCore, type PublicCore, startPublicCore } from "./builds.js";
@@ -312,7 +312,7 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
   }, TEST_TIMEOUT_MS);
 
   it("a private process's own client reads through the core: each value as the core reads it, the handle at its height", async () => {
-    const transport = new PrivateTransport({
+    const transport = privateSocketTransport({
       address,
       instance: "instance-p",
       version: UMBRADB_VERSION,

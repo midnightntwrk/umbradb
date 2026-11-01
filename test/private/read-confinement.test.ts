@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
-import { PrivateTransport } from "../../src/private/private-transport.js";
+import { privateSocketTransport } from "../../src/private/private-socket.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
 import { type PublicCore, startPublicCore } from "./builds.js";
 import { confinementProblems, PUB, PUB_ENTRY, publicState, stateProblems } from "./read-confinement-checks.js";
@@ -47,7 +47,7 @@ describe.each(PRIVATE_BACKENDS)("A172: a transport read is confined to reads on 
 
   it("a private process's own client gets read-refused naming the statement; its next read is served", async () => {
     const before = await publicState(core.db());
-    const transport = new PrivateTransport({
+    const transport = privateSocketTransport({
       address: core.transport(),
       instance: "a172-client",
       version: UMBRADB_VERSION,

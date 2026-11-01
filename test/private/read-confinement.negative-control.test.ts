@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startCoreTransport } from "../../src/private/core-transport.js";
+import { startCoreTransport } from "../../src/private/core-socket.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
 import { type PublicCore, startPublicCore } from "./builds.js";
 import { confinementProblems, PUB, PUB_ENTRY } from "./read-confinement-checks.js";

@@ -1,17 +1,12 @@
 /**
- * The core's side of the process transport. The core process listens for private processes at the address its
- * network plan gives the link (`umbradb run`'s `listen.privateLink`, or a library host's request) over WebSocket
- * (`ws`), and answers them with the messages of `./messages.ts`. When the plan listens for the link, the process starts
- * the transport once its database is open and its chain known, before the bootstrap's wait, and closes it at its stop
- * (`src/runner/process.ts`). [PP-3, PP-4, PP-5, PP-9, PP-11; design §8; CORE-ARCH §4.14, §4.20]
- *
- * **Mutual TLS** is opt-in, through the `core` entry's `tls`: `certificate` and `key` (the core's own) and
- * `trustedRoots` (the certificate authorities whose certificates it accepts), each PEM text. With `tls` set, the server
- * is an `https` server that requires a client certificate signed by one of `trustedRoots` (`requestCert`,
- * `rejectUnauthorized`). A private process without such a certificate is refused in the TLS handshake, before any
- * WebSocket exists (`CERTIFICATE_REQUIRED`). Without `tls`, it is a plain `http` server and the transport is
- * unauthenticated: for trusted networks, one host, or a TEE with its own channel. TEE attestation is out of scope.
- * [PP-11, Q34; design §14]
+ * The core's side of the process transport: its session logic, which every carrier of the link shares. The core
+ * process serves private processes at the address its network plan gives the link (`umbradb run`'s
+ * `listen.privateLink`, or a library host's request) over WebSocket (`./core-socket.ts`, the socket carrier), or over
+ * the channels a library host hands it (`./core-channels.ts`), and answers them with the messages of `./messages.ts`.
+ * Each connection is one {@link LinkSession} of {@link coreSessions}, over its carrier's {@link LinkConnection}: the
+ * rules below are the same on every carrier. When the plan serves the link, the process starts it once its database
+ * is open and its chain known, before the bootstrap's wait, and closes it at its stop (`src/runner/process.ts`).
+ * [PP-3, PP-4, PP-5, PP-9, PP-11, LM-6; design §8; CORE-ARCH §4.14, §4.20]
  *
  * **A connection** speaks after its `hello`: any other message first closes it. A `hello` whose instance id another
  * connection holds (or this one already, when `hello` is sent twice) is refused with `hello-ack.refused`
@@ -57,22 +52,20 @@
  * **What closes a connection** [PP-4]:
  * - a message that is not JSON, has an unknown `v` or `type`, or fails its schema; an `api` or `api-result` message is
  *   an unknown `type`, since nothing calls a module across the transport [Q140 C];
- * - a binary frame;
- * - a message over {@link MAX_MESSAGE_BYTES} (`ws`'s `maxPayload`);
+ * - a binary frame (on a channel: a message that is no text);
+ * - a message over {@link MAX_MESSAGE_BYTES} (`ws`'s `maxPayload`; on a channel, its envelope's check);
  * - a message only the core sends (`hello-ack`, `committed`, `read-result`);
  * - more than {@link MAX_PENDING_READS} reads unanswered at once;
- * - a peer that reads so slowly that more than {@link MAX_BUFFERED_BYTES} wait in its socket: the core never waits for
- *   an instance, it drops it, and the instance reconnects and catches up from the public cursor [PP-5];
+ * - a peer that reads so slowly that more than {@link MAX_BUFFERED_BYTES} wait in its socket (or its channel, when the
+ *   channel tells its `bufferedAmount`): the core never waits for an instance, it drops it, and the instance reconnects
+ *   and catches up from the public cursor [PP-5];
  * - a peer that does not answer a ping within {@link PING_INTERVAL_MS} (a half-open connection would otherwise hold its
- *   instance id).
+ *   instance id); the carrier pings, and ends the session by {@link LinkSession.terminate}.
  *
  * Each close is logged with its reason, never with the message's text.
  */
 
-import { createServer as createHttpServer, type IncomingMessage, type Server } from "node:http";
-import { createServer as createHttpsServer, type ServerOptions } from "node:https";
-import type { AddressInfo } from "node:net";
-import { type RawData, type WebSocket, WebSocketServer } from "ws";
+
 import type { Database, ReadHandle } from "../db/api.js";
 import { UmbraError } from "../db/errors.js";
 import { BLOCKS_TABLE } from "../backbone/core-block-commit/sql.js";
@@ -88,13 +81,12 @@ import {
   type JsonValue,
   type Message,
   messageText,
-  parseMessage,
+  type Parsed,
   type Read,
   READ_REFUSED,
   type Report,
   type StatementResult,
 } from "./messages.js";
-import { unrefTimer } from "./timers.js";
 
 /** The largest message either side sends or takes, in bytes (`ws`'s `maxPayload`; a `read-result` above it is refused). */
 export const MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
@@ -151,12 +143,8 @@ export interface InstanceView {
   readonly hash: string | null;
 }
 
-/** What {@link startCoreTransport} takes. */
-export interface CoreTransportOptions {
-  /** The plan's address of the link (`listen.privateLink` for the command), `host:port` (port 0 for a free one). */
-  readonly address: string;
-  /** The `tls` setting; plain WebSocket without it. */
-  readonly tls?: TransportTls | undefined;
+/** What {@link coreSessions} takes: everything of the link but its carrier. */
+export interface CoreSessionOptions {
   /** The public database (reads only). */
   readonly db: Pick<Database, "read">;
   /** The public genesis hash, for `hello-ack`. */
@@ -175,8 +163,6 @@ export interface CoreTransportOptions {
   readonly configHash: string;
   /** Where log lines go. */
   readonly log: (line: string) => void;
-  /** The negative controls' `https` options from `tls`; {@link mutualTlsOptions} unless given. */
-  readonly serverTls?: (tls: TransportTls) => ServerOptions;
   /** The negative controls' handling of a second `hello` of a connected id; refused unless `"accept"`. */
   readonly duplicates?: "refuse" | "accept";
   /** The negative controls' check of a `report`'s hash; compared with the public block's unless `"accept"`. */
@@ -190,46 +176,65 @@ export interface CoreTransportOptions {
   readonly limits?: Partial<TransportLimits>;
 }
 
-/** The core's running transport. */
-export interface CoreTransport {
-  /** The address it listens on. */
-  readonly host: string;
-  readonly port: number;
+/**
+ * One connection of the link as the session logic drives it, whatever carries it: a WebSocket (`./core-socket.ts`) or
+ * a host's channel (`./core-channels.ts`). [PP-4, LM-6]
+ */
+export interface LinkConnection {
+  /** Whether it still carries messages: nothing is sent once it does not. */
+  isOpen(): boolean;
+  /** The bytes waiting to be delivered, or null when the carrier does not know them (then it bounds its own queue). */
+  bufferedAmount(): number | null;
+  send(text: string): void;
+  /** Ends it with `code` and `reason`: the carrier's own close (a WebSocket's close frame, a channel's close message). */
+  close(code: number, reason: string): void;
+  /** Ends it at once. */
+  terminate(): void;
+}
+
+/** What a carrier read from its peer: a message as {@link parseMessage} reads it, or a fault of the carrier's own. */
+export type Received = Parsed | { readonly ok: false; readonly fault: string };
+
+/** One connection's session (see the module comment), told by its carrier what happens on the connection. */
+export interface LinkSession {
+  /** A message from the peer, or why what it sent is none. */
+  received(received: Received): void;
+  /** A fault the carrier found: logged with its reason, and the connection closed with `code`. */
+  drop(code: number, reason: string): void;
+  /** A peer the carrier gives up on (no pong): logged with its reason, and the connection ended at once. */
+  terminate(reason: string): void;
+  /** The connection ended, however: its instance's id is free again. */
+  closed(): void;
+}
+
+/** The core's sessions of the link: one per connection its carriers open. */
+export interface CoreSessions {
+  /** A new connection, past its carrier's own handshake: its session waits for its `hello`. */
+  open(connection: LinkConnection): LinkSession;
+  /** Tells every connection past its `hello` that `block` committed (`committed`). */
+  committed(block: BlockRef): void;
+  /** The instances connected now. */
+  instances(): readonly InstanceView[];
+}
+
+/** The core's running link, whatever its carrier: what the process tells it and asks of it. [PP-4, LM-6] */
+export interface CoreLink {
   /** Tells every connected instance that `block` committed (`committed`). */
   committed(block: BlockRef): void;
   /** The instances connected now. */
   instances(): readonly InstanceView[];
-  /** Stops listening and closes every connection (1001); resolves once the server closed. */
+  /** Stops serving and closes every connection; resolves once its carrier closed. */
   close(): Promise<void>;
-}
-
-/** The `https` options of mutual TLS from `tls` (see the module comment). */
-export function mutualTlsOptions(tls: TransportTls): ServerOptions {
-  return {
-    cert: tls.certificate,
-    key: tls.key,
-    ca: [...tls.trustedRoots],
-    requestCert: true,
-    rejectUnauthorized: true,
-  };
-}
-
-/** `host:port` split; a bracketed IPv6 host without its brackets. */
-export function splitAddress(address: string): { readonly host: string; readonly port: number } {
-  const colon = address.lastIndexOf(":");
-  const host = address.slice(0, colon);
-  return { host: host.startsWith("[") ? host.slice(1, -1) : host, port: Number(address.slice(colon + 1)) };
 }
 
 /** One connection. */
 interface Session {
-  readonly socket: WebSocket;
+  readonly connection: LinkConnection;
   hello: Hello | null;
   reported: Report | null;
   /** Why the core does not count this connection's instance, or null. [PP-6, PP-7] */
   refused: "lockstep-behind" | "report-hash-mismatch" | null;
   pending: number;
-  alive: boolean;
 }
 
 const HASH_SQL = `SELECT hash FROM ${BLOCKS_TABLE} WHERE height = $1`;
@@ -269,33 +274,28 @@ async function statementResult(read: ReadHandle, rows: Record<string, unknown>[]
 /** A failure as a `read-result`'s code: an `UmbraError`'s, `database-error` otherwise. [AE-6] */
 const codeOf = (error: unknown): string => (error instanceof UmbraError ? error.code : "database-error");
 
-/** Starts the core's transport (see the module comment): resolves once it listens; rejects with `listen`'s error. */
-export async function startCoreTransport(options: CoreTransportOptions): Promise<CoreTransport> {
-  const { host, port } = splitAddress(options.address);
+/** The core's sessions of the link (see the module comment), over whatever carrier opens their connections. */
+export function coreSessions(options: CoreSessionOptions): CoreSessions {
   const limits: TransportLimits = { ...TRANSPORT_LIMITS, ...options.limits };
-  const server: Server =
-    options.tls === undefined
-      ? createHttpServer()
-      : createHttpsServer((options.serverTls ?? mutualTlsOptions)(options.tls));
-  const wss = new WebSocketServer({ noServer: true, maxPayload: limits.maxMessageBytes, perMessageDeflate: false });
-  const sessions = new Set<Session>();
   const connected = new Map<string, Session>();
   const lockstep = options.lockstep ?? new Lockstep({ listed: options.lockstepInstances, log: options.log });
 
+  /** The connection's name in a log line: its instance's, once its `hello` gave one. */
+  const of = (session: Session): string => (session.hello === null ? "" : ` of ${session.hello.instance}`);
+
   const drop = (session: Session, code: number, reason: string): void => {
-    options.log(`transport: closed the connection${session.hello === null ? "" : ` of ${session.hello.instance}`}: ${reason}`);
-    session.socket.close(code, reason);
-    // A peer that never completes the close handshake is ended after it.
-    unrefTimer(setTimeout(() => session.socket.terminate(), 5_000));
+    options.log(`transport: closed the connection${of(session)}: ${reason}`);
+    session.connection.close(code, reason);
   };
 
   const send = (session: Session, message: Message): void => {
-    if (session.socket.readyState !== session.socket.OPEN) return;
-    if (session.socket.bufferedAmount > limits.maxBufferedBytes) {
+    if (!session.connection.isOpen()) return;
+    const buffered = session.connection.bufferedAmount();
+    if (buffered !== null && buffered > limits.maxBufferedBytes) {
       drop(session, CLOSE_PROTOCOL, "too-slow");
       return;
     }
-    session.socket.send(messageText(message));
+    session.connection.send(messageText(message));
   };
 
   const ack = (session: Session, instance: string, refused: "duplicate-instance" | "lockstep-behind" | null): void => {
@@ -427,13 +427,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     }
   };
 
-  const onMessage = (session: Session, data: RawData, binary: boolean): void => {
-    if (binary) {
-      drop(session, CLOSE_PROTOCOL, "binary-frame");
-      return;
-    }
-    // A text frame, whole: `ws` gives it as one Buffer (its default `binaryType`).
-    const parsed = parseMessage((data as Buffer).toString("utf8"));
+  const received = (session: Session, parsed: Received): void => {
     if (!parsed.ok) {
       drop(session, CLOSE_PROTOCOL, parsed.fault);
       return;
@@ -466,59 +460,25 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     }
   };
 
-  wss.on("connection", (socket: WebSocket) => {
-    const session: Session = { socket, hello: null, reported: null, refused: null, pending: 0, alive: true };
-    sessions.add(session);
-    socket.on("message", (data, binary) => onMessage(session, data, binary));
-    socket.on("pong", () => {
-      session.alive = true;
-    });
-    socket.on("error", () => undefined);
-    socket.on("close", () => {
-      sessions.delete(session);
-      if (session.hello !== null && connected.get(session.hello.instance) === session) {
-        connected.delete(session.hello.instance);
-        lockstep.disconnected(session.hello.instance);
-        options.log(`transport: instance ${session.hello.instance} disconnected`);
-      }
-    });
-  });
-  server.on("upgrade", (request: IncomingMessage, socket, head) => {
-    wss.handleUpgrade(request, socket, head, (client) => wss.emit("connection", client, request));
-  });
-  server.on("tlsClientError", () => undefined);
-
-  const pings = setInterval(() => {
-    for (const session of sessions) {
-      if (!session.alive) {
-        options.log(`transport: closed the connection${session.hello === null ? "" : ` of ${session.hello.instance}`}: no-pong`);
-        session.socket.terminate();
-        continue;
-      }
-      session.alive = false;
-      session.socket.ping();
-    }
-  }, limits.pingIntervalMs);
-  unrefTimer(pings);
-
-  await new Promise<void>((resolve, reject) => {
-    const failed = (error: Error): void => {
-      clearInterval(pings);
-      reject(error);
-    };
-    server.once("error", failed);
-    server.listen(port, host, () => {
-      server.off("error", failed);
-      resolve();
-    });
-  });
-  const bound = server.address() as AddressInfo;
-  options.log(`transport listening on ${host}:${bound.port}${options.tls === undefined ? "" : " (mutual TLS)"}`);
-
-  let closing: Promise<void> | undefined;
   return Object.freeze({
-    host,
-    port: bound.port,
+    open(connection: LinkConnection): LinkSession {
+      const session: Session = { connection, hello: null, reported: null, refused: null, pending: 0 };
+      return Object.freeze({
+        received: (parsed: Received) => received(session, parsed),
+        drop: (code: number, reason: string) => drop(session, code, reason),
+        terminate: (reason: string) => {
+          options.log(`transport: closed the connection${of(session)}: ${reason}`);
+          connection.terminate();
+        },
+        closed: () => {
+          if (session.hello !== null && connected.get(session.hello.instance) === session) {
+            connected.delete(session.hello.instance);
+            lockstep.disconnected(session.hello.instance);
+            options.log(`transport: instance ${session.hello.instance} disconnected`);
+          }
+        },
+      });
+    },
     committed(block: BlockRef) {
       for (const session of connected.values()) {
         send(session, { v: 1, type: "committed", height: block.height.toString(), hash: hexOf(block.hash), configHash: options.configHash });
@@ -534,24 +494,6 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
           hash: (last as Hello | Report).hash,
         });
       });
-    },
-    close() {
-      closing ??= (async () => {
-        clearInterval(pings);
-        for (const session of sessions) session.socket.close(1001, "the core is stopping");
-        await new Promise<void>((resolve) => {
-          server.close(() => resolve());
-          // Sockets that do not finish their close handshake.
-          unrefTimer(
-            setTimeout(() => {
-              for (const session of sessions) session.socket.terminate();
-              server.closeAllConnections();
-            }, 1_000),
-          );
-        });
-        await new Promise<void>((resolve) => wss.close(() => resolve()));
-      })();
-      return closing;
     },
   });
 }

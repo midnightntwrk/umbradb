@@ -44,7 +44,8 @@ import { UmbraError } from "../../db/errors.js";
 import { openPostgres } from "../../db/postgres.js";
 import { UMBRADB_VERSION } from "../../config/build.js";
 import type { TransportTls } from "../../private/core-transport.js";
-import { PrivateTransport, type TransportPosition } from "../../private/private-transport.js";
+import type { PrivateTransport, TransportPosition } from "../../private/private-transport.js";
+import { privateSocketTransport } from "../../private/private-socket.js";
 import type { PublicItem } from "../../modules/graph.js";
 import type { BlockRef } from "../../runner/block-source.js";
 
@@ -216,7 +217,7 @@ export function openPublicSide(
   const { link } = options;
   const transport =
     link !== null
-      ? new PrivateTransport({
+      ? privateSocketTransport({
           address: link.address,
           tls: link.tls,
           instance: settings.instanceId as string,
