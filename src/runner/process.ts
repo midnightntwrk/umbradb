@@ -231,9 +231,8 @@ import { openPostgres } from "../db/postgres.js";
 import { refuseWritingReader, transportReaderFacts, type TransportReaderFacts } from "../private/transport-reader.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkHistory, graphInputOf, type HistoryCheck, versionText } from "../config/history.js";
-import { loadConfig } from "../config/load.js";
+import { configModuleUrl, configPath, loadConfig } from "../config/load.js";
 import { resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import type { PlainObject } from "../config/plain-data.js";
 import { configRedactor, type Redactor, redactor } from "../config/redact.js";
 import type { CheckedConfig, CheckedEntry } from "../config/validate.js";
@@ -774,33 +773,15 @@ interface LoadedInput {
 }
 
 /**
- * The absolute path of a `{ file }` configuration — a file URL converted (`fileURLToPath`), a relative path resolved
- * against `cwd` —, or null for `{ data }`. Throws `invalid-configuration` (`load-failed`) for a URL that is no file
- * URL. [CF-1, LM-2]
- */
-export function configFileOf(config: EngineConfig, cwd: string): string | null {
-  if (!("file" in config)) return null;
-  const { file } = config;
-  if (!(file instanceof URL)) return resolve(cwd, file);
-  if (file.protocol !== "file:") {
-    throw new UmbraError(
-      "invalid-configuration",
-      `the configuration file ${file.href} could not be loaded: a configuration is a file path or a file: URL`,
-      { file: file.href, reason: "load-failed", errorCode: null },
-    );
-  }
-  return fileURLToPath(file);
-}
-
-/**
  * The ledger worker the engine starts for `input` (see {@link EngineOptions.ledgerWorker}): the one given, else
  * UmbraDB's entry, which for a `{ file }` configuration imports that file in the worker for its `modules` export's
  * ledger tasks. [LG-10, LG-17, MD-1, LM-7]
  */
 export function ledgerWorkerOf(input: Pick<EngineOptions, "config" | "cwd" | "ledgerWorker">): () => LedgerHost {
   if (input.ledgerWorker !== undefined) return input.ledgerWorker;
-  const file = configFileOf(input.config, input.cwd);
-  return () => startLedgerWorker(file === null ? {} : { modules: pathToFileURL(file) });
+  const { config } = input;
+  const modules = "file" in config ? configModuleUrl(configPath(config.file, input.cwd)) : null;
+  return () => startLedgerWorker(modules === null ? {} : { modules });
 }
 
 /**
@@ -1194,14 +1175,14 @@ class Process implements ProcessHandle {
   }
 
   /**
-   * Startup's load (step 2): a `{ file }` imported with its `modules` export (`loadConfig`, relative to `cwd`), or the
-   * data given. Rejects with the loader's refusal, which names the file. [CF-1, LM-1]
+   * Startup's load (step 1): a `{ file }` imported with its `modules` export (`loadConfig`: a file URL converted, a
+   * path resolved against `cwd`), or the data given. Rejects with the loader's refusal, which names the file.
+   * [CF-1, LM-1, LM-2]
    */
   async #load(): Promise<LoadedInput> {
     const { config, cwd } = this.#input;
-    const file = configFileOf(config, cwd);
-    if (file === null) return { file: null, data: (config as { readonly data: unknown }).data, modules: [] };
-    return loadConfig({ file, cwd });
+    if ("file" in config) return loadConfig({ file: config.file, cwd });
+    return { file: null, data: config.data, modules: [] };
   }
 
   /**

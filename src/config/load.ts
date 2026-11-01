@@ -25,7 +25,8 @@
  * Every failure refuses startup with an `UmbraError` (not retryable) that names the file. It is either
  * `invalid-configuration`, with one of these `details.reason`s:
  * - `file-not-found`: no file at the path;
- * - `load-failed`: importing or evaluating it threw; the error is the cause, and its `code` is in `details.errorCode`;
+ * - `load-failed`: importing or evaluating it threw (the error is the cause, and its `code` is in `details.errorCode`),
+ *   or the file was named by a URL that is no `file:` URL;
  * - `no-default-export`;
  * - `modules-not-a-list`: a `modules` export that is not an array;
  *
@@ -36,7 +37,7 @@
 
 import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { UmbraError } from "../db/errors.js";
 import { type PlainData, plainData } from "./plain-data.js";
 
@@ -45,8 +46,11 @@ export const DEFAULT_CONFIG_FILE = "umbradb.config.ts";
 
 /** Where the configuration file is. */
 export interface LoadOptions {
-  /** The file (`--config`), absolute or relative to `cwd`; {@link DEFAULT_CONFIG_FILE} when absent. */
-  readonly file?: string;
+  /**
+   * The file (`--config`): a path, absolute or relative to `cwd`, or a file URL; {@link DEFAULT_CONFIG_FILE} when
+   * absent.
+   */
+  readonly file?: string | URL;
   /**
    * The working directory a relative `file` resolves against: always given, so that the loader never reads the host
    * program's own (a library host's `cwd`, the command's working directory). [LM-2, CF-1]
@@ -90,9 +94,34 @@ async function isFile(file: string): Promise<boolean> {
   }
 }
 
+/**
+ * The absolute path of the configuration file `file`: a file URL converted (`fileURLToPath`), a path resolved against
+ * `cwd`. Throws `invalid-configuration` (`load-failed`, naming the URL) for a URL that is no `file:` URL. [CF-1, LM-2]
+ */
+export function configPath(file: string | URL, cwd: string): string {
+  if (!(file instanceof URL)) return resolve(cwd, file);
+  if (file.protocol !== "file:") {
+    throw invalid(
+      file.href,
+      "load-failed",
+      `the configuration file ${file.href} could not be loaded: a configuration file is a path or a file: URL`,
+      { errorCode: null },
+    );
+  }
+  return fileURLToPath(file);
+}
+
+/**
+ * The URL that names the configuration file at `path` (absolute) as a module: the one the loader imports, and the one
+ * the ledger worker imports for the file's user modules, so both threads import the same module. [MD-1, LG-17]
+ */
+export function configModuleUrl(path: string): URL {
+  return pathToFileURL(path);
+}
+
 /** Loads the configuration file: see the module comment. [CF-1] */
 export async function loadConfig(options: LoadOptions): Promise<LoadedConfig> {
-  const file = resolve(options.cwd, options.file ?? DEFAULT_CONFIG_FILE);
+  const file = configPath(options.file ?? DEFAULT_CONFIG_FILE, options.cwd);
   if (!(await isFile(file))) {
     throw invalid(
       file,
@@ -103,7 +132,7 @@ export async function loadConfig(options: LoadOptions): Promise<LoadedConfig> {
   }
   let module: Record<string, unknown>;
   try {
-    module = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
+    module = (await import(configModuleUrl(file).href)) as Record<string, unknown>;
   } catch (error) {
     const errorCode = (error as { code?: unknown } | null)?.code;
     const syntax = TYPESCRIPT_SYNTAX.includes(errorCode as string)
