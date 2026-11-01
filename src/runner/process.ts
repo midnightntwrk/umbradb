@@ -218,8 +218,9 @@
  * refusal of the configuration itself is logged finding by finding, with those secrets and the ones the validation
  * read (the resolver's `refusalSecrets`) redacted: `startup refused: <code> (<n> findings); the process ends`, then
  * `startup refused: <path>: <message> [<code>]` for each finding; `started` rejects with the refusal redacted alike
- * (`shownRefusal`), and admin shows its reason so. A later refusal, a halt and each retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
- * `processing retries in <ms> ms (<condition>, attempt <n>): …`, `startup retries …`). [CF-4, AE-6]
+ * (`shownRefusal`), and admin shows its reason so. A later refusal, a halt and each retry are logged with their
+ * reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`, `processing retries in <ms> ms
+ * (<condition>, attempt <n>): …`, `startup retries …`). [CF-4, AE-6]
  *
  * **Ports.** What a process does to the program it runs in comes only through its ports, each off when absent, so a
  * host program's process does nothing to it by default; `umbradb run` gives all but the ledger worker's entry [LM-2,
