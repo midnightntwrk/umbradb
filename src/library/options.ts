@@ -98,6 +98,18 @@ const finding = (path: string, message: string): Finding =>
 const threw = (path: string): Finding => finding(path, "reading it threw");
 
 /**
+ * The finding at `cwd` when the host's working directory, which a `cwd` absent (`given` undefined) or relative needs,
+ * cannot be read — `process.cwd()` threw `error`, the directory removed under the host: the options are then refused,
+ * and an absolute `cwd` is what starts. [LM-1, LM-10, G8, issue 00067]
+ */
+export function cwdUnreadable(given: string | undefined, error: unknown): Finding {
+  const code = guarded(() => (error as { readonly code?: unknown }).code);
+  const why = typeof code === "string" ? ` (${code})` : "";
+  const what = given === undefined ? "is not given" : `${JSON.stringify(given)} is relative`;
+  return finding("cwd", `${what}, and the host's working directory cannot be read${why}: give an absolute cwd`);
+}
+
+/**
  * `value` read once as plain data at `path`, `depth` levels down (see the module comment): an array becomes a frozen
  * copy of its elements, another object (a proxy's too) a frozen object of its own enumerable keys and their values,
  * anything else is itself. Each read that throws adds its finding to `found`, and what could not be read is

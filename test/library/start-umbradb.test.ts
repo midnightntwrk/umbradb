@@ -11,6 +11,7 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { startProcess } from "../runner/process-build.js";
 import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library-fixtures.js";
+import { runQuietChild } from "./quiet-child.js";
 
 /**
  * `startUmbraDB`, the library's one entry (`src/library/start-umbradb.ts`): its handle, its options and their refusals.
@@ -604,4 +605,53 @@ describe("the handlers exist from the return on", () => {
       point: "on-db-write",
     });
   });
+});
+
+describe("LM-1: a host whose working directory was removed (issue 00067)", () => {
+  /** What `./gone-cwd.child.ts` writes to its result file. */
+  interface GoneCwdResult {
+    readonly cwdThrows: boolean;
+    readonly runs: readonly {
+      readonly name: string;
+      readonly threw: string | null;
+      readonly refused: { readonly code: string; readonly reason: string | null; readonly option: string | null; readonly message: string } | null;
+      readonly cursor: string | null;
+      readonly state: string | null;
+    }[];
+  }
+  let given: string;
+  beforeAll(() => {
+    given = mkdtempSync(join(tmpdir(), "umbradb-gone-cwd-given-"));
+  });
+  afterAll(() => {
+    rmSync(given, { recursive: true, force: true });
+  });
+
+  it("an absolute cwd is used as it is and starts; without cwd, or a relative one, started rejects at cwd; nothing throws", async () => {
+    const run = await runQuietChild<GoneCwdResult>("./gone-cwd.child.ts", { cwd: given });
+    expect(run.stderr).toBe("");
+    expect(run.code).toBe(0);
+    const result = run.result as GoneCwdResult;
+    // The fault is real in the child: its process.cwd() throws once its directory is gone.
+    expect(result.cwdThrows).toBe(true);
+    const [absolute, absent, relative] = result.runs;
+    // The absolute cwd is the base of the PGlite path, read without the host's working directory. [G8, D-14]
+    expect(absolute).toEqual({ name: "absolute", threw: null, refused: null, cursor: "3", state: "stopping" });
+    expect(existsSync(join(given, "data", "db"))).toBe(true);
+    // Without cwd, or with a relative one, the working directory is needed and cannot be read: refused at the
+    // configuration step, through started, at the option cwd. [LM-1, LM-10]
+    for (const [refused, name] of [
+      [absent, "absent"],
+      [relative, "relative"],
+    ] as const) {
+      expect(refused, name).toMatchObject({
+        name,
+        threw: null,
+        refused: { code: "invalid-configuration", reason: "invalid-option", option: "cwd" },
+        cursor: null,
+        state: "refused",
+      });
+      expect(refused?.refused?.message, name).toContain("give an absolute cwd");
+    }
+  }, 300_000);
 });

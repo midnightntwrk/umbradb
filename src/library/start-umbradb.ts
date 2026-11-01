@@ -22,7 +22,9 @@
  *
  * **`cwd`.** Every relative path the process meets — a `{ file }`, a PGlite `path`, a backup's target — resolves
  * against `cwd`, the host's working directory (`process.cwd()`) unless given; a relative `cwd` resolves against it
- * once, here. This module is the one place a library process reads the working directory. [LM-2, G8, G10, D-14]
+ * once, here. This module is the one place a library process reads the working directory, and only for a `cwd` absent
+ * or relative: an absolute one is used as it is. A working directory that cannot be read (removed under the host) is a
+ * finding at `cwd` that refuses the options. [LM-1, LM-2, G8, G10, D-14, issue 00067]
  *
  * **The handle is a facade** ({@link UmbraDBHandle}): exactly the members of design §4, none of the engine's test seams
  * nor its `backup(out, seams)`; {@link UmbraDBStarted} holds the module API's address, the side and S — never the
@@ -45,10 +47,11 @@
  * authentication, Origin policy, connection and rate limits, and its own error answers. [LM-4, LM-5, LM-6, N7, N8, N9]
  */
 
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { startAdminServer } from "../admin/server.js";
 import type { BackupWritten } from "../backup/backup.js";
 import type { ProcessSide } from "../config/core-settings.js";
+import type { Finding } from "../config/validate.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import type { NodeHttpHandler, NodeUpgradeHandler } from "../runner/api-answers.js";
 import type { InMemoryBlockSource } from "../runner/in-memory-source.js";
@@ -66,6 +69,7 @@ import {
 import type { NetworkRequest } from "../runner/resolve.js";
 import type { PrivateLinkChannel } from "./channels.js";
 import {
+  cwdUnreadable,
   librarySettingsRefusal,
   modulesGivenTwice,
   optionFindings,
@@ -180,6 +184,23 @@ function userModulesOf(values: Readonly<Record<string, unknown>>): EngineInput["
   return { modules: (values.modules as readonly unknown[] | undefined) ?? [] };
 }
 
+/**
+ * The process's `cwd` for `given`, the `cwd` option as read: one given absolute as it is, without reading the host's
+ * working directory; else that directory — the one read of it [G10, D-14] — and a relative `cwd` resolved against it
+ * once. When `process.cwd()` throws (the directory removed under the host), `unread` is the finding at `cwd` that
+ * refuses the options through `started`: `startUmbraDB` never throws for it. [LM-1, LM-2, G8, issue 00067]
+ */
+function cwdOf(given: unknown): { readonly cwd: string } | { readonly unread: Finding } {
+  if (typeof given === "string" && isAbsolute(given)) return { cwd: given };
+  const relative = typeof given === "string" ? given : undefined;
+  try {
+    const host = process.cwd();
+    return { cwd: relative === undefined ? host : resolve(host, relative) };
+  } catch (error) {
+    return { unread: cwdUnreadable(relative, error) };
+  }
+}
+
 /** Whether the network request, as checked, asks admin to listen: `true`, or `{ host?, port }`. [LM-3, G9] */
 function listensForAdmin(network: unknown): boolean {
   const admin = (network as NetworkRequest | undefined)?.admin;
@@ -197,17 +218,20 @@ const startedOf = (started: StartedProcess): UmbraDBStarted =>
  */
 export function engineInputOf(options: UmbraDBOptions): { readonly input: EngineInput } {
   const read = readOptions(options);
+  const directory = cwdOf(read.values.cwd);
   const refusal =
-    optionsRefusal(optionFindings(read)) ?? modulesGivenTwice(read.values) ?? sourceRefusal(read.values.source);
+    optionsRefusal([...optionFindings(read), ...("unread" in directory ? [directory.unread] : [])]) ??
+    modulesGivenTwice(read.values) ??
+    sourceRefusal(read.values.source);
   const values = refusal === null ? read.values : {};
   // The host's log, when it is one, also tells a refusal of the other options. [AE-3]
   const log = guardedLog(read.values.log);
-  // The one read of the host's working directory. [G10, D-14]
-  const cwd = typeof values.cwd === "string" ? resolve(process.cwd(), values.cwd) : process.cwd();
   const input: EngineInput = {
     // A refusal of the options is given before anything is read, so the configuration is then none. [LM-10]
     config: refusal === null ? (values.config as EngineInput["config"]) : { data: null },
-    cwd,
+    // A refused start resolves no path (its refusal is thrown at the configuration step's start): the working
+    // directory that could not be read is then the `cwd` as given, or the empty path. [LM-10, issue 00067]
+    cwd: "cwd" in directory ? directory.cwd : typeof read.values.cwd === "string" ? read.values.cwd : "",
     userModules: userModulesOf(values),
     network: (values.network as NetworkRequest | undefined) ?? {},
     // The admin thread only when admin is asked to listen (`true`, or an address in code). [G4, G9, LM-3]
