@@ -23,13 +23,15 @@ import { exchange, type MapiHooks, mapiModule, mountHandlers } from "./mounted-f
 /**
  * Mounted admin (`startUmbraDB`'s `admin.http`) on PostgreSQL 18 and a PGlite directory. [LM-5, LM-4, AE-1, AE-5, AE-6]
  *
- * - **L61** `[NEG]`: with no admin listener, mounted `/status` and `/config` reach the expected `core_digest.tables`
- *   rows, server version and identity anchor — the oracle reads them itself from the database (`db.query`, a plain
- *   connection on PostgreSQL, a plain engine on the directory once the process closed it), at the committed height
- *   the loop stays at — after startup's open with no commit yet (a restart on a database with a cursor), after
- *   commits, and after a forced interleaving in which a commit lands during a fact read (the read held after its
- *   queries until the commit landed); a listening admin on the same database reaches the same values. The negative
- *   control forgets a commit that landed during a read, and fails the freshness assertion. No database read runs per
+ * - **L61** `[NEG]`: with no admin listener (`network` not given; `status().listening.admin` null), mounted `/status`
+ *   and `/config` reach the expected `core_digest.tables` rows, server version and identity anchor — the oracle reads
+ *   them itself from the database (`db.query`, a plain connection on PostgreSQL, a plain engine on the directory once
+ *   the process closed it), at the committed height the loop stays at — after startup's open with no commit yet (a
+ *   restart on a database with a cursor), after commits, and after a forced interleaving in which a commit lands during
+ *   a fact read (the read held after its queries until the commit landed). A listening admin on the same database
+ *   reaches the same values, in runs of its own. The negative controls, with no listener: fact reads that forget a
+ *   commit landing during them fail the freshness assertion; a process that publishes only with a listener (the
+ *   early return before mounted admin) never shows the facts, while with a listener the same fault passes. No database read runs per
  *   request: the four endpoints answer within 1 s while PGlite's one session is held by an open block transaction, and
  *   on PostgreSQL while the tables they show are locked. The heartbeat's timer does not keep the host's event loop
  *   alive: a host that returns without stopping ends by itself (its control, a heartbeat kept referenced, does not).
@@ -131,30 +133,37 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
+  /** How one L61 run goes (see {@link factsRun}). */
+  interface FactsRunOptions {
+    /** Admin's test seams beside the run's own hold of a fact read. */
+    readonly seams?: AdminSeams;
+    /** A commit `[a, b]` during a fact read after the heads: `a`'s read is held after its queries until `b` committed. */
+    readonly interleave?: readonly [bigint, bigint];
+    /** Admin also listens (`network.admin` at port 0), and must show what mounted admin shows; none by default. */
+    readonly listener?: boolean;
+  }
+
   /**
-   * One L61 run on `db`, its in-memory head first `heads[0]`: the facts mounted admin shows at each of `heads` (each
-   * finalized once the one before was shown) must be the listening admin's and the database's own, the oracle reading
-   * them itself (on PGlite once the process closed). With `interleave` `[a, b]` after them, the fact read of `a`'s
-   * commit is held after its queries until `b` committed, and the facts at `b` must be shown then. The problems, none
-   * when so.
+   * One L61 run on `db`, its in-memory head first `heads[0]`, with no admin listener unless `listener` (the process's
+   * `status().listening.admin` is checked to be null): the facts mounted admin shows at each of `heads` (each finalized
+   * once the one before was shown) must be the database's own, the oracle reading them itself (on PGlite once the
+   * process closed), and with `listener` the listening admin's the same. With `interleave` `[a, b]` after them, the
+   * fact read of `a`'s commit is held after its queries until `b` committed, and the facts at `b` must be shown then.
+   * The problems, none when so. [L61]
    */
-  async function factsRun(
-    db: ProcessDatabase,
-    heads: readonly bigint[],
-    seams: AdminSeams = {},
-    interleave?: readonly [bigint, bigint],
-  ): Promise<string[]> {
+  async function factsRun(db: ProcessDatabase, heads: readonly bigint[], options: FactsRunOptions = {}): Promise<string[]> {
+    const { seams = {}, interleave, listener = false } = options;
     const problems: string[] = [];
     const m = rowsModule("m");
     const source = new InMemoryBlockSource({ head: heads[0] as bigint });
     const hold = factsHold();
     const handle = startWithSeams(
-      { config: { data: libraryData(db.setting, [m]) }, modules: [m], source, network: { admin: { port: 0 } } },
+      { config: { data: libraryData(db.setting, [m]) }, modules: [m], source, ...(listener ? { network: { admin: { port: 0 } } } : {}) },
       { adminSeams: { ...seams, factsRead: hold.read } },
     );
     const host = await mountHandlers(handle);
     let last: (Expected & { readonly cursor: string | null }) | null = null;
-    /** The facts at `head`, mounted and listening alike; a problem when they never were. */
+    /** The facts at `head` on mounted admin, and the listening admin's the same; a problem when they never were. */
     const show = async (head: bigint): Promise<void> => {
       await cursorReaches(handle, head);
       last = await shownAt(host.admin, head, 1);
@@ -162,6 +171,7 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
         problems.push(`mounted admin never showed the facts at ${head}: ${JSON.stringify(await shownBy(host.admin))}`);
         return;
       }
+      if (!listener) return;
       const listening = await shownAt(adminOf(handle), head, 1);
       if (JSON.stringify(listening) !== JSON.stringify(last)) {
         problems.push(`the listening admin showed ${JSON.stringify(listening)}, the mounted ${JSON.stringify(last)}`);
@@ -178,6 +188,8 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
     };
     try {
       await handle.started;
+      const admin = handle.status().listening.admin;
+      if ((admin === null) === listener) problems.push(`admin's listener: ${JSON.stringify(admin)}, asked ${listener}`);
       for (const [index, head] of heads.entries()) {
         if (index > 0) source.finalize(head);
         await show(head);
@@ -204,20 +216,38 @@ describe.each(PROCESS_BACKENDS)("mounted admin on $name (LM-5)", (backend: Proce
     return problems;
   }
 
-  it("L61: mounted /status and /config reach the database's facts after the open, after commits and after a commit during a fact read", async () => {
+  it("L61: with no admin listener, mounted /status and /config reach the database's facts after the open, after commits and after a commit during a fact read", async () => {
     const db = await backend.database();
     // A database with a cursor, then a restart: the first facts are the open's, before any commit.
     expect(await factsRun(db, [3n])).toEqual([]);
     expect(await factsRun(db, [3n])).toEqual([]);
     expect(await factsRun(db, [3n, 6n])).toEqual([]);
-    expect(await factsRun(db, [6n], {}, [7n, 8n])).toEqual([]);
+    expect(await factsRun(db, [6n], { interleave: [7n, 8n] })).toEqual([]);
   }, 300_000);
 
-  it("L61's negative control: fact reads that forget a commit landing during them leave mounted admin stale", async () => {
+  it("L61: a listening admin on the same database reaches the same values as mounted admin, after the open, after commits and after a commit during a fact read", async () => {
+    const db = await backend.database();
+    expect(await factsRun(db, [3n], { listener: true })).toEqual([]);
+    expect(await factsRun(db, [3n, 6n], { listener: true })).toEqual([]);
+    expect(await factsRun(db, [6n], { listener: true, interleave: [7n, 8n] })).toEqual([]);
+  }, 300_000);
+
+  it("L61's negative control: fact reads that forget a commit landing during them leave mounted admin stale, with no listener", async () => {
     const db = await backend.database();
     expect(await factsRun(db, [3n])).toEqual([]);
-    const problems = await factsRun(db, [3n], { forgetCommitsDuringRead: true }, [4n, 5n]);
+    const problems = await factsRun(db, [3n], { seams: { forgetCommitsDuringRead: true }, interleave: [4n, 5n] });
     expect(problems.some((problem) => problem.startsWith("mounted admin never showed the facts at 5"))).toBe(true);
+  }, 300_000);
+
+  it("L61's negative control: a process that publishes only with a listener, as before mounted admin, leaves mounted admin without facts", async () => {
+    const db = await backend.database();
+    // The fault: no publication, so no fact read, while nothing listens. A start, then a restart with no commit.
+    for (const heads of [[3n], [3n]] as const) {
+      const problems = await factsRun(db, heads, { seams: { publishOnlyWithListener: true } });
+      expect(problems.some((problem) => problem.startsWith("mounted admin never showed the facts at 3")), problems.join("; ")).toBe(true);
+    }
+    // With a listener the same fault is unseen, which is why the criterion's runs have none.
+    expect(await factsRun(db, [3n, 6n], { listener: true, seams: { publishOnlyWithListener: true } })).toEqual([]);
   }, 300_000);
 
   it("L61: no database read per request — the four endpoints answer within 1 s while the database is held", async () => {

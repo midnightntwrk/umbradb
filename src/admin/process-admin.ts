@@ -118,6 +118,11 @@ export interface AdminSeams {
   readonly factsRead?: () => Promise<void>;
   /** The negative control's fact reads: a commit that lands during a read is forgotten when the read ends. [L61] */
   readonly forgetCommitsDuringRead?: true;
+  /**
+   * The negative control's publication: none without a listener, the fact reads with it — `publish()` returning before
+   * them when nothing listens, as before mounted admin. [L61]
+   */
+  readonly publishOnlyWithListener?: true;
   /** The negative control's heartbeat: its timer keeps Node.js running with no listener. [L61] */
   readonly heartbeatKeepsAlive?: true;
   /** The negative control's mounted answers, in place of the mounted route table's. [L65] */
@@ -454,6 +459,8 @@ export class ProcessAdmin {
    */
   publish(): void {
     if (this.#closed) return;
+    // The negative control's fault: a process without a listener publishes nothing, its facts never read. [L61]
+    if (this.#seams.publishOnlyWithListener === true && this.#server === undefined) return;
     this.#readFacts();
     const server = this.#server;
     if (server === undefined) return;
