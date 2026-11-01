@@ -24,6 +24,10 @@
  *        configuration file); `config check` passes a configuration file that imports the exported builders from
  *        "umbradb" and enables `core-chain-events` and `core-block-parsed`, having run the TypeScript compiler on it
  *        [LS-6, A6];
+ *     4d. a module test from the installed package: the module guide's recipe, `examples/try-module/try-module.ts` (a
+ *        module with one route, run by `startUmbraDB` on an in-memory chain and PGlite in memory, its answer read
+ *        through `api.http` mounted in the test's own server), copied into the scratch project, type-checks under
+ *        `--strict` against the installed declarations and passes under `node --test` [L54, LM-1, LS-1];
  *
  *   With Docker:
  *     5. a tape sync on PostgreSQL: a PostgreSQL container (the repository's one image), a tape node serving the browser
@@ -39,7 +43,7 @@
  * script also ends them itself.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -84,6 +88,9 @@ const SURFACE = pinnedSurface(
   readFileSync(join(repoRoot, "openspec/changes/start-umbradb/design.md"), "utf8"),
 );
 if (SURFACE.values.length === 0 || SURFACE.types.length === 0) fail("design.md §12 lists no values or no types.");
+
+/** The module guide's module test (its §17 recipe), which oracle 4d runs from the installed package. [L54, L59] */
+const MODULE_TEST = "examples/try-module/try-module.ts";
 
 /** The ledger versions the build carries: each a directory of `vendor/ledger/`. */
 const LEDGERS = ["v8", "v9-rc3", "v9"];
@@ -207,9 +214,10 @@ async function dockerIndependentOracles() {
     skipLibCheck: true,
     types: [],
   };
-  const typeCheck = (name, source) => {
+  const typeCheck = (name, source, extra = {}) => {
     writeFileSync(join(scratch, `${name}.ts`), source);
-    writeFileSync(join(scratch, `tsconfig.${name}.json`), `${JSON.stringify({ compilerOptions, files: [`${name}.ts`] }, null, 2)}\n`);
+    const options = { ...compilerOptions, ...extra };
+    writeFileSync(join(scratch, `tsconfig.${name}.json`), `${JSON.stringify({ compilerOptions: options, files: [`${name}.ts`] }, null, 2)}\n`);
     const tsc = run(process.execPath, [tscBin, "--noEmit", "--project", `tsconfig.${name}.json`], { cwd: scratch });
     return { status: tsc.status, out: `${tsc.stdout}\n${tsc.stderr}` };
   };
@@ -272,6 +280,26 @@ async function dockerIndependentOracles() {
   );
   checkConfig(command, "a configuration file importing from umbradb");
   console.log("pack-install smoke: the installed umbradb command prints its usage (exit 2), knows run, backup and restore, and config check passes a file importing §12's builders from umbradb (LS-6, A6, A35).");
+
+  // ---- 4d. L54: the module guide's module test, from the installed package [L54, LM-1, LS-1] -------------------------
+  // The test imports only "umbradb", zod (a dependency of the package, installed with it) and Node.js; its author's
+  // own development dependency, @types/node, is the repository's, linked in when the install did not bring it.
+  writeFileSync(join(scratch, "try-module.ts"), readFileSync(join(repoRoot, MODULE_TEST), "utf8"));
+  const nodeTypes = join(scratch, "node_modules", "@types", "node");
+  if (!existsSync(nodeTypes)) {
+    mkdirSync(dirname(nodeTypes), { recursive: true });
+    symlinkSync(join(repoRoot, "node_modules", "@types", "node"), nodeTypes, "dir");
+  }
+  const moduleTestTypes = typeCheck("try-module", readFileSync(join(scratch, "try-module.ts"), "utf8"), { types: ["node"] });
+  if (moduleTestTypes.status !== 0 || /error TS\d+/.test(moduleTestTypes.out)) {
+    fail(`the module test ${MODULE_TEST} did not type-check against the installed package (L54):\n${moduleTestTypes.out}`);
+  }
+  const moduleTest = run(process.execPath, ["--test", "--test-reporter=tap", "try-module.ts"], { cwd: scratch, timeout: 120_000 });
+  const tap = `${moduleTest.stdout}\n${moduleTest.stderr}`;
+  if (moduleTest.status !== 0 || !/^# pass 1$/m.test(tap) || !/^# fail 0$/m.test(tap)) {
+    fail(`the module test ${MODULE_TEST} did not pass from the installed package under node --test (L54):\n${moduleTest.status}\n${tap}`);
+  }
+  console.log(`pack-install smoke: the module guide's module test (${MODULE_TEST}) type-checks under --strict against the installed package and passes under node --test: startUmbraDB on an in-memory chain reached height 10, and api.http answered its module's route (L54).`);
   return command;
 }
 
@@ -426,12 +454,12 @@ async function main() {
   const command = await dockerIndependentOracles();
   if (dockerAvailable) {
     await tapeSyncOracle(command);
-    console.log("\npack-install smoke: PASS -- the tarball ships the declarations and the vendored ledger packages; §12 type-checks for a consumer and the retired names do not; the deep import is blocked; the umbradb command runs; the installed process synced a tape on PostgreSQL.");
+    console.log("\npack-install smoke: PASS -- the tarball ships the declarations and the vendored ledger packages; §12 type-checks for a consumer and the retired names do not; the deep import is blocked; the umbradb command runs; a module test passes from the installed package; the installed process synced a tape on PostgreSQL.");
   } else if (isCI) {
     fail("Docker is REQUIRED in CI but `docker info` failed: the tape sync on PostgreSQL (oracle 5) cannot run and must not be skipped. Oracles 1-4 ran.");
   } else {
     console.log("\npack-install smoke: NOTICE -- Docker absent locally; skipping ONLY the tape sync on PostgreSQL (oracle 5).");
-    console.log("pack-install smoke: PASS (oracles 1-4) -- tarball contents, install, deep import, §12 consumer, retired names, the umbradb command.");
+    console.log("pack-install smoke: PASS (oracles 1-4) -- tarball contents, install, deep import, §12 consumer, retired names, the umbradb command, the module test.");
   }
 }
 
