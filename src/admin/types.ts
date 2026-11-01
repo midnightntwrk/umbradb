@@ -34,9 +34,12 @@ export interface SanitizedError {
   readonly details: PlainObject;
 }
 
-/** Which process this is (its instance role): the core, or a private process with its `instanceId`. [AE-5, CF-4] */
+/**
+ * Which process this is (its instance role): the core, or a private process with its `instanceId`; null until the
+ * process's side is known (a handler mounted in a library host answers from the process's start on). [AE-5, CF-4, LM-5]
+ */
 export interface InstanceStatus {
-  readonly role: "core" | "private";
+  readonly role: "core" | "private" | null;
   /** A private process's `instanceId`; null on the core. */
   readonly id: string | null;
 }
@@ -138,7 +141,7 @@ export interface StatusSnapshot {
   readonly instance: InstanceStatus;
   /** When the last height committed, by the wall clock, as RFC 3339 UTC text; null before any commit. [Q68] */
   readonly lastCommitAt: string | null;
-  /** The node, on the core; null on a private process (it never talks to the node). */
+  /** The node, on the core; null on a private process (it never talks to the node), and until the side is known. */
   readonly node: NodeStatus | null;
   /** Every part of the database, in startup order; null until startup resolved them. */
   readonly modules: readonly ModuleStatus[] | null;
@@ -149,7 +152,7 @@ export interface StatusSnapshot {
    * on a private process, and on the core until startup has opened its database. [PP-9]
    */
   readonly privateInstances: readonly PrivateInstanceStatus[] | null;
-  /** On a private process, the public side; null on the core. */
+  /** On a private process, the public side; null on the core, and until the side is known. */
   readonly public: PublicStatus | null;
 }
 

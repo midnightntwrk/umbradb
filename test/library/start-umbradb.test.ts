@@ -5,7 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { coreEntry } from "../../src/config/entries.js";
 import type { PrivateLinkChannel } from "../../src/library/channels.js";
 import { optionFindings, readOptions } from "../../src/library/options.js";
-import { lifecycleBody, startUmbraDB, type UmbraDBHandle, type UmbraDBOptions } from "../../src/library/start-umbradb.js";
+import { lifecycleBody } from "../../src/runner/api-answers.js";
+import { startUmbraDB, type UmbraDBHandle, type UmbraDBOptions } from "../../src/library/start-umbradb.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { startProcess } from "../runner/process-build.js";
@@ -24,7 +25,8 @@ import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library
  *   control gives the engine the same options unchecked: none of them is refused `invalid-option`.
  * - L51's library half: a renamed key is refused `renamed-setting` naming the new key, nothing opened.
  * - The handlers exist from the return on: `privateLink.accept` closes a channel this process does not accept and
- *   throws nothing; the module API's and admin's answer the lifecycle's 503.
+ *   throws nothing; the module API's answer the lifecycle's 503 until the module API serves, admin's answer throughout
+ *   (the lifecycle's criteria are `./lifecycle.test.ts`'s, the mounted rules `./mounted-api.test.ts`'s).
  */
 
 /** The members of design §4's handle, sorted. [L52] */
@@ -308,6 +310,7 @@ describe("the other options reach the process", () => {
     const written: unknown[] = [];
     const sent = { headersSent: true, writeHead: (...args: unknown[]) => written.push(args), end: () => undefined };
     handle.api.http({} as never, sent as never);
+    handle.admin.http({ method: "GET", url: "/status" } as never, sent as never);
     // A socket that cannot be written is destroyed instead.
     let destroyed = false;
     handle.api.upgrade({} as never, { end: () => { throw new Error("closed"); }, destroy: () => { destroyed = true; } } as never, Buffer.alloc(0));
@@ -395,7 +398,7 @@ describe("the handlers exist from the return on", () => {
     }
   }, 60_000);
 
-  it("mounted in a host's server, api.http, api.upgrade and admin.http answer 503 with the lifecycle's body", async () => {
+  it("mounted in a host's server from the return on: the module API's 503 until it serves, then its own answers; admin answers throughout", async () => {
     const { createServer } = await import("node:http");
     const { connect } = await import("node:net");
     const handle = startUmbraDB({
@@ -405,23 +408,19 @@ describe("the handlers exist from the return on", () => {
         throw new Error("a host's log that throws loses its line, and nothing else");
       },
     });
-    const server = createServer((request, response) =>
-      (request.url?.startsWith("/admin/") ? handle.admin.http : handle.api.http)(request, response),
-    );
+    const server = createServer((request, response) => {
+      if (request.url?.startsWith("/admin/") === true) {
+        request.url = request.url.slice("/admin".length);
+        handle.admin.http(request, response);
+      } else {
+        handle.api.http(request, response);
+      }
+    });
     server.on("upgrade", (request, socket, head) => handle.api.upgrade(request, socket, head));
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const { port } = server.address() as { port: number };
-    try {
-      await handle.started;
-      const api = await fetch(`http://127.0.0.1:${port}/api/rows`);
-      expect(api.status).toBe(503);
-      expect(api.headers.get("x-umbra-version")).toMatch(/^\d+\.\d+\.\d+/);
-      expect(await api.json()).toMatchObject({ error: { code: "not-serving" }, state: handle.status().state, reason: null });
-      const admin = await fetch(`http://127.0.0.1:${port}/admin/status`);
-      expect(admin.status).toBe(503);
-      expect(admin.headers.get("x-umbra-version")).toBeNull();
-      expect(await admin.json()).toMatchObject({ error: { code: "not-serving" } });
-      const upgraded = await new Promise<string>((resolve, reject) => {
+    const upgrade = () =>
+      new Promise<string>((resolve, reject) => {
         const socket = connect(port, "127.0.0.1", () =>
           socket.write(
             "GET /subscriptions HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n" +
@@ -431,12 +430,33 @@ describe("the handlers exist from the return on", () => {
         let text = "";
         socket.on("data", (chunk) => {
           text += chunk.toString();
+          if (text.includes("\r\n\r\n")) {
+            socket.destroy();
+            resolve(text);
+          }
         });
-        socket.on("end", () => resolve(text));
         socket.on("error", reject);
       });
-      expect(upgraded).toMatch(/^HTTP\/1\.1 503 Service Unavailable\r\n/);
-      expect(upgraded).toContain('"code":"not-serving"');
+    try {
+      // Before startup's first step (it runs on a later turn): the module API does not serve; admin answers.
+      const early = await fetch(`http://127.0.0.1:${port}/api/rows`);
+      expect(early.status).toBe(503);
+      expect(early.headers.get("x-umbra-version")).toMatch(/^\d+\.\d+\.\d+/);
+      expect(await early.json()).toMatchObject({ error: { code: "not-serving" }, reason: null });
+      expect(await upgrade()).toMatch(/^HTTP\/1\.1 503 Service Unavailable\r\n/);
+      await handle.started;
+      await cursorReaches(handle, 1n);
+      // Serving: the module API's own answers (no module route here: 404), its subscriptions' upgrade.
+      const api = await fetch(`http://127.0.0.1:${port}/api/rows`);
+      expect(api.status).toBe(404);
+      expect(api.headers.get("x-umbra-version")).toMatch(/^\d+\.\d+\.\d+/);
+      expect(api.headers.get("x-umbra-config-hash")).toMatch(/^0x[0-9a-f]{64}$/);
+      expect(((await api.json()) as { error: { code: string } }).error.code).toBe("not-found");
+      expect(await upgrade()).toMatch(/^HTTP\/1\.1 101 Switching Protocols\r\n/);
+      const admin = await fetch(`http://127.0.0.1:${port}/admin/status`);
+      expect(admin.status).toBe(200);
+      expect(admin.headers.get("x-umbra-version")).toBeNull();
+      expect(await admin.json()).toMatchObject({ state: "following", cursor: "1" });
     } finally {
       await new Promise((resolve) => server.close(resolve));
       await handle.stop();
@@ -445,7 +465,7 @@ describe("the handlers exist from the return on", () => {
 
   it("the lifecycle's body names the state and the reason, never a message of a failure", () => {
     expect(JSON.parse(lifecycleBody({ state: "starting", reason: null }))).toEqual({
-      error: { code: "not-serving", message: "this handler does not serve while the process is starting" },
+      error: { code: "not-serving", message: "the module API does not serve while the process is starting" },
       state: "starting",
       reason: null,
     });

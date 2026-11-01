@@ -9,6 +9,11 @@
  *   main thread has not ticked for longer: it is then stuck by definition, since computation blocks it and awaiting
  *   does not. The body says so, with the tick's age in whole milliseconds and the timeout:
  *   `{ "live": true, "heartbeatAgeMs": 412, "livenessTimeoutMs": 30000 }`. [AE-2]
+ * - **Mounted** (`startUmbraDB`'s `admin.http`, answered on the host's thread, not by the admin worker),
+ *   `/health/live` answers 200 whenever it answers: on the thread it would watch, it cannot see that thread blocked, so
+ *   it tells the heartbeat's age as information only (it may exceed the timeout after a block that has ended) and names
+ *   the thread: `{ "live": true, "heartbeatAgeMs": 412, "livenessTimeoutMs": 30000, "thread": "host" }`. A host that
+ *   needs a probe of a blocked thread asks UmbraDB to listen for admin. [AE-2, LM-5]
  * - `/health/ready` answers 200 or 503 as {@link readinessOf} decides, from the published state and lag and the process
  *   revision's `readinessLag`: never ready while `starting`, `refused`, `halted` or `stopping`; always ready while
  *   `stopped`; otherwise ready within the readiness lag, if one is set. The body shows what it decided from:
@@ -31,6 +36,15 @@ const LIVE: AdminEndpoint = {
   },
 };
 
+/** `GET /health/live` mounted on the host's thread (see the module comment). [AE-2, LM-5, L25] */
+const MOUNTED_LIVE: AdminEndpoint = {
+  path: "/health/live",
+  answer: ({ snapshot, beatAgeMs }) => ({
+    status: 200,
+    body: { live: true, heartbeatAgeMs: Math.max(0, Math.round(beatAgeMs)), livenessTimeoutMs: snapshot.livenessTimeoutMs, thread: "host" },
+  }),
+};
+
 /** `GET /health/ready`. [AE-4] */
 const READY: AdminEndpoint = {
   path: "/health/ready",
@@ -46,4 +60,10 @@ const READY: AdminEndpoint = {
 export const CORE_HEALTH_ENDPOINTS: AdminPart = Object.freeze({
   id: "core-health",
   endpoints: Object.freeze([Object.freeze(LIVE), Object.freeze(READY)]),
+});
+
+/** `core-health`'s endpoints mounted in a library host's server: its `/health/live` the host thread's. [AE-2, LM-5] */
+export const CORE_HEALTH_MOUNTED_ENDPOINTS: AdminPart = Object.freeze({
+  id: "core-health",
+  endpoints: Object.freeze([Object.freeze(MOUNTED_LIVE), Object.freeze(READY)]),
 });

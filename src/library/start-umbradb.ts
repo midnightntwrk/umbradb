@@ -33,21 +33,22 @@
  * (`network-address-conflict`, `private-link-misconfigured`): nothing listens or connects unless asked. The admin
  * listener's thread (the engine's admin port) is given only when the request asks admin to listen. [LM-3, G4, G9, N1]
  *
- * **The handlers** exist from the return on. `privateLink.accept(channel)` closes a channel the process does not
- * accept (`private-link-not-accepting`), logs a line and throws nothing. The module API's (`api.http`, `api.upgrade`)
- * and admin's (`admin.http`) answer a request they cannot serve with 503 and the lifecycle's body — `{ error: { code:
- * "not-serving", message }, state, reason }`, the message from the state's name only. [LM-4, LM-5, LM-6, N9]
+ * **The handlers** exist from the return on, whether or not a surface listens; they are the engine's. The module API's
+ * (`api.http`, `api.upgrade`) apply the module API listener's per-request and per-message rules and headers, and answer
+ * 503 with the lifecycle's body — `{ error: { code: "not-serving", message }, state, reason }` — while the module API
+ * does not serve (starting, refused, after a stop's drain). Admin's (`admin.http`) answers the four endpoints from the
+ * process's snapshot in memory, in every state and after `closed`. `privateLink.accept(channel)` closes a channel the
+ * process does not accept (`private-link-not-accepting`), logs a line and throws nothing. The host owns what its own
+ * server does: TLS, authentication, Origin policy, connection and rate limits, and its own error answers.
+ * [LM-4, LM-5, LM-6, N7, N8, N9]
  */
 
-import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
-import type { Duplex } from "node:stream";
 import { startAdminServer } from "../admin/server.js";
 import type { BackupWritten } from "../backup/backup.js";
-import { UMBRADB_VERSION } from "../config/build.js";
 import type { ProcessSide } from "../config/core-settings.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
-import { VERSION_HEADER } from "../runner/api-server.js";
+import type { NodeHttpHandler, NodeUpgradeHandler } from "../runner/api-answers.js";
 import type { InMemoryBlockSource } from "../runner/in-memory-source.js";
 import type { ProcessReason } from "../runner/failures.js";
 import {
@@ -78,11 +79,7 @@ export interface Address {
   readonly port: number;
 }
 
-/** A handler of Node.js's HTTP server `request` event, which a host calls from its own server. [LM-4] */
-export type NodeHttpHandler = (request: IncomingMessage, response: ServerResponse) => void;
-
-/** A handler of Node.js's HTTP server `upgrade` event (the module API's WebSocket subscriptions). [LM-4] */
-export type NodeUpgradeHandler = (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
+export type { NodeHttpHandler, NodeUpgradeHandler };
 
 /** The network request (design §5.1): every surface off unless asked. [LM-3] */
 export type UmbraDBNetwork = NetworkRequest;
@@ -156,56 +153,6 @@ export interface UmbraDBHandle {
   readonly api: { readonly http: NodeHttpHandler; readonly upgrade: NodeUpgradeHandler };
   readonly admin: { readonly http: NodeHttpHandler };
   readonly privateLink: { readonly accept: (channel: PrivateLinkChannel) => void };
-}
-
-/** The content type of every answer the handlers write themselves. */
-const JSON_TYPE = "application/json; charset=utf-8";
-
-/** A reason as JSON: its height as decimal text. */
-const reasonJson = (reason: ProcessReason | null) =>
-  reason === null ? null : { code: reason.code, height: reason.height === null ? null : String(reason.height), module: reason.module, point: reason.point };
-
-/**
- * The lifecycle's body for `status` (design §5.3): the module API's error envelope, `not-serving`, its message from the
- * state's name only, with the state and the reason. [LM-5, AE-6]
- */
-export function lifecycleBody(status: Pick<ProcessStatus, "state" | "reason">): string {
-  return JSON.stringify({
-    error: { code: "not-serving", message: `this handler does not serve while the process is ${status.state}` },
-    state: status.state,
-    reason: reasonJson(status.reason),
-  });
-}
-
-/** Writes the lifecycle's 503 to `response`, with `extra` headers; nothing when the host already answered. */
-function answerNotServing(response: ServerResponse, status: ProcessStatus, extra: Readonly<Record<string, string>>): void {
-  try {
-    if (response.headersSent) return;
-    const body = lifecycleBody(status);
-    response.writeHead(503, {
-      "Content-Type": JSON_TYPE,
-      "Content-Length": String(Buffer.byteLength(body)),
-      "Cache-Control": "no-store",
-      ...extra,
-    });
-    response.end(body);
-  } catch {
-    // The host's response could not be written (its connection ended): there is nothing to answer.
-  }
-}
-
-/** Writes the lifecycle's 503 on an upgrade's socket, then ends it. */
-function refuseUpgrade(socket: Duplex, status: ProcessStatus): void {
-  try {
-    const body = lifecycleBody(status);
-    socket.end(
-      "HTTP/1.1 503 Service Unavailable\r\n" +
-        `Content-Type: ${JSON_TYPE}\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n` +
-        `${VERSION_HEADER}: ${UMBRADB_VERSION}\r\n\r\n${body}`,
-    );
-  } catch {
-    socket.destroy();
-  }
 }
 
 /** The host's log, never throwing: a line its log refuses is lost. */
@@ -300,8 +247,6 @@ export function handleOf(handle: ProcessHandle, log: ((line: string) => void) | 
   const started = handle.started.then(startedOf);
   // As the engine's: a host that never attaches a handler gets no unhandled rejection. [LM-9]
   started.catch(() => undefined);
-  const notServing: NodeHttpHandler = (_request, response) =>
-    answerNotServing(response, handle.status(), { [VERSION_HEADER]: UMBRADB_VERSION });
   return Object.freeze({
     status: (): UmbraDBStatus => Object.freeze({ ...handle.status(), listening: handle.listening() }),
     started,
@@ -311,13 +256,9 @@ export function handleOf(handle: ProcessHandle, log: ((line: string) => void) | 
     pause: () => handle.pause(),
     resume: () => handle.resume(),
     backup: (target: string) => handle.backup(target),
-    api: Object.freeze({
-      http: notServing,
-      upgrade: (_request: IncomingMessage, socket: Duplex) => refuseUpgrade(socket, handle.status()),
-    }),
-    admin: Object.freeze({
-      http: (_request: IncomingMessage, response: ServerResponse) => answerNotServing(response, handle.status(), {}),
-    }),
+    // The engine's handlers, from the return on. [LM-4, LM-5]
+    api: Object.freeze({ http: handle.api.http, upgrade: handle.api.upgrade }),
+    admin: Object.freeze({ http: handle.admin.http }),
     privateLink: Object.freeze({
       accept: (channel: PrivateLinkChannel) => {
         try {

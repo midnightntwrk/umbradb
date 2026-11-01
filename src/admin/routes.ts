@@ -9,12 +9,15 @@
  * - any other method or path is 404 `not-found` ({@link NOT_FOUND}) [AE-1];
  * - an endpoint that throws is 500 `internal-error` with a fixed message and nothing of the error [AE-6].
  *
+ * A library host's mounted handler answers the same table, but for `core-health`'s mounted `/health/live`, which runs on
+ * the host's thread ({@link MOUNTED_ADMIN_ROUTES}). [AE-2, LM-5]
+ *
  * It imports nothing of Node.js, so the admin worker can run it, and so can the browser build's worker over its message
  * channel.
  */
 
 import { CORE_CONFIG_ENDPOINTS } from "../backbone/core-config/endpoints.js";
-import { CORE_HEALTH_ENDPOINTS } from "../backbone/core-health/endpoints.js";
+import { CORE_HEALTH_ENDPOINTS, CORE_HEALTH_MOUNTED_ENDPOINTS } from "../backbone/core-health/endpoints.js";
 import { CORE_STATUS_ENDPOINTS } from "../backbone/core-status/endpoints.js";
 import { BACKBONE_ORDER } from "../modules/graph.js";
 import type { AdminAnswer, AdminEndpoint, AdminPart, AdminView } from "./types.js";
@@ -60,6 +63,19 @@ export function adminRoutes(parts: readonly AdminPart[]): AdminRoutes {
 
 /** The admin endpoints the admin worker serves: {@link ADMIN_PARTS}'. */
 export const ADMIN_ROUTES: AdminRoutes = adminRoutes(ADMIN_PARTS);
+
+/**
+ * The backbone parts' endpoints mounted in a library host's server: {@link ADMIN_PARTS}, `core-health`'s `/health/live`
+ * the host thread's. [AE-1, AE-2, LM-5]
+ */
+export const MOUNTED_ADMIN_PARTS: readonly AdminPart[] = Object.freeze([
+  CORE_HEALTH_MOUNTED_ENDPOINTS,
+  CORE_STATUS_ENDPOINTS,
+  CORE_CONFIG_ENDPOINTS,
+]);
+
+/** The admin endpoints a library host's mounted handler answers: {@link MOUNTED_ADMIN_PARTS}'. [AE-1, LM-4] */
+export const MOUNTED_ADMIN_ROUTES: AdminRoutes = adminRoutes(MOUNTED_ADMIN_PARTS);
 
 /** The answer to any method or path that is no admin endpoint. [AE-1] */
 export const NOT_FOUND: AdminAnswer = Object.freeze({

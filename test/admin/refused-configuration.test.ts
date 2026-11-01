@@ -16,6 +16,7 @@ import { type EngineConfig, type EngineInput, type ProcessHandle, startProcess }
 import type { DeclarationSet } from "../../src/modules/validation.js";
 import { startUmbraDB, type UmbraDBOptions } from "../../src/library/start-umbradb.js";
 import { type CliProject, cliProject, inProcess } from "../cli/cli-fixtures.js";
+import { mountHandlers } from "../library/mounted-fixtures.js";
 import { exitWithin, runCoreSettings, runInChild } from "../cli/run-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { entryOf, loggingModule, testBuild } from "../runner/process-build.js";
@@ -402,6 +403,8 @@ function stoppedWith(handle: ProcessHandle, also: () => Promise<void>): ProcessH
     backup: (out, seams) => handle.backup(out, seams),
     pause: () => handle.pause(),
     resume: () => handle.resume(),
+    api: handle.api,
+    admin: handle.admin,
     stop: () => {
       stopping ??= (async () => {
         await handle.stop();
@@ -619,6 +622,23 @@ describe.each(PROCESS_BACKENDS)("A157: a refused configuration ends startUmbraDB
       expect(status.status).toBe(200);
       expect(status.json).toMatchObject({ state: "refused", reason: { code: "migration-checksum-changed", module: "m" } });
       expect((await ask(origin, "/config")).status).toBe(200);
+      // Mounted in a host's server, as behind an orchestrator: the same four answers, and the module API's 503 names
+      // the same reason. [LM-5]
+      const host = await mountHandlers(second);
+      try {
+        expect(stateProblems(await observe(host.admin), { state: "refused", ready: false, reason: { code: "migration-checksum-changed", module: "m" } })).toEqual([]);
+        const api = await ask(host.origin, "/rows");
+        expect([api.status, api.json]).toEqual([
+          503,
+          {
+            error: { code: "not-serving", message: "the module API does not serve while the process is refused" },
+            state: "refused",
+            reason: { code: "migration-checksum-changed", height: null, module: "m", point: null },
+          },
+        ]);
+      } finally {
+        await host.close();
+      }
     } finally {
       await second.stop();
     }

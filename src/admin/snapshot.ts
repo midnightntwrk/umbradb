@@ -122,8 +122,8 @@ export interface SnapshotFacts {
   readonly config: ConfigSnapshot;
   /** When the process started: `process.hrtime.bigint()`. */
   readonly startedNs: bigint;
-  /** The process's side: the core (`public`) or a private process. */
-  readonly side: ProcessSide;
+  /** The process's side: the core (`public`) or a private process; null until the configuration says which. [AE-5] */
+  readonly side: ProcessSide | null;
   /** A private process's `instanceId`; null on the core, or before the configuration gives it. */
   readonly instanceId: string | null;
   /** The process revision's `tipCap`. */
@@ -202,7 +202,9 @@ function modulesOf(modules: readonly ModuleFacts[], digests: ReadonlyMap<string,
 export function snapshotOf(status: ProcessStatus, facts: SnapshotFacts): AdminSnapshot {
   const { ended, reason } = status;
   const error = ended !== null && (ended.kind === "refused" || ended.kind === "failed") ? ended.error : undefined;
+  // Until the side is known, nothing of either side is shown: no role, no node, no instances. [AE-5, LM-5]
   const core = facts.side === "public";
+  const role = facts.side === null ? null : core ? "core" : "private";
   const shown: StatusSnapshot = {
     state: status.state,
     ready: status.ready,
@@ -212,14 +214,14 @@ export function snapshotOf(status: ProcessStatus, facts: SnapshotFacts): AdminSn
     lag: height(status.lag),
     reason: reason === null ? null : sanitizedError(reason, error, facts.redactor),
     // The public `core` schema has no `instanceId`: on the core it is null.
-    instance: Object.freeze({ role: core ? "core" : "private", id: facts.instanceId }),
+    instance: Object.freeze({ role, id: facts.instanceId }),
     lastCommitAt: facts.lastCommitMs === null ? null : utcText(facts.lastCommitMs),
     node: core ? nodeOf(status, facts.tipCap, facts.node) : null,
     modules: facts.modules === null ? null : Object.freeze(modulesOf(facts.modules, facts.digests, status.cursor)),
     ledger: null,
     // The core's instances once startup opened the database (its parts known); a private process has none.
     privateInstances: !core || facts.modules === null ? null : instancesOf(facts.privateInstances ?? []),
-    public: core ? null : Object.freeze({ cursor: height(status.head), lockstep: facts.publicLockstep ?? null }),
+    public: facts.side !== "private" ? null : Object.freeze({ cursor: height(status.head), lockstep: facts.publicLockstep ?? null }),
   };
   return Object.freeze({
     livenessTimeoutMs: facts.livenessTimeoutMs,

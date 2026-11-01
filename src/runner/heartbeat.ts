@@ -10,8 +10,11 @@
  * The admin worker (`../admin/`) reads it at each request, so it tells a stuck main thread from a busy one without
  * asking the main thread anything.
  *
- * The heartbeat's timer keeps Node.js running (a process whose loop waits on an in-memory source, or that stays up
- * refused or halted, has nothing else that would), until {@link Heartbeat.stop}.
+ * **Whether it keeps Node.js running** is its owner's choice ({@link HeartbeatOptions.keepAlive}, then
+ * {@link Heartbeat.keepAlive}): an admin listener answers by it, so while one listens the timer keeps the process up (a
+ * process whose loop waits on an in-memory source, or that stays up refused or halted, has nothing else that would);
+ * with only a handler mounted in a library host's server, the timer is `unref()`ed and never keeps the host's event
+ * loop alive. It ticks until {@link Heartbeat.stop}. [AE-2, LM-5, L61]
  */
 
 /** How often the main thread ticks: every second. [AE-2] */
@@ -30,19 +33,34 @@ export function tickAgeMs(buffer: SharedArrayBuffer, now: bigint = process.hrtim
   return Number(now - lastTick(buffer)) / 1e6;
 }
 
+/** How a {@link Heartbeat} starts. */
+export interface HeartbeatOptions {
+  /** Whether its timer keeps Node.js running from the start: yes unless `false` (see the module comment). */
+  readonly keepAlive?: boolean;
+}
+
+/** A timer's handle as Node.js gives it (`ref`, `unref`); a browser's timer is a number, which has neither. */
+type TimerHandle = { readonly ref?: () => unknown; readonly unref?: () => unknown };
+
 /** The heartbeat (see the module comment): it ticks once at once, then every {@link HEARTBEAT_INTERVAL_MS}. */
 export class Heartbeat {
   /** The shared memory the ticks are written to. */
   readonly buffer: SharedArrayBuffer = new SharedArrayBuffer(BYTES);
   readonly #slot = new BigInt64Array(this.buffer);
   readonly #onTick: () => void;
-  readonly #timer: NodeJS.Timeout;
+  readonly #timer: ReturnType<typeof setInterval>;
 
   /** Starts ticking; `onTick` is told after each tick (a listener that throws stops no tick). */
-  constructor(onTick: () => void = () => undefined) {
+  constructor(onTick: () => void = () => undefined, options: HeartbeatOptions = {}) {
     this.#onTick = onTick;
     this.tick();
     this.#timer = setInterval(() => this.tick(), HEARTBEAT_INTERVAL_MS);
+    if (options.keepAlive === false) (this.#timer as unknown as TimerHandle).unref?.();
+  }
+
+  /** From now on its timer keeps Node.js running (see the module comment). [AE-2] */
+  keepAlive(): void {
+    (this.#timer as unknown as TimerHandle).ref?.();
   }
 
   /** Writes the time now as the last tick, then tells the listener. */

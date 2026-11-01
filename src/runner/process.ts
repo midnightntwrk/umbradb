@@ -227,10 +227,14 @@
  *   the log without it (`./worker-output.ts`);
  * - {@link EngineOptions.ledgerWorkerEntry}: the ledger worker's script (the browser's); Node.js's entry without it.
  *
- * **The admin endpoints** (`../admin/`) are served through the {@link EngineOptions.adminListener} port, when given
- * [AE-1, AE-2, Q128 B]:
- * - The heartbeat ticks from `startProcess` on and publishes `status()` to the admin worker. It ends when a refusal of
- *   the configuration ends the process.
+ * **The admin endpoints** (`../admin/`): every process has admin — the heartbeat, the publication of `status()`, the
+ * fact reads and the mounted handler ({@link ProcessHandle.admin}) — and the {@link EngineOptions.adminListener} port,
+ * when given, adds its listener [AE-1, AE-2, LM-5, Q128 B]:
+ * - The heartbeat ticks from `startProcess` on and publishes `status()`: to the admin worker once it listens, else into
+ *   the snapshot kept in memory, its timer then never keeping the program's event loop alive. It ends when the process
+ *   has closed, or when a refusal of the configuration ends the process.
+ * - `/status` and `/config` show the configuration once the resolver validated it, a refusal of the configuration step
+ *   after that included; a refusal before it is shown redacted by the configuration's secrets as loaded.
  * - The admin listener starts where the network plan puts it (the command's on `listen.admin`, `0.0.0.0:8081` unless
  *   written) once the process's `core` revision and its plan are known, before the database opens, and never before
  *   (a refusal before that ends the process, as above). A listener that cannot listen (for
@@ -239,6 +243,16 @@
  * - `/status`'s node shows the node client's connection state (published at once when it changes, and once the client
  *   and the source are made), and the block source's best head announced last and its queue depth
  *   (`BlockSource.nodeView`) [AE-5].
+ *
+ * **The handlers** a library host mounts in its own server exist from `startProcess`'s return on, whether or not a
+ * surface listens [LM-4, LM-5, RN-15, RN-16; design §5.3]:
+ * - {@link ProcessHandle.api}: the module API's own handlers (`./api-server.ts`: the listener's rules — the body limit,
+ *   the read timeout on PostgreSQL, the subscription protocol, its message limit and slow-subscriber close — and the
+ *   core's headers) while the module API is open: from its start (step 9) through the states `syncing`, `following`,
+ *   `stopped` and `halted`, and a stop's drain, until the stop closes it — its listener, and the subscriptions opened
+ *   through the handlers. Otherwise (`starting`, `refused`, after the drain) the lifecycle's 503 (`./api-answers.ts`),
+ *   with `X-Umbra-Version` and, once startup read it, `X-Umbra-Config-Hash`.
+ * - {@link ProcessHandle.admin}: the four endpoints from the snapshot in memory, in every state and after `closed`.
  */
 
 import { openedCursorHeight } from "../backbone/core-block-commit/sql.js";
@@ -289,13 +303,15 @@ import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
 import type { NetworkShown } from "../admin/configuration.js";
-import { type PrivateSideFacts, ProcessAdmin } from "../admin/process-admin.js";
+import { mountedAdminHandler } from "../admin/mounted.js";
+import { type AdminSeams, type PrivateSideFacts, ProcessAdmin } from "../admin/process-admin.js";
 import { type NodeFacts, utcText } from "../admin/snapshot.js";
 import type { AdminStarter } from "../admin/server.js";
 import { NodeClient, type NodeClientOptions, type NodeRetry } from "../node/client.js";
 import { resolveGraph } from "../modules/graph.js";
 import type { DeclarationSet } from "../modules/validation.js";
-import { type StartedModuleApi, startModuleApi } from "./api-server.js";
+import { answerNotServing, type NodeHttpHandler, type NodeUpgradeHandler, refuseNotServing } from "./api-answers.js";
+import { type MountedApiSeams, type StartedModuleApi, startModuleApi } from "./api-server.js";
 import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
 import {
   addressText,
@@ -507,6 +523,13 @@ export interface EngineOptions {
   readonly closeFault?: (step: string) => unknown;
   /** The negative control's way of running the close steps; {@link closeSteps} unless given. [L9] */
   readonly closeHelper?: CloseHelper;
+  /**
+   * The negative controls' changes of the module API's mounted handlers only (`MountedApiSeams`: a limit, an error
+   * answer, the core's headers, the module API they answer through); none unless given. [L24, L65, L68]
+   */
+  readonly mountedApi?: MountedApiSeams;
+  /** The fact-read tests' hold and the negative controls' admin (`AdminSeams`); none unless given. [L61, L65] */
+  readonly adminSeams?: AdminSeams;
 }
 
 /** What {@link startProcess}, the engine, takes: the build and the options. [LM-1] */
@@ -744,6 +767,13 @@ export interface ProcessHandle {
    * until written. Without a pause, nothing.
    */
   resume(): void;
+  /**
+   * The module API's handlers a host mounts in its own server, from the start on (see **The handlers** in the module
+   * comment): `http` for its requests, `upgrade` for its subscriptions. [LM-4, LM-5]
+   */
+  readonly api: { readonly http: NodeHttpHandler; readonly upgrade: NodeUpgradeHandler };
+  /** Admin's handler a host mounts in its own server, from the start on (`../admin/mounted.ts`). [LM-4, LM-5, AE-1] */
+  readonly admin: { readonly http: NodeHttpHandler };
 }
 
 /** What {@link statusOf} computes the state from. */
@@ -1043,7 +1073,10 @@ class Process implements ProcessHandle {
   #db: Database | undefined;
   #source: BlockSource | undefined;
   #api: StartedModuleApi | undefined;
-  readonly #admin: ProcessAdmin | undefined;
+  /** The process's configuration hash, once startup read it (after `on-start-db`). [RN-16, PP-14] */
+  #configHash: string | undefined;
+  /** Admin: the heartbeat, the publication, the fact reads, the mounted handler's answers, and a listener once served. */
+  readonly #admin: ProcessAdmin;
   /** The process's one node client, shared by `core-chain`'s `node-client` item and the block source. */
   #nodeClient: NodeClient | null = null;
   /** The node client's close, once begun (`#closeNode`). */
@@ -1069,7 +1102,7 @@ class Process implements ProcessHandle {
    * The holds that pause the loop between heights: {@link pause}'s and SIGUSR2's. A change of the pause that `/status`
    * shows is published at once. [BK-1, Q152 B, Q174 B]
    */
-  readonly #pauses = new LoopPauses({ onChange: () => this.#admin?.publish() });
+  readonly #pauses = new LoopPauses({ onChange: () => this.#admin.publish() });
   /** {@link pause}'s hold, until {@link resume}. */
   #pauseHold: PauseHold | undefined;
   /** The backup on SIGUSR2 pending or being written, until it ended (never rejects). */
@@ -1077,21 +1110,39 @@ class Process implements ProcessHandle {
   /** Stops listening for SIGUSR2, once the process listens. */
   #unlisten: (() => void) | undefined;
 
+  /**
+   * The module API's handlers (see **The handlers** in the module comment): the module API's own while it is open,
+   * else the lifecycle's 503 with the state, the reason and the core's headers. [LM-4, LM-5, RN-16]
+   */
+  readonly api = Object.freeze({
+    http: (request: Parameters<NodeHttpHandler>[0], response: Parameters<NodeHttpHandler>[1]): void => {
+      const handlers = this.#openApi()?.handlers;
+      if (handlers === null || handlers === undefined) answerNotServing(response, this.status(), this.#configHash);
+      else handlers.http(request, response);
+    },
+    upgrade: (request: Parameters<NodeUpgradeHandler>[0], socket: Parameters<NodeUpgradeHandler>[1], head: Buffer): void => {
+      const handlers = this.#openApi()?.handlers;
+      if (handlers === null || handlers === undefined) refuseNotServing(socket, this.status(), this.#configHash);
+      else handlers.upgrade(request, socket, head);
+    },
+  });
+
+  /** Admin's handler (see **The handlers** in the module comment). [LM-4, LM-5] */
+  readonly admin = Object.freeze({ http: mountedAdminHandler((method, url) => this.#admin.answer(method, url)) });
+
   constructor(input: EngineInput) {
     this.#input = input;
     const { adminListener } = input;
-    this.#admin =
-      adminListener === undefined
-        ? undefined
-        : new ProcessAdmin({
-            status: () => this.status(),
-            log: (line) => this.#log(line),
-            privateSide: () => this.#privateSide(),
-            node: () => this.#nodeFacts(),
-            network: () => this.#networkShown(),
-            start: adminListener,
-            output: this.#workerOutput(),
-          });
+    this.#admin = new ProcessAdmin({
+      status: () => this.status(),
+      log: (line) => this.#log(line),
+      privateSide: () => this.#privateSide(),
+      node: () => this.#nodeFacts(),
+      network: () => this.#networkShown(),
+      ...(adminListener === undefined ? {} : { start: adminListener }),
+      output: this.#workerOutput(),
+      ...(input.adminSeams === undefined ? {} : { seams: input.adminSeams }),
+    });
     this.closed = new Promise((resolve) => {
       this.#resolveClosed = resolve;
     });
@@ -1108,7 +1159,7 @@ class Process implements ProcessHandle {
     // `ended` tells a refusal too: a caller that awaits only `ended` leaves no rejection unhandled. [LM-9]
     this.started.catch(() => undefined);
     this.ended = this.#run(outcome);
-    this.#admin?.follow(startup, this.ended);
+    this.#admin.follow(startup, this.ended);
     const { signal } = input;
     if (signal?.aborted === true) void this.#stopWith(signal.reason);
     else signal?.addEventListener("abort", () => void this.#stopWith(signal.reason), { once: true });
@@ -1145,12 +1196,23 @@ class Process implements ProcessHandle {
       address === null || address === undefined ? null : Object.freeze({ host: address.host, port: address.port });
     return Object.freeze({
       api: this.#apiClosed ? null : bound(this.#api?.server),
-      admin: bound(this.#admin?.listening()),
+      admin: bound(this.#admin.listening()),
       privateLink: this.#transportClosed ? null : bound(this.#transport),
     });
   }
 
-  /** Closes the module API's listener, if any; its address is then no more ({@link listening}). [RN-13, L21] */
+  /**
+   * The module API while it serves: from `on-start-api` and its listener on (step 9) until a stop's drain has ended and
+   * it closes; none before or after, and never after a refusal. [LM-5, RN-13]
+   */
+  #openApi(): StartedModuleApi | undefined {
+    return this.#apiClosed ? undefined : this.#api;
+  }
+
+  /**
+   * Closes the module API's listener, if any, and the subscriptions of its mounted handlers; its address is then no
+   * more ({@link listening}), and the mounted handlers answer the lifecycle's 503. [RN-13, L21, LM-5]
+   */
   async #closeApi(): Promise<void> {
     if (this.#api === undefined) return;
     this.#apiClosed = true;
@@ -1349,7 +1411,7 @@ class Process implements ProcessHandle {
   async #close(): Promise<void> {
     const starting = this.#phase === "starting";
     this.#phase = "stopping";
-    this.#admin?.publish();
+    this.#admin.publish();
     this.#stop.abort();
     // The waits for the chain end now, not once startup or the loop has ended. [RN-13]
     const waits = starting ? this.#endStartupWaits() : this.#endLoopWaits();
@@ -1366,7 +1428,7 @@ class Process implements ProcessHandle {
         ["backup on signal", () => this.#signalBackup],
         ["database", () => this.#db?.close()],
         ["block source", () => this.#source?.close?.()],
-        ["admin", () => this.#admin?.close()],
+        ["admin", () => this.#admin.close()],
         ["SIGUSR2 listener", () => this.#unlisten?.()],
       ]);
     } finally {
@@ -1553,6 +1615,8 @@ class Process implements ProcessHandle {
       const loaded = await this.#load();
       this.#step();
       const resolved = this.#resolve(loaded);
+      // `/status` and `/config` show the validated configuration from now on, a refusal of this step's included. [AE-5]
+      this.#admin.validated(resolved.checked, resolved.core);
       this.#refuseObjectTasks(resolved);
       // The network plan: a request at odds with the written addresses refuses here, before anything opens. [LM-3]
       const planned = planNetwork(resolved, input.network, input.networkRules);
@@ -1571,11 +1635,11 @@ class Process implements ProcessHandle {
       this.#start = BigInt(checked.start);
       this.#core = core;
       this.#listenForBackups(core);
-      if (this.#admin !== undefined) {
-        // Admin listens where the plan puts it, once the configuration and the plan are validated. [AE-1, LM-3]
-        await this.#admin.serve(checked, core, plan.admin.mode === "listening" ? plan.admin.address.text : null);
-        this.#step();
-      }
+      // Admin listens where the plan puts it, through the admin port, once the configuration and the plan are
+      // validated; without the port it is the mounted handler's only. [AE-1, LM-3, G9]
+      const adminAddress = input.adminListener !== undefined && plan.admin.mode === "listening" ? plan.admin.address.text : null;
+      await this.#admin.serve(checked, core, adminAddress);
+      this.#step();
       // A host's in-memory chain needs no node: no client is made, so `node` is never contacted. [LM-8, L49]
       const nodeOptions = input.inMemorySource === undefined ? nodeOptionsOf(core.settings as PlainObject) : null;
       const makeClient = input.nodeClient ?? ((options: NodeClientOptions) => new NodeClient(options));
@@ -1589,7 +1653,7 @@ class Process implements ProcessHandle {
                 if (!retrying) this.#nodeAttempts = null;
               },
               // `/status` shows a change of the connection at once: the heartbeat may be a second away.
-              onConnectionChange: () => this.#admin?.publish(),
+              onConnectionChange: () => this.#admin.publish(),
             });
       const shared: SourceShared = {
         nodeClient: this.#nodeClient,
@@ -1606,7 +1670,7 @@ class Process implements ProcessHandle {
       const source: BlockSource = typeof given === "function" ? given(core, shared) : given;
       this.#source = source;
       // `/status` shows the client's `connecting` and the source's queue from now on.
-      this.#admin?.publish();
+      this.#admin.publish();
       // A read's height is the cursor's: the core's cursor table, or a private process's own (its source's). [DB-2]
       const db = await openConfiguredDatabase(core, {
         committedHeight: source.committedHeight ?? openedCursorHeight(),
@@ -1635,6 +1699,8 @@ class Process implements ProcessHandle {
           // them (the resolver's), and the URL patterns only before; `#run` then ends the process. [Q137 B, AE-6]
           const early = redactor(refusalSecrets(error));
           for (const line of configurationRefusalLines(error, early.text)) this.#log(line);
+          // The mounted handler's `/status` shows the reason redacted alike. [AE-6]
+          this.#admin.refusedWith(early);
         } else {
           this.#log(`startup refused: ${reasonOf(error).code}: ${messageOf(error)}`);
         }
@@ -1771,8 +1837,10 @@ class Process implements ProcessHandle {
     // run. It goes on X-Umbra-Config-Hash of every module API answer and on the transport's messages.
     // [RN-16, PP-14, Q147]
     const configHash = await db.read((read) => (input.configHash === undefined ? readConfigHash(read) : input.configHash(read, core)));
+    // From now on the module API's answers carry it, the lifecycle's included. [RN-16, D-17]
+    this.#configHash = configHash;
     // `/status` and `/config` show the database's parts from here on, and what startup read. [AE-5]
-    this.#admin?.opened({
+    this.#admin.opened({
       declarations,
       modules: graph.modules,
       revisionsOf: processRevisions(check, core),
@@ -1808,7 +1876,7 @@ class Process implements ProcessHandle {
         log: (line) => this.#log(line),
       });
       // `/status` and `/config` show where it listens at once.
-      this.#admin?.publish();
+      this.#admin.publish();
       this.#step();
     }
     // The bootstrap's wait: every bootstrap step has run, and nothing is processed until block S commits. It comes
@@ -1825,6 +1893,7 @@ class Process implements ProcessHandle {
       apiReadTimeoutMs: settings.apiReadTimeoutMs as number,
       configHash,
       onError: (error, where) => this.#log(`module API: ${where.route} of ${where.module} failed: ${messageOf(error)}`),
+      ...(input.mountedApi === undefined ? {} : { mounted: input.mountedApi }),
     });
     this.#step();
     this.#upgrade = upgradeBoundary(check, declarations);
@@ -1852,7 +1921,7 @@ class Process implements ProcessHandle {
         committed: (block) => {
           this.#cursor = block.height;
           this.#recovered();
-          this.#admin?.committed();
+          this.#admin.committed();
           this.#transport?.committed(block);
         },
       },
@@ -1929,7 +1998,7 @@ class Process implements ProcessHandle {
       const what = SLOW_WINDOW_NAMES[event.window].ended;
       this.#log(`slow block: height ${event.height}'s ${what} ${how} after ${Math.round(event.ms)} ms`);
     }
-    this.#admin?.publish();
+    this.#admin.publish();
   }
 
   /** What was retried works again: no condition, and the next retry's back-off starts from 1 s. */
@@ -1999,7 +2068,7 @@ class Process implements ProcessHandle {
    */
   async #endItself(): Promise<void> {
     try {
-      await this.#closeAll([["admin", () => this.#admin?.close()]]);
+      await this.#closeAll([["admin", () => this.#admin.close()]]);
     } finally {
       this.#resolveClosed();
     }

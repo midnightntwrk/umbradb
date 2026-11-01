@@ -4,7 +4,7 @@
  * - the backbone parts' endpoints it answers (`./routes.ts`: `core-health`, `core-status`, `core-config`), from the
  *   snapshot the runner publishes (`./snapshot.ts`, `./types.ts`) and the heartbeat's shared memory
  *   (`../runner/heartbeat.ts`);
- * - the runner's side of it (`./process-admin.ts`);
+ * - the runner's side of it (`./process-admin.ts`), and the handler a library host mounts (`./mounted.ts`);
  * - the redaction and the sanitized errors the endpoints share (`./redaction.ts`, `./errors.ts`).
  *
  * Internal: not part of the package's public surface. [AE-1, AE-2, AE-3, AE-4, AE-5, AE-6, Q70; CORE-ARCH §4.18;
@@ -12,6 +12,7 @@
  */
 
 export * from "./errors.js";
+export * from "./mounted.js";
 export * from "./process-admin.js";
 export * from "./redaction.js";
 export * from "./routes.js";

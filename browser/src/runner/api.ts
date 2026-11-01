@@ -48,6 +48,8 @@ export interface StartedModuleApi {
   readonly routes: ApiRoutes;
   readonly api: ModuleApi;
   readonly server: ModuleApiServer | null;
+  /** None: a page has no Node.js HTTP server to mount handlers in, so the engine's handle answers through none. [LM-4] */
+  readonly handlers: null;
   close(): Promise<void>;
 }
 
@@ -88,6 +90,7 @@ export async function startModuleApi(input: ModuleApiStart): Promise<StartedModu
     routes,
     api,
     server,
+    handlers: null,
     close: async () => {
       closeOpened();
     },
