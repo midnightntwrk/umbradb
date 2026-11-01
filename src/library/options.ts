@@ -11,14 +11,23 @@
  * `modules` export they are, `modules` and `modulesFrom`, or `modulesFrom` with `{ file }` (`modules-given-twice`).
  * [LM-7, L44]
  *
+ * **The in-memory chain** ({@link sourceRefusal}, {@link privateSourceRefusal}): `source` is read only when it is exactly
+ * an `InMemoryBlockSource` — its prototype that class's own, no proxy — carrying none of the members the engine takes
+ * as hooks of a block source ({@link SOURCE_HOOKS}), so that a host cannot reach the engine's checks, its commit height
+ * or its prefetch through it; and only on a public process, a private one reading its public side
+ * (`source-refused`). [LM-8, L48]
+ *
  * **The settings of the process's `core` revision a library process refuses** ({@link librarySettingsRefusal}):
  * `backupAtStop` and `backupOnSignal`, which write backups at the command's stop and on its SIGUSR2; a host writes its
  * backups with `UmbraDBHandle.backup` instead (`library-setting-refused`, naming the setting). [LM-2, BK-1, G3, L47]
  */
 
+import { types } from "node:util";
+import type { ProcessSide } from "../config/core-settings.js";
 import type { PlainObject } from "../config/plain-data.js";
 import type { CheckedEntry, Finding } from "../config/validate.js";
 import { UmbraError } from "../db/errors.js";
+import { InMemoryBlockSource } from "../runner/in-memory-source.js";
 
 /** The options `startUmbraDB` knows (design §4). */
 export const OPTION_NAMES: readonly string[] = Object.freeze([
@@ -255,6 +264,65 @@ export function modulesGivenTwice(values: Readonly<Record<string, unknown>>): Um
     `the user modules are given more than once, by ${by}: a { file } configuration gives them by its modules export, ` +
       "{ data } by modules (objects) or modulesFrom (a module file), one of them",
     { given: Object.freeze(sources) },
+  );
+}
+
+/**
+ * The members of a block source the engine takes as its hooks (`../runner/block-source.ts`): a private process's own
+ * chain and module checks, the committed height of its reads, the node source's prefetch and its prepared blocks, and
+ * its reads at a height. An in-memory chain carries none of them. [LM-8]
+ */
+export const SOURCE_HOOKS: readonly string[] = Object.freeze([
+  "checkChain",
+  "committedHeight",
+  "checkModules",
+  "attach",
+  "prepared",
+  "fetchRead",
+]);
+
+/** A `source-refused` refusal for `reason`, with its message and `extra` details. [LM-8] */
+function sourceRefused(reason: string, message: string, extra: Readonly<Record<string, unknown>> = {}): UmbraError {
+  return new UmbraError("source-refused", message, { reason, ...extra });
+}
+
+/**
+ * The refusal of a `source` that is not exactly an `InMemoryBlockSource` carrying no hook (see the module comment);
+ * null for none given or for one the process may read. [LM-8, L48]
+ */
+export function sourceRefusal(source: unknown): UmbraError | null {
+  if (source === undefined) return null;
+  const exact =
+    typeof source === "object" &&
+    source !== null &&
+    !types.isProxy(source) &&
+    Object.getPrototypeOf(source) === InMemoryBlockSource.prototype;
+  if (!exact) {
+    return sourceRefused(
+      "not-in-memory-source",
+      "source is read only when it is an InMemoryBlockSource itself, made with new InMemoryBlockSource({ head }): " +
+        "not a subclass, a proxy or another object",
+    );
+  }
+  const members = SOURCE_HOOKS.filter((member) => member in source);
+  if (members.length === 0) return null;
+  return sourceRefused(
+    "hook-members",
+    `source carries ${members.join(", ")}, which the engine takes as hooks of its block source: give the ` +
+      "InMemoryBlockSource without them",
+    { members: Object.freeze(members) },
+  );
+}
+
+/**
+ * The refusal of a `source` given to a private process, which reads the blocks of its public side, never an in-memory
+ * chain; null on a public process or without one. [LM-8, L48]
+ */
+export function privateSourceRefusal(side: ProcessSide, source: unknown): UmbraError | null {
+  if (source === undefined || side === "public") return null;
+  return sourceRefused(
+    "private-process",
+    "source is a public process's in-memory chain: a private process reads the blocks of its public side; remove it",
   );
 }
 

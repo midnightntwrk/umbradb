@@ -22,9 +22,10 @@
  * order. Before that it is empty, so no `on-start-db` depends on the order of its providers' setups. [MD-7]
  *
  * **`process-item-missing`.** The seal refuses startup when an item is required by a module of this process, some part
- * declares it with the `process` lifetime, and it was not published. A module of this process is a part active in a
- * range the process may run, including the cursor's (since the callbacks are delivered there again after a restart),
- * but not one whose revisions all ended below it. [RN-11]
+ * declares it with the `process` lifetime, and it was not published, unless the process has none of it
+ * ({@link ProcessContextsInput.absent}: no node client while it reads a host's in-memory chain). A module of this
+ * process is a part active in a range the process may run, including the cursor's (since the callbacks are delivered
+ * there again after a restart), but not one whose revisions all ended below it. [RN-11, LM-8]
  */
 
 import { UmbraError } from "../db/errors.js";
@@ -51,6 +52,12 @@ export interface ProcessContextsInput {
   readonly graph: Pick<ResolvedGraph, "modules" | "ranges">;
   /** Each module's revisions, in start order; none when not given. */
   readonly revisionsOf?: (id: string) => readonly Revision[];
+  /**
+   * The `process` items this process has none of, which no part publishes: `node-client` for a process reading a host
+   * program's in-memory chain, which makes no node client. A module requiring one finds it missing from its `items`,
+   * and the seal does not refuse it. None unless given. [LM-8, MD-7]
+   */
+  readonly absent?: readonly string[];
 }
 
 /** Why a `publish` is refused. */
@@ -122,6 +129,8 @@ export class ProcessContexts implements MisuseReports {
   /** The parts that may run a point in this process: active in a range of the graph's `ranges`. */
   readonly #running: ReadonlySet<string>;
   readonly #revisionsOf: (id: string) => readonly Revision[];
+  /** The process items this process has none of (see {@link ProcessContextsInput.absent}). */
+  readonly #absent: ReadonlySet<string>;
   readonly #contexts = new Map<string, ProcessContext>();
   /** Each published item's value and the module that published it, in publication order. */
   readonly #published = new Map<string, { readonly module: string; readonly value: unknown }>();
@@ -137,6 +146,7 @@ export class ProcessContexts implements MisuseReports {
     this.#parts = new Map(input.graph.modules.map((part) => [part.id, part]));
     this.#running = new Set(input.graph.ranges.flatMap((range) => range.order.map((part) => part.id)));
     this.#revisionsOf = input.revisionsOf ?? (() => []);
+    this.#absent = new Set(input.absent ?? []);
   }
 
   /** Whether the seal ran: from `on-start-api` on. */
@@ -209,7 +219,9 @@ export class ProcessContexts implements MisuseReports {
     for (const part of this.#parts.values()) {
       if (!this.#running.has(part.id)) continue;
       for (const item of part.requires) {
-        if (providers.has(item) && !this.#published.has(item)) missing.set(item, [...(missing.get(item) ?? []), part.id]);
+        if (providers.has(item) && !this.#published.has(item) && !this.#absent.has(item)) {
+          missing.set(item, [...(missing.get(item) ?? []), part.id]);
+        }
       }
     }
     const [first] = missing;

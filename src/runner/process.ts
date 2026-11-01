@@ -281,6 +281,7 @@ import { type StartedModuleApi, startModuleApi } from "./api-server.js";
 import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
 import { type NetworkRequest, refusalSecrets, type Resolved, resolve as resolveBuild } from "./resolve.js";
 import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
+import type { InMemoryBlockSource } from "./in-memory-source.js";
 import { configurationRefusalLines } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
 import { type ProcessReason, reasonOf, type RetryCode, retryOf } from "./failures.js";
@@ -370,6 +371,13 @@ export interface EngineOptions {
    * [RN-14, Q102]
    */
   readonly source?: BlockSource | ((core: CheckedEntry, shared: SourceShared) => BlockSource);
+  /**
+   * A host program's chain in memory (`startUmbraDB`'s `source`, which the library holds to exactly an
+   * `InMemoryBlockSource` on a public process): the process's block source in place of the node's, and the process makes
+   * no node client — the `core` revision's `node`, validated as the configuration format requires, is never contacted,
+   * and the `node-client` item is absent (a module requiring it finds none). [LM-8, L49]
+   */
+  readonly inMemorySource?: InMemoryBlockSource;
   /** Stops the process when it aborts ({@link terminationSignal} for SIGTERM). [RN-13] */
   readonly signal?: AbortSignal;
   /**
@@ -1422,7 +1430,8 @@ class Process implements ProcessHandle {
         await this.#admin.serve(checked, core);
         this.#step();
       }
-      const nodeOptions = nodeOptionsOf(core.settings as PlainObject);
+      // A host's in-memory chain needs no node: no client is made, so `node` is never contacted. [LM-8, L49]
+      const nodeOptions = input.inMemorySource === undefined ? nodeOptionsOf(core.settings as PlainObject) : null;
       const makeClient = input.nodeClient ?? ((options: NodeClientOptions) => new NodeClient(options));
       this.#nodeClient =
         nodeOptions === null
@@ -1442,8 +1451,8 @@ class Process implements ProcessHandle {
         log: (line) => this.#log(line),
         ...(input.acceptPublicConfigHash === undefined ? {} : { updateHash: input.acceptPublicConfigHash }),
       };
-      const given = input.source ?? sourceOf(resolved);
-      const source = typeof given === "function" ? given(core, shared) : given;
+      const given = input.inMemorySource ?? input.source ?? sourceOf(resolved);
+      const source: BlockSource = typeof given === "function" ? given(core, shared) : given;
       this.#source = source;
       // `/status` shows the client's `connecting` and the source's queue from now on.
       this.#admin?.publish();
@@ -1556,7 +1565,12 @@ class Process implements ProcessHandle {
     source.checkModules?.(graph.modules);
     const plan = schemaPlan(graph.modules);
     this.#optedOut = plan.optedOut;
-    const contexts = new ProcessContexts({ graph, revisionsOf: processRevisions(check, core) });
+    // Reading a host's in-memory chain, the process has no node client to publish. [LM-8, L49]
+    const contexts = new ProcessContexts({
+      graph,
+      revisionsOf: processRevisions(check, core),
+      ...(input.inMemorySource === undefined ? {} : { absent: ["node-client"] }),
+    });
     const start = BigInt(checked.start);
     // Every build has core-chain, the first backbone part (`contexts.of` throws for a graph without it); a retried
     // startup binds its new contexts, the node client kept.

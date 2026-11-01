@@ -347,6 +347,10 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
   "refusal:ledger-tasks-need-modules-from": [
     { file: "test/library/modules.test.ts", test: "refused before anything opens, naming the module" },
   ],
+  "refusal:source-refused": [
+    { file: "test/library/source.test.ts", test: "an instance given a hook names the hook members it carries" },
+    { file: "test/library/source.test.ts", test: "an in-memory source on a private process is refused source-refused; nothing opened" },
+  ],
   "refusal:transport-reader-can-write": [
     {
       file: "test/private/transport-reader.test.ts",

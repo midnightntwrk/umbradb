@@ -1777,8 +1777,10 @@ public configuration hash than the one it accepted, not given with --update-hash
 owner decision Q175, task 4.5; §8), `package-hash-mismatch`,
 `writer-lock-held`, `durability-fsync-off`, `durability-pooler`, `durability-full-page-writes-off`,
 `library-setting-refused` (a library process's core revision setting `backupAtStop` or `backupOnSignal`: LM-2,
-the start-umbradb change's design §7.2), `modules-given-twice` (a library process given its user modules twice: LM-7)
-and `ledger-tasks-need-modules-from` (user modules given as objects that declare ledger tasks: LM-7);
+the start-umbradb change's design §7.2), `modules-given-twice` (a library process given its user modules twice: LM-7),
+`ledger-tasks-need-modules-from` (user modules given as objects that declare ledger tasks: LM-7) and
+`source-refused` (a library process's in-memory chain that is not exactly an InMemoryBlockSource, or given to a
+private process: LM-8);
 `callback-error` (a
 failing `on-start-db` or `on-start-api`, with point and module) and `listen-failed` (a listener that cannot bind)
 (Q115). **Backup and restore refuse** (the command exits non-zero; nothing is written or committed):

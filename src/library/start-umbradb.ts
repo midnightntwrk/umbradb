@@ -13,6 +13,10 @@
  * `core` revision that sets `backupAtStop` or `backupOnSignal`, which only the command acts on, is refused
  * (`library-setting-refused`). [LM-2, G1–G5, L47]
  *
+ * **An in-memory chain** (`source`): read only when it is exactly an `InMemoryBlockSource` with none of the engine's hook
+ * members, on a public process (`source-refused`); the process then makes no node client, and `node`, validated as the
+ * configuration format requires, is never contacted. [LM-8]
+ *
  * **User modules** (design §6): a `{ file }`'s own `modules` export; with `{ data }`, `modules` objects or
  * `modulesFrom`, a module file both threads import. Given twice, they are refused (`modules-given-twice`). [LM-7]
  *
@@ -56,7 +60,15 @@ import {
 } from "../runner/process.js";
 import type { NetworkRequest } from "../runner/resolve.js";
 import type { PrivateLinkChannel } from "./channels.js";
-import { librarySettingsRefusal, modulesGivenTwice, optionFindings, optionsRefusal, readOptions } from "./options.js";
+import {
+  librarySettingsRefusal,
+  modulesGivenTwice,
+  optionFindings,
+  optionsRefusal,
+  privateSourceRefusal,
+  readOptions,
+  sourceRefusal,
+} from "./options.js";
 
 /** An address a surface listens at once bound: the host as the system reports it, and the port. [LM-3, LM-9] */
 export interface Address {
@@ -86,7 +98,10 @@ export interface UmbraDBOptions {
    * the ledger worker both import — the way to give a module that declares ledger tasks. [LM-7]
    */
   readonly modulesFrom?: URL;
-  /** An in-memory chain in place of the node. [LM-8] */
+  /**
+   * An in-memory chain in place of the node, on a public process: exactly an `InMemoryBlockSource`, no subclass. With it
+   * the process makes no node client and never contacts `node`. [LM-8]
+   */
   readonly source?: InMemoryBlockSource;
   /** Aborting it stops the process as {@link UmbraDBHandle.stop} does. [LM-9, RN-13] */
   readonly signal?: AbortSignal;
@@ -219,11 +234,17 @@ const startedOf = (started: StartedProcess): UmbraDBStarted =>
   Object.freeze({ api: started.api, side: started.side, start: started.start });
 
 /**
- * Starts UmbraDB in this process (see the module comment) and returns its handle at once; never throws. [LM-1, LM-9]
+ * What `startUmbraDB` gives the engine for `options`, and the host's `log` (guarded) for the handle: the options read
+ * once and checked, their refusal given to the engine to throw at its configuration step. Exported for the tests, which
+ * start the engine with this input plus a seam of their own. [LM-1, LM-10]
  */
-export function startUmbraDB(options: UmbraDBOptions): UmbraDBHandle {
+export function engineInputOf(options: UmbraDBOptions): {
+  readonly input: EngineInput;
+  readonly log: ((line: string) => void) | undefined;
+} {
   const read = readOptions(options);
-  const refusal = optionsRefusal(optionFindings(read)) ?? modulesGivenTwice(read.values);
+  const refusal =
+    optionsRefusal(optionFindings(read)) ?? modulesGivenTwice(read.values) ?? sourceRefusal(read.values.source);
   const values = refusal === null ? read.values : {};
   // The host's log, when it is one, also tells a refusal of the other options. [AE-3]
   const log = guardedLog(read.values.log);
@@ -237,17 +258,26 @@ export function startUmbraDB(options: UmbraDBOptions): UmbraDBHandle {
     network: (values.network as NetworkRequest | undefined) ?? {},
     ...(log === undefined ? {} : { log }),
     ...(values.signal === undefined ? {} : { signal: values.signal as AbortSignal }),
-    ...(values.source === undefined ? {} : { source: values.source as InMemoryBlockSource }),
+    // The host's in-memory chain: the process's block source, and no node client. [LM-8, L49]
+    ...(values.source === undefined ? {} : { inMemorySource: values.source as InMemoryBlockSource }),
     ...(values.acceptPublicConfigHash === undefined ? {} : { acceptPublicConfigHash: values.acceptPublicConfigHash as string }),
     // The settings only the command acts on are refused once the process's core revision is known. [LM-2, G3, L47]
     library: {
       refusal,
       resolved: (resolved) => {
-        const refused = librarySettingsRefusal(resolved.core);
+        const refused = privateSourceRefusal(resolved.side, values.source) ?? librarySettingsRefusal(resolved.core);
         if (refused !== null) throw refused;
       },
     },
   };
+  return { input, log };
+}
+
+/**
+ * Starts UmbraDB in this process (see the module comment) and returns its handle at once; never throws. [LM-1, LM-9]
+ */
+export function startUmbraDB(options: UmbraDBOptions): UmbraDBHandle {
+  const { input, log } = engineInputOf(options);
   return handleOf(startProcess(input), log);
 }
 

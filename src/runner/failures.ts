@@ -85,6 +85,7 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "library-setting-refused",
   "modules-given-twice",
   "ledger-tasks-need-modules-from",
+  "source-refused",
 ] as const);
 
 /**

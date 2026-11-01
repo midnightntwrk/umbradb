@@ -251,6 +251,13 @@ export const ERROR_CODES = [
    * `details { modules }`. [LM-7, LG-17]
    */
   "ledger-tasks-need-modules-from",
+  /**
+   * A library process's `source` it may not read: not exactly an `InMemoryBlockSource` (a subclass, another object, a
+   * proxy, a value of another kind; `reason: not-in-memory-source`), one carrying a member the engine treats as a hook
+   * of its block source (`reason: hook-members`, `details.members`), or one given to a private process, which reads
+   * its public side (`reason: private-process`). [LM-8]
+   */
+  "source-refused",
   // The backup's refusals (`src/backup/`): the command exits 1 and writes no file. [BK-1, PP-12]
   /**
    * The tool a backup needs is missing or of another major version than 18: the PostgreSQL 18 client's `pg_dump` for a
