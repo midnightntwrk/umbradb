@@ -31,6 +31,21 @@ its event loop.
 - The machine was also building a Docker image and running a PostgreSQL container at the time (a stagenet smoke
   run), so it was under load.
 
+## Seen again (2026-11-01, `start-umbradb` P9)
+
+In `npx vitest run --coverage --coverage.reportOnFailure=true` on `8cc9754` (Mac, Node.js 24.9.0, PGlite 0.5.10; the
+load average 2 at the start, about 20 during the run), one fork ran at 98 % CPU for 19 minutes after the other 375
+files had reported, and printed nothing. A `sample` (3 s) shows the same stack as above: the main thread inside one
+microtask resumed after a `FileHandle` closed (`node::fs::FileHandle::ClosePromise`), running WebAssembly that calls
+into JavaScript and back (`JSToWasmWrapper` → `WasmToJsWrapperCSA` → `JSToWasmWrapper`), no `V8_Fatal` frame (so not
+issue 00065). `SIGUSR1` opened no inspector (the main thread never returns to its loop). The fork held the lock files of
+a `test/runner/process-backends.ts` temporary directory (`umbradb-process-*`: `db-0` and `db-1` data directories
+created, `db-2` created empty at the same second) — so it hung while PGlite created its third database of a file. The
+file is not named (the reporter prints a file's results when it ends). The fork was killed by hand; Vitest then ended
+the run with "Worker exited unexpectedly"; the other 375 files' results were all there (the only failures the 20 of
+issues 00059 and 00060), the hung file's missing.
+The same tree's plain full run and its conformance run, before it, had no hang.
+
 ## Suggested fix
 
 1. Run the file alone, in a loop, with `--reporter=verbose` and the PGlite cases only, to find the case and whether it
