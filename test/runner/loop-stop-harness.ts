@@ -7,7 +7,7 @@ import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { NodeClientOptions } from "../../src/node/client.js";
 import type { ConnectSocket } from "../../src/node/socket.js";
 import { connectWebSocket } from "../../src/node/ws-socket.js";
-import { type ProcessHandle, type SourceShared, terminationSignal } from "../../src/runner/process.js";
+import { type EngineOptions, type ProcessHandle, type SourceShared, terminationSignal } from "../../src/runner/process.js";
 import type { BlockSource } from "../../src/runner/block-source.js";
 import { type TapeRecord, TapeNode } from "../../tools/tape/index.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
@@ -249,7 +249,7 @@ function processFor(
   scenario: LoopStopScenario,
   url: string,
   lines: string[],
-  more: Partial<Parameters<typeof startProcess>[0]> = {},
+  more: Partial<EngineOptions> = {},
 ): ProcessHandle {
   return startProcess({
     declarations: chainDeclarations([watcher(watched())], { core: scenario.core }),

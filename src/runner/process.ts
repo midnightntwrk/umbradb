@@ -1,17 +1,20 @@
 /**
- * The process that `umbradb run` starts. {@link startProcess} assembles the runner's startup from the build's
- * declarations, the configuration and a block source, runs the finalized loop, and publishes the process's state.
- * [RN-1, RN-7–RN-13, CF-3, CF-4, CF-6, CF-8, IN-10, IN-12, AE-3, AE-4, Q43, Q102; design §1, §2, §7, §11; CORE-ARCH
- * §4.6, §4.12, §4.15, §4.17, §4.18]
+ * The engine: the one lifecycle every entry point starts a process through (`umbradb run`, the browser demo).
+ * {@link startProcess} loads the configuration, resolves the build, runs the runner's startup, runs the finalized
+ * loop, and publishes the process's state. [LM-1, RN-1, RN-7–RN-13, CF-3, CF-4, CF-6, CF-8, IN-10, IN-12, AE-3, AE-4,
+ * Q43, Q102; design §1, §2, §7, §11; CORE-ARCH §4.6, §4.12, §4.15, §4.17, §4.18]
  *
  * **Startup** runs these steps in order; each step refuses with its own typed error:
- * 1. Validate the build's declarations (`validateDeclarations`).
- * 2. Load the configuration (`loadConfig`: the file, or the data given) and validate it (`validateConfig`). [CF-1]
- * 3. Take the `core` entry's operational and secret fields from its latest revision of the build's version, for the
- *    whole run (`processCoreEntry`): the database, the node, `listen.api`, the timeouts, the development opt-in, the
- *    core's stop. The process's one node client is made from this revision's `node` (`nodeOptionsOf`). A block source
- *    given as a function is made from the revision and that client (`core-block-fetch`'s node source,
- *    `nodeSourceOf`). [Q102]
+ * 1. Load the configuration ({@link EngineConfig}): a `{ file }` imported against `cwd` (`loadConfig`), with its
+ *    `modules` export, or the data given. No other file is looked for. [CF-1, LM-1]
+ * 2. Resolve the build and the configuration (`resolve`, `./resolve.ts`): the side the configuration describes, the
+ *    command's build for it with the user modules ({@link UserModulesSource}) validated, the data held to the
+ *    plain-data rules and validated, and the `core` entry's operational and secret fields taken from its latest
+ *    revision of the build's version, for the whole run: the database, the node, `listen.api`, the timeouts, the
+ *    development opt-in, the core's stop. [MD-2, CF-3, Q102]
+ * 3. Make the process's one node client from this revision's `node` (`nodeOptionsOf`), and the block source from the
+ *    revision and that client: the node's (`core-block-fetch`'s node source, `nodeSourceOf`) on the core, the private
+ *    intake's on a private process. [RN-14, PP-1]
  * 4. Open the database that revision names (`openConfiguredDatabase`; PGlite is refused without its opt-in) and start
  *    its writer (`startWriter`: the lock, and the durability probe, whose warnings are logged). [CF-9]
  * 5. In one read, read the cursor (the block source's), the configuration history (`readHistory`) and the chain's
@@ -48,8 +51,8 @@
  * then the block source. It rejects {@link ProcessHandle.started} with the refusal. The process stays up, `refused`
  * with the refusal's reason, until it is stopped. [IN-12, AE-3]
  *
- * **A refusal of the configuration itself** ends the process instead. This covers steps 1 to 3, before the process's
- * `core` revision is known: the declarations, loading the configuration, its plain data and validation, and the choice
+ * **A refusal of the configuration itself** ends the process instead. This covers steps 1 and 2, before the process's
+ * `core` revision is known: loading the configuration, the declarations, its plain data and validation, and the choice
  * of its revision. The process logs every finding with its path (`./configuration-refusal.ts`) and opens no admin
  * listener (there is no validated `listen.admin`). It is `refused` with `closed` resolved, so nothing is left to stop,
  * and `umbradb run` then exits 1. Every later refusal keeps the process up, as above. [Q137 B]
@@ -112,7 +115,7 @@
  * client's retries (`node retries in <ms> ms (node-retrying, <call or connect>, attempt <n>): …`). The condition clears
  * when the client stops retrying. [IN-10]
  *
- * **SIGTERM.** {@link terminationSignal} gives a signal that SIGTERM aborts. Aborting {@link ProcessInput.signal}, or
+ * **SIGTERM.** {@link terminationSignal} gives a signal that SIGTERM aborts. Aborting {@link EngineOptions.signal}, or
  * calling {@link ProcessHandle.stop}, enters `stopping` and aborts the loop's signal. The loop finishes the height in
  * progress (so a block whose transaction is open commits) and starts no other. The process awaits it, then closes the
  * module API (WebSocket clients get 1001, every connection ends), the node client, the database and the block source.
@@ -134,7 +137,7 @@
  * {@link LoopPauses} is kept (`./pause.ts`, `./loop.ts`). {@link ProcessHandle.pause} takes one until
  * {@link ProcessHandle.resume}. [BK-1, Q152 B]
  *
- * A process whose `core` revision sets `backupOnSignal` listens for SIGUSR2 ({@link ProcessInput.backupSignals}:
+ * A process whose `core` revision sets `backupOnSignal` listens for SIGUSR2 ({@link EngineOptions.backupSignals}:
  * Node.js's `process` unless given), from the moment that revision is known until the process has closed. Each SIGUSR2
  * takes a hold, writes the backup of the cursor's height once the loop is paused there (by the same rules as the backup
  * at stop: `backupAtStop`, `../backup/backup.ts`), and releases the hold, so processing goes on from the next height.
@@ -179,13 +182,13 @@
  * migration (`BlockSource.checkModules`: `needs-lockstep-not-listed`). [PP-6]
  *
  * **Logs** go through the configuration's redaction (`configRedactor`) once it is validated. A refusal of the
- * configuration itself is logged finding by finding, with its secrets redacted as the validation reads them
- * (`earlyRedactor`: the configuration as loaded, else the URL patterns only): `startup refused: <code> (<n> findings);
- * the process ends`, then `startup refused: <path>: <message> [<code>]` for each finding. A later refusal, a halt and
- * each retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
+ * configuration itself is logged finding by finding, with its secrets redacted as the validation reads them (the
+ * resolver's `refusalSecrets`: the configuration as loaded, else the URL patterns only): `startup refused: <code> (<n>
+ * findings); the process ends`, then `startup refused: <path>: <message> [<code>]` for each finding. A later refusal,
+ * a halt and each retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
  * `processing retries in <ms> ms (<condition>, attempt <n>): …`, `startup retries …`). [CF-4, AE-6]
  *
- * **The admin endpoints** (`../admin/`) are served unless {@link ProcessInput.admin} is `false` [AE-1, AE-2, Q128 B]:
+ * **The admin endpoints** (`../admin/`) are served unless {@link EngineOptions.admin} is `false` [AE-1, AE-2, Q128 B]:
  * - The heartbeat ticks from `startProcess` on and publishes `status()` to the admin worker. It ends when a refusal of
  *   the configuration ends the process.
  * - The admin listener starts on `listen.admin` once the process's `core` revision is known, before the database
@@ -228,12 +231,12 @@ import { openPostgres } from "../db/postgres.js";
 import { refuseWritingReader, transportReaderFacts, type TransportReaderFacts } from "../private/transport-reader.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkHistory, graphInputOf, type HistoryCheck, versionText } from "../config/history.js";
-import { loadConfig, type LoadOptions } from "../config/load.js";
+import { loadConfig } from "../config/load.js";
 import { resolve } from "node:path";
-import { type PlainObject, plainData } from "../config/plain-data.js";
-import { processCoreEntry } from "../config/process.js";
-import { configRedactor, type Redactor } from "../config/redact.js";
-import { type CheckedConfig, type CheckedEntry, type ConfigInput, validateConfig } from "../config/validate.js";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import type { PlainObject } from "../config/plain-data.js";
+import { configRedactor, type Redactor, redactor } from "../config/redact.js";
+import type { CheckedConfig, CheckedEntry } from "../config/validate.js";
 import type { Database, ReadHandle } from "../db/api.js";
 import { type MigrationPart, startDatabase } from "../db/migrate.js";
 import { startWriter } from "../db/writer-lock.js";
@@ -246,12 +249,13 @@ import type { ModuleDeclaration, PointName, Revision } from "../modules/declarat
 import { backoffDelay } from "../node/backoff.js";
 import { type PrivateSideFacts, ProcessAdmin } from "../admin/process-admin.js";
 import { type NodeFacts, utcText } from "../admin/snapshot.js";
-import { earlyRedactor } from "../admin/redaction.js";
 import type { AdminStarter } from "../admin/server.js";
 import { NodeClient, type NodeClientOptions, type NodeRetry } from "../node/client.js";
 import { resolveGraph } from "../modules/graph.js";
-import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
+import type { DeclarationSet } from "../modules/validation.js";
 import { type StartedModuleApi, startModuleApi } from "./api-server.js";
+import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
+import { refusalSecrets, type Resolved, resolve as resolveBuild } from "./resolve.js";
 import type { BlockRef, BlockSource, SourceCondition } from "./block-source.js";
 import { configurationRefusalLines } from "./configuration-refusal.js";
 import { CallbackFailure, isBackbonePart } from "./dispatch.js";
@@ -275,28 +279,42 @@ import { privateInstancesOf } from "../private/instances.js";
 import { Lockstep, type LockstepCondition } from "../private/lockstep.js";
 
 /**
- * The configuration a process runs with: a file to load, or its data (a browser's bundle, a test's). Startup holds
- * given data to the same plain-data rules as a file's default export (`plainData`). [CF-1]
+ * The configuration a process runs with: a file to load — a path, absolute or relative to {@link EngineOptions.cwd}, or
+ * a file URL — or its data (a host's, the browser's bundle, a test's). Startup loads the file itself (`loadConfig`) and
+ * holds given data to the same plain-data rules as a file's default export (`plainData`). No other file is looked for.
+ * [LM-1, CF-1]
  */
-export type ProcessConfig = LoadOptions | { readonly data: unknown; readonly file?: string };
+export type EngineConfig = { readonly file: string | URL } | { readonly data: unknown };
 
-/** What {@link startProcess} takes. */
-export interface ProcessInput {
+/**
+ * Where the build's user modules come from: the configuration's own `modules` export (`umbradb run`'s; a `{ data }`
+ * configuration has none), or declarations given as objects (a host's, a test's). [LM-7, CF-1, MD-1, Q106 B]
+ */
+export type UserModulesSource = { readonly from: "config" } | { readonly modules: readonly unknown[] };
+
+/**
+ * The build: its user modules, which the resolver joins to UmbraDB's own backbone parts and core modules for the side
+ * the configuration describes (`resolve`, `./resolve.ts`) — or, for the tests only, a build of their own (their test
+ * backbone, core modules and user modules), not validated, in its place. [LM-1, MD-1]
+ */
+export type EngineBuild =
+  | { readonly userModules: UserModulesSource; readonly declarations?: undefined }
+  | { readonly declarations: DeclarationSet; readonly userModules?: undefined };
+
+/** What {@link startProcess}, the engine, takes besides the build ({@link EngineInput}). */
+export interface EngineOptions {
+  /** The configuration (see {@link EngineConfig}). */
+  readonly config: EngineConfig;
+  /** The working directory: a relative `{ file }` resolves against it, never against the host's own. [LM-2, CF-1] */
+  readonly cwd: string;
   /**
-   * The build's declarations, not yet validated: UmbraDB's backbone parts (among them `core-chain`, `CORE_CHAIN`,
-   * which startup binds to its process context), its core modules, and the host's user modules.
+   * The block source, or how to make it from the process's `core` revision and what the process shares with it, its
+   * node client: a test seam. Unless given, the engine reads the chain as the resolver says (`sourceKind`): the node
+   * through `core-block-fetch`'s node source (`nodeSourceOf`), or a private process's public side through its private
+   * intake. A function is called once, after the configuration is validated and before the database opens.
+   * [RN-14, Q102]
    */
-  readonly declarations: DeclarationSet;
-  /** The configuration; `umbradb.config.ts` in the working directory when absent. [CF-1] */
-  readonly config?: ProcessConfig;
-  /**
-   * The block source, or how to make it (`nodeSourceOf` for the node) from the process's `core` revision and what the
-   * process shares with it, its node client. A function is called once, after the configuration is validated and
-   * before the database opens. [RN-14, Q102]
-   */
-  readonly source: BlockSource | ((core: CheckedEntry, shared: SourceShared) => BlockSource);
-  /** The process's side, which decides the `core` schema that applies; public unless given. [CF-4] */
-  readonly side?: ProcessSide;
+  readonly source?: BlockSource | ((core: CheckedEntry, shared: SourceShared) => BlockSource);
   /** Stops the process when it aborts ({@link terminationSignal} for SIGTERM). [RN-13] */
   readonly signal?: AbortSignal;
   /** Where each log line goes, redacted (see the module comment); standard error when absent. */
@@ -322,8 +340,10 @@ export interface ProcessInput {
    */
   readonly admin?: boolean | AdminStarter;
   /**
-   * The process's ledger worker: started when the graph has `core-block-parsed` or `core-ledger-state`, with
-   * `startLedgerWorker` unless given (a test package's, a negative control's), and closed with the process. [LG-10]
+   * The process's ledger worker: started when the graph has `core-block-parsed` or `core-ledger-state`, and closed with
+   * the process. Unless given (a test package's, a negative control's, the browser's Web Worker), it is UmbraDB's own
+   * entry (`startLedgerWorker`), which for a `{ file }` configuration imports that file in the worker for its user
+   * modules' ledger tasks, as the main thread imports it ({@link ledgerWorkerOf}). [LG-10, LG-17, MD-1, LM-7]
    */
   readonly ledgerWorker?: () => LedgerHost;
   /**
@@ -365,6 +385,9 @@ export interface ProcessInput {
   readonly transportReaderCheck?: (facts: TransportReaderFacts) => readonly string[];
 }
 
+/** What {@link startProcess}, the engine, takes: the build and the options. [LM-1] */
+export type EngineInput = EngineOptions & EngineBuild;
+
 /** What delivers SIGUSR2 for `backupOnSignal`: Node.js's `process`, or a test's emitter. */
 export interface BackupSignals {
   on(event: "SIGUSR2", listener: () => void): unknown;
@@ -379,7 +402,7 @@ export interface SourceShared {
   readonly start: bigint;
   /** The process's log, redacted (a private source's transport logs its connections). */
   readonly log: (line: string) => void;
-  /** {@link ProcessInput.updateHash}, when given (a private source's). */
+  /** {@link EngineOptions.updateHash}, when given (a private source's). */
   readonly updateHash?: string;
 }
 
@@ -669,7 +692,7 @@ export interface SignalTarget {
 }
 
 /**
- * For a Node.js process: a signal that aborts on the first SIGTERM `target` receives (the {@link ProcessInput.signal}
+ * For a Node.js process: a signal that aborts on the first SIGTERM `target` receives (the {@link EngineOptions.signal}
  * of `umbradb run`), and `dispose`, which stops listening. [RN-13]
  */
 export function terminationSignal(target: SignalTarget = process): { readonly signal: AbortSignal; dispose(): void } {
@@ -742,6 +765,61 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+/** A configuration as startup loaded it: a file's evaluated data and its `modules` export, or data given (none). */
+interface LoadedInput {
+  /** The file, absolute; null for data given. */
+  readonly file: string | null;
+  readonly data: unknown;
+  readonly modules: readonly unknown[];
+}
+
+/**
+ * The absolute path of a `{ file }` configuration — a file URL converted (`fileURLToPath`), a relative path resolved
+ * against `cwd` —, or null for `{ data }`. Throws `invalid-configuration` (`load-failed`) for a URL that is no file
+ * URL. [CF-1, LM-2]
+ */
+export function configFileOf(config: EngineConfig, cwd: string): string | null {
+  if (!("file" in config)) return null;
+  const { file } = config;
+  if (!(file instanceof URL)) return resolve(cwd, file);
+  if (file.protocol !== "file:") {
+    throw new UmbraError(
+      "invalid-configuration",
+      `the configuration file ${file.href} could not be loaded: a configuration is a file path or a file: URL`,
+      { file: file.href, reason: "load-failed", errorCode: null },
+    );
+  }
+  return fileURLToPath(file);
+}
+
+/**
+ * The ledger worker the engine starts for `input` (see {@link EngineOptions.ledgerWorker}): the one given, else
+ * UmbraDB's entry, which for a `{ file }` configuration imports that file in the worker for its `modules` export's
+ * ledger tasks. [LG-10, LG-17, MD-1, LM-7]
+ */
+export function ledgerWorkerOf(input: Pick<EngineOptions, "config" | "cwd" | "ledgerWorker">): () => LedgerHost {
+  if (input.ledgerWorker !== undefined) return input.ledgerWorker;
+  const file = configFileOf(input.config, input.cwd);
+  return () => startLedgerWorker(file === null ? {} : { modules: pathToFileURL(file) });
+}
+
+/**
+ * How the engine reads the chain unless a test gives its block source: as the resolver says (`sourceKind`), the node
+ * through `core-block-fetch`'s node source, or a private process's public side through its private intake.
+ * [RN-14, PP-1]
+ */
+function sourceOf(resolved: Resolved): (core: CheckedEntry, shared: SourceShared) => BlockSource {
+  if (resolved.sourceKind === "node") return nodeSourceOf;
+  const intake = resolved.privateIntake;
+  if (intake === null) {
+    throw new Error(
+      "a test's private build (EngineBuild.declarations) carries its own private intake: give the process that " +
+        "intake's block source (EngineOptions.source)",
+    );
+  }
+  return (core, shared) => intake.source(core, shared);
+}
+
 /** What startup leaves for the loop. */
 interface Startup {
   readonly loop: FinalizedLoop;
@@ -762,12 +840,14 @@ class Process implements ProcessHandle {
   readonly started: Promise<StartedProcess>;
   readonly ended: Promise<ProcessingEnd>;
   readonly closed: Promise<void>;
-  readonly #input: ProcessInput;
+  readonly #input: EngineInput;
   readonly #stop = new AbortController();
   #resolveClosed!: () => void;
   #closing: Promise<void> | undefined;
   #phase: StatusFacts["phase"] = "starting";
   #redactor: Redactor | undefined;
+  /** The process's side, once the resolver took it from the configuration; public until then. [CF-4] */
+  #side: ProcessSide = "public";
   #core: CheckedEntry | undefined;
   #start: bigint | null = null;
   #cursor: bigint | null = null;
@@ -813,7 +893,7 @@ class Process implements ProcessHandle {
   /** Stops listening for SIGUSR2, once the process listens. */
   #unlisten: (() => void) | undefined;
 
-  constructor(input: ProcessInput) {
+  constructor(input: EngineInput) {
     this.#input = input;
     const { admin } = input;
     this.#admin =
@@ -822,7 +902,6 @@ class Process implements ProcessHandle {
         : new ProcessAdmin({
             status: () => this.status(),
             log: (line) => this.#log(line),
-            side: input.side ?? "public",
             privateSide: () => this.#privateSide(),
             node: () => this.#nodeFacts(),
             ...(typeof admin === "function" ? { start: admin } : {}),
@@ -980,7 +1059,7 @@ class Process implements ProcessHandle {
       target: target.backend === "postgres" ? { backend: "postgres", connection: target.connection } : { backend: "pglite" },
       out,
       optedOut: this.#optedOut,
-      side: this.#input.side ?? "public",
+      side: this.#side,
       developmentOptIn: settings.developmentOptIn === true,
     };
   }
@@ -1114,26 +1193,51 @@ class Process implements ProcessHandle {
     if (wait !== null) this.#conditions.push(Object.freeze({ code: "waiting-for-node", ...wait }));
   }
 
+  /**
+   * Startup's load (step 2): a `{ file }` imported with its `modules` export (`loadConfig`, relative to `cwd`), or the
+   * data given. Rejects with the loader's refusal, which names the file. [CF-1, LM-1]
+   */
+  async #load(): Promise<LoadedInput> {
+    const { config, cwd } = this.#input;
+    const file = configFileOf(config, cwd);
+    if (file === null) return { file: null, data: (config as { readonly data: unknown }).data, modules: [] };
+    return loadConfig({ file, cwd });
+  }
+
+  /**
+   * Startup's resolution of the build and the configuration (`./resolve.ts`): the user modules the build names (the
+   * configuration's `modules` export, or the list given), or a test's build in their place. Throws the resolver's
+   * refusal unchanged. [LM-1, MD-2, CF-3, Q102]
+   */
+  #resolve(loaded: LoadedInput): Resolved {
+    const input = this.#input;
+    const given = input.userModules;
+    const userModules = given === undefined ? [] : "modules" in given ? given.modules : loaded.modules;
+    return resolveBuild({
+      data: loaded.data,
+      file: loaded.file,
+      userModules,
+      ...(input.declarations === undefined ? {} : { declarations: input.declarations }),
+      ...(input.processCore === undefined ? {} : { processCore: input.processCore }),
+    });
+  }
+
   /** Startup (see the module comment); on a refusal or a stop, closes what it opened and rejects. */
   async #startup(): Promise<Startup> {
     // Begins on the next microtask, so that a signal aborted before `startProcess` returned stops it before anything.
     await Promise.resolve();
     const input = this.#input;
-    // The configuration as loaded, once it is: what a refusal of its validation is redacted with.
-    let loadedInput: ConfigInput | undefined;
     try {
       this.#step();
-      // A module's ledger tasks run through points of its own (`src/ledger/tasks.ts`). [LG-17]
-      const declarations = withLedgerTaskPoints(validateDeclarations(input.declarations));
-      const given = input.config ?? {};
-      const loaded =
-        "data" in given ? { file: given.file, data: plainData(given.data, given.file) } : await loadConfig(given);
-      loadedInput = { config: loaded, declarations, side: input.side ?? "public" };
+      const loaded = await this.#load();
       this.#step();
-      const checked = validateConfig(loadedInput);
+      const resolved = this.#resolve(loaded);
+      // A module's ledger tasks run through points of its own (`src/ledger/tasks.ts`). [LG-17]
+      const declarations = withLedgerTaskPoints(resolved.declarations);
+      const { checked, core } = resolved;
+      this.#side = resolved.side;
       this.#redactor = configRedactor(checked);
       this.#start = BigInt(checked.start);
-      const core = (input.processCore ?? processCoreEntry)(checked);
       this.#core = core;
       this.#listenForBackups(core);
       if (this.#admin !== undefined) {
@@ -1160,7 +1264,8 @@ class Process implements ProcessHandle {
         log: (line) => this.#log(line),
         ...(input.updateHash === undefined ? {} : { updateHash: input.updateHash }),
       };
-      const source = typeof input.source === "function" ? input.source(core, shared) : input.source;
+      const given = input.source ?? sourceOf(resolved);
+      const source = typeof given === "function" ? given(core, shared) : given;
       this.#source = source;
       // `/status` shows the client's `connecting` and the source's queue from now on.
       this.#admin?.publish();
@@ -1186,8 +1291,10 @@ class Process implements ProcessHandle {
     } catch (error) {
       if (!this.#stop.signal.aborted) {
         if (this.#core === undefined) {
-          // A refusal of the configuration itself: every finding logged; `#run` then ends the process. [Q137 B]
-          for (const line of configurationRefusalLines(error, earlyRedactor(loadedInput).text)) this.#log(line);
+          // A refusal of the configuration itself: every finding logged, its secrets redacted as the validation read
+          // them (the resolver's), and the URL patterns only before; `#run` then ends the process. [Q137 B, AE-6]
+          const early = redactor(refusalSecrets(error));
+          for (const line of configurationRefusalLines(error, early.text)) this.#log(line);
         } else {
           this.#log(`startup refused: ${reasonOf(error).code}: ${messageOf(error)}`);
         }
@@ -1295,7 +1402,7 @@ class Process implements ProcessHandle {
       // released, refuses startup here, before the worker starts and before block S. [LG-5, A173]
       const sources = settings.ledgerSources as VerifyLedgerPackagesOptions["sources"];
       (input.checkLedgerPackages ?? checkLedgerPackages)(sources === undefined ? {} : { sources });
-      this.#ledger ??= (input.ledgerWorker ?? startLedgerWorker)();
+      this.#ledger ??= ledgerWorkerOf(input)();
       // A request given no read (a parse) reads stored nodes through the process's database.
       this.#ledger.useDatabase({ read: (body) => db.read(body) });
       if (parses) bindLedgerParser(contexts.of(CORE_BLOCK_PARSED_ID), this.#ledger);
@@ -1334,7 +1441,7 @@ class Process implements ProcessHandle {
     if (this.#lockstep === undefined && lockstepInstances.length > 0) {
       this.#lockstep = new Lockstep({ listed: lockstepInstances, log: (line) => this.#log(line) });
     }
-    if (this.#transport === undefined && (input.side ?? "public") === "public" && transportAddress !== undefined) {
+    if (this.#transport === undefined && this.#side === "public" && transportAddress !== undefined) {
       const reads = await this.#transportReads(settings, db, source);
       this.#transport = await startCoreTransport({
         address: transportAddress,
@@ -1550,6 +1657,6 @@ class Process implements ProcessHandle {
  * Starts a process (see the module comment): returns its handle at once, startup running — `started` tells when it
  * completed, `ended` how processing ended, `status()` the state meanwhile.
  */
-export function startProcess(input: ProcessInput): ProcessHandle {
+export function startProcess(input: EngineInput): ProcessHandle {
   return new Process(input);
 }

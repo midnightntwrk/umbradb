@@ -1,10 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { privateCursorHeight, privateIntake } from "../../src/backbone/core-private-source/index.js";
+import { privateCursorHeight } from "../../src/backbone/core-private-source/index.js";
 import type { Manifest } from "../../src/backup/manifest.js";
 import type { PublicDatabase } from "../../src/backbone/core-private-source/index.js";
-import { commandBuild } from "../../src/cli/build-modules.js";
 import { type RestoreCommandSeams, type RestoreOutcome, runRestore } from "../../src/cli/restore.js";
-import { loadConfig } from "../../src/config/load.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import type { ProcessHandle } from "../../src/runner/process.js";
@@ -24,10 +22,10 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * core opens, through the core's process transport (`coreTransport`, the core's `listen.transport`).
  *
  * **A private process** is started from a configuration file of a command project, as `umbradb run` starts one
- * (`src/cli/run.ts`: the command's private build with one intake, its source the intake's), so that `umbradb restore`
- * reads the same file and build: its `core` entry and one private module `pm` ({@link pmModule}, `../private/builds.ts`'s
- * `privateModule` as a module file declares it), which requires the public `table` item `blocks` and stores, at each
- * height, the public block's hash it read with its data setting `salt`.
+ * (`src/cli/run.ts`: the engine given the file, whose resolver makes the private build with one intake, its source the
+ * intake's), so that `umbradb restore` reads the same file and build: its `core` entry and one private module `pm`
+ * ({@link pmModule}, `../private/builds.ts`'s `privateModule` as a module file declares it), which requires the public
+ * `table` item `blocks` and stores, at each height, the public block's hash it read with its data setting `salt`.
  */
 
 /** The module `pm` as a module file declares it (see the module comment), importing `defineModule` from `builders`. */
@@ -128,14 +126,10 @@ export interface FileProcess {
 
 /** Starts the private process of the configuration file `file`, as `umbradb run` starts one (see the module comment). */
 export async function startPrivateFile(file: string): Promise<FileProcess> {
-  const loaded = await loadConfig({ file });
-  const intake = privateIntake();
   const lines: string[] = [];
   const handle = startProcess({
-    declarations: commandBuild(loaded.modules, { side: "private", intake }),
-    config: { data: loaded.data, file: loaded.file },
-    source: (core, shared) => intake.source(core, shared),
-    side: "private",
+    config: { file },
+    userModules: { from: "config" },
     log: (line) => lines.push(line),
   });
   return {

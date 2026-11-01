@@ -14,7 +14,7 @@ import { openPglite, PGLITE_START_PARAMS } from "../../src/db/pglite.js";
 import { openPostgres } from "../../src/db/postgres.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import type { BackupSignals, ProcessHandle, ProcessInput } from "../../src/runner/process.js";
+import type { BackupSignals, ProcessHandle, EngineInput } from "../../src/runner/process.js";
 import { spawnChild } from "../child-processes.js";
 import type { CliProject } from "../cli/cli-fixtures.js";
 import { startPostgresServer, type PostgresTestServer } from "../db/postgres-server.js";
@@ -173,7 +173,7 @@ export interface TickerOptions {
 export async function startTicker(
   file: string,
   head: bigint,
-  chain?: ProcessInput["source"],
+  chain?: EngineInput["source"],
   options: TickerOptions = {},
 ): Promise<TickerProcess> {
   const loaded = await loadConfig({ file });

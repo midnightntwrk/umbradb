@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
-import type { ProcessInput } from "../../src/runner/process.js";
+import type { EngineInput } from "../../src/runner/process.js";
 import { type PrivateBackend, READER_LOGIN, type TestDatabase } from "./backends.js";
 import { launchPrivate, launchPublicCore, type PrivateProcess, type PublicCore } from "./builds.js";
 import { RetargetProxy } from "./relays.js";
@@ -106,8 +106,8 @@ export interface A162Options {
   readonly private?: boolean;
   /** A negative control's private process that ignores `configHash` (`PrivateIntakeOptions.configHash`). */
   readonly ignore?: boolean;
-  /** A negative control's configuration hash of the core (`ProcessInput.configHash`). */
-  readonly configHash?: ProcessInput["configHash"];
+  /** A negative control's configuration hash of the core (`EngineInput.configHash`). */
+  readonly configHash?: EngineInput["configHash"];
 }
 
 /** Waits until `check` holds, or fails after `ms` naming `what`. */

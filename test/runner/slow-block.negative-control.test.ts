@@ -7,7 +7,7 @@ import { PROCESS_BACKENDS } from "./process-backends.js";
 import { a142Problems, HOLD_MS, holding, observe, quietProblems, type Seen, SLOW_HEIGHT, startSlow } from "./slow-block-harness.js";
 
 /**
- * The slow height's committed negative controls: wrong watchdogs, each a loop of the process (`ProcessInput.loop`).
+ * The slow height's committed negative controls: wrong watchdogs, each a loop of the process (`EngineInput.loop`).
  * Each fails the slow height's own oracle (`./slow-block-harness.ts`) through the process on PostgreSQL 18 and PGlite
  * 0.5.10. [A142, RN-17, Q71]
  * - one that never clears the condition fails "the condition is gone after the commit";

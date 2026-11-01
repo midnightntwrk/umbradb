@@ -148,7 +148,7 @@ export interface IngestOptions {
   /** The node source's class (a negative control's), or a factory wrapping the process's client (an instrument). */
   readonly Source?: SourceClass;
   readonly client?: (client: NodeClient) => NodeClient;
-  /** Makes the process's node client (`ProcessInput.nodeClient`: a clock of the test's own); the process's own unless given. */
+  /** Makes the process's node client (`EngineInput.nodeClient`: a clock of the test's own); the process's own unless given. */
   readonly nodeClient?: (options: NodeClientOptions) => NodeClient;
   /** More user modules. */
   readonly user?: readonly ModuleDeclaration[];

@@ -66,6 +66,7 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints' life with the process on $
     const build = testBuild([]);
     const lines: string[] = [];
     const handle = startProcess({
+      cwd: process.cwd(),
       declarations: build.declarations,
       config: { data: { entries: [adminCore(db.setting, 1, { extra: { listen: { admin: `127.0.0.1:${port}` } } })] } },
       source: adminSource(3n),
@@ -178,6 +179,7 @@ describe("the process publishes at once when startup ends, processing ends and t
     });
     const build = testBuild([failing]);
     const handle = startProcess({
+      cwd: process.cwd(),
       declarations: build.declarations,
       config: { data: { entries: [adminCore({ kind: "pglite", memory: true }, 1, { extra: { listen: { admin: "127.0.0.1:0" } } }), entryOf(failing, 1)] } },
       source: adminSource(3n),
@@ -220,6 +222,7 @@ describe("the process publishes at once when startup ends, processing ends and t
       });
       let release!: () => void;
       const handle = startProcess({
+        cwd: process.cwd(),
         declarations: build.declarations,
         config: { data: { entries: [adminCore({ kind: "pglite", path: database }, 1, { extra: { listen: { admin: "127.0.0.1:0" } } })] } },
         source: adminSource(1n),
@@ -251,6 +254,7 @@ describe("a stop before the configuration was read", () => {
     const build = testBuild([]);
     let asked = 0;
     const handle = startProcess({
+      cwd: process.cwd(),
       declarations: build.declarations,
       config: { data: { entries: [adminCore({ kind: "pglite", memory: true }, 1)] } },
       source: adminSource(1n),

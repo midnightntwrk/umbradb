@@ -62,7 +62,10 @@ export interface ProcessAdminOptions {
   readonly log: (line: string) => void;
   /** How the listener starts: {@link startAdminServer} (its worker thread) unless given (the negative controls'). */
   readonly start?: AdminStarter;
-  /** The process's side, the instance role `/status` shows: public (the core) unless given. [CF-4, AE-5] */
+  /**
+   * The process's side, the instance role `/status` shows until {@link ProcessAdmin.serve} takes it from the validated
+   * configuration: public (the core) unless given. [CF-4, AE-5]
+   */
   readonly side?: ProcessSide;
   /**
    * The process's private side now, asked at each snapshot: on the core its private instances, on a private process
@@ -162,7 +165,7 @@ export class ProcessAdmin {
   readonly #log: (line: string) => void;
   readonly #start: AdminStarter;
   readonly #heartbeat: Heartbeat;
-  readonly #side: ProcessSide;
+  #side: ProcessSide;
   readonly #privateSide: (() => PrivateSideFacts) | undefined;
   readonly #node: (() => NodeFacts) | undefined;
   readonly #startedNs = process.hrtime.bigint();
@@ -205,12 +208,13 @@ export class ProcessAdmin {
 
   /**
    * The process's `core` revision is known (`core` of `checked`): starts the listener on its `listen.admin`, with its
-   * liveness timeout, its readiness lag and the configuration's redaction; resolves once it listens, rejects when it
-   * cannot.
+   * liveness timeout, its readiness lag, the configuration's redaction and its side; resolves once it listens, rejects
+   * when it cannot.
    */
   async serve(checked: CheckedConfig, core: CheckedEntry): Promise<void> {
     if (this.#closed || this.#listening !== undefined) return;
     const settings = core.settings as Readonly<Record<string, unknown>>;
+    this.#side = checked.side;
     this.#redactor = configRedactor(checked);
     this.#liveness = settings.livenessTimeoutMs as number;
     this.#readinessLag = (settings.readinessLag as number | undefined) ?? null;

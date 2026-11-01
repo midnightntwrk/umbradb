@@ -12,7 +12,8 @@ import { versionEntry } from "../../src/config/entries.js";
 import { redactor } from "../../src/config/redact.js";
 import { UmbraError } from "../../src/db/errors.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
-import { type ProcessConfig, type ProcessHandle, type ProcessInput, startProcess } from "../../src/runner/process.js";
+import { type EngineConfig, type EngineInput, type ProcessHandle, startProcess } from "../../src/runner/process.js";
+import type { DeclarationSet } from "../../src/modules/validation.js";
 import { type CliProject, cliProject, inProcess } from "../cli/cli-fixtures.js";
 import { exitWithin, runCoreSettings, runInChild } from "../cli/run-fixtures.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
@@ -64,7 +65,7 @@ const ENDS_WITHIN_MS = 30_000;
 const SECRET = "pw-8-1b-REFUSED";
 
 /** How a test starts a process: the runner's `startProcess`, or a negative control's. */
-type Start = (input: ProcessInput) => ProcessHandle;
+type Start = (input: EngineInput) => ProcessHandle;
 
 /** A directory of this file's own, for configuration files. */
 let directory: string;
@@ -81,7 +82,7 @@ interface Refusal {
   readonly what: string;
   readonly code: "invalid-configuration" | "not-plain-data";
   /** The configuration on `database`, its `listen.admin` at `address` where it has one. */
-  config(database: DatabaseParts, address: string): ProcessConfig;
+  config(database: DatabaseParts, address: string): EngineConfig;
   /** The paths of findings it must log (besides every other finding its refusal carries). */
   paths(): readonly string[];
 }
@@ -251,7 +252,7 @@ async function sessionsOf(observer: ProcessDatabase, db: ProcessDatabase): Promi
 }
 
 /** The tests' build with the admin endpoints' parts among its backbone (as the command's), and `user`. */
-function declarationsOf(user: readonly ModuleDeclaration[] = []): ProcessInput["declarations"] {
+function declarationsOf(user: readonly ModuleDeclaration[] = []): DeclarationSet {
   const { declarations } = testBuild(user);
   return { ...declarations, backbone: [...declarations.backbone, ...ADMIN_BACKBONE] };
 }
@@ -278,6 +279,7 @@ async function endedProblems(start: Start, backend: ProcessBackend, refusal: Ref
   const lines: string[] = [];
   const watch = probe(port);
   const handle = start({
+    cwd: process.cwd(),
     declarations: declarationsOf(),
     config: refusal.config(db.setting, address),
     source: adminSource(3n),
@@ -326,8 +328,9 @@ const migrating = (sql: string): ModuleDeclaration =>
   loggingModule("m", [], ["on-db-write"], { migrations: [{ id: "001", sql }] });
 
 /** A process of the tests' build on `database` with `user`'s entries from 1 and its admin listener at `address`. */
-function started(start: Start, database: DatabaseParts, address: string, user: readonly ModuleDeclaration[], admin: ProcessInput["admin"]) {
+function started(start: Start, database: DatabaseParts, address: string, user: readonly ModuleDeclaration[], admin: EngineInput["admin"]) {
   return start({
+    cwd: process.cwd(),
     declarations: declarationsOf(user),
     config: { data: { entries: [adminCore(database, 1, { extra: { listen: { admin: address } } }), ...user.map((part) => entryOf(part, 1))] } },
     source: adminSource(3n),

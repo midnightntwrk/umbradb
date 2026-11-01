@@ -16,7 +16,7 @@ import type { DeclarationSet } from "../../src/modules/validation.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { FinalizedLoop, LoopInput } from "../../src/runner/loop.js";
-import type { ProcessHandle, ProcessInput } from "../../src/runner/process.js";
+import type { ProcessHandle, EngineInput } from "../../src/runner/process.js";
 import { startProcess } from "../runner/process-build.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
 import { REACH_TIMEOUT_MS, TRANSPORT_LOGIN } from "./backends.js";
@@ -113,12 +113,12 @@ export interface PublicCoreOptions {
    * {@link extra} (`127.0.0.1:0` for a free port), or through a negative control's starter; none unless given.
    */
   readonly admin?: boolean | AdminStarter;
-  /** A negative control's configuration hash (`ProcessInput.configHash`); the process's own unless given. [RN-16] */
-  readonly configHash?: ProcessInput["configHash"];
-  /** The transport-reader test's seam: the transport's read path (`ProcessInput.transportReads`). [A177] */
-  readonly transportReads?: ProcessInput["transportReads"];
-  /** The transport-reader negative control's judgement of the reader (`ProcessInput.transportReaderCheck`). [A177] */
-  readonly transportReaderCheck?: ProcessInput["transportReaderCheck"];
+  /** A negative control's configuration hash (`EngineInput.configHash`); the process's own unless given. [RN-16] */
+  readonly configHash?: EngineInput["configHash"];
+  /** The transport-reader test's seam: the transport's read path (`EngineInput.transportReads`). [A177] */
+  readonly transportReads?: EngineInput["transportReads"];
+  /** The transport-reader negative control's judgement of the reader (`EngineInput.transportReaderCheck`). [A177] */
+  readonly transportReaderCheck?: EngineInput["transportReaderCheck"];
 }
 
 /** The public core's module that keeps the core's `db` item for the tests' direct reads (see the module comment). */
@@ -454,7 +454,6 @@ export function launchPrivate(options: PrivateOptions): PrivateProcess {
       declarations,
       config: { data: { entries: [privateCoreEntry(options), ...entries] } },
       source: (core, shared) => intake.source(core, shared),
-      side: "private",
       log: options.lines === undefined ? quiet : (line) => options.lines?.push(line),
       ...(options.loop === undefined ? {} : { loop: options.loop }),
       ...(options.admin === undefined ? {} : { admin: options.admin }),

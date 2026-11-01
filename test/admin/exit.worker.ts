@@ -31,6 +31,7 @@ const extra = {
   ...(mode === "refuse" ? { livenessTimeoutMs: "thirty seconds" } : {}),
 };
 const handle = startProcess({
+  cwd: process.cwd(),
   declarations: build.declarations,
   config: { data: { entries: [adminCore(database, 1, { extra })] } },
   source: adminSource(2n),

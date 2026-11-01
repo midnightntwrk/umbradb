@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildCoreVersion } from "../../src/config/build.js";
 import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
@@ -687,7 +688,9 @@ describe("startProcess without a database", () => {
     expect(handle.status().state).toBe("refused");
   });
 
-  it("logs to standard error by default, and loads umbradb.config.ts from the working directory by default (CF-1)", async () => {
+  it("logs to standard error by default; a relative { file } resolves against cwd, not the host's directory (CF-1, LM-2)", async () => {
+    // The engine looks for no default file: `umbradb run` names `umbradb.config.ts` itself (`src/cli/run.ts`).
+    const cwd = mkdtempSync(join(tmpdir(), "umbradb-engine-cwd-"));
     const written: string[] = [];
     const write = process.stderr.write.bind(process.stderr);
     process.stderr.write = ((chunk: string | Uint8Array) => {
@@ -695,19 +698,57 @@ describe("startProcess without a database", () => {
       return true;
     }) as typeof process.stderr.write;
     try {
-      const handle = startProcess({ declarations: testBuild([]).declarations, source: new InMemoryBlockSource({ head: 1n }) });
+      const handle = startProcess({
+        declarations: testBuild([]).declarations,
+        config: { file: "umbradb.config.ts" },
+        cwd,
+        source: new InMemoryBlockSource({ head: 1n }),
+      });
       await expect(handle.started).rejects.toMatchObject({
         code: "invalid-configuration",
-        details: { reason: "file-not-found", file: join(process.cwd(), "umbradb.config.ts") },
+        details: { reason: "file-not-found", file: join(cwd, "umbradb.config.ts") },
       });
       await handle.stop();
     } finally {
       process.stderr.write = write;
+      rmSync(cwd, { recursive: true, force: true });
     }
+    expect(cwd).not.toBe(process.cwd());
     expect(written).toEqual([
       "startup refused: invalid-configuration (1 finding); the process ends\n",
       expect.stringMatching(/^startup refused: .*umbradb\.config\.ts: no configuration file at .* \[invalid-configuration file-not-found\]\n$/),
     ]);
+  });
+
+  it("takes a { file } given as a file URL as its path, and refuses a URL that is no file URL (CF-1)", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "umbradb-engine-url-"));
+    try {
+      const file = join(cwd, "absent.config.ts");
+      const byUrl = startProcess({
+        declarations: testBuild([]).declarations,
+        config: { file: pathToFileURL(file) },
+        source: new InMemoryBlockSource({ head: 1n }),
+        log: () => undefined,
+      });
+      await expect(byUrl.started).rejects.toMatchObject({ code: "invalid-configuration", details: { reason: "file-not-found", file } });
+      await byUrl.stop();
+      const lines: string[] = [];
+      const web = startProcess({
+        declarations: testBuild([]).declarations,
+        config: { file: new URL("https://example.invalid/umbradb.config.ts") },
+        source: new InMemoryBlockSource({ head: 1n }),
+        log: (line) => lines.push(line),
+      });
+      await expect(web.started).rejects.toMatchObject({
+        code: "invalid-configuration",
+        details: { reason: "load-failed", file: "https://example.invalid/umbradb.config.ts" },
+      });
+      expect(await web.ended).toMatchObject({ kind: "refused" });
+      await web.closed;
+      expect(lines[0]).toBe("startup refused: invalid-configuration (1 finding); the process ends");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("logs a refusal after the configuration was validated with its code and message; a value thrown that is no Error as text", async () => {

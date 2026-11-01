@@ -496,7 +496,7 @@ describe("A140 for /status: core-status's, from its own folder, its tests beside
       instanceId: "instance-1",
       listen: { admin: "127.0.0.1:0" },
     });
-    const run = startWithAdmin({ database: { kind: "pglite", memory: true }, side: "private", entries: [coreEntry({ start: 1, config: settings as never })] });
+    const run = startWithAdmin({ database: { kind: "pglite", memory: true }, entries: [coreEntry({ start: 1, config: settings as never })] });
     await expect(run.handle.started).rejects.toMatchObject({ code: "development-opt-in-required" });
     const body = await statusWhen(await run.origin(), (each) => each.state === "refused");
     expect(body).toMatchObject({ instance: { role: "private", id: "instance-1" }, node: null, public: { cursor: null, lockstep: null } });

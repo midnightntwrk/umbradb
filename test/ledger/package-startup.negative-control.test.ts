@@ -9,7 +9,7 @@ import { expectProcessChecks, expectWorkerChecks, type InstallationCopy, install
 /**
  * The committed negative control for the package checks: a startup that never calls the check fails the checks of
  * `./package-startup-checks.ts`. [A173, LG-5; acceptance §12]
- * - **The process** started without its check (`ProcessInput.checkLedgerPackages` checking nothing) goes on to start
+ * - **The process** started without its check (`EngineInput.checkLedgerPackages` checking nothing) goes on to start
  *   its ledger worker over a package whose Node.js entry changed, and fails the check `ledger workers started`.
  * - **The ledger worker** over a copy whose `src/ledger/load.ts` never calls `checkLedgerPackage` imports the changed
  *   entry, which records its import, and fails the check `the worker imported the package`.

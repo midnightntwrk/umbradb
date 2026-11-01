@@ -26,7 +26,7 @@ import {
 } from "./pause-fixtures.js";
 
 /**
- * The pause tests' committed negative controls, on PGlite 0.5.10, each a loop (`ProcessInput.loop`) that pauses
+ * The pause tests' committed negative controls, on PGlite 0.5.10, each a loop (`EngineInput.loop`) that pauses
  * wrongly, run through `./pause.test.ts`'s scenario and oracles (`./pause-fixtures.ts`), each oracle seen failing:
  * [A163, BK-1, RN-13, Q152 B]
  * - **inside the height:** a loop that pauses in a height's block transaction, before its `on-db-write`, instead of

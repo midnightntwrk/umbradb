@@ -4,7 +4,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EXIT, runProcessCommand, USAGE } from "../../src/cli/command.js";
 import { startProcess as startWithoutAdmin } from "../runner/process-build.js";
-import type { ProcessHandle, ProcessInput } from "../../src/runner/process.js";
+import type { ProcessHandle, EngineInput } from "../../src/runner/process.js";
 import { ask, statusWhen } from "../admin/admin-harness.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { type CliProject, cliProject, inProcess } from "./cli-fixtures.js";
@@ -354,7 +354,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
   it("--update-hash=<hash> (or --update-hash <hash>) reaches startProcess as its updateHash, exactly as given (PP-14, Q159)", async () => {
     const hash = `0x${"5a".repeat(32)}`;
     for (const args of [[`--update-hash=${hash}`], ["--update-hash", hash], ["--config", "absent.config.ts", `--update-hash=${hash}`]]) {
-      const inputs: ProcessInput[] = [];
+      const inputs: EngineInput[] = [];
       const result = await inProcess(["run", ...args], project.dir, {
         run: runProcessCommand({
           start: (input) => {
@@ -366,7 +366,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
       expect(result.code).toBe(EXIT.ok);
       expect(inputs.map((input) => input.updateHash)).toEqual([hash]);
     }
-    const inputs: ProcessInput[] = [];
+    const inputs: EngineInput[] = [];
     await inProcess(["run"], project.dir, {
       run: runProcessCommand({
         start: (input) => {
@@ -383,7 +383,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     try {
       const db = await backend.database();
       const file = write({ core: runCoreSettings(db.setting, tape.url) });
-      const ignoring = runHere(["--config", file], { userModules: () => [] });
+      const ignoring = runHere(["--config", file], { userModules: { modules: [] } });
       const result = await endedByItself(ignoring);
       expect((await ignoring.status()).reason?.code).toBe("invalid-configuration");
       expect(result?.code).toBe(EXIT.failed);

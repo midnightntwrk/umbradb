@@ -237,8 +237,6 @@ export interface AdminRunOptions {
   readonly build?: TestBuildOptions;
   /** Adds {@link dbKeeper} (and its entry from 1), so that {@link AdminRun.db} gives the process's database. */
   readonly keepDb?: boolean;
-  /** The process's side; public unless given. */
-  readonly side?: "public" | "private";
 }
 
 /** A process started with its admin endpoints. */
@@ -293,10 +291,10 @@ export function startWithAdmin(options: AdminRunOptions): AdminRun {
   server.catch(() => undefined);
   const starter = options.starter ?? startAdminServer;
   const handle = startProcess({
+    cwd: process.cwd(),
     declarations: { ...build.declarations, backbone: [...build.declarations.backbone, ...ADMIN_BACKBONE] },
     config: { data: { entries } },
     source,
-    ...(options.side === undefined ? {} : { side: options.side }),
     log: (line) => lines.push(line),
     admin: async (start) => {
       asked(start.address);

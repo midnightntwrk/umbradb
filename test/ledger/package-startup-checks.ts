@@ -8,7 +8,7 @@ import { CORE_CHAIN_EVENTS } from "../../src/backbone/core-chain-events/core-cha
 import type { LedgerName } from "../../src/ledger/types.js";
 import { type LedgerHost, startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
-import type { ProcessHandle, ProcessInput } from "../../src/runner/process.js";
+import type { ProcessHandle, EngineInput } from "../../src/runner/process.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
 import type { ProcessDatabase } from "../runner/process-backends.js";
 import { core, entryOf, settle, startProcess } from "../runner/process-build.js";
@@ -176,7 +176,7 @@ export interface PackageStartup {
 }
 
 /** Starts a process (see {@link expectProcessChecks}). */
-export type StartPackageProcess = (startup: PackageStartup, input: ProcessInput) => ProcessHandle;
+export type StartPackageProcess = (startup: PackageStartup, input: EngineInput) => ProcessHandle;
 
 /** The block the processes start at, S, and the in-memory chain's finalized head: blocks S to it can be processed. */
 const S = 5;
@@ -191,7 +191,8 @@ function packageProcess(start: StartPackageProcess, startup: PackageStartup): { 
   const source = new InMemoryBlockSource({ head: HEAD });
   const modules = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED];
   const extra = startup.ledgerSources === undefined ? {} : { extra: { ledgerSources: startup.ledgerSources } };
-  const input: ProcessInput = {
+  const input: EngineInput = {
+    cwd: process.cwd(),
     declarations: chainDeclarations([], { core: modules }),
     config: { data: { entries: [core(startup.db.setting, S, extra), ...modules.map((module) => entryOf(module, S))] } },
     source,

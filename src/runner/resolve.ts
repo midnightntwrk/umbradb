@@ -29,7 +29,13 @@ import type { ProcessSide } from "../config/core-settings.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { plainData } from "../config/plain-data.js";
 import { processCoreEntry } from "../config/process.js";
-import { type CheckedConfig, type CheckedEntry, type ConfigInput, configSecrets, validateConfig } from "../config/validate.js";
+import {
+  type CheckedConfig,
+  type CheckedEntry,
+  type ConfigInput,
+  configSecrets,
+  validateConfig,
+} from "../config/validate.js";
 import type { ModuleDeclaration } from "../modules/declaration.js";
 import { type DeclarationSet, validateDeclarations } from "../modules/validation.js";
 
@@ -38,7 +44,9 @@ const SECRETS = new WeakMap<object, readonly string[]>();
 
 /** Records `secrets` for the refusal `error`; a value thrown that is not an object carries none. */
 function carrying(error: unknown, secrets: readonly string[]): unknown {
-  if (typeof error === "object" && error !== null && !SECRETS.has(error)) SECRETS.set(error, Object.freeze([...secrets]));
+  if (typeof error === "object" && error !== null && !SECRETS.has(error)) {
+    SECRETS.set(error, Object.freeze([...secrets]));
+  }
   return error;
 }
 
@@ -137,7 +145,7 @@ export interface ResolvedConfig {
   /** The validated configuration. [CF-3] */
   readonly checked: CheckedConfig;
   readonly side: ProcessSide;
-  /** The process's `core` revision, whose operational and secret fields it runs with; its `index` is its place. [Q102] */
+  /** The process's `core` revision, whose operational and secret fields it runs with (`index`: its place). [Q102] */
   readonly core: CheckedEntry;
   /** The addresses that revision writes, before defaults. */
   readonly surfaces: Surfaces;
@@ -208,7 +216,7 @@ export interface ResolveInput {
 export interface Resolved extends ResolvedConfig {
   /** The build's validated declarations. */
   readonly declarations: DeclarationSet<ModuleDeclaration>;
-  /** A private build's intake, whose `core-private-source` is in its backbone; null on the core, or for a test's build. */
+  /** A private build's intake, its `core-private-source` in the backbone; null on the core and for a test's build. */
   readonly privateIntake: PrivateIntake | null;
   readonly sourceKind: SourceKind;
 }

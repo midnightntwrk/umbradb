@@ -5,7 +5,7 @@ import { a161Problems, AFTER_COMMIT_MS, HOLD_MS, holding, observe, type OutsideP
 
 /**
  * The committed negative controls for slow activity outside a height's processing: wrong watchdogs, each a loop of the
- * process (`ProcessInput.loop`). Each fails that case's own oracle (`./slow-block-harness.ts`, `a161Problems`) through
+ * process (`EngineInput.loop`). Each fails that case's own oracle (`./slow-block-harness.ts`, `a161Problems`) through
  * the process on PostgreSQL 18 and PGlite 0.5.10. [A161, RN-17, Q145 B]
  * - One that never times the points after a commit (the earlier watchdog) fails "shown" for `on-after-db-write`.
  * - One that never times `on-finalized` fails "shown" for it.

@@ -6,7 +6,7 @@ import { openConfiguredDatabase } from "../../src/config/database.js";
 import { processCoreEntry } from "../../src/config/process.js";
 import { validateConfig } from "../../src/config/validate.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
-import { type ProcessHandle, type ProcessInput, startProcess } from "../../src/runner/process.js";
+import { type ProcessHandle, type EngineInput, startProcess } from "../../src/runner/process.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { entryOf, loggingModule, testBuild } from "../runner/process-build.js";
 import { freePort } from "../runner/process-harness.js";
@@ -36,7 +36,7 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  */
 
 /** How a test starts a process: the runner's `startProcess`, or a negative control's. */
-type Start = (input: ProcessInput) => ProcessHandle;
+type Start = (input: EngineInput) => ProcessHandle;
 
 /** A negative control: the earlier opt-in default, where a process started without `admin` serves none. [Q128 A] */
 const optIn: Start = (input) => startProcess(input.admin === undefined ? { ...input, admin: false } : input);
@@ -57,6 +57,7 @@ function started(
   const build = testBuild(rest.user ?? []);
   const lines: string[] = [];
   const handle = start({
+    cwd: process.cwd(),
     declarations: { ...build.declarations, backbone: [...build.declarations.backbone, ...ADMIN_BACKBONE] },
     config: { data: { entries: entriesOf(database, address, rest.user) } },
     source: adminSource(3n),

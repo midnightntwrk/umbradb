@@ -9,9 +9,10 @@ import { builtInLedgerTable } from "../../src/ledger/networks.js";
 import type { LedgerTable } from "../../src/ledger/version-table.js";
 import { type InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import {
+  type EngineBuild,
+  type EngineOptions,
   type ProcessHandle,
   type ProcessingEnd,
-  type ProcessInput,
   startProcess as startRunnerProcess,
 } from "../../src/runner/process.js";
 import { LOOP_BACKBONE } from "./loop-harness.js";
@@ -40,9 +41,12 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * listens on a port of its own (`127.0.0.1:0`, as `test/admin/admin-harness.ts` does). A test outside `test/admin/`
  * that takes the runner's own fails `test/admin/test-processes.test.ts`. [AE-1, CF-4, Q128 B]
  */
-export function startProcess(input: ProcessInput): ProcessHandle {
-  return startRunnerProcess({ ...input, admin: input.admin ?? false });
+export function startProcess(input: TestProcessInput): ProcessHandle {
+  return startRunnerProcess({ ...input, cwd: input.cwd ?? process.cwd(), admin: input.admin ?? false });
 }
+
+/** The engine's input for the tests: its `cwd` the test's working directory unless given. */
+export type TestProcessInput = Omit<EngineOptions, "cwd"> & { readonly cwd?: string } & EngineBuild;
 
 /** What the `core-chain` stand-in saw. */
 export interface CoreSeen {

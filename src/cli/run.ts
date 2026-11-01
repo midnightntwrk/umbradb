@@ -3,25 +3,22 @@
  * file, with the user modules the file exports, and runs it until it is signalled, or until a refusal of the
  * configuration itself ends it. [LS-6; design §12]
  *
- * **What it starts** ({@link runProcess}). The configuration file (`--config`, or `umbradb.config.ts` in the working
- * directory) is loaded once (`loadConfig`), and the process is the runner's `startProcess` with: [CF-1]
- * - the evaluated data as its configuration, so startup holds it to the plain-data rule and validates it as it would
- *   the file [CF-1];
- * - the command's build (`./build-modules.ts`): UmbraDB's backbone parts and core modules, and as its user modules the
- *   ones the file exports in `modules`; the runner validates them and refuses a fault, naming the module [MD-2, Q106 B];
- * - the side taken from the file (`inferSide`: private when a `core` entry has `instanceId` and none has `node`). A
- *   public process reads the chain from the `core` entry's `node` through `core-block-fetch`'s node source
- *   (`nodeSourceOf`); a private one reads it from its public database through one private intake
- *   (`core-private-source`);
+ * **What it starts** ({@link runProcess}). The process is the engine's (`startProcess`, `src/runner/process.ts`),
+ * given: [CF-1, LM-1]
+ * - the configuration file (`--config`, or `umbradb.config.ts` in the working directory: the command's default, which
+ *   the engine never looks for itself), which the engine loads once, holding its data to the plain-data rule [CF-1];
+ * - as its user modules, the ones the file exports in `modules`. The engine's resolver joins them to UmbraDB's own
+ *   backbone parts and core modules for the side the file describes (private when a `core` entry has `instanceId` and
+ *   none has `node`), validates them and refuses a fault, naming the module. A public process reads the chain from the
+ *   `core` entry's `node`, a private one from its public database through its private intake; a public process's
+ *   ledger worker imports the file for its user modules' ledger tasks, as the main thread does [MD-1, MD-2, LG-17,
+ *   Q106 B];
  * - the admin endpoints, served by default on `listen.admin`, so nothing is passed for them [AE-1, Q128 B];
- * - for a public process, a ledger worker given the file to import for its user modules' ledger tasks. The file is the
- *   host program, imported in the worker as on the main thread (`LedgerWorkerOptions.modules`) [MD-1, LG-17];
  * - its log on standard error, redacted by the process [CF-4, AE-6];
  * - `--update-hash`, when given, as its `updateHash`: the public configuration hash a private process accepts at this
  *   start, which a public process's block source ignores [PP-14, Q159].
  *
- * A file that cannot be loaded is handed to startup as the file, so that startup refuses it as itself, with the
- * build's own modules.
+ * A file that cannot be loaded is refused by the engine as itself, with UmbraDB's own modules only.
  *
  * **Why startup refused** is in the process's log, which the command writes to stderr as it is. A refusal of the
  * configuration itself (the loader's, a fault of the build's declarations with the file's modules, or every finding of
@@ -48,20 +45,15 @@
  * applies there. [BK-1, Q152 B, Q173 C]
  */
 
-import { pathToFileURL } from "node:url";
-import { privateIntake } from "../backbone/core-private-source/index.js";
-import { nodeSourceOf } from "../backbone/core-block-fetch/node-source.js";
-import { type LoadedConfig, loadConfig } from "../config/load.js";
-import { startLedgerWorker } from "../ledger/worker/host.js";
+import { DEFAULT_CONFIG_FILE } from "../config/load.js";
 import {
   type BackupSignals,
+  type EngineInput,
   type ProcessHandle,
   type ProcessingEnd,
-  type ProcessInput,
   startProcess,
+  type UserModulesSource,
 } from "../runner/process.js";
-import { commandBuild } from "./build-modules.js";
-import { inferSide } from "../runner/resolve.js";
 
 /** The signals that stop the process. [RN-13] */
 export const STOP_SIGNALS = Object.freeze(["SIGTERM", "SIGINT"] as const);
@@ -94,7 +86,7 @@ export function stopSignal(source: SignalSource): { readonly signal: AbortSignal
 
 /**
  * `umbradb run`'s SIGUSR2. The command listens for it from its start to its end, so that a SIGUSR2 sent from a shell
- * never ends the indexer. It hands the process a source of its own ({@link ProcessInput.backupSignals}), on which the
+ * never ends the indexer. It hands the process a source of its own (`EngineOptions.backupSignals`), on which the
  * process listens only when its `core` revision sets `backupOnSignal`. [BK-1, Q173 C]
  *
  * A signal goes to the process's listener when it has one. Otherwise it is logged as ignored, in one line naming
@@ -176,46 +168,13 @@ export interface RunSeams {
   readonly backupSignals?: BackupSignals;
   /** Told the process's handle once it is started (a test's view of it). */
   readonly started?: (handle: ProcessHandle) => void;
-  /** The build's user modules from the loaded file; its `modules` export unless given (a negative control's). [Q106 B] */
-  readonly userModules?: (loaded: LoadedConfig) => readonly unknown[];
+  /** The build's user modules; the file's `modules` export unless given (a negative control's list). [Q106 B] */
+  readonly userModules?: UserModulesSource;
   /**
-   * How the process is started; the runner's `startProcess` unless given (a test's: one that serves no admin endpoints,
+   * How the process is started; the engine's `startProcess` unless given (a test's: one that serves no admin endpoints,
    * or a negative control's).
    */
-  readonly start?: (input: ProcessInput) => ProcessHandle;
-}
-
-/** The configuration and build of a file that loaded, or of one handed to startup to refuse. */
-function processOf(
-  options: RunOptions,
-  loaded: LoadedConfig | null,
-  userModules: (loaded: LoadedConfig) => readonly unknown[],
-): Pick<ProcessInput, "config" | "declarations" | "source" | "side" | "ledgerWorker"> {
-  if (loaded === null) {
-    // Startup loads the file again and refuses it as itself (see the module comment).
-    const file = options.file === undefined ? {} : { file: options.file };
-    return { config: { ...file, cwd: options.cwd }, declarations: commandBuild(), source: nodeSourceOf };
-  }
-  const user = userModules(loaded);
-  const config = { data: loaded.data, file: loaded.file };
-  if (inferSide(loaded.data) === "private") {
-    const intake = privateIntake();
-    return {
-      config,
-      declarations: commandBuild(user, { side: "private", intake }),
-      // The runner's S and log: a private process's transport `hello`s with S − 1 before its first commit.
-      source: (core, shared) => intake.source(core, shared),
-      side: "private",
-    };
-  }
-  const modules = pathToFileURL(loaded.file);
-  return {
-    config,
-    declarations: commandBuild(user),
-    source: nodeSourceOf,
-    side: "public",
-    ledgerWorker: () => startLedgerWorker({ modules }),
-  };
+  readonly start?: (input: EngineInput) => ProcessHandle;
 }
 
 /**
@@ -227,16 +186,10 @@ export async function runProcess(options: RunOptions, seams: RunSeams = {}): Pro
   // From here to the end, SIGUSR2 is the command's: relayed to the process, or logged as ignored. [Q173 C]
   const usr2 = backupSignalRelay(seams.backupSignals ?? process, options.log);
   try {
-    let loaded: LoadedConfig | null = null;
-    try {
-      loaded = await loadConfig({ ...(options.file === undefined ? {} : { file: options.file }), cwd: options.cwd });
-    } catch {
-      // Startup loads the file again and refuses it as itself, logging why (see the module comment).
-    }
-    const userModules = seams.userModules ?? ((file: LoadedConfig) => file.modules);
-    const input = processOf(options, loaded, userModules);
     const handle = (seams.start ?? startProcess)({
-      ...input,
+      config: { file: options.file ?? DEFAULT_CONFIG_FILE },
+      cwd: options.cwd,
+      userModules: seams.userModules ?? { from: "config" },
       signal: stop.signal,
       log: options.log,
       backupSignals: usr2.signals,

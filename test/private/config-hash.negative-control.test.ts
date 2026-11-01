@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readConfigHash } from "../../src/backbone/core-chain/index.js";
 import type { PlainObject } from "../../src/config/plain-data.js";
-import type { ProcessInput } from "../../src/runner/process.js";
+import type { EngineInput } from "../../src/runner/process.js";
 import { PRIVATE_BACKENDS, START_TIMEOUT_MS, TEST_TIMEOUT_MS } from "./backends.js";
 import { a162Problems, a162Run } from "./config-hash-checks.js";
 
@@ -16,8 +16,8 @@ import { a162Problems, a162Run } from "./config-hash-checks.js";
  * [A162, PP-14, RN-16]
  */
 
-/** A configuration hash of the core's secrets (a negative control's `ProcessInput.configHash`): the node's password as hex. */
-const showingSecrets: NonNullable<ProcessInput["configHash"]> = async (read, core) => {
+/** A configuration hash of the core's secrets (a negative control's `EngineInput.configHash`): the node's password as hex. */
+const showingSecrets: NonNullable<EngineInput["configHash"]> = async (read, core) => {
   await readConfigHash(read);
   const password = new URL(String((core.settings as PlainObject).node)).password;
   return `0x${Buffer.from(password, "utf8").toString("hex").padEnd(64, "0").slice(0, 64)}`;

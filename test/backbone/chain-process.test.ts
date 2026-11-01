@@ -26,7 +26,7 @@ import { NodeClient } from "../../src/node/index.js";
 import type { BlockRef } from "../../src/runner/block-source.js";
 import { InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import { HeightFailure } from "../../src/runner/loop.js";
-import type { ProcessHandle, ProcessInput } from "../../src/runner/process.js";
+import type { EngineInput, EngineOptions, ProcessHandle } from "../../src/runner/process.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
 import { core, entryOf, settle, startProcess } from "../runner/process-build.js";
 import { workModule } from "../runner/sigterm-module.js";
@@ -138,7 +138,7 @@ function chainProcess(
     readonly build?: ChainBuildOptions;
     /** More `core` settings (`listen.api`, …). */
     readonly settings?: Readonly<Record<string, unknown>>;
-  } & Partial<ProcessInput> = {},
+  } & Partial<EngineOptions> = {},
 ): ProcessHandle {
   const { user = [], build, settings, ...rest } = options;
   const entries = [
@@ -540,7 +540,7 @@ describe.each(PROCESS_BACKENDS)("the chain through the process on $name", (backe
   const builtInGenesis = (network: string): Uint8Array =>
     new Uint8Array(Buffer.from((builtInNetwork(network)?.genesis?.hash as string).slice(2), "hex"));
 
-  async function a78Run(seam?: ProcessInput["checkChain"]): Promise<A78Observation> {
+  async function a78Run(seam?: EngineInput["checkChain"]): Promise<A78Observation> {
     const options = seam === undefined ? {} : { checkChain: seam };
     /** A start of `db` over a source with `blocks`, expected to refuse; `settings` replace the tests' network. */
     const observe = async (

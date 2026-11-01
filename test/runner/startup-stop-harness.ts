@@ -6,13 +6,11 @@ import { performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import { NodeBlockSource, nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
 import { type ChainCheck, type ChainCheckInput, checkChain } from "../../src/backbone/core-chain/index.js";
-import { privateIntake } from "../../src/backbone/core-private-source/index.js";
-import { commandBuild } from "../../src/cli/build-modules.js";
 import { coreEntry } from "../../src/config/entries.js";
 import { NodeClient, type NodeClientOptions } from "../../src/node/client.js";
 import type { ConnectSocket } from "../../src/node/socket.js";
 import { connectWebSocket } from "../../src/node/ws-socket.js";
-import { type ProcessHandle, type ProcessInput, terminationSignal } from "../../src/runner/process.js";
+import { type ProcessHandle, type EngineInput, terminationSignal } from "../../src/runner/process.js";
 import type { ProcessBackend, ProcessDatabase } from "./process-backends.js";
 import { core, coreSettings, startProcess, testBuild } from "./process-build.js";
 import { freePort } from "./process-harness.js";
@@ -210,7 +208,7 @@ export async function closedWithin(handle: ProcessHandle, from: number): Promise
  * A negative control's startup check against the node, given the run's {@link NodeWatch} and the options the process
  * made its client with.
  */
-export type CheckOf = (watch: NodeWatch, options: () => NodeClientOptions) => NonNullable<ProcessInput["checkChain"]>;
+export type CheckOf = (watch: NodeWatch, options: () => NodeClientOptions) => NonNullable<EngineInput["checkChain"]>;
 
 /**
  * One run on `db` (see the module comment): the process's startup retries the node, `by` stops it, and the run
@@ -363,12 +361,10 @@ export async function privateRun(backend: ProcessBackend, db: ProcessDatabase): 
     coreTransport: silent.address,
   });
   delete settings.node;
-  const intake = privateIntake();
+  // The engine's own private build and source: the resolver takes the side from the configuration. [LM-1]
   const handle = startProcess({
-    declarations: commandBuild([], { side: "private", intake }),
+    userModules: { modules: [] },
     config: { data: { entries: [coreEntry({ start: 1, config: settings as never })] } },
-    source: (entry, shared) => intake.source(entry, shared),
-    side: "private",
     log: () => undefined,
   });
   let observed: Omit<PrivateObservation, "unclean">;

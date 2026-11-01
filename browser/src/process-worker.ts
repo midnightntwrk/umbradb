@@ -1,13 +1,14 @@
 /**
  * One process of the browser build in a dedicated Web Worker: the core (`./core-worker.ts`) or a private instance
- * (`./private-worker.ts`). It is started as `umbradb run` starts one (`src/cli/run.ts`), with the same build and the
- * same runner. [BR-1, BR-2, BR-3, BR-4; design §9.2]
- * - the build is the command's (`commandBuild`: UmbraDB's backbone parts and core modules, and the configuration's user
- *   modules; a private process's backbone with its private intake);
+ * (`./private-worker.ts`). It is started as `umbradb run` starts one (`src/cli/run.ts`), through the same engine
+ * (`startProcess`) and its resolver. [BR-1, BR-2, BR-3, BR-4, LM-1, LM-11; design §9.2]
+ * - the build is the resolver's for the side the configuration describes (`src/runner/resolve.ts`: UmbraDB's backbone
+ *   parts and core modules, and the configuration's user modules; a private process's backbone with its private
+ *   intake);
  * - the configuration is the bundled module's data for this run (`umbradb:configuration`, `./configuration.ts`), with
  *   the development opt-in set on every `core` entry. The browser build always runs under it, as it runs PGlite only.
  *   Startup requires it to be plain data and validates it [BR-1, CF-1];
- * - the block source is the node's (`nodeSourceOf`) for the core, the private intake's for a private process, whose
+ * - the block source is the engine's: the node's for the core, the private intake's for a private process, whose
  *   transport to the core runs over the page's message network (`./net/`);
  * - the ledger worker is a Web Worker beside this one (`ledger-worker.js`, `src/ledger/worker/host.ts` unchanged), its
  *   node-store bridge a `SharedArrayBuffer` (the page is cross-origin isolated);
@@ -44,21 +45,17 @@ import configuration from "umbradb:configuration";
 import { readCursor } from "../../src/backbone/core-block-commit/sql.js";
 import { nodeSourceOf } from "../../src/backbone/core-block-fetch/node-source.js";
 import { nodeOptionsOf } from "../../src/backbone/core-chain/core-chain.js";
-import { privateIntake } from "../../src/backbone/core-private-source/index.js";
 import { manifestLine, readManifestLine } from "../../src/backup/manifest.js";
 import { type PgliteDump, pgliteBackupText } from "../../src/backup/pglite-backup.js";
 import { type RestoreSeams, restoreBackup } from "../../src/backup/restore.js";
 import { blobText } from "../../src/backup/text.js";
-import { commandBuild } from "../../src/cli/build-modules.js";
-import { resolveDeclarations } from "../../src/runner/resolve.js";
-import { type PlainObject, plainData } from "../../src/config/plain-data.js";
-import { processCoreEntry } from "../../src/config/process.js";
-import { validateConfig } from "../../src/config/validate.js";
+import type { PlainObject } from "../../src/config/plain-data.js";
+import { resolve } from "../../src/runner/resolve.js";
 import type { CommittedHeight, Database } from "../../src/db/api.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
 import { startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { NodeClient } from "../../src/node/client.js";
-import { type ProcessHandle, type ProcessInput, startProcess } from "../../src/runner/process.js";
+import { type ProcessHandle, startProcess } from "../../src/runner/process.js";
 import { adminAnswer, messageAdmin } from "./admin.js";
 import { type BrowserConfiguration, type BrowserRun, withDevelopmentOptIn } from "./configuration.js";
 import { openConfiguredDatabase } from "./db/database.js";
@@ -137,9 +134,8 @@ async function restoreInto(file: Blob, run: StartRun): Promise<unknown> {
       () => run.start ?? 0,
     );
     const { data, modules } = (configuration as BrowserConfiguration).core({ ...run, start });
-    const declarations = resolveDeclarations({ userModules: modules, side: "public" });
-    const config = validateConfig({ config: { data: plainData(withDevelopmentOptIn(data)) }, declarations, side: "public" });
-    const core = processCoreEntry(config);
+    const resolved = resolve({ data: withDevelopmentOptIn(data), file: null, userModules: modules, side: "public" });
+    const { declarations, checked: config, core } = resolved;
     const options = nodeOptionsOf(core.settings as PlainObject);
     if (options === null) throw new Error("the core's configuration has no node to check the backup against");
     const client = new NodeClient({
@@ -200,15 +196,12 @@ async function startWorkerProcess(message: Extract<ToProcessWorker, { type: "sta
   const instance = isCore ? null : instances.find((candidate) => candidate.id === message.instance);
   if (instance === undefined) throw new Error(`the configuration has no private instance ${message.instance}`);
   const { data, modules } = instance === null ? chosen.core(run) : instance.configure(run);
-  const intake = isCore ? null : privateIntake();
-  const declarations = intake === null ? commandBuild(modules) : commandBuild(modules, { side: "private", intake });
-  const source: ProcessInput["source"] = intake === null ? nodeSourceOf : (core, shared) => intake.source(core, shared);
   const ledgerEntry = new URL("./ledger-worker.js", scope.location.href);
+  // The engine's resolver takes the side from the configuration: a private instance's has instanceId and no node.
   handle = startProcess({
-    declarations,
     config: { data: withDevelopmentOptIn(data) },
-    source,
-    side: message.side,
+    cwd: "/",
+    userModules: { modules },
     log: (line) => post({ type: "log", line }),
     admin: messageAdmin,
     ledgerWorker: () => startLedgerWorker({ entry: ledgerEntry }),
