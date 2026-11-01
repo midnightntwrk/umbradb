@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { coreEntry, InMemoryBlockSource, startProcess } from "../src/index.js";
+import { coreEntry, InMemoryBlockSource, startUmbraDB } from "../src/index.js";
 import { inMemoryBlock } from "../src/runner/in-memory-source.js";
 import { startBenchEnv } from "./environment.js";
 import { measureManual, summarize } from "./stats.js";
@@ -13,9 +13,10 @@ import type { Backend, LatencyStats } from "./types.js";
  * no chain event), on PGlite and on PostgreSQL. [design §13]
  *
  * The process is the `umbradb` command's build (the resolver's: the public backbone, its core modules off, no user
- * module) over an `InMemoryBlockSource`, started through the exported `startProcess` and `coreEntry` on a `custom`
- * network whose genesis is the in-memory chain's, the admin endpoints off. Each sample is one block: the source's head
- * raised by one, then the wait until the loop waits past it (`waiting`). [design §12]
+ * module) over an `InMemoryBlockSource`, started through the exported `startUmbraDB` and `coreEntry` on a `custom`
+ * network whose genesis is the in-memory chain's, with no listener and no node client (a library process's default).
+ * Each sample is one block: the source's head raised by one, then the wait until the loop waits past it (`waiting`).
+ * [design §12, LM-1]
  */
 
 /** The workload name of a backend, as the baseline records it. */
@@ -36,10 +37,7 @@ const GENESIS = `0x${Buffer.from(inMemoryBlock(0n).hash).toString("hex")}`;
 async function commitSamples(database: object, options: CommitOptions): Promise<number[]> {
   const source = new InMemoryBlockSource({ head: 0n });
   const lines: string[] = [];
-  const handle = startProcess({
-    userModules: { modules: [] },
-    cwd: process.cwd(),
-    network: "configured",
+  const handle = startUmbraDB({
     config: {
       data: {
         entries: [

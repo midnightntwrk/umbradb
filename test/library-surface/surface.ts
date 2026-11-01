@@ -3,7 +3,8 @@ import ts from "typescript";
 /**
  * The package's one entry point, `"."` (`src/index.ts`, built to `dist/index.js` and `dist/index.d.ts`), exports
  * exactly the design's exported surface: its **Values** and its **Types**, read from the design's own text
- * (`design.md`), so the pin cannot drift from the document unseen. [A1 STATIC, LS-1; design §12]
+ * (`design.md`), as the start-umbradb change's design §4 amends them ({@link section4Amendment}), so the pin cannot
+ * drift from the documents unseen. [A1 STATIC, LS-1; design §12; start-umbradb design §4]
  *
  * Every check takes plain data and returns one sentence per problem, naming the export, empty when there is none, so
  * `./surface.test.ts` runs the same checks on the real barrel and on its negative controls.
@@ -42,6 +43,81 @@ export function section12Surface(design: string): Surface {
   const section = section12(design);
   const sorted = (names: string[]) => [...new Set(names)].sort();
   return { values: sorted(identifiersIn(paragraph(section, "Values"))), types: sorted(identifiersIn(paragraph(section, "Types"))) };
+}
+
+/**
+ * What the start-umbradb change's design §4 changes in §12's surface (its **Exports** bullet): the values and the types
+ * it adds, and the names it removes. [A1, LS-1; start-umbradb design §4]
+ */
+export interface SurfaceAmendment {
+  readonly addedValues: readonly string[];
+  readonly addedTypes: readonly string[];
+  readonly removed: readonly string[];
+}
+
+/** The opening of the start-umbradb change's design §4 bullet that amends §12. */
+const EXPORTS_BULLET = "- **Exports** (`core-arch` design §12, amended):";
+
+/**
+ * The amendment of the start-umbradb change's `design` (the text of its `design.md`): its **Exports** bullet's
+ * identifiers between `added` and `and the types` (values), between `and the types` and `; kept` (types), and after
+ * `removed` (names). Throws when the bullet or one of its parts moved, so a reworded bullet fails rather than amending
+ * nothing. [A1; start-umbradb design §4]
+ */
+export function section4Amendment(design: string): SurfaceAmendment {
+  const start = design.indexOf(EXPORTS_BULLET);
+  const end = design.indexOf("\n## 5.", start);
+  if (start < 0 || end < start) throw new Error("the start-umbradb design has no §4 Exports bullet before §5");
+  const bullet = design.slice(start + EXPORTS_BULLET.length, end).replace(/\s+/g, " ");
+  const part = (from: string, to: string | null): string => {
+    const at = bullet.indexOf(from);
+    const until = to === null ? bullet.length : bullet.indexOf(to, at);
+    if (at < 0 || until < at) throw new Error(`the start-umbradb design's Exports bullet no longer has "${from}" before "${to}"`);
+    return bullet.slice(at + from.length, until);
+  };
+  return {
+    addedValues: identifiersIn(part(" added ", " and the types ")),
+    addedTypes: identifiersIn(part(" and the types ", "; kept ")),
+    removed: identifiersIn(part("; removed ", null)),
+  };
+}
+
+/** `base` with `amendment` applied: its removed names dropped, its added values and types added, sorted. */
+export function amendedSurface(base: Surface, amendment: SurfaceAmendment): Surface {
+  const removed = new Set(amendment.removed);
+  const sorted = (names: readonly string[]) => [...new Set(names)].sort();
+  return {
+    values: sorted([...base.values.filter((name) => !removed.has(name)), ...amendment.addedValues]),
+    types: sorted([...base.types.filter((name) => !removed.has(name)), ...amendment.addedTypes]),
+  };
+}
+
+/** `surface` less the names of `pending`, sorted. */
+export function withoutPending(surface: Surface, pending: Surface): Surface {
+  return {
+    values: surface.values.filter((name) => !pending.values.includes(name)),
+    types: surface.types.filter((name) => !pending.types.includes(name)),
+  };
+}
+
+/**
+ * The amendment's names not exported yet: the `MessagePort` adapter of the private link's channels and its carrier's
+ * type, which the channel link writes (the start-umbradb change's P6.2). The list only shrinks: `./surface.test.ts`
+ * checks each name is the amendment's and still unexported, and the pin is whole once it is empty.
+ * [A1; start-umbradb design §5.4]
+ */
+export const PENDING_EXPORTS: Surface = Object.freeze({
+  values: Object.freeze(["messagePortChannel"]),
+  types: Object.freeze(["MessagePortLike"]),
+});
+
+/**
+ * The surface `"."` exports today, from the two designs' texts: `core-arch`'s §12 (`coreDesign`) as the start-umbradb
+ * change's §4 (`changeDesign`) amends it, less {@link PENDING_EXPORTS}. What A1 pins and the pack smoke's consumer
+ * imports. [A1, A2, LS-1]
+ */
+export function pinnedSurface(coreDesign: string, changeDesign: string): Surface {
+  return withoutPending(amendedSurface(section12Surface(coreDesign), section4Amendment(changeDesign)), PENDING_EXPORTS);
 }
 
 /** Whether an export is a value at run time: its target has a value meaning and it is not exported as a type only. */

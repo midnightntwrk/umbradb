@@ -1,7 +1,7 @@
 /**
  * Ledger tasks, from the main thread: what makes a module's declared `ledgerTasks` run in the ledger worker for each
  * block and become the module's `block` items. A task's function cannot cross to the worker, so the worker gets it
- * from its entry (`./worker/run.ts`'s `runLedgerWorker`, which the host's entry calls with the modules it ships). The
+ * from its entry (`./worker/run.ts`'s `runLedgerWorker`, which the entry calls with the modules the process runs). The
  * main thread only names the task: the module's id, the task's name, the block, its ledger and how many transactions
  * `block-parsed` holds. [LG-7, LG-17, MD-1, Q49; design §5.5]
  *

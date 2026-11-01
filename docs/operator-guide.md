@@ -227,9 +227,10 @@ logs `SIGUSR2 ignored: backupOnSignal is not set, so no backup is written`, writ
 running. While it is still starting it logs `SIGUSR2 ignored: the process is starting and has not listened for it
 (backupOnSignal not set or not yet read)` instead: a process that sets `backupOnSignal` listens once its configuration
 is validated, so send the signal once it has logged `SIGUSR2 writes a backup to <path> …`. A process a host program
-starts with `startProcess` adds no SIGUSR2 listener unless it sets `backupOnSignal`: there SIGUSR2 does what Node.js or
-the host program's own handler does (by default, it ends the process). A host program can pause and resume the loop
-itself with its handle's `pause()` and `resume()`.
+starts with `startUmbraDB` adds no SIGUSR2 listener: it refuses `backupOnSignal` and `backupAtStop`
+(`library-setting-refused`), so SIGUSR2 there does what Node.js or the host program's own handler does (by default, it
+ends the process). A host program writes its backups with its handle's `backup(target)`, and can pause and resume the
+loop itself with `pause()` and `resume()`.
 
 ### What a backup holds
 

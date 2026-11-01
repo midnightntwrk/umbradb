@@ -1,14 +1,15 @@
 /**
- * The ledger worker thread's main function, {@link runLedgerWorker}. The host program's ledger worker entry calls it
- * with the modules the program ships, the same modules as on the main thread, so the worker has their ledger tasks:
- * functions cannot cross between threads. [LG-10, LG-17, MD-1; design §5.3, §5.5]
+ * The ledger worker thread's main function, {@link runLedgerWorker}. A ledger worker entry calls it with the modules the
+ * process runs, the same modules as on the main thread, so the worker has their ledger tasks: functions cannot cross
+ * between threads. It is internal: a host program gives its modules through a module file both threads import
+ * (`startUmbraDB`'s `modulesFrom`), never an entry of its own. [LG-10, LG-17, MD-1, LM-7; design §5.3]
  *
  * Entries that call it:
  * - UmbraDB's own entry (`./entry.ts`): the tasks of UmbraDB's core modules (`src/backbone/ledger-tasks.ts`), plus the
- *   user modules of a module the host names (`LedgerWorkerOptions.modules`; for the `umbradb` command, its
- *   configuration file, which is the host program). [CF-1, Q106]
- * - An entry of a program that starts processes itself, given to `startLedgerWorker` as `LedgerWorkerOptions.entry`,
- *   which calls `runLedgerWorker([...CORE_LEDGER_TASK_MODULES, ...its modules])`.
+ *   user modules of the module file the process names (`LedgerWorkerOptions.modules`: the `umbradb` command's
+ *   configuration file, a `{ file }` configuration's, or `modulesFrom`). [CF-1, Q106, LM-7]
+ * - A test's entry, given to `startLedgerWorker` as `LedgerWorkerOptions.entry`, which calls
+ *   `runLedgerWorker([...CORE_LEDGER_TASK_MODULES, ...its modules])`.
  * - The browser build, which runs UmbraDB's entry in its ledger worker's bundle. [design §9.2]
  *
  * It runs the engine (`./engine.ts`) over the adapters `../load.ts` loads, or over a test package's loader

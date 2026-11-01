@@ -12,7 +12,7 @@
  *     2. the tarball installed in the scratch project;
  *     3. a deep import (`umbradb/dist/runner/process.js`) fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`: `exports` names
  *        only `"."`;
- *     4. a consumer importing every value and every type of the design's exported surface (read from `design.md`, as
+ *     4. a consumer importing every value and every type of the design's exported surface (read from the designs, as
  *        the library-surface pin reads it) from "umbradb", none `any`, and writing a configuration with them,
  *        type-checks under `--strict` (the first of the two consumer files) [A1, A2];
  *     4c. a consumer importing any of 0.9.5's retired names — the storage parts `PgTemporalKV`, `PgCheckpointStore`,
@@ -47,7 +47,7 @@ import { fileURLToPath } from "node:url";
 // Node.js's own TypeScript type stripping reads these three (none imports another file of the repository).
 import { spawnChild } from "../child-processes.ts";
 import { POSTGRES_IMAGE } from "../postgres-image.ts";
-import { section12Surface } from "../library-surface/surface.ts";
+import { pinnedSurface } from "../library-surface/surface.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const shell = process.platform === "win32";
@@ -75,8 +75,14 @@ for (const f of ["dist/index.js", "dist/index.d.ts", "dist/cli/main.js"]) {
 const tscBin = join(repoRoot, "node_modules", "typescript", "bin", "tsc");
 if (!existsSync(tscBin)) fail(`typescript compiler not found at ${tscBin} -- install the devDependencies first.`);
 
-/** The design's exported surface, as the library-surface pin reads it from `design.md`. [A1; design §12] */
-const SURFACE = section12Surface(readFileSync(join(repoRoot, "openspec/changes/core-arch/design.md"), "utf8"));
+/**
+ * The exported surface, as the library-surface pin reads it: `core-arch`'s `design.md` §12 as the start-umbradb change's
+ * `design.md` §4 amends it, less the names not exported yet. [A1, A2; design §12; start-umbradb design §4]
+ */
+const SURFACE = pinnedSurface(
+  readFileSync(join(repoRoot, "openspec/changes/core-arch/design.md"), "utf8"),
+  readFileSync(join(repoRoot, "openspec/changes/start-umbradb/design.md"), "utf8"),
+);
 if (SURFACE.values.length === 0 || SURFACE.types.length === 0) fail("design.md §12 lists no values or no types.");
 
 /** The ledger versions the build carries: each a directory of `vendor/ledger/`. */
