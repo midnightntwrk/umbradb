@@ -14,7 +14,7 @@ import { endedWithin, hello, rawClient, type RawClient } from "./raw-client.js";
 
 /**
  * The message protocol through a running core, on PostgreSQL 18.6 and PGlite 0.5.10. The core process listens on its
- * `listen.transport` (`127.0.0.1:0`) and a raw client (`./raw-client.ts`) speaks to it. [A115 CI, PP-4; design §8]
+ * `listen.privateLink` (`127.0.0.1:0`) and a raw client (`./raw-client.ts`) speaks to it. [A115 CI, PP-4; design §8]
  * - `hello` is answered with `hello-ack` (the genesis, S, the public cursor, the lockstep flag).
  * - Every commit is announced with `committed`.
  * - A `read-result` carries its request's `id`, the height read (`null` on an empty public database) and, per
@@ -34,8 +34,8 @@ import { endedWithin, hello, rawClient, type RawClient } from "./raw-client.js";
 /** A configuration hash's form: 32 bytes as `0x` and lowercase hex. [PP-4] */
 const CONFIG_HASH = /^0x[0-9a-f]{64}$/;
 
-/** The core's `listen.transport`: a free port of the loopback interface. */
-const TRANSPORT = { listen: { transport: "127.0.0.1:0" } };
+/** The core's `listen.privateLink`: a free port of the loopback interface. */
+const TRANSPORT = { listen: { privateLink: "127.0.0.1:0" } };
 
 /** A statement whose columns are of the four types the protocol test names, and two more. [A115 CI] */
 const TYPED_SQL =

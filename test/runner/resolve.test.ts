@@ -148,7 +148,7 @@ describe("resolveConfig: plain data, validation, the process's core revision and
     expect((silent.core.settings?.listen as { admin: string }).admin).toBe("0.0.0.0:8081");
     expect(silent.surfaces).toEqual({ api: null, admin: null, privateLink: null });
     const written = resolveConfig({
-      data: publicData({ listen: { api: "127.0.0.1:7001", admin: "127.0.0.1:7002", transport: "127.0.0.1:7003" } }),
+      data: publicData({ listen: { api: "127.0.0.1:7001", admin: "127.0.0.1:7002", privateLink: "127.0.0.1:7003" } }),
       file: null,
       declarations,
     });
@@ -163,10 +163,10 @@ describe("resolveConfig: plain data, validation, the process's core revision and
     expect(resolved.surfaces.api).toBe("127.0.0.1:7050");
   });
 
-  it("a private process connects at coreTransport; a listen.transport written there is no surface of it", () => {
+  it("a private process connects at privateLink; a listen.privateLink written there is no surface of it", () => {
     const build = resolveDeclarations({ userModules: [], side: "private" });
     const resolved = resolveConfig({
-      data: privateData({ coreTransport: "127.0.0.1:7004", listen: { transport: "127.0.0.1:7005", api: "127.0.0.1:7006" } }),
+      data: privateData({ privateLink: "127.0.0.1:7004", listen: { privateLink: "127.0.0.1:7005", api: "127.0.0.1:7006" } }),
       file: null,
       declarations: build,
     });

@@ -19,7 +19,7 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * **The public side** is a public core of `../private/builds.ts` (`startPublicCore`: the in-memory chain, the custom
  * network {@link genesisHex}(0xa1) unless another is given), on a database of the backend. A private process reads it
  * as in production: on PostgreSQL directly, its `publicDatabase` the public database's parts; on PGlite, which only the
- * core opens, through the core's process transport (`coreTransport`, the core's `listen.transport`).
+ * core opens, through the core's process transport (`privateLink`, the core's `listen.privateLink`).
  *
  * **A private process** is started from a configuration file of a command project, as `umbradb run` starts one
  * (`src/cli/run.ts`: the engine given the file, whose resolver makes the private build with one intake, its source the
@@ -69,7 +69,7 @@ export function pmModule(builders: string): string {
 }
 
 /** Where a private process reads its public database: PostgreSQL's parts (`publicDatabase`) or the core's transport. */
-export type PublicSetting = { readonly publicDatabase: DatabaseParts } | { readonly coreTransport: string };
+export type PublicSetting = { readonly publicDatabase: DatabaseParts } | { readonly privateLink: string };
 
 /** What a private configuration file of these tests holds. */
 export interface PrivateConfig {
@@ -176,10 +176,10 @@ export async function startPublicSide(backend: BackupBackend, options: PublicSid
     start: options.start ?? 1,
     ...(options.genesisHash === undefined ? {} : { genesisHash: options.genesisHash }),
     ...(options.blocks === undefined ? {} : { blocks: options.blocks }),
-    ...(pglite ? { extra: { listen: { transport: "127.0.0.1:0" } } } : {}),
+    ...(pglite ? { extra: { listen: { privateLink: "127.0.0.1:0" } } } : {}),
   });
   try {
-    const setting = pglite ? { coreTransport: await core.transportWithin(LISTEN_MS) } : { publicDatabase: db.setting };
+    const setting = pglite ? { privateLink: await core.transportWithin(LISTEN_MS) } : { publicDatabase: db.setting };
     return { core, setting, db };
   } catch (error) {
     await core.stop();

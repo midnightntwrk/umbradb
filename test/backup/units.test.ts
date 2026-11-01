@@ -405,7 +405,7 @@ describe("a restore's empty target and its refusals before reading the file (BK-
       ].join("\n"),
     );
     const outcome = await runRestore({ file: join(dir, "none.backup"), config: file, cwd: project.dir });
-    // Neither a PostgreSQL publicDatabase nor coreTransport (the earlier interim refusal is gone). [Q153]
+    // Neither a PostgreSQL publicDatabase nor privateLink (the earlier interim refusal is gone). [Q153]
     expect(outcome).toMatchObject({
       restored: false,
       error: { code: "invalid-configuration", details: { reason: "public-database-transport" } },

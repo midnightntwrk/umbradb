@@ -18,8 +18,8 @@ import { HoldingRelay } from "./relays.js";
  * **The run** ({@link a165Run}): a public core with the public module `pub` (`./config-hash-checks.ts`: a data setting
  * `level`, a route `GET /level`), whose revision from 30 has `level` 1, then 2, then 3 — each a change of a data field
  * above the core's cursor, so another configuration hash, read from `X-Umbra-Config-Hash` at each start —, its
- * module API on a free port and, with a transport, its `listen.transport` behind a {@link HoldingRelay} that follows
- * its restarts; and a private process `acceptor` with `coreTransport` (the relay), or without one (PostgreSQL only: its
+ * module API on a free port and, with a transport, its `listen.privateLink` behind a {@link HoldingRelay} that follows
+ * its restarts; and a private process `acceptor` with `privateLink` (the relay), or without one (PostgreSQL only: its
  * public database read directly), on one private database, started again and again — each start an "attempt". [RN-16]
  * 1. `first` — the core at 5 with `level` 1 (hash H1): the private process's first start runs to 5 and records H1;
  * 2. the core restarted with `level` 2 (H2) at 8; `changed` — a start without `updateHash` stops, before any height,
@@ -96,7 +96,7 @@ export interface A165Run {
 
 /** Options of {@link a165Run}. */
 export interface A165Options {
-  /** Whether the private process has `coreTransport`; without, PostgreSQL only. */
+  /** Whether the private process has `privateLink`; without, PostgreSQL only. */
   readonly transport: boolean;
   /** A negative control's start decision (`PrivateIntakeOptions.acceptance`). */
   readonly acceptance?: PrivateIntakeOptions["acceptance"];
@@ -154,7 +154,7 @@ export async function a165Run(backend: PrivateBackend, options: A165Options): Pr
       head,
       modules: [pub()],
       entries: pubEntries(level),
-      extra: { listen: { api: "127.0.0.1:0", ...(options.transport ? { transport: "127.0.0.1:0" } : {}) } },
+      extra: { listen: { api: "127.0.0.1:0", ...(options.transport ? { privateLink: "127.0.0.1:0" } : {}) } },
     });
   let core = launch(5n, 1);
   /** Starts the core (already launched) behind the relay, takes it to `head`, and resolves with its hash. */
@@ -175,7 +175,7 @@ export async function a165Run(backend: PrivateBackend, options: A165Options): Pr
   const privateOptions = (database: TestDatabase, rest: Partial<PrivateOptions> = {}): PrivateOptions => ({
     database: database.setting,
     instanceId: "acceptor",
-    ...(relay === null ? {} : { coreTransport: relay.address }),
+    ...(relay === null ? {} : { privateLink: relay.address }),
     ...(postgres ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
     extra: { backoffCeilingMs: 1_000 },
     ...(options.acceptance === undefined ? {} : { intake: { acceptance: options.acceptance } }),

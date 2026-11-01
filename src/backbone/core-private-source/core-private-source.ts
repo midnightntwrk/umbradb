@@ -57,13 +57,13 @@
  * committed), or, before the first commit, S − 1 with no hash. The transport connects during startup's chain check,
  * after startup has read the cursor; that is where the instance learns whether it is lockstep. [PP-4]
  *
- * **Lockstep.** With `coreTransport`, startup's chain check waits for the transport's `hello-ack`, after the public
+ * **Lockstep.** With `privateLink`, startup's chain check waits for the transport's `hello-ack`, after the public
  * database's own checks. It refuses a core of another network than the configured one (`private-binding-mismatch`,
- * `network`): with a PostgreSQL `publicDatabase` read directly, nothing else checks the core at `coreTransport`.
+ * `network`): with a PostgreSQL `publicDatabase` read directly, nothing else checks the core at `privateLink`.
  * The ack says whether the core lists the instance in `lockstepInstances`. [PP-6, Q136 B, Q142]
  *
  * After the graph is resolved, a module declaring `needsLockstep` refuses to run on an instance that is not lockstep or
- * has no `coreTransport` at all ({@link needsLockstepRefusal}, `needs-lockstep-not-listed`, before any migration).
+ * has no `privateLink` at all ({@link needsLockstepRefusal}, `needs-lockstep-not-listed`, before any migration).
  * [PP-6]
  *
  * An instance that is lockstep at startup, or listed by a later `hello-ack`, takes height h only while the public
@@ -78,11 +78,11 @@
  * **A changed public configuration.** Startup's chain check reads the public configuration history with the identity
  * ({@link readPublicConfiguration}): the items, and the configuration hash the core computes from the same rows with
  * the same function. [PP-14, Q147]
- * - With `coreTransport`, the transport does the check. It records the first `hello-ack`'s `configHash`, and a later
+ * - With `privateLink`, the transport does the check. It records the first `hello-ack`'s `configHash`, and a later
  *   message carrying another one refuses it for good with `public-config-changed`. The source then fails its next read
  *   of public data with that refusal, even a read of a PostgreSQL public database read directly, so no other height is
  *   processed.
- * - Without `coreTransport`, the source's first read after the public database lost a connection
+ * - Without `privateLink`, the source's first read after the public database lost a connection
  *   ({@link PublicDatabase.reconnections}) reads the history again, inside that read and before its body. It fails with
  *   `public-config-changed` ({@link publicConfigChanged}) when the hash differs from the one read at startup.
  *
@@ -95,7 +95,7 @@
  *
  * Startup's read of the private cursor reads this hash too ({@link readAcceptedConfigHash}). The chain check, after the
  * binding checks and before the graph, compares it with the hashes this start found (the public history's, and with
- * `coreTransport` the first `hello-ack`'s) and with the operator's `updateHash` (`umbradb run --update-hash`;
+ * `privateLink` the first `hello-ack`'s) and with the operator's `updateHash` (`umbradb run --update-hash`;
  * {@link startHashDecision}):
  * - a first start records the hash it finds;
  * - the hash already accepted runs on;
@@ -103,7 +103,7 @@
  *   hash given. A given hash is recorded by the part's `on-start-db`, in its transaction after the binding, once the
  *   full checks have passed (the binding checks in the chain check, the public item checks in the graph);
  * - two found hashes that differ stop the start whatever was given: either the core's configuration changed during the
- *   start, or `coreTransport` and `publicDatabase` do not belong to the same core.
+ *   start, or `privateLink` and `publicDatabase` do not belong to the same core.
  * [PP-2, PP-13, PP-14, Q149, Q159]
  */
 
@@ -191,12 +191,12 @@ export function networkRefusal(
   if (sameBytes(configured.hash, current.genesisHash)) return null;
   const found =
     of === "transport"
-      ? `the core at coreTransport has genesis hash ${publicHash}: it indexes another network than its public database's`
+      ? `the core at privateLink has genesis hash ${publicHash}: it indexes another network than its public database's`
       : `the public database's genesis hash is ${publicHash}: its core indexes another network`;
   return new UmbraError(
     "private-binding-mismatch",
     `the private process is configured for the network ${configured.network}, whose genesis hash is ` +
-      `${hex(configured.hash)}, and ${found}; point publicDatabase or coreTransport at a ` +
+      `${hex(configured.hash)}, and ${found}; point publicDatabase or privateLink at a ` +
       `public database of ${configured.network} and its core, or configure the network its public database is of`,
     { reason: "network", network: configured.network, configured: hex(configured.hash), public: publicHash },
   );
@@ -270,7 +270,7 @@ const listed = (names: readonly string[]): string =>
 /**
  * The refusal (`needs-lockstep-not-listed`, not retried) of the `modules` that declare `needsLockstep`, on an instance
  * that is not lockstep: the core's `hello-ack` said `lockstep: false` (`transport`), or the instance has no
- * `coreTransport`, so no core can hold it in lockstep. Null when no module declares it, or the instance is lockstep.
+ * `privateLink`, so no core can hold it in lockstep. Null when no module declares it, or the instance is lockstep.
  * [PP-6]
  */
 export function needsLockstepRefusal(modules: readonly ModuleDeclaration[], lockstep: boolean, transport: boolean): UmbraError | null {
@@ -278,10 +278,10 @@ export function needsLockstepRefusal(modules: readonly ModuleDeclaration[], lock
   if (needing.length === 0 || lockstep) return null;
   const which = needing.length === 1 ? `the module ${listed(needing)} declares` : `the modules ${listed(needing)} declare`;
   const why = transport
-    ? "the core at coreTransport answered lockstep: false — list this instance's instanceId in the core's " +
+    ? "the core at privateLink answered lockstep: false — list this instance's instanceId in the core's " +
       "lockstepInstances, or run the module on an instance it lists"
-    : "this private process has no coreTransport, so no core can hold it in lockstep — give it the core's " +
-      "listen.transport as coreTransport and list its instanceId in the core's lockstepInstances";
+    : "this private process has no privateLink, so no core can hold it in lockstep — give it the core's " +
+      "listen.privateLink as privateLink and list its instanceId in the core's lockstepInstances";
   return new UmbraError(
     "needs-lockstep-not-listed",
     `${which} needsLockstep: it reads mutable public tables, which only a lockstep instance reads at the height it ` +
@@ -311,7 +311,7 @@ export interface StartHashes {
   readonly recorded: string | null;
   /** The hash of the public configuration history this start read; null when the public database has none. */
   readonly history: string | null;
-  /** The `configHash` of the core's `hello-ack` this start waited for; null without `coreTransport`. */
+  /** The `configHash` of the core's `hello-ack` this start waited for; null without `privateLink`. */
   readonly core: string | null;
   /**
    * The hash the operator accepts for this start (`umbradb run --update-hash`, `startProcess`'s `updateHash`), or
@@ -342,9 +342,9 @@ function startStop(hashes: StartHashes, found: string, moved: boolean): UmbraErr
       : ` The --update-hash given, ${hashes.given}, is not that hash, so nothing was accepted.`;
   const instead = hashes.recorded === null ? "" : `, in place of ${hashes.recorded}, the one it accepted`;
   const message = moved
-    ? `the core at coreTransport sends the configuration hash ${hashes.core}, and the public configuration ` +
+    ? `the core at privateLink sends the configuration hash ${hashes.core}, and the public configuration ` +
       `history this start read hashes to ${hashes.history}: the core's configuration changed during this ` +
-      "start, or coreTransport and publicDatabase are not one core's, so the public table " +
+      "start, or privateLink and publicDatabase are not one core's, so the public table " +
       "items checked are not the core's. Start the private process again once both give one hash — with " +
       `${accept}, to accept the core's${instead}.${given}`
     : `the public core's configuration hash is ${found}, and this private process last ran on ` +
@@ -637,7 +637,7 @@ export class PrivateBlockSource implements BlockSource {
    * - Its genesis hash is compared with the configured network's, `input.configured` ({@link networkRefusal}). [Q136 B]
    * - The binding found by the startup read of the private cursor is compared with it ({@link bindingRefusal}:
    *   `genesis`, `start`, `private-start-below`). The part's `on-start-db` compares again in its transaction.
-   * - With `coreTransport`, the core's `hello-ack` is checked (its network) and its lockstep flag kept.
+   * - With `privateLink`, the core's `hello-ack` is checked (its network) and its lockstep flag kept.
    * - The public configuration hash it accepted is compared with the hashes found ({@link startHashDecision}).
    *   [PP-14, Q159]
    *

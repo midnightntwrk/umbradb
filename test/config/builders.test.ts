@@ -211,7 +211,7 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
     type Public = Minimal & { node: string };
     expectTypeOf<Accepts<typeof coreEntry, Public & { instanceId: string }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Public & { publicDatabase: DatabasePartsInput }>>().toEqualTypeOf<false>();
-    expectTypeOf<Accepts<typeof coreEntry, Public & { coreTransport: string }>>().toEqualTypeOf<false>();
+    expectTypeOf<Accepts<typeof coreEntry, Public & { privateLink: string }>>().toEqualTypeOf<false>();
     type Private = Minimal & { instanceId: string };
     expectTypeOf<Accepts<typeof coreEntry, Private & { node: string }>>().toEqualTypeOf<false>();
     expectTypeOf<Accepts<typeof coreEntry, Private & { lockstepInstances: string[] }>>().toEqualTypeOf<false>();
@@ -239,7 +239,7 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
         retainStates: 0,
         database: { kind: "postgres", host: "db", port: 5432, user: "indexer", password: "p", name: "umbradb", ssl: "require" },
         node: "ws://127.0.0.1:9944",
-        listen: { api: "0.0.0.0:8080", admin: "0.0.0.0:8081", transport: "0.0.0.0:8082" },
+        listen: { api: "0.0.0.0:8080", admin: "0.0.0.0:8081", privateLink: "0.0.0.0:8082" },
         transportReader: { user: "umbradb_transport", password: "r" },
         tipCap: 600,
         prefetchWindow: 64,
@@ -263,7 +263,7 @@ describe("CF-2, CF-4: the core entry's settings are typed as CF-4 lists them", (
         database: { kind: "pglite", path: "/var/lib/umbradb/wallet" },
         instanceId: "wallet-1",
         publicDatabase: { kind: "postgres", host: "db", user: "reader", name: "umbradb", ssl: "verify-full" },
-        coreTransport: "core.internal:8082",
+        privateLink: "core.internal:8082",
         developmentOptIn: true,
       },
     });

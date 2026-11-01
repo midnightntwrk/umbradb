@@ -54,7 +54,7 @@ export async function instancesRun(backend: PrivateBackend, options: InstancesOp
   const core: PublicCore = launchPublicCore({
     database: publicDb.setting,
     head,
-    extra: { listen: { transport: "127.0.0.1:0", admin: "127.0.0.1:0" }, ...(lockstep ? { lockstepInstances: ["keeper"] } : {}) },
+    extra: { listen: { privateLink: "127.0.0.1:0", admin: "127.0.0.1:0" }, ...(lockstep ? { lockstepInstances: ["keeper"] } : {}) },
     admin: options.coreAdmin === undefined ? true : options.coreAdmin,
   });
   const instances: PrivateProcess[] = [];
@@ -66,7 +66,7 @@ export async function instancesRun(backend: PrivateBackend, options: InstancesOp
       const db = await backend.database("private");
       return launchPrivate({
         database: db.setting,
-        coreTransport: transport,
+        privateLink: transport,
         ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
         extra: { listen: { admin: "127.0.0.1:0" } },
         admin: true,

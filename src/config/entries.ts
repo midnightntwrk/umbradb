@@ -51,7 +51,7 @@ export type LedgerTable = { readonly rows?: readonly LedgerTableRow[]; readonly 
 export type LedgerSources = { readonly [ledger in LedgerName]?: "vendored" | "released" };
 
 /** The process's listeners, each a `host:port` address. [RN-15, AE-1, PP-3] */
-export type Listen = { readonly api?: string; readonly admin?: string; readonly transport?: string };
+export type Listen = { readonly api?: string; readonly admin?: string; readonly privateLink?: string };
 
 /** Opt-in mutual TLS: this process's certificate and key, and the roots it trusts, as PEM text. [PP-11] */
 export type TlsSettings = {
@@ -99,11 +99,11 @@ export type PublicCoreSettings = CoreSettingsBase & {
   readonly node: string;
   /** Instance ids. */
   readonly lockstepInstances?: readonly string[];
-  /** The login the transport reads with; required with a PostgreSQL database and `listen.transport`. [Q175 A] */
+  /** The login the transport reads with; required with a PostgreSQL database and `listen.privateLink`. [Q175 A] */
   readonly transportReader?: TransportReader;
   readonly instanceId?: never;
   readonly publicDatabase?: never;
-  readonly coreTransport?: never;
+  readonly privateLink?: never;
 };
 
 /** A private process's `core` entry: instead of `node` and `lockstepInstances`, its own three fields. [CF-4] */
@@ -112,7 +112,7 @@ export type PrivateCoreSettings = CoreSettingsBase & {
   /** The public database's parts: a login that may only read. [CF-4, Q167] */
   readonly publicDatabase?: DatabasePartsInput;
   /** The core's transport address. */
-  readonly coreTransport?: string;
+  readonly privateLink?: string;
   readonly node?: never;
   readonly lockstepInstances?: never;
   readonly transportReader?: never;

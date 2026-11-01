@@ -1071,7 +1071,7 @@ describe("CF-3, CF-4: the validated configuration", () => {
             ...withPrivateCore({
               ...PRIVATE_SETTINGS,
               publicDatabase: { kind: "postgres", host: "db", user: "reader", name: "umbradb" },
-              coreTransport: "core.internal:8082",
+              privateLink: "core.internal:8082",
             }).entries,
             WALLET.entry({ start: 0, config: { pollMs: 1000 } }),
           ],
@@ -1084,7 +1084,7 @@ describe("CF-3, CF-4: the validated configuration", () => {
     expect(checked.entries[0]?.kinds).toMatchObject({
       instanceId: "operational",
       publicDatabase: "operational",
-      coreTransport: "operational",
+      privateLink: "operational",
     });
   });
 

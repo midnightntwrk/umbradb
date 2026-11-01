@@ -58,7 +58,7 @@ function lockstepCore(db: TestDatabase, head: bigint, listed: readonly string[],
   return launchPublicCore({
     database: db.setting,
     head,
-    extra: { listen: { transport: "127.0.0.1:0" }, lockstepInstances: listed },
+    extra: { listen: { privateLink: "127.0.0.1:0" }, lockstepInstances: listed },
     ...(loop === undefined ? {} : { loop }),
   });
 }
@@ -193,7 +193,7 @@ async function a117Problems(backend: PrivateBackend): Promise<string[]> {
     launchPrivate({
       database: privateDb.setting,
       instanceId: LISTED,
-      coreTransport: proxy.address,
+      privateLink: proxy.address,
       ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
       extra: { backoffCeilingMs: 1_000 },
       seen,
@@ -258,7 +258,7 @@ describe.each(PRIVATE_BACKENDS)("A117: the core waits for a lockstep instance on
   );
 
   it(
-    "A117: a core listing an instance but without listen.transport waits for it all the same (Q24: no instance can connect)",
+    "A117: a core listing an instance but without listen.privateLink waits for it all the same (Q24: no instance can connect)",
     async () => {
       const publicDb = await backend.database("public");
       const core = launchPublicCore({ database: publicDb.setting, head: 3n, extra: { lockstepInstances: [LISTED] } });

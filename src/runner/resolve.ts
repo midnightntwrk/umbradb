@@ -119,8 +119,8 @@ export interface Surfaces {
   /** `listen.admin`: the admin endpoints. */
   readonly admin: string | null;
   /**
-   * The private link's side of the process: on the core, the address it listens at (`listen.transport`); on a private
-   * process, the core's address it connects to (`coreTransport`). A `listen.transport` written on a private process is
+   * The private link's side of the process: on the core, the address it listens at (`listen.privateLink`); on a private
+   * process, the core's address it connects to (`privateLink`). A `listen.privateLink` written on a private process is
    * no surface of it.
    */
   readonly privateLink: string | null;
@@ -163,7 +163,7 @@ function surfacesOf(data: unknown, core: CheckedEntry, side: ProcessSide): Surfa
   return Object.freeze({
     api: addressOf(listen.api),
     admin: addressOf(listen.admin),
-    privateLink: addressOf(side === "public" ? listen.transport : config.coreTransport),
+    privateLink: addressOf(side === "public" ? listen.privateLink : config.privateLink),
   });
 }
 

@@ -7,7 +7,7 @@ import { confinementProblems, PUB, PUB_ENTRY, publicState, stateProblems } from 
 
 /**
  * Confined reads through a running core, on PostgreSQL 18.6 and PGlite 0.5.10. The core process listens on its
- * `listen.transport`, and a raw client sends `read`s whose statements try to leave the read: `COMMIT` then `INSERT`,
+ * `listen.privateLink`, and a raw client sends `read`s whose statements try to leave the read: `COMMIT` then `INSERT`,
  * `ROLLBACK`, `BEGIN`, `SET TRANSACTION READ WRITE`, `SET` and `RESET` of a setting or the role, `set_config`, `DO`,
  * `nextval`, `pg_advisory_lock`, `COPY`, `LISTEN`, and two statements in one. [A172 FAULT, PP-4; design §8; threat model
  * draft, gap 1]
@@ -21,8 +21,8 @@ import { confinementProblems, PUB, PUB_ENTRY, publicState, stateProblems } from 
  * The committed negative control is `read-confinement.negative-control.test.ts`.
  */
 
-/** The core's `listen.transport`: a free port of the loopback interface. */
-const TRANSPORT = { listen: { transport: "127.0.0.1:0" } };
+/** The core's `listen.privateLink`: a free port of the loopback interface. */
+const TRANSPORT = { listen: { privateLink: "127.0.0.1:0" } };
 
 describe.each(PRIVATE_BACKENDS)("A172: a transport read is confined to reads on $name", (backend: PrivateBackend) => {
   beforeAll(() => backend.start(), START_TIMEOUT_MS);

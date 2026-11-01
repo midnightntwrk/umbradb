@@ -17,7 +17,7 @@ import { input, PRIVATE_SETTINGS } from "./validate-fixtures.js";
  * - `ssl` defaults to `disable` for a loopback host or a socket directory, and to `require` for another host;
  *   [A177, Q182 B]
  * - only `password` is secret; the other parts are shown; [Q167 A]
- * - `core.transportReader` is required on PostgreSQL with `listen.transport`, and refused on PGlite.
+ * - `core.transportReader` is required on PostgreSQL with `listen.privateLink`, and refused on PGlite.
  *   [A177, CF-10, Q175 A]
  *
  * The committed negative control is the last `describe`: a `database` schema that also takes a URL (as the setting
@@ -122,7 +122,7 @@ describe("A170: database and publicDatabase are parts, never a connection string
     const settings = {
       ...CORE_SETTINGS,
       database: postgresOn("db.internal"),
-      listen: { transport: "0.0.0.0:7000" },
+      listen: { privateLink: "0.0.0.0:7000" },
       transportReader: { user: "umbradb_transport", password: "reader-secret" },
     };
     const checked = validateConfig(input({ entries: [coreEntry({ start: 0, config: settings as never })] }));
@@ -169,25 +169,25 @@ describe("A177: ssl defaults to disable on a loopback host or socket, require on
   });
 });
 
-describe("A177: core.transportReader is required on PostgreSQL with listen.transport, refused on PGlite (Q175 A)", () => {
-  const transport = { listen: { transport: "0.0.0.0:7000" } };
+describe("A177: core.transportReader is required on PostgreSQL with listen.privateLink, refused on PGlite (Q175 A)", () => {
+  const transport = { listen: { privateLink: "0.0.0.0:7000" } };
   const reader = { transportReader: { user: "umbradb_transport", password: "p" } };
 
-  it("PostgreSQL with listen.transport and no transportReader is refused with its path", () => {
+  it("PostgreSQL with listen.privateLink and no transportReader is refused with its path", () => {
     const found = findings({ ...CORE_SETTINGS, database: postgresOn("db.internal"), ...transport });
     expect(found.map((one) => one.path)).toEqual(["entries[0].config.transportReader"]);
     expect(found[0]?.message).toContain(
-      "a PostgreSQL database with listen.transport needs transportReader { user, password }, a login that may only " +
-        "read, which the transport's reads run as",
+      "a PostgreSQL database with listen.privateLink needs transportReader { user, password }, a login that may " +
+        "only read, which the transport's reads run as",
     );
   });
 
-  it("PostgreSQL with both, and PostgreSQL without listen.transport, pass", () => {
+  it("PostgreSQL with both, and PostgreSQL without listen.privateLink, pass", () => {
     expect(findings({ ...CORE_SETTINGS, database: postgresOn("db.internal"), ...transport, ...reader })).toEqual([]);
     expect(findings({ ...CORE_SETTINGS, database: postgresOn("db.internal") })).toEqual([]);
   });
 
-  it("PGlite with a transportReader is refused with its path; PGlite with listen.transport alone passes", () => {
+  it("PGlite with a transportReader is refused with its path; PGlite with listen.privateLink alone passes", () => {
     const pglite = { database: { kind: "pglite", memory: true }, developmentOptIn: true };
     const found = findings({ ...CORE_SETTINGS, ...pglite, ...transport, ...reader });
     expect(found.map((one) => one.path)).toEqual(["entries[0].config.transportReader"]);

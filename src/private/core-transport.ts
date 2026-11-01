@@ -1,8 +1,8 @@
 /**
- * The core's side of the process transport. The core process listens for private processes on its `listen.transport`
- * address over WebSocket (`ws`), and answers them with the messages of `./messages.ts`. When `listen.transport` is set,
- * the process starts the transport once its database is open and its chain known, before the bootstrap's wait, and
- * closes it at its stop (`src/runner/process.ts`). [PP-3, PP-4, PP-5, PP-9, PP-11; design §8; CORE-ARCH §4.14, §4.20]
+ * The core's side of the process transport. The core process listens for private processes on its
+ * `listen.privateLink` address over WebSocket (`ws`), and answers them with the messages of `./messages.ts`. When
+ * `listen.privateLink` is set, the process starts the transport once its database is open and its chain known, before
+ * the bootstrap's wait, and closes it at its stop (`src/runner/process.ts`). [PP-3, PP-4, PP-5, PP-9, PP-11; design §8; CORE-ARCH §4.14, §4.20]
  *
  * **Mutual TLS** is opt-in, through the `core` entry's `tls`: `certificate` and `key` (the core's own) and
  * `trustedRoots` (the certificate authorities whose certificates it accepts), each PEM text. With `tls` set, the server
@@ -152,7 +152,7 @@ export interface InstanceView {
 
 /** What {@link startCoreTransport} takes. */
 export interface CoreTransportOptions {
-  /** `listen.transport`, `host:port` (port 0 for a free one). */
+  /** `listen.privateLink`, `host:port` (port 0 for a free one). */
   readonly address: string;
   /** The `tls` setting; plain WebSocket without it. */
   readonly tls?: TransportTls | undefined;

@@ -3,7 +3,7 @@
  * private-transport.ts`): its `WebSocket` client and its `WebSocketServer` (`noServer`, connections handed over by
  * `./http.ts`'s upgrade), over the page's message network (`./network.ts`, `./socket.ts`). [design §8, §9.2]
  *
- * A client's URL is `ws://<address>/`, the core's `listen.transport` address as the private process's `coreTransport`
+ * A client's URL is `ws://<address>/`, the core's `listen.privateLink` address as the private process's `privateLink`
  * names it. When nothing listens there, the connection is refused (`error` with `ECONNREFUSED`, then `close` 1006), and
  * the transport retries. `wss://` (mutual TLS) is refused the same way: the page's message channels never leave the
  * page, and a browser cannot present a client certificate here. [PP-11]

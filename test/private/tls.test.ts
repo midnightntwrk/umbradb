@@ -72,7 +72,7 @@ describe("A121: with tls set, the core's transport requires mutual TLS (raw clie
     const core = await startPublicCore({
       database: db.setting,
       head: 2n,
-      extra: { listen: { transport: "127.0.0.1:0" }, tls: coreTls() },
+      extra: { listen: { privateLink: "127.0.0.1:0" }, tls: coreTls() },
     });
     try {
       expect(core.lines.join("\n")).toMatch(/transport listening on 127\.0\.0\.1:\d+ \(mutual TLS\)/);
@@ -116,7 +116,7 @@ describe.each(PRIVATE_BACKENDS)("A121: private processes and a core with tls on 
     core = await startPublicCore({
       database: publicDb.setting,
       head: 4n,
-      extra: { listen: { transport: "127.0.0.1:0" }, tls: coreTls() },
+      extra: { listen: { privateLink: "127.0.0.1:0" }, tls: coreTls() },
     });
   }, START_TIMEOUT_MS);
   afterAll(() => core?.stop(), START_TIMEOUT_MS);
@@ -130,7 +130,7 @@ describe.each(PRIVATE_BACKENDS)("A121: private processes and a core with tls on 
       running: launchPrivate({
         database: privateDb.setting,
         instanceId,
-        coreTransport: core.transport(),
+        privateLink: core.transport(),
         ...(tls === undefined ? {} : { tls }),
         ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
         lines,

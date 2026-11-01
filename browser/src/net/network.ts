@@ -1,7 +1,7 @@
 /**
  * The page's message network, as a worker sees it. The process transport between the core worker and each private
  * worker runs over `postMessage`, through `MessagePort`s the page hands out (`./broker.ts`). A worker that listens (the
- * core's `listen.transport`) names its address. A worker that connects (a private process's `coreTransport`) asks the
+ * core's `listen.privateLink`) names its address. A worker that connects (a private process's `privateLink`) asks the
  * page for that address and gets one end of a new `MessageChannel`, whose other end goes to the listener. Nothing of it
  * leaves the page: no network request is made. [BR-1, BR-3, PP-4; design §8, §9.2]
  *

@@ -120,7 +120,7 @@ async function q142Run(backend: PrivateBackend, reread?: boolean): Promise<Q142O
     database: publicDb.setting,
     head: 0n,
     loop: SkipsLockstep,
-    extra: { listen: { transport: "127.0.0.1:0" }, lockstepInstances: [INSTANCE] },
+    extra: { listen: { privateLink: "127.0.0.1:0" }, lockstepInstances: [INSTANCE] },
   });
   const pause = pauseGate();
   try {
@@ -128,7 +128,7 @@ async function q142Run(backend: PrivateBackend, reread?: boolean): Promise<Q142O
     const instance = launchPrivate({
       database: privateDb.setting,
       instanceId: INSTANCE,
-      coreTransport: address,
+      privateLink: address,
       modules: [pausing(pause)],
       extra: { backoffCeilingMs: 1_000 },
       ...(reread === undefined ? {} : { intake: { reread } }),

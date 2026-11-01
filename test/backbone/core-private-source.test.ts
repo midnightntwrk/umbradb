@@ -416,7 +416,7 @@ describe("the public database and the wake-ups a private process starts with", (
       expect(error).toBeInstanceOf(UmbraError);
       expect((error as UmbraError).code).toBe("invalid-configuration");
       expect((error as UmbraError).details).toEqual({ reason: "public-database-transport" });
-      expect((error as UmbraError).message).toContain("through the core's transport, at the core entry's coreTransport");
+      expect((error as UmbraError).message).toContain("through the core's transport, at the core entry's privateLink");
     }
   });
 
@@ -595,7 +595,7 @@ describe("lockstep on the private side (task 14.3; PP-6, PP-7, Q142)", () => {
     expect(source.lockstep).toBe(false);
     expect(await source.checkChain(configuredAs("custom", bytes(0xa1)))).toMatchObject({ genesisHash: bytes(0xa1) });
     expect([lockstep.state.asked, source.lockstep]).toEqual([1, true]);
-    // The core at coreTransport of another network than the configured one, its public database the configured one's.
+    // The core at privateLink of another network than the configured one, its public database the configured one's.
     const elsewhere = fakeTransport({ genesis: hexOf(bytes(0xb2)) });
     const refusal = await refusalOf(
       new PrivateBlockSource(fakePublic(publicAnswers({ head: 9n })).db, pollingWakes(), elsewhere.transport).checkChain(
@@ -606,7 +606,7 @@ describe("lockstep on the private side (task 14.3; PP-6, PP-7, Q142)", () => {
       code: "private-binding-mismatch",
       details: { reason: "network", network: "custom", configured: hexOf(bytes(0xa1)), public: hexOf(bytes(0xb2)) },
     });
-    expect(refusal.message).toContain(`the core at coreTransport has genesis hash ${hexOf(bytes(0xb2))}`);
+    expect(refusal.message).toContain(`the core at privateLink has genesis hash ${hexOf(bytes(0xb2))}`);
     // The public database's own checks come first: a database of another network is refused for that.
     const both = fakeTransport({ genesis: hexOf(bytes(0xb2)) });
     const first = await refusalOf(
@@ -643,7 +643,7 @@ describe("lockstep on the private side (task 14.3; PP-6, PP-7, Q142)", () => {
     expect((refusal as UmbraError).message).toContain("needs-a and needs-b declare needsLockstep");
     const none = new PrivateBlockSource(fakePublic(publicAnswers({})).db, pollingWakes());
     await none.checkChain(configuredAs("custom", bytes(0xa1)));
-    expect(() => none.checkModules(modules)).toThrow(/no coreTransport/);
+    expect(() => none.checkModules(modules)).toThrow(/no privateLink/);
     expect(needsLockstepRefusal(modules, false, false)?.details).toEqual({ modules: ["needs-a", "needs-b"], transport: false });
     // Listed: they run; a graph without such a module runs anywhere.
     const listed = new PrivateBlockSource(fakePublic(publicAnswers({})).db, pollingWakes(), fakeTransport({ lockstep: true }).transport);
@@ -907,7 +907,7 @@ describe("PP-14 at a start: the public configuration hash a private process acce
         code: "public-config-changed",
         details: { via: "startup", recorded, found: H3, history: H2, core: H3, given },
       });
-      expect(refusal?.message).toContain(`the core at coreTransport sends the configuration hash ${H3}`);
+      expect(refusal?.message).toContain(`the core at privateLink sends the configuration hash ${H3}`);
       expect(refusal?.message).toContain(`hashes to ${H2}`);
       expect(refusal?.message).toContain(`--update-hash=${H3}`);
     }

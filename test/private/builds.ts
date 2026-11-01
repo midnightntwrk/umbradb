@@ -40,8 +40,8 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  * and its private modules. Its public data comes from the public database: on PostgreSQL through `publicDatabase`, the
  * parts of a login that may only read (the production path, `openPublicDatabase`); on PGlite, whose public database the
  * core alone opens, through direct reads of the core's `db` item — the direct calls allowed in tests —, or, given
- * `coreTransport`, through the core's process transport (`read` messages, and its wake-ups in place of the tests'
- * poll), which a core started with `listen.transport` serves. [PP-4]
+ * `privateLink`, through the core's process transport (`read` messages, and its wake-ups in place of the tests'
+ * poll), which a core started with `listen.privateLink` serves. [PP-4]
  *
  * Imports nothing of Vitest.
  */
@@ -106,7 +106,7 @@ export interface PublicCoreOptions {
   readonly entries?: readonly Readonly<Record<string, unknown>>[];
   /** A negative control's loop. */
   readonly loop?: new (input: LoopInput) => FinalizedLoop;
-  /** More settings of the `core` entry (`listen.transport`, `tls`, `lockstepInstances`). */
+  /** More settings of the `core` entry (`listen.privateLink`, `tls`, `lockstepInstances`). */
   readonly extra?: Readonly<Record<string, unknown>>;
   /**
    * The admin endpoints (the `/status` of the private instances): served when given, on the `listen.admin` of
@@ -142,12 +142,12 @@ function publicReads(keep: (db: ReadOnlyDatabase) => void): ModuleDeclaration {
 
 /**
  * The login every PostgreSQL test database's core reads its transport with (`./backends.ts`'s `umbradb_transport`,
- * which holds `pg_read_all_data` only): a core on PostgreSQL with `listen.transport` requires one. [CF-4, Q175 A]
+ * which holds `pg_read_all_data` only): a core on PostgreSQL with `listen.privateLink` requires one. [CF-4, Q175 A]
  */
 const TRANSPORT_READER = Object.freeze({ user: TRANSPORT_LOGIN, password: TRANSPORT_LOGIN });
 
 /**
- * The public core's `core` entry. On PostgreSQL with `listen.transport`, `transportReader` is the tests' reader login
+ * The public core's `core` entry. On PostgreSQL with `listen.privateLink`, `transportReader` is the tests' reader login
  * unless `extra` names it — `transportReader: undefined` for none (the start refused for a missing reader). [A177]
  */
 export function publicCoreEntry(
@@ -156,8 +156,8 @@ export function publicCoreEntry(
   genesisHash = genesisHex(0xa1),
   given: Readonly<Record<string, unknown>> = {},
 ) {
-  const listen = given.listen as { readonly transport?: string } | undefined;
-  const reader = database.kind === "postgres" && listen?.transport !== undefined && !Object.hasOwn(given, "transportReader");
+  const listen = given.listen as { readonly privateLink?: string } | undefined;
+  const reader = database.kind === "postgres" && listen?.privateLink !== undefined && !Object.hasOwn(given, "transportReader");
   const extra = Object.fromEntries(
     Object.entries({ ...(reader ? { transportReader: TRANSPORT_READER } : {}), ...given }).filter(([, value]) => value !== undefined),
   );
@@ -348,10 +348,10 @@ export interface PrivateOptions {
   readonly publicDatabase?: DatabaseParts;
   /** Public data read some other way than `publicDatabase` (PGlite's direct reads). */
   readonly direct?: () => ReadOnlyDatabase;
-  /** What wakes the private source; with `coreTransport` the transport's, else a 50 ms poll, unless given. */
+  /** What wakes the private source; with `privateLink` the transport's, else a 50 ms poll, unless given. */
   readonly wakes?: PublicWakes;
-  /** The core's transport address (`coreTransport`): the private process's wake-ups, and on PGlite its public reads. */
-  readonly coreTransport?: string;
+  /** The core's transport address (`privateLink`): the private process's wake-ups, and on PGlite its public reads. */
+  readonly privateLink?: string;
   /** The `tls` setting. [PP-11] */
   readonly tls?: { readonly certificate: string; readonly key: string; readonly trustedRoots: readonly string[] };
   /** Where the process's log lines go; nowhere unless given. */
@@ -406,7 +406,7 @@ export function privateCoreEntry(options: PrivateOptions) {
       instanceId: options.instanceId ?? "instance-1",
       developmentOptIn: true,
       ...(options.publicDatabase === undefined ? {} : { publicDatabase: options.publicDatabase }),
-      ...(options.coreTransport === undefined ? {} : { coreTransport: options.coreTransport }),
+      ...(options.privateLink === undefined ? {} : { privateLink: options.privateLink }),
       ...(options.tls === undefined ? {} : { tls: options.tls }),
       ...options.extra,
     } as never,
@@ -434,7 +434,7 @@ function poll(): PublicWakes {
 /** Starts a private process (see the module comment) and returns it at once, startup running. */
 export function launchPrivate(options: PrivateOptions): PrivateProcess {
   const direct = options.direct;
-  const wakes = options.wakes ?? (options.coreTransport === undefined ? poll() : undefined);
+  const wakes = options.wakes ?? (options.privateLink === undefined ? poll() : undefined);
   const intake = privateIntake({
     ...options.intake,
     ...(direct === undefined ? {} : { publicDatabase: () => directPublic(direct) }),

@@ -12,9 +12,9 @@ import type { DatabaseParts, PostgresParts } from "../../src/config/database-par
  * its negative controls' file; imports nothing of Vitest. [A162, PP-14, RN-16, PP-4, Q147]
  *
  * **The run** ({@link a162Run}): a public core with the public module `pub` (a data setting `level`, a route `GET
- * /level`), its module API on a free port and, for a private process with a transport, its `listen.transport` behind a
- * proxy whose target follows the core's restarts (`RetargetProxy`); and a private process `watcher` — with
- * `coreTransport` (the proxy), or without one (PostgreSQL only: its public database read directly, woken by a poll).
+ * /level`), its module API on a free port and, for a private process with a transport, its `listen.privateLink` behind
+ * a proxy whose target follows the core's restarts (`RetargetProxy`); and a private process `watcher` — with
+ * `privateLink` (the proxy), or without one (PostgreSQL only: its public database read directly, woken by a poll).
  * The core starts at head 5, and is restarted three times, each with a higher head that the private process must then
  * reach: (1) with the same configuration, head 8; (2) with only secrets changed — the node URL's password, and on
  * PostgreSQL the password of the core's own login (`ALTER ROLE`) in `database` —, head 11; (3) with a data field
@@ -100,7 +100,7 @@ export interface A162Run {
 
 /** Options of {@link a162Run}. */
 export interface A162Options {
-  /** Whether the private process has `coreTransport`; without, PostgreSQL only. */
+  /** Whether the private process has `privateLink`; without, PostgreSQL only. */
   readonly transport: boolean;
   /** Whether a private process runs; true unless given. */
   readonly private?: boolean;
@@ -164,7 +164,7 @@ export async function a162Run(backend: PrivateBackend, options: A162Options): Pr
       entries: pubEntries(changed),
       extra: {
         node: `ws://watch:${secret.node}@127.0.0.1:9/node`,
-        listen: { api: "127.0.0.1:0", ...(options.transport ? { transport: "127.0.0.1:0" } : {}) },
+        listen: { api: "127.0.0.1:0", ...(options.transport ? { privateLink: "127.0.0.1:0" } : {}) },
       },
       ...(options.configHash === undefined ? {} : { configHash: options.configHash }),
     });
@@ -199,7 +199,7 @@ export async function a162Run(backend: PrivateBackend, options: A162Options): Pr
       watcher = launchPrivate({
         database: privateDb.setting,
         instanceId: "watcher",
-        ...(options.transport ? { coreTransport: proxy.address } : {}),
+        ...(options.transport ? { privateLink: proxy.address } : {}),
         ...(postgres ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
         extra: { backoffCeilingMs: 1_000, listen: { api: "127.0.0.1:0" } },
         ...(options.ignore === true ? { intake: { configHash: "ignore" as const } } : {}),

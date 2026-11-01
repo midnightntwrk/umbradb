@@ -7,7 +7,7 @@ import { type Message, messageText, parseMessage, type Report } from "../../src/
  * Go-betweens of a private process and the core's transport, for the lockstep and core-restart tests. Imports nothing
  * of Vitest. [PP-6, PP-14]
  * - {@link RetargetProxy}: a TCP proxy whose target can change. A restarted core listens on another free port, and the
- *   private process's `coreTransport` stays the proxy's.
+ *   private process's `privateLink` stays the proxy's.
  * - {@link ReportRelay}: a WebSocket relay that can rewrite the reports a private process sends, giving a `report`
  *   whose hash is not the public block's without changing the private process.
  * - {@link HoldingRelay}: a WebSocket relay that holds a private process's messages until the test releases them.
@@ -204,7 +204,7 @@ export class HoldingRelay {
     return relay;
   }
 
-  /** Where it listens: a private process's `coreTransport`. */
+  /** Where it listens: a private process's `privateLink`. */
   get address(): string {
     return `127.0.0.1:${(this.#http.address() as { port: number }).port}`;
   }

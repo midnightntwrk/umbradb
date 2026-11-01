@@ -17,7 +17,7 @@
  *   retry on stderr; Ctrl-C ends the command. [IN-10]
  * - **A private process's configuration** (its `core` entry has no `node`): its chain is its public database, read as
  *   the private process reads it (`openPublicSide` of `core-private-source`). A PostgreSQL `publicDatabase` is read
- *   directly, with reads only; otherwise the chain is read through the core's transport at `coreTransport`, whose
+ *   directly, with reads only; otherwise the chain is read through the core's transport at `privateLink`, whose
  *   `hello` gives an empty private database's position, S − 1 with no hash. The transport's lines go to stderr. The
  *   restore checks the backup's binding and block against it (`src/backup/restore.ts`). [CF-4, PP-4, PP-12, Q153]
  * - **Refusals** (exit 1, nothing committed, the target left as it was): the restore's own refusal codes, the

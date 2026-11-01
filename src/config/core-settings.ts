@@ -15,7 +15,7 @@
  *
  * **`database`**: the database's parts, never a connection string ({@link databaseSetting}, also used for a private
  * process's `publicDatabase`). It is operational, with its `password` part secret. A public process's
- * `transportReader` is required with a PostgreSQL database and `listen.transport`, and rejected with PGlite
+ * `transportReader` is required with a PostgreSQL database and `listen.privateLink`, and rejected with PGlite
  * (`transportReaderRule`). [CF-4, Q167 A, Q175 A, Q182 B]
  *
  * Choices the core settings table leaves open [CF-4]:
@@ -179,7 +179,7 @@ const BASE = {
     .strictObject({
       api: address().optional(),
       admin: address().default(DEFAULT_ADMIN_ADDRESS),
-      transport: address().optional(),
+      privateLink: address().optional(),
     })
     .prefault({})
     .meta(OPERATIONAL),
@@ -225,23 +225,23 @@ function genesisHashRule(settings: { network: string; genesisHash?: string | und
 /** The `core` settings `transportReader`'s rule reads. */
 type TransportReaderSettings = {
   database: DatabaseParts;
-  listen: { transport?: string | undefined };
+  listen: { privateLink?: string | undefined };
   transportReader?: unknown;
 };
 
 /**
- * `transportReader` is required where the database is PostgreSQL and `listen.transport` is set, since the transport's
+ * `transportReader` is required where the database is PostgreSQL and `listen.privateLink` is set, since the transport's
  * reads run as that login. It is rejected on PGlite, whose database has one session, the writer's. [CF-4, Q175 A]
  */
 function transportReaderRule(settings: TransportReaderSettings, context: z.RefinementCtx) {
   const given = settings.transportReader !== undefined;
-  if (settings.database.kind === "postgres" && settings.listen.transport !== undefined && !given) {
+  if (settings.database.kind === "postgres" && settings.listen.privateLink !== undefined && !given) {
     context.addIssue({
       code: "custom",
       path: ["transportReader"],
       message:
-        "a PostgreSQL database with listen.transport needs transportReader { user, password }, a login that may only " +
-        "read, which the transport's reads run as",
+        "a PostgreSQL database with listen.privateLink needs transportReader { user, password }, a login that may " +
+        "only read, which the transport's reads run as",
     });
   }
   if (settings.database.kind === "pglite" && given) {
@@ -296,7 +296,7 @@ export const PRIVATE_CORE_SCHEMA = z
     // The id this process gives in its `hello` (`../private/instance-id.ts`). [CF-4, PP-4]
     instanceId: instanceIdSchema().meta(OPERATIONAL),
     publicDatabase: databaseSetting().optional().meta(OPERATIONAL),
-    coreTransport: address().optional().meta(OPERATIONAL),
+    privateLink: address().optional().meta(OPERATIONAL),
   })
   .superRefine(genesisHashRule)
   .superRefine(ledgerTableRule)

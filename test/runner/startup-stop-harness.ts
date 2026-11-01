@@ -358,7 +358,7 @@ export async function privateRun(backend: ProcessBackend, db: ProcessDatabase): 
   const settings = coreSettings(db.setting, {
     backoffCeilingMs: CEILING_MS,
     instanceId: "a167-private",
-    coreTransport: silent.address,
+    privateLink: silent.address,
   });
   delete settings.node;
   // The engine's own private build and source: the resolver takes the side from the configuration. [LM-1]

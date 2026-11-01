@@ -161,8 +161,8 @@
  * [RN-16, PP-14, Q147]
  *
  * **The process transport** (`../private/core-transport.ts`). A public process whose `core` revision has
- * `listen.transport` starts it once its database is open and its chain known (step 7, before the bootstrap's wait). The
- * process tells it each commit (`committed`) and closes it at its stop or at a refusal. A listener that cannot listen
+ * `listen.privateLink` starts it once its database is open and its chain known (step 7, before the bootstrap's wait).
+ * The process tells it each commit (`committed`) and closes it at its stop or at a refusal. A listener that cannot listen
  * refuses startup (`listen-failed`). [PP-4]
  *
  * On PostgreSQL the transport's reads run on a read pool of their own, logged in as `core.transportReader`
@@ -175,7 +175,7 @@
  * **Lockstep** (`../private/lockstep.ts`). A public process whose `core` revision lists `lockstepInstances` keeps one
  * bookkeeping of them for its run. Its transport tells that bookkeeping of the instances' `hello`s, reports and closes,
  * and the loop awaits it before each block's `BEGIN` (`LoopInput.lockstep`). While the loop waits, the process raises
- * `waiting-for-lockstep`. Without `listen.transport` no listed instance can connect, and the core waits for them.
+ * `waiting-for-lockstep`. Without `listen.privateLink` no listed instance can connect, and the core waits for them.
  * [PP-6, PP-7, Q24]
  *
  * On a private process, the source checks the resolved graph's modules after step 7 resolves the graph and before any
@@ -852,7 +852,7 @@ class Process implements ProcessHandle {
   #nodeClosed: Promise<void> | undefined;
   /** The process's ledger worker, once its graph needs one; kept across a retried startup. */
   #ledger: LedgerHost | undefined;
-  /** A public process's process transport on `listen.transport` (`../private/core-transport.ts`). [PP-4] */
+  /** A public process's process transport on `listen.privateLink` (`../private/core-transport.ts`). [PP-4] */
   #transport: CoreTransport | undefined;
   /** The transport's read pool on PostgreSQL, logged in as `core.transportReader`. [Q175 A] */
   #transportReader: Database | undefined;
@@ -1414,9 +1414,9 @@ class Process implements ProcessHandle {
       history,
       genesisHash,
     });
-    // The process transport: a public process given listen.transport listens for private ones from here on, once,
+    // The process transport: a public process given listen.privateLink listens for private ones from here on, once,
     // before the bootstrap's wait, so that they connect before S commits. [PP-4]
-    const { transport: transportAddress } = settings.listen as { readonly transport?: string };
+    const { privateLink: transportAddress } = settings.listen as { readonly privateLink?: string };
     const lockstepInstances = (settings.lockstepInstances as unknown as readonly string[] | undefined) ?? [];
     // Lockstep: one bookkeeping for the run, which the transport tells and the loop waits on. [PP-6]
     if (this.#lockstep === undefined && lockstepInstances.length > 0) {

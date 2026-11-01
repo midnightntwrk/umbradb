@@ -30,7 +30,7 @@ describe("A177's negative control: a transportReader check that accepts a superu
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
 
   it("negative control (committed): the superuser's core starts, failing A177's refusal", async () => {
-    const extra = { listen: { transport: "127.0.0.1:0" }, transportReader: { user: SUPER, password: SUPER } };
+    const extra = { listen: { privateLink: "127.0.0.1:0" }, transportReader: { user: SUPER, password: SUPER } };
     const options = { head: 3n, modules: [PUB], entries: [PUB_ENTRY], extra };
     const control = launchPublicCore({
       ...options,

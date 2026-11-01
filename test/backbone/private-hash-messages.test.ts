@@ -18,8 +18,8 @@ describe("PP-14's stop messages (task 17.5b)", () => {
     const moved = startHashDecision({ recorded: A, history: B, core: C, given: B });
     expect(moved.reason).toBe("refused");
     expect(moved.refusal?.message).toBe(
-      `the core at coreTransport sends the configuration hash ${C}, and the public configuration history this start ` +
-        `read hashes to ${B}: the core's configuration changed during this start, or coreTransport and ` +
+      `the core at privateLink sends the configuration hash ${C}, and the public configuration history this start ` +
+        `read hashes to ${B}: the core's configuration changed during this start, or privateLink and ` +
         "publicDatabase are not one core's, so the public table items checked are not the " +
         `core's. Start the private process again once both give one hash — with --update-hash=${C}, to accept the ` +
         `core's, in place of ${A}, the one it accepted. The --update-hash given, ${B}, is not that hash, so nothing ` +
@@ -55,7 +55,7 @@ describe("PP-14's stop messages (task 17.5b)", () => {
       "configuration, so the public table items this process checked at its startup may no longer be what it " +
       "reads, and it halts before it processes another height; ";
     expect(publicConfigChanged(A, B, "transport").message).toBe(
-      `a message of the core at coreTransport carries the configuration hash ${B}${tail}to accept ${B}, start it again ` +
+      `a message of the core at privateLink carries the configuration hash ${B}${tail}to accept ${B}, start it again ` +
         `with --update-hash=${B}: the start checks the public side again and records it (a start without it stops)`,
     );
     expect(publicConfigChanged(A, null, "public-database").message).toBe(

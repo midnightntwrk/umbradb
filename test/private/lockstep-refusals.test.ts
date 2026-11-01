@@ -30,7 +30,7 @@ import { ReportRelay } from "./relays.js";
  * - A `report` whose hash is not the public block's (a relay rewrites it) closes the instance's connection with
  *   `report-hash-mismatch`; the instance halts with that code and the core keeps waiting for it. A module declaring
  *   `needsLockstep` refuses to start with `needs-lockstep-not-listed` on an instance the core's `hello-ack` says is not
- *   lockstep, and on one with no `coreTransport`, before any migration — and runs on a listed one.
+ *   lockstep, and on one with no `privateLink`, before any migration — and runs on a listed one.
  *   [A117 FAULT, last two sentences]
  *
  * The report check's negative control is `./transport-faults.test.ts`'s (a core comparing nothing).
@@ -53,7 +53,7 @@ function waitingOf(core: PublicCore): LockstepCondition | null {
 
 /** A core on `db` with its transport on a free port, listing `listed`: launched, startup running. */
 const coreOn = (db: TestDatabase, head: bigint, listed: readonly string[]): PublicCore =>
-  launchPublicCore({ database: db.setting, head, extra: { listen: { transport: "127.0.0.1:0" }, lockstepInstances: listed } });
+  launchPublicCore({ database: db.setting, head, extra: { listen: { privateLink: "127.0.0.1:0" }, lockstepInstances: listed } });
 
 /** A private process's public side on `backend`: PostgreSQL read directly, PGlite through the core. */
 const publicSide = (backend: PrivateBackend, db: TestDatabase): Partial<PrivateOptions> =>
@@ -128,7 +128,7 @@ async function a118Run(backend: PrivateBackend): Promise<A118Observation> {
     launchPrivate({
       database: privateDb.setting,
       instanceId: LATE,
-      coreTransport: address,
+      privateLink: address,
       ...publicSide(backend, publicDb),
       extra: { backoffCeilingMs: 1_000 },
       lines,
@@ -232,7 +232,7 @@ async function mismatchRun(backend: PrivateBackend): Promise<MismatchObservation
       const instance = launchPrivate({
         database: privateDb.setting,
         instanceId: MISMATCHED,
-        coreTransport: relay.address,
+        privateLink: relay.address,
         ...publicSide(backend, publicDb),
         extra: { backoffCeilingMs: 1_000 },
         lines,
@@ -302,7 +302,7 @@ describe.each(PRIVATE_BACKENDS)("lockstep's refusals and halts on $name (PP-6, P
 
   it(
     "A117: a needsLockstep module refuses to run when hello-ack says lockstep: false (needs-lockstep-not-listed), or with no " +
-      "coreTransport, before any migration; on a listed instance it runs",
+      "privateLink, before any migration; on a listed instance it runs",
     async () => {
       const publicDb = await backend.database("public");
       const core = coreOn(publicDb, 3n, [NEEDS_LISTED]);
@@ -319,11 +319,11 @@ describe.each(PRIVATE_BACKENDS)("lockstep's refusals and halts on $name (PP-6, P
         });
         // Not listed: the core's hello-ack says lockstep false.
         const unlistedDb = await backend.database("private");
-        const unlisted = await refusalOf(options(unlistedDb, { instanceId: "needs-unlisted", coreTransport: address, ...publicSide(backend, publicDb) }));
+        const unlisted = await refusalOf(options(unlistedDb, { instanceId: "needs-unlisted", privateLink: address, ...publicSide(backend, publicDb) }));
         expect([unlisted.state, unlisted.code]).toEqual(["refused", "needs-lockstep-not-listed"]);
         expect((unlisted.error as UmbraError).details).toEqual({ modules: ["needs"], transport: true });
         expect(await hasSchema(unlistedDb, "needs")).toBe(false);
-        // No coreTransport: no core can hold it in lockstep.
+        // No privateLink: no core can hold it in lockstep.
         const loneDb = await backend.database("private");
         const lone = await refusalOf(
           options(loneDb, {
@@ -336,7 +336,7 @@ describe.each(PRIVATE_BACKENDS)("lockstep's refusals and halts on $name (PP-6, P
         expect(await hasSchema(loneDb, "needs")).toBe(false);
         // Listed: it runs, in lockstep with the core.
         const listedDb = await backend.database("private");
-        const listed = launchPrivate(options(listedDb, { instanceId: NEEDS_LISTED, coreTransport: address, ...publicSide(backend, publicDb) }));
+        const listed = launchPrivate(options(listedDb, { instanceId: NEEDS_LISTED, privateLink: address, ...publicSide(backend, publicDb) }));
         try {
           await listed.reach(3n);
         } finally {

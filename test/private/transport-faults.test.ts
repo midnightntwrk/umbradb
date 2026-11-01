@@ -466,7 +466,7 @@ describe("the core's side: lockstep (task 14.3; PP-6, PP-7)", () => {
   });
 });
 
-describe("a public process whose listen.transport is taken refuses startup (listen-failed)", () => {
+describe("a public process whose listen.privateLink is taken refuses startup (listen-failed)", () => {
   const backend = PRIVATE_BACKENDS.find((one) => one.kind === "pglite") as PrivateBackend;
   beforeAll(() => backend.start(), START_TIMEOUT_MS);
   afterAll(() => backend.stop(), START_TIMEOUT_MS);
@@ -476,7 +476,7 @@ describe("a public process whose listen.transport is taken refuses startup (list
     await new Promise<void>((resolve) => holder.listen(0, "127.0.0.1", resolve));
     const { port } = holder.address() as { port: number };
     const db = await backend.database("public");
-    const running = launchPublicCore({ database: db.setting, head: 2n, extra: { listen: { transport: `127.0.0.1:${port}` } } });
+    const running = launchPublicCore({ database: db.setting, head: 2n, extra: { listen: { privateLink: `127.0.0.1:${port}` } } });
     try {
       await expect(running.handle.started).rejects.toMatchObject({ code: "EADDRINUSE" });
       expect(running.handle.status()).toMatchObject({ state: "refused", reason: { code: "listen-failed" } });

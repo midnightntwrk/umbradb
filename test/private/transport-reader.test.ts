@@ -7,8 +7,8 @@ import { hello, rawClient } from "./raw-client.js";
 import { PUB, PUB_ENTRY, publicState, stateProblems } from "./read-confinement-checks.js";
 
 /**
- * The transport reader's login, on PostgreSQL 18.6. A core with `listen.transport` runs the transport's reads on a pool
- * of its own, logged in as `core.transportReader`. [A177 CI, CF-4, PP-4, Q175 A]
+ * The transport reader's login, on PostgreSQL 18.6. A core with `listen.privateLink` runs the transport's reads on a
+ * pool of its own, logged in as `core.transportReader`. [A177 CI, CF-4, PP-4, Q175 A]
  * - A login that holds only `SELECT` on the public schemas (`pg_read_all_data`) serves a private process's reads:
  *   `current_user` in a read is it.
  * - A login that could write refuses startup with `transport-reader-can-write`, naming the login and what it found.
@@ -36,9 +36,9 @@ const WRITERS = [
 /** The login that holds INSERT on one public table besides SELECT on all. */
 const INSERTER = "a177_insert";
 
-/** The core's settings with `listen.transport` and, unless given otherwise, the reader's login. */
+/** The core's settings with `listen.privateLink` and, unless given otherwise, the reader's login. */
 const transportWith = (reader: Readonly<Record<string, unknown>> | undefined) => ({
-  listen: { transport: "127.0.0.1:0" },
+  listen: { privateLink: "127.0.0.1:0" },
   transportReader: reader,
 });
 
@@ -83,7 +83,7 @@ async function readThrough(address: string, statements: readonly string[]) {
   }
 }
 
-describe("A177: the transport's reads on PostgreSQL run as core.transportReader (CF-4, PP-4, Q175 A)", () => {
+describe("A177: with listen.privateLink, the transport's reads on PostgreSQL run as core.transportReader (CF-4, PP-4, Q175 A)", () => {
   const backend = POSTGRES;
   beforeAll(async () => {
     await backend.start();

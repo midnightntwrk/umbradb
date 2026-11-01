@@ -29,9 +29,9 @@ import {
  * declared `deterministic: false` (the contents hash names it only, so both runs must pass the schema plan's list), and
  * whose module API answers `GET /probe/:height` with that document. With `api=1` the module API answers on the core
  * worker's channel (`listen.api`); with `private=1` the core listens for private instances on the page's network
- * (`listen.transport` `core:1`), and with `lockstep=1` it lists the private instance `p1` as lockstep. [A132, Q76]
+ * (`listen.privateLink` `core:1`), and with `lockstep=1` it lists the private instance `p1` as lockstep. [A132, Q76]
  *
- * **The private instance `p1`** (with `private=1`) reads public data through the core's transport (`coreTransport`
+ * **The private instance `p1`** (with `private=1`) reads public data through the core's transport (`privateLink`
  * `core:1`), from S, with the private module `shadow`, which stores each public block's hash as the core committed it.
  */
 
@@ -127,7 +127,7 @@ export function coreConfiguration(run: BrowserRun): ProcessConfiguration {
   const modules = (param(run, "modules") ?? DEFAULT_MODULES).split(",").filter((id) => id !== "");
   const listen = {
     ...(param(run, "api") === "1" ? { api: "core:2" } : {}),
-    ...(param(run, "private") === "1" ? { transport: "core:1" } : {}),
+    ...(param(run, "private") === "1" ? { privateLink: "core:1" } : {}),
   };
   const transport = Object.keys(listen).length === 0 ? {} : { listen };
   const lockstep = param(run, "lockstep") === "1" ? { lockstepInstances: ["p1"] } : {};
@@ -171,7 +171,7 @@ export function privateConfiguration(run: BrowserRun): ProcessConfiguration {
             ledgerTable: LEDGER_TABLE,
             database: databaseOf(run.storage, "p1"),
             instanceId: "p1",
-            coreTransport: "core:1",
+            privateLink: "core:1",
           } as never,
         }),
         { id: SHADOW.id, version: SHADOW.version, start: run.start, config: {} } as never,

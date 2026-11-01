@@ -202,7 +202,7 @@ describe.each(BACKUP_BACKENDS)("A164: a private process's backup on $name", (bac
       // A public database whose core never started: nothing to bind to. On PGlite, read directly (no core serves it).
       const empty = await backend.database();
       const setting =
-        backend.kind === "postgres" ? { publicDatabase: empty.setting } : { coreTransport: "127.0.0.1:9" };
+        backend.kind === "postgres" ? { publicDatabase: empty.setting } : { privateLink: "127.0.0.1:9" };
       const unstarted = await target({ setting });
       const notStarted = await restorePrivate(
         project,

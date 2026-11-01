@@ -11,7 +11,7 @@ import { endedWithin, rawClient } from "./raw-client.js";
 /**
  * Block intake over the real process transport, with the transport itself rather than the stand-in `./link.ts`.
  * [A114 FAULT, PP-3, PP-4, PP-5]
- * - A private process with `coreTransport` is woken only by the core's `committed` messages and by every
+ * - A private process with `privateLink` is woken only by the core's `committed` messages and by every
  *   (re)connection, with no poll. The 1 s poll is the wake-up only without a transport.
  * - On PGlite it reads its public database through the core (`read` messages); on PostgreSQL directly
  *   (`publicDatabase`).
@@ -100,7 +100,7 @@ describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name (PP-
   it("A114: dropped while the public cursor advances 50 heights, the private process processes them in order after reconnecting", async () => {
     const publicDb = await backend.database("public");
     const privateDb = await backend.database("private");
-    const core = await startPublicCore({ database: publicDb.setting, head: BigInt(FROM), extra: { listen: { transport: "127.0.0.1:0" } } });
+    const core = await startPublicCore({ database: publicDb.setting, head: BigInt(FROM), extra: { listen: { privateLink: "127.0.0.1:0" } } });
     const proxy = await TransportProxy.start(core.transport());
     const seen: PrivateSeen[] = [];
     const lines: string[] = [];
@@ -108,7 +108,7 @@ describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name (PP-
       database: privateDb.setting,
       seen,
       lines,
-      coreTransport: proxy.address,
+      privateLink: proxy.address,
       ...(backend.kind === "postgres" ? { publicDatabase: publicDb.readerSetting as DatabaseParts } : {}),
     });
     let cursorDuringDrop: bigint | null;
@@ -140,8 +140,8 @@ describe.each(PRIVATE_BACKENDS)("intake over the process transport on $name (PP-
       await proxy.close();
       await core.stop();
     }
-    // Each hello gave the private cursor: S − 1 before the first commit — a private process with coreTransport connects
-    // at startup's chain check, which waits for its hello-ack to learn whether it is lockstep —; then the
+    // Each hello gave the private cursor: S − 1 before the first commit — a private process with privateLink
+    // connects at startup's chain check, which waits for its hello-ack to learn whether it is lockstep —; then the
     // height it had reached.
     const connects = core.lines.filter((line) => line.startsWith("transport: instance instance-1 connected at "));
     expect(connects[0]).toBe("transport: instance instance-1 connected at 0");

@@ -64,7 +64,7 @@ const PUBLIC: Readonly<Record<string, readonly [string, Absent]>> = {
   ...BASE,
   node: ["secret", "required"],
   lockstepInstances: ["operational", { default: [] }],
-  // Its `password` part is secret; required with a PostgreSQL database and listen.transport. [Q175 A]
+  // Its `password` part is secret; required with a PostgreSQL database and listen.privateLink. [Q175 A]
   transportReader: ["operational", "absent"],
 };
 
@@ -73,7 +73,7 @@ const PRIVATE: Readonly<Record<string, readonly [string, Absent]>> = {
   ...BASE,
   instanceId: ["operational", "required"],
   publicDatabase: ["operational", "absent"],
-  coreTransport: ["operational", "absent"],
+  privateLink: ["operational", "absent"],
 };
 
 const REQUIRED_PUBLIC = { network: "preprod", database: { kind: "pglite", memory: true }, node: "ws://127.0.0.1:9944" };
@@ -136,7 +136,7 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
         retainStates: 4,
         database: { kind: "postgres", host: "db", port: 5432, user: "indexer", password: "p", name: "umbradb", ssl: "require" },
         node: "wss://node.example:443",
-        listen: { api: "0.0.0.0:8080", admin: "[::1]:8081", transport: "localhost:8082" },
+        listen: { api: "0.0.0.0:8080", admin: "[::1]:8081", privateLink: "localhost:8082" },
         transportReader: { user: "umbradb_transport", password: "r" },
         tipCap: 1,
         prefetchWindow: 0,
@@ -159,7 +159,7 @@ describe("CF-4: the core entry's fields, kinds and defaults", () => {
         ...REQUIRED_PRIVATE,
         database: { kind: "pglite", path: "/var/lib/umbradb/wallet" },
         publicDatabase: { kind: "postgres", host: "db", user: "reader", name: "umbradb" },
-        coreTransport: "core.internal:8082",
+        privateLink: "core.internal:8082",
       }).error,
     ).toBeUndefined();
   });
@@ -296,7 +296,7 @@ type DeepReadonly<T> = T extends readonly (infer E)[]
     : T;
 
 /** The fields one side's type declares `never`, to refuse the other side's. */
-type PrivateOnly = "instanceId" | "publicDatabase" | "coreTransport";
+type PrivateOnly = "instanceId" | "publicDatabase" | "privateLink";
 type PublicOnly = "node" | "lockstepInstances" | "transportReader";
 
 describe("CF-2, CF-4: the builders' types and the schemas say the same", () => {

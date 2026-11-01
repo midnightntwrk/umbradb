@@ -21,11 +21,11 @@
  *   opens it for reads only, each read one `REPEATABLE READ READ ONLY` transaction at the public cursor's height.
  *   [DB-2]
  * - Otherwise, through the core's transport (`read` messages, `src/private/private-transport.ts`), at the `core`
- *   entry's `coreTransport`. This covers a PGlite public database, which only the core can open, and a missing
+ *   entry's `privateLink`. This covers a PGlite public database, which only the core can open, and a missing
  *   `publicDatabase`. [DB-4, PP-4]
  * - A private process with neither is refused.
  *
- * **What wakes the private process** ({@link PublicWakes}): with `coreTransport`, only the core's `committed` messages
+ * **What wakes the private process** ({@link PublicWakes}): with `privateLink`, only the core's `committed` messages
  * and every connection or reconnection of the transport. These only wake it; it then reads the public cursor itself. A
  * private process without a transport (its public database is PostgreSQL, read directly) reads the public cursor every
  * {@link PUBLIC_POLL_MS} instead ({@link pollingWakes}). {@link openPublicSide} builds both from the `core` revision.
@@ -141,7 +141,7 @@ export function openPublicDatabase(core: CheckedEntry): PublicDatabase {
       "invalid-configuration",
       `${found}: openPublicDatabase reads a PostgreSQL public database directly, through publicDatabase (a login ` +
         "that may only read); a PGlite public database, which only the core opens, or one not given, is read " +
-        "through the core's transport, at the core entry's coreTransport",
+        "through the core's transport, at the core entry's privateLink",
       { reason: "public-database-transport" },
     );
   }
@@ -179,19 +179,19 @@ export interface PublicSideOptions {
 export interface PublicSide {
   readonly publicDatabase: PublicDatabase;
   readonly wakes: PublicWakes;
-  /** The transport to the core, made from `coreTransport`; null without it. */
+  /** The transport to the core, made from `privateLink`; null without it. */
   readonly transport: PrivateTransport | null;
 }
 
 /**
  * The public side of a private process, built from its `core` revision (see the module comment):
- * - a transport to the core when the revision has `coreTransport` (with its `tls`, `instanceId` and
+ * - a transport to the core when the revision has `privateLink` (with its `tls`, `instanceId` and
  *   `backoffCeilingMs`);
  * - its public database, read directly when `publicDatabase` is PostgreSQL's parts, otherwise through the transport;
  * - its wake-ups: the transport's, otherwise a poll.
  *
  * Throws `invalid-configuration` (`public-database-transport`) for a revision with neither a PostgreSQL
- * `publicDatabase` nor a `coreTransport`, since it then has no way to read public data. `given` replaces the public
+ * `publicDatabase` nor a `privateLink`, since it then has no way to read public data. `given` replaces the public
  * database or the wake-ups (tests use it for direct reads and links).
  */
 export function openPublicSide(
@@ -200,7 +200,7 @@ export function openPublicSide(
   given: { readonly publicDatabase?: PublicDatabase; readonly wakes?: PublicWakes } = {},
 ): PublicSide {
   const settings = core.settings as PlainObject;
-  const address = settings.coreTransport;
+  const address = settings.privateLink;
   const transport =
     typeof address === "string"
       ? new PrivateTransport({
@@ -221,9 +221,9 @@ export function openPublicSide(
     const which = settings.publicDatabase === undefined ? "no publicDatabase" : "a PGlite publicDatabase";
     throw new UmbraError(
       "invalid-configuration",
-      `the private process's core entry has ${which} and no coreTransport: a private process reads a PostgreSQL ` +
+      `the private process's core entry has ${which} and no privateLink: a private process reads a PostgreSQL ` +
         "public database directly (publicDatabase, a login that may only read), or any public database through the " +
-        "core's transport (coreTransport, the core's listen.transport), which also wakes it at every public commit; " +
+        "core's transport (privateLink, the core's listen.privateLink), which also wakes it at every public commit; " +
         "give it one of them",
       { reason: "public-database-transport" },
     );

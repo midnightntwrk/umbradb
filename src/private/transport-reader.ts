@@ -1,7 +1,7 @@
 /**
  * The login of the process transport's reads on PostgreSQL. A public process whose database is PostgreSQL and which has
- * `listen.transport` runs the transport's reads (a private process's `read`s and the checks of its `report`s) on a read
- * pool of their own. That pool logs in as `core.transportReader` (`{ user, password }`); the host, port, name and `ssl`
+ * `listen.privateLink` runs the transport's reads (a private process's `read`s and the checks of its `report`s) on a
+ * read pool of their own. That pool logs in as `core.transportReader` (`{ user, password }`); the host, port, name and `ssl`
  * are `database`'s. [CF-4, PP-4, Q175 A; design §8]
  *
  * Startup first checks, on that pool, that the login cannot write. It refuses with `transport-reader-can-write`, naming

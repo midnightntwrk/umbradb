@@ -1,5 +1,5 @@
 /**
- * A private process's side of the process transport: its connection to the core's `coreTransport` address. It:
+ * A private process's side of the process transport: its connection to the core's `privateLink` address. It:
  * - wakes the process's wait for the public cursor ({@link PrivateTransport.next}, the `PublicWakes` of
  *   `src/backbone/core-private-source/`);
  * - tells the core where the process is ({@link PrivateTransport.connection}'s `hello`, then
@@ -11,7 +11,7 @@
  * CORE-ARCH §4.14]
  *
  * **Connecting.** Startup's chain check connects ({@link PrivateTransport.connection}), after startup has read the
- * private cursor. It connects to `ws://<coreTransport>`, or to `wss://` with the `core` entry's `tls`: its certificate
+ * private cursor. It connects to `ws://<privateLink>`, or to `wss://` with the `core` entry's `tls`: its certificate
  * and key are presented to the core, and the core's certificate is checked against `trustedRoots`. On open it sends
  * `hello`: its instance id, the build's version, and its position (the private cursor, or S − 1 with no hash before its
  * first commit). [PP-11]
@@ -95,7 +95,7 @@ export interface TransportPosition {
 
 /** What {@link PrivateTransport} takes. */
 export interface PrivateTransportOptions {
-  /** `coreTransport`, `host:port`. */
+  /** `privateLink`, `host:port`. */
   readonly address: string;
   /** The `tls` setting; plain WebSocket without it. */
   readonly tls?: TransportTls | undefined;
@@ -130,7 +130,7 @@ export interface PrivateTransportOptions {
 export function publicConfigChanged(recorded: string | null, found: string | null, via: "transport" | "public-database"): UmbraError {
   const how =
     via === "transport"
-      ? `a message of the core at coreTransport carries the configuration hash ${found}`
+      ? `a message of the core at privateLink carries the configuration hash ${found}`
       : `the public configuration history, read again at a reconnection to the public database, hashes to ${found}`;
   const accept =
     found === null

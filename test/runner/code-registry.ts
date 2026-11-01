@@ -343,7 +343,7 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
       file: "test/private/lockstep-refusals.test.ts",
       test:
         "A117: a needsLockstep module refuses to run when hello-ack says lockstep: false (needs-lockstep-not-listed), or with no " +
-        "coreTransport, before any migration; on a listed instance it runs",
+        "privateLink, before any migration; on a listed instance it runs",
     },
     {
       file: "test/backbone/core-private-source.test.ts",
