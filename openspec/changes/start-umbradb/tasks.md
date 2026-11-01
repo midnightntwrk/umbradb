@@ -212,10 +212,15 @@ before the review.
       **Done (2026-11-01, `3e920e1`).**
 - [x] 8.4 This file.
       **Acceptance:** each task of §0–§8 checked with its criteria and their tests (`openspec/config.yaml`'s rule).
-- [ ] 8.5 The design amendments the build deferred (questions Q-2, Q-3, Q-6, Q-7, Q-9, Q-10, Q-12, Q-13, and design
+- [x] 8.5 The design amendments the build deferred (questions Q-2, Q-3, Q-6, Q-7, Q-9, Q-10, Q-12, Q-13, and design
       §1's file list) are written as proposed texts in the questions file, for the owner; none is applied to the
       approved change.
-      **Acceptance:** each question carries a "Proposed amendment" (file, section, old sentence, new sentence).
+      **Acceptance:** each question carries a "Proposed amendment" (file, section, old sentence, new sentence), and
+      `git diff` shows no change to `proposal.md`, `design.md`, `acceptance.md` or `specs/` of this change, or to
+      `core-arch`.
+      **Done (2026-11-01):** in the organizer's questions file (outside this repository), with four new questions and
+      their texts: Q-15 (this proposal's status line, still "Approved … No code yet."), Q-16 (design §1's eleven new
+      files), Q-17 (`core-arch` design §12's sentence on `--update-hash`), Q-18 (`/config`'s `core` and `entries[]`).
 - [ ] 8.6 The section's full run.
       **Acceptance:** `npx vitest run` fails only §0's known tests, the load-only flakes of issues 00062 and 00064 (each
       passing alone) and issue 00065's V8 fault; `test/browser/` passes in headless Chrome; `npm run graph:check` exits
