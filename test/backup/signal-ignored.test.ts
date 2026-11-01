@@ -14,10 +14,10 @@ import { listenerProblems, pacedNode, sigusr2Ignored, writeRunConfig } from "./s
  * the signal and `backupOnSignal`, writes no file, keeps committing heights and exits 0 on SIGTERM
  * (`./signal-ignored-fixtures.ts`'s `sigusr2Ignored`). [A175 CI, BK-1, Q173 C]
  *
- * A process a host program starts with `startProcess` without `backupOnSignal` adds no SIGUSR2 listener while it
- * starts, runs or closes (`listenerProblems`), so Node.js's default or the host's own handler applies; with
- * `backupOnSignal` it adds one while it runs, which shows the count sees the process's listener. The negative controls
- * are `./signal-ignored.negative-control.test.ts`.
+ * A process the engine starts without `backupOnSignal` adds no SIGUSR2 listener while it starts, runs or closes
+ * (`listenerProblems`), so Node.js's default or the host's own handler applies; with `backupOnSignal` and the
+ * command's port for signals (`backupSignals: process`) it adds one while it runs, which shows the count sees the
+ * process's listener. The negative controls are `./signal-ignored.negative-control.test.ts`.
  */
 
 /** Each test waits on purpose for processes: its own budget, for a loaded machine. */
@@ -67,19 +67,20 @@ describe("A175: SIGUSR2 without backupOnSignal (BK-1, Q173 C)", () => {
     "A175: a process started with startProcess without backupOnSignal adds no SIGUSR2 listener; with it, one while " +
       "it runs",
     async () => {
-      const pausable = (extra: Readonly<Record<string, unknown>>) => {
+      const pausable = (extra: Readonly<Record<string, unknown>>, signals?: typeof process) => {
         let run: Pausable | undefined;
         return {
           async start() {
             const db = await PGLITE.database();
-            run = await startPausable(writePausableConfig(project, { database: db.setting, extra }), { head: 6n });
+            const config = writePausableConfig(project, { database: db.setting, extra });
+            run = await startPausable(config, { head: 6n, ...(signals === undefined ? {} : { backupSignals: signals }) });
           },
           running: async () => (run as Pausable).reach(3n),
           stop: async () => (run as Pausable).handle.stop(),
         };
       };
       expect(await listenerProblems(pausable({}))).toEqual([]);
-      expect(await listenerProblems(pausable({ backupOnSignal: join(dir, "listened.backup") }), 1)).toEqual([]);
+      expect(await listenerProblems(pausable({ backupOnSignal: join(dir, "listened.backup") }, process), 1)).toEqual([]);
     },
     TEST_TIMEOUT_MS,
   );

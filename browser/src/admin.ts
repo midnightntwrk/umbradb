@@ -4,8 +4,9 @@
  * `/status`, `/config`), from the snapshot the process publishes and the age of its heartbeat's last tick.
  * [BR-3, AE-1 to AE-6; design §9.2]
  *
- * The process gets {@link messageAdmin} as its admin starter (`ProcessInput.admin`), so the runner's own side of them
- * (`ProcessAdmin`: the heartbeat, the snapshots, the redaction) runs unchanged; the "listener" is the channel. Before
+ * The process gets {@link messageAdmin} as its admin listener (the engine's `adminListener` port), so the runner's own
+ * side of them (`ProcessAdmin`: the heartbeat, the snapshots, the redaction) runs unchanged; the "listener" is the
+ * channel. Before
  * the process's `core` revision is known, and after a refusal of the configuration itself ended the process, nothing
  * answers, just as no listener exists in Node.js then. [Q137 B]
  */

@@ -37,7 +37,7 @@ const handle = startProcess({
   source: adminSource(2n),
   signal: termination.signal,
   log: () => undefined,
-  admin: async (options) => {
+  adminListener: async (options) => {
     const server = await startAdminServer(options);
     process.stdout.write(`${JSON.stringify({ port: server.port })}\n`);
     return server;

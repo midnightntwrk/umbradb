@@ -36,8 +36,8 @@ describe("PP-14's stop messages (task 17.5b)", () => {
     expect(stop.refusal?.message).toBe(
       `the public core's configuration hash is ${B}, and this private process last ran on ${A}, the one it accepted` +
         ": the public configuration changed since, so the public table items its modules read may no longer " +
-        `be what it checked. To accept ${B}, start it with --update-hash=${B} (startProcess's updateHash): the start ` +
-        "then runs its full checks of the public side and records the new hash",
+        `be what it checked. To accept ${B}, start it with --update-hash=${B} (startUmbraDB's acceptPublicConfigHash): ` +
+        "the start then runs its full checks of the public side and records the new hash",
     );
     const wrong = startHashDecision({ recorded: A, history: B, core: null, given: C });
     expect(wrong.refusal?.message).toContain(

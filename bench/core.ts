@@ -57,7 +57,6 @@ async function commitSamples(database: object, options: CommitOptions): Promise<
       },
     },
     source,
-    admin: false,
     log: (line) => lines.push(line),
   });
   try {

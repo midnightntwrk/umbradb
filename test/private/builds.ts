@@ -9,7 +9,7 @@ import {
 } from "../../src/backbone/core-private-source/index.js";
 import { privateBackbone } from "../../src/backbone/private.js";
 import { coreEntry } from "../../src/config/entries.js";
-import type { AdminStarter } from "../../src/admin/server.js";
+import { type AdminStarter, startAdminServer } from "../../src/admin/server.js";
 import type { ReadHandle, ReadOnlyDatabase } from "../../src/db/api.js";
 import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import type { DeclarationSet } from "../../src/modules/validation.js";
@@ -21,6 +21,15 @@ import { startProcess } from "../runner/process-build.js";
 import { chainDeclarations } from "../backbone/chain-build.js";
 import { REACH_TIMEOUT_MS, TRANSPORT_LOGIN } from "./backends.js";
 import type { DatabaseParts } from "../../src/config/database-parts.js";
+
+/**
+ * The engine's admin port for a build's `admin` option: `true` the admin worker (`startAdminServer`), a starter itself,
+ * none for `false` or absent.
+ */
+function adminPortOf(admin: boolean | AdminStarter | undefined): { readonly adminListener?: AdminStarter } {
+  if (admin === undefined || admin === false) return {};
+  return { adminListener: admin === true ? startAdminServer : admin };
+}
 
 /**
  * Builds and processes for the private processes' tests: a public core — the core process on the public database —
@@ -219,7 +228,7 @@ export function launchPublicCore(options: PublicCoreOptions): PublicCore {
     source,
     log: (line) => lines.push(line),
     ...(options.loop === undefined ? {} : { loop: options.loop }),
-    ...(options.admin === undefined ? {} : { admin: options.admin }),
+    ...adminPortOf(options.admin),
     ...(options.configHash === undefined ? {} : { configHash: options.configHash }),
     ...(options.transportReads === undefined ? {} : { transportReads: options.transportReads }),
     ...(options.transportReaderCheck === undefined ? {} : { transportReaderCheck: options.transportReaderCheck }),
@@ -456,8 +465,8 @@ export function launchPrivate(options: PrivateOptions): PrivateProcess {
       source: (core, shared) => intake.source(core, shared),
       log: options.lines === undefined ? quiet : (line) => options.lines?.push(line),
       ...(options.loop === undefined ? {} : { loop: options.loop }),
-      ...(options.admin === undefined ? {} : { admin: options.admin }),
-      ...(options.updateHash === undefined ? {} : { updateHash: options.updateHash }),
+      ...adminPortOf(options.admin),
+      ...(options.updateHash === undefined ? {} : { acceptPublicConfigHash: options.updateHash }),
     });
   const handle = options.within === undefined ? start() : options.within(start);
   return {

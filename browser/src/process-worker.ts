@@ -53,7 +53,6 @@ import type { PlainObject } from "../../src/config/plain-data.js";
 import { resolve } from "../../src/runner/resolve.js";
 import type { CommittedHeight, Database } from "../../src/db/api.js";
 import { contentsHash } from "../../src/determinism/contents-hash.js";
-import { startLedgerWorker } from "../../src/ledger/worker/host.js";
 import { NodeClient } from "../../src/node/client.js";
 import { type ProcessHandle, startProcess } from "../../src/runner/process.js";
 import { adminAnswer, messageAdmin } from "./admin.js";
@@ -203,8 +202,8 @@ async function startWorkerProcess(message: Extract<ToProcessWorker, { type: "sta
     cwd: "/",
     userModules: { modules },
     log: (line) => post({ type: "log", line }),
-    admin: messageAdmin,
-    ledgerWorker: () => startLedgerWorker({ entry: ledgerEntry }),
+    adminListener: messageAdmin,
+    ledgerWorkerEntry: ledgerEntry,
   });
   handle.started.then(
     (started) => post({ type: "started", api: started.api }),

@@ -314,8 +314,8 @@ export interface StartHashes {
   /** The `configHash` of the core's `hello-ack` this start waited for; null without `privateLink`. */
   readonly core: string | null;
   /**
-   * The hash the operator accepts for this start (`umbradb run --update-hash`, `startProcess`'s `updateHash`), or
-   * null.
+   * The hash the operator accepts for this start (`umbradb run --update-hash`, `startUmbraDB`'s
+   * `acceptPublicConfigHash`), or null.
    */
   readonly given: string | null;
 }
@@ -350,8 +350,8 @@ function startStop(hashes: StartHashes, found: string, moved: boolean): UmbraErr
     : `the public core's configuration hash is ${found}, and this private process last ran on ` +
       `${hashes.recorded}, the one it accepted: the public configuration changed since, so the public ` +
       `table items its modules read may no longer be what it checked.${given} To accept ${found}, start it with ` +
-      `${accept} (startProcess's updateHash): the start then runs its full checks of the public side and records ` +
-      "the new hash";
+      `${accept} (startUmbraDB's acceptPublicConfigHash): the start then runs its full checks of the public side and ` +
+      "records the new hash";
   return new UmbraError("public-config-changed", message, {
     via: "startup",
     recorded: hashes.recorded,
@@ -416,7 +416,10 @@ export interface PrivateChecks {
 
 /** What a {@link PrivateBlockSource} takes from its process besides its public side and checks. */
 export interface PrivateSourceOptions {
-  /** The public configuration hash the operator accepts for this start (`startProcess`'s `updateHash`). [PP-14] */
+  /**
+   * The public configuration hash the operator accepts for this start (`umbradb run --update-hash`, `startUmbraDB`'s
+   * `acceptPublicConfigHash`). [PP-14]
+   */
   readonly updateHash?: string | null;
   /** Where it logs the hash it records; nowhere unless given. */
   readonly log?: (line: string) => void;
@@ -773,7 +776,7 @@ export interface PrivateIntakeOptions {
 export interface PrivateShared {
   readonly start: bigint;
   readonly log: (line: string) => void;
-  /** `startProcess`'s `updateHash` (`umbradb run --update-hash`); none unless given. [PP-14, Q159] */
+  /** The engine's `acceptPublicConfigHash` (`umbradb run --update-hash`); none unless given. [PP-14, Q159] */
   readonly updateHash?: string;
 }
 

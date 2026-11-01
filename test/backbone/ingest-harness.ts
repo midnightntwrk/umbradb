@@ -160,7 +160,7 @@ export interface IngestOptions {
   readonly stopOf?: (id: string) => number | undefined;
   /** The process's ledger worker (a test package's, a negative control's); `startLedgerWorker` unless given. */
   readonly ledgerWorker?: () => LedgerHost;
-  /** The admin endpoints, as `startProcess` takes them; none unless given. */
+  /** The admin listener, as the engine's `adminListener` port takes it; none unless given. */
   readonly admin?: AdminStarter;
 }
 
@@ -219,8 +219,7 @@ export async function ingest(db: ProcessDatabase, records: readonly TapeRecord[]
     },
     log: (line) => lines.push(line),
     ...(options.ledgerWorker === undefined ? {} : { ledgerWorker: options.ledgerWorker }),
-    // Explicitly, so that no test of this harness serves the endpoints on their default address. [Q128 B]
-    admin: options.admin ?? false,
+    ...(options.admin === undefined ? {} : { adminListener: options.admin }),
     ...(options.nodeClient === undefined ? {} : { nodeClient: options.nodeClient }),
   });
   return {

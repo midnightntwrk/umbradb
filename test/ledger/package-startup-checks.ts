@@ -197,7 +197,6 @@ function packageProcess(start: StartPackageProcess, startup: PackageStartup): { 
     config: { data: { entries: [core(startup.db.setting, S, extra), ...modules.map((module) => entryOf(module, S))] } },
     source,
     log: () => undefined,
-    admin: false,
     ledgerWorker: startup.ledgerWorker,
   };
   return { handle: start(startup, input), source };

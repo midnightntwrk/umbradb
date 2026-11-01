@@ -41,6 +41,7 @@ import { readIdentity } from "../backbone/core-chain/sql.js";
 import type { HistoryCheck, HistoryRow } from "../config/history.js";
 import { type ConfigFacts, configOf, type OpenedConfig, UNVALIDATED_CONFIG } from "./configuration.js";
 import { earlyRedactor } from "./redaction.js";
+import type { WorkerOutput } from "../runner/worker-output.js";
 import { type AdminServer, type AdminStarter, startAdminServer } from "./server.js";
 import {
   DEFAULT_LIVENESS_TIMEOUT_MS,
@@ -62,6 +63,11 @@ export interface ProcessAdminOptions {
   readonly log: (line: string) => void;
   /** How the listener starts: {@link startAdminServer} (its worker thread) unless given (the negative controls'). */
   readonly start?: AdminStarter;
+  /**
+   * Where the listener's thread writes its standard output and standard error, given to the starter: the process's log,
+   * or `"inherit"` for `umbradb run`. [LM-2, L4, L55]
+   */
+  readonly output?: WorkerOutput;
   /**
    * The process's side, the instance role `/status` shows until {@link ProcessAdmin.serve} takes it from the validated
    * configuration: public (the core) unless given. [CF-4, AE-5]
@@ -164,6 +170,7 @@ export class ProcessAdmin {
   readonly #status: () => ProcessStatus;
   readonly #log: (line: string) => void;
   readonly #start: AdminStarter;
+  readonly #output: WorkerOutput | undefined;
   readonly #heartbeat: Heartbeat;
   #side: ProcessSide;
   readonly #privateSide: (() => PrivateSideFacts) | undefined;
@@ -200,6 +207,7 @@ export class ProcessAdmin {
     this.#status = options.status;
     this.#log = options.log;
     this.#start = options.start ?? startAdminServer;
+    this.#output = options.output;
     this.#side = options.side ?? "public";
     this.#privateSide = options.privateSide;
     this.#node = options.node;
@@ -320,6 +328,7 @@ export class ProcessAdmin {
       beat: this.#heartbeat.buffer,
       snapshot: first,
       onFailure: (error) => this.#log(`admin endpoints failed: ${error.message}`),
+      ...(this.#output === undefined ? {} : { output: this.#output }),
     }).then((server) => {
       this.#server = server;
       this.#published = JSON.stringify(first);

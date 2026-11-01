@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { type AdminStarter, startAdminServer } from "../../src/admin/server.js";
 import { adminCore, adminSource, ask, statusWhen } from "./admin-harness.js";
 import { freePort } from "../runner/process-harness.js";
 import { startProcess, testBuild } from "../runner/process-build.js";
@@ -105,7 +106,7 @@ describe("the tests' processes opt out of the admin endpoints unless they ask (t
   });
 
   it("the shared startProcess serves no admin endpoints unless the test asks, then on its own listen.admin", async () => {
-    const run = async (admin: { readonly admin?: boolean | undefined }) => {
+    const run = async (admin: { readonly adminListener?: AdminStarter | undefined }) => {
       const port = await freePort();
       const handle = startProcess({
         declarations: testBuild([]).declarations,
@@ -117,16 +118,15 @@ describe("the tests' processes opt out of the admin endpoints unless they ask (t
       try {
         await handle.started;
         const origin = `http://127.0.0.1:${port}`;
-        if (admin.admin === true) await statusWhen(origin, (body) => body.state === "following");
+        if (admin.adminListener !== undefined) await statusWhen(origin, (body) => body.state === "following");
         return (await ask(origin, "/health/live")).status ?? "nothing listens";
       } finally {
         await handle.stop();
       }
     };
     expect(await run({})).toBe("nothing listens");
-    expect(await run({ admin: undefined })).toBe("nothing listens");
-    expect(await run({ admin: false })).toBe("nothing listens");
-    expect(await run({ admin: true })).toBe(200);
+    expect(await run({ adminListener: undefined })).toBe("nothing listens");
+    expect(await run({ adminListener: startAdminServer })).toBe(200);
   }, 60_000);
 
   it("allows the runner's startProcess in the shared helper and under test/admin/ only", () => {

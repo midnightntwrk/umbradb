@@ -160,7 +160,7 @@ async function start(
     source,
     log: (line) => lines.push(line),
     ...(signals === undefined ? {} : { backupSignals: signals }),
-    admin: async (options) => {
+    adminListener: async (options) => {
       try {
         const started = await wrap(startAdminServer)(options);
         if (started.port < 10_000) throw new Error(`the admin listener listens on port ${started.port}, below 10000`);

@@ -284,7 +284,7 @@ async function endedProblems(start: Start, backend: ProcessBackend, refusal: Ref
     config: refusal.config(db.setting, address),
     source: adminSource(3n),
     log: (line) => lines.push(line),
-    admin: real ? true : recording.start,
+    adminListener: real ? startAdminServer : recording.start,
   });
   try {
     const error = await handle.started.then(
@@ -328,14 +328,20 @@ const migrating = (sql: string): ModuleDeclaration =>
   loggingModule("m", [], ["on-db-write"], { migrations: [{ id: "001", sql }] });
 
 /** A process of the tests' build on `database` with `user`'s entries from 1 and its admin listener at `address`. */
-function started(start: Start, database: DatabaseParts, address: string, user: readonly ModuleDeclaration[], admin: EngineInput["admin"]) {
+function started(
+  start: Start,
+  database: DatabaseParts,
+  address: string,
+  user: readonly ModuleDeclaration[],
+  admin: EngineInput["adminListener"],
+) {
   return start({
     cwd: process.cwd(),
     declarations: declarationsOf(user),
     config: { data: { entries: [adminCore(database, 1, { extra: { listen: { admin: address } } }), ...user.map((part) => entryOf(part, 1))] } },
     source: adminSource(3n),
     log: () => undefined,
-    admin,
+    ...(admin === undefined ? {} : { adminListener: admin }),
   });
 }
 
@@ -349,13 +355,13 @@ function started(start: Start, database: DatabaseParts, address: string, user: r
 async function stayUpProblems(start: Start, backend: ProcessBackend): Promise<string[]> {
   const problems: string[] = [];
   const db = await backend.database();
-  const first = started(startProcess, db.setting, "127.0.0.1:0", [migrating("CREATE TABLE m.rows (height bigint PRIMARY KEY)")], false);
+  const first = started(startProcess, db.setting, "127.0.0.1:0", [migrating("CREATE TABLE m.rows (height bigint PRIMARY KEY)")], undefined);
   await first.started;
   for (let waited = 0; first.status().cursor !== 3n && waited < 60_000; waited += 25) await sleep(25);
   await first.stop();
   const port = await freePort();
   const origin = `http://127.0.0.1:${port}`;
-  const second = started(start, db.setting, `127.0.0.1:${port}`, [migrating("CREATE TABLE m.rows (height bigint PRIMARY KEY, x int)")], true);
+  const second = started(start, db.setting, `127.0.0.1:${port}`, [migrating("CREATE TABLE m.rows (height bigint PRIMARY KEY, x int)")], startAdminServer);
   try {
     const error = await second.started.then(
       () => null,
@@ -412,12 +418,12 @@ const earlyListener =
     const handle = start(input);
     let server: Promise<AdminServer | null> = Promise.resolve(null);
     void handle.ended.then((end) => {
-      if (end.kind !== "refused" || typeof input.admin !== "function") return;
+      if (end.kind !== "refused" || input.adminListener === undefined) return;
       const data = (input.config as { readonly data?: { readonly entries?: readonly { readonly config?: { readonly listen?: { readonly admin?: string } } }[] } })
         .data;
       const address = data?.entries?.[0]?.config?.listen?.admin ?? DEFAULT_ADMIN_ADDRESS;
       const snapshot = adminSnapshot({ status: statusSnapshot({ state: "refused", ready: false }) });
-      server = input.admin({ address, beat: new SharedArrayBuffer(8), snapshot }).catch(() => null);
+      server = input.adminListener({ address, beat: new SharedArrayBuffer(8), snapshot }).catch(() => null);
     });
     return stoppedWith(handle, async () => {
       await (await server)?.close();
@@ -558,7 +564,7 @@ describe("A157: umbradb run on a refused configuration logs every finding and ex
     let handle: ProcessHandle | undefined;
     const run = runProcessCommand({
       signals,
-      start: (input) => start({ ...input, admin: recording.start }),
+      start: (input) => start({ ...input, adminListener: recording.start }),
       started: (given) => {
         handle = given;
       },

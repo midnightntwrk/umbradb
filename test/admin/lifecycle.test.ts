@@ -71,7 +71,7 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints' life with the process on $
       config: { data: { entries: [adminCore(db.setting, 1, { extra: { listen: { admin: `127.0.0.1:${port}` } } })] } },
       source: adminSource(3n),
       log: (line) => lines.push(line),
-      admin: true,
+      adminListener: startAdminServer,
     });
     const origin = `http://127.0.0.1:${port}`;
     await handle.started;
@@ -184,7 +184,7 @@ describe("the process publishes at once when startup ends, processing ends and t
       config: { data: { entries: [adminCore({ kind: "pglite", memory: true }, 1, { extra: { listen: { admin: "127.0.0.1:0" } } }), entryOf(failing, 1)] } },
       source: adminSource(3n),
       log: () => undefined,
-      admin: async (options) => {
+      adminListener: async (options) => {
         const server = await startAdminServer(options);
         return {
           host: server.host,
@@ -227,7 +227,7 @@ describe("the process publishes at once when startup ends, processing ends and t
         config: { data: { entries: [adminCore({ kind: "pglite", path: database }, 1, { extra: { listen: { admin: "127.0.0.1:0" } } })] } },
         source: adminSource(1n),
           log: () => undefined,
-        admin: async (options) => {
+        adminListener: async (options) => {
           asked();
           await new Promise<void>((resolve) => {
             release = resolve;
@@ -260,7 +260,7 @@ describe("a stop before the configuration was read", () => {
       source: adminSource(1n),
       signal: controller.signal,
       log: () => undefined,
-      admin: async (options) => {
+      adminListener: async (options) => {
         asked += 1;
         return startAdminServer(options);
       },

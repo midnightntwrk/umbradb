@@ -183,6 +183,8 @@ export async function startTicker(
     declarations: commandBuild(loaded.modules),
     config: { data: loaded.data, file: loaded.file },
     source: chain ?? source,
+    // The backup at the configured stop is `umbradb run`'s port, as this process stands for the command's. [BK-1]
+    backupAtStop: true,
     ...(options.backupSignals === undefined ? {} : { backupSignals: options.backupSignals }),
     log: (line) => lines.push(line),
   });

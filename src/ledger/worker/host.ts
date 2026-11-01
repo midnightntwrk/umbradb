@@ -44,6 +44,7 @@
 
 import { existsSync } from "node:fs";
 import { Worker } from "node:worker_threads";
+import { drainWorkerOutput, type WorkerOutput, workerStreams } from "../../runner/worker-output.js";
 import type { LedgerName, ParsedTransaction } from "../types.js";
 import {
   type AppliedState,
@@ -152,6 +153,12 @@ export interface LedgerWorkerOptions {
    * thread for their ledger tasks. For the `umbradb` command it is the configuration file. [LG-17, MD-1, CF-1, Q106]
    */
   readonly modules?: URL | string;
+  /**
+   * Where the thread's standard output and standard error go (`../../runner/worker-output.ts`): inherited from the
+   * process unless given, as Node.js does; the engine gives its log, or `"inherit"` for `umbradb run`. A restarted
+   * thread's go to the same place. [LM-2, L4, L55]
+   */
+  readonly output?: WorkerOutput;
 }
 
 /** The failure that ended a ledger worker (see the module comment). */
@@ -296,7 +303,12 @@ export function startLedgerWorker(options: LedgerWorkerOptions = {}): LedgerHost
   /** A new worker thread, its messages and its end handled while it is the host's (see {@link LedgerHost.restart}). */
   const spawn = (): Thread => {
     const memory = bridgeMemory(options.bridgeBytes);
-    const worker = new Worker(entry, { workerData: { memory, loader, loaderData: options.loaderData, modules } });
+    const output = options.output ?? "inherit";
+    const worker = new Worker(entry, {
+      workerData: { memory, loader, loaderData: options.loaderData, modules },
+      ...workerStreams(output),
+    });
+    drainWorkerOutput(worker, "ledger worker", output);
     const started: Thread = {
       worker,
       bridge: new BridgeServer(memory),

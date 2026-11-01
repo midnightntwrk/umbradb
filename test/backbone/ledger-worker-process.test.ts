@@ -82,7 +82,6 @@ describe("the process's ledger worker (LG-10)", () => {
       config: { data: { entries: [core(db.setting, 5), ...coreModules.map((m) => entryOf(m, 5))] } },
       source,
       log: () => undefined,
-      admin: false,
       ledgerWorker: workers.factory,
     });
     try {
@@ -113,7 +112,6 @@ describe("the process's ledger worker (LG-10)", () => {
       config: { data: { entries: [core(db.setting, 1)] } },
       source,
       log: () => undefined,
-      admin: false,
       ledgerWorker: workers.factory,
     });
     try {

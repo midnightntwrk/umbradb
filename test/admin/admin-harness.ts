@@ -296,7 +296,7 @@ export function startWithAdmin(options: AdminRunOptions): AdminRun {
     config: { data: { entries } },
     source,
     log: (line) => lines.push(line),
-    admin: async (start) => {
+    adminListener: async (start) => {
       asked(start.address);
       try {
         const started = await starter(start);

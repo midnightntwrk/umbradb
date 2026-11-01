@@ -2,8 +2,9 @@ import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { startAdminServer } from "../../src/admin/server.js";
 import { EXIT, runProcessCommand, USAGE } from "../../src/cli/command.js";
-import { startProcess as startWithoutAdmin } from "../runner/process-build.js";
+import { startWithoutAdmin } from "../runner/process-build.js";
 import type { ProcessHandle, EngineInput } from "../../src/runner/process.js";
 import { ask, statusWhen } from "../admin/admin-harness.js";
 import { PROCESS_BACKENDS, type ProcessBackend, type ProcessDatabase } from "../runner/process-backends.js";
@@ -351,7 +352,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
     expect(result.stderr).not.toContain("pw-4-4a-RUN");
   });
 
-  it("--update-hash=<hash> (or --update-hash <hash>) reaches startProcess as its updateHash, exactly as given (PP-14, Q159)", async () => {
+  it("--update-hash=<hash> (or --update-hash <hash>) reaches the engine as its acceptPublicConfigHash, exactly as given (PP-14, Q159)", async () => {
     const hash = `0x${"5a".repeat(32)}`;
     for (const args of [[`--update-hash=${hash}`], ["--update-hash", hash], ["--config", "absent.config.ts", `--update-hash=${hash}`]]) {
       const inputs: EngineInput[] = [];
@@ -364,7 +365,7 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
         }),
       });
       expect(result.code).toBe(EXIT.ok);
-      expect(inputs.map((input) => input.updateHash)).toEqual([hash]);
+      expect(inputs.map((input) => input.acceptPublicConfigHash)).toEqual([hash]);
     }
     const inputs: EngineInput[] = [];
     await inProcess(["run"], project.dir, {
@@ -375,7 +376,26 @@ describe("umbradb run: a refusal, SIGINT, its arguments (PGlite 0.5.10)", () => 
         },
       }),
     });
-    expect(inputs.map((input) => "updateHash" in input)).toEqual([false]);
+    expect(inputs.map((input) => "acceptPublicConfigHash" in input)).toEqual([false]);
+  });
+
+  it("L55: umbradb run gives the engine the command's ports: admin, the log, the threads' streams, the backups' signals and stop", async () => {
+    const inputs: EngineInput[] = [];
+    const result = await inProcess(["run", "--config", "absent.config.ts"], project.dir, {
+      run: runProcessCommand({
+        start: (input) => {
+          inputs.push(input);
+          return { started: Promise.resolve(), closed: Promise.resolve(), status: () => ({ ended: null }) } as unknown as ProcessHandle;
+        },
+      }),
+    });
+    expect(result.code).toBe(EXIT.ok);
+    const [input] = inputs;
+    expect(input).toMatchObject({ adminListener: startAdminServer, workerOutput: "inherit", backupAtStop: true });
+    expect(typeof input?.log).toBe("function");
+    expect(typeof input?.backupSignals?.on).toBe("function");
+    // The engine's own ledger worker entry: the command's thread is Node.js's. [LG-10]
+    expect(input?.ledgerWorkerEntry).toBeUndefined();
   });
 
   it("negative control (committed): a run that ignores the file's modules is refused and never runs stats", async () => {

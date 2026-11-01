@@ -25,7 +25,7 @@ import {
   inProcess,
 } from "../cli/cli-fixtures.js";
 import { chainNode, exitWithin, runCoreSettings, runInChild } from "../cli/run-fixtures.js";
-import { core, startProcess, testBuild } from "../runner/process-build.js";
+import { core, startProcess, startWithoutAdmin, testBuild } from "../runner/process-build.js";
 import { committedIn, processOn, processProblems, rowsIn, S } from "./pglite-directory-fixtures.js";
 
 /**
@@ -116,7 +116,7 @@ describe("A166: what writes a PGlite database creates its directory with any mis
       let handle: ProcessHandle | undefined;
       const run = runProcessCommand({
         signals,
-        start: startProcess,
+        start: startWithoutAdmin,
         started: (started) => {
           handle = started;
         },

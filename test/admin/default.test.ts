@@ -27,19 +27,27 @@ import {
 import type { DatabaseParts } from "../../src/config/database-parts.js";
 
 /**
- * The admin endpoints by default:
- * - `startProcess` serves them on `listen.admin` unless its caller passes `admin: false`. A process started without
- *   `admin`, as `umbradb run` will start one, answers on its admin listener in every state it reaches: its four
- *   endpoints, and 404 elsewhere. [Q128 B, AE-1, A62, A64]
+ * The admin endpoints by default, in the process `umbradb run` starts:
+ * - the command gives the engine its admin port (`adminListener: startAdminServer`, `src/cli/run.ts`), so the process
+ *   serves them on `listen.admin` with nothing configured for them: it answers on its admin listener in every state it
+ *   reaches, its four endpoints, and 404 elsewhere. The engine without that port, as a library host starts it, serves
+ *   none (the negative control). [Q128 B, AE-1, A62, A64, L55]
  * - An admin address another listener holds refuses startup with `listen-failed` before the database opens: no
  *   session on PostgreSQL 18.6, no data directory on PGlite 0.5.10. [Q128 B]
  */
 
-/** How a test starts a process: the runner's `startProcess`, or a negative control's. */
+/** How a test starts a process: as `umbradb run` does, or a negative control's. */
 type Start = (input: EngineInput) => ProcessHandle;
 
-/** A negative control: the earlier opt-in default, where a process started without `admin` serves none. [Q128 A] */
-const optIn: Start = (input) => startProcess(input.admin === undefined ? { ...input, admin: false } : input);
+/**
+ * The process `umbradb run` starts, as far as the admin endpoints go: the engine given the command's admin port
+ * (`startAdminServer`), unless the test gives its own starter. [Q128 B, L55]
+ */
+const commandProcess: Start = (input) =>
+  startProcess(input.adminListener === undefined ? { ...input, adminListener: startAdminServer } : input);
+
+/** A negative control: the engine without the admin port, as a library host starts it, which serves none. [Q128 A] */
+const optIn: Start = (input) => startProcess(input);
 
 /** The entries of a process of the tests on `database` with `listen.admin` at `address`, with `user`'s from 1. */
 const entriesOf = (database: DatabaseParts, address: string, user: readonly ModuleDeclaration[] = []) => [
@@ -62,7 +70,7 @@ function started(
     config: { data: { entries: entriesOf(database, address, rest.user) } },
     source: adminSource(3n),
     log: (line) => lines.push(line),
-    ...(rest.admin === undefined ? {} : { admin: rest.admin }),
+    ...(rest.admin === undefined ? {} : { adminListener: rest.admin }),
   });
   return { handle, lines };
 }
@@ -118,7 +126,7 @@ async function takenProblems(backend: ProcessBackend, start: Start, admin?: (dat
   const problems: string[] = [];
   const address = `127.0.0.1:${await freePort()}`;
   const firstDb = await backend.database();
-  const first = started(startProcess, firstDb.setting, address);
+  const first = started(commandProcess, firstDb.setting, address);
   const secondDb = await backend.database();
   try {
     await first.handle.started;
@@ -183,10 +191,10 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints by default on $name (task 8
   afterAll(() => backend.stop(), 60_000);
 
   it("a process started without admin answers on its admin listener", async () => {
-    expect(await defaultProblems(startProcess, (await backend.database()).setting)).toEqual([]);
+    expect(await defaultProblems(commandProcess, (await backend.database()).setting)).toEqual([]);
   }, 120_000);
 
-  it("negative control: task 8.1's opt-in default fails 'a process started without admin answers'", async () => {
+  it("negative control: the engine without the command's admin port fails 'a process started without admin answers'", async () => {
     expect(await defaultProblems(optIn, (await backend.database()).setting)).toEqual([
       "live answered ECONNREFUSED, not 200",
       "ready answered ECONNREFUSED, not 200",
@@ -198,7 +206,7 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints by default on $name (task 8
   it("A62 and A64 with the default: the four endpoints and 404 elsewhere, following, a refused start live and not ready", async () => {
     const port = await freePort();
     const origin = `http://127.0.0.1:${port}`;
-    const run = started(startProcess, (await backend.database()).setting, `127.0.0.1:${port}`);
+    const run = started(commandProcess, (await backend.database()).setting, `127.0.0.1:${port}`);
     try {
       await run.handle.started;
       await statusWhen(origin, (body) => body.state === "following" && body.cursor === "3");
@@ -224,7 +232,7 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints by default on $name (task 8
     });
     const refusedPort = await freePort();
     const refusedOrigin = `http://127.0.0.1:${refusedPort}`;
-    const refused = started(startProcess, (await backend.database()).setting, `127.0.0.1:${refusedPort}`, {
+    const refused = started(commandProcess, (await backend.database()).setting, `127.0.0.1:${refusedPort}`, {
       user: [failing],
     });
     try {
@@ -240,11 +248,11 @@ describe.each(PROCESS_BACKENDS)("the admin endpoints by default on $name (task 8
   }, 180_000);
 
   it("a second process given the same admin address refuses with listen-failed and opens no database session", async () => {
-    expect(await takenProblems(backend, startProcess)).toEqual([]);
+    expect(await takenProblems(backend, commandProcess)).toEqual([]);
   }, 120_000);
 
   it("negative control: a process that opens its database before listening fails 'opens no database session'", async () => {
     const opened = backend.kind === "postgres" ? "second: 1 session(s) on its database" : "second: its database directory exists";
-    expect(await takenProblems(backend, startProcess, databaseFirst)).toEqual([opened]);
+    expect(await takenProblems(backend, commandProcess, databaseFirst)).toEqual([opened]);
   }, 120_000);
 });

@@ -14,6 +14,7 @@
 import { existsSync } from "node:fs";
 import { Worker } from "node:worker_threads";
 import { parseAddress } from "../runner/api-server.js";
+import { drainWorkerOutput, type WorkerOutput, workerStreams } from "../runner/worker-output.js";
 import type { FromAdmin, ToAdmin } from "./serve.js";
 import type { AdminSnapshot } from "./types.js";
 
@@ -30,6 +31,11 @@ export interface AdminStartOptions {
   readonly snapshot: AdminSnapshot;
   /** Told when the listener's thread fails after it listened (it then answers no more). */
   readonly onFailure?: (error: Error) => void;
+  /**
+   * Where the thread's standard output and standard error go (`../runner/worker-output.ts`): inherited from the process
+   * unless given; the engine gives its log, or `"inherit"` for `umbradb run`. [LM-2, L4, L55]
+   */
+  readonly output?: WorkerOutput;
 }
 
 /** An admin listener that listens. */
@@ -83,7 +89,12 @@ function listenError(code: string, address: string): Error {
  */
 export async function startAdminServer(options: AdminStartOptions, entry: URL = workerEntry()): Promise<AdminServer> {
   const { host, port } = parseAddress(options.address);
-  const worker = new Worker(entry, { workerData: { host, port, beat: options.beat, snapshot: options.snapshot } });
+  const output = options.output ?? "inherit";
+  const worker = new Worker(entry, {
+    workerData: { host, port, beat: options.beat, snapshot: options.snapshot },
+    ...workerStreams(output),
+  });
+  drainWorkerOutput(worker, "admin worker", output);
   const exited = new Promise<void>((resolve) => worker.once("exit", () => resolve()));
   const closed = new Promise<void>((resolve) =>
     worker.on("message", (message: FromAdmin) => {

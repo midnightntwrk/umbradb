@@ -10,6 +10,7 @@ import type { LedgerTable } from "../../src/ledger/version-table.js";
 import { type InMemoryBlockSource, inMemoryBlock } from "../../src/runner/in-memory-source.js";
 import {
   type EngineBuild,
+  type EngineInput,
   type EngineOptions,
   type ProcessHandle,
   type ProcessingEnd,
@@ -35,14 +36,24 @@ import type { DatabaseParts } from "../../src/config/database-parts.js";
  */
 
 /**
- * The runner's `startProcess` for the tests that start a process: without the admin endpoints unless the test asks
- * for them with `admin`. The runner serves them by default on `listen.admin`, which is `0.0.0.0:8081` unless
- * configured, and test processes run in parallel on a shared machine. So each opts out here, or asks for them and
- * listens on a port of its own (`127.0.0.1:0`, as `test/admin/admin-harness.ts` does). A test outside `test/admin/`
- * that takes the runner's own fails `test/admin/test-processes.test.ts`. [AE-1, CF-4, Q128 B]
+ * The runner's `startProcess` for the tests that start a process: its `cwd` the test's working directory unless given,
+ * and without the admin endpoints unless the test gives the admin port (`adminListener`), as the engine is. With the
+ * port, `listen.admin` is `0.0.0.0:8081` unless configured, and test processes run in parallel on a shared machine, so
+ * a test giving it listens on a port of its own (`127.0.0.1:0`, as `test/admin/admin-harness.ts` does). A test outside
+ * `test/admin/` that takes the runner's own fails `test/admin/test-processes.test.ts`. [AE-1, CF-4, Q128 B]
  */
 export function startProcess(input: TestProcessInput): ProcessHandle {
-  return startRunnerProcess({ ...input, cwd: input.cwd ?? process.cwd(), admin: input.admin ?? false });
+  return startRunnerProcess({ ...input, cwd: input.cwd ?? process.cwd() });
+}
+
+/**
+ * {@link startProcess} for a test of `umbradb run` (its `start` seam): the command's input without its admin port, so
+ * that the process serves no admin endpoints on `listen.admin`'s default, `0.0.0.0:8081`, which processes running in
+ * parallel on a shared machine would contend for. [AE-1, Q128 B, L55]
+ */
+export function startWithoutAdmin(input: EngineInput): ProcessHandle {
+  const { adminListener: _admin, ...rest } = input;
+  return startProcess(rest);
 }
 
 /** The engine's input for the tests: its `cwd` the test's working directory unless given. */

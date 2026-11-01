@@ -63,7 +63,6 @@ describe("A173: the vendored ledger packages checked before any is imported (LG-
         config: { data: { entries: [core(db.setting, 5, { extra }), ...modules.map((module) => entryOf(module, 5))] } },
         source,
         log: () => undefined,
-        admin: false,
       });
       return { handle, source };
     };

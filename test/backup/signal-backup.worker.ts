@@ -8,7 +8,7 @@ import { startProcess } from "../runner/process-build.js";
  * A running process for the pause backup's real signal, started by `signal-backup.test.ts` with `node --import tsx` and
  * one JSON argument ({@link SignalJob}): `startProcess` (the tests' own, which serves no admin endpoints) as `umbradb
  * run` starts it — the configuration file and its modules, SIGTERM through `terminationSignal`, SIGUSR2 from this
- * process itself (no `backupSignals` given) — over an in-memory chain that finalizes one block every `feedMs` once
+ * process itself (`backupSignals: process`, the port the command gives through its relay) — over an in-memory chain that finalizes one block every `feedMs` once
  * startup completed, as a node does, so that blocks keep committing. It reports each event as one JSON line on stdout
  * ({@link SignalEvent}): its log lines, each new cursor, and `closed` once the process has stopped and closed; then it
  * lets Node.js end by itself. It exits on its own once its parent is no longer the test's. [A163, BK-1, Q152 B]
@@ -43,6 +43,7 @@ const handle = startProcess({
   config: { data: loaded.data, file: loaded.file },
   source,
   signal: termination.signal,
+  backupSignals: process,
   log: (line) => report({ event: "log", line }),
 });
 let feed: NodeJS.Timeout | undefined;

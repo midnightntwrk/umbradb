@@ -688,7 +688,7 @@ describe("startProcess without a database", () => {
     expect(handle.status().state).toBe("refused");
   });
 
-  it("logs to standard error by default; a relative { file } resolves against cwd, not the host's directory (CF-1, LM-2)", async () => {
+  it("logs nothing without the log port; a relative { file } resolves against cwd, not the host's directory (CF-1, LM-2)", async () => {
     // The engine looks for no default file: `umbradb run` names `umbradb.config.ts` itself (`src/cli/run.ts`).
     const cwd = mkdtempSync(join(tmpdir(), "umbradb-engine-cwd-"));
     const written: string[] = [];
@@ -714,10 +714,8 @@ describe("startProcess without a database", () => {
       rmSync(cwd, { recursive: true, force: true });
     }
     expect(cwd).not.toBe(process.cwd());
-    expect(written).toEqual([
-      "startup refused: invalid-configuration (1 finding); the process ends\n",
-      expect.stringMatching(/^startup refused: .*umbradb\.config\.ts: no configuration file at .* \[invalid-configuration file-not-found\]\n$/),
-    ]);
+    // Standard error is the command's log (`umbradb run` gives it as the port), never the engine's default. [G2]
+    expect(written).toEqual([]);
   });
 
   it("takes a { file } given as a file URL as its path, and refuses a URL that is no file URL (CF-1)", async () => {

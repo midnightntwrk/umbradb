@@ -13,10 +13,13 @@
  *   `core` entry's `node`, a private one from its public database through its private intake; a public process's
  *   ledger worker imports the file for its user modules' ledger tasks, as the main thread does [MD-1, MD-2, LG-17,
  *   Q106 B];
- * - the admin endpoints, served by default on `listen.admin`, so nothing is passed for them [AE-1, Q128 B];
- * - its log on standard error, redacted by the process [CF-4, AE-6];
- * - `--update-hash`, when given, as its `updateHash`: the public configuration hash a private process accepts at this
- *   start, which a public process's block source ignores [PP-14, Q159].
+ * - its ports, the program-level behaviour that only the command has [LM-2, L55]: the admin listener on `listen.admin`
+ *   (`0.0.0.0:8081` unless configured, the admin worker's `startAdminServer`) [AE-1, Q128 B]; its log on standard
+ *   error, redacted by the process [CF-4, AE-6]; the worker threads' output on the command's own standard output and
+ *   standard error (`workerOutput: "inherit"`); the backup at the configured stop (`backupAtStop`) and SIGUSR2's
+ *   relay (below) [BK-1];
+ * - `--update-hash`, when given, as its `acceptPublicConfigHash`: the public configuration hash a private process
+ *   accepts at this start, which a public process's block source ignores [PP-14, Q159].
  *
  * A file that cannot be loaded is refused by the engine as itself, with UmbraDB's own modules only.
  *
@@ -41,10 +44,11 @@
  * a shell never ends the indexer. With `backupOnSignal` set, the process writes a backup at the loop's next pause and
  * goes on. Without it, the signal is logged as ignored, in one line naming `backupOnSignal` (`SIGUSR2 ignored:
  * backupOnSignal is not set, so no backup is written`), and nothing else happens. A host program's own process
- * (`startProcess`) adds no SIGUSR2 listener without `backupOnSignal`, so Node.js's default or the host's handler
- * applies there. [BK-1, Q152 B, Q173 C]
+ * (`startUmbraDB`) adds no SIGUSR2 listener, so Node.js's default or the host's handler applies there. [BK-1, Q152 B,
+ * Q173 C]
  */
 
+import { startAdminServer } from "../admin/server.js";
 import { DEFAULT_CONFIG_FILE } from "../config/load.js";
 import {
   type BackupSignals,
@@ -192,8 +196,11 @@ export async function runProcess(options: RunOptions, seams: RunSeams = {}): Pro
       userModules: seams.userModules ?? { from: "config" },
       signal: stop.signal,
       log: options.log,
+      adminListener: startAdminServer,
+      workerOutput: "inherit",
+      backupAtStop: true,
       backupSignals: usr2.signals,
-      ...(options.updateHash === undefined ? {} : { updateHash: options.updateHash }),
+      ...(options.updateHash === undefined ? {} : { acceptPublicConfigHash: options.updateHash }),
     });
     seams.started?.(handle);
     handle.started.then(usr2.settled, usr2.settled);

@@ -1,4 +1,5 @@
 import { performance } from "node:perf_hooks";
+import { startAdminServer } from "../../src/admin/server.js";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { BlockItemSource } from "../../src/backbone/core-block-fetch/index.js";
 import type { BlockEventSource } from "../../src/backbone/core-block-fetch/events.js";
@@ -242,7 +243,7 @@ export function startSlow(db: ProcessDatabase, options: SlowOptions): SlowRun {
       lines.push(line);
       lineAt.push(performance.now());
     },
-    admin: true,
+    adminListener: startAdminServer,
     ...(options.loop === undefined ? {} : { loop: options.loop }),
   });
   const origin = async (): Promise<string> => {

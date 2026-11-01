@@ -137,8 +137,9 @@
  * {@link LoopPauses} is kept (`./pause.ts`, `./loop.ts`). {@link ProcessHandle.pause} takes one until
  * {@link ProcessHandle.resume}. [BK-1, Q152 B]
  *
- * A process whose `core` revision sets `backupOnSignal` listens for SIGUSR2 ({@link EngineOptions.backupSignals}:
- * Node.js's `process` unless given), from the moment that revision is known until the process has closed. Each SIGUSR2
+ * A process whose `core` revision sets `backupOnSignal` listens for SIGUSR2 on its {@link EngineOptions.backupSignals}
+ * port, from the moment that revision is known until the process has closed; without the port it listens for nothing
+ * and logs that SIGUSR2 writes no backup there. Each SIGUSR2
  * takes a hold, writes the backup of the cursor's height once the loop is paused there (by the same rules as the backup
  * at stop: `backupAtStop`, `../backup/backup.ts`), and releases the hold, so processing goes on from the next height.
  * All of it is logged. [BK-1, CF-4, Q152 B]
@@ -188,7 +189,19 @@
  * a halt and each retry are logged with their reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`,
  * `processing retries in <ms> ms (<condition>, attempt <n>): …`, `startup retries …`). [CF-4, AE-6]
  *
- * **The admin endpoints** (`../admin/`) are served unless {@link EngineOptions.admin} is `false` [AE-1, AE-2, Q128 B]:
+ * **Ports.** What a process does to the program it runs in comes only through its ports, each off when absent, so a
+ * host program's process does nothing to it by default; `umbradb run` gives all but the ledger worker's entry [LM-2,
+ * G1–G4, L55]:
+ * - {@link EngineOptions.log}: the log; nothing is written anywhere without it;
+ * - {@link EngineOptions.adminListener}: the admin listener and its thread; neither without it;
+ * - {@link EngineOptions.backupSignals}: SIGUSR2 for `backupOnSignal`; no signal is listened for without it;
+ * - {@link EngineOptions.backupAtStop}: the backup at the configured stop; none without it;
+ * - {@link EngineOptions.workerOutput}: the worker threads' standard output and standard error inherited; read into
+ *   the log without it (`./worker-output.ts`);
+ * - {@link EngineOptions.ledgerWorkerEntry}: the ledger worker's script (the browser's); Node.js's entry without it.
+ *
+ * **The admin endpoints** (`../admin/`) are served through the {@link EngineOptions.adminListener} port, when given
+ * [AE-1, AE-2, Q128 B]:
  * - The heartbeat ticks from `startProcess` on and publishes `status()` to the admin worker. It ends when a refusal of
  *   the configuration ends the process.
  * - The admin listener starts on `listen.admin` once the process's `core` revision is known, before the database
@@ -243,6 +256,7 @@ import { checkLedgerPackages, type VerifyLedgerPackagesOptions } from "../ledger
 import type { LedgerTable } from "../ledger/version-table.js";
 import { bindLedgerTasks, hasLedgerTasks, withLedgerTaskPoints } from "../ledger/tasks.js";
 import { type LedgerHost, startLedgerWorker } from "../ledger/worker/host.js";
+import type { WorkerOutput } from "./worker-output.js";
 import { schemaPlan } from "../modules/adapters.js";
 import type { ModuleDeclaration, PointName, Revision } from "../modules/declaration.js";
 import { backoffDelay } from "../node/backoff.js";
@@ -316,7 +330,10 @@ export interface EngineOptions {
   readonly source?: BlockSource | ((core: CheckedEntry, shared: SourceShared) => BlockSource);
   /** Stops the process when it aborts ({@link terminationSignal} for SIGTERM). [RN-13] */
   readonly signal?: AbortSignal;
-  /** Where each log line goes, redacted (see the module comment); standard error when absent. */
+  /**
+   * A port (see **Ports** in the module comment): where each log line goes, redacted, and the worker threads' output
+   * unless {@link workerOutput} inherits it. Nothing is logged when absent. [LM-2, G2]
+   */
   readonly log?: (line: string) => void;
   /** The negative controls' startup checks against the node; `core-chain`'s `checkChain` unless given. [IN-3] */
   readonly checkChain?: (input: ChainCheckInput) => Promise<ChainCheck>;
@@ -331,20 +348,38 @@ export interface EngineOptions {
    */
   readonly nodeClient?: (options: NodeClientOptions) => NodeClient;
   /**
-   * The admin endpoints (`../admin/`), served unless `false` (an opt-out). Absent or `true` serves them on
-   * `listen.admin` from the admin worker, with the heartbeat, from startup until {@link ProcessHandle.stop}; a starter
-   * serves them through itself (the negative controls'). A program or a test that starts several processes gives each
-   * its own `listen.admin` (port 0 for a free one) or opts out: a second process on one address refuses startup with
-   * `listen-failed` before its database opens. [AE-1, AE-2, Q128 B]
+   * A port: the admin listener (`../admin/`). Given, the admin endpoints are served through it — `startAdminServer`,
+   * the admin worker on `listen.admin`, for `umbradb run`; a test's or a negative control's starter; the browser's
+   * message channel — with the heartbeat, from startup until {@link ProcessHandle.stop}. Absent, there is no admin
+   * thread and no admin port. A program or a test that starts several processes gives each its own `listen.admin`
+   * (port 0 for a free one): a second process on one address refuses startup with `listen-failed` before its database
+   * opens. [AE-1, AE-2, LM-2, G4, G9, Q128 B]
    */
-  readonly admin?: boolean | AdminStarter;
+  readonly adminListener?: AdminStarter;
   /**
    * The process's ledger worker: started when the graph has `core-block-parsed` or `core-ledger-state`, and closed with
-   * the process. Unless given (a test package's, a negative control's, the browser's Web Worker), it is UmbraDB's own
-   * entry (`startLedgerWorker`), which for a `{ file }` configuration imports that file in the worker for its user
+   * the process. Unless given (a test package's, a negative control's), it is UmbraDB's own entry (`startLedgerWorker`
+   * at {@link ledgerWorkerEntry}), which for a `{ file }` configuration imports that file in the worker for its user
    * modules' ledger tasks, as the main thread imports it ({@link ledgerWorkerOf}). [LG-10, LG-17, MD-1, LM-7]
    */
   readonly ledgerWorker?: () => LedgerHost;
+  /**
+   * A port: the ledger worker's entry, a script the thread runs — the browser's Web Worker script. Node.js's
+   * `worker_threads` entry of UmbraDB (`ledgerWorkerEntry` of `../ledger/worker/host.ts`) when absent. [LG-10, LM-11]
+   */
+  readonly ledgerWorkerEntry?: URL;
+  /**
+   * A port: `"inherit"` gives the worker threads (the ledger worker, the admin worker) the process's own standard output
+   * and standard error, as `umbradb run` does. Absent, each thread's two streams are read line by line into
+   * {@link log}, or dropped without one (`./worker-output.ts`). [LM-2, G2, L4, L55]
+   */
+  readonly workerOutput?: "inherit";
+  /**
+   * A port: `true` writes the backup at the configured stop (the `core` revision's `backupAtStop`, after the core's
+   * `on-stop-height`), as `umbradb run` does. Absent, no backup is written at the stop, and a revision that sets
+   * `backupAtStop` gets a log line saying so at the stop. [BK-1, LM-2, G3]
+   */
+  readonly backupAtStop?: boolean;
   /**
    * The startup check of the vendored ledger packages, given the `core` revision's `ledgerSources` before the ledger
    * worker starts: `checkLedgerPackages` (`../ledger/identity.ts`) unless given (a test's, over a copy of the packages;
@@ -357,18 +392,18 @@ export interface EngineOptions {
    */
   readonly configHash?: (read: ReadHandle, core: CheckedEntry) => Promise<string>;
   /**
-   * The public configuration hash the operator accepts for this start (`umbradb run --update-hash`). A private
-   * process's source records it after the full checks, when it is the hash the start finds in place of the one the
-   * private database accepted. It is given to the block source ({@link SourceShared}); a public process's source
-   * ignores it. [PP-14, Q159]
+   * The public configuration hash the operator accepts for this start (`umbradb run --update-hash`, `startUmbraDB`'s
+   * `acceptPublicConfigHash`). A private process's source records it after the full checks, when it is the hash the
+   * start finds in place of the one the private database accepted. It is given to the block source
+   * ({@link SourceShared}); a public process's source ignores it. [PP-14, Q159, LM-9]
    */
-  readonly updateHash?: string;
+  readonly acceptPublicConfigHash?: string;
   /**
-   * Where SIGUSR2 comes from for the `core` revision's `backupOnSignal`: Node.js's `process` unless given (a test's
-   * emitter, or `umbradb run`'s relay, which listens for SIGUSR2 itself for the whole command and logs one it ignores).
-   * It is listened to only when `backupOnSignal` is set, from the moment the process's `core` revision is known until
-   * the process has closed (see the module comment). Without it the process adds no SIGUSR2 listener, so Node.js's
-   * default or the host program's own handler applies. [CF-4, BK-1, Q152 B, Q173 C]
+   * A port: where SIGUSR2 comes from for the `core` revision's `backupOnSignal` — `umbradb run`'s relay, which listens
+   * for SIGUSR2 itself for the whole command and logs one it ignores, or a test's emitter. It is listened to only when
+   * `backupOnSignal` is set, from the moment the process's `core` revision is known until the process has closed (see
+   * the module comment). Absent, the process listens for no signal: `backupOnSignal` then writes nothing, which the
+   * process logs. [CF-4, BK-1, LM-2, G1, Q152 B, Q173 C]
    */
   readonly backupSignals?: BackupSignals;
   /**
@@ -401,7 +436,7 @@ export interface SourceShared {
   readonly start: bigint;
   /** The process's log, redacted (a private source's transport logs its connections). */
   readonly log: (line: string) => void;
-  /** {@link EngineOptions.updateHash}, when given (a private source's). */
+  /** {@link EngineOptions.acceptPublicConfigHash}, when given (a private source's). */
   readonly updateHash?: string;
 }
 
@@ -701,17 +736,6 @@ export function terminationSignal(target: SignalTarget = process): { readonly si
   return Object.freeze({ signal: controller.signal, dispose: () => void target.removeListener("SIGTERM", listener) });
 }
 
-/** Node.js's `process` as the source of SIGUSR2, or undefined where there is none (a browser's worker). */
-function nodeSignals(): BackupSignals | undefined {
-  const node = (globalThis as { readonly process?: Partial<BackupSignals> }).process;
-  return typeof node?.on === "function" ? (node as BackupSignals) : undefined;
-}
-
-/** A log line to standard error. */
-const standardError = (line: string): void => {
-  process.stderr.write(`${line}\n`);
-};
-
 /** An error's message, or the value as text. */
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -774,14 +798,19 @@ interface LoadedInput {
 
 /**
  * The ledger worker the engine starts for `input` (see {@link EngineOptions.ledgerWorker}): the one given, else
- * UmbraDB's entry, which for a `{ file }` configuration imports that file in the worker for its `modules` export's
- * ledger tasks. [LG-10, LG-17, MD-1, LM-7]
+ * UmbraDB's entry (at {@link EngineOptions.ledgerWorkerEntry} when given), which for a `{ file }` configuration imports
+ * that file in the worker for its `modules` export's ledger tasks. The thread's output goes to `output`. [LG-10, LG-17,
+ * MD-1, LM-7, L4]
  */
-export function ledgerWorkerOf(input: Pick<EngineOptions, "config" | "cwd" | "ledgerWorker">): () => LedgerHost {
+export function ledgerWorkerOf(
+  input: Pick<EngineOptions, "config" | "cwd" | "ledgerWorker" | "ledgerWorkerEntry">,
+  output: WorkerOutput = "inherit",
+): () => LedgerHost {
   if (input.ledgerWorker !== undefined) return input.ledgerWorker;
-  const { config } = input;
+  const { config, ledgerWorkerEntry: entry } = input;
   const modules = "file" in config ? configModuleUrl(configPath(config.file, input.cwd)) : null;
-  return () => startLedgerWorker(modules === null ? {} : { modules });
+  return () =>
+    startLedgerWorker({ output, ...(entry === undefined ? {} : { entry }), ...(modules === null ? {} : { modules }) });
 }
 
 /**
@@ -876,16 +905,17 @@ class Process implements ProcessHandle {
 
   constructor(input: EngineInput) {
     this.#input = input;
-    const { admin } = input;
+    const { adminListener } = input;
     this.#admin =
-      admin === false
+      adminListener === undefined
         ? undefined
         : new ProcessAdmin({
             status: () => this.status(),
             log: (line) => this.#log(line),
             privateSide: () => this.#privateSide(),
             node: () => this.#nodeFacts(),
-            ...(typeof admin === "function" ? { start: admin } : {}),
+            start: adminListener,
+            output: this.#workerOutput(),
           });
     this.closed = new Promise((resolve) => {
       this.#resolveClosed = resolve;
@@ -961,7 +991,7 @@ class Process implements ProcessHandle {
   #listenForBackups(core: CheckedEntry): void {
     const out = (core.settings as PlainObject).backupOnSignal;
     if (typeof out !== "string") return;
-    const signals = this.#input.backupSignals ?? nodeSignals();
+    const signals = this.#input.backupSignals;
     if (signals === undefined) {
       this.#log("backupOnSignal is set, but this process receives no signals: SIGUSR2 writes no backup here");
       return;
@@ -1053,6 +1083,10 @@ class Process implements ProcessHandle {
   async #backupAtStop(height: bigint): Promise<void> {
     const out = ((this.#core as CheckedEntry).settings as PlainObject).backupAtStop;
     if (typeof out !== "string" || this.#db === undefined) return;
+    if (this.#input.backupAtStop !== true) {
+      this.#log(`backupAtStop is set, but this process writes no backup at its stop: no backup was written to ${out}`);
+      return;
+    }
     try {
       const { written, manifest } = await backupAtStop(this.#backupInput(resolve(out)), height);
       this.#log(
@@ -1158,9 +1192,15 @@ class Process implements ProcessHandle {
     });
   }
 
-  /** A log line, through the configuration's redaction once it is known. */
+  /** A log line, through the configuration's redaction once it is known; nowhere without the `log` port. [LM-2] */
   #log(text: string): void {
-    (this.#input.log ?? standardError)(this.#redactor === undefined ? text : this.#redactor.text(text));
+    const { log } = this.#input;
+    if (log !== undefined) log(this.#redactor === undefined ? text : this.#redactor.text(text));
+  }
+
+  /** Where the worker threads' output goes: inherited (`umbradb run`), or into the log, redacted. [LM-2, L4, L55] */
+  #workerOutput(): WorkerOutput {
+    return this.#input.workerOutput === "inherit" ? "inherit" : (line) => this.#log(line);
   }
 
   /** Throws the stop's reason when the process is stopping: startup's steps end there. */
@@ -1243,7 +1283,7 @@ class Process implements ProcessHandle {
         nodeClient: this.#nodeClient,
         start: BigInt(checked.start),
         log: (line) => this.#log(line),
-        ...(input.updateHash === undefined ? {} : { updateHash: input.updateHash }),
+        ...(input.acceptPublicConfigHash === undefined ? {} : { updateHash: input.acceptPublicConfigHash }),
       };
       const given = input.source ?? sourceOf(resolved);
       const source = typeof given === "function" ? given(core, shared) : given;
@@ -1383,7 +1423,7 @@ class Process implements ProcessHandle {
       // released, refuses startup here, before the worker starts and before block S. [LG-5, A173]
       const sources = settings.ledgerSources as VerifyLedgerPackagesOptions["sources"];
       (input.checkLedgerPackages ?? checkLedgerPackages)(sources === undefined ? {} : { sources });
-      this.#ledger ??= ledgerWorkerOf(input)();
+      this.#ledger ??= ledgerWorkerOf(input, this.#workerOutput())();
       // A request given no read (a parse) reads stored nodes through the process's database.
       this.#ledger.useDatabase({ read: (body) => db.read(body) });
       if (parses) bindLedgerParser(contexts.of(CORE_BLOCK_PARSED_ID), this.#ledger);
