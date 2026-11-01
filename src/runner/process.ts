@@ -961,8 +961,13 @@ interface Startup {
  */
 type StartupOutcome =
   | { readonly kind: "started"; readonly startup: Startup }
-  | { readonly kind: "stopped"; readonly rejection: unknown }
-  | { readonly kind: "refused"; readonly rejection: UmbraError; readonly configurationStep: boolean };
+  | { readonly kind: "stopped"; readonly rejection: unknown; readonly end: ProcessingEnd }
+  | {
+      readonly kind: "refused";
+      readonly rejection: UmbraError;
+      readonly end: ProcessingEnd;
+      readonly configurationStep: boolean;
+    };
 
 /** What startup has once the database opened: what its later steps — run again on a retryable failure — need. */
 interface Opened {
@@ -1123,12 +1128,18 @@ class Process implements ProcessHandle {
 
   /**
    * How startup ended with `error` (see {@link StartupOutcome}): by a stop, `started` rejecting with the abort reason;
-   * else a refusal, its reason recorded (`refused`) and `started` rejecting with the reason's code. [LM-9, LM-10]
+   * else a refusal, its reason recorded (`refused`) and `started` rejecting with the reason's code. How processing
+   * ended is recorded at once too, so that the next publication of `/status` shows the reason with its failure's
+   * details. [LM-9, LM-10, AE-5]
    */
   #startupEnded(error: unknown): StartupOutcome {
-    if (this.#stop.signal.aborted) return { kind: "stopped", rejection: this.#abortReason };
+    if (this.#stop.signal.aborted) {
+      return { kind: "stopped", rejection: this.#abortReason, end: this.#ended({ kind: "signal" }) };
+    }
     const reason = this.#fail("refused", error);
-    return { kind: "refused", rejection: startupRejection(error, reason), configurationStep: this.#configurationStep };
+    const rejection = startupRejection(error, reason);
+    const end = this.#ended({ kind: "refused", error: rejection });
+    return { kind: "refused", rejection, end, configurationStep: this.#configurationStep };
   }
 
   async backup(out: string, seams: BackupSeams = {}): Promise<BackupWritten> {
@@ -1853,12 +1864,11 @@ class Process implements ProcessHandle {
   /** Startup, then the loop: resolves with how processing ended (see {@link ProcessingEnd}). */
   async #run(outcome: Promise<StartupOutcome>): Promise<ProcessingEnd> {
     const settled = await outcome;
-    if (settled.kind === "stopped") return this.#ended({ kind: "signal" });
+    if (settled.kind === "stopped") return settled.end;
     if (settled.kind === "refused") {
-      const end = this.#ended({ kind: "refused", error: settled.rejection });
       // Refused at the configuration step (class A), which ends the process. [Q137 B, LM-10]
       if (settled.configurationStep) this.#closing ??= this.#endItself();
-      return end;
+      return settled.end;
     }
     const { loop } = settled.startup;
     let end: LoopEnd;
