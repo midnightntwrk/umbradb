@@ -6,12 +6,14 @@
  *
  * **Startup** runs these steps in order; each step refuses with its own typed error:
  * 1. Load the configuration ({@link EngineConfig}): a `{ file }` imported against `cwd` (`loadConfig`), with its
- *    `modules` export, or the data given. No other file is looked for. [CF-1, LM-1]
+ *    `modules` export, or the data given; and a module file's list when the user modules come from one
+ *    (`loadModuleList`, `startUmbraDB`'s `modulesFrom`). No other file is looked for. [CF-1, LM-1, LM-7]
  * 2. Resolve the build and the configuration (`resolve`, `./resolve.ts`): the side the configuration describes, the
  *    command's build for it with the user modules ({@link UserModulesSource}) validated, the data held to the
  *    plain-data rules and validated, and the `core` entry's operational and secret fields taken from its latest
  *    revision of the build's version, for the whole run: the database, the node, `listen.api`, the timeouts, the
- *    development opt-in, the core's stop. A host program's own checks of this step ({@link LibraryChecks}: its
+ *    development opt-in, the core's stop. User modules given as objects that declare ledger tasks refuse here
+ *    (`ledger-tasks-need-modules-from`: the ledger worker imports files, never objects). A host program's own checks of this step ({@link LibraryChecks}: its
  *    options, before the load; what resolved, after) refuse here too. [MD-2, CF-3, Q102, LM-10]
  * 3. Make the process's one node client from this revision's `node` (`nodeOptionsOf`), and the block source from the
  *    revision and that client: the node's (`core-block-fetch`'s node source, `nodeSourceOf`) on the core, the private
@@ -253,7 +255,7 @@ import { openPostgres } from "../db/postgres.js";
 import { refuseWritingReader, transportReaderFacts, type TransportReaderFacts } from "../private/transport-reader.js";
 import { CORE_ENTRY_ID } from "../config/entries.js";
 import { checkHistory, graphInputOf, type HistoryCheck, versionText } from "../config/history.js";
-import { configModuleUrl, configPath, loadConfig } from "../config/load.js";
+import { configModuleUrl, configPath, loadConfig, loadModuleList } from "../config/load.js";
 import { resolve } from "node:path";
 import type { PlainObject } from "../config/plain-data.js";
 import { configRedactor, type Redactor, redactor } from "../config/redact.js";
@@ -309,10 +311,17 @@ import { Lockstep, type LockstepCondition } from "../private/lockstep.js";
 export type EngineConfig = { readonly file: string | URL } | { readonly data: unknown };
 
 /**
- * Where the build's user modules come from: the configuration's own `modules` export (`umbradb run`'s; a `{ data }`
- * configuration has none), or declarations given as objects (a host's, a test's). [LM-7, CF-1, MD-1, Q106 B]
+ * Where the build's user modules come from [LM-7, CF-1, MD-1, Q106 B]:
+ * - `{ from: "config" }`: the configuration file's own `modules` export (`umbradb run`'s; a `{ data }` configuration
+ *   has none);
+ * - `{ from: URL }`: a module file's `modules` export (`startUmbraDB`'s `modulesFrom`), which startup imports
+ *   (`loadModuleList`) and the ledger worker imports too;
+ * - `{ modules }`: declarations given as objects (a host's, the browser demo's, a test's), which the ledger worker
+ *   cannot import: a module of them that declares ledger tasks refuses startup (`ledger-tasks-need-modules-from`).
  */
-export type UserModulesSource = { readonly from: "config" } | { readonly modules: readonly unknown[] };
+export type UserModulesSource =
+  | { readonly from: "config" | URL }
+  | { readonly modules: readonly unknown[] };
 
 /**
  * The build: its user modules, which the resolver joins to UmbraDB's own backbone parts and core modules for the side
@@ -887,12 +896,17 @@ interface LoadedInput {
  * MD-1, LM-7, L4]
  */
 export function ledgerWorkerOf(
-  input: Pick<EngineOptions, "config" | "cwd" | "ledgerWorker" | "ledgerWorkerEntry">,
+  input: Pick<EngineOptions, "config" | "cwd" | "ledgerWorker" | "ledgerWorkerEntry"> & {
+    readonly userModules?: UserModulesSource | undefined;
+  },
   output: WorkerOutput = "inherit",
 ): () => LedgerHost {
   if (input.ledgerWorker !== undefined) return input.ledgerWorker;
-  const { config, ledgerWorkerEntry: entry } = input;
-  const modules = "file" in config ? configModuleUrl(configPath(config.file, input.cwd)) : null;
+  const { config, ledgerWorkerEntry: entry, userModules } = input;
+  // The module file the main thread imported (`modulesFrom`), else a `{ file }` configuration: both threads import it.
+  const from =
+    userModules !== undefined && "from" in userModules && userModules.from instanceof URL ? userModules.from : null;
+  const modules = from ?? ("file" in config ? configModuleUrl(configPath(config.file, input.cwd)) : null);
   return () =>
     startLedgerWorker({ output, ...(entry === undefined ? {} : { entry }), ...(modules === null ? {} : { modules }) });
 }
@@ -1332,9 +1346,34 @@ class Process implements ProcessHandle {
    * [CF-1, LM-1, LM-2]
    */
   async #load(): Promise<LoadedInput> {
-    const { config, cwd } = this.#input;
-    if ("file" in config) return loadConfig({ file: config.file, cwd });
-    return { file: null, data: config.data, modules: [] };
+    const { config, cwd, userModules } = this.#input;
+    const loaded: LoadedInput =
+      "file" in config ? await loadConfig({ file: config.file, cwd }) : { file: null, data: config.data, modules: [] };
+    // A module file's list (`modulesFrom`), imported as the ledger worker imports it. [LM-7]
+    if (userModules !== undefined && "from" in userModules && userModules.from instanceof URL) {
+      return { ...loaded, modules: await loadModuleList(userModules.from) };
+    }
+    return loaded;
+  }
+
+  /**
+   * Refuses user modules given as objects that declare ledger tasks: the ledger worker imports a configuration file or a
+   * module file for its user modules' tasks, never objects (`ledger-tasks-need-modules-from`, class A). [LM-7, LG-17]
+   */
+  #refuseObjectTasks(resolved: Resolved): void {
+    const given = this.#input.userModules;
+    if (given === undefined || !("modules" in given)) return;
+    const tasked = resolved.declarations.user
+      .filter((declaration) => hasLedgerTasks(declaration))
+      .map((declaration) => declaration.id);
+    if (tasked.length === 0) return;
+    throw new UmbraError(
+      "ledger-tasks-need-modules-from",
+      `the user module${tasked.length === 1 ? "" : "s"} ${tasked.join(", ")} declare${tasked.length === 1 ? "s" : ""} ` +
+        "ledger tasks, which run in the ledger worker: give such a module through modulesFrom, a module file both " +
+        "threads import, not as an object",
+      { modules: Object.freeze(tasked) },
+    );
   }
 
   /**
@@ -1368,6 +1407,7 @@ class Process implements ProcessHandle {
       const loaded = await this.#load();
       this.#step();
       const resolved = this.#resolve(loaded);
+      this.#refuseObjectTasks(resolved);
       // A host's own checks of what resolved: still the configuration step, so the process ends as above. [LM-10]
       input.library?.resolved?.(resolved);
       // A module's ledger tasks run through points of its own (`src/ledger/tasks.ts`). [LG-17]

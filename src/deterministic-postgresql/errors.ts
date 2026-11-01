@@ -240,6 +240,17 @@ export const ERROR_CODES = [
    * [LM-2, BK-1]
    */
   "library-setting-refused",
+  /**
+   * A library process given its user modules twice: `modules` with a `{ file }` configuration (whose `modules` export
+   * they are), `modules` and `modulesFrom`, or `modulesFrom` with `{ file }`; `details { given }`. [LM-7]
+   */
+  "modules-given-twice",
+  /**
+   * User modules given as objects (`startUmbraDB`'s `modules`, the browser demo's) that declare ledger tasks: the
+   * ledger worker cannot import objects, so such a module comes through `modulesFrom`, which both threads import;
+   * `details { modules }`. [LM-7, LG-17]
+   */
+  "ledger-tasks-need-modules-from",
   // The backup's refusals (`src/backup/`): the command exits 1 and writes no file. [BK-1, PP-12]
   /**
    * The tool a backup needs is missing or of another major version than 18: the PostgreSQL 18 client's `pg_dump` for a

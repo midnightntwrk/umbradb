@@ -7,6 +7,10 @@
  * malformed network request are each a finding at the option's path (`config`, `network.api.port`), and together the
  * refusal `invalid-configuration` with the reason `invalid-option` ({@link optionsRefusal}). [L62]
  *
+ * **User modules given twice** ({@link modulesGivenTwice}): `modules` with a `{ file }` configuration, whose own
+ * `modules` export they are, `modules` and `modulesFrom`, or `modulesFrom` with `{ file }` (`modules-given-twice`).
+ * [LM-7, L44]
+ *
  * **The settings of the process's `core` revision a library process refuses** ({@link librarySettingsRefusal}):
  * `backupAtStop` and `backupOnSignal`, which write backups at the command's stop and on its SIGUSR2; a host writes its
  * backups with `UmbraDBHandle.backup` instead (`library-setting-refused`, naming the setting). [LM-2, BK-1, G3, L47]
@@ -21,6 +25,7 @@ export const OPTION_NAMES: readonly string[] = Object.freeze([
   "config",
   "cwd",
   "modules",
+  "modulesFrom",
   "source",
   "signal",
   "log",
@@ -198,6 +203,9 @@ export function optionFindings(read: ReadOptions): Finding[] {
   if (modules !== undefined && !Array.isArray(modules)) {
     found.push(finding("modules", "is an array of module declarations"));
   }
+  if (values.modulesFrom !== undefined && !(values.modulesFrom instanceof URL)) {
+    found.push(finding("modulesFrom", "is the URL of an ES module whose modules export lists the user modules"));
+  }
   if (signal !== undefined && !(signal instanceof AbortSignal)) found.push(finding("signal", "is an AbortSignal"));
   if (log !== undefined && typeof log !== "function") found.push(finding("log", "is a function of one line"));
   const hash = acceptPublicConfigHash;
@@ -226,6 +234,27 @@ export function optionsRefusal(findings: readonly Finding[]): UmbraError | null 
     "invalid-configuration",
     `the options of startUmbraDB were refused (${count}): ${findings.map((found) => found.message).join("; ")}`,
     { reason: "invalid-option", option: first.path, findings: Object.freeze([...findings]) },
+  );
+}
+
+/**
+ * The refusal of options that give the user modules twice (see the module comment), naming both sources (`given`);
+ * null when they give them once or not at all. [LM-7, L44]
+ */
+export function modulesGivenTwice(values: Readonly<Record<string, unknown>>): UmbraError | null {
+  const config = values.config as Readonly<Record<string, unknown>> | undefined;
+  const sources = [
+    ...(values.modules === undefined ? [] : ["modules"]),
+    ...(values.modulesFrom === undefined ? [] : ["modulesFrom"]),
+    ...(config !== undefined && "file" in config ? ["config.file"] : []),
+  ];
+  if (sources.length < 2) return null;
+  const by = `${sources.slice(0, -1).join(", ")} and ${sources.at(-1) as string}`;
+  return new UmbraError(
+    "modules-given-twice",
+    `the user modules are given more than once, by ${by}: a { file } configuration gives them by its modules export, ` +
+      "{ data } by modules (objects) or modulesFrom (a module file), one of them",
+    { given: Object.freeze(sources) },
   );
 }
 

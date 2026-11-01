@@ -338,6 +338,15 @@ export const REGISTRY: Readonly<Record<string, readonly CodeTest[]>> = Object.fr
       test: "backupAtStop, backupOnSignal and both are each refused library-setting-refused, naming the setting; nothing opened",
     },
   ],
+  "refusal:modules-given-twice": [
+    {
+      file: "test/library/modules.test.ts",
+      test: "modules with { file }, modules with modulesFrom, modulesFrom with { file }: each refused, naming both",
+    },
+  ],
+  "refusal:ledger-tasks-need-modules-from": [
+    { file: "test/library/modules.test.ts", test: "refused before anything opens, naming the module" },
+  ],
   "refusal:transport-reader-can-write": [
     {
       file: "test/private/transport-reader.test.ts",

@@ -83,6 +83,8 @@ export const REFUSAL_CODES: readonly ErrorCode[] = Object.freeze([
   "public-config-changed",
   "transport-reader-can-write",
   "library-setting-refused",
+  "modules-given-twice",
+  "ledger-tasks-need-modules-from",
 ] as const);
 
 /**

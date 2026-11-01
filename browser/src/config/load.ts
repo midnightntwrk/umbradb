@@ -38,6 +38,11 @@ export async function loadConfig(_options: LoadOptions): Promise<LoadedConfig> {
   throw noFile();
 }
 
+/** Refuses, as {@link loadConfig} does: the browser build imports no module file (`modulesFrom`). */
+export async function loadModuleList(_url: URL): Promise<readonly unknown[]> {
+  throw noFile();
+}
+
 /** Refuses, as {@link loadConfig} does: the browser build names no configuration file. */
 export function configPath(_file: string | URL, _cwd: string): string {
   throw noFile();

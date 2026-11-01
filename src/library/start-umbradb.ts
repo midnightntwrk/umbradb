@@ -13,6 +13,9 @@
  * `core` revision that sets `backupAtStop` or `backupOnSignal`, which only the command acts on, is refused
  * (`library-setting-refused`). [LM-2, G1–G5, L47]
  *
+ * **User modules** (design §6): a `{ file }`'s own `modules` export; with `{ data }`, `modules` objects or
+ * `modulesFrom`, a module file both threads import. Given twice, they are refused (`modules-given-twice`). [LM-7]
+ *
  * **`cwd`.** Every relative path the process meets — a `{ file }`, a PGlite `path`, a backup's target — resolves
  * against `cwd`, the host's working directory (`process.cwd()`) unless given; a relative `cwd` resolves against it
  * once, here. This module is the one place a library process reads the working directory. [LM-2, G8, G10, D-14]
@@ -53,7 +56,7 @@ import {
 } from "../runner/process.js";
 import type { NetworkRequest } from "../runner/resolve.js";
 import type { PrivateLinkChannel } from "./channels.js";
-import { librarySettingsRefusal, optionFindings, optionsRefusal, readOptions } from "./options.js";
+import { librarySettingsRefusal, modulesGivenTwice, optionFindings, optionsRefusal, readOptions } from "./options.js";
 
 /** An address a surface listens at once bound: the host as the system reports it, and the port. [LM-3, LM-9] */
 export interface Address {
@@ -76,8 +79,13 @@ export interface UmbraDBOptions {
   readonly config: { readonly file: string | URL } | { readonly data: unknown };
   /** The base of every relative path; `process.cwd()` unless given. [LM-2, G8] */
   readonly cwd?: string;
-  /** The user modules, with `{ data }`. [LM-7] */
+  /** The user modules as objects, with `{ data }`; none of them may declare ledger tasks. [LM-7] */
   readonly modules?: readonly ModuleDeclaration[];
+  /**
+   * With `{ data }`: the URL of an ES module whose `modules` export lists the user modules, which the main thread and
+   * the ledger worker both import — the way to give a module that declares ledger tasks. [LM-7]
+   */
+  readonly modulesFrom?: URL;
   /** An in-memory chain in place of the node. [LM-8] */
   readonly source?: InMemoryBlockSource;
   /** Aborting it stops the process as {@link UmbraDBHandle.stop} does. [LM-9, RN-13] */
@@ -195,6 +203,17 @@ function guardedLog(log: unknown): ((line: string) => void) | undefined {
   };
 }
 
+/**
+ * Where the engine takes the user modules from (design §6): a `{ file }`'s own `modules` export, `modulesFrom`'s module
+ * file, or the `modules` objects (none: an empty list). [LM-7, CF-1]
+ */
+function userModulesOf(values: Readonly<Record<string, unknown>>): EngineInput["userModules"] & object {
+  const config = values.config as Readonly<Record<string, unknown>> | undefined;
+  if (config !== undefined && "file" in config) return { from: "config" };
+  if (values.modulesFrom instanceof URL) return { from: values.modulesFrom };
+  return { modules: (values.modules as readonly unknown[] | undefined) ?? [] };
+}
+
 /** The handle's `started` from the engine's: its module API's address, side and S, never the settings. [L52] */
 const startedOf = (started: StartedProcess): UmbraDBStarted =>
   Object.freeze({ api: started.api, side: started.side, start: started.start });
@@ -204,7 +223,7 @@ const startedOf = (started: StartedProcess): UmbraDBStarted =>
  */
 export function startUmbraDB(options: UmbraDBOptions): UmbraDBHandle {
   const read = readOptions(options);
-  const refusal = optionsRefusal(optionFindings(read));
+  const refusal = optionsRefusal(optionFindings(read)) ?? modulesGivenTwice(read.values);
   const values = refusal === null ? read.values : {};
   // The host's log, when it is one, also tells a refusal of the other options. [AE-3]
   const log = guardedLog(read.values.log);
@@ -214,7 +233,7 @@ export function startUmbraDB(options: UmbraDBOptions): UmbraDBHandle {
     // A refusal of the options is given before anything is read, so the configuration is then none. [LM-10]
     config: refusal === null ? (values.config as EngineInput["config"]) : { data: null },
     cwd,
-    userModules: { modules: (values.modules as readonly unknown[] | undefined) ?? [] },
+    userModules: userModulesOf(values),
     network: (values.network as NetworkRequest | undefined) ?? {},
     ...(log === undefined ? {} : { log }),
     ...(values.signal === undefined ? {} : { signal: values.signal as AbortSignal }),

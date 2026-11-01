@@ -160,8 +160,42 @@ export async function loadConfig(options: LoadOptions): Promise<LoadedConfig> {
   return Object.freeze({ file, data, modules: modulesOf(module, file) });
 }
 
-/** The file's user modules (see the module comment): its `modules` export, a list, or none. */
-function modulesOf(module: Record<string, unknown>, file: string): readonly unknown[] {
+/**
+ * The user modules a module URL lists (`startUmbraDB`'s `modulesFrom`): its `modules` export, as a configuration file's,
+ * imported by the URL the ledger worker imports too, so both threads hold the same modules. Unlike a configuration
+ * file's, the export is required. Refuses with `invalid-configuration` naming the URL (`details.file`): `load-failed`
+ * when importing it threw (the error its cause, its `code` in `details.errorCode`), `modules-not-a-list` when its
+ * `modules` export is missing or not an array. [LM-7, MD-1, L63]
+ */
+export async function loadModuleList(url: URL): Promise<readonly unknown[]> {
+  let module: Record<string, unknown>;
+  try {
+    module = (await import(url.href)) as Record<string, unknown>;
+  } catch (error) {
+    const errorCode = (error as { code?: unknown } | null)?.code;
+    throw invalid(
+      url.href,
+      "load-failed",
+      `the module file ${url.href} (modulesFrom) could not be loaded: ` +
+        `${(error as Error | null)?.message ?? String(error)}`,
+      { errorCode: typeof errorCode === "string" ? errorCode : null },
+      error,
+    );
+  }
+  if (!(MODULES_EXPORT in module)) {
+    throw invalid(
+      url.href,
+      "modules-not-a-list",
+      `the module file ${url.href} (modulesFrom) has no modules export: it lists the user modules it imports, as ` +
+        "export const modules = [stats]",
+      { found: "none" },
+    );
+  }
+  return modulesOf(module, url.href, "the module file (modulesFrom)");
+}
+
+/** The file's user modules (see the module comment): its `modules` export, a list, or none; `what` names the file. */
+function modulesOf(module: Record<string, unknown>, file: string, what = "the configuration file"): readonly unknown[] {
   if (!(MODULES_EXPORT in module)) return Object.freeze([]);
   const modules = module[MODULES_EXPORT];
   if (!Array.isArray(modules)) {
@@ -169,8 +203,8 @@ function modulesOf(module: Record<string, unknown>, file: string): readonly unkn
     throw invalid(
       file,
       "modules-not-a-list",
-      `the configuration file ${file} exports modules as ${found}: its modules export is the list of the user modules ` +
-        "it imports, as export const modules = [stats]",
+      `${what} ${file} exports modules as ${found}: its modules export is the list of the user modules it imports, as ` +
+        "export const modules = [stats]",
       { found },
     );
   }
