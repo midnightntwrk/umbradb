@@ -518,6 +518,10 @@ cd examples/stats-module
 curl -i http://127.0.0.1:18080/stats-module/latest     # from a second terminal; ./try.sh sends more
 ```
 
+The first rows take several seconds (about 8 on a Mac 250 ms from the node), most of it waiting for the node: startup
+checks the chain and subscribes to it, then the first fetch reads block 0 (300 KB) and the runtime's metadata; meanwhile
+`/status` shows `starting`, then `syncing` with `cursor` null.
+
 Its routes: `GET /stats-module/latest`, `GET /stats-module/blocks/:height`, `GET /stats-module/recent?limit=N`, and the
 subscription `stats-module-blocks` (`args: { "minTx": n }`). At height 10,000 of preview:
 
