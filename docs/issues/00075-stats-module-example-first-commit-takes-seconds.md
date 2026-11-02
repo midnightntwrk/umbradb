@@ -1,6 +1,9 @@
 # 00075 — The stats-module example takes seconds to commit its first height, with nothing in the log that says why
 
-- **Status:** OPEN
+- **Status:** CLOSED — measured and documented 2026-11-02 in `c0ea6b2` (`start-umbradb` P12.B): 7.2–7.8 s to the first
+  commit on this Mac, about 6.4 s of it the node's answers, the first fetch (3.7–3.9 s) the largest phase; the README's
+  example section now says the first rows take several seconds, waiting for the node, and what `/status` shows
+  meanwhile. The prefetch's share is issue 00076, open.
 - **Area:** examples and documentation (the README's "Example: loading `stats-module`"); the node source's first fetch
   (`src/backbone/core-block-fetch/node-source.ts`)
 - **Severity:** low — a user following the README sees `umbradb run` start, log the admin address and the database,

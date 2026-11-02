@@ -1,6 +1,14 @@
 # 00072 — `umbradb run` logs nothing when SIGTERM or SIGINT stops it
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-11-02 in `9d12a87` (`start-umbradb` P12.B): the engine logs a stop in two lines, so
+  a host's `log` gets them as the command's standard error does — when it begins, `stopping (<cause>): <what it lets
+  finish>` (`cause` `stop()` or `signal: <the abort reason's text>`, the command's reason being `SIGTERM` or `SIGINT`;
+  the height in progress, none, startup, or that processing had already ended), and once processing or startup has
+  ended by it, `processing stopped (<cause>): the last committed height is <c>, where a restart resumes` (or none
+  committed and the height a restart starts at). Tests: `test/cli/run-stop-log.test.ts` (the command through its
+  signal seam, three cases on PostgreSQL 18 and PGlite) and `test/library/stop-log.test.ts` (a host's `stop()` and
+  signal); 8 of 8 failed before (no line), pass after. Eleven tests that counted the log lines after a stop now assert
+  the stop's lines too.
 - **Area:** runner (the process's stop, `src/runner/process.ts`) and the command (`src/cli/run.ts`)
 - **Severity:** low — the stop itself is clean (the height in progress commits or stores nothing, a restart resumes
   from the cursor), but an operator who presses Ctrl-C, or whose orchestrator sends SIGTERM, sees the log end with the

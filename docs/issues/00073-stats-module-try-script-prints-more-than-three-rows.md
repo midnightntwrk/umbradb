@@ -1,6 +1,9 @@
 # 00073 — `examples/stats-module/try.sh subscribe` prints every row that arrives before its close completes
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-11-02 in `97e50c5` (`start-umbradb` P12.B): the client prints nothing once the third
+  row is printed or the 30 s wait gave up, then closes. Test: `test/examples/try-script.test.ts` runs `./try.sh
+  subscribe` against a local `ws` server that sends 12 rows at once — the acknowledgement and rows 1–3 printed; before
+  the fix rows 4–12 were printed too; five runs after.
 - **Area:** examples (`examples/stats-module/try.sh`)
 - **Severity:** low — the script says it prints the subscription's messages "until three rows arrived", and a user
   following the README while the process syncs sees many more: rows keep arriving, and printing, until the WebSocket's
