@@ -8,9 +8,9 @@
   `core-block-commit` wrote its row, the loop's cursor check halts with `unexpected-cursor`. Modules otherwise write only
   their own schemas (DB-6), so this is the one way found for a module to change what the core records of a block. No
   attacker is involved: a module bug (reusing the array as a buffer) is enough.
-- **Effort:** small — give each callback copies of the block's byte arrays (or copy them once per height into the
-  context the callbacks share, keeping the loop's own `run.block` apart), and test that a module's change is seen by
-  nothing else.
+- **Effort:** small — the core reads its own protected copy of the block's byte arrays for its checks and the commit,
+  each callback gets its own copy (or an immutable view), and a test shows that a module's change is seen by nothing
+  else.
 - **GitHub:** NOT IN GITHUB ISSUE
 - **Found:** 2026-11-02, while investigating issue 00060 (`start-umbradb` P11.1) on a Mac with Node.js 24.9.0, by
   scratch runs through the process (`test/runner/process-build.ts`'s build, `InMemoryBlockSource`, head 8) on
@@ -44,8 +44,13 @@ block.parentHash, … })` (`src/runner/loop.ts:1173-1186`): the frozen object ho
 
 ## Suggested fix
 
-Copy the block's `hash` and `parentHash` into the context the callbacks get (one copy per height, shared by the
-callbacks, is enough to keep the loop's `run.block` and what the core commits apart; one per callback also keeps
-modules apart), and test on both backends that a module's change of its bytes changes neither the committed row nor
-another callback's view. The check before the `COMMIT` then no longer sees a module's change; another writer on a
-server database still reaches it (`test/runner/halts.test.ts`).
+The core must read its own protected copy of the block's `hash` and `parentHash` for its own checks and the commit —
+`core-block-commit`'s parent check and rows (`src/backbone/core-block-commit/core-block-commit.ts:118-147`, `:186`,
+which read the context's `b.hash` and `b.parentHash`) and the loop's cursor check before the `COMMIT` — and each
+callback must get its own copy of those bytes (or an immutable view of them), so that no callback can change what
+another callback sees or what the core writes. One copy per height shared by the callbacks is not enough:
+`core-block-commit` is itself one of the height's callbacks and reads the context's bytes, so an earlier callback
+could still change them before the core writes its rows. Test on both backends that a module's change of its bytes,
+in `on-compute` and in `on-db-write`, changes neither the committed rows nor another callback's view. The check before
+the `COMMIT` then no longer sees a module's change; another writer on a server database still reaches it
+(`test/runner/halts.test.ts`).
