@@ -48,30 +48,31 @@ never release them.
 ### Requirement: LG-14 Unused ledger nodes are reclaimed by reference counting
 
 THE system SHALL keep, for every key that stored ledger nodes reference, its **reference count**: the number of times
-the key occurs as a reference (`ArenaKey::Ref`) in the child lists of the stored nodes, found through embedded children,
-each occurrence counted (`core_ledger_state.ref_counts`; a key without a row has 0); and the **queue** of stored nodes
-that have neither a reference nor a root count (`core_ledger_state.unreferenced`). Per block h, `core-ledger-state`
-SHALL compute in `on-compute`, from the tables as committed at h − 1 and the block's flushed batch, and SHALL write in
-`on-db-write`, in the block's transaction, this step:
+the key occurs as a reference (`ArenaKey::Ref`) in the stored child lists of the stored nodes, found through embedded
+children, each occurrence counted (`core_ledger_state.ref_counts`; a key without a row has 0); and the **queue**: the
+stored nodes that have neither a reference nor a root count (`core_ledger_state.unreferenced`). Per block h,
+`core-ledger-state` SHALL compute in `on-compute`, from the tables as committed at h − 1 and the block's flushed batch,
+and SHALL write in `on-db-write`, in the block's transaction, this step:
 (1) the block's **new nodes** are the batch's inserted nodes whose keys were not stored at h − 1, and only they change
-counts: a node inserted again changes none;
+counts: a node inserted again keeps its stored child list and changes none;
 (2) each new node adds 1 to the count of each key its child list references, per occurrence;
-(3) a key queued at h − 1 whose count or root count rises in h leaves the queue and is kept;
-(4) every other key queued at h − 1 is deleted; each deleted node subtracts 1 from the count of each key its stored
-child list references, per occurrence; a key whose count so reaches 0, with no root count after h − 1 and none after h,
-is deleted too, in the same block, until no key is left to delete; no limit bounds the deletions of a block;
-(5) a stored key whose count is 0 after h and whose root count fell to 0 in h is queued, and is deleted no earlier than
-block h + 1.
-IF a count would fall below 0, a new node references a key that was not stored at h − 1 and is not a new node or that
-is deleted in h, a new node ends the block with neither a reference nor a root count, or a write of the step affects
-another number of rows than the step computed, THEN processing SHALL halt with `ledger-refcount-invalid`, naming the
-reason, and nothing of the block SHALL be stored. Nodes the step deletes SHALL be evicted from the worker's caches before
-the block's transaction; IF the ledger package still refuses an eviction after the worker freed every object it can,
-THEN THE system SHALL end the worker thread and start a new one, which loads the state at h − 1 from the database and
-applies block h again, the step included, without halting — only a refusal on that retry SHALL fail the block, with
-`callback-error` (owner decision Q144). WHERE the `core` entry sets `sweep: off` (development only), step (4) SHALL
-delete no node while steps (1)–(3) and (5) still run; the first block with `sweep: on` again SHALL delete the queue by
-step (4).
+(3) a key is **protected** in h, and not deleted in h, when it has a root count after h − 1 or after h, or when a node
+of the batch, new or inserted again, references it in the batch's child list;
+(4) starting from the keys queued at h − 1, every key with count 0 that is not protected is deleted; each deleted node
+subtracts 1 from the count of each key its stored child list references, per occurrence; a key whose count so reaches 0
+and that is not protected is deleted too, in the same block, until no key is left to delete; no limit bounds the
+deletions of a block;
+(5) after the step the queue holds exactly the stored nodes with neither a reference nor a root count, and a key that
+enters it in h is deleted no earlier than block h + 1.
+IF a count would fall below 0, a reference in a new node's child list or a key whose root count rises in h is not a
+stored node after the step, or a write of the step affects another number of rows than the step computed, THEN
+processing SHALL halt with `ledger-refcount-invalid`, naming the reason, and nothing of the block SHALL be stored. Nodes
+the step deletes SHALL be evicted from the worker's caches before the block's transaction; IF the ledger package still
+refuses an eviction after the worker freed every object it can, THEN THE system SHALL end the worker thread and start a
+new one, which loads the state at h − 1 from the database and applies block h again, the step included, without
+halting — only a refusal on that retry SHALL fail the block, with `callback-error` (owner decision Q144). WHERE the
+`core` entry sets `sweep: off` (development only), step (4) SHALL delete no node while steps (1)–(3) and (5) still run;
+the first block with `sweep: on` again SHALL delete the queue by step (4).
 
 #### Scenario: Same deletions on two machines
 - **WHEN** the same chain is synced on PostgreSQL and on PGlite
@@ -93,6 +94,12 @@ step (4).
 #### Scenario: A node queued and referenced again is kept
 - **WHEN** a key is queued at h − 1 and one new node of block h references it once
 - **THEN** it is not deleted at h, it leaves the queue, and its count is 1
+
+#### Scenario: A node only the batch references
+- **WHEN** block h inserts again a node whose stored child list embeds a small node X while its child list in the
+  batch references X by key, so that X is a new node nothing stored references
+- **THEN** X is queued at h, not deleted at h, and deleted at the first later block in which nothing references or
+  persists it and no batch references it
 
 #### Scenario: A reference to a missing node
 - **WHEN** a test package flushes, at block h, a new node that references a key that is not stored and not new

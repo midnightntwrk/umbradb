@@ -39,10 +39,11 @@ The owner decided the design's open points on 2026-11-02 (organizer research `re
 1. **Reclamation by reference counting** (LG-14, rewritten and renamed; `design.md` §3–§5): `core-ledger-state`
    keeps, for every stored node, the number of references to it in the child lists of the stored nodes (with repeats,
    through embedded children). Each block, from the tables as committed at h − 1 and the block's flushed batch, it
-   counts the references of the nodes it really inserts, deletes the nodes queued at h − 1 that nothing referenced or
-   persisted again, cascades the deletion through the children it leaves unreferenced, queues the roots the block
-   released, checks the result, evicts the deleted nodes from the ledger worker and writes everything in the block's
-   one transaction. A released state's nodes are deleted one block after their release, never in it.
+   counts the references of the nodes it really inserts, deletes the nodes queued at h − 1 that nothing references,
+   persists or names in the block's batch, cascades the deletion through the children it leaves unreferenced, queues
+   every stored node left with neither a reference nor a root count (in practice the roots the block released), checks
+   the result, evicts the deleted nodes from the ledger worker and writes everything in the block's one transaction. A
+   released state's nodes are deleted one block after their release, never in it.
 2. **The stored layout** (LG-11; `design.md` §2): two tables, `core_ledger_state.ref_counts` and
    `core_ledger_state.unreferenced`, replace the sweep's `sweep`, `grey` and `marks`. `core-ledger-state`'s migration
    `002` is rewritten to create them (open question O-2 in `design.md` §0): a database written by an earlier build
@@ -50,15 +51,15 @@ The owner decided the design's open points on 2026-11-02 (organizer research `re
 3. **`sweep: off`** (LG-14; the `core` entry's data field of CF-4, gated by the development opt-in of CF-9): no ledger
    node is deleted while it is off; the counts and the queue are still kept, so turning it on again needs no reset.
    The key keeps its name (open question O-1).
-4. **New checks that halt** (`design.md` §3.3, §10): a negative count, a new node that references a key not stored, a
-   new node that nothing references or persists, and a write whose affected rows differ from the computed ones halt
-   the block with one new code, `ledger-refcount-invalid` (open question O-6), with nothing of the block stored. Today
-   the sweep tolerates a reference to a missing node.
+4. **New checks that halt** (`design.md` §3.3, §10): a negative count, a new node's reference or a newly persisted
+   key that is not a stored node, and a write whose affected rows differ from the computed ones halt the block with one
+   new code, `ledger-refcount-invalid` (open question O-6), with nothing of the block stored. Today the sweep tolerates
+   a reference to a missing node.
 5. **The runtime mark-and-sweep is removed** (Q-E; `design.md` §11): `src/backbone/core-ledger-state/sweep.ts`, its
    statements in `sql.ts`, `sweepReset`, the grey picker seam and `SWEEP_BUDGET`. The tests of the runtime sweep go
-   with it; the sweep's reference model stays in the tests as the differential oracle and is retired by a close-out
-   task once the local preprod criterion passes.
-6. **Acceptance:** criteria R1 … R25 (`acceptance.md`); `core-arch`'s A104, A105, A134 and A160 rewritten. A105's
+   with it; the sweep's reference model stays in the tests as the differential oracle and is retired, with the two
+   criteria that use it, by a close-out task once the local preprod criteria pass.
+6. **Acceptance:** criteria R1 … R26 (`acceptance.md`); `core-arch`'s A104, A105, A134 and A160 rewritten. A105's
    required test id `ledger.sweep-cross-backend-identical` is replaced by `ledger.refcount-cross-backend-identical`.
 
 ## Non-goals (what this change does NOT cover)
@@ -66,8 +67,9 @@ The owner decided the design's open points on 2026-11-02 (organizer research `re
 - **No database triggers** compute or apply counts (Q-A). Only `core-ledger-state` writes its tables, as today.
 - **No in-place upgrade** of a database written by an earlier build, no build of counts from an existing node set, no
   restore of a backup taken by an earlier build (Q-B).
-- **No cap and no spreading** of a block's deletions (Q-C). The block after a v8 → v9 conversion deletes the whole
-  v8-only state at once; this change measures it (R22) and does not bound it. Spreading it would be a later decision.
+- **No cap and no spreading** of a block's deletions (Q-C). The block after the v8 state's release at a v8 → v9
+  conversion deletes every node of it that no root reaches, at once; this change measures it (R21) and checks it
+  (R22), and does not bound it. Spreading it would be a later decision.
 - **No change to the storage format** the ledger package writes: `layout-v2` keys, child lists and root counts stay
   as the node has them; the package's flush, the node-store bridge and the eviction path (LG-14's restart after a
   refused eviction, owner decision Q144 B) are unchanged.

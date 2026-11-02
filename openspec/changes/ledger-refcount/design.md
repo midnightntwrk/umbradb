@@ -1,7 +1,7 @@
 # Design — LEDGER-REFCOUNT: stored ledger nodes reclaimed by reference counting
 
 Section numbers of `core-arch` are cited as `core-arch design §n`. Requirement ids are `core-arch`'s (`LG-*`, `CF-*`,
-`DB-*`, `DT-*`, `BK-*`); criteria are this change's `R1` … `R26` and the rewritten `core-arch` criteria
+`DB-*`, `DT-*`, `BK-*`, `RN-*`); criteria are this change's `R1` … `R26` and the rewritten `core-arch` criteria
 (`acceptance.md`). `organizer:` names a path under `/Users/edwardalvarado/todo/Umbra` (the owner's workspace, not in
 this repository); `upstream:` names the `midnight-ledger` checkout at tag `ledger-9.1.0.0-rc.5`
 (`67f9f97246339539af0091c4d8c6bc5ab236a191`, the commit `vendor/ledger/v9/upstream.json` builds from).
@@ -23,10 +23,10 @@ Requirements`, FROM/TO, as the repository's OpenSpec skill describes it,
 | # | Decision | What it fixes here |
 |---|---|---|
 | Q-A | Counts are computed in the process, not by database triggers | §3: `core-ledger-state` computes in `on-compute`, writes in `on-db-write`; no trigger is added |
-| Q-B | No existing database is upgraded ("we are in development, there are no databases") | §2: no build of counts from an existing node set; an earlier build's database is refused |
-| Q-C | No cap on a block's deletions | §3.2 step 5 runs to the end; §9 the F + 1 spike |
-| Q-D | The cascade runs inside the block | §3.2 step 5; §4.3 equality with a one-block sweep cycle |
-| Q-E | The runtime sweep is removed; its model stays in the tests as the oracle until the local preprod run passes | §11 |
+| Q-B | No existing database is upgraded ("we are in development, there are no databases") | §2.3: no build of counts from an existing node set; an earlier build's database is refused |
+| Q-C | No cap on a block's deletions | §3.2 step 4 runs to the end; §9.2 the conversion spike |
+| Q-D | The cascade runs inside the block | §3.2 step 4; §4.4 equality with a one-block sweep cycle |
+| Q-E | The runtime sweep is removed; its model stays in the tests as the oracle until the local preprod run passes | §11: the sweep's model and the two criteria that use it (R2, R4) retire together at close-out |
 | Q-F | The change lands in PR #16, branch `00028-core-arch` | this section |
 
 **Open questions** (organizer `spec/00034-ledger-node-refcount.md`; each written for the owner there). This design
@@ -36,7 +36,7 @@ applies the recommended answer of each; an answer other than the recommended one
 |---|---|---|---|
 | O-1 | The `core` entry's `sweep` key: keep, rename, drop? | Keep `sweep: on \| off`; `off` deletes no node, counts kept | A rename needs `configuration` deltas restating `start-umbradb`'s CF-4 and `core-arch`'s CF-9; §6, R10, R26 |
 | O-2 | How the schema change is expressed when no database exists | Migration `002` rewritten in place; an earlier build's database is refused with `migration-checksum-changed` | §2.3, R16, the proposal's Impact |
-| O-3 | The v8 → v9 spike: measure before approval, or in the build's first phase? | Measured in the first phase (R22); a large figure raises a separate decision | §9.2, §13 |
+| O-3 | The conversion spike: measure before approval, or in the build's first phase? | Measured in the first phase (R21); a large figure raises a separate decision | §9.2, §13 |
 | O-4 | The local preprod performance target | ≥ 80 % of the no-reclamation reference's rate in every 10,000-height band from 10,000 to 50,000 | §12.3, R23 |
 | O-5 | The node's runtime-version call made once per block: in scope? | Not in scope: a separate work item | the proposal's Non-goals |
 | O-6 | The code of the new halts | One halt code, `ledger-refcount-invalid`, with `details.reason` | §10, R11, R19 |
@@ -46,14 +46,17 @@ applies the recommended answer of each; an answer other than the recommended one
 
 | Term | Meaning |
 |---|---|
-| node, key | A row of `core_ledger_state.nodes`: its key (32 bytes, the hash of its payload and its children's keys), `data`, and `children`, the ledger's serialization of its child list (LG-11). |
+| node, key | A row of `core_ledger_state.nodes`: its key (32 bytes, the hash of its payload and its children's hashes), `data`, and `children`, the ledger's serialization of its child list (LG-11). |
 | child list, reference, embedded child | `children` holds `ArenaKey::Ref` children (a 32-byte key of another node) and `ArenaKey::Direct` children (a small node embedded inline, with its own child list, recursively). A **reference** is one occurrence of a key as a `Ref` child, found through embedded children (`src/ledger/node-refs.ts` `childRefKeys`). A key listed twice in one child list is two references. |
+| form | One child list a key can have. A child's hash is the same embedded or referenced (`upstream:storage-core/src/arena.rs:2847-2880`), so one key can have two forms (§4.6). The **stored form** is the one in `nodes`; the **batch form** is the one in the block's batch. |
 | `S_h` | The keys of `nodes` after block h. |
-| `refs_h(k)` | The number of references to k in the child lists of the nodes of `S_h`. |
+| `refs_h(k)` | The number of references to k in the stored forms of the nodes of `S_h`. |
 | `roots_h(k)` | k's root count after block h (`root_counts`; 0 without a row). A **root** after h is a key with `roots_h(k) > 0`. |
-| `R_h` | The keys of stored nodes reachable from the roots after h by following references (a root without a stored node reaches nothing). `R_{−1}` is empty. |
-| batch `B` | What the ledger worker flushed for block h (`src/ledger/types.ts:54-62`): `B.inserts`, nodes with their child lists, and `B.rootCounts`, one netted signed change per key. |
-| new nodes `N` | The nodes of `B.inserts` whose key is not in `S_{h−1}`. A node of `B.inserts` already in `S_{h−1}` is a **re-insert**: the package writes content again after its memory dropped the stored copy (`layout-v2` treats every creation as new, `upstream:storage-core/src/backend.rs:532-534`), and on a restarted worker. |
+| `R_h` | The keys reachable from the roots after h through the stored forms of `S_h`. `R_{−1}` is empty. |
+| batch `B` | What the ledger worker flushed for block h (`src/ledger/types.ts:54-62`): `B.inserts`, nodes in their batch forms, and `B.rootCounts`, one netted signed change per key. |
+| new nodes `N` | The nodes of `B.inserts` whose key is not in `S_{h−1}`. A node of `B.inserts` already in `S_{h−1}` is **inserted again**: the package writes content again after its memory dropped the stored copy (`layout-v2` treats every creation as new, `upstream:storage-core/src/backend.rs:532-534`), and on a restarted worker. |
+| batch references | Every reference in the batch form of every node of `B.inserts`, new or inserted again. |
+| protected in h | A key with a root count after h − 1 or after h, or among the batch references. |
 | queue `Q_h` | The keys of `unreferenced` after block h. |
 | release | A root count lowered by the block's batch: block h releases the states leaving the retention window (LG-12). |
 
@@ -81,13 +84,18 @@ deleted or kept wrongly. Their column types and keys are ones DT-6's startup che
 
 After every committed block h with `core-ledger-state` active:
 
-- **I1 (closed):** every reference in a child list of `S_h` is a key of `S_h`.
-- **I2 (counts):** `ref_counts` holds exactly the keys with `refs_h(k) > 0`, each with `refs_h(k)`; every such key is
-  in `S_h` (by I1).
+- **I1 (closed):** every reference in a stored form of `S_h` is a key of `S_h`.
+- **I2 (counts):** `ref_counts` holds exactly the keys with `refs_h(k) > 0`, each with `refs_h(k)`.
 - **I3 (queue):** `Q_h = { k ∈ S_h : refs_h(k) = 0 and roots_h(k) = 0 }`.
-- **I4 (stored set):** `S_h ⊇ R_{h−1} ∪ R_h`, with equality after every block whose `sweep` is on.
+- **I4 (roots resolve):** every key with `roots_h(k) > 0` is in `S_h`. With I1, every retained state and every
+  persisted contract and zswap state loads from the database with all it reaches.
+- **I5 (nothing kept twice):** with `sweep` on at h, every key of `Q_{h−1}` that is not protected in h and gains no
+  reference in h is gone after h, and so is every key that only such keys reached.
+- **I6 (exact set):** with `sweep` on at h, `R_{h−1} ⊆ S_h`; and when no key is kept in h only because it is a batch
+  reference and no new node of h ends unreferenced, `S_h = R_{h−1} ∪ R_h` (§4.3, §4.6).
 
-I1–I3 hold whatever `sweep` is; I4's equality needs it on at h only (§4.2).
+By I1 and I3, in the acyclic graph every stored key is reached from a root after h or from a queued key, so the queue
+names all the garbage there is.
 
 ### 2.3 Migration (O-2)
 
@@ -124,31 +132,37 @@ Inputs: on-compute's read at h − 1, giving `S_{h−1}` (by key), `refs_{h−1}
 `Δ(k)` is the netted change of k's reference count in h, 0 unless set below; `roots'(k) = roots_{h−1}(k) + δ(k)`,
 where `δ(k)` is k's change in `B.rootCounts` (0 if absent).
 
-1. **New nodes.** `N` = the nodes of `B.inserts` whose key is not in `S_{h−1}`. Only they change counts.
-2. **Increments.** For each node of `N`, for each reference k in its child list: `Δ(k) += 1`.
-3. **Kept from the queue.** `K = { q ∈ Q_{h−1} : Δ(q) > 0 or roots'(q) > 0 }`: a queued key that gained a reference
-   from a new node, or a root count, in h leaves the queue and is not deleted.
-4. **Deletions, when `on`.** `D` starts as `Q_{h−1} \ K`. Repeat: for each node added to `D` in the last round, for
-   each reference k in its child list as stored at h − 1, `Δ(k) −= 1`; then add to `D` every key k not yet in it with
-   `refs_{h−1}(k) + Δ(k) = 0`, `roots_{h−1}(k) = 0` and `roots'(k) = 0` — until a round adds none. When not `on`,
-   `D` is empty. No limit bounds `D` (Q-C); it holds a released state's whole chain of newly unreferenced nodes (Q-D).
+1. **New nodes.** `N` = the nodes of `B.inserts` whose key is not in `S_{h−1}`. Only they change counts; a node
+   inserted again keeps its stored form (`ON CONFLICT DO NOTHING`) and changes none.
+2. **Increments.** For each node of `N`, for each reference k in its form: `Δ(k) += 1`.
+3. **Protection.** A key protected in h (§1: a root count after h − 1 or after h, or a batch reference) is not
+   deleted in h.
+4. **Deletions, when `on`.** Starting from the keys of `Q_{h−1}`, repeat: every candidate k not yet deleted, not
+   protected, with `refs_{h−1}(k) + Δ(k) = 0`, is deleted; for each node deleted in that round, for each reference k in
+   its stored form, `Δ(k) −= 1` and k becomes a candidate — until a round deletes none. `D` is the set deleted. When not
+   `on`, `D` is empty. No limit bounds `D` (Q-C); it holds a released state's whole chain of newly unreferenced nodes
+   (Q-D).
 5. **Counts after h.** `refs_h(k) = refs_{h−1}(k) + Δ(k)` for every key with `Δ(k) ≠ 0`.
-6. **Queue after h.** `Q_h = (Q_{h−1} \ K \ D) ∪ E`, where `E` = the keys k of `(S_{h−1} \ D) ∪ keys(N)` with
-   `refs_h(k) = 0`, `roots_{h−1}(k) > 0` and `roots'(k) = 0`: a root released in h that nothing references. When `on`,
-   `Q_{h−1} \ K \ D` is empty. A key of `E` is deleted no earlier than block h + 1.
+6. **Queue after h.** `Q_h = { k ∈ S_h : refs_h(k) = 0 and roots'(k) = 0 }`, where `S_h = (S_{h−1} \ D) ∪ keys(N)`.
+   It is computed over the keys whose membership can change in h — `Q_{h−1}`, the keys of `N`, the keys with
+   `Δ(k) ≠ 0`, the keys of `B.rootCounts` — since any other stored key keeps its count and its root count. A key that
+   enters the queue in h is deleted no earlier than block h + 1. It holds, in practice, the roots the block released;
+   also a new node that nothing references (§4.6) and a key kept only as a batch reference.
 7. **Checks** (§3.3), before eviction.
 8. **Eviction.** The worker evicts `D` (`LedgerHost.evict`), in `on-compute`, before the block's transaction, as today
    (`core-ledger-state.ts:504`). A refusal after the worker freed every object it can restarts the worker and computes
    the block again, steps 1–8 included (`computeBlock`, LG-14, Q144 B, unchanged).
 9. **Writes**, in `on-db-write` after `writeBlock`'s statements: the netted `Δ` of every key with `Δ(k) ≠ 0` merged
    into `ref_counts` (the shape of `root_counts`' merge, `sql.ts:138-142`: deltas added, a count reaching 0 deleted);
-   `Q_{h−1} ∩ (K ∪ D)` deleted from `unreferenced`; `E` inserted; `D` deleted from `nodes`. Each statement over a key
-   list is chunked by `NODES_PER_STATEMENT` (1,000, `core-ledger-state.ts:146`), as the node inserts are. The result
-   does not depend on the statements' order or chunking.
+   `Q_{h−1} \ Q_h` deleted from `unreferenced` and `Q_h \ Q_{h−1}` inserted; `D` deleted from `nodes`. Each statement
+   over a key list is chunked by `NODES_PER_STATEMENT` (1,000, `core-ledger-state.ts:146`), as the node inserts are. The
+   result does not depend on the statements' order or chunking.
 
-Why rule 4's root conditions: a key whose count reaches 0 but had a root count at h − 1 is in `R_{h−1}`, still held by
-the worker during h (`docs/issues/00019`); if its root count also fell to 0 in h, rule 6 queues it. A key with a root
-count after h is in `R_h`.
+Why the root conditions of rule 3: a key whose count reaches 0 but had a root count at h − 1 is in `R_{h−1}`, still
+held by the worker during h (`docs/issues/00019`); if its root count also fell to 0 in h, rule 6 queues it and it is
+deleted at h + 1 at the earliest. A key with a root count after h is in `R_h`. Why batch references: a node the batch
+inserts again keeps its stored form, so a reference only its batch form holds is not counted (§4.6); the sweep marks
+through batch forms the same way (`sweep.ts:218`).
 
 ### 3.3 Checks
 
@@ -157,98 +171,117 @@ Each check halts processing at h with `ledger-refcount-invalid` (§10) and nothi
 | `details.reason` | Fails when | Where |
 |---|---|---|
 | `negative-count` | some `refs_{h−1}(k) + Δ(k) < 0` | `on-compute`, before eviction |
-| `missing-reference` | a node of `N` references a key that is neither in `S_{h−1}` nor a key of `N`, or is in `D` | `on-compute`, before eviction |
-| `unreferenced-new-node` | a node of `N` ends with `refs_h = 0` and `roots' = 0` | `on-compute`, before eviction |
-| `row-count-mismatch` | a write affects another number of rows than computed: the node inserts (summed over chunks) ≠ `|N|`; the `ref_counts` merge ≠ the number of keys with `Δ ≠ 0` and `refs_h > 0`; the `unreferenced` delete ≠ `|Q_{h−1} ∩ (K ∪ D)|`; its insert ≠ `|E|`; the node delete ≠ `|D|` | `on-db-write`; the transaction rolls back |
+| `missing-reference` | a reference in a new node's form, or a key whose root count rises in h, is not in `S_h` (neither in `S_{h−1} \ D` nor a key of `N`) | `on-compute`, before eviction |
+| `row-count-mismatch` | a write affects another number of rows than computed: the node inserts (summed over chunks) ≠ `|N|`; the `ref_counts` merge ≠ the number of keys with `Δ ≠ 0` and `refs_h > 0`; the `unreferenced` delete ≠ `|Q_{h−1} \ Q_h|`; its insert ≠ `|Q_h \ Q_{h−1}|`; the node delete ≠ `|D|` | `on-db-write`; the transaction rolls back |
 
-The first three need reads the step makes anyway (§3.4). `missing-reference` is new strictness: today the sweep marks
-a missing key and adds nothing (LG-14 step 3). The research found no reference to a missing node in the preprod
-snapshot at 48,665 (organizer `research/00034-ledger-node-refcount-data/analyze.out.json`: `missingChildRefs` 0).
-A root count on a key with no stored node is tolerated, as today (that snapshot: `rootsWithoutNode` 0): it reaches
-nothing (§1, `R_h`).
+`missing-reference` keeps I1 and I4: it is new strictness, since today the sweep marks a missing key and adds nothing
+(LG-14 step 3), and a root without a node only fails later, when its state is loaded. The preprod snapshot at 48,665
+has no reference to a missing node and no root without a node (organizer
+`research/00034-ledger-node-refcount-data/analyze.out.json`: `missingChildRefs` 0, `rootsWithoutNode` 0). A new node
+that ends the block unreferenced is not a check: it is queued (rule 6; §4.6).
 
 ### 3.4 Reads
 
 All through on-compute's read at h − 1, each an indexed lookup by key list (`= ANY($1::bytea[])`), chunked by 1,000
-keys: which keys of `B.inserts`, of the references of `N`, and of the keys whose root count falls in h are stored;
-`unreferenced` in full (on preprod 1–2 rows); `root_counts` and `ref_counts` of the keys of `Q_{h−1}`, of
-`B.rootCounts` and of each round's decremented keys; and, per round of step 4, the child lists of the nodes the round
-adds to `D`. A round's child lists are parsed to references (`childRefKeys`) and their bytes dropped before the next
-chunk, so memory follows the number of references, not the child lists' size. The number of rounds is at most the
-depth of the deleted chain (5 on the preprod snapshot).
+keys: which keys of `B.inserts`, of the references of `N`, and of `B.rootCounts` are stored; `unreferenced` in full (on
+preprod 1–2 rows); `root_counts` and `ref_counts` of the keys of `Q_{h−1}`, of `B.rootCounts` and of each round's
+candidates; and, per round of rule 4, the stored forms of the nodes the round deletes. The batch forms of the nodes
+inserted again are parsed in memory for the batch references. A round's stored forms are parsed to references
+(`childRefKeys`) and their bytes dropped before the next chunk, so memory follows the number of references, not the
+child lists' size. The number of rounds is at most the depth of the deleted chain (5 on the preprod snapshot).
 
 ## 4. Properties
 
 ### 4.1 Safety: no deleted node is live
 
-Every key of `D` is in neither `R_{h−1}` nor `R_h`. By induction on the rounds of step 4:
+Every key of `D` is in neither `R_{h−1}` nor `R_h`, is no batch reference, and is no root after h − 1 or after h. By
+induction on the rounds of rule 4: a deleted key d is not protected, and `refs_h(d) = 0`, which counts every reference
+in the stored forms of `S_{h−1}` minus the deleted nodes' plus the new nodes'. So every node of `S_{h−1}` that
+referenced d was deleted in an earlier round (in neither set, by induction), no new node references d, and no node of
+the batch references d. Hence no state reaches d through stored forms, nor through the batch's forms: neither the state
+the worker holds at h − 1 nor the state it builds at h, which is the condition `docs/issues/00019` sets (the eviction
+does not refuse a live state's root, so this is kept by the rule, not by the refusal). An object outside those states (a
+kept parse, or an in-memory node whose form differs from both, §4.6) can still hold d: the eviction is then refused, and
+the existing free-and-retry and restart path reloads the state from the database's stored forms (§5).
 
-- A key q of `Q_{h−1} \ K` has `refs_{h−1}(q) = 0` and `roots_{h−1}(q) = 0` (I3), so no stored node references it
-  and it is not a root at h − 1: q ∉ `R_{h−1}`. It gained no reference from `N` and has no root count after h (not in
-  `K`), and no other node gains a reference in h (only `N` adds child lists): q ∉ `R_h`.
-- A key k added in a later round had every stored parent deleted in earlier rounds (its count reached 0 counting
-  every reference of `S_{h−1}` and of `N`), each in neither set by induction, and k is a root neither at h − 1 nor
-  after h: so k is in neither set.
+### 4.2 No leak (I5)
 
-So neither the state the worker holds at h − 1 nor the state it builds at h reaches a deleted node, which is the
-condition `docs/issues/00019` sets (the eviction does not refuse a live state's root, so this is kept by the rule, not
-by the refusal). Only an object outside the held states (a kept parse) can hold one; the existing free-and-retry and
-restart path handles it (§5).
+With `on`, every key of `Q_{h−1}` that is not protected and gains no reference has `refs = 0` and is deleted by rule 4's
+first round; a key every stored parent of which is deleted reaches `refs = 0` and is deleted in a later round unless
+protected. Keys reached only through such keys are deleted round by round down the chain, which ends since the graph
+is acyclic (a key is the hash of its children's hashes, so a cycle needs a hash fixed point; the preprod snapshot has
+none). This holds also at the first block with `sweep` on after blocks with it off: I3 holds throughout, so `Q_{h−1}`
+holds every parentless non-root node those blocks left.
 
-### 4.2 No leak
+### 4.3 The exact set (I6)
 
-After a block h with `on`, `S_h = R_{h−1} ∪ R_h` (I4's equality), given I1–I3 after h − 1 and `S_{h−1} ⊇ R_{h−1}`:
-let `G = (S_{h−1} ∪ keys(N)) \ (R_{h−1} ∪ R_h)`. Every node of `N` is in `R_h` (§4.4), so `G ⊆ S_{h−1}`. Every stored
-parent of a key of `G` is in `G` (a parent in `R_{h−1} ∪ R_h` would put the child there). The graph is acyclic (a key
-is the hash of its children's keys, so a cycle needs a hash fixed point; none in the preprod snapshot), so `G`'s keys
-with no parent in `G` have no stored parent at all and no root at h − 1: they are in `Q_{h−1}` (I3) and not in `K`
-(gaining a reference or a root would put them in `R_h`). Step 4 deletes them, and then, round by round, every key of
-`G` whose parents are all deleted. With §4.1, `D = G`. This holds also at the first block with `sweep` on after
-blocks with it off: I3 holds throughout, so `Q_{h−1}` holds every parentless non-root node left by those blocks.
+`R_{h−1} ⊆ S_h` by §4.1. Let `G = S_h \ (R_{h−1} ∪ R_h)`. A key of `G` with no parent in `S_h` has `refs_h = 0` and no
+root after h, so it is in `Q_h`; it is in neither `R_{h−1}` nor `R_h`, so it was not a queued key of `Q_{h−1}` kept by
+a root, and not a candidate kept by a root count at h − 1: it is a new node that ends unreferenced, or a key kept only
+as a batch reference. When neither happens in h, `G` has no parentless key, and since every parent of a key of `G` is in
+`G` and the graph is acyclic, `G` is empty: `S_h = R_{h−1} ∪ R_h`.
 
-### 4.3 Equal to the sweep where its cycle fits one block
+### 4.4 Equal to the sweep where its cycle fits one block
 
 LG-14's sweep, when a whole cycle starts and ends in block h, marks from the root counts at h − 1 and the keys whose
-count rose in h (`sweep.ts:197-208`) through the stored nodes and the batch's inserts, and deletes every unmarked node:
-it keeps `R_{h−1} ∪ R_h` (the roots after h are among those two sets, and every key that rose has a positive count
-after h). Both implementations start empty at genesis, so they store the same nodes at every height up to the first
-block whose cycle does not fit. On preprod every block so far ran a whole cycle in-block (`sweep.cycle` =
-height + 1, cycle 46,739 when the run stopped near 46,738: organizer plan P13.3 and questions Q-37). Where a cycle spans blocks, the sweep deletes a node only if
-nothing reachable from the roots at the cycle's start or from any key that rose during it reaches it, a superset of
-`R_{h−1} ∪ R_h`: the counted set is a subset of the swept set. *Derived here; R2 and R4 test both claims.*
+count rose in h (`sweep.ts:197-208`), following the batch form of a node the batch inserts and the stored form
+otherwise (`sweep.ts:218`), and deletes every unmarked node. Counting keeps the same set at h, provided every node of
+the batch is reachable from a key whose root count rose (the flush, §4.5): a key the sweep marks through stored forms is
+kept by its counted references, one it marks through a batch form is a batch reference (rule 3), and a node that only a
+batch form references is new and queued, not deleted. Both start empty at genesis, so they store the same nodes at every
+height up to the first block whose cycle does not fit. On preprod every block so far ran a whole cycle in-block
+(`sweep.cycle` = height + 1, cycle 46,739 when the run stopped near 46,738: organizer plan P13.3 and questions Q-37).
+Where a cycle spans blocks, the sweep deletes a node only if nothing reachable from the roots at the cycle's start or
+from any key that rose during it reaches it, a superset of what counting keeps: the counted set is a subset of the swept
+set. *Derived here; R2 and R4 test both claims.*
 
 When the sweep's model is fed the counting run's batches (R4), the comparison is valid in both regimes: the sweep model
 deletes a node only after counting deleted it (subset), so the counting run's package, which evicted it, writes it
 again whenever a later state needs it, and the sweep model sees that insert.
 
-### 4.4 New nodes are reachable
+### 4.5 The flush
 
-`flushNodes` takes only nodes reachable from a key whose root count rose, through other taken nodes (patch
-`vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch:143-160`, export patch `0003-…:393-399`), so
-every node of `N` should be in `R_h`. The step checks it without relying on it: by I1 no node of `S_{h−1}` references a
-key outside `S_{h−1}`, so a node of `N` is referenced only by other nodes of `N`; in the acyclic graph some node of `N`
-has no parent in `N`, and `unreferenced-new-node` requires it to be a root after h; by induction every node of `N` is in
-`R_h`.
+`flushNodes` takes only nodes reachable from a key whose root count rose, through other taken nodes, and stops at nodes
+the package believes stored (patch `vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch:143-160`,
+export patch `0003-…:386-423`; the same patches exist for `v8` and `v9-rc3`). So every new node is expected to be
+reachable after h, and its references to be stored (`missing-reference` checks the latter). A new node that nothing
+references after all is queued and deleted at h + 1 unless referenced by then; R21 counts such nodes on the tapes.
+
+### 4.6 Two forms of one key
+
+The ledger embeds a child exactly when it is small (`upstream:storage-core/src/storable.rs:139-159`, `child_from`),
+and rebuilds a loaded node's children with the same rule (`upstream:storage-core/src/arena.rs:875-896`), so a node the
+ledger builds has one form per content. `Sp::into_tracked` (`arena.rs:1329-1352`) gives a small node a by-reference
+form with the same hash, and upstream's own test puts both forms of one hash in one parent (`arena.rs:2847-2880`). In
+the packages UmbraDB vendors, its only caller outside tests is UmbraDB's patch `hold_as_node`, which tracks the
+persisted state, contract-state and zswap-state roots (`vendor/ledger/v9/patches/0003-…:333-334, 383, 483, 503`; the
+same lines in `v9-rc3`'s `0003`, and `v8`'s `0003:299-300, 349, 449, 469`); those are roots, held until the next flush,
+not children of another node. So a node inserted again in another form than its stored one is not expected. If it
+happens, the stored form stays, a key only the batch form references is protected in that block (rule 3) and queued,
+and a node the batch form references by key while the stored form embeds it is new and queued: both are deleted at the
+first later block in which nothing protects them, as the sweep's next cycle would delete them. R21 counts such forms on
+the tapes. *The `v8` package's `storage-core` (`ledger-8.1.2`) was not read here (unconfirmed); the rules do not rely
+on the form being unique, only the I6 equality does.*
 
 ## 5. Eviction, the one-block lag and the worker restart
 
-Unchanged from LG-14 and `core-arch` design §5.4, with the lag now set by rules 4 and 6 instead of the sweep's "roots as
-committed at h − 1". With `retainStates` 0, block h releases the state after h − 1 (`engine.ts:554`), which the worker
-holds until `commit(h)`: its root goes to `E` at h (when unreferenced) and its nodes are deleted at h + 1, after the
-worker dropped that state. A node forgotten by the package but still stored is merely written again (a re-insert, no
-count change); a node deleted but not forgotten would be referenced by a later new node without being written — the
-`missing-reference` check halts that block instead of storing a dangling reference. A restart after a refused eviction
-(Q144 B) recomputes the step from the same read at h − 1 and the new thread's batch, whose extra re-inserts change no
-count (rule 1), so it gives the same `D`, counts and queue.
+Unchanged from LG-14 and `core-arch` design §5.4, with the lag now set by rule 3's root conditions and rule 6 instead
+of the sweep's "roots as committed at h − 1". With `retainStates` 0, block h releases the state after h − 1
+(`engine.ts:554`), which the worker holds until `commit(h)`: its root is queued at h (when unreferenced) and its nodes
+are deleted at h + 1, after the worker dropped that state. A node forgotten by the package but still stored is merely
+written again (no count change); a node deleted but not forgotten would be referenced by a later new node without being
+written — `missing-reference` halts that block instead of storing a dangling reference. A restart after a refused
+eviction (Q144 B) recomputes the step from the same read at h − 1 and the new thread's batch: its extra nodes inserted
+again change no count, and the new thread holds the stored forms, so an in-memory form that held a deleted node is gone.
 
 ## 6. `sweep: off` (O-1)
 
 The key keeps its name, values and kind (CF-4: data field, `on` or `off`, default `on`) and stays gated by the
 development opt-in (CF-9; `src/config/history.ts:618-636`, feature `sweep-off`). While it is off at h, rules 1–3 and
-5–7 run, step 4's `D` is empty and nothing is evicted: no node is deleted, the counts stay exact and the queue keeps
-every parentless non-root node (I1–I3). The first block with it on again deletes the whole queue and its cascade by
-rule 4, after which I4's equality holds again (§4.2). Unlike the sweep (`sweepReset`, `sweep.ts:281-294`), no reset
-is written when it is turned off or on.
+5–7 run, rule 4's `D` is empty and nothing is evicted: no node is deleted, the counts stay exact and the queue keeps
+every parentless non-root node (I1–I4). The first block with it on again deletes the whole queue that is not protected,
+and its cascade, by rule 4 (§4.2). Unlike the sweep (`sweepReset`, `sweep.ts:281-294`), no reset is written when it is
+turned off or on.
 
 ## 7. Crash safety and restarts
 
@@ -272,7 +305,7 @@ digests compare each key's row before and after the block (DT-4), so netting is 
 
 | | The sweep today (3,568 nodes, a whole cycle per block) | Reference counting |
 |---|---|---|
-| Child lists read and parsed | every stored node's, ≈ 7.7 MB (≈ 15.5 MB of hex), twice | the deleted nodes', ≈ 10 (≈ 22 KB); `N`'s are in the batch |
+| Child lists read and parsed | every stored node's, ≈ 7.7 MB (≈ 15.5 MB of hex), twice | the deleted nodes', ≈ 10 (≈ 22 KB); the batch's are in memory |
 | Lookups | a flag per marked key, a scan of every node | ≈ 9 existence checks; the counts of the ≈ 10–20 keys whose count falls; the queue (1–2 rows) |
 | Count changes | — | ≈ 544 increments and ≈ 544 decrements, netting to ≈ 18 keys |
 | Rows written | the batch, ≈ 9 node deletes, the sweep row | the batch, ≈ 10 node deletes, ≈ 18 `ref_counts` rows, ≈ 2 queue rows: ≈ 40 |
@@ -282,23 +315,26 @@ Over a whole sync every node is deleted at most once per insertion, so the delet
 work. The ≈ 18 is an estimate (organizer `research/00034-ledger-node-refcount-data/netting.out.txt`); R21 replaces it
 with measured figures.
 
-### 9.2 The block after a ledger conversion (O-3)
+### 9.2 The block after a ledger conversion's release (O-3)
 
-At the v8 → v9 conversion block F the batch releases the v8 state (`engine.ts:40-45`), so F's `E` holds its root and
-F + 1 deletes every v8 node the v9 state does not share, in one block, with no cap (Q-C): the deleted set, the child
-lists read round by round, the deletes captured for the digests, and the eviction. No real network has crossed a v8 →
-v9 conversion yet (preprod's two runtime upgrades stay on v8; mainnet's pin at 1,774,492 is runtime 1.0, also v8).
-R22 measures the spike on the devnet v8 → v9 tape in the build's first phase; if it is large, spreading it is a
-separate decision (it changes which block deletes which node).
+At the v8 → v9 conversion block F the worker converts the state; the v8 state after F − 1 is released by the block
+that takes it out of the retention window (F with `retainStates` 0; F + R with `retainStates` R, `engine.ts:554`). The
+block after that release deletes every node of that v8 state that no root then reaches — the v8 contract and
+zswap-state keys persisted under LG-13 stay roots, so their nodes stay — in one block, with no cap (Q-C): the deleted
+set, the stored forms read round by round, the deletes captured for the digests, and the eviction. No real network has
+crossed a v8 → v9 conversion yet (preprod's two runtime upgrades stay on v8; mainnet's boundaries at 1,774,492 and
+2,738,211 stay on v8, `src/ledger/networks.json`). R21 measures the spike on the devnet v8 → v9 tape (F = 103,
+`test/backbone/contract-data.test.ts:209`) in the build's first phase, and R22 checks the reclamation across it; if the
+spike is large, spreading it is a separate decision (it changes which block deletes which node).
 
 ## 10. The halt code (O-6)
 
 `ledger-refcount-invalid` joins `ERROR_CODES` (`src/deterministic-postgresql/errors.ts`) and `HALT_CODES`
 (`src/runner/failures.ts:104-122`), so a failure with it halts with that code (`failures.ts` rule 1), and `core-arch`
 design §11's list of halts. Its details: `reason` (§3.3), `height`, and per reason the key as `0x` hex
-(`negative-count`, `missing-reference`, `unreferenced-new-node`) or the statement's name with the expected and actual
-row counts (`row-count-mismatch`). It carries no configuration value. The code registry test
-(`test/runner/code-registry.ts`) names the test that triggers it (A87).
+(`negative-count`, `missing-reference`) or the statement's name with the expected and actual row counts
+(`row-count-mismatch`). It carries no configuration value. The code registry test (`test/runner/code-registry.ts`)
+names the test that triggers it (A87).
 
 ## 11. What is removed, rewritten and kept
 
@@ -321,13 +357,13 @@ row counts (`row-count-mismatch`). It carries no configuration value. The code r
 | `test/backbone/ledger-sweep.test.ts`, `ledger-sweep-tables.test.ts` | Removed with `sweep.ts` (tests of the runtime sweep's step and tables) |
 | `test/backbone/ledger-sweep-process.test.ts` (A105's required test) | Replaced by `ledger-refcount-process.test.ts` carrying `[[ledger.refcount-cross-backend-identical]]` |
 | `test/backbone/ledger-sweep.negative-control.test.ts` | Replaced by the counting negative controls (R12) |
-| `test/backbone/sweep-model.ts` | Kept as R4's oracle until the close-out task that runs after R23 and R24 pass, which deletes it with R4's test (Q-E) |
-| `test/backbone/sweep-tapes.ts` | Kept with `sweep-model.ts`, retired with it |
+| `test/backbone/sweep-tapes.ts` | Split when the sweep is removed: the DAG fixture's plumbing (`SWEEP_LOADER`, `sweepTape`, `sweepCore`, `sweepTables`, `sweepWatcher`, `tablesByHeight`), which `eviction-restart.ts`, `ledger-eviction-restart.test.ts` and `ledger-storage.test.ts` import, moves to a kept `test/backbone/ledger-graph-tapes.ts`; their comparison with the sweep's model (`modelOfFixture`, `modelProblems`) becomes a comparison with the counting model (`test/backbone/refcount-model.ts`); what stays in `sweep-tapes.ts` serves R2 and R4 only |
+| `test/backbone/sweep-model.ts` and the rest of `sweep-tapes.ts` | Kept as R2's and R4's oracle until the close-out task that runs after R23 and R24 pass, which deletes them with R2's and R4's tests (Q-E) |
 | `test/backbone/ledger-storage.test.ts`, `.negative-control.test.ts`, `ledger-storage-checks.ts` (A100–A104) | Kept; A104's case reworded (its "two sweep cycles" become the blocks after the release) |
 | `test/backbone/ledger-eviction-restart.test.ts`, `.negative-control.test.ts` (A160) | Kept; the restart recomputes the counting step |
 | `test/ledger/worker-sweep.test.ts` | Kept (the worker's eviction is unchanged); renamed `worker-eviction.test.ts`, its comments reworded |
-| `test/ledger/fixtures/sweep-fixture.ts`, `sweep-test-loader.ts` | Kept as the DAG fixture and test package of the counting tests and of A160; extended with shared, duplicated and embedded children (A105) |
-| New | the reference model and reachability oracle (`test/backbone/refcount-model.ts`, R1, R2); the step's unit tests; R3–R17's tests |
+| `test/ledger/fixtures/sweep-fixture.ts`, `sweep-test-loader.ts` | Kept as the DAG fixture and test package of the counting tests and of A160; extended as A105 says |
+| New | the reference model and reachability oracle (`test/backbone/refcount-model.ts`, R1, R2); the step's unit tests; R3–R17's and R22's tests |
 
 **Documents.** `CHANGELOG.md` (one line: reclamation by reference counting, and the refusal of earlier builds'
 databases); `ROADMAP.md:37, 87`; `core-arch` design §5.4 (its sweep paragraphs replaced by a pointer to this design's
@@ -344,9 +380,7 @@ required-test manifest; their results are manual evidence in the pull request. A
 exits non-zero naming the variable; it is not a test file. It runs the build's `umbradb run` **inside a
 `node:24.9.0-alpine` container on the same Docker network as a `postgres:18` container**: from the host through Docker
 Desktop's port, every database answer over ~8–16 KB costs ~14 ms, which measures Docker Desktop rather than UmbraDB
-(organizer plan P13.2). It records, per 1,000-height window, the wall time and the stored node count, and the node's
-slow stretches (its runtime-version call, made once per block, has taken ~1.8 s for 10–50 s at a time, P13.3) are
-reported so a slow window is not read as UmbraDB's.
+(organizer plan P13.2). It records, per 1,000-height window, the wall time and the stored node count.
 
 ### 12.2 The before-picture
 
@@ -357,10 +391,15 @@ it) holds the sweep's stored node set at `H_p13`. It is read only: an experiment
 ### 12.3 The performance comparison (O-4)
 
 Two runs from genesis to 50,000 on the same machine and setup, every core module but `core-contract-logs-fast`: the
-**reference**, the branch's last commit before this change (no reclamation code) with `sweep: off`; and the
-**candidate**, this change with `sweep: on`. For each 10,000-height band from 10,000 to 50,000, the candidate's
-heights/s over the band is at least 80 % of the reference's. A 1,000-height window whose time in either run exceeds 3×
-that run's median window time is listed with the node's state and left out of both runs' bands.
+**reference**, this change's base commit `eb0ff7a` (no reclamation code) with `sweep: off`; and the **candidate**,
+this change with `sweep: on`. The node has slow stretches (its runtime-version call, made once per block, has taken
+~1.8 s for 10–50 s at a time, P13.3), so beside each run the script runs a probe that asks the node for
+`state_getRuntimeVersion` at the run's latest block once a second and records each answer's time. A 1,000-height
+window is left out of both runs' comparison only if, during that run's pass through it, the probe recorded an answer
+slower than 1 s; each 10,000-height band keeps at least 7 of its 10 windows, else both runs are repeated (twice at
+most; the attempt keeping the most windows counts). **Pass:** for each band from 10,000 to 50,000, the candidate's
+heights/s over the kept windows is at least 80 % of the reference's over the same windows. The ratio over all the
+band's windows is reported beside it.
 
 ## 13. Delivery order (for `tasks.md`, written after the stage-1 gate)
 
@@ -369,28 +408,32 @@ adjusted for Q-B and Q-E:
 
 | Phase | Goal | Criteria |
 |---|---|---|
-| 0 | Measure per block on the recorded tapes; the v8 → v9 spike (O-3) | R21, R22 |
-| 1 | Reference model and reachability oracle; the model against the sweep model | R1, R2 |
+| 0 | Measure per block on the recorded tapes, the conversion spike (O-3) and the forms of nodes inserted again | R21 |
+| 1 | Reference model and reachability oracle; the model against the sweep's model | R1, R2 |
 | 2 | `refcountStep` behind its tables seam; migration `002`; the halt code; every negative control seen failing | R11, R12, R16, R19 |
-| 3 | Wiring on both backends: model equality, backend equality, the sweep differential (also against the runtime sweep, recorded before it is removed), restart, crash points, A160, re-insert, resurrection, the lag, reuse, `sweep: off`, backups | A104, A105, A160, R3–R10, R13–R15, R17 |
-| 4 | Remove the runtime sweep; documents; the required test id; `npm run graph:refresh` | A134 (deferred, Q191), R18, R20, R26 |
+| 3 | Wiring on both backends: model equality, backend equality, the sweep differential (also against the runtime sweep, recorded before it is removed), restart, crash points, A160, nodes inserted again, a queued key referenced again, the lag, reuse, a lowered window, `sweep: off`, backups, the conversion | A104, A105, A160, R3–R10, R13–R15, R17, R22 |
+| 4 | Remove the runtime sweep (with the split of `sweep-tapes.ts`, §11); documents; the required test id; `npm run graph:refresh` | A134 (deferred, Q191), R18, R20, R26 |
 | 5 | The local preprod runs | R23–R25 |
-| 6 | Close-out: retire `sweep-model.ts` and R4's test (Q-E); `tasks.md` checked; the proposal's status; `ROADMAP.md`; `npm run graph:refresh` and `graphify-out/` committed with the close-out | — |
+| 6 | Close-out: retire `sweep-model.ts` with R2's and R4's tests (Q-E); `tasks.md` checked; the proposal's status; `ROADMAP.md`; `npm run graph:refresh` and `graphify-out/` committed with the close-out | — |
 
-Phases 0 and 1 can run in parallel; 2 → 3 → 4 in series; 5 after 3. The new tests keep to the conformance gate's
-deadline (105 minutes, about 75 used on a hosted runner, issue 00077): the per-block invariant of R3 runs after every
-block on the fixture and at sampled heights on the tapes.
+Phases 0 and 1 can run in parallel; 2 → 3 → 4 in series; 5 after 3. Every new or changed crash, property or
+differential test runs at least five times before the change merges (`AGENTS.md`, "Flaky tests"). The new tests keep to
+the conformance gate's deadline (105 minutes, about 75 used on a hosted runner, issue 00077): R3's check runs after every
+block on the DAG fixture and at sampled heights on the tapes.
 
 ## 14. External claims and their evidence
 
 | Claim | Evidence | Status |
 |---|---|---|
-| `INSERT … ON CONFLICT (node_key) DO NOTHING` reports only the rows really inserted; the `root_counts` merge shape reports the keys whose final count is non-zero (its `WITH` delete is not counted); `DELETE … WHERE node_key = ANY($1::bytea[])` reports the rows deleted | Probe on PGlite 0.5.10 (PostgreSQL 18.6) and PostgreSQL 18.6 (`postgres:18`), the repository's installed `@electric-sql/pglite` 0.5.10 and `postgres` 3.4.9: organizer `research/00034-ledger-node-refcount-data/probe-affected-rows.mjs` and `.out.txt` — identical on both | Verified |
+| `INSERT … ON CONFLICT (node_key) DO NOTHING` reports only the rows really inserted; the `root_counts` merge shape reports the keys whose final count is non-zero (its `WITH` delete is not counted); `DELETE … WHERE node_key = ANY($1::bytea[])` reports the rows deleted | Probe on PGlite 0.5.10 (PostgreSQL 18.6) and PostgreSQL 18.6 (`postgres:18`), the repository's installed `@electric-sql/pglite` 0.5.10 and `postgres` 3.4.9: organizer `research/00034-ledger-node-refcount-data/probe-affected-rows.mjs` and `.out.txt` — identical on both | Verified (run) |
 | `BlockWriteHandle.execute` returns the number of rows a statement affected | `src/db/api.ts:39-42` | Verified (repository) |
-| Every reference is stored; no root without a node; no cycle; depth 5; one block's garbage 10 nodes | Organizer `research/00034-ledger-node-refcount-data/analyze.out.json`, `garbage.out.txt`, `layers.out.txt` (preprod snapshot at 48,665) | Measured on one snapshot |
-| `flushNodes` takes only nodes reachable from a key whose root count rose, stopping at nodes believed stored | `vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch:143-160`, `0003-…:386-423` | Verified (repository); checked at run time by `unreferenced-new-node` |
+| No reference to a missing node, no root without a node, no cycle; depth 5; one block's garbage 10 nodes | Organizer `research/00034-ledger-node-refcount-data/analyze.out.json`, `garbage.out.txt`, `layers.out.txt` (preprod snapshot at 48,665) | Measured on one snapshot; checked at run time by `missing-reference` |
+| `flushNodes` takes only nodes reachable from a key whose root count rose, stopping at nodes believed stored | `vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch:143-160`, `0003-…:386-423` | Verified (repository); not relied on for safety (§4.5) |
 | `layout-v2` writes a re-created node again | `upstream:storage-core/src/backend.rs:532-534` | Verified (upstream, pinned) |
+| A child is embedded exactly when small; a loaded node's children follow the same rule; `into_tracked` gives a small node a by-reference form with the same hash | `upstream:storage-core/src/storable.rs:139-159`, `upstream:storage-core/src/arena.rs:875-896, 1329-1352, 2847-2880` | Verified (upstream, pinned, v9); the `v8` package's `storage-core` unconfirmed (§4.6) |
+| UmbraDB's patches call `into_tracked` only in `hold_as_node`, for persisted roots | `vendor/ledger/{v8,v9-rc3,v9}/patches/0003-ledger-wasm-node-store-exports.patch` (lines in §4.6) | Verified (repository) |
 | `midnight-storage-core` `layout-v1` kept a reference count per node and deleted at zero, decrementing children with multiplicity; `layout-v2` removed it | `upstream:storage-core/src/backend.rs:1202-1218`, `upstream:storage-core/src/db/sql.rs:250-266, 340-399`, `upstream:CHANGELOG_storage_core.md:23` | Verified (upstream, pinned); the reason for the removal is not given there (unconfirmed, not built on) |
-| The sweep's cycle fit one block at every preprod height of the stopped run (cycle 46,739 at the stop, near 46,738) | Organizer plan P13.3, questions Q-37 | Measured |
-| The size of the v8 state a real network releases at F | — | Unconfirmed: R22 measures the devnet tape's; no real network has converted |
-| OpenSpec applies `## RENAMED Requirements` (FROM/TO) | `.claude/skills/openspec-sync-specs/SKILL.md:46, 75-76, 112-115` (generated by OpenSpec 1.6.0); no OpenSpec CLI is installed in this repository | Verified against the repository's instructions; the archive applies it |
+| The sweep's cycle fit one block at every preprod height of the stopped run | Organizer plan P13.3, questions Q-37 | Measured |
+| The devnet v8 → v9 tape converts at F = 103 with contracts deployed on v8 | `test/backbone/contract-data.test.ts:209` | Verified (repository) |
+| The size of the v8 state a real network releases after its conversion | — | Unconfirmed: R21 measures the devnet tape's; no real network has converted |
+| OpenSpec applies `## RENAMED Requirements` (FROM/TO) | `.claude/skills/openspec-sync-specs/SKILL.md:46, 75-76, 112-115` (generated by OpenSpec 1.6.0); no OpenSpec CLI is installed in this repository | Verified against the repository's instructions |
