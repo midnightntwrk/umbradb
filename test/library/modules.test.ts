@@ -35,11 +35,14 @@ import { L63_CASES, moduleListProblems } from "./module-list-cases.js";
  *   configuration file's export, unlike it, is optional. The negative controls, `./modules.negative-control.test.ts`:
  *   each of `loadModuleList`'s three rules removed fails the oracle on its own cases.
  * - CF-4 `[NEG]` on the refusals that come before the configuration is validated — a `modulesFrom` that cannot be
- *   imported, a user module's own refusal, a `{ file }` whose `modules` export is no list: a credential the
+ *   imported (with data that is plain, or not plain data: the secrets of what is plain in it), a user module's own
+ *   refusal, a `{ file }` whose `modules` export is no list or whose default export is not plain data: a credential the
  *   configuration holds (`database.password`, the node URL's) that the refusal's text would show is shown nowhere — not
  *   on the host's log, in `started`'s error (its message, stack and details), `status()`, nor mounted `/status` and
  *   `/config` — while the refusal keeps its code, reason and URL. The committed control runs the oracle over the same
  *   refusal shown without the configuration's redaction (as before the fix): it finds the credential.
+ * - CF-4 with L63: a secret whose text is one of a refusal's own words (`load-failed`, `settings-schema`, `wrong-side`)
+ *   leaves those words as they are — the oracle is the same refusal with a password that is none of them.
  */
 
 const FIXTURES = new URL("./fixtures/", import.meta.url);
@@ -314,6 +317,29 @@ describe("CF-4: a refusal before the configuration is validated shows no credent
       writeFileSync(file, `export default ${JSON.stringify(secretData())};\nexport const modules = "no list";\n`);
       const shown = await shownBy({ config: { file }, cwd: dir });
       expect([shown.code, shown.reason]).toEqual(["invalid-configuration", "modules-not-a-list"]);
+      expect(leaks(shown)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("a { data } that is not plain data, with a modulesFrom whose import throws an error naming it: load-failed, the credential nowhere", async () => {
+    // A number that is no integer makes the data not plain; its refusal would come after the module file's.
+    const data = libraryData(SECRET_DATABASE, [], { node: `wss://node-user:${CREDENTIAL}@node.invalid/`, tipCap: 1.5 });
+    const shown = await shownBy({ config: { data }, modulesFrom: new URL("modules-throws-secret.ts", FIXTURES) });
+    expect([shown.code, shown.reason]).toEqual(["invalid-configuration", "load-failed"]);
+    expect(leaks(shown)).toEqual([]);
+  }, 60_000);
+
+  it("a { file } whose default export is not plain data, in a directory whose name holds it: not-plain-data, the credential nowhere", async () => {
+    const dir = mkdtempSync(join(tmpdir(), `umbradb-${CREDENTIAL}-`));
+    try {
+      const file = join(dir, "umbradb.config.ts");
+      const data = libraryData(SECRET_DATABASE, [], { node: `wss://node-user:${CREDENTIAL}@node.invalid/`, tipCap: 1.5 });
+      writeFileSync(file, `export default ${JSON.stringify(data)};\n`);
+      const shown = await shownBy({ config: { file }, cwd: dir });
+      expect(shown.code).toBe("not-plain-data");
+      expect(shown.places["started's message"]).toContain("tipCap");
       expect(leaks(shown)).toEqual([]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

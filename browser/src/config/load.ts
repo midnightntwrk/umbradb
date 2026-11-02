@@ -15,6 +15,7 @@ export const MODULES_EXPORT = "modules";
 export interface LoadOptions {
   readonly file?: string | URL;
   readonly cwd: string;
+  readonly evaluated?: (exports: Readonly<Record<string, unknown>>) => void;
 }
 
 /** What `src/config/load.ts`'s loader gives, for the same types. */

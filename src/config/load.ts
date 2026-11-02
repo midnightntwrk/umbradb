@@ -56,6 +56,12 @@ export interface LoadOptions {
    * program's own (a library host's `cwd`, the command's working directory). [LM-2, CF-1]
    */
   readonly cwd: string;
+  /**
+   * Told the file's exports once it is evaluated, before its default export is checked (`no-default-export`,
+   * `not-plain-data`): so that a caller knows the data, and its secrets, before anything it shows of those checks — a
+   * refusal whose text names the file. [CF-1, CF-4]
+   */
+  readonly evaluated?: (exports: Readonly<Record<string, unknown>>) => void;
 }
 
 /** A loaded configuration: the file's absolute path, its evaluated data, deeply frozen, and its user modules. */
@@ -167,6 +173,7 @@ export async function importConfig(options: LoadOptions): Promise<ImportedConfig
       error,
     );
   }
+  options.evaluated?.(module);
   if (!("default" in module)) {
     throw invalid(
       file,

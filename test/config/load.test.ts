@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildCoreVersion } from "../../src/config/build.js";
-import { DEFAULT_CONFIG_FILE, loadConfig } from "../../src/config/load.js";
+import { DEFAULT_CONFIG_FILE, importConfig, loadConfig } from "../../src/config/load.js";
 import { UmbraError } from "../../src/db/errors.js";
 import { CORE_SETTINGS, REPOSITORY } from "./config-fixtures.js";
 
@@ -198,6 +198,24 @@ describe("CF-1: a file that cannot be loaded refuses startup with invalid-config
     const error = await refusal(() => loadConfig({ file, cwd: directory }));
     expect(error.code).toBe("not-plain-data");
     expect(error.details).toEqual({ file, path: "entries[0].config.onError", found: "a function" });
+  });
+
+  it("tells evaluated the file's exports before it checks them: with no default export and with data not plain too; not when the import threw (CF-4)", async () => {
+    const told: unknown[] = [];
+    const evaluated = (exports: Readonly<Record<string, unknown>>) => told.push({ ...exports });
+    const plain = write("told.config.ts", 'export default { entries: [] };\nexport const modules = [];\n');
+    await importConfig({ file: plain, cwd: directory, evaluated });
+    const named = write("told-named.config.ts", "export const config = { entries: [] };\n");
+    await refusal(() => importConfig({ file: named, cwd: directory, evaluated }));
+    const notPlain = write("told-function.config.ts", "export const onError = () => 0;\nexport default { entries: [{ id: \"core\", config: { onError } }] };\n");
+    await refusal(() => importConfig({ file: notPlain, cwd: directory, evaluated }));
+    const throws = write("told-throws.config.ts", 'throw new Error("never evaluated");\nexport default {};\n');
+    await refusal(() => importConfig({ file: throws, cwd: directory, evaluated }));
+    expect(told).toHaveLength(3);
+    expect(told[0]).toEqual({ default: { entries: [] }, modules: [] });
+    expect(told[1]).toEqual({ config: { entries: [] } });
+    const third = told[2] as { default: { entries: { config: { onError: unknown } }[] } };
+    expect(typeof third.default.entries[0]?.config.onError).toBe("function");
   });
 });
 

@@ -1729,10 +1729,13 @@ class Process implements ProcessHandle {
     const { config, cwd, userModules } = this.#input;
     let loaded: LoadedInput;
     if ("file" in config) {
-      const imported = await importConfig({ file: config.file, cwd });
-      // The file's secrets are known before its `modules` export is checked, whose refusal names the file. [CF-4]
-      const exported = Object.hasOwn(imported.exports, "modules") ? imported.exports.modules : [];
-      this.#know(imported.data, Array.isArray(exported) ? exported : null);
+      // The file's secrets are known once it is evaluated, before its default export and its `modules` export are
+      // checked, whose refusals name the file: of its data as plain data, or of what is plain in it. [CF-4]
+      const know = (exports: Readonly<Record<string, unknown>>): void => {
+        const exported = Object.hasOwn(exports, "modules") ? exports.modules : [];
+        this.#know(exports.default, Array.isArray(exported) ? exported : null);
+      };
+      const imported = await importConfig({ file: config.file, cwd, evaluated: know });
       loaded = { file: imported.file, data: imported.data, modules: configModules(imported) };
     } else {
       loaded = { file: null, data: config.data, modules: [] };

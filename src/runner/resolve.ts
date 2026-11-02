@@ -30,7 +30,8 @@
  * before the configuration is validated — a module file that cannot be imported, the user modules' own refusal —
  * the secrets of the data as far as they can be told: each entry's by the kinds its module declares, read as the
  * validation reads them; while the user modules are not known (a module file not imported yet), or cannot be read as
- * declarations, every string of an entry whose module the build does not hold (fail closed). [CF-4, AE-6]
+ * declarations, every string of an entry whose module the build does not hold (fail closed). Data that is not plain
+ * data tells the secrets of what is plain in it. [CF-4, AE-6]
  */
 
 import { type PrivateIntake, privateIntake } from "../backbone/core-private-source/index.js";
@@ -74,9 +75,47 @@ export function refusalSecrets(error: unknown): readonly string[] {
 const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** What {@link plainPart} gives for a value the plain-data rules refuse. */
+const REFUSED: unique symbol = Symbol("refused");
+
+/** Whether `key` names an element of an array of `length` elements: `"0"` to `String(length - 1)`. */
+const isElement = (key: string, length: number): boolean => String(Number(key)) === key && Number(key) < length;
+
+/**
+ * What the plain-data rules keep of `value` (`../config/plain-data.ts`), read as they read it — own properties'
+ * descriptors, never a getter — with every value they refuse left out: an object's member dropped, an array's element
+ * dropped and the others kept in order; {@link REFUSED} for a value refused itself. So data refused at one place still
+ * tells the secrets of the rest. Throws what a proxy's trap throws. [CF-4, AE-6]
+ */
+function plainPart(value: unknown, open: Set<object>): PlainData | typeof REFUSED {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isSafeInteger(value) && value >= 0 ? value : REFUSED;
+  if (typeof value !== "object" || open.has(value)) return REFUSED;
+  const array = Array.isArray(value);
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return REFUSED;
+  open.add(value);
+  try {
+    const kept: [string, PlainData][] = [];
+    const length = array ? ((Object.getOwnPropertyDescriptor(value, "length") as PropertyDescriptor).value as number) : 0;
+    for (const key of Object.keys(value)) {
+      if (array && !isElement(key, length)) continue;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor === undefined || !("value" in descriptor)) continue;
+      const inner = plainPart(descriptor.value, open);
+      if (inner !== REFUSED) kept.push([key, inner]);
+    }
+    return array ? kept.map(([, inner]) => inner) : Object.fromEntries(kept);
+  } finally {
+    open.delete(value);
+  }
+}
+
 /**
  * The secrets of the configuration `data` before the resolver validated it (see the module comment), its user modules
- * `userModules` as given, or null while they are not known; none for data that is not plain data. Never throws.
+ * `userModules` as given, or null while they are not known. Data that is not plain data tells the secrets of what is
+ * plain in it ({@link plainPart}): its refusal, which comes later, may follow a refusal that quotes one of them (a
+ * module file's import error). Never throws: none for data that cannot be read at all (a proxy's trap that throws).
  * [CF-4, AE-6]
  */
 export function knownSecrets(data: unknown, userModules: readonly unknown[] | null): readonly string[] {
@@ -84,7 +123,13 @@ export function knownSecrets(data: unknown, userModules: readonly unknown[] | nu
   try {
     plain = plainData(data);
   } catch {
-    return [];
+    try {
+      const part = plainPart(data, new Set());
+      if (part === REFUSED) return [];
+      plain = part;
+    } catch {
+      return [];
+    }
   }
   const side = inferSide(plain);
   const config = { data: plain };

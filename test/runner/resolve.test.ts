@@ -313,9 +313,40 @@ describe("knownSecrets: the data's secrets before the validation (CF-4, AE-6)", 
     }
   });
 
-  it("none for data that is not plain data, and never a throw", () => {
+  it("data that is not plain data: the secrets of what is plain in it, read without a getter; never a throw", () => {
+    const plain = [...knownSecrets(data, [secretModule])].sort();
+    // A value the plain-data rules refuse, at the core entry, in a module's entry and as an entry: left out, the rest read.
+    let reads = 0;
+    const refused = (value: unknown) => {
+      const copy = structuredClone(data) as { entries: unknown[] };
+      const core = copy.entries[0] as { config: Record<string, unknown> };
+      core.config.tipCap = value;
+      (copy.entries[1] as { config: Record<string, unknown> }).config.onError = () => undefined;
+      copy.entries.push(new Date(0));
+      return copy;
+    };
+    for (const value of [1.5, -1, 10n, Symbol("s"), new Map(), undefined]) {
+      expect([...knownSecrets(refused(value), [secretModule])].sort(), String(value)).toEqual(plain);
+    }
+    // A getter is never called; a cycle and an array's hole are left out.
+    const withGetter = refused(1.5) as { entries: unknown[] };
+    Object.defineProperty((withGetter.entries[0] as { config: object }).config, "apiReadTimeoutMs", {
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return 5;
+      },
+    });
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    withGetter.entries.push(cycle);
+    withGetter.entries.length += 1;
+    expect([...knownSecrets(withGetter, [secretModule])].sort()).toEqual(plain);
+    expect(reads).toBe(0);
+    // Data that cannot be read at all, or holds nothing plain: none.
     expect(knownSecrets({ entries: [() => undefined] }, [])).toEqual([]);
     expect(knownSecrets(new Proxy({}, { ownKeys: () => { throw new Error("trap"); } }), null)).toEqual([]);
     expect(knownSecrets(null, null)).toEqual([]);
+    expect(knownSecrets(() => undefined, null)).toEqual([]);
   });
 });
