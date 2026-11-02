@@ -84,6 +84,23 @@ file runs alone right after (3 files, 26 tests):
     listener closes only once the database has closed" on PostgreSQL (`/status never matched within 20000 ms`, the
     harness's wait, `test/admin/admin-harness.ts:224`). Each of the six files passed alone right after
     (`p104c/rerun-*.log`).
+16. `start-umbradb` P10.4d's full run (2026-11-01/02, 68 min, 382 files; the load average about 6 at its start, 25 to
+    37 through it — Docker's VM at about 190 % CPU and another application at 100 % beside it): besides the known
+    A115 ×18 and `unexpected-cursor` ×2 (issues 00059, 00060), this issue's items 1/4/6 (`network.test.ts`'s seven
+    controls on PostgreSQL), 15 (L18's schema control), 5 and 7 (A62 ×2), 12 (A64 ×2), 2 (A63, on PGlite this time),
+    10 (A103, its 1,440 s budget) and 8 (A141's "within 2 s", 2,141 ms), and A177 (issue 00062's), ten new ones:
+    the 60 s hooks of `test/backbone/chain-process.test.ts` (PGlite, its `afterAll`'s `backend.stop()`) and
+    `test/db/postgres-tls.test.ts` (its `beforeAll`'s `startTlsPostgres()`); the 60 s test budgets of
+    `test/backbone/core-digest/capture.test.ts` ("lets a migration drop a column the old capture function names …",
+    PostgreSQL), `test/db/migrate.test.ts` (A16, PostgreSQL), `test/ledger/state-trees.test.ts` and
+    `state-trees.negative-control.test.ts` (one case each) and `test/runner/process-context.test.ts` (A74, PostgreSQL);
+    `test/backbone/contract-data.negative-control.test.ts`, A111's "-fast from h itself" control on PostgreSQL, refused
+    `writer-lock-held` instead of `changes-past` (item 13's race); `test/runner/slow-block-windows.test.ts`, "after a
+    commit, one window …" on PostgreSQL, the raised warning's time before `on-stop-height`'s start (`:208`, 63,520 ms
+    against 63,632 ms); and `test/db/read-timeouts.test.ts`, A141's "does not count a statement in flight as idle time …"
+    — its `pg_sleep(0.9)` cancelled by the 1 s `statement_timeout` (once more when its file ran alone right after, the
+    15-minute load still 15; then 3 of 3). Each of the 17 files passed alone right after, `read-timeouts.test.ts` from
+    its second run (`p104d/reruns.summary`, `rerun-*.log`).
 
 ## Evidence
 
@@ -92,7 +109,7 @@ file runs alone right after (3 files, 26 tests):
 - `test/backbone/core-health/liveness.test.ts:77` — `probedThrough`'s wait for `/status`, 20 s.
 - `test/db/prepared-statements.test.ts:119` — the test's 60 s budget.
 - The run's log and the reruns: the `start-umbradb` plan's P7 notes (`p7/logs/full-1.log`, `rerun-flaky.log`) and P8
-  notes (`p8/logs/full-1.log`, `rerun-1.log`, `rerun-network.log`, `rerun-a103.log`); P9 notes (`p9/logs/full-1.log`, `rerun-1.log`); P10.4a notes (`p104a/full.log`, `reruns.log`); P10.4c notes (`p104c/full.log`, `rerun-*.log`).
+  notes (`p8/logs/full-1.log`, `rerun-1.log`, `rerun-network.log`, `rerun-a103.log`); P9 notes (`p9/logs/full-1.log`, `rerun-1.log`); P10.4a notes (`p104a/full.log`, `reruns.log`); P10.4c notes (`p104c/full.log`, `rerun-*.log`); P10.4d notes (`p104d/full.log`, `full.json`, `reruns.summary`, `rerun-*.log`).
 
 ## Suggested fix
 
