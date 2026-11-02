@@ -469,3 +469,20 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   queue's L35 controls and C-F2's committed): `79d34d4`, `7b27e48`, `fc9e3e0`, `c2b782b`, `572bb24`. *Follow-up:*
   none dated; Q-20 records C-F2's readings (fail closed before the user modules are known, the redacted copy, the kept
   cause) for the owner.
+- **R3 — Weak tests and controls escaped P3–P8 and were found by stage 4's spec and release lanes**
+  (`plan-task-runner / claude-opus-5-5 / P10.4b`; the tests from P3–P6's rounds; found by claude-opus-5-5, P10.1, and
+  Codex, gpt-6-astra, P10.3). L61's facts ran only with a listening admin, so the base's early return without one
+  passed every test (R-F2 = S-F2); L4, L5, L7, L9 and L14 ran on one or two backends of definition of done item 3's
+  three while the acceptance map said three (S-F3); five `[NEG]` controls could not fail or failed for another reason
+  — L62's asserted a reason only the facade gives, L39's ran an accepting process, L63's called the configuration
+  file's loader, L18's schema case had none, L34's accepted any `hello-ack` (S-F4); eleven oracles checked part of their
+  criterion (S-F5). Strengthening L21 found a real defect: the private link's address was logged before
+  `status().listening` showed it (fixed, `11a6147`). *Second story:* each phase's agent wrote the test from the clause
+  that named the mechanism it was building (the listener it had just made mounted, the backend its fixture opened, the
+  check it had just added) and took a passing control as proof, without running it against the fault the criterion
+  names; the phase checks counted controls, not faults, and the map was written from the tests' titles. The fixes run
+  each control against its criterion's own oracle with the named fault put back (`vi.mock` in
+  `*.negative-control.test.ts` files, or the fault in the source for one recorded run), and the map's backends were read
+  from each test: `e725b72`, `c18aabb`, `3a22d31`, `09a5b82`, `11a6147`, `a075ec9`. *Follow-up:* questions Q-21 (L3's
+  "either order") and Q-11 (L37 on PGlite, a way without a product seam added) for the owner; issue 00067 fixed beside
+  (`a469e20`).
