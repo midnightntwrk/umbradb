@@ -1,282 +1,284 @@
 # Graph Report - UmbraDB
 
 ## Corpus Check
-- 1204 files · ~1,703,768 words
+- 1209 files · ~1,717,088 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 67 file(s) not represented in the graph (top: .patch 18, (none) 15, .lean 11)
 
 ## Summary
-- 12535 nodes · 38624 edges · 364 communities (330 shown, 34 thin omitted)
-- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 3246 edges (avg confidence: 0.9)
+- 12611 nodes · 38737 edges · 367 communities (331 shown, 36 thin omitted)
+- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 3288 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Corpus fingerprint: `bb3e4256032442a8` (1204 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
+- Corpus fingerprint: `60fe4a7f9a5cba61` (1209 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
 - `npm run graph:check` recomputes it: exit 0 means the graph matches the tracked files.
 - `npm run graph:refresh` rebuilds the graph from scratch (no LLM, deterministic).
 
 ## Community Hubs (Navigation)
-- startUmbraDB
+- builds.ts
 - process-backends.ts
-- version-checks.ts
-- release-version.ts
-- core.ts
-- browser/build.ts
-- postgres/transaction-history-storage.ts
-- ref_node_crypto
-- config-check-database.test.ts
-- process-worker.ts
-- containers.test.ts
-- signal-ignored-fixtures.ts
-- checks.test.ts
-- declarations.test.ts
-- read-gate.ts
-- backup/restore.ts
+- validation.ts
+- TransactionHistoryStorage
 - test/postgres/setup.ts
-- order.property.test.ts
-- interfaces/transaction-history-storage.ts
-- pg-tx-history-adapter.ts
-- ledger-sweep.test.ts
+- listening.test.ts
+- signal-backup.test.ts
+- browser.test.ts
+- release-version.ts
+- admin-harness.ts
+- redact.ts
+- browser/build.ts
+- block-fetch-decode.test.ts
+- page.ts
+- checks.test.ts
+- text.test.ts
+- .value
+- host.ts
+- version-checks.ts
+- code-registry.ts
+- LoopPauses
+- paused-harness.ts
+- halts.test.ts
 - documents.ts
-- relays.ts
-- pglite-lock.ts
-- config/history.ts
-- node-bridge.ts
+- backup/restore.ts
+- crash.test.ts
+- networks.ts
+- read-gate.ts
+- sigterm.test.ts
+- Tasks — v1.1.0: Formal completion (`formal-completion`)
+- height-versioned.property.test.ts
+- example-checks.ts
 - check-required-tests.ts
+- fetch-fixtures.ts
 - legacy-excluded.test.ts
 - threat-model.test.ts
-- .send
-- surface.test.ts
-- code-registry.ts
-- NodeClient
-- pack-install.mjs
-- options.ts
-- .concat
-- library-documents.test.ts
-- tape/index.ts
-- Buffer
 - configuration-refusal.test.ts
-- key-handling-checks.ts
-- node-fields-harness.ts
-- config/plain-data.ts
-- module-api.ts
+- surface.test.ts
+- ledger-table-config.test.ts
+- core-block-commit.test.ts
+- fixtures/configuration.ts
+- pack-install.mjs
+- start-umbradb.test.ts
+- HeightRun
+- demo-handlers.test.ts
+- harness.ts
+- adapter-fixtures.ts
+- core-block-fetch/metadata.ts
+- library-documents.test.ts
+- chrome.ts
+- transaction-history-storage.property.test.ts
+- browser-harness.ts
+- ModuleDeclaration
+- postgres-tls-server.ts
+- network.test.ts
+- package-startup-checks.ts
+- loop.test.ts
 - read-height.property.test.ts
-- FakeNode
-- LoopPauses
-- source-scan.ts
 - ws-mutual-tls.test.ts
-- statementsOf
-- ReadHandle
-- src/config/load.ts
-- checkParent
-- .name
-- ref_node_fs
-- Heartbeat
-- component-table.test.ts
+- checkShape
+- validation.test.ts
+- src/protocol.ts
+- core-block-fetch.test.ts
+- networks.test.ts
+- config/history.ts
+- quiet-host.child.ts
+- core.ts
+- browser/serve.ts
+- stats-module.ts
+- Session
+- upgrade-boundary.test.ts
+- migrate.ts
+- NodeClient
 - no-indexer-or-wallet-sdk.test.ts
 - browser/src/config/load.ts
-- 16. Browser
 - worker-threads.test.ts
-- declaration.ts
-- channel-queue.test.ts
-- history.property.test.ts
 - worker-threads-worker.ts
-- postgres-tls-server.ts
-- ProcessItems
-- stats-module.ts
-- loop.test.ts
-- childRefKeys
-- src/configuration.ts
+- backup-fixtures.ts
+- .send
 - Worker
-- core-transport.ts
 - Design — Sprint 1: project setup + TemporalKV
-- sweepStep
+- process-build.ts
+- RuntimeMetadata
 - ledger/plain-data.ts
+- ApiRoutes
 - sha256
-- loop.ts
-- postgres-image.test.ts
-- ledger-tapes.ts
-- HeldHeight
-- messagePortChannel
-- POSTGRES_IMAGE
-- .from
-- vendored-ledger-files.test.ts
-- private/lockstep-wait.test.ts
+- declaration.ts
+- ProcessItems
+- TapeAnswers
+- worker-output.test.ts
+- contract-modules.test.ts
+- ref_node_path
+- renamed-setting.test.ts
+- ledger/types.ts
 - mutation-evidence.d.mts
 - AsyncLocalStorage
-- ref_node_url
-- chain-process.test.ts
-- client.test.ts
-- column-rules.ts
-- durability-probe.test.ts
-- validate.ts
-- builds.ts
-- PageState
-- record-and-replay.test.ts
-- BlockLedgerSource
-- NodeFS
-- FinalizedLoop
-- UmbraError
-- cbor.ts
-- messages.ts
-- LedgerPackage
-- refused-configuration.test.ts
-- migrate.ts
-- api-server.test.ts
-- range.ts
+- devnet-upgrade.test.ts
 - Process
-- graph.ts
-- db/errors.ts
-- vitest
-- resolve.ts
 - NodeBlockSource
-- cli/command.ts
-- process-build.ts
-- contract-modules.test.ts
-- core-chain.test.ts
-- config-check.ts
-- browser.test.ts
-- PgTransactionHistoryStorage
-- connectWebSocket
-- binding.test.ts
-- core-ledger-state.ts
-- pause-fixtures.ts
+- range.ts
+- adapter.ts
+- .read
 - runner/process.ts
-- chain-placement.test.ts
-- loop-stop-harness.ts
-- backup/backup.ts
-- redact.ts
-- validation.ts
-- .value
-- ledger-tasks-checks.ts
-- sweep-tapes.ts
-- process-harness.ts
-- transform-checks.ts
-- ledger/types.ts
-- core-settings.ts
-- chain-events-decode.test.ts
-- paused-harness.ts
+- PageState
+- resolve.ts
+- PageApiChannel
+- CliBackend
+- ApiChannel
+- NodeFS
+- config-check.ts
+- pause-fixtures.ts
+- api-server.test.ts
+- contract-data-checks.ts
+- vitest
+- mounted-admin.test.ts
+- UmbraError
+- transport-faults.test.ts
+- api-session.test.ts
+- LedgerPackage
+- FinalizedLoop
+- process-admin.ts
+- cli/command.ts
+- core-transport.ts
+- in-memory-source.ts
+- tape/index.ts
+- private-transport.ts
+- PgTransactionHistoryStorage
+- column-rules.ts
+- startProcess
 - cold-boot-recovery.integration.test.ts
-- zero-timeouts-checks.ts
-- retirement.test.ts
-- restore-private.ts
-- node.test.ts
-- core-ledger-state/sql.ts
-- api.ts
-- read-confinement-checks.ts
-- real-tapes.ts
-- file-mode.test.ts
-- core-block-commit.test.ts
-- entries.ts
-- chain-data-tapes.ts
-- adapter-fixtures.ts
-- resolver-boundary.ts
-- page.ts
-- events-fixtures.ts
-- transaction-history-storage.property.test.ts
-- PrivateLinkChannel
-- refused
-- block-fetch-decode.test.ts
-- .configHash
-- Proposal — Sprint 3: CheckpointStore
-- ADDED Requirements
-- .off
-- connectChannel
-- T
-- Design — START-UMBRADB: UmbraDB as a library
-- Design — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)
-- transportReader
-- following
-- .slowBlockMs
-- .cwd
-- backupAtStop
-- Boundaries, threats and controls
+- backup/backup.ts
+- interfaces/transaction-history-storage.ts
+- private/lockstep-wait.test.ts
+- client.test.ts
+- slow-block-harness.ts
+- column-rules.test.ts
+- start-umbradb.ts
+- src/db/postgres.ts
 - boundary.test.ts
-- log
+- channels.ts
+- writer-lock-checks.ts
+- chain-process.test.ts
+- channel-queue.test.ts
+- core-ledger-state.ts
+- graph.ts
+- node-bridge.ts
+- cbor.ts
+- retirement.test.ts
+- mapping.ts
+- InMemoryBlockSource
+- openPostgres
+- .from
+- file-mode.test.ts
+- opt-out.test.ts
+- refused-configuration.test.ts
+- connectChannel
+- startup-stop-harness.ts
+- messages.ts
+- pglite-lock.ts
+- node-fields-harness.ts
+- validate.ts
+- config/plain-data.ts
+- core-block-parsed.ts
+- containers.test.ts
+- resolver-boundary.ts
+- restore-private.ts
+- recovery.test.ts
+- PrivateLinkChannel
+- cbor.property.test.ts
+- Design — Sprint 3: CheckpointStore
+- .configHash
+- refused
+- graph.py
+- .cwd
+- T
+- process-worker.ts
+- .slowBlockMs
 - mutation-per-adapter.mjs
 - Acceptance — CORE-ARCH: the standalone indexer's core architecture
 - twox.ts
-- Design — v1.1.0: Quint model checking
+- facade-merge-loader.ts
 - UmbraDB third-party component inventory (SBOM)
-- Tasks — START-UMBRADB: UmbraDB as a library
 - midnight-env — reproducible PREPROD dev environment
-- host-signal.ts
+- Requirement: BK-1 Backup
+- .boolean
 - 00041 — A128 refused once and A130 hung once under load, each passing in every other run
-- orphan-watcher.mjs
+- selectLedgerVersion
 - crash-worker.ts
+- startUmbraDB
 - history
-- .put
 - code
+- .put
 - version
 - ADDED Requirements
-- graph.py
+- .off
+- data
+- post-block-update/oracle/main.rs
 - ADDED Requirements
 - ADDED Requirements
+- ADDED Requirements
+- ADDED Requirements
+- ADDED Requirements
+- Requirement: CF-4 Every field is data, operational or secret
 - ADDED Requirements
 - package.json
-- Requirement: CF-4 Every field is data, operational or secret
 - ADDED Requirements
 - ADDED Requirements
 - ADDED Requirements
 - Requirements
-- ADDED Requirements
-- Requirement: DT-6 Stored data avoids non-deterministic values
-- Design — v1.0.0-durable-checkpoint-cursor
-- ADDED Requirements
 - UmbraDB v1.0.0 — Autonomous Run Log
 - ADDED Requirements
 - ADDED Requirements
 - ADDED Requirements
+- Design — v1.0.0-durable-checkpoint-cursor
+- Requirement: DT-6 Stored data avoids non-deterministic values
+- ADDED Requirements
 - ADDED Requirements
 - scripts
 - stryker.conf.json
+- G12 / R5 — manual pre-tag Preprod round-trip evidence
+- Requirement: LG-14 Unused ledger nodes are reclaimed by reference counting
+- ADDED Requirements
 - ADDED Requirements
 - devDependencies
-- The laws of UmbraDB's storage helpers
-- README.md
 - ADDED Requirements
-- Requirement: BK-1 Backup
 - ADDED Requirements
 - REMOVED Requirements
 - Requirement: RN-13 SIGTERM stops cleanly
-- UmbraDB v0.9.5 "Penumbra" — Release Record
 - ADDED Requirements
-- Design — Sprint 8: WalletState Envelope + Live Preprod DB-Sync + Cold-Boot Recovery
-- Tasks — v1.1.0: Formal completion (`formal-completion`)
 - compilerOptions
-- ADDED Requirements
+- UmbraDB 0.9.5 "Penumbra"
 - ADDED Requirements
 - devnet.sh
 - compilerOptions
 - openspec-explore/SKILL.md
-- UmbraDB 0.9.5 "Penumbra"
+- README.md
 - UmbraDB and SLSA — supply-chain integrity assessment
+- Design — Sprint 4: Watermarks
 - explore.md
 - 00027 — A Vitest worker hung for 24 minutes in V8's fatal-error path while freeing WebAssembly code
 - UmbraDB software supply-chain directory
+- Boundaries, threats and controls
+- Requirement: CF-4 Every field is data, operational or secret
 - Design — v1.0.0-infosec-signoff
+- Acceptance criteria — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)
 - Spec — `model-checking` capability
 - Tasks — v1.1.0: Quint model checking
 - After 0.10.0
 - [0.10.0] - 2026-10-27
 - scoped-review-manifest
+- UmbraDB in a browser
 - try.sh
+- ADDED Requirements
 - ADDED Requirements
 - Tasks — v1.0.0-infosec-signoff
 - Design — v1.0.0-perf-baseline
-- Proposal — v1.1.0: Quint model checking (`quint-model-checking`)
-- Repository agent policy
 - Contributing
-- UmbraDB in a browser
-- The database
+- UmbraDB 0.10.0 threat model
 - stats-module/tsconfig.json
 - try-module/tsconfig.json
-- Tasks — Sprint 4: Watermarks
-- Acceptance map — START-UMBRADB: UmbraDB as a library
-- Requirement: BK-1 Backup
 - Acceptance criteria — v1.0.0-infosec-signoff
 - Our Pledge
-- G12 / R5 — manual pre-tag Preprod round-trip evidence
+- ASSESSMENT — `midnight-node-archive` Peer Flapping (Midnight Preprod, WSL2 Docker Host)
 - Design — Sprint 5: Lean M3a Watermarks W1
 - Design — Sprint 6: Lean M3b CheckpointStore C1
 - Acceptance — v1.1.0: Formal completion (`formal-completion`)
@@ -290,9 +292,9 @@
 - 00032 — The runtime `npm audit` fails on zod 4.4.3 (GHSA-mrhx-c7xc-m3w5)
 - 00054 — A slow-block test hung inside PGlite for over an hour
 - UmbraDB node architecture
-- ASSESSMENT — `midnight-node-archive` Peer Flapping (Midnight Preprod, WSL2 Docker Host)
+- The laws of UmbraDB's storage helpers
 - Proposal — Sprint 1: project setup + TemporalKV
-- Proposal — CORE-ARCH: the standalone indexer's core architecture (`core-arch`)
+- Proposal — Sprint 4: Watermarks
 - Proposal — Sprint 5: Lean M3a Watermarks W1
 - Tasks — Sprint 5: Lean M3a Watermarks W1
 - Proposal — Sprint 6: Lean M3b CheckpointStore C1
@@ -309,15 +311,18 @@
 - 00009 — The recovery evidence says its PostgreSQL image was digest-pinned; the test setup used a tag
 - 00011 — A server `FATAL` while a statement is pending reaches the database API as `CONNECTION_CLOSED`: the server's reason is lost
 - 00013 — A nondeterministic collation compares differently on PGlite and on PostgreSQL
+- 00016 — The WebSocket transport's heartbeat takes an interval Node.js cannot time
 - 00021 — `pglite-queue.test.ts` removes its PGlite data directories but leaves their lock files in the temp folder
+- 00023 — The blocks table's height partitions end at 5,000,000
+- 00024 — The module API listener closes a refused request's connection before its client has sent the body
 - 00025 — The module API listener refuses a request that offers an upgrade other than WebSocket
 - 00026 — A configuration's `core` revisions may name different networks
 - 00030 — Two processes starting at once on one PostgreSQL server race to create the same module roles
 - 00031 — A module's error message can carry a secret setting's bytes into the log in a form the redaction misses
 - 00034 — `contract_logs.logs.logical_segment` is 0 for every log: the ledger labels fallible contract events so
+- 00035 — a slow-block test bounds the report from the source's ask, but the loop's window opens before the ask
 - 00037 — Two development dependencies are used only by the frozen `legacy/transaction-history/`
 - 00039 — A103's PostgreSQL case times out inside the full conformance run under load
-- 00042 — A stop while the loop waits on an unreachable node does not end the process
 - 00044 — `docs/supply-chain/` states a gate set and package counts that are no longer true
 - 00045 — Mutual TLS does not bind a certificate to an instance id
 - 00046 — The admin endpoints listen on all interfaces by default, and no HTTP service has an access policy
@@ -327,27 +332,28 @@
 - 00050 — A165's race step on PostgreSQL with a transport failed once under load
 - 00051 — The transport's instance id is any text: line breaks reach the core's log
 - 00052 — `openspec/config.yaml` and code comments still point at 0.9.5's deleted documents
-- 00063 — The browser demo refuses user modules that declare ledger tasks: its ledger worker imports no user module
+- 00060 — The `unexpected-cursor` halt test now halts `parent-mismatch` first
 - 00065 — Node.js 24.9.0's V8 aborts in its JIT page bookkeeping freeing WebAssembly code, and a test fork hangs
 - 00073 — `examples/stats-module/try.sh subscribe` prints every row that arrives before its close completes
-- 00075 — The stats-module example takes seconds to commit its first height, with nothing in the log that says why
 - 00076 — The node source's first prefetch reads the whole window's hashes before it fetches the first block
 - 00077 — The conformance suite runs in one CI job of about 75 minutes; split it across jobs
+- 00078 — A stored ledger node can arrive again in another child-list form, so the batch may depend on the worker's history
 - bug-report.md
 - feature-request.md
+- Requirement: RN-16 Chain-data reads name their view and height
 - MODIFIED Requirements
 - manifest.json
 - 00017 — `vitest.config.ts` is in no TypeScript program and does not type-check (`coverage.all`, gone in Vitest 4)
-- 00020 — A module id that is a reserved SQL key word passes DB-8, and every unquoted reference to its schema fails
-- 00038 — The A87 registry cannot name a test written with `it.runIf` or `it.skipIf`
 - PULL_REQUEST_CHECKLIST.md
 - documentation-improvement.md
 - Overview
 - transaction-history/tsconfig.json
-- Requirement: PP-2 A private database is bound to one public database
+- Test wallets
+- Requirement: RN-13 SIGTERM stops cleanly
 - Spec — capability `formal-completion`
 - renovate.json
 - start-stack.sh
+- peerDependenciesMeta
 - graphify/run.sh
 - build-in-container.sh
 - stats-module/run.sh
@@ -368,9 +374,6 @@
 - ADDED Requirements
 - ADDED Requirements
 - ADDED Requirements
-- ADDED Requirements
-- ADDED Requirements
-- post-block-update/oracle/main.rs
 
 ## God Nodes (most connected - your core abstractions)
 1. `vitest` - 414 edges
@@ -385,1169 +388,1181 @@
 10. `ReadHandle` - 92 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `1. Executable Watermarks model` --references--> `Address`  [INFERRED]
-  openspec/changes/sprint-5-formal-watermarks/tasks.md → src/library/start-umbradb.ts
-- `3. Modules` --references--> `RangeCheck`  [INFERRED]
-  openspec/changes/core-arch/tasks.md → src/modules/graph.ts
 - `Scenario: The barrel re-exports every frozen primitive and its interface type` --references--> `TransactionHistoryStorage`  [INFERRED]
   openspec/changes/v1.0.0-api-surface/specs/release-contract/spec.md → legacy/transaction-history/src/interfaces/transaction-history-storage.ts
+- `3. Modules` --references--> `OwnPart`  [INFERRED]
+  openspec/changes/core-arch/tasks.md → src/db/roles.ts
+- `2. Dependency direction: structural mirror, not a runtime import` --references--> `PgTransactionHistoryStorage`  [INFERRED]
+  openspec/changes/sprint-7-transaction-history-storage/design.md → legacy/transaction-history/src/postgres/transaction-history-storage.ts
+- `Impact` --references--> `PgTransactionHistoryStorage`  [INFERRED]
+  openspec/changes/sprint-7-transaction-history-storage/proposal.md → legacy/transaction-history/src/postgres/transaction-history-storage.ts
 - `Scenario: A bare upsert without a row lock is insufficient (negative control, implementation note)` --references--> `PgTransactionHistoryStorage`  [INFERRED]
   openspec/changes/sprint-7-transaction-history-storage/specs/transaction-history-storage/spec.md → legacy/transaction-history/src/postgres/transaction-history-storage.ts
-- `What changes — the 1.0.0 gate items this change addresses` --references--> `PgTransactionHistoryStorage`  [INFERRED]
-  openspec/changes/v1.0.0-api-surface/proposal.md → legacy/transaction-history/src/postgres/transaction-history-storage.ts
 
 ## Import Cycles
 - None detected.
 
-## Communities (364 total, 34 thin omitted)
+## Communities (367 total, 36 thin omitted)
 
-### Community 0 - "startUmbraDB"
+### Community 0 - "builds.ts"
 Cohesion: 0.02
-Nodes (241): BackupWritten, RunOptions, RunSeams, DatabaseParts, DatabasePartsInput, PostgresPartsInput, TransportReader, coreEntry (+233 more)
+Nodes (168): PrivateIntakeOptions, DatabaseParts, PglitePathParts, PostgresParts, PostgresPartsInput, Keeping, A165Options, a165Run (+160 more)
 
 ### Community 1 - "process-backends.ts"
-Cohesion: 0.02
-Nodes (217): BlockParsed, BlockParsedOptions, CoreContractLogsFullOptions, CoreContractStatesOptions, ContractStateRow, Manifest, Restored, BlockContext (+209 more)
-
-### Community 10 - "version-checks.ts"
 Cohesion: 0.03
-Nodes (117): MetadataNode, RuntimeMetadata, Boundary, BoundaryBlock, builtInNetwork, Issue, KnownNetwork, NetworkGenesis (+109 more)
+Nodes (193): BlockParsed, Manifest, Restored, itemsSeen, FixtureRun, ingest, IngestOptions, SourceClass (+185 more)
 
-### Community 102 - "release-version.ts"
+### Community 10 - "validation.ts"
+Cohesion: 0.02
+Nodes (135): CoreLedgerVersion, LedgerPackageIdentity, LedgerTableSettings, RenamedSetting, SettingPath, TransportReaderSettings, DatabasePartsInput, TransportReader (+127 more)
+
+### Community 100 - "TransactionHistoryStorage"
+Cohesion: 0.06
+Nodes (35): TransactionHistoryStorage, reason(), 00069 — `umbradb config check`'s text report redacts a finding's code when a secret's text equals it, Evidence, Problem, Suggested fix, 1. Schema, 2. Dependency direction: structural mirror, not a runtime import (+27 more)
+
+### Community 101 - "test/postgres/setup.ts"
+Cohesion: 0.08
+Nodes (27): Cancellable, CrashHook, CrashWorkerHandle, CrashWorkerReady, SpawnCrashWorkerOptions, SuiteWatchdogTimeoutError, registerSuiteLifecycle(), startTestDatabase() (+19 more)
+
+### Community 102 - "listening.test.ts"
+Cohesion: 0.07
+Nodes (26): RunOptions, RunSeams, SignalSource, stopSignal, EngineInput, UserModulesSource, ChannelCoreOptions, ChannelPrivateOptions (+18 more)
+
+### Community 103 - "signal-backup.test.ts"
+Cohesion: 0.08
+Nodes (30): ImportedConfig, LoadOptions, WORKER, SignalEvent, SignalJob, configModules(), configModuleUrl(), configPath() (+22 more)
+
+### Community 105 - "browser.test.ts"
+Cohesion: 0.08
+Nodes (36): Reachable, RestoreAttempt, PageBackup, PageEvent, PageRestore, StatusBody, continuedProblems(), midChainProblems() (+28 more)
+
+### Community 108 - "release-version.ts"
 Cohesion: 0.12
 Nodes (34): FoundDeclaration, SourceText, Lock, changelogProblems(), declarationProblems(), idOf(), importedFile(), isDeclaration() (+26 more)
 
-### Community 105 - "core.ts"
-Cohesion: 0.12
-Nodes (25): BaselineLoad, Comparison, CommitOptions, PostgresRun, ManualOpts, TinybenchOpts, Backend, Baseline (+17 more)
+### Community 11 - "admin-harness.ts"
+Cohesion: 0.03
+Nodes (127): AdminChannel, AdminServeOptions, FromAdmin, ToAdmin, AdminServer, AdminStartOptions, AdminAnswer, AdminSnapshot (+119 more)
 
-### Community 106 - "browser/build.ts"
+### Community 111 - "redact.ts"
+Cohesion: 0.10
+Nodes (28): RedactionForms, SecretForm, TextPattern, Needs, findings(), databaseText(), isMemoryDatabase(), configRedactor() (+20 more)
+
+### Community 112 - "browser/build.ts"
 Cohesion: 0.08
 Nodes (26): BrowserBuildOptions, BrowserControl, checkedLedgers, browserLedgerEntry(), browserPlugin(), buildBrowser(), common(), listFiles() (+18 more)
 
-### Community 107 - "postgres/transaction-history-storage.ts"
-Cohesion: 0.08
-Nodes (22): EntryLifecycle, JsonEncoded, StoredEntryJson, TxHistoryRow, assertStoredEntryShape(), capitalize(), decodeContent(), decodeRow() (+14 more)
-
-### Community 11 - "ref_node_crypto"
-Cohesion: 0.03
-Nodes (120): TableDigest, TableDigestRow, CaptureColumn, CapturedTable, CaptureState, ChangeKind, tableChanges, TouchedRow (+112 more)
-
-### Community 111 - "config-check-database.test.ts"
-Cohesion: 0.09
-Nodes (21): CheckStep, CheckTarget, CliBackend, configCheck(), configText(), coreSettings(), inChild(), lineOf() (+13 more)
-
-### Community 112 - "process-worker.ts"
-Cohesion: 0.11
-Nodes (25): Scope, crossedError, FromProcessWorker, StartRun, ToProcessWorker, withDevelopmentOptIn(), databaseOptions(), openConfiguredDatabase() (+17 more)
-
-### Community 114 - "containers.test.ts"
-Cohesion: 0.09
-Nodes (22): Started, FailsOnceStarted, SlowToReportPorts, SourceFile, guardContainers(), removeAttempt(), startContainer(), startContainers() (+14 more)
-
-### Community 116 - "signal-ignored-fixtures.ts"
+### Community 114 - "block-fetch-decode.test.ts"
 Cohesion: 0.10
-Nodes (26): IgnoredJob, ListenedRun, WorkerSignals, runFailed(), listenerProblems(), namesUnder(), pacedNode(), pacedTape() (+18 more)
+Nodes (26): ExtrinsicCall, MetadataPallet, PalletSpec, blake2b256(), compress(), rotateRight(), words(), blockTimeOf() (+18 more)
+
+### Community 115 - "page.ts"
+Cohesion: 0.08
+Nodes (29): LinkRecord, RestoreRecord, SavedBackup, WorkerView, appendLog(), backUp(), beginCore(), element() (+21 more)
 
 ### Community 117 - "checks.test.ts"
 Cohesion: 0.09
-Nodes (23): CheckFunctionsOptions, IntegerCheckRow, IntegerRule, IntegerRules, JsonbNumberRule, Case, checkFunctionsSql(), integerCheckName() (+15 more)
+Nodes (22): CheckFunctionsOptions, IntegerCheckRow, IntegerRule, IntegerRules, JsonbNumberRule, Case, checkFunctionsSql(), integerCheckName() (+14 more)
 
-### Community 118 - "declarations.test.ts"
-Cohesion: 0.09
-Nodes (17): ItemSink, BlockItems, LateUse, Accepts, Rest, WithKnownPoints, WithUnknownPoint, EagerItems (+9 more)
+### Community 118 - "text.test.ts"
+Cohesion: 0.10
+Nodes (21): MetaCommands, Piece, State, StatementSplitter, createReadStream(), formatUnknown(), dumpLines(), checkStatement() (+13 more)
 
-### Community 119 - "read-gate.ts"
-Cohesion: 0.12
-Nodes (25): readRefusal, ReadRefusalReason, refusedStatement, Token, Unreadable, foldAscii(), isDigit(), isRefusedName() (+17 more)
+### Community 119 - ".value"
+Cohesion: 0.15
+Nodes (15): MetadataField, MetadataType, Primitive, ScaleReader, ValueReader, bytesArgument(), decodeChainEvents(), littleEndian() (+7 more)
 
-### Community 12 - "backup/restore.ts"
+### Community 12 - "host.ts"
 Cohesion: 0.03
-Nodes (86): PrivateBlockSource, PrivateChecks, privateIntake, PrivateIntakeOptions, PrivateShared, PrivateSourceOptions, SourceTransport, startHashDecision (+78 more)
+Nodes (106): TransactionParser, CoreLedgerStateOptions, LedgerStateItem, RetainedState, LedgerName, ApplyOutput, ChainOutcome, LedgerTask (+98 more)
 
-### Community 120 - "test/postgres/setup.ts"
+### Community 121 - "version-checks.ts"
+Cohesion: 0.11
+Nodes (22): MetadataNode, VersionedBlock, Boundary, CallRecord, MetadataSelector, Select, UpgradeCase, Walk (+14 more)
+
+### Community 122 - "code-registry.ts"
 Cohesion: 0.10
-Nodes (24): Cancellable, CrashHook, CrashWorkerHandle, CrashWorkerReady, SpawnCrashWorkerOptions, SuiteWatchdogTimeoutError, pool(), worker() (+16 more)
+Nodes (28): CodeList, CodeTest, RegistryInput, Section11, TestLiterals, input(), readRepositoryFile(), registryProblems() (+20 more)
 
-### Community 121 - "order.property.test.ts"
-Cohesion: 0.10
-Nodes (29): CheckName, GraphSpec, ModuleSpec, TESTED, byBytes(), checkDigestLast(), checkEachOnce(), checkParallelWaits() (+21 more)
+### Community 125 - "LoopPauses"
+Cohesion: 0.08
+Nodes (17): LoopPause, LoopPaused, LoopPauses, LoopPausesOptions, clock(), watched(), 1. Module layout, 2. Backend routing (the one non-obvious constraint) (+9 more)
 
-### Community 122 - "interfaces/transaction-history-storage.ts"
-Cohesion: 0.07
-Nodes (20): EntryLifecycleStatus, FinalizedLifecycle, MergeEntriesFn, PendingLifecycle, RejectedLifecycle, TransactionHistoryReader, TransactionHistoryWriter, EntryContentSchema (+12 more)
+### Community 127 - "paused-harness.ts"
+Cohesion: 0.14
+Nodes (24): ReadOnlyDatabase, Body, KeeperGlobals, PausedExpectation, Read, Reader, Running, keepingPause() (+16 more)
 
-### Community 123 - "pg-tx-history-adapter.ts"
-Cohesion: 0.10
-Nodes (22): TransactionHistoryStatus, LifecycleDetailStore, TestEntry, TestSection, assertNoReservedAdapterKeys(), describeStatusValue(), mapSdkStatusToUmbra(), mapUmbraStatusToSdk() (+14 more)
+### Community 128 - "halts.test.ts"
+Cohesion: 0.09
+Nodes (28): ProcessingEnd, ProcessStatus, Q142Observation, A43Case, A43Observation, CursorElsewhere, Halt, Outcome (+20 more)
 
-### Community 124 - "ledger-sweep.test.ts"
-Cohesion: 0.13
-Nodes (15): SweepState, SweepWrites, Block, MemoryTables, ModelBatch, ModelSnapshot, SweepModel, bigints() (+7 more)
-
-### Community 125 - "documents.ts"
+### Community 129 - "documents.ts"
 Cohesion: 0.14
 Nodes (27): EngineeringRule, MarkdownLink, TextFile, agentsProblems(), changelogDocumentProblems(), descriptionProblems(), linkedPath(), linkProblems() (+19 more)
 
-### Community 127 - "relays.ts"
-Cohesion: 0.10
-Nodes (10): Session, Report, HeldLink, HoldingRelay, ReportRelay, RetargetProxy, hostPort(), sendable() (+2 more)
-
-### Community 128 - "pglite-lock.ts"
-Cohesion: 0.10
-Nodes (20): CreatedDirectory, EmitWarning, Held, PgliteLockUse, WarningArguments, WarningHook, ChildResult, isSqliteWarning() (+12 more)
-
-### Community 13 - "config/history.ts"
+### Community 13 - "backup/restore.ts"
 Cohesion: 0.03
-Nodes (114): OpenedFacts, CoreVersion, CoreSettings, HistoryCheck, HistoryCode, HistoryContext, HistoryOptions, HistoryRow (+106 more)
+Nodes (96): ChainCheck, ChainCheckInput, PrivateBlockSource, PrivateChecks, privateIntake, PrivateShared, PrivateSourceOptions, SourceTransport (+88 more)
 
-### Community 130 - "node-bridge.ts"
+### Community 130 - "crash.test.ts"
 Cohesion: 0.11
-Nodes (20): NodeStore, EngineOptions, Thread, BridgeServer, bridgeStore, Growable, bridgeMemory(), decodeNodes() (+12 more)
+Nodes (24): CrashCall, CrashEvent, CrashOptions, CrashObservation, ItemsAfterWrite, WORKER, CrashJob, CrashWorkerEvent (+16 more)
 
-### Community 131 - "check-required-tests.ts"
+### Community 132 - "networks.ts"
+Cohesion: 0.08
+Nodes (27): Boundary, BoundaryBlock, builtInNetwork, Issue, KnownNetwork, NetworkGenesis, NetworksFileProblem, NetworkSource (+19 more)
+
+### Community 133 - "read-gate.ts"
+Cohesion: 0.14
+Nodes (23): readRefusal, ReadRefusalReason, refusedStatement, Token, Unreadable, foldAscii(), isDigit(), isRefusedName() (+15 more)
+
+### Community 134 - "sigterm.test.ts"
+Cohesion: 0.11
+Nodes (23): Job, WorkEvent, WorkOptions, A48Observation, WORKER, Job, WorkerEvent, report() (+15 more)
+
+### Community 136 - "Tasks — v1.1.0: Formal completion (`formal-completion`)"
+Cohesion: 0.08
+Nodes (21): ReadPool, 0. Scaffolding + Trust reach, 1. C2a — GC-safety (release-blocking; start now), 2. C2b — eventual collection (DEFERRED), 3. L1 — lease mutual exclusion (release-blocking; start now), 4. Multi-key TemporalKV lift — FRAMING ONLY (DEFERRED), 5. Ordered chunk reconstruction (DEFERRED), 6. C1 collision hygiene (release-blocking rider) (+13 more)
+
+### Community 137 - "height-versioned.property.test.ts"
+Cohesion: 0.14
+Nodes (19): VersionedValue, StoredVersion, Block, BlockFails, Counts, Effect, Model, Op (+11 more)
+
+### Community 138 - "example-checks.ts"
+Cohesion: 0.15
+Nodes (19): BlockImport, ChildResult, CodeBlock, installedProject, allowedSource(), codeBlocks(), exampleCopy(), importProblems() (+11 more)
+
+### Community 139 - "check-required-tests.ts"
 Cohesion: 0.13
 Nodes (22): JsonReport, JsonReportAssertion, JsonReportFile, ManifestEntry, ReconcileResult, RequiredTestsManifest, ViolationReason, cli() (+14 more)
 
-### Community 132 - "legacy-excluded.test.ts"
+### Community 14 - "fetch-fixtures.ts"
+Cohesion: 0.03
+Nodes (121): NodeCallOptions, ProcessCondition, Scenario, RecordingClient, ArgType, BlockOptions, CallSpec, chainBlock (+113 more)
+
+### Community 140 - "legacy-excluded.test.ts"
 Cohesion: 0.15
 Nodes (23): VitestConfig, buildProblems(), coverageProblems(), programFiles(), repoPath(), runFiles(), holdsProblems(), inventoryProblems() (+15 more)
 
-### Community 133 - "threat-model.test.ts"
+### Community 141 - "threat-model.test.ts"
 Cohesion: 0.16
 Nodes (24): Citation, citationProblems(), citations(), headingProblems(), headings(), knownGapProblems(), lineCountOf(), lineLengthProblems() (+16 more)
 
-### Community 136 - ".send"
+### Community 144 - "configuration-refusal.test.ts"
 Cohesion: 0.14
-Nodes (10): Cdp, ChromeBrowser, ChromeTab, chrome(), chrome(), chromePath(), exitsWithin(), launchChrome() (+2 more)
+Nodes (21): ConfigFinding, ReasonCode, Unwrapped, findingText(), refusalFindings(), configurationFindings(), configurationRefusalLines(), isConfigurationRefusal() (+13 more)
 
-### Community 137 - "surface.test.ts"
+### Community 145 - "surface.test.ts"
 Cohesion: 0.14
 Nodes (25): Surface, SurfaceAmendment, amendedSurface(), coreModuleProblems(), identifiersIn(), isValueExport(), paragraph(), pinnedSurface() (+17 more)
 
-### Community 138 - "code-registry.ts"
-Cohesion: 0.14
-Nodes (23): CodeList, CodeTest, RegistryInput, Section11, TestLiterals, input(), readRepositoryFile(), registryProblems() (+15 more)
+### Community 149 - "ledger-table-config.test.ts"
+Cohesion: 0.17
+Nodes (20): CountingNode, Answers, toHex(), H(), withCore(), blockWith(), expectBadVersionDigestHalts(), expectPinsChecked() (+12 more)
 
-### Community 14 - "NodeClient"
-Cohesion: 0.04
-Nodes (78): NodeSourceOptions, FinalizedHeightOptions, HeadSubscriber, NodeClient, Pending, State, Subscription, Waiter (+70 more)
+### Community 15 - "core-block-commit.test.ts"
+Cohesion: 0.03
+Nodes (109): BlockRow, MigrationPart, SchemaModule, SchemaPlan, ProcessContext, ResolvedGraph, LoopInput, ApiStartup (+101 more)
 
-### Community 142 - "pack-install.mjs"
+### Community 150 - "fixtures/configuration.ts"
+Cohesion: 0.11
+Nodes (17): BrowserConfiguration, BrowserRun, PrivateInstance, ProcessConfiguration, PgliteMemoryParts, databaseOf(), coreConfiguration(), param() (+9 more)
+
+### Community 151 - "pack-install.mjs"
 Cohesion: 0.17
 Nodes (20): SmokeFailure, checkConfig(), configFile(), consumerSource(), dockerIndependentOracles(), fail(), main(), run() (+12 more)
 
-### Community 143 - "options.ts"
-Cohesion: 0.21
-Nodes (23): readOptions, addressFindings(), configFindings(), cwdUnreadable(), elementsOf(), finding(), guarded(), isHost() (+15 more)
+### Community 152 - "start-umbradb.test.ts"
+Cohesion: 0.14
+Nodes (16): ModuleListRule, GoneCwdResult, moduleListProblems(), closedByItself(), hostile(), optionProblems(), throwing(), problemsOf() (+8 more)
 
-### Community 144 - ".concat"
-Cohesion: 0.12
-Nodes (12): Armed, CommitArm, CommitFault, CommitProxy, Pair, probe(), holds(), tailOf() (+4 more)
+### Community 154 - "HeightRun"
+Cohesion: 0.10
+Nodes (9): HeightRun, SkipsAfterReconnect, SkipsUnseen, WaitsInTransaction, Batching, SkipsStartAtRestart, CommitsDespiteLastWrite, WaitsInTransaction (+1 more)
 
-### Community 149 - "library-documents.test.ts"
+### Community 155 - "demo-handlers.test.ts"
+Cohesion: 0.15
+Nodes (17): Compared, ConnectSeen, PortPeer, comparedOfExchange(), comparedOfResponse(), connected(), engineOf(), fetchProblems() (+9 more)
+
+### Community 156 - "harness.ts"
+Cohesion: 0.16
+Nodes (15): BaselineLoad, Comparison, PostgresRun, Backend, Baseline, LatencyStats, compareToBaseline(), loadBaseline() (+7 more)
+
+### Community 16 - "adapter-fixtures.ts"
+Cohesion: 0.04
+Nodes (112): ApplyInput, StoredNode, Upstream, contractFixture, Ledger, RawPackage, AdapterSubject, NodeRoot (+104 more)
+
+### Community 160 - "core-block-fetch/metadata.ts"
+Cohesion: 0.29
+Nodes (14): MetadataStorage, MetadataStorageEntry, TypeDef, ScaleError, field(), pallet(), readRuntimeMetadata(), readTypeRegistry() (+6 more)
+
+### Community 161 - "library-documents.test.ts"
 Cohesion: 0.14
 Nodes (20): Document, EntryInput, Renamed, changelogEntryProblems(), entryTerms(), namesWord(), newRefusalCodes(), paragraphs() (+12 more)
 
-### Community 15 - "tape/index.ts"
-Cohesion: 0.04
-Nodes (84): Recorded, Failure, Variant, RecordingProblem, TapeError, TapeProblem, TransformProblem, readRequest (+76 more)
-
-### Community 150 - "Buffer"
-Cohesion: 0.14
-Nodes (14): Buffer, BufferEncoding, Hash, bytesOfText(), charCodes(), encodingOf(), fromBase64(), fromHex() (+6 more)
-
-### Community 154 - "configuration-refusal.test.ts"
-Cohesion: 0.20
-Nodes (16): ConfigFinding, configurationRefused(), findingText(), refusalFindings(), configurationFindings(), configurationRefusalLines(), isConfigurationRefusal(), messageOf() (+8 more)
-
-### Community 155 - "key-handling-checks.ts"
-Cohesion: 0.13
-Nodes (16): Leftover, RemovedName, described(), keyLeftovers(), leftoversIn(), scannedFiles(), OWN_FILES, REMOVED_NAMES (+8 more)
-
-### Community 16 - "node-fields-harness.ts"
-Cohesion: 0.04
-Nodes (108): MetadataBlock, RuntimeMetadataEntry, ProcessCondition, A168Observation, A168Phase, A168RunOptions, Expected, GatedConnector (+100 more)
-
-### Community 163 - "config/plain-data.ts"
+### Community 163 - "chrome.ts"
 Cohesion: 0.16
-Nodes (17): PlainArray, PlainDataNode, PlainDataRule, Walk, copyArray(), copyObject(), instanceOf(), integer() (+9 more)
+Nodes (14): Cdp, CdpEvent, ChromeBrowser, Download, PageRequest, chrome(), chrome(), chromePath() (+6 more)
 
-### Community 17 - "module-api.ts"
-Cohesion: 0.04
-Nodes (93): coreHeaders, HeadersArgument, ModuleApiStart, MountedApiSeams, StartedModuleApi, ChannelConnectOptions, connectionRules, FetchHandler (+85 more)
+### Community 164 - "transaction-history-storage.property.test.ts"
+Cohesion: 0.11
+Nodes (16): EntryContent, Command, ReplayableStorage, applyCommand(), replay(), arbitraryCommand, badKeyValue, GOOD_LEAF_KEYS (+8 more)
 
-### Community 171 - "read-height.property.test.ts"
+### Community 168 - "browser-harness.ts"
+Cohesion: 0.25
+Nodes (17): PageLink, ProcessName, apiChannel(), backupThrough(), byDeadline(), call(), eventsOf(), eventWhen() (+9 more)
+
+### Community 17 - "ModuleDeclaration"
+Cohesion: 0.03
+Nodes (108): ModuleDeclaration, PointName, HeightRange, ResolvedRange, BlockItems, LateUse, Callback, CallbackFailure (+100 more)
+
+### Community 170 - "postgres-tls-server.ts"
 Cohesion: 0.16
-Nodes (12): TestDatabase, HeldRead, Job, Outcome, Reads, Step, concurrent(), queued() (+4 more)
+Nodes (13): SslMode, driverConnectionOptions, PostgresConnection, TlsPostgres, makeCertificates(), startTlsPostgres(), noHeight(), readError() (+5 more)
 
-### Community 175 - "LoopPauses"
-Cohesion: 0.18
-Nodes (5): LoopPause, LoopPaused, LoopPauses, LoopPausesOptions, watched()
-
-### Community 176 - "source-scan.ts"
+### Community 172 - "network.test.ts"
 Cohesion: 0.24
-Nodes (16): ModuleReference, boundaryViolations(), codeFingerprints(), declaredNames(), eachNode(), isInside(), lineOf(), literalText() (+8 more)
+Nodes (14): NetworkRuleName, Parsed, Expected, schemaCase(), commandRefusalProblems(), listeningSockets(), portFree(), refusedProblems() (+6 more)
 
-### Community 178 - "ws-mutual-tls.test.ts"
+### Community 174 - "package-startup-checks.ts"
+Cohesion: 0.16
+Nodes (13): ChangedFile, GenesisFixture, installationCopy, StartPackageProcess, expectWorkerChecks(), genesisOf(), hex(), withoutCheck() (+5 more)
+
+### Community 18 - "loop.test.ts"
+Cohesion: 0.03
+Nodes (112): EntryRange, GraphInput, CommitOutcome, HeldHeight, LockstepWait, PastFaultCase, RefusalCase, Contexts (+104 more)
+
+### Community 180 - "read-height.property.test.ts"
+Cohesion: 0.17
+Nodes (11): HeldRead, Job, Outcome, Reads, Step, concurrent(), queued(), run() (+3 more)
+
+### Community 182 - "ws-mutual-tls.test.ts"
 Cohesion: 0.17
 Nodes (11): Attempt, server(), connect(), file(), makeCa(), makeLeaf(), openssl(), read() (+3 more)
 
-### Community 179 - "statementsOf"
-Cohesion: 0.25
-Nodes (11): MetaCommands, Piece, State, StatementSplitter, formatUnknown(), checkStatement(), checkStatements(), statementsOf() (+3 more)
+### Community 183 - "checkShape"
+Cohesion: 0.34
+Nodes (8): Shape, checkItem(), checkLedgerTasks(), checkShape(), isObject(), isZodObject(), quoted(), shown()
 
-### Community 18 - "ReadHandle"
-Cohesion: 0.03
-Nodes (72): BlockWriteHandle, ReadHandle, cursorTable, CursorTableOptions, CursorValue, heightVersionedTable, HeightVersionedTableOptions, VersionedValue (+64 more)
+### Community 184 - "validation.test.ts"
+Cohesion: 0.16
+Nodes (12): DeclarationRule, Case, ShapeCase, Stats, validateWith(), failures(), loose(), refusal() (+4 more)
 
-### Community 183 - "src/config/load.ts"
-Cohesion: 0.23
-Nodes (14): ImportedConfig, LoadOptions, configModules(), configModuleUrl(), configPath(), importConfig(), invalid(), isFile() (+6 more)
+### Community 185 - "src/protocol.ts"
+Cohesion: 0.17
+Nodes (10): ProcessView, Scope, CallMethod, crossedError, FromProcessWorker, StartRun, ToProcessWorker, hexOf() (+2 more)
 
-### Community 184 - "checkParent"
-Cohesion: 0.18
-Nodes (12): AlwaysLanded, checkParent(), sameBytes(), hashAt(), 00028 — `core-block-commit`'s parent check lets a block above a gap commit, Evidence, Problem, Suggested fix (+4 more)
+### Community 188 - "core-block-fetch.test.ts"
+Cohesion: 0.14
+Nodes (6): LedgerTable, coreBlockFetchOnFetch(), isBlockItemSource(), chainBackbone(), CORE_BLOCK_ITEMS, KNOWN_NETWORKS
 
-### Community 185 - ".name"
-Cohesion: 0.22
-Nodes (6): Fetching, Recorder, 00059 — A115's fault tests send instance ids the 00051 rule refuses, so 18 transport tests fail, Evidence, Problem, Suggested fix
-
-### Community 19 - "ref_node_fs"
-Cohesion: 0.06
-Nodes (72): BackupBackend, BackupDatabase, killedRestore, TickerConfig, TickerHandle, TickerProcess, WORKER, SignalEvent (+64 more)
-
-### Community 191 - "Heartbeat"
-Cohesion: 0.22
-Nodes (7): Heartbeat, HeartbeatOptions, TimerHandle, lastTick(), tickAgeMs(), beat(), HEARTBEAT_INTERVAL_MS
-
-### Community 192 - "component-table.test.ts"
+### Community 189 - "networks.test.ts"
 Cohesion: 0.15
-Nodes (10): DesignTable, RowCoverage, rule(), opensDatabase(), calledNames(), typeScriptFiles(), OPENERS, ROWS (+2 more)
+Nodes (11): Answers, File, FormatRow, FoundTape, Tape, H(), validFile(), BUILT_IN_NETWORKS (+3 more)
 
-### Community 194 - "no-indexer-or-wallet-sdk.test.ts"
+### Community 19 - "config/history.ts"
+Cohesion: 0.03
+Nodes (121): OpenedFacts, CoreVersion, CoreSettings, versionEntry, ConfigHashRow, HistoryCode, HistoryFinding, HistoryInput (+113 more)
+
+### Community 190 - "quiet-host.child.ts"
+Cohesion: 0.15
+Nodes (11): Job, Outcome, Stated, event(), until(), added, before, db (+3 more)
+
+### Community 191 - "core.ts"
+Cohesion: 0.23
+Nodes (11): CommitOptions, ManualOpts, TinybenchOpts, commitEmptyBlockPglite(), commitEmptyBlockPostgres(), commitSamples(), startBenchEnv(), measureManual() (+3 more)
+
+### Community 192 - "browser/serve.ts"
+Cohesion: 0.21
+Nodes (10): BrowserBuild, pageBench, PageServer, main(), pageHandler(), servePage(), listenOnRandomPort(), CONTENT_TYPES (+2 more)
+
+### Community 193 - "stats-module.ts"
+Cohesion: 0.26
+Nodes (11): StatsRow, Outcome, insertRow(), lastTotal(), recentRows(), rowAt(), migrations, statsModule (+3 more)
+
+### Community 198 - "Session"
+Cohesion: 0.21
+Nodes (3): BoundedRead, Session, queryTimeout()
+
+### Community 199 - "upgrade-boundary.test.ts"
+Cohesion: 0.21
+Nodes (12): A47Observation, CommitsTheBoundary, Controls, Version, a47Problems(), a47Run(), big(), buildOf() (+4 more)
+
+### Community 2 - "migrate.ts"
+Cohesion: 0.02
+Nodes (162): Transaction, AppliedRow, Runnable, Settling, StartupInput, MultiStatementRunner, Difference, OwnPart (+154 more)
+
+### Community 20 - "NodeClient"
+Cohesion: 0.04
+Nodes (73): NodeSourceOptions, CoreChainBinding, FinalizedHeightOptions, Connection, HeadSubscriber, NodeClient, NodeRetry, Pending (+65 more)
+
+### Community 201 - "no-indexer-or-wallet-sdk.test.ts"
 Cohesion: 0.29
 Nodes (7): Finding, moduleSpecifier(), scanRoots(), scanSource(), scriptKind(), sourceFiles(), ROOTS
 
-### Community 195 - "browser/src/config/load.ts"
+### Community 202 - "browser/src/config/load.ts"
 Cohesion: 0.23
 Nodes (12): ImportedConfig, LoadedConfig, LoadOptions, configModules(), configModuleUrl(), configPath(), importConfig(), loadConfig() (+4 more)
 
-### Community 196 - "16. Browser"
-Cohesion: 0.21
-Nodes (8): BackupText, createReadStream(), dumpLines(), blobChunks(), blobText(), firstLineOf(), linesAfterFirst(), 16. Browser
-
-### Community 197 - "worker-threads.test.ts"
+### Community 203 - "worker-threads.test.ts"
 Cohesion: 0.19
 Nodes (6): Listener, FakeWorker, Listener, isMainThread, parentPort, workerData
 
-### Community 2 - "declaration.ts"
-Cohesion: 0.02
-Nodes (197): NetworkShown, OpenedConfig, MountedAdminAnswer, AdminSeams, PrivateSideFacts, ProcessAdmin, ProcessAdminOptions, adminRoutes (+189 more)
-
-### Community 20 - "channel-queue.test.ts"
-Cohesion: 0.04
-Nodes (82): EndpointOptions, Envelope, LinkTimers, MessagePortLike, CoreChannelSeams, Received, TransportLimits, ChannelCarrierSeams (+74 more)
-
-### Community 204 - "history.property.test.ts"
-Cohesion: 0.22
-Nodes (10): Hash, changesWithValues(), hex(), orderIndependent(), places(), reordered(), replaced(), dataFields (+2 more)
-
-### Community 206 - "worker-threads-worker.ts"
+### Community 207 - "worker-threads-worker.ts"
 Cohesion: 0.18
 Nodes (7): Scope, Worker, runEntry(), firstMessage, held, isMainThread, parentPort
 
-### Community 207 - "postgres-tls-server.ts"
-Cohesion: 0.20
-Nodes (8): TlsPostgres, makeCertificates(), startTlsPostgres(), HBA, 00064 — Under a loaded machine, tests' timing budgets run out in the full suite (L15–L18's controls, A63, F2, …), Evidence, Problem, Suggested fix
-
-### Community 209 - "stats-module.ts"
-Cohesion: 0.32
-Nodes (10): StatsRow, Outcome, insertRow(), lastTotal(), recentRows(), rowAt(), migrations, statsModule (+2 more)
-
-### Community 21 - "loop.test.ts"
+### Community 21 - "backup-fixtures.ts"
 Cohesion: 0.04
-Nodes (89): EntryRange, LockstepWait, LoopEnd, Contexts, Faults, LostCommit, Seen, AtGate (+81 more)
+Nodes (84): CheckStep, BackupBackend, BackupDatabase, killedRestore, TickerConfig, TickerHandle, cliProject, CheckTarget (+76 more)
 
-### Community 212 - "childRefKeys"
-Cohesion: 0.38
-Nodes (3): ChildReader, childRefKeys(), readChildren()
-
-### Community 215 - "src/configuration.ts"
-Cohesion: 0.18
-Nodes (6): BrowserConfiguration, BrowserRun, PrivateInstance, ProcessConfiguration, PgliteMemoryParts, umbradb:configuration
-
-### Community 22 - "core-transport.ts"
-Cohesion: 0.03
-Nodes (69): PrivateLinkAddress, ResultColumn, CoreChannelsOptions, Queued, Connected, CoreTransport, CoreTransportOptions, CoreLink (+61 more)
-
-### Community 221 - "Design — Sprint 1: project setup + TemporalKV"
+### Community 219 - "Design — Sprint 1: project setup + TemporalKV"
 Cohesion: 0.20
 Nodes (10): Key, Sql, 0. Schema naming, now that UmbraDB is standalone, 1. Package layout, 2. Migration mechanism, 3. Connection factory (`src/postgres/client.ts`), 4. `PgTemporalKV` adapter (`src/postgres/temporal-kv.ts`), 4a. Error translation (`src/postgres/errors.ts`) (+2 more)
 
-### Community 223 - "sweepStep"
-Cohesion: 0.27
-Nodes (4): SweepTables, hexOf(), merged(), sweepStep()
+### Community 22 - "process-build.ts"
+Cohesion: 0.04
+Nodes (84): MountedAdminAnswer, adminRoutes, AdminEndpoint, AdminPart, AdminView, ChainView, InstanceStatus, ItemView (+76 more)
 
-### Community 224 - "ledger/plain-data.ts"
+### Community 221 - "RuntimeMetadata"
+Cohesion: 0.24
+Nodes (4): RuntimeMetadata, contentStateOf(), hexOf(), walkOver()
+
+### Community 222 - "ledger/plain-data.ts"
 Cohesion: 0.29
 Nodes (8): Path, Point, described(), differs(), key(), plainDataProblem(), walk(), PLAIN_PROTOTYPES
 
-### Community 225 - "sha256"
+### Community 223 - "ApiRoutes"
+Cohesion: 0.31
+Nodes (6): ApiRoutes, parsePath(), shapeOf(), routesOf(), api(), routesOf()
+
+### Community 224 - "sha256"
 Cohesion: 0.31
 Nodes (5): sha256, hex(), instantiateLedger(), INITIAL, K
 
-### Community 23 - "loop.ts"
+### Community 23 - "declaration.ts"
 Cohesion: 0.04
-Nodes (79): PointName, ProcessContext, HeightRange, ResolvedRange, Callback, CallbackFailure, EntryBoundary, ParallelPoint (+71 more)
+Nodes (74): BlockWriteHandle, ReadHandle, SchemaWriteHandle, cursorTable, CursorTableOptions, CursorValue, heightVersionedTable, HeightVersionedTableOptions (+66 more)
 
-### Community 233 - "postgres-image.test.ts"
-Cohesion: 0.24
-Nodes (9): RepositoryFile, canPin(), pinViolations(), repositoryFiles(), files, HASH_COMMENTED, RECORDS, ROOT (+1 more)
+### Community 236 - "TapeAnswers"
+Cohesion: 0.40
+Nodes (6): TapeAnswers, nodeRootAt(), expectTableHolds(), devnetOf(), devnetUpgradeOf(), isCall()
 
-### Community 24 - "ledger-tapes.ts"
+### Community 237 - "worker-output.test.ts"
+Cohesion: 0.22
+Nodes (8): Seen, noisy(), outputProblems(), ADMIN_ENTRY, LEDGER_ENTRY, LOGGED, PGLITE_MEMORY, WRITTEN
+
+### Community 24 - "contract-modules.test.ts"
 Cohesion: 0.04
-Nodes (73): RawPackageClass, FreshInstanceRequest, FreshInstanceResult, StoredNode, Child, Reader, Disposable, NodeBatch (+65 more)
+Nodes (85): ContractLog, CoreContractLogsFastOptions, FastLogReader, UnsureLog, LogSite, Program, UnsureReason, V9Raw (+77 more)
 
-### Community 242 - "HeldHeight"
-Cohesion: 0.28
-Nodes (5): CommitOutcome, HeldHeight, Outcomes, AlwaysLost, DropsHeld
-
-### Community 244 - "messagePortChannel"
-Cohesion: 0.29
-Nodes (6): demoLink, onLink(), messagePortChannel(), found(), Change: `start-umbradb` — UmbraDB as a library (2026-11-01), Rework (class 4)
-
-### Community 245 - "POSTGRES_IMAGE"
-Cohesion: 0.32
-Nodes (5): BenchEnv, PG_SETTINGS, container, { guarded, fixture }, POSTGRES_IMAGE
-
-### Community 25 - ".from"
+### Community 25 - "ref_node_path"
 Cohesion: 0.03
-Nodes (85): Binding, EventKind, Native, Proof, RawBlockContext, RawEvent, RawIntent, RawLedgerPackage (+77 more)
+Nodes (79): Served, ParentJob, Kill, Orphaned, SourceFile, Run, WorkerEvent, LockResult (+71 more)
 
-### Community 257 - "vendored-ledger-files.test.ts"
-Cohesion: 0.29
-Nodes (6): Upstream, filesUnder(), patchesOf(), patchText(), ledgerDir, VERSIONS
+### Community 254 - "renamed-setting.test.ts"
+Cohesion: 0.39
+Nodes (6): Renamed, databaseOf(), dataOf(), escaped(), fileOf(), FINDING()
 
-### Community 26 - "private/lockstep-wait.test.ts"
+### Community 26 - "ledger/types.ts"
 Cohesion: 0.04
-Nodes (87): LockstepCondition, OpenTransaction, PrivateProcess, PrivateSeen, InstanceHashes, OptedOutObservation, Refusal, TableRefusals (+79 more)
+Nodes (76): LoadLedger, ManifestLine, LedgerReleasePackage, LedgerSource, LedgerSourceSettings, LedgerPackageOptions, V9Logs, LedgerPin (+68 more)
 
-### Community 266 - "mutation-evidence.d.mts"
+### Community 263 - "mutation-evidence.d.mts"
 Cohesion: 0.29
 Nodes (6): AdapterResult, GateResult, MutantTally, StrykerFile, StrykerMutant, StrykerReport
 
-### Community 27 - "ref_node_url"
-Cohesion: 0.03
-Nodes (83): CdpEvent, Download, ParentJob, Kill, Orphaned, SourceFile, LockResult, Report (+75 more)
+### Community 27 - "devnet-upgrade.test.ts"
+Cohesion: 0.05
+Nodes (65): Side, FreshInstanceRequest, FreshInstanceResult, StoredNode, Child, Reader, Disposable, NodeBatch (+57 more)
 
-### Community 28 - "chain-process.test.ts"
-Cohesion: 0.03
-Nodes (77): InMemoryItems, InMemorySourceOptions, Wait, Job, WorkerEvent, A77Observation, A78Observation, A78Refusal (+69 more)
+### Community 28 - "Process"
+Cohesion: 0.04
+Nodes (23): ProcessAdmin, BlockSource, SourceNodeView, ProcessReason, PauseHold, Opened, Process, withNetwork() (+15 more)
 
-### Community 29 - "client.test.ts"
-Cohesion: 0.03
-Nodes (53): Connection, NodeCallOptions, NodeRetry, NodeSocket, NodeSocketEvents, NodeTimers, RecordingClient, HandSocket (+45 more)
+### Community 29 - "NodeBlockSource"
+Cohesion: 0.04
+Nodes (41): BlockHeaderItem, BodyExtrinsic, BlockBody, CoreBlockHeader, CoreBlockItems, HeadWait, NodeBlockSource, Prefetch (+33 more)
 
-### Community 3 - "column-rules.ts"
+### Community 3 - "range.ts"
 Cohesion: 0.02
-Nodes (187): DumpInput, CheckedMigration, ModuleColumn, ModuleContentsError, ModuleContentsFailure, ModuleTable, ModuleTableOptions, PageOptions (+179 more)
+Nodes (146): NodeClientOptions, ConnectSocket, Outage, Refusal, Metadata, Step, FindTapeOptions, ReportedTest (+138 more)
 
-### Community 30 - "durability-probe.test.ts"
-Cohesion: 0.05
-Nodes (79): DurabilityProbeOptions, DurabilityViolation, DurabilityWarning, ProbeSession, Outcome, WriterSession, WriterStart, Row (+71 more)
-
-### Community 31 - "validate.ts"
-Cohesion: 0.04
-Nodes (88): HistoryFinding, plainData, ConfigInput, ConfigRule, CursorRule, EntryRef, Finding, Issue (+80 more)
-
-### Community 32 - "builds.ts"
-Cohesion: 0.04
-Nodes (69): PglitePathParts, PostgresParts, Keeping, PrivateBackend, SessionSeen, PrivateRefusal, PublicCore, A162Options (+61 more)
-
-### Community 33 - "record-and-replay.test.ts"
-Cohesion: 0.04
-Nodes (46): Answer, Handler, Received, recorded, ConnectionFrames, Failure, Variant, WrongRecording (+38 more)
-
-### Community 34 - "FinalizedLoop"
-Cohesion: 0.04
-Nodes (29): FinalizedLoop, HeightRun, LoopObserver, Startup, SkipsAfterReconnect, SkipsUnseen, WaitsInTransaction, Batching (+21 more)
-
-### Community 35 - "UmbraError"
-Cohesion: 0.04
-Nodes (40): databaseTarget, PostgresConnection, PostgresOptions, PgliteLockUse, JobQueue, PgliteDatabase, BoundedRead, ReadPool (+32 more)
-
-### Community 36 - "cbor.ts"
-Cohesion: 0.05
-Nodes (77): CanonicalEncodingError, CanonicalEncodingFailure, CanonicalValue, ColumnMode, DateTimeFields, Mode, PathNode, Task (+69 more)
-
-### Community 37 - "messages.ts"
-Cohesion: 0.04
-Nodes (55): Committed, HelloAck, JsonValue, MessageFault, ReadResult, StatementResult, CarrierConnection, Pending (+47 more)
-
-### Community 38 - "LedgerPackage"
-Cohesion: 0.05
-Nodes (43): LedgerPackage, StateHandle, LedgerEngine, LedgerTaskFailed, Settled, StagenetBlockJson, StagenetFixtureJson, stagenetReplay (+35 more)
-
-### Community 39 - "refused-configuration.test.ts"
-Cohesion: 0.05
-Nodes (77): EngineConfig, WorkerWithStreams, Answered, Start, Refusal, Start, listenError(), startAdminServer() (+69 more)
-
-### Community 4 - "migrate.ts"
-Cohesion: 0.02
-Nodes (156): SchemaWriteHandle, Transaction, AppliedRow, MigrationPart, Runnable, Settling, StartupInput, Difference (+148 more)
-
-### Community 41 - "api-server.test.ts"
-Cohesion: 0.04
-Nodes (65): ApiRegistry, ChainDataView, HttpHandler, HttpRoute, ModuleRegistration, AcceptsDuplicates, AddsExtensions, AddsHeaders (+57 more)
-
-### Community 42 - "range.ts"
-Cohesion: 0.04
-Nodes (68): NodeSubscription, ConnectSocket, BoundaryBlockReading, BoundaryOptions, BoundaryReading, Link, TapeBuilder, TapeBuilderOptions (+60 more)
-
-### Community 43 - "Process"
-Cohesion: 0.05
-Nodes (20): RetryCode, PauseHold, Process, RetryCondition, openedCursorHeight(), bindCoreBlockFetch(), isBlockLedgerSource(), bindLedgerParser() (+12 more)
-
-### Community 44 - "graph.ts"
-Cohesion: 0.04
-Nodes (83): ErrorCode, Edge, GraphFacts, GraphInput, GraphPart, GraphRule, MidChain, Missing (+75 more)
-
-### Community 45 - "db/errors.ts"
-Cohesion: 0.04
-Nodes (54): BackupFacts, ReadTimeoutSetting, exclusiveJob, ErrorDetails, ResultType, Case, hex(), isPrivateDatabase() (+46 more)
-
-### Community 46 - "vitest"
-Cohesion: 0.04
-Nodes (43): Served, Row, Lockfile, Manifest, BlockImport, ChildResult, CodeBlock, installedProject (+35 more)
-
-### Community 47 - "resolve.ts"
-Cohesion: 0.05
-Nodes (69): AddressRequest, Asked, LinkPlan, NetworkInput, NetworkPlan, NetworkProblem, NetworkRequest, NetworkRule (+61 more)
-
-### Community 48 - "NodeBlockSource"
-Cohesion: 0.06
-Nodes (23): HeadWait, NodeBlockSource, Prefetch, PreparedBlock, QueueRunner, EventsRunner, NoWindow, Refetches (+15 more)
-
-### Community 49 - "cli/command.ts"
-Cohesion: 0.05
-Nodes (53): CommandHandler, CommandIo, MainProcess, ConfigCheckReport, CommandResult, RunningCommand, statsConfig, backupArguments() (+45 more)
-
-### Community 5 - "process-build.ts"
-Cohesion: 0.02
-Nodes (164): EngineBuild, EngineNetwork, ProcessingEnd, ProcessStatus, ingest, watched, RestartEvent, RestartJob (+156 more)
-
-### Community 50 - "contract-modules.test.ts"
-Cohesion: 0.05
-Nodes (59): ContractLog, BlockTransaction, CoreContractLogsFastOptions, FastLogReader, UnsureLog, LogSite, Program, UnsureReason (+51 more)
-
-### Community 51 - "core-chain.test.ts"
-Cohesion: 0.05
-Nodes (48): Bound, ChainSource, ConfiguredGenesis, CoreChainBinding, NodeWait, WaitingListener, ConfigRow, ConfigHashRow (+40 more)
-
-### Community 52 - "config-check.ts"
-Cohesion: 0.06
-Nodes (58): ConfigFacts, CoreChainFacts, RestoreBase, BackupOutcome, CommandBuildOptions, CheckFinding, CheckState, ConfigCheckOptions (+50 more)
-
-### Community 53 - "browser.test.ts"
-Cohesion: 0.06
-Nodes (58): BrowserBuild, Reachable, RestoreAttempt, PageApiChannel, PageBackup, pageBench, PageEvent, PageLink (+50 more)
-
-### Community 54 - "PgTransactionHistoryStorage"
-Cohesion: 0.05
-Nodes (53): TransactionHistoryStorage, PgTransactionHistoryStorage, reason(), Frozen at `e31fcf85f2f0228d7c21c6e3f320a4f430f3ea94`, Layout, TransactionHistory (kept, not built), 1. Schema, 2. Dependency direction: structural mirror, not a runtime import (+45 more)
-
-### Community 55 - "connectWebSocket"
-Cohesion: 0.05
-Nodes (41): Outage, ScriptedRequest, syntheticChain, SyntheticChainOptions, SyntheticFault, SyntheticUpgrade, RangeOptions, connectWebSocket() (+33 more)
-
-### Community 57 - "binding.test.ts"
-Cohesion: 0.06
-Nodes (49): a165Run, Attempt, TestDatabase, A113Observation, A156Observation, Binding, Created, Outcome (+41 more)
-
-### Community 58 - "core-ledger-state.ts"
-Cohesion: 0.06
-Nodes (47): retainedStates, CoreRevision, boundLedgerParser(), applyBlock(), boundLedger(), chainOutcomesOf(), contractsOf(), hex() (+39 more)
-
-### Community 59 - "pause-fixtures.ts"
-Cohesion: 0.06
-Nodes (40): backupSignalRelay, SignalSource, stopSignal, BackupSignals, TickerOptions, BackupOnSignal, LoopClass, Pausable (+32 more)
-
-### Community 6 - "runner/process.ts"
+### Community 30 - "adapter.ts"
 Cohesion: 0.03
-Nodes (118): BlockHeaderItem, BlockEventSource, BodyExtrinsic, BlockBody, BlockItemSource, CoreBlockHeader, CoreBlockItems, QueuedBlock (+110 more)
+Nodes (76): AdapterSpec, Binding, EventKind, Native, Proof, RawBlockContext, RawEvent, RawIntent (+68 more)
 
-### Community 60 - "chain-placement.test.ts"
+### Community 31 - ".read"
+Cohesion: 0.04
+Nodes (89): TableDigest, TableDigestRow, CapturedTable, ChangeKind, tableChanges, TouchedRow, ChainOptions, DigestRow (+81 more)
+
+### Community 32 - "runner/process.ts"
+Cohesion: 0.03
+Nodes (75): AdminSeams, Bound, ChainSource, ConfiguredGenesis, CoreChainFacts, NodeWait, WaitingListener, ConfigRow (+67 more)
+
+### Community 33 - "resolve.ts"
+Cohesion: 0.04
+Nodes (88): EntryView, plainData, ConfigContext, EntryView, AddressRequest, Asked, LinkPlan, NetworkInput (+80 more)
+
+### Community 34 - "config-check.ts"
+Cohesion: 0.04
+Nodes (80): ConfigFacts, BackupInput, RestoreBase, BackupText, Environment, BackupCommandOptions, BackupOutcome, CommandBuildOptions (+72 more)
+
+### Community 35 - "pause-fixtures.ts"
+Cohesion: 0.04
+Nodes (71): backupSignalRelay, BackupSignals, BackupOnSignal, LoopClass, Pausable, PausableConfig, PausableOptions, RecorderGlobals (+63 more)
+
+### Community 36 - "api-server.test.ts"
+Cohesion: 0.04
+Nodes (69): ApiRegistry, ChainDataAnswer, ChainDataView, ApiError, ApiErrorCode, ApiRequest, HttpHandler, HttpMethod (+61 more)
+
+### Community 37 - "contract-data-checks.ts"
+Cohesion: 0.05
+Nodes (80): CallTx, contractScenario, ContractScenarioOptions, DeployTx, LogLine, Program, Ran, ScenarioTx (+72 more)
+
+### Community 38 - "vitest"
+Cohesion: 0.03
+Nodes (57): ProcessObservation, StartVia, Lockfile, Manifest, RepositoryFile, Upstream, Leftover, RemovedName (+49 more)
+
+### Community 39 - "mounted-admin.test.ts"
+Cohesion: 0.05
+Nodes (66): gate, SecretHashes, SecretVariant, Expected, SubscriptionSeen, Client, Exchanged, MapiHooks (+58 more)
+
+### Community 4 - "UmbraError"
+Cohesion: 0.02
+Nodes (120): ConfiguredDatabase, ConfiguredDatabaseOptions, databaseTarget, PostgresConnection, PostgresOptions, PgliteLockUse, BackupFacts, DumpInput (+112 more)
+
+### Community 41 - "transport-faults.test.ts"
+Cohesion: 0.05
+Nodes (59): CoreTransport, CoreTransportOptions, CoreSessionOptions, TransportTls, Message, PrivateSocketTransportOptions, SocketLimits, Ended (+51 more)
+
+### Community 42 - "api-session.test.ts"
+Cohesion: 0.06
+Nodes (69): coreHeaders, HeadersArgument, NodeHttpHandler, NodeUpgradeHandler, ModuleApiStart, MountedApiSeams, StartedModuleApi, ChannelConnectOptions (+61 more)
+
+### Community 43 - "LedgerPackage"
+Cohesion: 0.05
+Nodes (41): LedgerPackage, LedgerEngine, StagenetBlockJson, StagenetFixtureJson, stagenetReplay, hexOf(), idOf(), same() (+33 more)
+
+### Community 44 - "FinalizedLoop"
+Cohesion: 0.06
+Nodes (18): Activity, FinalizedLoop, LoopObserver, Startup, SkipsLockstep, WaitingInRead, FailingAfter, call() (+10 more)
+
+### Community 45 - "process-admin.ts"
+Cohesion: 0.05
+Nodes (67): NetworkShown, OpenedConfig, AllowedDetail, PrivateSideFacts, ProcessAdminOptions, RevisionSettings, DigestRow, ModuleFacts (+59 more)
+
+### Community 46 - "cli/command.ts"
+Cohesion: 0.05
+Nodes (55): CommandHandler, CommandIo, MainProcess, ConfigCheckReport, CommandResult, RunningCommand, statsConfig, backupArguments() (+47 more)
+
+### Community 47 - "core-transport.ts"
+Cohesion: 0.04
+Nodes (38): CoreChannelsOptions, Queued, Connected, CoreLink, coreSessions, InstanceView, LinkConnection, LinkSession (+30 more)
+
+### Community 49 - "in-memory-source.ts"
+Cohesion: 0.05
+Nodes (42): UmbraDBHandle, InMemoryItems, Wait, CloseHelper, Hold, Signal, Job, Run (+34 more)
+
+### Community 5 - "tape/index.ts"
+Cohesion: 0.03
+Nodes (126): LoopStopScenario, Recorded, Failure, Variant, Link, TapeBuilderOptions, RecordingError, RecordingProblem (+118 more)
+
+### Community 50 - "private-transport.ts"
+Cohesion: 0.06
+Nodes (35): PrivateLinkConnect, PublicSide, LinkTimers, CoreChannelSeams, Received, TransportLimits, HelloAck, JsonValue (+27 more)
+
+### Community 51 - "PgTransactionHistoryStorage"
+Cohesion: 0.05
+Nodes (45): MergeEntriesFn, TransactionHistoryEntry, PgTransactionHistoryStorage, InMemoryTransactionHistoryStorage, encodeStoredEntry(), rowToEntry(), abortErrorLike(), capitalize() (+37 more)
+
+### Community 52 - "column-rules.ts"
+Cohesion: 0.04
+Nodes (67): CatalogColumn, CatalogOptions, AllowedRule, CatalogFunction, CatalogType, ColumnFacts, DefaultCatalog, DefaultReference (+59 more)
+
+### Community 53 - "startProcess"
 Cohesion: 0.07
-Nodes (47): LoadLedger, TransactionParser, AdapterSpec, ManifestLine, VerifyLedgerPackagesOptions, LedgerRelease, LedgerReleasePackage, LedgerSourceSettings (+39 more)
+Nodes (43): testBuild, A42Observation, Seen, Hold, NoRedelivery, Phase, counted(), processOn() (+35 more)
 
-### Community 61 - "loop-stop-harness.ts"
-Cohesion: 0.08
-Nodes (44): SignalTarget, A169Observation, LoopStopScenario, SourceOf, A167Observation, CheckOf, NodeWatch, PrivateObservation (+36 more)
+### Community 54 - "cold-boot-recovery.integration.test.ts"
+Cohesion: 0.07
+Nodes (42): TransactionHistoryStatus, LifecycleDetailStore, PgWalletSdkTransactionHistoryAdapter, TestEntry, TestSection, phaseA_syncAndPersistEnvelope(), phaseB_freshProcessRestoreAndVerify(), deriveUnshieldedSeed() (+34 more)
 
-### Community 62 - "backup/backup.ts"
+### Community 57 - "backup/backup.ts"
 Cohesion: 0.06
-Nodes (48): BackupInput, BackupSeams, BackupTarget, ManifestHistoryRow, ManifestMigration, ManifestTool, PgliteDump, SnapshotSeams (+40 more)
+Nodes (48): BackupSeams, BackupTarget, BackupWritten, ManifestHistoryRow, ManifestMigration, ManifestTool, PgliteDump, SnapshotSeams (+40 more)
 
-### Community 63 - "redact.ts"
+### Community 58 - "interfaces/transaction-history-storage.ts"
+Cohesion: 0.05
+Nodes (39): EntryLifecycle, EntryLifecycleStatus, FinalizedLifecycle, PendingLifecycle, RejectedLifecycle, TransactionHistoryReader, TransactionHistoryWriter, JsonEncoded (+31 more)
+
+### Community 59 - "private/lockstep-wait.test.ts"
 Cohesion: 0.06
-Nodes (44): AllowedDetail, RevisionSettings, SanitizedError, PlainObject, RedactableConfig, RedactionForms, SecretForm, TextPattern (+36 more)
+Nodes (39): LockstepCondition, OpenTransaction, A118Observation, MismatchObservation, ExpectedWait, WaitSample, HeldLink, HoldingRelay (+31 more)
 
-### Community 64 - "validation.ts"
-Cohesion: 0.06
-Nodes (43): DeclarationRule, PlacedDeclaration, Plain, Shape, Case, ShapeCase, Stats, checkItem() (+35 more)
+### Community 6 - "client.test.ts"
+Cohesion: 0.02
+Nodes (81): heldClock, HandSocket, HandSockets, Answer, FakeNode, Handler, Received, recorded (+73 more)
 
-### Community 65 - ".value"
-Cohesion: 0.11
-Nodes (31): ExtrinsicCall, MetadataPallet, MetadataStorage, MetadataStorageEntry, MetadataType, RuntimeMetadataView, TypeDef, ScaleError (+23 more)
-
-### Community 66 - "ledger-tasks-checks.ts"
-Cohesion: 0.06
-Nodes (49): contractScenario, TasksRun, SlowStep, TestLoaderData, CallArgsItem, CallArguments, taskSeen, V9Raw (+41 more)
-
-### Community 67 - "sweep-tapes.ts"
-Cohesion: 0.09
-Nodes (48): CoreLedgerStateOptions, GreyPicker, FixtureRun, FixtureRunOptions, TableSnapshot, FixtureNode, FakeState, RefusalData (+40 more)
-
-### Community 68 - "process-harness.ts"
-Cohesion: 0.06
-Nodes (36): ItemDeclaration, Revision, ResolvedGraph, MisuseListener, MisuseReports, ProcessContexts, ProcessContextsInput, PublishRefusal (+28 more)
-
-### Community 69 - "transform-checks.ts"
+### Community 60 - "slow-block-harness.ts"
 Cohesion: 0.10
-Nodes (35): TransformError, NotificationRange, until(), baseRecords(), expectedText(), expectNotificationsAfterInsertedDisconnect(), expectResubscriptionOnTape(), expectVariantOutput() (+27 more)
+Nodes (48): ReadOpener, StatusBody, Times, Wait, askedSource, BodyRead, HoldMode, HoldSpec (+40 more)
 
-### Community 7 - "ledger/types.ts"
-Cohesion: 0.03
-Nodes (112): LedgerStateItem, RetainedState, LedgerName, LedgerSource, ApplyOutput, ChainOutcome, LedgerPackageOptions, LedgerTask (+104 more)
+### Community 61 - "column-rules.test.ts"
+Cohesion: 0.04
+Nodes (32): Because, columnVerdict, DefaultPart, Refusal, TableRule, TreeNode, TypeRule, DesignTable (+24 more)
 
-### Community 70 - "core-settings.ts"
-Cohesion: 0.05
-Nodes (44): LedgerTableSettings, RenamedSetting, SettingPath, TransportReaderSettings, PrivateCoreSettings, PublicCoreSettings, Absent, DeepReadonly (+36 more)
-
-### Community 71 - "chain-events-decode.test.ts"
-Cohesion: 0.07
-Nodes (44): MetadataField, MetadataVariant, Primitive, ChainTransaction, ChainEvent, EventPhase, RecordTypes, ScaleValue (+36 more)
-
-### Community 72 - "paused-harness.ts"
-Cohesion: 0.08
-Nodes (41): A176Options, Body, KeeperGlobals, PausedExpectation, Read, Reader, SignalJob, loadConfig() (+33 more)
-
-### Community 73 - "cold-boot-recovery.integration.test.ts"
+### Community 62 - "start-umbradb.ts"
 Cohesion: 0.09
-Nodes (31): PgWalletSdkTransactionHistoryAdapter, phaseA_syncAndPersistEnvelope(), phaseB_freshProcessRestoreAndVerify(), facadeDistIndexPath(), facadeMergeAvailable(), loadFacadeMerge(), unshieldedWalletDistIndexPath(), deriveUnshieldedSeed() (+23 more)
+Nodes (51): readOptions, Address, UmbraDBBackup, UmbraDBCondition, UmbraDBEnd, UmbraDBNetwork, UmbraDBOptions, UmbraDBReason (+43 more)
 
-### Community 74 - "zero-timeouts-checks.ts"
+### Community 64 - "src/db/postgres.ts"
+Cohesion: 0.07
+Nodes (38): DurabilityProbeOptions, DurabilityViolation, DurabilityWarning, ProbeSession, Outcome, DriverError, Outcome, Role (+30 more)
+
+### Community 65 - "boundary.test.ts"
 Cohesion: 0.08
-Nodes (36): Settings, Run, Job, WorkerEvent, Outcome, openBlockWrites(), expectNeverCutOffNorHung(), settings() (+28 more)
+Nodes (43): DesignTable, RowCoverage, ModuleReference, collationsWritten(), componentCode(), componentExports(), componentTexts(), copiedCode() (+35 more)
 
-### Community 75 - "retirement.test.ts"
+### Community 66 - "channels.ts"
+Cohesion: 0.05
+Nodes (39): demoLink, EndpointOptions, Envelope, MessagePortLike, onLink(), parseJsonLossless(), exceedsUtf8(), hasKeys() (+31 more)
+
+### Community 67 - "writer-lock-checks.ts"
+Cohesion: 0.09
+Nodes (40): WriterProcess, WorkerEvent, PauseReport, startWriter(), blocksIn(), cleanUp(), firstOf(), startWriterProcess() (+32 more)
+
+### Community 68 - "chain-process.test.ts"
+Cohesion: 0.06
+Nodes (38): WorkerEvent, ChainBuildOptions, A77Observation, A78Observation, A78Refusal, A90Observation, Failing, Flaky (+30 more)
+
+### Community 69 - "channel-queue.test.ts"
+Cohesion: 0.08
+Nodes (39): PeerEnd, PeerMessage, rawPeer, TestEnd, TestEndOptions, Logged, QueueRun, confinedCore() (+31 more)
+
+### Community 7 - "core-ledger-state.ts"
+Cohesion: 0.03
+Nodes (124): BlockLedgerSource, LedgerBinding, retainedStates, CoreRevision, StateRow, StoredState, GreyPicker, GreyView (+116 more)
+
+### Community 70 - "graph.ts"
+Cohesion: 0.07
+Nodes (46): Edge, GraphFacts, GraphPart, GraphRule, MidChain, Missing, RangeCheck, RangeFacts (+38 more)
+
+### Community 72 - "node-bridge.ts"
+Cohesion: 0.07
+Nodes (31): ChildReader, Thread, BridgeServer, bridgeStore, Growable, childRefKeys(), readChildren(), bridgeMemory() (+23 more)
+
+### Community 73 - "cbor.ts"
+Cohesion: 0.09
+Nodes (38): ColumnMode, DateTimeFields, Mode, PathNode, Task, Writer, ScalarColumnType, checkSafeInteger() (+30 more)
+
+### Community 74 - "retirement.test.ts"
 Cohesion: 0.06
 Nodes (43): Floor, ManifestShape, VitestConfig, acceptanceIds(), exportProblems(), floorProblems(), leanImports(), leanProblems() (+35 more)
 
-### Community 76 - "restore-private.ts"
+### Community 75 - "mapping.ts"
 Cohesion: 0.07
-Nodes (37): RestoreChain, RestoreSeams, Chain, RestoreCommandOptions, RestoreCommandSeams, RestoreOutcome, RestoreJob, FileProcess (+29 more)
+Nodes (33): ResultColumn, ResultType, arrayLiteral(), hexOf(), invalidParameter(), isInfinity(), isPlainObject(), jsonText() (+25 more)
 
-### Community 78 - "node.test.ts"
-Cohesion: 0.07
-Nodes (22): Metadata, Step, Failure, Variant, TapeClock, servePage(), expectAnswersByOccurrence(), expectDelayHonoured() (+14 more)
-
-### Community 79 - "core-ledger-state/sql.ts"
-Cohesion: 0.09
-Nodes (41): StateRow, StoredState, GreyView, SweepPhase, writeBlock(), addRootCounts(), allGreyKeys(), bytesOf() (+33 more)
-
-### Community 8 - "api.ts"
-Cohesion: 0.03
-Nodes (105): ConfiguredDatabase, ConfiguredDatabaseOptions, ReadDatabaseOptions, ConfiguredDatabase, ConfiguredDatabaseOptions, databaseTarget, SslMode, CommittedHeight (+97 more)
-
-### Community 80 - "read-confinement-checks.ts"
-Cohesion: 0.07
-Nodes (24): Message, MessageType, TestCertificates, Ended, rawClient, Escape, publicState, Refused (+16 more)
-
-### Community 81 - "real-tapes.ts"
+### Community 76 - "InMemoryBlockSource"
 Cohesion: 0.08
-Nodes (35): FindTapeOptions, ReportedTest, RealTape, RealTapeManifest, RealTapeSource, TapeLookup, TapeRefusedError, TapeTestOptions (+27 more)
+Nodes (24): QueuedBlock, BlockRef, InMemoryBlockSource, InMemorySourceOptions, Flaky, Fetching, Recorder, LateRedelivery (+16 more)
 
-### Community 82 - "file-mode.test.ts"
-Cohesion: 0.07
-Nodes (31): Place, After, ModeObservation, ModeOracleOptions, ModeWatch, PgDumpRun, PgDumpWatch, watchedBackup() (+23 more)
-
-### Community 83 - "core-block-commit.test.ts"
-Cohesion: 0.06
-Nodes (30): BlockRow, Commit, Committed, heightPartitionsSql(), standInHeader(), standInItems(), a145Stored(), blockAt() (+22 more)
-
-### Community 84 - "entries.ts"
-Cohesion: 0.06
-Nodes (38): CoreEntryInput, CoreSettingsBase, Entry, EntryBuilder, EntryConfig, EntryHeights, LedgerPin, LedgerSources (+30 more)
-
-### Community 86 - "chain-data-tapes.ts"
+### Community 77 - "openPostgres"
 Cohesion: 0.09
-Nodes (40): BlockSpec, EventSpec, Json, Phase, browserChain, heldClock, Broken, a91RangeScenario() (+32 more)
+Nodes (26): PostgresOptions, Phase, PostgresTestDatabase, PostgresTestServer, Job, openPostgres(), postgresBackend(), databaseAs() (+18 more)
 
-### Community 9 - "adapter-fixtures.ts"
-Cohesion: 0.04
-Nodes (120): ApplyInput, StoredNode, DeployTx, Upstream, contractFixture, Ledger, RawPackage, AdapterSubject (+112 more)
+### Community 78 - ".from"
+Cohesion: 0.06
+Nodes (35): Buffer, BufferEncoding, Hash, FixtureNode, FakeState, RefusalData, bytesOfText(), charCodes() (+27 more)
 
-### Community 92 - "resolver-boundary.ts"
+### Community 79 - "file-mode.test.ts"
+Cohesion: 0.06
+Nodes (31): TickerProcess, Place, After, ModeObservation, ModeOracleOptions, ModeWatch, PgDumpRun, PgDumpWatch (+23 more)
+
+### Community 8 - "opt-out.test.ts"
+Cohesion: 0.03
+Nodes (118): CaptureColumn, CaptureState, CheckedMigration, CanonicalEncodingError, ModuleColumn, ModuleContentsError, ModuleContentsFailure, ModuleTable (+110 more)
+
+### Community 80 - "refused-configuration.test.ts"
+Cohesion: 0.08
+Nodes (33): EngineConfig, ProcessHandle, Refusal, Start, codeOnly(), commandProblems(), declarationsOf(), endedProblems() (+25 more)
+
+### Community 81 - "connectChannel"
+Cohesion: 0.07
+Nodes (29): SubscriptionCarrier, SubscriptionConnection, discard(), isChannel(), connectChannel(), errorMessage(), socketConnection(), fault() (+21 more)
+
+### Community 82 - "startup-stop-harness.ts"
+Cohesion: 0.08
+Nodes (32): A167Observation, CheckOf, NodeWatch, PrivateObservation, silentCore, StartVia, stopBy, StopHandle (+24 more)
+
+### Community 83 - "messages.ts"
+Cohesion: 0.06
+Nodes (36): Committed, MessageFault, MessageType, instanceIdSchema(), bytesOf(), decodeParameter(), decodeValue(), describe() (+28 more)
+
+### Community 84 - "pglite-lock.ts"
+Cohesion: 0.08
+Nodes (33): CreatedDirectory, EmitWarning, Held, PgliteLockUse, WarningArguments, WarningHook, Job, ChildResult (+25 more)
+
+### Community 87 - "node-fields-harness.ts"
+Cohesion: 0.07
+Nodes (31): AdminStarter, LockstepInstance, AdminRunOptions, Validator, A168Observation, A168Phase, A168RunOptions, Expected (+23 more)
+
+### Community 88 - "validate.ts"
+Cohesion: 0.09
+Nodes (39): ConfigRule, CursorRule, Finding, Issue, Plain, SettingsSchema, coreSettingsSchema(), pathOf() (+31 more)
+
+### Community 89 - "config/plain-data.ts"
+Cohesion: 0.07
+Nodes (31): PlainArray, PlainDataNode, PlainDataRule, Walk, Hash, Row, copyArray(), copyObject() (+23 more)
+
+### Community 9 - "core-block-parsed.ts"
+Cohesion: 0.03
+Nodes (143): BlockEventSource, MetadataVariant, RuntimeMetadataView, BlockParsedOptions, BlockTransaction, ChainTransaction, ChainEvent, EventPhase (+135 more)
+
+### Community 90 - "containers.test.ts"
+Cohesion: 0.07
+Nodes (29): BenchEnv, Started, FailsOnceStarted, SlowToReportPorts, SourceFile, guardContainers(), removeAttempt(), startContainer() (+21 more)
+
+### Community 93 - "resolver-boundary.ts"
 Cohesion: 0.08
 Nodes (35): Finding, Access, AllowedRead, Boundary, Crossing, Guard, bare(), callsPathResolve() (+27 more)
 
-### Community 93 - "page.ts"
-Cohesion: 0.06
-Nodes (32): ApiChannel, LinkRecord, ProcessView, RestoreRecord, SavedBackup, WorkerView, CallMethod, appendLog() (+24 more)
+### Community 94 - "restore-private.ts"
+Cohesion: 0.09
+Nodes (31): RestoreChain, RestoreSeams, Chain, RestoreCommandOptions, RestoreCommandSeams, RestoreOutcome, RestoreJob, FileProcess (+23 more)
 
-### Community 94 - "events-fixtures.ts"
-Cohesion: 0.13
-Nodes (30): eventsRuntime, Field, PalletMetadata, Registry, RuntimeShape, StorageSpec, LedgerScenarioOptions, metadataWith() (+22 more)
-
-### Community 97 - "transaction-history-storage.property.test.ts"
+### Community 95 - "recovery.test.ts"
 Cohesion: 0.08
-Nodes (23): EntryContent, TransactionHistoryEntry, InMemoryTransactionHistoryStorage, Command, ReplayableStorage, abortErrorLike(), capitalize(), applyCommand() (+15 more)
+Nodes (28): Armed, CommitArm, CommitFault, CommitProxy, Pair, AlwaysLanded, AlwaysLost, DropsHeld (+20 more)
 
 ### Community 98 - "PrivateLinkChannel"
-Cohesion: 0.12
-Nodes (8): ChannelEndpoint, EndpointEvents, PrivateLinkChannel, CoreChannels, Link, controlEnvelope(), refuseChannel(), 4. Channels
+Cohesion: 0.11
+Nodes (11): ChannelEndpoint, EndpointEvents, PrivateLinkChannel, CoreChannels, Link, controlEnvelope(), messageEnvelope(), refuseChannel() (+3 more)
 
-### Community 103 - "refused"
+### Community 99 - "cbor.property.test.ts"
 Cohesion: 0.08
-Nodes (31): refused(), 00056 — A private process with no way to read the public data is refused only after its admin listener opens, Evidence, Problem, Suggested fix, The node on `/status`, 7. Storage helpers, Requirement: AE-3 States and conditions (+23 more)
+Nodes (37): CanonicalEncodingFailure, CanonicalValue, Abort, CheckResult, Decoded, DecodedEntry, DecodedMap, Plain (+29 more)
 
-### Community 148 - "block-fetch-decode.test.ts"
-Cohesion: 0.16
-Nodes (16): blake2b256(), compress(), rotateRight(), words(), encodeHeader(), headerHash(), concatBytes(), encodeCompact() (+8 more)
+### Community 157 - "Design — Sprint 3: CheckpointStore"
+Cohesion: 0.10
+Nodes (19): 0. Package layout, 1. Chunking, 2.1 `ckpt_manifest_chunks` needs an explicit position, 2.2 `seq` needs an explicit allocator, 2.3 `complete`: kept, and explicitly written `true` by every `save()`, 2. Schema — two corrections to `design/design.md` §3, 3. `prune` — two-step GC, `design/design.md` §3's pass plus §2.1's cascade, 4. `load` — full verification, no exceptions (+11 more)
 
-### Community 200 - ".configHash"
+### Community 205 - ".configHash"
 Cohesion: 0.17
 Nodes (11): Requirement: PP-14 A changed public configuration halts a private process, Requirement: PP-4 The process transport, Scenario: A read through the core, Scenario: The core restarts with another configuration, 8. Mounted admin, the database, security through the new paths, MODIFIED Requirements, Requirement: PP-14 A changed public configuration halts a private process, Requirement: PP-4 The process transport (+3 more)
 
-### Community 251 - "Proposal — Sprint 3: CheckpointStore"
-Cohesion: 0.32
-Nodes (6): 4. `load` — full verification, no exceptions, Impact, Non-goals (explicitly out of scope for this sprint), Proposal — Sprint 3: CheckpointStore, What changes, Why
-
-### Community 100 - "ADDED Requirements"
-Cohesion: 0.06
-Nodes (37): 5. WalletState envelope, Requirement: getAll returns live bigint/Date-typed values, not JSON-stringified primitives, Scenario: A bigint field survives the Postgres round-trip as a real bigint, Scenario: A Date field survives the Postgres round-trip as a real Date instance, ADDED Requirements, Requirement: a cold boot resumes without a full resync and preserves tx-history continuity, Requirement: a corrupt or non-JSON envelope payload is rejected with a typed error, Requirement: a live-synced transaction materializes as a Postgres row observable via getAll (+29 more)
-
-### Community 108 - ".off"
-Cohesion: 0.06
-Nodes (31): Durability, Requirement: DB-12 The durability probe guards PostgreSQL, Scenario: PGlite without the development opt-in, Requirement: CF-4 Every field is data, operational or secret, Scenario: A PGlite directory whose parent is missing, Scenario: A secret never appears, Scenario: Two `core` revisions with different databases, 2.1 Where the probe runs (the one real design decision) (+23 more)
-
-### Community 113 - "connectChannel"
-Cohesion: 0.09
-Nodes (26): exceedsUtf8(), discard(), isChannel(), connectChannel(), fault(), 00068 — Two readers of a host's channel beside the private link's endpoint read its members outside a guard, Evidence, Problem (+18 more)
-
-### Community 140 - "T"
-Cohesion: 0.09
-Nodes (24): T(), input(), Requirement: getAt satisfies temporal-projection equivalence (Law T3), within the store's retention window, Scenario: getAt matches an independent replay for an arbitrary put sequence, 0. Package layout, 10. Test infrastructure, 1. Schema — one physical-parameter correction to `design/design.md` §4, 3. `get` (+16 more)
-
-### Community 145 - "Design — START-UMBRADB: UmbraDB as a library"
-Cohesion: 0.09
-Nodes (19): transportReaderRule(), Evidence, 00061 — The threat model's `path:line` citations drift as the code moves, Evidence, Problem, Suggested fix, 0. Baseline, 1. Source layout (+11 more)
-
-### Community 147 - "Design — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)"
-Cohesion: 0.10
-Nodes (21): deferred(), 0. Test-infrastructure layout, 1.1 Skip-enforcement mechanism — the anti-self-skip guarantee, made a named check, 2.1 Process-kill mid-save (T1) — `02` §"Fault-injection test plan" T1; `council/B` §3 item 1, 2.2 Postgres-kill mid-save + retry-duplication contract (T2) — `02`-T2; `council/B` §3 item 2, 2.3 Crash between data and cursor — the keystone (T5) — `02`-T5; `council/B` §3 item 3; §5 item 1, 2.4 Lease non-wedge cold start (T3) — `02`-T3; `council/B` §3 item 4, 2. G9 — the four crash tests (+13 more)
-
-### Community 151 - "transportReader"
-Cohesion: 0.10
-Nodes (18): text(), transportReader(), 00055 — Settings that cannot take effect are accepted silently, or wait for ever, Problem, Suggested fix, 10. Requirement coverage, 2. Network, 3. Lifecycle (+10 more)
-
-### Community 152 - "following"
-Cohesion: 0.11
-Nodes (20): cursorRead(), following(), 00074 — `/status`'s finalized head, the lag and readiness stay at the head the loop read when its batch began, Evidence, Problem, Suggested fix, Backup and restore, Check and run (+12 more)
-
-### Community 156 - ".slowBlockMs"
-Cohesion: 0.13
-Nodes (16): 00035 — a slow-block test bounds the report from the source's ask, but the loop's window opens before the ask, Evidence, Problem, Suggested fix, 00040 — slow-block-windows.test.ts asserts no other slow-block within a 1 s threshold, which loaded heights cross, Evidence, Problem, Suggested fix (+8 more)
-
-### Community 157 - ".cwd"
-Cohesion: 0.12
-Nodes (16): 00058 — Backing up and restoring a library host's database with `umbradb backup`/`restore` is not documented, Evidence, Problem, Suggested fix, 00067 — `startUmbraDB` throws synchronously when the host's working directory no longer exists, Evidence, Problem, Suggested fix (+8 more)
-
-### Community 158 - "backupAtStop"
-Cohesion: 0.13
-Nodes (17): backupAtStop(), 17. Trying a module, A backup at the core's stop, A backup of a running process (SIGUSR2), Backups, Restoring a backup, What a backup holds, Writing a backup (+9 more)
-
-### Community 159 - "Boundaries, threats and controls"
-Cohesion: 0.10
-Nodes (20): ownerOnlyFile(), 10. Dependency producers and build pipeline → installed code, 1. Operator files and module code → process, 2. Midnight node → public process, 3. Runner and modules → PostgreSQL 18 or PGlite, 4. Main thread ↔ ledger worker, 5. Module API readers → process, 6. Admin callers → admin worker (+12 more)
-
-### Community 160 - "boundary.test.ts"
-Cohesion: 0.21
-Nodes (16): collationsWritten(), componentCode(), componentExports(), componentTexts(), copiedCode(), copiedTexts(), redeclared(), settingsElsewhere() (+8 more)
-
-### Community 162 - "log"
-Cohesion: 0.13
-Nodes (15): join(), normalize(), resolve(), log(), delimiter, sep, 00072 — `umbradb run` logs nothing when SIGTERM or SIGINT stops it, Evidence (+7 more)
-
-### Community 182 - "mutation-per-adapter.mjs"
-Cohesion: 0.17
-Nodes (11): gateAdapters(), tallyMutants(), adapters, conf, gate, JSON_REPORT, PER_ADAPTER_CONF, results (+3 more)
-
-### Community 186 - "Acceptance — CORE-ARCH: the standalone indexer's core architecture"
-Cohesion: 0.14
-Nodes (12): 10. Ingest, 11. Chain data, 12. Ledger, 13. Contract data, 14. Private processes, 17. Required test ids added to the manifest, 1. Library surface, 2. Database API (+4 more)
-
-### Community 193 - "twox.ts"
-Cohesion: 0.24
-Nodes (9): hex(), littleEndian(), merge(), rotl(), round(), storagePrefix(), twox128(), writeLittleEndian() (+1 more)
-
-### Community 203 - "Design — v1.1.0: Quint model checking"
-Cohesion: 0.15
-Nodes (12): clock(), 1. Module layout, 2. Backend routing (the one non-obvious constraint), 3. C2a model sketch, 4. C2b model sketch, 5. L1 model sketch, 6. Falsifiability controls, 6b. Witnesses — proving the interesting state is reachable (+4 more)
-
-### Community 217 - "UmbraDB third-party component inventory (SBOM)"
-Cohesion: 0.18
-Nodes (10): 1. npm — runtime dependencies, 2. npm — direct dev dependencies, 3. Nix — flake inputs (git-pinned), 4. Nix — pinned release binaries (`fetchurl` + sha256), 5. Docker images (digest-pinned), 7. Lean / mathlib toolchain, 8. Host / toolchain dependencies, 9. Vendored ledger WASM builds (`vendor/ledger/`) (+2 more)
-
-### Community 222 - "Tasks — START-UMBRADB: UmbraDB as a library"
-Cohesion: 0.18
-Nodes (10): ownKeys(), 0. Baseline, 10. Review (AGENTS.md stage 4, bounded), 11. Close-out, 2. The private link's settings renamed (D-6; CF-4), 6. The private link over channels (LM-6; design §5.4), 7. The browser demo on the engine (LM-11; design §8), 8. The test sweep, the documents and the pack smoke (design §9; LS-1) (+2 more)
-
-### Community 237 - "midnight-env — reproducible PREPROD dev environment"
-Cohesion: 0.25
-Nodes (8): locked(), 1. Reproducibility contract — what is pinned, and how, 2. Host-state assumptions the flake does NOT capture (the real impurities), 3. How to reproduce (exact steps), 4. Validation performed, midnight-env — reproducible PREPROD dev environment, Security — db-sync TLS posture (READ BEFORE ENABLING TLS), Why `nix develop -c bash scripts/start-stack.sh` and not `nix run .#start-stack`
-
-### Community 256 - "host-signal.ts"
-Cohesion: 0.32
-Nodes (5): isAbortSignal(), followSignal(), isSignal(), ABORTED, REASON
-
-### Community 259 - "00041 — A128 refused once and A130 hung once under load, each passing in every other run"
-Cohesion: 0.38
-Nodes (6): continueTo(), endedText(), 00041 — A128 refused once and A130 hung once under load, each passing in every other run, Evidence, Problem, Suggested fix
-
-### Community 287 - "orphan-watcher.mjs"
-Cohesion: 0.40
-Nodes (4): end(), removeContainers(), filters, listed
-
-### Community 336 - "crash-worker.ts"
-Cohesion: 0.83
-Nodes (3): main(), pauseUntilKilled(), requireEnv()
-
-### Community 40 - "history"
-Cohesion: 0.03
-Nodes (83): history(), params(), n(), data(), Change: `v1.0.0-perf-baseline` — G13 / G14 (2026-07-24), Rework (class 1 — infra flake, not a change defect), Rework (class 2 — the machine oracle caught what BOTH diff-scoped audits could not), Rework (class 3 continued — cross-vendor cold audit, rounds 2-4) (+75 more)
-
-### Community 56 - ".put"
+### Community 48 - "refused"
 Cohesion: 0.04
-Nodes (56): "on-fetch"(), 00010 — The bench smoke guard cannot run on a fast machine: its first workload writes one key twice in a millisecond, Evidence, Problem, Suggested fix, Requirement: A second write to the same key within one transaction is rejected at the trigger level, not silently absorbed, Requirement: Unconditional writes are gapless and monotonic (Law T1), Scenario: A second UPDATE to the same key's row in one transaction is rejected at the trigger level (+48 more)
+Nodes (67): refused(), cursorRead(), following(), 00056 — A private process with no way to read the public data is refused only after its admin listener opens, Evidence, Problem, Suggested fix, 00074 — `/status`'s finalized head, the lag and readiness stay at the head the loop read when its batch began (+59 more)
 
-### Community 77 - "code"
-Cohesion: 0.05
-Nodes (44): code(), Added, Acceptance — v1.0.0 API Surface & Release Contract, G1 — Public API surface, G20 — Lean cut-line, G2 — SemVer stability policy + CHANGELOG, G3 — Frozen, cleaned error catalog, G4 — Contract doc set (all true) (+36 more)
-
-### Community 85 - "version"
-Cohesion: 0.06
-Nodes (42): hexBytes(), side(), migrations(), version(), 10. Ready-made tables: cursor and height-versioned, 11. Start and stop heights, 12. When a callback fails, 13. Providing items to other modules (+34 more)
-
-### Community 88 - "ADDED Requirements"
-Cohesion: 0.05
-Nodes (40): up(), name, 4. G4 — The contract doc set (all *true*), ADDED Requirements, release-contract, Requirement: A cancellation contract states the abort guarantee as public behavior, Requirement: A CHANGELOG records the 1.0.0 surface, Requirement: A durability contract states the ordering guarantee and its binding precondition (+32 more)
-
-### Community 99 - "graph.py"
+### Community 106 - "graph.py"
 Cohesion: 0.12
 Nodes (17): check(), check_environment(), dump_canonical(), fail(), fingerprint(), freshness_section(), git_lines(), inside() (+9 more)
 
-### Community 101 - "ADDED Requirements"
+### Community 113 - ".cwd"
+Cohesion: 0.08
+Nodes (28): join(), normalize(), resolve(), log(), delimiter, sep, 00067 — `startUmbraDB` throws synchronously when the host's working directory no longer exists, Evidence (+20 more)
+
+### Community 153 - "T"
+Cohesion: 0.10
+Nodes (21): T(), input(), Requirement: getAt satisfies temporal-projection equivalence (Law T3), within the store's retention window, Scenario: getAt matches an independent replay for an arbitrary put sequence, 3. `get`, Requirement: T is a caller assertion — no runtime validation beyond the erased WatermarkValue shape, Scenario: Reading with a mismatched T returns the stored value, not a runtime error, 0. Schema (+13 more)
+
+### Community 169 - "process-worker.ts"
+Cohesion: 0.18
+Nodes (13): withDevelopmentOptIn(), answer(), backUp(), connectLink(), coreCommittedHeight(), openedProcess(), post(), restoreInto() (+5 more)
+
+### Community 181 - ".slowBlockMs"
+Cohesion: 0.17
+Nodes (13): 00040 — slow-block-windows.test.ts asserts no other slow-block within a 1 s threshold, which loaded heights cross, Evidence, Problem, Suggested fix, 00043 — slow-block-outside.negative-control.test.ts's 1 s threshold, which loaded heights cross, Evidence, Problem, Suggested fix (+5 more)
+
+### Community 187 - "mutation-per-adapter.mjs"
+Cohesion: 0.17
+Nodes (11): gateAdapters(), tallyMutants(), adapters, conf, gate, JSON_REPORT, PER_ADAPTER_CONF, results (+3 more)
+
+### Community 194 - "Acceptance — CORE-ARCH: the standalone indexer's core architecture"
+Cohesion: 0.14
+Nodes (12): 10. Ingest, 11. Chain data, 12. Ledger, 13. Contract data, 14. Private processes, 17. Required test ids added to the manifest, 1. Library surface, 2. Database API (+4 more)
+
+### Community 200 - "twox.ts"
+Cohesion: 0.24
+Nodes (9): hex(), littleEndian(), merge(), rotl(), round(), storagePrefix(), twox128(), writeLittleEndian() (+1 more)
+
+### Community 209 - "facade-merge-loader.ts"
+Cohesion: 0.36
+Nodes (8): facadeDistIndexPath(), facadeMergeAvailable(), loadFacadeMerge(), unshieldedWalletDistIndexPath(), ledgerV8NodeEntry(), loadMidnightWalletSdk(), midnightWalletRepoRoot(), packageDistFile()
+
+### Community 215 - "UmbraDB third-party component inventory (SBOM)"
+Cohesion: 0.18
+Nodes (10): 1. npm — runtime dependencies, 2. npm — direct dev dependencies, 3. Nix — flake inputs (git-pinned), 4. Nix — pinned release binaries (`fetchurl` + sha256), 5. Docker images (digest-pinned), 7. Lean / mathlib toolchain, 8. Host / toolchain dependencies, 9. Vendored ledger WASM builds (`vendor/ledger/`) (+2 more)
+
+### Community 242 - "midnight-env — reproducible PREPROD dev environment"
+Cohesion: 0.25
+Nodes (8): locked(), 1. Reproducibility contract — what is pinned, and how, 2. Host-state assumptions the flake does NOT capture (the real impurities), 3. How to reproduce (exact steps), 4. Validation performed, midnight-env — reproducible PREPROD dev environment, Security — db-sync TLS posture (READ BEFORE ENABLING TLS), Why `nix develop -c bash scripts/start-stack.sh` and not `nix run .#start-stack`
+
+### Community 245 - "Requirement: BK-1 Backup"
+Cohesion: 0.22
+Nodes (7): MODIFIED Requirements, Requirement: BK-1 Backup, Scenario: A backup of a running PGlite process, Scenario: Backup while syncing, Scenario: No `pg_dump` on the machine, Scenario: SIGUSR2 to `umbradb run` without `backupOnSignal`, Spec delta — `backups` capability
+
+### Community 252 - ".boolean"
+Cohesion: 0.29
+Nodes (7): 6. Determinism, Requirement: DT-1 One canonical row encoding, Requirement: DT-2 Primary-key order, Scenario: Map key order, Scenario: RFC test vectors, Scenario: Text keys with mixed case, Scenario: `uuid` and `boolean` keys
+
+### Community 256 - "00041 — A128 refused once and A130 hung once under load, each passing in every other run"
+Cohesion: 0.38
+Nodes (6): continueTo(), endedText(), 00041 — A128 refused once and A130 hung once under load, each passing in every other run, Evidence, Problem, Suggested fix
+
+### Community 265 - "selectLedgerVersion"
+Cohesion: 0.52
+Nodes (7): blockNamed(), checkPins(), hexOf(), isMnsvItem(), ledgerOfSpecVersion(), mnsvSpecVersion(), selectLedgerVersion()
+
+### Community 337 - "crash-worker.ts"
+Cohesion: 0.83
+Nodes (3): main(), pauseUntilKilled(), requireEnv()
+
+### Community 40 - "startUmbraDB"
+Cohesion: 0.03
+Nodes (75): backupAtStop(), text(), transportReader(), transportReaderRule(), startUmbraDB(), libraryCore(), readerOf(), 00055 — Settings that cannot take effect are accepted silently, or wait for ever (+67 more)
+
+### Community 55 - "history"
+Cohesion: 0.04
+Nodes (56): integer(), history(), Requirement: An already-aborted opts.signal rejects before any database work; a signal aborting after the call has begun has no effect, Requirement: CheckpointSummary metadata is populated and label round-trips, Requirement: history is newest-first, scoped per wallet+network, and supports cursor paging with no gap or duplicate, Scenario: A call with an already-aborted signal is rejected before any database work, Scenario: A label given at save time is returned by history and load, Scenario: A signal aborting after the call has begun does not interrupt it (+48 more)
+
+### Community 56 - "code"
+Cohesion: 0.04
+Nodes (57): code(), Added, 1. The twenty gate items, 2. Tag preconditions R1–R12, 3. Rulings recorded for this release, 4. Deferred to 1.1 / post-1.0.0, 5. R5 — live Preprod evidence against the RC, 6. R6 — independent cold release audit (+49 more)
+
+### Community 63 - ".put"
+Cohesion: 0.04
+Nodes (48): coreTxResultsOnParse(), "on-fetch"(), 00010 — The bench smoke guard cannot run on a fast machine: its first workload writes one key twice in a millisecond, Evidence, Problem, Suggested fix, Requirement: A second write to the same key within one transaction is rejected at the trigger level, not silently absorbed, Requirement: Unconditional writes are gapless and monotonic (Law T1) (+40 more)
+
+### Community 71 - "version"
+Cohesion: 0.05
+Nodes (45): deferred(), version(), Bounded review, Engineering rules, Lean, Model floors, Repository agent policy, Run log (+37 more)
+
+### Community 91 - "ADDED Requirements"
+Cohesion: 0.05
+Nodes (40): up(), name, 4. G4 — The contract doc set (all *true*), ADDED Requirements, release-contract, Requirement: A cancellation contract states the abort guarantee as public behavior, Requirement: A CHANGELOG records the 1.0.0 surface, Requirement: A durability contract states the ordering guarantee and its binding precondition (+32 more)
+
+### Community 96 - ".off"
+Cohesion: 0.05
+Nodes (38): 0. Baseline, decisions and open questions, 10. The halt code (O-6), 12.1 Setup, 12.2 The before-picture, 12.3 The performance comparison (O-4), 12. Local preprod runs (R23–R25), 13. Delivery order (for `tasks.md`, written after the stage-1 gate), 14. External claims and their evidence (+30 more)
+
+### Community 97 - "data"
+Cohesion: 0.06
+Nodes (41): params(), data(), 10. Ready-made tables: cursor and height-versioned, 11. Start and stop heights, 12. When a callback fails, 13. Providing items to other modules, 14. Private modules, 15. Migrations (+33 more)
+
+### Community 104 - "post-block-update/oracle/main.rs"
+Cohesion: 0.09
+Nodes (18): after_json(), CALL, clamp_and_normalize(), compute_overall_fullness(), cost(), DEPLOY, hex_of(), main() (+10 more)
+
+### Community 107 - "ADDED Requirements"
 Cohesion: 0.05
 Nodes (36): ADDED Requirements, Requirement: LG-10 Ledger work runs in a worker thread, Requirement: LG-11 The ledger state lives in the database, Requirement: LG-12 The retention window, Requirement: LG-13 Contract states stay alive, Requirement: LG-14 Unused ledger nodes are reclaimed by a fixed-budget mark-and-sweep, Requirement: LG-15 Every state root is checked, Requirement: LG-16 What `core-ledger-state` provides (+28 more)
 
-### Community 104 - "ADDED Requirements"
+### Community 109 - "ADDED Requirements"
+Cohesion: 0.06
+Nodes (35): ADDED Requirements, checkpoint-store (implementation), Requirement: A chunk still referenced by any surviving manifest is never reclaimed (Law C2a), Requirement: Checkpoint sequence numbers are gapless, monotonic, and scoped per wallet+network, Requirement: Chunk reclamation respects the grace window, protecting against re-reference races, Requirement: Chunk storage is content-addressed and globally deduplicated, Requirement: load always fully verifies chunk integrity before returning, Requirement: load and history read a consistent snapshot immune to a concurrently-committing prune (+27 more)
+
+### Community 110 - "ADDED Requirements"
 Cohesion: 0.06
 Nodes (35): ADDED Requirements, recovery-testing (crash-injection, soak, differential & live-evidence gate), Requirement: G10 — a full-sync soak runs at a declared envelope with GC passes and holds every invariant, Requirement: G10 — load during a concurrent prune never corrupts a live checkpoint's retrieval, Requirement: G11/T11 — a fault-schedule run is state-equivalent to a fault-free reference, Requirement: G12 — a manual pre-tag Preprod round-trip is run against the RC with recorded evidence, Requirement: G9/T1 — process-kill mid-save leaves no partially-visible checkpoint, Requirement: G9/T2 — Postgres-kill mid-save surfaces a typed error and stays all-or-nothing (+27 more)
 
-### Community 109 - "ADDED Requirements"
+### Community 116 - "ADDED Requirements"
 Cohesion: 0.06
 Nodes (33): ADDED Requirements, Requirement: A lease timeout surfaces distinctly for acquireLease vs. tryAcquireLease, Requirement: A resolved transaction handle always refers to its own live transaction, Requirement: A transaction timeout surfaces as TransactionFaultError, Requirement: Aborting opts.signal before withTransaction starts rejects with AbortError, Requirement: Aborting opts.signal during lease acquisition rejects with AbortError, Requirement: acquireLease waits indefinitely absent a timeout; tryAcquireLease never blocks unboundedly, Requirement: At most one holder per lease key at any instant (Law L1) (+25 more)
 
-### Community 110 - "package.json"
+### Community 120 - "ADDED Requirements"
 Cohesion: 0.06
-Nodes (33): bin, umbradb, bugs, url, description, optional, engines, node (+25 more)
+Nodes (32): ADDED Requirements, Requirement: a cold boot resumes without a full resync and preserves tx-history continuity, Requirement: a corrupt or non-JSON envelope payload is rejected with a typed error, Requirement: a live-synced transaction materializes as a Postgres row observable via getAll, Requirement: a sub-wallet absent from the envelope is skipped on restore, Requirement: an unrecognized envelopeVersion is rejected, never best-effort restored, Requirement: each sub-wallet resumes from its own last-known point; the envelope bundles for atomicity only, Requirement: encode and decode are lossless inverses (+24 more)
 
-### Community 115 - "Requirement: CF-4 Every field is data, operational or secret"
+### Community 123 - "Requirement: CF-4 Every field is data, operational or secret"
 Cohesion: 0.06
 Nodes (31): ADDED Requirements, Requirement: CF-10 `umbradb config check`, Requirement: CF-1 The configuration is a TypeScript file evaluated to plain data, Requirement: CF-2 Builders fill identity and version from the build, Requirement: CF-3 Every entry is validated at startup, Requirement: CF-4 Every field is data, operational or secret, Requirement: CF-5 Entries are revised by `(id, start)`, Requirement: CF-6 Configuration changes only the future (+23 more)
 
-### Community 126 - "ADDED Requirements"
+### Community 124 - "ADDED Requirements"
+Cohesion: 0.06
+Nodes (30): ADDED Requirements, Requirement: RN-10 Stop heights end an entry after its last block, Requirement: RN-11 After-write notifications are delivered at least once, Requirement: RN-12 The runner stops at an upgrade boundary, Requirement: RN-14 The block source is the runner's only view of the chain, Requirement: RN-15 Module APIs are registered once, at startup, Requirement: RN-1 The main program is a fixed sequence of points, Requirement: RN-2 The runner does only its five duties (+22 more)
+
+### Community 126 - "package.json"
+Cohesion: 0.06
+Nodes (30): bin, umbradb, bugs, url, description, engines, node, exports (+22 more)
+
+### Community 131 - "ADDED Requirements"
 Cohesion: 0.07
 Nodes (29): ADDED Requirements, Current release campaign evidence (owner Q195, 2026-10-28), Requirement: IN-10 Errors are retried or halt, by kind, Requirement: IN-11 Recovery after an uncertain COMMIT, Requirement: IN-12 Startup refusals and halts, Requirement: IN-1 The database holds finalized blocks only, Requirement: IN-2 Bootstrap of an empty database, Requirement: IN-3 Startup checks (+21 more)
 
-### Community 129 - "ADDED Requirements"
+### Community 135 - "ADDED Requirements"
 Cohesion: 0.07
 Nodes (27): ADDED Requirements, Requirement: a caller-supplied transaction handle is honored, not silently ignored, Requirement: a non-object JSON value round-trips correctly, Requirement: an already-aborted opts.signal rejects before any statement; a later abort has no effect, Requirement: get never throws for an unset cursor, Requirement: get returns exactly the last value set, scoped per (kind, key), Requirement: Postgres errors surface as the shared StorageError hierarchy, Requirement: set is an idempotent, unconditional overwrite (Law W1) (+19 more)
 
-### Community 134 - "ADDED Requirements"
+### Community 142 - "ADDED Requirements"
 Cohesion: 0.07
 Nodes (26): ADDED Requirements, performance-baseline (implementation), Requirement: a benchmark baseline is recorded as a committed artifact (the G14 gate), Requirement: a coarse smoke guard is wired now; the CV-aware regression gate is deferred, Requirement: an in-repo benchmark harness drives the real adapters against a pinned Postgres, Requirement: kv_current is fillfactor-tuned to preserve HOT-update eligibility (IS-1), Requirement: save() issues a bounded number of round-trips independent of chunk count (HP-1), Requirement: scalability ceilings are documented for 1.0.0 (+18 more)
 
-### Community 135 - "Requirements"
+### Community 143 - "Requirements"
 Cohesion: 0.07
 Nodes (26): Purpose, Requirement: A caller-supplied transaction handle is honored or rejected, never silently ignored, Requirement: Dual addressing agrees at recorded write timestamps (Law T4), Requirement: History intervals never overlap for a single key (Law T5), Requirement: listKeys streams without materializing the full result set first, and orders results correctly, Requirement: Migrations are idempotent and ordered, Requirement: Postgres errors surface as the shared StorageError hierarchy, Requirement: put's CAS guard distinguishes conflict from absence (+18 more)
 
-### Community 139 - "ADDED Requirements"
+### Community 146 - "UmbraDB v1.0.0 — Autonomous Run Log"
+Cohesion: 0.08
+Nodes (25): Audit (round 1) — the confirmation-bias control paid off, Boundary held, Change: process — guideline corrections, model floors, workflow moved to `AGENTS.md` (2026-10-20 → 10-21), Change: `start-umbradb` — UmbraDB as a library (2026-11-01), Change: `v1.0.0-api-surface` — G1/G2/G3/G4/G20 the public-surface freeze (2026-07-24), Change: `v1.0.0-durable-checkpoint-cursor` — G6 / G7 / G8 (2026-07-24), Change: `v1.0.0-perf-baseline` — G13 / G14 (2026-07-24), Change: `v1.0.0-recovery-testing` — G9/G10/G11 crash-injection + soak + differential (2026-07-24) (+17 more)
+
+### Community 147 - "ADDED Requirements"
 Cohesion: 0.08
 Nodes (25): ADDED Requirements, Requirement: A caller-supplied transaction handle is honored or rejected, never silently ignored, Requirement: Dual addressing agrees at recorded write timestamps (Law T4), Requirement: History intervals never overlap for a single key (Law T5), Requirement: listKeys streams without materializing the full result set first, and orders results correctly, Requirement: Migrations are idempotent and ordered, Requirement: Postgres errors surface as the shared StorageError hierarchy, Requirement: put's CAS guard distinguishes conflict from absence (+17 more)
 
-### Community 141 - "Requirement: DT-6 Stored data avoids non-deterministic values"
+### Community 148 - "ADDED Requirements"
 Cohesion: 0.08
-Nodes (23): ADDED Requirements, Requirement: DT-1 One canonical row encoding, Requirement: DT-3 The contents hash, Requirement: DT-4 Per-block changes of every module table, Requirement: DT-5 The `core-digest` part keeps one digest per table, and checkpoints, Requirement: DT-6 Stored data avoids non-deterministic values, Scenario: A `CURRENT_TIMESTAMP` default, Scenario: A fractional JSON number (+15 more)
+Nodes (24): ADDED Requirements, Requirement: PP-11 Opt-in mutual TLS, Requirement: PP-12 Private databases are not backed up by UmbraDB, Requirement: PP-13 A private module may require public table items, Requirement: PP-1 Processes and databases, Requirement: PP-2 A private database is bound to one public database, Requirement: PP-3 Private processes take blocks from the public database, Requirement: PP-5 Independent instances lag as they need (+16 more)
 
-### Community 146 - "Design — v1.0.0-durable-checkpoint-cursor"
+### Community 158 - "ADDED Requirements"
+Cohesion: 0.09
+Nodes (21): ADDED Requirements, Requirement: concurrent writers merging the same tx hash never lose a section, Requirement: driver-level failures surface as the shared StorageError hierarchy, Requirement: getAll returns live bigint/Date-typed values, not JSON-stringified primitives, Requirement: identifier-subset pending-clear rule survives repeated merges, Requirement: merge semantics are equivalent to mergeWalletEntries, not last-write-wins, Requirement: serialize() is a full synchronous-equivalent dump matching the fixed interface contract, Requirement: the merge function is caller-supplied and never a wallet-SDK runtime import (+13 more)
+
+### Community 159 - "Design — v1.0.0-durable-checkpoint-cursor"
 Cohesion: 0.09
 Nodes (21): 0. Package layout, 1.1 The gap, confirmed in source, 1.2 Change `save` to accept a caller transaction, 1.3 The `saveAndAdvance` combinator, 1.4 The ordering contract (for callers composing manually), 1. G5 — Co-transactional watermark + checkpoint data, 3.1 Connection defaults, 3.2 Bounded migration advisory-lock acquire (+13 more)
 
-### Community 153 - "ADDED Requirements"
+### Community 162 - "Requirement: DT-6 Stored data avoids non-deterministic values"
 Cohesion: 0.10
-Nodes (20): ADDED Requirements, Requirement: PP-11 Opt-in mutual TLS, Requirement: PP-12 Private databases are not backed up by UmbraDB, Requirement: PP-13 A private module may require public table items, Requirement: PP-1 Processes and databases, Requirement: PP-3 Private processes take blocks from the public database, Requirement: PP-5 Independent instances lag as they need, Requirement: PP-6 Lockstep instances process each height at that height (+12 more)
-
-### Community 161 - "UmbraDB v1.0.0 — Autonomous Run Log"
-Cohesion: 0.11
-Nodes (18): Audit (round 1) — the confirmation-bias control paid off, Boundary held, Change: process — guideline corrections, model floors, workflow moved to `AGENTS.md` (2026-10-20 → 10-21), Change: `v1.0.0-api-surface` — G1/G2/G3/G4/G20 the public-surface freeze (2026-07-24), Change: `v1.0.0-durable-checkpoint-cursor` — G6 / G7 / G8 (2026-07-24), Change: `v1.0.0-recovery-testing` — G9/G10/G11 crash-injection + soak + differential (2026-07-24), Reconciliations recorded as consolidating-lead decisions (spec written pre-G6/G7), Rework (class 1 — infra) (+10 more)
-
-### Community 164 - "ADDED Requirements"
-Cohesion: 0.11
-Nodes (18): ADDED Requirements, Requirement: MD-2 Declarations are validated at startup, Requirement: MD-3 The requirement graph is resolved per height range, Requirement: MD-4 Modules start mid-chain only when they promise it, Requirement: MD-5 Development-only modules need the development opt-in, Requirement: MD-6 Shared items have exactly one active provider per height, Requirement: MD-7 Process items are published once, at startup, Scenario: A consumer starts before its provider (+10 more)
+Nodes (20): ADDED Requirements, Requirement: DT-3 The contents hash, Requirement: DT-4 Per-block changes of every module table, Requirement: DT-5 The `core-digest` part keeps one digest per table, and checkpoints, Requirement: DT-6 Stored data avoids non-deterministic values, Scenario: A `CURRENT_TIMESTAMP` default, Scenario: A fractional JSON number, Scenario: A fractional `numeric` (+12 more)
 
 ### Community 165 - "ADDED Requirements"
 Cohesion: 0.11
-Nodes (18): ADDED Requirements, formal-watermarks, Requirement: Command traces compose in list order, Requirement: Lookup after a trace returns the last matching value, Requirement: Set is an unconditional overwrite at the exact address, Requirement: Set preserves distinct addresses, Requirement: The abstract Watermarks store has one absence representation, Requirement: The W1 proof claim remains abstract (+10 more)
+Nodes (18): ADDED Requirements, Requirement: MD-2 Declarations are validated at startup, Requirement: MD-3 The requirement graph is resolved per height range, Requirement: MD-4 Modules start mid-chain only when they promise it, Requirement: MD-5 Development-only modules need the development opt-in, Requirement: MD-6 Shared items have exactly one active provider per height, Requirement: MD-7 Process items are published once, at startup, Scenario: A consumer starts before its provider (+10 more)
 
 ### Community 166 - "ADDED Requirements"
 Cohesion: 0.11
-Nodes (18): ADDED Requirements, Requirement: concurrent writers merging the same tx hash never lose a section, Requirement: driver-level failures surface as the shared StorageError hierarchy, Requirement: identifier-subset pending-clear rule survives repeated merges, Requirement: merge semantics are equivalent to mergeWalletEntries, not last-write-wins, Requirement: serialize() is a full synchronous-equivalent dump matching the fixed interface contract, Requirement: the merge function is caller-supplied and never a wallet-SDK runtime import, Scenario: A bare upsert without a row lock is insufficient (negative control, implementation note) (+10 more)
+Nodes (18): ADDED Requirements, formal-watermarks, Requirement: Command traces compose in list order, Requirement: Lookup after a trace returns the last matching value, Requirement: Set is an unconditional overwrite at the exact address, Requirement: Set preserves distinct addresses, Requirement: The abstract Watermarks store has one absence representation, Requirement: The W1 proof claim remains abstract (+10 more)
 
-### Community 167 - "ADDED Requirements"
-Cohesion: 0.11
-Nodes (18): ADDED Requirements, Requirement: LM-11 The browser demo runs on the engine, Requirement: LM-1 One in-process entry point, Requirement: LM-3 The network request, Requirement: LM-4 Handlers always exist, Requirement: LM-5 A standard service lifecycle, Requirement: LM-6 The private link over channels, Requirement: LM-7 User modules for the ledger worker (+10 more)
-
-### Community 169 - "scripts"
+### Community 171 - "scripts"
 Cohesion: 0.11
 Nodes (18): scripts, bench, bench:smoke, build, build:browser, docs:storage, docs:storage:check, graph:check (+10 more)
 
-### Community 170 - "stryker.conf.json"
+### Community 173 - "stryker.conf.json"
 Cohesion: 0.11
 Nodes (17): cleanTempDir, _comment, concurrency, coverageAnalysis, mutate, reporters, $schema, tempDirName (+9 more)
 
-### Community 173 - "ADDED Requirements"
+### Community 175 - "G12 / R5 — manual pre-tag Preprod round-trip evidence"
+Cohesion: 0.12
+Nodes (11): Build commands, Build the package and install it, Building from source, Run from a clone, Captured transcript, Chain / wallet state at run time, Cold-boot round-trip, G12 / R5 — manual pre-tag Preprod round-trip evidence (+3 more)
+
+### Community 176 - "Requirement: LG-14 Unused ledger nodes are reclaimed by reference counting"
+Cohesion: 0.12
+Nodes (16): MODIFIED Requirements, RENAMED Requirements, Requirement: LG-11 The ledger state lives in the database, Requirement: LG-13 Contract states stay alive, Requirement: LG-14 Unused ledger nodes are reclaimed by reference counting, Scenario: A node only the batch references, Scenario: A node queued and referenced again is kept, Scenario: A re-inserted node changes no count (+8 more)
+
+### Community 177 - "ADDED Requirements"
 Cohesion: 0.12
 Nodes (16): ADDED Requirements, formal-checkpoint-c1, Requirement: C1 remains a save-only abstract projection, Requirement: Chunk identities form an unconditional finite join projection, Requirement: Chunk-map merge preserves existing bytes, Requirement: Collision freedom is an explicit local theorem premise, Requirement: Compatible chunk maps satisfy conditional C1 commutation, Requirement: Saving identity inputs is extensive, repeat-idempotent, and order-independent (+8 more)
 
-### Community 174 - "devDependencies"
+### Community 178 - "ADDED Requirements"
+Cohesion: 0.12
+Nodes (16): ADDED Requirements, Requirement: LM-11 The browser demo runs on the engine, Requirement: LM-1 One in-process entry point, Requirement: LM-3 The network request, Requirement: LM-4 Handlers always exist, Requirement: LM-5 A standard service lifecycle, Requirement: LM-6 The private link over channels, Requirement: LM-7 User modules for the ledger worker (+8 more)
+
+### Community 179 - "devDependencies"
 Cohesion: 0.12
 Nodes (17): devDependencies, ajv, effect, @electric-sql/pglite-tools, esbuild, fast-check, @midnightntwrk/wallet-sdk-abstractions, @stryker-mutator/core (+9 more)
 
-### Community 177 - "The laws of UmbraDB's storage helpers"
-Cohesion: 0.12
-Nodes (10): Build commands, Build the package and install it, Building from source, Run from a clone, 1. Status of each law, 2. T5 — versions over heights (the height-versioned table), 3. W1 — last write wins (the cursor table), 4. The Lean model (+2 more)
-
-### Community 180 - "README.md"
-Cohesion: 0.19
-Nodes (6): Choosing a database, Launching it, stats-module, Generate your local wallet, Test wallets, Why this is not just a committed key anymore
-
-### Community 181 - "ADDED Requirements"
+### Community 186 - "ADDED Requirements"
 Cohesion: 0.13
 Nodes (14): ADDED Requirements, Requirement: LS-1 The package exports exactly the new surface, Requirement: LS-2 Retired parts are gone, Requirement: LS-3 TransactionHistory stays, outside the build, Requirement: LS-4 The change is announced as breaking, Requirement: LS-5 The quality gates move to the new code, Requirement: LS-6 The `umbradb` command, Scenario: An extra export (+6 more)
 
-### Community 187 - "Requirement: BK-1 Backup"
-Cohesion: 0.14
-Nodes (13): ADDED Requirements, Requirement: BK-1 Backup, Requirement: BK-3 Restore into an empty database, checked before and after loading, Requirement: BK-4 A restored database continues like one that never stopped, Requirement: BK-5 The browser, Scenario: A backup of a running PGlite process, Scenario: A changed row, Scenario: Backup in the page (+5 more)
-
-### Community 188 - "ADDED Requirements"
+### Community 195 - "ADDED Requirements"
 Cohesion: 0.14
 Nodes (13): ADDED Requirements, Requirement: CD-1 `core-chain` records the chain's identity, Requirement: CD-2 `core-block-fetch` is the node-backed block source, Requirement: CD-3 `core-block-commit` writes the cursor before every module, Requirement: CD-4 `core-chain-events` stores every runtime event, Requirement: CD-6 `core-tx-results` stores outcomes from the chain events, Scenario: A partially successful transaction, Scenario: A repeated hash (+5 more)
 
-### Community 189 - "REMOVED Requirements"
+### Community 196 - "REMOVED Requirements"
 Cohesion: 0.14
 Nodes (13): REMOVED Requirements, Requirement: A caller-supplied transaction handle is honored or rejected, never silently ignored, Requirement: A second write to the same key within one transaction is rejected at the trigger level, not silently absorbed, Requirement: Dual addressing agrees at recorded write timestamps (Law T4), Requirement: getAt satisfies temporal-projection equivalence (Law T3), within the store's retention window, Requirement: History intervals never overlap for a single key (Law T5), Requirement: listKeys streams without materializing the full result set first, and orders results correctly, Requirement: Migrations are idempotent and ordered (+5 more)
 
-### Community 190 - "Requirement: RN-13 SIGTERM stops cleanly"
+### Community 197 - "Requirement: RN-13 SIGTERM stops cleanly"
 Cohesion: 0.14
 Nodes (13): MODIFIED Requirements, Requirement: RN-13 SIGTERM stops cleanly, Requirement: RN-15 Module APIs are registered once, at startup, Requirement: RN-16 Chain-data reads name their view and height, Scenario: A GraphQL module states its height, Scenario: Every answer names its build, Scenario: SIGTERM during a block transaction, Scenario: SIGTERM during startup, the node unreachable (+5 more)
 
-### Community 198 - "UmbraDB v0.9.5 "Penumbra" — Release Record"
-Cohesion: 0.15
-Nodes (13): 1. The twenty gate items, 2. Tag preconditions R1–R12, 3. Rulings recorded for this release, 4. Deferred to 1.1 / post-1.0.0, 5. R5 — live Preprod evidence against the RC, 6. R6 — independent cold release audit, 7. R9 — Go / No-Go, Track A — Release contract (`openspec/changes/v1.0.0-api-surface`, merged `726f567`) (+5 more)
-
-### Community 199 - "ADDED Requirements"
+### Community 204 - "ADDED Requirements"
 Cohesion: 0.15
 Nodes (12): ADDED Requirements, Requirement: CC-1 `core-contract-states` stores each touched contract's keys, Requirement: CC-2 `core-contract-logs-full` stores the ledger's logs, Requirement: CC-3 `core-contract-logs-fast` stores the same logs without state, or halts, Requirement: CC-4 One provider of contract logs at a time, Scenario: A computed log value, Scenario: A log in a failed fallible segment, Scenario: A v8 log (+4 more)
 
-### Community 201 - "Design — Sprint 8: WalletState Envelope + Live Preprod DB-Sync + Cold-Boot Recovery"
-Cohesion: 0.15
-Nodes (12): 1.1 Envelope shape, 1. Envelope decision: (a) one versioned envelope — DECIDED, 2. Module layout and dependency direction, 4. Live preprod DB-sync verification (nightly/labeled), 5. Cold-boot recovery, and the cross-sub-wallet consistency contract, 6. Relationship to the future verifiable-snapshot-recovery feature, 7.1 Unit / property (Pg-only, required gate) — `test:conformance`, 7.2 Live preprod DB-sync (nightly/labeled) — `test:live` (+4 more)
-
-### Community 202 - "Tasks — v1.1.0: Formal completion (`formal-completion`)"
-Cohesion: 0.15
-Nodes (12): 0. Scaffolding + Trust reach, 1. C2a — GC-safety (release-blocking; start now), 2. C2b — eventual collection (DEFERRED), 3. L1 — lease mutual exclusion (release-blocking; start now), 4. Multi-key TemporalKV lift — FRAMING ONLY (DEFERRED), 5. Ordered chunk reconstruction (DEFERRED), 6. C1 collision hygiene (release-blocking rider), 7. Transaction-envelope composition (DEFERRED) (+4 more)
-
-### Community 205 - "compilerOptions"
+### Community 206 - "compilerOptions"
 Cohesion: 0.15
 Nodes (12): compilerOptions, declaration, esModuleInterop, module, moduleResolution, noEmit, noUncheckedIndexedAccess, resolveJsonModule (+4 more)
 
-### Community 210 - "ADDED Requirements"
+### Community 208 - "UmbraDB 0.9.5 "Penumbra""
 Cohesion: 0.17
-Nodes (11): ADDED Requirements, Requirement: AE-1 Four read-only endpoints on the admin listener, Requirement: AE-2 A heartbeat independent of the work, Requirement: AE-4 Readiness, Requirement: AE-6 Secrets and errors are never leaked, Scenario: A blocking callback fails liveness, and the endpoints still answer, Scenario: A credential in an exception, Scenario: A long awaiting callback does not fail liveness (+3 more)
+Nodes (12): Benchmarks, Compatibility, and what 1.0.0 needs, Durability, Errors, If you build from source, Installing, Security, The fix this release exists for (+4 more)
 
-### Community 211 - "ADDED Requirements"
+### Community 210 - "ADDED Requirements"
 Cohesion: 0.17
 Nodes (11): ADDED Requirements, Requirement: BR-1 Workers and databases in the browser, Requirement: BR-2 The browser starts at the tip, Requirement: BR-3 Only the node and a user's backup, Requirement: BR-4 Same results as Node.js, Scenario: A second tab on one OPFS database, Scenario: Browser and Node.js agree, Scenario: Ledger state without a backup (+3 more)
 
-### Community 213 - "devnet.sh"
+### Community 212 - "devnet.sh"
 Cohesion: 0.36
 Nodes (9): attempt(), finalized(), log(), rpc(), devnet.sh script, sha(), spec_version(), traffic() (+1 more)
 
-### Community 214 - "compilerOptions"
+### Community 213 - "compilerOptions"
 Cohesion: 0.17
 Nodes (11): compilerOptions, declaration, declarationMap, noEmit, outDir, rootDir, sourceMap, exclude (+3 more)
 
-### Community 218 - "openspec-explore/SKILL.md"
+### Community 216 - "openspec-explore/SKILL.md"
 Cohesion: 0.18
 Nodes (10): Check for context, Ending Discovery, Guardrails, Handling Different Entry Points, OpenSpec Awareness, The Stance, What You Don't Have To Do, What You Might Do (+2 more)
 
-### Community 219 - "UmbraDB 0.9.5 "Penumbra""
-Cohesion: 0.18
-Nodes (11): Benchmarks, Compatibility, and what 1.0.0 needs, Errors, If you build from source, Installing, Security, The fix this release exists for, The surface (+3 more)
+### Community 217 - "README.md"
+Cohesion: 0.29
+Nodes (3): Choosing a database, Launching it, stats-module
 
-### Community 220 - "UmbraDB and SLSA — supply-chain integrity assessment"
+### Community 218 - "UmbraDB and SLSA — supply-chain integrity assessment"
 Cohesion: 0.18
 Nodes (11): 1. What SLSA v1.0 defines, 2. UmbraDB's current posture, 3. Target and gap analysis, Build track — **current estimate: L0–L1**, Build track levels, How npm `--provenance` maps to SLSA, Level summary, Source track (later-version intent) — solid, unclaimed under v1.0 (+3 more)
 
-### Community 226 - "explore.md"
+### Community 220 - "Design — Sprint 4: Watermarks"
+Cohesion: 0.18
+Nodes (10): 0. Package layout, 10. Test infrastructure, 1. Schema — one physical-parameter correction to `design/design.md` §4, 4. Large-integer cursor values — a documented convention, not a schema change, 5. Accepted tradeoffs (explicit, not silently possible), 6. Composing Transaction/Lease, 7. Cancellation (`opts.signal`), 8. Error translation — no additions to `src/postgres/errors.ts` (+2 more)
+
+### Community 225 - "explore.md"
 Cohesion: 0.20
 Nodes (9): Check for context, Ending Discovery, Guardrails, OpenSpec Awareness, The Stance, What You Don't Have To Do, What You Might Do, When a change exists (+1 more)
 
-### Community 227 - "00027 — A Vitest worker hung for 24 minutes in V8's fatal-error path while freeing WebAssembly code"
+### Community 226 - "00027 — A Vitest worker hung for 24 minutes in V8's fatal-error path while freeing WebAssembly code"
 Cohesion: 0.20
 Nodes (9): 00027 — A Vitest worker hung for 24 minutes in V8's fatal-error path while freeing WebAssembly code, Evidence, Evidence, Further occurrences, Occurrence of 2026-10-27, task 15.1a's conformance gate ("seen again"), Occurrence of 2026-10-28, task 17.5b's conformance gate, Problem, Suggested fix (+1 more)
 
-### Community 228 - "UmbraDB software supply-chain directory"
+### Community 227 - "UmbraDB software supply-chain directory"
 Cohesion: 0.20
 Nodes (7): How the inventory is organized, Recommended follow-up, Security process — the CI gates, SLSA posture in one paragraph, UmbraDB software supply-chain directory, Update process — how and when to bump each ecosystem, Why this exists
 
-### Community 229 - "Design — v1.0.0-infosec-signoff"
+### Community 228 - "Boundaries, threats and controls"
+Cohesion: 0.20
+Nodes (10): 10. Dependency producers and build pipeline → installed code, 1. Operator files and module code → process, 2. Midnight node → public process, 3. Runner and modules → PostgreSQL 18 or PGlite, 4. Main thread ↔ ledger worker, 5. Module API readers → process, 6. Admin callers → admin worker, 7. Public process/database ↔ private process (+2 more)
+
+### Community 229 - "Requirement: CF-4 Every field is data, operational or secret"
+Cohesion: 0.20
+Nodes (9): MODIFIED Requirements, Requirement: CF-1 The configuration is a TypeScript file evaluated to plain data, Requirement: CF-4 Every field is data, operational or secret, Scenario: A function in the configuration, Scenario: A PGlite directory whose parent is missing, Scenario: A secret never appears, Scenario: A user module from the configuration file, Scenario: Two `core` revisions with different databases (+1 more)
+
+### Community 230 - "Design — v1.0.0-infosec-signoff"
 Cohesion: 0.20
 Nodes (9): 0. Scope boundary and what this change does NOT touch, 1. G15 — `SECURITY.md` / threat-model document, 2. G16 — CheckpointStore cross-wallet dedup interface-doc rewrite, 3. G17 — TLS caveat surfaced + VerifyFull/`--ca` de-stubbed, 4. G18 — Supply-chain CI gate, 5. G19 — Replace the committed Preview wallet secret, 6. Non-goals & boundaries respected (summary), Audit resolution (+1 more)
 
-### Community 230 - "Spec — `model-checking` capability"
+### Community 231 - "Acceptance criteria — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)"
+Cohesion: 0.20
+Nodes (9): Acceptance criteria — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`), Boundary / scope guardrails (council rulings honored), Differential state-equivalence, in-repo (G11, fault-schedule half depends on G5), Full-sync soak + load-under-prune (G10), Lease non-wedge cold start (G9 / T3), Manual pre-tag Preprod evidence run (G12, release step 7, against the RC), Postgres-kill mid-save + retry contract (G9 / T2), Process-kill mid-save (G9 / T1) (+1 more)
+
+### Community 232 - "Spec — `model-checking` capability"
 Cohesion: 0.20
 Nodes (9): 1. Scope and honesty, 2. Faithfulness to the algebra, 3. C2a — GC reachability safety, 4. C2b — eventual collection (liveness), 5. L1 — lease mutual exclusion, 6. T1 cross-writer, 7. CI integration, 8. Documentation (+1 more)
 
-### Community 231 - "Tasks — v1.1.0: Quint model checking"
+### Community 233 - "Tasks — v1.1.0: Quint model checking"
 Cohesion: 0.20
 Nodes (9): 0. Toolchain and scaffolding, 1. C2a — GC reachability safety, 2. C2b — eventual collection, 3. L1 — lease mutual exclusion, 4. T1 — cross-writer, 5. CI, 6. Documentation and close-out, 7. Model-based conformance (the refinement bridge) (+1 more)
 
-### Community 232 - "After 0.10.0"
+### Community 234 - "After 0.10.0"
 Cohesion: 0.20
 Nodes (10): 0.10.0: the core architecture (`openspec/changes/core-arch`), 0.9.5 (released), After 0.10.0, Also next, Deferred network coverage (Q195), Feature modules, Later core work, Non-goals (+2 more)
 
-### Community 234 - "[0.10.0] - 2026-10-27"
+### Community 238 - "[0.10.0] - 2026-10-27"
 Cohesion: 0.22
 Nodes (8): [0.10.0] - 2026-10-27, [0.9.5] - 2026-07-25 — "Penumbra", Added, Breaking changes, Changelog, Contract documents, Deferred to a 1.1 fast-follow (explicitly outside the frozen 1.0 surface), [Unreleased]
 
-### Community 235 - "scoped-review-manifest"
+### Community 239 - "scoped-review-manifest"
 Cohesion: 0.22
 Nodes (8): Cleanup, scoped-review-manifest, Step 0 — Skip check, Step 1 — Freshness gate, Step 2 — Changed-file seed set, Step 3 — Blast-radius computation, Step 4 — Write the manifest, Step 5 — Hand off
 
-### Community 236 - "try.sh"
+### Community 240 - "UmbraDB in a browser"
+Cohesion: 0.22
+Nodes (8): Backups and status, Build and serve, Differences from `umbradb run`, How the page is built, The configuration, The page's parameters, UmbraDB in a browser, What the default page runs
+
+### Community 241 - "try.sh"
 Cohesion: 0.53
 Nodes (8): bad(), block(), latest(), recent(), try.sh script, show(), status(), subscribe()
 
-### Community 238 - "ADDED Requirements"
+### Community 243 - "ADDED Requirements"
+Cohesion: 0.22
+Nodes (8): ADDED Requirements, Requirement: BK-3 Restore into an empty database, checked before and after loading, Requirement: BK-4 A restored database continues like one that never stopped, Requirement: BK-5 The browser, Scenario: A changed row, Scenario: Backup in the page, Scenario: Restore on the other backend, Spec delta — `backups` capability
+
+### Community 244 - "ADDED Requirements"
 Cohesion: 0.22
 Nodes (8): ADDED Requirements, Requirement: SH-1 The cursor table (from 0.9.5's Watermarks), Requirement: SH-2 The height-versioned table (from 0.9.5's TemporalKV), Requirement: SH-3 One change per key per block, Scenario: A second change in the same block, Scenario: Last write wins, Scenario: Reading as of a height, Spec delta — `storage-helpers` capability
 
-### Community 239 - "Tasks — v1.0.0-infosec-signoff"
+### Community 246 - "Tasks — v1.0.0-infosec-signoff"
 Cohesion: 0.22
 Nodes (8): 0. Threat-model documentation hub (G15), 1. CheckpointStore interface-doc rewrite (G16) — depends on 0.3, 2. TLS caveat + VerifyFull de-stub (G17) — independent, 3. Supply-chain CI gate (G18) — 3.5 depends on 4.1, 4. Committed-secret remediation (G19) — mutually dependent with 3.5, 4b. Release-publication artifact (R7) — found missing during the release run, 5. Change close-out, Tasks — v1.0.0-infosec-signoff
 
-### Community 240 - "Design — v1.0.0-perf-baseline"
+### Community 247 - "Design — v1.0.0-perf-baseline"
 Cohesion: 0.22
 Nodes (8): 0. Package layout, 1. HP-1 — `save()` `UNNEST` batching (G13), 3. IS-1 — `kv_current fillfactor=90` (G13), 4. G14 — benchmark harness, 5. G14 — the GC anti-join measurement + recorded baseline, 7. Boundaries and non-goals respected, Audit resolution, Design — v1.0.0-perf-baseline
 
-### Community 241 - "Proposal — v1.1.0: Quint model checking (`quint-model-checking`)"
-Cohesion: 0.22
-Nodes (8): Binding constraints, Dependencies, Proposal — v1.1.0: Quint model checking (`quint-model-checking`), Tooling, What changes, What this does NOT claim, Why Quint specifically, Why: three laws are unproved, and it is not a coincidence which three
-
-### Community 243 - "Repository agent policy"
-Cohesion: 0.25
-Nodes (7): Bounded review, Lean, Model floors, Repository agent policy, Run log, The five stages, The three review lanes
-
-### Community 246 - "Contributing"
+### Community 248 - "Contributing"
 Cohesion: 0.25
 Nodes (7): Code Contribution Process, Contributing, Contributor License Agreement, Getting Started, Requirements for Acceptable Contributions:, Submitting Issues, Support and Communication:
 
-### Community 247 - "UmbraDB in a browser"
+### Community 249 - "UmbraDB 0.10.0 threat model"
 Cohesion: 0.25
-Nodes (7): Backups and status, Build and serve, Differences from `umbradb run`, The configuration, The page's parameters, UmbraDB in a browser, What the default page runs
+Nodes (8): Assets and actors, Backups and restore, Exposure defaults and hash limits, Known gaps, Private reads of public data, Residual risks and scope, The Midnight node, UmbraDB 0.10.0 threat model
 
-### Community 248 - "The database"
-Cohesion: 0.25
-Nodes (8): A paused loop on `/status`, A PGlite directory that does not exist, A private process and a changed public configuration, Checking a configuration against its database, The database, The transport reader, TLS to PostgreSQL: `ssl`, UmbraDB operator guide
-
-### Community 249 - "stats-module/tsconfig.json"
+### Community 250 - "stats-module/tsconfig.json"
 Cohesion: 0.25
 Nodes (7): compilerOptions, allowImportingTsExtensions, paths, extends, include, umbradb, ../../tsconfig.json
 
-### Community 250 - "try-module/tsconfig.json"
+### Community 251 - "try-module/tsconfig.json"
 Cohesion: 0.25
 Nodes (7): compilerOptions, allowImportingTsExtensions, paths, extends, include, umbradb, ../../tsconfig.json
 
-### Community 252 - "Tasks — Sprint 4: Watermarks"
-Cohesion: 0.25
-Nodes (7): 0. Schema, 1. `set`, 2. `get`, 3. Cancellation and errors, 4. Property test (`Formal/STORAGE_ALGEBRA.md` §5), 5. Sprint close-out, Tasks — Sprint 4: Watermarks
-
-### Community 253 - "Acceptance map — START-UMBRADB: UmbraDB as a library"
-Cohesion: 0.25
-Nodes (7): 10. Definition of done, item by item, 1. Library-mode guarantees, 3. Lifecycle, 5. Modules and the ledger worker, 7. The command and shared resolution, 9. `core-arch` criteria rewritten by this change, Acceptance map — START-UMBRADB: UmbraDB as a library
-
-### Community 254 - "Requirement: BK-1 Backup"
-Cohesion: 0.25
-Nodes (7): MODIFIED Requirements, Requirement: BK-1 Backup, Scenario: A backup of a running PGlite process, Scenario: Backup while syncing, Scenario: No `pg_dump` on the machine, Scenario: SIGUSR2 to `umbradb run` without `backupOnSignal`, Spec delta — `backups` capability
-
-### Community 255 - "Acceptance criteria — v1.0.0-infosec-signoff"
+### Community 253 - "Acceptance criteria — v1.0.0-infosec-signoff"
 Cohesion: 0.25
 Nodes (7): Acceptance criteria — v1.0.0-infosec-signoff, Cross-cutting council-ruling gates (close-out — Task 5.1), G15 — Threat-model / `SECURITY.md`, G16 — CheckpointStore dedup interface-doc caveat, G17 — TLS caveat surfaced + VerifyFull de-stubbed, localhost default kept, G18 — Supply-chain CI gate, G19 — Committed-secret remediation
 
-### Community 258 - "Our Pledge"
+### Community 255 - "Our Pledge"
 Cohesion: 0.29
 Nodes (6): Attribution, Enforcement, Our Pledge, Our Responsibilities, Our Standards, Scope
 
-### Community 260 - "G12 / R5 — manual pre-tag Preprod round-trip evidence"
+### Community 257 - "ASSESSMENT — `midnight-node-archive` Peer Flapping (Midnight Preprod, WSL2 Docker Host)"
 Cohesion: 0.29
-Nodes (7): Captured transcript, Chain / wallet state at run time, Cold-boot round-trip, G12 / R5 — manual pre-tag Preprod round-trip evidence, Pass/fail per M5 sub-criterion, Run identity, Verdict
+Nodes (6): 1. Executive verdict, 2. Ranked root causes, evidence, and council challenges resolved, 3. THE recommended action, 4. Decisive validation experiment, 5. Residual risk and confidence, ASSESSMENT — `midnight-node-archive` Peer Flapping (Midnight Preprod, WSL2 Docker Host)
 
-### Community 261 - "Design — Sprint 5: Lean M3a Watermarks W1"
+### Community 258 - "Design — Sprint 5: Lean M3a Watermarks W1"
 Cohesion: 0.29
 Nodes (6): 1. Executable carrier, 2. Commands and interpretation, 3. Laws, 4. Trust and reachability, 5. Refinement boundary, Design — Sprint 5: Lean M3a Watermarks W1
 
-### Community 262 - "Design — Sprint 6: Lean M3b CheckpointStore C1"
+### Community 259 - "Design — Sprint 6: Lean M3b CheckpointStore C1"
 Cohesion: 0.29
 Nodes (6): 1. Finite identity projection, 2. Finite byte-bearing maps, 3. Collision premise bridge, 4. Laws and trust boundary, 5. Refinement boundary, Design — Sprint 6: Lean M3b CheckpointStore C1
 
-### Community 263 - "Acceptance — v1.1.0: Formal completion (`formal-completion`)"
+### Community 260 - "Acceptance — v1.1.0: Formal completion (`formal-completion`)"
 Cohesion: 0.29
 Nodes (6): Acceptance — v1.1.0: Formal completion (`formal-completion`), Change-level exit (Option B) / checklist-close (Option A), Definition-of-done for a gate to CLOSE, Non-goals, Normative release-law manifest (single source of truth), The forced decision (must be recorded before this change closes)
 
-### Community 264 - "Design — v1.0.0: Formal completion (`formal-completion`)"
+### Community 261 - "Design — v1.0.0: Formal completion (`formal-completion`)"
 Cohesion: 0.29
 Nodes (6): §1 C2a — GC reachability-safety (`Checkpoint/GC.lean`), §2 L1 — lease mutual exclusion (`Transaction/Lease.lean`), §3 Supporting gates, §4 Refinement register & three statuses, §5 CI faithfulness manifest, Design — v1.0.0: Formal completion (`formal-completion`)
 
-### Community 265 - "Proposal — v1.1.0: Formal completion (`formal-completion`)"
+### Community 262 - "Proposal — v1.1.0: Formal completion (`formal-completion`)"
 Cohesion: 0.29
 Nodes (6): Binding constraints, Dependencies & critical path, Governance framing (read first), Proposal — v1.1.0: Formal completion (`formal-completion`), What changes, Why
 
-### Community 267 - "Midnight Foundation Security Policy"
+### Community 264 - "Midnight Foundation Security Policy"
 Cohesion: 0.29
 Nodes (7): Commit policy, Disclosing a security issue, Midnight Foundation Security Policy, Preferred Languages, Suggesting changes, Threat model, Vulnerability management
 
-### Community 269 - "UmbraDB — project instructions"
+### Community 267 - "UmbraDB — project instructions"
 Cohesion: 0.33
 Nodes (5): Asking the owner to decide, Keep the knowledge graph current, sprint by sprint, Review workflow, UmbraDB — project instructions, Unrelated findings go to `docs/issues/` first
 
-### Community 270 - "00006 — `postgres` 3.4.9 reads a NULL array element as the text "NULL", so equal hashes can hide different rows"
+### Community 268 - "00006 — `postgres` 3.4.9 reads a NULL array element as the text "NULL", so equal hashes can hide different rows"
 Cohesion: 0.33
 Nodes (5): 00006 — `postgres` 3.4.9 reads a NULL array element as the text "NULL", so equal hashes can hide different rows, Evidence, Problem, Resolution, Suggested fix
 
-### Community 271 - "00012 — A user module may be named `core`, the id of the `core` configuration entry"
+### Community 269 - "00012 — A user module may be named `core`, the id of the `core` configuration entry"
 Cohesion: 0.33
 Nodes (5): 00012 — A user module may be named `core`, the id of the `core` configuration entry, Evidence, Problem, Resolution, Suggested fix
 
-### Community 272 - "00022 — The tape `record` command's process test leaves its child running when the test process is gone"
+### Community 270 - "00022 — The tape `record` command's process test leaves its child running when the test process is gone"
 Cohesion: 0.33
 Nodes (5): 00022 — The tape `record` command's process test leaves its child running when the test process is gone, Evidence, Problem, Resolution, Suggested fix
 
-### Community 273 - "00032 — The runtime `npm audit` fails on zod 4.4.3 (GHSA-mrhx-c7xc-m3w5)"
+### Community 271 - "00032 — The runtime `npm audit` fails on zod 4.4.3 (GHSA-mrhx-c7xc-m3w5)"
 Cohesion: 0.33
 Nodes (5): 00032 — The runtime `npm audit` fails on zod 4.4.3 (GHSA-mrhx-c7xc-m3w5), Evidence, Problem, Resolution, Suggested fix
 
-### Community 274 - "00054 — A slow-block test hung inside PGlite for over an hour"
+### Community 272 - "00054 — A slow-block test hung inside PGlite for over an hour"
 Cohesion: 0.33
 Nodes (5): 00054 — A slow-block test hung inside PGlite for over an hour, Evidence, Problem, Seen again (2026-11-01, `start-umbradb` P9), Suggested fix
 
-### Community 275 - "UmbraDB node architecture"
+### Community 273 - "UmbraDB node architecture"
 Cohesion: 0.33
 Nodes (6): At each start, Best blocks: worked on early, never stored, Finalized heights: one transaction each, Private processes, UmbraDB node architecture, When something fails
 
-### Community 276 - "ASSESSMENT — `midnight-node-archive` Peer Flapping (Midnight Preprod, WSL2 Docker Host)"
+### Community 274 - "The laws of UmbraDB's storage helpers"
 Cohesion: 0.33
-Nodes (5): 2. Ranked root causes, evidence, and council challenges resolved, 3. THE recommended action, 4. Decisive validation experiment, 5. Residual risk and confidence, ASSESSMENT — `midnight-node-archive` Peer Flapping (Midnight Preprod, WSL2 Docker Host)
+Nodes (6): 1. Status of each law, 2. T5 — versions over heights (the height-versioned table), 3. W1 — last write wins (the cursor table), 4. The Lean model, 5. Property tests, The laws of UmbraDB's storage helpers
 
-### Community 277 - "Proposal — Sprint 1: project setup + TemporalKV"
+### Community 275 - "Proposal — Sprint 1: project setup + TemporalKV"
 Cohesion: 0.33
 Nodes (5): Impact, Non-goals (explicitly out of scope for this sprint), Proposal — Sprint 1: project setup + TemporalKV, What changes, Why
 
-### Community 278 - "Proposal — CORE-ARCH: the standalone indexer's core architecture (`core-arch`)"
+### Community 276 - "Proposal — Sprint 4: Watermarks"
 Cohesion: 0.33
-Nodes (5): Impact, Non-goals (what this change does NOT cover), Proposal — CORE-ARCH: the standalone indexer's core architecture (`core-arch`), What changes, Why
+Nodes (5): Impact, Non-goals (explicitly out of scope for this sprint), Proposal — Sprint 4: Watermarks, What changes, Why
 
-### Community 279 - "Proposal — Sprint 5: Lean M3a Watermarks W1"
+### Community 277 - "Proposal — Sprint 5: Lean M3a Watermarks W1"
 Cohesion: 0.33
 Nodes (5): Impact, Non-goals, Proposal — Sprint 5: Lean M3a Watermarks W1, What changes, Why
 
-### Community 280 - "Tasks — Sprint 5: Lean M3a Watermarks W1"
+### Community 278 - "Tasks — Sprint 5: Lean M3a Watermarks W1"
 Cohesion: 0.33
 Nodes (5): 0. Specification freeze, 1. Executable Watermarks model, 2. W1 theorem tranche, 3. Close-out, Tasks — Sprint 5: Lean M3a Watermarks W1
 
-### Community 281 - "Proposal — Sprint 6: Lean M3b CheckpointStore C1"
+### Community 279 - "Proposal — Sprint 6: Lean M3b CheckpointStore C1"
 Cohesion: 0.33
 Nodes (5): Impact, Non-goals, Proposal — Sprint 6: Lean M3b CheckpointStore C1, What changes, Why
 
-### Community 282 - "Tasks — Sprint 6: Lean M3b CheckpointStore C1"
+### Community 280 - "Tasks — Sprint 6: Lean M3b CheckpointStore C1"
 Cohesion: 0.33
 Nodes (5): 0. Specification freeze, 1. Chunk-identity projection, 2. Compatible chunk maps, 3. Close-out, Tasks — Sprint 6: Lean M3b CheckpointStore C1
 
-### Community 283 - "Proposal — v1.0.0-infosec-signoff"
+### Community 281 - "Proposal — v1.0.0-infosec-signoff"
 Cohesion: 0.33
 Nodes (5): Impact, Non-goals (explicitly out of scope — per the council rulings), Proposal — v1.0.0-infosec-signoff, What changes (the 1.0.0 gate items addressed), Why
 
-### Community 284 - "Proposal — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)"
+### Community 282 - "Proposal — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`)"
 Cohesion: 0.33
 Nodes (5): Impact, Non-goals (explicitly out of scope for this change), Proposal — v1.0.0: Recovery, Crash-Injection & Soak Testing (`recovery-testing`), What changes (the 1.0.0 gate items this change addresses), Why
 
-### Community 285 - "Acceptance — v1.1.0: Quint model checking"
+### Community 283 - "Acceptance — v1.1.0: Quint model checking"
 Cohesion: 0.33
 Nodes (5): Acceptance — v1.1.0: Quint model checking, Definition of done, Explicit non-goals, Status manifest — what this change may and may not claim, The honesty bar
 
-### Community 286 - "dependencies"
+### Community 284 - "dependencies"
 Cohesion: 0.33
 Nodes (6): dependencies, @electric-sql/pglite, postgres, typescript, ws, zod
 
-### Community 288 - "lib.sh"
+### Community 285 - "lib.sh"
 Cohesion: 0.60
 Nodes (5): build(), build_image(), file_sha256(), lib.sh script, sums()
 
-### Community 289 - "00001 — `graph.yml` cites a CLAUDE.md section that no longer exists"
+### Community 286 - "00001 — `graph.yml` cites a CLAUDE.md section that no longer exists"
 Cohesion: 0.40
 Nodes (4): 00001 — `graph.yml` cites a CLAUDE.md section that no longer exists, Evidence, Problem, Suggested fix
 
-### Community 290 - "00002 — Most OpenSpec proposals carry a stale or non-standard status line"
+### Community 287 - "00002 — Most OpenSpec proposals carry a stale or non-standard status line"
 Cohesion: 0.40
 Nodes (4): 00002 — Most OpenSpec proposals carry a stale or non-standard status line, Evidence, Problem, Suggested fix
 
-### Community 291 - "00003 — The `v1.1.0-formal-completion` headings say "v1.0.0""
+### Community 288 - "00003 — The `v1.1.0-formal-completion` headings say "v1.0.0""
 Cohesion: 0.40
 Nodes (4): 00003 — The `v1.1.0-formal-completion` headings say "v1.0.0", Evidence, Problem, Suggested fix
 
-### Community 292 - "00005 — The supply-chain inventory's npm graph figures and dev table are stale"
+### Community 289 - "00005 — The supply-chain inventory's npm graph figures and dev table are stale"
 Cohesion: 0.40
 Nodes (4): 00005 — The supply-chain inventory's npm graph figures and dev table are stale, Evidence, Problem, Suggested fix
 
-### Community 293 - "00009 — The recovery evidence says its PostgreSQL image was digest-pinned; the test setup used a tag"
+### Community 290 - "00009 — The recovery evidence says its PostgreSQL image was digest-pinned; the test setup used a tag"
 Cohesion: 0.40
 Nodes (4): 00009 — The recovery evidence says its PostgreSQL image was digest-pinned; the test setup used a tag, Evidence, Problem, Suggested fix
 
-### Community 294 - "00011 — A server `FATAL` while a statement is pending reaches the database API as `CONNECTION_CLOSED`: the server's reason is lost"
+### Community 291 - "00011 — A server `FATAL` while a statement is pending reaches the database API as `CONNECTION_CLOSED`: the server's reason is lost"
 Cohesion: 0.40
 Nodes (4): 00011 — A server `FATAL` while a statement is pending reaches the database API as `CONNECTION_CLOSED`: the server's reason is lost, Evidence, Problem, Suggested fix
 
-### Community 295 - "00013 — A nondeterministic collation compares differently on PGlite and on PostgreSQL"
+### Community 292 - "00013 — A nondeterministic collation compares differently on PGlite and on PostgreSQL"
 Cohesion: 0.40
 Nodes (4): 00013 — A nondeterministic collation compares differently on PGlite and on PostgreSQL, Evidence, Problem, Suggested fix
 
-### Community 296 - "00021 — `pglite-queue.test.ts` removes its PGlite data directories but leaves their lock files in the temp folder"
+### Community 293 - "00016 — The WebSocket transport's heartbeat takes an interval Node.js cannot time"
+Cohesion: 0.40
+Nodes (4): 00016 — The WebSocket transport's heartbeat takes an interval Node.js cannot time, Evidence, Problem, Suggested fix
+
+### Community 294 - "00021 — `pglite-queue.test.ts` removes its PGlite data directories but leaves their lock files in the temp folder"
 Cohesion: 0.40
 Nodes (4): 00021 — `pglite-queue.test.ts` removes its PGlite data directories but leaves their lock files in the temp folder, Evidence, Resolution, Suggested fix
+
+### Community 295 - "00023 — The blocks table's height partitions end at 5,000,000"
+Cohesion: 0.40
+Nodes (4): 00023 — The blocks table's height partitions end at 5,000,000, Evidence, Problem, Suggested fix
+
+### Community 296 - "00024 — The module API listener closes a refused request's connection before its client has sent the body"
+Cohesion: 0.40
+Nodes (4): 00024 — The module API listener closes a refused request's connection before its client has sent the body, Evidence, Problem, Suggested fix
 
 ### Community 297 - "00025 — The module API listener refuses a request that offers an upgrade other than WebSocket"
 Cohesion: 0.40
@@ -1569,17 +1584,17 @@ Nodes (4): 00031 — A module's error message can carry a secret setting's bytes
 Cohesion: 0.40
 Nodes (4): 00034 — `contract_logs.logs.logical_segment` is 0 for every log: the ledger labels fallible contract events so, Evidence, Problem, Suggested fix
 
-### Community 302 - "00037 — Two development dependencies are used only by the frozen `legacy/transaction-history/`"
+### Community 302 - "00035 — a slow-block test bounds the report from the source's ask, but the loop's window opens before the ask"
+Cohesion: 0.40
+Nodes (4): 00035 — a slow-block test bounds the report from the source's ask, but the loop's window opens before the ask, Evidence, Problem, Suggested fix
+
+### Community 303 - "00037 — Two development dependencies are used only by the frozen `legacy/transaction-history/`"
 Cohesion: 0.40
 Nodes (4): 00037 — Two development dependencies are used only by the frozen `legacy/transaction-history/`, Evidence, Problem, Suggested fix
 
-### Community 303 - "00039 — A103's PostgreSQL case times out inside the full conformance run under load"
+### Community 304 - "00039 — A103's PostgreSQL case times out inside the full conformance run under load"
 Cohesion: 0.40
 Nodes (4): 00039 — A103's PostgreSQL case times out inside the full conformance run under load, Evidence, Problem, Suggested fix
-
-### Community 304 - "00042 — A stop while the loop waits on an unreachable node does not end the process"
-Cohesion: 0.40
-Nodes (4): 00042 — A stop while the loop waits on an unreachable node does not end the process, Evidence, Problem, Suggested fix
 
 ### Community 305 - "00044 — `docs/supply-chain/` states a gate set and package counts that are no longer true"
 Cohesion: 0.40
@@ -1617,9 +1632,9 @@ Nodes (4): 00051 — The transport's instance id is any text: line breaks reach 
 Cohesion: 0.40
 Nodes (4): 00052 — `openspec/config.yaml` and code comments still point at 0.9.5's deleted documents, Evidence, Problem, Suggested fix
 
-### Community 314 - "00063 — The browser demo refuses user modules that declare ledger tasks: its ledger worker imports no user module"
+### Community 314 - "00060 — The `unexpected-cursor` halt test now halts `parent-mismatch` first"
 Cohesion: 0.40
-Nodes (4): 00063 — The browser demo refuses user modules that declare ledger tasks: its ledger worker imports no user module, Evidence, Problem, Suggested fix
+Nodes (4): 00060 — The `unexpected-cursor` halt test now halts `parent-mismatch` first, Evidence, Problem, Suggested fix
 
 ### Community 315 - "00065 — Node.js 24.9.0's V8 aborts in its JIT page bookkeeping freeing WebAssembly code, and a test fork hangs"
 Cohesion: 0.40
@@ -1629,17 +1644,17 @@ Nodes (4): 00065 — Node.js 24.9.0's V8 aborts in its JIT page bookkeeping free
 Cohesion: 0.40
 Nodes (4): 00073 — `examples/stats-module/try.sh subscribe` prints every row that arrives before its close completes, Evidence, Problem, Suggested fix
 
-### Community 317 - "00075 — The stats-module example takes seconds to commit its first height, with nothing in the log that says why"
-Cohesion: 0.40
-Nodes (4): 00075 — The stats-module example takes seconds to commit its first height, with nothing in the log that says why, Evidence, Problem, Suggested fix
-
-### Community 318 - "00076 — The node source's first prefetch reads the whole window's hashes before it fetches the first block"
+### Community 317 - "00076 — The node source's first prefetch reads the whole window's hashes before it fetches the first block"
 Cohesion: 0.40
 Nodes (4): 00076 — The node source's first prefetch reads the whole window's hashes before it fetches the first block, Evidence, Problem, Suggested fix
 
-### Community 319 - "00077 — The conformance suite runs in one CI job of about 75 minutes; split it across jobs"
+### Community 318 - "00077 — The conformance suite runs in one CI job of about 75 minutes; split it across jobs"
 Cohesion: 0.40
 Nodes (4): 00077 — The conformance suite runs in one CI job of about 75 minutes; split it across jobs, Evidence, Problem, Suggested fix
+
+### Community 319 - "00078 — A stored ledger node can arrive again in another child-list form, so the batch may depend on the worker's history"
+Cohesion: 0.40
+Nodes (4): 00078 — A stored ledger node can arrive again in another child-list form, so the batch may depend on the worker's history, Evidence, Problem, Suggested fix
 
 ### Community 320 - "bug-report.md"
 Cohesion: 0.40
@@ -1649,45 +1664,45 @@ Nodes (4): Actual behavior:, Context & versions:, Expected behavior:, Steps to r
 Cohesion: 0.40
 Nodes (4): Describe the proposed feature:, Details:, Expected Benefit:, User Need:
 
-### Community 322 - "MODIFIED Requirements"
+### Community 322 - "Requirement: RN-16 Chain-data reads name their view and height"
+Cohesion: 0.40
+Nodes (5): Requirement: RN-16 Chain-data reads name their view and height, Scenario: A GraphQL module states its height, Scenario: Every answer names its build, Scenario: The configuration hash holds no secret, Scenario: The core leaves an answer as the module wrote it
+
+### Community 323 - "MODIFIED Requirements"
 Cohesion: 0.40
 Nodes (4): MODIFIED Requirements, Requirement: LS-1 The package exports exactly the new surface, Scenario: An extra export, Spec delta — `library-surface` capability
 
-### Community 323 - "manifest.json"
+### Community 324 - "manifest.json"
 Cohesion: 0.40
 Nodes (4): about, format, tapes, version
 
-### Community 325 - "00017 — `vitest.config.ts` is in no TypeScript program and does not type-check (`coverage.all`, gone in Vitest 4)"
+### Community 326 - "00017 — `vitest.config.ts` is in no TypeScript program and does not type-check (`coverage.all`, gone in Vitest 4)"
 Cohesion: 0.50
 Nodes (3): 00017 — `vitest.config.ts` is in no TypeScript program and does not type-check (`coverage.all`, gone in Vitest 4), Problem, Suggested fix
 
-### Community 326 - "00020 — A module id that is a reserved SQL key word passes DB-8, and every unquoted reference to its schema fails"
-Cohesion: 0.50
-Nodes (3): 00020 — A module id that is a reserved SQL key word passes DB-8, and every unquoted reference to its schema fails, Evidence, Suggested fix
-
-### Community 327 - "00038 — The A87 registry cannot name a test written with `it.runIf` or `it.skipIf`"
-Cohesion: 0.50
-Nodes (3): 00038 — The A87 registry cannot name a test written with `it.runIf` or `it.skipIf`, Evidence, Suggested fix
-
-### Community 328 - "PULL_REQUEST_CHECKLIST.md"
+### Community 327 - "PULL_REQUEST_CHECKLIST.md"
 Cohesion: 0.50
 Nodes (3): Change summary, Review (AGENTS.md), Validation
 
-### Community 329 - "documentation-improvement.md"
+### Community 328 - "documentation-improvement.md"
 Cohesion: 0.50
 Nodes (3): Description of Improvement:, Documentation URL:, Proposed Solution (Optional):
 
-### Community 330 - "Overview"
+### Community 329 - "Overview"
 Cohesion: 0.50
 Nodes (3): Links, Overview, Submission Checklist
 
-### Community 331 - "transaction-history/tsconfig.json"
+### Community 330 - "transaction-history/tsconfig.json"
 Cohesion: 0.50
 Nodes (3): extends, include, ../../tsconfig.json
 
-### Community 332 - "Requirement: PP-2 A private database is bound to one public database"
+### Community 331 - "Test wallets"
 Cohesion: 0.50
-Nodes (4): Requirement: PP-2 A private database is bound to one public database, Scenario: Configured for another network, Scenario: Pointed at another public database, Scenario: The public core never started
+Nodes (3): Generate your local wallet, Test wallets, Why this is not just a committed key anymore
+
+### Community 332 - "Requirement: RN-13 SIGTERM stops cleanly"
+Cohesion: 0.50
+Nodes (4): Requirement: RN-13 SIGTERM stops cleanly, Scenario: SIGTERM during a block transaction, Scenario: SIGTERM during startup, the node unreachable, Scenario: SIGTERM while the loop waits on an unreachable node
 
 ### Community 333 - "Spec — capability `formal-completion`"
 Cohesion: 0.50
@@ -1697,49 +1712,41 @@ Nodes (3): Governed by, Requirements (EARS), Spec — capability `formal-complet
 Cohesion: 0.50
 Nodes (3): extends, $schema, local>midnightntwrk/renovate-config
 
-### Community 87 - "ADDED Requirements"
+### Community 341 - "peerDependenciesMeta"
+Cohesion: 0.67
+Nodes (3): optional, peerDependenciesMeta, @electric-sql/pglite-tools
+
+### Community 85 - "ADDED Requirements"
+Cohesion: 0.05
+Nodes (43): ADDED Requirements, Requirement: DB-10 Migrations of an upgrade never change stored values, Requirement: DB-11 Exactly one writer per database, Requirement: DB-12 The durability probe guards PostgreSQL, Requirement: DB-13 A lost connection is a distinct, retryable error, Requirement: DB-14 Block transactions change rows only, Requirement: DB-15 Timeouts by connection role, Requirement: DB-1 One API over two backends (+35 more)
+
+### Community 86 - "ADDED Requirements"
 Cohesion: 0.05
 Nodes (43): ADDED Requirements, Requirement: A real VerifyFull/--ca path is provided, replacing the stub (G17), Requirement: A shipped threat-model document states the single-trusted-writer trust model (G15), Requirement: CI gates any change to flake.lock behind explicit review (G18), Requirement: CI installs dependencies with npm ci (G18), Requirement: CI runs a blocking npm audit on runtime dependencies (G18), Requirement: CI runs full-history gitleaks secret scanning with the wallet history and template allowlisted (G18), Requirement: CI scans both pinned Docker image digests for CVEs (G18) (+35 more)
 
-### Community 89 - "ADDED Requirements"
+### Community 92 - "ADDED Requirements"
 Cohesion: 0.05
-Nodes (41): ADDED Requirements, Requirement: DB-10 Migrations of an upgrade never change stored values, Requirement: DB-11 Exactly one writer per database, Requirement: DB-13 A lost connection is a distinct, retryable error, Requirement: DB-14 Block transactions change rows only, Requirement: DB-15 Timeouts by connection role, Requirement: DB-1 One API over two backends, Requirement: DB-2 A read handle sees one committed height (+33 more)
-
-### Community 90 - "ADDED Requirements"
-Cohesion: 0.05
-Nodes (41): ADDED Requirements, Requirement: RN-10 Stop heights end an entry after its last block, Requirement: RN-11 After-write notifications are delivered at least once, Requirement: RN-12 The runner stops at an upgrade boundary, Requirement: RN-13 SIGTERM stops cleanly, Requirement: RN-14 The block source is the runner's only view of the chain, Requirement: RN-15 Module APIs are registered once, at startup, Requirement: RN-16 Chain-data reads name their view and height (+33 more)
-
-### Community 91 - "ADDED Requirements"
-Cohesion: 0.05
-Nodes (41): ADDED Requirements, checkpoint-store (implementation), Requirement: A chunk still referenced by any surviving manifest is never reclaimed (Law C2a), Requirement: A manifest preserves the exact order and multiplicity of its chunks, including repeats, Requirement: Checkpoint sequence numbers are gapless, monotonic, and scoped per wallet+network, Requirement: Chunk reclamation respects the grace window, protecting against re-reference races, Requirement: Chunk storage is content-addressed and globally deduplicated, Requirement: load always fully verifies chunk integrity before returning (+33 more)
-
-### Community 95 - "ADDED Requirements"
-Cohesion: 0.05
-Nodes (39): ADDED Requirements, durable-composition (implementation), Requirement: a conforming composition keeps the durable cursor from ever being ahead of durable checkpoint data, Requirement: a durability probe asserts the server's crash-safety settings at client bootstrap, Requirement: a transaction-pooling proxy is detected and refused, Requirement: JsonValueSchema rejects values exceeding the maximum nesting depth, Requirement: migration advisory-lock acquisition is bounded and fails fast, Requirement: save accepts and joins a caller-supplied transaction handle (+31 more)
-
-### Community 96 - "post-block-update/oracle/main.rs"
-Cohesion: 0.09
-Nodes (18): after_json(), CALL, clamp_and_normalize(), compute_overall_fullness(), cost(), DEPLOY, hex_of(), main() (+10 more)
+Nodes (41): ADDED Requirements, durable-composition (implementation), Requirement: a conforming composition keeps the durable cursor from ever being ahead of durable checkpoint data, Requirement: a durability probe asserts the server's crash-safety settings at client bootstrap, Requirement: a transaction-pooling proxy is detected and refused, Requirement: JsonValueSchema rejects values exceeding the maximum nesting depth, Requirement: migration advisory-lock acquisition is bounded and fails fast, Requirement: save accepts and joins a caller-supplied transaction handle (+33 more)
 
 ## Knowledge Gaps
-- **57 isolated node(s):** `RFC-8949`, `RFC-8949`, `RFC-8949`, `@stryker-mutator/core`, `@stryker-mutator/vitest-runner` (+52 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 4131 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **34 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **57 isolated node(s):** `RFC-3339`, `RFC-7693`, `RFC-7693`, `@stryker-mutator/core`, `@stryker-mutator/vitest-runner` (+52 more)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 4178 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **36 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `vitest` connect `vitest` to `startUmbraDB`, `process-backends.ts`, `declaration.ts`, `column-rules.ts`, `migrate.ts`, `process-build.ts`, `runner/process.ts`, `ledger/types.ts`, `api.ts`, `adapter-fixtures.ts`, `version-checks.ts`, `ref_node_crypto`, `backup/restore.ts`, `config/history.ts`, `NodeClient`, `tape/index.ts`, `node-fields-harness.ts`, `module-api.ts`, `ReadHandle`, `ref_node_fs`, `channel-queue.test.ts`, `loop.test.ts`, `core-transport.ts`, `loop.ts`, `ledger-tapes.ts`, `.from`, `private/lockstep-wait.test.ts`, `ref_node_url`, `chain-process.test.ts`, `client.test.ts`, `durability-probe.test.ts`, `validate.ts`, `builds.ts`, `record-and-replay.test.ts`, `UmbraError`, `cbor.ts`, `messages.ts`, `LedgerPackage`, `refused-configuration.test.ts`, `api-server.test.ts`, `graph.ts`, `db/errors.ts`, `resolve.ts`, `NodeBlockSource`, `cli/command.ts`, `contract-modules.test.ts`, `core-chain.test.ts`, `browser.test.ts`, `connectWebSocket`, `binding.test.ts`, `core-ledger-state.ts`, `pause-fixtures.ts`, `chain-placement.test.ts`, `loop-stop-harness.ts`, `backup/backup.ts`, `redact.ts`, `validation.ts`, `ledger-tasks-checks.ts`, `sweep-tapes.ts`, `process-harness.ts`, `transform-checks.ts`, `core-settings.ts`, `chain-events-decode.test.ts`, `paused-harness.ts`, `cold-boot-recovery.integration.test.ts`, `zero-timeouts-checks.ts`, `retirement.test.ts`, `restore-private.ts`, `node.test.ts`, `core-ledger-state/sql.ts`, `read-confinement-checks.ts`, `real-tapes.ts`, `file-mode.test.ts`, `core-block-commit.test.ts`, `resolver-boundary.ts`, `transaction-history-storage.property.test.ts`, `release-version.ts`, `core.ts`, `browser/build.ts`, `postgres/transaction-history-storage.ts`, `package.json`, `config-check-database.test.ts`, `containers.test.ts`, `signal-ignored-fixtures.ts`, `checks.test.ts`, `declarations.test.ts`, `read-gate.ts`, `test/postgres/setup.ts`, `order.property.test.ts`, `pg-tx-history-adapter.ts`, `ledger-sweep.test.ts`, `documents.ts`, `pglite-lock.ts`, `node-bridge.ts`, `check-required-tests.ts`, `legacy-excluded.test.ts`, `threat-model.test.ts`, `surface.test.ts`, `code-registry.ts`, `block-fetch-decode.test.ts`, `library-documents.test.ts`, `configuration-refusal.test.ts`, `key-handling-checks.ts`, `boundary.test.ts`, `excluded-not-exported.test.ts`, `read-height.property.test.ts`, `LoopPauses`, `ws-mutual-tls.test.ts`, `statementsOf`, `mutation-per-adapter.mjs`, `Heartbeat`, `component-table.test.ts`, `twox.ts`, `no-indexer-or-wallet-sdk.test.ts`, `worker-threads.test.ts`, `history.property.test.ts`, `ledger/plain-data.ts`, `postgres-image.test.ts`, `host-signal.ts`, `vendored-ledger-files.test.ts`?**
-  _High betweenness centrality (0.227) - this node is a cross-community bridge._
+- **Why does `vitest` connect `vitest` to `builds.ts`, `process-backends.ts`, `migrate.ts`, `range.ts`, `UmbraError`, `tape/index.ts`, `client.test.ts`, `core-ledger-state.ts`, `opt-out.test.ts`, `core-block-parsed.ts`, `validation.ts`, `admin-harness.ts`, `host.ts`, `backup/restore.ts`, `fetch-fixtures.ts`, `core-block-commit.test.ts`, `adapter-fixtures.ts`, `ModuleDeclaration`, `loop.test.ts`, `config/history.ts`, `NodeClient`, `backup-fixtures.ts`, `process-build.ts`, `declaration.ts`, `contract-modules.test.ts`, `ref_node_path`, `ledger/types.ts`, `devnet-upgrade.test.ts`, `NodeBlockSource`, `adapter.ts`, `.read`, `runner/process.ts`, `resolve.ts`, `pause-fixtures.ts`, `api-server.test.ts`, `contract-data-checks.ts`, `mounted-admin.test.ts`, `transport-faults.test.ts`, `api-session.test.ts`, `LedgerPackage`, `process-admin.ts`, `cli/command.ts`, `core-transport.ts`, `in-memory-source.ts`, `private-transport.ts`, `startProcess`, `cold-boot-recovery.integration.test.ts`, `backup/backup.ts`, `interfaces/transaction-history-storage.ts`, `private/lockstep-wait.test.ts`, `slow-block-harness.ts`, `column-rules.test.ts`, `start-umbradb.ts`, `src/db/postgres.ts`, `boundary.test.ts`, `channels.ts`, `writer-lock-checks.ts`, `chain-process.test.ts`, `channel-queue.test.ts`, `node-bridge.ts`, `retirement.test.ts`, `mapping.ts`, `openPostgres`, `file-mode.test.ts`, `refused-configuration.test.ts`, `startup-stop-harness.ts`, `messages.ts`, `pglite-lock.ts`, `node-fields-harness.ts`, `config/plain-data.ts`, `containers.test.ts`, `resolver-boundary.ts`, `restore-private.ts`, `recovery.test.ts`, `cbor.property.test.ts`, `test/postgres/setup.ts`, `listening.test.ts`, `signal-backup.test.ts`, `browser.test.ts`, `release-version.ts`, `redact.ts`, `browser/build.ts`, `block-fetch-decode.test.ts`, `checks.test.ts`, `text.test.ts`, `version-checks.ts`, `code-registry.ts`, `LoopPauses`, `package.json`, `halts.test.ts`, `documents.ts`, `crash.test.ts`, `read-gate.ts`, `sigterm.test.ts`, `height-versioned.property.test.ts`, `example-checks.ts`, `check-required-tests.ts`, `legacy-excluded.test.ts`, `threat-model.test.ts`, `configuration-refusal.test.ts`, `surface.test.ts`, `ledger-table-config.test.ts`, `start-umbradb.test.ts`, `demo-handlers.test.ts`, `harness.ts`, `library-documents.test.ts`, `transaction-history-storage.property.test.ts`, `excluded-not-exported.test.ts`, `postgres-tls-server.ts`, `network.test.ts`, `package-startup-checks.ts`, `read-height.property.test.ts`, `ws-mutual-tls.test.ts`, `validation.test.ts`, `mutation-per-adapter.mjs`, `core-block-fetch.test.ts`, `networks.test.ts`, `upgrade-boundary.test.ts`, `twox.ts`, `no-indexer-or-wallet-sdk.test.ts`, `worker-threads.test.ts`, `facade-merge-loader.ts`, `ledger/plain-data.ts`, `worker-output.test.ts`, `renamed-setting.test.ts`?**
+  _High betweenness centrality (0.241) - this node is a cross-community bridge._
 - **Are the 22 inferred relationships involving `UmbraError` (e.g. with `Engineering rules` and `Changed since `v0.10.0-rc.1`: UmbraDB as a library (`start-umbradb`)`) actually correct?**
   _`UmbraError` has 22 INFERRED edges - model-reasoned connections that need verification._
-- **What connects `RFC-8949`, `RFC-8949`, `RFC-8949` to the rest of the system?**
+- **What connects `RFC-3339`, `RFC-7693`, `RFC-7693` to the rest of the system?**
   _57 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `startUmbraDB` be split into smaller, more focused modules?**
-  _Cohesion score 0.015926356242738405 - nodes in this community are weakly interconnected._
-- **Why does `UmbraError` connect `UmbraError` to `startUmbraDB`, `pglite-lock.ts`, `declaration.ts`, `column-rules.ts`, `migrate.ts`, `process-build.ts`, `runner/process.ts`, `ledger/types.ts`, `api.ts`, `process-backends.ts`, `version-checks.ts`, `ref_node_crypto`, `backup/restore.ts`, `config/history.ts`, `NodeClient`, `options.ts`, `node-fields-harness.ts`, `module-api.ts`, `ReadHandle`, `ref_node_fs`, `channel-queue.test.ts`, `loop.test.ts`, `core-transport.ts`, `loop.ts`, `tape/index.ts`, `configuration-refusal.test.ts`, `private/lockstep-wait.test.ts`, `chain-process.test.ts`, `client.test.ts`, `backupAtStop`, `validate.ts`, `durability-probe.test.ts`, `record-and-replay.test.ts`, `builds.ts`, `config/plain-data.ts`, `cbor.ts`, `messages.ts`, `FinalizedLoop`, `refused-configuration.test.ts`, `log`, `api-server.test.ts`, `range.ts`, `Process`, `graph.ts`, `db/errors.ts`, `vitest`, `resolve.ts`, `NodeBlockSource`, `contract-modules.test.ts`, `core-chain.test.ts`, `statementsOf`, `config-check.ts`, `src/config/load.ts`, `checkParent`, `binding.test.ts`, `core-ledger-state.ts`, `pause-fixtures.ts`, `chain-placement.test.ts`, `backup/backup.ts`, `redact.ts`, `validation.ts`, `ledger-tasks-checks.ts`, `browser/src/config/load.ts`, `process-harness.ts`, `transform-checks.ts`, `core-settings.ts`, `zero-timeouts-checks.ts`, `restore-private.ts`, `core-block-commit.test.ts`, `entries.ts`, `sha256`, `checks.test.ts`, `declarations.test.ts`?**
-  _High betweenness centrality (0.081) - this node is a cross-community bridge._
+- **Should `builds.ts` be split into smaller, more focused modules?**
+  _Cohesion score 0.023228915662650604 - nodes in this community are weakly interconnected._
+- **Why does `UmbraError` connect `UmbraError` to `builds.ts`, `process-backends.ts`, `migrate.ts`, `range.ts`, `tape/index.ts`, `client.test.ts`, `core-ledger-state.ts`, `opt-out.test.ts`, `validation.ts`, `admin-harness.ts`, `host.ts`, `backup/restore.ts`, `fetch-fixtures.ts`, `core-block-commit.test.ts`, `ModuleDeclaration`, `loop.test.ts`, `config/history.ts`, `NodeClient`, `backup-fixtures.ts`, `process-build.ts`, `declaration.ts`, `contract-modules.test.ts`, `ledger/types.ts`, `Process`, `NodeBlockSource`, `.read`, `runner/process.ts`, `resolve.ts`, `config-check.ts`, `pause-fixtures.ts`, `api-server.test.ts`, `contract-data-checks.ts`, `vitest`, `mounted-admin.test.ts`, `startUmbraDB`, `transport-faults.test.ts`, `FinalizedLoop`, `process-admin.ts`, `core-transport.ts`, `refused`, `in-memory-source.ts`, `private-transport.ts`, `startProcess`, `backup/backup.ts`, `private/lockstep-wait.test.ts`, `slow-block-harness.ts`, `start-umbradb.ts`, `src/db/postgres.ts`, `writer-lock-checks.ts`, `chain-process.test.ts`, `channel-queue.test.ts`, `graph.ts`, `version`, `cbor.ts`, `mapping.ts`, `InMemoryBlockSource`, `openPostgres`, `refused-configuration.test.ts`, `pglite-lock.ts`, `validate.ts`, `config/plain-data.ts`, `restore-private.ts`, `signal-backup.test.ts`, `checks.test.ts`, `text.test.ts`, `version-checks.ts`, `halts.test.ts`, `configuration-refusal.test.ts`, `ledger-table-config.test.ts`, `postgres-tls-server.ts`, `checkShape`, `validation.test.ts`, `Session`, `upgrade-boundary.test.ts`, `browser/src/config/load.ts`, `RuntimeMetadata`, `ApiRoutes`, `sha256`, `renamed-setting.test.ts`, `selectLedgerVersion`?**
+  _High betweenness centrality (0.058) - this node is a cross-community bridge._
 - **Are the 6 inferred relationships involving `ModuleDeclaration` (e.g. with `12. Exported surface and command (LS-1, LS-6)` and `1. Source layout`) actually correct?**
   _`ModuleDeclaration` has 6 INFERRED edges - model-reasoned connections that need verification._
 - **Should `process-backends.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.023114763262339987 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.028444850743644737 - nodes in this community are weakly interconnected._
