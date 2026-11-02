@@ -814,7 +814,8 @@ export interface ProcessHandle {
   /**
    * Pauses the finalized loop between heights. At its next point between two heights (no transaction open, every read
    * of the previous height ended; at once while it waits for the head), it stops and starts nothing (no head read, no
-   * point, no height) until {@link resume}. Reads go on meanwhile: the module API, the admin endpoints, a
+   * point, no height) until {@link resume}. A wait for the head already running goes on, so on a private process it
+   * can still raise the reported head. Reads go on meanwhile: the module API, the admin endpoints, a
    * {@link backup}. [BK-1, Q152 B]
    *
    * Resolves once the loop is paused, once processing has ended (nothing processes then), or once `resume()` came
