@@ -486,3 +486,22 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   from each test: `e725b72`, `c18aabb`, `3a22d31`, `09a5b82`, `11a6147`, `a075ec9`. *Follow-up:* questions Q-21 (L3's
   "either order") and Q-11 (L37 on PGlite, a way without a product seam added) for the owner; issue 00067 fixed beside
   (`a469e20`).
+- **R4 — Three defects introduced by stage 4's own fixes, and a fix that did not reach every route, found by the
+  targeted fix check** (`plan-task-runner / claude-opus-5-5 / P10.4c`; the fixes from P10.4a, the same role and model;
+  found by Codex, gpt-6-astra, the fix check on `26f8048`). C-F3's fix copied an array option with `slice`, which keeps
+  the host's species, then called `map` on the copy: an `Array` subclass whose `map` getter throws made `startUmbraDB`
+  throw (N1, `fc9e3e0`). C-F4's fix put a `bufferedAmount` check before every send, and the property was read before the
+  guard that held only its call: a getter that throws escaped the endpoint's send, its ping and the core's answer to a
+  hello (N2, `c2b782b`). C-F2's fix redacted every string of a refused start's details and its log lines whole: a
+  password equal to `load-failed` replaced the reason, a rule and the log's codes, and `/status` dropped the reason
+  (N3, `7b27e48`). And C-F2's fix knew the secrets of plain data only: data that was not plain, or a `{ file }` refused at
+  its plain-data check, still showed a credential the host's text quoted. *Second story:* each fix was written against
+  its finding's counterexample and the paths beside it, and each was checked by tests that varied the input the finding
+  named (getters and proxies, the amount's value, the secret's place); none varied what the fix itself added — a
+  host's own array methods, a throwing read of the member the new check reads, a secret equal to the words the new
+  redaction passes over — because the fixer read its new code as safe plumbing, not as a new boundary with the host. A
+  reviewer that read the fix diff as new attack surface found all three in one pass. The fixes (`3ec84de`, `2ae0985`,
+  `e13b9df`, `63207b9`) each add the test that varies what the fix added, seen failing first and with the fault put
+  back. *Follow-up:* the second targeted fix check (AGENTS.md "Bounded review"), then the owner; Q-20 (the `cause`
+  chains, with the fix check's evidence) and Q-22 (a configuration file whose own import throws) for the owner; issues
+  00068 and 00069 filed beside, skipped.
