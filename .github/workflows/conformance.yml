@@ -70,6 +70,12 @@ jobs:
         #   - test/integration/chain-archive-replay-decode.integration.test.ts (needs a built
         #     sibling midnight-wallet checkout + a captured indexer SQLite DB, absent in CI).
         # A green CI run therefore says NOTHING about those suites beyond clean collection.
+        #
+        # The gate's deadline (`UMBRADB_CONFORMANCE_DEADLINE_MS`, default 60 minutes; it catches a hung worker) is 105
+        # minutes here, under the job's 120: on a hosted runner the suite (387 files, about 6,200 tests) takes about 75
+        # minutes. Splitting the suite across jobs is docs/issues/00077.
+        env:
+          UMBRADB_CONFORMANCE_DEADLINE_MS: "6300000"
         run: npm run test:conformance
 
   mutation:
