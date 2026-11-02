@@ -319,6 +319,15 @@ before the review.
       the tree at `5a84047` (the code of `63207b9`; 44 min under a load of about 21): 382 files, 6,223 tests — §0's 20
       and A12, and 11 load-only cases of issue 00064 (each file passing alone right after), 6,135 passed, 56 skipped.
       Its own targeted fix check next.
+      **Issue 00068 (P10.4d, brought into this change's scope: the two readers are its own code, and the unhandled
+      rejection breaks G6):** fixed test-first at `7a10576..dc16a06`, each test seen failing on the tree before and again
+      with the fix put back: the private side's carrier reads a channel's members and a `connect()` rejection inside a
+      guard — a value whose members cannot be read is no channel (failed, ended 1006, connected again), nothing
+      unhandled (`7a10576`; L40, L41, LM-2); `api.connect` reads a channel's `bufferedAmount` inside the guard, one that
+      throws ending the connection after the module's emit, an absent one no limit (`9bf97d6`; L68, LM-11; the approved
+      test that read a throwing one as no limit rewritten); and, found by the search of the change's channel code,
+      `messagePortChannel` reads a port's event data inside a guard, one that cannot be read being no text (`dc16a06`;
+      L33). Issue 00070 filed beside, skipped. P10.4c's and P10.4d's targeted fix check next.
 
 ## 11. Close-out
 
