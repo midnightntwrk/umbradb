@@ -552,3 +552,14 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   plus a test of the old staging's `parent-mismatch`); issue 00071 filed beside (a module can change the bytes of the
   block's hash the core commits). A fix that narrows what a check accepts is checked by the full suite against the last
   baseline before it is pushed, and its search for affected tests covers values the tests build, not only literals.
+- **R8 — The suppression of a secret-scan false positive quoted the value it suppressed, and was checked before it
+  was committed** (`orchestrator / claude-opus-5-5 / start-umbradb P11`; found by CI's `deps` job on `cccdb2e`,
+  2026-11-02). The supply-chain gate's full-history gitleaks scan flagged the WebSocket standard's example key in two
+  test helpers (a nonce, not a secret); `cccdb2e` suppressed both by exact fingerprint in `.gitleaksignore`, but its
+  comment quoted the header with the key, so the comment itself became a new `generic-api-key` finding. The local scan
+  that "verified" the fix ran before the commit, and `gitleaks detect` in git mode reads committed history only, so it
+  could not see the new line; CI scans the pull request's merge commit. *Second story:* the check was run at the moment
+  the file was edited, not on what would be pushed. The fix (`165c55f`) drops the quoted key from the comment and pins
+  the earlier comment's line by fingerprint (the commit is pushed, so the history keeps it); verified after committing,
+  on all refs and on a merge commit of the branch into the PR's base built the way CI builds it: no leaks. A scan that
+  checks a suppression runs on the committed tree, merged as CI merges it.
