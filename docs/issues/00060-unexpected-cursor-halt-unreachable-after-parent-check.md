@@ -1,6 +1,16 @@
 # 00060 — The `unexpected-cursor` halt test now halts `parent-mismatch` first
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-11-02 in `7d7bd0b` (`start-umbradb` P11.1). The halt is not unreachable: on
+  PostgreSQL another writer (a session of the server outside UmbraDB, which the writer lock does not keep out) that
+  adds a row above h while h is processed leaves h's parent stored and the cursor row not h's, and the loop's check
+  halts. The test now stages that on PostgreSQL (a module holds height 3 in `on-compute`; the test's own connection
+  adds block 7's row) and keeps asserting `{ code: "unexpected-cursor", height: 3n, module: null, point: null }`, with
+  the halt's log line and the heights kept. On PGlite no other writer exists and, with the real backbone, a block of
+  another height never reaches the check (`parent-mismatch` above the cursor + 1, the stored block's primary key or
+  S's anchor at or below it); the test reaches it there through a test `core-block-commit` without its parent check
+  (`testBuild`'s `backbone` option, as `loop.test.ts` does). A new test asserts the old staging's earlier halt,
+  `parent-mismatch` at 3 in `core-block-commit`'s `on-db-write`. Found beside: issue 00071 (a module can change the
+  block's hash bytes, the one path to this halt on PGlite without a test part).
 - **Area:** test
 - **Severity:** high — 2 tests of `test/runner/halts.test.ts` fail on PR #16's head (`c5cdb86`), one per backend; the
   halt they meet is correct, earlier and more specific.

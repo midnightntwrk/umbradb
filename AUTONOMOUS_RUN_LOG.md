@@ -534,3 +534,21 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   regression varied only the field the finding named. *Follow-up:* the bounded review's automated rounds are spent
   (one full round, a targeted fix check, and the edit's own check); M1 and the residual go to the owner as Q-23
   (fix by value and context, accept with a reason, or revisit the redaction's design), 2026-11-02.
+- **R7 — Two regressions our own pushed fixes introduced, which the fixes' checks did not catch before the push**
+  (introduced by the `core-arch` issue-fix batch of 2026-10-29, `8f55772` and `40b30d3`, pushed to PR #16; the model id
+  is not recorded in those commits; found by the `start-umbradb` P0 baseline, the orchestrator `claude-opus-5-5`; fixed
+  by `plan-task-runner / claude-opus-5-5 / P11.1`). The instance id rule (issue 00051, `8f55772`) refused ids with a
+  space, and A115's nine fault cases greet with ids built from their labels (`fault-${name}`, `after-${name}`), so 18
+  transport tests waited 30 s for a `hello-ack` that never came (issue 00059). The parent check above a missing height
+  (issue 00028, `40b30d3`) refused block 4 at height 3 inside the block transaction, and the halt test that staged
+  `unexpected-cursor` that way met `parent-mismatch` first, 2 tests (issue 00060). *Second story:* each fix was checked
+  against the tests it knew to touch: `8f55772`'s message says "every instance id of the tests and fixtures already
+  matched it", from a search of the ids written as literals, not of ids a test builds at run time; `40b30d3` updated the
+  two tests it saw stage a block above a gap (the loop's and A86's control) and lists them, but not the process-level
+  halt test that staged the same thing. No full-suite run of that batch, compared with a baseline, is recorded before
+  the push; the full run would have shown the 20 failures (P0 saw them at once, deterministic, on both backends).
+  *Follow-up:* fixed in P11.1 (`f35dbbc`: the ids derived from the labels; `7d7bd0b`: the halt test restaged on a real case on PostgreSQL —
+  another writer's row above the height — and on PGlite through a test `core-block-commit` without its parent check,
+  plus a test of the old staging's `parent-mismatch`); issue 00071 filed beside (a module can change the bytes of the
+  block's hash the core commits). A fix that narrows what a check accepts is checked by the full suite against the last
+  baseline before it is pushed, and its search for affected tests covers values the tests build, not only literals.

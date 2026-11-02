@@ -1,6 +1,11 @@
 # 00059 — A115's fault tests send instance ids the 00051 rule refuses, so 18 transport tests fail
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-11-02 in `f35dbbc` (`start-umbradb` P11.1): each fault case greets as
+  `fault-${idOf(name)}` and `after-${idOf(name)}`, where `idOf` replaces every character an instance id does not allow
+  with `-` (18 ids, all distinct, all matching `INSTANCE_ID`); the assertions are unchanged, and each case again reaches
+  and checks the fault it names. Before, on PostgreSQL 18 and PGlite: 18 of the file's 39 tests failed; after: 39
+  passed. A search of the tests (every `hello(…)`, `greeted(…)`, `instance:`, `instanceId:`, `lockstepInstances:` and
+  the constants they name) found no other id the rule refuses besides the deliberate negative cases.
 - **Area:** test
 - **Severity:** high — 18 tests of `test/private/transport.test.ts` fail on PR #16's head (`c5cdb86`) on both backends,
   so the conformance run is red; the transport itself behaves as specified.
