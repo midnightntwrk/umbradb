@@ -38,6 +38,9 @@
  *   send — a message of the link, a ping, a pong: more than its limit ({@link MAX_BUFFERED_BYTES}) waiting ends the
  *   channel 1008 `too-slow`, its owner told once; the `close` that ends it is sent unchecked, and nothing after it, so
  *   the check cannot come back to itself;
+ * - every member of the carrier it reads or calls — `send`, `onMessage`, `onClose`, `bufferedAmount` (a getter of it
+ *   included), `close`, `terminate`, the disposers — is read inside its own guard: one that throws has ended the
+ *   carrier (1006, nothing more sent), never an exception out of a send, the interval or a listener;
  * - its own close or terminate sends the peer a `close` envelope and ends the channel at once — its listeners disposed,
  *   its owner told —, whatever the carrier's own close does. [LM-6, L42]
  */
@@ -317,16 +320,22 @@ export class ChannelEndpoint {
     this.#post(messageEnvelope(text));
   }
 
-  /** The bytes the channel has not delivered, when it tells them; null otherwise. */
+  /**
+   * The bytes the channel has not delivered, when it tells them; null otherwise. Reading them is the carrier's, getter
+   * and call alike: one that throws has ended the carrier, as a `send` that throws — the channel ends (1006, its
+   * listeners and interval disposed, its owner told) and null is answered. [LM-6, L35, LM-10]
+   */
   bufferedAmount(): number | null {
-    const { bufferedAmount } = this.#channel;
-    if (bufferedAmount === undefined) return null;
+    let found: unknown;
     try {
-      const found = bufferedAmount.call(this.#channel);
-      return typeof found === "number" && Number.isFinite(found) ? found : null;
+      const { bufferedAmount } = this.#channel;
+      if (typeof bufferedAmount !== "function") return null;
+      found = bufferedAmount.call(this.#channel);
     } catch {
+      this.#end(CLOSE_ABNORMAL, "", () => this.#channel.close());
       return null;
     }
+    return typeof found === "number" && Number.isFinite(found) ? found : null;
   }
 
   /** Ends the channel with `code` and `reason`: the peer is told, then the carrier closed. [LM-6, L42] */
@@ -396,6 +405,8 @@ export class ChannelEndpoint {
     if (check === "checked") {
       if (this.#backlogged) return;
       const held = this.bufferedAmount();
+      // A carrier whose amount could not be read has ended: nothing is sent on it. [LM-6]
+      if (this.#ended) return;
       if (held !== null && held > this.#maxBufferedBytes) {
         this.#backlogged = true;
         this.#events.backlogged(CLOSE_PROTOCOL, "too-slow");

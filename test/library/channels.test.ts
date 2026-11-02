@@ -8,6 +8,7 @@ import {
   type EndpointEvents,
   exceedsUtf8,
   messagePortChannel,
+  type PrivateLinkChannel,
   readEnvelope,
 } from "../../src/library/channels.js";
 import { MAX_BUFFERED_BYTES, MAX_MESSAGE_BYTES, PING_INTERVAL_MS } from "../../src/private/core-transport.js";
@@ -310,22 +311,82 @@ describe("an endpoint (LM-6)", () => {
     expect(seen.received).toEqual([{ ok: false, fault: "not-text" }]);
   });
 
-  it("tells the carrier's bufferedAmount, null without one or when it throws or is no number", () => {
+  it("tells the carrier's bufferedAmount, null without one or when it is no number; one that throws has ended the carrier", () => {
     let amount = 7;
     const [told] = channelPair({ bufferedAmount: () => amount });
     const endpoint = new ChannelEndpoint(told, recorder().events);
     expect(endpoint.bufferedAmount()).toBe(7);
     amount = Number.NaN;
     expect(endpoint.bufferedAmount()).toBeNull();
+    expect(endpoint.open).toBe(true);
+    // A carrier whose amount cannot be read has failed, as one whose send throws: null, and the channel ended.
     const [throwing] = channelPair({
       bufferedAmount: () => {
         throw new Error("x");
       },
     });
-    expect(new ChannelEndpoint(throwing, recorder().events).bufferedAmount()).toBeNull();
+    const failed = recorder();
+    const ended = new ChannelEndpoint(throwing, failed.events);
+    expect(ended.bufferedAmount()).toBeNull();
+    expect([ended.open, failed.seen.ended]).toEqual([false, [[1006, ""]]]);
     const [none] = channelPair();
     expect(new ChannelEndpoint(none, recorder().events).bufferedAmount()).toBeNull();
   });
+
+  /**
+   * A carrier over an end of a test-owned channel whose `bufferedAmount` cannot be read: a getter (`getter`) or the
+   * method itself (`method`) throws; `reads` counts the attempts.
+   */
+  function unreadableAmount(kind: "getter" | "method") {
+    const [ours, theirs] = channelPair();
+    const state = { reads: 0 };
+    const carrier: PrivateLinkChannel = {
+      send: (message) => ours.send(message),
+      onMessage: (listener) => ours.onMessage(listener),
+      onClose: (listener) => ours.onClose(listener),
+      close: () => ours.close(),
+    };
+    const fail = (): never => {
+      state.reads += 1;
+      throw new Error("host bufferedAmount");
+    };
+    Object.defineProperty(carrier, "bufferedAmount", kind === "getter" ? { get: fail } : { value: fail });
+    return { carrier, ours, theirs, state };
+  }
+
+  it.each(["getter", "method"] as const)(
+    "a carrier whose bufferedAmount %s throws has ended: nothing thrown out of a send or the ping, the channel ended once (1006), its interval and listeners disposed, nothing sent",
+    async (kind) => {
+      for (const via of ["send", "ping"] as const) {
+        const { carrier, ours, theirs, state } = unreadableAmount(kind);
+        const clock = controlledTimers();
+        const { seen, events } = recorder();
+        const endpoint = new ChannelEndpoint(carrier, events, { timers: clock.timers });
+        const peer = rawPeer(theirs);
+        await settle();
+        expect([via, clock.active, ours.listeners]).toEqual([via, 1, { message: 1, close: 1 }]);
+        expect(() => (via === "send" ? endpoint.send(JSON.stringify({ v: 1, type: "report" })) : clock.advance(PING_INTERVAL_MS))).not.toThrow();
+        expect([via, endpoint.open, seen.ended, seen.backlogged, clock.active, ours.listeners, ours.closes]).toEqual([
+          via,
+          false,
+          [[1006, ""]],
+          [],
+          0,
+          { message: 0, close: 0 },
+          1,
+        ]);
+        // Nothing after the end: a send, the next intervals and a close neither read the carrier nor end it again.
+        expect(() => {
+          endpoint.send(JSON.stringify({ v: 1, type: "report" }));
+          clock.advance(PING_INTERVAL_MS * 2);
+          endpoint.close(1001, "stopping");
+        }).not.toThrow();
+        expect(await peer.ended).toEqual({ carrier: true });
+        await settle();
+        expect([via, peer.received.length, peer.pings, seen.ended.length, state.reads, ours.closes]).toEqual([via, 0, 0, 1, 1, 1]);
+      }
+    },
+  );
 
   /**
    * What the peer of an endpoint saw when the endpoint had to send `kind` with `held` bytes undelivered and its limit

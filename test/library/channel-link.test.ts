@@ -243,6 +243,44 @@ describe.each(PRIVATE_BACKENDS)("the channel link's own rules on $name (LM-6)", 
     }
   }, 120_000);
 
+  it("a channel whose bufferedAmount getter throws is a carrier that ended: the core's answer to its hello throws nothing, the channel ends, its id is free, the core follows on", async () => {
+    const core = channelCore(await backend.database("public"), { head: 2n });
+    try {
+      await core.handle.started;
+      const [coreEnd, peerEnd] = channelPair();
+      const unreadable = Object.defineProperty(
+        {
+          send: (message: string) => coreEnd.send(message),
+          onMessage: (listener: (message: string) => void) => coreEnd.onMessage(listener),
+          onClose: (listener: () => void) => coreEnd.onClose(listener),
+          close: () => coreEnd.close(),
+        },
+        "bufferedAmount",
+        {
+          get: () => {
+            throw new Error("host bufferedAmount getter");
+          },
+        },
+      );
+      core.handle.privateLink.accept(unreadable);
+      const peer = rawPeer(peerEnd);
+      peer.send(peerHello("unreadable-amount"));
+      // The carrier failed at the core's first send, its hello-ack: no close envelope, the carrier closed. [LM-6, LM-10]
+      expect(await peer.ended).toEqual({ carrier: true });
+      expect([peer.received, coreEnd.closes, coreEnd.listeners]).toEqual([[], 1, { message: 0, close: 0 }]);
+      // Its instance id is free: a reconnect with it is answered, refused by nothing.
+      const [healthyEnd, healthyPeerEnd] = channelPair();
+      core.handle.privateLink.accept(healthyEnd);
+      const again = rawPeer(healthyPeerEnd);
+      again.send(peerHello("unreadable-amount"));
+      expect((await again.next("hello-ack")).refused).toBeNull();
+      await cursorReaches(core.handle, 2n);
+      expect(core.handle.status().state).toBe("following");
+    } finally {
+      await core.handle.stop();
+    }
+  }, 120_000);
+
   it("L36: a message above MAX_MESSAGE_BYTES in UTF-8 bytes closes the channel too-large (1009)", async () => {
     const core = channelCore(await backend.database("public"), { head: 2n });
     try {
