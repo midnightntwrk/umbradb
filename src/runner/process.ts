@@ -1185,6 +1185,11 @@ class Process implements ProcessHandle {
   /** A public process's process transport where its plan listens (`../private/core-socket.ts`). [PP-4] */
   #transport: CoreTransport | undefined;
   /**
+   * The transport's address from the moment it listens, before its start returns and before the line that logs it:
+   * {@link listening} shows it as it binds. [L21]
+   */
+  #transportBound: { readonly host: string; readonly port: number } | undefined;
+  /**
    * A public process's link over channels, from the start on when its network request asks for it: the queue, then
    * the link once started (`../private/core-channels.ts`). [LM-6]
    */
@@ -1332,7 +1337,7 @@ class Process implements ProcessHandle {
     return Object.freeze({
       api: this.#apiClosed ? null : bound(this.#api?.server),
       admin: bound(this.#admin.listening()),
-      privateLink: this.#transportClosed ? null : bound(this.#transport),
+      privateLink: this.#transportClosed ? null : bound(this.#transport ?? this.#transportBound),
     });
   }
 
@@ -1364,10 +1369,8 @@ class Process implements ProcessHandle {
    * channels, if any: its queue and its sessions. [PP-4, L21, LM-6]
    */
   async #closeTransport(): Promise<void> {
-    if (this.#transport !== undefined) {
-      this.#transportClosed = true;
-      await this.#transport.close();
-    }
+    if (this.#transport !== undefined || this.#transportBound !== undefined) this.#transportClosed = true;
+    await this.#transport?.close();
     await this.#channels?.close();
   }
 
@@ -2057,6 +2060,10 @@ class Process implements ProcessHandle {
           tls: settings.tls as TransportTls | undefined,
           ...(input.transportReads === undefined ? {} : { reads: input.transportReads }),
           ...sessions,
+          // Shown from the bind on, before the line that logs it. [L21]
+          listening: (address) => {
+            this.#transportBound = address;
+          },
         });
         this.#link = this.#transport;
       } else {

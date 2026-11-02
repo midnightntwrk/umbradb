@@ -30,8 +30,10 @@ import { cursorReaches, libraryData, rowsModule } from "./library-fixtures.js";
  *   `publicSide: true` / `privateSide: true` and the addresses and `tls` written in the configurations; in both the
  *   private process follows, in lockstep (the core waits at S for the instance it lists until it connects).
  * - **L21**: with `port: 0` on the module API, admin and the link, each bound address is in `status().listening` as it
- *   binds (admin's before the database opens, while `on-start-db` is held); after a class-B refusal admin's stays and
- *   answers, the link's (closed) is null, the module API's (never bound) null; after `closed`, all are null.
+ *   binds: admin's and the link's in the very call that logs their bind, admin's before the database opens (while
+ *   `on-start-db` is held), the link's before the module API's (while `on-start-api` is held), the module API's at
+ *   `started`'s first reaction; after a class-B refusal admin's stays and answers, the link's (closed) is null, the
+ *   module API's (never bound) null; after `closed`, all are null.
  * - **L22**: `/config` of a library process shows its revision's `listen` and `privateLink` as the plan's addresses as
  *   bound, absent where nothing listens or connects, and `network` naming each surface's mode; the command's keeps its
  *   `listen` as written and gains `network`. Each body validates against A66's schema.
@@ -232,19 +234,38 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let releaseApi!: () => void;
+    const apiGate = new Promise<void>((resolve) => {
+      releaseApi = resolve;
+    });
     let reached = false;
+    let reachedApi = false;
     const held = rowsModule("held", undefined, {
       points: {
         async "on-start-db"() {
           reached = true;
           await gate;
         },
+        async "on-start-api"() {
+          reachedApi = true;
+          await apiGate;
+        },
         async "on-db-write"(_p, b, w) {
           await w.execute("INSERT INTO held.rows (height) VALUES ($1)", [b.height]);
         },
       },
     });
-    const handle = libraryCore(db, 3n, {}, { modules: [held], network: everywhere });
+    // Admin and the link each log their address once bound: status().listening is read in that same line's call.
+    const bound: { readonly line: string; readonly listening: unknown }[] = [];
+    let handle: UmbraDBHandle | undefined;
+    const log = (line: string): void => {
+      if (line.startsWith("admin endpoints listening on ") || line.startsWith("transport listening on ")) {
+        bound.push({ line, listening: handle?.status().listening ?? null });
+      }
+    };
+    handle = libraryCore(db, 3n, {}, { modules: [held], network: everywhere, log });
+    // The module API's address as `started` resolves: its first reaction reads status().listening.
+    const atStarted = handle.started.then(() => (handle as UmbraDBHandle).status().listening);
     try {
       await until(() => reached, "the held on-start-db");
       // Admin listens once the configuration and the plan are validated, before the database's migrations end; the
@@ -255,8 +276,22 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
       expect(during.api).toBeNull();
       expect((await ask(adminOrigin(handle), "/health/live")).status).toBe(200);
       release();
+      // At on-start-api the link has bound and the module API not yet.
+      await until(() => reachedApi, "the held on-start-api");
+      const linked = handle.status().listening;
+      expect(linked.privateLink).toEqual({ host: "127.0.0.1", port: expect.any(Number) });
+      expect(linked.api).toBeNull();
+      releaseApi();
       await handle.started;
       const up = handle.status().listening;
+      expect(await atStarted).toEqual(up);
+      // Each address was there when its bind was logged, the line naming it.
+      expect(bound.map((one) => one.line)).toEqual([
+        `admin endpoints listening on 127.0.0.1:${up.admin?.port}`,
+        `transport listening on 127.0.0.1:${up.privateLink?.port}`,
+      ]);
+      expect(bound[0]?.listening).toEqual({ api: null, admin: up.admin, privateLink: null });
+      expect(bound[1]?.listening).toEqual({ api: null, admin: up.admin, privateLink: up.privateLink });
       for (const [surface, address] of Object.entries(up)) {
         expect(address, surface).toEqual({ host: "127.0.0.1", port: expect.any(Number) });
         expect(address?.port, surface).toBeGreaterThan(0);
@@ -278,6 +313,7 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
       for (const address of Object.values(up)) expect(await portFree(address?.port as number)).toBe(true);
     } finally {
       release();
+      releaseApi();
       await handle.stop();
     }
   }, 240_000);

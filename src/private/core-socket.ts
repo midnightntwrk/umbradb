@@ -41,6 +41,11 @@ export interface CoreTransportOptions extends CoreSessionOptions {
   readonly tls?: TransportTls | undefined;
   /** The negative controls' `https` options from `tls`; {@link mutualTlsOptions} unless given. */
   readonly serverTls?: (tls: TransportTls) => ServerOptions;
+  /**
+   * Told the address once the server listens, before the line that logs it, so that its owner shows the address from
+   * then on: a host reading where the link listens on that line finds it. [LM-3, LM-9, L21]
+   */
+  readonly listening?: (address: { readonly host: string; readonly port: number }) => void;
 }
 
 /** The core's running transport over WebSocket. */
@@ -149,6 +154,7 @@ export async function startCoreTransport(options: CoreTransportOptions): Promise
     });
   });
   const bound = server.address() as AddressInfo;
+  options.listening?.(Object.freeze({ host, port: bound.port }));
   options.log(`transport listening on ${host}:${bound.port}${options.tls === undefined ? "" : " (mutual TLS)"}`);
 
   let closing: Promise<void> | undefined;
