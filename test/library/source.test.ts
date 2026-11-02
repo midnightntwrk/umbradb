@@ -25,6 +25,10 @@ import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library
  *   `node` address sees none) while the process starts, processes the in-memory chain and stops, on PostgreSQL and
  *   PGlite. The controls: the same input with the in-memory chain given through the engine's test seam makes the node
  *   client; the node source on the same `node` connects to the server.
+ * - A74, as this change rewrites it (MD-7's exception): with an in-memory `source` the process item `node-client` is
+ *   not published and startup goes on — a module requiring it finds none in its items, and the chain is processed —,
+ *   while another required process item left unpublished is still refused `process-item-missing`, on PostgreSQL and
+ *   PGlite.
  */
 
 /** A hook member's stand-in of the subclass below: it notes that it ran, then fails the start. */
@@ -275,4 +279,76 @@ describe("L49: the in-memory chain without a node client", () => {
       await handle.stop();
     }
   }, 60_000);
+});
+
+/**
+ * MD-7's one exception, as A74 is rewritten by this change: with a host's in-memory chain the engine makes no node
+ * client, so `node-client` is never published and the seal does not refuse it; any other required process item left
+ * unpublished is refused as before. The module `asks` requires `node-client` beside `core-block-fetch`; `needs` also
+ * requires `client`, which its provider `silent` never publishes. [MD-7, A74 CI; LM-8]
+ */
+describe.each(PROCESS_BACKENDS)("A74: node-client with an in-memory source, MD-7's exception (LM-8), on $name", (backend: ProcessBackend) => {
+  beforeAll(async () => {
+    await backend.start();
+  }, 180_000);
+  afterAll(async () => {
+    await backend.stop();
+  }, 60_000);
+
+  it("node-client is not published and startup goes on: a module requiring it finds none, and the chain is processed", async () => {
+    const db = await backend.database();
+    const found: unknown[] = [];
+    const m = rowsModule("asks", undefined, {
+      requires: ["block-header", "node-client"],
+      points: {
+        async "on-start-api"(p) {
+          found.push(p.items.has("node-client"), p.items.get("node-client"));
+        },
+        async "on-db-write"(_p, b, w) {
+          await w.execute("INSERT INTO asks.rows (height) VALUES ($1)", [b.height]);
+        },
+      },
+    });
+    const handle = startUmbraDB({
+      config: { data: libraryData(db.setting, [m]) },
+      modules: [m],
+      source: new InMemoryBlockSource({ head: 3n }),
+    });
+    try {
+      await handle.started;
+      await cursorReaches(handle, 3n);
+      expect(found).toEqual([false, undefined]);
+      expect(handle.status().reason).toBeNull();
+    } finally {
+      await handle.stop();
+    }
+    await handle.closed;
+    const rows = await db.query("SELECT height FROM asks.rows ORDER BY height");
+    expect(rows.map((row) => String(row.height))).toEqual(["1", "2", "3"]);
+  }, 120_000);
+
+  it("the exception is node-client's alone: another required process item left unpublished is refused process-item-missing", async () => {
+    const db = await backend.database();
+    const silent = rowsModule("silent", undefined, {
+      provides: [{ name: "client", lifetimes: ["process"] }],
+      migrations: [],
+      points: {},
+    });
+    const needs = rowsModule("needs", undefined, { requires: ["block-header", "node-client", "client"] });
+    const handle = startUmbraDB({
+      config: { data: libraryData(db.setting, [silent, needs]) },
+      modules: [silent, needs],
+      source: new InMemoryBlockSource({ head: 3n }),
+    });
+    try {
+      await expect(handle.started).rejects.toMatchObject({
+        code: "process-item-missing",
+        details: { item: "client", modules: ["needs"], providers: ["silent"] },
+      });
+      expect(handle.status()).toMatchObject({ state: "refused", reason: { code: "process-item-missing" } });
+    } finally {
+      await handle.stop();
+    }
+    await handle.closed;
+  }, 120_000);
 });
