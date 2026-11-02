@@ -497,6 +497,16 @@ export class FinalizedLoop {
   }
 
   /**
+   * The height whose processing is open — from the loop's start on it to its `COMMIT`, or to its failure or stop —, or
+   * null outside one: waiting for the head, in `on-finalized`, after a commit, or at a run's re-delivery. The process's
+   * stop names it in its log line. [RN-13]
+   */
+  heightInProgress(): bigint | null {
+    const watch = this.#watch;
+    return watch?.window === "height" ? watch.height : null;
+  }
+
+  /**
    * The height's block transaction while it is open, from its request (its `BEGIN` waits for the writer) until it has
    * committed or rolled back: a promise that settles then and never rejects. Null while none is open. The process's
    * stop closes the node client at once when none is open, else once it settles (`./process.ts`). [RN-6, RN-13]

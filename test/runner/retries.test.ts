@@ -29,6 +29,14 @@ import { core, entryOf, loggingModule, settle, startProcess, testBuild } from ".
  */
 
 const HEAD = 5n;
+/**
+ * The stop's two lines (issue 00072) of a `stop()` while the loop waits at the head, which every case below that
+ * reaches the head logs last. [RN-13]
+ */
+const STOPPED_AT_HEAD = [
+  "stopping (stop()): no height in progress, and no new height starts",
+  `processing stopped (stop()): the last committed height is ${HEAD}, where a restart resumes`,
+];
 /** The back-off ceiling the retries run with here: 20 ms, so no test waits the back-off's seconds. [IN-10] */
 const CEILING = 20;
 
@@ -136,7 +144,8 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     } finally {
       await handle.stop();
     }
-    expect(started.lines).toHaveLength(4);
+    expect(started.lines).toHaveLength(6);
+    expect(started.lines.slice(4)).toEqual(STOPPED_AT_HEAD);
     expect(started.lines[0]).toMatch(retryLine("processing", "node-retrying", 1));
     expect(started.lines[1]).toMatch(retryLine("processing", "node-retrying", 2));
     expect(started.lines[2]).toMatch(retryLine("processing", "node-retrying", 1));
@@ -192,8 +201,9 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
       await handle.stop();
     }
     expect(seen.map((status) => status.conditions)).toEqual([[{ code: "node-retrying", attempts: 1, height: 3n }]]);
-    expect(started.lines).toHaveLength(1);
+    expect(started.lines).toHaveLength(3);
     expect(started.lines[0]).toMatch(retryLine("processing", "node-retrying", 1));
+    expect(started.lines.slice(1)).toEqual(STOPPED_AT_HEAD);
     const at = (height: number) => ["on-fetch", "on-parse", "on-compute", "on-db-write", "on-after-db-write"].map((p) => `w ${p}@${height}`);
     // 3 again from on-compute: not fetched or parsed again, and the cursor's on-after-db-write (2) not re-delivered.
     expect(log).toEqual([...at(1), ...at(2), "w on-fetch@3", "w on-parse@3", "w on-compute@3", ...at(3).slice(2), ...at(4), ...at(5)]);
@@ -300,8 +310,9 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     } finally {
       await again.handle.stop();
     }
-    expect(again.lines).toHaveLength(1);
+    expect(again.lines).toHaveLength(3);
     expect(again.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
+    expect(again.lines.slice(1)).toEqual(STOPPED_AT_HEAD);
   }, 180_000);
 
   it("a retryable failure of the height in progress when stop() was called is not retried: processing ends by the stop", async () => {
@@ -331,7 +342,11 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     await stopping;
     expect(await started.handle.ended).toEqual({ kind: "signal" });
     expect(started.handle.status()).toMatchObject({ state: "stopping", conditions: [], reason: null });
-    expect(started.lines).toEqual([]);
+    // No retry line: only the stop's own, which names the height it found in progress and ended. [RN-13]
+    expect(started.lines).toEqual([
+      "stopping (stop()): height 2 is in progress; it commits or stores nothing, and no new height starts",
+      "processing stopped (stop()): the last committed height is 1, where a restart resumes",
+    ]);
     expect(await cursorIn(db)).toBe(1);
   }, 180_000);
 
@@ -356,8 +371,9 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
       await handle.stop();
     }
     expect(seen.map((status) => status.conditions)).toEqual([[{ code: "database-retrying", attempts: 1, height: null }]]);
-    expect(started.lines).toHaveLength(1);
+    expect(started.lines).toHaveLength(3);
     expect(started.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
+    expect(started.lines.slice(1)).toEqual(STOPPED_AT_HEAD);
     expect(await cursorIn(db)).toBe(5);
   }, 180_000);
 
@@ -427,9 +443,10 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
         await handle.stop();
       }
       expect(seen.map((status) => status.conditions)).toEqual([[{ code: "database-retrying", attempts: 1, height: 3n }]]);
-      expect(started.lines).toHaveLength(1);
+      expect(started.lines).toHaveLength(3);
       expect(started.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
       expect(started.lines[0]).toContain("connection");
+      expect(started.lines.slice(1)).toEqual(STOPPED_AT_HEAD);
       expect(log).toEqual([
         "w on-db-write@1",
         "w on-after-db-write@1",
@@ -490,8 +507,9 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
       }
       expect(seen).toHaveLength(1);
       expect(seen[0]).toMatchObject({ state: "starting", conditions: [{ code: "database-retrying", attempts: 1, height: null }] });
-      expect(started.lines).toHaveLength(1);
+      expect(started.lines).toHaveLength(3);
       expect(started.lines[0]).toMatch(retryLine("startup", "database-retrying", 1));
+      expect(started.lines.slice(1)).toEqual(STOPPED_AT_HEAD);
       expect(await cursorIn(db)).toBe(5);
       // The rolled-back first on-start-db wrote nothing.
       expect(await db.query("SELECT height FROM setup.rows")).toEqual([]);
@@ -526,9 +544,10 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
       } finally {
         await started.handle.stop();
       }
-      expect(started.lines).toHaveLength(2);
+      expect(started.lines).toHaveLength(3);
       expect(started.lines[0]).toMatch(retryLine("processing", "database-retrying", 1));
       expect(started.lines[1]).toMatch(/^processing halted \(writer-lock-lost\): /);
+      expect(started.lines[2]).toBe("stopping (stop()): processing had already ended (halted)");
       expect(await cursorIn(db)).toBe(2);
     }, 180_000);
   }

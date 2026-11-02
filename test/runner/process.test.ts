@@ -782,6 +782,8 @@ describe("startProcess without a database", () => {
     expect(lines).toEqual([
       "database: pglite in memory",
       "startup refused: callback-error: the on-start-db callback of throwing failed: on-start-db throws a string",
+      // The stop's own line (issue 00072): startup had already ended. [RN-13]
+      "stopping (stop()): processing had already ended (refused)",
     ]);
   });
 

@@ -37,6 +37,11 @@
  * else starts, and the module API, the node client, the database and the admin listener close. A second signal is not
  * listened for: Node.js's default ends the command at once. [IN-12, AE-3, RN-13]
  *
+ * The process logs the stop, naming the signal: when it begins, with the height in progress
+ * (`stopping (signal: SIGTERM): height 412 is in progress; …`), and once processing has ended, with the last committed
+ * height, where a restart resumes (`processing stopped (signal: SIGTERM): the last committed height is 412, …`).
+ * [RN-13]
+ *
  * The command then resolves with how processing ended. `refused` or `failed` (a halt) is a failure (exit 1); anything
  * else (the stop itself, the core's stop height, an upgrade boundary) is not (exit 0).
  *
@@ -73,18 +78,22 @@ export interface SignalSource {
 
 /**
  * An abort signal that the first SIGTERM or SIGINT of `source` aborts, and `dispose`, which stops listening; after the
- * first, neither is listened for (Node.js's default then ends the process at a second one).
+ * first, neither is listened for (Node.js's default then ends the process at a second one). Its abort reason is an
+ * `AbortError` whose message is the signal's name, which the process's log lines of the stop name. [RN-13]
  */
 export function stopSignal(source: SignalSource): { readonly signal: AbortSignal; dispose(): void } {
   const controller = new AbortController();
+  const listeners = STOP_SIGNALS.map((name) => {
+    const stop = (): void => {
+      dispose();
+      controller.abort(new DOMException(name, "AbortError"));
+    };
+    return [name, stop] as const;
+  });
   const dispose = (): void => {
-    for (const name of STOP_SIGNALS) source.removeListener(name, stop);
+    for (const [name, stop] of listeners) source.removeListener(name, stop);
   };
-  const stop = (): void => {
-    dispose();
-    controller.abort();
-  };
-  for (const name of STOP_SIGNALS) source.once(name, stop);
+  for (const [name, stop] of listeners) source.once(name, stop);
   return Object.freeze({ signal: controller.signal, dispose });
 }
 

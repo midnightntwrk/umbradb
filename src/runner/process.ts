@@ -154,6 +154,14 @@
  * progress stores nothing and is processed again after a restart; if it had committed, its later points are delivered
  * again then. [RN-11, RN-13]
  *
+ * The stop is in the log, in two lines. When it begins: what asked for it — `stop()`, or `signal` with the abort
+ * reason's text, which for `umbradb run` is the signal's name — and what it lets finish: the height in progress,
+ * which commits or stores nothing, none, or startup (`stopping (signal: SIGTERM): height 412 is in progress; …`). Once
+ * processing (or startup) has ended by it: the last committed height, where a restart resumes, or that none committed
+ * and the height a restart starts at (`processing stopped (signal: SIGTERM): the last committed height is 412, where a
+ * restart resumes`). A stop after processing ended by itself (a refusal, a halt, the core's stop) logs the first line
+ * only. [RN-13, LM-2]
+ *
  * **The pause, and the backup on SIGUSR2.** The loop pauses between heights while a hold of the process's
  * {@link LoopPauses} is kept (`./pause.ts`, `./loop.ts`). {@link ProcessHandle.pause} takes one until
  * {@link ProcessHandle.resume}. [BK-1, Q152 B]
@@ -949,6 +957,20 @@ export function terminationSignal(target: SignalTarget): { readonly signal: Abor
 /** An error's message, or the value as text. */
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+/**
+ * What a stop by the host's signal names in its log lines: `signal`, with the abort reason's text when it has one to
+ * read — a string, or an error's message (`umbradb run`'s reason is the name of the signal it received). Never
+ * throws: the reason is the host's value. [RN-13, LM-9]
+ */
+function signalCause(reason: unknown): string {
+  try {
+    const text = typeof reason === "string" ? reason : reason instanceof Error ? reason.message : undefined;
+    return typeof text === "string" && text !== "" ? `signal: ${text}` : "signal";
+  } catch {
+    return "signal";
+  }
+}
+
 /** One step of closing a process: its name, as the log names it, and its work. */
 export type CloseStep = readonly [name: string, work: () => unknown];
 
@@ -1158,6 +1180,8 @@ class Process implements ProcessHandle {
   #core: CheckedEntry | undefined;
   #start: bigint | null = null;
   #cursor: bigint | null = null;
+  /** Whether startup has read the cursor from the database: until then a stop cannot say where a restart resumes. */
+  #cursorRead = false;
   #head: bigint | null = null;
   #upgrade: UpgradeBoundary | null = null;
   #conditions: ProcessCondition[] = [];
@@ -1303,7 +1327,9 @@ class Process implements ProcessHandle {
     this.#admin.follow(startup, this.ended);
     // The host's signal is read through AbortSignal's own members, never the object's: nothing of it throws here.
     // [LM-1, LM-9]
-    if (input.signal !== undefined) this.#unfollowSignal = followSignal(input.signal, (reason) => void this.#stopWith(reason));
+    if (input.signal !== undefined) {
+      this.#unfollowSignal = followSignal(input.signal, (reason) => void this.#stopWith(reason, signalCause(reason)));
+    }
   }
 
   status(): ProcessStatus {
@@ -1376,13 +1402,17 @@ class Process implements ProcessHandle {
   }
 
   stop(): Promise<void> {
-    return this.#stopWith(new DOMException("the process was stopped (stop()) before its startup completed", "AbortError"));
+    const reason = new DOMException("the process was stopped (stop()) before its startup completed", "AbortError");
+    return this.#stopWith(reason, "stop()");
   }
 
-  /** {@link stop}, by `stop()` or the signal: the first stop's `reason` is what a startup it ends rejects with. */
-  #stopWith(reason: unknown): Promise<void> {
+  /**
+   * {@link stop}, by `stop()` or the signal: the first stop's `reason` is what a startup it ends rejects with, and its
+   * `cause` what its log lines name (see the module comment). [LM-9, RN-13]
+   */
+  #stopWith(reason: unknown, cause: string): Promise<void> {
     if (this.#closing === undefined) this.#abortReason = reason;
-    this.#closing ??= this.#close();
+    this.#closing ??= this.#close(cause);
     return this.#closing;
   }
 
@@ -1559,9 +1589,16 @@ class Process implements ProcessHandle {
     return (this.#input.closeHelper ?? closeSteps)(faulted, (line) => this.#log(line));
   }
 
-  /** {@link stop}'s work. Every step runs, whatever an earlier one did, and `closed` resolves. [RN-13, G7] */
-  async #close(): Promise<void> {
+  /**
+   * {@link stop}'s work, the stop asked for by `cause`. Every step runs, whatever an earlier one did, and `closed`
+   * resolves. [RN-13, G7]
+   *
+   * Its two log lines (see the module comment): when it begins, what it lets finish; once processing has ended by it,
+   * where a restart resumes. [RN-13]
+   */
+  async #close(cause: string): Promise<void> {
     const starting = this.#phase === "starting";
+    this.#log(`stopping (${cause}): ${this.#inProgress()}`);
     this.#phase = "stopping";
     // From the stop on no channel is accepted, and the queued ones are closed; open ones close with the link. [LM-6]
     this.#channels?.stopAccepting("the process is stopping");
@@ -1570,6 +1607,9 @@ class Process implements ProcessHandle {
     // The waits for the chain end now, not once startup or the loop has ended. [RN-13]
     const waits = starting ? this.#endStartupWaits() : this.#endLoopWaits();
     await this.ended;
+    if (this.#end?.kind === "signal") {
+      this.#log(`${starting ? "startup" : "processing"} stopped (${cause}): ${this.#resumesAt()}`);
+    }
     try {
       await this.#closeAll([
         ["module API", () => this.#closeApi()],
@@ -1588,6 +1628,32 @@ class Process implements ProcessHandle {
     } finally {
       this.#resolveClosed();
     }
+  }
+
+  /**
+   * What a stop finds when it begins, for its first line: startup, the height in progress — the loop's open height,
+   * which commits or stores nothing —, none, or that processing had already ended (its state). [RN-13]
+   */
+  #inProgress(): string {
+    if (this.#phase === "starting") return "during startup, which ends before its next step";
+    if (this.#phase !== "running") return `processing had already ended (${this.#phase})`;
+    const height = this.#loop?.heightInProgress() ?? null;
+    return height === null
+      ? "no height in progress, and no new height starts"
+      : `height ${height} is in progress; it commits or stores nothing, and no new height starts`;
+  }
+
+  /**
+   * Where a restart resumes, once processing has ended by a stop, for its second line: the last committed height (the
+   * cursor, from which a restart resumes), none committed (a restart starts at S), or not known yet when startup had
+   * not read the cursor. [RN-13, RN-11]
+   */
+  #resumesAt(): string {
+    if (!this.#cursorRead) {
+      return "before it read the cursor; a restart resumes from the database's last committed height";
+    }
+    if (this.#cursor === null) return `no height committed; a restart starts at ${this.#start}`;
+    return `the last committed height is ${this.#cursor}, where a restart resumes`;
   }
 
   /**
@@ -1957,6 +2023,7 @@ class Process implements ProcessHandle {
     }));
     this.#step();
     this.#cursor = cursor?.height ?? null;
+    this.#cursorRead = true;
     const check = checkHistory({ config: checked, cursor: this.#cursor, declarations, history, process: core });
     const waiting = (wait: NodeWait | null): void => this.#waiting(wait);
     // A private process's source checks its chain itself, since a private process never talks to the node. [PP-1]

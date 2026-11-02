@@ -630,8 +630,11 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
         ready: false,
         reason: { code: "callback-error", height: 3n, module: "late", point: "on-compute" },
       });
-      expect(lines).toHaveLength(1);
-      expect(lines[0]).toMatch(/^processing halted \(callback-error\): /);
+      // The stop's own line first (issue 00072), naming the height it found in progress; then the halt, which ended
+      // processing: no line of an end by the stop. [RN-13]
+      expect(lines).toHaveLength(2);
+      expect(lines[0]).toBe("stopping (stop()): height 3 is in progress; it commits or stores nothing, and no new height starts");
+      expect(lines[1]).toMatch(/^processing halted \(callback-error\): /);
       expect(await cursorIn(db)).toBe(2);
     }, 180_000);
 

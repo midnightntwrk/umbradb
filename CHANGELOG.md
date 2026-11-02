@@ -107,6 +107,11 @@ is refused. For the `umbradb` command, only those two keys break. The change is 
   process's addresses as bound; `/status`'s `instance.role` is null until the side is known.
 - **Changed, not breaking:** the `node:sqlite` `ExperimentalWarning` (printed when a PGlite directory's lock first
   loads `node:sqlite`) no longer prints, for the command too.
+- **Changed, not breaking: a stop is logged** (issue 00072). `umbradb run` on SIGTERM or SIGINT, and a host's `log` on
+  `stop()` or its `signal`, get two lines, where before they got none: when the stop begins, what asked for it and the
+  height in progress (`stopping (signal: SIGTERM): height 412 is in progress; …`), and once processing has ended by it,
+  the last committed height, where a restart resumes (`processing stopped (signal: SIGTERM): the last committed height
+  is 412, where a restart resumes`).
 
 ## [0.9.5] - 2026-07-25 — "Penumbra"
 
