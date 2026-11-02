@@ -53,6 +53,7 @@ applies the recommended answer of each; an answer other than the recommended one
 | `refs_h(k)` | The number of references to k in the stored forms of the nodes of `S_h`. |
 | `roots_h(k)` | k's root count after block h (`root_counts`; 0 without a row). A **root** after h is a key with `roots_h(k) > 0`. |
 | `R_h` | The keys reachable from the roots after h through the stored forms of `S_h`. `R_{−1}` is empty. |
+| `K_h` | The keys reachable through stored forms (a new node's form is its stored form) from the roots after h − 1 and after h, from block h's batch references, and from h's new nodes: what block h keeps. |
 | batch `B` | What the ledger worker flushed for block h (`src/ledger/types.ts:54-62`): `B.inserts`, nodes in their batch forms, and `B.rootCounts`, one netted signed change per key. |
 | new nodes `N` | The nodes of `B.inserts` whose key is not in `S_{h−1}`. A node of `B.inserts` already in `S_{h−1}` is **inserted again**: the package writes content again after its memory dropped the stored copy (`layout-v2` treats every creation as new, `upstream:storage-core/src/backend.rs:532-534`), and on a restarted worker. |
 | batch references | Every reference in the batch form of every node of `B.inserts`, new or inserted again. |
@@ -91,8 +92,8 @@ After every committed block h with `core-ledger-state` active:
   persisted contract and zswap state loads from the database with all it reaches.
 - **I5 (nothing kept twice):** with `sweep` on at h, every key of `Q_{h−1}` that is not protected in h and gains no
   reference in h is gone after h, and so is every key that only such keys reached.
-- **I6 (exact set):** with `sweep` on at h, `R_{h−1} ⊆ S_h`; and when no key is kept in h only because it is a batch
-  reference and no new node of h ends unreferenced, `S_h = R_{h−1} ∪ R_h` (§4.3, §4.6).
+- **I6 (exact set):** `R_{h−1} ∪ R_h ⊆ K_h ⊆ S_h`; with `sweep` on at h, `S_h = K_h`; and when no key is kept in h only
+  because it is a batch reference and no new node of h ends unreferenced, `K_h = R_{h−1} ∪ R_h` (§4.3, §4.6).
 
 By I1 and I3, in the acyclic graph every stored key is reached from a root after h or from a queued key, so the queue
 names all the garbage there is.
@@ -171,7 +172,7 @@ Each check halts processing at h with `ledger-refcount-invalid` (§10) and nothi
 | `details.reason` | Fails when | Where |
 |---|---|---|
 | `negative-count` | some `refs_{h−1}(k) + Δ(k) < 0` | `on-compute`, before eviction |
-| `missing-reference` | a reference in a new node's form, or a key whose root count rises in h, is not in `S_h` (neither in `S_{h−1} \ D` nor a key of `N`) | `on-compute`, before eviction |
+| `missing-reference` | a batch reference (a reference in the batch form of a node the batch inserts, new or again), or a key whose root count rises in h, is not in `S_h` (neither in `S_{h−1} \ D` nor a key of `N`) | `on-compute`, before eviction |
 | `row-count-mismatch` | a write affects another number of rows than computed: the node inserts (summed over chunks) ≠ `|N|`; the `ref_counts` merge ≠ the number of keys with `Δ ≠ 0` and `refs_h > 0`; the `unreferenced` delete ≠ `|Q_{h−1} \ Q_h|`; its insert ≠ `|Q_h \ Q_{h−1}|`; the node delete ≠ `|D|` | `on-db-write`; the transaction rolls back |
 
 `missing-reference` keeps I1 and I4: it is new strictness, since today the sweep marks a missing key and adds nothing
@@ -183,7 +184,7 @@ that ends the block unreferenced is not a check: it is queued (rule 6; §4.6).
 ### 3.4 Reads
 
 All through on-compute's read at h − 1, each an indexed lookup by key list (`= ANY($1::bytea[])`), chunked by 1,000
-keys: which keys of `B.inserts`, of the references of `N`, and of `B.rootCounts` are stored; `unreferenced` in full (on
+keys: which keys of `B.inserts`, of the batch references, and of `B.rootCounts` are stored; `unreferenced` in full (on
 preprod 1–2 rows); `root_counts` and `ref_counts` of the keys of `Q_{h−1}`, of `B.rootCounts` and of each round's
 candidates; and, per round of rule 4, the stored forms of the nodes the round deletes. The batch forms of the nodes
 inserted again are parsed in memory for the batch references. A round's stored forms are parsed to references
@@ -215,20 +216,24 @@ holds every parentless non-root node those blocks left.
 
 ### 4.3 The exact set (I6)
 
-`R_{h−1} ⊆ S_h` by §4.1. Let `G = S_h \ (R_{h−1} ∪ R_h)`. A key of `G` with no parent in `S_h` has `refs_h = 0` and no
-root after h, so it is in `Q_h`; it is in neither `R_{h−1}` nor `R_h`, so it was not a queued key of `Q_{h−1}` kept by
-a root, and not a candidate kept by a root count at h − 1: it is a new node that ends unreferenced, or a key kept only
-as a batch reference. When neither happens in h, `G` has no parentless key, and since every parent of a key of `G` is in
-`G` and the graph is acyclic, `G` is empty: `S_h = R_{h−1} ∪ R_h`.
+`K_h ⊆ S_h` by §4.1: a deleted key is not protected, so it is no root and no batch reference, and `refs_h = 0`, so no
+surviving or new node references it. With `on`, every key of `S_{h−1}` outside `K_h` is deleted, by induction on the
+length of the longest chain of stored parents above it (the graph is acyclic). A key k of `S_{h−1}` outside `K_h` with
+no parent in `S_{h−1}` is not a root at h − 1 (else it is in `R_{h−1} ⊆ K_h`), so it is in `Q_{h−1}` (I3); it is not
+protected and no new node references it (either would put it in `K_h`), so rule 4 deletes it. A key k with parents in
+`S_{h−1}`: each parent is outside `K_h` too (`K_h` is closed under following stored forms), so by induction each is
+deleted in h; with no new node referencing k and no protection, its count reaches 0 and rule 4 deletes it. Since a new
+node is in `K_h`, `S_h = K_h`. The keys of `K_h` outside `R_{h−1} ∪ R_h` are those reached only from a key kept only as
+a batch reference or from a new node that ended unreferenced, which happen only when a node arrives in its second form
+or the flush takes a node no rising root reaches (§4.5, §4.6).
 
 ### 4.4 Equal to the sweep where its cycle fits one block
 
 LG-14's sweep, when a whole cycle starts and ends in block h, marks from the root counts at h − 1 and the keys whose
 count rose in h (`sweep.ts:197-208`), following the batch form of a node the batch inserts and the stored form
-otherwise (`sweep.ts:218`), and deletes every unmarked node. Counting keeps the same set at h, provided every node of
-the batch is reachable from a key whose root count rose (the flush, §4.5): a key the sweep marks through stored forms is
-kept by its counted references, one it marks through a batch form is a batch reference (rule 3), and a node that only a
-batch form references is new and queued, not deleted. Both start empty at genesis, so they store the same nodes at every
+otherwise (`sweep.ts:218`), and deletes every unmarked node. Counting keeps `K_h` (§4.3), the same set, provided every
+node of the batch is reachable from a key whose root count rose (the flush, §4.5): the references of a batch form are
+batch references, and every new node is then reached from a rising root. Both start empty at genesis, so they store the same nodes at every
 height up to the first block whose cycle does not fit. On preprod every block so far ran a whole cycle in-block
 (`sweep.cycle` = height + 1, cycle 46,739 when the run stopped near 46,738: organizer plan P13.3 and questions Q-37).
 Where a cycle spans blocks, the sweep deletes a node only if nothing reachable from the roots at the cycle's start or
@@ -265,20 +270,23 @@ as the sweep's next cycle would delete them. R21 counts such forms on the tapes.
 
 ### 4.7 Determinism across worker histories
 
-Which nodes a batch inserts again depends on what the package's memory still holds (a restart, its cache). When a node
-inserted again carries its stored form, rule 3 protects only keys already in `R_h` (the node is reached from a rising
-root through the batch, §4.5, and its children through it), and the new nodes are the same on every machine with the
-same stored set (the package flushes every reachable node it does not believe stored, and it never believes a deleted
-node stored, §5): the step's result does not depend on the worker's history. When a node inserted again carries the
-other form (§4.6), the batch can bring a small node as a new row on one machine and not on another, and the stored rows
-— then every later per-block digest — differ. That dependency is not new with counting: the node inserts already write
-that row on the one machine only (LG-11), and the sweep marks through the batch's forms the same way (`sweep.ts:218`).
-The criteria that compare runs with different worker histories would show it: R13 (restarts at 20 heights of the
-preprod tape), A160 (a worker restart), and the cross-backend comparisons (A105, R17, R25); none has shown it with the
-sweep (`core-arch` A160 and A55; the organizer plan's P13.1 restarts ended with equal contents hashes). *Assumption,
-unconfirmed in general: a node inserted again carries its stored form.* Issue `docs/issues/00078` records the
-question — whether the packages produce a node in two forms on one chain — and the fix if they do (a canonical stored
-form written by UmbraDB), outside this change.
+Which nodes a batch inserts again depends on what the package's memory still holds (a restart, its cache), and a
+node's form can depend on how the package came to hold its children (§4.6). The step is a function of the tables at
+h − 1 and the batch; the batch's effect on the stored rows is the same on two machines with the same tables when every
+node the package writes — new, created again after a deletion, or inserted again — carries a form that depends only on
+the chain, not on the worker's history. Then a node inserted again carries its stored form, so rule 3 protects only keys
+already in `R_h` (the node is reached from a rising root through the batch, §4.5); and the new nodes, with their forms,
+are the same on both machines (the package flushes every reachable node it does not believe stored, and never believes
+a deleted node stored, §5). When a form does depend on the history, two machines can write one node's key with
+different child lists, or a small node as a row on one machine only, and the stored rows — then every later per-block
+digest — differ. That dependency is not new with counting: the node inserts already write those rows (LG-11), and the
+sweep marks through the batch's forms (`sweep.ts:218`). The criteria that compare runs with different worker histories
+would show it: R13 (restarts at 20 heights of the preprod tape), A160 (a worker restart), and the cross-backend
+comparisons (A105, R17, R25); none has shown it with the sweep (`core-arch` A160 and A55; the organizer plan's P13.1
+restarts ended with equal contents hashes). *Assumption, unconfirmed in general: every node the package writes carries
+a form that depends only on the chain.* Issue `docs/issues/00078` records the question — whether the packages write a
+node in two forms on one chain — and the fix if they do (a canonical stored form written by UmbraDB), outside this
+change.
 
 ## 5. Eviction, the one-block lag and the worker restart
 
@@ -312,7 +320,7 @@ the step keeps nothing in memory between blocks. A block processed again after a
 
 `ref_counts` after h is a function of `S_h` (I2), and `S_h` and `Q_h` are fixed by the rules from the tables at h − 1
 and the batch, so every machine with the same history stores the same rows; across different worker histories they do
-under §4.7's assumption. The cascade's fixed point does not depend
+under §4.7's assumption that every node the package writes carries a form that depends only on the chain. The cascade's fixed point does not depend
 on the order of its rounds or of a round's keys; the merge, inserts and deletes are set operations; the statements are
 the shapes both backends already run (`unnest` of `bytea[]`, `= ANY`, `ON CONFLICT`, a data-modifying `WITH`). The
 digests compare each key's row before and after the block (DT-4), so netting is not visible in them either way.
@@ -450,7 +458,7 @@ block on the DAG fixture and at sampled heights on the tapes.
 | `layout-v2` writes a re-created node again | `upstream:storage-core/src/backend.rs:532-534` | Verified (upstream, pinned) |
 | A child's hash is the same in both forms; a new child is embedded when small; `persist` and `into_tracked` give a small node the referenced form; `RcMap` builds referenced children; a loaded node keeps its stored form | `upstream:storage-core/src/arena.rs:975-990, 1329-1352, 1525-1540, 2847-2880`, `upstream:storage-core/src/storable.rs:139-159`, `upstream:storage/src/delta_tracking/rcmap.rs:199, 224, 251` | Verified (upstream, pinned, v9); the `v8` package's `storage-core` (`ledger-8.1.2`) not read (unconfirmed) |
 | UmbraDB's patches track every persisted root with `hold_as_node` (`into_tracked`) and load stored nodes through `BackendLoader` | `vendor/ledger/{v8,v9-rc3,v9}/patches/0003-ledger-wasm-node-store-exports.patch` (lines in §4.6) | Verified (repository) |
-| A node inserted again carries its stored form, so the batch's effect does not depend on the worker's history | — | Unconfirmed assumption (§4.7), shared with LG-11's node inserts and the sweep; R13, A160 and the cross-backend criteria would show a breach; issue `docs/issues/00078` |
+| Every node the package writes (new, created again, or inserted again) carries a form that depends only on the chain, so the batch's effect does not depend on the worker's history | — | Unconfirmed assumption (§4.7), shared with LG-11's node inserts and the sweep; R13, A160 and the cross-backend criteria would show a breach; issue `docs/issues/00078` |
 | `midnight-storage-core` `layout-v1` kept a reference count per node and deleted at zero, decrementing children with multiplicity; `layout-v2` removed it | `upstream:storage-core/src/backend.rs:1202-1218`, `upstream:storage-core/src/db/sql.rs:250-266, 340-399`, `upstream:CHANGELOG_storage_core.md:23` | Verified (upstream, pinned); the reason for the removal is not given there (unconfirmed, not built on) |
 | The sweep's cycle fit one block at every preprod height of the stopped run | Organizer plan P13.3, questions Q-37 | Measured |
 | The devnet v8 → v9 tape converts at F = 103 with contracts deployed on v8 | `test/backbone/contract-data.test.ts:209` | Verified (repository) |

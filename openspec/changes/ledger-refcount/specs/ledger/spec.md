@@ -64,8 +64,8 @@ and that is not protected is deleted too, in the same block, until no key is lef
 deletions of a block;
 (5) after the step the queue holds exactly the stored nodes with neither a reference nor a root count, and a key that
 enters it in h is deleted no earlier than block h + 1.
-IF a count would fall below 0, a reference in a new node's child list or a key whose root count rises in h is not a
-stored node after the step, or a write of the step affects another number of rows than the step computed, THEN
+IF a count would fall below 0, a reference in the batch's child list of a node the batch inserts, or a key whose root
+count rises in h, is not a stored node after the step, or a write of the step affects another number of rows than the step computed, THEN
 processing SHALL halt with `ledger-refcount-invalid`, naming the reason, and nothing of the block SHALL be stored. Nodes
 the step deletes SHALL be evicted from the worker's caches before the block's transaction; IF the ledger package still
 refuses an eviction after the worker freed every object it can, THEN THE system SHALL end the worker thread and start a
@@ -84,8 +84,8 @@ the first block with `sweep: on` again SHALL delete the queue by step (4).
 
 #### Scenario: A released state is deleted the block after its release
 - **WHEN** `retainStates` is 0 and block h releases the state after h − 1
-- **THEN** no node of that state is deleted at h, and at h + 1 every node of it that the states after h and h + 1 do
-  not reach is deleted
+- **THEN** no node of that state is deleted at h, and at h + 1 every node of it that neither the states after h and
+  h + 1 nor a node of block h + 1's batch reaches is deleted
 
 #### Scenario: A re-inserted node changes no count
 - **WHEN** block h's batch inserts again a node stored at h − 1
