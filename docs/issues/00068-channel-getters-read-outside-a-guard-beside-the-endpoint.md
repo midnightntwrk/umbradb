@@ -1,6 +1,24 @@
 # 00068 — Two readers of a host's channel beside the private link's endpoint read its members outside a guard
 
-- **Status:** OPEN
+- **Status:** CLOSED — fixed 2026-11-01 (`start-umbradb` P10.4d; brought into the change's scope by its orchestrator:
+  both readers are the change's own code, and the unhandled rejection breaks G6). **1, the private side**, `7a10576`:
+  `isChannel` reads the four members inside one guard — a value whose member cannot be read (a getter or a proxy's trap
+  that throws) is no channel: the connection fails ("the host's connect() resolved with no channel") and ends (1006), the
+  transport connects again after its back-off, and after the stop `discard` leaves it alone; `rejection` reads a
+  rejected value's prototype, `code` and `name` inside a guard and keeps only a string, else the value's type. No
+  rejection is left unhandled. Tests: `test/library/channel-queue.test.ts` › «the channel carrier at the transport
+  (LM-6)» › «a connect() that resolves with %s resolved with no channel: …», «%s, resolved after the stop or after the
+  connection's own close, is left alone: …», «a connect() whose channel's members cannot be read is a lost connection,
+  …», «a connect() that rejects with an error that cannot be read is a lost connection, logged by its type; …» (12 cases,
+  each failing on the tree before). **2, `api.connect`**, `9bf97d6`: `connectChannel`'s `bufferedAmount()` reads the
+  member and calls it inside one guard; a throw (getter or call) ends the connection as the endpoint does since
+  `2ae0985` — nothing sent after, the channel closed and the connection ended after the module's emit returned; an
+  absent `bufferedAmount` stays no limit. Test: `test/runner/api-session.test.ts` › «a channel whose bufferedAmount %s
+  throws has ended: …» (getter, method); the approved test that read a throwing one as no limit rewritten («a channel
+  connection: …; an absent or unknown bufferedAmount is no limit; …»). **The search of the change's channel code** found
+  one more place of the same pattern, fixed in `dc16a06`: `messagePortChannel` read a host port's `event.data` outside
+  a guard (an event whose data cannot be read is now a message that is no text); and one defect of another kind, filed
+  as 00070. Each fix's tests failed again with it put back.
 - **Area:** library (the private side's channel carrier; the module API's `api.connect` channels)
 - **Severity:** medium — a host channel whose member is a getter that throws: on the private side an unhandled
   rejection (which ends a Node.js host by default) and a connection that never ends or reconnects; on `api.connect` an
