@@ -4,11 +4,15 @@
   a host's `log` gets them as the command's standard error does — when it begins, `stopping (<cause>): <what it lets
   finish>` (`cause` `stop()` or `signal: <the abort reason's text>`, the command's reason being `SIGTERM` or `SIGINT`;
   the height in progress, none, startup, or that processing had already ended), and once processing or startup has
-  ended by it, `processing stopped (<cause>): the last committed height is <c>, where a restart resumes` (or none
-  committed and the height a restart starts at). Tests: `test/cli/run-stop-log.test.ts` (the command through its
-  signal seam, three cases on PostgreSQL 18 and PGlite) and `test/library/stop-log.test.ts` (a host's `stop()` and
-  signal); 8 of 8 failed before (no line), pass after. Eleven tests that counted the log lines after a stop now assert
-  the stop's lines too.
+  ended by it, a second line. Tests: `test/cli/run-stop-log.test.ts` (the command through its signal seam, three cases
+  on PostgreSQL 18 and PGlite) and `test/library/stop-log.test.ts` (a host's `stop()` and signal); 8 of 8 failed before
+  (no line), pass after. Eleven tests that counted the log lines after a stop now assert the stop's lines too.
+  **The second line reworded** on 2026-11-02 (`start-umbradb` P12.C; the targeted check of P12.B found it could name
+  the wrong height): it first said `the last committed height is <c>, where a restart resumes`, but `<c>` is the
+  process's cursor in memory, and a `COMMIT` whose answer was lost can leave the stored cursor one height above it. It
+  now says only what the process saw: `processing stopped (<cause>): the last height this process saw committed is
+  <c>; a restart resumes after the stored cursor` (or `this process saw no height committed; …, if any`, or `this
+  process had not read the cursor; …, if any`); the stop reads nothing from the database.
 - **Area:** runner (the process's stop, `src/runner/process.ts`) and the command (`src/cli/run.ts`)
 - **Severity:** low — the stop itself is clean (the height in progress commits or stores nothing, a restart resumes
   from the cursor), but an operator who presses Ctrl-C, or whose orchestrator sends SIGTERM, sees the log end with the

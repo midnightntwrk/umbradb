@@ -38,9 +38,9 @@
  * listened for: Node.js's default ends the command at once. [IN-12, AE-3, RN-13]
  *
  * The process logs the stop, naming the signal: when it begins, with the height in progress
- * (`stopping (signal: SIGTERM): height 412 is in progress; …`), and once processing has ended, with the last committed
- * height, where a restart resumes (`processing stopped (signal: SIGTERM): the last committed height is 412, …`).
- * [RN-13]
+ * (`stopping (signal: SIGTERM): height 412 is in progress; …`), and once processing has ended, with the last height it
+ * saw committed (`processing stopped (signal: SIGTERM): the last height this process saw committed is 412; …`); a
+ * restart resumes after the cursor the database stored. [RN-13]
  *
  * The command then resolves with how processing ended. `refused` or `failed` (a halt) is a failure (exit 1); anything
  * else (the stop itself, the core's stop height, an upgrade boundary) is not (exit 0).

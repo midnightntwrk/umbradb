@@ -338,8 +338,8 @@ A process is in one state at a time:
 - `halted`: a callback or a check failed, and nothing of that height was stored; the API serves the last committed
   height. Read `reason` and the log, fix the cause, restart.
 - `stopping`: after SIGTERM or SIGINT, the height in progress finishes. The log names that height when the stop
-  begins, and once processing has ended, the last committed height, where a restart resumes. A second signal ends the
-  process at once.
+  begins, and once processing has ended, the last height the process saw committed; a restart resumes after the cursor
+  the database stored. A second signal ends the process at once.
 
 A configuration that cannot be loaded or fails its schemas is no state: `umbradb run` logs every finding with its path
 and exits 1 at once, without opening the admin listener.

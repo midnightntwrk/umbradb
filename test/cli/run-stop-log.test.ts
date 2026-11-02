@@ -16,8 +16,9 @@ import { chainNode, HEAD, runCoreSettings, statsConfig, statsModule } from "./ru
  * Two lines, the engine's, so a host's `log` gets them as the command's standard error does:
  * - when the stop begins, what asked for it (the signal, by its name) and what was in progress: a height, which then
  *   commits or stores nothing, none, or startup;
- * - once processing has ended by the stop, the last committed height, where a restart resumes, or that none committed
- *   and the height a restart starts at.
+ * - once processing has ended by the stop, the last height the process saw committed, or that it saw none; a restart
+ *   resumes after the cursor the database stored, which the line does not claim to know (a `COMMIT` whose answer was
+ *   lost can leave it one height above what the process saw).
  *
  * The cases: SIGTERM at the head; SIGINT while height 3 waits in a module's `on-db-write`; SIGTERM during startup,
  * while it retries an unreachable node. [RN-13]
@@ -101,7 +102,7 @@ describe.each(PROCESS_BACKENDS)("issue 00072: umbradb run logs its stop by a sig
   beforeAll(() => backend.start(), 180_000);
   afterAll(() => backend.stop(), 60_000);
 
-  it("SIGTERM at the head: the stop with nothing in progress, then the last committed height, where a restart resumes", async () => {
+  it("SIGTERM at the head: the stop with nothing in progress, then the last height the process saw committed", async () => {
     const tape = await chainNode();
     try {
       const db = await backend.database();
@@ -112,14 +113,14 @@ describe.each(PROCESS_BACKENDS)("issue 00072: umbradb run logs its stop by a sig
       expect(code).toBe(EXIT.ok);
       expect(stopLines(stderr)).toEqual([
         "stopping (signal: SIGTERM): no height in progress, and no new height starts",
-        `processing stopped (signal: SIGTERM): the last committed height is ${HEAD}, where a restart resumes`,
+        `processing stopped (signal: SIGTERM): the last height this process saw committed is ${HEAD}; a restart resumes after the stored cursor`,
       ]);
     } finally {
       await tape.close();
     }
   }, PATIENCE_MS * 2);
 
-  it("SIGINT while height 3 is in its on-db-write: the stop names height 3, which commits; a restart resumes there", async () => {
+  it("SIGINT while height 3 is in its on-db-write: the stop names height 3, which commits, the last height seen committed", async () => {
     const tape = await chainNode();
     const hold = openHold(HOLD);
     try {
@@ -139,7 +140,7 @@ describe.each(PROCESS_BACKENDS)("issue 00072: umbradb run logs its stop by a sig
       expect(code).toBe(EXIT.ok);
       expect(stopLines(stderr)).toEqual([
         "stopping (signal: SIGINT): height 3 is in progress; it commits or stores nothing, and no new height starts",
-        "processing stopped (signal: SIGINT): the last committed height is 3, where a restart resumes",
+        "processing stopped (signal: SIGINT): the last height this process saw committed is 3; a restart resumes after the stored cursor",
       ]);
       // Height 3 committed whole, and no height after it started.
       expect(await statsRows(db)).toEqual(["1 held", "2 held", "3 held"]);
@@ -149,7 +150,7 @@ describe.each(PROCESS_BACKENDS)("issue 00072: umbradb run logs its stop by a sig
     }
   }, PATIENCE_MS * 2);
 
-  it("SIGTERM during startup, the node unreachable: the stop during startup, then no height committed and where a restart starts", async () => {
+  it("SIGTERM during startup, the node unreachable: the stop during startup, then that the process saw no height committed", async () => {
     const db = await backend.database();
     const run = runHere(write({ core: runCoreSettings(db.setting, "ws://127.0.0.1:9/node"), statsConfig: '{ label: "start" }' }));
     await until(
@@ -162,7 +163,7 @@ describe.each(PROCESS_BACKENDS)("issue 00072: umbradb run logs its stop by a sig
     expect(code).toBe(EXIT.ok);
     expect(stopLines(stderr)).toEqual([
       "stopping (signal: SIGTERM): during startup, which ends before its next step",
-      "startup stopped (signal: SIGTERM): no height committed; a restart starts at 1",
+      "startup stopped (signal: SIGTERM): this process saw no height committed; a restart resumes after the stored cursor, if any",
     ]);
   }, PATIENCE_MS * 2);
 });

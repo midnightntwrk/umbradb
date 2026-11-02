@@ -15,7 +15,7 @@ const stopLines = (lines: readonly string[]): string[] =>
   lines.filter((line) => /^(stopping|processing stopped|startup stopped) \(/.test(line));
 
 describe("issue 00072: a host's log gets the stop's lines (RN-13, LM-2)", () => {
-  it("stop() at the head: named stop(), nothing in progress, then the last committed height", async () => {
+  it("stop() at the head: named stop(), nothing in progress, then the last height the process saw committed", async () => {
     const lines: string[] = [];
     const m = rowsModule("logged");
     const handle = startUmbraDB({
@@ -32,7 +32,25 @@ describe("issue 00072: a host's log gets the stop's lines (RN-13, LM-2)", () => 
     }
     expect(stopLines(lines)).toEqual([
       "stopping (stop()): no height in progress, and no new height starts",
-      "processing stopped (stop()): the last committed height is 3, where a restart resumes",
+      "processing stopped (stop()): the last height this process saw committed is 3; a restart resumes after the stored cursor",
+    ]);
+  }, 60_000);
+
+  it("stop() before startup read the cursor: the stop during startup, then that the process had not read it", async () => {
+    const lines: string[] = [];
+    const m = rowsModule("early");
+    const handle = startUmbraDB({
+      config: { data: libraryData(PGLITE_MEMORY, [m]) },
+      modules: [m],
+      source: new InMemoryBlockSource({ head: 3n }),
+      log: (line) => lines.push(line),
+    });
+    // Called at once, before startup opened the database: nothing of the cursor is known.
+    await handle.stop();
+    await expect(handle.started).rejects.toMatchObject({ name: "AbortError" });
+    expect(stopLines(lines)).toEqual([
+      "stopping (stop()): during startup, which ends before its next step",
+      "startup stopped (stop()): this process had not read the cursor; a restart resumes after the stored cursor, if any",
     ]);
   }, 60_000);
 
@@ -53,7 +71,7 @@ describe("issue 00072: a host's log gets the stop's lines (RN-13, LM-2)", () => 
     await handle.closed;
     expect(stopLines(lines)).toEqual([
       "stopping (signal: the host is deploying): no height in progress, and no new height starts",
-      "processing stopped (signal: the host is deploying): the last committed height is 3, where a restart resumes",
+      "processing stopped (signal: the host is deploying): the last height this process saw committed is 3; a restart resumes after the stored cursor",
     ]);
   }, 60_000);
 });

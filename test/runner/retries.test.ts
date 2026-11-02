@@ -35,7 +35,7 @@ const HEAD = 5n;
  */
 const STOPPED_AT_HEAD = [
   "stopping (stop()): no height in progress, and no new height starts",
-  `processing stopped (stop()): the last committed height is ${HEAD}, where a restart resumes`,
+  `processing stopped (stop()): the last height this process saw committed is ${HEAD}; a restart resumes after the stored cursor`,
 ];
 /** The back-off ceiling the retries run with here: 20 ms, so no test waits the back-off's seconds. [IN-10] */
 const CEILING = 20;
@@ -345,7 +345,7 @@ describe.each(PROCESS_BACKENDS)("retries (IN-10) on $name", (backend) => {
     // No retry line: only the stop's own, which names the height it found in progress and ended. [RN-13]
     expect(started.lines).toEqual([
       "stopping (stop()): height 2 is in progress; it commits or stores nothing, and no new height starts",
-      "processing stopped (stop()): the last committed height is 1, where a restart resumes",
+      "processing stopped (stop()): the last height this process saw committed is 1; a restart resumes after the stored cursor",
     ]);
     expect(await cursorIn(db)).toBe(1);
   }, 180_000);

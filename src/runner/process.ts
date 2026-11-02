@@ -157,10 +157,12 @@
  * The stop is in the log, in two lines. When it begins: what asked for it — `stop()`, or `signal` with the abort
  * reason's text, which for `umbradb run` is the signal's name — and what it lets finish: the height in progress,
  * which commits or stores nothing, none, or startup (`stopping (signal: SIGTERM): height 412 is in progress; …`). Once
- * processing (or startup) has ended by it: the last committed height, where a restart resumes, or that none committed
- * and the height a restart starts at (`processing stopped (signal: SIGTERM): the last committed height is 412, where a
- * restart resumes`). A stop after processing ended by itself (a refusal, a halt, the core's stop) logs the first line
- * only. [RN-13, LM-2]
+ * processing (or startup) has ended by it: the last height the process saw committed — its cursor in memory —, or that
+ * it saw none or had not read the cursor; a restart resumes after the cursor the database stored
+ * (`processing stopped (signal: SIGTERM): the last height this process saw committed is 412; a restart resumes after
+ * the stored cursor`). The line claims nothing of the database: a `COMMIT` whose answer was lost may have stored the
+ * height after the one the process saw, and the stop reads nothing to find out. A stop after processing ended by itself
+ * (a refusal, a halt, the core's stop) logs the first line only. [RN-13, LM-2]
  *
  * **The pause, and the backup on SIGUSR2.** The loop pauses between heights while a hold of the process's
  * {@link LoopPauses} is kept (`./pause.ts`, `./loop.ts`). {@link ProcessHandle.pause} takes one until
@@ -1180,7 +1182,7 @@ class Process implements ProcessHandle {
   #core: CheckedEntry | undefined;
   #start: bigint | null = null;
   #cursor: bigint | null = null;
-  /** Whether startup has read the cursor from the database: until then a stop cannot say where a restart resumes. */
+  /** Whether startup has read the cursor from the database: until then a stop's line knows no height committed. */
   #cursorRead = false;
   #head: bigint | null = null;
   #upgrade: UpgradeBoundary | null = null;
@@ -1594,7 +1596,7 @@ class Process implements ProcessHandle {
    * resolves. [RN-13, G7]
    *
    * Its two log lines (see the module comment): when it begins, what it lets finish; once processing has ended by it,
-   * where a restart resumes. [RN-13]
+   * the last height the process saw committed. [RN-13]
    */
   async #close(cause: string): Promise<void> {
     const starting = this.#phase === "starting";
@@ -1644,16 +1646,16 @@ class Process implements ProcessHandle {
   }
 
   /**
-   * Where a restart resumes, once processing has ended by a stop, for its second line: the last committed height (the
-   * cursor, from which a restart resumes), none committed (a restart starts at S), or not known yet when startup had
-   * not read the cursor. [RN-13, RN-11]
+   * What the process saw committed, once processing has ended by a stop, for its second line: the last height it saw
+   * committed (its cursor in memory), none, or that startup had not read the cursor. A restart resumes after the cursor
+   * the database stored, which this does not read: a `COMMIT` whose answer was lost may have stored one height more
+   * than the process saw. [RN-13, RN-11]
    */
   #resumesAt(): string {
-    if (!this.#cursorRead) {
-      return "before it read the cursor; a restart resumes from the database's last committed height";
-    }
-    if (this.#cursor === null) return `no height committed; a restart starts at ${this.#start}`;
-    return `the last committed height is ${this.#cursor}, where a restart resumes`;
+    const restart = "a restart resumes after the stored cursor";
+    if (!this.#cursorRead) return `this process had not read the cursor; ${restart}, if any`;
+    if (this.#cursor === null) return `this process saw no height committed; ${restart}, if any`;
+    return `the last height this process saw committed is ${this.#cursor}; ${restart}`;
   }
 
   /**
