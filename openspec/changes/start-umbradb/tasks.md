@@ -307,6 +307,15 @@ before the review.
       382 files, 6,199 tests, exactly §0's 20 failed, 56 skipped; every title the acceptance map cites passed (A162's
       PostgreSQL-only case skipped on PGlite, as before). Open for the owner: Q-1, Q-11 (L37 on PGlite), Q-19, Q-20,
       Q-21 (L3's "either order"), the design amendments of 8.5.
+      **The targeted fix check (2026-11-01, Codex, on `26f8048`): BLOCK** — 11 of 15 fixes resolved, 4 partly; three
+      defects the fixes introduced. Fixed test-first at `3ec84de..63207b9` (P10.4c), each test seen failing on the tree
+      before and again with the fix put back: an array option copied by its length and elements alone, none of the
+      host's list's own code run (N1, `3ec84de`; LM-1, L62); a channel's `bufferedAmount` read inside the endpoint's
+      guard, one that throws ending the carrier (N2, `2ae0985`; L35, LM-10); a configuration refusal's own words — its
+      reason, rules, paths and codes — kept whatever a secret's text (N3, `e13b9df`; L63, CF-4); the secrets of data
+      that is not plain data, and of a `{ file }` once evaluated, known before its refusal (C-F2's residual, `63207b9`;
+      L65, CF-4). Issues 00068 and 00069 filed beside, skipped. Open for the owner besides: Q-20's `cause` chains (the
+      fix check's evidence added), Q-22 (a configuration file whose own import throws). Its own targeted fix check next.
 
 ## 11. Close-out
 
