@@ -505,3 +505,19 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   back. *Follow-up:* the second targeted fix check (AGENTS.md "Bounded review"), then the owner; Q-20 (the `cause`
   chains, with the fix check's evidence) and Q-22 (a configuration file whose own import throws) for the owner; issues
   00068 and 00069 filed beside, skipped.
+- **R5 — A fix of one reader of a host's channel left the change's other readers with the same unguarded reads**
+  (`plan-task-runner / claude-opus-5-5 / P10.4d`; the code from P6.2, P6.3 and P7.1, the same role and model; found by
+  the P10.4c fixer while fixing N2, filed as issue 00068 and brought into scope by the orchestrator). The private side's
+  carrier checked a channel `connect()` resolved with by reading its members outside any guard, inside the handler of a
+  discarded promise: a getter that threw was an unhandled rejection (G6) and a connection that never failed, ended or
+  reconnected; its log of a rejection read the error's prototype, code and name the same way. `api.connect`'s carrier
+  read `bufferedAmount` before its guard, so the getter's error escaped into the host carrier's own message listener
+  and a module's `emit`, and a throwing call was read as no limit. The search of the change's channel code found one
+  more: `messagePortChannel` read a host port's `event.data` outside a guard, into the port's dispatch. *Second story:*
+  each reader was written against the channel's typed interface, whose members are methods, so a read of a member
+  looked like data, not like a call into the host; N2's fix was scoped to the file its finding named, and the same
+  reads one module away were filed rather than fixed. The fixes (`7a10576`, `9bf97d6`, `dc16a06`) each add the test
+  with the getter or trap that throws, seen failing first and again with the fix put back; the search is recorded place
+  by place in the plan. *Follow-up:* issue 00070 (a host channel that tells its close at once makes `api.connect`'s
+  slow-subscriber disconnect unsubscribe inside the module's emit), filed beside, skipped; P10.4c's and P10.4d's
+  targeted fix check next.
