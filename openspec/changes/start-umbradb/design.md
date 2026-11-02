@@ -15,11 +15,24 @@ capabilities. `core-arch` is archived first, then this change; each `## MODIFIED
 src/
   library/start-umbradb.ts     startUmbraDB, the handle facade, the cwd default (the Node entry)      [new]
   library/channels.ts          PrivateLinkChannel, messagePortChannel, the channel envelope            [new]
+  library/options.ts           the options' checks and the library's refusals (invalid-option, …)     [new]
+  library/finalized-height.ts  finalizedHeight                                                       [new]
   runner/resolve.ts            resolve and its stages; planNetwork                                    [new]
-  runner/process.ts            the engine (today's startProcess; internal)                             [changed]
+  runner/worker-output.ts      the worker threads' output drained to log (or dropped)                 [new]
+  runner/host-signal.ts        a host's AbortSignal, read through AbortSignal's own members           [new]
+  runner/process.ts            the engine (today's startProcess; internal); the demo's api.fetch,      [changed]
+                               admin.fetch, api.connect, opened()
   private/core-transport.ts    session logic shared by sockets and channels; socket carrier split out  [changed]
   private/private-transport.ts the same, private side                                                  [changed]
+  private/core-socket.ts       the core's socket carrier: the http(s) server, ws, pings               [new]
+  private/private-socket.ts    the private side's socket carrier: the ws client                       [new]
+  private/core-channels.ts     the core's link over channels: the queue of 64, the sessions           [new]
+  private/private-channels.ts  the private side's carrier over the host's connect()                   [new]
   runner/api-server.ts         module API handlers usable mounted; socket carrier split out           [changed]
+  runner/api-session.ts        the module API's answers and subscription protocol (no Node.js import) [new]
+  runner/api-socket.ts         the module API's node:http / ws carrier and listener                    [new]
+  runner/api-answers.ts        the core's headers, the lifecycle body, the handler types              [new]
+  admin/mounted.ts             mounted admin's handlers (admin.http, admin.fetch)                     [new]
   cli/run.ts, cli/*.ts         the command builds its ports and calls the engine / the resolver        [changed]
 ```
 
@@ -51,8 +64,10 @@ interface EngineInput {
   cwd: string;                         // base of every relative path, for { file } and { data } alike
   userModules: UserModulesSource;      // §6
   network: NetworkRequest;             // §5; the string "configured" only from src/cli
-  ports: EnginePorts;                  // below; absent = off
-  source?: InMemoryBlockSource;        // library, public side only (§4)
+  // the ports of the table below, each a member of its own, off when absent: log, adminListener,
+  // backupSignals, backupAtStop, workerOutput, ledgerWorkerEntry
+  inMemorySource?: InMemoryBlockSource; // library, public side only (§4); the engine's own source is a test seam
+  library?: LibraryChecks;             // startUmbraDB's option refusal and its checks after resolve (class A, §7.2)
   acceptPublicConfigHash?: string;
   signal?: AbortSignal;
   // + today's test seams (checkChain, loop, nodeClient, …): internal, never reachable from startUmbraDB
@@ -83,6 +98,7 @@ removed.
 `src/runner/resolve.ts`: pure, no I/O, importable by the browser bundle.
 
 ```ts
+resolveSide(data, side?) → ProcessSide                                // the given side, else inferSide(data)
 resolveDeclarations({ userModules, side }) → DeclarationSet           // commandBuild + validateDeclarations (MD-2)
 resolveConfig({ data, file, declarations, side? }) → {                // plainData (CF-1) + validateConfig (CF-2, CF-3)
   checked, side,                                                       //   + processCoreEntry (Q102)
@@ -98,10 +114,12 @@ planNetwork(resolved, request) → plan | refusals   // §5.2: N1–N9
   `plainData`, `validateConfig` or `processCoreEntry` throws, with its findings — carrying the loaded input's secrets
   (`configSecrets`, `src/config/validate.ts:338`) so that a caller redacts the refusal as the engine's `earlyRedactor`
   does today (AE-6). `resolve` stops at the first stage that throws.
-- **Callers.** The engine calls `resolve` and `planNetwork`; the plan drives what opens. `umbradb config check` calls
-  the two stages itself, as today, so that it still reports a declarations refusal at `modules[<i>]` beside the
-  validation findings (`src/cli/config-check.ts:274-291`); `umbradb backup` and `umbradb restore` call `resolve`. Their
-  checks and behaviour are unchanged. No module outside `src/runner/resolve.ts` calls `commandBuild`,
+- **Callers.** The engine calls `resolve` and `planNetwork`; the plan drives what opens. `umbradb config check`,
+  `umbradb backup` and `umbradb restore` call the stages themselves — `resolveSide`, then `resolveDeclarations` and
+  `resolveConfig` —, as today: `config check` still reports a declarations refusal at `modules[<i>]` beside the
+  validation findings (`src/cli/config-check.ts`), and `backup` and `restore` still report a refused configuration as
+  the configuration's and a declarations fault as its own (`src/cli/configured.ts`). Their checks and behaviour are
+  unchanged. No module outside `src/runner/resolve.ts` calls `commandBuild`,
   `buildDeclarations`, `inferSide`, `validateConfig` or `processCoreEntry`, and none outside the engine calls
   `planNetwork` (L56).
 - **The private side's link** (`privateIntake`, `openPublicSide`) takes a link — an address with the configuration's
@@ -192,7 +210,9 @@ export function messagePortChannel(port: MessagePortLike): PrivateLinkChannel;  
 - **`source`** is accepted only when `Object.getPrototypeOf(source) === InMemoryBlockSource.prototype` and the object
   has none of the engine's hook members (`checkChain`, `committedHeight`, `checkModules`, `attach`, `prepared`,
   `fetchRead`); otherwise `source-refused`. With a `source` the engine creates no node client: `node` is validated
-  (the configuration format requires it) and never contacted.
+  (the configuration format requires it) and never contacted, and the process item `node-client` is absent — a module
+  that requires it finds none in its items, and the process contexts' seal does not refuse it (`core-block-fetch` reads
+  the bound block source, not the client).
 - **Exports** (`core-arch` design §12, amended): added `startUmbraDB`, `finalizedHeight`, `messagePortChannel`, and the
   types `UmbraDBOptions`, `UmbraDBHandle`, `UmbraDBStatus`, `UmbraDBStarted`, `UmbraDBEnd`, `UmbraDBBackup`,
   `UmbraDBReason`, `UmbraDBCondition`, `UmbraDBNetwork`, `PrivateLinkChannel`, `MessagePortLike`, `Address`,
@@ -270,8 +290,9 @@ only: the command's `"configured"` request is derived from the file — a surfac
 if its address is written, plus the admin default `0.0.0.0:8081` when none is written (issue 00046) — and so it never
 produces them.
 
-**`/config`.** The process revision's `listen` and `privateLink` show the plan's addresses, as bound (a requested port
-0 shows the bound port), and are absent where nothing listens or connects at an address. A field `network` names each
+**`/config`.** The process revision as `/config` shows it in `core` has `listen` and `privateLink` set to the plan's
+addresses, as bound (a requested port 0 shows the bound port), and absent where nothing listens or connects at an
+address; `entries[]` keep every revision as validated. A field `network` names each
 surface's mode: `{ api, admin, privateLink }`, each `"listening"`, `"connecting"`, `"mounted"` (handlers only),
 `"channels"`, `"connect"` or `"none"`. The command's `/config` keeps its `listen` values (its plan is the written
 addresses plus the admin default) and gains the `network` field.
@@ -335,7 +356,15 @@ export interface PrivateLinkChannel {
 - **Framing (channel links only, not TCP):** UmbraDB wraps the link's messages (PP-4) in an envelope that also carries
   `ping`, `pong` and `close { code, reason }`, so the close codes the protocol depends on — 1008
   `report-hash-mismatch` (halt), 1011 `report-unchecked` (reconnect), 1008 `too-slow` — survive any carrier, including
-  a browser `MessagePort`, which may have no close event (a Node `worker_threads` port has one).
+  a browser `MessagePort`, which may have no close event (a Node `worker_threads` port has one). Each channel message
+  is one JSON object, strict: `{ "link": 1, "kind": "message", "message": <a PP-4 message> }`,
+  `{ "link": 1, "kind": "ping" }`, `{ "link": 1, "kind": "pong" }` or
+  `{ "link": 1, "kind": "close", "code": <an integer 1000–4999>, "reason": <text of at most 256 characters> }`. Text
+  that is no JSON closes the channel `not-json`, another shape `invalid-envelope`, and a message failing its own
+  schema keeps its fault, as on a socket. A size limit (`MAX_MESSAGE_BYTES`, a queued channel's `MAX_HELLO_BYTES`) is
+  checked on the envelope's UTF-8 bytes less the envelope's own fixed bytes, so a message passes over a channel
+  exactly when it passes over a socket. `no-pong`, `hello-first`, `hello-pending` and `private-link-not-accepting`
+  close with 1008; a forced end still sends the peer its `close` envelope first.
 - **UmbraDB's own `close()`/`terminate()` ends the channel** — the instance id is released, listeners are disposed —
   whatever the carrier's `onClose` does.
 - **Liveness:** each side sends its first ping one `PING_INTERVAL_MS` (15 s) after the channel opens, then every
@@ -448,11 +477,16 @@ is renamed; `duplicate-instance` is unchanged.
   `node:http`/`ws` shims for the link are removed.
 - API and admin: not listening; the demo's message channel calls the handle's fetch-style handlers (`api.fetch`,
   `admin.fetch`) and opens subscriptions through `api.connect(channel)` (a `PrivateLinkChannel`-shaped carrier for the
-  module API's subscription protocol); these three are built for the demo and not exported. An `api.connect` channel
+  module API's subscription protocol), and reads its process — the contents hash, the page's reads, its backup —
+  through `opened()`: the database the module API reads and the schema plan's `deterministic: false` tables, while the
+  module API is open, null otherwise; these four are built for the demo and not exported. An `api.connect` channel
   keeps the module API's own subscription rules, not §5.4's link rules: its message limit (`DEFAULT_MAX_MESSAGE_BYTES`,
   64 KiB) and its slow-subscriber close (the module API's own `MAX_BUFFERED_BYTES`, 1 MiB, through `bufferedAmount`
-  when the carrier gives it; `src/runner/api-server.ts:77-79`), with no ping/pong envelope (the page owns the carrier's
-  lifetime).
+  when the carrier gives it; `src/runner/api-session.ts:44-46`), with no ping/pong envelope (the page owns the
+  carrier's lifetime). A channel offered while the module API does not serve (§5.3: `starting`, `refused`, after a
+  stop's drain) gets the lifecycle body as its one message and is closed; a message over the limit, a subscriber over
+  its buffered limit and the module API's close end the channel with no message, as the WebSocket path closes or
+  destroys its socket, and its subscriptions are unsubscribed.
 - **The socket carriers stay out of the bundle.** The link's and the module API's TCP/WebSocket carriers (today inside
   `src/private/core-transport.ts`, `src/private/private-transport.ts`, `src/runner/api-server.ts`) move into their own
   modules, apart from the session logic that channels also use; the browser build lists those carrier modules in
