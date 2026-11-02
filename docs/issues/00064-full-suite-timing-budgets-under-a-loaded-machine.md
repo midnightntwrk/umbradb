@@ -76,6 +76,14 @@ file runs alone right after (3 files, 26 tests):
     beside it, each passing alone). Its two
     faulted closes leave their database open by design (the closer stops before the database's step); alone the file
     passes 37 of 37. Not investigated further.
+15. `start-umbradb` P10.4c's full run (2026-11-01, 44 min instead of about 10, 382 files; the machine's load average
+    about 21, Docker's VM at 230 % CPU): besides this issue's items 1/4/6 (`test/library/network.test.ts`, the seven
+    controls on PostgreSQL), 3 (F2) and 5 (`zero-timeouts`'s 5 s case, `CONNECTION_CLOSED`), and A12, two new ones —
+    `test/library/network.negative-control.test.ts`, L18's schema case (P10.4b's control, the same
+    `CONTROL_SETTLES_MS` race, `test/library/network-refusals.ts:26`), and `test/admin/lifecycle.test.ts`, "the admin
+    listener closes only once the database has closed" on PostgreSQL (`/status never matched within 20000 ms`, the
+    harness's wait, `test/admin/admin-harness.ts:224`). Each of the six files passed alone right after
+    (`p104c/rerun-*.log`).
 
 ## Evidence
 
@@ -84,7 +92,7 @@ file runs alone right after (3 files, 26 tests):
 - `test/backbone/core-health/liveness.test.ts:77` — `probedThrough`'s wait for `/status`, 20 s.
 - `test/db/prepared-statements.test.ts:119` — the test's 60 s budget.
 - The run's log and the reruns: the `start-umbradb` plan's P7 notes (`p7/logs/full-1.log`, `rerun-flaky.log`) and P8
-  notes (`p8/logs/full-1.log`, `rerun-1.log`, `rerun-network.log`, `rerun-a103.log`); P9 notes (`p9/logs/full-1.log`, `rerun-1.log`); P10.4a notes (`p104a/full.log`, `reruns.log`).
+  notes (`p8/logs/full-1.log`, `rerun-1.log`, `rerun-network.log`, `rerun-a103.log`); P9 notes (`p9/logs/full-1.log`, `rerun-1.log`); P10.4a notes (`p104a/full.log`, `reruns.log`); P10.4c notes (`p104c/full.log`, `rerun-*.log`).
 
 ## Suggested fix
 
