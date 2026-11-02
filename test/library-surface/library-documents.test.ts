@@ -11,8 +11,8 @@ import { section4Amendment } from "./surface.js";
 /**
  * The library entry's documents: `CHANGELOG.md`'s entry for it (L59's changelog half; the module guide's recipe is
  * `test/examples/try-module.test.ts`'s), and the documents a user reads free of the removed exports and of the renamed
- * settings' old keys. The checks are `./library-documents.ts`'s; each has its negative controls below. [L59 DOC, LS-1,
- * CF-4]
+ * settings' old keys: they describe the current version, and only the changelog records what changed. The checks are
+ * `./library-documents.ts`'s; each has its negative controls below. [L59 DOC, LS-1, CF-4]
  */
 
 const ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -124,7 +124,7 @@ describe("L59: CHANGELOG.md's entry for the library entry", () => {
   });
 });
 
-describe("the documents a user reads name no removed export, and no renamed setting's old key alone (LS-1, CF-4)", () => {
+describe("the documents a user reads name no removed export, and no renamed setting's old key (LS-1, CF-4)", () => {
   it("covers the README, the guides and the examples", () => {
     const files = userDocuments().map(({ file }) => file);
     expect(files).toEqual(expect.arrayContaining([
@@ -134,7 +134,7 @@ describe("the documents a user reads name no removed export, and no renamed sett
     expect(files.some((file) => file.startsWith("docs/issues/") || file === "CHANGELOG.md")).toBe(false);
   });
 
-  it("no document names startProcess, ProcessHandle, ProcessState, runLedgerWorker or BlockSource, or an old key alone", () => {
+  it("no document names startProcess, ProcessHandle, ProcessState, runLedgerWorker or BlockSource, or an old key", () => {
     expect(sweepProblems(userDocuments(), AMENDMENT.removed, RENAMED)).toEqual([]);
   });
 
@@ -149,27 +149,30 @@ describe("the documents a user reads name no removed export, and no renamed sett
       expect(check("An `InMemoryBlockSource`, a `BlockSourceKind`, `startProcesses`.")).toEqual([]);
     });
 
-    it("fails on an old key in a paragraph without its new key; passes the README's form of the note", () => {
+    it("fails on an old key, with its line, also beside its new key; the new keys alone pass", () => {
       expect(check("Set `listen.transport` to the address.")).toEqual([
-        "x.md:1: writes listen.transport, renamed listen.privateLink, without naming listen.privateLink (CF-4)",
+        "x.md:1: names listen.transport, the old key of listen.privateLink; only the changelog records renames (CF-4)",
       ]);
-      expect(check("The link (`privateLink`; it was\n`coreTransport`, now refused).")).toEqual([]);
-      expect(check("The link (`privateLink`).\n\nIt was `coreTransport`.")).toEqual([
-        "x.md:3: writes coreTransport, renamed privateLink, without naming privateLink (CF-4)",
+      expect(check("The link (`privateLink`; it was\n`coreTransport`, now refused).")).toEqual([
+        "x.md:2: names coreTransport, the old key of privateLink; only the changelog records renames (CF-4)",
       ]);
+      expect(check("The link (`privateLink`, the public `listen.privateLink`).")).toEqual([]);
     });
 
     it("reads each table row as a paragraph of its own", () => {
       const table = ["| Key | |", "|---|---|", "| `listen.privateLink` | the link |", "| `listen.transport` | old |"];
       expect(check(table.join("\n"))).toEqual([
-        "x.md:4: writes listen.transport, renamed listen.privateLink, without naming listen.privateLink (CF-4)",
+        "x.md:4: names listen.transport, the old key of listen.privateLink; only the changelog records renames (CF-4)",
       ]);
     });
 
-    it("the real README fails with its rename note's new key taken out", () => {
-      const readme = read("README.md").replace("| `listen.privateLink` | none |", "| `listen.link` | none |");
-      expect(sweepProblems([{ file: "README.md", text: readme }], AMENDMENT.removed, RENAMED)).toEqual([
-        expect.stringMatching(/^README\.md:\d+: writes listen\.transport, renamed listen\.privateLink/),
+    it("the real README fails with a rename note put back in its settings table", () => {
+      const row = "| `listen.privateLink` | none | The private processes' link |";
+      const readme = read("README.md");
+      expect(readme).toContain(row);
+      const noted = readme.replace(row, "| `listen.privateLink` | none | The private processes' link (was `listen.transport`) |");
+      expect(sweepProblems([{ file: "README.md", text: noted }], AMENDMENT.removed, RENAMED)).toEqual([
+        expect.stringMatching(/^README\.md:\d+: names listen\.transport, the old key of listen\.privateLink/),
       ]);
     });
   });

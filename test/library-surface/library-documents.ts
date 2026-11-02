@@ -9,8 +9,8 @@
  *   `node:sqlite`, whose `ExperimentalWarning` no longer prints; the six new refusal codes; `callback-error` and
  *   `listen-failed` with `ERROR_CODES`; the exports the change removed and the values it added.
  * - **The documents' sweep** ({@link sweepProblems}): no paragraph of a document a user reads names a removed export
- *   as a word (`InMemoryBlockSource` is not `BlockSource`), and a paragraph that names a renamed setting's old key also
- *   names its new one, in backticks (README's notes of the rename). A paragraph is a run of lines between blank lines,
+ *   as a word (`InMemoryBlockSource` is not `BlockSource`) or a renamed setting's old key: those documents describe the
+ *   current version, and only the changelog records what changed. A paragraph is a run of lines between blank lines,
  *   each Markdown table row one of its own; the line reported is the name's own.
  *
  * Pure functions over texts; `./library-documents.test.ts` gives them the tree, the change's design (its §4 Exports
@@ -118,8 +118,8 @@ const namesWord = (line: string, name: string): boolean =>
   new RegExp(`(?<![A-Za-z0-9_$])${name.replaceAll(".", "\\.")}(?![A-Za-z0-9_$])`).test(line);
 
 /**
- * The problems of the documents' sweep (see the module comment): each `file:line` naming a removed export, or an old
- * key in a paragraph that does not name its new key in backticks.
+ * The problems of the documents' sweep (see the module comment): each `file:line` naming a removed export or a
+ * renamed setting's old key.
  */
 export function sweepProblems(documents: readonly Document[], removed: readonly string[], renamed: readonly Renamed[]): string[] {
   const problems: string[] = [];
@@ -131,8 +131,8 @@ export function sweepProblems(documents: readonly Document[], removed: readonly 
           if (namesWord(line, name)) problems.push(`${at}: names ${name}, which the package no longer exports (LS-1)`);
         }
         for (const { from, to } of renamed) {
-          if (namesWord(line, from) && !paragraph.lines.some((other) => other.includes(`\`${to}\``))) {
-            problems.push(`${at}: writes ${from}, renamed ${to}, without naming ${to} (CF-4)`);
+          if (namesWord(line, from)) {
+            problems.push(`${at}: names ${from}, the old key of ${to}; only the changelog records renames (CF-4)`);
           }
         }
       });
