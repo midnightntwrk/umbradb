@@ -293,7 +293,9 @@ before the review.
 
 ## 10. Review (AGENTS.md stage 4, bounded)
 
-- [ ] 10.1 The three lanes on the final tree: spec compliance, cold adversarial, release.
+- [x] 10.1 The three lanes on the final tree: spec compliance, cold adversarial, release.
+      **Done (2026-11-01, on `c3bc7de`):** spec compliance PASS (claude-opus-5-5; 3 MAJOR, 4 MINOR, 1 NIT); cold
+      adversarial BLOCK (Codex, gpt-6-astra; 2 BLOCKER, 2 MAJOR, 1 MINOR); release BLOCK (Codex, gpt-6-astra; 2 BLOCKER).
 - [ ] 10.2 Blocking findings fixed, then one targeted fix check by a reviewer other than the fixer; every finding still
       open recorded for the owner.
       **In progress (2026-11-01):** the fixes are done, the targeted fix check next. The code defects (cold lane C-F1 …
@@ -328,6 +330,14 @@ before the review.
       test that read a throwing one as no limit rewritten); and, found by the search of the change's channel code,
       `messagePortChannel` reads a port's event data inside a guard, one that cannot be read being no text (`dc16a06`;
       L33). Issue 00070 filed beside, skipped. P10.4c's and P10.4d's targeted fix check next.
+      **The second targeted fix check (2026-11-02, Codex, on `74ebc7b`): BLOCK** — N1, N2, N3's reason, and issue
+      00068's three readers resolved, each counterexample rerun and each fix seen failing its regression with the fix
+      put back; C-F2's residual partly (a nested `Proxy` whose `ownKeys` throws stops the collection of readable
+      sibling secrets); one MAJOR introduced by N3's fix, M1: the fields the redaction keeps whole — a finding's path
+      and field, a declaration's unknown field, a class name in `found` — carry host-written keys, so a configuration
+      key equal to a secret's text shows the secret. Under the bounded-review rule no further automated round runs: M1
+      and C-F2's residual are the owner's (Q-23), with Q-1, Q-11, Q-19, Q-20, Q-21, Q-22 and the design amendments
+      of 8.5. **Open for the owner.**
 
 ## 11. Close-out
 

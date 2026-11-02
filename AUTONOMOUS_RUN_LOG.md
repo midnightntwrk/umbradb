@@ -521,3 +521,16 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   by place in the plan. *Follow-up:* issue 00070 (a host channel that tells its close at once makes `api.connect`'s
   slow-subscriber disconnect unsubscribe inside the module's emit), filed beside, skipped; P10.4c's and P10.4d's
   targeted fix check next.
+- **R6 — N3's fix kept whole fields that carry host-written text, found by the second targeted fix check**
+  (`plan-task-runner / claude-opus-5-5 / P10.4c`, the fix; found by Codex, gpt-6-astra, the second fix check on
+  `74ebc7b`; recorded by the orchestrator, `claude-opus-5-5`). To keep a refusal's machine-readable words when a
+  secret's text equals them (N3), `e13b9df` left a set of detail fields unredacted by name — a finding's `path` and
+  `field`, a declaration's field, a class name in `found` — but those fields are built from the host's own keys and
+  names: a configuration key equal to the password's text shows it in the log, `started`'s details and `status()`
+  (M1, CF-4). C-F2's residual fix collects the secrets of data that is not plain data, but a nested `Proxy` whose
+  `ownKeys` throws stops the walk and drops readable sibling secrets. *Second story:* the redaction is a text
+  substitution of known secret values over whatever is shown, and each fix narrowed or widened it by field name; a
+  rule by field name cannot tell UmbraDB's own words from host text built into the same field, and each round's
+  regression varied only the field the finding named. *Follow-up:* the bounded review's automated rounds are spent
+  (one full round, a targeted fix check, and the edit's own check); M1 and the residual go to the owner as Q-23
+  (fix by value and context, accept with a reason, or revisit the redaction's design), 2026-11-02.
