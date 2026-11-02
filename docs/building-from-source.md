@@ -8,7 +8,7 @@ UmbraDB straight from a clone. Both need Node.js 24 or later and git.
 
 ```sh
 git clone https://github.com/midnightntwrk/umbradb
-cd umbradb && git checkout -q v0.10.0-rc.1             # the release's code
+cd umbradb && git checkout -q v0.10.0-rc.2             # the release's code
 npm ci && npm run build && npm pack                    # writes umbradb-0.10.0.tgz
 cd .. && mkdir my-indexer && cd my-indexer
 npm init -y && npm pkg set type=module
@@ -19,7 +19,7 @@ The tarball holds what a release's tarball holds: `npm pack` follows `package.js
 quick start goes on as written: `umbradb.config.ts`, then `npx umbradb config check umbradb.config.ts` and
 `npx umbradb run`.
 
-The commands build `v0.10.0-rc.1`; for another version, check out its tag instead. The tarball's SHA-256
+The commands build `v0.10.0-rc.2`; for another version, check out its tag instead. The tarball's SHA-256
 (`shasum -a 256 umbradb-0.10.0.tgz`) can be compared with the one the release lists; a different npm or Node.js
 version may give a different tarball from the same sources.
 
@@ -29,7 +29,7 @@ Without packing anything: build once, then run the command from `dist/`.
 
 ```sh
 git clone https://github.com/midnightntwrk/umbradb
-cd umbradb && git checkout -q v0.10.0-rc.1             # the release's code
+cd umbradb && git checkout -q v0.10.0-rc.2             # the release's code
 npm ci && npm run build
 node dist/cli/main.js config check umbradb.config.ts
 node dist/cli/main.js run                                # reads ./umbradb.config.ts; Ctrl-C stops it

@@ -49,10 +49,10 @@ file imports `umbradb` from the project's `node_modules`, and the install also a
 (`npx umbradb`).
 
 ```sh
-npm install https://github.com/midnightntwrk/umbradb/releases/download/v0.10.0-rc.1/umbradb-0.10.0.tgz
+npm install https://github.com/midnightntwrk/umbradb/releases/download/v0.10.0-rc.2/umbradb-0.10.0.tgz
 ```
 
-`v0.10.0-rc.1` is a pre-release of 0.10.0, for review and feedback. To update, run it again with the new release's
+`v0.10.0-rc.2` is a pre-release of 0.10.0, for review and feedback. To update, run it again with the new release's
 URL. To build the package yourself, or to run UmbraDB from a clone,
 see [Building from source](docs/building-from-source.md).
 
@@ -112,7 +112,7 @@ modules); name your own module to change it.
 ```sh
 git clone https://github.com/midnightntwrk/umbradb my-web-indexer
 cd my-web-indexer
-git checkout -q v0.10.0-rc.1                                  # the release's code
+git checkout -q v0.10.0-rc.2                                  # the release's code
 npm ci
 node browser/build.ts --configuration browser/src/config.ts   # builds the page into dist-browser/
 node browser/serve.ts                                         # serves it on 127.0.0.1:8090; Ctrl-C stops it
