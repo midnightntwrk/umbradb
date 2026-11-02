@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 import { type EmitWarning, isSqliteWarning, quietImport, type WarningHook } from "../../src/db/pglite-lock.js";
 import { runQuietChild } from "../library/quiet-child.js";
@@ -14,7 +15,8 @@ import { runQuietChild } from "../library/quiet-child.js";
  * - the same two in the real process: another `ExperimentalWarning` the host emits while the import runs reaches its
  *   listener and stderr, and a host that replaces `process.emitWarning` meanwhile keeps its replacement;
  * - the negative control imports `node:sqlite` through the same wrapper with nothing dropped: its warning reaches the
- *   listener and stderr.
+ *   listener and stderr. A Node.js that prints no warning for `node:sqlite` (24.22.1 does not; 24.9.0 does) leaves the
+ *   wrapper nothing to drop: there the control passes when nothing reaches the listener or stderr.
  *
  * The wrapper's rules are checked with a load the test settles itself and a hook of its own (no `process`); the real
  * import in child processes, since `node:sqlite` warns once per process.
@@ -46,6 +48,10 @@ function testHook() {
 }
 
 const SQLITE = ["SQLite is an experimental feature and might change at any time", "ExperimentalWarning", undefined, undefined];
+
+/** Whether the running Node.js prints a warning when `node:sqlite` loads, read in a process of its own. [L3] */
+const NODE_WARNS_ON_SQLITE = spawnSync(process.execPath, ["-e", "require('node:sqlite')"], { encoding: "utf8" })
+  .stderr.includes("SQLite is an experimental feature");
 
 /** What `./sqlite-warning.child.ts` writes to its result file. */
 interface ChildResult {
@@ -174,6 +180,12 @@ describe("L3: the node:sqlite warning is dropped through one shared import (G2)"
   it("negative control: the same wrapper dropping nothing lets node:sqlite's warning reach the listener and stderr", async () => {
     const run = await runQuietChild<ChildResult>("../db/sqlite-warning.child.ts", { mode: "control" });
     expect(run.code).toBe(0);
+    if (!NODE_WARNS_ON_SQLITE) {
+      // This Node.js prints no warning for node:sqlite: nothing to drop, and nothing reaches the host.
+      expect(run.result).toEqual({ warnings: [], restored: true, finished: [] });
+      expect(run.stderr).not.toContain("SQLite");
+      return;
+    }
     expect(run.result).toEqual({
       warnings: ["ExperimentalWarning: SQLite is an experimental feature and might change at any time"],
       restored: true,
