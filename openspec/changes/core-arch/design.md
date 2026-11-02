@@ -1839,7 +1839,8 @@ settings, the database parts) reach a host program through `coreEntry`'s paramet
 `umbradb backup --out <file> [--config <file>]`, `umbradb restore <file>` — `package.json`'s `bin` `umbradb`
 (`dist/cli/main.js`, task 4.4). `--update-hash` (task 14.1c, PP-14, Q159) takes a configuration hash as a start that
 stopped with `public-config-changed` names it (`0x` and 64 lowercase hex digits; another form, or the flag twice,
-prints the usage and exits 2) and is `startProcess`'s `updateHash`: the hash a private process accepts at this start.
+prints the usage and exits 2) and is the engine's `acceptPublicConfigHash` (`startUmbraDB`'s option of that name,
+`start-umbradb` design §4): the hash a private process accepts at this start.
 No command, or any other, or a wrong argument, prints the usage and exits 2; a failed check exits 1; `run` (task 4.4a,
 §7) runs until SIGTERM or SIGINT and exits 1 when startup refused or processing halted, else 0, and exits 1 at once
 when the configuration itself is refused (Q137 B, task 8.1b); `backup` exits 0 once its file is written and 1 when
