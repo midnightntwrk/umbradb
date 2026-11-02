@@ -1,17 +1,14 @@
-import { readConfigHash } from "../../src/backbone/core-chain/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UMBRADB_VERSION } from "../../src/config/build.js";
-import type { DatabaseParts, PostgresParts } from "../../src/config/database-parts.js";
-import type { PlainObject } from "../../src/config/plain-data.js";
 import { engineInputOf, handleOf, startUmbraDB, type UmbraDBHandle, type UmbraDBOptions } from "../../src/library/start-umbradb.js";
 import type { ModuleApi } from "../../src/runner/module-api.js";
 import { ModuleApi as RealModuleApi } from "../../src/runner/module-api.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { EngineOptions } from "../../src/runner/process.js";
 import { gate } from "../admin/admin-harness.js";
-import { SECRET, SECRET_FORMS, SECRET_NODE, secretDatabase } from "../admin/secrets.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { startProcess } from "../runner/process-build.js";
+import { HASH, hashesOfSecrets, hashProblems } from "./config-hash-cases.js";
 import { cursorReaches, libraryData } from "./library-fixtures.js";
 import {
   Client,
@@ -35,22 +32,24 @@ import {
  * - **L23**: every module-API answer, mounted and on the listener, carries `X-Umbra-Version` once; before the
  *   configuration hash exists (a module's `on-start-db` held) the mounted answers — the lifecycle's 503 and the
  *   upgrade's — carry no `X-Umbra-Config-Hash`; once it exists (the bootstrap's wait, serving, after the stop's drain)
- *   every answer carries the same one, the listener's.
+ *   every answer carries the same one, the listener's: a route's answers, a 404, a 405, the module API's own 400, 413
+ *   and 500, and on PostgreSQL its 504.
  * - **L24** `[NEG]`: mounted `api.http`, a body over the module API's limit gets 413 `request-too-large`, as on the
  *   listener; on PostgreSQL a read past `apiReadTimeoutMs` fails `query-timeout` (504), as on the listener; on PGlite a
  *   read past it completes, as on the listener (DB-15). Controls: the mounted path without the body limit, and over a
  *   module API whose read is not bounded, each fail the oracle.
  * - **L68** `[NEG]`: through mounted `api.upgrade`, as on the listener: a message that is not a JSON object with a
- *   type, a `subscribe` without a valid id, an unknown type, an `unsubscribe` whose id is an object whose conversion
- *   to text throws are answered `invalid-request` (the connection goes on), an unknown subscription
+ *   type (text that is no JSON, a list, a string, a number, null, an object without a type), a `subscribe` without a
+ *   valid id or name, an unknown type, an `unsubscribe` whose id is an object whose conversion to text throws are
+ *   answered `invalid-request` (the connection goes on), an unknown subscription
  *   name `not-found`; a message over the module API's 64 KiB closes the connection (1009); a subscriber holding more
  *   than 1 MiB unsent is disconnected; the upgrade's 101 carries `X-Umbra-Version` and `X-Umbra-Config-Hash`, which
  *   holds no secret and does not change with one (a password in `database` on PostgreSQL; a TLS key and a node URL's
- *   credentials on PGlite). Controls, each on the mounted path only: no error answers, no message limit, no
- *   slow-subscriber check, no core headers; and a configuration hash over the secrets.
+ *   credentials on PGlite; the run and oracle are `./config-hash-cases.ts`'s). Controls, each on the mounted path only:
+ *   no error answers, no message limit, no slow-subscriber check, no core headers; and, in
+ *   `./mounted-api.negative-control.test.ts`, a configuration hash over the secrets on the mounted handlers only.
  */
 
-const HASH = /^0x[0-9a-f]{64}$/;
 
 /** A JSON body one byte over the module API's default limit (1 MiB): a handler without the limit would echo it. */
 const OVERSIZE = JSON.stringify("x".repeat(1_048_575));
@@ -133,14 +132,40 @@ interface SubscriptionSeen {
   readonly slowDisconnected: boolean;
 }
 
-/** The answers the protocol's checks give (as the listener gives them). */
+/**
+ * The protocol's malformed messages, in order: text that is no JSON, JSON that is no object (a list, a string, a
+ * number, null), an object without a type, an unknown type, `subscribe`s without a valid id or name (an id that is
+ * no string or is empty, a name missing or no string), an unknown subscription name. [L68]
+ */
+const PROTOCOL_MESSAGES: readonly unknown[] = [
+  "{not json",
+  "[1,2]",
+  '"text"',
+  "42",
+  "null",
+  {},
+  { type: "dance" },
+  { type: "subscribe", id: 7, name: "feed" },
+  { type: "subscribe", id: "", name: "feed" },
+  { type: "subscribe", id: "y" },
+  { type: "subscribe", id: "y", name: 7 },
+  { type: "subscribe", id: "x", name: "nothing" },
+];
+
+/** The answer to a message that is no JSON object with a type. */
+const NOT_AN_OBJECT = { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } };
+
+/** The answer to a `subscribe` without a valid id and name. */
+const NO_ID_AND_NAME = {
+  type: "error",
+  error: { code: "invalid-request", message: "a subscribe message has an id, a string of 1 to 128 characters, and a name, a string" },
+};
+
+/** The answers the protocol's checks give (as the listener gives them), one for each of {@link PROTOCOL_MESSAGES}, then the poisoned unsubscribe's. */
 const PROTOCOL_ERRORS = [
-  { type: "error", error: { code: "invalid-request", message: "a message is a JSON object with a type" } },
+  ...Array.from({ length: 6 }, () => NOT_AN_OBJECT),
   { type: "error", error: { code: "invalid-request", message: "a message's type is subscribe or unsubscribe" } },
-  {
-    type: "error",
-    error: { code: "invalid-request", message: "a subscribe message has an id, a string of 1 to 128 characters, and a name, a string" },
-  },
+  ...Array.from({ length: 4 }, () => NO_ID_AND_NAME),
   { type: "error", id: "x", error: { code: "not-found", message: "no subscription is named nothing" } },
   // An id whose conversion to text throws: answered, never thrown out of the socket's callback. [LM-4, LM-10]
   { type: "error", error: { code: "invalid-request", message: "an unsubscribe message's id is a string, not an object" } },
@@ -155,9 +180,7 @@ const POISONED_UNSUBSCRIBE = '{"type":"unsubscribe","id":{"toString":null}}';
  */
 async function subscriptionSeen(ws: string, hooks: MapiHooks): Promise<SubscriptionSeen> {
   const protocol = await Client.connect(ws);
-  for (const message of ["{not json", { type: "dance" }, { type: "subscribe", id: 7, name: "feed" }, { type: "subscribe", id: "x", name: "nothing" }, POISONED_UNSUBSCRIBE]) {
-    protocol.send(message);
-  }
+  for (const message of [...PROTOCOL_MESSAGES, POISONED_UNSUBSCRIBE]) protocol.send(message);
   // Every answer comes within 3 s, or the check counts what came.
   await protocol.until(PROTOCOL_ERRORS.length, 3_000).catch(() => undefined);
   const errors = [...protocol.messages];
@@ -200,9 +223,6 @@ function subscriptionProblems(where: string, seen: SubscriptionSeen): string[] {
   return problems;
 }
 
-/** `text`'s forms a header could show it in: as written, and its UTF-8 bytes as hex. */
-const formsOf = (text: string): readonly string[] => [text, Buffer.from(text, "utf8").toString("hex")];
-
 describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-4)", (backend: ProcessBackend) => {
   const postgres = backend.kind === "postgres";
   beforeAll(() => backend.start(), 180_000);
@@ -214,7 +234,13 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-
     const m = mapiModule(hooks);
     // S = 1 above the head: once on-start-db ran (and the hash was read), startup waits for the node.
     const source = new InMemoryBlockSource({ head: 0n });
-    const handle = startUmbraDB({ config: { data: libraryData(db.setting, [m]) }, modules: [m], source, network: { api: { port: 0 } } });
+    // A read bound to 1 s, so that on PostgreSQL a read past it answers 504. [DB-15]
+    const handle = startUmbraDB({
+      config: { data: libraryData(db.setting, [m], { apiReadTimeoutMs: 1_000 }) },
+      modules: [m],
+      source,
+      network: { api: { port: 0 } },
+    });
     const host = await mountHandlers(handle);
     const problems: string[] = [];
     try {
@@ -247,6 +273,18 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-
           problems.push(...coreHeaderProblems(`${where} ${path}`, await exchange(origin, "GET", path), hash));
         }
         problems.push(...coreHeaderProblems(`${where} POST /rows`, await exchange(origin, "POST", "/rows", "{}"), hash));
+        // The module API's own error answers: a body that is no JSON (400), one over the limit (413), a handler that
+        // throws (500), and on PostgreSQL a read past apiReadTimeoutMs (504).
+        const errors: (readonly [string, number, Exchanged])[] = [
+          ["POST /echo, no JSON", 400, await exchange(origin, "POST", "/echo", "{not json")],
+          ["POST /echo, over the limit", 413, await exchange(origin, "POST", "/echo", OVERSIZE)],
+          ["GET /fails", 500, await exchange(origin, "GET", "/fails")],
+          ...(postgres ? [["GET /sleep", 504, await exchange(origin, "GET", "/sleep")] as const] : []),
+        ];
+        for (const [what, status, answer] of errors) {
+          if (answer.status !== status) problems.push(`${where} ${what}: answered ${answer.status}, not ${status}`);
+          problems.push(...coreHeaderProblems(`${where} ${what}`, answer, hash));
+        }
         const upgraded = await upgradeHead(origin);
         expect(upgraded.upgraded, where).toBe(true);
         problems.push(...upgradeHeaderProblems(`${where} upgrade`, upgraded.head, hash));
@@ -396,72 +434,10 @@ describe.each(PROCESS_BACKENDS)("the module API's mounted handlers on $name (LM-
     }
   }, 300_000);
 
-  /**
-   * The mounted upgrade's configuration hash of two processes whose configurations differ only in their secrets — on
-   * PostgreSQL the password of `database` (two logins), on PGlite a TLS key and the node URL's credentials — with
-   * `configHash` the engine's (the real one unless a control gives one); and every secret they were given.
-   */
-  async function hashesOfSecrets(configHash?: EngineOptions["configHash"]): Promise<{ readonly hashes: readonly (string | null)[]; readonly secrets: readonly string[] }> {
-    const variants: { readonly database: DatabaseParts; readonly extra: Readonly<Record<string, unknown>>; readonly secrets: readonly string[] }[] = [];
-    if (postgres) {
-      const first = await secretDatabase(await backend.database());
-      const plain = (await backend.database()).setting as PostgresParts;
-      variants.push({ database: first, extra: {}, secrets: [SECRET] }, { database: plain, extra: {}, secrets: plain.password === undefined ? [] : [plain.password] });
-    } else {
-      const tls = (key: string) => ({ certificate: "-----BEGIN CERTIFICATE-----\nnot-checked\n-----END CERTIFICATE-----", key, trustedRoots: [] });
-      variants.push(
-        { database: (await backend.database()).setting, extra: { tls: tls("first-tls-key-secret"), node: SECRET_NODE }, secrets: ["first-tls-key-secret", SECRET] },
-        { database: (await backend.database()).setting, extra: { tls: tls("second-tls-key-secret"), node: "ws://other:second-node-secret@127.0.0.1:9/node" }, secrets: ["second-tls-key-secret", "second-node-secret"] },
-      );
-    }
-    const hashes: (string | null)[] = [];
-    for (const variant of variants) {
-      const m = mapiModule({ emits: new Set() });
-      const options: UmbraDBOptions = { config: { data: libraryData(variant.database, [m], variant.extra) }, modules: [m], source: new InMemoryBlockSource({ head: 1n }) };
-      const handle = configHash === undefined ? startUmbraDB(options) : startWithSeams(options, { configHash });
-      const host = await mountHandlers(handle);
-      try {
-        await handle.started;
-        await cursorReaches(handle, 1n);
-        const head = (await upgradeHead(host.origin)).head;
-        hashes.push(rawHeaderValues(head, "x-umbra-config-hash")[0] ?? null);
-      } finally {
-        await handle.stop();
-        await host.close();
-      }
-    }
-    return { hashes, secrets: variants.flatMap((variant) => variant.secrets) };
-  }
-
-  /** The L68 hash oracle: one hash for both, of the hash's form, holding none of the secrets. */
-  function hashProblems(seen: { readonly hashes: readonly (string | null)[]; readonly secrets: readonly string[] }): string[] {
-    const problems: string[] = [];
-    if (new Set(seen.hashes).size !== 1) problems.push(`the hash changed with only secrets changed: ${JSON.stringify(seen.hashes)}`);
-    for (const hash of seen.hashes) {
-      if (hash === null || !HASH.test(hash)) problems.push(`the upgrade's X-Umbra-Config-Hash is ${String(hash)}`);
-      for (const secret of [...seen.secrets, ...SECRET_FORMS]) {
-        if (hash !== null && formsOf(secret).some((form) => form !== "" && hash.includes(form))) problems.push(`the hash holds the secret ${secret}`);
-      }
-    }
-    return problems;
-  }
-
   it("L68: the upgrade's X-Umbra-Config-Hash neither holds nor changes with a secret of the configuration", async () => {
-    expect(hashProblems(await hashesOfSecrets())).toEqual([]);
-  }, 180_000);
-
-  it("L68's negative control: a configuration hash over a secret changes with it and holds it", async () => {
-    // The hash is the first secret's bytes as hex, in the hash's form: the database's password, or the TLS key.
-    const showingSecret: NonNullable<EngineOptions["configHash"]> = async (read, core) => {
-      await readConfigHash(read);
-      const settings = core.settings as PlainObject;
-      const secret = postgres
-        ? String((settings.database as PlainObject).password ?? "")
-        : String((settings.tls as PlainObject).key);
-      return `0x${Buffer.from(secret, "utf8").toString("hex").padEnd(64, "0").slice(0, 64)}`;
-    };
-    const problems = hashProblems(await hashesOfSecrets(showingSecret));
-    expect(problems.some((problem) => problem.startsWith("the hash changed with only secrets changed"))).toBe(true);
-    expect(problems.some((problem) => problem.startsWith("the hash holds the secret"))).toBe(true);
+    // The run and its oracle (`./config-hash-cases.ts`): the mounted upgrade's hash, and the listener's the same.
+    const seen = await hashesOfSecrets(backend);
+    expect(hashProblems("mounted", seen.hashes, seen.secrets)).toEqual([]);
+    expect(seen.listener).toEqual(seen.hashes);
   }, 180_000);
 });

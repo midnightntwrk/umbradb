@@ -20,7 +20,9 @@ import { privateCoreEntry, type PublicCore, startPublicCore } from "../private/b
 import { makeCertificates, type TestCertificates } from "../private/certificates.js";
 import { freePort } from "../runner/process-harness.js";
 import { coreSettings, startProcess, startWithoutAdmin } from "../runner/process-build.js";
+import { channelCore, channelPrivate, linkTo } from "./channel-processes.js";
 import { cursorReaches, libraryData, rowsModule } from "./library-fixtures.js";
+import { mountHandlers } from "./mounted-fixtures.js";
 
 /**
  * Where a library process listens and connects, from its network plan `[CI]`, on PostgreSQL 18 (Docker) and PGlite
@@ -35,8 +37,10 @@ import { cursorReaches, libraryData, rowsModule } from "./library-fixtures.js";
  *   `started`'s first reaction; after a class-B refusal admin's stays and answers, the link's (closed) is null, the
  *   module API's (never bound) null; after `closed`, all are null.
  * - **L22**: `/config` of a library process shows its revision's `listen` and `privateLink` as the plan's addresses as
- *   bound, absent where nothing listens or connects, and `network` naming each surface's mode; the command's keeps its
- *   `listen` as written and gains `network`. Each body validates against A66's schema.
+ *   bound, absent where nothing listens or connects at an address — admin mounted, the module API mounted, a link over
+ *   channels or `connect` — and `network` naming each surface's mode (`mounted`, `listening`, `channels`, `connect`,
+ *   `none`); the command's keeps its `listen` as written and gains `network`, through the engine's `"configured"` mode
+ *   and through `umbradb run` itself. Each body validates against A66's schema.
  * - **L64**: a private configuration that writes `listen.privateLink` (no surface of a private process): `umbradb run`
  *   starts as today, listens nowhere for it and refuses nothing; `startUmbraDB` on the same configuration likewise.
  */
@@ -375,6 +379,48 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
     }
   }, 240_000);
 
+  it("L22: mounted admin and module API, no link: /config's listen holds no address, network names each mounted", async () => {
+    const db = await backend.database("public");
+    const handle = libraryCore(db, 3n, {}, {});
+    const host = await mountHandlers(handle);
+    try {
+      await handle.started;
+      expect(handle.status().listening).toEqual({ api: null, admin: null, privateLink: null });
+      const config = await configWhen(host.admin, (shown) => shown.network !== null);
+      expect(config.network).toEqual({ api: "mounted", admin: "mounted", privateLink: "none" });
+      // Admin mounted listens nowhere: its address, written as the default or not, is absent.
+      expect(config.core.settings.listen).toEqual({});
+      expect(Object.hasOwn(config.core.settings, "privateLink")).toBe(false);
+    } finally {
+      await handle.stop();
+      await host.close();
+    }
+  }, 240_000);
+
+  it("L22: a private process over { connect }: /config names the link's mode connect, with no address", async () => {
+    const publicDb = await backend.database("public");
+    const privateDb = await backend.database("private");
+    const core = channelCore(publicDb, { head: 3n });
+    try {
+      await core.handle.started;
+      const instance = channelPrivate(privateDb, publicDb, { instanceId: "l22-connect", connect: linkTo(core.handle).connect });
+      const host = await mountHandlers(instance.handle);
+      try {
+        await cursorReaches(instance.handle, 3n, FOLLOWS_MS);
+        const config = await configWhen(host.admin, (shown) => shown.network !== null);
+        expect(config.network).toEqual({ api: "mounted", admin: "mounted", privateLink: "connect" });
+        // The link connects through the host's connect(), at no address: privateLink is absent, and listen holds none.
+        expect(Object.hasOwn(config.core.settings, "privateLink")).toBe(false);
+        expect(config.core.settings.listen ?? {}).toEqual({});
+      } finally {
+        await instance.handle.stop();
+        await host.close();
+      }
+    } finally {
+      await core.handle.stop();
+    }
+  }, 300_000);
+
   it("L22: the command's /config keeps its listen as written and gains network", async () => {
     const db = await backend.database("public");
     const listen = { api: "127.0.0.1:0", admin: "127.0.0.1:0" };
@@ -393,6 +439,27 @@ describe.each(PRIVATE_BACKENDS)("L21, L22: listeners at port 0 and what /config 
       expect(config.network).toEqual({ api: "listening", admin: "listening", privateLink: "none" });
     } finally {
       await handle.stop();
+    }
+    // The same through umbradb run itself (runProcess): its configuration file, its admin listener, SIGTERM to end it.
+    const dir = mkdtempSync(join(tmpdir(), "umbradb-l22-command-"));
+    const signals = new EventEmitter();
+    let command: ProcessHandle | undefined;
+    try {
+      const other = await backend.database("public");
+      writeFileSync(join(dir, "umbradb.config.ts"), `export default ${JSON.stringify(libraryData(other.setting, [], { listen }))};\n`);
+      const run = runProcess({ cwd: dir, log: () => undefined }, { signals, backupSignals: new EventEmitter(), started: (started) => (command = started) });
+      try {
+        await until(() => command?.listening().admin != null, "umbradb run's admin listener");
+        const admin = command?.listening().admin;
+        const config = await configWhen(`http://127.0.0.1:${admin?.port}`, (shown) => shown.network !== null);
+        expect(config.core.settings.listen).toEqual(listen);
+        expect(config.network).toEqual({ api: "listening", admin: "listening", privateLink: "none" });
+      } finally {
+        signals.emit("SIGTERM");
+        await run;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   }, 240_000);
 });

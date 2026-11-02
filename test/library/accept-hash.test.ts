@@ -1,8 +1,15 @@
+import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { runProcess } from "../../src/cli/run.js";
 import { startUmbraDB, type UmbraDBHandle } from "../../src/library/start-umbradb.js";
+import type { ProcessHandle } from "../../src/runner/process.js";
 import { PRIVATE_BACKENDS, type PrivateBackend, type TestDatabase } from "../private/backends.js";
 import { launchPublicCore, type PublicCore, privateCoreEntry } from "../private/builds.js";
 import { pub } from "../private/config-hash-checks.js";
+import { startWithoutAdmin } from "../runner/process-build.js";
 import { cursorReaches } from "./library-fixtures.js";
 
 /**
@@ -13,6 +20,10 @@ import { cursorReaches } from "./library-fixtures.js";
  * reads its public database directly (its `publicDatabase`); on PGlite 0.5.10 through the core's link, which its
  * network request connects to (`privateSide: true`, the core's address written as its `privateLink`).
  * [LM-9, LM-3, PP-14, Q159]
+ *
+ * L55's `--update-hash` half, through `umbradb run` itself (`runProcess`, the private configuration in its file): once
+ * the core's hash changed again (C), the command without `--update-hash` stops with `public-config-changed` naming C,
+ * and with `--update-hash=C` it records C and follows. [L55, PP-14]
  */
 
 /** `pub`'s entries: `level` 0 from 1 and `level` from 30, a data field above the cursor. */
@@ -104,5 +115,83 @@ describe.each(PRIVATE_BACKENDS)("L50: acceptPublicConfigHash lets a private data
     await cursorReaches(again, 8n);
     await again.stop();
     expect(again.status().reason).toBeNull();
+  }, 300_000);
+
+  /**
+   * One `umbradb run` (`runProcess`, no admin listener) of a private process on `database` from its configuration file
+   * in a directory of its own, with `--update-hash` as `updateHash` when given: how its startup settled, and the cursor it
+   * reached (`until`, when it started); then SIGTERM. [L55, PP-14]
+   */
+  async function commandRun(database: TestDatabase, updateHash: string | undefined, until: bigint): Promise<{ readonly refusal: { code: string; details: { found: string } } | null; readonly cursor: bigint | null }> {
+    const dir = mkdtempSync(join(tmpdir(), "umbradb-l55-update-hash-"));
+    const signals = new EventEmitter();
+    let handle: ProcessHandle | undefined;
+    try {
+      const entry = privateCoreEntry({
+        database: database.setting,
+        instanceId: "command-acceptor",
+        ...(linked
+          ? { privateLink: (core as PublicCore).transport() }
+          : { publicDatabase: publicDb.readerSetting as NonNullable<TestDatabase["readerSetting"]> }),
+      });
+      writeFileSync(join(dir, "umbradb.config.ts"), `export default ${JSON.stringify({ entries: [entry] })};\n`);
+      const run = runProcess(
+        { cwd: dir, log: () => undefined, ...(updateHash === undefined ? {} : { updateHash }) },
+        { signals, backupSignals: new EventEmitter(), start: startWithoutAdmin, started: (started) => (handle = started) },
+      );
+      try {
+        while (handle === undefined) await new Promise((resolve) => setTimeout(resolve, 10));
+        const started = handle;
+        const refusal = await started.started.then(
+          () => null,
+          (error: { code: string; details: { found: string } }) => error,
+        );
+        if (refusal === null) {
+          const deadline = Date.now() + 120_000;
+          while (started.status().cursor !== until && started.status().ended === null && Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+        }
+        return { refusal, cursor: started.status().cursor };
+      } finally {
+        signals.emit("SIGTERM");
+        await run;
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it("L55: umbradb run --update-hash=<hash> reaches the private source: refused on C without it, continuing on C with it", async () => {
+    // A private database of its own, recording the core's hash now (B, the test above's), through the library.
+    const other = await backend.database("private");
+    const recorder = startUmbraDB({
+      config: {
+        data: {
+          entries: [
+            privateCoreEntry({
+              database: other.setting,
+              instanceId: "command-acceptor",
+              ...(linked
+                ? { privateLink: (core as PublicCore).transport() }
+                : { publicDatabase: publicDb.readerSetting as NonNullable<TestDatabase["readerSetting"]> }),
+            }),
+          ],
+        },
+      },
+      ...(linked ? { network: { privateLink: { privateSide: true } } } : {}),
+    });
+    await recorder.started;
+    await cursorReaches(recorder, 8n);
+    await recorder.stop();
+    // The core's data field changes again (hash C): the command without --update-hash stops, naming C.
+    await runCore(11n, 3);
+    const refused = await commandRun(other, undefined, 11n);
+    expect(refused.refusal?.code).toBe("public-config-changed");
+    const found = refused.refusal?.details.found as string;
+    expect(found).toMatch(/^0x[0-9a-f]{64}$/);
+    // With --update-hash=C it runs its checks, records C and follows.
+    const accepted = await commandRun(other, found, 11n);
+    expect(accepted).toEqual({ refusal: null, cursor: 11n });
   }, 300_000);
 });

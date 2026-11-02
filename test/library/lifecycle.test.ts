@@ -1,3 +1,4 @@
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { once } from "node:events";
 import { createServer, type Server } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -10,10 +11,12 @@ import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import type { EngineInput, ProcessHandle } from "../../src/runner/process.js";
 import { type Answered, ask, gate, type Observation, stateProblems, type StatusBody, statusWhen } from "../admin/admin-harness.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
+import { freePort } from "../runner/process-harness.js";
 import { startProcess } from "../runner/process-build.js";
 import { openHold } from "./fixtures/import-holds.js";
 import { cursorReaches, libraryData } from "./library-fixtures.js";
 import { Client, eventually, exchange, headerValues, type MapiHooks, mapiModule, type Mounted, mountHandlers } from "./mounted-fixtures.js";
+import { portFree } from "./network-refusals.js";
 
 /**
  * The standard service lifecycle of a library process (design §5.3), through its mounted handlers and, where the
@@ -32,7 +35,9 @@ import { Client, eventually, exchange, headerValues, type MapiHooks, mapiModule,
  * - **L28** `halted`: live 200, ready 503, `/status` with the reason; reads at the cursor until `stop()`.
  * - **L29** a class-A refusal (`library-setting-refused`): mounted live 200, ready 503, `/status` 200 `refused` with the
  *   reason; the module API's 503 carries the same reason; `started` rejects with that code; `closed` resolves; nothing
- *   opened; no rejection unhandled though no handler was attached to `started`.
+ *   opened though the module API, admin and the link were each asked to listen at a port of their own — no `listen()`
+ *   at any time (the `net.server.listen` tracing channel), no thread, each port still free, no database; no rejection
+ *   unhandled though no handler was attached to `started`.
  * - **L30** `[NEG]` class-B refusals: a failing `on-start-db` (`callback-error`, the module and point, `cause` the
  *   thrown value), the module API's port and the link's port in use (`listen-failed`); a listening admin answers
  *   (`/health/live` 200, `/status` 200 `refused`) until `stop()`, and `closed` waits for it. The committed control is a
@@ -285,16 +290,44 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
     const onUnhandled = (reason: unknown) => unhandled.push(reason);
     process.on("unhandledRejection", onUnhandled);
     const m = mapiModule({ emits: new Set() });
+    // Every surface asked to listen, at ports of its own, so that "nothing opened" can fail: none may bind. On
+    // PostgreSQL the link's reader login is written (never contacted), so the plan takes the request. [LM-3, LM-10]
+    const ports = { api: await freePort(), admin: await freePort(), privateLink: await freePort() };
+    const reader = backend.kind === "postgres" ? { transportReader: { user: "l29_reader", password: "never-used" } } : {};
+    const network = {
+      api: { host: "127.0.0.1", port: ports.api },
+      admin: { host: "127.0.0.1", port: ports.admin },
+      privateLink: { publicSide: { host: "127.0.0.1", port: ports.privateLink } },
+    };
+    // Every server that begins to listen meanwhile; the host's own two (its mounted handlers') are told apart at the end.
+    const servers: { address(): unknown }[] = [];
+    const opened = { threads: 0 };
+    const listened = (message: unknown): void => {
+      servers.push((message as { readonly server: { address(): unknown } }).server);
+    };
+    const threaded = (): void => {
+      opened.threads += 1;
+    };
+    subscribe("tracing:net.server.listen:asyncStart", listened);
+    subscribe("worker_threads", threaded);
     const handle = startUmbraDB({
-      config: { data: libraryData(db.setting, [m], { backupAtStop: "at-stop.backup" }) },
+      config: { data: libraryData(db.setting, [m], { backupAtStop: "at-stop.backup", ...reader }) },
       modules: [m],
       source: new InMemoryBlockSource({ head: 2n }),
+      network,
     });
     const host = await mountHandlers(handle);
     try {
       // No handler on `started` until the process has closed.
       await handle.closed;
       await sleep(50);
+      unsubscribe("tracing:net.server.listen:asyncStart", listened);
+      unsubscribe("worker_threads", threaded);
+      // Nothing of UmbraDB's listened at any time, no thread started (admin's would), and every asked port is free.
+      const hostPorts = [host.origin, host.admin].map((origin) => Number(new URL(origin).port));
+      const others = servers.filter((server) => !hostPorts.includes((server.address() as { port?: number } | null)?.port ?? -1));
+      expect({ listens: others.length, threads: opened.threads }).toEqual({ listens: 0, threads: 0 });
+      for (const [surface, port] of Object.entries(ports)) expect(await portFree(port), surface).toBe(true);
       const reason = { code: "library-setting-refused", height: null, module: null, point: null };
       expect(stateProblems(await mountedObservation(host), { state: "refused", ready: false, reason })).toEqual([]);
       expect(await apiLifecycle(host)).toEqual({ status: 503, code: "not-serving", state: "refused", reason, version: [UMBRADB_VERSION] });
@@ -312,6 +345,8 @@ describe.each(PROCESS_BACKENDS)("the library's service lifecycle on $name (LM-5)
       }
       expect(unhandled).toEqual([]);
     } finally {
+      unsubscribe("tracing:net.server.listen:asyncStart", listened);
+      unsubscribe("worker_threads", threaded);
       process.off("unhandledRejection", onUnhandled);
       await handle.stop();
       await host.close();
