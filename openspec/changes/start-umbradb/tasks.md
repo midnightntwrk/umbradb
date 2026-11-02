@@ -315,7 +315,10 @@ before the review.
       reason, rules, paths and codes — kept whatever a secret's text (N3, `e13b9df`; L63, CF-4); the secrets of data
       that is not plain data, and of a `{ file }` once evaluated, known before its refusal (C-F2's residual, `63207b9`;
       L65, CF-4). Issues 00068 and 00069 filed beside, skipped. Open for the owner besides: Q-20's `cause` chains (the
-      fix check's evidence added), Q-22 (a configuration file whose own import throws). Its own targeted fix check next.
+      fix check's evidence added), Q-22 (a configuration file whose own import throws). Full `npx vitest run` on
+      the tree at `5a84047` (the code of `63207b9`; 44 min under a load of about 21): 382 files, 6,223 tests — §0's 20
+      and A12, and 11 load-only cases of issue 00064 (each file passing alone right after), 6,135 passed, 56 skipped.
+      Its own targeted fix check next.
 
 ## 11. Close-out
 
