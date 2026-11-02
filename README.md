@@ -175,7 +175,7 @@ The `core` entry's settings, the main ones (`GET /config` shows them all, with t
 | `developmentOptIn` | `false` | Required for PGlite and for development-only modules |
 | `listen.admin` | `0.0.0.0:8081` | The admin endpoints (a program's own process listens only if asked: `startUmbraDB`) |
 | `listen.api` | none | The module API; without it, no module API is served |
-| `listen.privateLink` | none | The private processes' link (renamed from `listen.transport`) |
+| `listen.privateLink` | none | The private processes' link |
 | `transportReader` | none | The login of the link's reads; required with `listen.privateLink` on PostgreSQL |
 | `readinessLag` | none | `/health/ready` answers 503 while the lag is above it |
 | `followingThreshold` | `3` | The lag at or below which the state is `following` |
@@ -540,8 +540,8 @@ committed it. The public database stays shareable; what the private modules deri
 UmbraDB takes no keys itself: a private module takes them through its `secret` settings or its own API.
 
 Its `core` entry has an `instanceId` and no `node`, and reaches the public data directly (`publicDatabase`, a
-PostgreSQL database's parts), through the public process's link (`privateLink`, the public `listen.privateLink`; up to
-`v0.10.0-rc.1` they were `coreTransport` and `listen.transport`, names now refused), or both:
+PostgreSQL database's parts), through the public process's link (`privateLink`, the public `listen.privateLink`), or
+both:
 
 ```ts
 coreEntry({
@@ -580,11 +580,9 @@ the core, each with its own specification. Wallet and dApp APIs compatible with 
 (MIP-0018), unshielded and shielded token state, fast DUST and shielded sync, private wallet data, a JSON-RPC for
 Passport, an explorer, and private user secrets.
 
-**Breaking change from 0.9.5.** 0.9.5 was a PostgreSQL storage library for wallet state. 0.10.0 is the indexer: no
-0.9.5 export or database is carried over; the indexer starts a new database. The [CHANGELOG](CHANGELOG.md) lists what
-changed. The specification is the OpenSpec change [`core-arch`](openspec/changes/core-arch/) (`proposal.md`,
-`design.md`, the capability specs), with [`start-umbradb`](openspec/changes/start-umbradb/) for UmbraDB as a library,
-and the [operator guide](docs/operator-guide.md) covers running it.
+**Specification.** The OpenSpec change [`core-arch`](openspec/changes/core-arch/) (`proposal.md`, `design.md`, the
+capability specs), with [`start-umbradb`](openspec/changes/start-umbradb/) for UmbraDB as a library; the
+[operator guide](docs/operator-guide.md) covers running it.
 
 **Security.** Read the [threat model](docs/THREAT_MODEL.md) and the [security policy](SECURITY.md) before deploying:
 modules and configuration files are trusted code, the node is trusted for what it says is finalized, and a restore
@@ -614,3 +612,5 @@ when stale, 2 when missing or not written by `graph:refresh`.
 - [Contributing](CONTRIBUTING.md) · [Security policy](SECURITY.md)
 - Issues: [github.com/midnightntwrk/umbradb/issues](https://github.com/midnightntwrk/umbradb/issues).
 - License: Apache License 2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)).
+
+**Breaking change from 0.9.5.** See the [CHANGELOG](CHANGELOG.md).

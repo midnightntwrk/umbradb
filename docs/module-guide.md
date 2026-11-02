@@ -902,8 +902,7 @@ command ignores it. `/config` shows the addresses as bound and, in `network`, ea
   - Processing halts: `callback-error`, `handle-closed`, `truncate-not-allowed`, `database-error`, `root-mismatch`,
     `fast-log-unsupported`, `lockstep-behind`, `public-config-changed`.
   - A call your code may catch: `query-timeout`, `no-committed-height`, `state-not-retained`, `read-refused`.
-  - A host's start (§18): `invalid-configuration` (`invalid-option`, and the finding `renamed-setting` for
-    `listen.transport` and `coreTransport`, now `listen.privateLink` and `privateLink`), `modules-given-twice`,
+  - A host's start (§18): `invalid-configuration` (`invalid-option`, `renamed-setting`), `modules-given-twice`,
     `ledger-tasks-need-modules-from`, `source-refused`, `library-setting-refused`, `network-address-conflict`,
     `private-link-misconfigured`, `listen-failed`, `writer-lock-held`.
 - **A.3 Refused column types, and why.** `real`, `double precision`: approximate, so one value computed two ways can
