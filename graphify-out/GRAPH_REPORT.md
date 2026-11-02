@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Corpus fingerprint: `dc944d69dbb9ffc9` (1203 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
+- Corpus fingerprint: `c286cc413b48897f` (1203 tracked files, graphify 0.9.89, Python 3.12, post-process v2)
 - `npm run graph:check` recomputes it: exit 0 means the graph matches the tracked files.
 - `npm run graph:refresh` rebuilds the graph from scratch (no LLM, deterministic).
 
