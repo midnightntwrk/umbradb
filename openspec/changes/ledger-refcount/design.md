@@ -231,14 +231,19 @@ or the flush takes a node no rising root reaches (§4.5, §4.6).
 
 LG-14's sweep, when a whole cycle starts and ends in block h, marks from the root counts at h − 1 and the keys whose
 count rose in h (`sweep.ts:197-208`), following the batch form of a node the batch inserts and the stored form
-otherwise (`sweep.ts:218`), and deletes every unmarked node. Counting keeps `K_h` (§4.3), the same set, provided every
-node of the batch is reachable from a key whose root count rose (the flush, §4.5): the references of a batch form are
-batch references, and every new node is then reached from a rising root. Both start empty at genesis, so they store the same nodes at every
+otherwise (`sweep.ts:218`), and deletes every unmarked node. Counting keeps `K_h` (§4.3). The two are the same set
+provided every node of the batch is reachable from a key whose root count rose (the flush, §4.5) **and every node the
+batch inserts again carries its stored form** (§4.6): then a batch form's references are its stored form's, and every
+new node is reached from a rising root. When a node arrives in its second form the two can differ for that block in
+either direction (the sweep follows the batch form, counting keeps the stored form's references too): a stored form
+referencing a leaf the batch form embeds keeps the leaf under counting and not under the sweep. This precondition is
+§4.7's assumption; R2 and the DAG fixture's case of R4 exclude second forms, and R4 on the recorded tapes asserts the
+equality, so a second form on a real chain would fail R4 there and fall under issue `docs/issues/00078`. Both start empty at genesis, so they store the same nodes at every
 height up to the first block whose cycle does not fit. On preprod every block so far ran a whole cycle in-block
 (`sweep.cycle` = height + 1, cycle 46,739 when the run stopped near 46,738: organizer plan P13.3 and questions Q-37).
 Where a cycle spans blocks, the sweep deletes a node only if nothing reachable from the roots at the cycle's start or
-from any key that rose during it reaches it, a superset of what counting keeps: the counted set is a subset of the swept
-set. *Derived here; R2 and R4 test both claims.*
+from any key that rose during it reaches it, a superset of what counting keeps: under the same precondition, the
+counted set is a subset of the swept set. *Derived here; R2 and R4 test both claims.*
 
 When the sweep's model is fed the counting run's batches (R4), the comparison is valid in both regimes: the sweep model
 deletes a node only after counting deleted it (subset), so the counting run's package, which evicted it, writes it
