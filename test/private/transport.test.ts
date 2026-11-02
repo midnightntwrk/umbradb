@@ -97,6 +97,12 @@ const lossyDecode: typeof decodeValue = (type, found) => {
   return decodeValue(type, found);
 };
 
+/**
+ * An instance id of a test case's own, from its label: every character an instance id does not allow (a space, a
+ * parenthesis) becomes `-`, so the id passes `hello`'s schema and the case reaches the fault it names. [PP-4, A115 CI]
+ */
+const idOf = (label: string): string => label.replace(/[^A-Za-z0-9._:-]/g, "-");
+
 /** A client that said `hello` as `instance` and got its `hello-ack`. */
 async function greeted(address: string, instance: string): Promise<{ client: RawClient; ack: Extract<Message, { type: "hello-ack" }> }> {
   const client = rawClient(`ws://${address}/`);
@@ -360,13 +366,13 @@ describe.each(PRIVATE_BACKENDS)("A115: the core's process transport on $name", (
     await client.opened;
     // An id of its own per case: several cases close for one reason.
     if (afterHello) {
-      client.send(hello(`fault-${name}`));
+      client.send(hello(`fault-${idOf(name)}`));
       await client.next("hello-ack");
     }
     client.send(text);
     const end = await endedWithin(client);
     expect(end).toMatchObject({ opened: true, code: 1008, reason });
-    const other = await greeted(address, `after-${name}`);
+    const other = await greeted(address, `after-${idOf(name)}`);
     expect(other.ack.refused).toBeNull();
     other.client.close();
   }, TEST_TIMEOUT_MS);
