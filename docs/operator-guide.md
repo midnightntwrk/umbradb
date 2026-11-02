@@ -127,7 +127,7 @@ On the core, `/status` (the admin endpoints on `listen.admin`) shows in `node` w
 
 - `finalizedHead`: the node's latest finalized head the process holds, from its subscription to the node's finalized
   heads, read without asking the node. It rises as the node finalizes, also while the process is still working through
-  the heights up to an earlier head; `head` and the lag are the same.
+  the heights up to an earlier head. `/status`'s `head` is the same height, and its `lag` is computed from it.
 - `bestHead`: the best head the node announced last, the height of its latest new-heads notification (lower than an
   earlier one after the node switched to another branch); null until the node announced one.
 - `connection`: the state of the process's one connection to the node. `connecting` before it first connected,
