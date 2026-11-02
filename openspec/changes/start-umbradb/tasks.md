@@ -350,6 +350,19 @@ before the review.
       §1 also names `src/runner/host-signal.ts`, added after the draft (`fc9e3e0`), so that the layout lists every
       file of `src/` the change added; §8 cites the limits at `src/runner/api-session.ts:44-46` (the draft's `43-45`
       was one line early). The targeted check of these edits is the organizer's plan's P11.3.
+- [x] 10.4 The owner's answers (2026-11-02) to the targeted check of 10.3's edits (the organizer's questions Q-25 and
+      Q-26, the check's P1 and P2): MD-7's exception for `node-client` with an in-memory `source`, written into the spec;
+      issue 00071's suggested fix corrected.
+      **Acceptance:** `specs/modules/spec.md` restates MD-7 whole (header and text as `core-arch` writes them) with the
+      exception and a scenario for it, its own scenario kept; A74 rewritten in `acceptance.md` §9 with the exception and
+      its narrowness, the coverage table updated; `acceptance-map.md` maps A74; design §4's `source` bullet points at
+      MD-7's exception; `test/library/source.test.ts` › «A74: node-client with an in-memory source, MD-7's exception
+      (LM-8), on $name» passes on both backends, seen failing first with the engine's exemption removed (4 of 4) and
+      with it widened to every item (the narrowness test, both backends); the tests that read the change's documents,
+      the source tests, A74's tests and the code registry's pass (27 files, 714 tests); issue 00071 no longer offers a
+      copy shared by the callbacks.
+      **Done (2026-11-02, `20a856a`, `1f862cc`, `8fb6c7b`).** The targeted check of these edits is the organizer's
+      plan's P11.5.
 
 ## 11. Close-out
 
