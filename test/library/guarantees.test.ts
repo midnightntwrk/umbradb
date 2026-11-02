@@ -29,8 +29,9 @@ import { runQuietChild } from "./quiet-child.js";
  *   negative control gives the engine one of the command's ports and fails its criterion.
  * - L5: no child process starts without `backup()`; `backup()` on PostgreSQL spawns exactly `pg_dump --version` and
  *   `pg_dump` (Node.js's `child_process` diagnostics channel), and on PGlite none.
- * - L6 `[NEG]`: no listening socket exists without a request (no `TCPServerWrap` among the process's resources, no
- *   thread that could listen); the control is the command's network with `listen.api` written.
+ * - L6 `[NEG]`: no listening socket exists without a request: no server of the process begins to listen at any time
+ *   while it starts, runs and stops (the `net.server.listen` tracing channel), no `TCPServerWrap` among its resources at
+ *   each step, no thread that could listen; the control is the command's network with `listen.api` written.
  * - L7 `[NEG]`: a `umbradb.config.ts` in `cwd` is not read; the control is `umbradb run`, which reads it.
  * - L9 `[FAULT][NEG]`: a close step that fails is logged, the later ones run, `closed` resolves, no rejection is
  *   unhandled — in `stop()`'s close, startup's refusal cleanup and a configuration refusal's end; the control's
@@ -51,13 +52,16 @@ interface QuietResult {
   readonly before: Readonly<Record<string, number>>;
   readonly during: Readonly<Record<string, number>>;
   readonly after: Readonly<Record<string, number>>;
+  /** Every listener added to `process` during the runs, by event (its `newListener` event). */
+  readonly added: readonly string[];
   readonly exitCode: { readonly before: number | null; readonly after: number | null };
   readonly outcomes: readonly { readonly state: string; readonly code: string | null; readonly note: string }[];
 }
 
 /**
- * The quiet host's oracle: every problem with a child's run, none when it wrote nothing, every event's listener count
- * stayed as it was before (while the first run ran and after all), and `process.exitCode` did too. [L1, L2, L8]
+ * The quiet host's oracle: every problem with a child's run, none when it wrote nothing, no listener was added to
+ * `process` at any time during the runs, every event's listener count stayed as it was before (while the first run ran
+ * and after all), and `process.exitCode` did too. [L1, L2, L8]
  */
 function quietProblems(run: { stdout: string; stderr: string; code: number | null; result: QuietResult | null }): string[] {
   const problems: string[] = [];
@@ -76,6 +80,8 @@ function quietProblems(run: { stdout: string; stderr: string; code: number | nul
       if (now !== was) problems.push(`${when}: ${now - was} ${event} listener(s) added`);
     }
   }
+  // A listener added at any time, removed again or not: during startup, a backup or a stop as much as while it follows.
+  for (const event of result.added) problems.push(`a ${event} listener was added`);
   if (result.exitCode.after !== result.exitCode.before) {
     problems.push(`process.exitCode ${result.exitCode.before} → ${result.exitCode.after}`);
   }
@@ -150,7 +156,7 @@ describe("L1, L2, L8: a quiet host (LM-2)", () => {
       databases: [PGLITE_MEMORY],
       dir: dirOf("control-listener"),
     });
-    expect(quietProblems(run)).toEqual(["while it runs: 1 SIGUSR2 listener(s) added"]);
+    expect(quietProblems(run)).toEqual(["while it runs: 1 SIGUSR2 listener(s) added", "a SIGUSR2 listener was added"]);
   }, 300_000);
 
   it("negative control (L2): the command's log on stderr fails it", async () => {
@@ -252,6 +258,25 @@ describe.each([
 /** The process's own listening sockets now: Node.js's `TCPServerWrap` resources. */
 const listeningSockets = (): number => process.getActiveResourcesInfo().filter((resource) => resource === "TCPServerWrap").length;
 
+/**
+ * How many times a server of this thread began to listen while `body` runs (Node.js's `net.server.listen` tracing
+ * channel, whose `asyncStart` each `listen()` publishes — `node:net`'s and `node:http`'s servers alike): a listener
+ * opened and closed again between two samples is counted too. [L6]
+ */
+async function listensDuring(body: () => Promise<void>): Promise<number> {
+  let listens = 0;
+  const listener = (): void => {
+    listens += 1;
+  };
+  subscribe("tracing:net.server.listen:asyncStart", listener);
+  try {
+    await body();
+  } finally {
+    unsubscribe("tracing:net.server.listen:asyncStart", listener);
+  }
+  return listens;
+}
+
 describe.each([
   ...PROCESS_BACKENDS.map((backend) => [backend.name, backend] as const),
   ["PGlite in memory", null] as const,
@@ -263,43 +288,58 @@ describe.each([
   it("without a request: no listener and no thread while it starts, runs and stops; with the ledger, its worker only", async () => {
     const m = rowsModule("m");
     const sockets = listeningSockets();
-    let during = -1;
+    // The sockets sampled at each step — started, following, stopped — beside every listen() the run makes at all.
+    const sampled: number[] = [];
+    let listens = -1;
     const plain = await threadsDuring(async () => {
-      const handle = startUmbraDB({ config: { data: libraryData(await database(), [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 3n }) });
-      await handle.started;
-      await cursorReaches(handle, 3n);
-      during = listeningSockets();
-      await handle.stop();
+      listens = await listensDuring(async () => {
+        const handle = startUmbraDB({ config: { data: libraryData(await database(), [m]) }, modules: [m], source: new InMemoryBlockSource({ head: 3n }) });
+        await handle.started;
+        sampled.push(listeningSockets() - sockets);
+        await cursorReaches(handle, 3n);
+        sampled.push(listeningSockets() - sockets);
+        await handle.stop();
+        sampled.push(listeningSockets() - sockets);
+      });
     });
-    expect({ plain, during }).toEqual({ plain: 0, during: sockets });
+    expect({ plain, listens, sampled }).toEqual({ plain: 0, listens: 0, sampled: [0, 0, 0] });
     // With core-block-parsed the build needs the ledger: its worker starts, and no other thread.
     const parsed = [CORE_CHAIN_EVENTS, CORE_BLOCK_PARSED].map((part) => ({ id: part.id, start: 1, version: part.version, config: {} }));
+    sampled.length = 0;
     const ledger = await threadsDuring(async () => {
-      const data = libraryData(await database());
-      const handle = startUmbraDB({ config: { data: { entries: [...data.entries, ...parsed] } }, source: new InMemoryBlockSource({ head: 3n }) });
-      await handle.started;
-      await cursorReaches(handle, 3n);
-      during = listeningSockets();
-      await handle.stop();
+      listens = await listensDuring(async () => {
+        const data = libraryData(await database());
+        const handle = startUmbraDB({ config: { data: { entries: [...data.entries, ...parsed] } }, source: new InMemoryBlockSource({ head: 3n }) });
+        await handle.started;
+        sampled.push(listeningSockets() - sockets);
+        await cursorReaches(handle, 3n);
+        sampled.push(listeningSockets() - sockets);
+        await handle.stop();
+        sampled.push(listeningSockets() - sockets);
+      });
     });
-    expect({ ledger, during }).toEqual({ ledger: 1, during: sockets });
+    expect({ ledger, listens, sampled }).toEqual({ ledger: 1, listens: 0, sampled: [0, 0, 0] });
   }, 300_000);
 
   it("negative control: the command's network with listen.api written listens, and its admin port starts its thread", async () => {
     const sockets = listeningSockets();
     let during = -1;
+    let listens = -1;
     const threads = await threadsDuring(async () => {
-      const handle = startProcess({
-        config: { data: libraryData(await database(), [], { listen: { api: "127.0.0.1:0", admin: "127.0.0.1:0" } }) },
-        userModules: { modules: [] },
-        adminListener: startAdminServer,
-        source: new InMemoryBlockSource({ head: 1n }),
+      listens = await listensDuring(async () => {
+        const handle = startProcess({
+          config: { data: libraryData(await database(), [], { listen: { api: "127.0.0.1:0", admin: "127.0.0.1:0" } }) },
+          userModules: { modules: [] },
+          adminListener: startAdminServer,
+          source: new InMemoryBlockSource({ head: 1n }),
+        });
+        await handle.started;
+        during = listeningSockets();
+        await handle.stop();
       });
-      await handle.started;
-      during = listeningSockets();
-      await handle.stop();
     });
-    expect({ threads, listening: during - sockets }).toEqual({ threads: 1, listening: 1 });
+    // The module API listens on this thread (admin's listener is its thread's): seen sampled and as a listen().
+    expect({ threads, listening: during - sockets, listens }).toEqual({ threads: 1, listening: 1, listens: 1 });
   }, 120_000);
 });
 

@@ -9,7 +9,8 @@ import { cursorReaches, libraryData, rowsModule } from "./library-fixtures.js";
 /**
  * A host program for the quiet-host criteria (L1, L2, L8), run by `./guarantees.test.ts` through `./quiet-child.ts`:
  * it starts UmbraDB without `log`, as a host does, in each of the runs below, and writes to its result file what it
- * observed of `process` — every event's listener count before the runs, while the first one runs and after all of
+ * observed of `process` — every listener added to it during the runs (its `newListener` event, which sees one added
+ * and removed again too), every event's listener count before the runs, while the first one runs and after all of
  * them, and `process.exitCode` before and after — and how each run ended. The parent reads the child's stdout and
  * stderr whole. [L1, L2, L8, LM-2]
  *
@@ -63,6 +64,12 @@ async function until(handle: Stated, states: readonly string[]): Promise<void> {
   }
 }
 
+// Every listener added to `process` from here on, whenever it is added and whether or not it is removed again: the
+// runs must add none, for any event (L1). The listener counts are also sampled while the first run follows.
+const added: string[] = [];
+process.on("newListener", (event: string | symbol) => {
+  added.push(String(event));
+});
 const before = listeners();
 const exitCodeBefore = process.exitCode ?? null;
 let during: Record<string, number> = {};
@@ -164,6 +171,7 @@ writeFileSync(
     before,
     during,
     after: listeners(),
+    added,
     exitCode: { before: exitCodeBefore, after: process.exitCode ?? null },
     outcomes,
   }),

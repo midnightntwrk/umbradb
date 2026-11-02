@@ -19,9 +19,11 @@ import { l39Problems } from "./refused-channels.js";
  *   65th closes 1013 `try-again`; a queued channel whose first message is not a `hello` closes `hello-first`, one sending
  *   a second message `hello-pending`, one whose `hello` is over 64 KiB `too-large`; a queued peer that sends its `hello`
  *   and answers pings through three intervals (a controlled clock) stays queued and is activated (`hello-ack`) when the
- *   link starts; one that stops answering closes `no-pong` and frees its place; at a class-B refusal (the held
- *   `on-start-db` throws) every queued channel closes `private-link-not-accepting`. Negative control: the queue's limit
- *   lifted (the channel link's seam), the 65th is queued, and the oracle fails.
+ *   link starts; all 64 are pinged at the first interval and kept while they answer; one that stops answering closes
+ *   `no-pong` at the second and frees its place — the queue full until then, the faults silent, so a channel accepted
+ *   right after is queued only in the freed place; at a class-B refusal (the held `on-start-db` throws) every queued
+ *   channel closes `private-link-not-accepting`. Negative control: the queue's limit lifted (the channel link's seam),
+ *   the 65th is queued, and the oracle fails.
  * - **L39** `[NEG]`: `accept()` on a process not accepting channels (no channel request), after a refusal and after
  *   `stop()`: the channel closes `private-link-not-accepting`, a line is logged, nothing throws (a carrier that throws
  *   included; the run and oracle are `./refused-channels.ts`'s). Negative control,
@@ -88,6 +90,10 @@ function accepted(core: Logged): { peer: RawPeer; end: TestEnd } {
 /** What one L38 run saw. */
 interface QueueRun {
   readonly sixtyFifth: unknown;
+  /** How many of the 64 queued channels were pinged by the first interval and still open then. */
+  readonly pingedAtFirst: number;
+  /** How many of the 63 that answer were still open after the second interval, the dead one's. */
+  readonly openAtSecond: number;
   readonly faults: Readonly<Record<string, unknown>>;
   readonly healthy: { readonly pings: number; readonly endedWhileQueued: unknown; readonly ack: unknown };
   readonly dead: unknown;
@@ -96,7 +102,12 @@ interface QueueRun {
   readonly activated: number;
 }
 
-/** One L38 run on `backend` with the queue's limit `queueMax` (the control's seam), or the link's own. */
+/**
+ * One L38 run on `backend` with the queue's limit `queueMax` (the control's seam), or the link's own. The queue stays
+ * full — 64 channels, the three faults among them, silent — until the dead peer's `no-pong` at the second interval, so
+ * that the late channel accepted then is queued only when the dead one freed its place; the faults' messages come
+ * after it.
+ */
 async function queueRun(backend: PrivateBackend, queueMax?: number): Promise<QueueRun> {
   const clock = controlledTimers();
   const held = gate();
@@ -115,22 +126,30 @@ async function queueRun(backend: PrivateBackend, queueMax?: number): Promise<Que
     const others = Array.from({ length: 59 }, () => accepted(core));
     const sixtyFifth = accepted(core);
     await until(() => sixtyFifth.peer.end !== null || core.lines.some((line) => line.includes("try-again")), "the 65th's answer", 2_000).catch(() => undefined);
-    // Their messages, once all 64 wait.
+    const queued = [healthy, dead, ...Object.values(faults), ...others];
+    // The greeting peers' hellos; the faults wait, answering pings, so the queue stays full.
     healthy.peer.send(peerHello("q-healthy"));
     dead.peer.send(peerHello("q-dead"));
     dead.peer.answersPings = false;
+    others.forEach((other, index) => other.peer.send(peerHello(`q-${index}`)));
+    // The first interval: every queued channel is pinged, and answers.
+    await tick(clock, PING_INTERVAL_MS);
+    const pingedAtFirst = queued.filter((one) => one.peer.pings >= 1 && one.peer.end === null).length;
+    // The second: the dead one is ended no-pong and its place freed, the 63 others kept.
+    await tick(clock, PING_INTERVAL_MS);
+    const deadEnd = dead.peer.end;
+    const openAtSecond = queued.filter((one) => one !== dead && one.peer.end === null).length;
+    // A full queue but for the dead one's place: the late channel takes it.
+    const late = accepted(core);
+    late.peer.send(peerHello("q-late"));
+    await until(() => late.peer.end !== null, "the late channel's close", 200).catch(() => undefined);
+    // The faults' messages, now.
     faults.first.peer.send({ v: 1, type: "read", id: "1", statements: [] });
     faults.pending.peer.send(peerHello("q-pending"));
     faults.pending.peer.send({ v: 1, type: "read", id: "1", statements: [] });
     faults.large.peer.send({ ...peerHello("q-large"), version: "x".repeat(64 * 1024) });
-    others.forEach((other, index) => other.peer.send(peerHello(`q-${index}`)));
     await until(() => Object.values(faults).every((one) => one.peer.end !== null), "the faults' closes", 10_000).catch(() => undefined);
-    // Three intervals: the dead one is ended at its second, its place freed for another.
-    await tick(clock, PING_INTERVAL_MS);
-    await tick(clock, PING_INTERVAL_MS);
-    const deadEnd = dead.peer.end;
-    const late = accepted(core);
-    late.peer.send(peerHello("q-late"));
+    // The third interval: the healthy one stays queued.
     await tick(clock, PING_INTERVAL_MS);
     const endedWhileQueued = healthy.peer.end;
     const pings = healthy.peer.pings;
@@ -144,6 +163,8 @@ async function queueRun(backend: PrivateBackend, queueMax?: number): Promise<Que
     }
     return {
       sixtyFifth: sixtyFifth.peer.end,
+      pingedAtFirst,
+      openAtSecond,
       faults: Object.fromEntries(Object.entries(faults).map(([name, one]) => [name, one.peer.end])),
       healthy: { pings, endedWhileQueued, ack },
       dead: deadEnd,
@@ -162,6 +183,8 @@ function queueProblems(run: QueueRun): string[] {
   const problems: string[] = [];
   const json = (value: unknown) => JSON.stringify(value);
   if (json(run.sixtyFifth) !== json({ code: 1013, reason: "try-again" })) problems.push(`the 65th: ${json(run.sixtyFifth)}`);
+  if (run.pingedAtFirst !== 64) problems.push(`${run.pingedAtFirst} of the 64 queued channels pinged and open at the first interval`);
+  if (run.openAtSecond !== 63) problems.push(`${run.openAtSecond} of the 63 answering channels open after the second interval`);
   const expected = { first: { code: 1008, reason: "hello-first" }, pending: { code: 1008, reason: "hello-pending" }, large: { code: 1009, reason: "too-large" } };
   if (json(run.faults) !== json(expected)) problems.push(`the faults: ${json(run.faults)}`);
   if (run.healthy.endedWhileQueued !== null || run.healthy.pings < 3) problems.push(`the healthy peer while queued: ${json(run.healthy)}`);

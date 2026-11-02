@@ -8,7 +8,11 @@ import { runQuietChild } from "../library/quiet-child.js";
  * - another `ExperimentalWarning` emitted while the wrapper is installed reaches the host's listeners;
  * - a host that replaced `process.emitWarning` meanwhile keeps its replacement;
  * - two overlapping PGlite directory acquisitions, finishing in either order, share one import and leave the original
- *   `process.emitWarning` installed — in a process of their own, whose stderr stays empty;
+ *   `process.emitWarning` installed — in a process of their own, whose stderr stays empty. After the one shared import
+ *   the acquisitions finish in their call order, so either finishes first when one of them fails (its lock file's path a
+ *   directory) and is called first or second;
+ * - the same two in the real process: another `ExperimentalWarning` the host emits while the import runs reaches its
+ *   listener and stderr, and a host that replaces `process.emitWarning` meanwhile keeps its replacement;
  * - the negative control imports `node:sqlite` through the same wrapper with nothing dropped: its warning reaches the
  *   listener and stderr.
  *
@@ -42,6 +46,13 @@ function testHook() {
 }
 
 const SQLITE = ["SQLite is an experimental feature and might change at any time", "ExperimentalWarning", undefined, undefined];
+
+/** What `./sqlite-warning.child.ts` writes to its result file. */
+interface ChildResult {
+  readonly warnings: readonly string[];
+  readonly restored: boolean;
+  readonly finished: readonly string[];
+}
 
 describe("L3: the node:sqlite warning is dropped through one shared import (G2)", () => {
   it("knows node:sqlite's warning, in each form Node.js may emit it, and no other", () => {
@@ -122,19 +133,51 @@ describe("L3: the node:sqlite warning is dropped through one shared import (G2)"
   it.each(["locks-ab", "locks-ba"])(
     "two overlapping directory locks (%s) share one import: no warning reaches a listener or stderr; emitWarning is restored",
     async (mode) => {
-      const run = await runQuietChild<{ warnings: string[]; restored: boolean }>("../db/sqlite-warning.child.ts", { mode });
+      const run = await runQuietChild<ChildResult>("../db/sqlite-warning.child.ts", { mode });
       expect({ code: run.code, stdout: run.stdout, stderr: run.stderr }).toEqual({ code: 0, stdout: "", stderr: "" });
-      expect(run.result).toEqual({ warnings: [], restored: true });
+      expect(run.result).toEqual({ warnings: [], restored: true, finished: ["a acquired", "b acquired"] });
     },
     240_000,
   );
 
+  it.each([
+    ["fail-first", ["broken database-error open-failed", "b acquired"]],
+    ["fail-second", ["a acquired", "broken database-error open-failed"]],
+  ] as const)(
+    "two overlapping directory acquisitions finishing in either order (%s: the one that fails finishes first, or last) share one import: no warning; emitWarning restored",
+    async (mode, finished) => {
+      const run = await runQuietChild<ChildResult>("../db/sqlite-warning.child.ts", { mode });
+      expect({ code: run.code, stdout: run.stdout, stderr: run.stderr }).toEqual({ code: 0, stdout: "", stderr: "" });
+      expect(run.result).toEqual({ warnings: [], restored: true, finished });
+    },
+    240_000,
+  );
+
+  it("in a process of its own, another ExperimentalWarning emitted while the real import runs reaches the host's listener and stderr", async () => {
+    const run = await runQuietChild<ChildResult>("../db/sqlite-warning.child.ts", { mode: "another" });
+    expect(run.code).toBe(0);
+    expect(run.result).toEqual({
+      warnings: ["ExperimentalWarning: Another feature is an experimental feature and might change at any time"],
+      restored: true,
+      finished: ["a acquired", "b acquired"],
+    });
+    expect(run.stderr).toContain("ExperimentalWarning: Another feature is an experimental feature and might change at any time");
+    expect(run.stderr).not.toContain("SQLite");
+  }, 240_000);
+
+  it("in a process of its own, a host that replaces process.emitWarning while the real import runs keeps its replacement", async () => {
+    const run = await runQuietChild<ChildResult>("../db/sqlite-warning.child.ts", { mode: "replaced" });
+    expect(run.code).toBe(0);
+    expect(run.result).toMatchObject({ restored: true, finished: ["a acquired", "b acquired"] });
+  }, 240_000);
+
   it("negative control: the same wrapper dropping nothing lets node:sqlite's warning reach the listener and stderr", async () => {
-    const run = await runQuietChild<{ warnings: string[]; restored: boolean }>("../db/sqlite-warning.child.ts", { mode: "control" });
+    const run = await runQuietChild<ChildResult>("../db/sqlite-warning.child.ts", { mode: "control" });
     expect(run.code).toBe(0);
     expect(run.result).toEqual({
       warnings: ["ExperimentalWarning: SQLite is an experimental feature and might change at any time"],
       restored: true,
+      finished: [],
     });
     expect(run.stderr).toContain("ExperimentalWarning: SQLite is an experimental feature and might change at any time");
   }, 240_000);
