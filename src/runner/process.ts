@@ -216,9 +216,10 @@
  * the data's secrets as far as they are known (the resolver's `knownSecrets`, from the moment the data is given or the
  * file imported, before a module file is imported or the user modules are checked; the URL patterns only before). A
  * refusal of the configuration itself is logged finding by finding, with those secrets and the ones the validation
- * read (the resolver's `refusalSecrets`) redacted: `startup refused: <code> (<n> findings); the process ends`, then
+ * read (the resolver's `refusalSecrets`) redacted in what may hold the host's text — the messages, the file — and the
+ * codes and UmbraDB's paths as written: `startup refused: <code> (<n> findings); the process ends`, then
  * `startup refused: <path>: <message> [<code>]` for each finding; `started` rejects with the refusal redacted alike
- * (`shownRefusal`), and admin shows its reason so. A later refusal, a halt and each retry are logged with their
+ * (`shownRefusal`, its reason and its findings' rules kept), and admin shows its reason so. A later refusal, a halt and each retry are logged with their
  * reason's code (`startup refused: <code>: …`, `processing halted (<code>): …`, `processing retries in <ms> ms
  * (<condition>, attempt <n>): …`, `startup retries …`). [CF-4, AE-6]
  *
@@ -1688,6 +1689,15 @@ class Process implements ProcessHandle {
     if (log !== undefined) log((this.#redactor ?? this.#known.redactor).text(text));
   }
 
+  /**
+   * A line its maker redacted already, with every secret `#known` holds and more (a configuration refusal's lines): as
+   * it is, so that what the maker kept in UmbraDB's own words — the codes — stays so; nowhere without the `log` port.
+   * [CF-4, L63]
+   */
+  #logRedacted(line: string): void {
+    this.#input.log?.(line);
+  }
+
   /** The configuration's data `data` is known, its user modules `userModules` (null: not yet): see `#known`. [CF-4] */
   #know(data: unknown, userModules: readonly unknown[] | null): void {
     const secrets = knownSecrets(data, userModules);
@@ -1875,7 +1885,7 @@ class Process implements ProcessHandle {
           // them (the resolver's), and the URL patterns only before; `#run` then ends the process. [Q137 B, AE-6]
           const early = redactor([...this.#known.secrets, ...refusalSecrets(error)]);
           this.#refusalRedactor = early;
-          for (const line of configurationRefusalLines(error, early.text)) this.#log(line);
+          for (const line of configurationRefusalLines(error, early.text)) this.#logRedacted(line);
           // The mounted handler's `/status` shows the reason redacted alike. [AE-6]
           this.#admin.refusedWith(early);
         } else {

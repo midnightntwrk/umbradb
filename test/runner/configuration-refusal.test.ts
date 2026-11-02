@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { earlyRedactor } from "../../src/admin/redaction.js";
 import { buildCoreVersion } from "../../src/config/build.js";
+import { findingText, refusalFindings } from "../../src/config/findings.js";
 import { coreEntry, versionEntry } from "../../src/config/entries.js";
 import { loadConfig } from "../../src/config/load.js";
 import { plainData } from "../../src/config/plain-data.js";
@@ -12,7 +13,7 @@ import { REDACTED, redactor } from "../../src/config/redact.js";
 import { type ConfigInput, validateConfig } from "../../src/config/validate.js";
 import { validateDeclarations } from "../../src/modules/validation.js";
 import { UmbraError } from "../../src/db/errors.js";
-import { configurationRefusalLines, shownRefusal } from "../../src/runner/configuration-refusal.js";
+import { configurationFindings, configurationRefusalLines, OWN_WORDS, shownRefusal } from "../../src/runner/configuration-refusal.js";
 import { coreSettings } from "./process-build.js";
 
 /**
@@ -171,11 +172,64 @@ describe("configurationRefusalLines", () => {
     ]);
   });
 
-  it("passes every line through the redaction given", () => {
-    const error = thrown(() => plainData({ onError: () => 0 }));
-    const lines = configurationRefusalLines(error, (text) => `<${text}>`);
-    expect(lines.length).toBe(2);
-    for (const line of lines) expect(line).toMatch(/^<startup refused: .*>$/);
+  it("passes what may hold the host's text through the redaction given: each message, a file; the codes, the count and UmbraDB's paths as they are", () => {
+    const mark = (text: string) => `<${text}>`;
+    // Not plain data: its path inside the configuration kept, its message (which names the file) redacted.
+    const plain = thrown(() => plainData({ onError: () => 0 }, "/x/umbradb.config.ts"));
+    expect(configurationRefusalLines(plain, mark)).toEqual([
+      "startup refused: not-plain-data (1 finding); the process ends",
+      expect.stringMatching(/^startup refused: onError: <\/x\/umbradb\.config\.ts: the configuration's value at onError is a function, .*> \[not-plain-data\]$/),
+    ]);
+    // The loader's refusal at the file: the file and the message redacted, the code kept.
+    const loader = new UmbraError("invalid-configuration", "the module file m.ts could not be loaded: boom", { file: "m.ts", reason: "load-failed" });
+    expect(configurationRefusalLines(loader, mark)).toEqual([
+      "startup refused: invalid-configuration (1 finding); the process ends",
+      "startup refused: <m.ts>: <the module file m.ts could not be loaded: boom> [invalid-configuration load-failed]",
+    ]);
+    // A finding whose message starts with its path: the path kept, the rest of the message redacted.
+    const options = new UmbraError("invalid-configuration", "refused", {
+      reason: "invalid-option",
+      findings: [{ rule: "invalid-option", path: "modules[1]", entry: null, field: null, message: "modules[1]: reading it threw" }],
+    });
+    expect(configurationRefusalLines(options, mark)).toEqual([
+      "startup refused: invalid-configuration (1 finding); the process ends",
+      "startup refused: modules[1]<: reading it threw> [invalid-configuration invalid-option]",
+    ]);
+    // Anything else thrown: its message redacted, its code kept.
+    expect(configurationRefusalLines(new TypeError("a bug"), mark)).toEqual([
+      "startup refused: database-error (1 finding); the process ends",
+      "startup refused: <a bug> [database-error]",
+    ]);
+  });
+
+  it("a secret whose text is a refusal's code, reason or path leaves them as they are; the message is redacted (L63)", () => {
+    const loader = new UmbraError("invalid-configuration", "the module file m.ts could not be loaded: the store refused load-failed", {
+      file: "m.ts",
+      reason: "load-failed",
+    });
+    expect(configurationRefusalLines(loader, redactor(["load-failed", "invalid-configuration"]).text)).toEqual([
+      "startup refused: invalid-configuration (1 finding); the process ends",
+      `startup refused: m.ts: the module file m.ts could not be loaded: the store refused ${REDACTED} [invalid-configuration load-failed]`,
+    ]);
+  });
+
+  it("unredacted, the findings' texts are umbradb config check's (findingText)", () => {
+    const errors = [
+      thrown(() => plainData({ onError: () => 0 }, "/x/umbradb.config.ts")),
+      new UmbraError("invalid-configuration", "no file", { file: "/x/a.ts", reason: "file-not-found" }),
+      new UmbraError("invalid-configuration", "refused", {
+        reason: "invalid-entries",
+        findings: [
+          { rule: "settings-schema", path: "entries[0].config.x", entry: 0, field: "x", message: "entries[0].config.x: bad" },
+          { rule: "settings-schema", path: "", entry: null, field: null, message: "no entries" },
+          { rule: "settings-schema", path: "entries", entry: null, field: null, message: "not a list" },
+        ],
+      }),
+    ];
+    for (const error of errors) {
+      const { file } = (error as UmbraError).details as { file?: string };
+      expect(configurationFindings(error)).toEqual(refusalFindings(error, file ?? "the configuration").map(findingText));
+    }
   });
 });
 
@@ -187,7 +241,7 @@ describe("shownRefusal: the refusal a host is given (CF-4, AE-6)", () => {
     const refusal = new UmbraError(
       "invalid-configuration",
       `the module file could not be loaded: ${PASSWORD}`,
-      { reason: "load-failed", file: `/srv/${PASSWORD}/m.ts`, height: 5n, found: [PASSWORD, 1], where: { path: PASSWORD }, at: new Date(0) },
+      { reason: "load-failed", file: `/srv/${PASSWORD}/m.ts`, height: 5n, values: [PASSWORD, 1], where: { text: PASSWORD }, at: new Date(0) },
       { cause },
     );
     const shown = shownRefusal(refusal, redact) as UmbraError;
@@ -198,14 +252,39 @@ describe("shownRefusal: the refusal a host is given (CF-4, AE-6)", () => {
       reason: "load-failed",
       file: `/srv/${REDACTED}/m.ts`,
       height: 5n,
-      found: [REDACTED, 1],
-      where: { path: REDACTED },
+      values: [REDACTED, 1],
+      where: { text: REDACTED },
       at: new Date(0),
     });
     expect(shown.stack).not.toContain(PASSWORD);
     // Only its details: a copy too, without a cause when it had none.
     const inDetails = shownRefusal(new UmbraError("invalid-declaration", "a module is refused", { module: PASSWORD }), redact) as UmbraError;
     expect([inDetails.message, inDetails.details.module, inDetails.cause]).toEqual(["a module is refused", REDACTED, undefined]);
+  });
+
+  it("its own words are kept whatever a secret's text — the reason, the findings' rules and paths, the names it writes — and every other string redacted (L63)", () => {
+    const own = redactor(["load-failed", "settings-schema", "entries[0].config.x", "backupAtStop", "wrong-side", "m"]).text;
+    const refusal = new UmbraError("invalid-configuration", "the store refused load-failed", {
+      reason: "load-failed",
+      file: "/srv/m/load-failed.ts",
+      module: "m",
+      findings: [{ rule: "settings-schema", path: "entries[0].config.x", entry: 0, field: "x", message: "entries[0].config.x: settings-schema" }],
+      settings: ["backupAtStop"],
+      problems: [{ code: "private-link-misconfigured", reason: "wrong-side", surface: "privateLink", request: "network.privateLink.privateSide", setting: null }],
+    });
+    const shown = shownRefusal(refusal, own) as UmbraError;
+    expect(shown.message).toBe(`the store refused ${REDACTED}`);
+    expect(shown.details).toEqual({
+      reason: "load-failed",
+      file: `/srv/${REDACTED}/${REDACTED}.ts`,
+      module: REDACTED,
+      findings: [{ rule: "settings-schema", path: "entries[0].config.x", entry: 0, field: "x", message: `${REDACTED}: ${REDACTED}` }],
+      settings: ["backupAtStop"],
+      problems: [{ code: "private-link-misconfigured", reason: "wrong-side", surface: "privateLink", request: "network.privateLink.privateSide", setting: null }],
+    });
+    expect([...OWN_WORDS].sort()).toEqual(
+      ["code", "expected", "field", "found", "given", "kind", "members", "option", "origin", "path", "point", "reason", "request", "rule", "setting", "settings", "surface"],
+    );
   });
 
   it("a refusal that holds none is given itself, and a value that is no UmbraError as it is", () => {
