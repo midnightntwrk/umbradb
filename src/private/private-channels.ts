@@ -7,6 +7,9 @@
  * **Each (re)connection** calls `connect(signal)` and takes the channel it resolves with; the endpoint registers on it
  * in the same turn, and the transport sends its `hello`. A `connect()` that rejects (or resolves with no channel, or
  * throws) is a lost connection: the transport connects again after its back-off, as after a socket that did not open.
+ * What the host gives is read inside a guard, never thrown out of the handlers of its promise (no rejection is left
+ * unhandled): a value whose members cannot be read — a getter or a proxy's trap that throws — is no channel, and a
+ * rejection whose error cannot be read is logged by its type. [LM-6, LM-2]
  *
  * **At the stop** the transport's signal aborts: `connect()` is not waited for, a channel it resolves later is closed at
  * once, a later rejection is consumed, and no retry starts. A channel open at the stop is closed (1001). [LM-6, L41]
@@ -36,21 +39,39 @@ export interface ChannelCarrierSeams {
   readonly message?: (value: unknown) => Received;
 }
 
-/** Whether `found` has a channel's members (see `PrivateLinkChannel`). */
+/**
+ * Whether `found` has a channel's members (see `PrivateLinkChannel`). Each is read inside the guard: a value whose
+ * member cannot be read — a getter or a proxy's trap that throws — is no channel. [LM-6, LM-2]
+ */
 function isChannel(found: unknown): found is PrivateLinkChannel {
   if (typeof found !== "object" || found === null) return false;
   const channel = found as Record<string, unknown>;
-  return ["send", "onMessage", "onClose", "close"].every((member) => typeof channel[member] === "function");
+  try {
+    return ["send", "onMessage", "onClose", "close"].every((member) => typeof channel[member] === "function");
+  } catch {
+    return false;
+  }
 }
 
-/** A rejection of the host's `connect()`, in a log line: its code or its kind, never its message. */
+/**
+ * A rejection of the host's `connect()`, in a log line: its code or its kind, never its message; its type when neither
+ * can be read as text (a getter or a proxy's trap that throws, a name that is no string). [LM-6, LM-2]
+ */
 function rejection(error: unknown): string {
-  if (error instanceof UmbraError) return error.code;
-  if (error instanceof Error) return error.name;
-  return typeof error;
+  let found: unknown;
+  try {
+    if (error instanceof UmbraError) found = error.code;
+    else if (error instanceof Error) found = error.name;
+  } catch {
+    found = undefined;
+  }
+  return typeof found === "string" ? found : typeof error;
 }
 
-/** Closes a channel the transport no longer wants; a carrier whose close throws is ended as far as it goes. */
+/**
+ * Closes a channel the transport no longer wants; a value that is no channel, one whose members cannot be read
+ * included, is left alone, and a carrier whose close throws is ended as far as it goes. [LM-6, L41]
+ */
 function discard(channel: unknown): void {
   if (!isChannel(channel)) return;
   try {

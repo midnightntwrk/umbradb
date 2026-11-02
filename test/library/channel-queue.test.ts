@@ -29,10 +29,13 @@ import { l39Problems } from "./refused-channels.js";
  *   included; the run and oracle are `./refused-channels.ts`'s). Negative control,
  *   `./channel-queue.negative-control.test.ts`: the not-accepting paths keeping the channel fail the same oracle.
  * - **L40**: a `connect()` that rejects is retried with the back-off (1 s, doubling up to `backoffCeilingMs`), each
- *   logged, until one resolves; the private process then follows.
+ *   logged, until one resolves; the private process then follows. A value whose channel members cannot be read (a
+ *   getter or a proxy's trap that throws) is no channel, and a rejection whose error cannot be read is logged by its
+ *   type: each a lost connection (`failed`, then `ended` 1006), with no rejection unhandled (issue 00068, G6).
  * - **L41** `[NEG]`: a `connect()` that never settles does not delay `stop()`; a channel it resolves after `stop()` is
- *   closed; a rejection after it is not unhandled; no retry starts. Negative control: a carrier that waits for its
- *   `connect()` at the stop and ignores the signal (the fault) fails the same oracle, at the transport.
+ *   closed; a rejection after it is not unhandled; no retry starts; a value whose members cannot be read, resolved
+ *   after it, is left alone, nothing unhandled. Negative control: a carrier that waits for its `connect()` at the stop
+ *   and ignores the signal (the fault) fails the same oracle, at the transport.
  * - **L35** `[NEG]` beyond the core's own sends (`./channel-link.test.ts`): on the private side, a channel holding more
  *   than `MAX_BUFFERED_BYTES` undelivered is closed 1008 `too-slow` at its next send (the `hello`), and the transport
  *   connects again; on a queued channel of the core, at its next ping, and at its answer to the peer's ping. Negative
@@ -416,6 +419,89 @@ const ACK = {
   configHash: `0x${"c1".repeat(32)}`,
 };
 
+/** The unhandled rejections seen until `stop()` (G6: UmbraDB leaves none). */
+function unhandledRejections(): { readonly unhandled: unknown[]; stop(): void } {
+  const unhandled: unknown[] = [];
+  const listener = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on("unhandledRejection", listener);
+  return { unhandled, stop: () => process.off("unhandledRejection", listener) };
+}
+
+/** A channel over a test-owned end whose `member` cannot be read: its getter throws. */
+function unreadableMember(member: "send" | "onMessage" | "onClose" | "close"): () => unknown {
+  return () => {
+    const [end] = channelPair();
+    const channel: Record<string, unknown> = {
+      send: (message: string) => end.send(message),
+      onMessage: (listener: (message: string) => void) => end.onMessage(listener),
+      onClose: (listener: () => void) => end.onClose(listener),
+      close: () => end.close(),
+    };
+    Object.defineProperty(channel, member, {
+      get() {
+        throw new Error(`host ${member} getter`);
+      },
+    });
+    return channel;
+  };
+}
+
+/**
+ * Values a host's `connect()` may resolve with whose channel members cannot be read (issue 00068): each member's getter
+ * that throws, and a proxy whose trap throws for them (not for `then`, which the promise reads first).
+ */
+const UNREADABLE_CHANNELS: readonly (readonly [string, () => unknown])[] = [
+  ["a channel whose send getter throws", unreadableMember("send")],
+  ["a channel whose onMessage getter throws", unreadableMember("onMessage")],
+  ["a channel whose onClose getter throws", unreadableMember("onClose")],
+  ["a channel whose close getter throws", unreadableMember("close")],
+  [
+    "a proxy whose get trap throws for a channel's members",
+    () =>
+      new Proxy(channelPair()[0], {
+        get(target, key, receiver) {
+          if (key === "then") return Reflect.get(target, key, receiver);
+          throw new Error("host get trap");
+        },
+      }),
+  ],
+];
+
+/**
+ * One connection of the channel carrier over `connect`, its events recorded: `running`, the value resolved while the
+ * transport wants it; `stopped`, after the transport's signal aborted; `closed`, after the connection's own close.
+ * What its events and the unhandled rejections were 50 ms after.
+ */
+async function dialed(connect: () => Promise<unknown>, when: "running" | "stopped" | "closed"): Promise<{ readonly seen: string[]; readonly unhandled: unknown[] }> {
+  const seen: string[] = [];
+  const { unhandled, stop } = unhandledRejections();
+  const controller = new AbortController();
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const connection = channelCarrier(async () => {
+    await released;
+    return (await connect()) as PrivateLinkChannel;
+  }).dial(
+    {
+      opened: () => seen.push("opened"),
+      received: () => undefined,
+      failed: (why) => seen.push(`failed ${why}`),
+      ended: (code) => seen.push(`ended ${code}`),
+    },
+    controller.signal,
+  );
+  if (when === "stopped") controller.abort();
+  if (when === "closed") connection.close(1000, "closed");
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  stop();
+  return { seen, unhandled };
+}
+
 describe("the channel carrier at the transport (LM-6)", () => {
   it("a connect() that resolves with no channel, or throws, is a lost connection; the next one connects", async () => {
     const cores: RawPeer[] = [];
@@ -456,6 +542,111 @@ describe("the channel carrier at the transport (LM-6)", () => {
     (pending[0] as (value: unknown) => void)("no channel");
     await new Promise((done) => setTimeout(done, 50));
     expect(transport.state).toBe("closed");
+  }, 30_000);
+
+  it.each(UNREADABLE_CHANNELS)(
+    "a connect() that resolves with %s resolved with no channel: the connection failed, then ended (1006), and no rejection is unhandled (issue 00068, LM-2)",
+    async (_name, channelOf) => {
+      const { seen, unhandled } = await dialed(async () => channelOf(), "running");
+      expect([seen, unhandled]).toEqual([["failed the host's connect() resolved with no channel", "ended 1006"], []]);
+    },
+  );
+
+  it.each(UNREADABLE_CHANNELS)(
+    "%s, resolved after the stop or after the connection's own close, is left alone: no event, and no rejection is unhandled (issue 00068, L41)",
+    async (_name, channelOf) => {
+      for (const when of ["stopped", "closed"] as const) {
+        const { seen, unhandled } = await dialed(async () => channelOf(), when);
+        expect([when, seen, unhandled]).toEqual([when, [], []]);
+      }
+    },
+  );
+
+  it("a connect() whose channel's members cannot be read is a lost connection, logged as no channel; the next one connects, and nothing is unhandled (issue 00068)", async () => {
+    // A getter that throws, then a proxy's trap that throws, then a channel.
+    const unreadable = [UNREADABLE_CHANNELS[0], UNREADABLE_CHANNELS[4]].map((found) => (found as (typeof UNREADABLE_CHANNELS)[number])[1]);
+    const cores: RawPeer[] = [];
+    let calls = 0;
+    const { unhandled, stop } = unhandledRejections();
+    const { transport, lines } = transportOver(
+      channelCarrier(async () => {
+        calls += 1;
+        const channelOf = unreadable[calls - 1];
+        if (channelOf !== undefined) return channelOf() as PrivateLinkChannel;
+        const [privateEnd, coreEnd] = channelPair();
+        cores.push(rawPeer(coreEnd));
+        return privateEnd;
+      }),
+    );
+    try {
+      await until(() => cores.length === 1, "the third connect()", 15_000);
+      (cores[0] as RawPeer).send(ACK);
+      await until(() => transport.state === "connected", "connected", 10_000);
+      expect(lines.filter((line) => line.includes("connect()"))).toEqual([
+        "transport: the host's connect() resolved with no channel; connecting again in 1000 ms (attempt 1)",
+        "transport: the host's connect() resolved with no channel; connecting again in 1000 ms (attempt 2)",
+      ]);
+      expect(unhandled).toEqual([]);
+    } finally {
+      stop();
+      await transport.close();
+    }
+  }, 30_000);
+
+  it("a connect() that rejects with an error that cannot be read is a lost connection, logged by its type; the next one connects, and nothing is unhandled (issue 00068)", async () => {
+    const errors: readonly unknown[] = [
+      // A name whose getter throws.
+      Object.defineProperty(new Error("x"), "name", {
+        get() {
+          throw new Error("host name getter");
+        },
+      }),
+      // A name that is no text (a symbol: a template literal throws on it).
+      Object.defineProperty(new Error("x"), "name", { value: Symbol("name") }),
+      // An UmbraError whose code's getter throws.
+      Object.create(UmbraError.prototype, {
+        code: {
+          get() {
+            throw new Error("host code getter");
+          },
+        },
+      }),
+      // A proxy whose prototype cannot be read (`instanceof` throws), and a revoked one.
+      new Proxy(new Error("x"), {
+        getPrototypeOf() {
+          throw new Error("host getPrototypeOf trap");
+        },
+      }),
+      (() => {
+        const { proxy, revoke } = Proxy.revocable(new Error("x"), {});
+        revoke();
+        return proxy;
+      })(),
+    ];
+    const cores: RawPeer[] = [];
+    let calls = 0;
+    const { unhandled, stop } = unhandledRejections();
+    const { transport, lines } = transportOver(
+      channelCarrier(async () => {
+        calls += 1;
+        if (calls <= errors.length) throw errors[calls - 1];
+        const [privateEnd, coreEnd] = channelPair();
+        cores.push(rawPeer(coreEnd));
+        return privateEnd;
+      }),
+    );
+    try {
+      await until(() => cores.length === 1, "the sixth connect()", 20_000);
+      (cores[0] as RawPeer).send(ACK);
+      await until(() => transport.state === "connected", "connected", 10_000);
+      expect(lines.filter((line) => line.includes("connect()"))).toEqual(
+        [1, 2, 3, 4, 5].map((attempt) => `transport: the host's connect() rejected (object); connecting again in 1000 ms (attempt ${attempt})`),
+      );
+      expect(unhandled).toEqual([]);
+    } finally {
+      stop();
+      await transport.close();
+    }
   }, 30_000);
 
   it("a core message over the private side's limit closes its channel too-large (1009), and it connects again", async () => {
