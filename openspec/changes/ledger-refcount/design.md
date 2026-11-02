@@ -249,19 +249,36 @@ references after all is queued and deleted at h + 1 unless referenced by then; R
 
 ### 4.6 Two forms of one key
 
-The ledger embeds a child exactly when it is small (`upstream:storage-core/src/storable.rs:139-159`, `child_from`),
-and rebuilds a loaded node's children with the same rule (`upstream:storage-core/src/arena.rs:875-896`), so a node the
-ledger builds has one form per content. `Sp::into_tracked` (`arena.rs:1329-1352`) gives a small node a by-reference
-form with the same hash, and upstream's own test puts both forms of one hash in one parent (`arena.rs:2847-2880`). In
-the packages UmbraDB vendors, its only caller outside tests is UmbraDB's patch `hold_as_node`, which tracks the
-persisted state, contract-state and zswap-state roots (`vendor/ledger/v9/patches/0003-…:333-334, 383, 483, 503`; the
-same lines in `v9-rc3`'s `0003`, and `v8`'s `0003:299-300, 349, 449, 469`); those are roots, held until the next flush,
-not children of another node. So a node inserted again in another form than its stored one is not expected. If it
-happens, the stored form stays, a key only the batch form references is protected in that block (rule 3) and queued,
-and a node the batch form references by key while the stored form embeds it is new and queued: both are deleted at the
-first later block in which nothing protects them, as the sweep's next cycle would delete them. R21 counts such forms on
-the tapes. *The `v8` package's `storage-core` (`ledger-8.1.2`) was not read here (unconfirmed); the rules do not rely
-on the form being unique, only the I6 equality does.*
+A child's hash is the same embedded or referenced (`upstream:storage-core/src/arena.rs:2847-2880`, upstream's test of
+both forms of one hash in one parent), so one key can have two child lists. The ledger embeds a newly built child when
+it is small (`upstream:storage-core/src/storable.rs:139-159`, `child_from`), but a node can also hold a small child by
+reference: `Sp::persist` turns a small node into a referenced one, a behaviour its comment calls "baked into behaviour"
+(`arena.rs:1525-1540`); `Sp::into_tracked` does the same (`arena.rs:1329-1352`); the ledger's `RcMap` builds `Ref`
+children for keys (`upstream:storage/src/delta_tracking/rcmap.rs:199, 224, 251`); and UmbraDB's `hold_as_node` tracks
+every persisted root (`vendor/ledger/v9/patches/0003-…:333-334, 383, 483, 503`; the same in `v9-rc3`'s `0003`, and
+`v8`'s `0003:299-300, 349, 449, 469`). A node loaded from the database keeps its stored form (`BackendLoader`, patch
+`0003-…:319`, through `arena.rs:975-990`, `child.clone()`). So a node inserted again may carry another form than its
+stored one. The rules stay safe when it does: the stored form stays (`ON CONFLICT DO NOTHING`), a key only the batch
+form references is protected in that block (rule 3) and queued, and a small node the batch form references by key while
+the stored form embeds it is new and queued; both are deleted at the first later block in which nothing protects them,
+as the sweep's next cycle would delete them. R21 counts such forms on the tapes.
+
+### 4.7 Determinism across worker histories
+
+Which nodes a batch inserts again depends on what the package's memory still holds (a restart, its cache). When a node
+inserted again carries its stored form, rule 3 protects only keys already in `R_h` (the node is reached from a rising
+root through the batch, §4.5, and its children through it), and the new nodes are the same on every machine with the
+same stored set (the package flushes every reachable node it does not believe stored, and it never believes a deleted
+node stored, §5): the step's result does not depend on the worker's history. When a node inserted again carries the
+other form (§4.6), the batch can bring a small node as a new row on one machine and not on another, and the stored rows
+— then every later per-block digest — differ. That dependency is not new with counting: the node inserts already write
+that row on the one machine only (LG-11), and the sweep marks through the batch's forms the same way (`sweep.ts:218`).
+The criteria that compare runs with different worker histories would show it: R13 (restarts at 20 heights of the
+preprod tape), A160 (a worker restart), and the cross-backend comparisons (A105, R17, R25); none has shown it with the
+sweep (`core-arch` A160 and A55; the organizer plan's P13.1 restarts ended with equal contents hashes). *Assumption,
+unconfirmed in general: a node inserted again carries its stored form.* Issue `docs/issues/00078` records the
+question — whether the packages produce a node in two forms on one chain — and the fix if they do (a canonical stored
+form written by UmbraDB), outside this change.
 
 ## 5. Eviction, the one-block lag and the worker restart
 
@@ -294,7 +311,8 @@ the step keeps nothing in memory between blocks. A block processed again after a
 ## 8. Determinism
 
 `ref_counts` after h is a function of `S_h` (I2), and `S_h` and `Q_h` are fixed by the rules from the tables at h − 1
-and the batch, so every machine with the same history stores the same rows. The cascade's fixed point does not depend
+and the batch, so every machine with the same history stores the same rows; across different worker histories they do
+under §4.7's assumption. The cascade's fixed point does not depend
 on the order of its rounds or of a round's keys; the merge, inserts and deletes are set operations; the statements are
 the shapes both backends already run (`unnest` of `bytea[]`, `= ANY`, `ON CONFLICT`, a data-modifying `WITH`). The
 digests compare each key's row before and after the block (DT-4), so netting is not visible in them either way.
@@ -430,8 +448,9 @@ block on the DAG fixture and at sampled heights on the tapes.
 | No reference to a missing node, no root without a node, no cycle; depth 5; one block's garbage 10 nodes | Organizer `research/00034-ledger-node-refcount-data/analyze.out.json`, `garbage.out.txt`, `layers.out.txt` (preprod snapshot at 48,665) | Measured on one snapshot; checked at run time by `missing-reference` |
 | `flushNodes` takes only nodes reachable from a key whose root count rose, stopping at nodes believed stored | `vendor/ledger/v9/patches/0001-storage-core-external-node-store.patch:143-160`, `0003-…:386-423` | Verified (repository); not relied on for safety (§4.5) |
 | `layout-v2` writes a re-created node again | `upstream:storage-core/src/backend.rs:532-534` | Verified (upstream, pinned) |
-| A child is embedded exactly when small; a loaded node's children follow the same rule; `into_tracked` gives a small node a by-reference form with the same hash | `upstream:storage-core/src/storable.rs:139-159`, `upstream:storage-core/src/arena.rs:875-896, 1329-1352, 2847-2880` | Verified (upstream, pinned, v9); the `v8` package's `storage-core` unconfirmed (§4.6) |
-| UmbraDB's patches call `into_tracked` only in `hold_as_node`, for persisted roots | `vendor/ledger/{v8,v9-rc3,v9}/patches/0003-ledger-wasm-node-store-exports.patch` (lines in §4.6) | Verified (repository) |
+| A child's hash is the same in both forms; a new child is embedded when small; `persist` and `into_tracked` give a small node the referenced form; `RcMap` builds referenced children; a loaded node keeps its stored form | `upstream:storage-core/src/arena.rs:975-990, 1329-1352, 1525-1540, 2847-2880`, `upstream:storage-core/src/storable.rs:139-159`, `upstream:storage/src/delta_tracking/rcmap.rs:199, 224, 251` | Verified (upstream, pinned, v9); the `v8` package's `storage-core` (`ledger-8.1.2`) not read (unconfirmed) |
+| UmbraDB's patches track every persisted root with `hold_as_node` (`into_tracked`) and load stored nodes through `BackendLoader` | `vendor/ledger/{v8,v9-rc3,v9}/patches/0003-ledger-wasm-node-store-exports.patch` (lines in §4.6) | Verified (repository) |
+| A node inserted again carries its stored form, so the batch's effect does not depend on the worker's history | — | Unconfirmed assumption (§4.7), shared with LG-11's node inserts and the sweep; R13, A160 and the cross-backend criteria would show a breach; issue `docs/issues/00078` |
 | `midnight-storage-core` `layout-v1` kept a reference count per node and deleted at zero, decrementing children with multiplicity; `layout-v2` removed it | `upstream:storage-core/src/backend.rs:1202-1218`, `upstream:storage-core/src/db/sql.rs:250-266, 340-399`, `upstream:CHANGELOG_storage_core.md:23` | Verified (upstream, pinned); the reason for the removal is not given there (unconfirmed, not built on) |
 | The sweep's cycle fit one block at every preprod height of the stopped run | Organizer plan P13.3, questions Q-37 | Measured |
 | The devnet v8 → v9 tape converts at F = 103 with contracts deployed on v8 | `test/backbone/contract-data.test.ts:209` | Verified (repository) |

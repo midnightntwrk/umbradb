@@ -34,7 +34,7 @@ the point reports that it was reached at its height. The requirements each crite
   the ledger package's own `childRefs`) and a reachability oracle (reachable sets recomputed from scratch from each
   height's generated state, not from the model's sets) agree after every block of generated histories: I1–I5 hold; no
   key that a node of the block's batch references in its batch form is deleted in that block; and I6's equality holds at
-  every block with neither a key kept only as a batch reference nor a new node left unreferenced. The generators cover
+  every block with `sweep` on and neither a key kept only as a batch reference nor a new node left unreferenced. The generators cover
   shared children (one key under parents of different states), a key repeated in one child list, embedded children
   holding references, nodes inserted again in their stored form and in the other form of a small child, a queued key
   referenced again, `retainStates` 0 and > 0, contract keys persisted and never released, a lowered window releasing
@@ -53,11 +53,12 @@ the point reports that it was reached at its height. The requirements each crite
   preprod 0–10,000, stagenet 0–10,000 and devnet v8 → v9 tapes, a check that reads the database through its own
   queries (not through the step's code) finds: (a) I1, I2 and I3, each count recomputed from every stored child list
   with repeats counted; (b) I4, and every state key of `core_ledger_state.states` inside the retention window and every
-  key `core_contract_states.states` stores is a stored node whose whole reachable set is stored; (c) on the DAG
-  fixture, `R_{h−1} ∪ R_h` computed from the fixture's own states at h − 1 and h (not from the database) equals the
-  stored set at every block the fixture builds without a second form, and on the tapes `R_{h−1} ⊆ S_h` with the number
-  of keys of `S_h` outside `R_{h−1} ∪ R_h` reported; (d) I5 against the queue read at h − 1; (e) no key that a node of
-  block h's batch references in its batch form was deleted at h (the batch seen through a watcher module). **Negative
+  key `core_contract_states.states` stores is a stored node whose whole reachable set is stored; (c) `R_{h−1} ⊆ S_h`,
+  with `R_{h−1}` and `R_h` computed on the DAG fixture from the fixture's own states at h − 1 and h (not from the
+  database), and, at every block with `sweep` on, on the DAG fixture `S_h = R_{h−1} ∪ R_h` wherever the fixture builds
+  no second form, and on the tapes the number of keys of `S_h` outside `R_{h−1} ∪ R_h` reported; (d) at every block
+  with `sweep` on, I5 against the queue read at h − 1; (e) no key that a node of block h's batch references in its batch
+  form was deleted at h (the batch seen through a watcher module). **Negative
   control:** a test seam that, at one block, deletes the state's newly persisted root and the nodes only it reaches
   makes (b) and (c) fail. (LG-11, LG-14)
 - **R4** `[DIFF][NEG]` The counting run's batches, fed after every block to the sweep's reference model (which follows
@@ -71,14 +72,15 @@ the point reports that it was reached at its height. The requirements each crite
   restarted worker's first block) changes no count, and the node insert's affected rows exclude it. (LG-14)
 - **R6** `[CI]` A key queued at h − 1 that one new node of block h references once is not deleted at h, leaves the
   queue, has count 1, and its children's counts do not change at h. (LG-14)
-- **R7** `[CI]` With `retainStates` 0, the state released by block h has its root queued at h and the nodes of it no
-  root reaches deleted at h + 1, none at h, and the worker's eviction at h + 1 is not refused; with `retainStates` 2,
-  the state after h − 1 is released at h + 2 and those of its nodes are deleted at h + 3. (LG-12, LG-14)
+- **R7** `[CI]` With `retainStates` 0, the state released by block h has its root queued at h; none of its nodes is
+  deleted at h, and at h + 1 every node of it outside `R_h ∪ R_{h+1}` is deleted, and the worker's eviction at h + 1 is
+  not refused; with `retainStates` 2, the state after h − 1 is released at h + 2, none of its nodes is deleted before
+  h + 3, and at h + 3 every node of it outside `R_{h+2} ∪ R_{h+3}` is deleted. (LG-12, LG-14)
 - **R8** `[CI]` A node deleted at h1 and needed again at h2 is inserted again at h2 with its references counted again,
   and loading the state at h2 from the database (a fresh worker) succeeds. (LG-11, LG-14)
 - **R9** `[CI]` With the window full, a revision lowering `retainStates` from 5 to 0 at h releases the six states after
-  h − 6 … h − 1 at h; every node of theirs that no root after h reaches is deleted at h + 1, in that one block.
-  (LG-12, LG-14)
+  h − 6 … h − 1 at h; at h + 1, in that one block, every node of theirs outside `R_h ∪ R_{h+1}` is deleted, and a node
+  of theirs that the state after h + 1 holds again stays. (LG-12, LG-14)
 - **R10** `[CI]` With `sweep: off` from h1 to h2 (the development opt-in set) no node is deleted, R3's (a) and (b)
   pass, and the queue holds every stored key with no reference and no root count; the first block with `sweep: on`
   again deletes the queue and its cascade, after which R3's (c) passes; no reset is written at either switch. Without
@@ -145,8 +147,8 @@ the point reports that it was reached at its height. The requirements each crite
   at the block after the v8 state's release (F + 1 with `retainStates` 0) the nodes deleted, the cascade's rounds, the
   step's time and the block's total time. (LG-9, LG-14; `design.md` §9)
 - **R22** `[CI]` On the devnet v8 → v9 tape (F = 103), with `core-contract-states` active and `retainStates` 0, then 2:
-  R3 passes at every block from F − 3 to F + 4; each v8 state is released by the block its window sets and the nodes
-  of it that no root then reaches are deleted the block after, none earlier; every contract state and zswap state stored
+  R3 passes at every block from F − 3 to F + 4; each v8 state is released by the block b its window sets, none of its
+  nodes is deleted before b + 1, and at b + 1 every node of it outside `R_b ∪ R_{b+1}` is deleted; every contract state and zswap state stored
   below F loads from its stored key after F + 4. (LG-9, LG-13, LG-14)
 
 ## 5. Local preprod runs (`design.md` §12; never in CI)

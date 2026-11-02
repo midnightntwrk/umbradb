@@ -76,6 +76,9 @@ The owner decided the design's open points on 2026-11-02 (organizer research `re
 - **No change to the retention window** (LG-12), the v8 → v9 conversion (LG-9), contract keys (LG-13's rule), the
   contents hash's definition and the per-block digests (DT-3 … DT-5), or backups' format (BK-1 … BK-5): only what
   `core_ledger_state` holds changes.
+- **No change to the forms the ledger writes.** A key can arrive in two child-list forms (embedded or referenced); the
+  stored form stays the first one written, as today. Whether the packages produce two forms of one node on a real chain,
+  and storing a canonical form if they do, is issue `docs/issues/00078` (`design.md` §4.7).
 - **No performance work outside reclamation:** the node's runtime-version call made once per block (open question
   O-5), the cost of decoding `bytea` results in `src/deterministic-postgresql/` (Q-38's option D), and splitting the
   conformance suite (issue 00077) are separate items.
