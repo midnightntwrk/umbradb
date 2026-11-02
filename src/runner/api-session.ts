@@ -26,8 +26,9 @@
  * **Over a channel** (`api.connect`): the module API's own rules, not the private link's — no envelope, no ping (the
  * host owns the channel's lifetime). A message that is no text is answered as a WebSocket's binary frame is; one over
  * the message limit, and a slow subscriber, end the connection as a WebSocket's 1009 and disconnect do: the channel is
- * closed (it carries no close code). The module API's close closes every channel it serves, at once.
- * [LM-11, RN-15; design §8]
+ * closed (it carries no close code). A channel whose `bufferedAmount` cannot be read (its getter or the call throws)
+ * has ended too, as one whose `send` throws: it is closed, and nothing is sent on it. The module API's close closes
+ * every channel it serves, at once. [LM-11, RN-15; design §8]
  */
 
 import { parseJsonLossless } from "../deterministic-postgresql/index.js";
@@ -324,7 +325,9 @@ export interface ChannelConnectOptions {
 /**
  * Serves the subscription protocol on `channel` over `api` (see **Over a channel** in the module comment). Its
  * listeners are registered now, in the caller's turn, as the host's carrier needs. Throws nothing: a channel that throws
- * while it is set up is closed, as far as UmbraDB goes. [LM-11, RN-15]
+ * while it is set up is closed, as far as UmbraDB goes; every member of the channel it reads or calls later — `send`,
+ * `bufferedAmount` (a getter of it included), `close`, `terminate`, the disposers — is read inside its own guard, so
+ * nothing is thrown into the carrier's message listener or out of a module's `emit`. [LM-11, RN-15, LM-2]
  */
 export function connectChannel(channel: PrivateLinkChannel, api: ModuleApi, options: ChannelConnectOptions): ServedConnection {
   const max = options.maxMessageBytes ?? DEFAULT_MAX_MESSAGE_BYTES;
@@ -361,13 +364,25 @@ export function connectChannel(channel: PrivateLinkChannel, api: ModuleApi, opti
       }
     },
     bufferedAmount() {
-      if (typeof channel.bufferedAmount !== "function") return null;
+      if (!live) return null;
+      let held: unknown;
       try {
-        const held = channel.bufferedAmount();
-        return typeof held === "number" && Number.isFinite(held) ? held : null;
+        const { bufferedAmount } = channel;
+        if (typeof bufferedAmount !== "function") return null;
+        held = Reflect.apply(bufferedAmount, channel, []);
       } catch {
+        // Reading it is the carrier's, getter and call alike: a carrier that cannot tell what it holds cannot be held
+        // to the limit, so it has ended — nothing sent on it, closed, and its end after the module's emit returned, so
+        // an unsubscribe never runs inside it. [LM-11, RN-15, LM-2]
+        live = false;
+        queueMicrotask(() => {
+          if (!open) return;
+          quietly(() => channel.close());
+          end();
+        });
         return null;
       }
+      return typeof held === "number" && Number.isFinite(held) ? held : null;
     },
     disconnect() {
       if (!live) return;

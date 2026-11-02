@@ -27,7 +27,9 @@ import { Client } from "../library/mounted-fixtures.js";
  * The module API's session logic on its own (`src/runner/api-session.ts`), with the module API over a stand-in
  * database whose reads see height 7: the fetch-style handler's and the channel connection's edges that the processes'
  * tests do not reach — a body whose stream fails, an answer with no body, a carrier that throws in each of its members,
- * a carrier without `terminate` — and the lifecycle's and admin's fetch-style answers. [LM-11, RN-15, RN-16, LM-5]
+ * a `bufferedAmount` whose getter or call throws ending the connection (a carrier that cannot tell what it holds cannot
+ * be held to the limit; issue 00068), one absent being no limit, a carrier without `terminate` — and the lifecycle's
+ * and admin's fetch-style answers. [LM-11, RN-15, RN-16, LM-5]
  *
  * A client's malformed message — any JSON value where an id or a field is expected, objects whose conversion to text
  * throws among them — is answered `invalid-request` and the connection goes on, on each carrier of the protocol: a
@@ -65,6 +67,62 @@ function throwing(overrides: Partial<PrivateLinkChannel>): { readonly channel: P
     ...overrides,
   };
   return { channel, peer };
+}
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+/**
+ * A host's channel whose `bufferedAmount` cannot be read once `state.fails` is set: its getter (`getter`) or the
+ * method itself (`method`) throws; `reads` counts the attempts. Its message listener is kept (`heard`), so a test calls
+ * it as the host's carrier does; its close tells its close listeners at once.
+ */
+function unreadableAmount(kind: "getter" | "method") {
+  const state = {
+    fails: false,
+    reads: 0,
+    closes: 0,
+    sent: [] as string[],
+    heard: undefined as ((message: string) => void) | undefined,
+  };
+  const closeListeners = new Set<() => void>();
+  const channel: PrivateLinkChannel = {
+    send: (message) => {
+      state.sent.push(message);
+    },
+    onMessage: (listener) => {
+      state.heard = listener;
+      return () => {
+        state.heard = undefined;
+      };
+    },
+    onClose: (listener) => {
+      closeListeners.add(listener);
+      return () => {
+        closeListeners.delete(listener);
+      };
+    },
+    close: () => {
+      state.closes += 1;
+      for (const listener of [...closeListeners]) listener();
+    },
+  };
+  const read = (): void => {
+    state.reads += 1;
+    if (state.fails) throw new Error(`host bufferedAmount ${kind}`);
+  };
+  Object.defineProperty(
+    channel,
+    "bufferedAmount",
+    kind === "getter"
+      ? {
+          get: () => {
+            read();
+            return () => 0;
+          },
+        }
+      : { value: () => (read(), 0) },
+  );
+  return { channel, state };
 }
 
 describe("the module API's session logic (LM-11)", () => {
@@ -108,11 +166,11 @@ describe("the module API's session logic (LM-11)", () => {
     expect(() => refuseChannelNotServing(channel, { state: "starting", reason: null })).not.toThrow();
   });
 
-  it("a channel connection: a send that throws ends it after the emit; an unknown or throwing bufferedAmount is no limit; no terminate is a close", async () => {
+  it("a channel connection: a send that throws ends it after the emit; an absent or unknown bufferedAmount is no limit; no terminate is a close", async () => {
     const emits = new Set<(value: unknown) => void>();
     const module = api(emits);
     const rules = connectionRules({ maxBufferedBytes: 10 });
-    // A send that throws once the subscription is open.
+    // A send that throws once the subscription is open, on a carrier without bufferedAmount (it bounds its own queue).
     let fails = false;
     let ended = 0;
     const sent: string[] = [];
@@ -120,9 +178,6 @@ describe("the module API's session logic (LM-11)", () => {
       send: (message) => {
         if (fails) throw new Error("the carrier broke");
         sent.push(message);
-      },
-      bufferedAmount: () => {
-        throw new Error("unknown");
       },
     });
     connectChannel(channel, module, { rules, ended: () => (ended += 1) });
@@ -153,6 +208,58 @@ describe("the module API's session logic (LM-11)", () => {
     await connection.close();
     expect(closes).toBe(1);
   });
+
+  it.each(["getter", "method"] as const)(
+    "a channel whose bufferedAmount %s throws has ended: nothing thrown into the carrier's listener or out of a module's emit, nothing sent after, closed once and its subscriptions unsubscribed after the emit (issue 00068)",
+    async (kind) => {
+      const rules = connectionRules({});
+      // The answer to a client's message, inside the carrier's own message listener.
+      {
+        const { channel, state } = unreadableAmount(kind);
+        let ended = 0;
+        connectChannel(channel, api(new Set()), { rules, ended: () => (ended += 1) });
+        state.fails = true;
+        expect(() => state.heard?.("not json")).not.toThrow();
+        expect([state.sent, ended, state.closes]).toEqual([[], 0, 0]);
+        await settle();
+        expect([ended, state.closes, state.heard, state.reads]).toEqual([1, 1, undefined, 1]);
+      }
+      // A module's emit: nothing unsubscribed or closed inside it, nothing read or sent after; the module API's close
+      // after the end does nothing more.
+      {
+        const emits = new Set<(value: unknown) => void>();
+        const { channel, state } = unreadableAmount(kind);
+        let ended = 0;
+        const connection = connectChannel(channel, api(emits), { rules, ended: () => (ended += 1) });
+        state.heard?.(JSON.stringify({ type: "subscribe", id: "s", name: "feed" }));
+        expect(state.sent.map((text) => JSON.parse(text))).toEqual([{ type: "subscribed", id: "s" }]);
+        state.fails = true;
+        state.reads = 0;
+        for (const emit of [...emits]) {
+          expect(() => emit("x")).not.toThrow();
+          expect(() => emit("y")).not.toThrow();
+        }
+        expect([emits.size, ended, state.closes, state.sent.length]).toEqual([1, 0, 0, 1]);
+        await settle();
+        expect([emits.size, ended, state.closes, state.sent.length, state.reads]).toEqual([0, 1, 1, 1, 1]);
+        await connection.close();
+        expect([ended, state.closes]).toEqual([1, 1]);
+      }
+      // The module API's close in the same turn as the failed read: closed and ended once.
+      {
+        const emits = new Set<(value: unknown) => void>();
+        const { channel, state } = unreadableAmount(kind);
+        let ended = 0;
+        const connection = connectChannel(channel, api(emits), { rules, ended: () => (ended += 1) });
+        state.heard?.(JSON.stringify({ type: "subscribe", id: "s", name: "feed" }));
+        state.fails = true;
+        for (const emit of [...emits]) emit("x");
+        await connection.close();
+        await settle();
+        expect([emits.size, ended, state.closes]).toEqual([0, 1, 1]);
+      }
+    },
+  );
 
   it("a channel whose registration throws is closed and ended, and nothing reaches the host", async () => {
     let closes = 0;
