@@ -7,6 +7,7 @@ import {
   ENVELOPE_BYTES,
   type EndpointEvents,
   exceedsUtf8,
+  type MessagePortLike,
   messagePortChannel,
   type PrivateLinkChannel,
   readEnvelope,
@@ -17,7 +18,8 @@ import { channelPair, controlledTimers, rawPeer, until } from "./channel-fixture
 /**
  * The private link's channels, unit by unit `[CI]` [LM-6; design §5.4]:
  * - `messagePortChannel` over a real `worker_threads` `MessageChannel`: text both ways, a message kept until the
- *   listener registers, the peer's close heard, the listeners disposed;
+ *   listener registers, the peer's close heard, the listeners disposed; over a host's port-like object, an event whose
+ *   data cannot be read is a message that is no text, nothing thrown into the port's dispatch (issue 00068);
  * - the envelope: each kind, and every fault of its shape;
  * - the UTF-8 count of a message, against Node.js's own (`Buffer.byteLength`);
  * - an endpoint: its own close and terminate end the channel whatever the carrier tells (L42), the pings on a
@@ -94,6 +96,56 @@ describe("messagePortChannel over a worker_threads MessageChannel (LM-6)", () =>
     expect(channel.terminate).toBeUndefined();
     port1.close();
     port2.close();
+  });
+});
+
+describe("messagePortChannel over a host's port-like object (LM-6)", () => {
+  /** A port-like object of a host's own: it dispatches each event it is given to its message listeners. */
+  function hostPort() {
+    const listeners = new Set<(event: { readonly data: unknown }) => void>();
+    const posted: string[] = [];
+    const port: MessagePortLike = {
+      postMessage: (message) => {
+        posted.push(message);
+      },
+      addEventListener: (type: "message" | "close", listener: never) => {
+        if (type === "message") listeners.add(listener);
+      },
+      removeEventListener: (type: "message" | "close", listener: never) => {
+        if (type === "message") listeners.delete(listener);
+      },
+      close: () => undefined,
+    };
+    const dispatch = (event: { readonly data: unknown }): void => {
+      for (const listener of [...listeners]) listener(event);
+    };
+    return { port, dispatch, listeners, posted };
+  }
+
+  it("a message whose data cannot be read is no text: nothing is thrown into the port's dispatch, the endpoint is told not-text, the next message is read (issue 00068)", async () => {
+    const { port, dispatch, listeners, posted } = hostPort();
+    const { seen, events } = recorder();
+    const endpoint = new ChannelEndpoint(messagePortChannel(port), events);
+    await settle();
+    expect(listeners.size).toBe(1);
+    const unreadable = Object.defineProperty({}, "data", {
+      get() {
+        throw new Error("host event data getter");
+      },
+    }) as { readonly data: unknown };
+    expect(() => dispatch(unreadable)).not.toThrow();
+    expect(() => dispatch(new Proxy({ data: "x" }, { get: () => { throw new Error("host get trap"); } }))).not.toThrow();
+    // The next message is read: a ping is answered.
+    dispatch({ data: JSON.stringify({ link: 1, kind: "ping" }) });
+    expect([seen.received, seen.ended, endpoint.open, posted]).toEqual([
+      [
+        { ok: false, fault: "not-text" },
+        { ok: false, fault: "not-text" },
+      ],
+      [],
+      true,
+      [JSON.stringify({ link: 1, kind: "pong" })],
+    ]);
   });
 });
 

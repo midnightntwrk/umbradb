@@ -84,7 +84,8 @@ export interface MessagePortLike {
  * A channel over `port` (see the module comment): `send` posts the text, `onMessage` hears each message's data, and
  * `onClose` its `close` event, which a Node.js port fires on both ends and a browser's may never. The port's queue
  * keeps what arrives before the listener: the port starts once a message listener is registered. It has no
- * `bufferedAmount`: a port tells none. [LM-6]
+ * `bufferedAmount`: a port tells none. An event whose data cannot be read (a getter or a proxy's trap that throws) is
+ * a message that is no text, never an exception thrown into the port's dispatch. [LM-6, LM-2]
  */
 export function messagePortChannel(port: MessagePortLike): PrivateLinkChannel {
   return Object.freeze({
@@ -92,7 +93,15 @@ export function messagePortChannel(port: MessagePortLike): PrivateLinkChannel {
       port.postMessage(message);
     },
     onMessage(listener: (message: string) => void) {
-      const heard = (event: { readonly data: unknown }): void => listener(event.data as string);
+      const heard = (event: { readonly data: unknown }): void => {
+        let data: unknown;
+        try {
+          data = event.data;
+        } catch {
+          data = undefined;
+        }
+        listener(data as string);
+      };
       port.addEventListener("message", heard);
       port.start?.();
       return () => port.removeEventListener("message", heard);
