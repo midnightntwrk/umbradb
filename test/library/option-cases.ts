@@ -78,6 +78,21 @@ export const UNREADABLE: readonly (readonly [string, () => unknown, string])[] =
   ["signal a hostile proxy", () => ({ config: { data: {} }, signal: hostile() }), "signal"],
   ["modules a hostile proxy of an array", () => ({ config: { data: {} }, modules: hostile([]) }), "modules"],
   ["modules a revoked proxy", () => ({ config: { data: {} }, modules: revoked() }), "modules"],
+  [
+    "modules an array whose element's getter throws",
+    () => ({ config: { data: {} }, modules: Object.defineProperty([{}], 0, { enumerable: true, get: throwing }) }),
+    "modules[0]",
+  ],
+  [
+    "modules a proxy of an array whose element's read throws",
+    () => ({ config: { data: {} }, modules: new Proxy([{}, {}], { get: (target, key) => (key === "1" ? throwing() : Reflect.get(target, key)) }) }),
+    "modules[1]",
+  ],
+  [
+    "modules a proxy of an array whose length reads as no array's",
+    () => ({ config: { data: {} }, modules: new Proxy([], { get: (target, key) => (key === "length" ? -1 : Reflect.get(target, key)) }) }),
+    "modules",
+  ],
   ["modulesFrom a fake URL", () => ({ config: { data: {} }, modulesFrom: Object.create(URL.prototype) }), "modulesFrom"],
   ["the options a revoked proxy", () => revoked(), "options"],
   ["the options a hostile proxy", () => hostile(), "options"],

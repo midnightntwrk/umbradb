@@ -7,6 +7,7 @@ import type { PrivateLinkChannel } from "../../src/library/channels.js";
 import { optionFindings, readOptions } from "../../src/library/options.js";
 import { lifecycleBody } from "../../src/runner/api-answers.js";
 import { startUmbraDB, type UmbraDBHandle, type UmbraDBOptions } from "../../src/library/start-umbradb.js";
+import type { ModuleDeclaration } from "../../src/modules/declaration.js";
 import { InMemoryBlockSource } from "../../src/runner/in-memory-source.js";
 import { PROCESS_BACKENDS, type ProcessBackend } from "../runner/process-backends.js";
 import { cursorReaches, libraryData, PGLITE_MEMORY, rowsModule } from "./library-fixtures.js";
@@ -28,8 +29,14 @@ import { runQuietChild } from "./quiet-child.js";
  * - LM-1's "it never throws" for options that cannot be read as given: a getter or a proxy's trap that throws inside
  *   `config` or `network` (at any depth), a proxy as an option or as the options, a revoked proxy, a fake URL or
  *   `AbortSignal` (made with `Object.create` of its prototype, or a proxy of a real one), an array whose elements
- *   cannot be read: each refused `invalid-option` at its path through `started`; a real `AbortSignal` whose own members
- *   were replaced, and a proxy that only hides `in`, start as given.
+ *   cannot be read (refused at the element's path, `modules[1]`) or whose length reads as no array's: each refused
+ *   `invalid-option` at its path through `started`; a real `AbortSignal` whose own members were replaced, and a proxy
+ *   that only hides `in`, start as given.
+ * - LM-1's "it never throws" for a host's list as `modules` whose own code would run if it were copied by its own
+ *   methods — an `Array` subclass whose `map` getter throws, one whose `Symbol.species` getter throws, an array whose
+ *   own `constructor`, `map`, `slice` and iterator throw, a proxy whose `constructor` is a species building such lists:
+ *   on PostgreSQL 18 and PGlite, each is copied by its length and elements alone, its module runs, and none of the
+ *   list's own code ran.
  * - L51's library half: a renamed key is refused `renamed-setting` naming the new key, nothing opened.
  * - The handlers exist from the return on: `privateLink.accept` closes a channel this process does not accept and
  *   throws nothing; the module API's answer the lifecycle's 503 until the module API serves, admin's answer throughout
@@ -208,6 +215,102 @@ describe("LM-1: options that cannot be read as given are refused through started
     await served.closed;
     expect(await served.ended).toEqual({ kind: "signal" });
   }, 60_000);
+});
+
+/**
+ * Host lists given as `modules` whose own code would run, or throw, were they copied by their own methods: each made
+ * holding `m`, its code recording in `ran` what of it ran (a member other than `length` and the elements). [LM-1]
+ */
+const HOST_LISTS: readonly (readonly [string, (m: ModuleDeclaration, ran: string[]) => unknown])[] = [
+  [
+    "an Array subclass whose map getter throws",
+    (m, ran) => {
+      class HostArray extends Array<unknown> {}
+      Object.defineProperty(HostArray.prototype, "map", {
+        get: () => {
+          ran.push("map");
+          return throwing();
+        },
+      });
+      return HostArray.of(m);
+    },
+  ],
+  [
+    "an Array subclass whose Symbol.species getter throws",
+    (m, ran) => {
+      class SpeciesArray extends Array<unknown> {
+        static override get [Symbol.species](): never {
+          ran.push("Symbol.species");
+          return throwing();
+        }
+      }
+      return SpeciesArray.of(m);
+    },
+  ],
+  [
+    "an array whose own constructor, map, slice and iterator are getters that throw",
+    (m, ran) => {
+      const list: unknown[] = [m];
+      for (const member of ["constructor", "map", "slice", Symbol.iterator] as const) {
+        Object.defineProperty(list, member, {
+          get: () => {
+            ran.push(String(member));
+            return throwing();
+          },
+        });
+      }
+      return list;
+    },
+  ],
+  [
+    "a proxy of an array whose constructor is a species building lists whose map throws",
+    (m, ran) => {
+      class HostArray extends Array<unknown> {}
+      Object.defineProperty(HostArray.prototype, "map", { get: throwing });
+      return new Proxy([m], {
+        get: (target, key, receiver) => {
+          if (key !== "length" && !(typeof key === "string" && /^\d+$/.test(key))) ran.push(String(key));
+          return key === "constructor" ? HostArray : Reflect.get(target, key, receiver);
+        },
+      });
+    },
+  ],
+];
+
+describe.each(PROCESS_BACKENDS)("LM-1: a host's list as modules is read element by element, none of its own code run, on $name", (backend: ProcessBackend) => {
+  beforeAll(async () => {
+    await backend.start();
+  }, 180_000);
+  afterAll(async () => {
+    await backend.stop();
+  }, 60_000);
+
+  it.each(HOST_LISTS)("%s: copied, its module runs, nothing of the list's own ran", async (_name, make) => {
+    const db = await backend.database();
+    const seen: string[] = [];
+    const ran: string[] = [];
+    const m = rowsModule("m", seen);
+    const modules = make(m, ran);
+    let handle: UmbraDBHandle | undefined;
+    // The call never throws, whatever the host's list does (the copy that called its `map` threw here). [LM-1]
+    expect(() => {
+      handle = startUmbraDB({
+        config: { data: libraryData(db.setting, [m]) },
+        modules: modules as readonly ModuleDeclaration[],
+        source: new InMemoryBlockSource({ head: 2n }),
+      });
+    }).not.toThrow();
+    const started = handle as UmbraDBHandle;
+    try {
+      await started.started;
+      await cursorReaches(started, 2n);
+      expect(seen).toEqual(["m 1", "m 2"]);
+      // Only the list's length and its elements were read: no species, constructor, map, slice or iterator. [LM-1]
+      expect(ran).toEqual([]);
+    } finally {
+      await started.stop();
+    }
+  }, 120_000);
 });
 
 describe("L62: the options' shapes, finding by finding", () => {

@@ -109,11 +109,42 @@ export function cwdUnreadable(given: string | undefined, error: unknown): Findin
   return finding("cwd", `${what}, and the host's working directory cannot be read${why}: give an absolute cwd`);
 }
 
+/** The largest length an array has (2^32 − 1). */
+const MAX_ARRAY_LENGTH = 2 ** 32 - 1;
+
+/**
+ * The elements of the array `value` at `path`, read one by one into a frozen array of UmbraDB's own: its `length`, then
+ * each index, each read guarded, and nothing else of the host's array — so no species, constructor, `map`, `slice` or
+ * iterator of its own or of its prototype runs. An element whose read throws is a finding at its path
+ * (`modules[1]: reading it threw`) and undefined in the copy; a length that cannot be read, or reads as no array's
+ * length (a proxy's), is a finding at the array's path, and the array undefined. [LM-1, L62]
+ */
+function elementsOf(value: object, path: string, depth: number, found: Finding[]): readonly unknown[] | undefined {
+  const length = guarded(() => (value as { readonly length: unknown }).length);
+  if (length === THREW) {
+    found.push(threw(path));
+    return undefined;
+  }
+  if (typeof length !== "number" || !Number.isInteger(length) || length < 0 || length > MAX_ARRAY_LENGTH) {
+    found.push(finding(path, "is an array whose length reads as no array's length"));
+    return undefined;
+  }
+  const copy: unknown[] = [];
+  for (let index = 0; index < length; index++) {
+    const element = guarded(() => (value as Readonly<Record<number, unknown>>)[index]);
+    if (element === THREW) {
+      found.push(threw(`${path}[${index}]`));
+      copy.push(undefined);
+    } else copy.push(snapshot(element, `${path}[${index}]`, depth - 1, found));
+  }
+  return Object.freeze(copy);
+}
+
 /**
  * `value` read once as plain data at `path`, `depth` levels down (see the module comment): an array becomes a frozen
- * copy of its elements, another object (a proxy's too) a frozen object of its own enumerable keys and their values,
- * anything else is itself. Each read that throws adds its finding to `found`, and what could not be read is
- * undefined: nothing of the host's object is kept. [LM-1, L62]
+ * copy of its elements ({@link elementsOf}), another object (a proxy's too) a frozen object of its own enumerable keys
+ * and their values, anything else is itself. Each read that throws adds its finding to `found`, and what could not be
+ * read is undefined: nothing of the host's object is kept, and none of its methods is called. [LM-1, L62]
  */
 function snapshot(value: unknown, path: string, depth: number, found: Finding[]): unknown {
   if (depth === 0 || typeof value !== "object" || value === null) return value;
@@ -122,14 +153,7 @@ function snapshot(value: unknown, path: string, depth: number, found: Finding[])
     found.push(threw(path));
     return undefined;
   }
-  if (array) {
-    const elements = guarded(() => Array.prototype.slice.call(value) as unknown[]);
-    if (elements === THREW) {
-      found.push(threw(path));
-      return undefined;
-    }
-    return Object.freeze(elements.map((element, index) => snapshot(element, `${path}[${index}]`, depth - 1, found)));
-  }
+  if (array) return elementsOf(value, path, depth, found);
   const keys = keysOf(value);
   if (keys === null) {
     found.push(threw(path));
