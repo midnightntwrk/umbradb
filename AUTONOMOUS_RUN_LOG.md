@@ -563,3 +563,21 @@ Orchestrated by `orchestrator / claude-opus-5-5 / review-v2`. Not yet committed 
   the earlier comment's line by fingerprint (the commit is pushed, so the history keeps it); verified after committing,
   on all refs and on a merge commit of the branch into the PR's base built the way CI builds it: no leaks. A scan that
   checks a suppression runs on the committed tree, merged as CI merges it.
+- **R9 — The README's acceptance check missed two findings of a user run, and the stop line written for one of them
+  claimed more than the process knew** (the check: `core-arch` task 17.3a, "the README's two quick starts run as
+  written", done 2026-10-28, its model id not recorded in the task; the stop line: `plan-task-runner / claude-opus-5-5 /
+  P12.B`; found by an agent's user run of the README on `v0.10.0-rc.1` and by P12.B's targeted check, Codex,
+  gpt-6-astra, S1, 2026-11-02; recorded by `plan-task-runner / claude-opus-5-5 / P12.C`). 17.3a ran both quick starts
+  and saw them reach `syncing` and `following`; it did not stop the command it started and read what it printed last
+  (finding 3: `umbradb run` stopped by SIGTERM or SIGINT logged nothing), nor count what `try.sh subscribe` printed
+  against the three rows the script says it prints (finding 4: it printed every row that arrived before its close).
+  P12.B's fix of finding 3 then logged, at a stop, "the last committed height is N, where a restart resumes", N being
+  the process's cursor in memory: after a `COMMIT` whose answer was lost, the database holds N + 1 and a restart resumes
+  at N + 2 (Q-30). *Second story:* "runs as written" was checked by each command's happy path, read for success, not by
+  the operator's whole session — start, watch, stop, read the last lines, run again —; and the stop line's words were
+  chosen for what an operator wants to know (where a restart resumes), while its value came from what the process knows,
+  which every test of the fix shared (none lost a `COMMIT`'s answer). *Follow-up:* the line now says only what the
+  process saw, "the last height this process saw committed is N; a restart resumes after the stored cursor" (`86213bb`,
+  the owner's answer to Q-30, 2026-11-02; `/status`'s head, finding 6, in `abddf7b`); the README run of P12.A, after
+  `v0.10.0-rc.2`, stops every command it starts and compares each command's whole output, its last lines included, with
+  what the README and the scripts say.
