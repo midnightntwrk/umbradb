@@ -296,6 +296,17 @@ before the review.
 - [ ] 10.1 The three lanes on the final tree: spec compliance, cold adversarial, release.
 - [ ] 10.2 Blocking findings fixed, then one targeted fix check by a reviewer other than the fixer; every finding still
       open recorded for the owner.
+      **In progress (2026-11-01):** the fixes are done, the targeted fix check next. The code defects (cold lane C-F1 …
+      C-F5) were fixed test-first at `79d34d4..1c53d29`. The tests' strength and the status line (release lane R-F2, spec
+      lane S-F2 … S-F5, S-F7) at `33e0e35..efafcd9`: the proposal's status line `In progress` (S-F7, `33e0e35`); L61's
+      facts with no admin listener, its control the base's early return (R-F2 = S-F2, `e725b72`); five `[NEG]` controls
+      putting back their criterion's fault (S-F4, `c18aabb`); L4, L5, L7, L9 and L14 on the three backends (S-F3,
+      `3a22d31`); eleven oracles checking their criterion's words, each seen failing with a fault the old one missed
+      (S-F5, `09a5b82`, `a075ec9`), which found the private link's address logged before `status().listening` showed it
+      (fixed, `11a6147`); and issue 00067, an absolute `cwd` used as it is (`a469e20`). Full `npx vitest run` on `efafcd9`:
+      382 files, 6,199 tests, exactly §0's 20 failed, 56 skipped; every title the acceptance map cites passed (A162's
+      PostgreSQL-only case skipped on PGlite, as before). Open for the owner: Q-1, Q-11 (L37 on PGlite), Q-19, Q-20,
+      Q-21 (L3's "either order"), the design amendments of 8.5.
 
 ## 11. Close-out
 
