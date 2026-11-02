@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { writeBlockRow, writeHashRow } from "../../src/backbone/core-block-commit/core-block-commit.js";
 import type { BlockItemSource } from "../../src/backbone/core-block-fetch/index.js";
 import type { BlockWriteHandle, Transaction } from "../../src/db/api.js";
 import { UmbraError } from "../../src/db/errors.js";
@@ -256,13 +257,24 @@ class SilentHalt extends FinalizedLoop {
   }
 }
 
-/** Runs a build of `user` on `db` with head 8 until processing ends; the outcome and the state. */
+/** How a run of {@link haltOf} ended: processing's end, the state then, and the lines the process logged. */
+interface Halt {
+  readonly ended: ProcessingEnd;
+  readonly status: ProcessStatus;
+  readonly lines: readonly string[];
+}
+
+/**
+ * Runs a build of `user` on `db` with head 8 until processing ends; the outcome and the state. `backbone` replaces a
+ * backbone part of the build, as {@link testBuild}'s option does.
+ */
 async function haltOf(
   db: ProcessDatabase,
   user: readonly ModuleDeclaration[],
   source: BlockSource = new InMemoryBlockSource({ head: HEAD }),
-): Promise<{ readonly ended: ProcessingEnd; readonly status: ProcessStatus; readonly lines: readonly string[] }> {
-  const build = testBuild(user);
+  backbone?: (part: ModuleDeclaration) => ModuleDeclaration,
+): Promise<Halt> {
+  const build = testBuild(user, backbone === undefined ? {} : { backbone });
   const lines: string[] = [];
   const handle = startProcess({
     declarations: build.declarations,
@@ -276,6 +288,110 @@ async function haltOf(
   } finally {
     await handle.stop();
   }
+}
+
+/**
+ * A source that answers height 3 with the block of height 4, and every other height with its own block. Block 4's
+ * parent is block 3, which the database does not hold yet.
+ */
+function shiftedSource(): BlockSource & BlockItemSource {
+  const source = new InMemoryBlockSource({ head: HEAD });
+  return {
+    cursor: (read) => source.cursor(read),
+    finalizedHead: () => source.finalizedHead(),
+    waitForHead: (above, signal) => source.waitForHead(above, signal),
+    // core-block-fetch's items, as the source gives them.
+    blockItems: (block: BlockRef) => source.blockItems(block),
+    block: async (height): Promise<BlockRef> => (height === 3n ? inMemoryBlock(4n) : source.block(height)),
+  };
+}
+
+/**
+ * A test's `core-block-commit`: it writes the block's two rows without its parent check, so a block above a missing
+ * height is not refused in its `on-db-write` and reaches the loop's cursor check before the `COMMIT`, as in the loop's
+ * own test of that check (`loop.test.ts`). Every other part is the build's. [IN-4; design §11]
+ */
+function rowsWithoutParentCheck(part: ModuleDeclaration): ModuleDeclaration {
+  if (part.id !== "core-block-commit") return part;
+  return {
+    ...part,
+    points: {
+      async "on-db-write"(_p: unknown, b: BlockContext, w: BlockWriteHandle) {
+        await writeBlockRow(w, b);
+        await writeHashRow(w, b);
+      },
+    },
+  } as ModuleDeclaration;
+}
+
+/** The heights of the blocks table, from outside the process. */
+async function blockHeights(db: ProcessDatabase): Promise<number[]> {
+  return (await db.query("SELECT height::int AS h FROM core_block_commit.blocks ORDER BY height")).map((row) => Number(row.h));
+}
+
+/**
+ * A run in which the block transaction of height 3 leaves the cursor at another row than block 3's, while block 3's
+ * parent, block 2, is stored: how it halted, the height of the row the cursor was left at, and the heights the blocks
+ * table holds afterwards.
+ */
+interface CursorElsewhere {
+  readonly halt: Halt;
+  readonly left: bigint;
+  readonly kept: readonly number[];
+}
+
+/**
+ * On PostgreSQL, as a real run meets it: another writer, a session of the server outside UmbraDB (the writer lock keeps
+ * out another UmbraDB process, not a session that writes the tables), adds block 7's row to the blocks table while the
+ * process holds height 3 in a module's `on-compute`. Block 3's parent is stored, so core-block-commit's parent check
+ * passes; the block transaction's cursor read then finds block 7's row, the table's last, and the loop's check before
+ * the `COMMIT` halts. Block 3 rolls back; the table keeps 1, 2 and the other writer's 7. [IN-4; design §11]
+ */
+async function anotherWriterAbove(db: ProcessDatabase): Promise<CursorElsewhere> {
+  const admin = db.admin;
+  if (admin === undefined) throw new Error("another writer needs the PostgreSQL database's plain driver connection");
+  let reached!: () => void;
+  const atThree = new Promise<void>((resolve) => {
+    reached = resolve;
+  });
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const holding = loggingModule("holding", [], [], {
+    points: {
+      async "on-compute"(_p, b) {
+        if (b.height !== 3n) return;
+        reached();
+        await released;
+      },
+    },
+  });
+  const halting = haltOf(db, [holding]);
+  // Processing that ends before it holds height 3 fails the test, rather than leaving it waiting.
+  const endedFirst = halting.then(() => Promise.reject(new Error("processing ended before height 3's on-compute")));
+  endedFirst.catch(() => undefined);
+  await Promise.race([atThree, endedFirst]);
+  const block = inMemoryBlock(7n);
+  await admin.unsafe(
+    "INSERT INTO core_block_commit.blocks (height, hash, parent_hash, spec_version, ledger_version, block_time) " +
+      "VALUES ($1, $2, $3, $4, $5, $6)",
+    [7, Buffer.from(block.hash), Buffer.from(block.parentHash), 0, "v9", new Date(0)],
+  );
+  release();
+  return { halt: await halting, left: 7n, kept: [1, 2, 7] };
+}
+
+/**
+ * On PGlite the process holds the database's one connection, so no other writer exists; and with the real backbone, a
+ * block of another height never reaches the loop's cursor check: above the cursor + 1 core-block-commit's parent check
+ * refuses it (`parent-mismatch`), at or below the cursor the block stored there does (the blocks table's primary key,
+ * or at S core-chain's anchor, which is recorded once). The check is reached through
+ * {@link rowsWithoutParentCheck} instead, the source answering height 3 with block 4 ({@link shiftedSource}). Block 3's
+ * transaction, which wrote block 4's row, rolls back; the table keeps 1 and 2. [IN-4; design §11]
+ */
+async function rowsOfAnotherHeight(db: ProcessDatabase): Promise<CursorElsewhere> {
+  return { halt: await haltOf(db, [], shiftedSource(), rowsWithoutParentCheck), left: 4n, kept: [1, 2] };
 }
 
 describe("A43: a failure before COMMIT leaves nothing and halts; after it, halts with h committed (RN-8), on PostgreSQL and on PGlite", () => {
@@ -403,23 +519,42 @@ describe.each(PROCESS_BACKENDS)("halts (RN-8, design §11) on $name", (backend) 
     }, 180_000);
 
     it("a block whose cursor row is not the height's halts with unexpected-cursor, naming no module or point", async () => {
-      const source = new InMemoryBlockSource({ head: HEAD });
-      const blocks: BlockSource & BlockItemSource = {
-        cursor: (read) => source.cursor(read),
-        finalizedHead: () => source.finalizedHead(),
-        waitForHead: (above, signal) => source.waitForHead(above, signal),
-        // core-block-fetch's items, as the source gives them.
-        blockItems: (block: BlockRef) => source.blockItems(block),
-        // The source answers height 3 with the block of height 4: core-block-commit writes the cursor row at 4.
-        block: async (height): Promise<BlockRef> => (height === 3n ? inMemoryBlock(4n) : source.block(height)),
-      };
+      // Another writer's row above the height on PostgreSQL; on PGlite, where none can exist, a core-block-commit
+      // without its parent check. [IN-4, IN-12; design §11]
       const db = await backend.database();
-      const { status, ended } = await haltOf(db, [], blocks);
+      const staged = backend.kind === "postgres" ? await anotherWriterAbove(db) : await rowsOfAnotherHeight(db);
+      const { status, ended, lines } = staged.halt;
       expect(ended).toMatchObject({ kind: "failed" });
       expect(status).toMatchObject({
         state: "halted",
         reason: { code: "unexpected-cursor", height: 3n, module: null, point: null },
       });
+      // The loop's check before the COMMIT halted, not its check of the cursor after a lost COMMIT.
+      expect(lines.filter((line) => line.startsWith("processing halted ("))).toEqual([
+        expect.stringMatching(
+          new RegExp(
+            `^processing halted \\(unexpected-cursor\\): .*the block transaction of height 3 left the cursor at height ` +
+              `${staged.left}, not at height 3 with the block's hash`,
+          ),
+        ),
+      ]);
+      expect(await blockHeights(db)).toEqual(staged.kept);
+    }, 180_000);
+
+    it("a source that answers height 3 with block 4 halts with parent-mismatch in core-block-commit's on-db-write, before the loop's cursor check (IN-4)", async () => {
+      // The database holds no block at 3, block 4's parent: core-block-commit refuses it inside the block transaction,
+      // so the loop never reads the cursor row block 4 wrote. [IN-4; design §11]
+      const db = await backend.database();
+      const { status, ended, lines } = await haltOf(db, [], shiftedSource());
+      expect(ended).toMatchObject({ kind: "failed" });
+      expect(status).toMatchObject({
+        state: "halted",
+        reason: { code: "parent-mismatch", height: 3n, module: "core-block-commit", point: "on-db-write" },
+      });
+      expect(lines.filter((line) => line.startsWith("processing halted ("))).toEqual([
+        expect.stringMatching(/^processing halted \(parent-mismatch\): .*the database holds no block at height 3\b/),
+      ]);
+      expect(await blockHeights(db)).toEqual([1, 2]);
       expect(await cursorIn(db)).toBe(2);
     }, 180_000);
 
